@@ -1358,6 +1358,38 @@ func TestServeStdioConfigAgentsTierUsesDetectedHarness(t *testing.T) {
 	}
 }
 
+// TestServeStdioConfigAgentsTierUsesDetectedPiHarness mirrors
+// TestServeStdioConfigAgentsTierUsesDetectedHarness for the Pi harness: an
+// `initialize` request whose clientInfo.name is exactly "ws-pi-bridge" must
+// be detected via the structured clientInfo check
+// (detectHarnessFromInitializeParams) and used as the config.tune harness
+// default. Unlike the Claude-detection sibling test, this does not exercise
+// mercenary.register: Open Decision #3 keeps mercenary untouched and
+// unreachable from Pi in this phase.
+func TestServeStdioConfigAgentsTierUsesDetectedPiHarness(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260513-feat-harness-local-agent-tier-config")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	var out bytes.Buffer
+	initializeInput := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"ws-pi-bridge","version":"test"}}}`
+	if err := server.ServeStdio(context.Background(), strings.NewReader(initializeInput), &out); err != nil {
+		t.Fatalf("ServeStdio initialize returned error: %v", err)
+	}
+
+	out.Reset()
+	configInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.tune","arguments":{"key":"agents.tier","value":{"tier":"medium","backend":"pi","model":"pi-model","effort":"medium"}}}}`
+	if err := server.ServeStdio(context.Background(), strings.NewReader(configInput), &out); err != nil {
+		t.Fatalf("ServeStdio config returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	configText := toolText(t, byID["2"])
+	if !strings.Contains(configText, `"pi":{"backend":"pi","model":"pi-model","effort":"medium"}`) {
+		t.Fatalf("config response missing pi harness mapping: %s", byID["2"])
+	}
+}
+
 // TestServeStdioConfigAgentsTierAcceptsTierSynonyms guards the 260814 config
 // surface swap against a regression: config.tune must NOT enum-validate the
 // agents.tier `tier` up front. The removed config.agents_tier passed the raw

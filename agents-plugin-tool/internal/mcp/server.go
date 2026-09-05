@@ -235,7 +235,7 @@ func (s *Server) handleNotification(req request, requests *sync.Map) {
 func (s *Server) handle(ctx context.Context, req request) response {
 	switch req.Method {
 	case "initialize":
-		s.observeHarness("initialize", detectHarnessFromRaw(req.Params))
+		s.observeHarness("initialize", detectHarnessFromInitializeParams(req.Params))
 		return response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{
 			"protocolVersion": ProtocolVersion,
 			"serverInfo": map[string]string{
@@ -740,8 +740,13 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			if harness == "" {
 				harness = s.currentHarness()
 			}
-			if harnessEnum := fieldEnum(entry.SelectorFields, "harness"); len(harnessEnum) > 0 && !enumContains(harnessEnum, harness) {
-				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: harness must be one of claude, codex, or *; got %q", harness))
+			if harnessEnum := fieldEnum(entry.SelectorFields, "harness"); len(harnessEnum) > 0 {
+				if harness == "" && enumContains(harnessEnum, "default") {
+					harness = "default"
+				}
+				if !enumContains(harnessEnum, harness) {
+					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: harness must be one of %s; got %q", strings.Join(harnessEnum, ", "), harness))
+				}
 			}
 		}
 		// Scope: parse when non-empty. agents.tier is not resolver-backed and only
@@ -3184,6 +3189,25 @@ func (s *Server) currentHarness() string {
 	return s.sessionHarness
 }
 
+// detectHarnessFromInitializeParams parses the "initialize" request's
+// clientInfo.name via structured JSON first: an exact match on
+// "ws-pi-bridge" identifies the Pi harness. Any other (or absent) clientInfo
+// falls through to the substring-based detectHarnessFromRaw, which stays
+// byte-identical for Codex/Claude detection.
+func detectHarnessFromInitializeParams(raw json.RawMessage) string {
+	var params struct {
+		ClientInfo struct {
+			Name string `json:"name"`
+		} `json:"clientInfo"`
+	}
+	if err := json.Unmarshal(raw, &params); err == nil {
+		if strings.TrimSpace(params.ClientInfo.Name) == "ws-pi-bridge" {
+			return "pi"
+		}
+	}
+	return detectHarnessFromRaw(raw)
+}
+
 func detectHarnessFromRaw(raw json.RawMessage) string {
 	text := strings.ToLower(string(raw))
 	if text == "" {
@@ -3215,6 +3239,8 @@ func normalizedHarness(value string) string {
 		return "codex"
 	case "claude":
 		return "claude"
+	case "pi":
+		return "pi"
 	default:
 		return ""
 	}
@@ -3674,7 +3700,7 @@ func tools() []map[string]any {
 					"key":         stringProperty("Config knob key to write, e.g. workflow.prefer_subagent, bootstrap_alarm, doc_coverage_alarm, workflow.prefer_mercenary, agents.tier, or prompt.<pointId>. See config.list for the supported set."),
 					"value":       anyProperty("New value. A string for scalar knobs (e.g. on/off), or an object {tier, backend, model, effort} for agents.tier. Omit when reset is true."),
 					"scope":       enumStringProperty("Optional storage scope. When omitted the write lands in the key's declared default scope. Global-only keys reject non-global scopes; agents.tier only supports project scope.", wsconfig.ScopeSchemaEnum()),
-					"harness":     stringProperty("Optional harness selector. Load-bearing for prompt.* (claude, codex, or * for all) and agents.tier (alias key); ignored for keys that do not vary by harness. When omitted for a harness-applicable key, defaults to the current session's detected harness."),
+					"harness":     stringProperty("Optional harness selector. Load-bearing for prompt.* (claude, codex, pi, or * for all) and agents.tier (alias key); ignored for keys that do not vary by harness. When omitted for a harness-applicable key, defaults to the current session's detected harness."),
 					"reset":       boolProperty("When true, drop the key's override and fall back to its builtin/inherited default instead of writing an explicit value. Mutually exclusive with value; only valid for keys that support reset."),
 					"session_key": stringProperty("Caller's lead ws session key. Required at dispatch for lead-authority keys (global-only workflow preferences and alarms) and for prompt.* keys; also the target session for a session-scope write."),
 				},

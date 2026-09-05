@@ -181,6 +181,34 @@ func TestSetAgentsTierForHarnessTargetsHarnessAlias(t *testing.T) {
 	}
 }
 
+// TestSetAgentsTierForHarnessTargetsPiAlias mirrors
+// TestSetAgentsTierForHarnessTargetsHarnessAlias for the "pi" harness,
+// proving SetAgentsTierForHarness/ResolveAgentForHarness round-trip for
+// harness="pi" independent of the MCP dispatch layer, and that the
+// "default" bucket is left untouched (Decision: default bucket semantics
+// unchanged).
+func TestSetAgentsTierForHarnessTargetsPiAlias(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "cache")
+	cfg, err := SetAgentsTierForHarness(Options{CacheHome: cache}, "medium", "pi", "pi-model-1", "pi")
+	if err != nil {
+		t.Fatalf("SetAgentsTierForHarness returned error: %v", err)
+	}
+	if mapping := cfg.Agents.ModelAliases["medium"]["pi"]; mapping.Backend != "pi" || mapping.Model != "pi-model-1" {
+		t.Fatalf("pi alias mapping = %#v", mapping)
+	}
+	if mapping := cfg.Agents.ModelAliases["medium"]["default"]; mapping.Backend != "codex" || mapping.Model != "gpt-5.6-terra" {
+		t.Fatalf("default alias mapping was overwritten = %#v", mapping)
+	}
+
+	backend, model, err := ResolveAgentForHarness(Options{CacheHome: cache}, "medium", "", "", "pi")
+	if err != nil {
+		t.Fatalf("ResolveAgentForHarness returned error: %v", err)
+	}
+	if backend != "pi" || model != "pi-model-1" {
+		t.Fatalf("pi harness resolution = %q/%q", backend, model)
+	}
+}
+
 func TestSetAgentsTierForHarnessStoresEffortWithoutModelChange(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "cache")
 	cfg, err := SetAgentsTierForHarness(Options{CacheHome: cache}, "medium", "", "", "codex", "medium")
