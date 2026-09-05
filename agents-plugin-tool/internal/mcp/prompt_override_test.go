@@ -897,6 +897,45 @@ func TestConfigPromptUnsetSessionScope(t *testing.T) {
 	}
 }
 
+// TestConfigPromptSetRejectsUnresolvedEmptyHarness is a review-relay
+// regression test for the plan's own flagged "Risk signal": the config.tune
+// harness-enum guard's empty-harness normalization
+// (`if harness == "" && enumContains(harnessEnum, "default") { harness =
+// "default" }`) must NOT fire for prompt.* keys, since promptHarnessEnum has
+// no "default" member. With no explicit `harness` argument and no prior
+// initialize/observeHarness call (so s.currentHarness() also resolves to
+// ""), a prompt.* config.tune must still be rejected — verified here by an
+// assertion that would fail if that guard ever regressed (e.g. if "default"
+// were added to promptHarnessEnum, or the enumContains check were
+// inverted) — and the rejection text must enumerate the full per-key enum
+// (claude, codex, pi, *) rather than the old hard-coded
+// "claude, codex, or *".
+func TestConfigPromptSetRejectsUnresolvedEmptyHarness(t *testing.T) {
+	useLeadProfile(t)
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	// No s.observeHarness call: the session harness stays "" throughout.
+	s := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, s, 920099, root, nil))
+
+	resp := callToolOnce(t, s, 1, "config.tune", map[string]any{
+		"session_key": key,
+		"key":         "prompt.DelegationSection",
+		"value":       "x",
+	})
+	if !strings.Contains(resp, `"isError":true`) {
+		t.Fatalf("expected isError:true for unresolved empty harness, got: %s", resp)
+	}
+	msg := toolText(t, resp)
+	if !strings.Contains(msg, `harness must be one of claude, codex, pi, *; got ""`) {
+		t.Fatalf("error message must name the full per-key enum for an unresolved empty harness: %q", msg)
+	}
+}
+
 // TestConfigPromptSetValidationAndDefaultScope covers the setter's input-validation
 // guards and the omitted-scope path (DefaultScope → project), which the happy-path
 // end-to-end test does not exercise.
@@ -1037,6 +1076,52 @@ func TestConfigPromptListEnumeratesDeclaredPoints(t *testing.T) {
 	}
 	if idxExt < 0 || idxSeed < 0 || idxExt > idxSeed {
 		t.Errorf("expected ExtSlot to sort before SeedSection in catalog: ext=%d seed=%d", idxExt, idxSeed)
+	}
+}
+
+// TestConfigPromptListShowsPiHarnessOverride is a review-relay regression
+// test for promptOverrideHarnessBuckets (server.go): a prompt override
+// stored for harness "pi" via config.tune must appear in config.list's
+// tuning catalog, not just resolve correctly at render time. Before the fix,
+// promptOverrideHarnessBuckets was still {"claude", "codex", "all"} — the
+// resolver was never queried for "prompt.<point>.pi", so a Pi lead's own
+// override read back as unset.
+func TestConfigPromptListShowsPiHarnessOverride(t *testing.T) {
+	useLeadProfile(t)
+
+	rsrcRoot := buildOverrideTestTree(t)
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	s := NewServer(root, "test")
+	s.observeHarness("test", "pi")
+
+	key, _ := parseLoginResponse(t, callLogin(t, s, 900210, root, nil))
+
+	setResp := callToolOnce(t, s, 1, "config.tune", map[string]any{
+		"session_key": key,
+		"key":         "prompt.SeedSection",
+		"harness":     "pi",
+		"value":       "pi-specific seeded override",
+		"scope":       "session",
+	})
+	if setText := toolText(t, setResp); !strings.Contains(setText, "prompt override set: SeedSection/pi") {
+		t.Fatalf("config.tune prompt-set (pi) confirmation missing: %s", setText)
+	}
+
+	catalog := parseTuningCatalogResponse(t, callToolOnce(t, s, 2, "config.list", map[string]any{
+		"session_key": key,
+		"format":      "json",
+	}))
+
+	seed := requireTuningKnob(t, catalog, "prompt.SeedSection")
+	cur := mustMarshalJSON(t, seed.Current)
+	if !strings.Contains(cur, `"harness":"pi"`) || !strings.Contains(cur, `"value":"pi-specific seeded override"`) {
+		t.Errorf("config.list must show the stored pi-harness override in prompt.SeedSection's current value: %s", cur)
 	}
 }
 
