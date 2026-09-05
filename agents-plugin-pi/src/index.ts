@@ -303,7 +303,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
               count: orphans.length,
               agents: buildOrphanSummary(orphans),
               detail:
-                "A previous run of this session left these delegated agents behind. They are registered as dormant: ws-agent-send revives one from its own session file, ws-agent-transcript reads what it did, ws-agent-stop drops it.",
+                "A previous run of this session left these delegated agents behind. They are registered as dormant: ws-agent-send revives one from its own session file, ws-agent-transcript reads what it did, ws-agent-stop drops it. An agent listed as running was mid-turn when the session went away — it resumes from its last flushed turn, so re-issue that instruction when you revive it rather than waiting for a report nobody is writing.",
             },
             "followUp",
           );

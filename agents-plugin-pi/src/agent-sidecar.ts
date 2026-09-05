@@ -18,10 +18,14 @@
  * can then `ws-agent-send` any of them — `sendToAgent`'s existing
  * dormant-auto-resume branch relaunches from the same `--session` file.
  *
- * Deliberately narrow: only the fields `sendToAgent`'s resume branch actually
- * reads are persisted. Nothing runtime-only (no `client`, no `unsubscribe`,
- * no `reportLog`, no `running`) round-trips — a revived record is dormant by
- * definition, and its live state is rebuilt on the resume, not restored.
+ * Deliberately narrow: the fields `sendToAgent`'s resume branch actually reads,
+ * plus two purely DESCRIPTIVE ones for the roll-call — `state` (what the child
+ * was doing at shutdown) and `lastReportAt` (how long it had been quiet). No
+ * live state round-trips (no `client`, no `unsubscribe`, no `reportLog`): a
+ * revived record is dormant by definition and rebuilds its own state on the
+ * resume. `state` is never restored ONTO the record; it only tells the lead
+ * that a `"running"` child was cut off mid-turn and needs its instruction
+ * re-issued, since a resume replays from the last flushed turn.
  *
  * Pure serialize/parse helpers are unit-tested directly
  * (test/agent-sidecar.test.ts); the two filesystem functions are thin and
@@ -49,7 +53,24 @@ export interface PersistedOrphan {
   toolGroup: ToolGroup;
   explicitTools?: string;
   spawnRole?: SpawnAgentRole;
+  /**
+   * What the child was doing when the session went away: `"running"` means a
+   * prompt was outstanding (`RpcAgentRecord.running`), `"idle"` means it was
+   * live but between turns. Load-bearing for the roll-call, not for the
+   * resume: a `"running"` orphan was cut off mid-turn and comes back from its
+   * last FLUSHED turn, so the lead must re-issue whatever it had asked for
+   * rather than assume the work continued. Absent in a sidecar written before
+   * this field existed — `parseOrphans` reads that as `"idle"`, the
+   * conservative default (no caveat claimed about work that may not have been
+   * outstanding).
+   */
+  state?: OrphanState;
+  /** ISO time of the newest `reportLog` entry at shutdown; omitted when the child never reported. */
+  lastReportAt?: string;
 }
+
+/** See `PersistedOrphan.state`. */
+export type OrphanState = "running" | "idle";
 
 export interface SidecarFile {
   version: number;
@@ -82,9 +103,20 @@ export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
       toolGroup: record.toolGroup,
       explicitTools: record.explicitTools,
       spawnRole: record.spawnRole,
+      state: record.running ? "running" : "idle",
+      // `undefined` (never reported) rather than an omitted key, matching every
+      // other optional field above — `JSON.stringify` drops it on the way out
+      // and `parseOrphans` reads it back the same way.
+      lastReportAt: lastReportAt(record),
     });
   }
   return orphans;
+}
+
+/** ISO time of the newest `reportLog` entry, or `undefined` when the child never reported. */
+function lastReportAt(record: RpcAgentRecord): string | undefined {
+  const newest = record.reportLog[record.reportLog.length - 1];
+  return newest ? new Date(newest.at).toISOString() : undefined;
 }
 
 /** Pure serializer — pretty-printed so a stranded sidecar is readable by hand during a post-mortem. */
@@ -125,6 +157,10 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
       toolGroup: (o.toolGroup ?? "full-worker") as ToolGroup,
       explicitTools: typeof o.explicitTools === "string" ? o.explicitTools : undefined,
       spawnRole: o.spawnRole,
+      // An older sidecar (or a corrupt value) has no state to trust; "idle" is
+      // the conservative read — it claims nothing about outstanding work.
+      state: o.state === "running" ? "running" : "idle",
+      lastReportAt: typeof o.lastReportAt === "string" ? o.lastReportAt : undefined,
     });
   }
   return out;
@@ -204,12 +240,30 @@ export function reviveOrphans(registry: RpcAgentRegistry, orphans: PersistedOrph
 }
 
 /**
+ * The caveat a `"running"` orphan carries. A child cut off mid-turn resumes
+ * from its last FLUSHED turn, so whatever the lead had asked for is gone with
+ * the process — re-issuing the instruction is the only way to get it done, and
+ * a lead that assumes the work merely paused would wait forever for a report
+ * nobody is writing.
+ */
+export const MID_TURN_ORPHAN_CAVEAT = "was mid-turn at shutdown; resumes from its last flushed turn — re-issue the instruction after ws-agent-send";
+
+/**
  * The `ws-agent-orphaned` push body. One message for the whole set (not one
  * per agent): a lead restarting after a crash wants a single roll-call it can
- * act on, not N interleaved notices.
+ * act on, not N interleaved notices. One LINE per agent, though — each carries
+ * its role, its state at shutdown, its last-report time, and (when it was
+ * mid-turn) the re-issue caveat, which is more than fits a comma-joined run.
  */
 export function buildOrphanSummary(orphans: PersistedOrphan[]): string {
-  return orphans.map((o) => `${o.agentId} (${o.spawnRole ?? "worker"})`).join(", ");
+  return orphans
+    .map((o) => {
+      const state = o.state ?? "idle";
+      const facts = [o.spawnRole ?? "worker", state, ...(o.lastReportAt ? [`last report ${o.lastReportAt}`] : ["no reports"])];
+      const caveat = state === "running" ? ` — ${MID_TURN_ORPHAN_CAVEAT}` : "";
+      return `${o.agentId} (${facts.join(", ")})${caveat}`;
+    })
+    .join("\n");
 }
 
 /** Best-effort sidecar write; a failure here must never break session shutdown. */

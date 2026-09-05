@@ -26,6 +26,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   SIDECAR_VERSION,
+  MID_TURN_ORPHAN_CAVEAT,
   buildOrphanSummary,
   captureOrphans,
   parseOrphans,
@@ -94,6 +95,18 @@ describe("captureOrphans", () => {
     );
   });
 
+  test("records the state at shutdown and the last-report time (relay #2: the roll-call needs both)", () => {
+    const registry: RpcAgentRegistry = new Map([
+      ["busy", record({ agentId: "busy", client: {} as RpcClient, running: true, reportLog: [{ at: 1_000 }, { kind: "final", at: 2_000 }] })],
+      ["quiet", record({ agentId: "quiet", client: {} as RpcClient, running: false })],
+    ]);
+    const [busy, quiet] = captureOrphans(registry);
+    assert.equal(busy.state, "running", "a prompt was still outstanding when the session went away");
+    assert.equal(busy.lastReportAt, new Date(2_000).toISOString(), "the NEWEST report, not the first");
+    assert.equal(quiet.state, "idle");
+    assert.equal(quiet.lastReportAt, undefined, "a child that never reported carries no time at all");
+  });
+
   test("carries exactly the resume fields plus spawnRole, and nothing runtime-only", () => {
     const registry: RpcAgentRegistry = new Map([
       [
@@ -121,6 +134,8 @@ describe("captureOrphans", () => {
         toolGroup: "full-worker",
         explicitTools: "bash,ws-report-to-lead",
         spawnRole: "fork",
+        state: "running",
+        lastReportAt: new Date(1).toISOString(),
       },
     ]);
   });
@@ -145,11 +160,45 @@ describe("serializeOrphans / parseOrphans", () => {
       toolGroup: "full-worker",
       explicitTools: "bash",
       spawnRole: "fork",
+      state: "running",
+      lastReportAt: "2026-09-05T10:00:00.000Z",
     },
   ];
 
-  test("round-trips a full orphan set unchanged", () => {
+  test("round-trips a full orphan set unchanged, state and last-report time included", () => {
     assert.deepEqual(parseOrphans(serializeOrphans(orphans)), orphans);
+  });
+
+  test("relay #2: an idle orphan with no reports round-trips with lastReportAt absent, not invented", () => {
+    const idle: PersistedOrphan[] = [
+      { agentId: "a2", sessionPath: "/tmp/s.jsonl", systemPromptPath: "/tmp/p.md", wsToolNames: [], toolGroup: "full-worker", state: "idle" },
+    ];
+    const [parsed] = parseOrphans(serializeOrphans(idle));
+    assert.equal(parsed.state, "idle");
+    assert.equal(parsed.lastReportAt, undefined);
+  });
+
+  test("relay #2: a sidecar written before these fields existed still parses, reading as idle", () => {
+    const raw = JSON.stringify({
+      version: SIDECAR_VERSION,
+      orphans: [{ agentId: "old", sessionPath: "/tmp/s.jsonl", systemPromptPath: "/tmp/p.md", wsToolNames: [], toolGroup: "full-worker" }],
+    });
+    const [parsed] = parseOrphans(raw);
+    assert.equal(parsed.agentId, "old", "an older sidecar is still revivable — no crash, no dropped entry");
+    assert.equal(parsed.state, "idle", "the conservative read: claim nothing about work that may not have been outstanding");
+    assert.equal(parsed.lastReportAt, undefined);
+  });
+
+  test("relay #2: a corrupt state value degrades to idle rather than poisoning the entry", () => {
+    const raw = JSON.stringify({
+      version: SIDECAR_VERSION,
+      orphans: [
+        { agentId: "a", sessionPath: "/tmp/s.jsonl", systemPromptPath: "/tmp/p.md", wsToolNames: [], toolGroup: "full-worker", state: 42, lastReportAt: 7 },
+      ],
+    });
+    const [parsed] = parseOrphans(raw);
+    assert.equal(parsed.state, "idle");
+    assert.equal(parsed.lastReportAt, undefined);
   });
 
   test("stamps the version and a writtenAt, and ends with a newline so the file is readable by hand", () => {
@@ -232,14 +281,32 @@ describe("rehydrateOrphanRecord", () => {
 });
 
 describe("buildOrphanSummary", () => {
-  test("names every orphan and its role in one line", () => {
+  function orphan(overrides: Partial<PersistedOrphan> = {}): PersistedOrphan {
+    return { agentId: "a1", sessionPath: "s", systemPromptPath: "p", wsToolNames: [], toolGroup: "full-worker", ...overrides };
+  }
+
+  test("names every orphan with its role, state at shutdown and last-report time, one per line", () => {
     assert.equal(
       buildOrphanSummary([
-        { agentId: "a1", sessionPath: "s", systemPromptPath: "p", wsToolNames: [], toolGroup: "full-worker", spawnRole: "fork" },
-        { agentId: "a2", sessionPath: "s", systemPromptPath: "p", wsToolNames: [], toolGroup: "full-worker" },
+        orphan({ agentId: "a1", spawnRole: "fork", state: "idle", lastReportAt: "2026-09-05T10:00:00.000Z" }),
+        orphan({ agentId: "a2", state: "idle" }),
       ]),
-      "a1 (fork), a2 (worker)",
+      ["a1 (fork, idle, last report 2026-09-05T10:00:00.000Z)", "a2 (worker, idle, no reports)"].join("\n"),
     );
+  });
+
+  test("relay #2: a running entry carries the mid-turn re-issue caveat; an idle one does not", () => {
+    const running = buildOrphanSummary([orphan({ agentId: "a1", state: "running" })]);
+    assert.ok(running.includes(MID_TURN_ORPHAN_CAVEAT), running);
+    assert.match(running, /re-issue the instruction after ws-agent-send/);
+
+    const idle = buildOrphanSummary([orphan({ agentId: "a2", state: "idle" })]);
+    assert.ok(!idle.includes(MID_TURN_ORPHAN_CAVEAT), "an idle child was between turns — nothing was cut off");
+  });
+
+  test("an orphan from an older sidecar (no state field) reads as idle and claims no lost work", () => {
+    const summary = buildOrphanSummary([orphan({ agentId: "a1", spawnRole: "fork" })]);
+    assert.equal(summary, "a1 (fork, idle, no reports)");
   });
 });
 
