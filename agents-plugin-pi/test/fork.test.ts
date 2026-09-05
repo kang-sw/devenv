@@ -523,7 +523,7 @@ describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2, 260
     assert.deepEqual(advisories(h.pushes), ["acknowledge-and-return"]);
     assert.equal(
       h.pushes[0].details?.status,
-      "2 of 3 delegated agents still running",
+      "2 of 3 delegated agents still running: sibling-1, sibling-2",
       "the two live siblings are what distinguish the real shared registry from an empty stand-in",
     );
     assert.equal(h.pushes[0].details?.agent_id, "a1");
@@ -618,7 +618,8 @@ describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2, 260
       args: { kind: "final", message: "Outcome: x" },
     });
     assert.equal(calls, 0);
-    assert.deepEqual(outcome, { push: { family: "ws-agent-report", payload: { kind: "final", report: "Outcome: x" }, deliverAs: "followUp" } });
+    assert.deepEqual(outcome, {}, "Edition: a final is stashed for the turn end rather than pushed here");
+    assert.equal(h.record.pendingFinal, "Outcome: x");
   });
 
   test("I6: with no hook set the question is pushed to the lead", () => {
@@ -666,7 +667,7 @@ describe("buildForkSpawnCtx (the ws-fork push channel)", () => {
     assert.deepEqual([...ctx.wsToolNames], ["ws__ferrule"]);
   });
 
-  test("C1: a record wired through that ctx's pi pushes ws-agent-report on the fork's own final", () => {
+  test("C1: a record wired through that ctx's pi pushes ws-agent-report when the fork's own final turn ends", async () => {
     const sent: Array<{ customType?: string; details?: Record<string, unknown> }> = [];
     const pushPi = { sendMessage: (m: { customType?: string; details?: Record<string, unknown> }) => void sent.push(m) } as unknown as ExtensionAPI;
     const ctx = buildForkSpawnCtx(pushPi, bridge, { cwd: "/repo", modelCatalogPath: "/c.json" }, {
@@ -699,6 +700,10 @@ describe("buildForkSpawnCtx (the ws-fork push channel)", () => {
     // Exactly what spawnAgent does with the ctx it is handed.
     attachEventListener(ctx.pi, registry, record, client);
     listener?.({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "final", message: "Outcome: shipped" } });
+    assert.deepEqual(sent, [], "Edition: the final is stashed while the fork is still mid-turn");
+
+    listener?.({ type: "agent_settled" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     assert.deepEqual(
       sent.map((m) => m.customType),
@@ -706,6 +711,7 @@ describe("buildForkSpawnCtx (the ws-fork push channel)", () => {
       "a fork's final is the lead's completion signal — dropping it strands the whole ws-fork surface",
     );
     assert.equal(sent[0].details?.report, "Outcome: shipped");
+    assert.equal(sent[0].details?.settled_reason, "idle");
     assert.equal(sent[0].details?.agent_id, "fork-1");
   });
 });

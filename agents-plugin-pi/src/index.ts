@@ -137,7 +137,7 @@ import {
   type RpcAgentRegistry,
 } from "./spawner.ts";
 import { registerPushMessageRenderers } from "./push-render.ts";
-import { buildOrphanSummary, captureOrphans, readAndClearSidecar, reviveOrphans, writeSidecar } from "./agent-sidecar.ts";
+import { buildOrphanPush, captureOrphans, readAndClearSidecar, reviveOrphans, writeSidecar } from "./agent-sidecar.ts";
 import { buildDiscussKickoff } from "./discuss.ts";
 import { registerGoalLoop } from "./goal-loop.ts";
 import { resolveSkillsDir } from "./skills-dir.ts";
@@ -320,9 +320,10 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
         // 260905 orphan revival: a previous run of THIS lead session died (or
         // was shut down) with children still live. Read-and-delete the
         // sidecar, put each orphan back on the registry as a dormant record
-        // (ws-agent-send relaunches it from the same --session file), and tell
-        // the lead once. Runs before `registerAsk`/`registerThreadCommands`
-        // only incidentally — nothing below depends on it.
+        // (ws-agent-send relaunches it from the same --session file), and —
+        // when any of them was cut off mid-turn — tell the lead once. Runs
+        // before `registerAsk`/`registerThreadCommands` only incidentally —
+        // nothing below depends on it.
         const orphans = readAndClearSidecar(sessionFile);
         if (orphans.length > 0) {
           // Role-keyed wiring re-arm (review relay #1, I1): `spawnRole` is
@@ -338,19 +339,13 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
               record.onApprovalPending = onApprovalPending;
             },
           });
-          pushToLead(
-            pi,
-            agentTools.rpcRegistry,
-            undefined,
-            "ws-agent-orphaned",
-            {
-              count: orphans.length,
-              agents: buildOrphanSummary(orphans),
-              detail:
-                "A previous run of this session left these delegated agents behind. They are registered as dormant: ws-agent-send revives one from its own session file, ws-agent-transcript reads what it did, ws-agent-stop drops it. An agent listed as running was mid-turn when the session went away — it resumes from its last flushed turn, so re-issue that instruction when you revive it rather than waiting for a report nobody is writing.",
-            },
-            "followUp",
-          );
+          // Edition: EVERY entry is re-registered above (an idle reviewer
+          // must stay reachable through ws-agent-send), but only a set
+          // containing cut-off work is announced — see buildOrphanPush.
+          const orphanPush = buildOrphanPush(orphans);
+          if (orphanPush) {
+            pushToLead(pi, agentTools.rpcRegistry, undefined, "ws-agent-orphaned", orphanPush, "followUp");
+          }
         }
       }
       refreshPendingWidget(ctx, threadHandle);

@@ -27,8 +27,10 @@ import { join } from "node:path";
 import {
   SIDECAR_VERSION,
   MID_TURN_ORPHAN_CAVEAT,
+  buildOrphanPush,
   buildOrphanSummary,
   captureOrphans,
+  partitionOrphansByState,
   parseOrphans,
   readAndClearSidecar,
   rehydrateOrphanRecord,
@@ -285,28 +287,97 @@ describe("buildOrphanSummary", () => {
     return { agentId: "a1", sessionPath: "s", systemPromptPath: "p", wsToolNames: [], toolGroup: "full-worker", ...overrides };
   }
 
-  test("names every orphan with its role, state at shutdown and last-report time, one per line", () => {
+  test("names every RUNNING orphan with its role, last-report time and the re-issue caveat, one per line", () => {
     assert.equal(
       buildOrphanSummary([
-        orphan({ agentId: "a1", spawnRole: "fork", state: "idle", lastReportAt: "2026-09-05T10:00:00.000Z" }),
-        orphan({ agentId: "a2", state: "idle" }),
+        orphan({ agentId: "a1", spawnRole: "fork", state: "running", lastReportAt: "2026-09-05T10:00:00.000Z" }),
+        orphan({ agentId: "a2", state: "running" }),
       ]),
-      ["a1 (fork, idle, last report 2026-09-05T10:00:00.000Z)", "a2 (worker, idle, no reports)"].join("\n"),
+      [
+        `a1 (fork, running, last report 2026-09-05T10:00:00.000Z) — ${MID_TURN_ORPHAN_CAVEAT}`,
+        `a2 (worker, running, no reports) — ${MID_TURN_ORPHAN_CAVEAT}`,
+      ].join("\n"),
     );
   });
 
-  test("relay #2: a running entry carries the mid-turn re-issue caveat; an idle one does not", () => {
-    const running = buildOrphanSummary([orphan({ agentId: "a1", state: "running" })]);
-    assert.ok(running.includes(MID_TURN_ORPHAN_CAVEAT), running);
-    assert.match(running, /re-issue the instruction after ws-agent-send/);
-
-    const idle = buildOrphanSummary([orphan({ agentId: "a2", state: "idle" })]);
-    assert.ok(!idle.includes(MID_TURN_ORPHAN_CAVEAT), "an idle child was between turns — nothing was cut off");
+  test("Edition: idle entries collapse into one closing line — they lost nothing and need no instruction re-issued", () => {
+    const summary = buildOrphanSummary([
+      orphan({ agentId: "a1", state: "running" }),
+      orphan({ agentId: "a2", state: "idle" }),
+      orphan({ agentId: "a3" }),
+    ]);
+    assert.equal(summary.split("\n").length, 2);
+    assert.match(summary, /^a1 \(worker, running, no reports\) — /);
+    assert.equal(summary.split("\n")[1], "2 idle agents re-registered dormant: a2, a3", "an orphan with no state field reads as idle");
   });
 
-  test("an orphan from an older sidecar (no state field) reads as idle and claims no lost work", () => {
-    const summary = buildOrphanSummary([orphan({ agentId: "a1", spawnRole: "fork" })]);
-    assert.equal(summary, "a1 (fork, idle, no reports)");
+  test("Edition: an all-running set has no idle line at all", () => {
+    const summary = buildOrphanSummary([orphan({ agentId: "a1", state: "running" })]);
+    assert.equal(summary.split("\n").length, 1);
+    assert.ok(!summary.includes("re-registered dormant"));
+  });
+
+  test("Edition: the idle line agrees in number", () => {
+    const summary = buildOrphanSummary([orphan({ agentId: "a1", state: "running" }), orphan({ agentId: "a2", state: "idle" })]);
+    assert.match(summary, /1 idle agent re-registered dormant: a2$/);
+  });
+});
+
+/**
+ * Edition (live-run fix): a `/reload` after three workers had all finished
+ * announced all three, and the lead had nothing to do with any of them. The
+ * push decision is pure and lives here rather than at the `session_start` call
+ * site precisely so it has coverage — the glue around it is live-gate only.
+ */
+describe("buildOrphanPush (announce only what was cut off)", () => {
+  function orphan(overrides: Partial<PersistedOrphan> = {}): PersistedOrphan {
+    return { agentId: "a1", sessionPath: "s", systemPromptPath: "p", wsToolNames: [], toolGroup: "full-worker", ...overrides };
+  }
+
+  test("an all-idle set is worth NO message — every entry is still re-registered, and ws-agent-list is the trace", () => {
+    assert.equal(buildOrphanPush([orphan({ agentId: "a1", state: "idle" }), orphan({ agentId: "a2" })]), undefined);
+  });
+
+  test("an empty set pushes nothing either", () => {
+    assert.equal(buildOrphanPush([]), undefined);
+  });
+
+  test("a mixed set announces the running entries, counts only those, and names the idle ones once", () => {
+    const push = buildOrphanPush([
+      orphan({ agentId: "a1", state: "running" }),
+      orphan({ agentId: "a2", state: "idle" }),
+      orphan({ agentId: "a3", state: "idle" }),
+    ])!;
+    assert.equal(push.count, 1, "count is what the lead must act on, not how many were re-registered");
+    assert.deepEqual(push.idle_agent_ids, ["a2", "a3"]);
+    const agents = String(push.agents).split("\n");
+    assert.equal(agents.length, 2);
+    assert.ok(agents[0].startsWith("a1 ("));
+    assert.ok(agents[0].includes(MID_TURN_ORPHAN_CAVEAT));
+    assert.equal(agents[1], "2 idle agents re-registered dormant: a2, a3");
+  });
+
+  test("an all-running set carries no idle_agent_ids field to render", () => {
+    const push = buildOrphanPush([orphan({ agentId: "a1", state: "running" }), orphan({ agentId: "a2", state: "running" })])!;
+    assert.equal(push.count, 2);
+    assert.equal("idle_agent_ids" in push, false);
+    assert.equal(String(push.agents).split("\n").length, 2);
+  });
+});
+
+describe("partitionOrphansByState", () => {
+  function orphan(overrides: Partial<PersistedOrphan> = {}): PersistedOrphan {
+    return { agentId: "a1", sessionPath: "s", systemPromptPath: "p", wsToolNames: [], toolGroup: "full-worker", ...overrides };
+  }
+
+  test("a missing state field counts as idle, the conservative default", () => {
+    const { running, idle } = partitionOrphansByState([
+      orphan({ agentId: "a1", state: "running" }),
+      orphan({ agentId: "a2", state: "idle" }),
+      orphan({ agentId: "a3" }),
+    ]);
+    assert.deepEqual(running.map((o) => o.agentId), ["a1"]);
+    assert.deepEqual(idle.map((o) => o.agentId), ["a2", "a3"]);
   });
 });
 

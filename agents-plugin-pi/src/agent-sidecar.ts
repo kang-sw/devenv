@@ -13,10 +13,15 @@
  * file of the lead's own session file (`<sessionFile>.ws-agents.json` — the
  * same naming convention `ask.ts`'s `<sessionFile>.ws-threads.json` already
  * uses), and the next `session_start` reads it, DELETES it (one revival per
- * crash, never a growing backlog), re-registers each entry as a dormant
- * record, and emits a single `ws-agent-orphaned` push naming them. The lead
- * can then `ws-agent-send` any of them — `sendToAgent`'s existing
- * dormant-auto-resume branch relaunches from the same `--session` file.
+ * crash, never a growing backlog), and re-registers each entry as a dormant
+ * record. The lead can then `ws-agent-send` any of them — `sendToAgent`'s
+ * existing dormant-auto-resume branch relaunches from the same `--session`
+ * file.
+ *
+ * A single `ws-agent-orphaned` push announces the set, but only when at least
+ * one entry was `"running"` (see `buildOrphanPush`): re-registration is
+ * bookkeeping, whereas a child cut off mid-turn is work the lead has to
+ * re-issue.
  *
  * Deliberately narrow: the fields `sendToAgent`'s resume branch actually reads,
  * plus two purely DESCRIPTIVE ones for the roll-call — `state` (what the child
@@ -249,21 +254,71 @@ export function reviveOrphans(registry: RpcAgentRegistry, orphans: PersistedOrph
 export const MID_TURN_ORPHAN_CAVEAT = "was mid-turn at shutdown; resumes from its last flushed turn — re-issue the instruction after ws-agent-send";
 
 /**
+ * Splits a revived set by what the lead has to DO about each entry. Every
+ * entry is re-registered either way (an idle reviewer must stay reachable
+ * through `ws-agent-send`); only the `"running"` ones carry lost work.
+ */
+export function partitionOrphansByState(orphans: PersistedOrphan[]): {
+  running: PersistedOrphan[];
+  idle: PersistedOrphan[];
+} {
+  const running: PersistedOrphan[] = [];
+  const idle: PersistedOrphan[] = [];
+  for (const orphan of orphans) {
+    ((orphan.state ?? "idle") === "running" ? running : idle).push(orphan);
+  }
+  return { running, idle };
+}
+
+/**
  * The `ws-agent-orphaned` push body. One message for the whole set (not one
  * per agent): a lead restarting after a crash wants a single roll-call it can
- * act on, not N interleaved notices. One LINE per agent, though — each carries
- * its role, its state at shutdown, its last-report time, and (when it was
- * mid-turn) the re-issue caveat, which is more than fits a comma-joined run.
+ * act on, not N interleaved notices. One LINE per agent that was mid-turn —
+ * each carries its role, its state at shutdown, its last-report time and the
+ * re-issue caveat, which is more than fits a comma-joined run — plus, when
+ * there were also idle entries, one closing line naming them together.
+ *
+ * Edition (live-run fix): the idle entries are a summary line rather than a
+ * line each. They lost nothing and need no instruction re-issued; naming them
+ * at length invited the lead to treat re-registration as a task.
  */
 export function buildOrphanSummary(orphans: PersistedOrphan[]): string {
-  return orphans
-    .map((o) => {
-      const state = o.state ?? "idle";
-      const facts = [o.spawnRole ?? "worker", state, ...(o.lastReportAt ? [`last report ${o.lastReportAt}`] : ["no reports"])];
-      const caveat = state === "running" ? ` — ${MID_TURN_ORPHAN_CAVEAT}` : "";
-      return `${o.agentId} (${facts.join(", ")})${caveat}`;
-    })
-    .join("\n");
+  const { running, idle } = partitionOrphansByState(orphans);
+  const lines = running.map((o) => {
+    const facts = [o.spawnRole ?? "worker", "running", ...(o.lastReportAt ? [`last report ${o.lastReportAt}`] : ["no reports"])];
+    return `${o.agentId} (${facts.join(", ")}) — ${MID_TURN_ORPHAN_CAVEAT}`;
+  });
+  if (idle.length > 0) {
+    lines.push(`${idle.length} idle agent${idle.length === 1 ? "" : "s"} re-registered dormant: ${idle.map((o) => o.agentId).join(", ")}`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * The whole `ws-agent-orphaned` payload for a revived set, or `undefined` when
+ * the set is worth no message at all.
+ *
+ * Edition (live-run fix): a `/reload` after three workers had all finished
+ * announced all three, and the lead had nothing to do with any of them. A
+ * roll-call is worth a message only when something was CUT OFF: an entry that
+ * was mid-turn resumes from its last flushed turn and needs its instruction
+ * re-issued, while an idle one is simply reachable again. So the push happens
+ * only when at least one entry was `"running"`; the idle ones ride along in
+ * the summary, and an all-idle set leaves no trace but `ws-agent-list`.
+ *
+ * Pure and exported (rather than inlined at the `session_start` call site) so
+ * this decision has direct coverage — the glue around it is live-gate only.
+ */
+export function buildOrphanPush(orphans: PersistedOrphan[]): Record<string, unknown> | undefined {
+  const { running, idle } = partitionOrphansByState(orphans);
+  if (running.length === 0) return undefined;
+  return {
+    count: running.length,
+    agents: buildOrphanSummary(orphans),
+    ...(idle.length > 0 ? { idle_agent_ids: idle.map((o) => o.agentId) } : {}),
+    detail:
+      "A previous run of this session left these delegated agents behind. Every agent named here is registered as dormant: ws-agent-send revives one from its own session file, ws-agent-transcript reads what it did, ws-agent-stop drops it. The agents listed individually were mid-turn when the session went away — they resume from their last flushed turn, so re-issue that instruction when you revive one rather than waiting for a report nobody is writing.",
+  };
 }
 
 /** Best-effort sidecar write; a failure here must never break session shutdown. */

@@ -417,7 +417,7 @@ describe("createApprovalRelay (260905: unconditional ws-agent-approval push)", (
       const registry: RpcAgentRegistry = new Map([[record.agentId, record]]);
       createApprovalRelay(pi.api, { cwd }, { current: registry })(record);
 
-      assert.equal(pi.sent[0].message.details?.status, "1 of 1 delegated agent still running");
+      assert.equal(pi.sent[0].message.details?.status, `1 of 1 delegated agent still running: ${record.agentId}`);
     });
   });
 
@@ -433,13 +433,14 @@ describe("createApprovalRelay (260905: unconditional ws-agent-approval push)", (
     });
   });
 
-  test("an unfilled registry ref (the relay is built BEFORE registerAgentTools) degrades to 0 of 0 rather than throwing", () => {
+  test("an unfilled registry ref (the relay is built BEFORE registerAgentTools) degrades to a status-less push rather than throwing", () => {
     withTempCwd((cwd) => {
       const pi = fakePi();
       const record = freshRecord({ cmdId: "call-4", command: "echo hi" });
 
       assert.doesNotThrow(() => createApprovalRelay(pi.api, { cwd }, { current: undefined })(record));
-      assert.equal(pi.sent[0].message.details?.status, "0 of 0 delegated agents still running");
+      assert.equal(pi.sent[0].message.details?.status, undefined, "Edition: no readable fan-in means no status line");
+      assert.equal(pi.sent[0].message.details?.cmd_id, "call-4", "the approval itself still relays");
     });
   });
 });

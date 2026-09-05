@@ -642,8 +642,8 @@ describe("handleForkRaisedQuestion (Entry A meets Entry B)", () => {
     assert.equal(live.overlayAttached, undefined, "no VIEW is attached yet — the two flags have different lifetimes");
     assert.equal(
       computeRunningStatusLine(registry),
-      "0 of 0 delegated agents still running",
-      "a question-parked fork is outside both N and M",
+      undefined,
+      "a question-parked fork is outside both N and M, and an empty fan-in produces no line at all",
     );
   });
 
@@ -668,11 +668,8 @@ describe("handleForkRaisedQuestion (Entry A meets Entry B)", () => {
 
     assert.equal(live.threadBound, false, "without this the fork is outside N and M, and settle-suppressed, forever");
     assert.equal(handle.threads.get(thread.threadId)!.status, "dormant", "the owner has nothing left to answer");
-    assert.deepEqual(
-      outcome,
-      { push: { family: "ws-agent-report", payload: { kind: "final", report: "Outcome: rebased." }, deliverAs: "followUp" } },
-      "a fork-raised final is still the lead's completion signal",
-    );
+    assert.deepEqual(outcome, {}, "Edition: a final is stashed, not pushed at tool-invocation time");
+    assert.equal(live.pendingFinal, "Outcome: rebased.", "a fork-raised final is still the lead's completion signal — it is released when the fork's turn ends");
   });
 
   test("I2 (headless): the lead answering through ws-agent-send releases the bind at that moment", async () => {

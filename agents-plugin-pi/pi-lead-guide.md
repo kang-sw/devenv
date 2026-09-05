@@ -62,7 +62,7 @@ substitute for it. Each child signal arrives on its own as a message:
 | `ws-agent-question` | A child needs an answer to continue. In an interactive session this is instead handled by the owner and you get a thread notice — see below. |
 | `ws-agent-approval` | An `ws-execute` worker is blocked on a shell command. It carries `cmd_id`; answer with `ws-approve`. Nothing else unblocks it. |
 | `ws-agent-advisory` | The adapter's own judgment about a child: a malformed `kind:"final"`, a missing `Commit:`, a fork that went idle without reporting, a stall. Advisories are about the child, never from it. |
-| `ws-agent-orphaned` | A previous run of this session left children behind. They are registered as dormant: `ws-agent-send` revives one from its own session file, `ws-agent-transcript` reads what it did, `ws-agent-stop` drops it. Each is listed with its state at shutdown and its last-report time; one listed as `running` was cut off mid-turn and resumes from its last flushed turn, so re-issue that instruction when you revive it. |
+| `ws-agent-orphaned` | A previous run of this session left children behind mid-turn. They are registered as dormant: `ws-agent-send` revives one from its own session file, `ws-agent-transcript` reads what it did, `ws-agent-stop` drops it. Each one listed individually was cut off mid-turn and resumes from its last flushed turn, so re-issue that instruction when you revive it. This message appears only when something was cut off; children that were idle at shutdown are re-registered silently, and `ws-agent-list` is where you see them. |
 
 Each of these ends with a line like `1 of 3 delegated agents still running:
 w3` whenever you have anything delegated at all. Read it as your fan-in state:
