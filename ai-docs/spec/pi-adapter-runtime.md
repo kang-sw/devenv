@@ -925,14 +925,23 @@ channel for an owner question: it registers and carries on.
   overlay detaches.
 - **Overlay chat.** Owner text goes to the respondent as a `prompt` when it is
   idle and as a `steer` when it is streaming; child text deltas render into the
-  overlay. Pasted input is delivered as one message. The transcript is
+  overlay. Pasted input is delivered as one message. While the respondent's
+  turn is running and no text has streamed yet, the overlay shows one
+  `working…` line in the streaming-tail slot — the first text delta replaces
+  it and settle clears it; the state is read from `ForkChannel.isStreaming()`
+  at render time (the registry's streaming flag), not derived from
+  `agent_start`/`agent_settled` events the component itself receives, because
+  attaching to a live fork mid-turn or a dormant thread's first message never
+  delivers a start event to the component. The transcript is
   persisted per thread (on the thread record, newest 200 entries), so a reopen
   after `Esc` or after a lead restart shows the conversation so far; owner
   lines are styled with the host's user-message background; thread text is
   rendered as Markdown when the host's renderer is available (plain wrapped
-  text otherwise). `Esc` closes the view only: the thread stays `open` and the
-  fork keeps running, reattachable at any time. `/done` typed in the overlay
-  closes the **thread**, on its origin:
+  text otherwise). The header states, once, directly after the `opened <time>`
+  line when present, `Esc: close view (thread stays open) · /done: end thread`
+  — there is no footer hint. `Esc` closes the view only: the thread stays
+  `open` and the fork keeps running, reattachable at any time. `/done` typed
+  in the overlay closes the **thread**, on its origin:
   - `lead-ask` — the discussion fork is asked for a summary turn; on settle the
     adapter injects `context + question + summary` into the lead session as a
     custom message (type `ws-thread-summary`, delivered `followUp` so it lands
