@@ -280,9 +280,11 @@ report channel" below):
   shortly after it settles (see "Turn completion is gated on RPC idle"), so
   `idle` is mostly observed mid-transition, not as a steady status to poll
   for. `model` (260905) is the effective resolved model the child was
-  launched with, omitted only when the record carries no model at all (a
-  sidecar written before the field existed); an inheriting child (no catalog
-  entry for its alias) shows the parent's own concrete model, not an absent
+  launched with, omitted only when the record carries no model at all —
+  either a sidecar written before the field existed, or a fresh spawn whose
+  inherited-model lookup itself came back empty (no tool-context model to
+  fall back to); an inheriting child (no catalog entry for its alias) shows
+  the parent's own concrete model, not an absent
   field. `include_prompt` (default `false`) additionally surfaces each
   record's original spawn prompt, stored head-truncated to 4KB.
 - `ws-agent-stop(agent_id)` — halt a child's process while retaining its registry

@@ -156,6 +156,24 @@ describe("captureOrphans", () => {
     assert.notEqual(orphan.wsToolNames, live.wsToolNames);
     assert.deepEqual(orphan.wsToolNames, [...live.wsToolNames]);
   });
+
+  test("review relay #1 (Important): a revived orphan that never reports again still has its lastReportAt survive a SECOND capture, via lastReportAtOverride", () => {
+    const lastReportAt = new Date(1_700_000_060_000).toISOString();
+    const revived = rehydrateOrphanRecord({
+      agentId: "a1",
+      sessionPath: "/tmp/s1.jsonl",
+      systemPromptPath: "/tmp/p1.md",
+      wsToolNames: [],
+      toolGroup: "full-worker",
+      lastReportAt,
+    });
+    // reportLog is empty on the revived record (no synthetic entry) — before
+    // the fix, captureOrphans's lastReportAt(record) helper read only
+    // reportLog and would drop the value here.
+    assert.deepEqual(revived.reportLog, []);
+    const [recaptured] = captureOrphans(new Map([["a1", revived]]));
+    assert.equal(recaptured.lastReportAt, lastReportAt, "a revive-then-shutdown-again cycle must not silently drop the last-report time");
+  });
 });
 
 describe("serializeOrphans / parseOrphans", () => {
@@ -276,6 +294,17 @@ describe("serializeOrphans / parseOrphans", () => {
     assert.deepEqual(parsed.wsToolNames, []);
     assert.equal(parsed.toolGroup, "full-worker");
   });
+
+  test("review relay #1 (Minor a): a lastReportAt that is a string but does not parse as a date is rejected, not passed through to poison later Date.parse arithmetic", () => {
+    const raw = JSON.stringify({
+      version: SIDECAR_VERSION,
+      orphans: [
+        { agentId: "a", sessionPath: "/tmp/s.jsonl", systemPromptPath: "/tmp/p.md", wsToolNames: [], toolGroup: "full-worker", lastReportAt: "not-a-date" },
+      ],
+    });
+    const [parsed] = parseOrphans(raw);
+    assert.equal(parsed.lastReportAt, undefined);
+  });
 });
 
 describe("rehydrateOrphanRecord", () => {
@@ -339,6 +368,27 @@ describe("rehydrateOrphanRecord", () => {
     const registry: RpcAgentRegistry = new Map([["a1", revived]]);
     const [entry] = listAgents(registry);
     assert.equal(entry.last_report_at, new Date(newReportAt).toISOString());
+  });
+
+  test("review relay #1 (Minor c): any real reportLog entry wins over the override even when the override is numerically NEWER", () => {
+    const laterOverride = new Date(1_700_000_120_000).toISOString();
+    const revived = rehydrateOrphanRecord({
+      agentId: "a1",
+      sessionPath: "/tmp/s1.jsonl",
+      systemPromptPath: "/tmp/p1.md",
+      wsToolNames: [],
+      toolGroup: "full-worker",
+      lastReportAt: laterOverride,
+    });
+    const earlierReportAt = 1_700_000_060_000;
+    revived.reportLog.push({ at: earlierReportAt });
+    const registry: RpcAgentRegistry = new Map([["a1", revived]]);
+    const [entry] = listAgents(registry);
+    assert.equal(
+      entry.last_report_at,
+      new Date(earlierReportAt).toISOString(),
+      "the contract is 'any real report wins', not 'the larger timestamp wins' — the override must never resurface once reportLog is non-empty",
+    );
   });
 });
 

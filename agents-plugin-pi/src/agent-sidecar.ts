@@ -133,10 +133,21 @@ export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
   return orphans;
 }
 
-/** ISO time of the newest `reportLog` entry, or `undefined` when the child never reported. */
+/**
+ * ISO time of the newest `reportLog` entry, or `undefined` when the child
+ * never reported.
+ *
+ * Review relay #1 (Important): falls back to `record.lastReportAtOverride`
+ * when `reportLog` is empty — the same precedence `listAgents` and
+ * `evictForCapacity` use — so a revived-but-never-reported-since orphan's
+ * last-report time round-trips through a SECOND shutdown/revive cycle
+ * instead of being dropped once `reportLog` is captured empty again. This
+ * stays read-side only: the override rides on the existing `lastReportAt`
+ * field rather than a second persisted key.
+ */
 function lastReportAt(record: RpcAgentRecord): string | undefined {
   const newest = record.reportLog[record.reportLog.length - 1];
-  return newest ? new Date(newest.at).toISOString() : undefined;
+  return newest ? new Date(newest.at).toISOString() : record.lastReportAtOverride;
 }
 
 /** Pure serializer — pretty-printed so a stranded sidecar is readable by hand during a post-mortem. */
@@ -183,7 +194,14 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
       // An older sidecar (or a corrupt value) has no state to trust; "idle" is
       // the conservative read — it claims nothing about outstanding work.
       state: o.state === "running" ? "running" : "idle",
-      lastReportAt: typeof o.lastReportAt === "string" ? o.lastReportAt : undefined,
+      // Review relay #1 (Minor a): a hand-edited/corrupt sidecar could carry a
+      // non-date string; `typeof === "string"` alone would let it through to
+      // feed `Date.parse` arithmetic in `evictForCapacity` (poisoning
+      // `Math.max` with `NaN`, making the record permanently un-evictable)
+      // and to `listAgents`'s `last_report_at`, which the tool description
+      // and spec both declare ISO. `Number.isFinite(Date.parse(...))` rejects
+      // anything that does not parse as a date.
+      lastReportAt: typeof o.lastReportAt === "string" && Number.isFinite(Date.parse(o.lastReportAt)) ? o.lastReportAt : undefined,
     });
   }
   return out;

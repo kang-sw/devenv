@@ -2447,13 +2447,16 @@ async function harvestLastMessage(record: RpcAgentRecord): Promise<string | unde
  * 260905 (list-model/last-report-fidelity ticket) adds `model`: the
  * effective resolved model the child was launched with (`modelBase`, plus
  * `/<effort>` when `modelEffort` is set), omitted only when the record
- * carries no `modelBase` at all (a sidecar written before the field
- * existed). Because `resolveModelForAliasViaWsMcp` falls back to the
- * parent's own concrete model on any catalog miss, an inheriting child's
- * `modelBase` already IS the parent's model name — no separate
- * inherited-vs-explicit flag is needed. `last_report_at` now falls back to
- * `record.lastReportAtOverride` (set only by `rehydrateOrphanRecord`) when
- * `reportLog` is empty, so a revived orphan does not read as never-reported.
+ * carries no `modelBase` at all — either a sidecar written before the field
+ * existed, or a fresh spawn whose `resolveModelForAliasViaWsMcp` fallback
+ * (`ctx.inheritModel`, via `inheritModelFromToolCtx`) itself came back
+ * `undefined` because the tool-context model was absent or malformed.
+ * Because that resolver otherwise falls back to the parent's own concrete
+ * model on any catalog miss, an inheriting child's `modelBase` already IS
+ * the parent's model name — no separate inherited-vs-explicit flag is
+ * needed. `last_report_at` now falls back to `record.lastReportAtOverride`
+ * (set only by `rehydrateOrphanRecord`) when `reportLog` is empty, so a
+ * revived orphan does not read as never-reported.
  */
 export function listAgents(
   registry: RpcAgentRegistry,

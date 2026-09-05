@@ -2659,11 +2659,20 @@ describe("evictForCapacity", () => {
   });
 
   test("260905 (list-model/last-report-fidelity): prefers to drop a never-active record over a revived orphan whose lastReportAtOverride is newer", () => {
-    const neverActive = freshRpcRecord({ agentId: "never" });
+    // Review relay #1 (Critical): both records must have distinct, non-zero
+    // activity under the FIXED formula, and "revived" is inserted first so
+    // insertion-order tie-breaking cannot coincidentally produce the right
+    // answer for the wrong reason. "never" gets a small lastLeadPromptAt
+    // (100) that is unambiguously below the override (9_000) only once the
+    // override is actually honored — under the pre-fix formula (which
+    // ignores lastReportAtOverride entirely), "revived" scores activity 0
+    // (lowest) and would be evicted instead, so this test fails if the
+    // lastReportAtOverride fallback in evictForCapacity regresses.
     const revived = freshRpcRecord({ agentId: "revived", lastReportAtOverride: new Date(9_000).toISOString() });
+    const neverActive = freshRpcRecord({ agentId: "never", lastLeadPromptAt: 100 });
     const registry: RpcAgentRegistry = new Map([
-      ["never", neverActive],
       ["revived", revived],
+      ["never", neverActive],
     ]);
     const result = evictForCapacity(registry, 2);
     assert.deepEqual(result, { ok: true, evictedLabel: "never" });
