@@ -424,11 +424,20 @@ function getPiInvocation(extraArgs: string[]): { command: string; args: string[]
  * `waiters: Array<() => void>` field so it is reusable verbatim by both the
  * one-shot `explore` registry (`AgentRecord`) and the RPC-backed registry
  * (`RpcAgentRecord`) below.
+ *
+ * Returns the number of waiters it resolved (the pre-drain length) — Phase 2
+ * (260904, re-scoped 2026-09-05) uses this as the "did this event already
+ * wake a lead blocked in `ws-agent-wait`" signal, so `applyRpcEvent`'s
+ * gated-exec branch can tell `attachEventListener`/`createApprovalRelay`
+ * whether the redundant approval steer is safe to skip. Existing call sites
+ * that don't need the count keep working unchanged (return value simply
+ * unused there).
  */
-function settleWaiters<T extends { waiters: Array<() => void> }>(record: T): void {
+function settleWaiters<T extends { waiters: Array<() => void> }>(record: T): number {
   const waiters = record.waiters;
   record.waiters = [];
   for (const resolve of waiters) resolve();
+  return waiters.length;
 }
 
 function waitForDone(record: AgentRecord): Promise<void> {
@@ -763,20 +772,21 @@ export interface RpcSpawnCtx {
   /**
    * 260904 Phase 1: fired right after `attachEventListener` observes a
    * freshly-set `record.pendingApproval` on this spawn's record — the
-   * approval-request-relay injection hook. `spawner.ts` stays generic (no
-   * `pi.sendUserMessage` import) by taking this as a plain callback;
-   * `execute-gateway.ts`'s `createApprovalRelay` is the only real
-   * implementation. Never fires for a non-`"execute-worker"` spawn in
-   * practice, since `GATED_EXEC_TOOL_NAME` is reachable only from that
-   * group's `--tools` list.
+   * approval-request-relay injection hook, now told whether a lead-side
+   * waiter was already woken by this event (260904 Phase 2, re-scoped
+   * 2026-09-05). `spawner.ts` stays generic (no `pi.sendUserMessage` import)
+   * by taking this as a plain callback; `execute-gateway.ts`'s
+   * `createApprovalRelay` is the only real implementation. Never fires for a
+   * non-`"execute-worker"` spawn in practice, since `GATED_EXEC_TOOL_NAME` is
+   * reachable only from that group's `--tools` list.
    */
-  onApprovalPending?: (record: RpcAgentRecord) => void;
+  onApprovalPending?: (record: RpcAgentRecord, info: { waiterWoken: boolean }) => void;
 }
 
 export interface RpcResumeCtx {
   cwd: string;
-  /** See `RpcSpawnCtx.onApprovalPending` — threaded through `sendToAgent`'s dormant-auto-resume branch so a resumed `execute-worker`'s approval relay keeps working. */
-  onApprovalPending?: (record: RpcAgentRecord) => void;
+  /** See `RpcSpawnCtx.onApprovalPending` (now told whether a lead-side waiter was already woken) — threaded through `sendToAgent`'s dormant-auto-resume branch so a resumed `execute-worker`'s approval relay keeps working. */
+  onApprovalPending?: (record: RpcAgentRecord, info: { waiterWoken: boolean }) => void;
 }
 
 /**
@@ -856,6 +866,11 @@ export const REPORT_BUFFER_CAP = 32;
  * explicit `undefined` property) when the caller omits it, so an existing
  * `full-worker`/`execute-worker` report round-trips as `{message}` — no
  * `kind` key at all — unchanged in shape from before this field existed.
+ *
+ * Stays `void` (review fix, relay #1 Minor): nothing reads a woken-count for
+ * the `ws-report-to-lead` branch — `applyRpcEvent`'s report branch below
+ * returns `{waiterWoken: false}` unconditionally rather than threading a
+ * count through this exported `enqueue*` verb for zero current benefit.
  */
 export function enqueueReport(record: RpcAgentRecord, message: string, kind?: "question" | "final"): void {
   const entry: AgentReport = kind === undefined ? { message } : { message, kind };
@@ -915,19 +930,24 @@ export function drainReports(record: RpcAgentRecord): { reports: AgentReport[]; 
  * (`undefined`) otherwise, so a caller falls back to the worker's base cwd
  * exactly as `execute-gateway.ts`'s `execute()` itself does.
  */
-export function applyRpcEvent(record: RpcAgentRecord, evt: { type?: string; toolName?: string; args?: unknown; toolCallId?: string }): void {
+export function applyRpcEvent(
+  record: RpcAgentRecord,
+  evt: { type?: string; toolName?: string; args?: unknown; toolCallId?: string },
+): { waiterWoken: boolean } {
   if (evt.type === "agent_start") {
     record.streaming = true;
   } else if (evt.type === "agent_settled") {
     record.streaming = false;
     record.idlePending = true;
-    settleWaiters(record);
+    const woken = settleWaiters(record);
+    return { waiterWoken: woken > 0 };
   } else if (evt.type === "tool_execution_start" && evt.toolName === REPORT_TO_LEAD_TOOL_NAME) {
     const args = evt.args as { message?: unknown; kind?: unknown } | undefined;
     const message = args?.message;
     if (typeof message === "string") {
       const kind = args?.kind === "question" || args?.kind === "final" ? args.kind : undefined;
       enqueueReport(record, message, kind);
+      return { waiterWoken: false };
     }
   } else if (evt.type === "tool_execution_start" && evt.toolName === GATED_EXEC_TOOL_NAME) {
     const args = evt.args as { command?: unknown; rationale?: unknown; cwd?: unknown } | undefined;
@@ -944,28 +964,46 @@ export function applyRpcEvent(record: RpcAgentRecord, evt: { type?: string; tool
       // branches above. Without this the lead stays blocked, and the
       // turn-boundary-only approval steer queues behind the unfinished wait
       // turn — a circular deadlock broken only by the wait timeout.
-      settleWaiters(record);
+      //
+      // 260904 Phase 2 (re-scoped 2026-09-05): the woken-count is also
+      // returned as `waiterWoken` so `attachEventListener` can tell
+      // `createApprovalRelay` whether the lead already learned of this
+      // pending approval through the wait return, making the parallel
+      // `pi.sendUserMessage(..., {deliverAs:"steer"})` relay a stale
+      // duplicate that should be skipped.
+      const woken = settleWaiters(record);
+      return { waiterWoken: woken > 0 };
     }
   }
+  return { waiterWoken: false };
 }
 
 /**
  * Wires `client.onEvent()` into `applyRpcEvent` for `record`, then — 260904
- * Phase 1 — additionally invokes `onApprovalPending(record)` right after any
- * `tool_execution_start` for `GATED_EXEC_TOOL_NAME` (the same event
+ * Phase 1 — additionally invokes `onApprovalPending(record, info)` right
+ * after any `tool_execution_start` for `GATED_EXEC_TOOL_NAME` (the same event
  * `applyRpcEvent` just used to set `record.pendingApproval`). Kept as a
  * second, independent check on the raw event (not a "did pendingApproval
  * change" diff) so this function stays a thin, generic wire-up: `spawner.ts`
  * never imports `pi.sendUserMessage` itself (golden-rule-adjacent — keeps the
  * approval-relay's actual injection behavior owned entirely by
  * `execute-gateway.ts`, which supplies the real callback).
+ *
+ * 260904 Phase 2 (re-scoped 2026-09-05): `applyRpcEvent`'s return value is
+ * now captured and threaded through as `info.waiterWoken` — tells
+ * `onApprovalPending` whether this same event already woke a lead blocked in
+ * `ws-agent-wait`, so `createApprovalRelay` can skip the redundant steer.
  */
-function attachEventListener(record: RpcAgentRecord, client: RpcClient, onApprovalPending?: (record: RpcAgentRecord) => void): void {
+function attachEventListener(
+  record: RpcAgentRecord,
+  client: RpcClient,
+  onApprovalPending?: (record: RpcAgentRecord, info: { waiterWoken: boolean }) => void,
+): void {
   record.unsubscribe = client.onEvent((evt) => {
     const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string };
-    applyRpcEvent(record, e);
+    const { waiterWoken } = applyRpcEvent(record, e);
     if (onApprovalPending && e.type === "tool_execution_start" && e.toolName === GATED_EXEC_TOOL_NAME) {
-      onApprovalPending(record);
+      onApprovalPending(record, { waiterWoken });
     }
   });
 }
@@ -1323,23 +1361,45 @@ export async function waitForAgents(registry: RpcAgentRegistry, agentIds: string
     );
   }
 
+  // Keep a handle to every pushed resolver so it can be unregistered again —
+  // `record.waiters.length` is now a load-bearing "is a lead actually
+  // blocked here" signal (Phase 2, 260904 re-scope) consumed via
+  // `settleWaiters`'s return count. Leaving a resolver behind after this
+  // wait concludes (win or timeout) would let a LATER unrelated event drain
+  // a dead resolver and report `waiterWoken: true` with nobody listening —
+  // resolving an already-settled promise is harmless, but the count lying
+  // about liveness is not.
+  const pushed: Array<{ record: RpcAgentRecord; fn: () => void }> = [];
   const winner = new Promise<string>((resolve) => {
     for (const { id, record } of records) {
-      record.waiters.push(() => resolve(id));
+      const fn = () => resolve(id);
+      record.waiters.push(fn);
+      pushed.push({ record, fn });
     }
   });
 
   let winnerId: string | undefined;
-  if (timeoutMs && timeoutMs > 0) {
-    let timer: NodeJS.Timeout | undefined;
-    const timeoutPromise = new Promise<"timeout">((resolve) => {
-      timer = setTimeout(() => resolve("timeout"), timeoutMs);
-    });
-    const result = await Promise.race([winner, timeoutPromise]);
-    clearTimeout(timer);
-    if (result !== "timeout") winnerId = result;
-  } else {
-    winnerId = await winner;
+  try {
+    if (timeoutMs && timeoutMs > 0) {
+      let timer: NodeJS.Timeout | undefined;
+      const timeoutPromise = new Promise<"timeout">((resolve) => {
+        timer = setTimeout(() => resolve("timeout"), timeoutMs);
+      });
+      const result = await Promise.race([winner, timeoutPromise]);
+      clearTimeout(timer);
+      if (result !== "timeout") winnerId = result;
+    } else {
+      winnerId = await winner;
+    }
+  } finally {
+    // Unregister every resolver this call pushed. The winner's own record
+    // was already drained by `settleWaiters` (indexOf finds nothing there,
+    // a harmless no-op); every losing/timed-out record still has its
+    // resolver present and must have it spliced out here.
+    for (const { record, fn } of pushed) {
+      const idx = record.waiters.indexOf(fn);
+      if (idx !== -1) record.waiters.splice(idx, 1);
+    }
   }
 
   if (!winnerId) {
@@ -1479,7 +1539,7 @@ export function registerAgentTools(
    * is unreachable from `full-worker`/`recon`/`read-only`'s `--tools` lists,
    * so this callback simply never fires for them.
    */
-  onApprovalPending?: (record: RpcAgentRecord) => void,
+  onApprovalPending?: (record: RpcAgentRecord, info: { waiterWoken: boolean }) => void,
 ): AgentToolsHandle {
   const rpcRegistry: RpcAgentRegistry = new Map();
   const exploreRegistry: AgentRegistry = new Map();

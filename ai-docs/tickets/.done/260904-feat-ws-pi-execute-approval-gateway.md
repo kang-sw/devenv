@@ -14,6 +14,7 @@ sage-review-design: completed
 sage-review-design-reviewed: d1adbf443f708c3e
 sage-review-completeness: completed
 sage-review-completeness-reviewed: c97852f5cf200bc5
+completed: 2026-09-05
 ---
 
 # Pi lead-execute approval gateway: delegated mutation via ws.execute + per-mutation ws.approve
@@ -443,6 +444,48 @@ the steer relay.
 The secondary items (mid-task `complex` escalation; on-demand approval-context
 expand) are **dropped from this ticket** — the plan itself rates them low-value
 on their own; re-raise as a separate ticket if a concrete need appears.
+
+### Result (bc8bc669) - 2026-09-05
+
+Landed the re-scoped Phase 2 on `impl/goal/track/pi-agent/amber-otter-canyon/plus-wife-purse`
+(`0a138c68` + `bc8bc669`; spec `30722aba`). Behavioral delta: a pending-approval
+event now notifies the lead through exactly one path. `settleWaiters` reports how
+many waiters it drained, `applyRpcEvent` surfaces that as `{ waiterWoken }`,
+`attachEventListener` threads it into `onApprovalPending(record, info)`, and
+`createApprovalRelay` skips the `steer` injection when a live `ws-agent-wait` was
+woken by the same event; a non-waiting lead still receives the steer as the sole
+fallback path. `enqueueReport` stays `void`.
+
+Review (single full-scope, opus): review #1 returned one **Critical** — the
+`waiterWoken` count included dead resolvers that `waitForAgents` left behind on
+its timeout path and on the losers of a multi-agent race, so a lead that had
+timed out and moved on would have had its steer suppressed with nobody
+listening, and the worker's decision wait has no timeout (the 260905 deadlock
+class through a different door). Relay #1 (`bc8bc669`) fixed it: `waitForAgents`
+keeps a handle to every resolver it pushes and splices them out by identity in a
+`finally`, covering the timeout return and unregistering losers on a win. Review
+#2 (Critical-scoped): `[resolved]`, clean with 2 Minor remaining, recorded only:
+(a) the `attachEventListener` wiring seam is untested end-to-end (both ends are
+covered independently); (b) a theoretical same-tick race in a multi-agent wait
+where another agent's settle wins and a loser's gated-exec event is processed
+before the `finally` runs — judged practically unreachable (distinct child
+processes deliver events in separate I/O callbacks with the microtask queue
+drained between them) and self-recovering via the pending-approval fast path on
+the next wait; no change requested.
+
+Verification: `cd agents-plugin-pi && npm test` → **358/358** (350 baseline + 8:
+2 `applyRpcEvent` return-value tests, 3 `createApprovalRelay` branch tests with a
+fake `pi` and a non-git tmpdir, 3 `waitForAgents`-driven tests — timeout → no
+suppression; race loser → no suppression; live wait → suppression and the wait
+resolves `approval-pending`). Spec: `{#260905-pi-worker-gated-exec}` gained the
+single-notification rule and dropped the "harness-native pause/resume is a later
+optimization" line; `spec_index.verify` ok.
+
+Outstanding (manual, owner-run): the re-scoped live two-run check — a lead
+parked in `ws-agent-wait` handles an approval via the wait return and sees no
+trailing stale steer; a non-waiting lead still receives the steer relay. No
+credentials in the build sandbox; the owner drives live `pi` sessions with the
+user-scope-installed adapter.
 
 ## Blocked (2026-09-05)
 
