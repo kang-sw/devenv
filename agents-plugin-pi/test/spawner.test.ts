@@ -660,6 +660,29 @@ describe("applyRpcEvent: ws-worker-exec (260904 Phase 1 approval-request capture
     assert.equal(record.waiters.length, 1, "the un-woken waiter stays armed");
   });
 
+  test("260904 Phase 2 (re-scoped 2026-09-05): a gated-exec event returns {waiterWoken: true} when a waiter was pending beforehand", () => {
+    const record = freshRpcRecord();
+    record.waiters.push(() => {});
+    const result = applyRpcEvent(record, {
+      type: "tool_execution_start",
+      toolName: GATED_EXEC_TOOL_NAME,
+      toolCallId: "call-1",
+      args: { command: "echo hi" },
+    });
+    assert.deepEqual(result, { waiterWoken: true }, "attachEventListener/createApprovalRelay rely on this to skip the redundant steer");
+  });
+
+  test("260904 Phase 2 (re-scoped 2026-09-05): a gated-exec event returns {waiterWoken: false} when no waiter was pending", () => {
+    const record = freshRpcRecord();
+    const result = applyRpcEvent(record, {
+      type: "tool_execution_start",
+      toolName: GATED_EXEC_TOOL_NAME,
+      toolCallId: "call-2",
+      args: { command: "echo hi" },
+    });
+    assert.deepEqual(result, { waiterWoken: false }, "no waiter was woken, so the relay must fall through to its steer fallback");
+  });
+
   test("cwd is omitted (undefined) when args.cwd is missing or not a string", () => {
     const record = freshRpcRecord();
     applyRpcEvent(record, { type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, toolCallId: "call-1", args: { command: "echo hi" } });

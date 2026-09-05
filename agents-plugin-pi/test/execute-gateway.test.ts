@@ -16,12 +16,22 @@
  * Plan split and mirroring test/spawner.test.ts's own documented pure/IO
  * split: `scrapeWorkingContext` (real `git` subprocess calls), and the
  * `ws-worker-exec`/`ws-execute`/`ws-approve`/ugly-read tool `execute()`
- * bodies plus `createApprovalRelay`'s `pi.sendUserMessage` call (all need a
- * live `pi --mode rpc` session or a real `RpcClient`) — their pure inner
- * logic (`sliceLines`, `resolveApprovalContextCwd`,
+ * bodies (all need a live `pi --mode rpc` session or a real `RpcClient`) —
+ * their pure inner logic (`sliceLines`, `resolveApprovalContextCwd`,
  * `validateApprovalDecisionInput`) is extracted and covered directly instead.
  * Exercised only by the plan's documented manual verification gate (no
  * provider credentials in this sandbox — deferred, not faked).
+ *
+ * 260904 Phase 2 (re-scoped 2026-09-05): `createApprovalRelay`'s
+ * `info.waiterWoken` skip/no-skip branching IS covered below (`describe
+ * ("createApprovalRelay")`) — it takes `pi: ExtensionAPI` as a plain
+ * parameter, so a minimal fake `{sendUserMessage}` object is sufficient to
+ * assert whether the steer fires, with a non-git tmpdir as `sessionCtx.cwd`
+ * so `scrapeWorkingContext`'s real `git` calls degrade to `undefined` fields
+ * (execute-gateway.ts's own documented non-git-cwd behavior) rather than
+ * needing a live session. The two-branch LIVE `pi --mode rpc` run (a waiting
+ * lead sees no stale steer; a non-waiting lead still gets one) remains the
+ * manual gate named in the plan's Verification Plan.
  *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
@@ -42,13 +52,15 @@ import {
   validateApprovalDecisionInput,
   sliceLines,
   waitForDecisionFile,
+  createApprovalRelay,
   EXECUTE_TOOL_NAME,
   APPROVE_TOOL_NAME,
   UGLY_READ_TOOL_NAME,
   type PendingApproval,
   type WorkingContext,
 } from "../src/execute-gateway.ts";
-import { GATED_EXEC_TOOL_NAME } from "../src/spawner.ts";
+import { GATED_EXEC_TOOL_NAME, type RpcAgentRecord } from "../src/spawner.ts";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 describe("buildExecuteWorkerPrompt", () => {
   test("no command: returns the lead's prompt unchanged", () => {
@@ -324,6 +336,80 @@ describe("waitForDecisionFile (review fix, relay #1, TEST finding #5)", () => {
       setTimeout(() => writeFileSync(path, JSON.stringify({ decision: "deny", reason: "no" })), 20);
       const result = await waitForDecisionFile(path, undefined, 5);
       assert.deepEqual(result, { decision: "deny", reason: "no" });
+    });
+  });
+});
+
+describe("createApprovalRelay (260904 Phase 2, re-scoped 2026-09-05: waiterWoken steer suppression)", () => {
+  function freshRecord(pending: PendingApproval): RpcAgentRecord {
+    return {
+      agentId: "rpc-agent-1",
+      sessionPath: "/tmp/ws-pi-agent-x/session.jsonl",
+      systemPromptPath: "/tmp/ws-pi-agent-x/prompt.md",
+      wsToolNames: [],
+      toolGroup: "execute-worker",
+      streaming: false,
+      idlePending: false,
+      waiters: [],
+      pendingReports: [],
+      reportsDropped: 0,
+      pendingApproval: pending,
+    };
+  }
+
+  function withTempCwd<T>(fn: (cwd: string) => T): T {
+    // Non-git tmpdir: scrapeWorkingContext's real `git` subprocess calls
+    // degrade to undefined fields rather than throwing (execute-gateway.ts's
+    // own documented behavior) — no live pi/RpcClient session is needed to
+    // exercise createApprovalRelay's skip/no-skip branching.
+    const dir = mkdtempSync(join(tmpdir(), "ws-pi-agent-approval-relay-test-"));
+    try {
+      return fn(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  test("waiter-woken branch: sendUserMessage is NOT called — the lead already learned via the woken ws-agent-wait", () => {
+    withTempCwd((cwd) => {
+      const calls: Array<{ text: string; opts: unknown }> = [];
+      const fakePi = { sendUserMessage: (text: string, opts: unknown) => calls.push({ text, opts }) } as unknown as ExtensionAPI;
+      const relay = createApprovalRelay(fakePi, { cwd });
+      const record = freshRecord({ cmdId: "call-1", command: "echo hi" });
+
+      relay(record, { waiterWoken: true });
+
+      assert.equal(calls.length, 0, "a woken waiter already delivered the approval request; a parallel steer would be a stale duplicate");
+    });
+  });
+
+  test("no-waiter branch: sendUserMessage IS called exactly once, with the pending command/cmd_id in the steer text", () => {
+    withTempCwd((cwd) => {
+      const calls: Array<{ text: string; opts: unknown }> = [];
+      const fakePi = { sendUserMessage: (text: string, opts: unknown) => calls.push({ text, opts }) } as unknown as ExtensionAPI;
+      const relay = createApprovalRelay(fakePi, { cwd });
+      const record = freshRecord({ cmdId: "call-2", command: "rm -rf build", rationale: "clean stale output" });
+
+      relay(record, { waiterWoken: false });
+
+      assert.equal(calls.length, 1, "no waiter was woken, so the relay must fall through to the steer fallback");
+      assert.deepEqual(calls[0].opts, { deliverAs: "steer" });
+      assert.ok(calls[0].text.includes("call-2"), "steer text must carry the pending cmd_id");
+      assert.ok(calls[0].text.includes("rm -rf build"), "steer text must carry the pending command");
+    });
+  });
+
+  test("no pendingApproval on the record: sendUserMessage is never called, regardless of waiterWoken", () => {
+    withTempCwd((cwd) => {
+      const calls: Array<{ text: string; opts: unknown }> = [];
+      const fakePi = { sendUserMessage: (text: string, opts: unknown) => calls.push({ text, opts }) } as unknown as ExtensionAPI;
+      const relay = createApprovalRelay(fakePi, { cwd });
+      const record = freshRecord({ cmdId: "call-3", command: "echo hi" });
+      record.pendingApproval = undefined;
+
+      relay(record, { waiterWoken: false });
+
+      assert.equal(calls.length, 0, "nothing is pending to relay");
     });
   });
 });

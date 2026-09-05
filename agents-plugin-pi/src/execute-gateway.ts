@@ -41,10 +41,17 @@
  *     the LEAD's own running session via `pi.sendUserMessage(text,
  *     {deliverAs: "steer"})` — the same injection mechanism goal-loop.ts's
  *     `agent_settled` re-fire already uses, generalized to a different
- *     trigger. `deliverAs: "steer"` is the safe unconditional choice here:
- *     this callback fires from a raw `RpcClient.onEvent()` listener with no
- *     `ExtensionContext` available to check `isIdle()`, and `steer` is valid
- *     whether or not the lead is currently streaming (docs/rpc.md).
+ *     trigger. `steer` (not `followUp`) is used for this fallback path
+ *     because this callback fires from a raw `RpcClient.onEvent()` listener
+ *     with no `ExtensionContext` available to check `isIdle()`, and `steer`
+ *     is valid whether or not the lead is currently streaming (docs/rpc.md).
+ *     260904 Phase 2 (re-scoped 2026-09-05): the steer is now skipped
+ *     whenever `attachEventListener`/`applyRpcEvent` report a waiter was
+ *     already woken by the same event (`info.waiterWoken`, spawner.ts's
+ *     `settleWaiters`) — the lead already learns of the request via
+ *     `ws-agent-wait`'s `pending_approval` return (260905's deadlock fix), so
+ *     the parallel steer would just be a stale duplicate notice. It remains
+ *     the sole notification path for a non-waiting lead.
  *   - The decision relay (lead -> child): `ws-approve` writes
  *     `<sessionDir>/approvals/<cmd_id>.decision.json`
  *     (`approvalDecisionPath`); `ws-worker-exec`'s blocked `execute()` polls
@@ -419,7 +426,7 @@ export interface ExecuteGatewaySessionCtx {
   /** Fixed, adapter-authored execute-worker system prompt (execute-worker-guide.md) — NOT lead-rendered, see that file's header comment. */
   executeWorkerPromptPath: string;
   /** See spawner.ts's `RpcSpawnCtx.onApprovalPending` — threaded into every `spawnAgent` call this module makes for `ws-execute`. */
-  onApprovalPending?: (record: RpcAgentRecord) => void;
+  onApprovalPending?: (record: RpcAgentRecord, info: { waiterWoken: boolean }) => void;
 }
 
 /**
@@ -432,11 +439,23 @@ export interface ExecuteGatewaySessionCtx {
  * (before `registerAgentTools`, so it can be threaded into that call too —
  * see spawner.ts's `registerAgentTools` doc comment) and passed to both
  * `registerAgentTools` and `registerExecuteGateway`.
+ *
+ * 260904 Phase 2 (re-scoped 2026-09-05): skips the steer entirely when
+ * `info.waiterWoken` is true — the same `applyRpcEvent`/`settleWaiters` call
+ * that set `record.pendingApproval` already woke a lead blocked in
+ * `ws-agent-wait` (260905's deadlock fix), which returns `pending_approval`
+ * and lets the lead learn of the request that way. Injecting the steer too
+ * would just be a stale duplicate notice arriving at the next turn boundary.
+ * The steer remains the fallback path for a non-waiting lead.
  */
-export function createApprovalRelay(pi: ExtensionAPI, sessionCtx: { cwd: string }): (record: RpcAgentRecord) => void {
-  return (record) => {
+export function createApprovalRelay(
+  pi: ExtensionAPI,
+  sessionCtx: { cwd: string },
+): (record: RpcAgentRecord, info: { waiterWoken: boolean }) => void {
+  return (record, info) => {
     const pending = record.pendingApproval;
     if (!pending) return;
+    if (info.waiterWoken) return; // lead already learned via a woken ws-agent-wait; steering here would be a stale duplicate notice
     const context = scrapeWorkingContext(resolveApprovalContextCwd(pending, sessionCtx.cwd));
     const text = buildApprovalPromptText({
       agent_id: record.agentId,
