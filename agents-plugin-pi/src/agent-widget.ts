@@ -10,8 +10,11 @@
  * Source of truth is the two registries `index.ts` already owns — the RPC
  * agent registry (`spawner.ts`) and the owner-question thread registry
  * (`ask.ts`) — never a separate widget-owned model. `buildAgentRows` is pure
- * and reads both at render time; there is no cached/derived state to keep in
- * sync.
+ * and reads the UNION of both at render time (not the RPC registry alone —
+ * review relay #1's Critical fix: a pending `ws-ask` thread has no
+ * respondent yet, and a fork-raised thread's respondent can come back from a
+ * lead restart revived dormant with no `threadBound` re-set; both still owe
+ * the owner a row); there is no cached/derived state to keep in sync.
  *
  * Golden rule / placement: this module imports FROM `spawner.ts` and
  * `ask.ts` only (types, plus `ask.ts`'s pure `countPending` helper), never
@@ -33,6 +36,7 @@
 import { countPending, type ThreadRecord } from "./ask.ts";
 import type { RpcAgentRecord, RpcAgentRegistry, SpawnAgentRole } from "./spawner.ts";
 import { visibleWidth } from "./overlay-chat.ts";
+import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
 
 /** `ctx.ui.setWidget` key for the live-agent panel (`belowEditor`, not a footer/header replacement). */
 export const AGENT_WIDGET_KEY = "ws-agents";
@@ -91,33 +95,57 @@ function rowName(record: RpcAgentRecord): string {
   return record.alias ?? record.title ?? record.agentId.slice(0, 8);
 }
 
+/** A thread the widget still owes the owner an answer on — the two `countPending`-adjacent statuses that ever yield a row. Dormant/closed threads never do. */
+function isLiveThreadStatus(status: ThreadRecord["status"]): boolean {
+  return status === "pending" || status === "open";
+}
+
+/** `Math.max(0, deltaMs)`, but a malformed/missing clock (`Date.parse` of a bad `touchedAt`, review relay #1 Minor) collapses to 0 instead of propagating `NaN` through `formatElapsed`. */
+function clampElapsed(deltaMs: number): number {
+  return Number.isFinite(deltaMs) ? Math.max(0, deltaMs) : 0;
+}
+
 /**
- * Pure row builder: one row per registry member, no widget-owned state.
+ * Pure row builder over the UNION of the two registries — the RPC agent
+ * registry and the owner-question thread registry — never the RPC registry
+ * alone (review relay #1 Critical: a pending `ws-ask` thread has no
+ * `respondentAgentId` until `/answer` lazily spawns its fork, and a
+ * fork-raised thread's respondent can come back from a lead restart revived
+ * dormant with `threadBound` unset (`agent-sidecar.ts`'s `reviveOrphans`) —
+ * both cases used to render zero rows and silently drop the merged-in
+ * pending-question surface entirely).
  *
- * Row inclusion (a record the widget cares about at all):
- * `record.threadBound || record.pendingApproval !== undefined || record.client
- * !== undefined`. A plain, non-`threadBound` idle record never satisfies any
- * of these — the automatic-park step in `spawner.ts`'s `attachEventListener`
- * has already cleared `client` by the time it would otherwise read that way
- * — which is what makes "idle is not a row state" true without this function
- * needing to check `streaming`/`running` itself. A `threadBound` record
- * renders even while dormant (`client === undefined`): that row is the
- * owner's action cue, and it must not disappear just because the respondent
- * fork happens to be parked between messages.
+ * Row inclusion, RPC-registry side (a record the widget cares about even
+ * with no matching thread): `record.threadBound || record.pendingApproval
+ * !== undefined || record.client !== undefined`. A plain, non-`threadBound`
+ * idle record never satisfies any of these — the automatic-park step in
+ * `spawner.ts`'s `attachEventListener` has already cleared `client` by the
+ * time it would otherwise read that way — which is what makes "idle is not a
+ * row state" true without this function needing to check `streaming`/
+ * `running` itself. A `threadBound` record renders even while dormant
+ * (`client === undefined`): that row is the owner's action cue, and it must
+ * not disappear just because the respondent fork happens to be parked
+ * between messages.
+ *
+ * Row inclusion, thread-registry side: every `isLiveThreadStatus` thread
+ * whose `respondentAgentId` does NOT resolve to an RPC-side row above (no
+ * respondent yet, or a respondent that exists but is not `threadBound`) gets
+ * its own synthetic row — name is the thread's own `title` (there is no
+ * agent identity to name it by), role is always `"thread"`, state is always
+ * `"awaiting-owner"`, elapsed is `now - touchedAt`, and the `/answer <id>`
+ * hint is always set. This is the ticket's merged-in pending-question row.
  *
  * State precedence: `threadBound` (awaiting owner) beats `pendingApproval`
  * (awaiting approval) beats the default `"running"`.
  *
- * Role: a `threadBound` record renders as `"thread"` only when a thread in
- * `threads` has `respondentAgentId === record.agentId` AND `origin ===
- * "lead-ask"` — the ticket's Entry-B-only override. A `threadBound`
- * fork-raised (Entry A) respondent, or any non-`threadBound` record, keeps
- * its own role from `record.spawnRole`.
- *
- * Elapsed: a `"thread"` row uses `now - Date.parse(thread.touchedAt)`; every
- * other row uses `now - (record.runStartedAt ?? now)` (0 when the record has
- * never been prompted, which should not occur for an included record but
- * must never go negative or throw).
+ * Hint/clock vs. role (review relay #1 Important #2): a `threadBound`
+ * record's `/answer <id>` hint and `touchedAt`-based elapsed follow the
+ * `awaiting-owner` STATE and apply whenever a matching live thread is found,
+ * regardless of `origin` — a fork-raised (Entry A) respondent owes the owner
+ * an answer exactly as much as a lead-ask (Entry B) one does. Only the ROLE
+ * LABEL stays origin-dependent: `"thread"` renders only for a `lead-ask`
+ * match (the ticket's Entry-B-only role override); a fork-raised match keeps
+ * the record's own `spawnRole` label (typically `"fork"`).
  *
  * Sort: state rank first (awaiting owner, then awaiting approval, then
  * running), elapsed descending within each state. No cap here — `N` for the
@@ -128,26 +156,39 @@ function rowName(record: RpcAgentRecord): string {
  */
 export function buildAgentRows(records: RpcAgentRegistry, threads: readonly ThreadRecord[], now: number): AgentRow[] {
   const rows: AgentRow[] = [];
+  const coveredThreadIds = new Set<string>();
 
   for (const record of records.values()) {
     const included = record.threadBound === true || record.pendingApproval !== undefined || record.client !== undefined;
     if (!included) continue;
 
     const boundThread = record.threadBound
-      ? threads.find((t) => t.respondentAgentId === record.agentId && t.origin === "lead-ask")
+      ? threads.find((t) => t.respondentAgentId === record.agentId && isLiveThreadStatus(t.status))
       : undefined;
-    const isThreadRow = boundThread !== undefined;
+    if (boundThread) coveredThreadIds.add(boundThread.threadId);
 
     const state: AgentRowState = record.threadBound ? "awaiting-owner" : record.pendingApproval !== undefined ? "awaiting-approval" : "running";
+    const isAwaitingOwnerWithThread = state === "awaiting-owner" && boundThread !== undefined;
 
-    const elapsedMs = isThreadRow ? Math.max(0, now - Date.parse(boundThread!.touchedAt)) : Math.max(0, now - (record.runStartedAt ?? now));
+    const elapsedMs = isAwaitingOwnerWithThread ? clampElapsed(now - Date.parse(boundThread!.touchedAt)) : clampElapsed(now - (record.runStartedAt ?? now));
 
     rows.push({
       name: rowName(record),
-      role: isThreadRow ? "thread" : roleFromSpawnRole(record.spawnRole),
+      role: isAwaitingOwnerWithThread && boundThread!.origin === "lead-ask" ? "thread" : roleFromSpawnRole(record.spawnRole),
       state,
       elapsedMs,
-      answerHint: isThreadRow ? `/answer ${boundThread!.threadId}` : undefined,
+      answerHint: isAwaitingOwnerWithThread ? `/answer ${boundThread!.threadId}` : undefined,
+    });
+  }
+
+  for (const thread of threads) {
+    if (!isLiveThreadStatus(thread.status) || coveredThreadIds.has(thread.threadId)) continue;
+    rows.push({
+      name: thread.title,
+      role: "thread",
+      state: "awaiting-owner",
+      elapsedMs: clampElapsed(now - Date.parse(thread.touchedAt)),
+      answerHint: `/answer ${thread.threadId}`,
     });
   }
 
@@ -243,15 +284,53 @@ export function buildStatusSegment(rows: readonly AgentRow[], pendingCount: numb
   return `ws: ${rows.length} agents${questionPart}`;
 }
 
+/**
+ * 260905 review relay #1 (Important #5): the widget's own arming gate,
+ * extracted out of `index.ts`'s `session_start` into a small pure predicate
+ * so "the widget is wired only for a TUI lead/fork session" is a directly
+ * testable invariant again — the deleted `ask.ts` `refreshPendingWidget`
+ * used to carry a directly-tested `ctx.mode !== "tui"` guard of its own; that
+ * coverage lapsed when the guard moved into `index.ts`'s `session_start`,
+ * which has no test file. Mirrors the exact inline gate `index.ts` used
+ * (`isLeadOrFork(readSpawnRole(process.env)) && ctx.mode === "tui"`) —
+ * `index.ts` calls this instead of repeating the two conditions itself.
+ */
+export function shouldArmAgentWidget(role: SpawnRole | undefined, mode: string | undefined): boolean {
+  return isLeadOrFork(role) && mode === "tui";
+}
+
 // ---------------------------------------------------------------------------
 // IO glue: the setWidget/setStatus repaint plus the arm-while-non-empty
 // elapsed timer. Not unit tested here — see this file's header comment.
 // ---------------------------------------------------------------------------
 
-/** Minimal duck-typed `ctx` surface this controller needs — the same convention `ask.ts`'s `AskUiCtx` uses. */
+/**
+ * Duck-typed `Component` surface this controller's `setWidget` factory
+ * returns — mirrors `pi-tui`'s `Component.render(width)` contract, the same
+ * one `overlay-chat.ts`'s `OverlayChatComponent.render` implements.
+ */
+export interface AgentWidgetComponent {
+  render(width: number): string[];
+}
+
+/**
+ * Minimal duck-typed `ctx` surface this controller needs — the same
+ * convention `ask.ts`'s `AskUiCtx` uses. `setWidget`'s content param accepts
+ * either a plain line array or a `(tui, theme) => Component` factory
+ * (`ExtensionUIContext.setWidget`'s second overload,
+ * `@earendil-works/pi-coding-agent`'s `types.d.ts`); this controller always
+ * uses the factory overload (review relay #1 Important #3) so `render(width)`
+ * is called with the REAL terminal width at repaint time instead of the
+ * fixed `DEFAULT_AGENT_WIDGET_WIDTH`. `tui`/`theme` are typed `unknown`
+ * because the factory below never reads either.
+ */
 export interface AgentWidgetUiCtx {
   ui?: {
-    setWidget?(key: string, content: string[] | undefined, options?: { placement?: string }): void;
+    setWidget?(
+      key: string,
+      content: string[] | ((tui: unknown, theme: unknown) => AgentWidgetComponent) | undefined,
+      options?: { placement?: string },
+    ): void;
     setStatus?(key: string, text: string | undefined): void;
   };
 }
@@ -282,8 +361,28 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
   function paint(): void {
     const threadList = [...threads.values()];
     const rows = buildAgentRows(registry, threadList, Date.now());
-    ctx.ui?.setWidget?.(AGENT_WIDGET_KEY, buildWidgetLines(rows), { placement: "belowEditor" });
-    ctx.ui?.setStatus?.(AGENT_STATUS_KEY, buildStatusSegment(rows, countPending(threadList)));
+    try {
+      // 260905 review relay #1 (Important #3): pass the factory overload, not
+      // a pre-rendered line array, so `render(width)` is called by the host
+      // with the REAL terminal width at paint time — `buildWidgetLines`
+      // itself stays pure and width-agnostic. `rows` is captured by this
+      // closure at THIS paint's freshness; a resize between paints re-renders
+      // the same rows at the new width, matching `OverlayChatComponent`'s own
+      // width-is-a-render-time-input contract.
+      ctx.ui?.setWidget?.(
+        AGENT_WIDGET_KEY,
+        rows.length === 0 ? undefined : () => ({ render: (width: number) => buildWidgetLines(rows, width) ?? [] }),
+        { placement: "belowEditor" },
+      );
+      ctx.ui?.setStatus?.(AGENT_STATUS_KEY, buildStatusSegment(rows, countPending(threadList)));
+    } catch {
+      // 260905 review relay #1 (Important #4): this function is also the bare
+      // `setInterval` callback (below) and is called bare from `index.ts`'s
+      // `session_start` — a throwing `setWidget`/`setStatus` (e.g. a
+      // torn-down TUI surface) must cost one lost repaint, not crash the
+      // timer/event loop the way every other call site in this ticket already
+      // guards against (`triggerAgentWidgetRefresh`/`refreshAgentWidget`).
+    }
 
     if (rows.length > 0 && !timer) {
       timer = setInterval(paint, AGENT_WIDGET_TICK_MS);

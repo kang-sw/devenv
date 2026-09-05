@@ -11,7 +11,7 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { buildAgentRows, buildWidgetLines, buildStatusSegment, AGENT_WIDGET_ROW_CAP } from "../src/agent-widget.ts";
+import { buildAgentRows, buildWidgetLines, buildStatusSegment, shouldArmAgentWidget, AGENT_WIDGET_ROW_CAP } from "../src/agent-widget.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "../src/spawner.ts";
 import type { ThreadRecord } from "../src/ask.ts";
 
@@ -101,20 +101,50 @@ describe("buildAgentRows", () => {
     assert.equal(rows[0].state, "awaiting-owner", "threadBound must win over a simultaneously-set pendingApproval");
   });
 
-  test("role \"thread\" applies ONLY to a threadBound record bound to a lead-ask thread — a fork-raised (Entry A) threadBound record keeps its own spawnRole", () => {
+  test("role \"thread\" applies ONLY to a threadBound record bound to a lead-ask thread — a fork-raised (Entry A) threadBound record keeps its own spawnRole, but review relay #1 #2: BOTH origins carry the /answer hint and the thread clock, since those follow the awaiting-owner STATE, not the role override", () => {
     const leadAsk = record({ agentId: "aaaaaaaa-0000-0000-0000-000000000000", threadBound: true, spawnRole: "fork" });
     const forkRaised = record({ agentId: "bbbbbbbb-0000-0000-0000-000000000000", threadBound: true, spawnRole: "fork" });
     const threads: ThreadRecord[] = [
-      thread({ threadId: "q1", respondentAgentId: leadAsk.agentId, origin: "lead-ask" }),
-      thread({ threadId: "q2", respondentAgentId: forkRaised.agentId, origin: "fork-raised" }),
+      thread({ threadId: "q1", respondentAgentId: leadAsk.agentId, origin: "lead-ask", touchedAt: new Date(NOW - 4_000).toISOString() }),
+      thread({ threadId: "q2", respondentAgentId: forkRaised.agentId, origin: "fork-raised", touchedAt: new Date(NOW - 6_000).toISOString() }),
     ];
     const rows = buildAgentRows(registryOf(leadAsk, forkRaised), threads, NOW);
     const leadAskRow = rows.find((row) => row.name === "aaaaaaaa")!;
     const forkRaisedRow = rows.find((row) => row.name === "bbbbbbbb")!;
     assert.equal(leadAskRow.role, "thread");
     assert.equal(leadAskRow.answerHint, "/answer q1");
+    assert.equal(leadAskRow.elapsedMs, 4_000);
     assert.equal(forkRaisedRow.role, "fork", "a fork-raised threadBound record is not overridden to \"thread\"");
-    assert.equal(forkRaisedRow.answerHint, undefined);
+    assert.equal(forkRaisedRow.answerHint, "/answer q2", "the hint follows the awaiting-owner state, not the role override — the owner owes an answer here too");
+    assert.equal(forkRaisedRow.elapsedMs, 6_000, "the fork-raised row's clock is the thread's touchedAt, not runStartedAt");
+  });
+
+  test("review relay #1 Critical: a pending ws-ask thread with NO respondent yet (empty registry) still renders one row, named by the thread's own title, carrying the /answer hint", () => {
+    const t = thread({ threadId: "q9", title: "why is the build red", status: "pending", origin: "lead-ask", respondentAgentId: undefined, touchedAt: new Date(NOW - 5_000).toISOString() });
+    const rows = buildAgentRows(registryOf(), [t], NOW);
+    assert.deepEqual(rows, [{ name: "why is the build red", role: "thread", state: "awaiting-owner", elapsedMs: 5_000, answerHint: "/answer q9" }]);
+  });
+
+  test("review relay #1 Critical: the lead-restart scenario — a thread with a respondentAgentId but no matching registry record (reviveOrphans never re-sets threadBound) — still renders one row", () => {
+    const t = thread({ threadId: "q10", title: "post-restart question", status: "open", origin: "fork-raised", respondentAgentId: "ffffffff-0000-0000-0000-000000000000", touchedAt: new Date(NOW - 9_000).toISOString() });
+    // The orphan record IS in the registry (reviveOrphans always re-registers it), just not threadBound.
+    const orphan = record({ agentId: "ffffffff-0000-0000-0000-000000000000" });
+    const rows = buildAgentRows(registryOf(orphan), [t], NOW);
+    assert.deepEqual(rows, [{ name: "post-restart question", role: "thread", state: "awaiting-owner", elapsedMs: 9_000, answerHint: "/answer q10" }]);
+  });
+
+  test("review relay #1 Critical: dedupe — once a live threadBound record covers the thread, no second synthetic row is added for the same thread", () => {
+    const respondent = record({ agentId: "12121212-0000-0000-0000-000000000000", threadBound: true });
+    const t = thread({ threadId: "q11", respondentAgentId: respondent.agentId, origin: "lead-ask" });
+    const rows = buildAgentRows(registryOf(respondent), [t], NOW);
+    assert.equal(rows.length, 1, "exactly one row for the one live thread, not two");
+    assert.equal(rows[0].name, respondent.agentId.slice(0, 8), "the covered row is named from the RECORD, not synthesized from the thread's title");
+  });
+
+  test("a dormant/closed thread yields no row at all, whether or not a respondent record exists", () => {
+    const closed = thread({ threadId: "q12", status: "closed", respondentAgentId: undefined });
+    const dormant = thread({ threadId: "q13", status: "dormant", respondentAgentId: undefined });
+    assert.deepEqual(buildAgentRows(registryOf(), [closed, dormant], NOW), []);
   });
 
   test("elapsed: a thread row uses now - Date.parse(touchedAt); a non-thread row uses now - runStartedAt, defaulting to 0 when never prompted", () => {
@@ -134,6 +164,12 @@ describe("buildAgentRows", () => {
     const threads: ThreadRecord[] = [thread({ respondentAgentId: bound.agentId, origin: "lead-ask", touchedAt: new Date(NOW + 10_000).toISOString() })];
     const rows = buildAgentRows(registryOf(bound, running), threads, NOW);
     for (const row of rows) assert.equal(row.elapsedMs, 0);
+  });
+
+  test("a malformed touchedAt (unparsable date) collapses elapsedMs to 0 rather than propagating NaN", () => {
+    const t = thread({ threadId: "q14", touchedAt: "not-a-date", respondentAgentId: undefined });
+    const rows = buildAgentRows(registryOf(), [t], NOW);
+    assert.equal(rows[0].elapsedMs, 0);
   });
 
   test("sort: state rank first (awaiting-owner, awaiting-approval, running), then elapsed descending within a state", () => {
@@ -171,12 +207,22 @@ describe("buildWidgetLines", () => {
     assert.ok(lines![1].includes("b "));
   });
 
-  test("over the cap: running rows are trimmed to fit AGENT_WIDGET_ROW_CAP total, with a +N more tail", () => {
-    const rows = [awaitingRow("t1"), awaitingRow("t2"), awaitingRow("t3"), runningRow(1, "r1"), runningRow(2, "r2"), runningRow(3, "r3"), runningRow(4, "r4")];
+  test("exact cap boundary: 5 total rows (0 hidden) renders all 5 with no tail", () => {
+    const rows = [awaitingRow("t1"), awaitingRow("t2"), runningRow(4, "r1"), runningRow(3, "r2"), runningRow(2, "r3")];
+    const lines = buildWidgetLines(rows, 80)!;
+    assert.equal(lines.length, AGENT_WIDGET_ROW_CAP, "exactly at the cap: nothing hidden, no +N more tail");
+    assert.ok(!lines.some((l) => l.includes("more")));
+  });
+
+  test("over the cap: running rows are trimmed to fit AGENT_WIDGET_ROW_CAP total, with a +N more tail — the KEPT running rows are the front of the (already elapsed-descending, per buildAgentRows) input", () => {
+    // Fixture order mirrors buildAgentRows's real contract: running rows arrive already
+    // sorted elapsed-DESCENDING, so slicing the front keeps the longest-running ones.
+    const rows = [awaitingRow("t1"), awaitingRow("t2"), awaitingRow("t3"), runningRow(4, "r4"), runningRow(3, "r3"), runningRow(2, "r2"), runningRow(1, "r1")];
     const lines = buildWidgetLines(rows, 80)!;
     assert.equal(lines.length, AGENT_WIDGET_ROW_CAP + 1, "5 shown rows plus one +N more tail line");
     assert.ok(lines.slice(0, 3).every((l, i) => l.includes(`t${i + 1}`)), "all 3 awaiting rows are kept verbatim");
-    assert.equal(lines[lines.length - 1], "+2 more", "4 running rows minus the 2 slots left after 3 awaiting rows = 2 hidden");
+    assert.ok(lines[3].includes("r4") && lines[4].includes("r3"), "the two KEPT running rows are the longest-elapsed (r4, r3), not merely the first two in array order");
+    assert.equal(lines[lines.length - 1], "+2 more", "4 running rows minus the 2 slots left after 3 awaiting rows = 2 hidden (the shortest-elapsed r2/r1)");
   });
 
   test("awaiting rows alone exceeding the cap are NEVER folded — no tail line is added in that case", () => {
@@ -222,5 +268,26 @@ describe("buildStatusSegment", () => {
 
   test("still renders when rows is empty but pendingCount is positive", () => {
     assert.equal(buildStatusSegment([], 1), "ws: 0 agents · 1 question");
+  });
+});
+
+describe("shouldArmAgentWidget (review relay #1 Important #5: the wiring gate index.ts uses, now directly testable)", () => {
+  test("the host lead (role undefined) in a TUI session arms the widget", () => {
+    assert.equal(shouldArmAgentWidget(undefined, "tui"), true);
+  });
+
+  test("a fork (role \"fork\") in a TUI session also arms the widget", () => {
+    assert.equal(shouldArmAgentWidget("fork", "tui"), true);
+  });
+
+  test("a worker or explore child NEVER arms the widget, even if somehow run in tui mode", () => {
+    assert.equal(shouldArmAgentWidget("worker", "tui"), false);
+    assert.equal(shouldArmAgentWidget("explore", "tui"), false);
+  });
+
+  test("a lead/fork session that is NOT tui mode (rpc/headless) does not arm the widget", () => {
+    assert.equal(shouldArmAgentWidget(undefined, "rpc"), false);
+    assert.equal(shouldArmAgentWidget(undefined, undefined), false);
+    assert.equal(shouldArmAgentWidget("fork", "rpc"), false);
   });
 });

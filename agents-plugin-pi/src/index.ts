@@ -152,7 +152,7 @@ import {
   type AgentToolsHandle,
   type RpcAgentRegistry,
 } from "./spawner.ts";
-import { createAgentWidgetController, type AgentWidgetController } from "./agent-widget.ts";
+import { createAgentWidgetController, shouldArmAgentWidget, type AgentWidgetController } from "./agent-widget.ts";
 import { registerPushMessageRenderers } from "./push-render.ts";
 import { buildOrphanPush, captureOrphans, readAndClearSidecar, reviveOrphans, writeSidecar } from "./agent-sidecar.ts";
 import { buildDiscussKickoff } from "./discuss.ts";
@@ -377,13 +377,16 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
           }
         }
       }
-      // 260905 (live-agent widget ticket): TUI-lead-only, mirroring the same
+      // 260905 (live-agent widget ticket): TUI-lead-only, via
+      // `shouldArmAgentWidget` (review relay #1 Important #5: extracted into
+      // agent-widget.ts's own pure predicate, directly unit tested, so this
+      // gate is no longer only a doc comment) — mirrors the same
       // `ctx.mode === "tui"` check already used at #L249 for the push
-      // renderers — the outer `isLeadOrFork` block above also runs headless
+      // renderers. The outer `isLeadOrFork` block above also runs headless
       // (hydration/orphan revival apply there too), but the widget itself
       // must not. A prior controller (a `/reload`) is stopped first so its
       // timer never outlives the registry/threads it closed over.
-      if (ctx.mode === "tui") {
+      if (shouldArmAgentWidget(readSpawnRole(process.env), ctx.mode)) {
         agentWidgetHandle?.stop();
         agentWidgetHandle = createAgentWidgetController(ctx, agentTools.rpcRegistry, threadHandle.threads);
         agentWidgetRefreshRef.current = () => agentWidgetHandle?.refresh();
