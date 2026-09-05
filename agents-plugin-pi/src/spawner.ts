@@ -874,6 +874,16 @@ export interface RpcAgentRecord {
    */
   reportLog: AgentReportLogEntry[];
   /**
+   * 260905 (list-model/last-report-fidelity ticket): the sidecar-revival-only
+   * fallback for `last_report_at` — `rehydrateOrphanRecord` fills this from
+   * `PersistedOrphan.lastReportAt` (the newest `reportLog` entry at
+   * shutdown, already an ISO string). `listAgents` and `evictForCapacity`
+   * both prefer a real `reportLog` entry over this value whenever one is
+   * present, so a revived record that has reported since falls back to its
+   * own history rather than the stale shutdown snapshot.
+   */
+  lastReportAtOverride?: string;
+  /**
    * 260904 Phase 1: set by `applyRpcEvent` the instant a `tool_execution_start`
    * for `GATED_EXEC_TOOL_NAME` is observed on this record's child; cleared by
    * `ws-approve` once a decision is written. `undefined` means "no gated
@@ -2080,7 +2090,8 @@ export function reserveAgentAlias(
  * 260905 (alias/park/cap ticket): the registry-cap half of `spawnAgent`'s
  * guard clauses. While the registry is at or over `cap`, evicts the dormant
  * (`!record.client`), non-`running`, non-`threadBound` record with the
- * oldest last-activity stamp (`max(lastLeadPromptAt, last reportLog entry)`)
+ * oldest last-activity stamp (`max(lastLeadPromptAt, last reportLog entry, or —
+ * for a revived orphan with no reportLog yet — its lastReportAtOverride)`)
  * until the new spawn fits. Never evicts a `running`/`threadBound` record —
  * when none remain to evict, the spawn fails outright rather than silently
  * exceeding the cap. Only forgets the registry entry (never touches the
@@ -2094,7 +2105,8 @@ export function evictForCapacity(registry: RpcAgentRegistry, cap: number): { ok:
     let candidateActivity = Number.POSITIVE_INFINITY;
     for (const record of registry.values()) {
       if (record.client || record.running || record.threadBound) continue;
-      const activity = Math.max(record.lastLeadPromptAt ?? 0, record.reportLog.at(-1)?.at ?? 0);
+      const lastReportActivity = record.reportLog.at(-1)?.at ?? (record.lastReportAtOverride ? Date.parse(record.lastReportAtOverride) : 0);
+      const activity = Math.max(record.lastLeadPromptAt ?? 0, lastReportActivity);
       if (activity < candidateActivity) {
         candidate = record;
         candidateActivity = activity;
@@ -2431,19 +2443,33 @@ async function harvestLastMessage(record: RpcAgentRecord): Promise<string | unde
  * includes the record's stored (already head-truncated at spawn) `prompt`.
  * Off by default — a full-registry dump with every prompt inlined would be
  * needlessly large for the common "what's out there" check.
+ *
+ * 260905 (list-model/last-report-fidelity ticket) adds `model`: the
+ * effective resolved model the child was launched with (`modelBase`, plus
+ * `/<effort>` when `modelEffort` is set), omitted only when the record
+ * carries no `modelBase` at all (a sidecar written before the field
+ * existed). Because `resolveModelForAliasViaWsMcp` falls back to the
+ * parent's own concrete model on any catalog miss, an inheriting child's
+ * `modelBase` already IS the parent's model name — no separate
+ * inherited-vs-explicit flag is needed. `last_report_at` now falls back to
+ * `record.lastReportAtOverride` (set only by `rehydrateOrphanRecord`) when
+ * `reportLog` is empty, so a revived orphan does not read as never-reported.
  */
 export function listAgents(
   registry: RpcAgentRegistry,
   opts?: { includePrompt?: boolean },
-): Array<{ agent_id: string; status: AgentStatus; alias?: string; title?: string; last_report_at?: string; prompt?: string }> {
+): Array<{ agent_id: string; status: AgentStatus; alias?: string; title?: string; model?: string; last_report_at?: string; prompt?: string }> {
   return [...registry.entries()].map(([agentId, record]) => {
     const lastReport = record.reportLog[record.reportLog.length - 1];
+    const lastReportAt = lastReport ? new Date(lastReport.at).toISOString() : record.lastReportAtOverride;
+    const model = record.modelBase ? (record.modelEffort ? `${record.modelBase}/${record.modelEffort}` : record.modelBase) : undefined;
     return {
       agent_id: agentId,
       status: (record.client ? (record.streaming ? "running" : "idle") : "dormant") as AgentStatus,
       ...(record.alias ? { alias: record.alias } : {}),
       ...(record.title ? { title: record.title } : {}),
-      ...(lastReport ? { last_report_at: new Date(lastReport.at).toISOString() } : {}),
+      ...(model ? { model } : {}),
+      ...(lastReportAt ? { last_report_at: lastReportAt } : {}),
       ...(opts?.includePrompt && record.prompt ? { prompt: record.prompt } : {}),
     };
   });
@@ -2735,7 +2761,7 @@ export function registerAgentTools(
     name: "ws-agent-list",
     label: "ws-agent-list",
     description:
-      "List every tracked agent_id, its alias/title (when set), status (running/idle/dormant — most agents park to dormant shortly after settling, so idle is transient), and last_report_at (ISO, absent if it has never reported). Use it to check on a quiet agent — there is no wait tool; every report, question, approval request and completion is pushed to you as a ws-agent-* message on its own.",
+      "List every tracked agent_id, its alias/title (when set), status (running/idle/dormant — most agents park to dormant shortly after settling, so idle is transient), model (the model the agent runs on; an inheriting child shows its parent's model), and last_report_at (ISO, absent if it has never reported). Use it to check on a quiet agent — there is no wait tool; every report, question, approval request and completion is pushed to you as a ws-agent-* message on its own.",
     parameters: {
       type: "object",
       properties: {

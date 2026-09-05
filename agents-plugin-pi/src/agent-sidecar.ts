@@ -195,6 +195,13 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
  * `ws-agent-send` into `sendToAgent`'s relaunch branch), and `running:
  * false` keeps a revived orphan out of the fan-in status line until the lead
  * actually prompts it.
+ *
+ * 260905 (list-model/last-report-fidelity ticket): `lastReportAtOverride` is
+ * a direct passthrough of `orphan.lastReportAt` (already ISO, already the
+ * newest `reportLog` entry at shutdown) — the revived record's `reportLog`
+ * itself stays empty (no synthetic entry), so `listAgents` and
+ * `evictForCapacity` read the shutdown snapshot only until the record
+ * reports again for real.
  */
 export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
   return {
@@ -214,6 +221,7 @@ export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
     streaming: false,
     running: false,
     reportLog: [],
+    lastReportAtOverride: orphan.lastReportAt,
   };
 }
 

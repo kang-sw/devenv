@@ -41,7 +41,7 @@ import {
   type PersistedOrphan,
 } from "../src/agent-sidecar.ts";
 import { armForkRoleWiring } from "../src/fork.ts";
-import { applyRpcEvent, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { applyRpcEvent, listAgents, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import type { ExtensionAPI, RpcClient } from "@earendil-works/pi-coding-agent";
 
 function record(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
@@ -307,6 +307,38 @@ describe("rehydrateOrphanRecord", () => {
     const revived = rehydrateOrphanRecord(orphan);
     assert.notEqual(revived.wsToolNames, orphan.wsToolNames);
     assert.deepEqual(revived.wsToolNames, orphan.wsToolNames);
+  });
+
+  test("260905 (list-model/last-report-fidelity): a rehydrated orphan lists the sidecar's last_report_at via lastReportAtOverride", () => {
+    const lastReportAt = new Date(1_700_000_060_000).toISOString();
+    const revived = rehydrateOrphanRecord({
+      agentId: "a1",
+      sessionPath: "/tmp/s1.jsonl",
+      systemPromptPath: "/tmp/p1.md",
+      wsToolNames: [],
+      toolGroup: "full-worker",
+      lastReportAt,
+    });
+    const registry: RpcAgentRegistry = new Map([["a1", revived]]);
+    const [entry] = listAgents(registry);
+    assert.equal(entry.last_report_at, lastReportAt);
+  });
+
+  test("260905 (list-model/last-report-fidelity): a rehydrated orphan that reports afterwards lists the new time, not the stale override", () => {
+    const staleOverride = new Date(1_700_000_060_000).toISOString();
+    const revived = rehydrateOrphanRecord({
+      agentId: "a1",
+      sessionPath: "/tmp/s1.jsonl",
+      systemPromptPath: "/tmp/p1.md",
+      wsToolNames: [],
+      toolGroup: "full-worker",
+      lastReportAt: staleOverride,
+    });
+    const newReportAt = 1_700_000_120_000;
+    revived.reportLog.push({ at: newReportAt });
+    const registry: RpcAgentRegistry = new Map([["a1", revived]]);
+    const [entry] = listAgents(registry);
+    assert.equal(entry.last_report_at, new Date(newReportAt).toISOString());
   });
 });
 
