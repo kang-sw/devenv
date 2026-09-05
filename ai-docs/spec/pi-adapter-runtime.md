@@ -326,7 +326,12 @@ worker's `--tools` allowlist admits `explore` but no delegation-driving tool, an
 the `explore` leaf's own `recon` allowlist admits neither `explore` nor any
 `ws-agent-*` tool, so no branch of the tree extends past an explore leaf. This is
 enforced entirely by the adapter's per-spawn `--tools` allowlists; the ws-mcp
-core's own keyed-handler role check is untouched.
+core's own keyed-handler role check is untouched. The bound is measured from
+the **root of the delegation tree**, and a side-thread fork (see "Side-thread
+task fork") is lateral rather than a descendant: it inherits the lead's surface,
+so it is itself a root of its own worker → explore-leaf tree and consumes no
+depth budget of the lead's. A fork cannot fork again, because `ws-fork` is
+absent from its surface.
 
 ### Model resolution: name alias, not tier {#260903-pi-spawner-model-tier-inherit}
 
