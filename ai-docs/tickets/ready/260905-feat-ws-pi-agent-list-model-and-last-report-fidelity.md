@@ -91,3 +91,40 @@ lead's own concrete model (they resolve identically without a catalog);
 optionally configure a catalog entry for the complex alias and confirm the
 two values then differ; finally `/reload` and confirm `last_report_at`
 survives.
+
+### Result (94c028ca) - 2026-09-06
+
+Landed as `69d13167` (survey plan), `94c028ca` (code and the six ticket
+tests), `874379db` (spec), `c3dc2766` (review relay #1) on the
+implementation branch under the goal branch. Adapter-only change.
+
+- `listAgents` adds `model` as `modelBase` plus `/<effort>` when an effort
+  is set, omitted when the record carries no `modelBase` (pre-field sidecar
+  or a fresh spawn whose alias resolution returned no model).
+  `last_report_at` prefers the newest `reportLog` entry and falls back to
+  the new `lastReportAtOverride` record field; `evictForCapacity` scores
+  activity with the same fallback. `rehydrateOrphanRecord` fills the
+  override from the sidecar's `lastReportAt`; no sidecar shape change.
+- Relay #1 additionally made `captureOrphans` persist the override when
+  `reportLog` is empty (a revived orphan that never reports again now
+  survives a second shutdown) and made `parseOrphans` drop a
+  `lastReportAt` that does not parse as a date.
+- Tests: the six ticket cases plus three from relay (capture round trip,
+  non-date sidecar value, a real report beating a numerically newer
+  override). Adapter suite 745 pass, 0 fail.
+- Spec: `ws-agent-list` bullet and the shutdown-sidecar paragraph under the
+  delegation-tools anchor amended; ids unchanged.
+
+Review (partitioned correctness/test): correctness one Important (capture
+side dropped the override) and two Minor; test one Critical (the eviction
+test tied at activity 0 and passed under the pre-fix formula) and one
+Minor. All fixed in relay #1; the Critical-scoped re-review confirmed the
+rewritten test fails with the fallback removed.
+
+Owner-run live check outstanding: the catalog/no-catalog model listing and
+the `/reload` survival check against the merged goal branch.
+
+## Blocked (2026-09-06) — owner sign-off pending, not a work item
+
+Phase 1 carries a Result; no autonomous work remains. Closing waits on the
+owner-run live check above. Once confirmed, close the ticket to `.done/`.
