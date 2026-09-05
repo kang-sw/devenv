@@ -9,10 +9,13 @@
  * `getForkSourceSessionFile`.
  *
  * `wireAntiBleedLoop`'s own event handling is additionally driven here
+ * `wireAntiBleedLoop`'s own event handling is additionally driven here
  * against a duck-typed fake client/record for the seams 260904 Phase 2 added
- * (the overlay-attached suppression, and the question-report hook through its
- * real `applyRpcEvent` call site).
- *
+ * (the thread-bound suppression, and the question-report hook through its
+ * real `applyRpcEvent` call site) and for 260905's push model (every advisory
+ * is a `ws-agent-advisory` push, the nudge routes through `promptAgent`, and
+ * the idle-without-final judgment reads `reportLog` filtered by the last lead
+ * prompt).
  * NOT covered here — genuinely live-gate only, mirroring
  * test/execute-gateway.test.ts's own pure/IO split: `registerFork`'s tool
  * `execute()` body (needs a live `pi --mode rpc` session or a real
@@ -43,7 +46,7 @@ import {
   buildForkInitialMessage,
   wireAntiBleedLoop,
 } from "../src/fork.ts";
-import { applyRpcEvent, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord } from "../src/spawner.ts";
+import { applyRpcEvent, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 describe("FORK_TOOL_NAME / FORK_EXCLUDED_TOOL_NAMES", () => {
@@ -322,16 +325,18 @@ describe("buildForkInitialMessage (260905 structural anti-bleed frame)", () => {
 });
 
 /**
- * 260904 Phase 2 (review relay #1 C1/I6): the loop's overlay-attached
- * suppression and the question-report hook, driven against a duck-typed fake
- * client/record (no subprocess, no real `RpcClient`) — the event stream is
- * replayed by hand through the listener `wireAntiBleedLoop` registers, and
- * the hook is exercised through the real `applyRpcEvent` (its actual call
- * site) rather than through the loop.
+ * 260904 Phase 2 (review relay #1 C1/I6), rewritten for 260905's push model:
+ * the loop's thread-bound suppression, its advisory PUSHES (formerly
+ * `pi.sendUserMessage` steers), the nudge routed through `promptAgent`, and
+ * the question-report hook's new suppression contract — driven against a
+ * duck-typed fake client/record (no subprocess, no real `RpcClient`). The
+ * event stream is replayed by hand through the listener `wireAntiBleedLoop`
+ * registers; the hook is exercised through the real `applyRpcEvent` (its
+ * actual call site) rather than through the loop.
  */
-describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2)", () => {
+describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2, 260905 push model)", () => {
   function harness() {
-    const notices: string[] = [];
+    const pushes: Array<{ customType?: string; details?: Record<string, unknown> }> = [];
     const prompts: string[] = [];
     let listener: ((evt: unknown) => void) | undefined;
     const record = {
@@ -340,11 +345,10 @@ describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2)", (
       systemPromptPath: "/nonexistent/prompt.md",
       wsToolNames: [],
       toolGroup: "full-worker",
+      spawnRole: "fork",
       streaming: false,
-      idlePending: false,
-      waiters: [],
-      pendingReports: [],
-      reportsDropped: 0,
+      running: false,
+      reportLog: [],
       client: {
         onEvent(l: (evt: unknown) => void) {
           listener = l;
@@ -357,11 +361,20 @@ describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2)", (
       },
     } as unknown as RpcAgentRecord;
     const pi = {
-      sendUserMessage(text: string) {
-        notices.push(text);
+      sendMessage(message: { customType?: string; details?: Record<string, unknown> }) {
+        pushes.push(message);
+      },
+      sendUserMessage() {
+        throw new Error("wireAntiBleedLoop must push custom messages, never a bare user message");
       },
     } as unknown as ExtensionAPI;
-    return { pi, record, notices, prompts, emit: (evt: unknown) => listener?.(evt) };
+    const registry: RpcAgentRegistry = new Map([["a1", record]]);
+    return { pi, registry, record, pushes, prompts, emit: (evt: unknown) => listener?.(evt) };
+  }
+
+  /** The advisory names pushed for each `ws-agent-advisory` message, in order. */
+  function advisories(pushes: Array<{ customType?: string; details?: Record<string, unknown> }>): string[] {
+    return pushes.filter((p) => p.customType === "ws-agent-advisory").map((p) => String(p.details?.advisory));
   }
 
   const questionTurn = [
@@ -376,103 +389,177 @@ describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2)", (
     args: { kind: "question", message: "Which of the two anchors should I use?" },
   };
 
-  test("a question turn is a valid stop — no nudge, no lead notice", () => {
+  test("a question turn is a valid stop — no nudge, no advisory", () => {
     const h = harness();
-    wireAntiBleedLoop(h.pi, "a1", h.record, false);
+    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
     for (const evt of questionTurn) h.emit(evt);
-    assert.deepEqual(h.notices, [], "a question turn is a valid stop — no lead notice");
+    assert.deepEqual(advisories(h.pushes), [], "a question turn is a valid stop");
     assert.deepEqual(h.prompts, [], "a question turn is never nudged");
   });
 
-  test("C1: an attached owner overlay suppresses the no-signal nudge", () => {
+  test("C1 (widened 260905): a bound owner discussion thread suppresses the no-signal nudge", () => {
     const h = harness();
-    (h.record as unknown as { overlayAttached?: boolean }).overlayAttached = true;
-    wireAntiBleedLoop(h.pi, "a1", h.record, false);
+    h.record.threadBound = true;
+    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
     for (let turn = 0; turn < 5; turn += 1) {
       h.emit({ type: "agent_start" });
       h.emit({ type: "agent_settled" });
     }
-    assert.deepEqual(h.prompts, [], "an owner-attached fork must never be re-prompted mid-discussion");
-    assert.deepEqual(h.notices, [], "and must never be reported to the lead as stalled");
+    assert.deepEqual(h.prompts, [], "a thread-bound fork must never be re-prompted mid-discussion");
+    assert.deepEqual(advisories(h.pushes), [], "and must never be reported to the lead as stalled");
   });
 
-  test("C1: the same record still nudges once the overlay detaches", () => {
+  test("C1: the same record still nudges once the thread closes", () => {
     const h = harness();
-    const record = h.record as unknown as { overlayAttached?: boolean };
-    record.overlayAttached = true;
-    wireAntiBleedLoop(h.pi, "a1", h.record, false);
+    h.record.threadBound = true;
+    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
     h.emit({ type: "agent_start" });
     h.emit({ type: "agent_settled" });
     assert.deepEqual(h.prompts, []);
-    record.overlayAttached = false;
+    h.record.threadBound = false;
     h.emit({ type: "agent_start" });
     h.emit({ type: "agent_settled" });
-    assert.equal(h.prompts.length, 1, "suppression is scoped to the attached window, not permanent");
+    assert.equal(h.prompts.length, 1, "suppression is scoped to the bound window, not permanent");
   });
 
-  test("I6: a question report is relayed to the lead through record.onQuestionReport", () => {
+  test("260905: the nudge goes through promptAgent — running latches without moving the lead-prompt watermark", () => {
+    const h = harness();
+    h.record.lastLeadPromptAt = 1_000;
+    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
+    h.emit({ type: "agent_start" });
+    h.emit({ type: "agent_settled" });
+    assert.equal(h.prompts.length, 1);
+    assert.equal(h.record.running, true, "the nudged fork is outstanding again");
+    assert.equal(h.record.lastLeadPromptAt, 1_000, "an internal re-prompt is not a new task boundary");
+  });
+
+  test('260905: a kind:"final" already filed for THIS task stops the idle-without-final flag (reportLog, not the deleted pendingReports)', () => {
+    const h = harness();
+    h.record.lastLeadPromptAt = 1_000;
+    h.record.reportLog.push({ kind: "final", at: 2_000 });
+    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
+    h.emit({ type: "agent_start" });
+    h.emit({ type: "agent_settled" });
+    assert.deepEqual(h.prompts, [], "the fork already completed — a text-only turn after that is not a bleed");
+    assert.deepEqual(advisories(h.pushes), []);
+  });
+
+  test('260905: a kind:"final" from BEFORE the last lead prompt does NOT count — the stale completion is filtered out', () => {
+    const h = harness();
+    h.record.lastLeadPromptAt = 5_000;
+    h.record.reportLog.push({ kind: "final", at: 1_000 });
+    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
+    h.emit({ type: "agent_start" });
+    h.emit({ type: "agent_settled" });
+    assert.equal(h.prompts.length, 1, "the new task has produced no completion signal yet");
+  });
+
+  test("260905: acknowledge-and-return pushes a ws-agent-advisory (followUp), never a bare steer", () => {
+    const h = harness();
+    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
+    h.emit({ type: "agent_start" });
+    h.emit({ type: "tool_execution_start", toolName: "bash", args: {} });
+    h.emit({ type: "agent_settled" });
+    assert.deepEqual(advisories(h.pushes), ["acknowledge-and-return"]);
+    assert.deepEqual(h.prompts, [], "a turn that did real work is not itself a bleed signal");
+  });
+
+  test("260905: exhausting the nudge budget pushes a `stalled` advisory carrying a transcript tail", () => {
+    const h = harness();
+    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
+    for (let turn = 0; turn < MAX_FORK_NUDGES + 1; turn += 1) {
+      h.emit({ type: "agent_start" });
+      h.emit({ type: "agent_settled" });
+    }
+    assert.equal(h.prompts.length, MAX_FORK_NUDGES);
+    assert.deepEqual(advisories(h.pushes), ["stalled"]);
+    const stalled = h.pushes.find((p) => p.details?.advisory === "stalled");
+    assert.ok(typeof stalled?.details?.transcript_tail === "string", "an unreadable transcript degrades to a placeholder, never to a missing field");
+  });
+
+  test('260905: a malformed kind:"final" pushes a final-report-shape advisory', () => {
+    const h = harness();
+    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
+    h.emit({ type: "agent_start" });
+    h.emit({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "final", message: "all done" } });
+    assert.deepEqual(advisories(h.pushes), ["final-report-shape"]);
+  });
+
+  test('260905: expects_commit with Commit: none pushes an expects-commit advisory', () => {
+    const h = harness();
+    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, true);
+    h.emit({ type: "agent_start" });
+    h.emit({
+      type: "tool_execution_start",
+      toolName: REPORT_TO_LEAD_TOOL_NAME,
+      args: { kind: "final", message: REQUIRED_FINAL_REPORT_FIELDS.map((f) => (f === "Commit" ? "Commit: none" : `${f}: something`)).join("\n") },
+    });
+    assert.deepEqual(advisories(h.pushes), ["expects-commit"]);
+  });
+
+  test("260905: a well-formed final with a real Commit pushes no advisory at all", () => {
+    const h = harness();
+    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, true);
+    h.emit({ type: "agent_start" });
+    h.emit({
+      type: "tool_execution_start",
+      toolName: REPORT_TO_LEAD_TOOL_NAME,
+      args: { kind: "final", message: REQUIRED_FINAL_REPORT_FIELDS.map((f) => (f === "Commit" ? "Commit: abc1234" : `${f}: something`)).join("\n") },
+    });
+    assert.deepEqual(advisories(h.pushes), []);
+  });
+
+  test("I6 (260905): a hook return SUPPRESSES the question push — the owner surface consumed it", () => {
     const h = harness();
     const seen: Array<{ agentId: string; message: string }> = [];
     h.record.onQuestionReport = (rec, message) => {
       seen.push({ agentId: rec.agentId, message });
-      return "[ws] thread T1 — the owner answers this; keep waiting.";
+      return "[ws] thread T1 — the owner answers this.";
     };
-    applyRpcEvent(h.record, questionReportEvent);
+    const outcome = applyRpcEvent(h.record, questionReportEvent);
     assert.deepEqual(seen, [{ agentId: "a1", message: "Which of the two anchors should I use?" }]);
-    assert.deepEqual(
-      h.record.pendingReports.map((r) => ({ message: r.message, kind: r.kind })),
-      [{ message: "[ws] thread T1 — the owner answers this; keep waiting.", kind: "question" }],
-      "the lead-visible report text is the hook's replacement, not the fork's own question",
-    );
+    assert.deepEqual(outcome, {}, "§1 keeps the lead out of a fork-raised question entirely");
+    assert.equal(h.record.reportLog.length, 1, "the report is still logged for the anti-bleed loop");
   });
 
-  test("I6: returning undefined (headless) keeps the Phase 1 report byte-identical", () => {
+  test("I6: returning undefined (headless) keeps the ws-agent-question push", () => {
     const h = harness();
     h.record.onQuestionReport = () => undefined;
-    applyRpcEvent(h.record, questionReportEvent);
-    assert.deepEqual(
-      h.record.pendingReports.map((r) => ({ message: r.message, kind: r.kind })),
-      [{ message: "Which of the two anchors should I use?", kind: "question" }],
-    );
+    assert.deepEqual(applyRpcEvent(h.record, questionReportEvent), {
+      push: { family: "ws-agent-question", payload: { question: "Which of the two anchors should I use?" }, deliverAs: "steer" },
+    });
   });
 
-  test("I6: a throwing hook falls back to the original message rather than dropping the report", () => {
+  test("I6: a throwing hook degrades to the headless baseline rather than dropping the question", () => {
     const h = harness();
     h.record.onQuestionReport = () => {
       throw new Error("boom");
     };
-    applyRpcEvent(h.record, questionReportEvent);
-    assert.deepEqual(
-      h.record.pendingReports.map((r) => r.message),
-      ["Which of the two anchors should I use?"],
-    );
+    assert.deepEqual(applyRpcEvent(h.record, questionReportEvent), {
+      push: { family: "ws-agent-question", payload: { question: "Which of the two anchors should I use?" }, deliverAs: "steer" },
+    });
   });
 
-  test("I6: a final-kind report never reaches the hook", () => {
+  test("I6: a final-kind report never reaches the question hook", () => {
     const h = harness();
     let calls = 0;
     h.record.onQuestionReport = () => {
       calls += 1;
       return "replaced";
     };
-    applyRpcEvent(h.record, {
+    const outcome = applyRpcEvent(h.record, {
       type: "tool_execution_start",
       toolName: REPORT_TO_LEAD_TOOL_NAME,
       args: { kind: "final", message: "Outcome: x" },
     });
     assert.equal(calls, 0);
-    assert.deepEqual(
-      h.record.pendingReports.map((r) => ({ message: r.message, kind: r.kind })),
-      [{ message: "Outcome: x", kind: "final" }],
-    );
+    assert.deepEqual(outcome, { push: { family: "ws-agent-report", payload: { kind: "final", report: "Outcome: x" }, deliverAs: "followUp" } });
   });
 
-  test("I6: with no hook set the report branch is unchanged", () => {
+  test("I6: with no hook set the question is pushed to the lead", () => {
     const h = harness();
-    applyRpcEvent(h.record, questionReportEvent);
-    assert.deepEqual(
-      h.record.pendingReports.map((r) => ({ message: r.message, kind: r.kind })),
-      [{ message: "Which of the two anchors should I use?", kind: "question" }],
-    );
+    assert.deepEqual(applyRpcEvent(h.record, questionReportEvent), {
+      push: { family: "ws-agent-question", payload: { question: "Which of the two anchors should I use?" }, deliverAs: "steer" },
+    });
   });
 });

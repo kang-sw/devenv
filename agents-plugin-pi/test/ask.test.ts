@@ -479,11 +479,12 @@ describe("captureForkResume / rehydrateForkRecord (the persistence-gap resolutio
     wsToolNames: ["ws__todo_list"],
     toolGroup: "full-worker",
     explicitTools: "bash,ws-report-to-lead",
+    spawnRole: "fork",
     streaming: true,
-    idlePending: true,
-    waiters: [() => {}],
-    pendingReports: [{ message: "hi" }],
-    reportsDropped: 2,
+    running: true,
+    threadBound: true,
+    terminalThisTurn: true,
+    reportLog: [{ kind: "final", at: 1 }],
   } as unknown as RpcAgentRecord;
 
   test("capture keeps only JSON-serializable resume fields (never the live client or runtime state)", () => {
@@ -510,10 +511,10 @@ describe("captureForkResume / rehydrateForkRecord (the persistence-gap resolutio
     assert.equal(record.toolGroup, "full-worker");
     assert.equal(record.modelBase, "prov/model");
     assert.equal(record.streaming, false);
-    assert.equal(record.idlePending, false);
-    assert.deepEqual(record.waiters, []);
-    assert.deepEqual(record.pendingReports, []);
-    assert.equal(record.reportsDropped, 0);
+    assert.equal(record.running, false, "a rehydrated record is dormant — it must not count toward the lead's fan-in until prompted");
+    assert.deepEqual(record.reportLog, [], "the push model never restores report history; the reports were already delivered");
+    assert.equal(record.spawnRole, "fork", "a rehydrated respondent is always a discussion/task fork");
+    assert.equal(record.threadBound, undefined, "binding is re-established by ensureRespondent, not carried in the resume snapshot");
   });
 
   test("rehydration copies the tool-name list instead of aliasing the persisted array", () => {
@@ -575,11 +576,10 @@ describe("handleForkRaisedQuestion (Entry A meets Entry B)", () => {
       systemPromptPath: "/tmp/p.md",
       wsToolNames: [],
       toolGroup: "full-worker",
+      spawnRole: "fork",
       streaming: false,
-      idlePending: false,
-      waiters: [],
-      pendingReports: [],
-      reportsDropped: 0,
+      running: false,
+      reportLog: [],
     } as unknown as RpcAgentRecord);
     assert.equal(handleForkRaisedQuestion(handle, registry, "agent-7", "q?").forkResume?.sessionPath, "/tmp/s.jsonl");
     assert.equal(handleForkRaisedQuestion(handle, new Map(), "agent-9", "q?").forkResume, undefined);
@@ -762,12 +762,12 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
       systemPromptPath: "/tmp/p.md",
       wsToolNames: [],
       toolGroup: "full-worker",
+      spawnRole: "fork",
       streaming: false,
-      idlePending: false,
-      waiters: [],
-      pendingReports: [],
-      reportsDropped: 0,
+      running: false,
+      reportLog: [],
       overlayAttached: true,
+      threadBound: true,
       client: {
         abort: async () => {},
         stop: async () => {
@@ -853,7 +853,7 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
 
     assert.deepEqual(sent, [], "§1: the lead is not part of a fork-raised exchange — it learns the outcome from the fork's final report");
     await new Promise((resolve) => setImmediate(resolve));
-    assert.deepEqual(stops, [], "stopping a live task fork would destroy its task and hang the lead's ws-agent-wait");
+    assert.deepEqual(stops, [], "stopping a live task fork would destroy the in-flight task the lead is still expecting a pushed final from");
     assert.ok(live.client, "the fork's client is untouched");
     assert.equal(live.overlayAttached, false, "the overlay is detached, so the anti-bleed loop is armed again");
     assert.equal(record.status, "dormant", "dormant means reopenable while the fork lives");
@@ -943,15 +943,36 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
       assert.deepEqual(stops, []);
     });
 
-    test("fork-raised with no overlay attached: nothing changes", () => {
+    test("260905: fork-raised with no overlay attached still detaches the thread and releases the bind", () => {
       const { pi, sent, handle, record } = setup("fork-raised");
       record.status = "open";
       record.respondentAgentId = "agent-7";
       const live = liveRespondent([]);
-      handleRespondentFinalReport(pi, handle, new Map([["agent-7", live]]), record, "Task done.", undefined);
-      assert.deepEqual(sent, []);
-      assert.equal(record.status, "open");
-      assert.equal(live.overlayAttached, true, "untouched — the flag belongs to whatever attached it");
+      const consumed = handleRespondentFinalReport(pi, handle, new Map([["agent-7", live]]), record, "Task done.", undefined);
+      assert.equal(consumed, false, "a fork-raised final IS the completion signal — it must still be pushed to the lead");
+      assert.deepEqual(sent, [], "nothing is injected; the lead reads the pushed report itself");
+      assert.equal(record.status, "dormant", "the thread that the question opened is over");
+      assert.equal(live.threadBound, false, "the fork rejoins the lead's fan-in on the very report that ends the thread");
+    });
+
+    test("260905 suppression contract: a lead-ask final returns true (consumed), a fork-raised final returns false", () => {
+      const leadAsk = setup("lead-ask");
+      leadAsk.record.status = "open";
+      assert.equal(
+        handleRespondentFinalReport(leadAsk.pi, leadAsk.handle, new Map(), leadAsk.record, "Decided.", undefined),
+        true,
+        "the decision already reaches the lead as the ws-thread-summary message; pushing the raw report too would duplicate it",
+      );
+
+      const forkRaised = setup("fork-raised");
+      forkRaised.record.status = "open";
+      assert.equal(handleRespondentFinalReport(forkRaised.pi, forkRaised.handle, new Map(), forkRaised.record, "Task done.", undefined), false);
+    });
+
+    test("260905: a final on a non-open thread returns false — nothing was consumed", () => {
+      const { pi, handle, record } = setup("lead-ask");
+      record.status = "dormant";
+      assert.equal(handleRespondentFinalReport(pi, handle, new Map(), record, "late", undefined), false);
     });
 
     test("a final report on a thread that is not open (pending, dormant, closed) is ignored — no duplicate injection", () => {
@@ -977,12 +998,13 @@ describe("checkContextLength / buildForkQuestionLeadNotice", () => {
     assert.ok(warn && warn.includes(String(MAX_CONTEXT_CHARS + 5)) && warn.includes(String(MAX_CONTEXT_CHARS)));
   });
 
-  test("I6 notice names the thread, the owner channel, and tells the lead to keep waiting", () => {
+  test("I6 notice names the thread and the owner channel, and tells the lead to end its turn (never to poll a deleted wait verb)", () => {
     const notice = buildForkQuestionLeadNotice("agent-7", "q3");
     assert.ok(notice.includes("agent-7"));
     assert.ok(notice.includes("q3"));
     assert.match(notice, /\/answer q3/);
-    assert.match(notice, /ws-agent-wait/i);
+    assert.match(notice, /end your turn/i);
+    assert.ok(!/ws-agent-wait/i.test(notice), "ws-agent-wait is deleted — the notice must not send the lead to a tool that no longer exists");
     assert.match(notice, /do not relay/i);
     // C2: the decision comes back on the fork's own final report, not as a
     // thread-summary message — /done never injects one for this origin.

@@ -32,7 +32,7 @@ Route a task to the right primitive by what you actually need done:
 | --- | --- |
 | Delegate a task to a persistent subagent | `ws-agent-spawn` (pass an already-rendered `system_prompt_path`, e.g. via `ws__playbook_render`) |
 | Send a follow-up or steer a running subagent | `ws-agent-send` |
-| Wait for a subagent to finish or report progress | `ws-agent-wait` — returns `reason` `idle`/`report`/`approval-pending`. On `approval-pending` it hands you `pending_approval:{cmd_id,command,rationale}`: call `ws-approve` with that `cmd_id`, then call `ws-agent-wait` again to harvest — do NOT keep blocking (an un-approved worker cannot progress). |
+| Wait for a subagent to finish or report progress | **Nothing — end your turn.** There is no wait verb. Every child signal is pushed into your session as a message that starts a turn on arrival. |
 | See every subagent's status (running/idle/dormant) | `ws-agent-list` |
 | Gracefully stop a subagent (keeps it resumable) | `ws-agent-stop` |
 | Read a subagent's full session transcript | `ws-agent-transcript` |
@@ -44,9 +44,30 @@ Route a task to the right primitive by what you actually need done:
 | Compact context mid-goal and keep going (non-terminal) | `goal-compact-and-continue <carry-forward>` |
 | Delegate a lead-consensus-caliber shell task, gated command-by-command | `ws-execute` (spawns an execute-worker; optional `command` runs verbatim first, then `prompt` drives the worker; `complex:true` for a stronger model). This gate exists because `ws-execute` proxies actions at your own trust level — a general `ws-agent-spawn` worker carries no such gate. |
 | Respond to a pending execute-worker command approval request | `ws-approve` (`decision`: `approve` \| `deny` with `reason` \| `run-instead` with `command`; rejected if `cmd_id` is stale or mismatched) |
-| Delegate a task-thread fork that shares your full current context (lateral peer, not a depth-consuming worker) | `ws-fork` (`prompt`, optional `model_name`/`expects_commit`; it reports back ONLY via `ws-report-to-lead(kind:"question"|"final")` — never harvest a bare turn-end as its result) |
+| Delegate a task-thread fork that shares your full current context (lateral peer, not a depth-consuming worker) | `ws-fork` (`prompt`, optional `model_name`/`expects_commit`; it reports back ONLY via `ws-report-to-lead(kind:"question"|"final")` — never treat a bare turn-end as its result) |
 | Ask the owner a question without blocking or interrupting them | `ws-ask` (`title`, `question`, optional `context` — 2-3 sentences of background, no paths or hashes). Returns `{question_id}` and spawns nothing; keep working on whatever does not depend on the answer. |
 | Withdraw a question you no longer need answered | `ws-resolve` (`question_id`) — clears it from the owner's pending count; nothing is injected back, since you already know the answer |
+
+## Delegated children push to you — never poll, never block
+
+After `ws-agent-spawn`, `ws-execute` or `ws-fork` returns its `{agent_id}`,
+dispatch anything else you can do in parallel and then **end your turn**.
+Blocking is not available and polling with `ws-agent-list` in a loop is not a
+substitute for it. Each child signal arrives on its own as a message:
+
+| Message | What it means |
+| --- | --- |
+| `ws-agent-report` | The child called `ws-report-to-lead`. Its `kind` is `final` (the completion signal — the only thing you may treat as a result), `question`, or absent (plain progress). |
+| `ws-agent-settled` | The child's run ended. `reason`: `idle` (turn finished with no terminal report — NOT a result, send it a follow-up or judge it stalled), `stopped` (you stopped it), `exited` (its process died — the work is gone), `spawn-failed` (it never started; `error` says why). |
+| `ws-agent-question` | A child needs an answer to continue. In an interactive session this is instead handled by the owner and you get a thread notice — see below. |
+| `ws-agent-approval` | An `ws-execute` worker is blocked on a shell command. It carries `cmd_id`; answer with `ws-approve`. Nothing else unblocks it. |
+| `ws-agent-advisory` | The adapter's own judgment about a child: a malformed `kind:"final"`, a missing `Commit:`, a fork that went idle without reporting, a stall. Advisories are about the child, never from it. |
+| `ws-agent-orphaned` | A previous run of this session left children behind. They are registered as dormant: `ws-agent-send` revives one from its own session file, `ws-agent-transcript` reads what it did, `ws-agent-stop` drops it. |
+
+Every one of these ends with a line like `2 of 3 delegated agents still
+running`. Read it as your fan-in state: while the first number is above zero,
+more is coming — end your turn again rather than concluding early. Agents in an
+owner discussion thread are not counted; they are not yours to wait on.
 
 The owner side of a question is theirs, not yours: `/answer <id>` opens one in
 a chat overlay (which is when a discussion thread is actually forked, at your
@@ -58,10 +79,12 @@ these; just register the question and carry on.
 The same applies when a `ws-fork` you spawned raises a question of its own: in
 an interactive session you receive only a notice naming the thread id, and the
 owner answers that fork directly in their overlay. Do not relay it, do not
-answer it yourself, and do not ask the owner about it — keep waiting on the
-fork (`ws-agent-wait`). That fork keeps running its task through and after the
-discussion; what was decided reaches you in its own `kind:"final"` report,
-under `Decisions:` — not as a separate thread-summary message.
+answer it yourself, and do not ask the owner about it — just end your turn.
+That fork keeps running its task through and after the discussion; what was
+decided reaches you in its own pushed `kind:"final"` report, under
+`Decisions:` — not as a separate thread-summary message. While that thread is
+open the fork is excluded from your `N of M` count, so an `0 of 0` line does
+not mean it is gone.
 
 This table grows as later tickets land more primitives — treat any verb not
 listed here as not yet available, not as a naming mismatch to guess around.
