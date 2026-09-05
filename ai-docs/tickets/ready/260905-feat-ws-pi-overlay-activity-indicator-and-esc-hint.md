@@ -90,3 +90,52 @@ persistence unchanged. Amend the spec bullet. Live check (owner-run): open a
 fork-raised thread with `/answer` while the fork is mid-turn and confirm the
 marker shows immediately; then send a message that makes the fork run a
 tool and confirm the marker shows before any text arrives.
+
+### Result (fd36f541) - 2026-09-06
+
+Landed as `7aeb5d2a` (survey plan), `fd36f541` (overlay change and tests),
+`6911aae3` (spec bullet), `8cb384f0` (review relay #1) on the
+implementation branch under the goal branch. Adapter-only change, confined
+to `overlay-chat.ts`, its test file, and the spec bullet.
+
+- `transcriptRows` draws one `working…` row in the streaming slot when
+  `channel.isStreaming()` is true and the tail is empty; the first delta
+  replaces it and settle clears it. The row is built at render time and
+  never reaches `entries` or `onTranscriptChange`.
+- The key hint moved from the footer to the header, directly after the
+  `opened <time>` row, as `Esc: close view (thread stays open) · /done: end
+  thread`, wrapped by `wrapLine`; the footer block is gone, so exactly one
+  line states what `Esc` does. `Esc` and `/done` semantics unchanged.
+- Relay #1 corrected a premise in this ticket: `record.streaming` flips on
+  `agent_start`, not "the instant the prompt is issued" (`promptAgent`
+  sets `running`). With the render cache keyed on width only and no
+  refresh on `agent_start`, the frame cached at submit time hid the marker
+  until the first delta. The cache now misses when `isStreaming()` differs
+  from the cached value, `handleEvent` refreshes on `agent_start`, and
+  `deliver` refreshes after `send()` resolves, which also covers the
+  dormant-relaunch first message and the stale-true mirror when the flag
+  clears without an event.
+- Tests: the ticket's cases plus three render-time discriminators (bare
+  flag flip and re-render, `agent_start` alone requests a render, settle
+  mirror without an event); header-hint tests pin the row position after
+  `opened`. Adapter suite 770 pass, 0 fail.
+- Spec: "Overlay chat" bullet amended with the marker and the header hint;
+  anchor id unchanged.
+
+Review (single, full scope): one Critical (marker never shown in the E3
+scenario, see above), one Important (no test could catch it), three Minor.
+Critical and Important fixed in relay #1; two Minor fixed, one recorded: a
+live task fork (`summarizeOnDone: false`) shows `working…` throughout its
+own task work, which the ticket wording ("the respondent's turn is
+running") covers. The Critical-scoped re-review confirmed the fix with a
+probe of E3, dormant relaunch, and the stale-true mirror, and left one
+Minor (the post-send refresh in `deliver` is unpinned by a test).
+
+Owner-run live check outstanding: open a fork-raised thread with `/answer`
+mid-turn and confirm the marker, then trigger a tool run and confirm the
+marker precedes any text.
+
+## Blocked (2026-09-06) — owner sign-off pending, not a work item
+
+Phase 1 carries a Result; no autonomous work remains. Closing waits on the
+owner-run live check above. Once confirmed, close the ticket to `.done/`.
