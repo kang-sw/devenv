@@ -57,8 +57,12 @@ parsing, launcher compatibility, or structured protocol metadata preserve an
 explicit JSON or full-detail escape hatch. {#260512-mcp-llm-readable-output-defaults}
 
 The MCP server detects the host harness from observable MCP payloads before
-relying on environment variables. It inspects `initialize.params` and request
-metadata for high-confidence Codex or Claude markers, treats
+relying on environment variables. On `initialize`, it first parses
+`params.clientInfo.name` as structured JSON: an exact match on
+`ws-pi-bridge` identifies the Pi harness, checked before any substring
+inspection runs. Only when that structured check does not match does it fall
+back to inspecting `initialize.params` and request metadata for
+high-confidence Codex or Claude markers. It treats
 `tools/call.params._meta.x-codex-turn-metadata` as a Codex signal, and records
 conflicting signals in diagnostics instead of silently changing the session
 harness. The detected harness is exposed through session inspection output.
@@ -1108,7 +1112,7 @@ by `prompt.<point id>` config keys.
 
 `config.tune(key: "prompt.<point id>", value: <text>, harness?, scope?,
 session_key)` stores a prompt override keyed by `(point id, harness)`, where
-`harness` is `claude`, `codex`, or `*` (the cross-harness `all` bucket; `*` is
+`harness` is `claude`, `codex`, `pi`, or `*` (the cross-harness `all` bucket; `*` is
 stored under the `all` key). The override text travels in the generic `value`
 argument. The value is written through the layered config scope model
 (`#260619-layered-config-scope-model`) under the key `prompt.<point id>.<harness>`:
@@ -2119,8 +2123,16 @@ detected (`#260508-mcp-payload-harness-detection`). Harness differences are
 served as data, not as separate code paths: a shared playbook body plus a
 per-harness terminology table (exploration agent name, spawn idiom, continuation
 idiom, model aliases), with structural divergence expressed only through
-per-harness overlay files. The supported harness set is Claude and Codex; an
-unrecognized harness renders host-neutral text rather than failing. Concrete
+per-harness overlay files. The detected-harness set for structural
+`<name>.<harness>.md` overlay selection is `claude`, `codex`, and `pi`
+(`#260508-mcp-payload-harness-detection`); the bundled terminology table
+(`playbookTerminologyTable`) covers Claude and Codex only, and any other
+detected harness — `pi` included — falls back to the host-neutral
+terminology row rather than getting a dedicated row. Structural overlay
+selection and terminology-table coverage are independent: a harness can
+select its own overlay file while still rendering host-neutral terminology.
+An unrecognized harness in either sense renders host-neutral text rather
+than failing. Concrete
 per-provider model names are resolved from configuration
 (`#260513-harness-local-agent-tier-config`), never baked into the resource tree
 or the binary, so model-name churn is a config update rather than a
@@ -2236,8 +2248,8 @@ two orthogonal axes:
 - **What** is selected by `(point id, harness)`: a stored override whose harness
   matches the rendered harness wins; otherwise an override stored for the
   cross-harness `all` bucket applies; otherwise the inline seed default is used.
-  The harness axis values are `claude`, `codex`, and `all` (the `all` bucket is
-  the cross-harness / `*` setting).
+  The harness axis values are `claude`, `codex`, `pi`, and `all` (the `all`
+  bucket is the cross-harness / `*` setting).
 - **Where** the override is stored is selected by scope through the layered
   config scope model (`#260619-layered-config-scope-model`); resolution reads the
   highest-precedence scope that holds a value, including code-owned builtin
