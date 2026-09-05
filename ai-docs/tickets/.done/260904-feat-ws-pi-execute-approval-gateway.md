@@ -487,6 +487,23 @@ trailing stale steer; a non-waiting lead still receives the steer relay. No
 credentials in the build sandbox; the owner drives live `pi` sessions with the
 user-scope-installed adapter.
 
+#### Live verification (2026-09-05) — both runs PASS
+
+Owner-run on a fresh `pi` session with the user-scope-installed adapter after
+`e5f0e697`, using a paste-in two-run script (each run: `ws-execute` spawns a
+worker that creates one file under a scratch directory, then reports `final`).
+
+- Run A (waiting lead): `ws-agent-wait` returned `approval-pending` with the
+  worker's `cmd_id`; `ws-approve` + re-wait harvested the `run-a done` report;
+  **no** injected approval message appeared after the lead ended its turn.
+- Run B (non-waiting lead): the lead ended its turn without waiting; the
+  injected approval request ("A spawned execute-worker … needs your approval.")
+  arrived as the steered message on the next turn; `ws-approve` + wait harvested
+  `run-b done`.
+- Both worker-created files verified on disk. Nothing unexpected reported.
+
+The manual gate above is closed; the ticket has no outstanding verification.
+
 ## Blocked (2026-09-05)
 
 Phase 2 is not autonomously advanceable in the current build sandbox. Its
