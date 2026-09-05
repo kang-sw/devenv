@@ -47,7 +47,9 @@ phases. Code work is deferred until the discussion in "Open questions" converges
    (`260801-feat-ws-opencode-adapter` → `.dropped/`) and the ws workflow
    system is ported onto Pi as an opinionated framework layer.
 2. **Bridge path (a), not native re-implementation (b).** ws-mcp stays as the
-   harness-neutral MCP server (Go source untouched); a Pi extension bridges
+   harness-neutral MCP server (no Pi-specific logic in its Go source; the
+   harness-peer clause in `AGENTS.md`, 2026-09-05, lets harness-keyed config
+   surfaces gain `pi` as a peer bucket); a Pi extension bridges
    each ws-mcp MCP tool to a `pi.registerTool` call and drives the ws workflow
    surface (skills, playbook, goal-loop, compaction, tier/subagent) through Pi
    extension events. "Framework on a clean base" does not mean re-cutting the

@@ -295,7 +295,8 @@ ai-docs/tickets/.dropped/
   `260429-research-host-neutral-ws-plugin` anchor is absorbed and archived.
 - Active direction: **Pi-native framework** (branch `feat/ws-pi-plugin`,
   research anchor `260802-research-ws-pi-native-framework`). A Pi extension
-  bridges ws-mcp (harness-neutral; Go source untouched) onto Pi via a stdio MCP
+  bridges ws-mcp (harness-neutral; no host-specific logic in its Go source)
+  onto Pi via a stdio MCP
   client, composing skills + playbook + tier/subagent + goal-loop as the
   opinionated framework layer; dependency stays one-directional (Pi extension ->
   ws-mcp). One clause (owner, 2026-09-05): ws-mcp may change so that a host

@@ -9,7 +9,10 @@ related-mental-model:
   - plugin-runtime
 spec:
   - pi-adapter-runtime
-sage-review-design: recommended
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 5aea625fddd7e749
+sage-review-completeness-reviewed: 5aea625fddd7e749
 ---
 
 # Pi adapter: agent alias and title, park idle children, cap the registry
@@ -46,15 +49,20 @@ channel). Three gaps in how the lead and the owner see and keep children:
   are persisted on the record and in the sidecar. The adapter never derives
   either from the prompt.
 - **Every `agent_id` parameter accepts a uuid or an alias.** `ws-agent-send`,
-  `ws-agent-stop`, `ws-agent-transcript` resolve the alias against the
-  registry; spawn returns both `agent_id` and `alias`. Pushed-message heads,
+  `ws-agent-stop`, `ws-agent-transcript` and `ws-approve` resolve the alias
+  against the registry through one helper (an execute worker never carries a
+  lead-chosen alias, so `ws-approve` resolves uuids in practice, but the
+  parameter contract is the same); spawn returns both `agent_id` and
+  `alias`. Pushed-message heads,
   the TUI renderer, `ws-agent-list` rows and the orphan roll-call print the
   alias when there is one, followed by the uuid.
 - **Alias reuse overwrites.** A new spawn with an alias already held by a
-  dormant or idle record takes it: the previous holder's alias is cleared and
-  it stays reachable by uuid. Reuse is rejected only when the holder is
-  `running` — a child the lead is still waiting on must not be renamed
-  underneath its plan. No `ws-agent-close`: parking plus the cap below cover
+  dormant or idle record takes it: the previous holder's alias is cleared
+  (its `title` stays; only the identifier moves) and it stays reachable by
+  uuid. Reuse is rejected when the holder is `running` or thread-bound — a
+  child the lead is still waiting on, or one the owner is talking to, must
+  not be renamed underneath its plan (the same exemption class park and
+  eviction use). No `ws-agent-close`: parking plus the cap below cover
   what an explicit close would, and the owner preferred fewer tools.
 - **Idle children are parked at once.** When a child's turn settles with
   nothing queued, the adapter stops its process silently (the existing
@@ -64,22 +72,62 @@ channel). Three gaps in how the lead and the owner see and keep children:
   for the park itself. Children blocked on a question or an approval are not
   idle in Pi (the tool call holds the turn open) and are unaffected. No grace
   period: one rule, and a follow-up right after a `final` costs one resume.
+  Two exemptions and one safety net (design review, 2026-09-05):
+  - *Thread-bound records are never parked.* A record with an owner
+    discussion thread open on it (`threadBound`: a `lead-ask` discussion fork
+    or a fork-raised question the owner is answering) settles idle after
+    every owner line and is prompted directly by the overlay `ForkChannel`;
+    parking it would add a process resume to each line of an interactive
+    exchange. It becomes park-eligible when the thread closes (`/done`, the
+    fork's own `final`, `ws-resolve`) and settles next.
+  - *Park is the last step of settle handling and is skipped when the settle
+    itself re-prompted the child.* `fork.ts`'s anti-bleed nudge prompts a
+    fork that went idle without a report from inside the same settle
+    handling; if `record.running` is true again when park's turn comes, the
+    child is not parked.
+  - *The resume seam is `sendToAgent`'s dormant branch, and every prompt
+    site already reaches it.* The overlay `ForkChannel` delegates to
+    `sendToAgent`; `spawnAgent` prompts a client it just started; the nudge
+    fires synchronously inside the fork's own `agent_settled` listener, ahead
+    of the spawner's async settle body where park is appended, so
+    `record.running` is already true when park's turn comes. The exemptions
+    above are therefore a latency choice, not a correctness requirement.
+    Defense in depth, not the mechanism: `promptAgent` itself keeps its
+    live-client signature; a guard at the resume-capable seam (`sendToAgent`)
+    is what any future direct caller must go through, and a test pins that
+    a parked record prompted via the overlay path and via the nudge path
+    comes back.
+  - *Resume sees the whole transcript.* The park runs after the child's own
+    `agent_settled`, by which point Pi has appended the turn to its session
+    file; the test that pins it is park → resume by alias →
+    `ws-agent-transcript` shows the parked turn's `final`.
 - **Status-line presence keys on the registry, not on live processes.** The
   `N delegated agents still running` line is present whenever the registry
   holds any non-thread-bound member (dormant included) and omitted only when
-  it holds none; N is unchanged. Without this the last `final` of a fan-out
+  it holds none; N is unchanged. A member is thread-bound
+  (`RpcAgentRecord.threadBound`) while an owner discussion thread is open on
+  it — a discussion fork or a fork-raised question the owner is answering —
+  and such a member belongs to the owner's exchange, not to the lead's fan-in. Without this the last `final` of a fan-out
   would park its sender and drop the line instead of reading `0 …`. The
   orphan roll-call therefore ends with the `0 …` line, which is accurate for
   a set that was just re-registered dormant.
-- **The sidecar persists every registry entry.** Dormant entries included,
-  with `alias`, `title`, and the initial `prompt`, so `/reload` and `/resume`
-  keep the full `ws-agent-list` and a revived record still names itself.
+- **The sidecar persists dormant entries too; the thread-bound skip stays.**
+  `captureOrphans` today skips a record when it has no client *or* is
+  thread-bound. Only the first condition is removed: dormant entries are
+  written with `alias`, `title`, and the initial `prompt`, so `/reload` and
+  `/resume` keep the full `ws-agent-list` and a revived record still names
+  itself. The thread-bound skip is deliberate and kept — the owner surface's
+  own `<sessionFile>.ws-threads.json` already persists and rehydrates a
+  thread respondent, and writing it here too would register the same agent
+  twice at `session_start` and put a thread respondent into the roll-call.
 - **The registry is capped; dormant entries are evicted LRU.** Default 256
-  entries (owner-set; 32 was judged too small), tunable through the adapter
-  config. When a spawn would exceed it, the dormant entries with the oldest
+  entries (owner-set; 32 was judged too small), overridable by the
+  environment variable `WS_PI_AGENT_REGISTRY_CAP` read by the lead process
+  at spawn time (the adapter has no config file; its existing knobs are
+  environment-driven, like the spawn role). When a spawn would exceed it, the dormant entries with the oldest
   last activity (last send or last report) are forgotten until the spawn
-  fits; running records are never evicted, and a spawn that cannot fit
-  without evicting a running record fails with an error. The spawn result
+  fits; running and thread-bound records are never evicted, and a spawn
+  that cannot fit without evicting one of those fails with an error. The spawn result
   carries one line naming what was evicted (alias or uuid) — the spawn
   caused it, so the notice belongs there, not in a separate advisory push.
   Eviction only forgets the registry entry; the session file stays on disk.
@@ -88,7 +136,10 @@ channel). Three gaps in how the lead and the owner see and keep children:
   Default rows add `alias`/`title` when set. `include_prompt: true` adds the
   initial prompt so a lead recovering from compaction or `/reload` can
   re-read what each child was asked; off by default because prompts are long
-  and the common call is a liveness check.
+  and the common call is a liveness check. The stored prompt is
+  head-truncated to 4 KB at spawn (a marker line notes the cut), which bounds
+  the record, the sidecar (at most 256 × 4 KB of prompt text) and the
+  `include_prompt` reply alike.
 - **Rejected:** auto-generated aliases or titles (the lead has the intent in
   hand at spawn; a derived name is worse than none); alias uniqueness errors
   on dormant holders (the owner chose overwrite); a live-process cap (parking
@@ -112,7 +163,17 @@ channel). Three gaps in how the lead and the owner see and keep children:
 resolution on every `agent_id` parameter, `ws-agent-list` row shape and
 `include_prompt`, pushed-message head form, automatic park at idle, the
 status-line presence rule, sidecar entry shape and scope, and the registry
-cap with its eviction notice.
+cap with its eviction notice. Anchors whose current prose park contradicts:
+`{#260903-pi-spawner-completion-gating}` ("the child stays alive after
+settling, ready for the next `ws-agent-send`" becomes "the child is parked
+after settling and resumes on the next prompt"),
+`{#260904-pi-report-to-lead-channel}` ("the delegated set only grows across a
+session (an idle child keeps its process …)" is rewritten to the registry
+presence rule), and `{#260903-pi-delegation-spawner-tools}` (the
+`ws-agent-list` status vocabulary running / idle / dormant stays, with a
+note that `idle` is transient). The sibling's unlanded Phase 2 test line
+"children idle … → normal re-fire" describes a state that becomes transient;
+N is unchanged, so that is wording only, adjusted when Phase 2 lands.
 
 ## Phases
 
@@ -123,13 +184,16 @@ cap with its eviction notice.
   running-holder rejection; apply the registry cap before registering and
   append the eviction line to the result.
 - Alias resolution helper used by `ws-agent-send`, `ws-agent-stop`,
-  `ws-agent-transcript`.
-- Automatic park: in the settle handling after `flushPendingFinal` and the
-  advisory judgment, stop the process silently and clear live state; verify
-  `onResume` role re-wiring still fires on the next `ws-agent-send`.
+  `ws-agent-transcript`, `ws-approve`.
+- Automatic park: as the last step of settle handling (after
+  `flushPendingFinal` and the advisory/nudge judgment), when the record is
+  neither `threadBound` nor `running`, stop the process silently and clear
+  live state. The resume seam stays `sendToAgent`'s dormant branch;
+  `onResume` role re-wiring fires there whichever caller reached it.
 - `computeRunningStatusLine`: presence keyed on any non-thread-bound
   registry member.
-- Sidecar: persist every entry with the new fields; `reviveOrphans` restores
+- Sidecar: drop the `!record.client` skip in `captureOrphans` (keep the
+  `threadBound` skip); persist the new fields; `reviveOrphans` restores
   them; old-shape entries still load. The roll-call summary uses alias/title.
 - `ws-agent-list`: `alias`, `title`, `include_prompt`.
 - Naming surfaces: `buildPushContent` head, `src/push-render.ts`,
@@ -140,7 +204,11 @@ cap with its eviction notice.
 - Tests: spawn with/without alias and title; alias overwrite on dormant and
   rejection on running; resolution by alias on send/stop/transcript; park
   after settle with the `final` still delivered and the `0 …` line present;
-  cap eviction order and the result line; sidecar round-trip for old and new
+  no park for a `threadBound` record and for a record the nudge re-prompted;
+  a parked record resumed through the overlay `ForkChannel` and through the
+  nudge path (not only `ws-agent-send`); park → resume → transcript still
+  holds the parked turn; thread-bound records excluded from eviction; prompt
+  head-truncation at 4 KB; cap eviction order and the result line; sidecar round-trip for old and new
   shapes; list rows with and without `include_prompt`; head rendering.
 - Verification: `cd agents-plugin-pi && npm test`; one live run with three
   aliased workers checking the push heads, that `ws-agent-list` shows them

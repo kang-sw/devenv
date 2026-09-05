@@ -534,8 +534,10 @@ consults the RPC registry (through the Phase 1 `session_start`-filled ref,
 since `registerGoalLoop` runs at factory scope) with the Phase 1 fan-in
 predicate: when N > 0
 (some persistent child is mid-turn) it neither re-injects the reminder nor
-advances the runaway streak (record a "yielding to N running agents" status
-via `ctx.ui.setStatus`, cleared on the next lead turn). Cover with tests
+advances the runaway streak (record a "yielding to running agents" status
+via `ctx.ui.setStatus` under its own key, cleared on the next lead turn; the
+footer's agent count belongs to `260905-feat-ws-pi-live-agent-widget`'s
+segment, so this one carries the yield wording only). Cover with tests
 for: running child → no re-fire, no streak change; children idle, dormant,
 stopped or `final`-reported-this-turn → normal re-fire; a `threadBound`
 respondent alone → normal re-fire; a pushed

@@ -9,8 +9,11 @@ The ws Pi adapter (`agents-plugin-pi/`) is a self-contained Pi extension that
 makes the harness-neutral ws-mcp server usable from Pi. It spawns the ws-mcp
 launcher as a child process, speaks MCP JSON-RPC over its stdio, and re-exposes
 every ws-mcp tool as a Pi tool. The dependency is one-directional (adapter →
-ws-mcp); no ws-mcp source is modified for Pi. All Pi-specific policy lives in the
-adapter.
+ws-mcp); ws-mcp carries no Pi-specific logic. Its harness-keyed config surfaces
+(the closed harness enum, `agents.tier`, prompt overrides, rsrc harness
+variants) may treat `pi` as a peer of Codex/Claude — the harness-peer clause in
+`AGENTS.md` (owner, 2026-09-05), which applies to any later host as much as to
+Pi — and all Pi-specific policy lives in the adapter.
 
 This document describes the caller-observable behavior of the adapter. It covers
 the bridge surface, the delegation spawner (persistent RPC worker children with

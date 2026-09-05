@@ -9,7 +9,10 @@ related-mental-model:
 spec:
   - mcp-tools
   - pi-adapter-runtime
-sage-review-design: blocked
+sage-review-design: completed
+sage-review-design-reviewed: 0419eaf97cb3d6e3
+sage-review-completeness: completed
+sage-review-completeness-reviewed: b65918c686bc149b
 ---
 
 # Add `pi` as a first-class harness bucket in ws-mcp and unify the Pi adapter's model table on ws config (config.tune, model aliases, rsrc harness variants)
@@ -100,10 +103,19 @@ ws side can answer the same lookup.
   alias concept (see Open Decisions #1); `ws-execute complex:true` inherits
   the lead's model and consults no table. For Pi the `model` value is the
   `provider/id` string Pi's own model registry accepts and `effort` maps onto
-  the spawner's `modelEffort` with a fixed table: ws `none` → Pi `off`, and
-  `low|medium|high|xhigh` pass through unchanged; Pi's `minimal` and `max`
-  levels are not representable in ws config and are simply not offered
-  through this layer. A caller-supplied `model_effort` spawn parameter keeps
+  the spawner's `modelEffort` with a fixed table: an empty resolved effort
+  (the stored form of "not given" — `normalizeOptionalEffort` collapses both
+  `""` and `none` to `""`, so a stored tier never carries `none`) passes no
+  `modelEffort` and leaves the child's default, and `low|medium|high|xhigh`
+  pass through unchanged; Pi's `off`, `minimal` and `max` levels are not
+  representable in ws config and are simply not offered through this layer.
+  `playbook.render`'s `recommended-model` line is left as-is on Pi: for an
+  unset `pi` tier it still prints the `default` bucket's id, which the Phase 4
+  guide tells the lead to ignore in favour of the tier name (the adapter
+  resolves the tier through the Phase 3 tool and inherits on a non-`pi`
+  answer). Accepted as presentation debt; suppressing the line would need a
+  harness-aware rule in `withRecommendedRenderBinding` that also changes
+  what undetected hosts see. A caller-supplied `model_effort` spawn parameter keeps
   winning over the config-resolved effort (explicit per-call beats table
   default), matching how `model_name` already overrides. Rejected: keeping `model-catalog.json` and
   syncing it from ws config (two writers, drift), and deriving ws config from
@@ -188,7 +200,7 @@ mode on an existing config read tool — decide at implementation and record
 the choice) that returns the resolved `{backend, model, effort}` for a fixed
 tier under the session's detected harness, applying the same fallback chain
 and normalization `playbook.render` uses, and reporting which bucket answered
-(pending Open Decisions #2). Register it in the config registry with the
+(Open Decisions #2, settled). Register it in the config registry with the
 no-agent/harness applicability the other config tools carry, document it in
 `mcp-tools.md`, and cover it with Go tests for: each tier under `pi`,
 fallback to `default` with the answering bucket reported, and an unknown
@@ -278,8 +290,16 @@ recorded for the owner to accept or overrule:
    independent of the global `workflow.prefer_mercenary` knob, so Codex and
    Claude sessions are unaffected). Playbook blocks tagged mercenary-only
    already render under the same knob; the Pi guide names no mercenary
-   route. Mercenary-from-Pi is therefore unreachable by construction, not
-   rejected at runtime. The adapter half lands in Phase 1.
+   route. Mercenary-from-Pi is therefore unreachable from a Pi process,
+   not rejected at runtime. The parent epic classes a `tools/list` filter as
+   a harness-owned soft guard (containment proper belongs in the keyed
+   `tools/call` handler); this ticket knowingly trades against that for a
+   deprecated surface — the residual path (`mercenary.register(backend:
+   "pi")` issued from a non-Pi session) stays as loud and as unsupported as
+   any other misuse of a deprecated tool, and the prose that
+   `workflow.prefer_mercenary: on` renders for a Pi lead describes tools it
+   cannot see, which the Pi guide's "no mercenary route" line already
+   overrides. The adapter half lands in Phase 1.
 4. **Golden-rule exception and spec territory.** Phases 2–3 are ws-mcp Go
    changes motivated solely by Pi; branch sequencing does not answer whether
    that is an exception to "ws-mcp Go is never modified for Pi". The live spec
@@ -298,11 +318,23 @@ recorded for the owner to accept or overrule:
    that needs to be a peer of Codex/Claude in the harness-keyed surfaces. The
    clause is recorded in `AGENTS.md` (Project Knowledge, Pi direction) and
    the `pi-adapter-runtime` anchor amendment lands with Phase 4. `spec:` and
-   `## Spec Impact` added.
+   `## Spec Impact` added. Design re-review found three live statements
+   still contradicting Phases 2–3 (the AGENTS.md bullet's "Go source
+   untouched" parenthetical, the `pi-adapter-runtime` preamble's "no ws-mcp
+   source is modified for Pi", and the research anchor's "Go source
+   untouched"); all three were reworded to "no Pi-specific logic in its Go
+   source" plus a pointer to the clause in the same commit that stamps this
+   review, so no phase carries them. Only the
+   `{#260903-pi-model-catalog-config-file}` sentence remains scheduled
+   (Phase 4).
 
-## Blocked (2026-09-05)
+## Blocked (2026-09-05) — resolved, kept as history
 
-### Design Reviewer — block
+Superseded the same day: every `missing` row below was settled under
+`## Open Decisions`, and the design re-review returned `concern` with all
+issues autonomous. The table is the original round-1 record.
+
+### Design Reviewer — block (round 1)
 
 | # | Title | Severity | Resolution |
 |---|-------|----------|------------|
