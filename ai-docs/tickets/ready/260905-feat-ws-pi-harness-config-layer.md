@@ -444,6 +444,15 @@ Forward: `agents-plugin-pi/rsrc/` has drifted from `agents-plugin/rsrc/`
 hand-sync declaration; only `runtime.json` is now guarded by a test.
 Captured as `260906-bug-ws-pi-rsrc-mirror-drift`.
 
+## Blocked (2026-09-06) — owner sign-off pending, not a work item
+
+All four phases carry a Result; no autonomous work remains. Closing waits
+on the owner-run live checks listed in Phases 1, 2 and 4 (each spawn kind
+against a ws-mcp whose version string matches the adapter pin, see the
+Phase 4 Result caveat) and on the AGENTS.md owner-clause wording question
+raised in the Decisions section. Once those are done, close the ticket to
+`.done/`.
+
 ## Non-goals
 
 - Authoring any `.pi.md` playbook overlays. This ticket makes them selectable;
