@@ -33,6 +33,7 @@
     "note.query": ">=0.45.2-dev <0.46.0",
     "config.list": ">=0.45.2-dev <0.46.0",
     "config.tune": ">=0.45.2-dev <0.46.0",
+    "config.resolve_agent": ">=0.45.2-dev <0.46.0",
     "project_tree": ">=0.45.2-dev <0.46.0",
     "infra.read": ">=0.45.2-dev <0.46.0",
     "convention.read": ">=0.45.2-dev <0.46.0",

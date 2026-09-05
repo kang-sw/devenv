@@ -1390,6 +1390,202 @@ func TestServeStdioConfigAgentsTierUsesDetectedPiHarness(t *testing.T) {
 	}
 }
 
+// resolveAgentTierResponse mirrors the config.resolve_agent JSON payload
+// (resolveAgentTierResult) for test-side decoding.
+type resolveAgentTierResponse struct {
+	Backend      string `json:"backend"`
+	Model        string `json:"model"`
+	Effort       string `json:"effort"`
+	ResolvedFrom string `json:"resolved_from"`
+}
+
+// TestServeStdioConfigResolveAgentUsesDetectedPiHarness covers the ticket's
+// "each tier under pi with a set value" case: for every fixed tier, seed a
+// "pi" bucket via config.tune under a detected "pi" harness session, then
+// call config.resolve_agent with no explicit harness and assert it reports
+// resolved_from == "pi" and the exact backend/model/effort that was set
+// (260905 Phase 3). Mirrors
+// TestServeStdioConfigAgentsTierUsesDetectedPiHarness and, like it, skips
+// mercenary.register (Open Decision #3: mercenary untouched/unreachable from
+// Pi in this phase).
+func TestServeStdioConfigResolveAgentUsesDetectedPiHarness(t *testing.T) {
+	for _, tier := range []string{"small", "medium", "large", "xlarge"} {
+		t.Run(tier, func(t *testing.T) {
+			useLeadProfile(t)
+			root := initTicketRepo(t, "260905-feat-ws-pi-harness-config-layer")
+			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+			server := NewServer(root, "test")
+			var out bytes.Buffer
+			initializeInput := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"ws-pi-bridge","version":"test"}}}`
+			if err := server.ServeStdio(context.Background(), strings.NewReader(initializeInput), &out); err != nil {
+				t.Fatalf("ServeStdio initialize returned error: %v", err)
+			}
+
+			out.Reset()
+			model := "pi-model-" + tier
+			configInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.tune","arguments":{"key":"agents.tier","value":{"tier":%q,"backend":"pi","model":%q,"effort":"high"}}}}`, tier, model)
+			if err := server.ServeStdio(context.Background(), strings.NewReader(configInput), &out); err != nil {
+				t.Fatalf("ServeStdio config.tune returned error: %v", err)
+			}
+
+			out.Reset()
+			resolveInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"config.resolve_agent","arguments":{"tier":%q,"format":"json"}}}`, tier)
+			if err := server.ServeStdio(context.Background(), strings.NewReader(resolveInput), &out); err != nil {
+				t.Fatalf("ServeStdio config.resolve_agent returned error: %v", err)
+			}
+			byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+			if toolIsError(t, byID["3"]) {
+				t.Fatalf("config.resolve_agent returned an error: %s", byID["3"])
+			}
+			var result resolveAgentTierResponse
+			if err := json.Unmarshal([]byte(toolText(t, byID["3"])), &result); err != nil {
+				t.Fatalf("decode config.resolve_agent response: %v", err)
+			}
+			if result.Backend != "pi" || result.Model != model || result.Effort != "high" {
+				t.Fatalf("result = %#v, want backend=pi model=%s effort=high", result, model)
+			}
+			if result.ResolvedFrom != "pi" {
+				t.Fatalf("resolved_from = %q, want %q", result.ResolvedFrom, "pi")
+			}
+		})
+	}
+}
+
+// TestServeStdioConfigResolveAgentFallsBackToDefault covers the ticket's
+// "fallback to default with the answering bucket reported" case: under a
+// detected "pi" harness session with nothing set for the "pi" bucket,
+// config.resolve_agent must resolve at the seeded "default" bucket
+// (applyDefaultModelAliases always seeds "default"/"codex", never "pi") and
+// report resolved_from == "default".
+func TestServeStdioConfigResolveAgentFallsBackToDefault(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260905-feat-ws-pi-harness-config-layer")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	var out bytes.Buffer
+	initializeInput := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"ws-pi-bridge","version":"test"}}}`
+	if err := server.ServeStdio(context.Background(), strings.NewReader(initializeInput), &out); err != nil {
+		t.Fatalf("ServeStdio initialize returned error: %v", err)
+	}
+
+	out.Reset()
+	resolveInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.resolve_agent","arguments":{"tier":"medium","format":"json"}}}`
+	if err := server.ServeStdio(context.Background(), strings.NewReader(resolveInput), &out); err != nil {
+		t.Fatalf("ServeStdio config.resolve_agent returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	var result resolveAgentTierResponse
+	if err := json.Unmarshal([]byte(toolText(t, byID["2"])), &result); err != nil {
+		t.Fatalf("decode config.resolve_agent response: %v", err)
+	}
+	if result.Backend != "codex" || result.Model != "gpt-5.6-terra" || result.Effort != "high" {
+		t.Fatalf("result = %#v, want the seeded default medium tier", result)
+	}
+	if result.ResolvedFrom != "default" {
+		t.Fatalf("resolved_from = %q, want %q", result.ResolvedFrom, "default")
+	}
+}
+
+// TestServeStdioConfigResolveAgentNoDetectedHarnessFallsBackToDefault covers
+// the "no detected harness" case: without an initialize call establishing a
+// harness, config.resolve_agent defaults its harness argument to
+// s.currentHarness() (empty), which resolveAliasMapping/aliasResolutionKeys
+// degrade to the same "default" bucket.
+func TestServeStdioConfigResolveAgentNoDetectedHarnessFallsBackToDefault(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260905-feat-ws-pi-harness-config-layer")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	var out bytes.Buffer
+	resolveInput := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.resolve_agent","arguments":{"tier":"medium","format":"json"}}}`
+	if err := server.ServeStdio(context.Background(), strings.NewReader(resolveInput), &out); err != nil {
+		t.Fatalf("ServeStdio config.resolve_agent returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	var result resolveAgentTierResponse
+	if err := json.Unmarshal([]byte(toolText(t, byID["1"])), &result); err != nil {
+		t.Fatalf("decode config.resolve_agent response: %v", err)
+	}
+	if result.Backend != "codex" || result.Model != "gpt-5.6-terra" || result.Effort != "high" {
+		t.Fatalf("result = %#v, want the seeded default medium tier", result)
+	}
+	if result.ResolvedFrom != "default" {
+		t.Fatalf("resolved_from = %q, want %q", result.ResolvedFrom, "default")
+	}
+}
+
+// TestServeStdioConfigResolveAgentExplicitHarnessOverridesDetected proves an
+// explicit harness argument to config.resolve_agent overrides the detected
+// session harness: the session detects "codex", but a "pi" bucket is seeded
+// and the caller passes harness:"pi" explicitly, so the answer must come
+// from the pi bucket, not the detected codex one.
+func TestServeStdioConfigResolveAgentExplicitHarnessOverridesDetected(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260905-feat-ws-pi-harness-config-layer")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	var out bytes.Buffer
+	initializeInput := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-cli","version":"test"}}}`
+	if err := server.ServeStdio(context.Background(), strings.NewReader(initializeInput), &out); err != nil {
+		t.Fatalf("ServeStdio initialize returned error: %v", err)
+	}
+
+	out.Reset()
+	seedCodexInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.tune","arguments":{"key":"agents.tier","value":{"tier":"medium","backend":"codex","model":"codex-medium-model"}}}}`
+	if err := server.ServeStdio(context.Background(), strings.NewReader(seedCodexInput), &out); err != nil {
+		t.Fatalf("ServeStdio config.tune (codex) returned error: %v", err)
+	}
+
+	out.Reset()
+	seedPiInput := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"config.tune","arguments":{"key":"agents.tier","harness":"pi","value":{"tier":"medium","backend":"pi","model":"pi-medium-model"}}}}`
+	if err := server.ServeStdio(context.Background(), strings.NewReader(seedPiInput), &out); err != nil {
+		t.Fatalf("ServeStdio config.tune (pi) returned error: %v", err)
+	}
+
+	out.Reset()
+	resolveInput := `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"config.resolve_agent","arguments":{"tier":"medium","harness":"pi","format":"json"}}}`
+	if err := server.ServeStdio(context.Background(), strings.NewReader(resolveInput), &out); err != nil {
+		t.Fatalf("ServeStdio config.resolve_agent returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	var result resolveAgentTierResponse
+	if err := json.Unmarshal([]byte(toolText(t, byID["4"])), &result); err != nil {
+		t.Fatalf("decode config.resolve_agent response: %v", err)
+	}
+	if result.Backend != "pi" || result.Model != "pi-medium-model" {
+		t.Fatalf("explicit harness argument did not override detected codex harness: %#v", result)
+	}
+	if result.ResolvedFrom != "pi" {
+		t.Fatalf("resolved_from = %q, want %q", result.ResolvedFrom, "pi")
+	}
+}
+
+// TestServeStdioConfigResolveAgentRejectsUnknownTier covers the ticket's
+// "unknown tier rejected" case at the MCP dispatch layer.
+func TestServeStdioConfigResolveAgentRejectsUnknownTier(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260905-feat-ws-pi-harness-config-layer")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	var out bytes.Buffer
+	resolveInput := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.resolve_agent","arguments":{"tier":"bogus"}}}`
+	if err := server.ServeStdio(context.Background(), strings.NewReader(resolveInput), &out); err != nil {
+		t.Fatalf("ServeStdio config.resolve_agent returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if !toolIsError(t, byID["1"]) {
+		t.Fatalf("expected config.resolve_agent to error on unknown tier: %s", byID["1"])
+	}
+	if !strings.Contains(toolText(t, byID["1"]), "tier must be small, medium, large, or xlarge") {
+		t.Fatalf("error text missing valid tier set: %s", byID["1"])
+	}
+}
+
 // TestServeStdioConfigAgentsTierAcceptsHarnessCaseInsensitively is a
 // review-relay regression test: before this diff, agents.tier's harness
 // selector had no Enum, so an arbitrary-case value reached
@@ -1543,7 +1739,7 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 			t.Fatalf("tools/list exposed hidden no-agent tool %s: %s", hidden, list)
 		}
 	}
-	for _, visible := range []string{"api.list", "config.list", "config.tune", "tickets.query", "playbook.read", "playbook.render"} {
+	for _, visible := range []string{"api.list", "config.list", "config.tune", "config.resolve_agent", "tickets.query", "playbook.read", "playbook.render"} {
 		if !strings.Contains(list, visible) {
 			t.Fatalf("tools/list missing no-agent visible tool %s: %s", visible, list)
 		}
