@@ -24,6 +24,7 @@ import {
   maybeAppendModelCatalogAdvisory,
   MODEL_CATALOG_ADVISORY,
   computePiAliasTableUnset,
+  computeRawDispatchPiAliasTableUnset,
   cutStaticBody,
   prependWorkflowStateLine,
   shouldMapWorkflowManual,
@@ -436,34 +437,50 @@ describe("computePiAliasTableUnset", () => {
   }
 
   test("a genuine pi hit on any tier -> false", async () => {
-    const result = await computePiAliasTableUnset(async (_name, args) =>
-      args.tier === "medium" ? textResult(JSON.stringify({ resolved_from: "pi", model: "openrouter/big" })) : textResult(JSON.stringify({ resolved_from: "default" })),
-    );
+    const result = await computePiAliasTableUnset(async (name, args) => {
+      assert.equal(name, "config.resolve_agent");
+      return args.tier === "medium"
+        ? textResult(JSON.stringify({ resolved_from: "pi", model: "openrouter/big" }))
+        : textResult(JSON.stringify({ resolved_from: "default" }));
+    });
     assert.equal(result, false);
   });
 
   test("no tier resolves to pi -> true", async () => {
-    const result = await computePiAliasTableUnset(async () => textResult(JSON.stringify({ resolved_from: "default", model: "gpt-5.6-terra" })));
+    const result = await computePiAliasTableUnset(async (name) => {
+      assert.equal(name, "config.resolve_agent");
+      return textResult(JSON.stringify({ resolved_from: "default", model: "gpt-5.6-terra" }));
+    });
     assert.equal(result, true);
   });
 
   test("a pi-labeled but slash-less (codex-shaped) model does not count as a hit (Forward (a) guard)", async () => {
-    const result = await computePiAliasTableUnset(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "gpt-5.6-terra" })));
+    const result = await computePiAliasTableUnset(async (name) => {
+      assert.equal(name, "config.resolve_agent");
+      return textResult(JSON.stringify({ resolved_from: "pi", model: "gpt-5.6-terra" }));
+    });
     assert.equal(result, true);
   });
 
   test("an isError result on a tier is treated as a miss, not a crash", async () => {
-    const result = await computePiAliasTableUnset(async () => ({ content: [{ type: "text", text: "boom" }], isError: true }));
+    const result = await computePiAliasTableUnset(async (name) => {
+      assert.equal(name, "config.resolve_agent");
+      return { content: [{ type: "text", text: "boom" }], isError: true };
+    });
     assert.equal(result, true);
   });
 
   test("unparsable text on a tier is treated as a miss, not a crash", async () => {
-    const result = await computePiAliasTableUnset(async () => textResult("not json"));
+    const result = await computePiAliasTableUnset(async (name) => {
+      assert.equal(name, "config.resolve_agent");
+      return textResult("not json");
+    });
     assert.equal(result, true);
   });
 
   test("a thrown call is treated as a miss, not a crash (never-hard-fail)", async () => {
-    const result = await computePiAliasTableUnset(async () => {
+    const result = await computePiAliasTableUnset(async (name) => {
+      assert.equal(name, "config.resolve_agent");
       throw new Error("stdio pipe broke");
     });
     assert.equal(result, true);
@@ -471,12 +488,39 @@ describe("computePiAliasTableUnset", () => {
 
   test("queries all four fixed tiers with format:json", async () => {
     const seenTiers: unknown[] = [];
-    await computePiAliasTableUnset(async (_name, args) => {
+    await computePiAliasTableUnset(async (name, args) => {
+      assert.equal(name, "config.resolve_agent");
       seenTiers.push(args.tier);
       assert.equal(args.format, "json");
       return textResult(JSON.stringify({ resolved_from: "default" }));
     });
     assert.deepEqual(seenTiers, ["small", "medium", "large", "xlarge"]);
+  });
+});
+
+describe("computeRawDispatchPiAliasTableUnset (review relay #1, Important/test: the raw-dispatch advisory gate)", () => {
+  function textResult(text: string): McpToolCallResult {
+    return { content: [{ type: "text", text }] };
+  }
+
+  test("a non-workflow_manual rawName never calls callTool at all (no config.resolve_agent round-trip)", async () => {
+    let called = false;
+    const result = await computeRawDispatchPiAliasTableUnset("playbook.render", async () => {
+      called = true;
+      return textResult("{}");
+    });
+    assert.equal(result, false, "the gate itself must resolve to false without ever invoking callTool");
+    assert.equal(called, false, "callTool must never be invoked for a rawName other than workflow_manual");
+  });
+
+  test("workflow_manual delegates to computePiAliasTableUnset (config.resolve_agent IS called)", async () => {
+    let sawResolveAgentCall = false;
+    const result = await computeRawDispatchPiAliasTableUnset("workflow_manual", async (name) => {
+      if (name === "config.resolve_agent") sawResolveAgentCall = true;
+      return textResult(JSON.stringify({ resolved_from: "default" }));
+    });
+    assert.equal(sawResolveAgentCall, true, "workflow_manual must trigger the config.resolve_agent round-trips");
+    assert.equal(result, true, "no tier resolved to a genuine pi hit, so the advisory-trigger value is true");
   });
 });
 

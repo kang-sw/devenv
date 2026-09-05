@@ -300,9 +300,9 @@ export function serializeThreadRegistry(records: readonly ThreadRecord[]): strin
 /**
  * Tolerant parse: anything that is not a well-formed `{threads:[...]}`
  * document degrades to `[]` rather than throwing — same never-throw contract
- * `readGoalLoopConfig`/`readModelCatalog` already use for adapter-owned data
- * files. Individual entries missing a `threadId`/`status` are dropped rather
- * than poisoning the whole registry.
+ * `readGoalLoopConfig` already uses for adapter-owned data files. Individual
+ * entries missing a `threadId`/`status` are dropped rather than poisoning
+ * the whole registry.
  */
 export function parseThreadRegistry(raw: string): ThreadRecord[] {
   let parsed: unknown;

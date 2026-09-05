@@ -75,6 +75,9 @@
 
 import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   resolveTools,
   isTerminalStopReason,
@@ -83,6 +86,7 @@ import {
   TOOL_GROUPS,
   handleAgentEvent,
   resolveModelForAliasViaWsMcp,
+  effectiveModelEffort,
   applyRpcEvent,
   attachEventListener,
   buildPushContent,
@@ -524,6 +528,59 @@ describe("resolveModelForAliasViaWsMcp", () => {
     const resolved = await resolveModelForAliasViaWsMcp(client, "reviewer", "inherited/model");
     assert.equal(resolved.model, "openrouter/reviewer-model");
     assert.equal(resolved.effort, undefined);
+  });
+});
+
+describe("effectiveModelEffort (review relay #1, Critical: the modelEffort merge rule)", () => {
+  test("an explicit, non-empty caller effort wins over a resolved one", () => {
+    assert.equal(effectiveModelEffort("high", "low"), "high");
+  });
+
+  test("no caller effort falls back to the resolved effort", () => {
+    assert.equal(effectiveModelEffort(undefined, "low"), "low");
+  });
+
+  test("an empty-string caller effort is treated as absent, not an explicit win (fixes the `??` vs `||` Minor)", () => {
+    assert.equal(effectiveModelEffort("", "low"), "low");
+  });
+
+  test("neither side set -> undefined", () => {
+    assert.equal(effectiveModelEffort(undefined, undefined), undefined);
+  });
+
+  test("caller set, nothing resolved -> the caller value", () => {
+    assert.equal(effectiveModelEffort("medium", undefined), "medium");
+  });
+});
+
+/**
+ * Review relay #1 (Critical): `spawnAgent` itself is live-gate only (it
+ * constructs a real `RpcClient` and calls `.start()` — see this file's
+ * header comment), so the actual spawn-time `applyModelEffort` call cannot
+ * be driven through a unit test. This is a source-level regression guard for
+ * the specific bug the review caught: the spawn-time apply
+ * (`spawner.ts`, inside `spawnAgent`) previously read `params.modelEffort`
+ * directly instead of the already-folded `record.modelEffort`, so a
+ * config-resolved tier effort was computed and stored but never actually
+ * applied to a freshly spawned child (only the dormant-resume path in
+ * `sendToAgent` read `record.modelEffort` correctly). Both call sites must
+ * read the same field so there is exactly one value in play, matching
+ * `effectiveModelEffort`'s single fold point tested above.
+ */
+describe("spawnAgent / sendToAgent applyModelEffort call sites (source-level regression guard)", () => {
+  const spawnerSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "spawner.ts"), "utf8");
+
+  test("neither call site reads params.modelEffort directly any more", () => {
+    assert.equal(
+      spawnerSource.includes("applyModelEffort(client, params.modelEffort)"),
+      false,
+      "applyModelEffort must be called with record.modelEffort — the single already-folded value — not the raw caller param",
+    );
+  });
+
+  test("both the spawn-time and dormant-resume call sites apply the folded record.modelEffort", () => {
+    const matches = spawnerSource.match(/applyModelEffort\(client, record\.modelEffort\)/g) ?? [];
+    assert.equal(matches.length, 2, "expected exactly two call sites (spawnAgent's first-spawn path and sendToAgent's dormant-resume path)");
   });
 });
 

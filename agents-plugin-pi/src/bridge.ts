@@ -29,6 +29,10 @@ import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding
 import { spawnWsMcpClient, type McpStdioClient, type McpContentItem, type McpToolCallResult } from "./mcp-stdio-client.ts";
 import { assertVersionPin, readRuntimeContract } from "./version-check.ts";
 import { WS_PI_PARENT_SESSION_KEY_ENV, isLeadOrFork, readSpawnRole, type SpawnRole } from "./process-role.ts";
+// Value import from spawner.ts is safe: spawner.ts only imports `type
+// BridgeHandle` from this file (type-only, erased at build/runtime), so no
+// runtime circular import is created in either direction.
+import { resolveModelForAliasViaWsMcp } from "./spawner.ts";
 
 export interface BridgeOptions {
   launcherPath: string;
@@ -108,42 +112,53 @@ export const MODEL_CATALOG_ADVISORY =
   "curate too. Changes apply immediately — no restart needed.";
 
 /**
- * The four fixed tiers `config.resolve_agent` understands — shared by
- * `computePiAliasTableUnset` here and `resolveModelForAliasViaWsMcp`
- * (spawner.ts), which applies the identical guard for a single tier lookup.
+ * The four fixed tiers `config.resolve_agent` understands — used by
+ * `computePiAliasTableUnset` below.
  */
 const PI_TIERS = ["small", "medium", "large", "xlarge"] as const;
 
 /**
  * `true` only when NONE of the four fixed tiers resolves to a GENUINE
  * `pi`-labeled `config.resolve_agent` hit — the trigger condition for
- * `MODEL_CATALOG_ADVISORY`. Applies the same `resolved_from === "pi" &&
- * model.includes("/")` guard spawner.ts's `resolveModelForAliasViaWsMcp`
- * uses for a single tier (Phase 3 Forward (a): a codex-seeded default can
- * answer under the `pi` label with no `/`, so `resolved_from === "pi"` alone
- * is not proof of a real Pi model string). NEVER HARD-FAILS: an `isError`
- * result, missing/unparsable text, or a thrown call are all treated as "not
- * a hit" for that tier and the loop continues — never surfaced as an error.
- * Four local stdio round-trips per `workflow_manual` call (only) is
- * acceptable — mirrors the advisory's existing per-call, no-caching
- * contract.
+ * `MODEL_CATALOG_ADVISORY`. Reuses `resolveModelForAliasViaWsMcp`
+ * (spawner.ts) per tier — with no `inheritModel` — rather than
+ * reimplementing its "genuine hit" guard (`resolved_from === "pi" &&
+ * model.includes("/")`, Phase 3 Forward (a)): that resolver already returns
+ * exactly the needed signal per tier — a genuine hit sets `model` to the
+ * resolved string, a miss/failure returns `{model: undefined}` since no
+ * inherit model was given — so a single shared implementation of the guard
+ * exists instead of two independently-maintained copies. NEVER HARD-FAILS:
+ * `resolveModelForAliasViaWsMcp` itself swallows every failure shape
+ * (`isError`, missing/unparsable text, thrown call) as "not a hit" for that
+ * tier, so this loop never needs its own try/catch. Four local stdio
+ * round-trips per `workflow_manual` call (only) is acceptable — mirrors the
+ * advisory's existing per-call, no-caching contract.
  */
 export async function computePiAliasTableUnset(callTool: WorkflowManualMappingDeps["callTool"]): Promise<boolean> {
   for (const tier of PI_TIERS) {
-    try {
-      const result = await callTool("config.resolve_agent", { tier, format: "json" });
-      if (result.isError) continue;
-      const text = firstText(result);
-      if (!text) continue;
-      const parsed = JSON.parse(text) as { model?: string; resolved_from?: string };
-      if (parsed.resolved_from === "pi" && parsed.model?.includes("/")) {
-        return false;
-      }
-    } catch {
-      // Never hard-fail this advisory computation — skip to the next tier.
+    const { model } = await resolveModelForAliasViaWsMcp({ callTool }, tier, undefined);
+    if (model !== undefined) {
+      return false;
     }
   }
   return true;
+}
+
+/**
+ * The raw-dispatch advisory gate: only a `workflow_manual` call pays for the
+ * extra `config.resolve_agent` round-trips `computePiAliasTableUnset` needs
+ * — every other bridged tool call skips it entirely (`callTool` is never
+ * invoked, `piAliasTableUnset` is simply `false`). Extracted out of
+ * `startBridge`'s raw-dispatch closure as its own function specifically so
+ * the gate is directly unit-testable: `startBridge` itself spawns a real
+ * ws-mcp subprocess and cannot be exercised in a unit test (review relay #1,
+ * Important/test).
+ */
+export async function computeRawDispatchPiAliasTableUnset(
+  rawName: string,
+  callTool: WorkflowManualMappingDeps["callTool"],
+): Promise<boolean> {
+  return rawName === "workflow_manual" ? await computePiAliasTableUnset(callTool) : false;
 }
 
 /**
@@ -518,9 +533,9 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
           }
           // The extra config.resolve_agent round-trips this needs are gated
           // on rawName === "workflow_manual" first, so no other bridged tool
-          // call pays for an unrelated MCP round-trip.
-          const piAliasTableUnset =
-            rawName === "workflow_manual" ? await computePiAliasTableUnset((name, callArgs) => client.callTool(name, callArgs)) : false;
+          // call pays for an unrelated MCP round-trip — see
+          // computeRawDispatchPiAliasTableUnset's doc comment.
+          const piAliasTableUnset = await computeRawDispatchPiAliasTableUnset(rawName, (name, callArgs) => client.callTool(name, callArgs));
           const content = maybeAppendModelCatalogAdvisory(rawName, result.content, piAliasTableUnset);
           return { content, details: result };
         },

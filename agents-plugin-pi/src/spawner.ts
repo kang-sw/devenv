@@ -360,10 +360,27 @@ export class AgentEventLineBuffer {
  * caller passes no `modelEffort` at all rather than an empty one).
  *
  * Used by both the RPC-backed `spawnAgent`'s `model_name` and `explore`'s
- * fixed `"small"` lookup.
+ * fixed `"small"` lookup, and per-tier by `bridge.ts`'s
+ * `computePiAliasTableUnset` (the sole "genuine `pi` hit" predicate — see
+ * that function's doc comment for why it reuses this resolver instead of
+ * reimplementing the guard).
  */
+/**
+ * Minimal `callTool`-shaped interface `resolveModelForAliasViaWsMcp` needs —
+ * a real `McpStdioClient` satisfies this structurally, but so does
+ * `bridge.ts`'s own duck-typed `callTool` closure (`WorkflowManualMappingDeps["callTool"]`),
+ * letting `computePiAliasTableUnset` call this resolver without a circular
+ * import (`spawner.ts` already imports `type BridgeHandle` from
+ * `bridge.ts` — a type-only import that is erased at build/runtime, so a
+ * VALUE import in the other direction, `bridge.ts` importing this function
+ * from `spawner.ts`, does not create a runtime cycle).
+ */
+export interface ResolveAgentCallToolClient {
+  callTool: (name: string, args: Record<string, unknown>) => Promise<McpToolCallResult>;
+}
+
 export async function resolveModelForAliasViaWsMcp(
-  client: McpStdioClient,
+  client: ResolveAgentCallToolClient,
   alias: string | undefined,
   inheritModel: string | undefined,
 ): Promise<{ model?: string; effort?: string }> {
@@ -386,6 +403,24 @@ export async function resolveModelForAliasViaWsMcp(
   } catch {
     return { model: inheritModel };
   }
+}
+
+/**
+ * Pure merge rule for `spawnAgent`'s `modelEffort`: an explicit caller
+ * `model_effort` always wins over the config-resolved `effort`, but only
+ * when it is actually non-empty — `model_effort` is a free-form `string`
+ * param with no enum (`SpawnAgentParams.modelEffort`), so a caller-supplied
+ * `""` is reachable and must NOT shadow a genuine tier effort (`??` would
+ * only guard `null`/`undefined`, not `""`; `applyModelEffort`'s own guard
+ * (`if (!modelEffort) return`) already treats `""` as absent, so this
+ * matches that convention). The single call site
+ * (`record.modelEffort = effectiveModelEffort(...)`) is the one place this
+ * rule is computed — both the spawn-time and dormant-resume `applyModelEffort`
+ * calls read the already-folded `record.modelEffort` back, never re-deriving
+ * it from `params`.
+ */
+export function effectiveModelEffort(callerEffort: string | undefined, resolvedEffort: string | undefined): string | undefined {
+  return callerEffort || resolvedEffort;
 }
 
 /**
@@ -2101,9 +2136,11 @@ export function runSpawnGuards(
  * `modelBase` resolves `model_name`-first through `config.resolve_agent`
  * (`resolveModelForAliasViaWsMcp`), falling back to `ctx.inheritModel`
  * unchanged when `model_name` is unset or resolves to a non-genuine `pi`
- * answer. A config-resolved `effort` is folded into `record.modelEffort`
- * only when the caller passed no explicit `params.modelEffort` — an explicit
- * caller effort always wins.
+ * answer. A config-resolved `effort` is folded into `record.modelEffort` via
+ * `effectiveModelEffort` — an explicit, non-empty caller `params.modelEffort`
+ * always wins. `record.modelEffort` is then the single value both the
+ * spawn-time and dormant-resume `applyModelEffort` calls apply — neither
+ * re-reads `params.modelEffort` directly.
  *
  * Returns as soon as `client.prompt()` has sent the initial message — that
  * call only awaits transmission, not full-run completion (docs/rpc.md) — so
@@ -2160,8 +2197,12 @@ export async function spawnAgent(
     sessionPath,
     systemPromptPath: params.systemPromptPath,
     modelBase,
-    // Explicit caller effort always wins over the config-resolved one.
-    modelEffort: params.modelEffort ?? resolvedEffort,
+    // Explicit caller effort always wins over the config-resolved one
+    // (effectiveModelEffort's `||` semantics — an empty-string caller value
+    // is treated as absent). This is the single fold point: both the
+    // spawn-time and dormant-resume `applyModelEffort` calls read
+    // `record.modelEffort` back rather than re-deriving it from `params`.
+    modelEffort: effectiveModelEffort(params.modelEffort, resolvedEffort),
     wsToolNames: ctx.wsToolNames,
     toolGroup,
     explicitTools: ctx.explicitTools,
@@ -2197,7 +2238,12 @@ export async function spawnAgent(
       record.sessionPath = forkedSessionFile;
     }
 
-    await applyModelEffort(client, params.modelEffort);
+    // Read the already-folded record value, not params.modelEffort directly
+    // — record.modelEffort is the single source of truth for what effort a
+    // spawned/resumed child should receive (see effectiveModelEffort above
+    // and the dormant-resume call site in sendToAgent, which reads the same
+    // field).
+    await applyModelEffort(client, record.modelEffort);
     attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     await promptAgent(record, client, params.prompt);
   } catch (err) {
