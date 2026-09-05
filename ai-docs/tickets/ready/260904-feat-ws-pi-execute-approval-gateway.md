@@ -404,6 +404,46 @@ resumed by a lead `ws.approve` without a separate injected lead turn; a light
 worker escalating a task that exceeded its tier; an approval request expanded on
 demand. Depends on Phase 1.
 
+#### Re-scope (2026-09-05) — headline achieved by 260905; Phase 2 narrowed
+
+Owner-approved re-scope. The headline deliverable above (replace the
+prompt-injection relay with a harness-native pause/resume so a worker pauses at
+a mutation and resumes on `ws.approve` **without a separate injected lead
+turn**) is **already achieved** by the approval-relay deadlock fix landed under
+`260905-bug-ws-pi-approval-relay-deadlocks-under-agent-wait` (commit
+`10cc4c01`), and live-verified:
+
+- The worker already pauses at the mutation at the tool level — the gated exec
+  blocks on the decision file (`waitForDecisionFile`) — independent of any Pi
+  harness pause capability.
+- A lead parked in `ws-agent-wait` now receives `reason:"approval-pending"`
+  with `pending_approval:{cmd_id,command,rationale}` **as the wait's own return
+  value**, approves via `ws-approve` (writing the decision file = resume), and
+  re-waits to harvest. No injected lead turn is on the critical path.
+
+The Pi in-flight pause/resume capability probe therefore no longer decides the
+headline and is dropped. What remains of Phase 2 is one small refinement:
+
+- **Suppress the redundant approval steer.** `createApprovalRelay`
+  (`execute-gateway.ts`) still injects the approval request via
+  `pi.sendUserMessage(..., {deliverAs:"steer"})` unconditionally, in parallel
+  with the waiter wake. When a waiter was woken (the lead already learned of the
+  request through `ws-agent-wait`), the steer arrives at the next turn boundary
+  as a stale duplicate notice (the observed "steering: queued message"). It is
+  harmless but noisy. Refine so the steer is emitted only when **no** waiter was
+  woken by the request (the lead was not blocked in a wait), preserving the
+  relay as the fallback path for a non-waiting lead. Add unit coverage for both
+  branches (waiter-woken → no steer; no waiter → steer).
+
+Verification (re-scoped): unit tests for both branches; a live run where a lead
+in `ws-agent-wait` handles an approval via the wait return and receives **no**
+trailing stale steer, and a second run where a non-waiting lead still receives
+the steer relay.
+
+The secondary items (mid-task `complex` escalation; on-demand approval-context
+expand) are **dropped from this ticket** — the plan itself rates them low-value
+on their own; re-raise as a separate ticket if a concrete need appears.
+
 ## Blocked (2026-09-05)
 
 Phase 2 is not autonomously advanceable in the current build sandbox. Its
@@ -417,6 +457,18 @@ lower-value on their own and share the same live-verification wall. Unblock when
 a live Pi environment with credentials is available; a human may also choose to
 accept Phase 1's relay as sufficient and drop Phase 2. Phase 1 is complete and
 merged; nothing in Phase 2 blocks the rest of the Pi drain.
+
+### Unblocked (2026-09-05) — re-scoped Phase 2 is advanceable
+
+The live wall is gone: the owner is driving the user-scope-installed adapter in
+live `pi` sessions (`openai-codex` subscription provider), and the approval
+flow has been live-verified end-to-end (approve-before-wait round trip and the
+approval-pending wake under a blocked `ws-agent-wait`). The headline Phase 2
+deliverable was found to be achieved by `260905` (see the Phase 2 Re-scope
+above), so the remaining phase is a small, self-contained refinement (suppress
+the redundant approval steer when a waiter was woken) with no dependency on a
+Pi pause/resume capability probe. The selector should **no longer skip** this
+ticket; dispatch the re-scoped Phase 2.
 
 ## Non-goals
 
