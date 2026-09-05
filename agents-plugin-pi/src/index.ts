@@ -94,6 +94,15 @@
  * callback, and applies `addAskToolsIfLead` as a third role-differentiated
  * active-tools step.
  *
+ * 260905 Phase 1 Edition (push delivery): three factory/session_start hooks
+ * serve the pushed child-report channel. `registerPushFlush` (factory scope)
+ * releases the pushes the spawner held while this session was mid-turn, on
+ * this session's own `agent_settled`; `session_start` fills
+ * `spawner.ts`'s `leadIdleRef` with this session's `ctx.isIdle` (the seam that
+ * decides hold vs send) and, in TUI only, registers the compact
+ * `push-render.ts` renderers for the six families; `session_shutdown` drops
+ * the held queue with the session it belonged to.
+ *
  * HAND-SYNC NOTE: bin/ws-mcp-launcher.py, runtime.json, and rsrc/ in this
  * package are byte-identical copies of the same-named files under
  * agents-plugin/ (same precedent as agents-plugin-wsflow's copies — no
@@ -118,7 +127,16 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { startBridge, type BridgeHandle } from "./bridge.ts";
-import { pushToLead, registerAgentTools, type AgentToolsHandle, type RpcAgentRegistry } from "./spawner.ts";
+import {
+  heldPushQueue,
+  leadIdleRef,
+  pushToLead,
+  registerAgentTools,
+  registerPushFlush,
+  type AgentToolsHandle,
+  type RpcAgentRegistry,
+} from "./spawner.ts";
+import { registerPushMessageRenderers } from "./push-render.ts";
 import { buildOrphanSummary, captureOrphans, readAndClearSidecar, reviveOrphans, writeSidecar } from "./agent-sidecar.ts";
 import { buildDiscussKickoff } from "./discuss.ts";
 import { registerGoalLoop } from "./goal-loop.ts";
@@ -207,8 +225,34 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
 
   registerGoalLoop(pi, { goalLoopConfigPath });
   registerLeadBootstrap(pi, wsBlockRef);
+  // 260905 Edition: releases the child pushes that arrived while this session
+  // was mid-turn, each with a status line computed at release time. Factory
+  // scope (like registerGoalLoop above, never inside session_start) so a
+  // /reload cannot stack duplicate agent_settled handlers.
+  registerPushFlush(pi);
+  // Whether the compact push renderers have been registered in THIS process.
+  // Registration is per-process and idempotent (Pi keys renderers by
+  // customType), but it costs a dynamic import, so a second session_start
+  // does not repeat it.
+  let pushRenderersRegistered = false;
 
   pi.on("session_start", async (_event, ctx) => {
+    // 260905 Edition: hand the spawner this session's idleness accessor (the
+    // same captured-ctx-per-session_start seam wsBlockRef uses), so a
+    // followUp push raised while this session is mid-turn is held until its
+    // turn settles instead of going out with an already-stale status line.
+    leadIdleRef.current = () => ctx.isIdle();
+    // TUI only: replace Pi's default custom-message rendering for the six
+    // push families, whose own content already opens with the family label
+    // the default would print again. No-op (default rendering stands) when
+    // pi-tui cannot be loaded — see push-render.ts.
+    if (!pushRenderersRegistered && ctx.mode === "tui" && isLeadOrFork(readSpawnRole(process.env))) {
+      pushRenderersRegistered = true;
+      void registerPushMessageRenderers(pi).then((registered) => {
+        pushRenderersRegistered = registered;
+      });
+    }
+
     handle = await startBridge(pi, {
       launcherPath,
       pluginDir,
@@ -377,6 +421,13 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     agentTools = undefined;
     rpcRegistryRef.current = undefined;
     leadSessionFile = undefined;
+    // Held pushes die with the session, exactly like the Pi followUp queue
+    // they stand in for: their registry is about to be discarded, so a status
+    // line computed after this point would describe nothing. The sidecar
+    // written above carries child IDENTITIES forward; reports are not
+    // persisted (see spawner.ts's heldPushQueue).
+    heldPushQueue.length = 0;
+    leadIdleRef.current = undefined;
     handle?.shutdown();
     handle = undefined;
   });

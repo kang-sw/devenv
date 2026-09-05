@@ -23,11 +23,19 @@
  * in one of six families — `ws-agent-report`, `ws-agent-settled`,
  * `ws-agent-question`, `ws-agent-approval`, `ws-agent-advisory`,
  * `ws-agent-orphaned` — each carrying `details.agent_id`, its own payload, and
- * a fan-in status line (`computeRunningStatusLine`) telling the lead how many
- * delegated agents are still outstanding. The lead therefore ends its turn
+ * a fan-in status line (`computeRunningStatusLine`) naming how many delegated
+ * agents are still outstanding and which. The lead therefore ends its turn
  * after dispatching work and is woken by the pushes themselves; it never
  * blocks in a wait call, so an approval request can reach it mid-flight
  * instead of queueing behind an unfinished wait turn.
+ *
+ * A `followUp` push raised while the owning session is mid-turn is HELD
+ * (`heldPushQueue`) and released on that turn's `agent_settled`, so its status
+ * line is fresh as of delivery rather than as of arrival; `steer` pushes are
+ * sent immediately, since interrupting is their purpose. Symmetrically, a
+ * child's `kind:"final"` report is held on the CHILD's side of the same
+ * boundary (`pendingFinal`) and pushed when that child's own turn ends, so
+ * "done" is never announced while its author is still working.
  *
  * The spawn tool carries **no tier** parameter (D-A / Shape A): the caller
  * (the lead) passes an already-rendered `system_prompt_path` — this module
@@ -711,6 +719,22 @@ export interface RpcAgentRecord {
    */
   terminalThisTurn?: boolean;
   /**
+   * 260905 (Phase 1 Edition): the text of a `kind:"final"` report this child
+   * filed during the current turn, stashed instead of pushed. A final is the
+   * child's ANSWER, but at the instant the tool call is observed the child is
+   * still mid-turn — it may still be committing, cleaning up, or (rarely)
+   * filing a corrected final. Pushing then handed the lead a completion signal
+   * while its author was still working. So the final is held here and pushed
+   * when the child actually leaves the running state, carrying
+   * `settled_reason` (`idle`/`stopped`/`exited`) to say how.
+   *
+   * Last one wins within a turn (a corrected final supersedes the first), and
+   * `promptAgent` clears it: an un-pushed final from a previous task must not
+   * surface as the answer to a new one. A hook-consumed final (a `lead-ask`
+   * thread's decision) is never stashed at all — it is not the lead's message.
+   */
+  pendingFinal?: string;
+  /**
    * 260905: epoch-ms stamp of the last LEAD-issued prompt on this record
    * (`promptAgent` with `isLeadPrompt` not `false`). An internal nudge
    * (`fork.ts`'s anti-bleed loop) deliberately does NOT move it, so a stale
@@ -866,8 +890,9 @@ export const REPORT_LOG_CAP = 64;
  * 260905: the six push families. Each is a Pi custom-message `customType`
  * delivered by `pushToLead` into whichever session owns the child:
  *
- * - `ws-agent-report` — a `ws-report-to-lead` progress update or a
- *   `kind:"final"` completion report.
+ * - `ws-agent-report` — a `ws-report-to-lead` progress update (pushed at once)
+ *   or a `kind:"final"` completion report (deferred to the end of the child's
+ *   turn and then carrying `settled_reason`; see `flushPendingFinal`).
  * - `ws-agent-settled` — the child stopped producing: `reason` is `"idle"`
  *   (settled with no terminal report this turn, carrying `last_message`),
  *   `"stopped"` (an explicit `ws-agent-stop`), `"exited"` (its process died —
@@ -880,13 +905,16 @@ export const REPORT_LOG_CAP = 64;
  * - `ws-agent-orphaned` — children that outlived their lead session and are
  *   revivable with `ws-agent-send` (shutdown sidecar, `agent-sidecar.ts`).
  */
-export type PushFamily =
-  | "ws-agent-report"
-  | "ws-agent-settled"
-  | "ws-agent-question"
-  | "ws-agent-approval"
-  | "ws-agent-advisory"
-  | "ws-agent-orphaned";
+export const PUSH_FAMILIES = [
+  "ws-agent-report",
+  "ws-agent-settled",
+  "ws-agent-question",
+  "ws-agent-approval",
+  "ws-agent-advisory",
+  "ws-agent-orphaned",
+] as const;
+
+export type PushFamily = (typeof PUSH_FAMILIES)[number];
 
 /** Pi's own `sendMessage` delivery axis (`ExtensionAPI.sendMessage`'s `options.deliverAs`). */
 export type PushDeliverAs = "steer" | "followUp" | "nextTurn";
@@ -923,65 +951,115 @@ export function shouldPushToLead(env: NodeJS.ProcessEnv = process.env): boolean 
  * `0 of 3`" cue could never actually occur in the real event order. A live but
  * idle child is none of dormant/stopped/exited, so it stays in M and only
  * leaves N.
+ *
+ * Two live-run corrections (Phase 1 Edition):
+ * - When N > 0 the line names the outstanding ids (`: a1, a2`). "2 of 3" alone
+ *   told a lead how many were missing but not WHICH, so it could not act on
+ *   the difference (chase one, keep waiting on another) without a
+ *   `ws-agent-list` round-trip.
+ * - When M is 0 there is no line at all (`undefined`), so a push that has
+ *   nothing to do with delegation fan-in — an `ws-agent-orphaned` roll-call at
+ *   session start, a `spawn-failed` for the only child — no longer ends with a
+ *   contentless `0 of 0 delegated agents still running`.
  */
-export function computeRunningStatusLine(registry: RpcAgentRegistry | undefined): string {
+export function computeRunningStatusLine(registry: RpcAgentRegistry | undefined): string | undefined {
   let m = 0;
-  let n = 0;
+  const runningIds: string[] = [];
   for (const record of registry?.values() ?? []) {
     if (record.threadBound || !record.client) continue;
     m += 1;
-    if (record.running && !record.terminalThisTurn) n += 1;
+    if (record.running && !record.terminalThisTurn) runningIds.push(record.agentId);
   }
-  return `${n} of ${m} delegated agent${m === 1 ? "" : "s"} still running`;
+  if (m === 0) return undefined;
+  const head = `${runningIds.length} of ${m} delegated agent${m === 1 ? "" : "s"} still running`;
+  return runningIds.length > 0 ? `${head}: ${runningIds.join(", ")}` : head;
 }
 
 /**
  * Renders a pushed message's human-readable `content`. `details` carries the
  * same fields structurally (that is what a renderer/tool would read); this
  * body is what the lead's model actually sees in its transcript, so it stays
- * plain text with the status line last.
+ * plain text with the status line last. An absent status (nothing delegated,
+ * see `computeRunningStatusLine`) contributes no line at all.
  */
 export function buildPushContent(
   family: PushFamily,
   agentId: string | undefined,
   payload: Record<string, unknown>,
-  status: string,
+  status: string | undefined,
 ): string {
   const head = agentId ? `[${family}] agent ${agentId}` : `[${family}]`;
   const body = Object.entries(payload)
     .filter(([, value]) => value !== undefined && value !== null && value !== "")
     .map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
-  return [head, ...body, status].join("\n");
+  return [head, ...body, ...(status ? [status] : [])].join("\n");
 }
 
 /**
- * Pushes one child signal into the owning session as a Pi custom message.
- * This is the whole replacement for the deleted `ws-agent-wait` harvest: the
- * lead ends its turn and is woken by these instead of blocking.
- *
- * `triggerTurn: true` is what makes an IDLE lead act on the signal at once
- * rather than leaving it queued until the owner's next prompt (the same
- * lesson `ask.ts`'s `injectDiscussionSummary` already encodes). `deliverAs`
- * is per-family: `"steer"` for the two things a lead must act on mid-turn (a
- * blocked approval, a headless question), `"followUp"` for everything else so
- * a streaming lead finishes its current turn first and multiple signals queue
- * in arrival order.
- *
- * Guarded on `shouldPushToLead` and on `pi` being present (a `sendToAgent`
- * resume path may run without one), so a worker-role process and an
- * un-threaded call site are both silent no-ops rather than errors.
+ * The owning session's idleness accessor, filled from the `session_start` ctx
+ * (`ctx.isIdle`) by `index.ts` — the same mutable-ref seam `wsBlockRef` uses
+ * for a value only a live ctx can supply. `pushToLead` reads it to decide
+ * whether a `followUp` push can go out now or must be HELD (see
+ * `heldPushQueue`). Unset (a test, a headless path that never ran
+ * `session_start`, a torn-down session) is deliberately treated as IDLE: the
+ * pre-hold behavior of sending straight through is the safe default, since a
+ * held push that nothing ever flushes would be a lost report.
  */
-export function pushToLead(
-  pi: ExtensionAPI | undefined,
+export const leadIdleRef: { current: (() => boolean) | undefined } = { current: undefined };
+
+/** Whether the owning session's agent is between turns right now. See `leadIdleRef`. */
+function isOwningAgentIdle(): boolean {
+  const isIdle = leadIdleRef.current;
+  if (!isIdle) return true;
+  try {
+    return isIdle() !== false;
+  } catch {
+    return true;
+  }
+}
+
+/** One `followUp` push deferred until the owning session's current turn settles. */
+interface HeldPush {
+  registry: RpcAgentRegistry | undefined;
+  record: RpcAgentRecord | undefined;
+  family: PushFamily;
+  payload: Record<string, unknown>;
+}
+
+/**
+ * Pushes that arrived while the owning session was mid-turn, in arrival order.
+ *
+ * Phase 1 Edition (live-run fix): Pi queues a `followUp` sent mid-turn in its
+ * own `PendingMessageQueue` and delivers it after the turn ends — but there is
+ * no extension hook at that delivery (`before_agent_start` fires only for
+ * owner-typed prompts; see `agent-session.ts`'s `prompt()` vs
+ * `sendCustomMessage`), so a message built at ARRIVAL time carried a status
+ * line already stale by the time the lead read it. A worker that finished
+ * while the lead was still spawning its siblings said `0 of 1`, the next said
+ * `0 of 2`, and only the last said `0 of 3` — three separate invitations to
+ * synthesize early. Holding the push here and building the message at FLUSH
+ * time is the fix: the status line is then computed against the registry as it
+ * stands when the lead actually reads it.
+ *
+ * Exported for the flush handler and for test isolation only; nothing else may
+ * write it. Held pushes are in-memory and die with the process, exactly like
+ * the Pi queue they stand in for — `session_shutdown` drops them rather than
+ * persisting them (the sidecar carries child IDENTITIES, never reports).
+ */
+export const heldPushQueue: HeldPush[] = [];
+
+/** Builds and sends one push immediately, computing its status line right now. */
+function sendPush(
+  pi: ExtensionAPI,
   registry: RpcAgentRegistry | undefined,
   record: RpcAgentRecord | undefined,
   family: PushFamily,
   payload: Record<string, unknown>,
   deliverAs: PushDeliverAs,
 ): void {
-  if (!pi || !shouldPushToLead()) return;
   const status = computeRunningStatusLine(registry);
-  const details: Record<string, unknown> = record ? { agent_id: record.agentId, ...payload, status } : { ...payload, status };
+  const base: Record<string, unknown> = record ? { agent_id: record.agentId, ...payload } : { ...payload };
+  const details = status ? { ...base, status } : base;
   try {
     pi.sendMessage(
       {
@@ -1000,12 +1078,113 @@ export function pushToLead(
 }
 
 /**
+ * Releases every held push, in arrival order, each with a status line computed
+ * NOW. Called from the owning session's `agent_settled` (see
+ * `registerPushFlush`): the agent is idle at that instant, so the first send
+ * starts a fresh run and the rest land in Pi's own followUp queue behind it —
+ * one lead run that sees all of them in order, which is what the one-at-a-time
+ * drain was always meant to produce.
+ *
+ * The queue is drained BEFORE the first send so a push issued from inside that
+ * run is held again for the next settle rather than re-entering this drain.
+ */
+export function flushHeldPushes(pi: ExtensionAPI | undefined): number {
+  const pending = heldPushQueue.splice(0, heldPushQueue.length);
+  if (!pi) return 0;
+  for (const held of pending) {
+    sendPush(pi, held.registry, held.record, held.family, held.payload, "followUp");
+  }
+  return pending.length;
+}
+
+/**
+ * Arms the held-push release on the owning session's own `agent_settled`.
+ * Registered at factory scope (like `registerGoalLoop`) rather than inside
+ * `session_start`, so a `/reload` cannot stack duplicate handlers. The role
+ * gate is re-checked at fire time for the same reason `pushToLead` checks it:
+ * a `worker`/`explore` process holds nothing, so it has nothing to flush.
+ */
+export function registerPushFlush(pi: ExtensionAPI): void {
+  pi.on("agent_settled", () => {
+    if (!shouldPushToLead()) return;
+    flushHeldPushes(pi);
+  });
+}
+
+/**
+ * Emits the deferred `kind:"final"` report for a child that has just left the
+ * running state, and says whether there was one.
+ *
+ * Phase 1 Edition: a `final` observed mid-turn is stashed on the record
+ * (`pendingFinal`) rather than pushed, because at that instant the child is
+ * still working — it filed its answer through a tool call and its turn
+ * continues. This is the release point, reached from every way a child can
+ * stop running: the RPC `agent_settled` (`idle`), the `ws-agent-stop` tool
+ * (`stopped`), and the liveness probe's exit detection (`exited`).
+ * `details.settled_reason` records which, so a final released by a stop or a
+ * process death is not read as an orderly completion.
+ *
+ * A `true` return means the caller must NOT also push `ws-agent-settled` for
+ * the same transition — one child turn is one message to the lead.
+ */
+export function flushPendingFinal(
+  pi: ExtensionAPI | undefined,
+  registry: RpcAgentRegistry | undefined,
+  record: RpcAgentRecord,
+  settledReason: "idle" | "stopped" | "exited",
+): boolean {
+  const report = record.pendingFinal;
+  record.pendingFinal = undefined;
+  if (report === undefined) return false;
+  pushToLead(pi, registry, record, "ws-agent-report", { kind: "final", report, settled_reason: settledReason }, "followUp");
+  return true;
+}
+
+/**
+ * Pushes one child signal into the owning session as a Pi custom message.
+ * This is the whole replacement for the deleted `ws-agent-wait` harvest: the
+ * lead ends its turn and is woken by these instead of blocking.
+ *
+ * `triggerTurn: true` is what makes an IDLE lead act on the signal at once
+ * rather than leaving it queued until the owner's next prompt (the same
+ * lesson `ask.ts`'s `injectDiscussionSummary` already encodes). `deliverAs`
+ * is per-family: `"steer"` for the two things a lead must act on mid-turn (a
+ * blocked approval, a headless question), `"followUp"` for everything else.
+ *
+ * A `followUp` push that arrives while the owning session is MID-TURN is not
+ * sent now — it is held (`heldPushQueue`) and released on that turn's
+ * `agent_settled` with its status line computed at release time. See
+ * `heldPushQueue` for why: Pi's own queue would deliver the message later but
+ * with an arrival-time status line, which read stale by the time the lead saw
+ * it. `steer` pushes are never held; their whole point is to interrupt.
+ *
+ * Guarded on `shouldPushToLead` and on `pi` being present (a `sendToAgent`
+ * resume path may run without one), so a worker-role process and an
+ * un-threaded call site are both silent no-ops rather than errors.
+ */
+export function pushToLead(
+  pi: ExtensionAPI | undefined,
+  registry: RpcAgentRegistry | undefined,
+  record: RpcAgentRecord | undefined,
+  family: PushFamily,
+  payload: Record<string, unknown>,
+  deliverAs: PushDeliverAs,
+): void {
+  if (!pi || !shouldPushToLead()) return;
+  if (deliverAs === "followUp" && !isOwningAgentIdle()) {
+    heldPushQueue.push({ registry, record, family, payload });
+    return;
+  }
+  sendPush(pi, registry, record, family, payload, deliverAs);
+}
+
+/**
  * Single funnel for every `client.prompt(...)` call in this adapter, so the
  * fan-in bookkeeping cannot drift from the actual dispatches: marks the child
  * `running` from the instant the prompt is ISSUED (not when `agent_start`
  * arrives — a lead ending its turn immediately after dispatch must already
- * see it counted), clears the previous turn's `terminalThisTurn`, and stamps
- * `lastLeadPromptAt`.
+ * see it counted), clears the previous turn's `terminalThisTurn` and any
+ * un-pushed `pendingFinal`, and stamps `lastLeadPromptAt`.
  *
  * `isLeadPrompt: false` is passed by exactly one caller — `fork.ts`'s
  * anti-bleed nudge — because an internal re-prompt is not a new task
@@ -1020,6 +1199,9 @@ export async function promptAgent(
 ): Promise<void> {
   record.running = true;
   record.terminalThisTurn = false;
+  // A final that never reached a settle belongs to the task being replaced,
+  // not to the one starting now.
+  record.pendingFinal = undefined;
   if (opts?.isLeadPrompt !== false) {
     record.lastLeadPromptAt = Date.now();
   }
@@ -1080,6 +1262,9 @@ export function markAgentExited(
 ): void {
   if (!record.client) return;
   clearLiveState(record);
+  // A child that filed a final and then died before settling still answered;
+  // `settled_reason: "exited"` is what tells the lead the death, not silence.
+  if (flushPendingFinal(pi, registry, record, "exited")) return;
   pushToLead(pi, registry, record, "ws-agent-settled", { reason: "exited" }, "followUp");
 }
 
@@ -1372,8 +1557,15 @@ export interface RpcEventOutcome {
  *
  * `record.onFinalReport` gained the parallel contract: returning `true` means
  * the hook fully consumed the report (a `lead-ask` discussion thread, whose
- * decision reaches the lead as its own `ws-thread-summary` message), so no
- * `ws-agent-report` push follows; falsy pushes it as normal.
+ * decision reaches the lead as its own `ws-thread-summary` message), so
+ * nothing is stashed; falsy stashes it as `record.pendingFinal`.
+ *
+ * Phase 1 Edition: an un-consumed `final` produces NO push from here. It is
+ * stashed and released by `flushPendingFinal` when the child leaves the
+ * running state — see that function and `RpcAgentRecord.pendingFinal`.
+ * `question` and untagged progress reports keep their immediate push: a
+ * question blocks the child until it is answered, and progress is only
+ * meaningful while the work is still going.
  */
 export function applyRpcEvent(
   record: RpcAgentRecord,
@@ -1425,7 +1617,13 @@ export function applyRpcEvent(
             consumed = false;
           }
         }
-        return consumed ? {} : { push: { family: "ws-agent-report", payload: { kind: "final", report: message }, deliverAs: "followUp" } };
+        // Phase 1 Edition: NOT pushed here. The child is still mid-turn at
+        // this instant; the final is stashed and pushed when it actually
+        // leaves the running state (`flushPendingFinal`), so the lead is told
+        // "done" only once the author has stopped working. A consumed report
+        // belongs to an owner thread and is not stashed at all.
+        if (!consumed) record.pendingFinal = message;
+        return {};
       }
 
       return { push: { family: "ws-agent-report", payload: { report: message }, deliverAs: "followUp" } };
@@ -1463,6 +1661,9 @@ export function applyRpcEvent(
  * stays owned entirely by `execute-gateway.ts`, which supplies that callback.
  *
  * The settle push is deliberately conditional and asynchronous:
+ * - replaced by the deferred `kind:"final"` report when this turn filed one
+ *   (`flushPendingFinal`) — that report IS the completion signal, and the
+ *   settle notice would be the same event a second time;
  * - suppressed while `record.threadBound` — an owner discussion thread's turn
  *   boundaries are not the lead's business (§1);
  * - suppressed when `record.terminalThisTurn` — the child already filed a
@@ -1499,7 +1700,8 @@ export function attachEventListener(
     }
     if (outcome.settled) {
       void (async () => {
-        if (!record.threadBound && !record.terminalThisTurn) {
+        // The deferred final, if this turn filed one, IS the settle message.
+        if (!flushPendingFinal(pi, registry, record, "idle") && !record.threadBound && !record.terminalThisTurn) {
           const lastMessage = await harvestLastMessage(record);
           pushToLead(pi, registry, record, "ws-agent-settled", { reason: "idle", last_message: lastMessage }, "followUp");
         }
@@ -1827,7 +2029,12 @@ export async function stopAgent(
     // later `ws-agent-send` revival, where it would silently suppress every
     // settle push for the rest of the session.
     record.threadBound = false;
-    if (!opts?.silent) {
+    if (opts?.silent) {
+      // An adapter-internal stop (a thread close, session shutdown) is not a
+      // lead-facing event at all, so an un-pushed final dies with it rather
+      // than arriving out of nowhere.
+      record.pendingFinal = undefined;
+    } else if (!flushPendingFinal(pi, registry, record, "stopped")) {
       pushToLead(pi, registry, record, "ws-agent-settled", { reason: "stopped" }, "followUp");
     }
   }
