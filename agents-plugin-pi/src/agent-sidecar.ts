@@ -50,6 +50,11 @@ export const SIDECAR_VERSION = 1;
  */
 export interface PersistedOrphan {
   agentId: string;
+  /** 260905 (alias/park/cap ticket): see `RpcAgentRecord.alias`/`.title`/`.prompt`. Absent for an old-shape sidecar entry. */
+  alias?: string;
+  title?: string;
+  /** Head-truncated at spawn (`truncatePromptForStorage`); round-trips verbatim, no re-truncation on revival. */
+  prompt?: string;
   sessionPath: string;
   systemPromptPath: string;
   modelBase?: string;
@@ -89,17 +94,27 @@ export function sidecarPath(leadSessionFile: string): string {
 }
 
 /**
- * Selects the records worth reviving: those with a LIVE client (a dormant
- * record was already stopped deliberately, and a thread-bound one belongs to
- * the owner surface, whose own `<sessionFile>.ws-threads.json` already
- * persists it — reviving it here would announce the same agent twice).
+ * Selects the records worth reviving: every non-thread-bound record,
+ * live or dormant. A thread-bound one belongs to the owner surface, whose own
+ * `<sessionFile>.ws-threads.json` already persists it — reviving it here
+ * would announce the same agent twice.
+ *
+ * 260905 (alias/park/cap ticket): the `!record.client` half of the old skip
+ * is gone — automatic parking now routinely turns a settled, non-threadBound
+ * child dormant well before shutdown, so capturing only LIVE records would
+ * silently lose every parked (alias/title/prompt included) agent on a
+ * restart. Dormant records are already resumable; carrying them through the
+ * sidecar too costs nothing and keeps the roll-call complete.
  */
 export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
   const orphans: PersistedOrphan[] = [];
   for (const record of registry.values()) {
-    if (!record.client || record.threadBound) continue;
+    if (record.threadBound) continue;
     orphans.push({
       agentId: record.agentId,
+      alias: record.alias,
+      title: record.title,
+      prompt: record.prompt,
       sessionPath: record.sessionPath,
       systemPromptPath: record.systemPromptPath,
       modelBase: record.modelBase,
@@ -154,6 +169,9 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
     if (typeof o.systemPromptPath !== "string") continue;
     out.push({
       agentId: o.agentId,
+      alias: typeof o.alias === "string" ? o.alias : undefined,
+      title: typeof o.title === "string" ? o.title : undefined,
+      prompt: typeof o.prompt === "string" ? o.prompt : undefined,
       sessionPath: o.sessionPath,
       systemPromptPath: o.systemPromptPath,
       modelBase: typeof o.modelBase === "string" ? o.modelBase : undefined,
@@ -181,6 +199,9 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
 export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
   return {
     agentId: orphan.agentId,
+    alias: orphan.alias,
+    title: orphan.title,
+    prompt: orphan.prompt,
     client: undefined,
     sessionPath: orphan.sessionPath,
     systemPromptPath: orphan.systemPromptPath,
@@ -282,14 +303,25 @@ export function partitionOrphansByState(orphans: PersistedOrphan[]): {
  * line each. They lost nothing and need no instruction re-issued; naming them
  * at length invited the lead to treat re-registration as a task.
  */
+/**
+ * 260905 (alias/park/cap ticket): the roll-call's per-agent label — `alias
+ * (agentId)` when an alias is set (mirrors the pushed-message head convention
+ * in `spawner.ts`'s `sendPush`), else the bare `agentId`; a `title`, when
+ * set, is appended for extra context.
+ */
+function orphanLabel(o: PersistedOrphan): string {
+  const idPart = o.alias ? `${o.alias} (${o.agentId})` : o.agentId;
+  return o.title ? `${idPart} "${o.title}"` : idPart;
+}
+
 export function buildOrphanSummary(orphans: PersistedOrphan[]): string {
   const { running, idle } = partitionOrphansByState(orphans);
   const lines = running.map((o) => {
     const facts = [o.spawnRole ?? "worker", "running", ...(o.lastReportAt ? [`last report ${o.lastReportAt}`] : ["no reports"])];
-    return `${o.agentId} (${facts.join(", ")}) — ${MID_TURN_ORPHAN_CAVEAT}`;
+    return `${orphanLabel(o)} (${facts.join(", ")}) — ${MID_TURN_ORPHAN_CAVEAT}`;
   });
   if (idle.length > 0) {
-    lines.push(`${idle.length} idle agent${idle.length === 1 ? "" : "s"} re-registered dormant: ${idle.map((o) => o.agentId).join(", ")}`);
+    lines.push(`${idle.length} idle agent${idle.length === 1 ? "" : "s"} re-registered dormant: ${idle.map((o) => orphanLabel(o)).join(", ")}`);
   }
   return lines.join("\n");
 }

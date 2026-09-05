@@ -406,11 +406,13 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async (_event, _ctx) => {
-    // 260905: snapshot the still-live children BEFORE stopAll() clears their
+    // 260905: snapshot the children BEFORE stopAll() tears down their live
     // clients, so the next start of this session can announce them rather
-    // than losing them silently (see agent-sidecar.ts's header). Ordering is
-    // load-bearing: after stopAll() every record is dormant and
-    // `captureOrphans` would return nothing.
+    // than losing them silently (see agent-sidecar.ts's header). Ordering
+    // still matters for the roll-call's accuracy — `captureOrphans` now also
+    // captures already-dormant (parked) records, but only a live-at-shutdown
+    // snapshot correctly reports which ones were still `running` at that
+    // instant; after stopAll() every record reads as dormant/idle.
     if (leadSessionFile && agentTools) {
       writeSidecar(leadSessionFile, captureOrphans(agentTools.rpcRegistry));
     }
