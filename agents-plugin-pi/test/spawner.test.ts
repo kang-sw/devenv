@@ -86,6 +86,7 @@ import {
   attachEventListener,
   buildPushContent,
   computeRunningStatusLine,
+  hasRunningAgents,
   flushHeldPushes,
   heldPushQueue,
   leadIdleRef,
@@ -903,6 +904,46 @@ describe("computeRunningStatusLine (fan-in running count)", () => {
   test("singular/plural agreement follows the running count", () => {
     assert.equal(computeRunningStatusLine(new Map([["a", liveRpcRecord({ agentId: "a", running: true })]])), "1 delegated agent still running");
     assert.equal(computeRunningStatusLine(new Map([["a", liveRpcRecord({ agentId: "a" })]])), "0 delegated agents still running");
+  });
+});
+
+describe("hasRunningAgents (goal-loop yield predicate)", () => {
+  test("an empty/absent registry is false — nothing known to be running", () => {
+    assert.equal(hasRunningAgents(new Map()), false);
+    assert.equal(hasRunningAgents(undefined), false);
+  });
+
+  test("one running child is true", () => {
+    const registry: RpcAgentRegistry = new Map([["a", liveRpcRecord({ agentId: "a", running: true })]]);
+    assert.equal(hasRunningAgents(registry), true);
+  });
+
+  test("a dormant record (no client) is false", () => {
+    const registry: RpcAgentRegistry = new Map([["a", freshRpcRecord({ agentId: "a" })]]);
+    assert.equal(hasRunningAgents(registry), false);
+  });
+
+  test("a stopped record (running: false, no client) is false", () => {
+    const registry: RpcAgentRegistry = new Map([["a", freshRpcRecord({ agentId: "a", running: false })]]);
+    assert.equal(hasRunningAgents(registry), false);
+  });
+
+  test("a running child that already filed its final/question this turn (terminalThisTurn) is false", () => {
+    const registry: RpcAgentRegistry = new Map([["a", liveRpcRecord({ agentId: "a", running: true, terminalThisTurn: true })]]);
+    assert.equal(hasRunningAgents(registry), false);
+  });
+
+  test("a threadBound respondent ALONE is false — the owner exchange is not the lead's fan-in", () => {
+    const registry: RpcAgentRegistry = new Map([["discussing", liveRpcRecord({ agentId: "discussing", running: true, threadBound: true })]]);
+    assert.equal(hasRunningAgents(registry), false);
+  });
+
+  test("a threadBound running record plus an ordinary running record is true — the threadBound one is excluded but the other still counts", () => {
+    const registry: RpcAgentRegistry = new Map([
+      ["discussing", liveRpcRecord({ agentId: "discussing", running: true, threadBound: true })],
+      ["worker", liveRpcRecord({ agentId: "worker", running: true })],
+    ]);
+    assert.equal(hasRunningAgents(registry), true);
   });
 });
 

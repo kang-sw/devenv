@@ -76,6 +76,7 @@
 import { readFileSync } from "node:fs";
 import type { ContextUsage, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readSpawnRole } from "./process-role.ts";
+import { hasRunningAgents, type RpcAgentRegistry } from "./spawner.ts";
 
 // ---------------------------------------------------------------------------
 // Config: adapter-owned runaway-threshold data file, sibling to
@@ -275,14 +276,23 @@ export function recordToolCall(state: GoalLoopState): GoalLoopState {
 
 export type SettleDecision =
   | { action: "ignore" }
+  | { action: "yield" }
   | { action: "reinject"; goal: string }
   | { action: "force-stop"; reason: string };
 
 /**
  * Pure reducer for an `agent_settled` firing: decides whether to ignore
- * (goal mode inactive), re-inject a reminder (under threshold), or
- * force-stop (streak reached `threshold`). Streak resets to 0 whenever a
+ * (goal mode inactive), yield (goal mode active but a persistent child is
+ * still mid-turn — Phase 2, 260905), re-inject a reminder (under threshold),
+ * or force-stop (streak reached `threshold`). Streak resets to 0 whenever a
  * tool call happened this cycle; otherwise it increments.
+ *
+ * `yielding` (default `false`) is the Phase 2 fan-in gate: when `true` the
+ * state passes through completely unchanged (no streak mutation, no
+ * `sawToolCallThisCycle` reset) and the decision is `{ action: "yield" }` —
+ * neither re-injecting the reminder nor advancing the runaway streak, exactly
+ * as if this settle had never fired. The inactive check runs first, so
+ * yielding never resurrects an inactive loop.
  *
  * The `"reinject"` decision carries only the bare `goal` string, not a
  * precomputed reminder: this reducer has no access to `ctx.getContextUsage()`
@@ -290,9 +300,16 @@ export type SettleDecision =
  * is called by `registerGoalLoop`'s IO glue instead, right where that context
  * is already available (Phase 2, 260903).
  */
-export function decideOnSettle(state: GoalLoopState, threshold: number): { next: GoalLoopState; decision: SettleDecision } {
+export function decideOnSettle(
+  state: GoalLoopState,
+  threshold: number,
+  yielding = false,
+): { next: GoalLoopState; decision: SettleDecision } {
   if (!state.active) {
     return { next: state, decision: { action: "ignore" } };
+  }
+  if (yielding) {
+    return { next: state, decision: { action: "yield" } };
   }
   const streak = state.sawToolCallThisCycle ? 0 : state.noToolCallStreak + 1;
   if (streak >= threshold) {
@@ -322,9 +339,22 @@ export function buildCompactionObservation(goal: string, reason: "manual" | "thr
 // IO glue: command + tool + event registration.
 // ---------------------------------------------------------------------------
 
+/** Phase 2 (260905) goal-loop yield status key: cleared unconditionally on the next `agent_start`. */
+const GOAL_LOOP_YIELD_STATUS_KEY = "ws-goal-loop-yield";
+
 export interface RegisterGoalLoopOptions {
   /** Path to the adapter-owned goal-loop config data file, read fresh per settle. */
   goalLoopConfigPath: string;
+  /**
+   * Phase 2 (260905): the shared RPC registry ref, filled by `index.ts` inside
+   * `session_start` (mirrors `execute-gateway.ts`'s `createApprovalRelay`
+   * `registryRef?` convention). Optional and degrade-gracefully: an
+   * undefined ref (or a ref whose `.current` is still undefined, e.g. before
+   * the first `session_start` or in a headless harness that never ran one)
+   * means "nothing known to be running" — `hasRunningAgents` resolves to
+   * `false` and the loop never yields.
+   */
+  rpcRegistryRef?: { current: RpcAgentRegistry | undefined };
 }
 
 /**
@@ -372,10 +402,21 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
 
     const config = readGoalLoopConfig(opts.goalLoopConfigPath);
     const threshold = resolveRunawayThreshold(config);
-    const { next, decision } = decideOnSettle(state, threshold);
+    const yielding = hasRunningAgents(opts.rpcRegistryRef?.current);
+    const { next, decision } = decideOnSettle(state, threshold, yielding);
     state = next;
 
     if (decision.action === "ignore") return;
+    if (decision.action === "yield") {
+      // Neither re-injects the reminder nor advances the runaway streak — a
+      // persistent child pushing its own settle/report wakes the lead next
+      // (pushToLead's `triggerTurn: true`), or the liveness probe's `exited`
+      // push does if the child died instead. Either way the very next
+      // `agent_start` clears this status unconditionally (see the listener
+      // below), so this yield status never lingers past that turn.
+      ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: yielding to running agents");
+      return;
+    }
     if (decision.action === "force-stop") {
       ctx.ui.notify(`Goal loop force-stopped: ${decision.reason}`, "warning");
       return;
@@ -384,6 +425,17 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
     const contextWindowOverride = resolveContextWindowOverride(config);
     const percent = computeContextPercent(ctx.getContextUsage(), contextWindowOverride);
     pi.sendUserMessage(buildGoalReminder(decision.goal, { percent, advisoryPercent }));
+  });
+
+  // Clears the yield status on the very next lead turn regardless of what
+  // started it (owner-typed prompt, or a pushed `steer`/`followUp` message
+  // with `triggerTurn: true`) — no per-push-family special-casing needed.
+  // Factory scope, registered once — never inside `session_start`, matching
+  // this file's own no-duplicate-handlers-across-`/reload` convention (see
+  // the `tool_call` listener above).
+  pi.on("agent_start", (_event, ctx) => {
+    if (isChildProcess(process.env)) return;
+    ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, undefined);
   });
 
   // Observe-only: never `cancel`s, never supplies a `compaction` override.
