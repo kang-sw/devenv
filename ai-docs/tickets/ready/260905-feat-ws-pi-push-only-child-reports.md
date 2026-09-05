@@ -234,13 +234,44 @@ that the only model.
   `agents-plugin/skills/` are not modified (golden rule; the spawner is
   adapter-owned).
 
+- **Edition decisions (owner, 2026-09-05, after the first live run).**
+  Supersede the bullets above where they differ:
+  - *Status line is built at delivery, not at push.* Pi has no hook at
+    followUp delivery (`before_agent_start` fires only for owner-typed
+    prompts), and a message built mid-turn read `0 of 1` for the first of
+    three workers. `followUp` pushes are sent at once only when the owning
+    process's agent is idle (`ctx.isIdle` captured at `session_start`);
+    otherwise they are held and released in arrival order from that
+    process's `agent_settled`, each built at release time. `steer` families
+    are never held; held pushes die with the process. The line gains
+    `: <running ids>` and is omitted when M = 0 (no `0 of 0` on the orphan
+    message).
+  - *A `final` is released when the child's turn ends.* Stashed on the
+    record at the tool call (last wins) and pushed as one `ws-agent-report`
+    with `details.settled_reason` (`idle` / `stopped` / `exited`) at the
+    leave-running transition, with no `ws-agent-settled`; a silent stop
+    drops it; hook-consumed finals still push nothing. Chosen over "final at
+    once, settle silent" so the lead never acts on a completion report
+    while the child is still finishing (a commit after the report, say).
+  - *`ws-agent-orphaned` only for children cut off mid-turn.* Every sidecar
+    entry is still re-registered dormant with role wiring, but the message
+    is pushed only when some entry was `running`; idle entries (finished or
+    waiting for a relay) are summarized in one line there and otherwise
+    only visible in `ws-agent-list`. The first live run announced three
+    finished workers as orphans, which was noise.
+  - *Per-family message renderer.* Pi's default custom-message rendering
+    repeated the family (its `[customType]` label plus the content head), so
+    the six families get a compact renderer in TUI; content is unchanged.
+
 ## Constraints
 
 - Headless lead (`--mode rpc`): `pi.sendMessage` is host-level, so push works
   there too; the `260904` §8 relay baseline for fork-raised questions becomes
   a pushed `kind:"question"` message rather than a `ws-agent-wait` return.
 - Within a live lead session no push is dropped or duplicated; the adapter
-  holds no queue of its own (Pi's followUp queue is the only buffer). On
+  holds `followUp` pushes only while its own agent is mid-turn and releases
+  them at `agent_settled` (Edition, 2026-09-05); it keeps no buffer a lead
+  could drain. On
   `/reload` or a session switch the existing `session_shutdown` → `stopAll()`
   behavior stands; the `.ws-agents.json` sidecar carries identities, never
   reports, and is consumed exactly once so a resumed session gets one
@@ -439,6 +470,42 @@ one `ws-agent-orphaned` naming it `running`, `ws-agent-send <id>` resuming
 it, and a second `/reload` pushing nothing; `/new` then `/resume` of the old
 session receiving the orphan message; and default rendering readability of
 the pushed messages.
+
+#### Edition (9f740c46) - 2026-09-05
+
+First live run (three workers, owner-driven) exercised the push channel and
+surfaced four clutter defects: the fan-in status line was computed at push
+time and read `0 of 1` / `0 of 2` / `0 of 3` on delivery; the TUI printed the
+`[family]` header twice; the orphan message ended in `0 of 0`; and `/reload`
+after all workers had finished pushed `ws-agent-orphaned` for idle entries.
+Owner decisions are recorded under `## Decisions` ("Edition decisions").
+
+Range `2627c6e6..9f740c46`:
+
+- Hold-until-settle: `followUp` pushes go out at once only while the owning
+  process's agent is idle (`ctx.isIdle` captured at `session_start`);
+  otherwise they are held and flushed in arrival order from `agent_settled`,
+  with the status line built at flush. Steer families are never held.
+- Status line `N of M delegated agents still running: <running ids>`, omitted
+  when M is 0.
+- `kind:"final"` is stashed on the record and pushed as one `ws-agent-report`
+  carrying `details.settled_reason` (`idle` / `stopped` / `exited`) when the
+  child leaves running; no `ws-agent-settled` follows it. Silent stops drop
+  it; a new instruction (prompt, steer, or followUp) clears it.
+- `ws-agent-orphaned` is pushed only when at least one sidecar entry was
+  `running`; all entries are still re-registered dormant.
+- Per-family TUI message renderer (`src/push-render.ts`) replaces the default
+  `[customType]` label; message content is unchanged.
+
+Verification: 634/634. Edition review (fresh reviewers): test `clean` with
+1 minor; correctness `non-clean: 1 important` (stale `pendingFinal` survived
+the live `sendToAgent` branch) → relay `9f740c46` fixed it and the unhandled
+renderer-registration rejection. Findings under `653f5694-0{1,2}-*`.
+
+Live re-check still owner-run: expect `2 of 3: <ids>` → `1 of 3: <id>` →
+`0 of 3`, finals arriving at child turn end with `settled_reason`, a single
+header per message, and no orphan push after `/reload` when all workers are
+idle.
 
 ### Phase 2: Goal loop yields to live children
 
