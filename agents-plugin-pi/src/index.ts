@@ -119,14 +119,14 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { startBridge, type BridgeHandle } from "./bridge.ts";
 import { pushToLead, registerAgentTools, type AgentToolsHandle, type RpcAgentRegistry } from "./spawner.ts";
-import { buildOrphanSummary, captureOrphans, readAndClearSidecar, rehydrateOrphanRecord, writeSidecar } from "./agent-sidecar.ts";
+import { buildOrphanSummary, captureOrphans, readAndClearSidecar, reviveOrphans, writeSidecar } from "./agent-sidecar.ts";
 import { buildDiscussKickoff } from "./discuss.ts";
 import { registerGoalLoop } from "./goal-loop.ts";
 import { resolveSkillsDir } from "./skills-dir.ts";
 import { buildWsBlock, registerLeadBootstrap } from "./lead-bootstrap.ts";
 import { isLeadOrFork, readSpawnRole } from "./process-role.ts";
 import { computeLeadActiveTools, createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
-import { addForkToolIfLead, registerFork } from "./fork.ts";
+import { addForkToolIfLead, armForkRoleWiring, registerFork } from "./fork.ts";
 import {
   addAskToolsIfLead,
   buildForkQuestionLeadNotice,
@@ -247,10 +247,14 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // the lead gets a notice naming the thread and telling it to keep waiting;
     // in headless there is no owner surface, so `undefined` keeps the Phase 1
     // relay byte-identical (§8).
-    registerFork(pi, handle, agentTools.rpcRegistry, { cwd: ctx.cwd, modelCatalogPath }, (agentId, message) => {
-      const thread = handleForkRaisedQuestion(threadHandle, agentTools!.rpcRegistry, agentId, message);
+    //
+    // Hoisted to a named callback (review relay #1, I1) because the shutdown
+    // sidecar's orphan revival below re-arms the SAME hook on a revived fork.
+    const onForkQuestion = (agentId: string, message: string): string | undefined => {
+      const thread = handleForkRaisedQuestion(threadHandle, agentTools!.rpcRegistry, agentId, message, pi);
       return threadHandle.ctxRef.current?.mode === "tui" ? buildForkQuestionLeadNotice(agentId, thread.threadId) : undefined;
-    });
+    };
+    registerFork(pi, handle, agentTools.rpcRegistry, { cwd: ctx.cwd, modelCatalogPath }, onForkQuestion);
 
     // 260904 Phase 2 (owner question surface), same declarative/global
     // registration placement as registerFork above: ws-ask/ws-resolve must
@@ -277,11 +281,19 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
         // only incidentally — nothing below depends on it.
         const orphans = readAndClearSidecar(sessionFile);
         if (orphans.length > 0) {
-          for (const orphan of orphans) {
-            if (!agentTools.rpcRegistry.has(orphan.agentId)) {
-              agentTools.rpcRegistry.set(orphan.agentId, rehydrateOrphanRecord(orphan));
-            }
-          }
+          // Role-keyed wiring re-arm (review relay #1, I1): `spawnRole` is
+          // persisted precisely so a revived FORK comes back with its question
+          // routing (§1 keeps a fork-raised question on the owner surface) and
+          // its anti-bleed loop, rather than silently degrading to plain-worker
+          // behavior on the next ws-agent-send. A revived execute-worker gets
+          // the approval relay pinned to the record itself, so it no longer
+          // depends on which call site happens to resume it.
+          reviveOrphans(agentTools.rpcRegistry, orphans, {
+            fork: (record) => armForkRoleWiring(pi, agentTools!.rpcRegistry, record, onForkQuestion),
+            executeWorker: (record) => {
+              record.onApprovalPending = onApprovalPending;
+            },
+          });
           pushToLead(
             pi,
             agentTools.rpcRegistry,

@@ -65,9 +65,13 @@ substitute for it. Each child signal arrives on its own as a message:
 | `ws-agent-orphaned` | A previous run of this session left children behind. They are registered as dormant: `ws-agent-send` revives one from its own session file, `ws-agent-transcript` reads what it did, `ws-agent-stop` drops it. |
 
 Every one of these ends with a line like `2 of 3 delegated agents still
-running`. Read it as your fan-in state: while the first number is above zero,
-more is coming — end your turn again rather than concluding early. Agents in an
-owner discussion thread are not counted; they are not yours to wait on.
+running`. Read it as your fan-in state: the second number is how many children
+you still have alive, the first is how many of those have yet to report this
+turn. While the first number is above zero, more is coming — end your turn
+again rather than concluding early; `0 of 3` is the cue that all three have
+reported. A child leaves the second number only when it is stopped, dies, or
+goes dormant. Agents in an owner discussion thread are counted in neither
+number; they are not yours to wait on.
 
 The owner side of a question is theirs, not yours: `/answer <id>` opens one in
 a chat overlay (which is when a discussion thread is actually forked, at your

@@ -807,6 +807,28 @@ export interface RpcAgentRecord {
    * whose final IS the completion signal the lead is meant to see.
    */
   onFinalReport?: (record: RpcAgentRecord, message: string) => boolean | void;
+  /**
+   * 260905 (review relay #1, I1): fired by `sendToAgent`'s dormant-resume
+   * branch right after the fresh client's event listener is attached. It
+   * exists for role wiring that needs a LIVE client and therefore cannot be
+   * re-armed at revival time — `fork.ts`'s `wireAntiBleedLoop`, which
+   * subscribes to `client.onEvent` and returns early when the record is
+   * dormant. A record revived from the shutdown sidecar carries this so its
+   * first `ws-agent-send` restores the fork wiring rather than silently
+   * degrading it to plain-worker behavior. Hook-only state, never serialized.
+   */
+  onResume?: (record: RpcAgentRecord) => void;
+  /**
+   * 260905 (review relay #1, I1): a per-RECORD fallback for the approval relay
+   * that `RpcSpawnCtx`/`RpcResumeCtx` normally carry per CALL SITE.
+   * `attachEventListener` prefers the ctx callback and falls back to this one,
+   * so an `execute-worker` keeps its relay even when it is resumed from a call
+   * site that has none — the shutdown sidecar's role-keyed revival sets it
+   * (making the re-arm explicit rather than a coincidence of which resume path
+   * ran), and `ask.ts`'s overlay channel resume, which passes no
+   * `onApprovalPending` of its own, gets it for free.
+   */
+  onApprovalPending?: (record: RpcAgentRecord) => void;
 }
 
 /**
@@ -886,23 +908,29 @@ export function shouldPushToLead(env: NodeJS.ProcessEnv = process.env): boolean 
  * The fan-in status line every pushed message carries: `N of M ... still
  * running`, computed fresh at push time over the shared registry.
  *
- * - M counts every registry member that is `running` (prompted and not yet
- *   settled/stopped/exited) and NOT `threadBound`. Dormant, stopped, exited
- *   and owner-bound agents are all excluded by those two flags; an `explore`
- *   leaf is never in this registry at all (it has its own).
- * - N is the M subset that has not yet filed a `final`/`question` this turn
- *   (`terminalThisTurn`), so the agent whose own terminal report triggered
- *   this very push has already removed itself — the last of three finals
- *   reads `0 of 3`, which is the lead's cue that the fan-in is complete and
- *   it can synthesize.
+ * - M counts every registry member that is neither dormant nor
+ *   stopped/exited (`record.client` present — the one flag all three of those
+ *   resting states clear) and NOT `threadBound`. An `explore` leaf is never in
+ *   this registry at all (it has its own).
+ * - N is the M subset that is still `running` and has not yet filed a
+ *   `final`/`question` this turn (`terminalThisTurn`), so the agent whose own
+ *   terminal report triggered this very push has already removed itself.
+ *
+ * Review relay #1 (I3): M is deliberately NOT keyed on `running`. A child that
+ * filed its final settles moments later, and `agent_settled` clears `running`
+ * — keying M on it made the DENOMINATOR shrink between messages (`2 of 3` ->
+ * `1 of 2` -> `0 of 1`), so the ticket's own "the last of three finals reads
+ * `0 of 3`" cue could never actually occur in the real event order. A live but
+ * idle child is none of dormant/stopped/exited, so it stays in M and only
+ * leaves N.
  */
 export function computeRunningStatusLine(registry: RpcAgentRegistry | undefined): string {
   let m = 0;
   let n = 0;
   for (const record of registry?.values() ?? []) {
-    if (record.threadBound || !record.running) continue;
+    if (record.threadBound || !record.client) continue;
     m += 1;
-    if (!record.terminalThisTurn) n += 1;
+    if (record.running && !record.terminalThisTurn) n += 1;
   }
   return `${n} of ${m} delegated agent${m === 1 ? "" : "s"} still running`;
 }
@@ -1081,6 +1109,26 @@ export function startLivenessProbe(
   return () => clearInterval(timer);
 }
 
+/**
+ * The `spawn-failed` half of `spawnAgent`'s launch-failure handling: park the
+ * half-registered record in its resting state and tell the owning session
+ * once, so the fan-in count is not left waiting on a child that never started.
+ * The caller re-throws the original error unchanged afterwards.
+ *
+ * Extracted (review relay #1, test partition C2) so this branch has offline
+ * coverage — `spawnAgent` itself constructs a real `RpcClient` and is
+ * live-gate only.
+ */
+export function pushSpawnFailed(
+  pi: ExtensionAPI | undefined,
+  registry: RpcAgentRegistry | undefined,
+  record: RpcAgentRecord,
+  err: unknown,
+): void {
+  clearLiveState(record);
+  pushToLead(pi, registry, record, "ws-agent-settled", { reason: "spawn-failed", error: err instanceof Error ? err.message : String(err) }, "followUp");
+}
+
 export interface SpawnAgentParams {
   systemPromptPath: string;
   prompt: string;
@@ -1163,6 +1211,20 @@ export interface RpcResumeCtx {
   cwd: string;
   /** See `RpcSpawnCtx.onApprovalPending` — threaded through `sendToAgent`'s dormant-auto-resume branch so a resumed `execute-worker`'s approval relay keeps working. */
   onApprovalPending?: (record: RpcAgentRecord) => void;
+  /**
+   * 260905 (review relay #1, I2): `true` only for the LEAD-facing
+   * `ws-agent-send` tool. The lead driving a child directly is the headless
+   * answer path for a fork-raised question — the fork was thread-bound from
+   * registration and, with no owner surface to ever open or close that thread,
+   * nothing else would release the bind before its own final. So a lead send
+   * unbinds it: the exchange is now the lead's, and the child rejoins the
+   * fan-in immediately rather than staying invisible until it completes.
+   *
+   * Deliberately NOT set by `ask.ts`'s overlay channel (`createForkChannel`),
+   * which routes the OWNER's messages through this same function — an owner
+   * typing into an open thread must leave the bind exactly as it is.
+   */
+  leadSend?: boolean;
 }
 
 /**
@@ -1413,8 +1475,16 @@ export function applyRpcEvent(
  * The settle is also a registry transition, so it doubles as a liveness-probe
  * point (`probeAgentLiveness`) — a child that died mid-turn is reported as
  * `exited` rather than silently going quiet.
+ *
+ * Exported (review relay #1, test partition C2) purely so the suppression
+ * conditions above have direct offline coverage: this listener, not the pure
+ * `applyRpcEvent`, is where the `!threadBound && !terminalThisTurn` gate
+ * actually lives, and `spawnAgent`/`sendToAgent` — its only production call
+ * sites — both construct a real `RpcClient` and are live-gate only. Tests
+ * drive it with a duck-typed `client` exposing `onEvent`/`getState`/
+ * `getLastAssistantText`.
  */
-function attachEventListener(
+export function attachEventListener(
   pi: ExtensionAPI | undefined,
   registry: RpcAgentRegistry | undefined,
   record: RpcAgentRecord,
@@ -1436,8 +1506,11 @@ function attachEventListener(
         await probeAgentLiveness(pi, registry, record);
       })();
     }
-    if (onApprovalPending && e.type === "tool_execution_start" && e.toolName === GATED_EXEC_TOOL_NAME) {
-      onApprovalPending(record);
+    // Ctx callback first, per-record fallback second (see
+    // `RpcAgentRecord.onApprovalPending`).
+    const approvalHook = onApprovalPending ?? record.onApprovalPending;
+    if (approvalHook && e.type === "tool_execution_start" && e.toolName === GATED_EXEC_TOOL_NAME) {
+      approvalHook(record);
     }
   });
 }
@@ -1545,15 +1618,7 @@ export async function spawnAgent(registry: RpcAgentRegistry, ctx: RpcSpawnCtx, p
     attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     await promptAgent(record, client, params.prompt);
   } catch (err) {
-    clearLiveState(record);
-    pushToLead(
-      ctx.pi,
-      registry,
-      record,
-      "ws-agent-settled",
-      { reason: "spawn-failed", error: err instanceof Error ? err.message : String(err) },
-      "followUp",
-    );
+    pushSpawnFailed(ctx.pi, registry, record, err);
     throw err;
   }
 
@@ -1605,6 +1670,11 @@ export async function sendToAgent(
     throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
   }
 
+  // See `RpcResumeCtx.leadSend`: the lead taking over the exchange releases a
+  // thread bind the owner surface will never close (the headless
+  // fork-raised-question path).
+  if (ctx.leadSend && record.threadBound) record.threadBound = false;
+
   if (!record.client) {
     // 260904 Phase 1 (side-thread fork): `forkFrom` is deliberately never
     // passed here — a dormant resume (including a stopped fork) always
@@ -1626,6 +1696,14 @@ export async function sendToAgent(
     await client.start();
     await applyModelEffort(client, record.modelEffort);
     attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
+    // Role wiring that needs a live client (a revived fork's anti-bleed loop —
+    // see `RpcAgentRecord.onResume`). Best effort: a wiring failure must not
+    // turn a routine resume into a failed send.
+    try {
+      record.onResume?.(record);
+    } catch {
+      // ignored — see above.
+    }
     await promptAgent(record, client, message);
     return { agent_id: agentId };
   }
@@ -1640,8 +1718,11 @@ export async function sendToAgent(
       }
       // A steer/followUp joins the run already in flight, so the child is
       // outstanding again from the lead's point of view even though no fresh
-      // prompt was issued.
+      // prompt was issued — including for `terminalThisTurn` (review relay #1,
+      // minor): new work was just dispatched, so a `final` filed before it no
+      // longer keeps the child out of N.
       record.running = true;
+      record.terminalThisTurn = false;
     } else {
       await promptAgent(record, live, message);
     }
@@ -1740,6 +1821,12 @@ export async function stopAgent(
       // best effort
     }
     clearLiveState(record);
+    // Review relay #1 (I2): a stop is a thread-close path too — the ticket
+    // names "lead stop" alongside `/done`/fork final/`ws-resolve`. Releasing
+    // the bind here keeps a stopped agent from carrying a latched flag into a
+    // later `ws-agent-send` revival, where it would silently suppress every
+    // settle push for the rest of the session.
+    record.threadBound = false;
     if (!opts?.silent) {
       pushToLead(pi, registry, record, "ws-agent-settled", { reason: "stopped" }, "followUp");
     }
@@ -1919,7 +2006,15 @@ export function registerAgentTools(
     } as never,
     async execute(_toolCallId, params) {
       const p = params as { agent_id: string; message: string; interrupt?: boolean };
-      const result = await sendToAgent(rpcRegistry, { pi, cwd: sessionCtx.cwd, onApprovalPending }, p.agent_id, p.message, p.interrupt);
+      // `leadSend: true`: this tool is the lead's own channel to a child (see
+      // `RpcResumeCtx.leadSend`), unlike ask.ts's overlay channel.
+      const result = await sendToAgent(
+        rpcRegistry,
+        { pi, cwd: sessionCtx.cwd, onApprovalPending, leadSend: true },
+        p.agent_id,
+        p.message,
+        p.interrupt,
+      );
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     },
   });

@@ -10,6 +10,12 @@
  * tmpdir — `readAndClearSidecar`'s delete-on-read contract is the whole point
  * of the file and cannot be asserted without touching disk.
  *
+ * Review relay #1 (I1) adds `reviveOrphans`, the role-keyed re-arm that turns
+ * a persisted `spawnRole` back into behavior: the full capture -> serialize ->
+ * parse -> revive round trip, ending in the assertion the ticket's own verify
+ * list names — a revived fork's `kind:"question"` routes to the owner surface
+ * instead of being pushed at the lead.
+ *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
 
@@ -27,11 +33,13 @@ import {
   rehydrateOrphanRecord,
   serializeOrphans,
   sidecarPath,
+  reviveOrphans,
   writeSidecar,
   type PersistedOrphan,
 } from "../src/agent-sidecar.ts";
-import type { RpcAgentRecord, RpcAgentRegistry } from "../src/spawner.ts";
-import type { RpcClient } from "@earendil-works/pi-coding-agent";
+import { armForkRoleWiring } from "../src/fork.ts";
+import { applyRpcEvent, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import type { ExtensionAPI, RpcClient } from "@earendil-works/pi-coding-agent";
 
 function record(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
   return {
@@ -279,5 +287,109 @@ describe("writeSidecar / readAndClearSidecar (filesystem)", () => {
         { agentId: "a1", sessionPath: "s", systemPromptPath: "p", wsToolNames: [], toolGroup: "full-worker" },
       ]),
     );
+  });
+});
+
+/**
+ * Review relay #1, I1: the sidecar's whole point is that a revived child keeps
+ * behaving like what it was. `spawnRole` was persisted and parsed but nothing
+ * READ it on revival, so a revived fork came back as a plain record — no
+ * question routing (a §1 violation the moment it asks something), no
+ * anti-bleed loop. These tests exercise the full round trip: capture ->
+ * serialize -> parse -> revive with the real role wiring -> the revived fork's
+ * question routes to the owner surface instead of being pushed at the lead.
+ */
+describe("reviveOrphans (role wiring re-armed on revival)", () => {
+  const pi = { sendMessage() {} } as unknown as ExtensionAPI;
+
+  test("a full sidecar round trip revives a fork whose question still routes to the owner surface", () => {
+    const source: RpcAgentRegistry = new Map([
+      ["fork-1", record({ agentId: "fork-1", spawnRole: "fork", client: {} as RpcClient })],
+      ["worker-1", record({ agentId: "worker-1", spawnRole: "worker", client: {} as RpcClient })],
+    ]);
+    const parsed = parseOrphans(serializeOrphans(captureOrphans(source)));
+
+    const revivedRegistry: RpcAgentRegistry = new Map();
+    const asked: Array<{ agentId: string; message: string }> = [];
+    reviveOrphans(revivedRegistry, parsed, {
+      fork: (rec) =>
+        armForkRoleWiring(pi, revivedRegistry, rec, (agentId, message) => {
+          asked.push({ agentId, message });
+          return "[ws] thread q1 — the owner answers this.";
+        }),
+    });
+
+    assert.deepEqual([...revivedRegistry.keys()].sort(), ["fork-1", "worker-1"]);
+    const fork = revivedRegistry.get("fork-1")!;
+    assert.equal(fork.client, undefined, "revived dormant — ws-agent-send relaunches it from its own session file");
+
+    const outcome = applyRpcEvent(fork, {
+      type: "tool_execution_start",
+      toolName: REPORT_TO_LEAD_TOOL_NAME,
+      args: { kind: "question", message: "which anchor?" },
+    });
+    assert.deepEqual(asked, [{ agentId: "fork-1", message: "which anchor?" }]);
+    assert.deepEqual(outcome, {}, "§1: routed to the owner surface, never pushed at the lead as ws-agent-question");
+
+    const worker = revivedRegistry.get("worker-1")!;
+    assert.equal(worker.onQuestionReport, undefined, "a plain worker has no role wiring to re-arm");
+  });
+
+  test("a revived fork's anti-bleed loop is restored on its first resume", () => {
+    const parsed = parseOrphans(serializeOrphans([{ ...(captureOrphans(new Map([["f", record({ agentId: "f", spawnRole: "fork", client: {} as RpcClient })]]))[0]) }]));
+    const registry: RpcAgentRegistry = new Map();
+    reviveOrphans(registry, parsed, { fork: (rec) => armForkRoleWiring(pi, registry, rec) });
+
+    const fork = registry.get("f")!;
+    let subscriptions = 0;
+    fork.client = {
+      onEvent() {
+        subscriptions += 1;
+        return () => {};
+      },
+    } as unknown as RpcClient;
+    fork.onResume?.(fork);
+    assert.equal(subscriptions, 1, "sendToAgent's dormant-resume branch fires this once the client exists");
+  });
+
+  test("an execute-worker's approval relay is re-armed on the record itself, not left to the resume call site", () => {
+    const parsed = parseOrphans(
+      serializeOrphans(captureOrphans(new Map([["ex", record({ agentId: "ex", spawnRole: "execute-worker", client: {} as RpcClient })]]))),
+    );
+    const registry: RpcAgentRegistry = new Map();
+    const relayed: string[] = [];
+    reviveOrphans(registry, parsed, {
+      executeWorker: (rec) => {
+        rec.onApprovalPending = (r) => relayed.push(r.agentId);
+      },
+      fork: () => assert.fail("an execute-worker must not get the fork wiring"),
+    });
+    registry.get("ex")!.onApprovalPending?.(registry.get("ex")!);
+    assert.deepEqual(relayed, ["ex"]);
+  });
+
+  test("an id already live on the registry is left untouched — a live child beats a stale sidecar entry", () => {
+    const live = record({ agentId: "a1", client: {} as RpcClient, spawnRole: "fork" });
+    const registry: RpcAgentRegistry = new Map([["a1", live]]);
+    const revived = reviveOrphans(registry, [{ agentId: "a1", sessionPath: "/x", systemPromptPath: "/y", wsToolNames: [], toolGroup: "full-worker" }], {
+      fork: () => assert.fail("nothing should be re-armed for a record that was never replaced"),
+    });
+    assert.deepEqual(revived, []);
+    assert.equal(registry.get("a1"), live);
+  });
+
+  test("a throwing wiring callback still leaves the record registered and does not stop the rest", () => {
+    const registry: RpcAgentRegistry = new Map();
+    const orphans: PersistedOrphan[] = [
+      { agentId: "f1", sessionPath: "/x", systemPromptPath: "/y", wsToolNames: [], toolGroup: "full-worker", spawnRole: "fork" },
+      { agentId: "w1", sessionPath: "/x", systemPromptPath: "/y", wsToolNames: [], toolGroup: "full-worker", spawnRole: "worker" },
+    ];
+    const revived = reviveOrphans(registry, orphans, {
+      fork: () => {
+        throw new Error("wiring blew up");
+      },
+    });
+    assert.equal(revived.length, 2);
+    assert.deepEqual([...registry.keys()].sort(), ["f1", "w1"]);
   });
 });

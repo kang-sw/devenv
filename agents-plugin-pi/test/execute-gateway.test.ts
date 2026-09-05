@@ -352,6 +352,10 @@ describe("createApprovalRelay (260905: unconditional ws-agent-approval push)", (
       spawnRole: "execute-worker",
       streaming: false,
       running: true,
+      // A live client is what puts the record in the fan-in denominator M
+      // (review relay #1, I3: M is "not dormant/stopped/exited", not
+      // "running"). Never a real `RpcClient` — nothing here calls into it.
+      client: {} as RpcAgentRecord["client"],
       reportLog: [],
       pendingApproval: pending,
     };

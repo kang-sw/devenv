@@ -16,6 +16,15 @@
  * is a `ws-agent-advisory` push, the nudge routes through `promptAgent`, and
  * the idle-without-final judgment reads `reportLog` filtered by the last lead
  * prompt).
+ * Review relay #1 (C1/I1/I4) adds: `buildForkSpawnCtx` — the `ws-fork` spawn
+ * ctx, extracted so its (required, silently droppable) `pi` field is asserted
+ * rather than assumed — with a push-on-final check through the real
+ * `attachEventListener`; `armForkRoleWiring`, the shared question-routing +
+ * anti-bleed arm used by both a fresh spawn and the shutdown sidecar's orphan
+ * revival; and `deliverAs`/status-line assertions on the advisory pushes (the
+ * harness now captures `sendMessage`'s options argument, which it previously
+ * dropped).
+ *
  * NOT covered here — genuinely live-gate only, mirroring
  * test/execute-gateway.test.ts's own pure/IO split: `registerFork`'s tool
  * `execute()` body (needs a live `pi --mode rpc` session or a real
@@ -45,9 +54,12 @@ import {
   buildForkDirectiveText,
   buildForkInitialMessage,
   wireAntiBleedLoop,
+  armForkRoleWiring,
+  buildForkSpawnCtx,
 } from "../src/fork.ts";
-import { applyRpcEvent, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { applyRpcEvent, attachEventListener, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import type { BridgeHandle } from "../src/bridge.ts";
+import type { ExtensionAPI, RpcClient } from "@earendil-works/pi-coding-agent";
 
 describe("FORK_TOOL_NAME / FORK_EXCLUDED_TOOL_NAMES", () => {
   test("FORK_TOOL_NAME is the literal ws-fork", () => {
@@ -336,7 +348,10 @@ describe("buildForkInitialMessage (260905 structural anti-bleed frame)", () => {
  */
 describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2, 260905 push model)", () => {
   function harness() {
-    const pushes: Array<{ customType?: string; details?: Record<string, unknown> }> = [];
+    // Review relay #1 (I4): the OPTIONS object is captured too. Capturing only
+    // the message left every "(followUp)" assertion in this file unverified —
+    // a regression back to `deliverAs: "steer"` would have stayed green.
+    const pushes: Array<{ customType?: string; details?: Record<string, unknown>; deliverAs?: string; triggerTurn?: boolean }> = [];
     const prompts: string[] = [];
     let listener: ((evt: unknown) => void) | undefined;
     const record = {
@@ -361,14 +376,21 @@ describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2, 260
       },
     } as unknown as RpcAgentRecord;
     const pi = {
-      sendMessage(message: { customType?: string; details?: Record<string, unknown> }) {
-        pushes.push(message);
+      sendMessage(message: { customType?: string; details?: Record<string, unknown> }, options?: { deliverAs?: string; triggerTurn?: boolean }) {
+        pushes.push({ ...message, deliverAs: options?.deliverAs, triggerTurn: options?.triggerTurn });
       },
       sendUserMessage() {
         throw new Error("wireAntiBleedLoop must push custom messages, never a bare user message");
       },
     } as unknown as ExtensionAPI;
-    const registry: RpcAgentRegistry = new Map([["a1", record]]);
+    // Two extra live siblings so the status line this loop's registry argument
+    // produces is distinguishable from the `0 of 0` an empty/wrong registry
+    // would render (review relay #1, I4).
+    const registry: RpcAgentRegistry = new Map([
+      ["a1", record],
+      ["sibling-1", { ...record, agentId: "sibling-1", running: true, reportLog: [] } as RpcAgentRecord],
+      ["sibling-2", { ...record, agentId: "sibling-2", running: true, reportLog: [] } as RpcAgentRecord],
+    ]);
     return { pi, registry, record, pushes, prompts, emit: (evt: unknown) => listener?.(evt) };
   }
 
@@ -462,6 +484,49 @@ describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2, 260
     h.emit({ type: "agent_settled" });
     assert.deepEqual(advisories(h.pushes), ["acknowledge-and-return"]);
     assert.deepEqual(h.prompts, [], "a turn that did real work is not itself a bleed signal");
+    // I4: the deliverAs half of this test's own name, previously unasserted.
+    assert.equal(h.pushes[0].deliverAs, "followUp", "an advisory is never a steer under the push model");
+    assert.equal(h.pushes[0].triggerTurn, true, "an idle lead must act on it rather than leaving it queued");
+  });
+
+  test("I4: every advisory family is delivered followUp, never steer", () => {
+    const h = harness();
+    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, true);
+    // final-report-shape
+    h.emit({ type: "agent_start" });
+    h.emit({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "final", message: "all done" } });
+    // expects-commit
+    h.emit({
+      type: "tool_execution_start",
+      toolName: REPORT_TO_LEAD_TOOL_NAME,
+      args: { kind: "final", message: REQUIRED_FINAL_REPORT_FIELDS.map((f) => (f === "Commit" ? "Commit: none" : `${f}: something`)).join("\n") },
+    });
+    // stalled (nudge budget exhausted)
+    h.record.reportLog.length = 0;
+    for (let turn = 0; turn < MAX_FORK_NUDGES + 1; turn += 1) {
+      h.emit({ type: "agent_start" });
+      h.emit({ type: "agent_settled" });
+    }
+    assert.deepEqual(advisories(h.pushes), ["final-report-shape", "expects-commit", "stalled"]);
+    assert.deepEqual(
+      h.pushes.map((p) => p.deliverAs),
+      ["followUp", "followUp", "followUp"],
+    );
+  });
+
+  test("I4: an advisory's status line is computed from the registry actually threaded in, not an empty one", () => {
+    const h = harness();
+    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
+    h.emit({ type: "agent_start" });
+    h.emit({ type: "tool_execution_start", toolName: "bash", args: {} });
+    h.emit({ type: "agent_settled" });
+    assert.deepEqual(advisories(h.pushes), ["acknowledge-and-return"]);
+    assert.equal(
+      h.pushes[0].details?.status,
+      "2 of 3 delegated agents still running",
+      "the two live siblings are what distinguish the real shared registry from an empty stand-in",
+    );
+    assert.equal(h.pushes[0].details?.agent_id, "a1");
   });
 
   test("260905: exhausting the nudge budget pushes a `stalled` advisory carrying a transcript tail", () => {
@@ -561,5 +626,147 @@ describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2, 260
     assert.deepEqual(applyRpcEvent(h.record, questionReportEvent), {
       push: { family: "ws-agent-question", payload: { question: "Which of the two anchors should I use?" }, deliverAs: "steer" },
     });
+  });
+});
+
+/**
+ * Review relay #1, C1: `RpcSpawnCtx.pi` became a REQUIRED field with the push
+ * model and `registerFork`'s own ctx literal was the one call site that never
+ * got it — silently, since this package has no `tsc` step. The result was that
+ * every `ws-fork` child ran with `ctx.pi === undefined`, so `pushToLead`'s
+ * `if (!pi) return` guard dropped its `kind:"final"` report (the lead's only
+ * completion signal now that `ws-agent-wait` is gone), its settles, and its
+ * headless questions. These tests pin both halves: the ctx carries `pi`, and a
+ * record wired from that ctx actually pushes on a final.
+ */
+describe("buildForkSpawnCtx (the ws-fork push channel)", () => {
+  const bridge = { wsToolNames: ["ws__ferrule"], defaultSessionKeyRef: { current: "amber-otter-canyon" } } as unknown as BridgeHandle;
+  const pi = { sendMessage() {} } as unknown as ExtensionAPI;
+
+  test("carries the spawning session's own pi — without it a fork has no report channel at all", () => {
+    const ctx = buildForkSpawnCtx(pi, bridge, { cwd: "/repo", modelCatalogPath: "/repo/model-catalog.json" }, {
+      forkFrom: "/tmp/lead-session.jsonl",
+      explicitTools: "read,grep",
+    });
+    assert.equal(ctx.pi, pi, "a ws-fork spawn must push into the session that spawned it");
+  });
+
+  test("carries the fork spawn shape: --fork source, explicit tools, parent session key, and spawnRole fork", () => {
+    const ctx = buildForkSpawnCtx(pi, bridge, { cwd: "/repo", modelCatalogPath: "/repo/model-catalog.json" }, {
+      forkFrom: "/tmp/lead-session.jsonl",
+      explicitTools: "read,grep",
+      inheritModel: "openrouter/some-model",
+    });
+    assert.equal(ctx.forkFrom, "/tmp/lead-session.jsonl");
+    assert.equal(ctx.explicitTools, "read,grep");
+    assert.equal(ctx.parentSessionKey, "amber-otter-canyon");
+    assert.equal(ctx.spawnRole, "fork");
+    assert.equal(ctx.inheritModel, "openrouter/some-model");
+    assert.equal(ctx.cwd, "/repo");
+    assert.deepEqual([...ctx.wsToolNames], ["ws__ferrule"]);
+  });
+
+  test("C1: a record wired through that ctx's pi pushes ws-agent-report on the fork's own final", () => {
+    const sent: Array<{ customType?: string; details?: Record<string, unknown> }> = [];
+    const pushPi = { sendMessage: (m: { customType?: string; details?: Record<string, unknown> }) => void sent.push(m) } as unknown as ExtensionAPI;
+    const ctx = buildForkSpawnCtx(pushPi, bridge, { cwd: "/repo", modelCatalogPath: "/c.json" }, {
+      forkFrom: "/tmp/lead-session.jsonl",
+      explicitTools: "read",
+    });
+
+    let listener: ((evt: unknown) => void) | undefined;
+    const client = {
+      onEvent(l: (evt: unknown) => void) {
+        listener = l;
+        return () => {};
+      },
+      getState: async () => ({}),
+    } as unknown as RpcClient;
+    const record = {
+      agentId: "fork-1",
+      sessionPath: "/tmp/f.jsonl",
+      systemPromptPath: "/tmp/p.md",
+      wsToolNames: [],
+      toolGroup: "full-worker",
+      spawnRole: "fork",
+      streaming: false,
+      running: true,
+      reportLog: [],
+      client,
+    } as unknown as RpcAgentRecord;
+    const registry: RpcAgentRegistry = new Map([["fork-1", record]]);
+
+    // Exactly what spawnAgent does with the ctx it is handed.
+    attachEventListener(ctx.pi, registry, record, client);
+    listener?.({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "final", message: "Outcome: shipped" } });
+
+    assert.deepEqual(
+      sent.map((m) => m.customType),
+      ["ws-agent-report"],
+      "a fork's final is the lead's completion signal — dropping it strands the whole ws-fork surface",
+    );
+    assert.equal(sent[0].details?.report, "Outcome: shipped");
+    assert.equal(sent[0].details?.agent_id, "fork-1");
+  });
+});
+
+/**
+ * Review relay #1, I1: role wiring must be re-armable on a record the shutdown
+ * sidecar revived as DORMANT, not only on a freshly-spawned live one.
+ */
+describe("armForkRoleWiring (fresh spawn and sidecar revival)", () => {
+  const pi = { sendMessage() {} } as unknown as ExtensionAPI;
+
+  function dormantForkRecord(): RpcAgentRecord {
+    return {
+      agentId: "fork-1",
+      sessionPath: "/tmp/f.jsonl",
+      systemPromptPath: "/tmp/p.md",
+      wsToolNames: [],
+      toolGroup: "full-worker",
+      spawnRole: "fork",
+      streaming: false,
+      running: false,
+      reportLog: [],
+    } as unknown as RpcAgentRecord;
+  }
+
+  test("arms question routing on a dormant record — a revived fork's question still reaches the owner surface", () => {
+    const record = dormantForkRecord();
+    const asked: Array<{ agentId: string; message: string }> = [];
+    armForkRoleWiring(pi, new Map([["fork-1", record]]), record, (agentId, message) => {
+      asked.push({ agentId, message });
+      return "[ws] thread q1 — the owner answers this.";
+    });
+
+    const outcome = applyRpcEvent(record, {
+      type: "tool_execution_start",
+      toolName: REPORT_TO_LEAD_TOOL_NAME,
+      args: { kind: "question", message: "which anchor?" },
+    });
+    assert.deepEqual(asked, [{ agentId: "fork-1", message: "which anchor?" }]);
+    assert.deepEqual(outcome, {}, "§1: routed to the owner, never pushed at the lead as ws-agent-question");
+  });
+
+  test("defers the anti-bleed loop to onResume when the record is dormant, and arms it immediately when it is live", () => {
+    const dormant = dormantForkRecord();
+    armForkRoleWiring(pi, new Map([["fork-1", dormant]]), dormant);
+    assert.equal(typeof dormant.onResume, "function", "wireAntiBleedLoop needs a client the dormant record has not got yet");
+
+    let subscriptions = 0;
+    const client = {
+      onEvent() {
+        subscriptions += 1;
+        return () => {};
+      },
+    } as unknown as RpcClient;
+    dormant.client = client;
+    dormant.onResume?.(dormant);
+    assert.equal(subscriptions, 1, "the resume is what restores the loop");
+
+    const live = dormantForkRecord();
+    live.client = client;
+    armForkRoleWiring(pi, new Map([["fork-1", live]]), live);
+    assert.equal(subscriptions, 2, "an already-live record is wired straight away");
   });
 });

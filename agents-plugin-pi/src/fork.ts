@@ -561,6 +561,72 @@ export function wireAntiBleedLoop(
 }
 
 /**
+ * Builds the `spawnAgent` ctx for a `ws-fork` spawn.
+ *
+ * Extracted (review relay #1, C1) because this object silently lost its `pi`
+ * field: `RpcSpawnCtx.pi` became REQUIRED with the push model, and with no
+ * `tsc` step in this package the omission was invisible — every `ws-fork`
+ * child spawned without a push channel, so its `kind:"final"` report (the
+ * lead's only completion signal now that `ws-agent-wait` is gone), its
+ * settles, and its headless questions were all dropped by `pushToLead`'s
+ * `if (!pi) return` guard. Keeping the ctx construction in one exported,
+ * directly-asserted function is the cheap standing guard against that class of
+ * regression.
+ */
+export function buildForkSpawnCtx(
+  pi: ExtensionAPI,
+  bridge: BridgeHandle,
+  sessionCtx: ForkSessionCtx,
+  opts: { forkFrom: string; explicitTools: string; inheritModel?: string },
+): Parameters<typeof spawnAgent>[1] {
+  return {
+    // Load-bearing: the fork's whole report channel back to the lead.
+    pi,
+    cwd: sessionCtx.cwd,
+    inheritModel: opts.inheritModel,
+    wsToolNames: bridge.wsToolNames,
+    modelCatalogPath: sessionCtx.modelCatalogPath,
+    forkFrom: opts.forkFrom,
+    explicitTools: opts.explicitTools,
+    parentSessionKey: bridge.defaultSessionKeyRef.current,
+    spawnRole: "fork",
+  };
+}
+
+/**
+ * Arms the `fork`-role wiring on `record`: the question-routing hook (§1 keeps
+ * a fork-raised question on the owner surface) and the §4 anti-bleed loop.
+ *
+ * Two call sites, which is why it is a function rather than inline in
+ * `registerFork` (review relay #1, I1): the fresh `ws-fork` spawn, and the
+ * shutdown sidecar's orphan revival in `index.ts`, which re-registers a
+ * previous session's fork as a DORMANT record. `wireAntiBleedLoop` needs a
+ * live client, which a dormant record has none of, so this defers it to
+ * `RpcAgentRecord.onResume` (fired by `sendToAgent`'s dormant-resume branch
+ * once the fresh client exists) and additionally arms it immediately when the
+ * record is already live.
+ */
+export function armForkRoleWiring(
+  pi: ExtensionAPI,
+  rpcRegistry: RpcAgentRegistry,
+  record: RpcAgentRecord,
+  onQuestion?: ForkQuestionCallback,
+  expectsCommit = false,
+): void {
+  if (onQuestion) {
+    // 260904 Phase 2 (review relay #1 I6), revised 260905: armed at the
+    // report-handling site rather than on turn settle. A defined return
+    // (TUI only) means the owner surface consumed the question, so the
+    // `ws-agent-question` push to the lead is suppressed.
+    record.onQuestionReport = (rec, message) => onQuestion(rec.agentId, message);
+  }
+  record.onResume = (rec) => {
+    wireAntiBleedLoop(pi, rpcRegistry, rec.agentId, rec, expectsCommit);
+  };
+  if (record.client) wireAntiBleedLoop(pi, rpcRegistry, record.agentId, record, expectsCommit);
+}
+
+/**
  * Registers `ws-fork` (lead-facing; reachable only after
  * `index.ts`'s role-differentiated `addForkToolIfLead` active-tools step —
  * see that file's `session_start` wiring): spawns a `pi --fork <own session>`
@@ -626,15 +692,11 @@ export function registerFork(
 
       const result = await spawnAgent(
         rpcRegistry,
-        {
-          cwd: sessionCtx.cwd,
-          inheritModel: inheritModelFromToolCtx(toolCtx),
-          wsToolNames: bridge.wsToolNames,
-          modelCatalogPath: sessionCtx.modelCatalogPath,
+        buildForkSpawnCtx(pi, bridge, sessionCtx, {
           forkFrom,
           explicitTools: tools.join(","),
-          parentSessionKey: bridge.defaultSessionKeyRef.current,
-        },
+          inheritModel: inheritModelFromToolCtx(toolCtx),
+        }),
         {
           systemPromptPath: directivePath,
           prompt: buildForkInitialMessage(p.prompt),
@@ -643,16 +705,7 @@ export function registerFork(
       );
 
       const record = rpcRegistry.get(result.agent_id);
-      if (record) {
-        if (onQuestion) {
-          // 260904 Phase 2 (review relay #1 I6), revised 260905: armed at the
-          // report-handling site rather than on turn settle. A defined return
-          // (TUI only) means the owner surface consumed the question, so the
-          // `ws-agent-question` push to the lead is suppressed.
-          record.onQuestionReport = (_rec, message) => onQuestion(result.agent_id, message);
-        }
-        wireAntiBleedLoop(pi, rpcRegistry, result.agent_id, record, p.expects_commit ?? false);
-      }
+      if (record) armForkRoleWiring(pi, rpcRegistry, record, onQuestion, p.expects_commit ?? false);
 
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     },

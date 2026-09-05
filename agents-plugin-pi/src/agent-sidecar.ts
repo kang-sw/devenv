@@ -156,6 +156,54 @@ export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
 }
 
 /**
+ * Role-keyed wiring re-armed on a revived orphan. The callbacks themselves are
+ * closures the revival's caller owns (`index.ts` composes `fork.ts`'s
+ * `armForkRoleWiring` and `execute-gateway.ts`'s approval relay), so this
+ * module stays free of both imports and directly testable.
+ */
+export interface OrphanRoleWiring {
+  /** A `ws-fork`/discussion fork: question routing (§1) plus the §4 anti-bleed loop. */
+  fork?: (record: RpcAgentRecord) => void;
+  /** A `ws-execute` worker: the approval relay's `onApprovalPending`. */
+  executeWorker?: (record: RpcAgentRecord) => void;
+  /** A plain `ws-agent-spawn` worker: nothing role-specific to re-arm. */
+  worker?: (record: RpcAgentRecord) => void;
+}
+
+/**
+ * Puts each parsed orphan back on `registry` as a dormant record and re-arms
+ * its role wiring.
+ *
+ * Review relay #1 (I1): the re-arm is the load-bearing half and was missing —
+ * `spawnRole` was persisted and parsed but read only for the roll-call text,
+ * so a revived FORK came back as a plain record with no `onQuestionReport` and
+ * no anti-bleed loop. Its next `kind:"question"` would then be pushed straight
+ * at the lead as `ws-agent-question` instead of routing to the owner surface,
+ * a direct §1 violation.
+ *
+ * An id already present on the registry is left untouched (a live child always
+ * wins over a stale sidecar entry) and is not returned.
+ */
+export function reviveOrphans(registry: RpcAgentRegistry, orphans: PersistedOrphan[], wiring: OrphanRoleWiring = {}): RpcAgentRecord[] {
+  const revived: RpcAgentRecord[] = [];
+  for (const orphan of orphans) {
+    if (registry.has(orphan.agentId)) continue;
+    const record = rehydrateOrphanRecord(orphan);
+    registry.set(orphan.agentId, record);
+    const arm = orphan.spawnRole === "fork" ? wiring.fork : orphan.spawnRole === "execute-worker" ? wiring.executeWorker : wiring.worker;
+    try {
+      arm?.(record);
+    } catch {
+      // A wiring failure must not stop the remaining orphans from being
+      // announced — the record is still registered and revivable, just without
+      // its role hooks.
+    }
+    revived.push(record);
+  }
+  return revived;
+}
+
+/**
  * The `ws-agent-orphaned` push body. One message for the whole set (not one
  * per agent): a lead restarting after a crash wants a single roll-call it can
  * act on, not N interleaved notices.

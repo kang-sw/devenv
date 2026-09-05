@@ -692,6 +692,13 @@ export function handleForkRaisedQuestion(
   rpcRegistry: RpcAgentRegistry,
   agentId: string,
   message: string,
+  /**
+   * Review relay #1 (I2): only used to arm the respondent's final-report hook
+   * here (see below). Optional so the registration itself still works from a
+   * call site with no extension API — the thread is registered either way; the
+   * bind is then released by the other close paths.
+   */
+  pi?: ExtensionAPI,
 ): ThreadRecord {
   const now = nowIso();
   const record: ThreadRecord = {
@@ -715,6 +722,17 @@ export function handleForkRaisedQuestion(
     live.threadBound = true;
   }
   handle.threads.set(record.threadId, record);
+  // Review relay #1 (I2): arm the final-report hook HERE, not only from
+  // `ensureRespondent`. `ensureRespondent` runs on `/answer`, so before this
+  // fix the bind set above could only ever be released by an owner who
+  // actually opened the thread — and in headless (§8) there is no owner
+  // surface at all, so a fork-raised question latched `threadBound` forever:
+  // permanently outside N and M, settles permanently suppressed, anti-bleed
+  // permanently disarmed, and the lead's fan-in reading `0 of 0` while the
+  // fork was still working. Armed at registration, the fork's OWN
+  // `kind:"final"` closes the thread and releases the bind with no owner
+  // involvement (`handleRespondentFinalReport` -> `detachForkRaisedThread`).
+  if (pi) armFinalReportHook(pi, handle, rpcRegistry, record.threadId, agentId);
   persistThreads(handle);
   refreshPendingWidget(handle.ctxRef.current, handle);
   return record;
@@ -1016,9 +1034,11 @@ function attachedOverlayFor(threadId: string): OverlayHandle | undefined {
  * §6 injection, the stop, `dormant`, persistence and the widget refresh in
  * one place, with no summary turn. A `fork-raised` thread's final report
  * closes an attached overlay and detaches the thread (its lifecycle belongs
- * to `ws-fork`, and the lead reads the pushed report itself). Ignored unless
- * the thread is `open` — a late duplicate from an already-closed thread must
- * not re-inject.
+ * to `ws-fork`, and the lead reads the pushed report itself). A `lead-ask`
+ * thread is ignored unless it is `open` — a late duplicate from an
+ * already-closed thread must not re-inject — while a `fork-raised` thread also
+ * accepts `pending` (review relay #1 I2: the owner may never open it, and in
+ * headless never can, so this is that bind's only release path).
  *
  * 260905 return value = `spawner.ts`'s `onFinalReport` SUPPRESSION contract:
  * `true` means "consumed, do not push this report to the lead". Only a
@@ -1040,22 +1060,30 @@ export function handleRespondentFinalReport(
   message: string,
   overlay: OverlayHandle | undefined = attachedOverlayFor(thread.threadId),
 ): boolean {
+  if (thread.origin === "fork-raised") {
+    // Review relay #1 (I2): `"pending"` counts here, unlike for `lead-ask`. A
+    // fork-raised thread is bound from REGISTRATION, and in headless (§8) no
+    // owner surface will ever open it — so the fork's own final is the only
+    // event that can release the bind, and refusing it while the thread is
+    // merely pending is exactly the permanent latch this branch must not
+    // create. The fork answered itself or finished the task; either way the
+    // owner has nothing left to answer.
+    if (thread.status !== "open" && thread.status !== "pending") return false;
+    // Close the view if one is open, then run the thread close itself
+    // (previously only reachable via `/done`) so `threadBound` is released and
+    // the fork rejoins the lead's fan-in on the very report that ends the
+    // thread.
+    overlay?.closeWithSummary("");
+    detachForkRaisedThread(handle, rpcRegistry, thread);
+    return false;
+  }
   if (thread.status !== "open") return false;
-  if (thread.origin === "lead-ask") {
-    if (overlay) {
-      overlay.closeWithSummary(message);
-      return true;
-    }
-    closeThreadOnDone(pi, handle, rpcRegistry, thread, message);
+  if (overlay) {
+    overlay.closeWithSummary(message);
     return true;
   }
-  // fork-raised: close the view if one is open, then run the thread close
-  // itself (previously only reachable via `/done`) so `threadBound` is
-  // released and the fork rejoins the lead's fan-in on the very report that
-  // ends the thread.
-  overlay?.closeWithSummary("");
-  detachForkRaisedThread(handle, rpcRegistry, thread);
-  return false;
+  closeThreadOnDone(pi, handle, rpcRegistry, thread, message);
+  return true;
 }
 
 /**
@@ -1080,8 +1108,14 @@ function armFinalReportHook(pi: ExtensionAPI, handle: ThreadRegistryHandle, rpcR
  * `rpcRegistry`, spawning a discussion fork lazily when it has none.
  * Returns the respondent's agent_id, or `undefined` when it could not be
  * established (already reported to the owner via `notify`).
+ *
+ * Exported (review relay #1, test partition C5) so the `threadBound`-on-open
+ * and `threadBound`-on-REOPEN invariants have direct offline coverage on the
+ * two branches that need no subprocess — an already-live respondent and a
+ * rehydrate-from-`forkResume` reopen. The third branch (a fresh discussion
+ * fork) goes through `spawnAgent` and stays live-gate only.
  */
-async function ensureRespondent(
+export async function ensureRespondent(
   pi: ExtensionAPI,
   ctx: AskUiCtx & { sessionManager?: unknown },
   bridge: BridgeHandle,

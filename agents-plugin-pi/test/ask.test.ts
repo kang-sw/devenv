@@ -14,6 +14,14 @@
  * NO spawn"), so both are offline-testable in the `createApprovalRelay` mold
  * (test/execute-gateway.test.ts).
  *
+ * Review relay #1 (C4/C5, I2/I5/I6) adds the `threadBound` lifecycle, which
+ * was wired but barely asserted: bound from fork-raised REGISTRATION (before
+ * any overlay exists), set by `ensureRespondent` on a first open and on a
+ * post-restart reopen (now exported for that), and released by every close
+ * path — `/done`'s two functions, `ws-resolve` against a REAL registry, a lead
+ * stop, and the headless paths (the fork's own final on a never-opened thread,
+ * and the lead answering through `ws-agent-send`).
+ *
  * NOT covered here — genuinely live-gate only, mirroring test/fork.test.ts's
  * own pure/IO split: `registerThreadCommands`'s handlers, the lazy
  * discussion-fork spawn and the overlay attach (all need a live `pi` session
@@ -57,6 +65,7 @@ import {
   rehydrateForkRecord,
   getLeafEntryId,
   handleForkRaisedQuestion,
+  ensureRespondent,
   registerAsk,
   injectDiscussionSummary,
   closeThreadOnDone,
@@ -71,7 +80,15 @@ import {
 } from "../src/ask.ts";
 import type { OverlayHandle } from "../src/overlay-chat.ts";
 import { FORK_EXCLUDED_TOOL_NAMES } from "../src/fork.ts";
-import type { RpcAgentRecord, RpcAgentRegistry } from "../src/spawner.ts";
+import {
+  applyRpcEvent,
+  computeRunningStatusLine,
+  REPORT_TO_LEAD_TOOL_NAME,
+  sendToAgent,
+  stopAgent,
+  type RpcAgentRecord,
+  type RpcAgentRegistry,
+} from "../src/spawner.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 function thread(overrides: Partial<ThreadRecord> = {}): ThreadRecord {
@@ -598,6 +615,105 @@ describe("handleForkRaisedQuestion (Entry A meets Entry B)", () => {
     assert.equal(record.status, "pending");
   });
 
+  /** A live task fork on the shared registry, as `ws-fork` left it. */
+  function liveFork(): RpcAgentRecord {
+    return {
+      agentId: "agent-7",
+      sessionPath: "/tmp/s.jsonl",
+      systemPromptPath: "/tmp/p.md",
+      wsToolNames: [],
+      toolGroup: "full-worker",
+      spawnRole: "fork",
+      streaming: false,
+      running: true,
+      reportLog: [],
+      client: {},
+    } as unknown as RpcAgentRecord;
+  }
+
+  test("C4: the fork is threadBound from REGISTRATION — before the owner opens anything", () => {
+    const { handle, registry } = setup();
+    const live = liveFork();
+    registry.set("agent-7", live);
+
+    handleForkRaisedQuestion(handle, registry, "agent-7", "Should I rebase?");
+
+    assert.equal(live.threadBound, true, "the exchange belongs to the owner from the moment the fork raised it");
+    assert.equal(live.overlayAttached, undefined, "no VIEW is attached yet — the two flags have different lifetimes");
+    assert.equal(
+      computeRunningStatusLine(registry),
+      "0 of 0 delegated agents still running",
+      "a question-parked fork is outside both N and M",
+    );
+  });
+
+  test("I2 (headless): the fork's OWN final releases the bind even though no owner ever opened the thread", () => {
+    const { handle, registry } = setup();
+    // Headless (§8): `index.ts` still registers the thread, returns undefined
+    // (so the question is relayed to the lead), and there is no owner surface
+    // that could ever run /answer or /done on it.
+    const pi = { sendMessage: () => assert.fail("§1: a fork-raised close never injects a summary") } as unknown as ExtensionAPI;
+    const live = liveFork();
+    registry.set("agent-7", live);
+    const thread = handleForkRaisedQuestion(handle, registry, "agent-7", "Should I rebase?", pi);
+    assert.equal(live.threadBound, true);
+    assert.equal(thread.status, "pending", "the owner never opened it");
+
+    // The fork works it out and files its own completion.
+    const outcome = applyRpcEvent(live, {
+      type: "tool_execution_start",
+      toolName: REPORT_TO_LEAD_TOOL_NAME,
+      args: { kind: "final", message: "Outcome: rebased." },
+    });
+
+    assert.equal(live.threadBound, false, "without this the fork is outside N and M, and settle-suppressed, forever");
+    assert.equal(handle.threads.get(thread.threadId)!.status, "dormant", "the owner has nothing left to answer");
+    assert.deepEqual(
+      outcome,
+      { push: { family: "ws-agent-report", payload: { kind: "final", report: "Outcome: rebased." }, deliverAs: "followUp" } },
+      "a fork-raised final is still the lead's completion signal",
+    );
+  });
+
+  test("I2 (headless): the lead answering through ws-agent-send releases the bind at that moment", async () => {
+    const { handle, registry } = setup();
+    const live = liveFork();
+    const prompts: string[] = [];
+    (live as { client?: unknown }).client = { prompt: async (m: string) => void prompts.push(m) };
+    registry.set("agent-7", live);
+    handleForkRaisedQuestion(handle, registry, "agent-7", "Should I rebase?");
+    assert.equal(live.threadBound, true);
+
+    await sendToAgent(registry, { cwd: "/repo", leadSend: true }, "agent-7", "yes, rebase");
+
+    assert.equal(live.threadBound, false, "the lead took over the exchange — the fork rejoins the fan-in immediately");
+    assert.deepEqual(prompts, ["yes, rebase"]);
+  });
+
+  test("I2: the OWNER's own overlay message (no leadSend) leaves the bind exactly as it is", async () => {
+    const { handle, registry } = setup();
+    const live = liveFork();
+    (live as { client?: unknown }).client = { prompt: async () => {} };
+    registry.set("agent-7", live);
+    handleForkRaisedQuestion(handle, registry, "agent-7", "Should I rebase?");
+
+    await sendToAgent(registry, { cwd: "/repo" }, "agent-7", "what are the options?");
+
+    assert.equal(live.threadBound, true, "ask.ts's overlay channel must never unbind the thread it is driving");
+  });
+
+  test("I2: a lead stop is a close path too — stopAgent releases the bind", async () => {
+    const { handle, registry } = setup();
+    const live = liveFork();
+    (live as { client?: unknown }).client = { abort: async () => {}, stop: async () => {} };
+    registry.set("agent-7", live);
+    handleForkRaisedQuestion(handle, registry, "agent-7", "Should I rebase?");
+
+    await stopAgent(registry, "agent-7", undefined, { silent: true });
+
+    assert.equal(live.threadBound, false, "a stopped agent must not carry a latched bind into a later revival");
+  });
+
   test("registration persists to the registry file once a path is known", () => {
     const dir = mkdtempSync(join(tmpdir(), "ws-pi-ask-test-"));
     const path = join(dir, "session.jsonl.ws-threads.json");
@@ -634,8 +750,12 @@ describe("registerAsk (fake pi)", () => {
     const dir = mkdtempSync(join(tmpdir(), "ws-pi-ask-test-"));
     const path = join(dir, "session.jsonl.ws-threads.json");
     hydrateThreadRegistry(handle, path);
-    registerAsk(pi, handle);
-    return { tools, handle, path };
+    // Review relay #1 (I6): the shared registry is threaded in, as `index.ts`
+    // does. Without it `ws-resolve`'s `threadBound` release was only ever
+    // exercised in its always-false no-op-guard form.
+    const rpcRegistry: RpcAgentRegistry = new Map();
+    registerAsk(pi, handle, rpcRegistry);
+    return { tools, handle, path, rpcRegistry };
   }
 
   function uiCtx(mode: string) {
@@ -732,6 +852,40 @@ describe("registerAsk (fake pi)", () => {
     assert.equal(ui.widgets.at(-1)!.content, undefined, "resolving the last pending question clears the widget");
   });
 
+  test("I6: ws-resolve releases the respondent's threadBound on a REAL registry, not just the no-op guard", async () => {
+    const { tools, handle, rpcRegistry } = setup();
+    const ui = uiCtx("tui");
+    await callAsk(tools, { title: "t", question: "q" }, ui.ctx);
+    handle.threads.get("q1")!.respondentAgentId = "agent-7";
+    const respondent = {
+      agentId: "agent-7",
+      sessionPath: "/tmp/s.jsonl",
+      systemPromptPath: "/tmp/p.md",
+      wsToolNames: [],
+      toolGroup: "full-worker",
+      streaming: false,
+      running: true,
+      reportLog: [],
+      threadBound: true,
+      client: {},
+    } as unknown as RpcAgentRecord;
+    rpcRegistry.set("agent-7", respondent);
+
+    await tools.get(RESOLVE_TOOL_NAME)!.execute("call-2", { question_id: "q1" }, undefined, undefined, ui.ctx);
+
+    assert.equal(respondent.threadBound, false, "the thread is closed for good — the fork rejoins the lead's fan-in");
+    assert.equal(handle.threads.get("q1")!.status, "closed");
+  });
+
+  test("I6: ws-resolve on a never-opened thread (no respondent yet) is still just a close", async () => {
+    const { tools, handle, rpcRegistry } = setup();
+    const ui = uiCtx("tui");
+    await callAsk(tools, { title: "t", question: "q" }, ui.ctx);
+    await tools.get(RESOLVE_TOOL_NAME)!.execute("call-2", { question_id: "q1" }, undefined, undefined, ui.ctx);
+    assert.equal(handle.threads.get("q1")!.status, "closed");
+    assert.equal(rpcRegistry.size, 0);
+  });
+
   test("ws-resolve throws on an unknown question_id rather than silently closing nothing", async () => {
     const { tools } = setup();
     await assert.rejects(
@@ -815,6 +969,7 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
 
     assert.equal(record.forkResume?.sessionPath, "/tmp/s.jsonl", "captured while the record was still live");
     assert.equal(live.overlayAttached, false);
+    assert.equal(live.threadBound, false, "I5: the thread itself closed here, so the thread-lifetime bind is released too");
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(stops, ["agent-7"], "260903 ws-agent-stop semantics: the child process is actually stopped");
     assert.ok(registry.has("agent-7"), "stopAgent retains the entry — the thread stays rehydratable");
@@ -856,6 +1011,7 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     assert.deepEqual(stops, [], "stopping a live task fork would destroy the in-flight task the lead is still expecting a pushed final from");
     assert.ok(live.client, "the fork's client is untouched");
     assert.equal(live.overlayAttached, false, "the overlay is detached, so the anti-bleed loop is armed again");
+    assert.equal(live.threadBound, false, "review relay #1 (I5): the fork rejoins the lead's fan-in and its settles are audible again");
     assert.equal(record.status, "dormant", "dormant means reopenable while the fork lives");
     assert.ok(handle.threads.has("q1"));
     assert.equal(loadThreadRegistryFile(path)[0]?.status, "dormant", "the detach is persisted like every other transition");
@@ -1010,5 +1166,115 @@ describe("checkContextLength / buildForkQuestionLeadNotice", () => {
     // thread-summary message — /done never injects one for this origin.
     assert.match(notice, /Decisions:/);
     assert.ok(!/thread-summary/i.test(notice), notice);
+  });
+});
+
+/**
+ * Review relay #1, test partition C5: the ticket names "`threadBound` is set
+ * on a thread reopen as well as first open" as a verify item, and
+ * `ensureRespondent` is where every open path sets it (`openThread` calls it
+ * unconditionally). Only the fresh-discussion-fork branch needs a subprocess;
+ * the already-live and rehydrate-from-`forkResume` branches — first open and
+ * reopen respectively — are driven directly here.
+ */
+describe("ensureRespondent (threadBound on open and on reopen)", () => {
+  const bridge = { wsToolNames: [], defaultSessionKeyRef: { current: undefined } } as never;
+  const sessionCtx = { cwd: "/repo", modelCatalogPath: "/repo/model-catalog.json" };
+
+  function askCtx() {
+    const notices: Array<{ message: string; type?: string }> = [];
+    return {
+      ctx: { mode: "tui", ui: { notify: (message: string, type?: string) => notices.push({ message, type }) } } as never,
+      notices,
+    };
+  }
+
+  function openThreadRecord(): ThreadRecord {
+    return thread({ threadId: "q1", status: "open", origin: "fork-raised", respondentAgentId: "agent-7", question: "Which anchor?" });
+  }
+
+  test("first open of an already-live respondent binds the thread and arms the final-report hook", async () => {
+    const handle = createThreadRegistryHandle();
+    const record = openThreadRecord();
+    handle.threads.set(record.threadId, record);
+    const live = {
+      agentId: "agent-7",
+      sessionPath: "/tmp/s.jsonl",
+      systemPromptPath: "/tmp/p.md",
+      wsToolNames: [],
+      toolGroup: "full-worker",
+      streaming: false,
+      running: true,
+      reportLog: [],
+      client: {},
+    } as unknown as RpcAgentRecord;
+    const registry: RpcAgentRegistry = new Map([["agent-7", live]]);
+    const ui = askCtx();
+
+    const agentId = await ensureRespondent({} as never, ui.ctx, bridge, registry, handle, record, sessionCtx);
+
+    assert.equal(agentId, "agent-7");
+    assert.equal(live.threadBound, true);
+    assert.equal(typeof live.onFinalReport, "function", "the respondent can end its own thread");
+  });
+
+  test("REOPEN after a lead restart rehydrates the record from forkResume and binds it again", async () => {
+    const handle = createThreadRegistryHandle();
+    const record = openThreadRecord();
+    record.forkResume = {
+      sessionPath: "/tmp/s.jsonl",
+      systemPromptPath: "/tmp/p.md",
+      wsToolNames: [],
+      toolGroup: "full-worker",
+    } as never;
+    handle.threads.set(record.threadId, record);
+    // The in-memory registry is empty — exactly the post-restart state.
+    const registry: RpcAgentRegistry = new Map();
+    const ui = askCtx();
+
+    const agentId = await ensureRespondent({} as never, ui.ctx, bridge, registry, handle, record, sessionCtx);
+
+    assert.equal(agentId, "agent-7");
+    const revived = registry.get("agent-7")!;
+    assert.equal(revived.threadBound, true, "a reopen binds just like a first open");
+    assert.equal(revived.client, undefined, "still dormant — the relaunch happens on the owner's first message");
+    assert.equal(typeof revived.onFinalReport, "function");
+  });
+
+  test("a second open of the same live respondent re-binds rather than leaving a stale unbound record", async () => {
+    const handle = createThreadRegistryHandle();
+    const record = openThreadRecord();
+    handle.threads.set(record.threadId, record);
+    const live = {
+      agentId: "agent-7",
+      sessionPath: "/tmp/s.jsonl",
+      systemPromptPath: "/tmp/p.md",
+      wsToolNames: [],
+      toolGroup: "full-worker",
+      streaming: false,
+      running: true,
+      reportLog: [],
+      client: {},
+      // The state a /done left behind.
+      threadBound: false,
+    } as unknown as RpcAgentRecord;
+    const registry: RpcAgentRegistry = new Map([["agent-7", live]]);
+
+    await ensureRespondent({} as never, askCtx().ctx, bridge, registry, handle, record, sessionCtx);
+
+    assert.equal(live.threadBound, true);
+  });
+
+  test("a respondent that can no longer be resumed notifies the owner and returns undefined (no bind)", async () => {
+    const handle = createThreadRegistryHandle();
+    const record = openThreadRecord();
+    handle.threads.set(record.threadId, record);
+    const ui = askCtx();
+
+    const agentId = await ensureRespondent({} as never, ui.ctx, bridge, new Map(), handle, record, sessionCtx);
+
+    assert.equal(agentId, undefined);
+    assert.equal(ui.notices.length, 1);
+    assert.equal(ui.notices[0].type, "error");
   });
 });
