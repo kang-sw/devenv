@@ -262,6 +262,13 @@ that the only model.
   - *Per-family message renderer.* Pi's default custom-message rendering
     repeated the family (its `[customType]` label plus the content head), so
     the six families get a compact renderer in TUI; content is unchanged.
+  - *Status line counts only running children (owner, after the second live
+    run).* `N delegated agents still running`, with no `of M` and no id
+    suffix; still omitted when nothing is delegated. M only grew across a
+    session (idle children keep their process until stopped or exited), and
+    the ids duplicated `ws-agent-list`. `0 delegated agents still running`
+    remains the synthesis cue. Naming children readably (spawn-time title,
+    context-bearing list) is `260905-feat-ws-pi-agent-title-and-list-context`.
 
 ## Constraints
 
@@ -506,6 +513,19 @@ Live re-check still owner-run: expect `2 of 3: <ids>` → `1 of 3: <id>` →
 `0 of 3`, finals arriving at child turn end with `settled_reason`, a single
 header per message, and no orphan push after `/reload` when all workers are
 idle.
+
+#### Edition (5b9fa21c) - 2026-09-05
+
+Second live run (three workers) matched the first Edition's expectations:
+finals arrived at child turn end with `settled_reason: idle`, one header per
+message, status lines `2 of 3: <ids>` → `1 of 3: <id>` → `0 of 3`. Owner then
+decided the `of M` total and the id suffix were noise (see the last Edition
+decision under `## Decisions`). `5b9fa21c` changes the line to
+`N delegated agents still running`, keeps the omission rule, and updates the
+renderer classifier, the guide, and the tests (634/634). Follow-up for
+readable child names: `260905-feat-ws-pi-agent-title-and-list-context`.
+Orphan gating (`/reload` all idle → nothing; `/reload` with one running →
+one roll-call naming it) is still owner-run.
 
 ### Phase 2: Goal loop yields to live children
 
