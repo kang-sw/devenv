@@ -1925,6 +1925,10 @@ export async function sendToAgent(
       // longer keeps the child out of N.
       record.running = true;
       record.terminalThisTurn = false;
+      // Mirror `promptAgent`: a final stashed before this instruction answers
+      // the task being replaced, not the one just dispatched — a later settle
+      // must not flush it as the reply to the new message.
+      record.pendingFinal = undefined;
     } else {
       await promptAgent(record, live, message);
     }

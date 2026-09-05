@@ -248,9 +248,16 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // pi-tui cannot be loaded — see push-render.ts.
     if (!pushRenderersRegistered && ctx.mode === "tui" && isLeadOrFork(readSpawnRole(process.env))) {
       pushRenderersRegistered = true;
-      void registerPushMessageRenderers(pi).then((registered) => {
-        pushRenderersRegistered = registered;
-      });
+      void registerPushMessageRenderers(pi)
+        .then((registered) => {
+          pushRenderersRegistered = registered;
+        })
+        .catch(() => {
+          // A rejection (e.g. Pi's assertActive() during teardown) must not
+          // surface as an unhandled rejection nor pin the flag at `true`,
+          // which would permanently skip the retry on the next session_start.
+          pushRenderersRegistered = false;
+        });
     }
 
     handle = await startBridge(pi, {

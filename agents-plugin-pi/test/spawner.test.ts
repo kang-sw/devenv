@@ -1738,6 +1738,45 @@ describe("sendToAgent (live branches only — dormant auto-resume is live-gate o
     assert.deepEqual(calls, [["prompt", "next task"]]);
   });
 
+  test("260905 review relay: a live streaming send (followUp branch) clears a stale pendingFinal so the next settle is a settle, not the old final", async () => {
+    let listener: ((evt: unknown) => void) | undefined;
+    const calls: Array<[string, string]> = [];
+    const client = {
+      onEvent(l: (evt: unknown) => void) {
+        listener = l;
+        return () => {};
+      },
+      followUp: async (message: string) => void calls.push(["followUp", message]),
+      steer: async (message: string) => void calls.push(["steer", message]),
+      getState: async () => ({ sessionFile: "/tmp/s.jsonl" }),
+      getLastAssistantText: async () => "the last thing it said",
+    } as unknown as RpcClient;
+    const pi = fakePi();
+    const record = liveRpcRecord({ agentId: "a", running: true, streaming: true, client });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+    attachEventListener(pi.api, registry, record, client);
+
+    // The child files its answer to the OLD task but has not settled yet.
+    listener?.({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "final", message: "Outcome: old answer" } });
+    assert.equal(record.pendingFinal, "Outcome: old answer");
+
+    await sendToAgent(registry, { pi: pi.api, cwd: "/tmp" }, "a", "actually, do this instead");
+
+    assert.deepEqual(calls, [["followUp", "actually, do this instead"]], "the streaming branch, not promptAgent");
+    assert.equal(record.pendingFinal, undefined, "the stale final belongs to the replaced task");
+    assert.equal(record.running, true);
+    assert.equal(record.terminalThisTurn, false);
+
+    listener?.({ type: "agent_settled" });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(
+      pi.sent.map((s) => s.message.customType),
+      ["ws-agent-settled"],
+      "the settle after the new instruction must not flush the old final as its answer",
+    );
+  });
+
   test("260905: a rejecting live client is treated as an exited child (markAgentExited) and the error still propagates", async () => {
     const { client } = fakeRpcClient({
       prompt: async () => {
