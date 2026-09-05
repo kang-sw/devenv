@@ -490,8 +490,10 @@ visible before approval. Full `git status`, diffs, and env dumps are excluded as
 context bombs; the lead `deny`s to ask for more. The unset-catalog advisory
 cadence and the report channel are unchanged. Once the lead decides, the adapter
 relays the decision back to the paused worker, which resumes (or re-plans, on
-`deny`). This prompt-injection relay is the documented baseline; a harness-native
-pause/resume is a later optimization.
+`deny`). The pause is tool-level (the worker's gated exec blocks until a decision
+arrives) and needs no harness pause/resume capability; the injected turn is the
+notification path for a lead that is **not** blocked in a wait — see the
+suppression rule below for a waiting lead.
 
 The out-of-band injected turn assumes the lead reaches a turn boundary to receive
 it — the injected approval request is turn-boundary-only. That assumption breaks
@@ -513,6 +515,17 @@ edge-consumed flag (it is real state cleared by `ws-approve`), so a re-wait
 before approving correctly re-reports `approval-pending` rather than looping. A
 pending approval takes priority over a same-agent settle or buffered report at
 harvest time, and buffered reports are still drained alongside it.
+
+**Single-notification rule.** A pending-approval event notifies the lead through
+exactly one path. When the event woke a lead blocked in `ws-agent-wait`, the
+out-of-band injected approval turn is **suppressed** — the wait's
+`approval-pending` return already carries the request, and the injected copy
+would arrive at the next turn boundary as a stale duplicate. When no lead was
+waiting on that agent, the injected turn is emitted as before and remains the
+sole notification path. "Waiting" means a wait that is actually live at event
+time: a wait that has already timed out, or a multi-agent wait that another
+agent already won, no longer counts as waiting, so the injected turn still
+fires for those leads.
 
 ## Lead native tool-surface reshaping {#260905-pi-lead-tool-surface-execute-gateway}
 
