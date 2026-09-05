@@ -19,7 +19,7 @@
  *     runs from the source tree.
  *
  * Phase 2 adds the self-built delegation spawner (`ws-agent-spawn` /
- * `ws-agent-continue` / `ws-agent-wait` / `explore`, see src/spawner.ts) on
+ * `ws-agent-continue` / `explore`, see src/spawner.ts) on
  * top of the Phase 1 bridge. Phase 3 adds the adapter-owned model-catalog
  * curation data file (`model-catalog.json`, see src/model-catalog.ts):
  * tier-aware `--model` resolution in the spawner, an unset-tier advisory
@@ -118,7 +118,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { startBridge, type BridgeHandle } from "./bridge.ts";
-import { registerAgentTools, type AgentToolsHandle } from "./spawner.ts";
+import { pushToLead, registerAgentTools, type AgentToolsHandle, type RpcAgentRegistry } from "./spawner.ts";
+import { buildOrphanSummary, captureOrphans, readAndClearSidecar, rehydrateOrphanRecord, writeSidecar } from "./agent-sidecar.ts";
 import { buildDiscussKickoff } from "./discuss.ts";
 import { registerGoalLoop } from "./goal-loop.ts";
 import { resolveSkillsDir } from "./skills-dir.ts";
@@ -153,6 +154,15 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   let handle: BridgeHandle | undefined;
   let agentTools: AgentToolsHandle | undefined;
   const wsBlockRef: { current: string | undefined } = { current: undefined };
+  // 260905 (push model): the shared RPC registry, published as a mutable ref
+  // so `createApprovalRelay` — which must be constructed BEFORE
+  // `registerAgentTools` creates that registry — can still read it at push
+  // time for the fan-in status line every push carries.
+  const rpcRegistryRef: { current: RpcAgentRegistry | undefined } = { current: undefined };
+  // The lead's own session file, captured on session_start so the shutdown
+  // handler (which gets a ctx of its own, but only after teardown has begun)
+  // knows where to write the orphan sidecar.
+  let leadSessionFile: string | undefined;
   // 260904 Phase 2 (side-thread question surface): one thread registry per
   // extension instance. Its in-memory map is hydrated from (and written back
   // to) a sibling file of the lead's own session file on every session_start
@@ -213,8 +223,9 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // spawner.ts's registerAgentTools doc comment for why a
     // dormant-resumed execute-worker needs the SAME callback wired through
     // ws-agent-send's auto-resume branch, not just ws-execute's own spawn.
-    const onApprovalPending = createApprovalRelay(pi, { cwd: ctx.cwd });
+    const onApprovalPending = createApprovalRelay(pi, { cwd: ctx.cwd }, rpcRegistryRef);
     agentTools = registerAgentTools(pi, handle, { cwd: ctx.cwd, modelCatalogPath }, onApprovalPending);
+    rpcRegistryRef.current = agentTools.rpcRegistry;
     registerExecuteGateway(pi, handle, agentTools.rpcRegistry, {
       cwd: ctx.cwd,
       modelCatalogPath,
@@ -255,10 +266,40 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     threadHandle.ctxRef.current = ctx;
     if (isLeadOrFork(readSpawnRole(process.env))) {
       const sessionFile = ctx.sessionManager.getSessionFile();
-      if (sessionFile) hydrateThreadRegistry(threadHandle, threadRegistryPath(sessionFile));
+      leadSessionFile = sessionFile ?? undefined;
+      if (sessionFile) {
+        hydrateThreadRegistry(threadHandle, threadRegistryPath(sessionFile));
+        // 260905 orphan revival: a previous run of THIS lead session died (or
+        // was shut down) with children still live. Read-and-delete the
+        // sidecar, put each orphan back on the registry as a dormant record
+        // (ws-agent-send relaunches it from the same --session file), and tell
+        // the lead once. Runs before `registerAsk`/`registerThreadCommands`
+        // only incidentally — nothing below depends on it.
+        const orphans = readAndClearSidecar(sessionFile);
+        if (orphans.length > 0) {
+          for (const orphan of orphans) {
+            if (!agentTools.rpcRegistry.has(orphan.agentId)) {
+              agentTools.rpcRegistry.set(orphan.agentId, rehydrateOrphanRecord(orphan));
+            }
+          }
+          pushToLead(
+            pi,
+            agentTools.rpcRegistry,
+            undefined,
+            "ws-agent-orphaned",
+            {
+              count: orphans.length,
+              agents: buildOrphanSummary(orphans),
+              detail:
+                "A previous run of this session left these delegated agents behind. They are registered as dormant: ws-agent-send revives one from its own session file, ws-agent-transcript reads what it did, ws-agent-stop drops it.",
+            },
+            "followUp",
+          );
+        }
+      }
       refreshPendingWidget(ctx, threadHandle);
     }
-    registerAsk(pi, threadHandle);
+    registerAsk(pi, threadHandle, agentTools.rpcRegistry);
     registerThreadCommands(pi, handle, agentTools.rpcRegistry, threadHandle, { cwd: ctx.cwd, modelCatalogPath });
 
     // §1/§4: fill the ws system-prompt block only when startBridge actually
@@ -307,6 +348,14 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async (_event, _ctx) => {
+    // 260905: snapshot the still-live children BEFORE stopAll() clears their
+    // clients, so the next start of this session can announce them rather
+    // than losing them silently (see agent-sidecar.ts's header). Ordering is
+    // load-bearing: after stopAll() every record is dormant and
+    // `captureOrphans` would return nothing.
+    if (leadSessionFile && agentTools) {
+      writeSidecar(leadSessionFile, captureOrphans(agentTools.rpcRegistry));
+    }
     // Await graceful RPC teardown of any still-live spawned `pi` children
     // before tearing down the bridge connection they were dispatching ws__*
     // tool calls through (agentTools.stopAll() is itself async now that
@@ -314,6 +363,8 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // SIGTERM — see spawner.ts's AgentToolsHandle doc comment).
     await agentTools?.stopAll();
     agentTools = undefined;
+    rpcRegistryRef.current = undefined;
+    leadSessionFile = undefined;
     handle?.shutdown();
     handle = undefined;
   });

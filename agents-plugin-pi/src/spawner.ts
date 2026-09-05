@@ -1,19 +1,33 @@
 /**
  * Self-built delegation spawner: `ws-agent-spawn` / `ws-agent-send` /
- * `ws-agent-wait` / `ws-agent-list` / `ws-agent-stop` /
- * `ws-agent-transcript` / `ws-report-to-lead` / `explore`.
+ * `ws-agent-list` / `ws-agent-stop` / `ws-agent-transcript` /
+ * `ws-report-to-lead` / `explore`.
  *
  * Phase 1 replaces the one-shot `pi --mode json -p` worker spawner with
  * persistent `RpcClient` (`--mode rpc`) children: `ws-agent-spawn` starts a
  * long-lived `pi` subprocess wired through `@earendil-works/pi-coding-agent`'s
  * `RpcClient`, `ws-agent-send` drives it (prompt/followUp/steer, branching on
  * locally-tracked streaming state — see the doc comment on `sendToAgent`),
- * `ws-agent-wait` races `agent_settled` events across a set of agent ids,
- * `ws-agent-list` reports live/idle/dormant status, and `ws-agent-stop`
- * gracefully stops a child's process while keeping its `agent_id` ->
- * session/prompt/model mapping registered for a later auto-resume (D-C).
- * `ws-agent-continue` folds into `ws-agent-send` (an id with no live
- * `RpcClient` is "dormant," not a separate tool).
+ * `ws-agent-list` reports live/idle/dormant status plus each agent's last
+ * report time, and `ws-agent-stop` gracefully stops a child's process while
+ * keeping its `agent_id` -> session/prompt/model mapping registered for a
+ * later auto-resume (D-C). `ws-agent-continue` folds into `ws-agent-send` (an
+ * id with no live `RpcClient` is "dormant," not a separate tool).
+ *
+ * 260905 (`260905-feat-ws-pi-push-only-child-reports` Phase 1): there is no
+ * harvest tool any more. `ws-agent-wait` is DELETED outright (not deprecated),
+ * along with the whole buffered-report machinery it existed to drain
+ * (`pendingReports`/`idlePending`/`RpcAgentRecord.waiters`). Every child
+ * signal is instead PUSHED into the owning session the instant it happens, as
+ * a Pi custom message (`pi.sendMessage(..., {deliverAs, triggerTurn:true})`)
+ * in one of six families — `ws-agent-report`, `ws-agent-settled`,
+ * `ws-agent-question`, `ws-agent-approval`, `ws-agent-advisory`,
+ * `ws-agent-orphaned` — each carrying `details.agent_id`, its own payload, and
+ * a fan-in status line (`computeRunningStatusLine`) telling the lead how many
+ * delegated agents are still outstanding. The lead therefore ends its turn
+ * after dispatching work and is woken by the pushes themselves; it never
+ * blocks in a wait call, so an approval request can reach it mid-flight
+ * instead of queueing behind an unfinished wait turn.
  *
  * The spawn tool carries **no tier** parameter (D-A / Shape A): the caller
  * (the lead) passes an already-rendered `system_prompt_path` — this module
@@ -35,16 +49,15 @@
  * retained unchanged — zero on-disk agent-profile files, curation lives in
  * the in-memory `TOOL_GROUPS` table below plus `pi` CLI flags.
  *
- * Phase 2 adds a bounded per-agent child->lead report channel:
- * `ws-report-to-lead` (child-side, `full-worker`-only) is relayed into a
- * `RpcAgentRecord.pendingReports` FIFO (cap `REPORT_BUFFER_CAP`,
- * drop-oldest-with-marker on overflow) purely by observing the existing
+ * Phase 2 adds the per-agent child->lead report channel: `ws-report-to-lead`
+ * (child-side, `full-worker`-only) is observed purely from the existing
  * `RpcClient.onEvent()` stream's `tool_execution_start` events — no new
- * transport (see `applyRpcEvent`'s doc comment for the full trace).
- * `ws-agent-wait` now also wakes on a report and drains the full buffer FIFO
- * on any wake (`reason: "idle" | "report" | "approval-pending"`, D-D — see
- * `harvestWinner`; the approval-pending wake, 260905, hands a lead blocked in a
- * wait back to a turn boundary so it can ws-approve a stuck child then re-wait).
+ * transport (see `applyRpcEvent`'s doc comment for the full trace) — and, as
+ * of 260905, pushed straight to the lead rather than buffered. Only a bounded
+ * `RpcAgentRecord.reportLog` (kind + timestamp, no text) is retained, because
+ * two consumers need the history rather than the event: `fork.ts`'s
+ * `isIdleWithoutFinal` check (filtered to entries since the record's last LEAD
+ * prompt) and `ws-agent-list`'s last-report time.
  * `ws-agent-transcript` (lead-side, not in any `TOOL_GROUPS`) returns the
  * already-tracked `sessionPath` with no RPC round-trip.
  */
@@ -60,7 +73,7 @@ import { RpcClient, type RpcClientOptions } from "@earendil-works/pi-coding-agen
 import type { McpStdioClient, McpToolCallResult } from "./mcp-stdio-client.ts";
 import type { BridgeHandle } from "./bridge.ts";
 import { readModelCatalog, resolveAlias, type ModelCatalogConfig } from "./model-catalog.ts";
-import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV } from "./process-role.ts";
+import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readSpawnRole } from "./process-role.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers: tool-group resolution, terminal-stopReason classification,
@@ -421,17 +434,13 @@ function getPiInvocation(extraArgs: string[]): { command: string; args: string[]
 /**
  * Resolves every pending one-shot waiter on `record` (its `waiters` array is
  * drained and each resolved). Generic over any record shape carrying a
- * `waiters: Array<() => void>` field so it is reusable verbatim by both the
- * one-shot `explore` registry (`AgentRecord`) and the RPC-backed registry
- * (`RpcAgentRecord`) below.
+ * `waiters: Array<() => void>` field.
  *
- * Returns the number of waiters it resolved (the pre-drain length) — Phase 2
- * (260904, re-scoped 2026-09-05) uses this as the "did this event already
- * wake a lead blocked in `ws-agent-wait`" signal, so `applyRpcEvent`'s
- * gated-exec branch can tell `attachEventListener`/`createApprovalRelay`
- * whether the redundant approval steer is safe to skip. Existing call sites
- * that don't need the count keep working unchanged (return value simply
- * unused there).
+ * 260905: now used ONLY by the one-shot `explore` registry (`AgentRecord`),
+ * whose `waitForDone` genuinely blocks on child exit. The RPC-backed
+ * registry no longer has waiters at all — under the push model a lead never
+ * blocks on a child, so `RpcAgentRecord.waiters` and everything that drained
+ * it went away with `ws-agent-wait`.
  */
 function settleWaiters<T extends { waiters: Array<() => void> }>(record: T): number {
   const waiters = record.waiters;
@@ -628,7 +637,7 @@ export async function exploreLeaf(
 
 // ---------------------------------------------------------------------------
 // RPC-backed persistent-child engine (`ws-agent-spawn` / `ws-agent-send` /
-// `ws-agent-wait` / `ws-agent-list` / `ws-agent-stop`).
+// `ws-agent-list` / `ws-agent-stop` / `ws-agent-transcript`).
 // ---------------------------------------------------------------------------
 
 /**
@@ -672,19 +681,69 @@ export interface RpcAgentRecord {
    * `toolGroup`/`wsToolNames` exactly as before.
    */
   explicitTools?: string;
+  /**
+   * 260905: which spawn shape produced this record, recorded at spawn time
+   * rather than re-derived from `toolGroup`/`explicitTools` heuristics. Read
+   * by the shutdown sidecar (`agent-sidecar.ts`) so a `session_start` revival
+   * can re-arm the right role wiring for a resurrected orphan.
+   */
+  spawnRole?: SpawnAgentRole;
   /** `true` while an agent run is actively looping (between `agent_start` and `agent_settled`). */
   streaming: boolean;
-  /** Edge-consume flag: set by the `agent_settled` listener, cleared by whichever `ws-agent-wait` call harvests it first. */
-  idlePending: boolean;
-  waiters: Array<() => void>;
+  /**
+   * 260905 fan-in bookkeeping: `true` from the instant a prompt is ISSUED to
+   * this child (`promptAgent`, i.e. before any `agent_start` event can arrive)
+   * until it settles, is stopped, exits, or fails to spawn. Deliberately a
+   * DIFFERENT, narrower flag than `streaming` (which is event-confirmed and
+   * still the right signal for `ws-agent-list`'s display status): this one
+   * exists only to feed `computeRunningStatusLine`'s N/M arithmetic, where a
+   * just-dispatched child must already count as outstanding.
+   */
+  running: boolean;
+  /**
+   * 260905: `true` once this child has sent a `kind:"final"` or
+   * `kind:"question"` report during the current turn; cleared by the next
+   * `promptAgent`. Two uses: it removes the sender from N on its own push (a
+   * child that just filed its final is not "still running" from the lead's
+   * point of view), and it suppresses the redundant `ws-agent-settled`
+   * `reason:"idle"` push that would otherwise follow the terminal report a
+   * few milliseconds later.
+   */
+  terminalThisTurn?: boolean;
+  /**
+   * 260905: epoch-ms stamp of the last LEAD-issued prompt on this record
+   * (`promptAgent` with `isLeadPrompt` not `false`). An internal nudge
+   * (`fork.ts`'s anti-bleed loop) deliberately does NOT move it, so a stale
+   * pre-nudge `final` cannot be mistaken for a fresh one. `fork.ts` filters
+   * `reportLog` by it.
+   */
+  lastLeadPromptAt?: number;
+  /**
+   * 260905: `true` for the whole lifetime of an owner discussion thread bound
+   * to this agent — set by `ask.ts` on every open/reopen (`ensureRespondent`/
+   * `openThread`) and on fork-raised question registration
+   * (`handleForkRaisedQuestion`), cleared only when the thread actually closes
+   * (`/done`, the respondent's own fork final, `ws-resolve`). While set, this
+   * agent produces no settle/advisory push and is excluded from both N and M:
+   * the exchange belongs to the owner, and the lead is not part of it.
+   *
+   * Deliberately distinct from `overlayAttached`, which is per-VIEW (an owner
+   * pressing Esc clears the overlay while the thread stays bound).
+   */
+  threadBound?: boolean;
   /** Last-seen final assistant text, cached across `getLastAssistantText()` calls. */
   lastText?: string;
   /** Detaches the current `client.onEvent(...)` listener; re-armed on every (re)start. */
   unsubscribe?: () => void;
-  /** FIFO buffer of undrained `ws-report-to-lead` messages, capped at `REPORT_BUFFER_CAP` (drop-oldest). */
-  pendingReports: AgentReport[];
-  /** Count of reports dropped from `pendingReports` due to overflow since the last drain. */
-  reportsDropped: number;
+  /**
+   * 260905: bounded history of `ws-report-to-lead` observations on this
+   * record — kind and timestamp only, never the text (the text is pushed to
+   * the lead immediately and never retained). Replaces the deleted
+   * `pendingReports` FIFO as the input to `fork.ts`'s `isIdleWithoutFinal`
+   * and as `ws-agent-list`'s last-report time. Capped at `REPORT_LOG_CAP`
+   * (drop-oldest) so a long-lived chatty child cannot grow it without bound.
+   */
+  reportLog: AgentReportLogEntry[];
   /**
    * 260904 Phase 1: set by `applyRpcEvent` the instant a `tool_execution_start`
    * for `GATED_EXEC_TOOL_NAME` is observed on this record's child; cleared by
@@ -705,15 +764,14 @@ export interface RpcAgentRecord {
   pendingApproval?: { cmdId: string; command: string; rationale?: string; cwd?: string };
   /**
    * 260904 Phase 2 (side-thread question surface, review relay #1 C1): `true`
-   * while an owner overlay chat is attached to this agent (`ask.ts`'s
-   * `openThread` sets it, closing clears it). `fork.ts`'s anti-bleed loop
-   * consults it to suppress its nudge/fail-loud branches for the duration —
-   * an owner<->fork discussion is text-only by design, so §4's
-   * "turn ended with no tool call" bleed signal is meaningless there and would
-   * otherwise inject machine nudges into the owner's conversation and then
-   * declare a healthy fork failed to the lead. Lives on the record (rather
-   * than in a set inside `ask.ts`) so `fork.ts` can read it without importing
-   * `ask.ts` — that direction would cycle.
+   * while an owner overlay chat VIEW is attached to this agent (`ask.ts`'s
+   * `openThread` sets it, closing the view clears it).
+   *
+   * 260905 narrowed its role: the suppression `fork.ts`'s anti-bleed loop and
+   * the push model both need is the THREAD's lifetime, not the view's — an
+   * owner pressing Esc must not re-arm nudges on a still-open discussion — so
+   * both now read `threadBound`. This flag stays as the per-view record
+   * `ask.ts` keeps for its own overlay bookkeeping.
    */
   overlayAttached?: boolean;
   /**
@@ -725,10 +783,10 @@ export interface RpcAgentRecord {
    *
    * §1 says the lead is not involved in a fork-raised question and §8 scopes
    * the lead relay to headless, so in TUI mode `ask.ts` registers the thread
-   * on the owner surface and returns a short notice naming it — the lead's
-   * `ws-agent-wait` still returns normally (`reason: "report"`, unchanged
-   * semantics), it just no longer receives the question as something to
-   * relay and answer itself. Set by `fork.ts`'s `registerFork`; `spawner.ts`
+   * on the owner surface and returns that notice — which, since 260905, is
+   * read as a SUPPRESSION signal: a defined return means the question was
+   * consumed there and no `ws-agent-question` push reaches the lead at all.
+   * Set by `fork.ts`'s `registerFork`; `spawner.ts`
    * stays generic and supplies no implementation, mirroring
    * `onApprovalPending`'s existing callback-injection convention.
    */
@@ -736,35 +794,292 @@ export interface RpcAgentRecord {
   /**
    * 260904 Phase 2 (post-close dogfood, 2026-09-05): consulted by
    * `applyRpcEvent` the instant a `kind:"final"` report is observed on this
-   * record, BEFORE the report is enqueued exactly as before (the hook never
-   * rewrites or suppresses it — `ws-agent-wait` semantics are untouched). A
-   * throwing hook is swallowed. `ask.ts` sets it on a thread's respondent so
-   * a discussion fork can end its own thread by reporting the decision; the
-   * report text is then the thread summary. Same callback-injection
-   * convention as `onQuestionReport`/`onApprovalPending`: `spawner.ts`
-   * supplies no implementation.
+   * record. A throwing hook is swallowed. `ask.ts` sets it on a thread's
+   * respondent so a discussion fork can end its own thread by reporting the
+   * decision; the report text is then the thread summary.
+   *
+   * 260905 (push model) gives it a SUPPRESSION contract: returning `true`
+   * means the hook fully consumed the report, so no `ws-agent-report` push is
+   * emitted for it. `ask.ts` returns `true` for a `"lead-ask"` discussion
+   * thread — the owner's decision already reaches the lead as the
+   * `ws-thread-summary` custom message, and pushing the raw report too would
+   * deliver the same event twice — and falsy for a `"fork-raised"` task fork,
+   * whose final IS the completion signal the lead is meant to see.
    */
-  onFinalReport?: (record: RpcAgentRecord, message: string) => void;
+  onFinalReport?: (record: RpcAgentRecord, message: string) => boolean | void;
 }
 
 /**
- * A single buffered `ws-report-to-lead` message. `kind` is optional
- * (260904 Phase 1, side-thread fork ticket): `"question"`/`"final"`
- * disambiguate a fork's task-thread turn (see `fork.ts`'s anti-bleed
- * predicates); existing `full-worker`/`execute-worker` callers omit it
- * entirely and are unaffected (additive, not a breaking rename of
- * `pendingReports`/`WaitForAgentsResult.reports`'s element shape from a bare
- * `string` — every existing consumer reads `.message` instead of the string
- * directly).
+ * One observed `ws-report-to-lead` call on a record: its `kind` (260904's
+ * `"question"`/`"final"` fork disambiguation; absent for a plain
+ * `full-worker`/`execute-worker` progress update) and the epoch-ms time it was
+ * seen. The message text is deliberately NOT retained — under the push model
+ * it has already been delivered to the lead by the time this entry is
+ * appended.
  */
-export interface AgentReport {
-  message: string;
+export interface AgentReportLogEntry {
   kind?: "question" | "final";
+  at: number;
 }
 
 export type RpcAgentRegistry = Map<string, RpcAgentRecord>;
 
 export type AgentStatus = "running" | "idle" | "dormant";
+
+/**
+ * 260905: the three RPC-backed spawn shapes, recorded on the record at spawn
+ * time (`RpcAgentRecord.spawnRole`). Narrower than `process-role.ts`'s
+ * `SpawnRole` on purpose — that one describes the CHILD process's own view of
+ * itself (`worker`/`fork`/`explore`) as carried in its env, while this one is
+ * the PARENT's classification of what it spawned, and must distinguish an
+ * `execute-worker` (approval-gated) from a plain worker so the shutdown
+ * sidecar can re-arm the right wiring on revival.
+ */
+export type SpawnAgentRole = "worker" | "execute-worker" | "fork";
+
+/** Per-agent cap on retained `reportLog` entries (drop-oldest); see `RpcAgentRecord.reportLog`. */
+export const REPORT_LOG_CAP = 64;
+
+/**
+ * 260905: the six push families. Each is a Pi custom-message `customType`
+ * delivered by `pushToLead` into whichever session owns the child:
+ *
+ * - `ws-agent-report` — a `ws-report-to-lead` progress update or a
+ *   `kind:"final"` completion report.
+ * - `ws-agent-settled` — the child stopped producing: `reason` is `"idle"`
+ *   (settled with no terminal report this turn, carrying `last_message`),
+ *   `"stopped"` (an explicit `ws-agent-stop`), `"exited"` (its process died —
+ *   see the liveness probe), or `"spawn-failed"`.
+ * - `ws-agent-question` — a headless `kind:"question"` report the lead itself
+ *   must answer (in TUI the owner surface consumes it and nothing is pushed).
+ * - `ws-agent-approval` — an `execute-worker` is blocked on `ws-approve`.
+ * - `ws-agent-advisory` — `fork.ts`'s anti-bleed loop has something to say
+ *   about a fork's turn shape.
+ * - `ws-agent-orphaned` — children that outlived their lead session and are
+ *   revivable with `ws-agent-send` (shutdown sidecar, `agent-sidecar.ts`).
+ */
+export type PushFamily =
+  | "ws-agent-report"
+  | "ws-agent-settled"
+  | "ws-agent-question"
+  | "ws-agent-approval"
+  | "ws-agent-advisory"
+  | "ws-agent-orphaned";
+
+/** Pi's own `sendMessage` delivery axis (`ExtensionAPI.sendMessage`'s `options.deliverAs`). */
+export type PushDeliverAs = "steer" | "followUp" | "nextTurn";
+
+/**
+ * The push gate: only the process that OWNS the child pushes into its own
+ * session. `isLeadOrFork` is exactly that set — the host lead and a `fork`
+ * child (which runs its own `session_start` and may itself spawn workers) —
+ * while a `worker`/`explore` child pushes nothing (its own reports travel to
+ * ITS parent over the RPC event stream, not through a message into its own
+ * transcript). Exported as a pure predicate over an explicit env so the gate
+ * is unit-testable without mutating the real process env.
+ */
+export function shouldPushToLead(env: NodeJS.ProcessEnv = process.env): boolean {
+  return isLeadOrFork(readSpawnRole(env));
+}
+
+/**
+ * The fan-in status line every pushed message carries: `N of M ... still
+ * running`, computed fresh at push time over the shared registry.
+ *
+ * - M counts every registry member that is `running` (prompted and not yet
+ *   settled/stopped/exited) and NOT `threadBound`. Dormant, stopped, exited
+ *   and owner-bound agents are all excluded by those two flags; an `explore`
+ *   leaf is never in this registry at all (it has its own).
+ * - N is the M subset that has not yet filed a `final`/`question` this turn
+ *   (`terminalThisTurn`), so the agent whose own terminal report triggered
+ *   this very push has already removed itself — the last of three finals
+ *   reads `0 of 3`, which is the lead's cue that the fan-in is complete and
+ *   it can synthesize.
+ */
+export function computeRunningStatusLine(registry: RpcAgentRegistry | undefined): string {
+  let m = 0;
+  let n = 0;
+  for (const record of registry?.values() ?? []) {
+    if (record.threadBound || !record.running) continue;
+    m += 1;
+    if (!record.terminalThisTurn) n += 1;
+  }
+  return `${n} of ${m} delegated agent${m === 1 ? "" : "s"} still running`;
+}
+
+/**
+ * Renders a pushed message's human-readable `content`. `details` carries the
+ * same fields structurally (that is what a renderer/tool would read); this
+ * body is what the lead's model actually sees in its transcript, so it stays
+ * plain text with the status line last.
+ */
+export function buildPushContent(
+  family: PushFamily,
+  agentId: string | undefined,
+  payload: Record<string, unknown>,
+  status: string,
+): string {
+  const head = agentId ? `[${family}] agent ${agentId}` : `[${family}]`;
+  const body = Object.entries(payload)
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
+  return [head, ...body, status].join("\n");
+}
+
+/**
+ * Pushes one child signal into the owning session as a Pi custom message.
+ * This is the whole replacement for the deleted `ws-agent-wait` harvest: the
+ * lead ends its turn and is woken by these instead of blocking.
+ *
+ * `triggerTurn: true` is what makes an IDLE lead act on the signal at once
+ * rather than leaving it queued until the owner's next prompt (the same
+ * lesson `ask.ts`'s `injectDiscussionSummary` already encodes). `deliverAs`
+ * is per-family: `"steer"` for the two things a lead must act on mid-turn (a
+ * blocked approval, a headless question), `"followUp"` for everything else so
+ * a streaming lead finishes its current turn first and multiple signals queue
+ * in arrival order.
+ *
+ * Guarded on `shouldPushToLead` and on `pi` being present (a `sendToAgent`
+ * resume path may run without one), so a worker-role process and an
+ * un-threaded call site are both silent no-ops rather than errors.
+ */
+export function pushToLead(
+  pi: ExtensionAPI | undefined,
+  registry: RpcAgentRegistry | undefined,
+  record: RpcAgentRecord | undefined,
+  family: PushFamily,
+  payload: Record<string, unknown>,
+  deliverAs: PushDeliverAs,
+): void {
+  if (!pi || !shouldPushToLead()) return;
+  const status = computeRunningStatusLine(registry);
+  const details: Record<string, unknown> = record ? { agent_id: record.agentId, ...payload, status } : { ...payload, status };
+  try {
+    pi.sendMessage(
+      {
+        customType: family,
+        content: buildPushContent(family, record?.agentId, payload, status),
+        display: true,
+        details: details as never,
+      },
+      { deliverAs, triggerTurn: true },
+    );
+  } catch {
+    // Best effort: a push that cannot be delivered (a torn-down session, a
+    // host that rejected the message) must never turn a child's routine
+    // report into a crashed event listener.
+  }
+}
+
+/**
+ * Single funnel for every `client.prompt(...)` call in this adapter, so the
+ * fan-in bookkeeping cannot drift from the actual dispatches: marks the child
+ * `running` from the instant the prompt is ISSUED (not when `agent_start`
+ * arrives — a lead ending its turn immediately after dispatch must already
+ * see it counted), clears the previous turn's `terminalThisTurn`, and stamps
+ * `lastLeadPromptAt`.
+ *
+ * `isLeadPrompt: false` is passed by exactly one caller — `fork.ts`'s
+ * anti-bleed nudge — because an internal re-prompt is not a new task
+ * boundary: moving `lastLeadPromptAt` there would hide a stale
+ * idle-without-final from the very check the nudge exists to serve.
+ */
+export async function promptAgent(
+  record: RpcAgentRecord,
+  client: RpcClient,
+  message: string,
+  opts?: { isLeadPrompt?: boolean },
+): Promise<void> {
+  record.running = true;
+  record.terminalThisTurn = false;
+  if (opts?.isLeadPrompt !== false) {
+    record.lastLeadPromptAt = Date.now();
+  }
+  await client.prompt(message);
+}
+
+/**
+ * Transitions `record` to the dead/stopped resting state: no client, not
+ * running, not streaming, listener detached. Shared by the liveness probe,
+ * the in-flight-rejection paths, and `stopAgent`, so "what a stopped record
+ * looks like" is defined once.
+ */
+function clearLiveState(record: RpcAgentRecord): void {
+  record.unsubscribe?.();
+  record.unsubscribe = undefined;
+  record.client = undefined;
+  record.streaming = false;
+  record.running = false;
+}
+
+/**
+ * 260905 liveness probe. `RpcClient` exposes no public exit event, but its
+ * `send()` throws synchronously once the child process has exited (the
+ * bundled client sets `exitError` on the process's own `'exit'`/`'error'`),
+ * so a `getState()` round-trip is a reliable liveness test: if it rejects,
+ * the child is gone. Called on registry transitions (settle), on a periodic
+ * timer while anything is outstanding, and implicitly by every in-flight
+ * request rejection routed through `markAgentExited`.
+ *
+ * Returns `true` when the agent is (still) alive, `false` when this call
+ * transitioned it to exited and pushed `ws-agent-settled` `reason:"exited"`.
+ */
+export async function probeAgentLiveness(
+  pi: ExtensionAPI | undefined,
+  registry: RpcAgentRegistry | undefined,
+  record: RpcAgentRecord,
+): Promise<boolean> {
+  const client = record.client;
+  if (!client) return false;
+  try {
+    await client.getState();
+    return true;
+  } catch {
+    markAgentExited(pi, registry, record);
+    return false;
+  }
+}
+
+/**
+ * Records that `record`'s child process is gone and tells the lead once. Safe
+ * to call repeatedly — a record already cleared of its client pushes nothing
+ * a second time.
+ */
+export function markAgentExited(
+  pi: ExtensionAPI | undefined,
+  registry: RpcAgentRegistry | undefined,
+  record: RpcAgentRecord,
+): void {
+  if (!record.client) return;
+  clearLiveState(record);
+  pushToLead(pi, registry, record, "ws-agent-settled", { reason: "exited" }, "followUp");
+}
+
+/** Interval of the background liveness sweep, while at least one agent is outstanding. */
+export const LIVENESS_PROBE_INTERVAL_MS = 30_000;
+
+/**
+ * Starts the periodic half of the liveness probe: every
+ * `LIVENESS_PROBE_INTERVAL_MS`, probe each still-`running` record. Skipped
+ * entirely while nothing is outstanding (N === 0), so an idle lead pays
+ * nothing. `unref()`'d so a pending sweep never holds the process open.
+ * Returns the stopper (`AgentToolsHandle.stopAll` calls it).
+ */
+export function startLivenessProbe(
+  pi: ExtensionAPI,
+  registry: RpcAgentRegistry,
+  intervalMs: number = LIVENESS_PROBE_INTERVAL_MS,
+): () => void {
+  const timer = setInterval(() => {
+    for (const record of [...registry.values()]) {
+      if (record.running && record.client) {
+        void probeAgentLiveness(pi, registry, record);
+      }
+    }
+  }, intervalMs);
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
 
 export interface SpawnAgentParams {
   systemPromptPath: string;
@@ -774,6 +1089,13 @@ export interface SpawnAgentParams {
 }
 
 export interface RpcSpawnCtx {
+  /**
+   * 260905: the spawning session's own `ExtensionAPI`, needed so every signal
+   * this child produces can be PUSHED back into that session (`pushToLead`).
+   * Required rather than optional: a spawn with no push channel would leave
+   * its child's reports unreachable now that `ws-agent-wait` is gone.
+   */
+  pi: ExtensionAPI;
   cwd: string;
   /** `provider/id`, forwarded from the calling tool-execute ctx.model, or undefined to inherit pi's own default. */
   inheritModel?: string;
@@ -821,14 +1143,26 @@ export interface RpcSpawnCtx {
    * `createApprovalRelay` is the only real implementation. Never fires for a
    * non-`"execute-worker"` spawn in practice, since `GATED_EXEC_TOOL_NAME` is
    * reachable only from that group's `--tools` list.
+   *
+   * 260905 dropped the `info: {waiterWoken}` argument: with `ws-agent-wait`
+   * deleted there is no wait return for the relay to be a stale duplicate of,
+   * so it now pushes unconditionally.
    */
-  onApprovalPending?: (record: RpcAgentRecord, info: { waiterWoken: boolean }) => void;
+  onApprovalPending?: (record: RpcAgentRecord) => void;
+  /**
+   * 260905: recorded on the record as `spawnRole` so the shutdown sidecar can
+   * re-arm the right wiring on revival. Defaults to `"fork"` when `forkFrom`
+   * is set, `"execute-worker"` for that tool group, `"worker"` otherwise.
+   */
+  spawnRole?: SpawnAgentRole;
 }
 
 export interface RpcResumeCtx {
+  /** See `RpcSpawnCtx.pi`. Optional here only because a resume can be driven from a call site with no push channel of its own; pushes are then skipped rather than erroring. */
+  pi?: ExtensionAPI;
   cwd: string;
-  /** See `RpcSpawnCtx.onApprovalPending` (now told whether a lead-side waiter was already woken) — threaded through `sendToAgent`'s dormant-auto-resume branch so a resumed `execute-worker`'s approval relay keeps working. */
-  onApprovalPending?: (record: RpcAgentRecord, info: { waiterWoken: boolean }) => void;
+  /** See `RpcSpawnCtx.onApprovalPending` — threaded through `sendToAgent`'s dormant-auto-resume branch so a resumed `execute-worker`'s approval relay keeps working. */
+  onApprovalPending?: (record: RpcAgentRecord) => void;
 }
 
 /**
@@ -892,65 +1226,59 @@ export function buildRpcClientOptions(
   };
 }
 
-/** Per-agent bounded FIFO cap on undrained `ws-report-to-lead` messages (drop-oldest-with-marker on overflow). */
-export const REPORT_BUFFER_CAP = 32;
-
 /**
- * Pushes `message` (optionally tagged with `kind` — 260904 Phase 1's
- * `"question"`/`"final"` disambiguation for a fork's task-thread turn, see
- * `fork.ts`) onto `record.pendingReports`, drop-oldest once the buffer
- * exceeds `REPORT_BUFFER_CAP` (incrementing `reportsDropped` as a truncation
- * marker), then settles any pending waiters — a report is a wake condition
- * exactly like `agent_settled` (reused `settleWaiters`; draining an empty
- * `waiters` array when nobody is currently waiting is already a no-op).
- *
- * `kind` is omitted from the pushed entry entirely (not stored as an
- * explicit `undefined` property) when the caller omits it, so an existing
- * `full-worker`/`execute-worker` report round-trips as `{message}` — no
- * `kind` key at all — unchanged in shape from before this field existed.
- *
- * Stays `void` (review fix, relay #1 Minor): nothing reads a woken-count for
- * the `ws-report-to-lead` branch — `applyRpcEvent`'s report branch below
- * returns `{waiterWoken: false}` unconditionally rather than threading a
- * count through this exported `enqueue*` verb for zero current benefit.
+ * Appends one observed `ws-report-to-lead` call to `record.reportLog`,
+ * drop-oldest past `REPORT_LOG_CAP`. `kind` is omitted from the entry
+ * entirely (not stored as an explicit `undefined` property) when the caller
+ * omits it, so a plain progress update round-trips as `{at}`.
  */
-export function enqueueReport(record: RpcAgentRecord, message: string, kind?: "question" | "final"): void {
-  const entry: AgentReport = kind === undefined ? { message } : { message, kind };
-  record.pendingReports.push(entry);
-  if (record.pendingReports.length > REPORT_BUFFER_CAP) {
-    record.pendingReports.shift();
-    record.reportsDropped += 1;
+export function recordReport(record: RpcAgentRecord, kind: "question" | "final" | undefined, at: number = Date.now()): void {
+  record.reportLog.push(kind === undefined ? { at } : { kind, at });
+  if (record.reportLog.length > REPORT_LOG_CAP) {
+    record.reportLog.shift();
   }
-  settleWaiters(record);
 }
 
 /**
- * Edge-consume drain: swaps `record.pendingReports`/`reportsDropped` for
- * empty/zero and returns the previous values. Pure, mirrors the edge/consume
- * shape of the existing `idlePending` clear in `waitForAgents`.
+ * The report kinds `record` has filed since its last LEAD prompt — the input
+ * `fork.ts`'s `isIdleWithoutFinal` judges a turn against. Filtering by
+ * `lastLeadPromptAt` is what makes a `final` from a PREVIOUS task stop
+ * counting once the lead sends a new one; a nudge deliberately does not move
+ * that stamp (see `promptAgent`), so it cannot un-flag a stale record.
  */
-export function drainReports(record: RpcAgentRecord): { reports: AgentReport[]; reports_dropped: number } {
-  const reports = record.pendingReports;
-  const reports_dropped = record.reportsDropped;
-  record.pendingReports = [];
-  record.reportsDropped = 0;
-  return { reports, reports_dropped };
+export function reportKindsSinceLeadPrompt(record: RpcAgentRecord): Array<"question" | "final" | undefined> {
+  const since = record.lastLeadPromptAt ?? 0;
+  return record.reportLog.filter((entry) => entry.at >= since).map((entry) => entry.kind);
+}
+
+/**
+ * What `attachEventListener` must DO about an event `applyRpcEvent` just
+ * applied. 260905: `applyRpcEvent` stays pure (no `pi`, no `RpcClient` — the
+ * convention its existing plain-fake-record tests depend on), so it describes
+ * the push instead of performing it, and the IO glue one layer up
+ * (`attachEventListener`, which already read this return value to fire
+ * `onApprovalPending`) turns that description into a `pi.sendMessage`.
+ */
+export interface RpcEventOutcome {
+  /** A push to emit verbatim, already resolved against the record's suppression hooks. */
+  push?: { family: PushFamily; payload: Record<string, unknown>; deliverAs: PushDeliverAs };
+  /** `true` on `agent_settled`: the caller decides whether a `ws-agent-settled` push follows (it needs an async `harvestLastMessage`). */
+  settled?: boolean;
 }
 
 /**
  * Applies an `agent_start`/`agent_settled`/`ws-report-to-lead`-tool RPC event
- * onto `record`'s locally-tracked streaming/report state. Exported so the
- * idle-edge-consume waiter logic (`ws-agent-send`'s prompt-vs-followUp/steer
- * branch, `ws-agent-wait`'s `idlePending` fast path) and the report-relay
- * branch have direct unit coverage without a real `RpcClient` subprocess —
- * mirrors `handleAgentEvent`'s test-injection pattern for the one-shot
- * `explore` path above.
+ * onto `record`'s locally-tracked streaming/report state, and returns what the
+ * IO layer should push for it. Exported so the streaming/turn bookkeeping and
+ * the report-classification branch have direct unit coverage without a real
+ * `RpcClient` subprocess — mirrors `handleAgentEvent`'s test-injection pattern
+ * for the one-shot `explore` path above.
  *
  * The report branch matches a raw `tool_execution_start` event (the same
  * event Pi's own extension-hook fan-out emits the instant the LLM dispatches
  * a tool call, forwarded verbatim to the parent's `RpcClient.onEvent()` — see
  * the plan's Codebase Findings for the full trace) whose `toolName` is
- * `REPORT_TO_LEAD_TOOL_NAME`; `evt.args.message`, if a string, is enqueued
+ * `REPORT_TO_LEAD_TOOL_NAME`; `evt.args.message`, if a string, becomes a push
  * (260904 Phase 1, side-thread fork ticket: along with `evt.args.kind` when
  * it is exactly `"question"` or `"final"` — any other value, including a
  * malformed one, is dropped, same as an absent `kind`).
@@ -974,52 +1302,71 @@ export function drainReports(record: RpcAgentRecord): { reports: AgentReport[]; 
  *
  * 260904 Phase 2 (side-thread question surface, review relay #1 I6): a
  * `kind:"question"` report is passed through `record.onQuestionReport` (when
- * set) before being enqueued, so the owner-question surface can replace the
- * lead-visible text with a notice instead of the question itself. See that
- * field's doc comment; with no hook set this branch is unchanged.
+ * set) first. Under the push model that hook's existing return contract IS
+ * the suppression signal: a DEFINED return means a TUI owner surface has
+ * taken the question (§1 keeps the lead out of that exchange entirely), so
+ * nothing is pushed at all; `undefined` is the headless baseline and the
+ * question is pushed as `ws-agent-question`/`steer` for the lead to answer.
+ *
+ * `record.onFinalReport` gained the parallel contract: returning `true` means
+ * the hook fully consumed the report (a `lead-ask` discussion thread, whose
+ * decision reaches the lead as its own `ws-thread-summary` message), so no
+ * `ws-agent-report` push follows; falsy pushes it as normal.
  */
 export function applyRpcEvent(
   record: RpcAgentRecord,
   evt: { type?: string; toolName?: string; args?: unknown; toolCallId?: string },
-): { waiterWoken: boolean } {
+): RpcEventOutcome {
   if (evt.type === "agent_start") {
     record.streaming = true;
   } else if (evt.type === "agent_settled") {
     record.streaming = false;
-    record.idlePending = true;
-    const woken = settleWaiters(record);
-    return { waiterWoken: woken > 0 };
+    // The run is over: the child stops counting toward the fan-in the instant
+    // it settles, whatever the caller decides to push about it.
+    record.running = false;
+    return { settled: true };
   } else if (evt.type === "tool_execution_start" && evt.toolName === REPORT_TO_LEAD_TOOL_NAME) {
     const args = evt.args as { message?: unknown; kind?: unknown } | undefined;
     const message = args?.message;
     if (typeof message === "string") {
       const kind = args?.kind === "question" || args?.kind === "final" ? args.kind : undefined;
-      // 260904 Phase 2 (review relay #1 I6): a kind:"question" report may be
-      // rewritten for the lead by `record.onQuestionReport` — see that
-      // field's doc comment. Everything else about the enqueue (buffer cap,
-      // waiter wake, `kind` tagging) is unchanged, so `ws-agent-wait`'s own
-      // semantics stay exactly as Phase 1 left them. A throwing/absent hook
-      // falls back to the original message rather than dropping the report.
-      let relayed = message;
-      if (kind === "question" && record.onQuestionReport) {
-        try {
-          relayed = record.onQuestionReport(record, message) ?? message;
-        } catch {
-          relayed = message;
-        }
+      recordReport(record, kind);
+      if (kind !== undefined) {
+        // A terminal report for this turn: the sender is out of N from here
+        // on (including on its own push), and the `agent_settled` that
+        // follows must not emit a redundant idle-settle push.
+        record.terminalThisTurn = true;
       }
-      // A kind:"final" report is observed by `record.onFinalReport` (see that
-      // field's doc comment) and then enqueued unchanged — the hook is a
-      // side-channel, never a rewrite.
-      if (kind === "final" && record.onFinalReport) {
-        try {
-          record.onFinalReport(record, message);
-        } catch {
-          // swallowed: a hook failure must not drop the report
+
+      if (kind === "question") {
+        // A defined return means the owner surface consumed it (TUI); only
+        // the headless `undefined` case reaches the lead. A throwing hook
+        // degrades to the headless baseline rather than dropping the report.
+        let consumed = false;
+        if (record.onQuestionReport) {
+          try {
+            consumed = record.onQuestionReport(record, message) !== undefined;
+          } catch {
+            consumed = false;
+          }
         }
+        return consumed ? {} : { push: { family: "ws-agent-question", payload: { question: message }, deliverAs: "steer" } };
       }
-      enqueueReport(record, relayed, kind);
-      return { waiterWoken: false };
+
+      if (kind === "final") {
+        let consumed = false;
+        if (record.onFinalReport) {
+          try {
+            consumed = record.onFinalReport(record, message) === true;
+          } catch {
+            // swallowed: a hook failure must not drop the report
+            consumed = false;
+          }
+        }
+        return consumed ? {} : { push: { family: "ws-agent-report", payload: { kind: "final", report: message }, deliverAs: "followUp" } };
+      }
+
+      return { push: { family: "ws-agent-report", payload: { report: message }, deliverAs: "followUp" } };
     }
   } else if (evt.type === "tool_execution_start" && evt.toolName === GATED_EXEC_TOOL_NAME) {
     const args = evt.args as { command?: unknown; rationale?: unknown; cwd?: unknown } | undefined;
@@ -1031,51 +1378,66 @@ export function applyRpcEvent(
         rationale: typeof args?.rationale === "string" ? args.rationale : undefined,
         cwd: typeof args?.cwd === "string" ? args.cwd : undefined,
       };
-      // 260905 (approval-relay deadlock fix): wake any lead already blocked in
-      // ws-agent-wait on this agent, exactly like the agent_settled/report
-      // branches above. Without this the lead stays blocked, and the
-      // turn-boundary-only approval steer queues behind the unfinished wait
-      // turn — a circular deadlock broken only by the wait timeout.
-      //
-      // 260904 Phase 2 (re-scoped 2026-09-05): the woken-count is also
-      // returned as `waiterWoken` so `attachEventListener` can tell
-      // `createApprovalRelay` whether the lead already learned of this
-      // pending approval through the wait return, making the parallel
-      // `pi.sendUserMessage(..., {deliverAs:"steer"})` relay a stale
-      // duplicate that should be skipped.
-      const woken = settleWaiters(record);
-      return { waiterWoken: woken > 0 };
+      // The approval PUSH itself is `createApprovalRelay`'s job
+      // (execute-gateway.ts owns the §7 payload and the working-context
+      // scrape); this branch only records what is pending. Fired from
+      // `attachEventListener` below via `onApprovalPending`, unconditionally
+      // now that there is no wait return for it to duplicate.
+      return {};
     }
   }
-  return { waiterWoken: false };
+  return {};
 }
 
 /**
- * Wires `client.onEvent()` into `applyRpcEvent` for `record`, then — 260904
- * Phase 1 — additionally invokes `onApprovalPending(record, info)` right
- * after any `tool_execution_start` for `GATED_EXEC_TOOL_NAME` (the same event
+ * Wires `client.onEvent()` into `applyRpcEvent` for `record` and performs the
+ * IO half of whatever it reports: emits the described push, and — on
+ * `agent_settled` — decides whether an idle-settle push follows. It also,
+ * since 260904 Phase 1, invokes `onApprovalPending(record)` right after any
+ * `tool_execution_start` for `GATED_EXEC_TOOL_NAME` (the same event
  * `applyRpcEvent` just used to set `record.pendingApproval`). Kept as a
  * second, independent check on the raw event (not a "did pendingApproval
- * change" diff) so this function stays a thin, generic wire-up: `spawner.ts`
- * never imports `pi.sendUserMessage` itself (golden-rule-adjacent — keeps the
- * approval-relay's actual injection behavior owned entirely by
- * `execute-gateway.ts`, which supplies the real callback).
+ * change" diff) so the approval-relay's actual payload/injection behavior
+ * stays owned entirely by `execute-gateway.ts`, which supplies that callback.
  *
- * 260904 Phase 2 (re-scoped 2026-09-05): `applyRpcEvent`'s return value is
- * now captured and threaded through as `info.waiterWoken` — tells
- * `onApprovalPending` whether this same event already woke a lead blocked in
- * `ws-agent-wait`, so `createApprovalRelay` can skip the redundant steer.
+ * The settle push is deliberately conditional and asynchronous:
+ * - suppressed while `record.threadBound` — an owner discussion thread's turn
+ *   boundaries are not the lead's business (§1);
+ * - suppressed when `record.terminalThisTurn` — the child already filed a
+ *   `final`/`question` this turn, and that push IS the signal; a settle
+ *   notice milliseconds later would just be a duplicate wake;
+ * - otherwise pushed with `last_message` from `harvestLastMessage` (the
+ *   former `ws-agent-wait` `reason:"idle"` payload, reused verbatim), which
+ *   needs an RPC round-trip and so cannot happen inline in the listener.
+ *
+ * The settle is also a registry transition, so it doubles as a liveness-probe
+ * point (`probeAgentLiveness`) — a child that died mid-turn is reported as
+ * `exited` rather than silently going quiet.
  */
 function attachEventListener(
+  pi: ExtensionAPI | undefined,
+  registry: RpcAgentRegistry | undefined,
   record: RpcAgentRecord,
   client: RpcClient,
-  onApprovalPending?: (record: RpcAgentRecord, info: { waiterWoken: boolean }) => void,
+  onApprovalPending?: (record: RpcAgentRecord) => void,
 ): void {
   record.unsubscribe = client.onEvent((evt) => {
     const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string };
-    const { waiterWoken } = applyRpcEvent(record, e);
+    const outcome = applyRpcEvent(record, e);
+    if (outcome.push) {
+      pushToLead(pi, registry, record, outcome.push.family, outcome.push.payload, outcome.push.deliverAs);
+    }
+    if (outcome.settled) {
+      void (async () => {
+        if (!record.threadBound && !record.terminalThisTurn) {
+          const lastMessage = await harvestLastMessage(record);
+          pushToLead(pi, registry, record, "ws-agent-settled", { reason: "idle", last_message: lastMessage }, "followUp");
+        }
+        await probeAgentLiveness(pi, registry, record);
+      })();
+    }
     if (onApprovalPending && e.type === "tool_execution_start" && e.toolName === GATED_EXEC_TOOL_NAME) {
-      onApprovalPending(record, { waiterWoken });
+      onApprovalPending(record);
     }
   });
 }
@@ -1148,11 +1510,10 @@ export async function spawnAgent(registry: RpcAgentRegistry, ctx: RpcSpawnCtx, p
     wsToolNames: ctx.wsToolNames,
     toolGroup,
     explicitTools: ctx.explicitTools,
+    spawnRole: ctx.spawnRole ?? (ctx.forkFrom ? "fork" : toolGroup === "execute-worker" ? "execute-worker" : "worker"),
     streaming: false,
-    idlePending: false,
-    waiters: [],
-    pendingReports: [],
-    reportsDropped: 0,
+    running: false,
+    reportLog: [],
   };
   registry.set(agentId, record);
 
@@ -1161,22 +1522,40 @@ export async function spawnAgent(registry: RpcAgentRegistry, ctx: RpcSpawnCtx, p
   );
   record.client = client;
 
-  await client.start();
+  // 260905: the record is registered BEFORE `start()`, so a failure anywhere
+  // in the launch sequence would otherwise leave a half-registered zombie the
+  // lead's fan-in count keeps waiting on. Push `spawn-failed` and re-throw
+  // unchanged — the thrown error still surfaces to the `ws-agent-spawn` caller
+  // exactly as before; the push is additive, for the M/N bookkeeping.
+  try {
+    await client.start();
 
-  if (ctx.forkFrom) {
-    const state = await client.getState();
-    const forkedSessionFile = state?.sessionFile;
-    if (!forkedSessionFile) {
-      throw new Error(
-        "ws-pi-agent: fork spawn: RpcClient.getState() returned no sessionFile — cannot determine the forked session's actual path",
-      );
+    if (ctx.forkFrom) {
+      const state = await client.getState();
+      const forkedSessionFile = state?.sessionFile;
+      if (!forkedSessionFile) {
+        throw new Error(
+          "ws-pi-agent: fork spawn: RpcClient.getState() returned no sessionFile — cannot determine the forked session's actual path",
+        );
+      }
+      record.sessionPath = forkedSessionFile;
     }
-    record.sessionPath = forkedSessionFile;
-  }
 
-  await applyModelEffort(client, params.modelEffort);
-  attachEventListener(record, client, ctx.onApprovalPending);
-  await client.prompt(params.prompt);
+    await applyModelEffort(client, params.modelEffort);
+    attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
+    await promptAgent(record, client, params.prompt);
+  } catch (err) {
+    clearLiveState(record);
+    pushToLead(
+      ctx.pi,
+      registry,
+      record,
+      "ws-agent-settled",
+      { reason: "spawn-failed", error: err instanceof Error ? err.message : String(err) },
+      "followUp",
+    );
+    throw err;
+  }
 
   return { agent_id: agentId };
 }
@@ -1192,27 +1571,27 @@ export async function spawnAgent(registry: RpcAgentRegistry, ctx: RpcSpawnCtx, p
  * that is never delivered. So:
  *
  * - Dormant (`!record.client`): rebuild a fresh `RpcClient` against the
- *   SAME cached session/prompt/model (auto-resume, D-C), clear any latched
- *   `idlePending` from a prior run, then deliver via `prompt()` regardless
- *   of `interrupt` — nothing is running yet to interrupt or queue behind.
- *   This is also where D-C's "auto-resumed child on the SAME ws
- *   session_key" lineage falls out for free: the reused `systemPromptPath`
- *   already has any session key spliced in by the lead's own prior
- *   `playbook.render` call, and passing it unchanged via
+ *   SAME cached session/prompt/model (auto-resume, D-C), then deliver via
+ *   `promptAgent()` regardless of `interrupt` — nothing is running yet to
+ *   interrupt or queue behind. This is also where D-C's "auto-resumed child
+ *   on the SAME ws session_key" lineage falls out for free: the reused
+ *   `systemPromptPath` already has any session key spliced in by the lead's
+ *   own prior `playbook.render` call, and passing it unchanged via
  *   `--append-system-prompt` on every relaunch never re-derives or
- *   duplicates it.
+ *   duplicates it. This branch is also how an ORPHANED child from a previous
+ *   lead session is revived (260905's shutdown sidecar re-registers it as a
+ *   plain dormant record; `ws-agent-send` needs no special case for it).
  * - Live and idle (including the instant after this function's own
- *   auto-resume branch, or right after `spawnAgent`'s initial `prompt()`
- *   settles): also `prompt()`, regardless of `interrupt` — and likewise
- *   clears `idlePending` first (D-D): the PREVIOUS run's completion left it
- *   latched, and leaving it set would let a `ws-agent-wait` racing this new
- *   run busy-return the stale prior finish/last-message instead of waiting
- *   for the run this send just started.
+ *   auto-resume branch, or right after `spawnAgent`'s initial prompt
+ *   settles): also `promptAgent()`, regardless of `interrupt`.
  * - Live and streaming: `interrupt ? steer() : followUp()`, per the
  *   ticket's literal flag semantics — this is the one case where an active
- *   run actually exists for the queue to drain into. `idlePending` is
- *   already `false` here (the agent never settled since it started
- *   streaming), so there is nothing to clear.
+ *   run actually exists for the queue to drain into.
+ *
+ * 260905: every delivery goes through `promptAgent` (or re-marks `running`
+ * for the steer/followUp branch), so the fan-in count reflects a send the
+ * moment it is issued; and any rejection from the live client is treated as
+ * the child having exited (`markAgentExited`) before being re-thrown.
  */
 export async function sendToAgent(
   registry: RpcAgentRegistry,
@@ -1244,79 +1623,46 @@ export async function sendToAgent(
       ),
     );
     record.client = client;
-    record.idlePending = false;
     await client.start();
     await applyModelEffort(client, record.modelEffort);
-    attachEventListener(record, client, ctx.onApprovalPending);
-    await client.prompt(message);
+    attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
+    await promptAgent(record, client, message);
     return { agent_id: agentId };
   }
 
-  if (record.streaming) {
-    if (interrupt) {
-      await record.client.steer(message);
+  const live = record.client;
+  try {
+    if (record.streaming) {
+      if (interrupt) {
+        await live.steer(message);
+      } else {
+        await live.followUp(message);
+      }
+      // A steer/followUp joins the run already in flight, so the child is
+      // outstanding again from the lead's point of view even though no fresh
+      // prompt was issued.
+      record.running = true;
     } else {
-      await record.client.followUp(message);
+      await promptAgent(record, live, message);
     }
-  } else {
-    // Live-idle: starting a fresh run here must clear any latched
-    // idlePending from the PREVIOUS run before prompt() fires — otherwise a
-    // ws-agent-wait racing this new run would busy-return with the stale
-    // finished/last_message from before this send (D-D violation). Mirrors
-    // the dormant-resume branch above, which clears it for the same reason.
-    record.idlePending = false;
-    await record.client.prompt(message);
+  } catch (err) {
+    // 260905: an in-flight request rejection is the other deterministic
+    // "the child is gone" signal (`RpcClient.send()` throws once the process
+    // has exited) — treat it exactly like a failed liveness probe so the lead
+    // is told rather than left counting a dead agent, then re-throw so the
+    // caller still sees the failure.
+    markAgentExited(ctx.pi, registry, record);
+    throw err;
   }
   return { agent_id: agentId };
 }
 
 /**
- * Pure selection helper: the first entry (in caller-given order) whose
- * `idlePending` edge-consume flag is already latched, or `undefined` when
- * none is. Split out of `waitForAgents` so the "already-settled since the
- * last wait/send" fast path is directly unit-testable against fake records
- * with no async plumbing or real `RpcClient` involved.
+ * The agent's last assistant text, refreshed over RPC when the child is still
+ * live and falling back to the cached `lastText` otherwise. This is the
+ * former `ws-agent-wait` `reason:"idle"` payload, reused verbatim as the
+ * `last_message` field of the `ws-agent-settled` push.
  */
-export function firstIdlePendingAgentId(records: ReadonlyArray<{ id: string; record: RpcAgentRecord }>): string | undefined {
-  return records.find(({ record }) => record.idlePending)?.id;
-}
-
-/**
- * Pure selection helper mirroring `firstIdlePendingAgentId`: the first entry
- * (in caller-given order) whose `pendingApproval` is set, or `undefined` when
- * none is (260905). Unlike `idlePending` this is not an edge-consume flag —
- * it is real state cleared by `ws-approve`, so a re-wait before approving
- * correctly re-selects the same agent.
- */
-export function firstPendingApprovalAgentId(records: ReadonlyArray<{ id: string; record: RpcAgentRecord }>): string | undefined {
-  return records.find(({ record }) => record.pendingApproval)?.id;
-}
-
-/**
- * Pure selection helper mirroring `firstIdlePendingAgentId`'s shape: the
- * first entry (in caller-given order) with at least one undrained buffered
- * report, or `undefined` when none has any. A dormant record can still carry
- * an undrained report from before it stopped, so this must be checked
- * independently of `client`/`idlePending` state.
- */
-export function firstReportPendingAgentId(records: ReadonlyArray<{ id: string; record: RpcAgentRecord }>): string | undefined {
-  return records.find(({ record }) => record.pendingReports.length > 0)?.id;
-}
-
-export interface WaitForAgentsResult {
-  agent_id?: string;
-  last_message?: string;
-  /** Present only on a non-timeout harvest: "idle" when the agent settled, "report" when only a buffered report woke the wait, "approval-pending" when the agent is blocked awaiting a lead approval (260905). */
-  reason?: "idle" | "report" | "approval-pending";
-  /** Present only on reason:"approval-pending": the gated command the agent is blocked on. The lead calls ws-approve with this cmd_id, then re-waits to harvest the eventual report. */
-  pending_approval?: { cmd_id: string; command: string; rationale?: string };
-  /** Buffered `ws-report-to-lead` messages drained for the woken agent, FIFO order. Always present ([] when nothing was harvested, e.g. on timeout). */
-  reports: AgentReport[];
-  /** Count of reports dropped from the buffer due to overflow since the last drain. Always present (0 when nothing was harvested). */
-  reports_dropped: number;
-  timed_out: boolean;
-}
-
 async function harvestLastMessage(record: RpcAgentRecord): Promise<string | undefined> {
   if (!record.client) return record.lastText;
   try {
@@ -1331,167 +1677,27 @@ async function harvestLastMessage(record: RpcAgentRecord): Promise<string | unde
 }
 
 /**
- * Harvests a woken/already-pending winner: idle takes priority over a
- * same-agent buffered report when both are true at harvest time (an
- * implementation-level tie-break, not a ticket ambiguity — see the plan) —
- * `reason: "idle"` is reported, but any buffered reports are still drained
- * and returned either way (D-D: a waking lead sees the full report queue
- * regardless of what triggered the wake).
- */
-async function harvestWinner(record: RpcAgentRecord, agentId: string): Promise<WaitForAgentsResult> {
-  // 260905: a pending approval takes priority — the agent is actively blocked
-  // waiting for the lead, so surface it first so the lead can ws-approve and
-  // unblock it. Not edge-consumed: record.pendingApproval is cleared by
-  // ws-approve itself (execute-gateway.ts), so a re-wait before approving
-  // correctly re-reports approval-pending rather than looping forever. Reports
-  // are still drained (mirroring the idle branch) so a report buffered before
-  // the gate is not stranded. An agent cannot be simultaneously mid-gated-call
-  // and idlePending, so this never races the idle branch on the same record.
-  if (record.pendingApproval) {
-    const { cmdId, command, rationale } = record.pendingApproval;
-    const drained = drainReports(record);
-    return {
-      agent_id: agentId,
-      reason: "approval-pending",
-      pending_approval: { cmd_id: cmdId, command, rationale },
-      ...drained,
-      timed_out: false,
-    };
-  }
-  if (record.idlePending) {
-    record.idlePending = false;
-    const drained = drainReports(record);
-    return { agent_id: agentId, reason: "idle", last_message: await harvestLastMessage(record), ...drained, timed_out: false };
-  }
-  const drained = drainReports(record);
-  return { agent_id: agentId, reason: "report", ...drained, timed_out: false };
-}
-
-/**
- * Races `agentIds` for the first to settle (`agent_settled`) or report
- * (`ws-report-to-lead`), NEVER killing a still-running agent on timeout — a
- * timed-out wait simply leaves every agent registered exactly as it was for
- * a later wait/send. Drops the old `policy: "any"|"all"` axis entirely
- * (Phase 1's `ws-agent-wait(agent_ids[], timeout?)` signature always behaves
- * as first-finisher).
- *
- * An agent whose `idlePending` flag is already latched at call time (it
- * settled since the last wait/send) is harvested immediately with no race
- * at all — see `firstIdlePendingAgentId`. Likewise, an agent already holding
- * an undrained buffered report (even a dormant one — see
- * `firstReportPendingAgentId`) is harvested immediately with `reason:
- * "report"`.
- */
-export async function waitForAgents(registry: RpcAgentRegistry, agentIds: string[], timeoutMs?: number): Promise<WaitForAgentsResult> {
-  if (agentIds.length === 0) {
-    // Racing zero promises would never settle — an empty agentIds with no
-    // timeout would otherwise hang ws-agent-wait forever. Fail fast instead.
-    throw new Error('ws-pi-agent: waitForAgents requires at least one agentId in "agent_ids"');
-  }
-
-  const records = agentIds.map((id) => {
-    const record = registry.get(id);
-    if (!record) {
-      throw new Error(`ws-pi-agent: unknown agentId "${id}"`);
-    }
-    return { id, record };
-  });
-
-  // 260905: an agent already blocked on a lead approval is the most urgent
-  // fast path — it is holding up a child and (unlike idle/report) cannot make
-  // any progress until the lead acts. Checked before idle/report; the three
-  // states never co-occur on one record (a mid-gated-call agent is neither
-  // settled nor, for that call, reporting), so ordering only picks among
-  // distinct agents, and unblocking a stuck child first is the right choice.
-  const alreadyPendingApproval = firstPendingApprovalAgentId(records);
-  if (alreadyPendingApproval) {
-    return harvestWinner(registry.get(alreadyPendingApproval) as RpcAgentRecord, alreadyPendingApproval);
-  }
-
-  const alreadyIdle = firstIdlePendingAgentId(records);
-  if (alreadyIdle) {
-    return harvestWinner(registry.get(alreadyIdle) as RpcAgentRecord, alreadyIdle);
-  }
-
-  // A dormant record can still carry an undrained report from before it
-  // stopped; this must resolve before the `allDormant` hang-guard below
-  // would otherwise (incorrectly) refuse the wait.
-  const alreadyReported = firstReportPendingAgentId(records);
-  if (alreadyReported) {
-    return harvestWinner(registry.get(alreadyReported) as RpcAgentRecord, alreadyReported);
-  }
-
-  // Guard: every listed record is dormant (no live client, per `stopAgent`)
-  // and none has `idlePending` latched (the fast path above already would
-  // have returned if so) — with no `timeoutMs`, nothing will EVER fire an
-  // `agent_settled` event to resolve the race below, so this would hang
-  // forever. Fail fast instead, mirroring the empty-`agentIds` guard above.
-  const allDormant = records.every(({ record }) => !record.client);
-  if (allDormant && !(timeoutMs && timeoutMs > 0)) {
-    throw new Error(
-      'ws-pi-agent: waitForAgents: every listed agentId is dormant (stopped) with no timeout given — nothing can ever settle this wait; pass a timeout or ws-agent-send one of them first to resume it',
-    );
-  }
-
-  // Keep a handle to every pushed resolver so it can be unregistered again —
-  // `record.waiters.length` is now a load-bearing "is a lead actually
-  // blocked here" signal (Phase 2, 260904 re-scope) consumed via
-  // `settleWaiters`'s return count. Leaving a resolver behind after this
-  // wait concludes (win or timeout) would let a LATER unrelated event drain
-  // a dead resolver and report `waiterWoken: true` with nobody listening —
-  // resolving an already-settled promise is harmless, but the count lying
-  // about liveness is not.
-  const pushed: Array<{ record: RpcAgentRecord; fn: () => void }> = [];
-  const winner = new Promise<string>((resolve) => {
-    for (const { id, record } of records) {
-      const fn = () => resolve(id);
-      record.waiters.push(fn);
-      pushed.push({ record, fn });
-    }
-  });
-
-  let winnerId: string | undefined;
-  try {
-    if (timeoutMs && timeoutMs > 0) {
-      let timer: NodeJS.Timeout | undefined;
-      const timeoutPromise = new Promise<"timeout">((resolve) => {
-        timer = setTimeout(() => resolve("timeout"), timeoutMs);
-      });
-      const result = await Promise.race([winner, timeoutPromise]);
-      clearTimeout(timer);
-      if (result !== "timeout") winnerId = result;
-    } else {
-      winnerId = await winner;
-    }
-  } finally {
-    // Unregister every resolver this call pushed. The winner's own record
-    // was already drained by `settleWaiters` (indexOf finds nothing there,
-    // a harmless no-op); every losing/timed-out record still has its
-    // resolver present and must have it spliced out here.
-    for (const { record, fn } of pushed) {
-      const idx = record.waiters.indexOf(fn);
-      if (idx !== -1) record.waiters.splice(idx, 1);
-    }
-  }
-
-  if (!winnerId) {
-    return { timed_out: true, reports: [], reports_dropped: 0 };
-  }
-
-  return harvestWinner(registry.get(winnerId) as RpcAgentRecord, winnerId);
-}
-
-/**
  * Maps every registered agent to a `{agent_id, status}` pair: `"dormant"`
  * when there is no live client (stopped, resumable — D-C), else
  * `"running"`/`"idle"` from the locally-tracked streaming flag. Pure — no
  * IO, no RPC round trip — so directly unit-testable against fake records.
+ *
+ * 260905 adds `last_report_at` (ISO, omitted when the agent has never
+ * reported): with `ws-agent-wait` gone, a lead that missed or compacted a
+ * pushed report needs some way to see how long an agent has been quiet.
+ * `status` deliberately keeps deriving from `streaming` rather than the new
+ * `running` flag — `streaming` is event-confirmed and is the right thing to
+ * DISPLAY, while `running` is the narrower, earlier-set fan-in counter.
  */
-export function listAgents(registry: RpcAgentRegistry): Array<{ agent_id: string; status: AgentStatus }> {
-  return [...registry.entries()].map(([agentId, record]) => ({
-    agent_id: agentId,
-    status: record.client ? (record.streaming ? "running" : "idle") : "dormant",
-  }));
+export function listAgents(registry: RpcAgentRegistry): Array<{ agent_id: string; status: AgentStatus; last_report_at?: string }> {
+  return [...registry.entries()].map(([agentId, record]) => {
+    const lastReport = record.reportLog[record.reportLog.length - 1];
+    return {
+      agent_id: agentId,
+      status: (record.client ? (record.streaming ? "running" : "idle") : "dormant") as AgentStatus,
+      ...(lastReport ? { last_report_at: new Date(lastReport.at).toISOString() } : {}),
+    };
+  });
 }
 
 /**
@@ -1502,8 +1708,21 @@ export function listAgents(registry: RpcAgentRegistry): Array<{ agent_id: string
  * agent stays registered as dormant/resumable; `ws-agent-send` auto-resumes
  * it later via the same cached session file. Throws only when `agentId`
  * itself is unknown.
+ *
+ * 260905: a stop is one of the four `ws-agent-settled` reasons, so a
+ * non-silent stop pushes `reason:"stopped"` — the lead asked for it, but the
+ * push is what removes the agent from its fan-in count in the same place
+ * every other terminal transition does. `opts.silent` suppresses that for the
+ * internal stops that are not a delegation outcome at all: `ask.ts` closing a
+ * discussion thread (the owner's summary is the signal, not a stop notice)
+ * and `stopAll()`'s shutdown sweep (the session is going away).
  */
-export async function stopAgent(registry: RpcAgentRegistry, agentId: string): Promise<{ agent_id: string }> {
+export async function stopAgent(
+  registry: RpcAgentRegistry,
+  agentId: string,
+  pi?: ExtensionAPI,
+  opts?: { silent?: boolean },
+): Promise<{ agent_id: string }> {
   const record = registry.get(agentId);
   if (!record) {
     throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
@@ -1520,10 +1739,10 @@ export async function stopAgent(registry: RpcAgentRegistry, agentId: string): Pr
     } catch {
       // best effort
     }
-    record.unsubscribe?.();
-    record.unsubscribe = undefined;
-    record.client = undefined;
-    record.streaming = false;
+    clearLiveState(record);
+    if (!opts?.silent) {
+      pushToLead(pi, registry, record, "ws-agent-settled", { reason: "stopped" }, "followUp");
+    }
   }
   return { agent_id: agentId };
 }
@@ -1569,26 +1788,30 @@ export interface AgentToolsHandle {
 }
 
 /**
- * Registers the seven RPC-backed delegation tools (`ws-agent-spawn`,
- * `ws-agent-send`, `ws-agent-wait`, `ws-agent-list`, `ws-agent-stop`,
- * `ws-agent-transcript`, `ws-report-to-lead`) plus the unchanged one-shot
- * `explore` tool, against two separate in-extension registries: `rpcRegistry`
- * (RPC-backed, persistent children) and `exploreRegistry` (one-shot,
- * self-reaping recon leaves). They are kept separate rather than unified
- * because their completion signals are fundamentally different (an
- * `agent_settled` RPC event vs. a child process's `close` event) — see
- * `waitForAgents` vs `waitForDone`.
+ * Registers the six RPC-backed delegation tools (`ws-agent-spawn`,
+ * `ws-agent-send`, `ws-agent-list`, `ws-agent-stop`, `ws-agent-transcript`,
+ * `ws-report-to-lead`) plus the unchanged one-shot `explore` tool, against two
+ * separate in-extension registries: `rpcRegistry` (RPC-backed, persistent
+ * children) and `exploreRegistry` (one-shot, self-reaping recon leaves). They
+ * are kept separate rather than unified because their completion signals are
+ * fundamentally different (an `agent_settled` RPC event, pushed to the lead,
+ * vs. a child process's `close` event awaited inline by `waitForDone`).
  *
  * Phase 2 adds a child->lead report channel: `ws-report-to-lead` is the only
  * child-side tool this ticket adds (registered here but reachable only from
  * a worker's `full-worker` `--tools` allowlist, per `TOOL_GROUPS`); its
- * `execute()` is a no-op ack — the relay to the parent's per-agent
- * `pendingReports` buffer rides the existing `RpcClient.onEvent()` wire via
- * `applyRpcEvent`'s new `tool_execution_start` branch, not the tool's return
- * value (see that function's doc comment). `ws-agent-transcript` is a
- * lead-side introspection tool (same family as `ws-agent-list`/
- * `ws-agent-stop`), never added to any `TOOL_GROUPS` entry, so it is not
- * reachable from a worker's own `--tools`.
+ * `execute()` is a no-op ack — the relay to the lead rides the existing
+ * `RpcClient.onEvent()` wire via `applyRpcEvent`'s `tool_execution_start`
+ * branch, not the tool's return value (see that function's doc comment).
+ * `ws-agent-transcript` is a lead-side introspection tool (same family as
+ * `ws-agent-list`/`ws-agent-stop`), never added to any `TOOL_GROUPS` entry, so
+ * it is not reachable from a worker's own `--tools`.
+ *
+ * 260905: there is no seventh, harvesting tool — `ws-agent-wait` is deleted.
+ * Everything a lead used to block for now arrives as a pushed custom message
+ * (see this module's header and `pushToLead`), and the background liveness
+ * probe started here is what turns a child that dies without settling into an
+ * `exited` push instead of silence.
  *
  * MVP depth is 0->1 leaf (D-B): none of the `ws-agent-*` tools are
  * themselves part of any `TOOL_GROUPS` entry, so a worker spawned through
@@ -1611,10 +1834,11 @@ export function registerAgentTools(
    * is unreachable from `full-worker`/`recon`/`read-only`'s `--tools` lists,
    * so this callback simply never fires for them.
    */
-  onApprovalPending?: (record: RpcAgentRecord, info: { waiterWoken: boolean }) => void,
+  onApprovalPending?: (record: RpcAgentRecord) => void,
 ): AgentToolsHandle {
   const rpcRegistry: RpcAgentRegistry = new Map();
   const exploreRegistry: AgentRegistry = new Map();
+  const stopLivenessProbe = startLivenessProbe(pi, rpcRegistry);
 
   /**
    * IO wrapper around `resolveModelForAlias` for `explore`'s implicit
@@ -1631,7 +1855,7 @@ export function registerAgentTools(
     name: "ws-agent-spawn",
     label: "ws-agent-spawn",
     description:
-      "Spawn a persistent RPC-backed pi subagent from an already-rendered system-prompt file (e.g. via ws/playbook.render). Returns {agent_id} immediately after the initial prompt is sent; harvest progress with ws-agent-wait.",
+      "Spawn a persistent RPC-backed pi subagent from an already-rendered system-prompt file (e.g. via ws/playbook.render). Returns {agent_id} immediately after the initial prompt is sent. Do not wait for it: end your turn, and its reports, questions and completion arrive on their own as ws-agent-* messages carrying a running-count status line.",
     parameters: {
       type: "object",
       properties: {
@@ -1658,6 +1882,7 @@ export function registerAgentTools(
       const result = await spawnAgent(
         rpcRegistry,
         {
+          pi,
           cwd: sessionCtx.cwd,
           inheritModel: inheritModelFromToolCtx(toolCtx),
           wsToolNames: bridge.wsToolNames,
@@ -1679,7 +1904,7 @@ export function registerAgentTools(
     name: "ws-agent-send",
     label: "ws-agent-send",
     description:
-      "Send a message to a spawned agent. Delivers via prompt() when idle (including immediately after auto-resuming a dormant agent); while mid-stream, interrupt:true steers it and interrupt:false/omitted queues a follow-up. A dormant (ws-agent-stop'd) agent_id is auto-resumed from its cached session file first.",
+      "Send a message to a spawned agent. Delivers via prompt() when idle (including immediately after auto-resuming a dormant agent); while mid-stream, interrupt:true steers it and interrupt:false/omitted queues a follow-up. A dormant (ws-agent-stop'd) agent_id — including one revived from a ws-agent-orphaned message after a session restart — is auto-resumed from its cached session file first. Returns as soon as the message is delivered; the agent's answer arrives later as a pushed ws-agent-* message.",
     parameters: {
       type: "object",
       properties: {
@@ -1694,27 +1919,7 @@ export function registerAgentTools(
     } as never,
     async execute(_toolCallId, params) {
       const p = params as { agent_id: string; message: string; interrupt?: boolean };
-      const result = await sendToAgent(rpcRegistry, { cwd: sessionCtx.cwd, onApprovalPending }, p.agent_id, p.message, p.interrupt);
-      return { content: [{ type: "text", text: JSON.stringify(result) }] };
-    },
-  });
-
-  pi.registerTool({
-    name: "ws-agent-wait",
-    label: "ws-agent-wait",
-    description:
-      "Wait for the first of the given agent_ids to settle (agent_settled) OR report (a child calling ws-report-to-lead) OR need a lead approval, returning agent_id, reason (idle|report|approval-pending), and all buffered reports for that agent drained in FIFO order (plus reports_dropped if the buffer overflowed). On reason:idle, last_message is also included. On reason:approval-pending, pending_approval:{cmd_id,command,rationale} is included — call ws-approve with that cmd_id, then call ws-agent-wait again to harvest the result (do not keep blocking). Never kills a running agent on timeout.",
-    parameters: {
-      type: "object",
-      properties: {
-        agent_ids: { type: "array", items: { type: "string" }, description: "agentIds to race for first-finisher." },
-        timeout: { type: "number", description: "Optional timeout in milliseconds." },
-      },
-      required: ["agent_ids"],
-    } as never,
-    async execute(_toolCallId, params) {
-      const p = params as { agent_ids: string[]; timeout?: number };
-      const result = await waitForAgents(rpcRegistry, p.agent_ids, p.timeout);
+      const result = await sendToAgent(rpcRegistry, { pi, cwd: sessionCtx.cwd, onApprovalPending }, p.agent_id, p.message, p.interrupt);
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     },
   });
@@ -1722,7 +1927,8 @@ export function registerAgentTools(
   pi.registerTool({
     name: "ws-agent-list",
     label: "ws-agent-list",
-    description: "List every tracked agent_id and its status (running/idle/dormant).",
+    description:
+      "List every tracked agent_id, its status (running/idle/dormant), and last_report_at (ISO, absent if it has never reported). Use it to check on a quiet agent — there is no wait tool; every report, question, approval request and completion is pushed to you as a ws-agent-* message on its own.",
     parameters: { type: "object", properties: {} } as never,
     async execute() {
       const result = listAgents(rpcRegistry);
@@ -1742,7 +1948,9 @@ export function registerAgentTools(
     } as never,
     async execute(_toolCallId, params) {
       const p = params as { agent_id: string };
-      const result = await stopAgent(rpcRegistry, p.agent_id);
+      // Non-silent: an explicit stop is a delegation outcome the lead should
+      // see land in its transcript like every other settle reason.
+      const result = await stopAgent(rpcRegistry, p.agent_id, pi);
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     },
   });
@@ -1768,7 +1976,7 @@ export function registerAgentTools(
     name: REPORT_TO_LEAD_TOOL_NAME,
     label: REPORT_TO_LEAD_TOOL_NAME,
     description:
-      "Surface a buffered async status update or intermediate finding to the lead immediately, distinct from your final answer (which the lead harvests separately once you settle). The lead receives this the next time it calls ws-agent-wait on you (reason: report), draining every buffered report in FIFO order.",
+      "Surface an async status update or intermediate finding to the lead immediately, distinct from your final answer. It is delivered to the lead the moment you call this — there is nothing to wait for on either side.",
     parameters: {
       type: "object",
       properties: {
@@ -1783,10 +1991,10 @@ export function registerAgentTools(
       required: ["message"],
     } as never,
     async execute() {
-      // No-op ack: the relay to the parent's per-agent report buffer already
-      // happens via the existing RpcClient.onEvent() stream (Pi emits
-      // tool_execution_start the instant the LLM dispatches this call,
-      // forwarded verbatim to the parent's applyRpcEvent) — see that
+      // No-op ack: the relay to the parent already happens via the existing
+      // RpcClient.onEvent() stream (Pi emits tool_execution_start the instant
+      // the LLM dispatches this call, forwarded verbatim to the parent's
+      // applyRpcEvent, which pushes it into the lead's session) — see that
       // function's doc comment for the full trace. This execute() body does
       // not touch the registry.
       return { content: [{ type: "text", text: "reported" }] };
@@ -1827,9 +2035,13 @@ export function registerAgentTools(
   return {
     rpcRegistry,
     async stopAll(): Promise<void> {
-      const rpcStops = [...rpcRegistry.values()]
-        .filter((record): record is RpcAgentRecord & { client: RpcClient } => !!record.client)
-        .map((record) => record.client.stop().catch(() => {}));
+      stopLivenessProbe();
+      // Silent by construction: the session itself is going away, so a
+      // per-agent "stopped" push would have nowhere to land. Routed through
+      // stopAgent so shutdown leaves records in the same resting shape every
+      // other stop does (the sidecar snapshot, index.ts, is taken BEFORE this
+      // runs, while the records are still marked live).
+      const rpcStops = [...rpcRegistry.keys()].map((agentId) => stopAgent(rpcRegistry, agentId, pi, { silent: true }).catch(() => undefined));
       await Promise.allSettled(rpcStops);
 
       for (const record of exploreRegistry.values()) {

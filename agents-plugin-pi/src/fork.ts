@@ -58,6 +58,9 @@ import type { BridgeHandle } from "./bridge.ts";
 import {
   REPORT_TO_LEAD_TOOL_NAME,
   inheritModelFromToolCtx,
+  promptAgent,
+  pushToLead,
+  reportKindsSinceLeadPrompt,
   spawnAgent,
   type RpcAgentRecord,
   type RpcAgentRegistry,
@@ -322,15 +325,14 @@ export interface ForkSessionCtx {
  * (register a thread whose respondent is this live fork, refresh the pending
  * widget); `fork.ts` stays generic and never imports it.
  *
- * Review relay #1 I6: the return value REPLACES the message the lead sees on
- * that report. In TUI mode `ask.ts` returns a short notice naming the thread
- * id and telling the lead the owner answers it (§1: the lead is not involved
- * in a fork-raised question); in headless mode it returns `undefined`, so the
- * lead relay stays byte-identical to Phase 1 (§8). This is invoked from
- * `spawner.ts`'s report-enqueue site rather than from `wireAntiBleedLoop`'s
- * settle handler, because a lead blocked in `ws-agent-wait` wakes at enqueue
- * time — the thread must already exist (and the message already be rewritten)
- * before that wake.
+ * Review relay #1 I6, revised 260905: returning a defined string means the TUI
+ * owner surface CONSUMED the question — `spawner.ts` then suppresses the
+ * `ws-agent-question` push entirely (§1: the lead is not involved in a
+ * fork-raised question). Returning `undefined` (headless) leaves the push in
+ * place so the lead still learns of it. This is invoked from `spawner.ts`'s
+ * report-handling site rather than from `wireAntiBleedLoop`'s settle handler,
+ * because the push is emitted at report time — the thread must already exist
+ * before the suppression decision is made.
  */
 export type ForkQuestionCallback = (agentId: string, message: string) => string | undefined;
 
@@ -346,9 +348,10 @@ export type ForkQuestionCallback = (agentId: string, message: string) => string 
  * - `"question"`/`"final"`: reset the nudge counter (a valid stop).
  * - Anything else (`"acknowledge-and-return"` or `"no-signal"`) is §4's
  *   "reached idle without `kind:"final"`" case — checked via
- *   `isIdleWithoutFinal` against `record.pendingReports`' own undrained
- *   kinds (so an already-buffered-but-not-yet-harvested `"final"` is not
- *   re-flagged):
+ *   `isIdleWithoutFinal` against the kinds this fork has reported SINCE THE
+ *   LAST LEAD PROMPT (`reportKindsSinceLeadPrompt`, spawner.ts), so a
+ *   `"final"` already filed for this task is not re-flagged, while one from a
+ *   previous task correctly stops counting once the lead sends a new one:
  *   - `"acknowledge-and-return"`: reset the nudge counter — a tool call is
  *     real progress, not itself a bleed signal (the ticket rules out
  *     prose-only bleed mitigation as a *substitute* for this check, not as
@@ -356,36 +359,53 @@ export type ForkQuestionCallback = (agentId: string, message: string) => string 
  *     incomplete-run notice to the LEAD so an idle fork with no
  *     completion/question signal is never mistaken for a finished result.
  *   - `"no-signal"`: `shouldNudge` — re-prompt the FORK itself via
- *     `record.client.prompt(...)` (never the lead's session — a spawned
- *     child only runs another turn when re-prompted on its OWN RPC handle;
- *     this mirrors `sendToAgent`'s live-idle branch, including clearing
- *     `record.idlePending` first so a racing `ws-agent-wait` cannot
- *     busy-return a stale pre-nudge snapshot). Once `MAX_FORK_NUDGES` is
- *     exhausted, fail loud to the LEAD with a transcript tail (`tailLines`
- *     over `record.sessionPath`, best-effort) and tell it not to harvest a
- *     result from this fork.
+ *     `promptAgent(record, client, ..., {isLeadPrompt: false})` (never the
+ *     lead's session — a spawned child only runs another turn when
+ *     re-prompted on its OWN RPC handle). `isLeadPrompt: false` is the whole
+ *     reason that option exists: an internal nudge is not a new task
+ *     boundary, so it must not move `lastLeadPromptAt` and thereby hide the
+ *     very stale-report condition this check is judging. Once
+ *     `MAX_FORK_NUDGES` is exhausted, fail loud to the LEAD with a transcript
+ *     tail (`tailLines` over `record.sessionPath`, best-effort) and tell it
+ *     not to treat this fork's output as a result.
  *
  * A `kind:"final"` report is additionally validated inline, the instant its
  * `tool_execution_start` is observed: `validateFinalReportShape` (rejects a
  * malformed report — never treated as a valid completion) and, when shape
  * is valid, `checkExpectsCommitCompletion` against the extracted `Commit:`
- * line. Both surface a steer notice to the lead on failure; neither mutates
- * `record.pendingReports` itself (that FIFO is `spawner.ts`'s own, drained
- * by `ws-agent-wait` as normal — this loop only ever ADDS advisory
- * `pi.sendUserMessage` notices to the lead, or a nudge `prompt()` to the
- * fork itself; it never blocks or rewrites the report).
+ * line. Both surface an advisory to the lead on failure; neither touches the
+ * report itself (`spawner.ts` pushes it to the lead independently — this loop
+ * only ever ADDS `ws-agent-advisory` pushes, or a nudge prompt to the fork
+ * itself; it never blocks or rewrites the report).
+ *
+ * 260905: those advisories are `pushToLead(..., "ws-agent-advisory", ...,
+ * "followUp")` rather than the old direct `pi.sendUserMessage(..., steer)`.
+ * Two deliberate changes: they are custom messages the lead can tell apart
+ * from an owner turn, and they carry the same fan-in status line every other
+ * push does; and `followUp` (not `steer`) means an advisory about a fork's
+ * turn shape waits for the lead's current turn to finish rather than cutting
+ * into it — nothing here is urgent enough to interrupt, unlike an approval
+ * request.
  *
  * 260904 Phase 2 (review relay #1 C1): every branch that would nudge the fork
- * or declare it stalled is suppressed while `record.overlayAttached` is set —
- * an owner is mid-conversation with this fork in the overlay chat, where a
- * text-only turn is the NORMAL shape, not §4's bleed signal. Without this the
- * loop re-prompts the fork mid-discussion (the owner watches a machine nudge
- * appear in their own conversation) and, one exchange later, steers a false
- * "this fork stalled — do NOT harvest a result from it" verdict into the
- * lead. The `"question"`/`"final"` branches need no guard: they already
- * return early as valid stops.
+ * or declare it stalled is suppressed while an owner discussion is bound to
+ * it — a text-only turn is the NORMAL shape there, not §4's bleed signal.
+ * Without this the loop re-prompts the fork mid-discussion (the owner watches
+ * a machine nudge appear in their own conversation) and, one exchange later,
+ * declares a healthy fork stalled to the lead. 260905 widens that guard from
+ * the per-VIEW `overlayAttached` to the thread-lifetime `threadBound`: an
+ * owner who presses Esc mid-discussion has not ended the thread, and the fork
+ * must not start being nudged in the gap before they reopen it. The
+ * `"question"`/`"final"` branches need no guard: they already return early as
+ * valid stops.
  */
-export function wireAntiBleedLoop(pi: ExtensionAPI, agentId: string, record: RpcAgentRecord, expectsCommit: boolean): void {
+export function wireAntiBleedLoop(
+  pi: ExtensionAPI,
+  rpcRegistry: RpcAgentRegistry,
+  agentId: string,
+  record: RpcAgentRecord,
+  expectsCommit: boolean,
+): void {
   const client = record.client;
   if (!client) return;
 
@@ -412,17 +432,28 @@ export function wireAntiBleedLoop(pi: ExtensionAPI, agentId: string, record: Rpc
         if (kind === "final" && typeof args?.message === "string") {
           const shape = validateFinalReportShape(args.message);
           if (!shape.ok) {
-            pi.sendUserMessage(
-              `Fork ${agentId}'s kind:"final" report is missing required field(s): ${shape.missing.join(", ")}. Required shape: ${REQUIRED_FINAL_REPORT_FIELDS.join(" / ")}. This is NOT treated as a valid completion — ask the fork to resubmit.`,
-              { deliverAs: "steer" },
+            pushToLead(
+              pi,
+              rpcRegistry,
+              record,
+              "ws-agent-advisory",
+              {
+                advisory: "final-report-shape",
+                detail: `This fork's kind:"final" report is missing required field(s): ${shape.missing.join(", ")}. Required shape: ${REQUIRED_FINAL_REPORT_FIELDS.join(" / ")}. This is NOT a valid completion — ask the fork to resubmit.`,
+              },
+              "followUp",
             );
           } else {
             const commitLine = extractReportField(args.message, "Commit");
             const commitCheck = checkExpectsCommitCompletion(expectsCommit, commitLine);
             if (!commitCheck.ok) {
-              pi.sendUserMessage(
-                `Fork ${agentId} reported kind:"final" but ${commitCheck.reason}. This is NOT treated as a valid completion.`,
-                { deliverAs: "steer" },
+              pushToLead(
+                pi,
+                rpcRegistry,
+                record,
+                "ws-agent-advisory",
+                { advisory: "expects-commit", detail: `This fork reported kind:"final" but ${commitCheck.reason}. This is NOT a valid completion.` },
+                "followUp",
               );
             }
           }
@@ -440,21 +471,22 @@ export function wireAntiBleedLoop(pi: ExtensionAPI, agentId: string, record: Rpc
       return;
     }
 
-    // 260904 Phase 2 (review relay #1 C1): an owner overlay is attached — a
-    // text-only turn is this thread's normal shape, so neither the nudge nor
-    // the fail-loud path applies. Reset the counter so a later, un-attached
-    // stall is still judged from zero.
-    if (record.overlayAttached) {
+    // 260904 Phase 2 (review relay #1 C1), widened 260905: an owner
+    // discussion thread is bound to this fork — a text-only turn is that
+    // thread's normal shape, so neither the nudge nor the fail-loud path
+    // applies. Reset the counter so a later, unbound stall is still judged
+    // from zero.
+    if (record.threadBound) {
       nudgeCount = 0;
       return;
     }
 
     // Neither "question" nor "final" this turn. §4: a fork reaching idle
     // (agent_settled) without a completion/question signal is
-    // non-completion. Check the record's own undrained report queue (not
-    // just this turn) so an already-buffered-but-not-yet-harvested
-    // kind:"final" is not re-flagged as idle-without-final.
-    if (!isIdleWithoutFinal(record.pendingReports.map((r) => r.kind))) {
+    // non-completion. Judged against everything reported since the last LEAD
+    // prompt (not just this turn), so a kind:"final" already filed for this
+    // task is not re-flagged.
+    if (!isIdleWithoutFinal(reportKindsSinceLeadPrompt(record))) {
       nudgeCount = 0;
       return;
     }
@@ -466,9 +498,16 @@ export function wireAntiBleedLoop(pi: ExtensionAPI, agentId: string, record: Rpc
       // fork with no completion/question signal is never mistaken for a
       // finished result.
       nudgeCount = 0;
-      pi.sendUserMessage(
-        `Fork ${agentId} went idle after doing work, but has not reported completion (kind:"final") or asked a question (kind:"question"). Do not treat this as a finished result yet.`,
-        { deliverAs: "steer" },
+      pushToLead(
+        pi,
+        rpcRegistry,
+        record,
+        "ws-agent-advisory",
+        {
+          advisory: "acknowledge-and-return",
+          detail: 'This fork went idle after doing work, but has not reported completion (kind:"final") or asked a question (kind:"question"). Do not treat this as a finished result yet.',
+        },
+        "followUp",
       );
       return;
     }
@@ -478,17 +517,24 @@ export function wireAntiBleedLoop(pi: ExtensionAPI, agentId: string, record: Rpc
     // doc comment).
     if (shouldNudge(nudgeCount)) {
       nudgeCount += 1;
-      record.idlePending = false; // mirrors sendToAgent's live-idle clearing: an internal re-prompt must not let a racing ws-agent-wait busy-return with the stale pre-nudge snapshot.
-      client
-        .prompt(
-          `Your last turn ended with no tool call and no ${REPORT_TO_LEAD_TOOL_NAME} report (nudge ${nudgeCount}/${MAX_FORK_NUDGES}). Continue the task, or call ${REPORT_TO_LEAD_TOOL_NAME} with kind:"question" or kind:"final".`,
-        )
-        .catch((err: unknown) => {
-          pi.sendUserMessage(
-            `Fork ${agentId}: failed to deliver an anti-bleed nudge to it (${err instanceof Error ? err.message : String(err)}). Treat this fork as potentially stalled.`,
-            { deliverAs: "steer" },
-          );
-        });
+      // `isLeadPrompt: false`: an internal re-prompt must not move the
+      // last-lead-prompt watermark, or the reports already filed for this
+      // task would drop out of `reportKindsSinceLeadPrompt`.
+      promptAgent(record, client, `Your last turn ended with no tool call and no ${REPORT_TO_LEAD_TOOL_NAME} report (nudge ${nudgeCount}/${MAX_FORK_NUDGES}). Continue the task, or call ${REPORT_TO_LEAD_TOOL_NAME} with kind:"question" or kind:"final".`, {
+        isLeadPrompt: false,
+      }).catch((err: unknown) => {
+        pushToLead(
+          pi,
+          rpcRegistry,
+          record,
+          "ws-agent-advisory",
+          {
+            advisory: "nudge-failed",
+            detail: `Failed to deliver an anti-bleed nudge to this fork (${err instanceof Error ? err.message : String(err)}). Treat this fork as potentially stalled.`,
+          },
+          "followUp",
+        );
+      });
       return;
     }
 
@@ -499,13 +545,17 @@ export function wireAntiBleedLoop(pi: ExtensionAPI, agentId: string, record: Rpc
       // best effort — see doc comment above; a missing/unreadable transcript
       // must not turn a fail-loud notice into an unhandled exception.
     }
-    pi.sendUserMessage(
-      [
-        `Fork ${agentId} stalled: ${MAX_FORK_NUDGES} consecutive turns with no tool call and no report. Treat this fork as failed — do NOT harvest a result from it.`,
-        "Transcript tail:",
-        transcriptTail,
-      ].join("\n"),
-      { deliverAs: "steer" },
+    pushToLead(
+      pi,
+      rpcRegistry,
+      record,
+      "ws-agent-advisory",
+      {
+        advisory: "stalled",
+        detail: `This fork stalled: ${MAX_FORK_NUDGES} consecutive turns with no tool call and no report. Treat this fork as failed — do NOT take a result from it.`,
+        transcript_tail: transcriptTail,
+      },
+      "followUp",
     );
   });
 }
@@ -518,10 +568,11 @@ export function wireAntiBleedLoop(pi: ExtensionAPI, agentId: string, record: Rpc
  * surface (`computeForkToolSurface` over the caller's OWN
  * `pi.getActiveTools()` at spawn time — not a static `TOOL_GROUPS` entry),
  * and wires the anti-bleed loop onto it. Returns `{agent_id}` immediately
- * (fire-and-return, same convention as `ws-execute`) — harvest progress with
- * the same shared `ws-agent-wait`/`ws-agent-list`/`ws-agent-transcript`
- * tools any other spawned agent uses (`rpcRegistry` is the one shared map,
- * per `AgentToolsHandle`'s own doc comment).
+ * (fire-and-return, same convention as `ws-execute`) — its reports, settles
+ * and advisories are PUSHED into the lead session as they happen, and
+ * `ws-agent-list`/`ws-agent-transcript` remain available for on-demand
+ * inspection (`rpcRegistry` is the one shared map, per `AgentToolsHandle`'s
+ * own doc comment).
  *
  * Registered declaratively/globally (same pattern as `ws-report-to-lead`/
  * `registerExecuteGateway`) from `index.ts`'s `session_start`, regardless of
@@ -542,7 +593,7 @@ export function registerFork(
     name: FORK_TOOL_NAME,
     label: FORK_TOOL_NAME,
     description:
-      'Spawn a lateral task-thread fork that inherits your full current context (a clone of your own session) to work a sub-task alongside you — not a worker (no depth-budget consumption). Its own tool surface excludes ws-fork (no recursive forking). It reports back only via ws-report-to-lead(kind:"question"|"final"); expects_commit:true flags a kind:"final" report whose Commit field is missing or "none" as incomplete. Returns {agent_id} immediately — harvest with ws-agent-wait/ws-agent-list like any other spawned agent.',
+      'Spawn a lateral task-thread fork that inherits your full current context (a clone of your own session) to work a sub-task alongside you — not a worker (no depth-budget consumption). Its own tool surface excludes ws-fork (no recursive forking). It reports back only via ws-report-to-lead(kind:"question"|"final"); expects_commit:true flags a kind:"final" report whose Commit field is missing or "none" as incomplete. Returns {agent_id} immediately — end your turn afterwards; its reports and settles arrive as pushed messages.',
     parameters: {
       type: "object",
       properties: {
@@ -594,13 +645,13 @@ export function registerFork(
       const record = rpcRegistry.get(result.agent_id);
       if (record) {
         if (onQuestion) {
-          // 260904 Phase 2 (review relay #1 I6): armed at the report-enqueue
-          // site rather than on turn settle, so the thread exists before a
-          // lead blocked in `ws-agent-wait` wakes. The returned string (TUI
-          // only) replaces the lead-visible report message.
+          // 260904 Phase 2 (review relay #1 I6), revised 260905: armed at the
+          // report-handling site rather than on turn settle. A defined return
+          // (TUI only) means the owner surface consumed the question, so the
+          // `ws-agent-question` push to the lead is suppressed.
           record.onQuestionReport = (_rec, message) => onQuestion(result.agent_id, message);
         }
-        wireAntiBleedLoop(pi, result.agent_id, record, p.expects_commit ?? false);
+        wireAntiBleedLoop(pi, rpcRegistry, result.agent_id, record, p.expects_commit ?? false);
       }
 
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
