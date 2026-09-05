@@ -288,13 +288,17 @@ its last-report time. On the next `session_start` for the **same** lead session
 file (resume, `/reload`) the sidecar is consumed exactly once: each entry is
 re-registered as a **dormant** record with its role wiring re-armed (`fork` →
 the fork hooks: question report, anti-bleed loop, final report;
-`execute-worker` → the approval relay; `worker` → none), and one
+`execute-worker` → the approval relay; `worker` → none). One
 `ws-agent-orphaned` custom message (`followUp`, `triggerTurn: true`) is pushed
-listing them with their state and a revival hint — `ws-agent-send <id>`
-auto-resumes a dormant record from its cached session file, so the hint is
-literally executable. A `running` entry resumes from its last flushed turn and
-is marked "was mid-turn; re-issue the instruction". What each child was doing is
-not restated; the resumed lead's own transcript already has it. A different
+**only when at least one entry was `running`** at shutdown: it lists those
+entries with the caveat that a child cut off mid-turn resumes from its last
+flushed turn and needs its instruction re-issued, summarizes the idle entries in
+one line, and carries the revival hint — `ws-agent-send <id>` auto-resumes a
+dormant record from its cached session file, so the hint is literally
+executable. When every entry was idle (children that had finished or were
+waiting for a relay) nothing is pushed; the re-registered records remain
+visible through `ws-agent-list`. What each child was doing is not restated; the
+resumed lead's own transcript already has it. A different
 session (`/new`) leaves the sidecar beside the old session file to fire on that
 session's later resume. Reports are never replayed from the sidecar: they belong
 to a process that no longer exists.
@@ -308,8 +312,14 @@ stays alive after settling, ready for the next `ws-agent-send`. A settle that
 ends a turn in which the child sent **no** `kind:"final"` (or `kind:"question"`)
 report pushes a `ws-agent-settled` message to the lead with `reason: "idle"`
 and the child's last message, so a worker whose playbook never says
-`ws-report-to-lead` still signals completion; a turn that did report `final`
-or `question` pushes only that report, and the settle is silent.
+`ws-report-to-lead` still signals completion. A turn that did report `final`
+releases that report **at this transition** instead: the final is stashed on
+the record when the child calls the tool (last one wins within a turn) and
+pushed as one `ws-agent-report` carrying `details.settled_reason`
+(`idle` / `stopped` / `exited`) when the child leaves the running state, with
+no separate `ws-agent-settled`; a silent adapter-internal stop drops the
+stash. A turn that reported `question` pushes only the question, and its
+settle is silent.
 `details.reason` takes one of `idle`, `stopped` (the `ws-agent-stop` tool),
 `exited` (process gone, see the liveness backstop in the report channel) or
 `spawn-failed` (bad interpreter, missing binary — pushed synchronously from the
@@ -420,8 +430,8 @@ existing RPC event stream (the tool-invocation event). Because the report rides
 the invocation event, it reaches the lead as soon as the model calls the tool,
 independent of the tool's own return value.
 
-**Every child signal is pushed; nothing is harvested.** The adapter holds no
-report buffer of its own. Each signal becomes a `pi.sendMessage` custom message
+**Every child signal is pushed; nothing is harvested.** The adapter keeps no
+report buffer a lead could drain. Each signal becomes a `pi.sendMessage` custom message
 (`display: true`, `details` carrying `agent_id`, the family payload and the
 status line below), issued by whichever process owns the child's registry — the
 lead for its children, a fork process into its own session for the fork's
@@ -429,9 +439,11 @@ workers and execute workers (`isLeadOrFork` gate); a `worker` process never
 pushes, its only delegate being the explore leaf. Six families:
 
 - `ws-agent-report` — `ws-report-to-lead` with `kind:"final"` or untagged
-  progress (`details.kind`); pushed mid-turn from the tool-invocation branch. A
-  `final` first marks the sender `terminalThisTurn`, so the status line on that
-  very message no longer counts it. `followUp`, `triggerTurn: true`.
+  progress (`details.kind`). Progress is pushed at once from the
+  tool-invocation branch; a `final` marks the sender `terminalThisTurn` and is
+  released when the child's turn ends (see "Turn completion is gated on RPC
+  idle"), so the lead never reads a completion report before the child has
+  actually stopped working. `followUp`, `triggerTurn: true`.
 - `ws-agent-settled` — a persistent child left the running state without a
   `final` that turn; `details.reason` is `idle` (with `last_message`),
   `stopped`, `exited` or `spawn-failed` (see "Turn completion is gated on RPC
@@ -444,8 +456,15 @@ pushes, its only delegate being the explore leaf. Six families:
 - `ws-agent-advisory` — the fork anti-bleed advisories (idle-without-final,
   fail-loud transcript tail, `expects_commit` non-completion;
   `details.advisory` names which). `followUp`.
-- `ws-agent-orphaned` — once per resumed session, from the shutdown sidecar
-  (see "Process lifecycle"). `followUp`.
+- `ws-agent-orphaned` — at most once per resumed session, from the shutdown
+  sidecar and only when a child was cut off mid-turn (see "Process
+  lifecycle"). `followUp`.
+
+In a TUI process the six families are drawn by an adapter-registered message
+renderer (one `[family] agent <id>` label, the payload lines, the status line
+dimmed) so the transcript does not repeat Pi's default `[customType]` header;
+the message content the model reads is unchanged, and the default rendering
+stands wherever the TUI modules cannot be loaded.
 
 The report branch consults the record's owner-thread hooks first: a report the
 hook consumes (a `lead-ask` thread's final, which becomes the `ws-thread-summary`
@@ -456,12 +475,24 @@ registration until the thread closes (`/done`, fork final, `ws-resolve`) —
 pushes no settle or advisory and is outside the status line, so owner↔fork
 exchanges reach the lead only through the summary / fork-final paths. A child's
 turn therefore never reaches the lead twice, and within a live session no push
-is dropped or duplicated: Pi's followUp queue is the only buffer, draining
-mid-turn arrivals one per loop iteration in arrival order, so a fan-out burst
-yields one lead run that sees the messages in order.
+is dropped or duplicated.
 
-**Fan-in stays with the model.** Every push carries a status line
-`N of M delegated agents still running`, where M is this process's
+**Delivery is held until the lead's turn settles.** Pi offers no hook at the
+moment a queued followUp is delivered, so a message built while the lead is
+mid-turn would carry a stale status line. A `followUp` push is therefore sent
+at once only when the owning process's agent is idle; otherwise the adapter
+holds it and releases the held pushes, in arrival order, from that process's
+`agent_settled` handler, building each message — status line included — at
+release time. The first release starts the lead's next run; the rest enter
+Pi's followUp queue and drain one per loop iteration, so a fan-out burst still
+yields one lead run that sees the messages in order. `steer` families
+(approval, question) are never held. Held pushes live only in the process:
+they are dropped with it at `session_shutdown`, exactly like Pi's own queue.
+
+**Fan-in stays with the model.** Every push whose process has at least one
+delegated agent carries a status line `N of M delegated agents still running`,
+followed by `: <running ids>` when N > 0; with no delegated agent (M = 0) the
+line is omitted from both content and `details`. M is this process's
 registry members that are neither dormant nor stopped/exited and not
 thread-bound (workers, execute workers, task forks), and N is the subset that is
 running and has not yet sent `final` or `question` this turn. A child blocked on
