@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: d1c4be09dac53060
 sage-review-completeness-reviewed: d1c4be09dac53060
+completed: 2026-09-05
 ---
 
 # Bug: approval-relay steer deadlocks under a blocking ws-agent-wait
@@ -116,6 +117,37 @@ turn-boundary-only approval steer queues behind the unfinished wait turn.
   harvested via `ws-agent-wait`, and a `ws-execute` immediately followed by
   `ws-agent-wait` — must no longer deadlock; the lead is handed back, approves,
   and harvests.
+
+### Result (10cc4c01) - 2026-09-05
+
+Implemented as planned. `applyRpcEvent`'s `pendingApproval` branch now calls
+`settleWaiters`; `waitForAgents`/`harvestWinner` gained a
+`firstPendingApprovalAgentId` fast-path returning `reason:"approval-pending"`
+with `pending_approval:{cmd_id,command,rationale}`, checked before idle/report.
+Not edge-consumed (cleared by `ws-approve`), so a pre-approve re-wait re-reports
+rather than loops; buffered reports still drain alongside. Tool description,
+module header, `pi-lead-guide.md`, and the spec approval-gateway section updated.
+348/348 offline tests pass (+8: settleWaiters-on-approval wake and its
+no-op-when-nothing-set counterpart, `firstPendingApprovalAgentId`, the wait
+fast-path, the not-edge-consumed re-wait, the mid-wait gated-exec race, and the
+priority-over-report drain).
+
+Live-verified (pi 0.84.4, openai-codex subscription): a `ws-execute` of an
+unpredictable command (`od -An -N8 -tx1 /dev/urandom`, so the worker must
+actually run it through the gate) followed immediately by `ws-agent-wait`
+returned `reason:"approval-pending"`; the lead approved with the real `cmd_id`
+and re-waited to harvest the true random bytes — no deadlock. A `ws-fork` running
+the same command harvested cleanly (`reason:"report"`) as well.
+
+**Residual (needs interactive re-check):** this fix is scoped to the adapter's
+`GATED_EXEC` (`ws-worker-exec`) approval path — the one that sets
+`record.pendingApproval`. The user's original interactive symptom (a fork's
+`bash` producing a queued `steering:` approval) may instead be Pi's **native**
+tool-approval surfacing, which the adapter does not route through
+`record.pendingApproval` at all and this wake therefore does not cover. The
+`--print` repros here auto-handle native approvals, so they cannot reproduce that
+path; confirm on a live interactive TUI whether a fork's native-`bash` approval
+still deadlocks, and if so file a follow-up for a native-approval wake.
 
 ## Spec Impact
 
