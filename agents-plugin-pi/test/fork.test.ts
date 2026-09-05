@@ -36,6 +36,7 @@ import {
   tailLines,
   getForkSourceSessionFile,
   buildForkDirectiveText,
+  buildForkInitialMessage,
 } from "../src/fork.ts";
 import { REPORT_TO_LEAD_TOOL_NAME } from "../src/spawner.ts";
 
@@ -286,5 +287,23 @@ describe("buildForkDirectiveText", () => {
     const text = buildForkDirectiveText();
     const allCapsWords = text.match(/\b[A-Z]{4,}\b/g) ?? [];
     assert.deepEqual(allCapsWords, [], `directive text must not carry ALL-CAPS override word(s): ${JSON.stringify(allCapsWords)}`);
+  });
+});
+
+describe("buildForkInitialMessage (260905 structural anti-bleed frame)", () => {
+  const task = "Run `od -An -N8 -tx1 /dev/urandom` and report the hex.";
+
+  test("fences the task, demotes inherited context, and keeps the task inline", () => {
+    const msg = buildForkInitialMessage(task);
+    assert.ok(msg.includes(task), "the lead's task text must survive inside the frame");
+    assert.ok(/reference\/background only/i.test(msg), "must demote inherited context to reference");
+    assert.ok(msg.includes("--- Message from the lead ---"), "must fence the lead's message");
+    assert.ok(msg.includes("--- end of message ---"), "must close the fence");
+    assert.ok(msg.includes(REPORT_TO_LEAD_TOOL_NAME), "must keep the report contract pointer");
+  });
+
+  test("stays calm — no ALL-CAPS override words (chosen over the aggressive header)", () => {
+    const allCapsWords = buildForkInitialMessage(task).match(/\b[A-Z]{4,}\b/g) ?? [];
+    assert.deepEqual(allCapsWords, [], `framed message must stay calm: ${JSON.stringify(allCapsWords)}`);
   });
 });

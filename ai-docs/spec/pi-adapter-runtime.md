@@ -591,9 +591,22 @@ not consume delegation depth.
   the fork's own session, at most twice) and then fails loud to the lead with a
   transcript tail rather than looping forever. A fork that reaches idle without
   having emitted a `kind:"final"` report is surfaced to the lead as an incomplete
-  run and is never harvested as a result. The spawn directive is short,
-  task-focused natural language: no identity or persona framing and no XML or
-  all-caps override language, which were found to backfire.
+  run and is never harvested as a result. The **system-prompt directive**
+  (`--append-system-prompt`) is short, task-focused natural language: no identity
+  or persona framing and no XML or all-caps override language, which were found to
+  backfire on the Claude host.
+- **Structural anti-bleed frame (fork initial message).** Because a fork inherits
+  the lead's full transcript *and* the lead-guide block the session-start hook
+  appends to any lead/fork process, an inherited lead-orchestration script can
+  push a fork into role-bleed (it re-runs the lead's plan instead of its own
+  task). The mitigation is not an identity override in the system prompt but a
+  structural frame on the fork's **initial user message**: it demotes the
+  inherited conversation to reference-only and fences the actual task as an
+  explicit "message from the lead", so the fork separates its task from the
+  lead's inherited plan without any all-caps identity shouting. This message-level
+  frame (not the system-prompt directive) is where fork identity is handled; it
+  was live-verified to stop role-bleed on both a weak model and a top-frontier
+  model, and it complements the completion loop above rather than replacing it.
 
 > [!note] Live verification · 2026-09-05
 > The Phase 1 live gate was run against the installed adapter on a real Pi

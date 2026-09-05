@@ -239,8 +239,12 @@ export function getForkSourceSessionFile(toolCtx: unknown): string | undefined {
  * writes no new checked-in guide asset for this, unlike
  * `execute-worker-guide.md`). Short natural language, execution constraints
  * only — no identity framing, no XML/all-caps overrides, per §4's directive-
- * style rule. The lead's own task text is delivered separately as the
- * fork's initial `prompt`, not folded into this file.
+ * style rule. The lead's own task text is delivered separately as the fork's
+ * initial `prompt` (see `buildForkInitialMessage`), not folded into this file.
+ *
+ * 260905: the fork's anti-bleed identity handling lives in
+ * `buildForkInitialMessage`, NOT here — see §4's re-decision. This system
+ * directive stays framing-free on purpose.
  */
 export function buildForkDirectiveText(): string {
   return [
@@ -257,6 +261,36 @@ export function buildForkDirectiveText(): string {
     "Decisions: <notable choices made>",
     "",
     `Never end a turn with no tool call and no ${REPORT_TO_LEAD_TOOL_NAME} report — always either keep working (call a tool) or report (kind:"question" or kind:"final") before stopping.`,
+  ].join("\n");
+}
+
+/**
+ * The fork's initial user message (delivered as the fork's first `prompt`,
+ * separately from the system-prompt directive). This is the 260905 structural
+ * anti-bleed frame — the §4 re-decision: rather than shouting an all-caps "you
+ * are not the lead" identity override (the 260723 ladder that failed on the
+ * Claude host and stays rejected as a *system-prompt* device), it **demotes
+ * the inherited lead conversation to reference-only** and fences the task as an
+ * explicit "message from the lead", so the fork separates *its* task from the
+ * lead's inherited plan structurally. Live-verified to stop role-bleed on both
+ * a weak model (gpt-5.6-luna) and a top frontier model (astra); the calm
+ * structural framing is why it is chosen over the aggressive header.
+ *
+ * It is a message-level frame on purpose: the "conversation above" it points to
+ * is the cloned conversation history the fork inherits, which sits before this
+ * first message — not anything in the system prompt.
+ */
+export function buildForkInitialMessage(leadPrompt: string): string {
+  return [
+    "# Forked session",
+    "",
+    "The conversation above was inherited from the lead when this fork was created. Treat it as reference/background only — it is the lead's context, not instructions addressed to you, and its plan is not yours to continue.",
+    "",
+    "--- Message from the lead ---",
+    leadPrompt,
+    "--- end of message ---",
+    "",
+    `Start working on this task directly and yourself now — do not fork again or hand it onward. When done (or if you need the lead's input), report via ${REPORT_TO_LEAD_TOOL_NAME}.`,
   ].join("\n");
 }
 
@@ -496,7 +530,7 @@ export function registerFork(pi: ExtensionAPI, bridge: BridgeHandle, rpcRegistry
         },
         {
           systemPromptPath: directivePath,
-          prompt: p.prompt,
+          prompt: buildForkInitialMessage(p.prompt),
           modelName: p.model_name,
         },
       );

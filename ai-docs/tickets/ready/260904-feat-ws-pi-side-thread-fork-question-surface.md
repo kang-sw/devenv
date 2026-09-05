@@ -232,6 +232,39 @@ mechanism; none is prompt text.
   speak as the lead — persona continuity is the feature — and the owner is
   present in real time.
 
+#### Re-decision (2026-09-05) — structural initial-message frame
+
+The **Directive-style / "no identity framing"** decision above holds for the
+*system-prompt directive* but was found insufficient in live Pi dogfooding: a
+task fork whose inherited context contained a lead-orchestration script role-bled
+— it re-ran the lead's plan and reported "unable to start the requested fork"
+instead of doing its own task. Root cause (audited): a fork is pushed toward
+lead-identity by **two** inherited signals — the cloned `--fork` conversation AND
+the `pi-lead-guide.md` block the `before_agent_start` hook appends to a fork's
+own system prompt (`isLeadOrFork` treats fork == lead) — against only a soft
+"work laterally alongside the lead" line.
+
+The `260723` finding that "bleed is not mitigated by prompt text" was established
+on the **Claude host (Opus 4.8 / Sonnet)**; it does not transfer wholesale to
+Pi. The rejected prompt-strength ladder was re-run empirically on Pi's actual
+models (owner-approved):
+
+| variant | luna (weak) | astra (top frontier) | wording |
+| --- | --- | --- | --- |
+| natural (prior shipped) | role-bled | — | none |
+| strong-header (all-caps identity) | fixed | — | aggressive |
+| **framed (structural)** | **fixed** | **fixed** | **calm** |
+
+**Adopted:** the fork's **initial user message** is now a structural frame
+(`buildForkInitialMessage`) that demotes the inherited conversation to
+reference-only and fences the task as an explicit "message from the lead" — no
+all-caps/identity override. The system-prompt directive stays framing-free (the
+original decision), so this is an *additive message-level* mechanism, not a
+reversal of the directive-style rule. `framed` is chosen over `strong-header`
+because it stops the bleed on both weak and top-frontier models with the calmest
+wording. This complements, and does not replace, the §4 anti-bleed mechanical
+loop.
+
 ### 5. Owner-facing surface (TUI lead)
 
 - Overlay chat via `ctx.ui.custom({ overlay: true })` rendering a pi-tui
