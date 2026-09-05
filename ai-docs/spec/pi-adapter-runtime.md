@@ -1029,7 +1029,7 @@ call. State lives in memory for the session; there is no on-disk goal substrate 
 this surface.
 
 - **Arming.** `/goal <goal>` (a `pi.registerCommand`) enters goal mode: it injects
-  a `Goal settled: <goal>` announcement turn and sets an active-goal marker. A
+  a `Goal armed: <goal>` announcement turn and sets an active-goal marker. A
   settle outside goal mode is an ordinary stop — the `agent_settled` handler is
   armed **only** while a goal is active, which is what keeps an ordinary Pi session
   from looping.
@@ -1082,7 +1082,11 @@ auto-compaction remains the last-resort backstop.
   once and returns without disarming the goal. Because a manual `ctx.compact`
   aborts the invoking turn, the goal then reaches a fresh settle and the existing
   armed `agent_settled` reminder re-enters the next goal turn — so compaction folds
-  into the normal loop rather than needing its own continuation path.
+  into the normal loop rather than needing its own continuation path. The tool's
+  returned text — the only in-band evidence of the request, since the
+  `Compaction completed` notification fires outside the model's view — reads
+  `Compaction requested; the conversation will resume from a summary carrying:
+  <carry_forward>`.
 - **Advisory surfacing, not a gate.** While armed, the reminder turn carries two
   pieces of information for the model to weigh: the current context usage as a
   percent (from `getContextUsage().percent`, or derived from `tokens` against the
