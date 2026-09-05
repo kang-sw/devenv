@@ -66,3 +66,33 @@ string, and add an assertion that the lever's returned text starts with
 `Compaction requested` and carries the `carry_forward` argument verbatim.
 Update the two spec passages. Live check (owner-run): `/goal` a trivial goal
 and confirm the lead does not treat the announcement as completion.
+
+### Result (e12ef1f0) - 2026-09-06
+
+Landed as `7ecc293c` (plan) and `e12ef1f0` (code, tests, spec) on the
+implementation branch under the goal branch.
+
+- `buildGoalAnnouncement` returns `Goal armed: <goal>`; the
+  `goal-compact-and-continue` lever returns `Compaction requested; the
+  conversation will resume from a summary carrying: <carry_forward>`, built
+  by a new pure helper `buildCompactionLeverResult` so the test suite's
+  no-IO convention holds (plan-authorized deviation). `ctx.compact` call and
+  the non-terminal (no disarm) behavior unchanged; reminder, yield status,
+  advisory, and terminal strings byte-identical.
+- Tests: announcement assertion updated; lever-result test added. Adapter
+  suite 736 pass, 0 fail.
+- Spec: goal-loop anchor quote and the lever sub-anchor amended; ids
+  unchanged. No `Goal settled` remains in adapter source, tests, guide, or
+  spec; only historical ticket and plan text.
+
+Review (single, full scope): clean; one Minor recorded (the
+`buildGoalAnnouncement` doc comment's "pinned verbatim by the ticket" now
+has an ambiguous referent between the 260903 and this ticket).
+
+Owner-run live check outstanding: `/goal` a trivial goal against the merged
+goal branch.
+
+## Blocked (2026-09-06) — owner sign-off pending, not a work item
+
+Phase 1 carries a Result; no autonomous work remains. Closing waits on the
+owner-run `/goal` live check. Once confirmed, close the ticket to `.done/`.
