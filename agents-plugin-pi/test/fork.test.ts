@@ -37,16 +37,18 @@ import {
   getForkSourceSessionFile,
   buildForkDirectiveText,
   buildForkInitialMessage,
+  wireAntiBleedLoop,
 } from "../src/fork.ts";
-import { REPORT_TO_LEAD_TOOL_NAME } from "../src/spawner.ts";
+import { REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord } from "../src/spawner.ts";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 describe("FORK_TOOL_NAME / FORK_EXCLUDED_TOOL_NAMES", () => {
   test("FORK_TOOL_NAME is the literal ws-fork", () => {
     assert.equal(FORK_TOOL_NAME, "ws-fork");
   });
 
-  test("Phase 1 excludes only ws-fork itself (ws-ask/ws-resolve don't exist yet)", () => {
-    assert.deepEqual([...FORK_EXCLUDED_TOOL_NAMES], [FORK_TOOL_NAME]);
+  test("excludes ws-fork itself plus Phase 2's ws-ask/ws-resolve (a fork's only question path is ws-report-to-lead)", () => {
+    assert.deepEqual([...FORK_EXCLUDED_TOOL_NAMES].sort(), [FORK_TOOL_NAME, "ws-ask", "ws-resolve"].sort());
   });
 });
 
@@ -67,6 +69,13 @@ describe("computeForkToolSurface", () => {
 
   test("an empty lead tool list still ends up with exactly ws-report-to-lead", () => {
     assert.deepEqual(computeForkToolSurface([]), [REPORT_TO_LEAD_TOOL_NAME]);
+  });
+
+  test("also removes the Phase 2 owner-question primitives ws-ask/ws-resolve", () => {
+    const result = computeForkToolSurface(["bash", "ws-ask", "ws-resolve", FORK_TOOL_NAME]);
+    assert.ok(!result.includes("ws-ask"), 'a fork\'s only question path is ws-report-to-lead(kind:"question")');
+    assert.ok(!result.includes("ws-resolve"));
+    assert.deepEqual([...result].sort(), ["bash", REPORT_TO_LEAD_TOOL_NAME].sort());
   });
 
   test("a lead surface with no ws-fork present is unaffected besides the ws-report-to-lead addition", () => {
@@ -305,5 +314,99 @@ describe("buildForkInitialMessage (260905 structural anti-bleed frame)", () => {
   test("stays calm — no ALL-CAPS override words (chosen over the aggressive header)", () => {
     const allCapsWords = buildForkInitialMessage(task).match(/\b[A-Z]{4,}\b/g) ?? [];
     assert.deepEqual(allCapsWords, [], `framed message must stay calm: ${JSON.stringify(allCapsWords)}`);
+  });
+});
+
+/**
+ * 260904 Phase 2: `wireAntiBleedLoop`'s new `onQuestion` seam, driven against
+ * a duck-typed fake client/record (no subprocess, no real `RpcClient`) — the
+ * event stream is replayed by hand through the listener the function
+ * registers. Everything else about the loop is unchanged Phase 1 behavior.
+ */
+describe("wireAntiBleedLoop onQuestion callback (Phase 2 seam)", () => {
+  function harness() {
+    const notices: string[] = [];
+    const prompts: string[] = [];
+    let listener: ((evt: unknown) => void) | undefined;
+    const record = {
+      agentId: "a1",
+      sessionPath: "/nonexistent/session.jsonl",
+      systemPromptPath: "/nonexistent/prompt.md",
+      wsToolNames: [],
+      toolGroup: "full-worker",
+      streaming: false,
+      idlePending: false,
+      waiters: [],
+      pendingReports: [],
+      reportsDropped: 0,
+      client: {
+        onEvent(l: (evt: unknown) => void) {
+          listener = l;
+          return () => {};
+        },
+        prompt(message: string) {
+          prompts.push(message);
+          return Promise.resolve();
+        },
+      },
+    } as unknown as RpcAgentRecord;
+    const pi = {
+      sendUserMessage(text: string) {
+        notices.push(text);
+      },
+    } as unknown as ExtensionAPI;
+    return { pi, record, notices, prompts, emit: (evt: unknown) => listener?.(evt) };
+  }
+
+  const questionTurn = [
+    { type: "agent_start" },
+    { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "question", message: "Which of the two anchors should I use?" } },
+    { type: "agent_settled" },
+  ];
+
+  test('fires once with (agentId, message) on a "question"-classified turn end', () => {
+    const h = harness();
+    const seen: Array<{ agentId: string; message: string }> = [];
+    wireAntiBleedLoop(h.pi, "a1", h.record, false, (agentId, message) => seen.push({ agentId, message }));
+    for (const evt of questionTurn) h.emit(evt);
+    assert.deepEqual(seen, [{ agentId: "a1", message: "Which of the two anchors should I use?" }]);
+  });
+
+  test('never fires on a "final" turn or on a bare no-signal turn end', () => {
+    const h = harness();
+    let calls = 0;
+    wireAntiBleedLoop(h.pi, "a1", h.record, false, () => {
+      calls += 1;
+    });
+    for (const evt of [
+      { type: "agent_start" },
+      { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "final", message: "Outcome: x\nFiles changed: none\nVerification: none\nBlockers: none\nCommit: none\nDecisions: none" } },
+      { type: "agent_settled" },
+      { type: "agent_start" },
+      { type: "agent_settled" },
+    ]) {
+      h.emit(evt);
+    }
+    assert.equal(calls, 0);
+  });
+
+  test("omitting the callback keeps Phase 1 behavior (no throw, question turn still resets quietly)", () => {
+    const h = harness();
+    wireAntiBleedLoop(h.pi, "a1", h.record, false);
+    for (const evt of questionTurn) h.emit(evt);
+    assert.deepEqual(h.notices, [], "a question turn is a valid stop — no lead notice");
+    assert.deepEqual(h.prompts, [], "a question turn is never nudged");
+  });
+
+  test("a throwing callback cannot break the loop for later turns", () => {
+    const h = harness();
+    let calls = 0;
+    wireAntiBleedLoop(h.pi, "a1", h.record, false, () => {
+      calls += 1;
+      throw new Error("boom");
+    });
+    for (const evt of questionTurn) h.emit(evt);
+    for (const evt of questionTurn) h.emit(evt);
+    assert.equal(calls, 2, "the listener must survive a throwing Phase 2 callback");
   });
 });
