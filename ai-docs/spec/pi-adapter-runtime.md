@@ -175,9 +175,9 @@ and never the manual body a second time:
 - The bridge prepends one fixed line to the mapped response — that the workflow
   manual is in the system prompt and this is the current session state — so a
   model expecting the manual is not confused by its absence.
-- The unset-catalog advisory (the model-catalog unset advisory below) keeps
-  riding the mapped response with its per-call cadence; it is keyed on the
-  registered name the model called, not on the wire tool the bridge dispatched.
+- The unset-tier advisory (below) keeps riding the mapped response with its
+  per-call cadence; it is keyed on the registered name the model called, not
+  on the wire tool the bridge dispatched.
 - Role- and bootstrap-gated: the cut/mapping and the prepended line apply only in
   a lead or fork process **and** only when the session-start static-body snapshot
   exists. A `worker` or `explore` that calls `ws__workflow_manual`, or any process
@@ -417,52 +417,76 @@ so it is itself a root of its own worker → explore-leaf tree and consumes no
 depth budget of the lead's. A fork cannot fork again, because `ws-fork` is
 absent from its surface.
 
-### Model resolution: name alias, not tier {#260903-pi-spawner-model-tier-inherit}
+### Model resolution: fixed tier through ws-mcp {#260903-pi-spawner-model-tier-inherit}
 
-`ws-agent-spawn` carries **no `tier`** parameter. Model selection is the lead's
-call at render time: `ws__playbook_render` already returns a config-resolved
-`recommended-tier` / `recommended-model` / `recommended-reasoning-effort`, and the
-lead either passes `model_name` (and optionally `model_effort`) to the spawn or
-omits them to inherit the parent's model. When `model_name` is given it is resolved
-through the catalog's alias table (see below) to a concrete `provider/id` and
-launched as `--model <that model>`; an unknown alias, an empty table, or an omitted
-`model_name` all degrade to inheriting the parent's active model. Resolution never
-hard-fails. `model_effort`, when given, is applied to the launched child through a
-post-launch reasoning-effort call rather than a launch flag; an unsupported value
-is a no-op, never an error.
+`ws-agent-spawn`'s `model_name` names one of the **four fixed tiers** —
+`small` | `medium` | `large` | `xlarge` — under harness `pi`; it is not a
+user-curated alias name. There is no adapter-owned data file: a given
+`model_name` is resolved by calling ws-mcp's `config.resolve_agent` tool
+(`{tier: model_name, format: "json"}`), never by parsing config directly. The
+call passes no explicit `harness` argument — it relies on the bridge's own
+detected session harness (`pi`, set at `initialize` time), so a harness typo
+elsewhere cannot silently misroute this call.
+
+The adapter accepts the tool's answer only as a **genuine `pi` hit**: the
+response's `resolved_from` must equal `"pi"` AND its `model` string must
+contain a `/` (a `provider/id` shape). A partial `config.tune agents.tier
+harness:pi` write can seed the `pi` bucket from a codex-shaped default model
+(no `/`), so `resolved_from === "pi"` alone is not proof of a real Pi model
+string — the slash check is what tells the two apart. Every other outcome —
+an `isError` result, missing/unparsable response text, a non-`pi`
+`resolved_from`, a `pi`-labeled-but-slash-less model, or an omitted/unmapped
+`model_name` — degrades to inheriting the parent's active model. Resolution
+never hard-fails.
+
+`model_effort` follows the same "explicit caller wins" rule: a caller-supplied
+`model_effort` on the spawn call always overrides whatever the config
+resolution returned. When the caller passes none, a genuine `pi` hit's own
+non-empty `effort` field (`low`/`medium`/`high`/`xhigh`) is applied as
+`modelEffort`; an empty resolved effort passes no `modelEffort` at all,
+leaving the child's own default effort untouched. A non-genuine hit never
+contributes an effort value, even if its raw payload happened to carry one.
 
 `explore` is a **role**, not a caller-facing model choice: it resolves its own
-model through the catalog and exposes no `model_name` parameter.
+model through the same `config.resolve_agent` path, implicitly keyed on the
+fixed tier name `small`, and exposes no `model_name` parameter.
 
-### Model catalog data file {#260903-pi-model-catalog-config-file}
+### Model resolution via ws-mcp config, not an adapter data file {#260903-pi-model-catalog-config-file}
 
-The curated model aliases live in an adapter-owned data file,
-`agents-plugin-pi/model-catalog.json` (sibling to `runtime.json`) — no Pi model
-strings are placed in the harness-neutral ws-mcp core. Its shape is an `aliases`
-object mapping a **generic model name** (e.g. `opus`, `sonnet`) to a concrete
-`provider/id` model string, plus an optional `catalog` list of curated candidate
-models. A `model_name` passed to `ws-agent-spawn` is resolved name → `provider/id`
-through this table; this replaces the earlier tier→model map, since the spawn tool
-no longer takes a tier. The file ships as `{}` (empty alias table) so a fresh
-checkout starts with every spawn inheriting until the user curates it. It is read
-**fresh on every spawn** (no caching), so a hand-edit applies without restarting
-Pi; a missing or malformed file is treated as an empty table rather than an error.
+There is no adapter-owned model-catalog file any more. `ws-agent-spawn`,
+`ws-fork` and `explore`'s implicit `small` lookup all resolve `model_name`
+by calling ws-mcp's `config.resolve_agent` tool at spawn time (see the
+anchor above for the exact accept/reject rule) — the adapter never reads or
+writes model configuration on disk. User config may carry Pi model strings;
+adapter and core code may not: curating a tier means running `config.tune
+agents.tier harness:pi` (directly, or via the `lead-tune` skill), not
+hand-editing a package-local JSON file. The call is re-issued fresh on every
+spawn (no caching), so a `config.tune` edit applies to the very next spawn
+with no adapter restart needed.
 
-The read-only `ws-model-catalog-list` command enumerates the session's usable
-models (`ctx.scopedModels`, falling back to the full available pool when no
-scoping is configured) as `provider/id` candidates for the user to hand-copy into
-`model-catalog.json`. It never writes the file.
+The read-only `ws-model-catalog-list` command still enumerates the session's
+usable models (`ctx.scopedModels`, falling back to the full available pool
+when no scoping is configured) as `provider/id` candidates — its underlying
+behavior (list Pi's own model registry) stays useful input for curating
+`config.tune agents.tier harness:pi` even though the file it used to point
+at is gone; it performs no writes either way.
 
-### Unset-catalog advisory on workflow_manual {#260903-pi-model-catalog-unset-advisory}
+### Unset-tier advisory on workflow_manual {#260903-pi-model-catalog-unset-advisory}
 
-While the catalog's alias table is empty, the adapter appends a strong advisory
-to every `workflow_manual` response (and only that tool's response), mirroring the
-cadence of the ws-mcp core's bootstrap-version-behind advisory — recomputed and
-re-appended on every call while the condition holds, not once per session. The
-advisory is appended after the tool's own content (never prepended, never mutating
-the original in place) and is added only on a successful `workflow_manual` result,
-never on an error response. Spawns and explores still degrade silently to inherit
-while the table is empty; the advisory is the only pressure and never blocks work.
+While harness `pi`'s `agents.tier` table has no genuine `pi` entry on any of
+the four fixed tiers, the adapter appends a strong advisory to every
+`workflow_manual` response (and only that tool's response), mirroring the
+cadence of the ws-mcp core's bootstrap-version-behind advisory — recomputed
+and re-appended on every call while the condition holds, not once per
+session. The condition itself is sourced from the same `config.resolve_agent`
+tool the spawn path uses: the adapter calls it once per fixed tier
+(`small`/`medium`/`large`/`xlarge`, four local stdio round-trips), applying
+the identical genuine-`pi`-hit guard, and fires the advisory only when none of
+the four comes back as a real Pi model. The advisory is appended after the
+tool's own content (never prepended, never mutating the original in place)
+and is added only on a successful `workflow_manual` result, never on an error
+response. Spawns and explores still degrade silently to inherit while every
+tier is unset; the advisory is the only pressure and never blocks work.
 
 ### Child→lead report channel {#260904-pi-report-to-lead-channel}
 
@@ -1001,10 +1025,10 @@ this surface.
 - **Runaway backstop.** N **consecutive** re-fires with no intervening tool call
   force-stop the goal and fully reset the loop; a re-fire in which a tool call did
   occur resets the streak to zero. The threshold defaults to 10 and is tunable
-  through an adapter-owned data file, `agents-plugin-pi/goal-loop-config.json`
-  (sibling to `model-catalog.json`), read **fresh** per settle; a missing or
-  malformed file, or a non-positive / non-finite `runaway_threshold`, falls back
-  to the default rather than erroring.
+  through an adapter-owned data file, `agents-plugin-pi/goal-loop-config.json`,
+  read **fresh** per settle; a missing or malformed file, or a non-positive /
+  non-finite `runaway_threshold`, falls back to the default rather than
+  erroring.
 - **Yield to live children.** While armed, a settle that finds any delegated
   child still running (the same predicate that drives the
   `N delegated agents still running` status line of the "Child→lead report
