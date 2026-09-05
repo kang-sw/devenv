@@ -84,7 +84,7 @@
  *
  * That ticket's Phase 2 adds the owner-question surface (src/ask.ts +
  * src/overlay-chat.ts): `ws-ask`/`ws-resolve`, a persisted per-lead-session
- * thread registry, the `N pending` widget, `/thread`, `/answer <id>` (which
+ * thread registry, `/thread`, `/answer <id>` (which
  * lazily forks a discussion thread at the lead's tip AT OPEN TIME and
  * attaches an overlay chat to it), and the `/done` summary injected back
  * into the lead as a Pi custom message. `session_start` re-captures `ctx`
@@ -102,6 +102,21 @@
  * decides hold vs send) and, in TUI only, registers the compact
  * `push-render.ts` renderers for the six families; `session_shutdown` drops
  * the held queue with the session it belonged to.
+ *
+ * The `260905-feat-ws-pi-live-agent-widget` ticket's Phase 1 adds the
+ * live-agent widget (src/agent-widget.ts, `createAgentWidgetController`): one
+ * compact `belowEditor` panel listing every live agent and owner discussion
+ * thread, plus a `setStatus` footer segment (`ws: N agents · M questions`).
+ * It also folds the 260904 owner-question surface's standalone `N pending`
+ * `aboveEditor` widget into this one panel — `ask.ts` no longer owns any
+ * widget of its own. `session_start`, in the same TUI-lead-only block that
+ * hydrates the thread registry, (re)creates the controller over
+ * `agentTools.rpcRegistry`/`threadHandle.threads` and points
+ * `spawner.ts`'s `agentWidgetRefreshRef` at its `refresh()`; every
+ * registry-transition point in `spawner.ts` and every widget-refresh call
+ * site left in `ask.ts` fire through that same ref, so neither module
+ * imports `agent-widget.ts` directly. `session_shutdown` stops its 10-second
+ * elapsed timer and clears both the widget and the status segment.
  *
  * HAND-SYNC NOTE: bin/ws-mcp-launcher.py, runtime.json, and rsrc/ in this
  * package are byte-identical copies of the same-named files under
@@ -128,6 +143,7 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { startBridge, type BridgeHandle } from "./bridge.ts";
 import {
+  agentWidgetRefreshRef,
   heldPushQueue,
   leadIdleRef,
   pushToLead,
@@ -136,6 +152,7 @@ import {
   type AgentToolsHandle,
   type RpcAgentRegistry,
 } from "./spawner.ts";
+import { createAgentWidgetController, type AgentWidgetController } from "./agent-widget.ts";
 import { registerPushMessageRenderers } from "./push-render.ts";
 import { buildOrphanPush, captureOrphans, readAndClearSidecar, reviveOrphans, writeSidecar } from "./agent-sidecar.ts";
 import { buildDiscussKickoff } from "./discuss.ts";
@@ -151,7 +168,6 @@ import {
   createThreadRegistryHandle,
   handleForkRaisedQuestion,
   hydrateThreadRegistry,
-  refreshPendingWidget,
   registerAsk,
   registerThreadCommands,
   threadRegistryPath,
@@ -186,6 +202,12 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   // to) a sibling file of the lead's own session file on every session_start
   // — see ask.ts's header for why that file exists at all.
   const threadHandle = createThreadRegistryHandle();
+  // 260905 (live-agent widget ticket): the IO controller behind
+  // `spawner.ts`'s `agentWidgetRefreshRef` — created once per TUI-lead
+  // `session_start`, torn down (timer stopped, widget/status cleared) on
+  // `session_shutdown`. `undefined` in every non-TUI or non-lead/fork process,
+  // which is also what keeps `agentWidgetRefreshRef.current` unset there.
+  let agentWidgetHandle: AgentWidgetController | undefined;
 
   pi.on("resources_discover", () => ({
     skillPaths: [skillsDir],
@@ -355,7 +377,18 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
           }
         }
       }
-      refreshPendingWidget(ctx, threadHandle);
+      // 260905 (live-agent widget ticket): TUI-lead-only, mirroring the same
+      // `ctx.mode === "tui"` check already used at #L249 for the push
+      // renderers — the outer `isLeadOrFork` block above also runs headless
+      // (hydration/orphan revival apply there too), but the widget itself
+      // must not. A prior controller (a `/reload`) is stopped first so its
+      // timer never outlives the registry/threads it closed over.
+      if (ctx.mode === "tui") {
+        agentWidgetHandle?.stop();
+        agentWidgetHandle = createAgentWidgetController(ctx, agentTools.rpcRegistry, threadHandle.threads);
+        agentWidgetRefreshRef.current = () => agentWidgetHandle?.refresh();
+        agentWidgetHandle.refresh();
+      }
     }
     registerAsk(pi, threadHandle, agentTools.rpcRegistry);
     registerThreadCommands(pi, handle, agentTools.rpcRegistry, threadHandle, { cwd: ctx.cwd, modelCatalogPath });
@@ -432,6 +465,12 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // persisted (see spawner.ts's heldPushQueue).
     heldPushQueue.length = 0;
     leadIdleRef.current = undefined;
+    // 260905 (live-agent widget ticket): stop the elapsed timer and clear the
+    // widget/status segment (mirrors `leadIdleRef.current = undefined` above)
+    // — the registries the controller closed over are about to be discarded.
+    agentWidgetHandle?.stop();
+    agentWidgetHandle = undefined;
+    agentWidgetRefreshRef.current = undefined;
     handle?.shutdown();
     handle = undefined;
   });

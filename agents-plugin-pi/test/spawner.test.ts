@@ -1621,6 +1621,26 @@ describe("promptAgent (the single prompt funnel)", () => {
     assert.equal(record.running, true);
     assert.equal(record.lastLeadPromptAt, 1_000, "moving the watermark would hide the very stale idle-without-final the nudge exists to serve");
   });
+
+  test("260905: stamps runStartedAt unconditionally, overwriting any stale prior value", async () => {
+    const { client } = fakeRpcClient();
+    const record = freshRpcRecord({ runStartedAt: 1_000 });
+    const before = Date.now();
+
+    await promptAgent(record, client, "do the thing");
+
+    assert.ok((record.runStartedAt ?? 0) >= before, "runStartedAt must be re-stamped to the new run's start, not left at the stale value");
+  });
+
+  test("260905: the anti-bleed nudge (isLeadPrompt:false) ALSO stamps runStartedAt — the widget's elapsed clock tracks any prompt, not just lead prompts", async () => {
+    const { client } = fakeRpcClient();
+    const record = freshRpcRecord({ runStartedAt: 1_000 });
+    const before = Date.now();
+
+    await promptAgent(record, client, "nudge", { isLeadPrompt: false });
+
+    assert.ok((record.runStartedAt ?? 0) >= before);
+  });
 });
 
 describe("recordReport / reportKindsSinceLeadPrompt", () => {

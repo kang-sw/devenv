@@ -31,7 +31,7 @@
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
 
-import { test, describe } from "node:test";
+import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -39,7 +39,6 @@ import { join } from "node:path";
 import {
   ASK_TOOL_NAME,
   RESOLVE_TOOL_NAME,
-  PENDING_WIDGET_KEY,
   nextThreadId,
   deriveThreadTitle,
   threadRegistryPath,
@@ -49,9 +48,7 @@ import {
   saveThreadRegistryFile,
   hydrateThreadRegistry,
   createThreadRegistryHandle,
-  refreshPendingWidget,
   countPending,
-  buildWidgetLines,
   buildThreadListLines,
   mostRecentReopenable,
   isEntryLive,
@@ -81,6 +78,7 @@ import {
 import type { OverlayHandle } from "../src/overlay-chat.ts";
 import { FORK_EXCLUDED_TOOL_NAMES } from "../src/fork.ts";
 import {
+  agentWidgetRefreshRef,
   applyRpcEvent,
   computeRunningStatusLine,
   REPORT_TO_LEAD_TOOL_NAME,
@@ -90,6 +88,14 @@ import {
   type RpcAgentRegistry,
 } from "../src/spawner.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+// 260905 (live-agent widget ticket): every widget-refresh call site in
+// ask.ts now fires through spawner.ts's module-level `agentWidgetRefreshRef`
+// instead of a locally-passed ctx/handle — reset it after every test so a
+// spy installed by one test can never leak into the next.
+afterEach(() => {
+  agentWidgetRefreshRef.current = undefined;
+});
 
 function thread(overrides: Partial<ThreadRecord> = {}): ThreadRecord {
   return {
@@ -276,50 +282,10 @@ describe("loadThreadRegistryFile / saveThreadRegistryFile (never-throw IO)", () 
   });
 });
 
-describe("countPending / buildWidgetLines", () => {
+describe("countPending", () => {
   test("counts pending threads only — an open or dormant thread is not still owed an answer", () => {
     const records = [thread({ threadId: "q1" }), thread({ threadId: "q2", status: "open" }), thread({ threadId: "q3", status: "dormant" }), thread({ threadId: "q4" })];
     assert.equal(countPending(records), 2);
-  });
-
-  test("zero pending clears the widget entirely (undefined content)", () => {
-    assert.equal(buildWidgetLines(0), undefined);
-    assert.equal(buildWidgetLines(-1), undefined);
-  });
-
-  test("the widget wording is singular for one and plural beyond", () => {
-    assert.match(buildWidgetLines(1)![0], /1 pending question\b/);
-    assert.match(buildWidgetLines(3)![0], /3 pending questions\b/);
-  });
-});
-
-describe("refreshPendingWidget", () => {
-  function fakeCtx(mode: string) {
-    const calls: Array<{ key: string; content: string[] | undefined; options?: { placement?: string } }> = [];
-    return {
-      ctx: { mode, ui: { setWidget: (key: string, content: string[] | undefined, options?: { placement?: string }) => calls.push({ key, content, options }) } },
-      calls,
-    };
-  }
-
-  test("paints an aboveEditor widget in TUI mode", () => {
-    const handle = createThreadRegistryHandle();
-    handle.threads.set("q1", thread());
-    const { ctx, calls } = fakeCtx("tui");
-    refreshPendingWidget(ctx, handle);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].key, PENDING_WIDGET_KEY);
-    assert.equal(calls[0].options?.placement, "aboveEditor");
-    assert.match(calls[0].content![0], /1 pending question/);
-  });
-
-  test("§8: never paints a widget outside TUI mode, and no-ops with no captured ctx", () => {
-    const handle = createThreadRegistryHandle();
-    handle.threads.set("q1", thread());
-    const { ctx, calls } = fakeCtx("rpc");
-    refreshPendingWidget(ctx, handle);
-    refreshPendingWidget(undefined, handle);
-    assert.deepEqual(calls, []);
   });
 });
 
@@ -566,10 +532,8 @@ describe("getLeafEntryId", () => {
 describe("handleForkRaisedQuestion (Entry A meets Entry B)", () => {
   function setup() {
     const handle = createThreadRegistryHandle();
-    const widgets: Array<string[] | undefined> = [];
-    handle.ctxRef.current = { mode: "tui", ui: { setWidget: (_key, content) => widgets.push(content) } };
     const registry: RpcAgentRegistry = new Map();
-    return { handle, registry, widgets };
+    return { handle, registry };
   }
 
   test("registers a pending thread whose respondent is already the live fork, with no entryId", () => {
@@ -602,11 +566,15 @@ describe("handleForkRaisedQuestion (Entry A meets Entry B)", () => {
     assert.equal(handleForkRaisedQuestion(handle, new Map(), "agent-9", "q?").forkResume, undefined);
   });
 
-  test("bumps the pending widget through the re-captured ctx", () => {
-    const { handle, registry, widgets } = setup();
+  test("bumps the merged live-agent widget refresh (260905: no widget of its own left here)", () => {
+    const { handle, registry } = setup();
+    let calls = 0;
+    agentWidgetRefreshRef.current = () => {
+      calls += 1;
+    };
     handleForkRaisedQuestion(handle, registry, "agent-7", "first?");
     handleForkRaisedQuestion(handle, registry, "agent-8", "second?");
-    assert.match(widgets.at(-1)![0], /2 pending questions/);
+    assert.equal(calls, 2, "each registration fires the merged refresh once");
   });
 
   test("a not-yet-captured ctx (the restart race the ticket names) is a guarded no-op, not a crash", () => {
@@ -756,19 +724,25 @@ describe("registerAsk (fake pi)", () => {
   }
 
   function uiCtx(mode: string) {
-    const widgets: Array<{ key: string; content: string[] | undefined }> = [];
     const notices: Array<{ message: string; type?: string }> = [];
     return {
       ctx: {
         mode,
         ui: {
-          setWidget: (key: string, content: string[] | undefined) => widgets.push({ key, content }),
           notify: (message: string, type?: string) => notices.push({ message, type }),
         },
       },
-      widgets,
       notices,
     };
+  }
+
+  /** Installs a counting spy on the merged live-agent widget refresh; returns a reader for the current count. */
+  function spyOnAgentWidgetRefresh(): () => number {
+    let calls = 0;
+    agentWidgetRefreshRef.current = () => {
+      calls += 1;
+    };
+    return () => calls;
   }
 
   async function callAsk(tools: Map<string, FakeTool>, params: unknown, ctx: unknown) {
@@ -781,9 +755,10 @@ describe("registerAsk (fake pi)", () => {
     assert.deepEqual([...tools.keys()].sort(), [ASK_TOOL_NAME, RESOLVE_TOOL_NAME].sort());
   });
 
-  test("tui: returns {question_id}, stores the thread, and refreshes the pending widget", async () => {
+  test("tui: returns {question_id}, stores the thread, and fires the merged live-agent widget refresh", async () => {
     const { tools, handle } = setup();
     const ui = uiCtx("tui");
+    const calls = spyOnAgentWidgetRefresh();
     const out = await callAsk(tools, { title: "rebase or merge?", question: "Which?", context: "short" }, ui.ctx);
 
     assert.equal(out.question_id, "q1");
@@ -793,18 +768,17 @@ describe("registerAsk (fake pi)", () => {
     assert.equal(record.context, "short");
     assert.equal(record.status, "pending");
     assert.equal(record.origin, "lead-ask", "C2: ws-ask owns its (lazily spawned) discussion fork, so /done may stop it");
-    assert.equal(ui.widgets.length, 1, "§8: the widget is the TUI branch's own signal");
-    assert.equal(ui.widgets[0].key, PENDING_WIDGET_KEY);
-    assert.match(ui.widgets[0].content![0], /1 pending question/);
+    assert.equal(calls(), 1, "§8: the merged refresh is the TUI branch's own signal");
     assert.deepEqual(ui.notices, [], "the TUI branch must not also fire the headless notify");
   });
 
-  test("headless: notifies instead of setting a widget (§8 baseline)", async () => {
+  test("headless: notifies instead of refreshing the widget (§8 baseline)", async () => {
     const { tools } = setup();
     const ui = uiCtx("print");
+    const calls = spyOnAgentWidgetRefresh();
     await callAsk(tools, { title: "rebase or merge?", question: "Which?" }, ui.ctx);
 
-    assert.deepEqual(ui.widgets, [], "no widget outside tui");
+    assert.equal(calls(), 0, "no widget refresh outside tui");
     assert.equal(ui.notices.length, 1);
     assert.equal(ui.notices[0].type, "info");
     assert.match(ui.notices[0].message, /q1/);
@@ -839,6 +813,7 @@ describe("registerAsk (fake pi)", () => {
   test("persists on register, and again on ws-resolve's close transition", async () => {
     const { tools, handle, path } = setup();
     const ui = uiCtx("tui");
+    const calls = spyOnAgentWidgetRefresh();
     await callAsk(tools, { title: "t", question: "q" }, ui.ctx);
     assert.equal(loadThreadRegistryFile(path)[0]?.status, "pending", "restart survival: pending is on disk before any answer");
 
@@ -846,7 +821,7 @@ describe("registerAsk (fake pi)", () => {
     assert.deepEqual(JSON.parse(res.content[0].text), { question_id: "q1", status: "closed" });
     assert.equal(handle.threads.get("q1")!.status, "closed");
     assert.equal(loadThreadRegistryFile(path)[0]?.status, "closed");
-    assert.equal(ui.widgets.at(-1)!.content, undefined, "resolving the last pending question clears the widget");
+    assert.equal(calls(), 2, "the merged refresh fires again on ws-resolve's close transition");
   });
 
   test("I6: ws-resolve releases the respondent's threadBound on a REAL registry, not just the no-op guard", async () => {
