@@ -18,6 +18,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createRequire } from "node:module";
+import { initTheme } from "@earendil-works/pi-coding-agent";
+import { pathToFileURL } from "node:url";
+import { loadToolResultWidth, createToolResultComponent, type RenderResultRowsOptions } from "../src/tool-result-render.ts";
 import {
   sanitizeToolName,
   filterOutMercenaryTools,
@@ -32,9 +36,8 @@ import {
   prependWorkflowStateLine,
   shouldMapWorkflowManual,
   dispatchMappedWorkflowManual,
-  renderResultRows,
+  renderResultRows as renderRows,
   renderResultText,
-  visibleDisplayWidth,
   yamlDisplayText,
   startBridge,
 } from "../src/bridge.ts";
@@ -566,8 +569,14 @@ describe("computeRawDispatchPiAliasTableReport (review relay #1, Important/test:
   });
 });
 
+// Import the actual installed Pi oracle independently of the production loader.
+const piTuiPath = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent")).resolve("@earendil-works/pi-tui");
+const { visibleWidth: visibleDisplayWidth } = await import(pathToFileURL(piTuiPath).href);
+
 describe("Pi tool-result YAML rendering", () => {
   const plainHint = "E to expand";
+  const renderResultRows = (content: Parameters<typeof renderRows>[0], options: Omit<RenderResultRowsOptions, "measure">) =>
+    renderRows(content, { ...options, measure: visibleDisplayWidth });
 
   test("renders JSON objects and arrays as YAML only in the display text", () => {
     assert.equal(renderResultText([{ type: "text", text: '{"name":"orca","ready":true}' }], { isError: false }), "name: orca\nready: true\n");
@@ -654,6 +663,127 @@ describe("Pi tool-result YAML rendering", () => {
     for (const row of [...tabs, ...keycaps, ...decoratedEmoji.flat(), ...controls]) assert.ok(visibleDisplayWidth(row) <= 2 || row === "beforeafter");
   });
 
+  test("loads Pi's width dynamically, supports nested installs, and degrades without a guessed metric", async () => {
+    assert.equal(await loadToolResultWidth(), visibleDisplayWidth);
+    assert.equal(await loadToolResultWidth(async () => ({ visibleWidth: visibleDisplayWidth }), () => {
+      throw new Error("nested lookup must not run after a direct hit");
+    }), visibleDisplayWidth);
+    const calls: string[] = [];
+    assert.equal(await loadToolResultWidth(async (specifier) => {
+      calls.push(specifier);
+      if (specifier === "nested") return { visibleWidth: visibleDisplayWidth };
+      throw new Error("not hoisted");
+    }, () => "nested"), visibleDisplayWidth);
+    assert.deepEqual(calls, ["@earendil-works/pi-tui", "nested"]);
+    assert.equal(await loadToolResultWidth(async () => ({}), () => "nested"), undefined);
+    assert.equal(await loadToolResultWidth(async () => { throw new Error("unavailable"); }, () => { throw new Error("unresolved"); }), undefined);
+  });
+
+  test("uses actual Pi width for indivisible modifier/mark chains, including clusters wider than two cells", () => {
+    const text = "\u{1F3FB}\u0301\u{1F3FB}\u0301";
+    assert.equal(visibleDisplayWidth(text), 4);
+    const content = [{ type: "text", text }];
+    const original = JSON.stringify(content);
+    for (const width of [1, 2, 3]) {
+      assert.deepEqual(renderResultRows(content, { isError: true, expanded: true, width }), ["?"]);
+    }
+    assert.deepEqual(renderResultRows(content, { isError: true, expanded: true, width: 4 }), [text]);
+    assert.deepEqual(renderResultRows(content, { isError: true, expanded: true, width: 0 }), []);
+    assert.equal(JSON.stringify(content), original);
+  });
+
+  test("comparative grapheme sweep bounds every row against actual Pi, not a local Unicode approximation", () => {
+    const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    const bases = ["a", "界", "ᄀ", "ᅡ", "각", "ｶ", "ﾞ", "क्‍ष", "กำ", "ກຳ", "\u093e", "\u0bbe", "\u0301", "1️⃣", "🇰🇷", "👩🏽‍💻"];
+    for (let code = 0x1f000; code <= 0x1faff; code++) bases.push(String.fromCodePoint(code));
+    let cases = 0;
+    for (const base of bases) {
+      for (const suffix of ["", "\u0301", "\uFE0E", "\uFE0F"]) {
+        const text = (base + suffix).repeat(2);
+        const segments = [...segmenter.segment(text)].map(({ segment }) => segment);
+        for (const width of [1, 2, 3, 4]) {
+          const rows = renderResultRows([{ type: "text", text }], { isError: true, expanded: true, width });
+          for (const row of rows) assert.ok(visibleDisplayWidth(row) <= width, `${JSON.stringify(text)} at ${width}: ${JSON.stringify(row)}`);
+          assert.equal(rows.join(""), segments.map((segment) => visibleDisplayWidth(segment) > width ? "?" : segment).join(""));
+          cases++;
+        }
+      }
+    }
+    assert.equal(cases, 45312);
+  });
+
+  test("actual Pi validates styled raw/YAML collapse and expansion across scripts and narrow widths", () => {
+    initTheme("dark", false);
+    const samples = ["\u{1F3FB}\u0301\u{1F3FB}\u0301", "🙂\uFE0E", "🙂\uFE0F", "a\u0301", "界", "1️⃣", "👩🏽‍💻", "क्‍ष", "กำ", "ｶﾞ", "\u093e"];
+    const theme = { fg: (_color: string, text: string) => `\x1b[32m${text}\x1b[0m` };
+    for (const sample of samples) {
+      const body = Array.from({ length: 12 }, () => sample.repeat(3)).join("\n");
+      for (const text of [body, JSON.stringify({ body })]) {
+        const content = [{ type: "text", text }];
+        for (const width of [1, 2, 3, 4, 10, 40]) {
+          const options = { isError: false, width, expandHint: plainHint };
+          const expanded = renderResultRows(content, { ...options, expanded: true });
+          const collapsed = renderResultRows(content, { ...options, expanded: false });
+          assert.ok(expanded.length > 10);
+          assert.deepEqual(collapsed.slice(0, 10), expanded.slice(0, 10));
+          assert.equal(collapsed.slice(10).join(""), `… ${expanded.length - 10} more rows (${plainHint})`);
+          for (const expand of [true, false]) {
+            const component = createToolResultComponent(content, { expanded: expand }, theme, { isError: false, showImages: true }, visibleDisplayWidth);
+            for (const row of component.render(width)) assert.ok(visibleDisplayWidth(row) <= width);
+          }
+        }
+      }
+    }
+  });
+
+  test("ASCII fallback sanitizes and escapes every body/marker character without guessing Unicode width", () => {
+    const raw = "A界🙂\u0301\u007f\u0085\u200d\ud800";
+    const escaped = "A\\u754c\\ud83d\\ude42\\u0301\\u007f\\u0085\\u200d\\ud800";
+    const content = [{ type: "text", text: Array(12).fill(raw).join("\n") }];
+    const bytes = JSON.stringify(content);
+    const expandHint = "⌘\x1b[31mE\x1b[0m\n to expand\x1b]52;c;clipboard\x07";
+    for (const width of [0, 1, 2, 3, 40]) {
+      for (const expanded of [false, true]) {
+        const rows = renderRows(content, { isError: false, expanded, width, expandHint });
+        if (width === 0) {
+          assert.deepEqual(rows, []);
+          continue;
+        }
+        assert.equal(rows.join(""), expanded ? escaped.repeat(12) :
+          escaped.repeat(10) + "\\u2026 2 more lines (\\u2318E\\u000a to expand)");
+        for (const row of rows) {
+          assert.match(row, /^[\x20-\x7e]*$/);
+          assert.ok(visibleDisplayWidth(row) <= width);
+        }
+      }
+    }
+    assert.equal(JSON.stringify(content), bytes);
+  });
+
+  test("ASCII fallback preserves parser/serializer/error and mixed-content policies", () => {
+    const options = { isError: false, expanded: true, width: 1, expandHint: plainHint };
+    for (const [text, expected] of [
+      ['"bare界"', '"bare\\u754c"'],
+      ["{bad🙂}", "{bad\\ud83d\\ude42}"],
+      ["a\t界", "a   \\u754c"],
+    ]) assert.equal(renderRows([{ type: "text", text }], options).join(""), expected);
+    const text = '{"name":"界"}';
+    assert.equal(renderRows([{ type: "text", text }], {
+      ...options, serialize: () => { throw new Error("serialization failed"); },
+    }).join(""), '{"name":"\\u754c"}');
+    const mixed = [
+      { type: "image", data: "unchanged", mimeType: "image/png\x1b[2J界\u007f" },
+      { type: "text", text: "prose界" },
+      { type: "text", text: '{"later":"🙂"}' },
+    ];
+    const bytes = JSON.stringify(mixed);
+    assert.equal(renderRows(mixed, { ...options, showImages: false }).join(""),
+      'prose\\u754c{"later":"\\ud83d\\ude42"}[Image: [image/png\\u754c\\u007f]]');
+    assert.equal(renderRows(mixed, { ...options, showImages: true }).join(""),
+      'prose\\u754c{"later":"\\ud83d\\ude42"}');
+    assert.equal(JSON.stringify(mixed), bytes);
+  });
+
   test("preserves an image fallback when Pi image display is disabled", () => {
     assert.deepEqual(
       renderResultRows([{ type: "image", data: "base64", mimeType: "image/png" }], { isError: false, showImages: false, expanded: true, width: 80, expandHint: plainHint }),
@@ -675,14 +805,14 @@ describe("Pi tool-result YAML rendering", () => {
     }
   });
 
-  test("the real bridge registration attaches the shared renderer and returns execute content unchanged", async () => {
+  for (const missingWidth of [false, true]) test(`real bridge keeps YAML renderer and execute bytes with width capability ${missingWidth ? "unavailable" : "available"}`, async () => {
     const directory = await mkdtemp(join(tmpdir(), "ws-pi-bridge-test-"));
     const launcherPath = join(directory, "fake-mcp.py");
     const runtimeJsonPath = join(directory, "runtime.json");
     const responseContent = [
-      { type: "text", text: '{"first":true}' },
+      { type: "text", text: '{ "first": true }' },
       { type: "image", data: "base64", mimeType: "image/png" },
-      { type: "text", text: '{"later":"raw"}' },
+      { type: "text", text: '{"later":"raw🙂"}' },
     ];
     await writeFile(runtimeJsonPath, JSON.stringify({ plugin_version: "test-version" }));
     await writeFile(launcherPath, [
@@ -693,7 +823,7 @@ describe("Pi tool-result YAML rendering", () => {
       "  elif request['method'] == 'tools/list': result = {'tools':[{'name':'sample.tool','description':'sample','inputSchema':{'type':'object'}}]}",
       "  else:",
       "    name = request['params']['name']",
-      "    content = [{'type':'text','text':'{\\\"session_key\\\":\\\"test-key\\\"}'}] if name == 'ferrule' else [{'type':'text','text':'{\\\"first\\\":true}'},{'type':'image','data':'base64','mimeType':'image/png'},{'type':'text','text':'{\\\"later\\\":\\\"raw\\\"}'}]",
+      "    content = [{'type':'text','text':'{\\\"session_key\\\":\\\"test-key\\\"}'}] if name == 'ferrule' else [{'type':'text','text':'{ \\\"first\\\": true }'},{'type':'image','data':'base64','mimeType':'image/png'},{'type':'text','text':'{\\\"later\\\":\\\"raw🙂\\\"}'}]",
       "    result = {'content': content}",
       "  print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}), flush=True)",
     ].join("\n"));
@@ -706,14 +836,72 @@ describe("Pi tool-result YAML rendering", () => {
         pluginDir: directory,
         runtimeJsonPath,
         cwd: directory,
+        resultWidthLoader: missingWidth ? () => loadToolResultWidth(async () => {
+          throw new Error("Pi width import unavailable");
+        }, () => "missing-nested-pi") : undefined,
       });
-      const tool = tools.get("ws__sample_tool");
-      assert.ok(tool?.renderResult, "every bridge-loop registration must carry the shared renderer");
-      const result = await tool.execute("call-1", {}, undefined, undefined, undefined);
-      assert.deepEqual(result.content, responseContent, "execute must forward the model-visible MCP content unchanged");
-      const component = tool.renderResult(result, { expanded: false, isPartial: false }, { fg: (_color: string, text: string) => text }, { isError: false, showImages: true });
-      assert.deepEqual(component.render(80), ["first: true", "", '{"later":"raw"}']);
-      handle.shutdown();
+      try {
+        const tool = tools.get("ws__sample_tool");
+        assert.ok(tool?.renderResult, "every bridge-loop registration must carry the shared renderer");
+        const result = await tool.execute("call-1", {}, undefined, undefined, undefined);
+        assert.deepEqual(result.content, responseContent, "execute must forward the model-visible MCP content unchanged");
+        assert.deepEqual(result.details, { content: responseContent });
+        const resultBytes = JSON.stringify(result);
+        const component = tool.renderResult(result, { expanded: false, isPartial: false }, { fg: (_color: string, text: string) => text }, { isError: false, showImages: true });
+        assert.deepEqual(component.render(80), ["first: true", "", missingWidth ? '{"later":"raw\\ud83d\\ude42"}' : '{"later":"raw🙂"}']);
+        assert.equal(JSON.stringify(result), resultBytes, "rendering must not mutate content or details");
+        const trickyText = "\u{1F3FB}\u0301\u{1F3FB}\u0301";
+        const tricky = tool.renderResult({ content: [{ type: "text", text: trickyText }] }, { expanded: true }, { fg: (_color: string, text: string) => text }, { isError: true, showImages: true });
+        if (!missingWidth) {
+          assert.deepEqual(tricky.render(2), ["?"]);
+          assert.deepEqual(tricky.render(4), [trickyText]);
+        } else {
+          assert.equal(tricky.render(2).join(""), "\\ud83c\\udffb\\u0301\\ud83c\\udffb\\u0301");
+          initTheme("dark", false);
+          const longValue = "界🙂".repeat(4);
+          const escapedValue = "\\u754c\\ud83d\\ude42".repeat(4);
+          const content = [
+            { type: "text", text: JSON.stringify(Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`field${i}`, longValue]))) },
+            { type: "image", data: "base64", mimeType: "image/png" },
+            { type: "text", text: '\x1b[2J{"later":"raw JSON"}\x1b]52;c;clipboard\x07' },
+          ];
+          const displayResult = { content, details: { content, extra: "原🙂" } };
+          const bytes = JSON.stringify(displayResult);
+          const context = { isError: false, showImages: false };
+          // Fallback is plain ASCII even if the theme would add unmeasured text.
+          const theme = { fg: (_color: string, text: string) => `\x1b[32m界${text}\x1b[0m` };
+          const expected = [
+            ...Array.from({ length: 12 }, (_, i) => `field${i}: ${escapedValue}`),
+            "", '{"later":"raw JSON"}', "[Image: [image/png]]",
+          ];
+          for (const width of [-1, 0, 1, 2, 7, 4096]) {
+            const expanded = tool.renderResult(displayResult, { expanded: true }, theme, context).render(width);
+            const collapsed = tool.renderResult(displayResult, { expanded: false }, theme, context).render(width);
+            if (width <= 0) {
+              assert.deepEqual(expanded, []);
+              assert.deepEqual(collapsed, []);
+              continue;
+            }
+            assert.equal(expanded.join(""), expected.join(""));
+            const selectedBody = expected.slice(0, 10).join("");
+            assert.ok(collapsed.join("").startsWith(selectedBody));
+            assert.match(collapsed.join("").slice(selectedBody.length), /^\\u2026 5 more lines \(.+to expand\)$/);
+            assert.ok(!collapsed.join("").includes("field10:"), "select ten logical lines before physical wrapping");
+            if (width === 1) assert.ok(collapsed.length > 10, "logical budget does not cap physical rows");
+            if (width === 4096) assert.deepEqual(expanded, expected);
+            for (const row of [...expanded, ...collapsed]) {
+              assert.match(row, /^[\x20-\x7e]*$/, "all final fallback rows are printable ASCII");
+              assert.ok(visibleDisplayWidth(row) <= width, "actual Pi validates each fallback row");
+            }
+          }
+          assert.equal(JSON.stringify(displayResult), bytes);
+          const errorRows = tool.renderResult(displayResult, { expanded: true }, theme, { ...context, isError: true }).render(4096);
+          assert.equal(errorRows[0], content[0].text.replaceAll(longValue, escapedValue), "errors stay raw JSON, with display-only Unicode escapes");
+          assert.equal(errorRows[1], '{"later":"raw JSON"}');
+        }
+      } finally {
+        handle.shutdown();
+      }
     } finally {
       if (previousRole === undefined) delete process.env.WS_PI_SPAWN_ROLE;
       else process.env.WS_PI_SPAWN_ROLE = previousRole;
