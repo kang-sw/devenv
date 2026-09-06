@@ -275,6 +275,17 @@ list is replaced, calling any enter tool is always a mode switch; a prior mode's
 derived list is discarded. Derivation logic lives in Go, so no skill-side
 `todo.add` loop is needed for a covered mode:
 
+Both route tools accept the canonical envelope
+`{session_key, params: {target, facts, ...}}`. The outer `session_key` binds
+the session; routing fields, including optional `policy` and `format` where
+supported, belong inside `params`. When present, `params` must be an object,
+the outer envelope may contain only `session_key` and `params`, and an inner
+`session_key` is rejected. Malformed or mixed envelopes fail before agenda or
+todo mutation. Wrapped calls always use typed routing, so a wrapped implement
+call without a valid target cannot fall back to legacy mode entry. Calls
+without `params` retain the existing top-level typed and legacy implement
+behavior for compatibility.
+
 - `implement`: `route.resolve_implement` is the public mode-switch call for the
   implementation-facts-complete boundary. Its published `inputSchema` is
   opaque (`session_key` plus a `params: object` and a pointer to
@@ -282,9 +293,9 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   optional grouped `facts.scope` / `facts.complexity` / `facts.risk` objects, a
   small `policy` object, and optional `format: text|json` — is documented in
   `ws:lead-implement`'s `Fact Contract` section, not in the published schema.
-  The Go decoder still internally parses and validates that same field set,
-  reading `target`/`facts`/`policy`/`format` as top-level call arguments;
-  routing behavior is unchanged. MCP observes Git branch state from the session root, including the
+  The resolver validates `target`/`facts`/`policy`/`format` inside `params`
+  and derives the same typed verdict, agenda, and todos as an equivalent
+  top-level compatibility call. MCP observes Git branch state from the session root, including the
   current branch, HEAD/start commit, target branch existence, and
   upstream/tracking ambiguity; callers provide only policy that cannot be
   observed mechanically, such as a merge target while already on an
@@ -401,9 +412,9 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   the real field contract — a required `target` object, optional grouped
   `facts.ticket` / `facts.gates` / `facts.work` objects, and optional `format:
   text|json` — is documented in `ws:lead-proceed`'s `Fact Contract` section,
-  not in the published schema. The Go decoder still internally parses and
-  validates that same field set, reading `target`/`facts`/`format` as
-  top-level call arguments; routing behavior is unchanged. It normalizes the
+  not in the published schema. The resolver validates `target`/`facts`/`format`
+  inside `params` and derives the same typed verdict, agenda, and todos as an
+  equivalent top-level compatibility call. It normalizes the
   current proceed route vocabulary (`target-kind`, `ticket-missing`,
   `has-ticket`, `status`, `migration-anchor`, `actionable`,
   `discussion-needed`, `needs-ticket`, `freshness`, `category`, `slice`, and
