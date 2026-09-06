@@ -257,22 +257,3 @@ reminder. Amend the goal-loop anchor in `pi-adapter-runtime` (lever
 sub-anchor) to state the verbatim guarantee. Live check (owner-run):
 `goal-compact-and-continue` with a distinctive sentence and confirm it
 appears byte-for-byte in the first message after compaction.
-
-## Blocked (2026-09-06)
-
-### Design Reviewer — block
-
-| # | Title | Severity | Resolution |
-|---|-------|----------|------------|
-| 1 | Re-arm from session_compact cannot send the reminder (Pi flag still set; agent streaming after push release) | critical | autonomous |
-| 2 | agent_settled held-push release not suppressed while compacting | important | autonomous |
-| 3 | No backstop clears the compacting flag if neither completion event fires | important | autonomous |
-| 4 | session_before_compact set point fires too late for non-lever manual compaction | important | autonomous |
-| 5 | Phase 1 contradicts three live spec sentences; no Spec Impact section | important | autonomous |
-| 6 | Holding steer pushes needs a HeldPush deliverAs field | minor | autonomous |
-
-### Completeness Reviewer — pass
-
-| # | Title | Severity |
-|---|-------|----------|
-| 1 | Advisory-point wording fix has no design bullet | minor |

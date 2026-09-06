@@ -266,20 +266,3 @@ argument; `exploreLeaf` passes the tier's effort through (mock the ws-mcp
 resolve to return one) and passes nothing on an inherit. Live check
 (owner-run): with `small` configured with an explicit effort, confirm the
 explore child's transcript shows that thinking level.
-
-## Blocked (2026-09-06)
-
-### Design Reviewer — concern (third pass; earlier blocking rows all addressed)
-
-| # | Title | Severity | Resolution |
-|---|-------|----------|------------|
-| 1 | `getAvailable()` is itself a cached snapshot, so the `no-auth` case can misfire on a correct configuration | important | autonomous |
-| 2 | "not a model Pi knows" is false for the motivating value and for a `:thinking` suffix | minor | autonomous |
-| 3 | The suggestion pointer names a command that lists a narrower set than the accept list | minor | autonomous |
-| 4 | The `readCatalog` injection seam is described one hop off from the code | minor | autonomous |
-
-### Completeness Reviewer — pass
-
-| # | Title | Severity |
-|---|-------|----------|
-| 1 | Reason field described two ways | minor |
