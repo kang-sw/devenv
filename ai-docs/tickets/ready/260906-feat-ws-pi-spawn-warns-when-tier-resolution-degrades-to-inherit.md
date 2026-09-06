@@ -2,6 +2,8 @@
 title: Pi spawn checks a configured tier model against Pi's catalog and warns with suggestions instead of silently inheriting
 related:
   260905-feat-ws-pi-harness-config-layer: owns resolveModelForAliasViaWsMcp and its genuine-pi-hit guard
+  260906-bug-ws-pi-tier-slug-rejected-children-inherit-parent-model: supersedes the "exactly provider/id" value contract with backend expansion; the deferred Phase 1 spec pass writes that accept rule, not the bare-id-ambiguity sentence
+  260906-bug-ws-pi-model-warning-keeps-reappearing: supersedes the "list row repeats the spawn warning" surface with a tier_rejected row field and a once-per-key advisory; the deferred Phase 1 spec pass writes those forms
 spec:
   - pi-adapter-runtime
 sage-review-design: completed
