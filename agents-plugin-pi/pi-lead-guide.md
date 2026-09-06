@@ -30,7 +30,7 @@ Route a task to the right primitive by what you actually need done:
 
 | You want to... | Call |
 | --- | --- |
-| Delegate a task to a persistent subagent | `ws-agent-spawn` (pass an already-rendered `system_prompt_path`, e.g. via `ws__playbook_render`; also pass `alias` and `title` — a short slug and a one-line description — so you and `ws-agent-list` can refer to it by name instead of by uuid) |
+| Delegate a task to a persistent subagent | `ws-agent-spawn` (pass an already-rendered `system_prompt_path`, e.g. via `ws__playbook_render`; also pass `alias` and `title` — a short slug and a one-line description — so you and `ws-agent-list` can refer to it by name instead of by uuid; optional `model_name` is one of the fixed tiers `small`/`medium`/`large`/`xlarge` configured for harness `pi` via `lead-tune`/`config.list` — omit to inherit your own model) |
 | Send a follow-up or steer a subagent, running or parked | `ws-agent-send <alias-or-agent_id>` — a parked (dormant) subagent is transparently resumed from its own session file, so there is no separate "wake it up" step |
 | Wait for a subagent to finish or report progress | **Nothing — end your turn.** There is no wait verb. Every child signal is pushed into your session as a message that starts a turn on arrival. |
 | See every subagent's status (running/idle/dormant), alias and title | `ws-agent-list` (pass `include_prompt:true` to also see each one's original prompt, head-truncated; off by default to keep the listing short) |
@@ -38,16 +38,18 @@ Route a task to the right primitive by what you actually need done:
 | Read a subagent's full session transcript | `ws-agent-transcript` |
 | (as a subagent) surface an intermediate finding to your lead | `ws-report-to-lead` |
 | Answer one scoped, read-only exploration question | `explore` |
-| Arm a persistent goal that survives multiple turns | `/goal <goal>` |
+| Arm a persistent goal that survives multiple turns | `/goal <goal>` — when the goal names a skill, start every cycle by calling `ws-skill <name>` for it, not by guessing its content from memory |
 | Declare the active goal achieved (terminal) | `goal-achieved <summary>` |
 | Declare the active goal blocked (terminal) | `goal-blocked <reason>` |
-| Compact context mid-goal and keep going (non-terminal) | `goal-compact-and-continue <carry-forward>` |
+| Compact context mid-goal and keep going (non-terminal) | `goal-compact-and-continue <carry-forward>` — the documented way to compact under an armed goal; the reminder is held and re-sent once compaction finishes, race-free. Typing `/compact` yourself instead still races an in-flight reminder (accepted, not intercepted). |
 | Delegate a lead-consensus-caliber shell task, gated command-by-command | `ws-execute` (spawns an execute-worker; optional `command` runs verbatim first, then `prompt` drives the worker; `complex:true` to inherit your own model instead of the default light one). This gate exists because `ws-execute` proxies actions at your own trust level — a general `ws-agent-spawn` worker carries no such gate. |
 | Respond to a pending execute-worker command approval request | `ws-approve` (`decision`: `approve` \| `deny` with `reason` \| `run-instead` with `command`; rejected if `cmd_id` is stale or mismatched) |
-| Delegate a task-thread fork that shares your full current context (lateral peer, not a depth-consuming worker) | `ws-fork` (`prompt`, optional `model_name`/`expects_commit`; it reports back ONLY via `ws-report-to-lead(kind:"question"|"final")` — never treat a bare turn-end as its result) |
+| Delegate a task-thread fork that shares your full current context (lateral peer, not a depth-consuming worker) | `ws-fork` (`prompt`, optional `model_name` — one of the fixed tiers `small`/`medium`/`large`/`xlarge` configured for harness `pi` via `lead-tune`/`config.list`, not a free-form name — and `expects_commit`; it reports back ONLY via `ws-report-to-lead(kind:"question"|"final")` — never treat a bare turn-end as its result) |
 | Ask the owner a question without blocking or interrupting them | `ws-ask` (`title`, `question`, optional `context` — 2-3 sentences of background, no paths or hashes). Returns `{question_id}` and spawns nothing; keep working on whatever does not depend on the answer. |
 | Withdraw a question you no longer need answered | `ws-resolve` (`question_id`) — clears it from the owner's pending count; nothing is injected back, since you already know the answer |
 | Read one file yourself when delegating the read would be absurd | `do-i-really-have-to-read-this-myself` (`path`, optional `offset`/`limit`). Native `read` and `bash` are removed from your surface; this is the only direct read you have, and the name is the point — it is a fallback for a must-look moment, not your first move. Prefer `explore` or a worker for anything wider than one file. |
+| Run one short command yourself when you need its output inline right now | `do-i-really-have-to-run-this-myself` (`command`, `why`). Fixed 30s timeout (bounds only that direct command, not a descendant it backgrounds) and 4KB output cap (trimmed to the last complete line, with a hint if truncated) — never yours to raise. The name is the point: single short command, nothing multi-step/long-running/mutating. Anything wider goes through `ws-execute`. |
+| Load and follow a ws skill (`lead-proceed`, `lead-drain-ready-queue`, `lead-write-ticket`, ...) | `ws-skill <name>` (optional `args`, appended as `User: <args>`) — the replacement for reading a SKILL.md yourself; native `read` is not on your surface. `<available_skills>` below lists every name/description/location. |
 
 `agent_id` on `ws-agent-send`, `ws-agent-stop`, `ws-agent-transcript` and
 `ws-approve` accepts either the alias you gave at spawn time or the raw uuid —

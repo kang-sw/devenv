@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 447daa1b31119316
 sage-review-completeness-reviewed: 447daa1b31119316
+completed: 2026-09-06
 ---
 
 # Pi lead regains a soft-discouraged one-liner exec tool next to the ugly-named read
@@ -126,3 +127,53 @@ timeout line rather than a thrown error; `why` is echoed first. Live check
 (owner-run): from a TUI lead, run `git rev-parse --abbrev-ref HEAD` through
 the hatch and confirm the one-line result, then run `cat` on a large file and
 confirm the cap and the `ws-execute` hint.
+
+### Result (45fc7948) - 2026-09-06
+
+Landed as `4a9eb2cb` (survey plan), `45fc7948` (tool, `capOutput`, tests),
+`5f698aa9` (guide row and spec anchor), `7a89bde5` (review relay #1) on the
+implementation branch under the goal branch. Adapter-only change.
+
+- `do-i-really-have-to-run-this-myself` is registered beside the read hatch
+  in `execute-gateway.ts` and appended to `LEAD_ADDED_TOOL_NAMES`, so it is
+  present for the lead and a lateral fork and absent from every child tool
+  group. Required `command` and `why`; the `why` line comes first in the
+  result. Runs `pi.exec("sh", ["-c", command], { cwd, timeout, signal })`
+  with a 30 s timeout and a 4 KB cap as module constants; the pure
+  `capOutput` trims to the last complete line inside the byte cap and keeps
+  a character-boundary head for a single long line; the drop hint names
+  `ws-execute`.
+- Relay #1: Pi's `execCommand` sets `killed` for both the timeout and the
+  caller's abort signal and coerces a signal-killed exit code to 0, so the
+  result now distinguishes "interrupted" from "timed out" via
+  `signal?.aborted` and annotates the exit-code line as killed. stdout and
+  stderr are merged through `mergeExecOutput` with a newline separator when
+  stdout lacks one. Tool description, guide row, and spec now say the
+  timeout bounds the direct `sh` child only, not a backgrounded descendant.
+- Tests: the ticket's cases (lead surface and child-group absence,
+  `capOutput` at the boundary, one over, multibyte straddle, single long
+  line, timeout without throwing, `why` first) plus interrupt-wording,
+  merge-separator, and constant-value cases. Adapter suite 761 pass, 0 fail.
+- Spec: `{#260905-pi-lead-tool-surface-execute-gateway}` lists the hatch
+  and its limits and now reads "no unbounded exec for the lead"; id
+  unchanged. Guide verb table gained one row.
+
+Review (partitioned correctness/test): test clean with one Minor (comment
+off-by-one, fixed); correctness one Important (killed-path misreport) and
+five Minor, four fixed in relay #1 and one recorded only (the drop hint is
+appended after the cap, so the returned text exceeds the cap by the hint's
+length; accepted as intended).
+
+Owner-run live check outstanding: from a TUI lead, run
+`git rev-parse --abbrev-ref HEAD` through the hatch, then `cat` a large
+file and confirm the cap and the `ws-execute` hint.
+
+## Blocked (2026-09-06) — owner sign-off pending, not a work item
+
+Phase 1 carries a Result; no autonomous work remains. Closing waits on the
+owner-run live check above. Once confirmed, close the ticket to `.done/`.
+
+
+## Resolution (2026-09-06)
+
+Owner-run live check on 2026-09-06 passed: one-line branch output through the hatch, the 4 KB cap with the `use ws-execute for bulk output` hint, the `(timed out after 30s)` line, the `(interrupted before completion)` wording with `exit code: 0 (killed — not a clean exit)`, and both hatches absent from the child tool inventory.

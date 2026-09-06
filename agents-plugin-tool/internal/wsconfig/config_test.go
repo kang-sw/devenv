@@ -3,6 +3,7 @@ package wsconfig
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -178,6 +179,34 @@ func TestSetAgentsTierForHarnessTargetsHarnessAlias(t *testing.T) {
 	}
 	if backend != "codex" || model != "gpt-5.4" {
 		t.Fatalf("claude harness resolution = %q/%q", backend, model)
+	}
+}
+
+// TestSetAgentsTierForHarnessTargetsPiAlias mirrors
+// TestSetAgentsTierForHarnessTargetsHarnessAlias for the "pi" harness,
+// proving SetAgentsTierForHarness/ResolveAgentForHarness round-trip for
+// harness="pi" independent of the MCP dispatch layer, and that the
+// "default" bucket is left untouched (Decision: default bucket semantics
+// unchanged).
+func TestSetAgentsTierForHarnessTargetsPiAlias(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "cache")
+	cfg, err := SetAgentsTierForHarness(Options{CacheHome: cache}, "medium", "pi", "pi-model-1", "pi")
+	if err != nil {
+		t.Fatalf("SetAgentsTierForHarness returned error: %v", err)
+	}
+	if mapping := cfg.Agents.ModelAliases["medium"]["pi"]; mapping.Backend != "pi" || mapping.Model != "pi-model-1" {
+		t.Fatalf("pi alias mapping = %#v", mapping)
+	}
+	if mapping := cfg.Agents.ModelAliases["medium"]["default"]; mapping.Backend != "codex" || mapping.Model != "gpt-5.6-terra" {
+		t.Fatalf("default alias mapping was overwritten = %#v", mapping)
+	}
+
+	backend, model, err := ResolveAgentForHarness(Options{CacheHome: cache}, "medium", "", "", "pi")
+	if err != nil {
+		t.Fatalf("ResolveAgentForHarness returned error: %v", err)
+	}
+	if backend != "pi" || model != "pi-model-1" {
+		t.Fatalf("pi harness resolution = %q/%q", backend, model)
 	}
 }
 
@@ -627,5 +656,65 @@ func TestXlargeIndependentOfLarge(t *testing.T) {
 	}
 	if backendL != "codex" || modelL != "gpt-custom-large" {
 		t.Fatalf("large after xlarge set = %q/%q, want codex/gpt-custom-large", backendL, modelL)
+	}
+}
+
+// TestResolveAgentTierForHarnessEachPiTier covers the ticket's "each tier
+// under pi with a set value" case: for every fixed tier, seed a "pi" bucket
+// via SetAgentsTierForHarness, then assert ResolveAgentTierForHarness returns
+// that exact backend/model/effort with resolvedFrom == "pi" (260905 Phase 3).
+func TestResolveAgentTierForHarnessEachPiTier(t *testing.T) {
+	for _, tier := range []string{"small", "medium", "large", "xlarge"} {
+		t.Run(tier, func(t *testing.T) {
+			cache := filepath.Join(t.TempDir(), "cache")
+			model := "pi-model-" + tier
+			if _, err := SetAgentsTierForHarness(Options{CacheHome: cache}, tier, "pi", model, "pi", "high"); err != nil {
+				t.Fatalf("SetAgentsTierForHarness: %v", err)
+			}
+			backend, gotModel, effort, resolvedFrom, err := ResolveAgentTierForHarness(Options{CacheHome: cache}, tier, "pi")
+			if err != nil {
+				t.Fatalf("ResolveAgentTierForHarness returned error: %v", err)
+			}
+			if backend != "pi" || gotModel != model || effort != "high" {
+				t.Fatalf("resolution = %q/%q/%q, want pi/%q/high", backend, gotModel, effort, model)
+			}
+			if resolvedFrom != "pi" {
+				t.Fatalf("resolvedFrom = %q, want %q", resolvedFrom, "pi")
+			}
+		})
+	}
+}
+
+// TestResolveAgentTierForHarnessFallsBackToDefault covers the ticket's
+// "fallback to default with the answering bucket reported" case: with
+// nothing set for the "pi" bucket, ResolveAgentTierForHarness must resolve
+// at the seeded "default" bucket (Codebase Findings: applyDefaultModelAliases
+// always seeds "default"/"codex", never "pi") and report resolvedFrom ==
+// "default".
+func TestResolveAgentTierForHarnessFallsBackToDefault(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "cache")
+	backend, model, effort, resolvedFrom, err := ResolveAgentTierForHarness(Options{CacheHome: cache}, "medium", "pi")
+	if err != nil {
+		t.Fatalf("ResolveAgentTierForHarness returned error: %v", err)
+	}
+	if backend != "codex" || model != "gpt-5.6-terra" || effort != "high" {
+		t.Fatalf("resolution = %q/%q/%q, want the seeded default medium tier", backend, model, effort)
+	}
+	if resolvedFrom != "default" {
+		t.Fatalf("resolvedFrom = %q, want %q", resolvedFrom, "default")
+	}
+}
+
+// TestResolveAgentTierForHarnessRejectsUnknownTier covers the ticket's
+// "unknown tier rejected" case, mirroring SetAgentsTierForHarness's own
+// unknown-tier rejection message.
+func TestResolveAgentTierForHarnessRejectsUnknownTier(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "cache")
+	_, _, _, _, err := ResolveAgentTierForHarness(Options{CacheHome: cache}, "bogus", "pi")
+	if err == nil {
+		t.Fatal("expected error for unknown tier, got nil")
+	}
+	if !strings.Contains(err.Error(), "tier must be small, medium, large, or xlarge") {
+		t.Fatalf("error = %v, want it to mention the valid tier set", err)
 	}
 }

@@ -574,7 +574,7 @@ describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2, 260
     assert.deepEqual(advisories(h.pushes), []);
   });
 
-  test("I6 (260905): a hook return SUPPRESSES the question push — the owner surface consumed it", () => {
+  test("I6 (260905): a hook return PUSHES the registration notice as ws-agent-advisory — the owner surface consumed the question, not the lead notice", () => {
     const h = harness();
     const seen: Array<{ agentId: string; message: string }> = [];
     h.record.onQuestionReport = (rec, message) => {
@@ -583,7 +583,11 @@ describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2, 260
     };
     const outcome = applyRpcEvent(h.record, questionReportEvent);
     assert.deepEqual(seen, [{ agentId: "a1", message: "Which of the two anchors should I use?" }]);
-    assert.deepEqual(outcome, {}, "§1 keeps the lead out of a fork-raised question entirely");
+    assert.deepEqual(
+      outcome,
+      { push: { family: "ws-agent-advisory", payload: { advisory: "fork-question-thread", detail: "[ws] thread T1 — the owner answers this." }, deliverAs: "followUp" } },
+      "§1 keeps the lead out of the fork-raised question exchange, but the lead must still see the thread notice",
+    );
     assert.equal(h.record.reportLog.length, 1, "the report is still logged for the anti-bleed loop");
   });
 
@@ -641,19 +645,23 @@ describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2, 260
  * record wired from that ctx actually pushes on a final.
  */
 describe("buildForkSpawnCtx (the ws-fork push channel)", () => {
-  const bridge = { wsToolNames: ["ws__ferrule"], defaultSessionKeyRef: { current: "amber-otter-canyon" } } as unknown as BridgeHandle;
+  const bridge = {
+    wsToolNames: ["ws__ferrule"],
+    defaultSessionKeyRef: { current: "amber-otter-canyon" },
+    client: { callTool: async () => ({ content: [] }) },
+  } as unknown as BridgeHandle;
   const pi = { sendMessage() {} } as unknown as ExtensionAPI;
 
   test("carries the spawning session's own pi — without it a fork has no report channel at all", () => {
-    const ctx = buildForkSpawnCtx(pi, bridge, { cwd: "/repo", modelCatalogPath: "/repo/model-catalog.json" }, {
+    const ctx = buildForkSpawnCtx(pi, bridge, { cwd: "/repo" }, {
       forkFrom: "/tmp/lead-session.jsonl",
       explicitTools: "read,grep",
     });
     assert.equal(ctx.pi, pi, "a ws-fork spawn must push into the session that spawned it");
   });
 
-  test("carries the fork spawn shape: --fork source, explicit tools, parent session key, and spawnRole fork", () => {
-    const ctx = buildForkSpawnCtx(pi, bridge, { cwd: "/repo", modelCatalogPath: "/repo/model-catalog.json" }, {
+  test("carries the fork spawn shape: --fork source, explicit tools, parent session key, spawnRole fork, and the bridge's client", () => {
+    const ctx = buildForkSpawnCtx(pi, bridge, { cwd: "/repo" }, {
       forkFrom: "/tmp/lead-session.jsonl",
       explicitTools: "read,grep",
       inheritModel: "openrouter/some-model",
@@ -665,12 +673,13 @@ describe("buildForkSpawnCtx (the ws-fork push channel)", () => {
     assert.equal(ctx.inheritModel, "openrouter/some-model");
     assert.equal(ctx.cwd, "/repo");
     assert.deepEqual([...ctx.wsToolNames], ["ws__ferrule"]);
+    assert.equal(ctx.client, bridge.client, "must read the ws-mcp client off the bridge");
   });
 
   test("C1: a record wired through that ctx's pi pushes ws-agent-report when the fork's own final turn ends", async () => {
     const sent: Array<{ customType?: string; details?: Record<string, unknown> }> = [];
     const pushPi = { sendMessage: (m: { customType?: string; details?: Record<string, unknown> }) => void sent.push(m) } as unknown as ExtensionAPI;
-    const ctx = buildForkSpawnCtx(pushPi, bridge, { cwd: "/repo", modelCatalogPath: "/c.json" }, {
+    const ctx = buildForkSpawnCtx(pushPi, bridge, { cwd: "/repo" }, {
       forkFrom: "/tmp/lead-session.jsonl",
       explicitTools: "read",
     });
@@ -751,7 +760,11 @@ describe("armForkRoleWiring (fresh spawn and sidecar revival)", () => {
       args: { kind: "question", message: "which anchor?" },
     });
     assert.deepEqual(asked, [{ agentId: "fork-1", message: "which anchor?" }]);
-    assert.deepEqual(outcome, {}, "§1: routed to the owner, never pushed at the lead as ws-agent-question");
+    assert.deepEqual(
+      outcome,
+      { push: { family: "ws-agent-advisory", payload: { advisory: "fork-question-thread", detail: "[ws] thread q1 — the owner answers this." }, deliverAs: "followUp" } },
+      "§1: routed to the owner, and the lead sees the registration notice, not a ws-agent-question",
+    );
   });
 
   test("defers the anti-bleed loop to onResume when the record is dormant, and arms it immediately when it is live", () => {

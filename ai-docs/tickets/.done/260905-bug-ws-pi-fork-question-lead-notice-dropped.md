@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 062509868d6e73d0
 sage-review-completeness-reviewed: 062509868d6e73d0
+completed: 2026-09-06
 ---
 
 # A fork-raised owner question never reaches the lead as the promised thread notice
@@ -96,3 +97,48 @@ Invert the three landed tests that assert the suppression. Tests: a stubbed
 throwing hook still degrades to the baseline. Amend the spec passages listed
 above. Live check (owner-run): repeat acceptance scenario E and confirm the
 lead sees the notice before the owner opens `/answer`.
+
+### Result (702d3c40) - 2026-09-06
+
+Landed as `2fbd404f` (survey plan), `702d3c40` (fix and tests), `834fa99a`
+(spec), `e104ebf7` (review relay #1, comment and spec sync) on the
+implementation branch under the goal branch. Adapter-only change.
+
+- `applyRpcEvent`'s question branch now returns the push
+  `ws-agent-advisory` / `advisory: "fork-question-thread"` / `detail:
+  <notice>` / `deliverAs: "followUp"` when the hook returns a string;
+  `undefined` and a throwing hook keep the headless
+  `ws-agent-question`/`steer` baseline. The push goes through the same
+  generic `pushToLead` path as every other family, so the `<alias> (<id>)`
+  sender label and the fan-in line come for free, and no downstream
+  thread-bound gate drops it (the settle gate guards only the idle-settle
+  push). Settle gate and anti-bleed loop untouched.
+- Tests: the three ticket cases added; five landed suppression tests
+  inverted, not deleted (the plan named three; two more of the identical
+  pattern surfaced in `fork.test.ts` and `agent-sidecar.test.ts`). Adapter
+  suite 735 pass, 0 fail.
+- Spec: family table row, the two thread-bound carve-out sentences, and
+  the "Attach to a live task fork" bullet amended; anchor ids unchanged.
+  The delivery wording was corrected in relay: `followUp` guarantees the
+  notice is queued for the lead's next turn boundary, not that the lead
+  sees it before the owner opens `/answer`, so the live check above should
+  read "the lead sees the notice at its next turn boundary".
+
+Review (partitioned correctness/test): test clean; correctness one
+Important (`PUSH_FAMILIES` in-code family table still described the TUI
+suppression) fixed in relay #1 together with three Minor (two stale hook
+comments, one overstated spec ordering claim).
+
+Owner-run live check outstanding: acceptance scenario E against the
+merged goal branch.
+
+## Blocked (2026-09-06) — owner sign-off pending, not a work item
+
+Phase 1 carries a Result; no autonomous work remains. Closing waits on the
+owner-run acceptance scenario E re-run. Once confirmed, close the ticket to
+`.done/`.
+
+
+## Resolution (2026-09-06)
+
+Owner-run acceptance scenario E re-run on 2026-09-06 passed: the fork's question was registered as a thread (`registered as thread q2`) and the final report carried the owner's answer (`Decisions: color=red`).

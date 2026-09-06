@@ -52,15 +52,21 @@ import {
   resolveApprovalContextCwd,
   validateApprovalDecisionInput,
   sliceLines,
+  capOutput,
+  mergeExecOutput,
   waitForDecisionFile,
   createApprovalRelay,
   EXECUTE_TOOL_NAME,
   APPROVE_TOOL_NAME,
   UGLY_READ_TOOL_NAME,
+  ONE_LINER_EXEC_TOOL_NAME,
+  ONE_LINER_TIMEOUT_MS,
+  ONE_LINER_OUTPUT_CAP_BYTES,
+  registerExecuteGateway,
   type PendingApproval,
   type WorkingContext,
 } from "../src/execute-gateway.ts";
-import { GATED_EXEC_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { GATED_EXEC_TOOL_NAME, TOOL_GROUPS, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 describe("buildExecuteWorkerPrompt", () => {
@@ -138,6 +144,7 @@ describe("computeLeadActiveTools", () => {
     assert.ok(result.includes(EXECUTE_TOOL_NAME));
     assert.ok(result.includes(APPROVE_TOOL_NAME));
     assert.ok(result.includes(UGLY_READ_TOOL_NAME));
+    assert.ok(result.includes(ONE_LINER_EXEC_TOOL_NAME));
   });
 
   test("is idempotent — running it twice in a row never re-adds a removed tool or duplicates an added one", () => {
@@ -147,15 +154,25 @@ describe("computeLeadActiveTools", () => {
     assert.equal(new Set(twice).size, twice.length, "no duplicate entries after a 2nd pass");
   });
 
-  test("never duplicates ws-execute/ws-approve/the ugly-read tool if the current list already carries them (e.g. after an earlier setActiveTools call)", () => {
-    const result = computeLeadActiveTools(["ws-agent-spawn", EXECUTE_TOOL_NAME, APPROVE_TOOL_NAME, UGLY_READ_TOOL_NAME]);
+  test("never duplicates ws-execute/ws-approve/the ugly-read tool/the one-liner exec hatch if the current list already carries them (e.g. after an earlier setActiveTools call)", () => {
+    const result = computeLeadActiveTools(["ws-agent-spawn", EXECUTE_TOOL_NAME, APPROVE_TOOL_NAME, UGLY_READ_TOOL_NAME, ONE_LINER_EXEC_TOOL_NAME]);
     assert.equal(result.filter((name) => name === EXECUTE_TOOL_NAME).length, 1);
     assert.equal(result.filter((name) => name === APPROVE_TOOL_NAME).length, 1);
     assert.equal(result.filter((name) => name === UGLY_READ_TOOL_NAME).length, 1);
+    assert.equal(result.filter((name) => name === ONE_LINER_EXEC_TOOL_NAME).length, 1);
   });
 
-  test("an empty current list still ends up with exactly the 3 added tools", () => {
-    assert.deepEqual([...computeLeadActiveTools([])].sort(), [APPROVE_TOOL_NAME, EXECUTE_TOOL_NAME, UGLY_READ_TOOL_NAME].sort());
+  test("an empty current list still ends up with exactly the 4 added tools", () => {
+    assert.deepEqual(
+      [...computeLeadActiveTools([])].sort(),
+      [APPROVE_TOOL_NAME, EXECUTE_TOOL_NAME, UGLY_READ_TOOL_NAME, ONE_LINER_EXEC_TOOL_NAME].sort(),
+    );
+  });
+
+  test("the one-liner exec hatch never appears in any spawned child's tool group (TOOL_GROUPS is the actual enforcement mechanism, not computeLeadActiveTools)", () => {
+    for (const [groupName, tools] of Object.entries(TOOL_GROUPS)) {
+      assert.ok(!tools.includes(ONE_LINER_EXEC_TOOL_NAME), `TOOL_GROUPS["${groupName}"] must not include ${ONE_LINER_EXEC_TOOL_NAME}`);
+    }
   });
 });
 
@@ -283,6 +300,72 @@ describe("sliceLines (review fix, relay #1, TEST finding #4)", () => {
   test("offset 0 or negative is treated the same as offset 1 (start of file)", () => {
     assert.equal(sliceLines(raw, 0), raw);
     assert.equal(sliceLines(raw, -5), raw);
+  });
+});
+
+describe("capOutput (byte-cap-to-last-complete-line for the one-liner exec hatch)", () => {
+  test("exactly at the byte cap: returned unchanged, no hint", () => {
+    const raw = "x".repeat(10);
+    assert.equal(capOutput(raw, 10), raw);
+  });
+
+  test("one byte over the cap: truncated and a drop-hint is appended", () => {
+    const raw = "line1\nline2\nline3";
+    const capped = capOutput(raw, Buffer.byteLength(raw, "utf8") - 1);
+    assert.notEqual(capped, raw);
+    assert.ok(capped.includes("truncated"), "a drop-hint must be appended when truncation happens");
+    assert.ok(capped.includes("ws-execute"), "the drop-hint must point at ws-execute for bulk output");
+  });
+
+  test("a multibyte character straddling the cut is never corrupted — the partial trailing codepoint is dropped cleanly", () => {
+    // Each "🙂" is 4 UTF-8 bytes (emoji1 = bytes 0-3, emoji2 = 4-7, emoji3 =
+    // 8-11); cutting at 10 bytes lands mid-emoji, keeping only the third
+    // emoji's first two bytes (byte 8 is that emoji's first byte, not its
+    // second), mirroring spawner.test.ts's truncatePromptForStorage
+    // multibyte test.
+    const raw = "🙂🙂🙂🙂🙂";
+    const capped = capOutput(raw, 10);
+    assert.ok(capped.startsWith("🙂🙂"));
+    const beforeHint = capped.split("\n")[0];
+    assert.ok(!beforeHint.includes("�"), "no replacement character from a split codepoint");
+  });
+
+  test("a single line longer than the cap with no newline inside it: the byte-trimmed head is kept, not emptied, and still gets a hint", () => {
+    const raw = "a".repeat(50);
+    const capped = capOutput(raw, 10);
+    assert.ok(capped.startsWith("a".repeat(10)), "the head must be kept at a character boundary, not dropped to nothing");
+    assert.ok(capped.length > 10, "the result must carry more than just the bare head (the drop-hint)");
+    assert.ok(capped.includes("truncated"));
+  });
+
+  test("a decoded head with a trailing partial line is trimmed back to the last complete line", () => {
+    const raw = "complete line one\ncomplete line two\npartial-tail-that-gets-cut";
+    // Cap lands inside "partial-tail-that-gets-cut", after the second newline.
+    const cutPoint = raw.indexOf("partial-tail") + 5;
+    const capped = capOutput(raw, cutPoint);
+    assert.ok(capped.startsWith("complete line one\ncomplete line two"));
+    assert.ok(!capped.includes("partial-tail-that-gets-cut"), "the trailing partial line must be dropped, not kept half-cut");
+  });
+
+  test("module constants: 30s timeout, 4KB cap", () => {
+    assert.equal(ONE_LINER_TIMEOUT_MS, 30_000);
+    assert.equal(ONE_LINER_OUTPUT_CAP_BYTES, 4096);
+  });
+});
+
+describe("mergeExecOutput (review relay #1, Minor a)", () => {
+  test("stdout already ends with a newline: concatenated with no extra separator", () => {
+    assert.equal(mergeExecOutput("out\n", "err"), "out\nerr");
+  });
+
+  test("stdout has no trailing newline: a newline is inserted so stderr is never glued onto stdout's last line", () => {
+    assert.equal(mergeExecOutput("out", "err"), "out\nerr");
+  });
+
+  test("stdout-only or stderr-only output is returned unchanged, never gains a spurious newline", () => {
+    assert.equal(mergeExecOutput("out", ""), "out");
+    assert.equal(mergeExecOutput("", "err"), "err");
+    assert.equal(mergeExecOutput("", ""), "");
   });
 });
 
@@ -442,5 +525,95 @@ describe("createApprovalRelay (260905: unconditional ws-agent-approval push)", (
       assert.equal(pi.sent[0].message.details?.status, undefined, "Edition: no readable fan-in means no status line");
       assert.equal(pi.sent[0].message.details?.cmd_id, "call-4", "the approval itself still relays");
     });
+  });
+});
+
+describe("do-i-really-have-to-run-this-myself (the one-liner exec hatch's execute() body)", () => {
+  type FakeExecResult = { stdout: string; stderr: string; code: number; killed: boolean };
+  type CapturedTool = {
+    execute: (toolCallId: string, params: unknown, signal?: AbortSignal) => Promise<{ content: Array<{ type: string; text: string }> }>;
+  };
+
+  // Unlike ws-worker-exec/ws-execute/ws-approve/the ugly-read tool (all
+  // RpcClient/registry/filesystem-dependent, hence live-gate only per this
+  // file's header comment), this tool's execute() only touches `pi.exec`, so
+  // a plain stub (same fakePi() convention as the createApprovalRelay block
+  // above, stubbing pi.exec instead of pi.sendMessage) is enough to unit-test
+  // it directly.
+  function registerAndCapture(execFn: (command: string, args: string[], options?: { cwd?: string; timeout?: number; signal?: AbortSignal }) => Promise<FakeExecResult>): CapturedTool {
+    const registered = new Map<string, CapturedTool>();
+    const pi = {
+      registerTool: (def: { name: string } & CapturedTool) => {
+        registered.set(def.name, def);
+      },
+      exec: execFn,
+    } as unknown as ExtensionAPI;
+    const bridge = {} as unknown as Parameters<typeof registerExecuteGateway>[1];
+    const registry: RpcAgentRegistry = new Map();
+    registerExecuteGateway(pi, bridge, registry, { cwd: "/tmp/ws-pi-agent-one-liner-test", executeWorkerPromptPath: "/tmp/fake-execute-worker-guide.md" });
+    const tool = registered.get(ONE_LINER_EXEC_TOOL_NAME);
+    assert.ok(tool, `${ONE_LINER_EXEC_TOOL_NAME} must be registered by registerExecuteGateway`);
+    return tool!;
+  }
+
+  test("why is echoed first, followed by exit code and the (uncapped) output", async () => {
+    const tool = registerAndCapture(async () => ({ stdout: "hello\n", stderr: "", code: 0, killed: false }));
+    const result = await tool.execute("call-1", { command: "echo hello", why: "quick sanity check before continuing" });
+    const text = result.content[0].text;
+    assert.ok(text.startsWith("why: quick sanity check before continuing"), "why must be echoed first in the result");
+    assert.ok(text.includes("exit code: 0"));
+    assert.ok(text.includes("hello"));
+  });
+
+  test("a timed-out command (killed:true, signal not aborted) resolves normally with the partial output plus a timeout line — never a thrown error", async () => {
+    // Review relay #1, Important: a real SIGTERM'd child exits by signal, so
+    // the installed package's exec.js coerces the null exit code to 0
+    // (`code ?? 0`) — not the plan's original 143 assumption. This stub
+    // reflects the actual shipped shape.
+    const tool = registerAndCapture(async () => ({ stdout: "partial", stderr: "", code: 0, killed: true }));
+    const result = await tool.execute("call-2", { command: "sleep 60", why: "check a slow command" });
+    const text = result.content[0].text;
+    assert.ok(text.includes("partial"), "partial output must still be returned");
+    assert.ok(text.includes("timed out"), "a timeout line must be appended when the timeout fired");
+    assert.ok(!text.split("\n").includes("exit code: 0"), "a killed run's exit-code line must never read as a bare, unannotated clean exit");
+  });
+
+  test("an interrupted command (killed:true, signal.aborted:true) reports an interrupt, never a fabricated timeout claim", async () => {
+    const tool = registerAndCapture(async () => ({ stdout: "started", stderr: "", code: 0, killed: true }));
+    const controller = new AbortController();
+    controller.abort();
+    const result = await tool.execute("call-2b", { command: "sleep 60", why: "check an interrupted command" }, controller.signal);
+    const text = result.content[0].text;
+    assert.ok(text.includes("interrupted"), "an aborted signal must be reported as an interrupt, not a timeout");
+    assert.ok(!text.includes("timed out"), "an interrupt must never be misreported as the 30s timeout firing");
+    assert.ok(!text.split("\n").includes("exit code: 0"), "a killed run's exit-code line must never read as a bare, unannotated clean exit");
+  });
+
+  test("no timeout line when the command finished on its own (killed:false)", async () => {
+    const tool = registerAndCapture(async () => ({ stdout: "done", stderr: "", code: 0, killed: false }));
+    const result = await tool.execute("call-3", { command: "true", why: "confirm no spurious timeout line" });
+    assert.ok(!result.content[0].text.includes("timed out"));
+  });
+
+  test("stdout and stderr are merged (same concatenation order as ws-execute's own pre-run) and run through the fixed byte cap", async () => {
+    let sawCap: number | undefined;
+    const oversized = "y".repeat(ONE_LINER_OUTPUT_CAP_BYTES + 500);
+    const tool = registerAndCapture(async () => ({ stdout: oversized, stderr: "-stderr-tail", code: 0, killed: false }));
+    const result = await tool.execute("call-4", { command: "big-output", why: "trigger the cap" });
+    const text = result.content[0].text;
+    sawCap = Buffer.byteLength(text, "utf8");
+    assert.ok(sawCap < Buffer.byteLength(oversized, "utf8") + Buffer.byteLength("-stderr-tail", "utf8"), "the merged output must actually be capped, not passed through raw");
+    assert.ok(text.includes("truncated"), "the capped output must carry its own drop-hint");
+  });
+
+  test("pi.exec is called with the fixed 30s timeout and the session's own cwd — no cwd/env override param exists", async () => {
+    let capturedOptions: { cwd?: string; timeout?: number } | undefined;
+    const tool = registerAndCapture(async (_command, _args, options) => {
+      capturedOptions = options;
+      return { stdout: "", stderr: "", code: 0, killed: false };
+    });
+    await tool.execute("call-5", { command: "pwd", why: "confirm cwd/timeout wiring" });
+    assert.equal(capturedOptions?.cwd, "/tmp/ws-pi-agent-one-liner-test");
+    assert.equal(capturedOptions?.timeout, ONE_LINER_TIMEOUT_MS);
   });
 });

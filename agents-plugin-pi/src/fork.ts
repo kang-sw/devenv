@@ -315,7 +315,6 @@ export function buildForkInitialMessage(leadPrompt: string): string {
 
 export interface ForkSessionCtx {
   cwd: string;
-  modelCatalogPath: string;
 }
 
 /**
@@ -585,7 +584,7 @@ export function buildForkSpawnCtx(
     cwd: sessionCtx.cwd,
     inheritModel: opts.inheritModel,
     wsToolNames: bridge.wsToolNames,
-    modelCatalogPath: sessionCtx.modelCatalogPath,
+    client: bridge.client,
     forkFrom: opts.forkFrom,
     explicitTools: opts.explicitTools,
     parentSessionKey: bridge.defaultSessionKeyRef.current,
@@ -616,8 +615,10 @@ export function armForkRoleWiring(
   if (onQuestion) {
     // 260904 Phase 2 (review relay #1 I6), revised 260905: armed at the
     // report-handling site rather than on turn settle. A defined return
-    // (TUI only) means the owner surface consumed the question, so the
-    // `ws-agent-question` push to the lead is suppressed.
+    // (TUI only) means the owner surface consumed the question itself, and
+    // that return string is the lead notice to push: `applyRpcEvent` sends
+    // it as `ws-agent-advisory`/`fork-question-thread` instead of the
+    // `ws-agent-question` push the headless baseline would send.
     record.onQuestionReport = (rec, message) => onQuestion(rec.agentId, message);
   }
   record.onResume = (rec) => {
@@ -669,7 +670,7 @@ export function registerFork(
         },
         model_name: {
           type: "string",
-          description: "Optional alias resolved against model-catalog.json's aliases map; omitted or unmapped inherits your own model.",
+          description: "Optional tier name (small|medium|large|xlarge) resolved against harness pi's config.tune agents.tier entries (see lead-tune/config.list); omitted or unmapped inherits your own model.",
         },
         expects_commit: {
           type: "boolean",

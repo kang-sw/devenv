@@ -28,15 +28,16 @@
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { spawnWsMcpClient, type McpStdioClient, type McpContentItem, type McpToolCallResult } from "./mcp-stdio-client.ts";
 import { assertVersionPin, readRuntimeContract } from "./version-check.ts";
-import { isModelCatalogUnset, readModelCatalog, type ModelCatalogConfig } from "./model-catalog.ts";
 import { WS_PI_PARENT_SESSION_KEY_ENV, isLeadOrFork, readSpawnRole, type SpawnRole } from "./process-role.ts";
+// Value import from spawner.ts is safe: spawner.ts only imports `type
+// BridgeHandle` from this file (type-only, erased at build/runtime), so no
+// runtime circular import is created in either direction.
+import { resolveModelForAliasViaWsMcp } from "./spawner.ts";
 
 export interface BridgeOptions {
   launcherPath: string;
   pluginDir: string;
   runtimeJsonPath: string;
-  /** Path to the adapter-owned model-catalog data file (see model-catalog.ts). Read fresh on every workflow_manual call — no caching. */
-  modelCatalogPath: string;
   /** Working directory of the Pi session — used as the ferrule bootstrap root. */
   cwd: string;
   ui?: ExtensionUIContext;
@@ -93,37 +94,85 @@ function firstText(result: McpToolCallResult): string | undefined {
 }
 
 /**
- * Advisory appended to every `workflow_manual` response while the model
- * catalog's alias table is empty. Mirrors the Go core's blockquote
+ * Advisory appended to every `workflow_manual` response while harness `pi`'s
+ * `agents.tier` alias table has no genuine `pi` entries (per
+ * `computePiAliasTableUnset` below). Mirrors the Go core's blockquote
  * bootstrap-staleness-advisory convention (`bootstrap_alarm.go`) — a `>
  * [!note]`-style block, re-warning on every read while the condition holds
  * rather than once per session (no ticket-mandated exact copy).
  */
 export const MODEL_CATALOG_ADVISORY =
   "> [!note]\n" +
-  "> **Pi model alias table is empty.** ws-agent-spawn and explore currently " +
-  "silently inherit the parent session's model for every delegated agent — " +
-  "costly for cheap recon/explore work. Curate at least a `small` alias " +
-  "in `agents-plugin-pi/model-catalog.json`'s `aliases` map (sibling to " +
-  "`runtime.json`) to route explore/recon to a cheaper model; other alias " +
-  "names are entirely up to you. Changes apply immediately — no restart " +
-  "needed.";
+  "> **Pi's model tier table has no entries.** ws-agent-spawn and explore " +
+  "currently silently inherit the parent session's model for every " +
+  "delegated agent — costly for cheap recon/explore work. Configure at " +
+  "least a `small` tier for harness `pi` via `config.tune agents.tier " +
+  "harness:pi` (see lead-tune) to route explore/recon to a cheaper model; " +
+  "the other three fixed tiers (`medium`/`large`/`xlarge`) are yours to " +
+  "curate too. Changes apply immediately — no restart needed.";
+
+/**
+ * The four fixed tiers `config.resolve_agent` understands — used by
+ * `computePiAliasTableUnset` below.
+ */
+const PI_TIERS = ["small", "medium", "large", "xlarge"] as const;
+
+/**
+ * `true` only when NONE of the four fixed tiers resolves to a GENUINE
+ * `pi`-labeled `config.resolve_agent` hit — the trigger condition for
+ * `MODEL_CATALOG_ADVISORY`. Reuses `resolveModelForAliasViaWsMcp`
+ * (spawner.ts) per tier — with no `inheritModel` — rather than
+ * reimplementing its "genuine hit" guard (`resolved_from === "pi" &&
+ * model.includes("/")`, Phase 3 Forward (a)): that resolver already returns
+ * exactly the needed signal per tier — a genuine hit sets `model` to the
+ * resolved string, a miss/failure returns `{model: undefined}` since no
+ * inherit model was given — so a single shared implementation of the guard
+ * exists instead of two independently-maintained copies. NEVER HARD-FAILS:
+ * `resolveModelForAliasViaWsMcp` itself swallows every failure shape
+ * (`isError`, missing/unparsable text, thrown call) as "not a hit" for that
+ * tier, so this loop never needs its own try/catch. Four local stdio
+ * round-trips per `workflow_manual` call (only) is acceptable — mirrors the
+ * advisory's existing per-call, no-caching contract.
+ */
+export async function computePiAliasTableUnset(callTool: WorkflowManualMappingDeps["callTool"]): Promise<boolean> {
+  for (const tier of PI_TIERS) {
+    const { model } = await resolveModelForAliasViaWsMcp({ callTool }, tier, undefined);
+    if (model !== undefined) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * The raw-dispatch advisory gate: only a `workflow_manual` call pays for the
+ * extra `config.resolve_agent` round-trips `computePiAliasTableUnset` needs
+ * — every other bridged tool call skips it entirely (`callTool` is never
+ * invoked, `piAliasTableUnset` is simply `false`). Extracted out of
+ * `startBridge`'s raw-dispatch closure as its own function specifically so
+ * the gate is directly unit-testable: `startBridge` itself spawns a real
+ * ws-mcp subprocess and cannot be exercised in a unit test (review relay #1,
+ * Important/test).
+ */
+export async function computeRawDispatchPiAliasTableUnset(
+  rawName: string,
+  callTool: WorkflowManualMappingDeps["callTool"],
+): Promise<boolean> {
+  return rawName === "workflow_manual" ? await computePiAliasTableUnset(callTool) : false;
+}
 
 /**
  * Appends `MODEL_CATALOG_ADVISORY` as a new `{type:"text"}` item onto a
  * COPY of `content` (never mutated in place) when `rawName ===
- * "workflow_manual"` and the catalog's alias table is empty; otherwise
- * returns `content` unchanged (same reference). Extracted as a pure
- * function — independent of the live MCP round-trip — so the
- * append-not-prepend/copy-not-mutate/unset-gated contract is directly
+ * "workflow_manual"` and `piAliasTableUnset` is true; otherwise returns
+ * `content` unchanged (same reference). Extracted as a pure function — the
+ * `config.resolve_agent` round-trips that compute `piAliasTableUnset` are the
+ * caller's job (`computePiAliasTableUnset`) — so the
+ * append-not-prepend/copy-not-mutate/gated contract stays directly
  * unit-testable, same as resolveSessionKey/withOptionalSessionKey above.
  */
-export function maybeAppendModelCatalogAdvisory(
-  rawName: string,
-  content: McpContentItem[],
-  config: ModelCatalogConfig | undefined,
-): McpContentItem[] {
-  if (rawName !== "workflow_manual" || !isModelCatalogUnset(config)) {
+export function maybeAppendModelCatalogAdvisory(rawName: string, content: McpContentItem[], piAliasTableUnset: boolean): McpContentItem[] {
+  if (rawName !== "workflow_manual" || !piAliasTableUnset) {
     return content;
   }
   return [...content, { type: "text", text: MODEL_CATALOG_ADVISORY }];
@@ -201,7 +250,6 @@ export interface WorkflowManualMappingDeps {
   callTool: (name: string, args: Record<string, unknown>) => Promise<McpToolCallResult>;
   /** The `playbook.print("lead-workflow-manual")` snapshot fetched once at session_start. */
   staticBodySnapshot: string;
-  modelCatalogPath: string;
   /** Invoked on a cut-miss fallback (renderer drift) — the caller is responsible for the "notify once per session" dedupe (a closure flag in `startBridge`), not this function. */
   notifyMappingDegraded: () => void;
 }
@@ -236,11 +284,11 @@ export async function dispatchMappedWorkflowManual(
   const manualText = firstText(manualResult) ?? "";
   const cut = cutStaticBody(manualText, deps.staticBodySnapshot);
 
-  const config = readModelCatalog(deps.modelCatalogPath);
+  const piAliasTableUnset = await computePiAliasTableUnset(deps.callTool);
 
   if (cut.found) {
     const content = replaceFirstTextItem(manualResult.content, prependWorkflowStateLine(cut.text));
-    return { content: maybeAppendModelCatalogAdvisory("workflow_manual", content, config), details: manualResult };
+    return { content: maybeAppendModelCatalogAdvisory("workflow_manual", content, piAliasTableUnset), details: manualResult };
   }
 
   deps.notifyMappingDegraded();
@@ -251,7 +299,7 @@ export async function dispatchMappedWorkflowManual(
   }
   const stateText = firstText(stateResult) ?? "";
   const content = replaceFirstTextItem(stateResult.content, prependWorkflowStateLine(stateText));
-  return { content: maybeAppendModelCatalogAdvisory("workflow_manual", content, config), details: stateResult };
+  return { content: maybeAppendModelCatalogAdvisory("workflow_manual", content, piAliasTableUnset), details: stateResult };
 }
 
 /**
@@ -464,7 +512,6 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
               // can't see through the predicate call, so this cast is safe
               // and load-bearing only for the type checker, not runtime.
               staticBodySnapshot: staticBodySnapshotRef.current as string,
-              modelCatalogPath: opts.modelCatalogPath,
               notifyMappingDegraded: () => {
                 if (!notifiedMappingDegraded) {
                   notifiedMappingDegraded = true;
@@ -484,9 +531,12 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
             // returning a value never sets it (docs/extensions.md#L1953-2011).
             throw new Error(firstText(result) ?? `${registeredName} failed with no error text`);
           }
-          // Read the catalog fresh on every call (no caching) so a hand-edit
-          // to model-catalog.json applies without restarting Pi.
-          const content = maybeAppendModelCatalogAdvisory(rawName, result.content, readModelCatalog(opts.modelCatalogPath));
+          // The extra config.resolve_agent round-trips this needs are gated
+          // on rawName === "workflow_manual" first, so no other bridged tool
+          // call pays for an unrelated MCP round-trip — see
+          // computeRawDispatchPiAliasTableUnset's doc comment.
+          const piAliasTableUnset = await computeRawDispatchPiAliasTableUnset(rawName, (name, callArgs) => client.callTool(name, callArgs));
+          const content = maybeAppendModelCatalogAdvisory(rawName, result.content, piAliasTableUnset);
           return { content, details: result };
         },
       });

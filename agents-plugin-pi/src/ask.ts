@@ -66,7 +66,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
 import {
   agentWidgetRefreshRef,
+  composeLeadTurnStartOptions,
+  heldPushQueue,
   inheritModelFromToolCtx,
+  isOwningAgentIdle,
   sendToAgent,
   spawnAgent,
   stopAgent,
@@ -292,7 +295,7 @@ export function threadRegistryPath(sessionFile: string): string {
   return `${sessionFile}.ws-threads.json`;
 }
 
-/** Stable, pretty-printed on-disk form (a hand-inspectable adapter data file, like model-catalog.json). */
+/** Stable, pretty-printed on-disk form (a hand-inspectable adapter data file). */
 export function serializeThreadRegistry(records: readonly ThreadRecord[]): string {
   return `${JSON.stringify({ threads: records }, null, 2)}\n`;
 }
@@ -300,9 +303,9 @@ export function serializeThreadRegistry(records: readonly ThreadRecord[]): strin
 /**
  * Tolerant parse: anything that is not a well-formed `{threads:[...]}`
  * document degrades to `[]` rather than throwing — same never-throw contract
- * `readGoalLoopConfig`/`readModelCatalog` already use for adapter-owned data
- * files. Individual entries missing a `threadId`/`status` are dropped rather
- * than poisoning the whole registry.
+ * `readGoalLoopConfig` already uses for adapter-owned data files. Individual
+ * entries missing a `threadId`/`status` are dropped rather than poisoning
+ * the whole registry.
  */
 export function parseThreadRegistry(raw: string): ThreadRecord[] {
   let parsed: unknown;
@@ -684,7 +687,6 @@ function nowIso(): string {
 
 export interface AskSessionCtx {
   cwd: string;
-  modelCatalogPath: string;
 }
 
 /**
@@ -918,6 +920,41 @@ export function detachForkRaisedThread(handle: ThreadRegistryHandle, rpcRegistry
  * dormant branch can relaunch from the same `--session` file. Review relay #2
  * C2 narrowed that stop to `"lead-ask"` threads — it is `closeThreadOnDone`'s
  * job to keep an Entry A task fork out of here.
+ *
+ * 260906 (compaction push-hold ticket, Phase 1): the outbound
+ * `ws-thread-summary` message is held on `spawner.ts`'s `heldPushQueue`
+ * (as a `kind: "raw"` entry) whenever `isOwningAgentIdle()` is false — mid-turn
+ * OR an in-flight compaction, the same predicate `pushToLead`'s `followUp`
+ * hold uses — and released with the rest of that queue on the owning turn's
+ * `agent_settled` or on `releaseAfterCompaction`. This call site never had a
+ * mid-turn guard before (it never carried a computed status line, so
+ * staleness never applied), but an in-flight compaction can abort the very
+ * turn a synchronous send here would otherwise race into. The thread's own
+ * dormant transition / respondent stop / persistence below runs immediately
+ * either way — those side effects are not part of the race being fixed and
+ * delaying them would add no safety.
+ *
+ * 260906 review relay #1 (Minor): the ticket only asked for a hold "while
+ * [the compaction flag] is set", but the predicate used here is the general
+ * `isOwningAgentIdle()` (mid-turn OR compacting), matching `pushToLead`'s own
+ * `followUp` hold rather than a compaction-only check. This is a deliberate,
+ * scope-widening choice (the plan's Implementation step 9 flagged it as an
+ * open call and recommended it): an ordinary MID-TURN `/done` is now deferred
+ * to the adapter's post-settle flush and delivered as a fresh turn, instead
+ * of racing straight into Pi's own in-run `agent.followUp()` queue as it did
+ * before this ticket. Still safe (the message is never lost, only delayed to
+ * the same turn boundary every other held `followUp` already uses), but it
+ * changes this call site's turn-boundary behavior beyond the compaction race
+ * this ticket set out to fix.
+ *
+ * 260906 Phase 1 review relay #1 (Important #2): the immediate send AND the
+ * held raw closure both build their options via `composeLeadTurnStartOptions`
+ * so the goal-loop's boundary guard (`leadReminderStartPendingRef`) is
+ * applied here too — a fork's `/done` completing while the reminder's own
+ * `sendUserMessage` is mid-await used to be able to start a colliding turn
+ * exactly like a child push once could. The closure calls the composer
+ * itself (not at hold time) so a held send flushed while the flag is set
+ * still reads it fresh at flush time.
  */
 export function injectDiscussionSummary(
   pi: ExtensionAPI,
@@ -926,19 +963,21 @@ export function injectDiscussionSummary(
   thread: ThreadRecord,
   summary: string,
 ): void {
-  pi.sendMessage(
-    {
-      customType: THREAD_SUMMARY_CUSTOM_TYPE,
-      content: buildInjectionMessage(thread.context, thread.question, summary),
-      display: true,
-      details: { threadId: thread.threadId, title: thread.title },
-    },
-    // `triggerTurn` is what makes an IDLE lead act on the decision: without
-    // it Pi only queues the message and nothing starts a turn until the
-    // owner's next prompt (dogfood 2026-09-05, Pi 0.84.4). `followUp` keeps
-    // the ordering contract for a lead mid-turn — delivered after that turn.
-    { deliverAs: "followUp", triggerTurn: true },
-  );
+  const message = {
+    customType: THREAD_SUMMARY_CUSTOM_TYPE,
+    content: buildInjectionMessage(thread.context, thread.question, summary),
+    display: true,
+    details: { threadId: thread.threadId, title: thread.title },
+  };
+  // `triggerTurn` is what makes an IDLE lead act on the decision: without
+  // it Pi only queues the message and nothing starts a turn until the
+  // owner's next prompt (dogfood 2026-09-05, Pi 0.84.4). `followUp` keeps
+  // the ordering contract for a lead mid-turn — delivered after that turn.
+  if (isOwningAgentIdle()) {
+    pi.sendMessage(message, composeLeadTurnStartOptions("followUp"));
+  } else {
+    heldPushQueue.push({ kind: "raw", send: (p) => p.sendMessage(message, composeLeadTurnStartOptions("followUp")) });
+  }
 
   const agentId = thread.respondentAgentId;
   if (agentId) {
@@ -1184,7 +1223,7 @@ export async function ensureRespondent(
       cwd: sessionCtx.cwd,
       inheritModel: inheritModelFromToolCtx(ctx),
       wsToolNames: bridge.wsToolNames,
-      modelCatalogPath: sessionCtx.modelCatalogPath,
+      client: bridge.client,
       forkFrom,
       explicitTools: computeForkToolSurface(pi.getActiveTools()).join(","),
       parentSessionKey: bridge.defaultSessionKeyRef.current,

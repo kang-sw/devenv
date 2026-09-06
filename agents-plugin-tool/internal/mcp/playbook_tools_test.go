@@ -301,6 +301,73 @@ func TestPlaybookPrintClaudeHarness(t *testing.T) {
 	}
 }
 
+// TestPlaybookPrintPiHarnessSelectsOverlay proves a `.pi.md` structural
+// overlay is selected only under a detected `pi` harness — the only piece
+// gating overlay selection is that s.currentHarness() can now return "pi"
+// (wsrsrc.Load itself validates harness only as a bare filesystem stem, with
+// no closed enum, so no wsrsrc code change is required for this phase).
+func TestPlaybookPrintPiHarnessSelectsOverlay(t *testing.T) {
+	const baseText = "Base playbook body."
+	const overlayText = "Pi overlay playbook body."
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"overlay-pb/overlay-pb.md":    "---\nkind: print\ndelegates: false\n---\n# Overlay Playbook\n\n" + baseText + "\n",
+		"overlay-pb/overlay-pb.pi.md": "---\nkind: print\ndelegates: false\n---\n# Overlay Playbook (Pi)\n\n" + overlayText + "\n",
+	})
+
+	piServer := newTestServerWithHarness(t, "pi")
+	piBody, _, err := printPlaybook(piServer, rsrcRoot, "overlay-pb", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook (pi): %v", err)
+	}
+	if !strings.Contains(piBody, overlayText) {
+		t.Errorf("pi body %q: expected pi overlay text %q", piBody, overlayText)
+	}
+	if strings.Contains(piBody, baseText) {
+		t.Errorf("pi body %q: base text must not appear when overlay is selected", piBody)
+	}
+
+	for _, harness := range []string{"", "codex"} {
+		s := newTestServerWithHarness(t, harness)
+		body, _, err := printPlaybook(s, rsrcRoot, "overlay-pb", nil, wsconfig.Options{}, "", nil)
+		if err != nil {
+			t.Fatalf("printPlaybook (%q): %v", harness, err)
+		}
+		if !strings.Contains(body, baseText) {
+			t.Errorf("harness %q body %q: expected base text", harness, body)
+		}
+		if strings.Contains(body, overlayText) {
+			t.Errorf("harness %q body %q: pi overlay must not be selected for a non-pi harness", harness, body)
+		}
+	}
+}
+
+// TestPlaybookPrintPiHarnessUsesNeutralTerminology guards the Non-goal that
+// this phase does not author Pi-specific terminology: terminologyForHarness
+// must still fall back to the host-neutral row for a detected "pi" harness,
+// even though structural overlay selection now works for pi.
+func TestPlaybookPrintPiHarnessUsesNeutralTerminology(t *testing.T) {
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"delegate-pb/delegate-pb.md": delegatePlaybookContent,
+	})
+	s := newTestServerWithHarness(t, "pi")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "delegate-pb", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+
+	neutral := terminologyForHarness("")
+	piTerm := terminologyForHarness("pi")
+	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
+		if piTerm[varName] != neutral[varName] {
+			t.Errorf("terminologyForHarness(pi)[%s] = %q, want host-neutral %q", varName, piTerm[varName], neutral[varName])
+		}
+		if !strings.Contains(body, neutral[varName]) {
+			t.Errorf("body %q: expected neutral %s %q for pi harness", body, varName, neutral[varName])
+		}
+	}
+}
+
 func TestPlaybookPrintCodexHarness(t *testing.T) {
 	rsrcRoot := buildTestRsrcTree(t, map[string]string{
 		"delegate-pb/delegate-pb.md": delegatePlaybookContent,
@@ -502,6 +569,52 @@ func TestPlaybookPrintModelAliasVariesWithConfig(t *testing.T) {
 	}
 	if bodyA == bodyB {
 		t.Error("different configs produced identical output — model alias resolution not config-driven")
+	}
+}
+
+// TestPlaybookPrintModelAliasPiHarnessWhenSet verifies that a pi-keyed
+// agents.tier value (harness="pi") is picked up by a detected pi-harness
+// session's playbook.render/print, proving the tier→model resolver's
+// aliasResolutionKeys chain now tries "pi" before falling back to "default".
+func TestPlaybookPrintModelAliasPiHarnessWhenSet(t *testing.T) {
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"model-pb/model-pb.md": modelAliasPlaybookContent,
+	})
+	s := newTestServerWithHarness(t, "pi")
+
+	cacheHome := t.TempDir()
+	uniqueModel := "test-pi-model-xyz-7777"
+	if _, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{CacheHome: cacheHome}, "medium", "pi", uniqueModel, "pi"); err != nil {
+		t.Fatalf("SetAgentsTierForHarness: %v", err)
+	}
+
+	body, _, err := printPlaybook(s, rsrcRoot, "model-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, uniqueModel) {
+		t.Errorf("body %q: expected pi-keyed model name %q", body, uniqueModel)
+	}
+}
+
+// TestPlaybookPrintModelAliasPiHarnessFallsBackToDefault verifies that a
+// detected pi-harness session with no pi-keyed agents.tier value falls
+// through to the seeded default-tier model (Decision: "Default bucket
+// semantics unchanged" — no new fallback special-case for pi).
+func TestPlaybookPrintModelAliasPiHarnessFallsBackToDefault(t *testing.T) {
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"model-pb/model-pb.md": modelAliasPlaybookContent,
+	})
+	s := newTestServerWithHarness(t, "pi")
+
+	cacheHome := t.TempDir()
+
+	body, _, err := printPlaybook(s, rsrcRoot, "model-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "gpt-5.6-terra") {
+		t.Errorf("body %q: expected seeded default medium-tier model gpt-5.6-terra", body)
 	}
 }
 
@@ -777,6 +890,17 @@ func TestPlaybookToolsNotNoAgentHidden(t *testing.T) {
 	}
 	if noAgentHiddenTool("playbook.render") {
 		t.Error("playbook.render is incorrectly hidden in no-agent mode")
+	}
+}
+
+// TestConfigResolveAgentNotNoAgentHidden covers config.resolve_agent's
+// no-agent applicability (260905 Phase 3): like config.list/config.tune, it
+// is a generic tool with no configRegistry entry, so configKeyEntryForTool
+// resolves not-found and noAgentHiddenTool's config.* branch falls through
+// to "not hidden" — the tool stays visible in agentless/wsflow mode.
+func TestConfigResolveAgentNotNoAgentHidden(t *testing.T) {
+	if noAgentHiddenTool("config.resolve_agent") {
+		t.Error("config.resolve_agent is incorrectly hidden in no-agent mode")
 	}
 }
 

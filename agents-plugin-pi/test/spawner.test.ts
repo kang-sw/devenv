@@ -2,9 +2,10 @@
  * Unit tests for spawner.ts's pure-logic seams: resolveTools,
  * isTerminalStopReason, buildSpawnArgs, AgentEventLineBuffer's
  * multibyte-split safety, handleAgentEvent's state-non-mutation invariant
- * (one-shot `explore` path), resolveModelForAlias (Phase 1's alias-first,
- * inherit-fallback resolution, replacing the old tier-based
- * resolveModelForTier), applyRpcEvent's streaming/report bookkeeping and its
+ * (one-shot `explore` path), resolveModelForAliasViaWsMcp (Phase 4:
+ * async, ws-mcp-`config.resolve_agent`-backed tier resolution against a stub
+ * `client.callTool`, replacing the old file-catalog-backed
+ * `resolveModelForAlias`), applyRpcEvent's streaming/report bookkeeping and its
  * push OUTCOMES, listAgents's status mapping, and sendToAgent's three LIVE
  * branches (streaming+interrupt->steer, streaming+no-interrupt->followUp,
  * idle->prompt) via a duck-typed `steer`/`followUp`/`prompt` stub cast as
@@ -74,6 +75,9 @@
 
 import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   resolveTools,
   isTerminalStopReason,
@@ -81,7 +85,8 @@ import {
   AgentEventLineBuffer,
   TOOL_GROUPS,
   handleAgentEvent,
-  resolveModelForAlias,
+  resolveModelForAliasViaWsMcp,
+  effectiveModelEffort,
   applyRpcEvent,
   attachEventListener,
   buildPushContent,
@@ -89,7 +94,9 @@ import {
   hasRunningAgents,
   flushHeldPushes,
   heldPushQueue,
+  leadCompactingRef,
   leadIdleRef,
+  leadReminderStartPendingRef,
   markAgentExited,
   probeAgentLiveness,
   promptAgent,
@@ -128,7 +135,7 @@ import {
 } from "../src/spawner.ts";
 import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 import type { RpcClient } from "@earendil-works/pi-coding-agent";
-import type { ModelCatalogConfig } from "../src/model-catalog.ts";
+import type { McpStdioClient, McpToolCallResult } from "../src/mcp-stdio-client.ts";
 
 function freshRunningRecord(): AgentRecord {
   return {
@@ -436,40 +443,146 @@ describe("AgentEventLineBuffer", () => {
   });
 });
 
-describe("resolveModelForAlias", () => {
-  const catalog: ModelCatalogConfig = {
-    aliases: { small: "openrouter/cheap-model", large: "openrouter/big-model" },
-  };
+describe("resolveModelForAliasViaWsMcp", () => {
+  function textResult(text: string): McpToolCallResult {
+    return { content: [{ type: "text", text }] };
+  }
 
-  test("alias set + mapped in catalog -> resolved model", () => {
-    assert.equal(resolveModelForAlias(catalog, "small", "inherited/model"), "openrouter/cheap-model");
-    assert.equal(resolveModelForAlias(catalog, "large", "inherited/model"), "openrouter/big-model");
+  /** Builds a duck-typed `McpStdioClient` stub whose `callTool` is the given fake. */
+  function stubClient(callTool: McpStdioClient["callTool"]): McpStdioClient {
+    return { callTool } as unknown as McpStdioClient;
+  }
+
+  test("no alias (model_name omitted) -> inherit unchanged, no call made", async () => {
+    let called = false;
+    const client = stubClient(async () => {
+      called = true;
+      return textResult("{}");
+    });
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, undefined, "inherited/model"), { model: "inherited/model" });
+    assert.equal(called, false, "no alias means no config.resolve_agent round-trip at all");
   });
 
-  test("alias set + catalog present but that alias unmapped -> inherit", () => {
-    assert.equal(resolveModelForAlias(catalog, "medium", "inherited/model"), "inherited/model");
-    assert.equal(resolveModelForAlias(catalog, "xlarge", undefined), undefined);
+  test("a genuine pi hit wins: resolved_from pi + a provider/id model", async () => {
+    const client = stubClient(async (name, args) => {
+      assert.equal(name, "config.resolve_agent");
+      assert.deepEqual(args, { tier: "small", format: "json" });
+      return textResult(JSON.stringify({ resolved_from: "pi", model: "openrouter/cheap-model", effort: "low" }));
+    });
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model"), {
+      model: "openrouter/cheap-model",
+      effort: "low",
+    });
   });
 
-  test("no alias (model_name omitted) -> inherit unchanged", () => {
-    assert.equal(resolveModelForAlias(catalog, undefined, "inherited/model"), "inherited/model");
-    assert.equal(resolveModelForAlias(catalog, undefined, undefined), undefined);
+  test("a non-pi resolved_from inherits", async () => {
+    const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "codex", model: "gpt-5.6-terra" })));
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model"), { model: "inherited/model" });
   });
 
-  test("alias set but catalog unset -> inherit", () => {
-    assert.equal(resolveModelForAlias(undefined, "small", "inherited/model"), "inherited/model");
+  test("Forward (a) guard: a pi-labeled but slash-less (codex-shaped) model inherits", async () => {
+    const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "gpt-5.6-terra" })));
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model"), { model: "inherited/model" });
   });
 
-  test("explore's implicit small alias -> resolved when catalog has aliases.small, inherit otherwise", () => {
-    assert.equal(resolveModelForAlias(catalog, "small", "inherited/model"), "openrouter/cheap-model");
-    const unmappedSmall: ModelCatalogConfig = { aliases: { large: "openrouter/big-model" } };
-    assert.equal(resolveModelForAlias(unmappedSmall, "small", "inherited/model"), "inherited/model");
-    assert.equal(resolveModelForAlias(undefined, "small", "inherited/model"), "inherited/model");
+  test("an isError result inherits", async () => {
+    const client = stubClient(async () => ({ content: [{ type: "text", text: "boom" }], isError: true }));
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model"), { model: "inherited/model" });
   });
 
-  test("an arbitrary user-chosen alias name (not one of the old four tier names) resolves normally", () => {
-    const reviewerCatalog: ModelCatalogConfig = { aliases: { reviewer: "openrouter/big-model" } };
-    assert.equal(resolveModelForAlias(reviewerCatalog, "reviewer", "inherited/model"), "openrouter/big-model");
+  test("no text content inherits", async () => {
+    const client = stubClient(async () => ({ content: [] }));
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model"), { model: "inherited/model" });
+  });
+
+  test("unparsable JSON text inherits", async () => {
+    const client = stubClient(async () => textResult("not json"));
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model"), { model: "inherited/model" });
+  });
+
+  test("a thrown call inherits (never-hard-fail)", async () => {
+    const client = stubClient(async () => {
+      throw new Error("stdio pipe broke");
+    });
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model"), { model: "inherited/model" });
+  });
+
+  test("no alias and no inherit model -> undefined model, no call made", async () => {
+    const client = stubClient(async () => textResult("{}"));
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, undefined, undefined), { model: undefined });
+  });
+
+  test("effort is carried through only on a genuine pi hit, and omitted when the resolved effort is empty", async () => {
+    const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "openrouter/big-model", effort: "" })));
+    const resolved = await resolveModelForAliasViaWsMcp(client, "large", "inherited/model");
+    assert.equal(resolved.model, "openrouter/big-model");
+    assert.equal(resolved.effort, undefined, "an empty resolved effort string must not surface as a truthy value");
+  });
+
+  test("effort is absent from a non-pi (inherit) resolution even if the payload carried one", async () => {
+    const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "codex", model: "gpt-5.6-terra", effort: "high" })));
+    const resolved = await resolveModelForAliasViaWsMcp(client, "large", "inherited/model");
+    assert.deepEqual(resolved, { model: "inherited/model" });
+  });
+
+  test("an arbitrary tier name still resolves normally (no closed vocabulary enforced by this function itself)", async () => {
+    const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "openrouter/reviewer-model" })));
+    const resolved = await resolveModelForAliasViaWsMcp(client, "reviewer", "inherited/model");
+    assert.equal(resolved.model, "openrouter/reviewer-model");
+    assert.equal(resolved.effort, undefined);
+  });
+});
+
+describe("effectiveModelEffort (review relay #1, Critical: the modelEffort merge rule)", () => {
+  test("an explicit, non-empty caller effort wins over a resolved one", () => {
+    assert.equal(effectiveModelEffort("high", "low"), "high");
+  });
+
+  test("no caller effort falls back to the resolved effort", () => {
+    assert.equal(effectiveModelEffort(undefined, "low"), "low");
+  });
+
+  test("an empty-string caller effort is treated as absent, not an explicit win (fixes the `??` vs `||` Minor)", () => {
+    assert.equal(effectiveModelEffort("", "low"), "low");
+  });
+
+  test("neither side set -> undefined", () => {
+    assert.equal(effectiveModelEffort(undefined, undefined), undefined);
+  });
+
+  test("caller set, nothing resolved -> the caller value", () => {
+    assert.equal(effectiveModelEffort("medium", undefined), "medium");
+  });
+});
+
+/**
+ * Review relay #1 (Critical): `spawnAgent` itself is live-gate only (it
+ * constructs a real `RpcClient` and calls `.start()` — see this file's
+ * header comment), so the actual spawn-time `applyModelEffort` call cannot
+ * be driven through a unit test. This is a source-level regression guard for
+ * the specific bug the review caught: the spawn-time apply
+ * (`spawner.ts`, inside `spawnAgent`) previously read `params.modelEffort`
+ * directly instead of the already-folded `record.modelEffort`, so a
+ * config-resolved tier effort was computed and stored but never actually
+ * applied to a freshly spawned child (only the dormant-resume path in
+ * `sendToAgent` read `record.modelEffort` correctly). Both call sites must
+ * read the same field so there is exactly one value in play, matching
+ * `effectiveModelEffort`'s single fold point tested above.
+ */
+describe("spawnAgent / sendToAgent applyModelEffort call sites (source-level regression guard)", () => {
+  const spawnerSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "spawner.ts"), "utf8");
+
+  test("neither call site reads params.modelEffort directly any more", () => {
+    assert.equal(
+      spawnerSource.includes("applyModelEffort(client, params.modelEffort)"),
+      false,
+      "applyModelEffort must be called with record.modelEffort — the single already-folded value — not the raw caller param",
+    );
+  });
+
+  test("both the spawn-time and dormant-resume call sites apply the folded record.modelEffort", () => {
+    const matches = spawnerSource.match(/applyModelEffort\(client, record\.modelEffort\)/g) ?? [];
+    assert.equal(matches.length, 2, "expected exactly two call sites (spawnAgent's first-spawn path and sendToAgent's dormant-resume path)");
   });
 });
 
@@ -619,7 +732,7 @@ describe("applyRpcEvent: ws-report-to-lead (260905 push outcomes)", () => {
     assert.deepEqual(record.reportLog.map((e) => e.kind), [undefined, undefined]);
   });
 
-  test("onQuestionReport returning a string SUPPRESSES the push entirely — the TUI owner surface consumed the question (§1)", () => {
+  test("onQuestionReport returning a string PUSHES the registration notice as ws-agent-advisory — the lead is told a thread exists, not asked to answer (§1)", () => {
     const seen: string[] = [];
     const record = freshRpcRecord({
       onQuestionReport: (_rec, message) => {
@@ -629,8 +742,12 @@ describe("applyRpcEvent: ws-report-to-lead (260905 push outcomes)", () => {
     });
     const result = applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "which branch?", kind: "question" } });
     assert.deepEqual(seen, ["which branch?"]);
-    assert.deepEqual(result, {}, "the lead is not part of a fork-raised question exchange");
-    assert.equal(record.reportLog.length, 1, "the report is still logged — suppression is about the push, not the bookkeeping");
+    assert.deepEqual(
+      result,
+      { push: { family: "ws-agent-advisory", payload: { advisory: "fork-question-thread", detail: "[ws] registered as thread q1" }, deliverAs: "followUp" } },
+      "the lead is not part of a fork-raised question exchange, but must still see the notice",
+    );
+    assert.equal(record.reportLog.length, 1, "the report is still logged — the push shape change doesn't affect bookkeeping");
   });
 
   test("onQuestionReport returning undefined (headless) keeps the ws-agent-question push", () => {
@@ -1031,6 +1148,18 @@ describe("buildPushContent", () => {
 });
 
 describe("pushToLead", () => {
+  // 260906 Phase 1 (settle-timer reminder race ticket): module state shared
+  // with goal-loop.ts's settle timer, mirroring the existing
+  // `leadCompactingRef`/`heldPushQueue` reset convention elsewhere in this
+  // file.
+  beforeEach(() => {
+    leadReminderStartPendingRef.current = false;
+  });
+
+  afterEach(() => {
+    leadReminderStartPendingRef.current = false;
+  });
+
   test("sends one custom message per family, with details carrying agent_id, the payload, and the status line", () => {
     const pi = fakePi();
     const record = liveRpcRecord({ agentId: "a", running: true });
@@ -1107,6 +1236,32 @@ describe("pushToLead", () => {
 
     assert.equal(pi.sent[0].message.content?.split("\n")[0], "[ws-agent-report] agent a1");
   });
+
+  test("260906 Phase 1 (settle-timer reminder race ticket): sends with triggerTurn: false while a reminder start is pending", () => {
+    const pi = fakePi();
+    const record = liveRpcRecord({ agentId: "a", running: true });
+    leadReminderStartPendingRef.current = true;
+
+    pushToLead(pi.api, new Map([["a", record]]), record, "ws-agent-report", { report: "halfway" }, "followUp");
+
+    assert.equal(pi.sent.length, 1);
+    assert.deepEqual(
+      pi.sent[0]!.options,
+      { deliverAs: "followUp", triggerTurn: false },
+      "lands via _appendCustomMessage instead of colliding with the reminder's own mid-await prompt() call",
+    );
+  });
+
+  test("260906 Phase 1 (settle-timer reminder race ticket): triggerTurn: true is unchanged when no reminder start is pending", () => {
+    const pi = fakePi();
+    const record = liveRpcRecord({ agentId: "a", running: true });
+    leadReminderStartPendingRef.current = false;
+
+    pushToLead(pi.api, new Map([["a", record]]), record, "ws-agent-report", { report: "halfway" }, "followUp");
+
+    assert.equal(pi.sent.length, 1);
+    assert.deepEqual(pi.sent[0]!.options, { deliverAs: "followUp", triggerTurn: true });
+  });
 });
 
 /**
@@ -1131,11 +1286,13 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     idle = true;
     heldPushQueue.length = 0;
     leadIdleRef.current = () => idle;
+    leadCompactingRef.current = false;
   });
 
   afterEach(() => {
     heldPushQueue.length = 0;
     leadIdleRef.current = undefined;
+    leadCompactingRef.current = false;
   });
 
   test("an IDLE lead is pushed to immediately — holding would only delay the wake", () => {
@@ -1187,6 +1344,61 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
       ["ws-agent-approval", "ws-agent-question"],
     );
     assert.deepEqual(heldPushQueue, [], "a blocked child cannot wait for the lead's turn to end");
+  });
+
+  test("260906 (Phase 1): a steer push is held while a compaction is in flight, even on an otherwise-idle lead", () => {
+    leadCompactingRef.current = true;
+    const pi = fakePi();
+    const record = liveRpcRecord({ agentId: "a", running: true });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+    pushToLead(pi.api, registry, record, "ws-agent-approval", { cmd_id: "c1" }, "steer");
+    assert.deepEqual(pi.sent, [], "sendCustomMessage bypasses Pi's own compaction guard — this hold is the only thing stopping it");
+    assert.equal(heldPushQueue.length, 1);
+
+    leadCompactingRef.current = false;
+    assert.equal(flushHeldPushes(pi.api), 1);
+    assert.equal(pi.sent[0]!.options?.deliverAs, "steer", "released with the SAME delivery mode it was held under");
+  });
+
+  test("260906 (Phase 1): a steer push mid-turn but NOT compacting still bypasses the hold as before", () => {
+    idle = false;
+    leadCompactingRef.current = false;
+    const pi = fakePi();
+    pushToLead(pi.api, new Map(), undefined, "ws-agent-approval", { cmd_id: "c1" }, "steer");
+    assert.equal(pi.sent.length, 1);
+    assert.deepEqual(heldPushQueue, []);
+  });
+
+  test("260906 (Phase 1): a followUp push is held while compacting even when leadIdleRef itself reports idle", () => {
+    leadCompactingRef.current = true;
+    const pi = fakePi();
+    pushToLead(pi.api, new Map(), undefined, "ws-agent-report", { report: "mid-compaction" }, "followUp");
+    assert.deepEqual(pi.sent, []);
+    assert.equal(heldPushQueue.length, 1);
+
+    leadCompactingRef.current = false;
+    assert.equal(flushHeldPushes(pi.api), 1);
+    assert.equal(pi.sent[0]!.options?.deliverAs, "followUp");
+  });
+
+  test("260906 (Phase 1): registerPushFlush's agent_settled handler does not flush while compacting", () => {
+    leadCompactingRef.current = true;
+    const sent: string[] = [];
+    let settled: (() => void) | undefined;
+    const api = {
+      on: (event: string, handler: () => void) => void (event === "agent_settled" && (settled = handler)),
+      sendMessage: (message: { customType?: string }) => void sent.push(message.customType ?? ""),
+    } as unknown as Parameters<typeof registerPushFlush>[0];
+    registerPushFlush(api);
+
+    heldPushQueue.push({ kind: "push", registry: undefined, record: undefined, family: "ws-agent-report", payload: { report: "held" }, deliverAs: "followUp" });
+    settled?.();
+    assert.deepEqual(sent, [], "the abort inside ctx.compact() settles the doomed turn before Pi's own compaction flag is set — this gate is what stops a premature flush into it");
+    assert.equal(heldPushQueue.length, 1, "left for releaseAfterCompaction to flush once the compaction actually finishes");
+
+    leadCompactingRef.current = false;
+    settled?.();
+    assert.deepEqual(sent, ["ws-agent-report"], "an ordinary settle once compaction is over flushes normally");
   });
 
   test("the live-run failure itself: three workers, two finals landing mid-turn, read 1 then 0 — never a premature 0", () => {
@@ -1264,7 +1476,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
       assert.deepEqual(pi.sent, []);
 
       // And the flush handler itself is a no-op there, even with a stale entry.
-      heldPushQueue.push({ registry: undefined, record: undefined, family: "ws-agent-report", payload: { report: "stale" } });
+      heldPushQueue.push({ kind: "push", registry: undefined, record: undefined, family: "ws-agent-report", payload: { report: "stale" }, deliverAs: "followUp" });
       let settled: (() => void) | undefined;
       const api = { on: (event: string, handler: () => void) => void (event === "agent_settled" && (settled = handler)), sendMessage: () => assert.fail("a worker process must not push") };
       registerPushFlush(api as unknown as Parameters<typeof registerPushFlush>[0]);
@@ -1414,11 +1626,14 @@ describe("attachEventListener (the settle-suppression IO gate)", () => {
     assert.equal(h.pi.sent[0].options?.deliverAs, "followUp");
   });
 
-  test("a hook-consumed question (the TUI owner surface) is not pushed at all", () => {
+  test("a hook-consumed question (the TUI owner surface) pushes the registration notice as ws-agent-advisory", () => {
     const h = listenerHarness();
     h.record.onQuestionReport = () => "[ws] thread q1 — the owner answers this.";
     h.emit({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "question", message: "which anchor?" } });
-    assert.deepEqual(h.pi.sent, []);
+    assert.deepEqual(families(h.pi), ["ws-agent-advisory"]);
+    assert.equal(h.pi.sent[0].message.details && (h.pi.sent[0].message.details as Record<string, unknown>).advisory, "fork-question-thread");
+    assert.equal(h.pi.sent[0].message.details && (h.pi.sent[0].message.details as Record<string, unknown>).detail, "[ws] thread q1 — the owner answers this.");
+    assert.equal(h.pi.sent[0].options?.deliverAs, "followUp");
   });
 
   test("a dead child's settle transitions it to exited and pushes once (the liveness probe on the transition)", async () => {
@@ -2000,6 +2215,23 @@ describe("listAgents", () => {
     const registry: RpcAgentRegistry = new Map([["a", freshRpcRecord({ agentId: "a" })]]);
     assert.deepEqual(listAgents(registry, { includePrompt: true }), [{ agent_id: "a", status: "dormant" }]);
   });
+
+  test("260905 (list-model/last-report-fidelity): modelBase + modelEffort lists model as \"<base>/<effort>\"", () => {
+    const record = freshRpcRecord({ agentId: "a", modelBase: "claude-opus-4", modelEffort: "high" });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+    assert.deepEqual(listAgents(registry), [{ agent_id: "a", status: "dormant", model: "claude-opus-4/high" }]);
+  });
+
+  test("260905 (list-model/last-report-fidelity): modelBase alone lists the bare base", () => {
+    const record = freshRpcRecord({ agentId: "a", modelBase: "claude-opus-4" });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+    assert.deepEqual(listAgents(registry), [{ agent_id: "a", status: "dormant", model: "claude-opus-4" }]);
+  });
+
+  test("260905 (list-model/last-report-fidelity): a record with neither modelBase nor modelEffort has no model key", () => {
+    const registry: RpcAgentRegistry = new Map([["a", freshRpcRecord({ agentId: "a" })]]);
+    assert.deepEqual(listAgents(registry), [{ agent_id: "a", status: "dormant" }]);
+  });
 });
 
 describe("sendToAgent (live branches only — dormant auto-resume is live-gate only, see module doc comment)", () => {
@@ -2521,6 +2753,27 @@ describe("evictForCapacity", () => {
     const registry: RpcAgentRegistry = new Map([["a", freshRpcRecord({ agentId: "a" })]]);
     evictForCapacity(registry, 1);
     assert.equal(registry.size, 0);
+  });
+
+  test("260905 (list-model/last-report-fidelity): prefers to drop a never-active record over a revived orphan whose lastReportAtOverride is newer", () => {
+    // Review relay #1 (Critical): both records must have distinct, non-zero
+    // activity under the FIXED formula, and "revived" is inserted first so
+    // insertion-order tie-breaking cannot coincidentally produce the right
+    // answer for the wrong reason. "never" gets a small lastLeadPromptAt
+    // (100) that is unambiguously below the override (9_000) only once the
+    // override is actually honored — under the pre-fix formula (which
+    // ignores lastReportAtOverride entirely), "revived" scores activity 0
+    // (lowest) and would be evicted instead, so this test fails if the
+    // lastReportAtOverride fallback in evictForCapacity regresses.
+    const revived = freshRpcRecord({ agentId: "revived", lastReportAtOverride: new Date(9_000).toISOString() });
+    const neverActive = freshRpcRecord({ agentId: "never", lastLeadPromptAt: 100 });
+    const registry: RpcAgentRegistry = new Map([
+      ["revived", revived],
+      ["never", neverActive],
+    ]);
+    const result = evictForCapacity(registry, 2);
+    assert.deepEqual(result, { ok: true, evictedLabel: "never" });
+    assert.equal(registry.has("revived"), true);
   });
 });
 

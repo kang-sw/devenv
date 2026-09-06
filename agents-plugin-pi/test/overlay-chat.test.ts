@@ -248,11 +248,23 @@ describe("render(width)", () => {
     assert.ok(text.includes("Rebase or merge?"));
   });
 
-  test("the footer names /done and says Esc leaves the thread running", () => {
-    const h = harness();
-    const text = h.component.render(80).join("\n");
-    assert.ok(text.includes(DONE_COMMAND));
-    assert.match(text, /keeps running/);
+  test("the header (not a footer) states the Esc//done hint exactly once, directly after the opened line", () => {
+    const h = harness({ createdAt: "2026-09-05T11:52:30.000Z" });
+    const lines = h.component.render(80);
+    const text = lines.join("\n");
+    const hintLine = `Esc: close view (thread stays open) · ${DONE_COMMAND}: end thread`;
+    assert.ok(text.includes(hintLine), text);
+    assert.equal((text.match(/Esc/g) ?? []).length, 1, "exactly one line states what Esc does");
+    assert.ok(!text.includes("closes the thread"), "the old footer phrasing is gone");
+    assert.ok(!text.includes("keeps running"), "the old footer phrasing is gone");
+
+    const openedIndex = lines.findIndex((line) => line.includes("opened "));
+    const hintIndex = lines.findIndex((line) => line.includes("Esc: close view"));
+    assert.ok(openedIndex >= 0, "the opened line must be present when createdAt is set");
+    assert.equal(hintIndex, openedIndex + 1, "the hint sits directly after the opened line, in the header");
+    // And still in the header, not down near the input line.
+    const inputIndex = lines.findIndex((line) => line.includes("> "));
+    assert.ok(hintIndex < inputIndex, "the hint is in the header block, well before the input row");
   });
 
   test("the registered question is seeded into the transcript", () => {
@@ -293,6 +305,98 @@ describe("render(width)", () => {
     h.component.handleInput("\x00");
     h.type("ok");
     assert.ok(h.component.render(80).join("\n").includes("> ok"));
+  });
+
+  test("the header hint is present exactly once, positioned right after the opened line, and every line stays width-bounded, at 40/80/120", () => {
+    for (const width of [40, 80, 120]) {
+      const h = harness({ createdAt: "2026-09-05T11:52:30.000Z" });
+      const lines = h.component.render(width);
+      const text = lines.join("\n");
+      const occurrences = (text.match(/Esc: close view/g) ?? []).length;
+      assert.equal(occurrences, 1, `width ${width}: hint must appear exactly once, got ${occurrences}`);
+      for (const line of lines) assert.ok(visibleWidth(line) <= width, `width ${width}: line ${JSON.stringify(line)} exceeds it`);
+
+      const openedIndex = lines.findIndex((line) => line.includes("opened "));
+      const hintIndex = lines.findIndex((line) => line.includes("Esc: close view"));
+      assert.ok(openedIndex >= 0, `width ${width}: the opened line must be present`);
+      assert.equal(hintIndex, openedIndex + 1, `width ${width}: the hint sits directly after the opened line`);
+    }
+  });
+});
+
+describe("working marker (260905: activity while the respondent thinks)", () => {
+  test("shows while the channel reports streaming and the tail is empty", () => {
+    const h = harness();
+    h.setStreaming(true);
+    assert.ok(h.component.render(80).join("\n").includes("working…"));
+  });
+
+  test("review relay #1 Important (cache-key discriminator): a render at the SAME width re-derives from a later flag flip with no intervening event", () => {
+    const h = harness();
+    const before = h.component.render(80).join("\n");
+    assert.ok(!before.includes("working…"), "not streaming yet, so the first render is cached marker-less");
+    h.setStreaming(true); // no emit()/delta()/settle() between this and the next render
+    const after = h.component.render(80).join("\n");
+    assert.ok(after.includes("working…"), "the same-width render must reflect the CURRENT flag, not replay the cold cached frame");
+  });
+
+  test("review relay #1 Important: an agent_start event alone (no delta yet) requests a render, and that render shows the marker", () => {
+    const h = harness();
+    h.component.render(80); // prime the cache while idle
+    const rendersBefore = h.renders;
+    h.setStreaming(true);
+    h.emit({ type: "agent_start" });
+    assert.ok(h.renders > rendersBefore, "agent_start must request a render, not be silently dropped");
+    assert.ok(h.component.render(80).join("\n").includes("working…"));
+  });
+
+  test("review relay #1 Important (settle mirror): the marker disappears on the next render once the flag clears, even with no settle event", () => {
+    const h = harness();
+    h.setStreaming(true);
+    assert.ok(h.component.render(80).join("\n").includes("working…"));
+    h.setStreaming(false); // no settle() emitted — e.g. clearLiveState after a failed liveness probe
+    assert.ok(!h.component.render(80).join("\n").includes("working…"), "a stale cached marker must not survive once the flag clears");
+  });
+
+  test("the first text delta replaces the marker", () => {
+    const h = harness();
+    h.setStreaming(true);
+    assert.ok(h.component.render(80).join("\n").includes("working…"));
+    h.delta("Merging keeps history.");
+    const text = h.component.render(80).join("\n");
+    assert.ok(!text.includes("working…"), "the marker is replaced once real text streams");
+    assert.ok(text.includes("Merging keeps history."));
+  });
+
+  test("settle clears it once the channel reports not streaming", () => {
+    const h = harness();
+    h.setStreaming(true);
+    assert.ok(h.component.render(80).join("\n").includes("working…"));
+    h.settle();
+    h.setStreaming(false);
+    assert.ok(!h.component.render(80).join("\n").includes("working…"));
+  });
+
+  test("shows on the very first render when the channel is already streaming (attach-mid-turn / dormant-relaunch — no start event ever reaches the component)", () => {
+    const h = harness({ streaming: true });
+    // No emit()/delta()/settle() call before this render: the channel simply
+    // already reports streaming, which is exactly the attach-mid-turn and
+    // dormant-relaunch shapes — neither ever delivers an `agent_start`-shaped
+    // event to this component.
+    assert.ok(h.component.render(80).join("\n").includes("working…"));
+  });
+
+  test("never appears in the persisted transcript", () => {
+    const h = harness({ question: "Rebase or merge?" });
+    h.setStreaming(true);
+    h.component.render(80);
+    h.delta("Merging keeps history.");
+    h.settle();
+    h.setStreaming(false);
+    h.component.render(80);
+    for (const snapshot of h.transcripts) {
+      for (const entry of snapshot) assert.ok(!entry.text.includes("working…"), JSON.stringify(entry));
+    }
   });
 });
 

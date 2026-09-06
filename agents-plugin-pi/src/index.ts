@@ -20,12 +20,15 @@
  *
  * Phase 2 adds the self-built delegation spawner (`ws-agent-spawn` /
  * `ws-agent-continue` / `explore`, see src/spawner.ts) on
- * top of the Phase 1 bridge. Phase 3 adds the adapter-owned model-catalog
- * curation data file (`model-catalog.json`, see src/model-catalog.ts):
- * tier-aware `--model` resolution in the spawner, an unset-tier advisory
- * appended to every `workflow_manual` bridge response (bridge.ts), and a
- * read-only `ws-model-catalog-list` command exercising Pi's
- * `ctx.scopedModels` read API to help the user hand-curate the catalog.
+ * top of the Phase 1 bridge. Phase 3 added (and the
+ * `260905-feat-ws-pi-harness-config-layer` ticket's Phase 4 retired) an
+ * adapter-owned tier-curation data file: tier-aware `--model` resolution now
+ * goes through ws-mcp's `config.resolve_agent` tool
+ * (`resolveModelForAliasViaWsMcp`, spawner.ts) instead of a hand-edited JSON
+ * file, the unset-tier advisory in bridge.ts is sourced from the same tool,
+ * and the read-only `ws-model-catalog-list` command below still exercises
+ * Pi's `ctx.scopedModels` read API but now points the user at `config.tune
+ * agents.tier harness:pi` / `lead-tune` for curation instead of a data file.
  *
  * Phase 4 ships the `/ws-discuss` proof-of-concept command (kickoff built by
  * src/discuss.ts): a single `pi.sendUserMessage` that loads the lead-discuss
@@ -51,7 +54,7 @@
  * the host lead and a future `fork` child only (never `worker`/`explore`).
  * `registerLeadBootstrap` itself is declarative (factory top level, no
  * subprocess); the actual snapshot fetch happens inside `startBridge`
- * (bridge.ts), and this file fills `wsBlockRef.current` from that result
+ * (bridge.ts), and this file fills `wsBlockBaseRef.current` from that result
  * once `session_start`'s `startBridge` call resolves — same seam
  * `registerAgentTools` already uses.
  *
@@ -118,6 +121,38 @@
  * imports `agent-widget.ts` directly. `session_shutdown` stops its 10-second
  * elapsed timer and clears both the widget and the status segment.
  *
+ * The `260906-bug-ws-pi-lead-cannot-see-or-load-skills` ticket's Phase 1 adds
+ * the lead/fork skill surface (src/lead-skills.ts): removing native
+ * `read`/`bash` from the reshaped lead/fork tool surface (above) also
+ * silently dropped Pi's own `<available_skills>` system-prompt block and its
+ * `read`-the-SKILL.md loading path, leaving the lead with no way to see or
+ * load a skill it was not told about via `/skill:<name>`. The fix is
+ * adapter-owned, mirroring the workflow-manual/tool-reshape split already in
+ * this file: a dedicated `<available_skills>` block (pointing at `ws-skill`,
+ * never `read`) is appended as the third ordered item of the ws
+ * system-prompt block, and `ws-skill(name, args?)` is registered globally
+ * and added to the active-tools surface for lead AND fork alike
+ * (`isLeadOrFork`, not the narrower lead-only gate
+ * `addForkToolIfLead`/`addAskToolsIfLead` use). This ticket also collapses
+ * the previously separate `buildWsBlock` call and three sequential
+ * `pi.setActiveTools()`/`pi.getActiveTools()` reshape steps below into one
+ * `computeSessionBootstrap` call (`lead-bootstrap.ts`) — a single pure
+ * function producing the whole lead/fork session-start outcome, testable
+ * end-to-end without a fake `ExtensionAPI`.
+ *
+ * A later dogfood fix corrected this ticket's original `session_start`-time
+ * `pi.getCommands()` snapshot: Pi actually runs `session_start` FIRST and
+ * only afterwards merges an extension's own `resources_discover` skills into
+ * the live command list (`extendResourcesFromExtensions`, confirmed against
+ * the installed `agent-session.js`), so that snapshot predated every ws
+ * skill and both `ws-skill` and the `<available_skills>` block saw only
+ * whatever other extension (e.g. `imagegen`) had registered first. Both now
+ * resolve `pi.getCommands()` LIVE instead — `ws-skill` inside its own
+ * `execute()` (`lead-skills.ts`), the block inside `before_agent_start`
+ * (`lead-bootstrap.ts`'s `computeSkillsBlockCached`, cached in
+ * `skillsBlockCacheRef` below) — so no `session_start`-scoped skill snapshot
+ * exists in this file at all any more.
+ *
  * HAND-SYNC NOTE: bin/ws-mcp-launcher.py, runtime.json, and rsrc/ in this
  * package are byte-identical copies of the same-named files under
  * agents-plugin/ (same precedent as agents-plugin-wsflow's copies — no
@@ -158,12 +193,11 @@ import { buildOrphanPush, captureOrphans, readAndClearSidecar, reviveOrphans, wr
 import { buildDiscussKickoff } from "./discuss.ts";
 import { registerGoalLoop } from "./goal-loop.ts";
 import { resolveSkillsDir } from "./skills-dir.ts";
-import { buildWsBlock, registerLeadBootstrap } from "./lead-bootstrap.ts";
+import { computeSessionBootstrap, registerLeadBootstrap, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
 import { isLeadOrFork, readSpawnRole } from "./process-role.ts";
-import { computeLeadActiveTools, createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
-import { addForkToolIfLead, armForkRoleWiring, registerFork } from "./fork.ts";
+import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
+import { armForkRoleWiring, registerFork } from "./fork.ts";
 import {
-  addAskToolsIfLead,
   buildForkQuestionLeadNotice,
   createThreadRegistryHandle,
   handleForkRaisedQuestion,
@@ -172,6 +206,7 @@ import {
   registerThreadCommands,
   threadRegistryPath,
 } from "./ask.ts";
+import { registerWsSkillTool } from "./lead-skills.ts";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const pluginDir = dirname(srcDir); // agents-plugin-pi/
@@ -179,7 +214,6 @@ const repoRoot = dirname(pluginDir);
 const skillsDir = resolveSkillsDir(pluginDir, repoRoot);
 const launcherPath = join(pluginDir, "bin", "ws-mcp-launcher.py");
 const runtimeJsonPath = join(pluginDir, "runtime.json");
-const modelCatalogPath = join(pluginDir, "model-catalog.json");
 const goalLoopConfigPath = join(pluginDir, "goal-loop-config.json");
 const piLeadGuidePath = join(pluginDir, "pi-lead-guide.md");
 const executeWorkerGuidePath = join(pluginDir, "execute-worker-guide.md");
@@ -187,7 +221,22 @@ const executeWorkerGuidePath = join(pluginDir, "execute-worker-guide.md");
 export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   let handle: BridgeHandle | undefined;
   let agentTools: AgentToolsHandle | undefined;
-  const wsBlockRef: { current: string | undefined } = { current: undefined };
+  // The manual-snapshot + guide-text half of the ws block, filled once per
+  // `session_start`. The `<available_skills>` half is deliberately NOT held
+  // here — see `skillsBlockCacheRef` below and `lead-bootstrap.ts`'s
+  // `computeSkillsBlockCached` for why that piece is resolved live instead.
+  const wsBlockBaseRef: { current: WsBlockBase | undefined } = { current: undefined };
+  // Dogfood fix: the `<available_skills>` block cache, built lazily inside
+  // `registerLeadBootstrap`'s `before_agent_start` handler against a LIVE
+  // `pi.getCommands()` read (never a `session_start`-time snapshot — Pi
+  // merges this adapter's own skills into `pi.getCommands()` AFTER
+  // `session_start` returns, so a snapshot taken here would predate them,
+  // same live-ref convention as `wsBlockBaseRef`/`rpcRegistryRef`). Lives at
+  // this factory scope (survives across every `session_start` on this loaded
+  // extension instance), but that is fine: `computeSkillsBlockCached` keys
+  // its cache on the live entry-path set and rebuilds on its own whenever
+  // that set changes, so no external reset is needed here.
+  const skillsBlockCacheRef: { current: SkillsBlockCache | undefined } = { current: undefined };
   // 260905 (push model): the shared RPC registry, published as a mutable ref
   // so `createApprovalRelay` — which must be constructed BEFORE
   // `registerAgentTools` creates that registry — can still read it at push
@@ -214,11 +263,11 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   }));
 
   // Read-only: lists Pi's currently scoped (or, if unscoped, all available)
-  // models as `provider/id` candidates for the user to hand-copy into
-  // model-catalog.json's `tiers`/`catalog` fields. No writes — curation
-  // stays a hand-edited data file (see model-catalog.ts's doc comment).
+  // models as `provider/id` candidates for the user to hand-copy into a
+  // `config.tune agents.tier harness:pi` write (see lead-tune). No writes —
+  // curation stays a ws-mcp config edit, not an adapter-owned data file.
   pi.registerCommand("ws-model-catalog-list", {
-    description: "List provider/id model candidates for curating model-catalog.json's tiers.",
+    description: "List provider/id model candidates for curating harness pi's agents.tier entries via config.tune / lead-tune.",
     handler: async (_args, ctx) => {
       const models = ctx.scopedModels.length > 0 ? ctx.scopedModels.map((sm) => sm.model) : ctx.modelRegistry.getAvailable();
       const lines = models.map((m) => `${m.provider}/${m.id}`);
@@ -245,8 +294,15 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     },
   });
 
-  registerGoalLoop(pi, { goalLoopConfigPath, rpcRegistryRef });
-  registerLeadBootstrap(pi, wsBlockRef);
+  const goalLoopHandle = registerGoalLoop(pi, { goalLoopConfigPath, rpcRegistryRef });
+  registerLeadBootstrap(pi, wsBlockBaseRef, skillsBlockCacheRef);
+  // 260906 Phase 1: declarative/global, same placement as registerFork/
+  // registerAsk above it — a fork child re-runs session_start too and needs
+  // ws-skill registered so addSkillToolIfLeadOrFork has something to
+  // activate. Whether it is ever ACTIVE is that gate's job, not this call's.
+  // Dogfood fix: takes only `pi` now — it reads `pi.getCommands()` live
+  // inside its own `execute()`, never a ref filled at `session_start`.
+  registerWsSkillTool(pi);
   // 260905 Edition: releases the child pushes that arrived while this session
   // was mid-turn, each with a status line computed at release time. Factory
   // scope (like registerGoalLoop above, never inside session_start) so a
@@ -260,7 +316,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     // 260905 Edition: hand the spawner this session's idleness accessor (the
-    // same captured-ctx-per-session_start seam wsBlockRef uses), so a
+    // same captured-ctx-per-session_start seam wsBlockBaseRef uses), so a
     // followUp push raised while this session is mid-turn is held until its
     // turn settles instead of going out with an already-stale status line.
     leadIdleRef.current = () => ctx.isIdle();
@@ -286,7 +342,6 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       launcherPath,
       pluginDir,
       runtimeJsonPath,
-      modelCatalogPath,
       cwd: ctx.cwd,
       ui: ctx.ui,
     });
@@ -297,11 +352,10 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // dormant-resumed execute-worker needs the SAME callback wired through
     // ws-agent-send's auto-resume branch, not just ws-execute's own spawn.
     const onApprovalPending = createApprovalRelay(pi, { cwd: ctx.cwd }, rpcRegistryRef);
-    agentTools = registerAgentTools(pi, handle, { cwd: ctx.cwd, modelCatalogPath }, onApprovalPending);
+    agentTools = registerAgentTools(pi, handle, { cwd: ctx.cwd }, onApprovalPending);
     rpcRegistryRef.current = agentTools.rpcRegistry;
     registerExecuteGateway(pi, handle, agentTools.rpcRegistry, {
       cwd: ctx.cwd,
-      modelCatalogPath,
       executeWorkerPromptPath: executeWorkerGuidePath,
       onApprovalPending,
     });
@@ -309,7 +363,8 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // same pattern as registerExecuteGateway above — a fork child re-runs
     // session_start too and needs ws-fork registered so computeForkToolSurface's
     // own exclusion of it has something to exclude. Whether it is ever ACTIVE
-    // is addForkToolIfLead's job below, not this registration.
+    // is addForkToolIfLead's job, applied below via computeSessionBootstrap,
+    // not this registration.
     // 260904 Phase 2: the onQuestion callback is what makes a task fork's own
     // ws-report-to-lead(kind:"question") land in the owner-question registry
     // with `respondent` already set to that live fork (Entry A meets Entry B)
@@ -327,13 +382,13 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       const thread = handleForkRaisedQuestion(threadHandle, agentTools!.rpcRegistry, agentId, message, pi);
       return threadHandle.ctxRef.current?.mode === "tui" ? buildForkQuestionLeadNotice(agentId, thread.threadId) : undefined;
     };
-    registerFork(pi, handle, agentTools.rpcRegistry, { cwd: ctx.cwd, modelCatalogPath }, onForkQuestion);
+    registerFork(pi, handle, agentTools.rpcRegistry, { cwd: ctx.cwd }, onForkQuestion);
 
     // 260904 Phase 2 (owner question surface), same declarative/global
     // registration placement as registerFork above: ws-ask/ws-resolve must
     // exist in a fork child's own process too, so computeForkToolSurface has
     // them present to exclude. Whether they are ever ACTIVE is
-    // addAskToolsIfLead's job below.
+    // addAskToolsIfLead's job, applied below via computeSessionBootstrap.
     //
     // §5's captured-ctx staleness rule: re-capture ctx on EVERY session_start
     // (never a factory-scope ctx), and hydrate the persisted registry so
@@ -394,16 +449,33 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       }
     }
     registerAsk(pi, threadHandle, agentTools.rpcRegistry);
-    registerThreadCommands(pi, handle, agentTools.rpcRegistry, threadHandle, { cwd: ctx.cwd, modelCatalogPath });
+    registerThreadCommands(pi, handle, agentTools.rpcRegistry, threadHandle, { cwd: ctx.cwd });
 
-    // §1/§4: fill the ws system-prompt block only when startBridge actually
-    // produced both snapshots (lead/fork role, non-degraded bootstrap — see
-    // bridge.ts's all-or-nothing fetch). Otherwise leave wsBlockRef.current
-    // unset — computeBeforeAgentStartResult's own guard already treats that
-    // as "no override" for every before_agent_start firing, matching §3's
-    // degraded-bootstrap behavior (no ws block, no crash).
-    if (isLeadOrFork(readSpawnRole(process.env)) && handle.manualSnapshotRef.current) {
-      let guideText = "";
+    // §1/§4/260906: one pure call produces BOTH the ws block's static base
+    // (manual snapshot + Pi lead guide) AND the fully reshaped lead/fork
+    // tool surface — see lead-bootstrap.ts's `computeSessionBootstrap` doc
+    // comment for why this replaced three separate
+    // `pi.setActiveTools()`/`pi.getActiveTools()` round-trips. The
+    // `<available_skills>` piece is NOT computed here (dogfood fix — see
+    // this file's header and `computeSkillsBlockCached`): it is resolved
+    // live inside `registerLeadBootstrap`'s `before_agent_start` handler
+    // instead, against a `pi.getCommands()` read taken well after Pi's own
+    // post-`session_start` skill merge. `wsBlockBase` stays `undefined` for
+    // `worker`/`explore`, or when `startBridge` produced no manual snapshot
+    // (degraded bootstrap) — `wsBlockBaseRef.current` is then left
+    // untouched, and `computeBeforeAgentStartResult`'s own guard already
+    // treats that as "no override" for every `before_agent_start` firing.
+    //
+    // Review cycle 1 (Minor): the guide read is gated the same way the
+    // pre-260906 code gated it — `isLeadOrFork` AND a present manual
+    // snapshot — rather than running for every role. `guideText` is only
+    // ever consumed inside `buildWsBlock` (now called from
+    // `before_agent_start`), which itself only runs when `manualSnapshot` is
+    // present, so reading it for `worker`/`explore` or a degraded bootstrap
+    // was pure waste with no observable effect.
+    const bootstrapRole = readSpawnRole(process.env);
+    let guideText = "";
+    if (isLeadOrFork(bootstrapRole) && handle.manualSnapshotRef.current) {
       try {
         guideText = readFileSync(piLeadGuidePath, "utf8");
       } catch {
@@ -411,33 +483,24 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
         // tree that hasn't copied it yet) — the manual snapshot alone is
         // still a strict improvement over no ws block at all.
       }
-      wsBlockRef.current = buildWsBlock(handle.manualSnapshotRef.current, guideText);
     }
-
-    // §8: reshape the LEAD's (or a fork's) own tool surface — bash/read
-    // removed, ws-execute/ws-approve/the ugly-read tool added, and the
-    // gated-exec tool itself excluded even though it was just registered
-    // globally (the auto-include footgun fix — see execute-gateway.ts's
-    // computeLeadActiveTools doc comment). Never applied to a worker/explore
-    // child: those spawn with an explicit `--tools` allowlist already, and
-    // this call would otherwise clobber it.
-    if (isLeadOrFork(readSpawnRole(process.env))) {
-      pi.setActiveTools(computeLeadActiveTools(pi.getActiveTools()));
-      // 260904 Phase 1 (side-thread fork): a SEPARATE, role-differentiated
-      // step from computeLeadActiveTools above — deliberately not folded
-      // into that function's shared LEAD_ADDED_TOOL_NAMES list, which is
-      // applied identically to lead and fork roles. addForkToolIfLead only
-      // adds ws-fork for the true top lead (role === undefined); a fork
-      // never regains it, keeping a fork's own surface excluding ws-fork
-      // (no recursive forking) even though isLeadOrFork treats lead/fork
-      // identically for the gates above.
-      pi.setActiveTools(addForkToolIfLead(pi.getActiveTools(), readSpawnRole(process.env)));
-      // 260904 Phase 2: a third role-differentiated step, alongside (never
-      // folded into) the two above for the same reason addForkToolIfLead is
-      // kept separate — computeLeadActiveTools is applied to lead and fork
-      // alike, so folding ws-ask/ws-resolve in there would hand a fork the
-      // very tools FORK_EXCLUDED_TOOL_NAMES exists to keep away from it.
-      pi.setActiveTools(addAskToolsIfLead(pi.getActiveTools(), readSpawnRole(process.env)));
+    const bootstrap = computeSessionBootstrap({
+      role: bootstrapRole,
+      manualSnapshot: handle.manualSnapshotRef.current,
+      guideText,
+      currentActiveTools: pi.getActiveTools(),
+    });
+    if (bootstrap.wsBlockBase !== undefined) {
+      wsBlockBaseRef.current = bootstrap.wsBlockBase;
+    }
+    // Review cycle 1 (Minor): gated on `isLeadOrFork` again, matching the
+    // pre-260906 code — for `worker`/`explore`, `computeSessionBootstrap`
+    // already returns `activeTools` unchanged, so calling `setActiveTools`
+    // there was a semantic no-op that still re-ran Pi's internal
+    // `_rebuildSystemPrompt` for a role that previously never took that
+    // path at all.
+    if (isLeadOrFork(bootstrapRole)) {
+      pi.setActiveTools(bootstrap.activeTools);
     }
   });
 
@@ -467,6 +530,13 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // written above carries child IDENTITIES forward; reports are not
     // persisted (see spawner.ts's heldPushQueue).
     heldPushQueue.length = 0;
+    // Review relay #1 (Minor, 260906): reset the compaction-in-flight flag
+    // and both of goal-loop.ts's private markers beside the held-push queue
+    // they gate — otherwise a shutdown/`/reload` that lands mid-compaction
+    // leaves `leadCompactingRef` stuck `true` into the replacement session,
+    // where every `followUp` push and `injectDiscussionSummary` would hold
+    // forever with nothing left to release them.
+    goalLoopHandle.resetCompactionStateForShutdown();
     leadIdleRef.current = undefined;
     // 260905 (live-agent widget ticket): stop the elapsed timer and clear the
     // widget/status segment (mirrors `leadIdleRef.current = undefined` above)

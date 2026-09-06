@@ -81,6 +81,10 @@ import {
   agentWidgetRefreshRef,
   applyRpcEvent,
   computeRunningStatusLine,
+  flushHeldPushes,
+  heldPushQueue,
+  leadCompactingRef,
+  leadReminderStartPendingRef,
   REPORT_TO_LEAD_TOOL_NAME,
   sendToAgent,
   stopAgent,
@@ -93,8 +97,19 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 // ask.ts now fires through spawner.ts's module-level `agentWidgetRefreshRef`
 // instead of a locally-passed ctx/handle — reset it after every test so a
 // spy installed by one test can never leak into the next.
+//
+// 260906 (compaction push-hold ticket, Phase 1): `leadCompactingRef` and
+// `heldPushQueue` are the same module state `spawner.ts`'s own hold uses —
+// reset both for the same leak-proofing reason.
+//
+// 260906 Phase 1 review relay #1 (Important #2): `leadReminderStartPendingRef`
+// is the goal-loop's boundary guard, now also read by `injectDiscussionSummary`
+// via `composeLeadTurnStartOptions` — reset for the same leak-proofing reason.
 afterEach(() => {
   agentWidgetRefreshRef.current = undefined;
+  leadCompactingRef.current = false;
+  heldPushQueue.length = 0;
+  leadReminderStartPendingRef.current = false;
 });
 
 function thread(overrides: Partial<ThreadRecord> = {}): ThreadRecord {
@@ -921,6 +936,71 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     );
   });
 
+  test("260906 Phase 1 review relay #1 (Important #2): the immediate send reads the goal-loop's boundary guard, sending triggerTurn: false while a reminder start is pending", () => {
+    leadReminderStartPendingRef.current = true;
+    const { pi, sent, handle, record } = setup();
+    injectDiscussionSummary(pi, handle, new Map(), record, "we take the second anchor");
+
+    assert.equal(sent.length, 1, "sent immediately — the lead is idle, no compaction in flight");
+    assert.deepEqual(
+      sent[0].options,
+      { deliverAs: "followUp", triggerTurn: false },
+      "a fork's /done completing while the reminder's own sendUserMessage is mid-await must not start a colliding turn",
+    );
+  });
+
+  test("260906 Phase 1 review relay #1 (Important #2): a held raw send reads the boundary guard at FLUSH time, not at hold time", () => {
+    leadReminderStartPendingRef.current = false;
+    leadCompactingRef.current = true;
+    const { pi, sent, handle, record } = setup();
+    injectDiscussionSummary(pi, handle, new Map(), record, "we take the second anchor");
+
+    assert.deepEqual(sent, [], "held — compacting");
+    assert.equal(heldPushQueue.length, 1);
+
+    // The flag flips to true only AFTER the send was held — a closure that
+    // captured `triggerTurn` at hold time would still send `true` here.
+    leadReminderStartPendingRef.current = true;
+    leadCompactingRef.current = false;
+    assert.equal(flushHeldPushes(pi), 1);
+    assert.equal(sent.length, 1, "delivered once released");
+    assert.deepEqual(
+      sent[0].options,
+      { deliverAs: "followUp", triggerTurn: false },
+      "composed fresh at flush time, reflecting the flag's CURRENT value rather than a stale snapshot from hold time",
+    );
+  });
+
+  test("260906 (Phase 1): held while a compaction is in flight, delivered once released — the thread-close side effects run immediately regardless", () => {
+    leadCompactingRef.current = true;
+    const { pi, sent, handle, path, record } = setup();
+    injectDiscussionSummary(pi, handle, new Map(), record, "we take the second anchor");
+
+    assert.deepEqual(sent, [], "the outbound ws-thread-summary message is held while compacting");
+    assert.equal(heldPushQueue.length, 1);
+    // Per the recommended ordering: the dormant transition and persistence
+    // are NOT part of the race being fixed, so they run immediately either way.
+    assert.equal(record.status, "dormant");
+    assert.equal(loadThreadRegistryFile(path)[0]?.status, "dormant");
+
+    leadCompactingRef.current = false;
+    assert.equal(flushHeldPushes(pi), 1);
+    assert.equal(sent.length, 1, "delivered once released");
+    const msg = sent[0].message as { customType: string; content: string; details: { threadId: string } };
+    assert.equal(msg.customType, "ws-thread-summary");
+    assert.equal(msg.details.threadId, "q1");
+    assert.ok(msg.content.includes("we take the second anchor"));
+    assert.deepEqual(sent[0].options, { deliverAs: "followUp", triggerTurn: true }, "the recorded delivery mode survives the hold");
+  });
+
+  test("260906 (Phase 1): not held when the lead is idle and no compaction is in flight (baseline behavior unchanged)", () => {
+    leadCompactingRef.current = false;
+    const { pi, sent, handle, record } = setup();
+    injectDiscussionSummary(pi, handle, new Map(), record, "decided");
+    assert.equal(sent.length, 1, "sent immediately — the ordinary path");
+    assert.deepEqual(heldPushQueue, []);
+  });
+
   test("§9: the thread goes dormant (retained, not deleted) and is persisted", () => {
     const { pi, handle, path, record } = setup();
     injectDiscussionSummary(pi, handle, new Map(), record, "decided");
@@ -1151,7 +1231,7 @@ describe("checkContextLength / buildForkQuestionLeadNotice", () => {
  */
 describe("ensureRespondent (threadBound on open and on reopen)", () => {
   const bridge = { wsToolNames: [], defaultSessionKeyRef: { current: undefined } } as never;
-  const sessionCtx = { cwd: "/repo", modelCatalogPath: "/repo/model-catalog.json" };
+  const sessionCtx = { cwd: "/repo" };
 
   function askCtx() {
     const notices: Array<{ message: string; type?: string }> = [];

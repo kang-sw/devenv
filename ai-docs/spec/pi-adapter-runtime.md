@@ -131,12 +131,42 @@ directly into the lead's system prompt and the handshake becomes unnecessary.
      and a **verb routing table** with one row per Pi lead verb. The guide is
      structured so later tickets extend the verb table with their own rows rather
      than rewriting shared text.
-- Fetch cadence: the block is assembled **once per session start** and held in
-  extension memory; it is not re-fetched per turn. The dynamic material is
-  refreshed only when an entry-point skill calls `workflow_manual` (the same
-  cadence as on the reference harnesses). Injecting the manual into the system
-  prompt — rather than as a transcript message — is deliberate: the system prompt
-  survives Pi compaction natively, so post-compaction recovery reduces to a
+  3. an **`<available_skills>` block** (260906 Phase 1; live-resolution fixed
+     by a later dogfood correction) — the adapter's own substitute for Pi's
+     own skill-loading system-prompt block, which is never rendered for a ws
+     lead/fork session at all (see "Skill exposure"). Sourced from
+     `pi.getCommands()`'s `source: "skill"` entries — the SAME list backing
+     Pi's own `/skill:<name>` slash commands, not a ws-tree scan — every
+     installed skill, ws or otherwise. Each entry's SKILL.md frontmatter is
+     read at block-build time, and an entry whose frontmatter sets
+     `disable-model-invocation: true` is excluded from the block — still
+     loadable by exact name via `ws-skill`, mirroring Pi's own
+     `formatSkillsForPrompt` exclusion. The block's preamble tells the model to
+     load a skill with `ws-skill <name>`, never `read` (absent from this
+     surface), and omits Pi's own "resolve relative paths against the skill
+     directory" line, since `ws-skill` takes a name, not a path. A
+     missing/unreadable SKILL.md is silently skipped from the block rather
+     than surfaced as an error there.
+- Fetch cadence: the manual-snapshot-plus-guide portion of the block is
+  assembled **once per session start** and held in extension memory; it is not
+  re-fetched per turn. The `<available_skills>` portion is deliberately NOT
+  part of that one-time fetch: Pi runs `session_start` and only afterwards
+  merges an extension's own `resources_discover` skills into the live
+  `pi.getCommands()` list, so a skills read taken during `session_start` can
+  predate every ws skill (the adapter shipped exactly this bug once — a lead
+  session that saw only another extension's skills, e.g. `imagegen`, and a
+  `ws-skill` call for a real ws skill answering "Unknown skill"). The block's
+  skills section is instead resolved against a live `pi.getCommands()` read
+  inside the `before_agent_start` handler itself, then cached: built once, on
+  the first `before_agent_start` firing whose live skill list is non-empty,
+  and frozen from then on for that session — a per-turn per-skill SKILL.md
+  re-read was judged not worth paying for the narrower case (a skill pack
+  installing itself mid-session, after that first firing) the cache trades
+  away. The manual/state dynamic material is refreshed only when an
+  entry-point skill calls `workflow_manual` (the same cadence as on the
+  reference harnesses). Injecting the manual into the system prompt — rather
+  than as a transcript message — is deliberate: the system prompt survives Pi
+  compaction natively, so post-compaction recovery reduces to a
   `workflow_state`/`workflow_manual` call.
 - Role gating: the ws block is appended only for the **lead** (no spawn role in
   the environment) and for a **`fork`** (a lead-caliber peer that needs the same
@@ -175,9 +205,9 @@ and never the manual body a second time:
 - The bridge prepends one fixed line to the mapped response — that the workflow
   manual is in the system prompt and this is the current session state — so a
   model expecting the manual is not confused by its absence.
-- The unset-catalog advisory (the model-catalog unset advisory below) keeps
-  riding the mapped response with its per-call cadence; it is keyed on the
-  registered name the model called, not on the wire tool the bridge dispatched.
+- The unset-tier advisory (below) keeps riding the mapped response with its
+  per-call cadence; it is keyed on the registered name the model called, not
+  on the wire tool the bridge dispatched.
 - Role- and bootstrap-gated: the cut/mapping and the prepended line apply only in
   a lead or fork process **and** only when the session-start static-body snapshot
   exists. A `worker` or `explore` that calls `ws__workflow_manual`, or any process
@@ -208,6 +238,30 @@ canonical path unconditionally, so a checkout missing both simply exposes no
 skills rather than failing. ws skill directory names are already hyphen-form
 (`lead-add-rule`, `lead-proceed`, …), which matches Pi's skill-name charset, so
 no renaming is required.
+
+On the reshaped lead/fork tool surface (see "Lead native tool-surface
+reshaping"), native `read` and `bash` are both absent, so Pi's own
+skill-loading path — the `<available_skills>` block instructing the model to
+`read` a listed SKILL.md, and the `/skill:<name>` slash-command expansion a
+human types — is not something the model itself can act on for a `read`-based
+load. Pi's own block is never rendered for a ws lead/fork session in the first
+place: its generation is part of the same system-prompt assembly the ws block
+is appended alongside, not instead of, and with no ws-owned substitute it is
+simply absent, leaving the lead unable to see or load a skill it was not
+already told about via `/skill:<name>`. The adapter closes that gap with its
+own substitute, sourced from the same `pi.getCommands()` list Pi's own
+`/skill:<name>` uses (not a ws-tree directory scan, so it covers ws skills and
+any other installed skill alike): its own `<available_skills>` list appended
+to the ws system-prompt block (see "Lead bootstrap: workflow manual + Pi lead
+guide in the system prompt") and its own `ws-skill(name, args?)` loader,
+gated the same lead-or-fork way as the rest of the reshaped surface (see
+"Lead native tool-surface reshaping"). Both the block and `ws-skill` read
+`pi.getCommands()` **live**, at block-build and at call time respectively,
+never from a snapshot taken at session start: Pi's own startup order runs
+`session_start` before merging an extension's `resources_discover` skills
+into that list, so a snapshot taken any earlier would answer with whatever
+other extension's skills had already registered and nothing this adapter
+exposes.
 
 ## Process lifecycle {#260903-pi-bridge-subprocess-lifecycle}
 
@@ -274,13 +328,19 @@ report channel" below):
   session (keeping the same ws `session_key`) and then delivers — so resume is
   subsumed by send, and there is no separate continue tool.
 - `ws-agent-list({ include_prompt? })` — enumerate registry members with their
-  status, alias and title. Status vocabulary is `running` / `idle` / `dormant`,
-  but `idle` (260905) is now transient rather than a resting state: an idle,
-  non-thread-bound record is parked to `dormant` by the adapter shortly after
-  it settles (see "Turn completion is gated on RPC idle"), so `idle` is mostly
-  observed mid-transition, not as a steady status to poll for. `include_prompt`
-  (default `false`) additionally surfaces each record's original spawn prompt,
-  stored head-truncated to 4KB.
+  status, alias, title and model. Status vocabulary is `running` / `idle` /
+  `dormant`, but `idle` (260905) is now transient rather than a resting state:
+  an idle, non-thread-bound record is parked to `dormant` by the adapter
+  shortly after it settles (see "Turn completion is gated on RPC idle"), so
+  `idle` is mostly observed mid-transition, not as a steady status to poll
+  for. `model` (260905) is the effective resolved model the child was
+  launched with, omitted only when the record carries no model at all —
+  either a sidecar written before the field existed, or a fresh spawn whose
+  inherited-model lookup itself came back empty (no tool-context model to
+  fall back to); an inheriting child (no catalog entry for its alias) shows
+  the parent's own concrete model, not an absent
+  field. `include_prompt` (default `false`) additionally surfaces each
+  record's original spawn prompt, stored head-truncated to 4KB.
 - `ws-agent-stop(agent_id)` — halt a child's process while retaining its registry
   mapping and on-disk session, leaving it **dormant/resumable** (a later
   `ws-agent-send` revives it) — the same end state the automatic park below
@@ -335,7 +395,10 @@ visible through `ws-agent-list`. What each child was doing is not restated; the
 resumed lead's own transcript already has it. A different
 session (`/new`) leaves the sidecar beside the old session file to fire on that
 session's later resume. Reports are never replayed from the sidecar: they belong
-to a process that no longer exists.
+to a process that no longer exists. A revived record's last-report time is not
+lost, either: it surfaces again as `ws-agent-list`'s `last_report_at` and feeds
+the registry-cap eviction score (see `ws-agent-spawn` above), both falling back
+to the sidecar's captured time until the record reports again for real.
 
 ### Turn completion is gated on RPC idle {#260903-pi-spawner-completion-gating}
 
@@ -417,52 +480,81 @@ so it is itself a root of its own worker → explore-leaf tree and consumes no
 depth budget of the lead's. A fork cannot fork again, because `ws-fork` is
 absent from its surface.
 
-### Model resolution: name alias, not tier {#260903-pi-spawner-model-tier-inherit}
+### Model resolution: fixed tier through ws-mcp {#260903-pi-spawner-model-tier-inherit}
 
-`ws-agent-spawn` carries **no `tier`** parameter. Model selection is the lead's
-call at render time: `ws__playbook_render` already returns a config-resolved
-`recommended-tier` / `recommended-model` / `recommended-reasoning-effort`, and the
-lead either passes `model_name` (and optionally `model_effort`) to the spawn or
-omits them to inherit the parent's model. When `model_name` is given it is resolved
-through the catalog's alias table (see below) to a concrete `provider/id` and
-launched as `--model <that model>`; an unknown alias, an empty table, or an omitted
-`model_name` all degrade to inheriting the parent's active model. Resolution never
-hard-fails. `model_effort`, when given, is applied to the launched child through a
-post-launch reasoning-effort call rather than a launch flag; an unsupported value
-is a no-op, never an error.
+`ws-agent-spawn`'s `model_name` names one of the **four fixed tiers** —
+`small` | `medium` | `large` | `xlarge` — under harness `pi`; it is not a
+user-curated alias name. There is no adapter-owned data file: a given
+`model_name` is resolved by calling ws-mcp's `config.resolve_agent` tool
+(`{tier: model_name, format: "json"}`), never by parsing config directly. The
+call passes no explicit `harness` argument — it relies on the bridge's own
+detected session harness (`pi`, set at `initialize` time), so a harness typo
+elsewhere cannot silently misroute this call.
+
+The adapter accepts the tool's answer only as a **genuine `pi` hit**: the
+response's `resolved_from` must equal `"pi"` AND its `model` string must
+contain a `/` (a `provider/id` shape). A partial `config.tune agents.tier
+harness:pi` write can seed the `pi` bucket from a codex-shaped default model
+(no `/`), so `resolved_from === "pi"` alone is not proof of a real Pi model
+string — the slash check is what tells the two apart. Every other outcome —
+an `isError` result, missing/unparsable response text, a non-`pi`
+`resolved_from`, a `pi`-labeled-but-slash-less model, or an omitted/unmapped
+`model_name` — degrades to inheriting the parent's active model. Resolution
+never hard-fails.
+
+`model_effort` follows the same "explicit caller wins" rule: a caller-supplied
+`model_effort` on the spawn call always overrides whatever the config
+resolution returned (an empty string is not an explicit choice and counts as
+"none"). When the caller passes none, a genuine `pi` hit's own
+non-empty `effort` field (`low`/`medium`/`high`/`xhigh`) is applied as
+`modelEffort`; an empty resolved effort passes no `modelEffort` at all,
+leaving the child's own default effort untouched. A non-genuine hit never
+contributes an effort value, even if its raw payload happened to carry one.
 
 `explore` is a **role**, not a caller-facing model choice: it resolves its own
-model through the catalog and exposes no `model_name` parameter.
+model through the same `config.resolve_agent` path, implicitly keyed on the
+fixed tier name `small`, and exposes no `model_name` parameter. Only the
+model half of that answer reaches the explore leaf: it has no effort
+surface, so a `small` tier's configured `effort` is not applied to explores.
 
-### Model catalog data file {#260903-pi-model-catalog-config-file}
+### Model resolution via ws-mcp config, not an adapter data file {#260903-pi-model-catalog-config-file}
 
-The curated model aliases live in an adapter-owned data file,
-`agents-plugin-pi/model-catalog.json` (sibling to `runtime.json`) — no Pi model
-strings are placed in the harness-neutral ws-mcp core. Its shape is an `aliases`
-object mapping a **generic model name** (e.g. `opus`, `sonnet`) to a concrete
-`provider/id` model string, plus an optional `catalog` list of curated candidate
-models. A `model_name` passed to `ws-agent-spawn` is resolved name → `provider/id`
-through this table; this replaces the earlier tier→model map, since the spawn tool
-no longer takes a tier. The file ships as `{}` (empty alias table) so a fresh
-checkout starts with every spawn inheriting until the user curates it. It is read
-**fresh on every spawn** (no caching), so a hand-edit applies without restarting
-Pi; a missing or malformed file is treated as an empty table rather than an error.
+There is no adapter-owned model-catalog file any more. `ws-agent-spawn`,
+`ws-fork` and `explore`'s implicit `small` lookup all resolve `model_name`
+by calling ws-mcp's `config.resolve_agent` tool at spawn time (see the
+anchor above for the exact accept/reject rule) — the adapter never reads or
+writes model configuration on disk. User config may carry Pi model strings;
+adapter and core code may not: curating a tier means running `config.tune
+agents.tier harness:pi` (directly, or via the `lead-tune` skill), not
+hand-editing a package-local JSON file. The call is re-issued fresh on every
+spawn (no caching), so a `config.tune` edit applies to the very next spawn
+with no adapter restart needed.
 
-The read-only `ws-model-catalog-list` command enumerates the session's usable
-models (`ctx.scopedModels`, falling back to the full available pool when no
-scoping is configured) as `provider/id` candidates for the user to hand-copy into
-`model-catalog.json`. It never writes the file.
+The read-only `ws-model-catalog-list` command still enumerates the session's
+usable models (`ctx.scopedModels`, falling back to the full available pool
+when no scoping is configured) as `provider/id` candidates — its underlying
+behavior (list Pi's own model registry) stays useful input for curating
+`config.tune agents.tier harness:pi` even though the file it used to point
+at is gone; it performs no writes either way.
 
-### Unset-catalog advisory on workflow_manual {#260903-pi-model-catalog-unset-advisory}
+### Unset-tier advisory on workflow_manual {#260903-pi-model-catalog-unset-advisory}
 
-While the catalog's alias table is empty, the adapter appends a strong advisory
-to every `workflow_manual` response (and only that tool's response), mirroring the
-cadence of the ws-mcp core's bootstrap-version-behind advisory — recomputed and
-re-appended on every call while the condition holds, not once per session. The
-advisory is appended after the tool's own content (never prepended, never mutating
-the original in place) and is added only on a successful `workflow_manual` result,
-never on an error response. Spawns and explores still degrade silently to inherit
-while the table is empty; the advisory is the only pressure and never blocks work.
+While harness `pi`'s `agents.tier` table has no genuine `pi` entry on any of
+the four fixed tiers, the adapter appends a strong advisory to every
+`workflow_manual` response (and only that tool's response), mirroring the
+cadence of the ws-mcp core's bootstrap-version-behind advisory — recomputed
+and re-appended on every call while the condition holds, not once per
+session. The condition itself is sourced from the same `config.resolve_agent`
+tool the spawn path uses: the adapter calls it once per fixed tier
+(`small`/`medium`/`large`/`xlarge`, four local stdio round-trips), applying
+the identical genuine-`pi`-hit guard, and fires the advisory only when none of
+the four comes back as a real Pi model. A failed lookup counts as a miss, so
+four failed round-trips (a server without the tool, a broken stdio) also fire
+the advisory rather than suppressing it. The advisory is appended after the
+tool's own content (never prepended, never mutating the original in place)
+and is added only on a successful `workflow_manual` result, never on an error
+response. Spawns and explores still degrade silently to inherit while every
+tier is unset; the advisory is the only pressure and never blocks work.
 
 ### Child→lead report channel {#260904-pi-report-to-lead-channel}
 
@@ -494,12 +586,16 @@ pushes, its only delegate being the explore leaf. Six families:
   idle"). `followUp`.
 - `ws-agent-question` — `kind:"question"` in the headless relay case; `steer`,
   since the child is blocked on the answer. In TUI the question is consumed by
-  the owner question surface instead.
+  the owner question surface instead, and the lead receives the registration
+  notice as a `ws-agent-advisory` push (`fork-question-thread`, below) rather
+  than the question text itself.
 - `ws-agent-approval` — an execute-gateway approval request; `steer` (see the
   approval gateway).
 - `ws-agent-advisory` — the fork anti-bleed advisories (idle-without-final,
-  fail-loud transcript tail, `expects_commit` non-completion;
-  `details.advisory` names which). `followUp`.
+  fail-loud transcript tail, `expects_commit` non-completion) plus
+  `fork-question-thread` (a fork-raised question was just registered as an
+  owner thread; `details.detail` carries the registration-notice text);
+  `details.advisory` names which. `followUp`.
 - `ws-agent-orphaned` — at most once per resumed session, from the shutdown
   sidecar and only when a child was cut off mid-turn (see "Process
   lifecycle"). `followUp`.
@@ -518,22 +614,46 @@ injection) is not pushed, while a `fork-raised` final closes its thread and is
 then pushed. A record that is **thread-bound** — bound to a non-closed owner
 thread, from thread open (first open and every reopen) or from question
 registration until the thread closes (`/done`, fork final, `ws-resolve`) —
-pushes no settle or advisory and is outside the status line, so owner↔fork
-exchanges reach the lead only through the summary / fork-final paths. A child's
-turn therefore never reaches the lead twice, and within a live session no push
-is dropped or duplicated.
+pushes no further settle or advisory and is outside the status line, so
+owner↔fork exchanges reach the lead only through the summary / fork-final
+paths. The one carve-out is the `fork-question-thread` registration notice
+itself: it is pushed for the very record the same hook call just made
+thread-bound, since that push is how the lead learns the thread exists at
+all; every later settle or advisory for that record is suppressed as above. A
+child's turn therefore never reaches the lead twice, and within a live
+session no push is dropped or duplicated.
 
 **Delivery is held until the lead's turn settles.** Pi offers no hook at the
 moment a queued followUp is delivered, so a message built while the lead is
 mid-turn would carry a stale status line. A `followUp` push is therefore sent
-at once only when the owning process's agent is idle; otherwise the adapter
-holds it and releases the held pushes, in arrival order, from that process's
-`agent_settled` handler, building each message — status line included — at
-release time. The first release starts the lead's next run; the rest enter
-Pi's followUp queue and drain one per loop iteration, so a fan-out burst still
-yields one lead run that sees the messages in order. `steer` families
-(approval, question) are never held. Held pushes live only in the process:
-they are dropped with it at `session_shutdown`, exactly like Pi's own queue.
+at once only when the owning process's agent is idle and no compaction is in
+flight; otherwise the adapter holds it and releases the held pushes, in
+arrival order, from that process's `agent_settled` handler once idle, or
+(compaction case) from the goal loop's post-compaction release routine —
+building each message — status line included — at release time. The first
+release starts the lead's next run; the rest enter Pi's followUp queue and
+drain one per loop iteration, so a fan-out burst still yields one lead run
+that sees the messages in order. `steer` families (approval, question) are
+normally never held — interrupting is their whole purpose — with one
+exception: while a compaction is in flight, a `steer` push is held too, since
+`ctx.compact()`'s custom-message send path bypasses Pi's own mid-compaction
+prompt guard entirely (see "Goal loop" below), and there is no live turn to
+interrupt into during a compaction anyway. Held pushes live only in the
+process: they are dropped with it at `session_shutdown`, exactly like Pi's own
+queue.
+
+**A reminder start pending suppresses the turn-start race (260906 Phase 1).**
+`pushToLead`'s `pi.sendMessage` call otherwise always passes `triggerTurn: true`
+for a `followUp`/`steer` push; while the goal loop's own settle-timer reminder
+is between arming its boundary guard and observing the resulting turn start
+(`leadReminderStartPendingRef.current === true`, owned by the goal loop — see
+"Goal loop" below), every push is sent with `triggerTurn: false` instead. This
+prevents a child's push landing in that narrow window from starting a second,
+colliding turn alongside the reminder's own `sendUserMessage`; the push still
+appends to the queue and is picked up by whichever turn starts. The guard
+clears on the next `agent_start` or `agent_settled`, or by its own short
+fallback timeout, so the suppression window is bounded even if the reminder's
+turn never starts.
 
 **Fan-in stays with the model.** Every push whose process has at least one
 delegated agent carries a status line `N delegated agents still running`; with
@@ -677,14 +797,27 @@ revived.
 
 ## Lead native tool-surface reshaping {#260905-pi-lead-tool-surface-execute-gateway}
 
-So the structural "no raw exec for the lead" guarantee holds by construction and
+So the structural "no unbounded exec for the lead" guarantee holds by construction and
 not merely by prompt convention, the adapter reshapes the **host lead session's**
 active tool set at session start (gated on the lead/fork role, like the system
 prompt injection): it removes native `bash` and native `read`, adds `ws-execute`,
-`ws-approve`, and a deliberately ugly-named direct read tool
-(`do-i-really-have-to-read-this-myself`) that stays available as a
-soft-discouraged escape hatch, and **excludes the worker-only `ws-worker-exec`
-from the lead's active set**. That last exclusion is load-bearing: `ws-worker-exec`
+`ws-approve`, a deliberately ugly-named direct read tool
+(`do-i-really-have-to-read-this-myself`), and a deliberately ugly-named
+one-liner exec hatch (`do-i-really-have-to-run-this-myself`, fixed 30s
+timeout bounding only that direct command and not a descendant it
+backgrounds, fixed 4KB output cap) — the read tool and the one-liner exec
+hatch both staying available as soft-discouraged escape hatches, the latter
+with no approval gate for the same reason as `ws-worker-exec`'s exclusion
+below —
+and adds `ws-skill` (260906 Phase 1) — the adapter's own skill loader,
+described under "Skill exposure" — for both the lead and a fork alike, via
+the same `isLeadOrFork` role gate the rest of this reshape uses. `ws-skill`'s
+addition is a separate step from the shared added-tool set above, not folded
+into it: that set is the execute/approve gateway's own module boundary
+(`computeLeadActiveTools`), and `ws-skill` belongs to the skill-exposure
+concern instead —
+and **excludes the worker-only `ws-worker-exec` from the lead's active set**.
+That last exclusion is load-bearing: `ws-worker-exec`
 must be registered so a worker process (loading the same extension) can activate
 it via its own tool allowlist, but if it were also active on the lead the lead
 could bypass the approval gate entirely — and, since nothing observes the lead's
@@ -857,24 +990,39 @@ channel for an owner question: it registers and carries on.
   fork reports `kind:"question"` from a TUI lead, the adapter registers a
   `fork-raised` thread whose respondent is that fork, increments the pending
   count, and hands the lead a **notice** in place of the question text: the
-  owner answers via `/answer <id>`; the lead must not relay, answer, or ask
-  the owner — it ends its turn, and the fork's own final report will arrive as
-  a pushed message. Registration marks the fork **thread-bound** (outside the
-  pushed status line, no settle or advisory pushed) until the thread closes,
-  whether or not the owner ever opens it. `/answer` attaches the overlay to the
-  existing process — no new spawn. While an owner overlay is attached, the
-  fork's anti-bleed loop treats the fork's turns as owner-driven (no nudge, no
-  fail-loud) and re-arms the moment the overlay detaches.
+  notice is delivered as a pushed `ws-agent-advisory` message
+  (`fork-question-thread`, `followUp`) so the lead is told the thread exists
+  rather than seeing nothing at all — `followUp` delivery only guarantees the
+  notice is queued for the lead's next turn boundary, not that it is ordered
+  against the owner's `/answer <id>`; the lead must not relay, answer, or ask
+  the owner — it ends its turn, and the fork's own final report will arrive
+  as a pushed message. Registration marks the fork **thread-bound** until the thread
+  closes, whether or not the owner ever opens it; the registration notice
+  above is the one push a thread-bound record still gets — every later
+  settle or advisory for it is outside the pushed status line and suppressed.
+  `/answer` attaches the overlay to the existing process — no new spawn. While
+  an owner overlay is attached, the fork's anti-bleed loop treats the fork's
+  turns as owner-driven (no nudge, no fail-loud) and re-arms the moment the
+  overlay detaches.
 - **Overlay chat.** Owner text goes to the respondent as a `prompt` when it is
   idle and as a `steer` when it is streaming; child text deltas render into the
-  overlay. Pasted input is delivered as one message. The transcript is
+  overlay. Pasted input is delivered as one message. While the respondent's
+  turn is running and no text has streamed yet, the overlay shows one
+  `working…` line in the streaming-tail slot — the first text delta replaces
+  it and settle clears it; the state is read from `ForkChannel.isStreaming()`
+  at render time (the registry's streaming flag), not derived from
+  `agent_start`/`agent_settled` events the component itself receives, because
+  attaching to a live fork mid-turn or a dormant thread's first message never
+  delivers a start event to the component. The transcript is
   persisted per thread (on the thread record, newest 200 entries), so a reopen
   after `Esc` or after a lead restart shows the conversation so far; owner
   lines are styled with the host's user-message background; thread text is
   rendered as Markdown when the host's renderer is available (plain wrapped
-  text otherwise). `Esc` closes the view only: the thread stays `open` and the
-  fork keeps running, reattachable at any time. `/done` typed in the overlay
-  closes the **thread**, on its origin:
+  text otherwise). The header states, once, directly after the `opened <time>`
+  line when present, `Esc: close view (thread stays open) · /done: end thread`
+  — there is no footer hint. `Esc` closes the view only: the thread stays
+  `open` and the fork keeps running, reattachable at any time. `/done` typed
+  in the overlay closes the **thread**, on its origin:
   - `lead-ask` — the discussion fork is asked for a summary turn; on settle the
     adapter injects `context + question + summary` into the lead session as a
     custom message (type `ws-thread-summary`, delivered `followUp` so it lands
@@ -986,13 +1134,42 @@ call. State lives in memory for the session; there is no on-disk goal substrate 
 this surface.
 
 - **Arming.** `/goal <goal>` (a `pi.registerCommand`) enters goal mode: it injects
-  a `Goal settled: <goal>` announcement turn and sets an active-goal marker. A
+  a `Goal armed: <goal>` announcement turn and sets an active-goal marker. A
   settle outside goal mode is an ordinary stop — the `agent_settled` handler is
   armed **only** while a goal is active, which is what keeps an ordinary Pi session
   from looping.
-- **Re-fire reminder.** While armed, an `agent_settled` re-injects a reminder turn
-  carrying the goal and the levers (naming the terminal tools and the force-stop
-  caveat), then the agent continues.
+- **Re-fire reminder is delayed past settle by a settle timer (260906 Phase
+  1).** An `agent_settled` that would otherwise re-inject no longer sends
+  immediately: it arms a single settle timer (`scheduleTimer`, real
+  `setTimeout`/`unref` by default, injectable for tests) for
+  `settle_delay_ms` and sets the footer to `Goal loop: settling` under the
+  adapter's own status key. This exists because the reminder's own turn start
+  can otherwise race a child's push landing at the same `agent_settled`
+  boundary — see "A reminder start pending suppresses the turn-start race" in
+  the "Child→lead report channel" entry above. The timer is the single fire
+  point for every reminder origin — an ordinary settle, the lever's
+  pending-rearm re-arm, and a swallowed-settle replay all route through it,
+  never sending directly. Only one timer (the settle timer, or its boundary
+  fallback below) is ever active at a time. `agent_start`, the terminal
+  levers (`goal-achieved`/`goal-blocked`), `/goal` re-arming, force-stop, and
+  session shutdown all cancel a pending settle timer outright, since each
+  invalidates the settle that armed it. At fire time the loop re-evaluates
+  its fire condition **fresh** rather than trusting the state at arm time:
+  `ctx.isIdle()`, `!leadCompactingRef.current` (a compaction that started
+  during the delay yields exactly like the ordinary compaction branch,
+  re-arming the release routine instead), and no running delegated child
+  (falls back to the yield outcome). Only when all hold does it set
+  `leadReminderStartPendingRef.current = true` (see the report-channel entry)
+  and send the reminder as an explicit `deliverAs: "followUp"` turn, then
+  immediately arm a short fallback timeout that clears the boundary guard and
+  retries (`Goal loop: reminder did not start a turn, retrying`, followed by
+  re-arming the settle timer) if `agent_start`/`agent_settled` never observed
+  the resulting turn. `agent_start` and `agent_settled` both clear the
+  boundary guard unconditionally as their first action.
+  - **`settle_delay_ms` config knob.** Joins the other goal-loop knobs in
+    `agents-plugin-pi/goal-loop-config.json`, read fresh per arm with the
+    same never-throw fallback (`DEFAULT_SETTLE_DELAY_MS`, 5000ms); a missing,
+    malformed, or non-positive value falls back to the default.
 - **Terminal levers.** Two model-invoked tools registered via `pi.registerTool`
   (zero prose parsing) end the run: `goal-achieved(summary)` and
   `goal-blocked(reason)`. Either disarms the loop, so the next settle is an
@@ -1001,24 +1178,49 @@ this surface.
 - **Runaway backstop.** N **consecutive** re-fires with no intervening tool call
   force-stop the goal and fully reset the loop; a re-fire in which a tool call did
   occur resets the streak to zero. The threshold defaults to 10 and is tunable
-  through an adapter-owned data file, `agents-plugin-pi/goal-loop-config.json`
-  (sibling to `model-catalog.json`), read **fresh** per settle; a missing or
-  malformed file, or a non-positive / non-finite `runaway_threshold`, falls back
-  to the default rather than erroring.
-- **Yield to live children.** While armed, a settle that finds any delegated
-  child still running (the same predicate that drives the
+  through an adapter-owned data file, `agents-plugin-pi/goal-loop-config.json`,
+  read **fresh** per settle; a missing or malformed file, or a non-positive /
+  non-finite `runaway_threshold`, falls back to the default rather than
+  erroring.
+- **Yield to live children (footer text updated 260906 Phase 1 review relay
+  #1, Minor).** A running-children check (the same predicate that drives the
   `N delegated agents still running` status line of the "Child→lead report
   channel" entry: a registry member with a live client that is mid-turn and
-  not thread-bound) neither re-injects the reminder nor advances the runaway
-  streak; goal state is otherwise unchanged. The footer shows
-  `Goal loop: yielding to running agents` under the adapter's own status key
-  until the next lead turn starts, whatever starts it — an owner prompt or a
-  pushed child message — and the key is cleared unconditionally then. The
-  child's own pushed `ws-agent-settled`/`ws-agent-report` (or, if it died, the
-  liveness probe's `ws-agent-settled` with reason `exited`) is what wakes the
-  lead, and that turn's settle re-evaluates the loop normally. Idle, dormant, or stopped children,
-  a child whose `final` already landed this turn, and thread-bound respondents
-  do not hold the loop. The footer's agent count is not part of this entry.
+  not thread-bound) is one of the settle timer's fire-condition checks (see
+  "Re-fire reminder is delayed past settle by a settle timer" above), not a
+  separate settle-time branch: an `agent_settled` arms the timer
+  unconditionally and the footer reads `Goal loop: settling` throughout. Only
+  at FIRE time, `settle_delay_ms` later, does a still-running child make the
+  fire yield — no reminder, no streak advance, goal state otherwise
+  unchanged, and the footer stays exactly as it was (still `Goal loop:
+  settling`; there is no separate `Goal loop: yielding to running agents`
+  string). The child's own pushed `ws-agent-settled`/`ws-agent-report` (or, if
+  it died, the liveness probe's `ws-agent-settled` with reason `exited`) is
+  what wakes the lead, and that turn's settle re-arms the timer, which
+  re-evaluates the loop normally after the next delay. Idle, dormant, or
+  stopped children, a child whose `final` already landed this turn, and
+  thread-bound respondents do not hold the loop. The footer's agent count is
+  not part of this entry.
+- **Waiting for compaction (260906 Phase 1; swallow marker added in review
+  relay #1; fire-time variant added in review relay #1 Important #1).** While
+  armed, a settle that fires while a compaction is ALREADY in flight (checked
+  before the yield branch above — compaction dominates) neither re-injects
+  the reminder nor advances the runaway streak, mirroring the yield outcome
+  exactly: goal state passes through unchanged and the footer shows `Goal
+  loop: waiting for compaction` under the same status key until the next lead
+  turn starts. A compaction that instead STARTS during the settle timer's
+  delay (the timer having already armed on an ordinary settle) is marked the
+  same way at fire time, checked before the idle/running-children fire
+  conditions — but leaves the footer reading `Goal loop: settling` rather
+  than switching it to `Goal loop: waiting for compaction`, since the fire
+  callback makes no status change on any of its yields. Either path can be
+  either the settle `ctx.compact()`'s own internal abort produces for the
+  turn it just cut off, or Pi's own threshold/overflow auto-compaction ending
+  a turn outright with nothing queued to follow it — in every case this
+  outcome is recorded as a SWALLOWED settle so the "Model-driven compaction"
+  entry below can replay it once the compaction actually finishes, instead of
+  the loop stalling forever because no further `agent_settled`/`agent_start`
+  was ever going to fire on its own.
 - **Lead-session-only.** The goal loop runs on the lead session only. Every
   spawned child (persistent RPC worker, one-shot explore leaf, or fork) is
   launched with a `WS_PI_SPAWN_ROLE` environment marker carrying its role, and
@@ -1035,26 +1237,73 @@ auto-compaction remains the last-resort backstop.
 
 - **The lever.** `goal-compact-and-continue(carry_forward)` is a model-invoked
   `pi.registerTool` tool (alongside the Phase-1 terminal levers) that is
-  **non-terminal**: it calls `ctx.compact({ customInstructions: carry_forward })`
-  once and returns without disarming the goal. Because a manual `ctx.compact`
-  aborts the invoking turn, the goal then reaches a fresh settle and the existing
-  armed `agent_settled` reminder re-enters the next goal turn — so compaction folds
-  into the normal loop rather than needing its own continuation path.
+  **non-terminal**: it marks the compaction as lever-originated (arming a
+  pending-rearm marker), then calls
+  `ctx.compact({ customInstructions: carry_forward })` once and returns
+  without disarming the goal. The tool's returned text — the only in-band
+  evidence of the request, since the `Compaction completed` notification
+  fires outside the model's view — reads `Compaction requested; the
+  conversation will resume from a summary carrying: <carry_forward>`.
+- **Re-arming after compaction (260906 Phase 1; swallowed-settle replay added
+  in review relay #1; `followUp` delivery on the replay added in review relay
+  #2).** A manual `ctx.compact` aborts the invoking turn immediately — well
+  before Pi's own compaction bookkeeping finishes — so nothing may send a
+  prompt from inside a `session_*compact*` handler without racing that
+  unwind. Instead, an idempotent release routine runs once compaction
+  actually finishes, deferred past Pi's own compaction flag. It checks
+  idleness FIRST: if the owning session is not idle (a fresh turn is already
+  underway by the time this deferred call lands), it clears both markers and
+  returns, leaving the held-push queue and any pending reminder to that
+  turn's own `agent_settled`/`registerPushFlush` flush — nothing is flushed
+  or sent on this branch. Only on the idle branch does it flush every push
+  held during the compaction window (see "Child→lead report channel" above)
+  and then, in order, do at most one of two things for the settle that got
+  swallowed while this compaction was in flight (per the previous entry).
+  For a lever-originated compaction it sends the pending goal reminder — for
+  a lever-originated one and the swallowed-settle replay alike, always as an
+  explicit `deliverAs: "followUp"` turn, since the flush just before it can
+  itself have started a turn synchronously (a held push with `triggerTurn:
+  true`), and an unmarked `sendUserMessage` would throw mid-stream and
+  silently drop the reminder — folding a compaction failure reason into it
+  when present. For any other compaction whose settle was swallowed
+  (owner-typed `/compact`, or Pi's own threshold/overflow auto-compaction
+  ending a turn outright with nothing queued to follow it) it instead
+  replays that settle: the same `decideOnSettle` reducer, streak accounting,
+  and force-stop path as a live `agent_settled`, against a freshly-read
+  context percent — this is what lets an armed goal recover from an
+  auto-compaction that would otherwise have left nothing to ever re-evaluate
+  the loop again. When a settle's outcome qualifies for both (the lever's own
+  `ctx.compact()` call produces a swallowed settle for its own invoking
+  turn), the lever reminder wins and the swallow is treated as consumed too
+  — exactly one reminder is sent for that settle. **Accepted race window:**
+  an owner who types `/compact` directly (bypassing the lever) can still
+  race a reminder that was already in flight before the compaction started —
+  this window is accepted as-is, not intercepted; only the lever's own
+  compaction is guaranteed race-free by construction. **Accepted narrow
+  gap:** unlike the lever, a non-lever compaction has no `onComplete`/
+  `onError` backstop of its own — if Pi's `session_compact` lookup were ever
+  to miss (the `savedCompactionEntry` guard it depends on), only
+  `agent_start`'s backstop clear would still recover a stuck flag/marker;
+  noted as a known, narrow gap rather than intercepted.
 - **Advisory surfacing, not a gate.** While armed, the reminder turn carries two
   pieces of information for the model to weigh: the current context usage as a
   percent (from `getContextUsage().percent`, or derived from `tokens` against the
   context window / a configured override when `percent` is null right after a
   compaction), and a static compression-safety heuristic (a phase boundary or
   merge gate is normally safe to compact; a non-phase stop is not). Past a
-  configurable advisory point the percent line reads as a nudge. None of this
-  auto-triggers compaction — the model decides.
+  configurable advisory point the percent line reads as a nudge; below it, the
+  line explicitly tells the model not to call `goal-compact-and-continue`. None
+  of this auto-triggers compaction — the model decides.
 - **`session_before_compact` companion (observe-only).** The adapter subscribes to
   `session_before_compact` purely to observe — it never returns `cancel` or a
   compaction override. Pi forwards a manual compaction's `customInstructions`
   verbatim into this event but hardcodes them empty for its own
   threshold/overflow auto-compaction, and offers no partial "inject state" hook on
   the auto path, so the companion observes Pi's `reason: "threshold"` signal while
-  the manual lever alone carries ws carry-forward state.
+  the manual lever alone carries ws carry-forward state. This same handler also
+  marks the compaction as in-flight (see "Child→lead report channel" above) for
+  ANY compaction reason, unconditionally — the defensive half of the push-hold
+  coverage, since not every compaction goes through the lever.
 - **Config knobs.** Two knobs join the Phase-1 runaway threshold in
   `agents-plugin-pi/goal-loop-config.json`, read fresh per settle with the same
   never-throw fallback: a compaction advisory point (percent, `(0,100]`) and a
