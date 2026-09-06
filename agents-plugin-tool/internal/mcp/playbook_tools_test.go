@@ -2752,7 +2752,10 @@ func TestPlaybookPrintGoldenLeadProceed(t *testing.T) {
 		"Call `ws/route.resolve_proceed(session_key: <key>, params: {target: ..., facts: ...})`.",
 		"Follow `Next:` exactly",
 		"Treat an `route.resolve_proceed` verdict as authoritative",
-		"judge: direct-execution",
+		"judge: free-form",
+		"Every touched path is a manual, note, or similar working document that no spec, mental model, or distributed artifact governs, regardless of file count, and no No row matches.",
+		"Otherwise, local scope and verification are clear",
+		"A ticket phase or ticket edit, unresolved choice, contract or canonical-flow impact, or requested review is present.",
 		"- On `Yes`",
 		"return without calling `route.resolve_proceed`",
 		"scope_blocked=no-unfinished-phase",
@@ -2775,6 +2778,8 @@ func TestPlaybookPrintGoldenLeadProceed(t *testing.T) {
 		"### 3. Report Routing Verdict",
 		"## Routing Verdict",
 		"If `NEXT: lead-discuss`, continue through `ws:lead-discuss`.",
+		"judge: direct-execution",
+		"broad scope",
 	} {
 		if strings.Contains(body, old) {
 			t.Errorf("body %q: old deterministic route matrix text still present: %q", body, old)

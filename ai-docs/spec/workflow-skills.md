@@ -1012,13 +1012,20 @@ nobody wrote in the first place.
 
 ## Proceed Routing Pipeline {#260505-proceed-routing-pipeline}
 
-`lead-proceed` is the first step for implementation tasks. An inline request
-whose local scope and verification are clear, and for which neither planning nor
-independent review materially improves the outcome, may take a direct-execution
-early return. It states the reason, performs and verifies the bounded request,
-and returns without calling `route.resolve_proceed`, leaving the session agenda and todos
-unchanged. The judgment may inspect only explicitly requested paths; unknown or
-expanded scope uses normal routing. {#260828-proceed-direct-execution-early-return}
+`lead-proceed` is the first step for implementation tasks. An inline request may
+take a free-form early return: an execution that skips route, branch, plan, and
+review, independent of who performs the edit. It qualifies when every touched
+path is a manual, note, or similar working document that no spec, mental model,
+or distributed artifact governs, regardless of file count; otherwise only when
+local scope and verification are clear and neither planning nor independent
+review materially improves the outcome. A ticket phase or ticket edit, an
+unresolved choice, contract or canonical-flow impact, or a requested review
+always defeats the early return, and an unknown judgment routes normally. On the
+early return, `lead-proceed` states the reason, does the work under project
+conventions including verification, and returns without calling
+`route.resolve_proceed`, leaving the session agenda and todos unchanged. The
+judgment may inspect only explicitly requested paths, and ticket-path targets
+never take the early return. {#260828-proceed-free-form-early-return}
 
 All other targets are route-only: `lead-proceed` reads conversation state and
 existing workflow artifacts, then continues through the needed pipeline stages
@@ -1089,7 +1096,7 @@ Verdict, stops when the anchor is missing, and treats absent binding anchor
 decisions as missing settled decisions.
 {#260513-proceed-ticket-freshness-gate}
 
-Except for a direct-execution early return, implementation routes through
+Except for a free-form early return, implementation routes through
 `lead-implement` with the selected scope as a hard scope boundary.
 `lead-proceed` does not rejudge general ticket quality, mutate ticket structure,
 decide delegated plan depth, or invoke implementation primitives before
@@ -1127,7 +1134,7 @@ route context and enter `ws.route.resolve_proceed` again instead of continuing f
 old verdict. When `NEXT:` is `lead-implement`, MCP's instruction tells
 `lead-proceed` to call `ws/playbook.read(name: "lead-implement")` and execute
 that playbook before source inspection, planning, editing, or
-implementation-tool use. Outside the direct-execution judgment, `lead-proceed`
+implementation-tool use. Outside the free-form judgment, `lead-proceed`
 does not apply sibling `lead-implement` judges, compute direct/delegated
 execution mode, compute branch mode, or inspect source.
 `lead-implement` owns those decisions when the handoff executes by calling

@@ -8,9 +8,9 @@ Target: user request
 
 ## Invariants
 
-- Keep a direct execution within the requested scope; stop before it expands.
+- Keep a free-form execution (an early return that skips route, plan, and review) within the requested scope; stop before it expands.
 - Reload `{{.McpNamespace}}/workflow_manual` after session compaction; recover key via `{{.SkillNamespace}}:lead-revive` if lost. Fresh start: call `{{.McpNamespace}}/workflow_manual(session_key: "obsidian-latch")`.
-- Limit pre-route source reads to explicitly requested paths and direct-execution judgment.
+- Limit pre-route source reads to explicitly requested paths and what the free-form judgment needs.
 - Treat an `route.resolve_proceed` verdict as authoritative; follow its `Next:` exactly.
 
 ## On: invoke
@@ -19,9 +19,9 @@ Target: user request
    continuation occurred since, call only `{{.McpNamespace}}/git.status(session_key: <key>)`.
    Otherwise call `{{.McpNamespace}}/workflow_manual(session_key: <key>)` and
    `{{.McpNamespace}}/git.status(session_key: <key>)` in parallel.
-2. For an inline target, apply `judge: direct-execution`.
-   - On `Yes`, state the reason, perform and verify the bounded request
-     directly, then return without calling `route.resolve_proceed`.
+2. For an inline target, apply `judge: free-form`.
+   - On `Yes`, say so with the reason, do the work under project conventions,
+     then return without calling `route.resolve_proceed`.
 3. If the target references a ticket, read it. Apply remaining judgments and
    resolve facts.
 4. Scope resolution before calling:
@@ -41,12 +41,13 @@ Target: user request
 | No | Target does not name a concrete change, observable outcome, or accepted implementation direction |
 | Yes | Target gives enough implementation intent to route without another design turn |
 
-### judge: direct-execution
+### judge: free-form
 
 | Decision | When |
 |----------|------|
-| Yes | The inline request has clear local scope and verification, and neither planning nor independent review materially improves the outcome. |
-| No | A ticket phase, unresolved choice, contract or canonical-flow impact, broad scope, or requested review is present. |
+| Yes | Every touched path is a manual, note, or similar working document that no spec, mental model, or distributed artifact governs, regardless of file count, and no No row matches. |
+| Yes | Otherwise, local scope and verification are clear and neither planning nor independent review materially improves the outcome. |
+| No | A ticket phase or ticket edit, unresolved choice, contract or canonical-flow impact, or requested review is present. |
 | Unknown | Treat as No. |
 
 ### judge: discussion-needed
@@ -113,5 +114,5 @@ values are normalized by the resolver.
 ## Doctrine
 
 Proceed optimizes for **workflow attention**: reserve the full pipeline for work
-where planning or independent review changes the outcome; complete bounded work
-directly when it does not. When ambiguous, preserve the user's intervention point.
+where planning or independent review changes the outcome; complete working-document
+and bounded work free-form when it does not. When ambiguous, preserve the user's intervention point.
