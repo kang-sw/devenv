@@ -15,6 +15,9 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   sanitizeToolName,
   filterOutMercenaryTools,
@@ -32,6 +35,8 @@ import {
   renderResultRows,
   renderResultText,
   visibleDisplayWidth,
+  yamlDisplayText,
+  startBridge,
 } from "../src/bridge.ts";
 import type { McpToolCallResult } from "../src/mcp-stdio-client.ts";
 
@@ -565,15 +570,15 @@ describe("Pi tool-result YAML rendering", () => {
   const plainHint = "E to expand";
 
   test("renders JSON objects and arrays as YAML only in the display text", () => {
-    assert.equal(renderResultText([{ type: "text", text: '{"name":"orca","ready":true}' }], false), "name: orca\nready: true\n");
-    assert.equal(renderResultText([{ type: "text", text: '["one",2]' }], false), "- one\n- 2\n");
+    assert.equal(renderResultText([{ type: "text", text: '{"name":"orca","ready":true}' }], { isError: false }), "name: orca\nready: true\n");
+    assert.equal(renderResultText([{ type: "text", text: '["one",2]' }], { isError: false }), "- one\n- 2\n");
   });
 
   test("keeps prose, bare JSON values, malformed JSON-looking text, and errors raw", () => {
     for (const text of ["plain prose", '"bare string"', "42", "null", "{not json}"]) {
-      assert.equal(renderResultText([{ type: "text", text }], false), text);
+      assert.equal(renderResultText([{ type: "text", text }], { isError: false }), text);
     }
-    assert.equal(renderResultText([{ type: "text", text: '{"error":"raw"}' }], true), '{"error":"raw"}');
+    assert.equal(renderResultText([{ type: "text", text: '{"error":"raw"}' }], { isError: true }), '{"error":"raw"}');
   });
 
   test("converts only the first text block and retains later text plus image blocks", () => {
@@ -583,47 +588,140 @@ describe("Pi tool-result YAML rendering", () => {
       { type: "text", text: '{"later":"must stay JSON"}' },
     ];
     const wirePayload = JSON.stringify(content);
-    assert.equal(renderResultText(content, false), "first: true\n\n{\"later\":\"must stay JSON\"}");
-    renderResultRows(content, false, false, 80, plainHint);
+    assert.equal(renderResultText(content, { isError: false }), "first: true\n\n{\"later\":\"must stay JSON\"}");
+    renderResultRows(content, { isError: false, expanded: false, width: 80, expandHint: plainHint });
     assert.equal(JSON.stringify(content), wirePayload, "display rendering must not alter the model-visible execute content");
     assert.equal(content[0].type, "image", "renderer must not remove Pi-managed image content");
     assert.equal(content[2].text, '{"later":"must stay JSON"}', "later text is retained raw");
   });
 
   test("wraps long raw and YAML lines by display width on narrow terminals", () => {
-    const rawRows = renderResultRows([{ type: "text", text: "abcdefghijkl" }], false, false, 4, plainHint);
-    const yamlRows = renderResultRows([{ type: "text", text: '{"long":"abcdefghijkl"}' }], false, false, 6, plainHint);
+    const rawRows = renderResultRows([{ type: "text", text: "abcdefghijkl" }], { isError: false, expanded: false, width: 4, expandHint: plainHint });
+    const yamlRows = renderResultRows([{ type: "text", text: '{"long":"abcdefghijkl"}' }], { isError: false, expanded: false, width: 6, expandHint: plainHint });
     assert.deepEqual(rawRows, ["abcd", "efgh", "ijkl"]);
     assert.ok(yamlRows.length > 1);
     for (const row of [...rawRows, ...yamlRows]) assert.ok(visibleDisplayWidth(row) <= 6);
   });
 
   test("keeps CJK, combining marks, and emoji graphemes within width boundaries", () => {
-    const rows = renderResultRows([{ type: "text", text: "界e\u0301🙂界" }], false, true, 4, plainHint);
+    const rows = renderResultRows([{ type: "text", text: "界e\u0301🙂界" }], { isError: false, expanded: true, width: 4, expandHint: plainHint });
     assert.deepEqual(rows, ["界e\u0301", "🙂界"]);
     for (const row of rows) assert.ok(visibleDisplayWidth(row) <= 4, `${JSON.stringify(row)} is too wide`);
   });
 
   test("collapsed previews show exactly ten body rows and a truthful visual-row marker", () => {
     const body = Array.from({ length: 12 }, (_, i) => `line-${i + 1}`).join("\n");
-    const collapsed = renderResultRows([{ type: "text", text: body }], false, false, 80, plainHint);
-    const expanded = renderResultRows([{ type: "text", text: body }], false, true, 80, plainHint);
+    const collapsed = renderResultRows([{ type: "text", text: body }], { isError: false, expanded: false, width: 80, expandHint: plainHint });
+    const expanded = renderResultRows([{ type: "text", text: body }], { isError: false, expanded: true, width: 80, expandHint: plainHint });
     assert.deepEqual(collapsed.slice(0, 10), Array.from({ length: 10 }, (_, i) => `line-${i + 1}`));
     assert.equal(collapsed[10], "… 2 more rows (E to expand)");
     assert.deepEqual(expanded, Array.from({ length: 12 }, (_, i) => `line-${i + 1}`));
   });
 
   test("collapsed marker counts wrapped raw and YAML body rows, and every marker row fits", () => {
-    const raw = renderResultRows([{ type: "text", text: "abcdefghijkl" }], false, false, 1, plainHint);
-    const yaml = renderResultRows([{ type: "text", text: `{"a":"${"x".repeat(60)}"}` }], false, false, 4, plainHint);
+    const raw = renderResultRows([{ type: "text", text: "abcdefghijkl" }], { isError: false, expanded: false, width: 1, expandHint: plainHint });
+    const yaml = renderResultRows([{ type: "text", text: `{"a":"${"x".repeat(60)}"}` }], { isError: false, expanded: false, width: 4, expandHint: plainHint });
     assert.equal(raw[10], "…");
     assert.ok(yaml.slice(10).join("").includes("more rows"), "YAML preview must carry a hidden visual-row marker");
     for (const row of [...raw, ...yaml]) assert.ok(visibleDisplayWidth(row) <= 4, `${JSON.stringify(row)} is too wide`);
   });
 
+  test("falls back when YAML serialization throws and keeps mixed error content raw", () => {
+    const raw = '{"value":"must stay raw"}';
+    assert.equal(yamlDisplayText(raw, () => { throw new Error("serializer failed"); }), raw);
+    const errorContent = [
+      { type: "text", text: raw },
+      { type: "image", data: "base64", mimeType: "image/png" },
+      { type: "text", text: '{"later":"also raw"}' },
+    ];
+    assert.equal(
+      renderResultText(errorContent, { isError: true, showImages: false }),
+      `${raw}\n{\"later\":\"also raw\"}\n[Image: [image/png]]`,
+    );
+  });
+
+  test("normalizes tabs, keycaps, and terminal control sequences before width-safe rendering", () => {
+    const tabs = renderResultRows([{ type: "text", text: "a\tb" }], { isError: false, expanded: true, width: 2, expandHint: plainHint });
+    const keycaps = renderResultRows([{ type: "text", text: "1️⃣1️⃣" }], { isError: false, expanded: true, width: 2, expandHint: plainHint });
+    const controls = renderResultRows([{ type: "text", text: "before\x1b[2J\x1b[Hafter\x1b]52;c;clipboard\x07" }], { isError: false, expanded: true, width: 80, expandHint: plainHint });
+    assert.deepEqual(tabs, ["a ", "  ", "b"]);
+    assert.deepEqual(keycaps, ["1️⃣", "1️⃣"]);
+    assert.deepEqual(controls, ["beforeafter"]);
+    for (const row of [...tabs, ...keycaps, ...controls]) assert.ok(visibleDisplayWidth(row) <= 2 || row === "beforeafter");
+  });
+
+  test("preserves an image fallback when Pi image display is disabled", () => {
+    assert.deepEqual(
+      renderResultRows([{ type: "image", data: "base64", mimeType: "image/png" }], { isError: false, showImages: false, expanded: true, width: 80, expandHint: plainHint }),
+      ["[Image: [image/png]]"],
+    );
+  });
+
+  test("narrow raw and YAML previews keep ten visual body rows, a truthful marker, and every expanded row", () => {
+    const rawContent = [{ type: "text", text: Array.from({ length: 12 }, () => "界界").join("\n") }];
+    const yamlContent = [{ type: "text", text: JSON.stringify({ rows: Array.from({ length: 12 }, () => "界界") }) }];
+    for (const content of [rawContent, yamlContent]) {
+      const collapsed = renderResultRows(content, { isError: false, expanded: false, width: 4, expandHint: plainHint });
+      const expanded = renderResultRows(content, { isError: false, expanded: true, width: 4, expandHint: plainHint });
+      const hidden = expanded.length - 10;
+      assert.deepEqual(collapsed.slice(0, 10), expanded.slice(0, 10));
+      assert.equal(collapsed.slice(10).join(""), `… ${hidden} more rows (${plainHint})`);
+      assert.ok(expanded.length > 10);
+      for (const row of [...collapsed, ...expanded]) assert.ok(visibleDisplayWidth(row) <= 4, `${JSON.stringify(row)} is too wide`);
+    }
+  });
+
+  test("the real bridge registration attaches the shared renderer and returns execute content unchanged", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "ws-pi-bridge-test-"));
+    const launcherPath = join(directory, "fake-mcp.py");
+    const runtimeJsonPath = join(directory, "runtime.json");
+    const responseContent = [
+      { type: "text", text: '{"first":true}' },
+      { type: "image", data: "base64", mimeType: "image/png" },
+      { type: "text", text: '{"later":"raw"}' },
+    ];
+    await writeFile(runtimeJsonPath, JSON.stringify({ plugin_version: "test-version" }));
+    await writeFile(launcherPath, [
+      "import json, sys",
+      "for line in sys.stdin:",
+      "  request = json.loads(line)",
+      "  if request['method'] == 'initialize': result = {'protocolVersion':'2025-03-26','capabilities':{},'serverInfo':{'name':'fake','version':'test-version'}}",
+      "  elif request['method'] == 'tools/list': result = {'tools':[{'name':'sample.tool','description':'sample','inputSchema':{'type':'object'}}]}",
+      "  else:",
+      "    name = request['params']['name']",
+      "    content = [{'type':'text','text':'{\\\"session_key\\\":\\\"test-key\\\"}'}] if name == 'ferrule' else [{'type':'text','text':'{\\\"first\\\":true}'},{'type':'image','data':'base64','mimeType':'image/png'},{'type':'text','text':'{\\\"later\\\":\\\"raw\\\"}'}]",
+      "    result = {'content': content}",
+      "  print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}), flush=True)",
+    ].join("\n"));
+    const tools = new Map<string, any>();
+    const previousRole = process.env.WS_PI_SPAWN_ROLE;
+    process.env.WS_PI_SPAWN_ROLE = "worker";
+    try {
+      const handle = await startBridge({ registerTool: (tool: any) => tools.set(tool.name, tool) } as any, {
+        launcherPath,
+        pluginDir: directory,
+        runtimeJsonPath,
+        cwd: directory,
+      });
+      const tool = tools.get("ws__sample_tool");
+      assert.ok(tool?.renderResult, "every bridge-loop registration must carry the shared renderer");
+      const result = await tool.execute("call-1", {}, undefined, undefined, undefined);
+      assert.deepEqual(result.content, responseContent, "execute must forward the model-visible MCP content unchanged");
+      const component = tool.renderResult(result, { expanded: false, isPartial: false }, { fg: (_color: string, text: string) => text }, { isError: false, showImages: true });
+      assert.deepEqual(component.render(80), ["first: true", "", '{"later":"raw"}']);
+      handle.shutdown();
+    } finally {
+      if (previousRole === undefined) delete process.env.WS_PI_SPAWN_ROLE;
+      else process.env.WS_PI_SPAWN_ROLE = previousRole;
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   test("has no static pi-tui import", async () => {
-    const source = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../src/bridge.ts", import.meta.url), "utf8"));
-    assert.doesNotMatch(source, /^\s*import(?:[\s\S]*?from\s*)?["']@earendil-works\/pi-tui["']/m);
+    for (const path of [new URL("../src/bridge.ts", import.meta.url), new URL("../src/tool-result-render.ts", import.meta.url)]) {
+      const source = await readFile(path, "utf8");
+      assert.doesNotMatch(source, /^\s*import(?:[\s\S]*?from\s*)?["']@earendil-works\/pi-tui["']/m);
+    }
   });
 });
 
