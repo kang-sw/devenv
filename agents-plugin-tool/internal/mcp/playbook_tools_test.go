@@ -2557,6 +2557,7 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Gather `target`, `facts`, and explicit caller `policy` for `ws/route.resolve_implement`",
+		"Call `ws/route.resolve_implement` with outer `session_key` and `params: {target, facts, policy, format: \"json\"}`.",
 		"For tickets, use the ticket description only; for inline targets, use the accepted caller contract, loaded context, focused source inspection, and command output.",
 		"Treat the installed todo list as the ordered runbook",
 		"Stop for unresolved binding decisions before source edits.",
@@ -2599,6 +2600,9 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("lead-implement full ws render missing %q:\n%s", want, body)
 		}
+	}
+	if strings.Contains(body, "with `session_key`, `target`, `facts`, `policy`, and `format: \"json\"`") {
+		t.Fatalf("lead-implement full ws render retained obsolete top-level route call:\n%s", body)
 	}
 	if strings.Contains(body, "Recommended tier: <recommended-tier>") {
 		t.Fatalf("lead-implement full ws render still exposes recommended tier in worker-facing task text:\n%s", body)
@@ -2745,6 +2749,7 @@ func TestPlaybookPrintGoldenLeadProceed(t *testing.T) {
 	}
 	for _, want := range []string{
 		`route.resolve_proceed`,
+		"Call `ws/route.resolve_proceed(session_key: <key>, params: {target: ..., facts: ...})`.",
 		"Follow `Next:` exactly",
 		"Treat an `route.resolve_proceed` verdict as authoritative",
 		"judge: direct-execution",
@@ -2759,6 +2764,9 @@ func TestPlaybookPrintGoldenLeadProceed(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("body %q: expected lead-proceed handoff/verdict text %q", body, want)
 		}
+	}
+	if strings.Contains(body, "route.resolve_proceed(session_key: <key>, target: ..., facts: ...)") {
+		t.Fatalf("lead-proceed full ws render retained obsolete top-level route call:\n%s", body)
 	}
 	for _, old := range []string{
 		"Use the first matching route block",

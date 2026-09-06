@@ -29,7 +29,7 @@ Target: user request
    - Every phase has `### Result` → `scope_blocked=no-unfinished-phase`; do not route to promotion.
    - Container ticket (epic/workset) → `scope_blocked=container-ticket`.
    - Two or more explicit phases in one request → `scope_blocked=multiple-explicit-phases`.
-5. Call `{{.McpNamespace}}/route.resolve_proceed(session_key: <key>, target: ..., facts: ...)`.
+5. Call `{{.McpNamespace}}/route.resolve_proceed(session_key: <key>, params: {target: ..., facts: ...})`.
 6. Follow `Next:` exactly.
 
 ## Judgments

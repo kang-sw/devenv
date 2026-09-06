@@ -107,7 +107,7 @@ state itself — do not pass observed branch facts as caller policy.
 3. Gather `target`, `facts`, and explicit caller `policy` for `{{.McpNamespace}}/route.resolve_implement`; use `unknown` unless a value is directly supported by the caller, ticket, loaded docs, file contents, command output, or MCP verdict.
 4. Do not set decision fields for delegation, branch mode, plan depth, review allocation, review need, or documentation need.
 5. Use the current lead `session_key` from `{{.McpNamespace}}/workflow_manual`; stop if no lead key is available.
-6. Call `{{.McpNamespace}}/route.resolve_implement` with `session_key`, `target`, `facts`, `policy`, and `format: "json"`.
+6. Call `{{.McpNamespace}}/route.resolve_implement` with outer `session_key` and `params: {target, facts, policy, format: "json"}`.
 
 Policy rules:
 - Set `policy.branch.merge_target` only when already on an implementation branch (`impl/*`, or legacy `implement/*`) or the user names it.
