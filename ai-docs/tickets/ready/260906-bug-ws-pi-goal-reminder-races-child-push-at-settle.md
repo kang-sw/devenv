@@ -311,3 +311,68 @@ re-issued at the timeout with the pushes still held; a streaming-time
 push is unaffected. Amend both Phase 2 spec passages. Owner-run live
 check: after a child push wakes an idle lead, a second model call in that
 run still sees the manual block and a fresh skill list.
+
+### Result (438f2f0b) - 2026-09-06
+
+Source and tests landed in `438f2f0b`; runtime spec reconciliation landed in
+`7bfef041` across the report-channel, goal-loop, compaction, and lead-bootstrap
+anchors.
+
+- Idle pushes now remain in the existing FIFO behind one counted user-message
+  wake. User preflight composes the additive ws block before confirmed
+  `agent_start` releases each push with its recorded delivery mode and rebuilt
+  status. Busy followUp boundaries and normal busy steer delivery are preserved.
+  Discussion summaries share this path without delaying thread closure,
+  respondent stopping, or persistence.
+- Pushes and reminders share one wake-start reservation with recovery armed
+  before dispatch, including synchronous failure. Held pushes survive a missing
+  start and retry without an active goal, including fork owners. Goal timer
+  cancellation cannot cancel push recovery. Compaction is an independent hold:
+  start alone cannot release it before deferred completion/failure release.
+- Verbatim carry remains untouched by push wakes, busy release, timer
+  cancellation, and yields; only an eligible goal-reminder dispatch returning
+  consumes it. Push wakes do not advance the reminder streak.
+- Historical premise correction, without rewriting frozen phase prose: landed
+  lead/fork async explore is a oneShot RPC child in the shared registry, counted
+  by fan-in and waking its owner through ordinary pushed completion. The earlier
+  separate-registry/non-waker description is superseded. Likewise Phase 1's
+  turn-less custom append and start-time compaction-clear behavior are superseded
+  by the Phase 2 held queue and independent compaction release, not retained as
+  fallback paths. Bootstrap freshness uses current discovered skill paths with
+  the existing manual snapshot, not a per-wake manual fetch.
+- Verification: tests-first lifecycle coverage initially failed on the missing
+  shared guard export; after implementation, the focused lifecycle/bootstrap/
+  carry suites passed (507 tests). The full Pi suite passed 908 tests in 163
+  suites via `env -u WS_PI_SPAWN_ROLE npm test`, with full output read. Coverage
+  includes both push/reminder arrival orders, FIFO/mixed modes, no-start and
+  synchronous-failure recovery, compaction/start ordering, inactive-goal/fork
+  recovery, summary side effects, and carry preservation. Diff checks passed.
+- Lead-reported independent reviews: correctness clean (633 relevant tests and
+  full 908-test suite passed); fit inspection clean, zero findings. These review
+  outcomes are attributed to the lead, not represented as another executor run.
+- Deviation: lead-approved fixture-only adaptation in `test/fork.test.ts` and
+  `test/execute-gateway.test.ts` initialized the confirmed user-wake/start
+  lifecycle rather than relying on undefined-idleness direct sends. Existing
+  assertions were preserved; no fork/gateway runtime change. The plan's two
+  owner-added annotation lines record that authorization and the intermediate
+  ten-failure checkpoint; the final 908-test pass above supersedes that checkpoint.
+- Documentation: authoritative runtime spec contains the invariant; no duplicate
+  mental-model update was needed. Owner-live acceptance remains outstanding;
+  fake preflight/model-call tests establish wiring, not provider-context lifetime.
+
+## Blocked - 2026-09-06
+
+Source implementation and offline review are complete, but this ticket is **not
+eligible for closure**. Keep it in `ready/`, open, until the owner supplies both
+live acceptance results from a fresh Pi session:
+
+1. **Phase 1 simultaneous-settle gate:** run a `/goal` drain where a child and
+   lead settle together; confirm no `already processing` error, Esc still
+   interrupts the real run, and `Goal loop: settling` is visible.
+2. **Phase 2 provider-context gate:** let a child push wake an idle lead, force
+   another model call in that same run, and inspect actual model/system context
+   to confirm the manual block and fresh skill list remain present.
+
+No owner evidence for either gate has been supplied. Unit tests and clean
+reviews do not discharge these gates; record the owner's observed outcomes
+before reassessing closure. No upstream Pi patch or UX work is included here.
