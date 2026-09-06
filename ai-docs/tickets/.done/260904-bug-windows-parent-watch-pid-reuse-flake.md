@@ -1,5 +1,6 @@
 ---
 title: "Windows parent-watch PID-reuse race flakes TestWatchProcessExit_NeverOpenablePID"
+completed: 2026-09-04
 ---
 
 ## Background
