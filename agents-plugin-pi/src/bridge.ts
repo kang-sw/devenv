@@ -34,6 +34,7 @@ import { WS_PI_PARENT_SESSION_KEY_ENV, isLeadOrFork, readSpawnRole, type SpawnRo
 // runtime circular import is created in either direction.
 import { resolveModelForAliasViaWsMcp, inheritModelFromToolCtx } from "./spawner.ts";
 import { modelCatalogFromToolCtx, formatTierWarning, type ModelCatalogEntry, type TierRejection } from "./model-catalog.ts";
+import { createToolPreviewRenderers, loadToolResultTuiModules } from "./tool-result-render.ts";
 
 export interface BridgeOptions {
   launcherPath: string;
@@ -460,6 +461,10 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     assertVersionPin(runtime, initResult.serverInfo.version);
 
     tools = filterOutMercenaryTools(await client.listTools());
+    // Rendering is TUI-only and display-only. When the nested host package is
+    // unavailable (notably node --test), Pi's native fallback remains intact.
+    const toolResultTui = await loadToolResultTuiModules();
+    const toolPreviewRenderers = toolResultTui ? createToolPreviewRenderers(toolResultTui) : undefined;
 
     for (const tool of tools) {
       const rawName = tool.name;
@@ -477,6 +482,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
         // symbols at runtime. ws-mcp's inputSchema is already a plain
         // {type, properties, required} object, so no typebox shim is needed.
         parameters: withOptionalSessionKey(tool.inputSchema) as never,
+        ...(toolPreviewRenderers ?? {}),
         async execute(_toolCallId, params, _signal, _onUpdate, toolCtx) {
           // Dispatch always uses the RAW dotted name — sanitization is
           // registration-only, never part of the ws-mcp wire call.
