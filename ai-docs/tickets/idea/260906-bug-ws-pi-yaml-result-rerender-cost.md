@@ -16,6 +16,23 @@ Source inspection of `src/tool-result-render.ts` found `createToolResultComponen
 
 Owner believes Pi's O(n) terminal responsiveness is a known upstream issue; this was not independently verified. Distinguish upstream transcript traversal/render cost from adapter-added work, other extensions, and terminal compositor cost.
 
+## Temporary rollback and comparison
+
+After initial capture, the owner reopened the same session without extensions
+and reported normal responsiveness. They also reported that the slowdown
+surged after reload introduced the YAML changes. This strengthens the
+extension/YAML hypothesis; it does not isolate this extension from all other
+extensions or prove a particular renderer call site.
+
+The owner then explicitly requested a temporary YAML rollback for comparison.
+The adapter source, dependency manifests, tests, and implemented YAML spec
+passage are restored to the pre-YAML baseline `b5df503a`; push-wake fixes and
+follow-up tickets are retained. Historical renderer findings above refer to
+`f34548f4`, not the temporarily reverted working tree. Reopen the same session
+with the ws extension enabled after rollback to isolate the YAML contribution.
+Owner-live rollback comparison is pending; do not claim restored performance
+from source equivalence or unit tests alone. No caching fix is implemented.
+
 ## Phases
 
 ### Phase 1: Attribute and reduce avoidable redraw work

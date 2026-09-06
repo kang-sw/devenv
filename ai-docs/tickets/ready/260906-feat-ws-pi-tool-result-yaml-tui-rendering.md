@@ -274,6 +274,22 @@ Owner-live YAML display/expand/model-follow-up acceptance remains pending;
 compiled/bundled host modes were not live-tested. Keep the ticket ready with
 Phase 2 and its resolver prerequisite unchanged. No merge is implied.
 
+#### Edition (22987b75) - 2026-09-06
+
+Temporary owner-requested rollback of Phase 1, including hardening through
+`f34548f4`, for same-session responsiveness comparison. The owner observed
+normal responsiveness without extensions and a sharp slowdown after the
+YAML reload. Adapter source/dependencies/tests return to pre-YAML `b5df503a`;
+the implemented YAML spec passage is withdrawn. Earlier Result evidence is
+historical, not a claim that YAML rendering remains enabled. Push-wake fixes
+are retained. Rollback verification: 935/935 adapter tests passed with
+`WS_PI_SPAWN_ROLE` unset; adapter/spec baseline equality and diff checks passed.
+
+Track attribution and eventual repair in
+`260906-bug-ws-pi-yaml-result-rerender-cost`. Owner-live rollback performance
+comparison remains pending. Phase 2 must not start against the reverted
+helper; restore and verify its Phase 1 prerequisite first.
+
 ### Phase 2: Dispatch-tool input summaries and resolved model line
 
 Depends on Phase 1 and on the tier-warning ticket's Phase 1. Add
