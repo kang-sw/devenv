@@ -55,6 +55,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
+import { modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx, type ModelCatalogEntry } from "./model-catalog.ts";
 import {
   REPORT_TO_LEAD_TOOL_NAME,
   inheritModelFromToolCtx,
@@ -576,13 +577,15 @@ export function buildForkSpawnCtx(
   pi: ExtensionAPI,
   bridge: BridgeHandle,
   sessionCtx: ForkSessionCtx,
-  opts: { forkFrom: string; explicitTools: string; inheritModel?: string },
+  opts: { forkFrom: string; explicitTools: string; inheritModel?: string; catalog: readonly ModelCatalogEntry[]; notifyTierWarning?: (warning: string) => void },
 ): Parameters<typeof spawnAgent>[1] {
   return {
     // Load-bearing: the fork's whole report channel back to the lead.
     pi,
     cwd: sessionCtx.cwd,
     inheritModel: opts.inheritModel,
+    catalog: opts.catalog,
+    notifyTierWarning: opts.notifyTierWarning,
     wsToolNames: bridge.wsToolNames,
     client: bridge.client,
     forkFrom: opts.forkFrom,
@@ -660,7 +663,7 @@ export function registerFork(
     name: FORK_TOOL_NAME,
     label: FORK_TOOL_NAME,
     description:
-      'Spawn a lateral task-thread fork that inherits your full current context (a clone of your own session) to work a sub-task alongside you — not a worker (no depth-budget consumption). Its own tool surface excludes ws-fork (no recursive forking). It reports back only via ws-report-to-lead(kind:"question"|"final"); expects_commit:true flags a kind:"final" report whose Commit field is missing or "none" as incomplete. Returns {agent_id} immediately — end your turn afterwards; its reports and settles arrive as pushed messages.',
+      'Spawn a lateral task-thread fork that inherits your full current context (a clone of your own session) to work a sub-task alongside you — not a worker (no depth-budget consumption). Its own tool surface excludes ws-fork (no recursive forking). It reports back only via ws-report-to-lead(kind:"question"|"final"); expects_commit:true flags a kind:"final" report whose Commit field is missing or "none" as incomplete. Returns {agent_id, warning?} immediately — end your turn afterwards; its reports and settles arrive as pushed messages.',
     parameters: {
       type: "object",
       properties: {
@@ -697,6 +700,8 @@ export function registerFork(
           forkFrom,
           explicitTools: tools.join(","),
           inheritModel: inheritModelFromToolCtx(toolCtx),
+          catalog: modelCatalogFromToolCtx(toolCtx),
+          notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx),
         }),
         {
           systemPromptPath: directivePath,

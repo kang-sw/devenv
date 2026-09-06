@@ -191,7 +191,7 @@ import { createAgentWidgetController, shouldArmAgentWidget, type AgentWidgetCont
 import { registerPushMessageRenderers } from "./push-render.ts";
 import { buildOrphanPush, captureOrphans, readAndClearSidecar, reviveOrphans, writeSidecar } from "./agent-sidecar.ts";
 import { buildDiscussKickoff } from "./discuss.ts";
-import { registerGoalLoop } from "./goal-loop.ts";
+import { registerGoalLoop, readGoalLoopConfig, resolveSettleDelayMs } from "./goal-loop.ts";
 import { resolveSkillsDir } from "./skills-dir.ts";
 import { computeSessionBootstrap, registerLeadBootstrap, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
 import { isLeadOrFork, readSpawnRole } from "./process-role.ts";
@@ -307,7 +307,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   // was mid-turn, each with a status line computed at release time. Factory
   // scope (like registerGoalLoop above, never inside session_start) so a
   // /reload cannot stack duplicate agent_settled handlers.
-  registerPushFlush(pi);
+  registerPushFlush(pi, { delayMs: () => resolveSettleDelayMs(readGoalLoopConfig(goalLoopConfigPath)) });
   // Whether the compact push renderers have been registered in THIS process.
   // Registration is per-process and idempotent (Pi keys renderers by
   // customType), but it costs a dynamic import, so a second session_start

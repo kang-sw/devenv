@@ -299,3 +299,62 @@ reminder. Amend the goal-loop anchor in `pi-adapter-runtime` (lever
 sub-anchor) to state the verbatim guarantee. Live check (owner-run):
 `goal-compact-and-continue` with a distinctive sentence and confirm it
 appears byte-for-byte in the first message after compaction.
+
+### Result (bfcf850b) - 2026-09-06
+
+Source/tests landed in `bfcf850b`; the existing
+`{#260904-pi-goal-loop-model-driven-compaction}` spec passage was updated in
+`f873268f`.
+
+- The lever captures the raw string before calling Pi's compaction API while
+  still passing it unchanged as `customInstructions`. The common reminder
+  sender includes it once on success or failure, preserving empty strings,
+  Unicode, tabs, leading/trailing whitespace, and mixed newlines. Consumption
+  happens after dispatch returns; a synchronous send failure retains it.
+- Carry lifetime is independent of compaction re-arm markers: busy release,
+  turn-start backstop clearing, and idle/child yields preserve it for an
+  eligible ordinary reminder. Goal replacement, terminal levers, runaway
+  force-stop, and shutdown discard unsent carry. No durable persistence was
+  added.
+- The landed delayed settle orchestration, reducer decisions, push priority,
+  and boundary guard remain unchanged. Delivery means the next eligible goal
+  reminder, not an arbitrary first post-compaction message when held pushes or
+  owner input take priority. The adjacent stale spec wording about sending
+  directly on release was reconciled to that existing timing contract. No
+  design deviation or source-scope expansion was needed.
+- Verification: tests-first observed 11 missing-carry failures; focused
+  goal-loop tests then passed 118/118 and the full Pi suite passed 894/894.
+  Tests ran with `WS_PI_SPAWN_ROLE` unset in the test subprocess to exercise
+  the lead-only loop rather than inherit the implementer's worker role. Full
+  outputs were read. Spec index and scoped documentation checks passed.
+- Independent review, reported by the lead: clean, 0 findings; focused
+  118/118 and full Pi 894/894 independently passed. No unresolved review
+  findings or mental-model update is needed: the non-obvious carry-lifetime
+  invariant is now in the authoritative spec.
+- Owner-run Phase 1 and Phase 2 live checks remain pending. Automated tests
+  and review do not satisfy these live gates; implementation and spec work
+  are recorded here without claiming the ticket is complete.
+
+## Blocked
+
+2026-09-06 — Waiting for owner-run live verification; not eligible for ticket
+closure or another automated implementation selection. Both phase plans
+explicitly require these live checks, and neither has recorded completion:
+
+1. **Phase 1:** In fresh Pi sessions, repeat the two Background dogfood cases:
+   the near-empty, one-word `pong` goal and the filled-session compaction
+   lever run. Confirm post-lever conversation is not replaced by a late
+   summary, and exercise a child report arriving during compaction to confirm
+   it is delivered afterwards. Record the failure-path outcome for the
+   near-empty session as well as the successful filled-session outcome.
+2. **Phase 2:** In a fresh Pi session with enough context to compact, call
+   `goal-compact-and-continue` with a distinctive sentence. In an otherwise
+   quiet run, inspect the first post-compaction message (the goal reminder)
+   and compare its carried payload byte-for-byte with the supplied string.
+   If held pushes or owner input precede it, inspect the first eligible goal
+   reminder instead, per the landed timing contract; neither model paraphrase
+   nor a TUI notification proves delivery.
+
+The owner must provide the live observations before this block can be cleared
+and closure reassessed. These checks have not been performed or waived; keep
+this ticket open and skip it in the automated ready-queue drain meanwhile.

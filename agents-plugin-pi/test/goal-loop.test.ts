@@ -52,7 +52,7 @@ import {
   type GoalLoopConfig,
 } from "../src/goal-loop.ts";
 import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
-import { leadCompactingRef, leadReminderStartPendingRef, heldPushQueue, isOwningAgentIdle, type RpcAgentRegistry } from "../src/spawner.ts";
+import { flushHeldPushes, leadIdleRef, clearWakeStart, leadCompactingRef, leadWakeStartPendingRef, heldPushQueue, isOwningAgentIdle, type RpcAgentRegistry } from "../src/spawner.ts";
 
 const tmpDir = mkdtempSync(join(tmpdir(), "ws-goal-loop-test-"));
 after(() => {
@@ -530,7 +530,7 @@ describe("isChildProcess", () => {
  * covered here with a fake-`pi` + duck-typed `ctx` harness, mirroring
  * `test/ask.test.ts`'s `describe("closeThreadOnDone / injectDiscussionSummary
  * (fake pi)")` shape. `leadCompactingRef`/`heldPushQueue`/
- * `leadReminderStartPendingRef` are module state shared with `spawner.ts`, so
+ * `leadWakeStartPendingRef` are module state shared with `spawner.ts`, so
  * every test here resets all three.
  *
  * Every `registerGoalLoop` call below passes a `fakeClock()`'s
@@ -543,13 +543,14 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
   beforeEach(() => {
     leadCompactingRef.current = false;
     heldPushQueue.length = 0;
-    leadReminderStartPendingRef.current = false;
+    leadWakeStartPendingRef.current = false;
   });
 
   afterEach(() => {
+    clearWakeStart();
+    leadIdleRef.current = undefined;
     leadCompactingRef.current = false;
     heldPushQueue.length = 0;
-    leadReminderStartPendingRef.current = false;
   });
 
   const configPath = join(tmpDir, "does-not-exist-compaction-260906.json");
@@ -673,8 +674,175 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       getContextUsage: () => undefined,
       compact: () => {},
     };
+    leadIdleRef.current = isIdle;
     return { ctx: ctx as unknown as ExtensionContext, notifications, statusCalls };
   }
+
+  const carryHeading = "\n\nCarried forward verbatim from before compaction:\n";
+  const exactCarry = "  Ω preserve\tthis\r\n한글 🦦\n  final\t ";
+
+  function assertCarry(content: unknown, payload: string): void {
+    assert.equal(typeof content, "string");
+    const parts = (content as string).split(carryHeading);
+    assert.equal(parts.length, 2, "exactly one carry heading");
+    assert.equal(parts[1], payload, "raw suffix preserves every character");
+  }
+
+  for (const completion of ["event", "callback", "both", "error", "failed-event"] as const) {
+    test(`verbatim carry is sent once after ${completion} release`, async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      const { ctx } = fakeCtx();
+      await pi.commands.get("goal")!("ship", ctx);
+      let compactCall!: Parameters<ExtensionContext["compact"]>[0];
+      ctx.compact = (opts) => { compactCall = opts; };
+      const result = await pi.tools.get("goal-compact-and-continue")!.execute("carry", { carry_forward: exactCarry }, undefined, undefined, ctx);
+      assert.equal((result as { terminate?: boolean }).terminate, undefined, "lever stays non-terminal");
+      assert.equal(compactCall!.customInstructions, exactCarry, "summary instructions remain unchanged");
+      pi.handlers.get("agent_settled")!({}, ctx);
+      if (completion === "callback" || completion === "both") compactCall!.onComplete!({} as never);
+      if (completion === "error") compactCall!.onError!(new Error("boom"));
+      if (completion === "event" || completion === "both") pi.handlers.get("session_compact")!({ reason: "manual" }, ctx);
+      if (completion === "failed-event") pi.handlers.get("session_compact_failed")!({ errorMessage: "Compaction failed: boom" }, ctx);
+      assert.equal(pi.sentUserMessages.length, 1, "no synchronous event send");
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(pi.sentUserMessages.length, 1, "release only arms the settle timer");
+      clock.fire();
+      assert.equal(pi.sentUserMessages.length, 2);
+      assertCarry(pi.sentUserMessages[1]!.content, exactCarry);
+      assert.deepEqual(pi.sentUserMessages[1]!.options, { deliverAs: "followUp" });
+      if (completion === "error" || completion === "failed-event") {
+        assert.match(pi.sentUserMessages[1]!.content as string, /^Compaction failed: boom Do not retry/);
+      }
+      pi.handlers.get("agent_start")!({}, ctx);
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire();
+      assert.equal(pi.sentUserMessages.length, 3);
+      assert.ok(!(pi.sentUserMessages[2]!.content as string).includes(carryHeading));
+    });
+  }
+
+  test("empty carry is present, captured before compact can synchronously complete and dispatch", async () => {
+    const clock = fakeClock();
+    const pi = fakePi();
+    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+    const { ctx } = fakeCtx();
+    await pi.commands.get("goal")!("ship", ctx);
+    ctx.compact = (opts) => {
+      assert.equal(opts!.customInstructions, "");
+      opts!.onComplete!({} as never);
+      clock.fire(); // Probe capture ordering before ctx.compact returns.
+      assertCarry(pi.sentUserMessages[1]!.content, "");
+    };
+    await pi.tools.get("goal-compact-and-continue")!.execute("carry", { carry_forward: "" }, undefined, undefined, ctx);
+  });
+
+  for (const interruption of ["busy-release", "start-before-release", "idle-yield", "child-yield"] as const) {
+    test(`carry survives ${interruption} until an eligible ordinary reminder`, async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      const registry = new Map([["child", { threadBound: false, running: false, terminalThisTurn: false }]]) as unknown as RpcAgentRegistry;
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock, rpcRegistryRef: { current: registry } });
+      let idle = true;
+      const { ctx } = fakeCtx(() => idle);
+      await pi.commands.get("goal")!("ship", ctx);
+      await pi.tools.get("goal-compact-and-continue")!.execute("carry", { carry_forward: exactCarry }, undefined, undefined, ctx);
+      if (interruption === "start-before-release") {
+        idle = false;
+        pi.handlers.get("agent_start")!({}, ctx);
+        assert.equal(leadCompactingRef.current, true, "start does not release compaction");
+        pi.handlers.get("session_compact")!({}, ctx);
+        await new Promise((resolve) => setImmediate(resolve));
+      } else {
+        if (interruption === "busy-release") idle = false;
+        pi.handlers.get("session_compact")!({}, ctx);
+        await new Promise((resolve) => setImmediate(resolve));
+        if (interruption === "idle-yield" || interruption === "child-yield") {
+          if (interruption === "idle-yield") idle = false;
+          else registry.get("child")!.running = true;
+          clock.fire();
+        }
+      }
+      assert.equal(pi.sentUserMessages.length, 1, "interruption sends nothing");
+      assert.equal(clock.pendingCount(), 0);
+      idle = true;
+      registry.get("child")!.running = false;
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire();
+      assertCarry(pi.sentUserMessages[1]!.content, exactCarry);
+    });
+  }
+
+  for (const cleanup of ["new-goal", "goal-achieved", "goal-blocked", "shutdown"] as const) {
+    test(`${cleanup} discards unsent carry`, async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      const handle = registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      const { ctx } = fakeCtx();
+      await pi.commands.get("goal")!("old", ctx);
+      await pi.tools.get("goal-compact-and-continue")!.execute("carry", { carry_forward: exactCarry }, undefined, undefined, ctx);
+      if (cleanup === "shutdown") handle.resetCompactionStateForShutdown();
+      else if (cleanup === "new-goal") await pi.commands.get("goal")!("new", ctx);
+      else await pi.tools.get(cleanup)!.execute("stop", { summary: "done", reason: "blocked" });
+      pi.handlers.get("session_compact")!({}, ctx);
+      await new Promise((resolve) => setImmediate(resolve));
+      pi.handlers.get("agent_settled")!({}, ctx);
+      if (clock.pendingCount()) clock.fire();
+      if (cleanup === "goal-achieved" || cleanup === "goal-blocked") {
+        assert.equal(pi.sentUserMessages.length, 1, "terminal lever sends no reminder");
+        await pi.commands.get("goal")!("new", ctx);
+        pi.handlers.get("agent_settled")!({}, ctx);
+        clock.fire();
+      }
+      assert.match(pi.sentUserMessages.at(-1)!.content as string, /Goal yet running/);
+      for (const message of pi.sentUserMessages) assert.ok(!(message.content as string).includes(carryHeading));
+    });
+  }
+
+  test("synchronous send failure does not consume carry", async () => {
+    const clock = fakeClock();
+    const pi = fakePi();
+    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+    const { ctx, notifications } = fakeCtx();
+    await pi.commands.get("goal")!("ship", ctx);
+    await pi.tools.get("goal-compact-and-continue")!.execute("carry", { carry_forward: exactCarry }, undefined, undefined, ctx);
+    pi.handlers.get("session_compact")!({}, ctx);
+    await new Promise((resolve) => setImmediate(resolve));
+    const send = pi.api.sendUserMessage;
+    pi.api.sendUserMessage = () => { throw new Error("send failed"); };
+    clock.fire();
+    assert.match(notifications.at(-1)!.message, /send failed/);
+    assert.equal(pi.sentUserMessages.length, 1);
+    pi.api.sendUserMessage = send;
+    pi.handlers.get("agent_settled")!({}, ctx);
+    clock.fire();
+    assertCarry(pi.sentUserMessages[1]!.content, exactCarry);
+  });
+
+  test("reducer preserves pending carry through waits and tool calls but discards it on force-stop", () => {
+    const pending = { ...armGoal("ship"), pendingCarryForward: exactCarry };
+    assert.equal(recordToolCall(pending).pendingCarryForward, exactCarry);
+    assert.equal(decideOnSettle(pending, 2, false, true).next.pendingCarryForward, exactCarry);
+    assert.equal(decideOnSettle(pending, 2, true).next.pendingCarryForward, exactCarry);
+    const first = decideOnSettle(pending, 2);
+    assert.equal(first.next.pendingCarryForward, exactCarry);
+    const stopped = decideOnSettle(first.next, 2);
+    assert.equal(stopped.decision.action, "force-stop");
+    assert.equal(stopped.next.pendingCarryForward, undefined);
+  });
+
+  test("ordinary reminder without a lever has no carry heading", async () => {
+    const clock = fakeClock();
+    const pi = fakePi();
+    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+    const { ctx } = fakeCtx();
+    await pi.commands.get("goal")!("ship", ctx);
+    pi.handlers.get("agent_settled")!({}, ctx);
+    clock.fire();
+    assert.equal(pi.sentUserMessages.length, 2);
+    assert.ok(!(pi.sentUserMessages[1]!.content as string).includes(carryHeading));
+  });
 
   test("release runs once when both the lever's onComplete and session_compact arrive", async () => {
     const clock = fakeClock();
@@ -757,7 +925,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     assert.match(reminder, /Do not retry goal-compact-and-continue/);
   });
 
-  test("agent_start clears the flag without sending a reminder or touching the held queue", () => {
+  test("agent_start preserves the compaction flag and held queue", () => {
     const pi = fakePi();
     registerGoalLoop(pi.api, { goalLoopConfigPath: configPath });
     const { ctx } = fakeCtx();
@@ -768,16 +936,16 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     assert.equal(leadCompactingRef.current, true);
 
     let flushed = false;
-    heldPushQueue.push({ kind: "raw", send: () => { flushed = true; } });
+    heldPushQueue.push({ kind: "raw", deliverAs: "followUp", send: () => { flushed = true; } });
 
     pi.handlers.get("agent_start")!({}, ctx);
-    assert.equal(leadCompactingRef.current, false);
-    assert.equal(pi.sentUserMessages.length, 0, "no reminder — this is a pure backstop clear");
+    assert.equal(leadCompactingRef.current, true, "start cannot clear an independent compaction hold");
+    assert.equal(pi.sentUserMessages.length, 0, "no reminder during compaction");
     assert.equal(flushed, false, "no queue touch either — that is releaseAfterCompaction's job, not this backstop's");
     assert.equal(heldPushQueue.length, 1, "left untouched for that turn's own settle/flush handler");
   });
 
-  test("a non-lever session_compact (no pendingRearm) releases held pushes but sends no reminder", async () => {
+  test("a non-lever session_compact holds pushes until confirmed start and sends no reminder", async () => {
     const pi = fakePi();
     registerGoalLoop(pi.api, { goalLoopConfigPath: configPath });
     const { ctx } = fakeCtx();
@@ -790,13 +958,15 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     assert.equal(leadCompactingRef.current, true);
 
     let flushed = false;
-    heldPushQueue.push({ kind: "raw", send: () => { flushed = true; } });
+    heldPushQueue.push({ kind: "raw", deliverAs: "followUp", send: () => { flushed = true; } });
 
     pi.handlers.get("session_compact")!({ reason: "manual" }, ctx);
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(leadCompactingRef.current, false);
-    assert.equal(flushed, true, "held pushes still release on any compaction, lever-originated or not");
+    assert.equal(flushed, false, "idle release cannot directly send custom messages");
+    assert.equal(flushHeldPushes(pi.api, true), 1, "confirmed start releases the held push");
+    assert.equal(flushed, true);
     assert.equal(pi.sentUserMessages.length, 1, "still just the armed announcement — no synthesized reminder for a non-lever compaction");
   });
 
@@ -816,7 +986,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     assert.equal(leadCompactingRef.current, true);
 
     let flushed = false;
-    heldPushQueue.push({ kind: "raw", send: () => { flushed = true; } });
+    heldPushQueue.push({ kind: "raw", deliverAs: "followUp", send: () => { flushed = true; } });
 
     // The release-time ctx reports NOT idle — e.g. agent_start's own backstop
     // raced this call and a fresh turn is already underway.
@@ -832,6 +1002,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     // A subsequent settle re-evaluates normally: leadCompactingRef is false
     // again, so decideOnSettle sees compacting=false and reinjects as usual.
     const settled = fakeCtx(() => true).ctx;
+    flushHeldPushes(pi.api, true); // model the push-woken start before its next settle
     pi.handlers.get("agent_settled")!({}, settled);
     assert.equal(pi.sentUserMessages.length, 1, "the settle timer was armed, not fired yet");
 
@@ -861,7 +1032,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     );
   });
 
-  test("260906 review relay #1 (Tests): release flushes held pushes before sending the lever's re-armed reminder", async () => {
+  test("confirmed-start flush precedes the lever reminder without consuming carry", async () => {
     const clock = fakeClock();
     const pi = fakePi();
     registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
@@ -876,7 +1047,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     assert.equal(leadCompactingRef.current, true);
 
     const order: string[] = [];
-    heldPushQueue.push({ kind: "raw", send: () => order.push("flush") });
+    heldPushQueue.push({ kind: "raw", deliverAs: "followUp", send: () => order.push("flush") });
     const originalSend = (pi.api as unknown as { sendUserMessage: (content: unknown, options?: unknown) => void }).sendUserMessage;
     (pi.api as unknown as { sendUserMessage: (content: unknown, options?: unknown) => void }).sendUserMessage = (content, options) => {
       order.push("reminder");
@@ -884,11 +1055,12 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     };
 
     compactCall!.onComplete!();
-    assert.deepEqual(order, ["flush"], "the held push flushes synchronously when the settle timer is armed");
-
+    assert.deepEqual(order, [], "idle release holds the batch for a user-woken start");
+    flushHeldPushes(pi.api, true);
     clock.fire();
     assert.deepEqual(order, ["flush", "reminder"], "held pushes flush before the pending reminder is sent");
     assert.equal(pi.sentUserMessages.length, 2, "the armed announcement, then the re-armed reminder");
+    assertCarry(pi.sentUserMessages[1]!.content, "x");
   });
 
   test("260906 review relay #1 (Critical): a threshold auto-compaction's swallowed settle is replayed by the deferred release — exactly one ordinary reminder, streak advanced", async () => {
@@ -984,7 +1156,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     );
   });
 
-  test("260906 review relay #2 (Critical): the swallowed-settle replay is delivered as followUp, surviving a flush that started a turn synchronously", async () => {
+  test("swallowed-settle replay retains followUp mode after confirmed-start delivery", async () => {
     const clock = fakeClock();
     const threshold2Path = writeConfig("relay2-threshold-2.json", JSON.stringify({ runaway_threshold: 2 }));
     const pi = fakePi();
@@ -1006,13 +1178,15 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     // SYNCHRONOUSLY, exactly like a real `HeldPush`/`HeldRawSend` calling
     // `pi.sendMessage(..., { triggerTurn: true })` (`spawner.ts`'s `sendPush`).
     heldPushQueue.push({
-      kind: "raw",
+      kind: "raw", deliverAs: "followUp",
       send: (p) => p.sendMessage({ customType: "ws-agent-report" }, { triggerTurn: true }),
     });
 
     await new Promise((resolve) => setImmediate(resolve));
 
-    assert.equal(pi.streaming.current, true, "the flush started a turn synchronously, as the fake's streaming guard models");
+    assert.equal(pi.streaming.current, false, "idle release cannot start a custom run");
+    flushHeldPushes(pi.api, true);
+    assert.equal(pi.streaming.current, true, "confirmed-start flush delivers the batch");
     assert.equal(pi.sentUserMessages.length, 1, "the deferred release only armed the settle timer");
     assert.equal(clock.pendingCount(), 1);
 
@@ -1085,7 +1259,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     assert.equal(clock.pendingCount(), pendingBeforeUnrelatedCompaction, "no new timer armed by this unrelated release");
   });
 
-  test("260906 review relay #2 (Test Important): the agent_start backstop's marker clearing is observable across a later, unrelated compaction", async () => {
+  test("start before release preserves the hold; subsequent busy release clears origins before unrelated compaction", async () => {
     const clock = fakeClock();
     const pi = fakePi();
     registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
@@ -1099,8 +1273,11 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     // agent_start's own backstop fires before session_compact ever does —
     // it must clear pendingRearm too, not just the flag.
     pi.handlers.get("agent_start")!({}, ctx);
-    assert.equal(leadCompactingRef.current, false);
-    assert.equal(pi.sentUserMessages.length, 1, "the backstop sends nothing");
+    assert.equal(leadCompactingRef.current, true, "start leaves pending compaction intact");
+    pi.handlers.get("session_compact")!({}, fakeCtx(() => false).ctx);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(leadCompactingRef.current, false, "deferred busy release owns marker cleanup");
+    assert.equal(pi.sentUserMessages.length, 1, "start and busy release send nothing");
     assert.equal(clock.pendingCount(), 0);
 
     // A later, unrelated, non-lever compaction cycle: a stale pendingRearm
@@ -1130,7 +1307,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     handle.resetCompactionStateForShutdown();
     assert.equal(leadCompactingRef.current, false, "the flag is reset");
     assert.equal(clock.pendingCount(), 0, "no lingering settle/boundary-guard timer");
-    assert.equal(leadReminderStartPendingRef.current, false);
+    assert.equal(leadWakeStartPendingRef.current, false);
 
     // A following push is not held: `spawner.ts`'s `isOwningAgentIdle()` —
     // the exact predicate `pushToLead`'s `followUp` hold and `ask.ts`'s
@@ -1356,21 +1533,21 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
 
       pi.handlers.get("agent_settled")!({}, ctx);
       clock.fire();
-      assert.equal(leadReminderStartPendingRef.current, true, "set right before the reminder's own sendUserMessage call");
+      assert.equal(leadWakeStartPendingRef.current, true, "set right before the reminder's own sendUserMessage call");
       assert.equal(clock.pendingCount(), 1, "the boundary-guard fallback timer is now the sole pending timer");
 
       // Clear point 1: agent_start.
       pi.handlers.get("agent_start")!({}, ctx);
-      assert.equal(leadReminderStartPendingRef.current, false);
+      assert.equal(leadWakeStartPendingRef.current, false);
       assert.equal(clock.pendingCount(), 0, "agent_start cancelled the fallback timer too");
 
       // Re-drive to the same point to test clear point 2: agent_settled.
       pi.handlers.get("agent_settled")!({}, ctx);
       assert.equal(clock.pendingCount(), 1);
       clock.fire();
-      assert.equal(leadReminderStartPendingRef.current, true);
+      assert.equal(leadWakeStartPendingRef.current, true);
       pi.handlers.get("agent_settled")!({}, ctx);
-      assert.equal(leadReminderStartPendingRef.current, false, "a real settle is proof the reminder's run at least started");
+      assert.equal(leadWakeStartPendingRef.current, false, "a real settle is proof the reminder's run at least started");
       assert.equal(
         clock.pendingCount(),
         1,
@@ -1380,10 +1557,10 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       // Re-drive once more to test clear point 3: the fallback timeout itself.
       pi.handlers.get("agent_settled")!({}, ctx);
       clock.fire(); // sends the reminder, arms the fallback timer
-      assert.equal(leadReminderStartPendingRef.current, true);
+      assert.equal(leadWakeStartPendingRef.current, true);
       const statusCallsBeforeTimeout = statusCalls.length;
       clock.fire(); // no agent_start/agent_settled ever arrived — the fallback fires
-      assert.equal(leadReminderStartPendingRef.current, false, "cleared by its own timeout");
+      assert.equal(leadWakeStartPendingRef.current, false, "cleared by its own timeout");
       // 260906 Phase 1 review relay #1 (Minor): the fallback timeout re-arms
       // the settle timer FIRST, then sets the retry status LAST — so the
       // retry text is the observable status after this fire, not immediately

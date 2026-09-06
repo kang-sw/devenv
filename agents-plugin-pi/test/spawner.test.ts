@@ -96,7 +96,7 @@ import {
   heldPushQueue,
   leadCompactingRef,
   leadIdleRef,
-  leadReminderStartPendingRef,
+  leadWakeStartPendingRef,
   markAgentExited,
   probeAgentLiveness,
   promptAgent,
@@ -451,6 +451,10 @@ describe("AgentEventLineBuffer", () => {
   });
 });
 
+import { suggestModels, formatTierWarning, modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx } from "../src/model-catalog.ts";
+
+const tierCatalog = ["cheap-model", "big-model", "reviewer-model"].map(id => ({ provider: "openrouter", id, hasAuth: true }));
+
 describe("resolveModelForAliasViaWsMcp", () => {
   function textResult(text: string): McpToolCallResult {
     return { content: [{ type: "text", text }] };
@@ -477,7 +481,7 @@ describe("resolveModelForAliasViaWsMcp", () => {
       assert.deepEqual(args, { tier: "small", format: "json" });
       return textResult(JSON.stringify({ resolved_from: "pi", model: "openrouter/cheap-model", effort: "low" }));
     });
-    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model"), {
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model", tierCatalog), {
       model: "openrouter/cheap-model",
       effort: "low",
     });
@@ -485,34 +489,36 @@ describe("resolveModelForAliasViaWsMcp", () => {
 
   test("a non-pi resolved_from inherits", async () => {
     const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "codex", model: "gpt-5.6-terra" })));
-    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model"), { model: "inherited/model" });
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model", tierCatalog), { model: "inherited/model" });
   });
 
-  test("Forward (a) guard: a pi-labeled but slash-less (codex-shaped) model inherits", async () => {
+  test("a pi-labeled bare id inherits with rejected detail", async () => {
     const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "gpt-5.6-terra" })));
-    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model"), { model: "inherited/model" });
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model", []), {
+      model: "inherited/model", rejected: { model: "gpt-5.6-terra", resolvedFrom: "pi", why: "unknown", suggestions: [] },
+    });
   });
 
   test("an isError result inherits", async () => {
     const client = stubClient(async () => ({ content: [{ type: "text", text: "boom" }], isError: true }));
-    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model"), { model: "inherited/model" });
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model", tierCatalog), { model: "inherited/model" });
   });
 
   test("no text content inherits", async () => {
     const client = stubClient(async () => ({ content: [] }));
-    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model"), { model: "inherited/model" });
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model", tierCatalog), { model: "inherited/model" });
   });
 
   test("unparsable JSON text inherits", async () => {
     const client = stubClient(async () => textResult("not json"));
-    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model"), { model: "inherited/model" });
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model", tierCatalog), { model: "inherited/model" });
   });
 
   test("a thrown call inherits (never-hard-fail)", async () => {
     const client = stubClient(async () => {
       throw new Error("stdio pipe broke");
     });
-    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model"), { model: "inherited/model" });
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model", tierCatalog), { model: "inherited/model" });
   });
 
   test("no alias and no inherit model -> undefined model, no call made", async () => {
@@ -522,22 +528,243 @@ describe("resolveModelForAliasViaWsMcp", () => {
 
   test("effort is carried through only on a genuine pi hit, and omitted when the resolved effort is empty", async () => {
     const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "openrouter/big-model", effort: "" })));
-    const resolved = await resolveModelForAliasViaWsMcp(client, "large", "inherited/model");
+    const resolved = await resolveModelForAliasViaWsMcp(client, "large", "inherited/model", tierCatalog);
     assert.equal(resolved.model, "openrouter/big-model");
     assert.equal(resolved.effort, undefined, "an empty resolved effort string must not surface as a truthy value");
   });
 
   test("effort is absent from a non-pi (inherit) resolution even if the payload carried one", async () => {
     const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "codex", model: "gpt-5.6-terra", effort: "high" })));
-    const resolved = await resolveModelForAliasViaWsMcp(client, "large", "inherited/model");
+    const resolved = await resolveModelForAliasViaWsMcp(client, "large", "inherited/model", tierCatalog);
     assert.deepEqual(resolved, { model: "inherited/model" });
   });
 
   test("an arbitrary tier name still resolves normally (no closed vocabulary enforced by this function itself)", async () => {
     const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "openrouter/reviewer-model" })));
-    const resolved = await resolveModelForAliasViaWsMcp(client, "reviewer", "inherited/model");
+    const resolved = await resolveModelForAliasViaWsMcp(client, "reviewer", "inherited/model", tierCatalog);
     assert.equal(resolved.model, "openrouter/reviewer-model");
     assert.equal(resolved.effort, undefined);
+  });
+});
+
+import { registerFork } from "../src/fork.ts";
+import { registerExecuteGateway } from "../src/execute-gateway.ts";
+import { ensureRespondent, createThreadRegistryHandle } from "../src/ask.ts";
+
+// Offline registered-wrapper coverage: only these test-process RPC methods are stubbed.
+// No installed Pi source is edited and no child/provider is started.
+describe("tier warning cardinality through registered spawn wrappers", () => {
+  // execute-worker uses the same process-role marker as worker (its tool group differs).
+  for (const role of [undefined, "fork", "worker", "explore"] as const) {
+    test(`spawn/fork/execute/explore under ${role ?? "lead"}`, async () => {
+      const previousRole = process.env[WS_PI_SPAWN_ROLE_ENV];
+      if (role) process.env[WS_PI_SPAWN_ROLE_ENV] = role;
+      else delete process.env[WS_PI_SPAWN_ROLE_ENV];
+      const originals = Object.fromEntries(["start", "onEvent", "prompt", "getState", "setThinkingLevel", "abort", "stop"].map(key => [key, RpcClient.prototype[key]]));
+      const efforts: string[] = [];
+      Object.assign(RpcClient.prototype, {
+        start: async () => {}, onEvent: () => () => {}, prompt: async () => {},
+        getState: async () => ({ sessionFile: "/tmp/fake-fork.jsonl" }),
+        setThinkingLevel: async (level: string) => { efforts.push(level); },
+        abort: async () => {}, stop: async () => {},
+      });
+      let handle: ReturnType<typeof registerAgentTools> | undefined;
+      try {
+        const tools = new Map<string, any>();
+        const pushes: unknown[] = [];
+        const notices: Array<[string, string]> = [];
+        const pi = { registerTool: (tool: any) => tools.set(tool.name, tool), sendMessage: (message: unknown) => pushes.push(message), getActiveTools: () => ["read", "ws-fork"] } as unknown as ExtensionAPI;
+        let value = "gpt-5.6-luna";
+        let source = "pi";
+        let auth = true;
+        let lookups = 0;
+        let reads = 0;
+        const bridge = {
+          client: { callTool: async (name: string, args: any) => {
+            if (name === "playbook.render") return { content: [{ type: "text", text: "/tmp/fake-prompt.md" }] };
+            assert.equal(name, "config.resolve_agent");
+            assert.deepEqual(args, { tier: "small", format: "json" });
+            lookups++;
+            return { content: [{ type: "text", text: JSON.stringify({ resolved_from: source, model: value, effort: "low" }) }] };
+          } }, wsToolNames: ["ws__todo_list"], defaultSessionKeyRef: { current: "parent-key" },
+        } as unknown as Parameters<typeof registerAgentTools>[1];
+        const leafCalls: any[] = [];
+        handle = registerAgentTools(pi, bridge, { cwd: "/tmp" }, undefined, async (_client, _registry, ctx, params) => {
+          leafCalls.push({ ctx, params });
+          return { agent_id: "leaf", state: "done", output: "answer" } as any;
+        });
+        registerFork(pi, bridge, handle.rpcRegistry, { cwd: "/tmp" });
+        registerExecuteGateway(pi, bridge, handle.rpcRegistry, { cwd: "/tmp", executeWorkerPromptPath: "/tmp/fake-prompt.md" });
+        const ui = { notify(message: string, level: string) { assert.equal(this, ui); notices.push([message, level]); } };
+        const ctx = {
+          hasUI: true, ui, model: { provider: "lead", id: "model" },
+          sessionManager: { getSessionFile: () => "/tmp/source.jsonl" },
+          modelRegistry: {
+            getAll: () => { reads++; return [{ provider: "openai-codex", id: "gpt-5.6-luna" }]; },
+            hasConfiguredAuth: () => auth,
+            getAvailable: () => assert.fail("must not read availability"),
+          },
+          get scopedModels() { return assert.fail("must not read scope"); },
+        };
+        const run = async (name: string, params: any) => JSON.parse((await tools.get(name).execute("call", params, undefined, undefined, ctx)).content[0].text);
+        const cases = [
+          ["ws-agent-spawn", { system_prompt_path: "/tmp/fake-prompt.md", prompt: "work", model_name: "small" }],
+          ["ws-fork", { prompt: "work", model_name: "small" }],
+          ["ws-execute", { prompt: "work" }],
+          ["explore", { query: "find it" }],
+        ] as const;
+        for (const [name, params] of cases) {
+          notices.length = 0;
+          const before = lookups;
+          const result = await run(name, params);
+          assert.equal(lookups, before + 1, `${name} resolves only once`);
+          assert.equal(notices.length, 1, `${name} notifies only once`);
+          assert.equal(JSON.stringify(result).match(/warning: tier/g)?.length, 1);
+          assert.doesNotMatch(JSON.stringify(result), /ws-model-catalog-list/);
+          assert.deepEqual(notices[0], [`${result.warning} See /ws-model-catalog-list for the models usable here.`, "warning"]);
+          if (name !== "explore" || role === undefined || role === "fork") {
+            const record = handle.rpcRegistry.get(result.agent_id)!;
+            assert.equal(record.modelBase, "lead/model");
+            assert.equal(record.modelEffort, undefined);
+            const row = listAgents(handle.rpcRegistry).find(row => row.agent_id === result.agent_id)!;
+            assert.equal(row.warning, result.warning);
+            if (name === "explore") {
+              assert.deepEqual(Object.keys(result).sort(), ["agent_id", "alias", "warning"]);
+              assert.equal(record.oneShot, true);
+              assert.equal(record.toolGroup, "recon");
+              assert.equal(record.spawnRole, "explore");
+            } else {
+              await stopAgent(handle.rpcRegistry, result.agent_id); // park without push
+              assert.equal(listAgents(handle.rpcRegistry).find(row => row.agent_id === result.agent_id)!.warning, result.warning);
+              await sendToAgent(handle.rpcRegistry, { pi, cwd: "/tmp" }, result.agent_id, "resume");
+              assert.equal(notices.length, 1, "resume produces no new notification");
+              assert.equal(lookups, before + 1, "resume never re-resolves");
+            }
+          } else {
+            assert.equal(leafCalls.at(-1).ctx.model, "lead/model");
+            assert.equal("effort" in leafCalls.at(-1).ctx, false, "Phase2 is excluded");
+            assert.equal(result.output, "answer");
+          }
+        }
+        assert.equal(efforts.length, 0, "rejected tiers contribute no effort");
+        assert.equal(pushes.length, 0, "warnings must never wake/push the lead");
+        // Reuse the SAME registered execute function with current auth/model/source changes.
+        const spawnParams = cases[0][1];
+        value = "openai-codex/gpt-5.6-luna";
+        notices.length = 0;
+        assert.equal((await run("ws-agent-spawn", spawnParams)).warning, undefined);
+        assert.deepEqual(efforts, ["low"]);
+        assert.equal(notices.length, 0);
+        auth = false;
+        assert.match((await run("ws-agent-spawn", spawnParams)).warning, /provider openai-codex has no configured auth/);
+        source = "tiers";
+        notices.length = 0;
+        assert.equal((await run("ws-agent-spawn", spawnParams)).warning, undefined);
+        assert.equal((await run("ws-fork", { prompt: "omitted tier" })).warning, undefined);
+        assert.equal((await run("ws-execute", { prompt: "complex", complex: true })).warning, undefined);
+        assert.equal(notices.length, 0);
+        source = "pi";
+        ctx.hasUI = false;
+        assert.ok((await run("ws-agent-spawn", spawnParams)).warning);
+        assert.equal(notices.length, 0, "headless gets result only");
+        // Discussion fork passes no tier, but must still forward its current context safely.
+        const before = lookups;
+        const beforeReads = reads;
+        const thread = { threadId: "discussion", title: "Question", question: "Why?", status: "open", origin: "lead-ask" } as any;
+        const threadHandle = createThreadRegistryHandle();
+        const respondent = await ensureRespondent(pi, ctx as any, bridge, handle.rpcRegistry, threadHandle, thread, { cwd: "/tmp" });
+        assert.ok(respondent);
+        assert.equal(handle.rpcRegistry.get(respondent!)!.modelBase, "lead/model");
+        assert.equal(handle.rpcRegistry.get(respondent!)!.warning, undefined);
+        assert.equal(lookups, before);
+        assert.equal(reads, beforeReads + 1);
+        assert.equal(notices.length, 0);
+      } finally {
+        await handle?.stopAll();
+        Object.assign(RpcClient.prototype, originals);
+        if (previousRole === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV];
+        else process.env[WS_PI_SPAWN_ROLE_ENV] = previousRole;
+      }
+    });
+  }
+});
+
+describe("catalog validation and warning copy", () => {
+  const catalog = [
+    { provider: "openai-codex", id: "gpt-5.6-luna", hasAuth: true },
+    { provider: "locked", id: "gpt-5.6-luna", hasAuth: false },
+    { provider: "router", id: "org/nested:high", hasAuth: true },
+  ];
+  const resolve = (model: string, resolved_from = "pi", entries = catalog) => resolveModelForAliasViaWsMcp({
+    callTool: async () => ({ content: [{ type: "text", text: JSON.stringify({ model, resolved_from, effort: "low" }) }] }),
+  }, "small", "lead/model", entries);
+
+  for (const value of ["gpt-5.6-luna", "openai-codex/gpt-5.6-lun", "unknown/gpt-5.6-luna", "openai-codex/gpt-5.6-luna:high", "", "far-away-model-name"]) {
+    test(`unknown ${JSON.stringify(value)} inherits without effort`, async () => {
+      const result = await resolve(value);
+      assert.equal(result.model, "lead/model");
+      assert.equal(result.effort, undefined);
+      assert.deepEqual(result.rejected, { model: value, resolvedFrom: "pi", why: "unknown", suggestions: suggestModels(value, catalog) });
+      assert.equal(effectiveModelEffort("high", result.effort), "high");
+    });
+  }
+  test("exact membership preserves nested ids and literal colons", async () => {
+    assert.deepEqual(await resolve("router/org/nested:high"), { model: "router/org/nested:high", effort: "low" });
+    assert.deepEqual(await resolve("openai-codex/gpt-5.6-luna"), { model: "openai-codex/gpt-5.6-luna", effort: "low" });
+  });
+  for (const source of ["codex", "default", "tiers", "claude", ""]) {
+    test(`${source} stays silent`, async () => assert.deepEqual(await resolve("gpt-5.6-luna", source), { model: "lead/model" }));
+  }
+  test("no-auth names provider and has no suggestion tail", async () => {
+    const result = await resolve("locked/gpt-5.6-luna");
+    assert.deepEqual(result, { model: "lead/model", rejected: { model: "locked/gpt-5.6-luna", resolvedFrom: "pi", why: "no-auth" } });
+    assert.equal(formatTierWarning("small", result.rejected!, result.model, false), 'warning: tier small is set to "locked/gpt-5.6-luna" for harness pi, but provider locked has no configured auth; inherited lead/model.');
+  });
+  test("exact unknown copy and all three tails", async () => {
+    const result = await resolve("gpt-5.6-luna");
+    assert.equal(formatTierWarning("small", result.rejected!, result.model, false), 'warning: tier small is set to "gpt-5.6-luna" for harness pi, which is not a provider/id entry in Pi\'s model catalog; inherited lead/model. Did you mean openai-codex/gpt-5.6-luna, locked/gpt-5.6-luna?');
+    const far = await resolve("far-away-model-name");
+    assert.match(formatTierWarning("small", far.rejected!, far.model, false), / No close match in Pi's model catalog\.$/);
+    const empty = await resolve("", "pi", []);
+    assert.match(formatTierWarning("small", empty.rejected!, empty.model, true), / Pi's model catalog is empty\.$/);
+  });
+  test("one-line escaping preserves raw detail", async () => {
+    const raw = 'bad"\n\r\t\x1b\u0085\u2028\u2029/value';
+    const result = await resolve(raw);
+    assert.equal(result.rejected!.model, raw);
+    const warning = formatTierWarning("small", result.rejected!, result.model, false);
+    assert.doesNotMatch(warning, /[\x00-\x1f\x7f-\x9f\u2028\u2029]/);
+    assert.ok(warning.includes('bad\\"\\n\\r\\t\\u001b'));
+  });
+  test("suggestions rank stably, deduplicate, cap three, use id after first slash and distance two", () => {
+    const entries = ["lun", "luna-plus", "luna", "luna", "lune", "luna-max"].map(id => ({ provider: "p", id, hasAuth: false }));
+    assert.deepEqual(suggestModels("typo/luna", entries), ["p/luna", "p/lun", "p/luna-plus"]);
+    assert.deepEqual(suggestModels("org/nested:high", catalog), ["router/org/nested:high"]); // containment after first separator
+    assert.deepEqual(suggestModels("typo/org/nested:high", catalog), ["router/org/nested:high"]);
+    assert.deepEqual(suggestModels("abXYef", [{ provider: "p", id: "abcdef", hasAuth: false }]), ["p/abcdef"]);
+    assert.deepEqual(suggestModels("aXYZef", [{ provider: "p", id: "abcdef", hasAuth: true }]), []);
+    assert.deepEqual(suggestModels("", entries), []);
+    assert.deepEqual(suggestModels("LUNA", entries), ["p/lun", "p/luna-plus", "p/luna"]);
+  });
+  test("live getAll/auth source ignores available/scoped lists and preserves receivers", async () => {
+    let auth = false;
+    let models = [{ provider: "live", id: "model" }];
+    const registry = {
+      getAll() { assert.equal(this, registry); return models; },
+      hasConfiguredAuth(model: unknown) { assert.equal(this, registry); assert.equal(model, models[0]); return auth; },
+      getAvailable() { assert.fail("cached availability is not a validation catalog"); },
+    };
+    const ctx = { modelRegistry: registry, get scopedModels() { assert.fail("scoped models are not validation"); } };
+    assert.equal((await resolve("live/model", "pi", modelCatalogFromToolCtx(ctx))).rejected?.why, "no-auth");
+    auth = true;
+    assert.equal((await resolve("live/model", "pi", modelCatalogFromToolCtx(ctx))).rejected, undefined);
+    models = [];
+    assert.equal((await resolve("live/model", "pi", modelCatalogFromToolCtx(ctx))).rejected?.why, "unknown");
+    const notices: unknown[] = [];
+    const ui = { notify(message: string, level: string) { assert.equal(this, ui); notices.push([message, level]); } };
+    tierWarningNotifierFromToolCtx({ hasUI: true, ui })!("warning");
+    assert.deepEqual(notices, [["warning See /ws-model-catalog-list for the models usable here.", "warning"]]);
+    assert.equal(tierWarningNotifierFromToolCtx({ hasUI: false, ui }), undefined);
   });
 });
 
@@ -641,17 +868,30 @@ function liveRpcRecord(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord 
  */
 function fakePi(overrides: { sendMessage?: (message: unknown, options?: unknown) => void } = {}): {
   api: Parameters<typeof pushToLead>[0];
+  wakes: unknown[];
   sent: Array<{ message: { customType?: string; content?: string; display?: boolean; details?: unknown }; options?: { deliverAs?: string; triggerTurn?: boolean } }>;
 } {
   const sent: Array<{ message: { customType?: string; content?: string; display?: boolean; details?: unknown }; options?: { deliverAs?: string; triggerTurn?: boolean } }> = [];
+  const wakes: unknown[] = [];
+  leadIdleRef.current ??= () => true;
+  const handlers = new Map<string, () => void>();
   const api = {
+    on: (event: string, handler: () => void) => handlers.set(event, handler),
+    sendUserMessage: (content: unknown) => {
+      wakes.push(content);
+      const accessor = leadIdleRef.current;
+      leadIdleRef.current = () => false;
+      handlers.get("agent_start")?.();
+      leadIdleRef.current = accessor;
+    },
     sendMessage:
       overrides.sendMessage ??
       ((message: unknown, options?: unknown) => {
         sent.push({ message: message as never, options: options as never });
       }),
   };
-  return { api: api as unknown as Parameters<typeof pushToLead>[0], sent };
+  registerPushFlush(api as never, { delayMs: () => 10 });
+  return { api: api as unknown as Parameters<typeof pushToLead>[0], sent, wakes };
 }
 
 describe("applyRpcEvent", () => {
@@ -1169,11 +1409,11 @@ describe("pushToLead", () => {
   // `leadCompactingRef`/`heldPushQueue` reset convention elsewhere in this
   // file.
   beforeEach(() => {
-    leadReminderStartPendingRef.current = false;
+    leadWakeStartPendingRef.current = false;
   });
 
   afterEach(() => {
-    leadReminderStartPendingRef.current = false;
+    leadWakeStartPendingRef.current = false;
   });
 
   test("sends one custom message per family, with details carrying agent_id, the payload, and the status line", () => {
@@ -1253,25 +1493,24 @@ describe("pushToLead", () => {
     assert.equal(pi.sent[0].message.content?.split("\n")[0], "[ws-agent-report] agent a1");
   });
 
-  test("260906 Phase 1 (settle-timer reminder race ticket): sends with triggerTurn: false while a reminder start is pending", () => {
+  test("Phase 2: a pending reminder holds pushes until confirmed start", () => {
     const pi = fakePi();
     const record = liveRpcRecord({ agentId: "a", running: true });
-    leadReminderStartPendingRef.current = true;
+    leadWakeStartPendingRef.current = true;
 
     pushToLead(pi.api, new Map([["a", record]]), record, "ws-agent-report", { report: "halfway" }, "followUp");
 
-    assert.equal(pi.sent.length, 1);
-    assert.deepEqual(
-      pi.sent[0]!.options,
-      { deliverAs: "followUp", triggerTurn: false },
-      "lands via _appendCustomMessage instead of colliding with the reminder's own mid-await prompt() call",
-    );
+    assert.equal(pi.sent.length, 0);
+    assert.equal(heldPushQueue.length, 1, "held until confirmed streaming start");
+    leadWakeStartPendingRef.current = false;
+    flushHeldPushes(pi.api, true);
+    assert.deepEqual(pi.sent[0]!.options, { deliverAs: "followUp", triggerTurn: true });
   });
 
   test("260906 Phase 1 (settle-timer reminder race ticket): triggerTurn: true is unchanged when no reminder start is pending", () => {
     const pi = fakePi();
     const record = liveRpcRecord({ agentId: "a", running: true });
-    leadReminderStartPendingRef.current = false;
+    leadWakeStartPendingRef.current = false;
 
     pushToLead(pi.api, new Map([["a", record]]), record, "ws-agent-report", { report: "halfway" }, "followUp");
 
@@ -1311,7 +1550,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     leadCompactingRef.current = false;
   });
 
-  test("an IDLE lead is pushed to immediately — holding would only delay the wake", () => {
+  test("an IDLE lead receives its push after the fake user wake confirms start", () => {
     const pi = fakePi();
     const record = liveRpcRecord({ agentId: "a", running: true });
     pushToLead(pi.api, new Map([["a", record]]), record, "ws-agent-report", { report: "halfway" }, "followUp");
@@ -1327,25 +1566,26 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     assert.deepEqual(pi.sent, []);
     assert.equal(heldPushQueue.length, 1);
 
-    assert.equal(flushHeldPushes(pi.api), 1);
+    assert.equal(flushHeldPushes(pi.api, true), 1);
     assert.equal(pi.sent.length, 1);
     assert.deepEqual(heldPushQueue, [], "the queue is drained, so a second settle re-sends nothing");
   });
 
-  test("no idleness accessor at all (a headless path, a torn-down session) sends straight through", () => {
-    leadIdleRef.current = undefined;
+  test("no idleness accessor means no send into an uninitialized or torn-down session", () => {
     const pi = fakePi();
+    leadIdleRef.current = undefined;
     pushToLead(pi.api, new Map(), undefined, "ws-agent-orphaned", { count: 1 }, "followUp");
-    assert.equal(pi.sent.length, 1, "a held push nothing ever flushes would be a lost report");
+    assert.equal(pi.sent.length, 0, "uninitialized or torn-down sessions never start custom runs");
   });
 
-  test("a throwing idleness accessor degrades to sending, not to holding", () => {
+  test("a throwing idleness accessor is a torn-down session: no send or hold", () => {
     leadIdleRef.current = () => {
       throw new Error("ctx is gone");
     };
     const pi = fakePi();
     pushToLead(pi.api, new Map(), undefined, "ws-agent-orphaned", { count: 1 }, "followUp");
-    assert.equal(pi.sent.length, 1);
+    assert.equal(pi.sent.length, 0);
+    assert.equal(heldPushQueue.length, 0);
   });
 
   test("steer families (an approval, a headless question) bypass the hold — interrupting is their whole purpose", () => {
@@ -1372,7 +1612,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     assert.equal(heldPushQueue.length, 1);
 
     leadCompactingRef.current = false;
-    assert.equal(flushHeldPushes(pi.api), 1);
+    assert.equal(flushHeldPushes(pi.api, true), 1);
     assert.equal(pi.sent[0]!.options?.deliverAs, "steer", "released with the SAME delivery mode it was held under");
   });
 
@@ -1393,7 +1633,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     assert.equal(heldPushQueue.length, 1);
 
     leadCompactingRef.current = false;
-    assert.equal(flushHeldPushes(pi.api), 1);
+    assert.equal(flushHeldPushes(pi.api, true), 1);
     assert.equal(pi.sent[0]!.options?.deliverAs, "followUp");
   });
 
@@ -1401,11 +1641,13 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     leadCompactingRef.current = true;
     const sent: string[] = [];
     let settled: (() => void) | undefined;
+    let start: (() => void) | undefined;
     const api = {
-      on: (event: string, handler: () => void) => void (event === "agent_settled" && (settled = handler)),
+      on: (event: string, handler: () => void) => { if (event === "agent_settled") settled = handler; if (event === "agent_start") start = handler; },
+      sendUserMessage: () => start?.(),
       sendMessage: (message: { customType?: string }) => void sent.push(message.customType ?? ""),
     } as unknown as Parameters<typeof registerPushFlush>[0];
-    registerPushFlush(api);
+    registerPushFlush(api, { delayMs: () => 10 });
 
     heldPushQueue.push({ kind: "push", registry: undefined, record: undefined, family: "ws-agent-report", payload: { report: "held" }, deliverAs: "followUp" });
     settled?.();
@@ -1435,7 +1677,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     // w3 is still working when the lead's turn ends: the held pair is released
     // now, against the registry as it stands at THIS instant.
     idle = true;
-    assert.equal(flushHeldPushes(pi.api), 2);
+    assert.equal(flushHeldPushes(pi.api, true), 2);
     assert.deepEqual(
       pi.sent.map((entry) => (entry.message.details as { status?: string }).status),
       ["1 delegated agent still running", "1 delegated agent still running"],
@@ -1454,7 +1696,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     idle = false;
     pushToLead(pi.api, registry, w3, "ws-agent-report", { kind: "final", report: "Outcome: w3" }, "followUp");
     idle = true;
-    flushHeldPushes(pi.api);
+    flushHeldPushes(pi.api, true);
 
     assert.equal(
       (pi.sent[2].message.details as { status?: string }).status,
@@ -1477,7 +1719,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     pushToLead(reentrant.api, registry, undefined, "ws-agent-report", { report: "first" }, "followUp");
 
     idle = true;
-    assert.equal(flushHeldPushes(reentrant.api), 1);
+    assert.equal(flushHeldPushes(reentrant.api, true), 1);
     assert.equal(heldPushQueue.length, 1, "the re-entrant push waits for the next settle rather than joining this drain");
   });
 
@@ -1495,7 +1737,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
       heldPushQueue.push({ kind: "push", registry: undefined, record: undefined, family: "ws-agent-report", payload: { report: "stale" }, deliverAs: "followUp" });
       let settled: (() => void) | undefined;
       const api = { on: (event: string, handler: () => void) => void (event === "agent_settled" && (settled = handler)), sendMessage: () => assert.fail("a worker process must not push") };
-      registerPushFlush(api as unknown as Parameters<typeof registerPushFlush>[0]);
+      registerPushFlush(api as unknown as Parameters<typeof registerPushFlush>[0], { delayMs: () => 10 });
       settled?.();
       assert.equal(heldPushQueue.length, 1, "left untouched rather than delivered into a worker's own transcript");
     } finally {
@@ -1505,15 +1747,17 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     }
   });
 
-  test("registerPushFlush releases the held pushes on the lead's own agent_settled", () => {
+  test("registerPushFlush requests a wake on settle and releases at confirmed start", () => {
     idle = false;
     const sent: string[] = [];
     let settled: (() => void) | undefined;
+    let start: (() => void) | undefined;
     const api = {
-      on: (event: string, handler: () => void) => void (event === "agent_settled" && (settled = handler)),
+      on: (event: string, handler: () => void) => { if (event === "agent_settled") settled = handler; if (event === "agent_start") start = handler; },
+      sendUserMessage: () => start?.(),
       sendMessage: (message: { customType?: string }) => void sent.push(message.customType ?? ""),
     } as unknown as Parameters<typeof registerPushFlush>[0];
-    registerPushFlush(api);
+    registerPushFlush(api, { delayMs: () => 10 });
 
     pushToLead(api as never, new Map(), undefined, "ws-agent-report", { report: "held" }, "followUp");
     assert.deepEqual(sent, []);
@@ -1640,6 +1884,8 @@ describe("attachEventListener (the settle-suppression IO gate)", () => {
     h.emit({ type: "agent_settled" });
     await settleDrain();
     assert.deepEqual(families(h.pi), ["ws-agent-settled"], "the answer still arrives as the settle push's last_message");
+    assert.equal(h.pi.wakes.length, 1, "shared-registry explore completion wakes the idle lead through user preflight");
+    assert.match(h.pi.wakes[0] as string, /1 ws messages waiting/);
     assert.equal(h.registry.has("a"), false, "a one-shot explore has no dormant-resumable resting state — it is gone, not parked");
   });
 

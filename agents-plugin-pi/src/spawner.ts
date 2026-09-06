@@ -97,6 +97,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { RpcClient, type RpcClientOptions } from "@earendil-works/pi-coding-agent";
 import type { McpStdioClient, McpToolCallResult } from "./mcp-stdio-client.ts";
 import type { BridgeHandle } from "./bridge.ts";
+import { suggestModels, formatTierWarning, modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx, type ModelCatalogEntry, type TierRejection } from "./model-catalog.ts";
 import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readSpawnRole, type SpawnRole } from "./process-role.ts";
 
 // ---------------------------------------------------------------------------
@@ -355,37 +356,17 @@ export class AgentEventLineBuffer {
 }
 
 /**
- * Async, ws-mcp-backed tier resolution (Phase 4: replaces the old
- * file-catalog-backed `resolveModelForAlias`): when `alias` (one of the four
- * fixed tiers `small|medium|large|xlarge`) is given, calls ws-mcp's
- * `config.resolve_agent` tool (`{tier: alias, format: "json"}`) and accepts
- * its answer only when it is a GENUINE `pi`-labeled hit — `resolved_from ===
- * "pi"` AND the returned model string contains a `/` (Phase 3 Forward (a): a
- * partial `config.tune agents.tier harness:pi` write can seed the `pi`
- * bucket from the codex default, so `resolved_from === "pi"` alone is not
- * proof of a real Pi `provider/id` string — a codex-shaped fallback model
- * carries no `/`).
- *
- * NEVER HARD-FAILS: no alias, an `isError` result, a missing/unparsable text
- * body, a non-`pi` `resolved_from`, or a `pi`-labeled-but-slash-less model
- * all degrade to `{model: inheritModel}` — matching this adapter's existing
- * "the adapter reads the resolution from ws-mcp; missing/unmapped stays
- * inherit, never an error" contract. `effort` is only ever populated
- * alongside a genuine hit, and only when the resolved effort string is
- * non-empty (an empty resolved effort means "no explicit override" — the
- * caller passes no `modelEffort` at all rather than an empty one).
- *
- * Used by both the RPC-backed `spawnAgent`'s `model_name` and `explore`'s
- * fixed `"small"` lookup, and per-tier by `bridge.ts`'s
- * `computePiAliasTableUnset` (the sole "genuine `pi` hit" predicate — see
- * that function's doc comment for why it reuses this resolver instead of
- * reimplementing the guard).
+ * Shared tier resolution for spawn, both explore paths, and the manual advisory.
+ * Accept only pi-labeled exact catalog membership with configured auth. Unknown
+ * or unauthenticated pi values inherit with rejected detail and no tier effort.
+ * Non-pi, omitted tiers and transport/parse failures silently inherit. Registry
+ * and auth reads stay outside this injected-MCP resolver; no config writes.
  */
 /**
  * Minimal `callTool`-shaped interface `resolveModelForAliasViaWsMcp` needs —
  * a real `McpStdioClient` satisfies this structurally, but so does
  * `bridge.ts`'s own duck-typed `callTool` closure (`WorkflowManualMappingDeps["callTool"]`),
- * letting `computePiAliasTableUnset` call this resolver without a circular
+ * letting `computePiAliasTableReport` call this resolver without a circular
  * import (`spawner.ts` already imports `type BridgeHandle` from
  * `bridge.ts` — a type-only import that is erased at build/runtime, so a
  * VALUE import in the other direction, `bridge.ts` importing this function
@@ -395,11 +376,14 @@ export interface ResolveAgentCallToolClient {
   callTool: (name: string, args: Record<string, unknown>) => Promise<McpToolCallResult>;
 }
 
+export interface TierResolution { model?: string; effort?: string; rejected?: TierRejection }
+
 export async function resolveModelForAliasViaWsMcp(
   client: ResolveAgentCallToolClient,
   alias: string | undefined,
   inheritModel: string | undefined,
-): Promise<{ model?: string; effort?: string }> {
+  catalog: readonly ModelCatalogEntry[] = [],
+): Promise<TierResolution> {
   if (!alias) return { model: inheritModel };
   try {
     const result = await client.callTool("config.resolve_agent", { tier: alias, format: "json" });
@@ -412,8 +396,15 @@ export async function resolveModelForAliasViaWsMcp(
     } catch {
       return { model: inheritModel };
     }
-    if (parsed.resolved_from !== "pi" || !parsed.model || !parsed.model.includes("/")) {
+    if (parsed?.resolved_from !== "pi" || typeof parsed.model !== "string") {
       return { model: inheritModel };
+    }
+    const entry = catalog.find(entry => `${entry.provider}/${entry.id}` === parsed.model);
+    if (!entry) {
+      return { model: inheritModel, rejected: { model: parsed.model, resolvedFrom: parsed.resolved_from, why: "unknown", suggestions: suggestModels(parsed.model, catalog) } };
+    }
+    if (!entry.hasAuth) {
+      return { model: inheritModel, rejected: { model: parsed.model, resolvedFrom: parsed.resolved_from, why: "no-auth" } };
     }
     return { model: parsed.model, effort: parsed.effort || undefined };
   } catch {
@@ -763,6 +754,8 @@ export interface RpcAgentRecord {
   systemPromptPath: string;
   /** Resolved `provider/id`, or undefined to inherit pi's own default resolution. Cached so a dormant resume reuses the same model. */
   modelBase?: string;
+  /** Spawn-time diagnostic only; intentionally omitted from persistence and resume notifications. */
+  warning?: string;
   /** Caller-supplied thinking level, applied via `setThinkingLevel()` after every (re)start. */
   modelEffort?: string;
   /** Cached bridge `ws__*` tool names, for `--tools` re-resolution on a dormant resume. */
@@ -1235,49 +1228,78 @@ export function buildPushContent(
   return [head, ...body, ...(status ? [status] : [])].join("\n");
 }
 
-/**
- * The owning session's idleness accessor, filled from the `session_start` ctx
- * (`ctx.isIdle`) by `index.ts` — the same mutable-ref seam `wsBlockBaseRef` uses
- * for a value only a live ctx can supply. `pushToLead` reads it to decide
- * whether a `followUp` push can go out now or must be HELD (see
- * `heldPushQueue`). Unset (a test, a headless path that never ran
- * `session_start`, a torn-down session) is deliberately treated as IDLE: the
- * pre-hold behavior of sending straight through is the safe default, since a
- * held push that nothing ever flushes would be a lost report.
- */
+/** Live session idleness accessor, supplied at session_start. Missing or stale accessors never authorize a custom turn start. */
 export const leadIdleRef: { current: (() => boolean) | undefined } = { current: undefined };
 
-/**
- * 260906 (compaction push-hold ticket, Phase 1): tracks whether the owning
- * session has an in-flight `ctx.compact()` right now. Set by the goal-loop's
- * `goal-compact-and-continue` lever before it calls `ctx.compact`, and
- * defensively by `session_before_compact` for ANY compaction reason (owner
- * `/compact`, Pi's own threshold/overflow auto-compaction) — not just the
- * lever's own. Cleared only by `goal-loop.ts`'s `releaseAfterCompaction`
- * (deferred past Pi's own compaction flag) or, as a backstop, by the next
- * `agent_start`. `isOwningAgentIdle()` folds this in so a `followUp` push
- * held during ordinary mid-turn work is ALSO held across the whole
- * compaction window, closing the race where a push or a
- * `goal-compact-and-continue` reminder could be delivered into the doomed
- * turn `ctx.compact()`'s internal abort just settled.
- */
+/** Independent compaction hold, set before any compaction and cleared only by deferred completion/failure or lever callbacks. agent_start is not proof of release. */
 export const leadCompactingRef: { current: boolean } = { current: false };
 
-/**
- * 260906 Phase 1 (settle-timer reminder race ticket): true only between the
- * goal-loop's settle timer calling `pi.sendUserMessage(reminder, { deliverAs:
- * "followUp" })` (the reinject reminder's own `prompt()` pre-run awaits,
- * before the run is actually streaming) and one of that boundary guard's
- * three clear points landing: `agent_start`, `agent_settled` (a real settle
- * is proof the reminder's run at least started), or the guard's own fallback
- * timeout (no `agent_start`/`agent_settled` arrived within the settle delay
- * of the send). Owned and mutated by `goal-loop.ts`'s settle timer; read
- * here, at send time, by `sendPush` so a push racing the reminder's own
- * pre-run await is sent with `triggerTurn: false` — landing via Pi's
- * `_appendCustomMessage` instead of colliding with the reminder's own
- * `prompt()` call ("Agent is already processing…").
- */
-export const leadReminderStartPendingRef: { current: boolean } = { current: false };
+/** Shared reservation for a push or reminder user prompt awaiting agent_start. All pushes stay held until confirmed start, settle, or recovery timeout clears this reservation. */
+export const leadWakeStartPendingRef: { current: boolean } = { current: false };
+
+export interface WakeStartOptions {
+  delayMs: () => number;
+  scheduleTimer?: (cb: () => void, ms: number) => NodeJS.Timeout;
+  clearTimer?: (handle: NodeJS.Timeout) => void;
+}
+let wakeOptions: WakeStartOptions | undefined;
+let cancelWakeTimeout: (() => void) | undefined;
+
+export function clearWakeStart(): void {
+  cancelWakeTimeout?.();
+  cancelWakeTimeout = undefined;
+  leadWakeStartPendingRef.current = false;
+}
+
+/** Reserve before prompt preflight; recovery exists even when dispatch throws. */
+export function reserveWakeStart(options: WakeStartOptions, onTimeout: () => void): boolean {
+  if (leadWakeStartPendingRef.current || !shouldPushToLead()) return false;
+  leadWakeStartPendingRef.current = true;
+  const schedule = options.scheduleTimer ?? ((cb, ms) => {
+    const timer = setTimeout(cb, ms);
+    timer.unref?.();
+    return timer;
+  });
+  const handle = schedule(() => {
+    cancelWakeTimeout = undefined;
+    leadWakeStartPendingRef.current = false;
+    onTimeout();
+  }, options.delayMs());
+  cancelWakeTimeout = () => (options.clearTimer ?? clearTimeout)(handle);
+  return true;
+}
+
+function requestPushWake(pi: ExtensionAPI): void {
+  if (!wakeOptions || !heldPushQueue.length || !leadIdleRef.current || !isOwningAgentIdle()) return;
+  if (!reserveWakeStart(wakeOptions, () => requestPushWake(pi))) return;
+  try {
+    pi.sendUserMessage(`${heldPushQueue.length} ws messages waiting; process the incoming reports.`, { deliverAs: "followUp" });
+  } catch {
+    // Keep the queue and timeout: handled input and rejected preflight need the same retry.
+  }
+}
+
+/** Admit raw summaries through the very same FIFO as family-shaped reports. */
+export function sendToLead(pi: ExtensionAPI, message: Parameters<ExtensionAPI["sendMessage"]>[0], deliverAs: PushDeliverAs): void {
+  if (!shouldPushToLead() || !leadIdleRef.current) return;
+  admitPush(pi, { kind: "raw", deliverAs, send: (p) => p.sendMessage(message, { deliverAs, triggerTurn: true }) });
+}
+
+function admitPush(pi: ExtensionAPI, held: HeldPush | HeldRawSend): void {
+  try {
+    leadIdleRef.current?.();
+  } catch {
+    return; // stale session accessor
+  }
+  if (leadCompactingRef.current || leadWakeStartPendingRef.current || isOwningAgentIdle() || held.deliverAs === "followUp") {
+    heldPushQueue.push(held);
+    requestPushWake(pi);
+  } else if (held.kind === "raw") {
+    held.send(pi);
+  } else {
+    sendPush(pi, held.registry, held.record, held.family, held.payload, held.deliverAs);
+  }
+}
 
 /**
  * 260905 (live-agent widget ticket): the same mutable-ref seam as
@@ -1308,16 +1330,7 @@ function triggerAgentWidgetRefresh(): void {
   }
 }
 
-/**
- * Whether the owning session's agent is between turns right now. See
- * `leadIdleRef`. 260906 (compaction push-hold ticket, Phase 1): an in-flight
- * compaction (`leadCompactingRef`) forces `false` regardless of Pi's own
- * idle read — `ctx.compact()`'s internal abort settles the invoking turn
- * before the compaction flag is even set, so relying on `leadIdleRef` alone
- * would read a compacting session as idle for the entire compaction window.
- * Exported for `goal-loop.ts`'s `releaseAfterCompaction`, which needs the
- * same read to decide whether to flush now or leave it to the next settle.
- */
+/** Read current idleness with the independent compaction hold composed in. Delivery also requires an initialized, live accessor. */
 export function isOwningAgentIdle(): boolean {
   if (leadCompactingRef.current) return false;
   const isIdle = leadIdleRef.current;
@@ -1325,7 +1338,7 @@ export function isOwningAgentIdle(): boolean {
   try {
     return isIdle() !== false;
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -1340,15 +1353,10 @@ interface HeldPush {
   deliverAs: PushDeliverAs;
 }
 
-/**
- * 260906 (compaction push-hold ticket, Phase 1): a pre-built raw send held
- * alongside family-shaped pushes on the same queue — `ask.ts`'s
- * `injectDiscussionSummary` builds its `ws-thread-summary` message itself
- * (it has no `PushFamily`/payload shape to reconstruct at flush time), so it
- * holds a closure that performs its own `pi.sendMessage` call instead.
- */
+/** Pre-built summaries share the family-push FIFO and explicitly record their delivery mode. */
 interface HeldRawSend {
   kind: "raw";
+  deliverAs: PushDeliverAs;
   send: (pi: ExtensionAPI) => void;
 }
 
@@ -1358,7 +1366,7 @@ interface HeldRawSend {
  * Phase 1 Edition (live-run fix): Pi queues a `followUp` sent mid-turn in its
  * own `PendingMessageQueue` and delivers it after the turn ends — but there is
  * no extension hook at that delivery (`before_agent_start` fires only for
- * owner-typed prompts; see `agent-session.ts`'s `prompt()` vs
+ * user prompts, including counted wakes; see `agent-session.ts`'s `prompt()` vs
  * `sendCustomMessage`), so a message built at ARRIVAL time carried a status
  * line already stale by the time the lead read it. A worker that finished
  * while the lead was still spawning its siblings reported zero still running
@@ -1380,38 +1388,7 @@ interface HeldRawSend {
  */
 export const heldPushQueue: Array<HeldPush | HeldRawSend> = [];
 
-/**
- * Composes the `pi.sendMessage`/`sendCustomMessage` options for an
- * adapter-initiated lead turn start, reading `leadReminderStartPendingRef`
- * FRESH at call time: `triggerTurn` is `false` while the ref is `true` — the
- * boundary guard against colliding with the goal-loop's settle-timer
- * reminder mid-await in its own `prompt()` call (`sendUserMessage` has no
- * `triggerTurn` option of its own to race against). With the ref set, the
- * send instead lands via Pi's `_appendCustomMessage` (a synchronous,
- * turn-less append onto `agent.state.messages`) and is picked up once the
- * reminder's own turn actually starts, rather than throwing "Agent is
- * already processing…" or silently dropping.
- *
- * 260906 Phase 1 review relay #1 (Important #2): extracted so every
- * adapter-initiated send that can start a lead turn goes through the same
- * guard, not just `sendPush`'s family-shaped pushes — `ask.ts`'s
- * `injectDiscussionSummary` also calls this, both for its immediate send and
- * inside its held `kind: "raw"` closure, so a closure built while the flag
- * was clear still reads the flag's value AT FLUSH TIME rather than a stale
- * snapshot captured when the send was held.
- */
-export function composeLeadTurnStartOptions(deliverAs: PushDeliverAs): { deliverAs: PushDeliverAs; triggerTurn: boolean } {
-  return { deliverAs, triggerTurn: !leadReminderStartPendingRef.current };
-}
-
-/**
- * Builds and sends one push immediately, computing its status line right
- * now.
- *
- * 260906 Phase 1 (settle-timer reminder race ticket): `triggerTurn` is
- * composed by `composeLeadTurnStartOptions` — see its doc comment for the
- * boundary-guard rationale.
- */
+/** Build current family status and send into a confirmed streaming run with its recorded mode. */
 function sendPush(
   pi: ExtensionAPI,
   registry: RpcAgentRegistry | undefined,
@@ -1437,7 +1414,7 @@ function sendPush(
         display: true,
         details: details as never,
       },
-      composeLeadTurnStartOptions(deliverAs),
+      { deliverAs, triggerTurn: true },
     );
   } catch {
     // Best effort: a push that cannot be delivered (a torn-down session, a
@@ -1446,25 +1423,21 @@ function sendPush(
   }
 }
 
-/**
- * Releases every held push, in arrival order — a `HeldPush` with its status
- * line computed NOW and resent with its recorded `deliverAs`, or a
- * `HeldRawSend` invoked as-is. Called from the owning session's
- * `agent_settled` (see `registerPushFlush`) or from `goal-loop.ts`'s
- * `releaseAfterCompaction`: the agent is idle at that instant, so the first
- * send starts a fresh run and the rest land in Pi's own followUp queue behind
- * it — one lead run that sees all of them in order, which is what the
- * one-at-a-time drain was always meant to produce.
- *
- * The queue is drained BEFORE the first send so a push issued from inside that
- * run is held again for the next settle rather than re-entering this drain.
- */
-export function flushHeldPushes(pi: ExtensionAPI | undefined): number {
+/** Idle release requests one counted user wake without draining. Only confirmed agent_start releases the batch, preserving FIFO and rebuilding family status at release time. Compaction and pending-start holds dominate every release. */
+export function flushHeldPushes(pi: ExtensionAPI | undefined, confirmedStart = false): number {
+  if (!pi || !shouldPushToLead() || !leadIdleRef.current || leadCompactingRef.current || leadWakeStartPendingRef.current) return 0;
+  if (!confirmedStart) {
+    requestPushWake(pi);
+    return 0;
+  }
   const pending = heldPushQueue.splice(0, heldPushQueue.length);
-  if (!pi) return 0;
   for (const held of pending) {
     if (held.kind === "raw") {
-      held.send(pi);
+      try {
+        held.send(pi);
+      } catch {
+        // Best effort, like family pushes; keep delivering the remaining batch.
+      }
       continue;
     }
     sendPush(pi, held.registry, held.record, held.family, held.payload, held.deliverAs);
@@ -1472,26 +1445,22 @@ export function flushHeldPushes(pi: ExtensionAPI | undefined): number {
   return pending.length;
 }
 
-/**
- * Arms the held-push release on the owning session's own `agent_settled`.
- * Registered at factory scope (like `registerGoalLoop`) rather than inside
- * `session_start`, so a `/reload` cannot stack duplicate handlers. The role
- * gate is re-checked at fire time for the same reason `pushToLead` checks it:
- * a `worker`/`explore` process holds nothing, so it has nothing to flush.
- *
- * 260906 (compaction push-hold ticket, Phase 1): also gated on
- * `leadCompactingRef` — the abort inside `ctx.compact()` fires an
- * `agent_settled` for the turn it just aborted BEFORE the compaction flag is
- * set on Pi's own side, so this is the only thing stopping this handler from
- * flushing the held queue into that doomed turn. `goal-loop.ts`'s
- * `releaseAfterCompaction` is what flushes it once the compaction actually
- * finishes.
- */
-export function registerPushFlush(pi: ExtensionAPI): void {
+/** Factory-scope wake lifecycle, also active in fork owners. Registration allocates no timers; only a reserved user wake does. Worker/explore roles never reserve wakes. */
+export function registerPushFlush(pi: ExtensionAPI, options: WakeStartOptions): void {
+  wakeOptions = options;
+  pi.on("agent_start", () => {
+    clearWakeStart();
+    flushHeldPushes(pi, true);
+  });
   pi.on("agent_settled", () => {
-    if (!shouldPushToLead()) return;
-    if (leadCompactingRef.current) return;
+    clearWakeStart();
     flushHeldPushes(pi);
+  });
+  pi.on("session_shutdown", () => {
+    clearWakeStart();
+    heldPushQueue.length = 0;
+    leadIdleRef.current = undefined;
+    wakeOptions = undefined;
   });
 }
 
@@ -1524,34 +1493,7 @@ export function flushPendingFinal(
   return true;
 }
 
-/**
- * Pushes one child signal into the owning session as a Pi custom message.
- * This is the whole replacement for the deleted `ws-agent-wait` harvest: the
- * lead ends its turn and is woken by these instead of blocking.
- *
- * `triggerTurn: true` is what makes an IDLE lead act on the signal at once
- * rather than leaving it queued until the owner's next prompt (the same
- * lesson `ask.ts`'s `injectDiscussionSummary` already encodes). `deliverAs`
- * is per-family: `"steer"` for the two things a lead must act on mid-turn (a
- * blocked approval, a headless question), `"followUp"` for everything else.
- *
- * A `followUp` push that arrives while the owning session is MID-TURN is not
- * sent now — it is held (`heldPushQueue`) and released on that turn's
- * `agent_settled` with its status line computed at release time. See
- * `heldPushQueue` for why: Pi's own queue would deliver the message later but
- * with an arrival-time status line, which read stale by the time the lead saw
- * it. `steer` pushes are normally never held — their whole point is to
- * interrupt — with one 260906 exception: while `leadCompactingRef.current` is
- * true, a `steer` push is held too, since `ctx.compact()`'s
- * `sendCustomMessage` path bypasses Pi's own `prompt()` compaction guard
- * entirely (there is no live turn to interrupt into during a compaction), and
- * is released once `goal-loop.ts`'s `releaseAfterCompaction` runs. A `steer`
- * push mid-turn (not compacting) still bypasses the hold as before.
- *
- * Guarded on `shouldPushToLead` and on `pi` being present (a `sendToAgent`
- * resume path may run without one), so a worker-role process and an
- * un-threaded call site are both silent no-ops rather than errors.
- */
+/** Admit a family push through the shared FIFO. Idle, compacting, pending-start, and ordinary busy followUps are held; normal busy steers still interrupt. Idle wakes use sendUserMessage so before_agent_start composes the ws block for the run. */
 export function pushToLead(
   pi: ExtensionAPI | undefined,
   registry: RpcAgentRegistry | undefined,
@@ -1560,14 +1502,8 @@ export function pushToLead(
   payload: Record<string, unknown>,
   deliverAs: PushDeliverAs,
 ): void {
-  if (!pi || !shouldPushToLead()) return;
-  const holdFollowUp = deliverAs === "followUp" && !isOwningAgentIdle();
-  const holdSteerWhileCompacting = deliverAs === "steer" && leadCompactingRef.current;
-  if (holdFollowUp || holdSteerWhileCompacting) {
-    heldPushQueue.push({ kind: "push", registry, record, family, payload, deliverAs });
-    return;
-  }
-  sendPush(pi, registry, record, family, payload, deliverAs);
+  if (!pi || !shouldPushToLead() || !leadIdleRef.current) return;
+  admitPush(pi, { kind: "push", registry, record, family, payload, deliverAs });
 }
 
 /**
@@ -1762,6 +1698,10 @@ export interface RpcSpawnCtx {
   cwd: string;
   /** `provider/id`, forwarded from the calling tool-execute ctx.model, or undefined to inherit pi's own default. */
   inheritModel?: string;
+  /** Current execute/command context's live getAll + configured-auth catalog. */
+  catalog: readonly ModelCatalogEntry[];
+  /** UI-only adapter; never a lifecycle push. */
+  notifyTierWarning?: (warning: string) => void;
   /** Bridge's sanitized `ws__*` registered tool names, for the `full-worker` group. */
   wsToolNames: readonly string[];
   /** ws-mcp client used to resolve `model_name` through `config.resolve_agent` (`resolveModelForAliasViaWsMcp`), read fresh per spawn. */
@@ -2396,7 +2336,7 @@ export async function spawnAgent(
   registry: RpcAgentRegistry,
   ctx: RpcSpawnCtx,
   params: SpawnAgentParams,
-): Promise<{ agent_id: string; alias?: string; evicted?: string }> {
+): Promise<{ agent_id: string; alias?: string; evicted?: string; warning?: string }> {
   // Guard clauses first, before any side effect (mkdtempSync/randomUUID) and
   // before `registry.set` — a rejected spawn leaves no trace, including on
   // the previous alias holder (see `runSpawnGuards`'s doc comment).
@@ -2409,7 +2349,9 @@ export async function spawnAgent(
   const sessionDir = mkdtempSync(join(tmpdir(), "ws-pi-agent-"));
   const sessionPath = join(sessionDir, "session.jsonl");
 
-  const { model: modelBase, effort: resolvedEffort } = await resolveModelForAliasViaWsMcp(ctx.client, params.modelName, ctx.inheritModel);
+  const { model: modelBase, effort: resolvedEffort, rejected } = await resolveModelForAliasViaWsMcp(ctx.client, params.modelName, ctx.inheritModel, ctx.catalog);
+  const warning = rejected ? formatTierWarning(params.modelName!, rejected, ctx.inheritModel, ctx.catalog.length === 0) : undefined;
+  if (warning) ctx.notifyTierWarning?.(warning);
 
   const toolGroup: ToolGroup = resolveSpawnToolGroup(ctx.toolGroup);
   const tools = ctx.explicitTools ?? resolveTools(toolGroup, ctx.wsToolNames);
@@ -2420,6 +2362,7 @@ export async function spawnAgent(
     sessionPath,
     systemPromptPath: params.systemPromptPath,
     modelBase,
+    ...(warning ? { warning } : {}),
     // Explicit caller effort always wins over the config-resolved one
     // (effectiveModelEffort's `||` semantics — an empty-string caller value
     // is treated as absent). This is the single fold point: both the
@@ -2487,7 +2430,7 @@ export async function spawnAgent(
   // 260905 (live-agent widget ticket): a brand-new registry member, live and
   // running from its initial prompt — the widget's first sighting of it.
   triggerAgentWidgetRefresh();
-  return { agent_id: agentId, alias: record.alias, evicted: eviction.evictedLabel };
+  return { agent_id: agentId, alias: record.alias, evicted: eviction.evictedLabel, ...(warning ? { warning } : {}) };
 }
 
 /**
@@ -2677,7 +2620,7 @@ async function harvestLastMessage(record: RpcAgentRecord): Promise<string | unde
 export function listAgents(
   registry: RpcAgentRegistry,
   opts?: { includePrompt?: boolean },
-): Array<{ agent_id: string; status: AgentStatus; alias?: string; title?: string; model?: string; last_report_at?: string; prompt?: string }> {
+): Array<{ agent_id: string; status: AgentStatus; alias?: string; title?: string; model?: string; last_report_at?: string; prompt?: string; warning?: string }> {
   return [...registry.entries()].map(([agentId, record]) => {
     const lastReport = record.reportLog[record.reportLog.length - 1];
     const lastReportAt = lastReport ? new Date(lastReport.at).toISOString() : record.lastReportAtOverride;
@@ -2688,6 +2631,7 @@ export function listAgents(
       ...(record.alias ? { alias: record.alias } : {}),
       ...(record.title ? { title: record.title } : {}),
       ...(model ? { model } : {}),
+      ...(record.warning ? { warning: record.warning } : {}),
       ...(lastReportAt ? { last_report_at: lastReportAt } : {}),
       ...(opts?.includePrompt && record.prompt ? { prompt: record.prompt } : {}),
     };
@@ -2865,6 +2809,8 @@ export function registerAgentTools(
    * so this callback simply never fires for them.
    */
   onApprovalPending?: (record: RpcAgentRecord) => void,
+  /** Narrow runner seam: worker exploration tests must never execute the test file as a child Pi. */
+  runExploreLeaf: typeof exploreLeaf = exploreLeaf,
 ): AgentToolsHandle {
   const rpcRegistry: RpcAgentRegistry = new Map();
   const exploreRegistry: AgentRegistry = new Map();
@@ -2887,9 +2833,13 @@ export function registerAgentTools(
    * applies without restarting Pi, matching bridge.ts's advisory's
    * no-caching choice.
    */
-  async function resolveExploreModel(toolCtx: unknown): Promise<string | undefined> {
-    const { model } = await resolveModelForAliasViaWsMcp(bridge.client, "small", inheritModelFromToolCtx(toolCtx));
-    return model;
+  async function resolveExploreModel(toolCtx: unknown): Promise<{ model?: string; warning?: string }> {
+    const inheritModel = inheritModelFromToolCtx(toolCtx);
+    const catalog = modelCatalogFromToolCtx(toolCtx);
+    const { model, rejected } = await resolveModelForAliasViaWsMcp(bridge.client, "small", inheritModel, catalog);
+    const warning = rejected ? formatTierWarning("small", rejected, inheritModel, catalog.length === 0) : undefined;
+    if (warning) tierWarningNotifierFromToolCtx(toolCtx)?.(warning);
+    return { model, ...(warning ? { warning } : {}) };
   }
 
   /**
@@ -2917,7 +2867,7 @@ export function registerAgentTools(
     name: "ws-agent-spawn",
     label: "ws-agent-spawn",
     description:
-      "Spawn a persistent RPC-backed pi subagent from an already-rendered system-prompt file (e.g. via ws/playbook.render). Returns {agent_id, alias?, evicted?} immediately after the initial prompt is sent. Do not wait for it: end your turn, and its reports, questions and completion arrive on their own as ws-agent-* messages carrying a running-count status line.",
+      "Spawn a persistent RPC-backed pi subagent from an already-rendered system-prompt file (e.g. via ws/playbook.render). Returns {agent_id, alias?, evicted?, warning?} immediately after the initial prompt is sent. Do not wait for it: end your turn, and its reports, questions and completion arrive on their own as ws-agent-* messages carrying a running-count status line.",
     parameters: {
       type: "object",
       properties: {
@@ -2963,6 +2913,8 @@ export function registerAgentTools(
           pi,
           cwd: sessionCtx.cwd,
           inheritModel: inheritModelFromToolCtx(toolCtx),
+          catalog: modelCatalogFromToolCtx(toolCtx),
+          notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx),
           wsToolNames: bridge.wsToolNames,
           client: bridge.client,
           onApprovalPending,
@@ -3016,7 +2968,7 @@ export function registerAgentTools(
     name: "ws-agent-list",
     label: "ws-agent-list",
     description:
-      "List every tracked agent_id, its alias/title (when set), status (running/idle/dormant — most agents park to dormant shortly after settling, so idle is transient), model (the model the agent runs on; an inheriting child shows its parent's model), and last_report_at (ISO, absent if it has never reported). Use it to check on a quiet agent — there is no wait tool; every report, question, approval request and completion is pushed to you as a ws-agent-* message on its own.",
+      "List every tracked agent_id, its alias/title (when set), status (running/idle/dormant — most agents park to dormant shortly after settling, so idle is transient), model (the model the agent runs on; an inheriting child shows its parent's model), optional spawn-time warning, and last_report_at (ISO, absent if it has never reported). Use it to check on a quiet agent — there is no wait tool; every report, question, approval request and completion is pushed to you as a ws-agent-* message on its own.",
     parameters: {
       type: "object",
       properties: {
@@ -3118,8 +3070,8 @@ export function registerAgentTools(
     // the dropped `async` param (see `ExploreParams`). Both branches share the
     // same `{query}`-only parameter schema.
     description: isLeadRole
-      ? "Spawn a one-shot, read-only exploration child (recon tool group, no continuation) as an RPC-backed subagent. Returns {agent_id, alias} immediately after the initial prompt is sent. Do not wait for it: end your turn — its answer arrives later on the settle push's last_message."
-      : "One-shot read-only exploration leaf: answers a single scoped question via the explore playbook with the recon tool group, no session persisted, no continuation.",
+      ? "Spawn a one-shot, read-only exploration child (recon tool group, no continuation) as an RPC-backed subagent. Returns {agent_id, alias, warning?} immediately after the initial prompt is sent. Do not wait for it: end your turn — its answer arrives later on the settle push's last_message."
+      : "One-shot read-only exploration leaf: answers a single scoped question via the explore playbook with the recon tool group, no session persisted, no continuation. Result includes an optional spawn-time warning when its tier is rejected.",
     parameters: {
       type: "object",
       properties: {
@@ -3155,6 +3107,8 @@ export function registerAgentTools(
             pi,
             cwd: sessionCtx.cwd,
             inheritModel: inheritModelFromToolCtx(toolCtx),
+            catalog: modelCatalogFromToolCtx(toolCtx),
+            notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx),
             wsToolNames: bridge.wsToolNames,
             client: bridge.client,
             toolGroup: "recon",
@@ -3175,20 +3129,21 @@ export function registerAgentTools(
             title: deriveExploreTitle(p.query),
           },
         );
-        // Literal {agent_id, alias} per the ticket's stated return contract —
+        // Keep the shared spawn-time warning without another resolution/notification.
         // `evicted` is not surfaced here (an explore preset carries no alias
         // collision risk worth reporting the way a caller-aliased
         // `ws-agent-spawn` does).
-        return { content: [{ type: "text", text: JSON.stringify({ agent_id: result.agent_id, alias: result.alias }) }] };
+        return { content: [{ type: "text", text: JSON.stringify({ agent_id: result.agent_id, alias: result.alias, ...(result.warning ? { warning: result.warning } : {}) }) }] };
       }
 
-      const result = await exploreLeaf(
+      const { model, warning } = await resolveExploreModel(toolCtx);
+      const result = await runExploreLeaf(
         bridge.client,
         exploreRegistry,
-        { sessionKey: bridge.defaultSessionKeyRef.current ?? "", cwd: sessionCtx.cwd, model: await resolveExploreModel(toolCtx) },
+        { sessionKey: bridge.defaultSessionKeyRef.current ?? "", cwd: sessionCtx.cwd, model },
         p,
       );
-      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      return { content: [{ type: "text", text: JSON.stringify({ ...result, ...(warning ? { warning } : {}) }) }] };
     },
   });
 

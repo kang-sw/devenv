@@ -57,9 +57,26 @@ import {
   armForkRoleWiring,
   buildForkSpawnCtx,
 } from "../src/fork.ts";
-import { applyRpcEvent, attachEventListener, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { leadIdleRef, registerPushFlush, applyRpcEvent, attachEventListener, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import type { BridgeHandle } from "../src/bridge.ts";
 import type { ExtensionAPI, RpcClient } from "@earendil-works/pi-coding-agent";
+
+// Phase 2: these payload-focused fixtures model a user wake followed by
+// confirmed streaming start, rather than the retired undefined-idle fallback.
+function initializePushLifecycle(pi: ExtensionAPI): void {
+  let idle = true;
+  leadIdleRef.current = () => idle;
+  const handlers = new Map<string, () => void>();
+  pi.on = ((event: string, handler: () => void) => handlers.set(event, handler)) as ExtensionAPI["on"];
+  pi.sendUserMessage = (content, options) => {
+    assert.match(String(content), /^\d+ ws messages waiting;[^\n]+$/);
+    assert.deepEqual(options, { deliverAs: "followUp" });
+    idle = false;
+    handlers.get("agent_start")?.();
+    idle = true;
+  };
+  registerPushFlush(pi, { delayMs: () => 10 });
+}
 
 describe("FORK_TOOL_NAME / FORK_EXCLUDED_TOOL_NAMES", () => {
   test("FORK_TOOL_NAME is the literal ws-fork", () => {
@@ -379,10 +396,8 @@ describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2, 260
       sendMessage(message: { customType?: string; details?: Record<string, unknown> }, options?: { deliverAs?: string; triggerTurn?: boolean }) {
         pushes.push({ ...message, deliverAs: options?.deliverAs, triggerTurn: options?.triggerTurn });
       },
-      sendUserMessage() {
-        throw new Error("wireAntiBleedLoop must push custom messages, never a bare user message");
-      },
     } as unknown as ExtensionAPI;
+    initializePushLifecycle(pi);
     // Two extra live siblings so the status line this loop's registry argument
     // produces is distinguishable from the absent line an empty/wrong registry
     // would render (review relay #1, I4).
@@ -651,10 +666,13 @@ describe("buildForkSpawnCtx (the ws-fork push channel)", () => {
     client: { callTool: async () => ({ content: [] }) },
   } as unknown as BridgeHandle;
   const pi = { sendMessage() {} } as unknown as ExtensionAPI;
+  const catalog = [{ provider: "p", id: "m", hasAuth: true }];
+  const notifyTierWarning = () => {};
 
   test("carries the spawning session's own pi — without it a fork has no report channel at all", () => {
     const ctx = buildForkSpawnCtx(pi, bridge, { cwd: "/repo" }, {
       forkFrom: "/tmp/lead-session.jsonl",
+      catalog, notifyTierWarning,
       explicitTools: "read,grep",
     });
     assert.equal(ctx.pi, pi, "a ws-fork spawn must push into the session that spawned it");
@@ -663,9 +681,12 @@ describe("buildForkSpawnCtx (the ws-fork push channel)", () => {
   test("carries the fork spawn shape: --fork source, explicit tools, parent session key, spawnRole fork, and the bridge's client", () => {
     const ctx = buildForkSpawnCtx(pi, bridge, { cwd: "/repo" }, {
       forkFrom: "/tmp/lead-session.jsonl",
+      catalog, notifyTierWarning,
       explicitTools: "read,grep",
       inheritModel: "openrouter/some-model",
     });
+    assert.equal(ctx.catalog, catalog);
+    assert.equal(ctx.notifyTierWarning, notifyTierWarning);
     assert.equal(ctx.forkFrom, "/tmp/lead-session.jsonl");
     assert.equal(ctx.explicitTools, "read,grep");
     assert.equal(ctx.parentSessionKey, "amber-otter-canyon");
@@ -679,8 +700,10 @@ describe("buildForkSpawnCtx (the ws-fork push channel)", () => {
   test("C1: a record wired through that ctx's pi pushes ws-agent-report when the fork's own final turn ends", async () => {
     const sent: Array<{ customType?: string; details?: Record<string, unknown> }> = [];
     const pushPi = { sendMessage: (m: { customType?: string; details?: Record<string, unknown> }) => void sent.push(m) } as unknown as ExtensionAPI;
+    initializePushLifecycle(pushPi);
     const ctx = buildForkSpawnCtx(pushPi, bridge, { cwd: "/repo" }, {
       forkFrom: "/tmp/lead-session.jsonl",
+      catalog, notifyTierWarning,
       explicitTools: "read",
     });
 
