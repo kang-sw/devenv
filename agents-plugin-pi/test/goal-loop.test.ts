@@ -539,22 +539,29 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     return { api: api as unknown as ExtensionAPI, handlers, commands, tools, sentUserMessages };
   }
 
-  /** A duck-typed `ExtensionContext` with a no-op `compact` — tests override it to capture the lever's callbacks. */
+  /**
+   * A duck-typed `ExtensionContext` with a no-op `compact` — tests override
+   * it to capture the lever's callbacks. `statusCalls` records every
+   * `setStatus` call in order (review relay #1, Tests: previously a no-op
+   * stub, so nothing could assert on the "waiting for compaction" footer).
+   */
   function fakeCtx(isIdle: () => boolean = () => true): {
     ctx: ExtensionContext;
     notifications: Array<{ message: string; level: string }>;
+    statusCalls: Array<{ key: string; value: string | undefined }>;
   } {
     const notifications: Array<{ message: string; level: string }> = [];
+    const statusCalls: Array<{ key: string; value: string | undefined }> = [];
     const ctx = {
       ui: {
         notify: (message: string, level: string) => notifications.push({ message, level }),
-        setStatus: () => {},
+        setStatus: (key: string, value: string | undefined) => statusCalls.push({ key, value }),
       },
       isIdle,
       getContextUsage: () => undefined,
       compact: () => {},
     };
-    return { ctx: ctx as unknown as ExtensionContext, notifications };
+    return { ctx: ctx as unknown as ExtensionContext, notifications, statusCalls };
   }
 
   test("release runs once when both the lever's onComplete and session_compact arrive", async () => {
@@ -570,7 +577,11 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       compactCall = opts as never;
     };
     await pi.tools.get("goal-compact-and-continue")!.execute("call-1", { carry_forward: "phase 1 done" }, undefined, undefined, ctx);
-    assert.equal(leadCompactingRef.current, true, "set before ctx.compact is even called");
+    // Proves the lever's own tool-call handler sets the flag as one of its
+    // synchronous effects (alongside calling the fake's no-op `ctx.compact`)
+    // — not a claim about ordering relative to the real `ctx.compact`, which
+    // this fake does not model.
+    assert.equal(leadCompactingRef.current, true, "set by the lever's tool call before it returns");
 
     compactCall!.onComplete!();
     assert.equal(leadCompactingRef.current, false);
@@ -695,5 +706,129 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     const settled = fakeCtx(() => true).ctx;
     pi.handlers.get("agent_settled")!({}, settled);
     assert.equal(pi.sentUserMessages.length, 2, "the ordinary reinject reminder fires on the next settle");
+  });
+
+  test("260906 review relay #1 (Tests): a settle that fires mid-compaction sets the waiting-for-compaction footer", async () => {
+    const pi = fakePi();
+    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath });
+    const { ctx } = fakeCtx();
+
+    await pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed)
+
+    // Simulate a compaction already in flight when the settle lands — this
+    // is the general shape both the lever's abort and Pi's own threshold
+    // auto-compaction produce, without needing to drive either end-to-end.
+    leadCompactingRef.current = true;
+    const { ctx: settledCtx, statusCalls } = fakeCtx();
+    pi.handlers.get("agent_settled")!({}, settledCtx);
+
+    assert.equal(pi.sentUserMessages.length, 1, "no reminder — this settle's outcome is swallowed, not sent");
+    assert.deepEqual(
+      statusCalls,
+      [{ key: "ws-goal-loop-yield", value: "Goal loop: waiting for compaction" }],
+      "the footer is set exactly once, with the waiting-for-compaction text",
+    );
+  });
+
+  test("260906 review relay #1 (Tests): release flushes held pushes before sending the lever's re-armed reminder", async () => {
+    const pi = fakePi();
+    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath });
+    const { ctx } = fakeCtx();
+
+    await pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed)
+    let compactCall: { onComplete?: () => void } | undefined;
+    (ctx as unknown as { compact: (opts: unknown) => void }).compact = (opts: unknown) => {
+      compactCall = opts as never;
+    };
+    await pi.tools.get("goal-compact-and-continue")!.execute("call-1", { carry_forward: "x" }, undefined, undefined, ctx);
+    assert.equal(leadCompactingRef.current, true);
+
+    const order: string[] = [];
+    heldPushQueue.push({ kind: "raw", send: () => order.push("flush") });
+    const originalSend = (pi.api as unknown as { sendUserMessage: (content: unknown, options?: unknown) => void }).sendUserMessage;
+    (pi.api as unknown as { sendUserMessage: (content: unknown, options?: unknown) => void }).sendUserMessage = (content, options) => {
+      order.push("reminder");
+      originalSend(content, options);
+    };
+
+    compactCall!.onComplete!();
+
+    assert.deepEqual(order, ["flush", "reminder"], "held pushes flush before the pending reminder is sent");
+    assert.equal(pi.sentUserMessages.length, 2, "the armed announcement, then the re-armed reminder");
+  });
+
+  test("260906 review relay #1 (Critical): a threshold auto-compaction's swallowed settle is replayed by the deferred release — exactly one ordinary reminder, streak advanced", async () => {
+    const pi = fakePi();
+    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath });
+    const { ctx } = fakeCtx();
+
+    await pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed), streak 0
+
+    // Pi's own threshold auto-compaction: session_before_compact sets the
+    // flag defensively (no lever call, so pendingRearm stays false), then
+    // session_compact fires, then — same microtask turn, before the
+    // setImmediate release fires — agent_settled lands with the flag still
+    // true (the Critical finding's exact sequence).
+    pi.handlers.get("session_before_compact")!({ reason: "threshold" }, ctx);
+    assert.equal(leadCompactingRef.current, true);
+    pi.handlers.get("session_compact")!({ reason: "threshold" }, ctx);
+
+    const { ctx: settledCtx } = fakeCtx();
+    pi.handlers.get("agent_settled")!({}, settledCtx);
+    assert.equal(pi.sentUserMessages.length, 1, "the settle's own outcome is swallowed, not sent yet");
+    assert.equal(leadCompactingRef.current, true, "still marked compacting until the deferred release runs");
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(leadCompactingRef.current, false);
+    assert.equal(pi.sentUserMessages.length, 2, "the deferred release replayed the swallowed settle as one ordinary reminder");
+    const reminder = pi.sentUserMessages[1]!.content as string;
+    assert.doesNotMatch(reminder, /Compaction failed/, "an ordinary reinject, not a lever failure reminder");
+
+    // Streak advanced: a second replayed settle force-stops at threshold 2.
+    pi.handlers.get("session_before_compact")!({ reason: "threshold" }, ctx);
+    pi.handlers.get("session_compact")!({ reason: "threshold" }, ctx);
+    pi.handlers.get("agent_settled")!({}, fakeCtx().ctx);
+    await new Promise((resolve) => setImmediate(resolve));
+    // DEFAULT_RUNAWAY_THRESHOLD is well above 2, so this should still reinject,
+    // not force-stop — this leg only proves the streak moved forward at all.
+    assert.equal(pi.sentUserMessages.length, 3, "the streak advanced past the first replayed reinject rather than resetting");
+  });
+
+  test("260906 review relay #1 (Critical): the lever's own pendingRearm wins over a same-settle swallow marker — exactly one reminder, both markers consumed", async () => {
+    const pi = fakePi();
+    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath });
+    const { ctx } = fakeCtx();
+
+    await pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed)
+
+    // The normal lever flow: ctx.compact()'s internal abort produces its own
+    // "waiting" settle for the invoking turn (setting the swallow marker)
+    // before the lever's onComplete/session_compact ever run — both
+    // pendingRearm (from the lever call below) and the swallow marker are
+    // true by the time release runs.
+    let compactCall: { onComplete?: () => void } | undefined;
+    (ctx as unknown as { compact: (opts: unknown) => void }).compact = (opts: unknown) => {
+      compactCall = opts as never;
+    };
+    await pi.tools.get("goal-compact-and-continue")!.execute("call-1", { carry_forward: "x" }, undefined, undefined, ctx);
+    assert.equal(leadCompactingRef.current, true);
+
+    pi.handlers.get("agent_settled")!({}, fakeCtx().ctx);
+    assert.equal(pi.sentUserMessages.length, 1, "the invoking turn's own settle is swallowed, not sent");
+
+    compactCall!.onComplete!();
+
+    assert.equal(pi.sentUserMessages.length, 2, "exactly one reminder — the lever's, not a second replayed settle");
+    const reminder = pi.sentUserMessages[1]!.content as string;
+    assert.doesNotMatch(reminder, /Compaction failed/);
+
+    // Both markers are consumed: a later non-lever compaction sends no
+    // reminder at all (no stale pendingRearm), and a later ordinary settle
+    // does not replay a second time (no stale swallow marker).
+    pi.handlers.get("session_before_compact")!({ reason: "manual" }, ctx);
+    pi.handlers.get("session_compact")!({ reason: "manual" }, ctx);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(pi.sentUserMessages.length, 2, "no stale pendingRearm leaking into this unrelated compaction");
   });
 });

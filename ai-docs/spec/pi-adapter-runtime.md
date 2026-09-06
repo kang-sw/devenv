@@ -1154,15 +1154,20 @@ this surface.
   lead, and that turn's settle re-evaluates the loop normally. Idle, dormant, or stopped children,
   a child whose `final` already landed this turn, and thread-bound respondents
   do not hold the loop. The footer's agent count is not part of this entry.
-- **Waiting for compaction (260906 Phase 1).** While armed, a settle that
-  fires while a compaction is in flight (checked before the yield branch
-  above — compaction dominates) neither re-injects the reminder nor advances
-  the runaway streak, mirroring the yield outcome exactly: goal state passes
-  through unchanged and the footer shows `Goal loop: waiting for compaction`
-  under the same status key until the next lead turn starts. This settle is
-  the one `ctx.compact()`'s own internal abort produces for the turn it just
-  cut off, not an ordinary turn end; the "Model-driven compaction" entry
-  below owns what re-arms the loop once the compaction actually finishes.
+- **Waiting for compaction (260906 Phase 1; swallow marker added in review
+  relay #1).** While armed, a settle that fires while a compaction is in
+  flight (checked before the yield branch above — compaction dominates)
+  neither re-injects the reminder nor advances the runaway streak, mirroring
+  the yield outcome exactly: goal state passes through unchanged and the
+  footer shows `Goal loop: waiting for compaction` under the same status key
+  until the next lead turn starts. This settle can be either the one
+  `ctx.compact()`'s own internal abort produces for the turn it just cut off,
+  or Pi's own threshold/overflow auto-compaction ending a turn outright with
+  nothing queued to follow it — in both cases this outcome is recorded as a
+  SWALLOWED settle so the "Model-driven compaction" entry below can replay
+  it once the compaction actually finishes, instead of the loop stalling
+  forever because no further `agent_settled`/`agent_start` was ever going to
+  fire on its own.
 - **Lead-session-only.** The goal loop runs on the lead session only. Every
   spawned child (persistent RPC worker, one-shot explore leaf, or fork) is
   launched with a `WS_PI_SPAWN_ROLE` environment marker carrying its role, and
@@ -1186,26 +1191,33 @@ auto-compaction remains the last-resort backstop.
   evidence of the request, since the `Compaction completed` notification
   fires outside the model's view — reads `Compaction requested; the
   conversation will resume from a summary carrying: <carry_forward>`.
-- **Re-arming after compaction (260906 Phase 1).** A manual `ctx.compact`
-  aborts the invoking turn immediately — well before Pi's own compaction
-  bookkeeping finishes — so nothing may send a prompt from inside a
-  `session_*compact*` handler without racing that unwind. Instead, an
-  idempotent release routine runs once compaction actually finishes,
-  deferred past Pi's own compaction flag: it flushes every push held during
-  the compaction window (see "Child→lead report channel" above) and, only
-  for a lever-originated compaction whose owning session is idle at that
-  instant, sends the pending goal reminder as a fresh turn — folding a
-  compaction failure reason into it when present — which is what re-enters
-  the goal loop, not that turn's own settle (which reports `waiting`, not
-  `reinject`, per the previous entry). A non-lever compaction (owner-typed
-  `/compact`, Pi's own threshold/overflow auto-compaction) still flushes held
-  pushes through the same routine but never synthesizes a reminder — the
-  goal loop stays observe-only there, and its own next ordinary settle
-  produces the next reminder. **Accepted race window:** an owner who types
-  `/compact` directly (bypassing the lever) can still race a reminder that
-  was already in flight before the compaction started — this window is
-  accepted as-is, not intercepted; only the lever's own compaction is
-  guaranteed race-free by construction.
+- **Re-arming after compaction (260906 Phase 1; swallowed-settle replay added
+  in review relay #1).** A manual `ctx.compact` aborts the invoking turn
+  immediately — well before Pi's own compaction bookkeeping finishes — so
+  nothing may send a prompt from inside a `session_*compact*` handler
+  without racing that unwind. Instead, an idempotent release routine runs
+  once compaction actually finishes, deferred past Pi's own compaction flag:
+  it flushes every push held during the compaction window (see
+  "Child→lead report channel" above), then, once the owning session is idle
+  again, does exactly one of two things for the settle that got swallowed
+  while this compaction was in flight (per the previous entry). For a
+  lever-originated compaction it sends the pending goal reminder as a fresh
+  turn — folding a compaction failure reason into it when present. For any
+  other compaction whose settle was swallowed (owner-typed `/compact`, or Pi's
+  own threshold/overflow auto-compaction ending a turn outright with nothing
+  queued to follow it) it instead replays that settle: the same
+  `decideOnSettle` reducer, streak accounting, and force-stop path as a live
+  `agent_settled`, against a freshly-read context percent — this is what lets
+  an armed goal recover from an auto-compaction that would otherwise have
+  left nothing to ever re-evaluate the loop again. When a settle's outcome
+  qualifies for both (the lever's own `ctx.compact()` call produces a
+  swallowed settle for its own invoking turn), the lever reminder wins and
+  the swallow is treated as consumed too — exactly one reminder is sent for
+  that settle. **Accepted race window:** an owner who types `/compact`
+  directly (bypassing the lever) can still race a reminder that was already
+  in flight before the compaction started — this window is accepted as-is,
+  not intercepted; only the lever's own compaction is guaranteed race-free by
+  construction.
 - **Advisory surfacing, not a gate.** While armed, the reminder turn carries two
   pieces of information for the model to weigh: the current context usage as a
   percent (from `getContextUsage().percent`, or derived from `tokens` against the

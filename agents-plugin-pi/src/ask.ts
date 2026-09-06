@@ -932,6 +932,19 @@ export function detachForkRaisedThread(handle: ThreadRegistryHandle, rpcRegistry
  * dormant transition / respondent stop / persistence below runs immediately
  * either way — those side effects are not part of the race being fixed and
  * delaying them would add no safety.
+ *
+ * 260906 review relay #1 (Minor): the ticket only asked for a hold "while
+ * [the compaction flag] is set", but the predicate used here is the general
+ * `isOwningAgentIdle()` (mid-turn OR compacting), matching `pushToLead`'s own
+ * `followUp` hold rather than a compaction-only check. This is a deliberate,
+ * scope-widening choice (the plan's Implementation step 9 flagged it as an
+ * open call and recommended it): an ordinary MID-TURN `/done` is now deferred
+ * to the adapter's post-settle flush and delivered as a fresh turn, instead
+ * of racing straight into Pi's own in-run `agent.followUp()` queue as it did
+ * before this ticket. Still safe (the message is never lost, only delayed to
+ * the same turn boundary every other held `followUp` already uses), but it
+ * changes this call site's turn-boundary behavior beyond the compaction race
+ * this ticket set out to fix.
  */
 export function injectDiscussionSummary(
   pi: ExtensionAPI,

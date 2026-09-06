@@ -294,7 +294,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     },
   });
 
-  registerGoalLoop(pi, { goalLoopConfigPath, rpcRegistryRef });
+  const goalLoopHandle = registerGoalLoop(pi, { goalLoopConfigPath, rpcRegistryRef });
   registerLeadBootstrap(pi, wsBlockBaseRef, skillsBlockCacheRef);
   // 260906 Phase 1: declarative/global, same placement as registerFork/
   // registerAsk above it — a fork child re-runs session_start too and needs
@@ -530,6 +530,13 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // written above carries child IDENTITIES forward; reports are not
     // persisted (see spawner.ts's heldPushQueue).
     heldPushQueue.length = 0;
+    // Review relay #1 (Minor, 260906): reset the compaction-in-flight flag
+    // and both of goal-loop.ts's private markers beside the held-push queue
+    // they gate — otherwise a shutdown/`/reload` that lands mid-compaction
+    // leaves `leadCompactingRef` stuck `true` into the replacement session,
+    // where every `followUp` push and `injectDiscussionSummary` would hold
+    // forever with nothing left to release them.
+    goalLoopHandle.resetCompactionStateForShutdown();
     leadIdleRef.current = undefined;
     // 260905 (live-agent widget ticket): stop the elapsed timer and clear the
     // widget/status segment (mirrors `leadIdleRef.current = undefined` above)
