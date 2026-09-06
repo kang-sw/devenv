@@ -1349,19 +1349,36 @@ interface HeldRawSend {
 export const heldPushQueue: Array<HeldPush | HeldRawSend> = [];
 
 /**
+ * Composes the `pi.sendMessage`/`sendCustomMessage` options for an
+ * adapter-initiated lead turn start, reading `leadReminderStartPendingRef`
+ * FRESH at call time: `triggerTurn` is `false` while the ref is `true` — the
+ * boundary guard against colliding with the goal-loop's settle-timer
+ * reminder mid-await in its own `prompt()` call (`sendUserMessage` has no
+ * `triggerTurn` option of its own to race against). With the ref set, the
+ * send instead lands via Pi's `_appendCustomMessage` (a synchronous,
+ * turn-less append onto `agent.state.messages`) and is picked up once the
+ * reminder's own turn actually starts, rather than throwing "Agent is
+ * already processing…" or silently dropping.
+ *
+ * 260906 Phase 1 review relay #1 (Important #2): extracted so every
+ * adapter-initiated send that can start a lead turn goes through the same
+ * guard, not just `sendPush`'s family-shaped pushes — `ask.ts`'s
+ * `injectDiscussionSummary` also calls this, both for its immediate send and
+ * inside its held `kind: "raw"` closure, so a closure built while the flag
+ * was clear still reads the flag's value AT FLUSH TIME rather than a stale
+ * snapshot captured when the send was held.
+ */
+export function composeLeadTurnStartOptions(deliverAs: PushDeliverAs): { deliverAs: PushDeliverAs; triggerTurn: boolean } {
+  return { deliverAs, triggerTurn: !leadReminderStartPendingRef.current };
+}
+
+/**
  * Builds and sends one push immediately, computing its status line right
  * now.
  *
  * 260906 Phase 1 (settle-timer reminder race ticket): `triggerTurn` is
- * `false` while `leadReminderStartPendingRef.current` is `true` — a boundary
- * guard against this push's own `sendMessage(..., { triggerTurn: true })`
- * colliding with the goal-loop's settle-timer reminder mid-await in its own
- * `prompt()` call (`sendUserMessage` has no `triggerTurn` option of its own
- * to race against). With the ref set, this push instead lands via Pi's
- * `_appendCustomMessage` (a synchronous, turn-less append onto
- * `agent.state.messages`) and is picked up once the reminder's own turn
- * actually starts, rather than throwing "Agent is already processing…" or
- * silently dropping.
+ * composed by `composeLeadTurnStartOptions` — see its doc comment for the
+ * boundary-guard rationale.
  */
 function sendPush(
   pi: ExtensionAPI,
@@ -1388,7 +1405,7 @@ function sendPush(
         display: true,
         details: details as never,
       },
-      { deliverAs, triggerTurn: !leadReminderStartPendingRef.current },
+      composeLeadTurnStartOptions(deliverAs),
     );
   } catch {
     // Best effort: a push that cannot be delivered (a torn-down session, a

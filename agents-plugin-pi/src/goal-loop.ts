@@ -541,6 +541,30 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
   }
 
   /**
+   * Runs a timer callback body inside a try/catch that reports (best effort)
+   * via `ctx.ui.notify` and never throws (260906 Phase 1 review relay #1,
+   * Minor). Unlike an extension event handler, a `setTimeout` callback is not
+   * caught by Pi's own runner error boundary, and Pi's interactive mode
+   * installs an `uncaughtException` listener that calls `process.exit(1)` —
+   * so an unhandled throw here (most realistically a stale captured
+   * `pi`/`ctx` failing `assertActive()` after a reload/session replacement
+   * that beat `session_shutdown`'s cancel) would otherwise crash the whole
+   * process instead of, at worst, leaving the goal loop stalled.
+   */
+  function runTimerCallback(ctx: ExtensionContext, label: string, fn: () => void): void {
+    try {
+      fn();
+    } catch (error) {
+      try {
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.ui.notify(`Goal loop: internal error in ${label}: ${message}`, "error");
+      } catch {
+        // best effort — never let the report itself throw.
+      }
+    }
+  }
+
+  /**
    * Arms (re-arming cancels any prior pending timer first) the settle timer
    * that will re-evaluate the loop after `settle_delay_ms` (260906 Phase 1).
    * Sets the `Goal loop: settling` footer unconditionally — every caller
@@ -549,9 +573,20 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
    */
   function armSettleTimer(ctx: ExtensionContext): void {
     cancelSettleTimer();
+    // 260906 Phase 1 review relay #1 (Minor): a live reminder-fallback timer
+    // has nothing left to guard once the settle timer is (re-)armed — this
+    // path is reached both from a live `agent_settled` (which already cleared
+    // it) and from the fallback timeout's own retry arm (which is about to
+    // become stale the instant this new settle timer takes over) and from
+    // `releaseAfterCompaction` (which could otherwise arm a fresh settle
+    // timer while an unrelated reminder fallback from an earlier cycle was
+    // still ticking). Cancelling here, alongside `fireReminder`'s own cancel
+    // below, makes "at most one timer of each kind" (settle timer, reminder
+    // fallback) an enforced invariant rather than an accident of call order.
+    cancelReminderTimeout();
     const config = readGoalLoopConfig(opts.goalLoopConfigPath);
     const delayMs = resolveSettleDelayMs(config);
-    settleTimer = scheduleTimer(() => onSettleTimerFire(ctx), delayMs);
+    settleTimer = scheduleTimer(() => runTimerCallback(ctx, "settle timer", () => onSettleTimerFire(ctx)), delayMs);
     ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: settling");
   }
 
@@ -568,17 +603,36 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
    * turn between the fire-condition check and this call.
    */
   function fireReminder(ctx: ExtensionContext, config: GoalLoopConfig | undefined, reminder: string): void {
+    // 260906 Phase 1 review relay #1 (Minor): cancel a leftover
+    // reminder-fallback timer before arming a fresh one — see
+    // `armSettleTimer`'s matching cancel for the full "at most one timer of
+    // each kind" rationale. `onSettleTimerFire`'s three consumers
+    // (`pendingRearm`, replayed `settleSwallowedWhileCompacting`, ordinary
+    // reinject) all funnel through this one function, so this is the single
+    // place that needs the cancel.
+    cancelReminderTimeout();
     leadReminderStartPendingRef.current = true;
     pi.sendUserMessage(reminder, { deliverAs: "followUp" });
     const delayMs = resolveSettleDelayMs(config);
-    reminderTimeoutHandle = scheduleTimer(() => {
-      reminderTimeoutHandle = undefined;
-      if (leadReminderStartPendingRef.current) {
-        leadReminderStartPendingRef.current = false;
-        ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: reminder did not start a turn, retrying");
-        armSettleTimer(ctx);
-      }
-    }, delayMs);
+    reminderTimeoutHandle = scheduleTimer(
+      () =>
+        runTimerCallback(ctx, "reminder fallback timer", () => {
+          reminderTimeoutHandle = undefined;
+          if (leadReminderStartPendingRef.current) {
+            leadReminderStartPendingRef.current = false;
+            // 260906 Phase 1 review relay #1 (Minor): arm FIRST, set the retry
+            // status LAST — `armSettleTimer`'s own first action overwrites the
+            // status key with "Goal loop: settling", so setting the retry
+            // string before arming made it unobservable (immediately
+            // clobbered in the same synchronous tick). Reversing the order
+            // lets the retry string actually be the status the footer shows
+            // once this callback returns.
+            armSettleTimer(ctx);
+            ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: reminder did not start a turn, retrying");
+          }
+        }),
+      delayMs,
+    );
   }
 
   /**
@@ -596,7 +650,14 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
       return;
     }
     if (decision.action === "yield") {
-      ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: yielding to running agents");
+      // 260906 Phase 1 review relay #1 (Minor): unreachable via this dispatch
+      // path — `decideOnSettle` is only ever called from `onSettleTimerFire`
+      // with `yielding: false` (the fire-time gate already returns before
+      // reaching it for a running child), so this branch never actually
+      // fires. No status string here: the footer is left reading `Goal loop:
+      // settling`, matching what a real yield-at-fire-time now shows. Kept as
+      // a bare no-op only for defense in depth against `SettleDecision`'s
+      // full union.
       return;
     }
     if (decision.action === "force-stop") {
@@ -617,13 +678,16 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
    * `settle_delay_ms` after whichever `armSettleTimer` call scheduled it.
    *
    * Fire condition, evaluated FRESH here (not at arm/settle time): yields —
-   * no send, no state mutation, no status-line change (the footer is left
-   * reading `Goal loop: settling`, and the next live `agent_settled`
-   * re-arms) — whenever the owning session is not idle, a compaction is now
-   * in flight, or any delegated child is still running. This is what lets a
-   * child push that lands during the settle delay, or a compaction that
-   * starts during it, cancel the reminder without a special-cased handler:
-   * the timer itself is the single place that ever decides to send.
+   * no send, no status-line change (the footer is left reading `Goal loop:
+   * settling`) — whenever the owning session is not idle or any delegated
+   * child is still running; the next live `agent_settled` re-arms in both
+   * cases. A compaction now in flight is handled separately and FIRST (see
+   * below): it marks `settleSwallowedWhileCompacting` before yielding, since
+   * nothing else will re-arm the timer once a compaction is running (260906
+   * Phase 1 review relay #1, Important #1). This is what lets a child push
+   * that lands during the settle delay, or a compaction that starts during
+   * it, cancel the reminder without a special-cased handler: the timer
+   * itself is the single place that ever decides to send.
    *
    * Past the gate, at most one of three origins consumes this fire (each
    * must survive un-cleared from settle/arm time until here, since the gate
@@ -636,10 +700,25 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
    */
   function onSettleTimerFire(ctx: ExtensionContext): void {
     settleTimer = undefined;
+
+    // 260906 Phase 1 review relay #1 (Important #1): a compaction that starts
+    // DURING the settle delay dominates, mirroring `decideOnSettle`'s own
+    // "compacting checked before yielding" ordering. Unlike the `notIdle`/
+    // `yielding` yields below, a compacting yield here would otherwise strand
+    // this settle forever: Pi's `ctx.compact()` never re-enters
+    // `_runAgentPrompt`, so no further `agent_settled`/`agent_start` fires to
+    // re-arm the timer on its own. Marking it swallowed makes
+    // `releaseAfterCompaction`'s idle branch re-arm the timer once the
+    // in-flight compaction actually finishes, exactly as it already does for
+    // a settle that arrived while compacting was already true.
+    if (leadCompactingRef.current) {
+      settleSwallowedWhileCompacting = true;
+      return;
+    }
+
     const notIdle = !ctx.isIdle();
-    const compacting = leadCompactingRef.current;
     const yielding = hasRunningAgents(opts.rpcRegistryRef?.current);
-    if (notIdle || compacting || yielding) return;
+    if (notIdle || yielding) return;
 
     const config = readGoalLoopConfig(opts.goalLoopConfigPath);
 
@@ -824,9 +903,9 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
       pendingRearmFailureReason = undefined;
       // Review relay #1 (Minor): clear the footer status BEFORE returning —
       // this turn is proof the loop moved on, so leaving a stale "waiting for
-      // compaction"/"yielding to running agents" footer up for its whole
-      // duration would be a lie the next branch's unconditional clear was
-      // supposed to have already told.
+      // compaction"/"settling" footer up for its whole duration would be a
+      // lie the next branch's unconditional clear was supposed to have
+      // already told.
       ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, undefined);
       return;
     }

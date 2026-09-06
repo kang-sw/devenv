@@ -66,6 +66,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
 import {
   agentWidgetRefreshRef,
+  composeLeadTurnStartOptions,
   heldPushQueue,
   inheritModelFromToolCtx,
   isOwningAgentIdle,
@@ -945,6 +946,15 @@ export function detachForkRaisedThread(handle: ThreadRegistryHandle, rpcRegistry
  * the same turn boundary every other held `followUp` already uses), but it
  * changes this call site's turn-boundary behavior beyond the compaction race
  * this ticket set out to fix.
+ *
+ * 260906 Phase 1 review relay #1 (Important #2): the immediate send AND the
+ * held raw closure both build their options via `composeLeadTurnStartOptions`
+ * so the goal-loop's boundary guard (`leadReminderStartPendingRef`) is
+ * applied here too — a fork's `/done` completing while the reminder's own
+ * `sendUserMessage` is mid-await used to be able to start a colliding turn
+ * exactly like a child push once could. The closure calls the composer
+ * itself (not at hold time) so a held send flushed while the flag is set
+ * still reads it fresh at flush time.
  */
 export function injectDiscussionSummary(
   pi: ExtensionAPI,
@@ -963,11 +973,10 @@ export function injectDiscussionSummary(
   // it Pi only queues the message and nothing starts a turn until the
   // owner's next prompt (dogfood 2026-09-05, Pi 0.84.4). `followUp` keeps
   // the ordering contract for a lead mid-turn — delivered after that turn.
-  const options = { deliverAs: "followUp" as const, triggerTurn: true };
   if (isOwningAgentIdle()) {
-    pi.sendMessage(message, options);
+    pi.sendMessage(message, composeLeadTurnStartOptions("followUp"));
   } else {
-    heldPushQueue.push({ kind: "raw", send: (p) => p.sendMessage(message, options) });
+    heldPushQueue.push({ kind: "raw", send: (p) => p.sendMessage(message, composeLeadTurnStartOptions("followUp")) });
   }
 
   const agentId = thread.respondentAgentId;

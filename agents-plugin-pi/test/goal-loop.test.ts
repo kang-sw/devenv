@@ -1297,6 +1297,56 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.equal(clock.pendingCount(), 0, "the fire callback itself does not re-arm on a yield");
     });
 
+    test("260906 Phase 1 review relay #1 (Important #1): a compaction starting during the settle delay no longer stalls the loop dead", async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
+      const { ctx, statusCalls } = fakeCtx();
+      pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed)
+
+      // Live settle arms the timer.
+      pi.handlers.get("agent_settled")!({}, ctx);
+      assert.equal(clock.pendingCount(), 1);
+      assert.equal(statusCalls.at(-1)?.value, "Goal loop: settling");
+
+      // An owner-typed /compact (or Pi's own auto-compaction) starts DURING
+      // the settle delay, before the timer ever fires — session_before_compact
+      // marks leadCompactingRef defensively, exactly as it does for any
+      // compaction reason.
+      pi.handlers.get("session_before_compact")!({ reason: "manual" }, ctx);
+      assert.equal(leadCompactingRef.current, true);
+
+      // The fire callback now finds compacting true: it must yield WITHOUT
+      // just dropping this settle on the floor — Pi's ctx.compact() never
+      // re-enters _runAgentPrompt, so nothing else will ever re-evaluate the
+      // loop for this settle unless the fire callback marks it swallowed.
+      clock.fire();
+      assert.equal(pi.sentUserMessages.length, 1, "yields — compacting at fire time, nothing sent");
+      assert.equal(clock.pendingCount(), 0, "the fire callback itself does not re-arm");
+
+      // session_compact lands; its release is deferred past the microtask.
+      pi.handlers.get("session_compact")!({ reason: "manual" }, ctx);
+      assert.equal(pi.sentUserMessages.length, 1, "nothing sent synchronously inside session_compact itself");
+      await new Promise((resolve) => setImmediate(resolve));
+
+      // The deferred release must have re-armed the settle timer — this is
+      // the crux of the fix: without settleSwallowedWhileCompacting set at
+      // fire time, releaseAfterCompaction's `if (pendingRearm ||
+      // settleSwallowedWhileCompacting)` guard would see both false and never
+      // re-arm, leaving the goal armed but the loop stalled forever.
+      assert.equal(leadCompactingRef.current, false);
+      assert.equal(clock.pendingCount(), 1, "the timer was re-armed by the deferred release");
+      assert.equal(statusCalls.at(-1)?.value, "Goal loop: settling", "footer is settling again, not stuck on the earlier yield");
+
+      // Firing the re-armed timer sends exactly one ordinary reminder — not a
+      // lever/failure-reason reminder, since this was never lever-originated.
+      clock.fire();
+      assert.equal(pi.sentUserMessages.length, 2, "the re-armed timer fires and sends exactly one ordinary reminder");
+      const reminder = pi.sentUserMessages[1]!.content as string;
+      assert.doesNotMatch(reminder, /Compaction failed/, "an ordinary reinject, not a lever failure reminder");
+      assert.match(reminder, /Goal yet running/, "the ordinary reinject wording, proving the loop is not stuck");
+    });
+
     test("the boundary guard's flag clears on agent_start, on agent_settled, and by its own fallback timeout (which retries via a fresh settle timer)", () => {
       const clock = fakeClock();
       const pi = fakePi();
@@ -1334,14 +1384,15 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       const statusCallsBeforeTimeout = statusCalls.length;
       clock.fire(); // no agent_start/agent_settled ever arrived — the fallback fires
       assert.equal(leadReminderStartPendingRef.current, false, "cleared by its own timeout");
-      // The fallback timeout sets the retry status, then immediately re-arms
-      // the settle timer, which overwrites it with "Goal loop: settling" —
-      // both status calls land from this one fire, in that order.
+      // 260906 Phase 1 review relay #1 (Minor): the fallback timeout re-arms
+      // the settle timer FIRST, then sets the retry status LAST — so the
+      // retry text is the observable status after this fire, not immediately
+      // overwritten by armSettleTimer's own "Goal loop: settling" set.
       const newStatusCalls = statusCalls.slice(statusCallsBeforeTimeout);
       assert.deepEqual(
         newStatusCalls.map((c) => c.value),
-        ["Goal loop: reminder did not start a turn, retrying", "Goal loop: settling"],
-        "the retry status text, then the re-armed settle timer's own status",
+        ["Goal loop: settling", "Goal loop: reminder did not start a turn, retrying"],
+        "the re-armed settle timer's own status, then the retry status text — observable, not immediately clobbered",
       );
       assert.equal(clock.pendingCount(), 1, "the timeout re-arms the settle timer");
     });
