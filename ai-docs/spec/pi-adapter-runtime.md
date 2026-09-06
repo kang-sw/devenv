@@ -1285,12 +1285,29 @@ auto-compaction remains the last-resort backstop.
 - **The lever.** `goal-compact-and-continue(carry_forward)` is a model-invoked
   `pi.registerTool` tool (alongside the Phase-1 terminal levers) that is
   **non-terminal**: it marks the compaction as lever-originated (arming a
-  pending-rearm marker), then calls
-  `ctx.compact({ customInstructions: carry_forward })` once and returns
-  without disarming the goal. The tool's returned text — the only in-band
-  evidence of the request, since the `Compaction completed` notification
-  fires outside the model's view — reads `Compaction requested; the
-  conversation will resume from a summary carrying: <carry_forward>`.
+  pending-rearm marker), captures the exact `carry_forward` string before
+  calling `ctx.compact({ customInstructions: carry_forward })` once, and
+  returns without disarming the goal. The string is passed unchanged as Pi's
+  custom instructions to steer the summary; the summary itself is not a
+  verbatim-delivery guarantee. The tool's returned text reads `Compaction
+  requested; the conversation will resume from a summary carrying:
+  <carry_forward>`; the `Compaction completed` notification remains outside
+  the model's view.
+- **Verbatim carry-forward.** On compaction success or failure, the next
+  eligible dispatched goal reminder appends exactly
+  `\n\nCarried forward verbatim from before compaction:\n` followed by the
+  captured string, once, without trimming, escaping, indentation,
+  summarization, or newline normalization. An empty string still produces the
+  heading; no pending payload means no heading. The payload is consumed only
+  after the reminder dispatch returns, so a synchronous send failure does not
+  consume it. Subsequent reminders do not repeat it. Delivery uses the existing
+  delayed settle path, not necessarily the first arbitrary post-compaction
+  message: held pushes and owner input retain priority. Busy release,
+  turn-start backstop clearing, timer cancellation, and idle/child yields leave
+  unsent carry available to the next eligible reminder, including an ordinary
+  reminder rather than a lever re-arm. Replacing the goal, either terminal
+  lever, runaway force-stop, or session shutdown discards unsent carry; it is
+  not persisted across reload or session replacement.
 - **Re-arming after compaction (260906 Phase 1; swallowed-settle replay added
   in review relay #1; `followUp` delivery on the replay added in review relay
   #2).** A manual `ctx.compact` aborts the invoking turn immediately — well
@@ -1304,20 +1321,20 @@ auto-compaction remains the last-resort backstop.
   turn's own `agent_settled`/`registerPushFlush` flush — nothing is flushed
   or sent on this branch. Only on the idle branch does it flush every push
   held during the compaction window (see "Child→lead report channel" above)
-  and then, in order, do at most one of two things for the settle that got
-  swallowed while this compaction was in flight (per the previous entry).
-  For a lever-originated compaction it sends the pending goal reminder — for
-  a lever-originated one and the swallowed-settle replay alike, always as an
-  explicit `deliverAs: "followUp"` turn, since the flush just before it can
-  itself have started a turn synchronously (a held push with `triggerTurn:
-  true`), and an unmarked `sendUserMessage` would throw mid-stream and
-  silently drop the reminder — folding a compaction failure reason into it
+  and then arms the existing settle timer when a lever reminder or swallowed
+  settle is pending; release itself never sends a reminder. The timer retains
+  the pending origin and any captured failure reason across its delay and
+  re-evaluates idleness, compaction, and running children at fire time, as
+  described above. At an eligible fire, a lever-originated compaction sends
+  its pending goal reminder, folding in the captured compaction failure reason
   when present. For any other compaction whose settle was swallowed
   (owner-typed `/compact`, or Pi's own threshold/overflow auto-compaction
-  ending a turn outright with nothing queued to follow it) it instead
-  replays that settle: the same `decideOnSettle` reducer, streak accounting,
-  and force-stop path as a live `agent_settled`, against a freshly-read
-  context percent — this is what lets an armed goal recover from an
+  ending a turn outright with nothing queued to follow it), the timer instead
+  replays that settle: the same reducer, streak accounting, and force-stop
+  path as an ordinary delayed settle, against a freshly-read context percent.
+  Both reminder origins use explicit `deliverAs: "followUp"` delivery to
+  survive a push that starts a turn between the fire-time check and the send.
+  This is what lets an armed goal recover from an
   auto-compaction that would otherwise have left nothing to ever re-evaluate
   the loop again. When a settle's outcome qualifies for both (the lever's own
   `ctx.compact()` call produces a swallowed settle for its own invoking
