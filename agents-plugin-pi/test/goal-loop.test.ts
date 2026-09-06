@@ -1179,7 +1179,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     // `pi.sendMessage(..., { triggerTurn: true })` (`spawner.ts`'s `sendPush`).
     heldPushQueue.push({
       kind: "raw", deliverAs: "followUp",
-      send: (p) => p.sendMessage({ customType: "ws-agent-report" }, { triggerTurn: true }),
+      send: (p, deliveryOverride) => p.sendMessage({ customType: "ws-agent-report" }, { deliverAs: deliveryOverride, triggerTurn: true }),
     });
 
     await new Promise((resolve) => setImmediate(resolve));
@@ -1187,6 +1187,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     assert.equal(pi.streaming.current, false, "idle release cannot start a custom run");
     flushHeldPushes(pi.api, true);
     assert.equal(pi.streaming.current, true, "confirmed-start flush delivers the batch");
+    assert.deepEqual(pi.sentMessages[0]!.options, { deliverAs: "steer", triggerTurn: true }, "the raw fixture honors confirmed-start steering");
     assert.equal(pi.sentUserMessages.length, 1, "the deferred release only armed the settle timer");
     assert.equal(clock.pendingCount(), 1);
 

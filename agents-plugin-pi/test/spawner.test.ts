@@ -1416,7 +1416,7 @@ describe("pushToLead", () => {
     leadWakeStartPendingRef.current = false;
   });
 
-  test("sends one custom message per family, with details carrying agent_id, the payload, and the status line", () => {
+  test("confirmed-start release sends one custom message per family, with details carrying agent_id, the payload, and the status line", () => {
     const pi = fakePi();
     const record = liveRpcRecord({ agentId: "a", running: true });
     const registry: RpcAgentRegistry = new Map([["a", record]]);
@@ -1428,7 +1428,7 @@ describe("pushToLead", () => {
     assert.equal(message.customType, "ws-agent-report");
     assert.equal(message.display, true);
     assert.deepEqual(message.details, { agent_id: "a", report: "halfway", status: "1 delegated agent still running" });
-    assert.deepEqual(options, { deliverAs: "followUp", triggerTurn: true }, "triggerTurn is what makes an IDLE lead act on the signal at once");
+    assert.deepEqual(options, { deliverAs: "steer", triggerTurn: true }, "confirmed start steers the held idle report before its first response");
   });
 
   test("an absent record still pushes (the orphan roll-call), and with nothing delegated it carries NO status field", () => {
@@ -1504,10 +1504,10 @@ describe("pushToLead", () => {
     assert.equal(heldPushQueue.length, 1, "held until confirmed streaming start");
     leadWakeStartPendingRef.current = false;
     flushHeldPushes(pi.api, true);
-    assert.deepEqual(pi.sent[0]!.options, { deliverAs: "followUp", triggerTurn: true });
+    assert.deepEqual(pi.sent[0]!.options, { deliverAs: "steer", triggerTurn: true });
   });
 
-  test("260906 Phase 1 (settle-timer reminder race ticket): triggerTurn: true is unchanged when no reminder start is pending", () => {
+  test("confirmed-start release retains triggerTurn: true when no reminder start is pending", () => {
     const pi = fakePi();
     const record = liveRpcRecord({ agentId: "a", running: true });
     leadWakeStartPendingRef.current = false;
@@ -1515,7 +1515,7 @@ describe("pushToLead", () => {
     pushToLead(pi.api, new Map([["a", record]]), record, "ws-agent-report", { report: "halfway" }, "followUp");
 
     assert.equal(pi.sent.length, 1);
-    assert.deepEqual(pi.sent[0]!.options, { deliverAs: "followUp", triggerTurn: true });
+    assert.deepEqual(pi.sent[0]!.options, { deliverAs: "steer", triggerTurn: true });
   });
 });
 
@@ -1613,7 +1613,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
 
     leadCompactingRef.current = false;
     assert.equal(flushHeldPushes(pi.api, true), 1);
-    assert.equal(pi.sent[0]!.options?.deliverAs, "steer", "released with the SAME delivery mode it was held under");
+    assert.equal(pi.sent[0]!.options?.deliverAs, "steer", "confirmed-start steering preserves a held steer");
   });
 
   test("260906 (Phase 1): a steer push mid-turn but NOT compacting still bypasses the hold as before", () => {
@@ -1634,7 +1634,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
 
     leadCompactingRef.current = false;
     assert.equal(flushHeldPushes(pi.api, true), 1);
-    assert.equal(pi.sent[0]!.options?.deliverAs, "followUp");
+    assert.equal(pi.sent[0]!.options?.deliverAs, "steer", "confirmed-start release upgrades held followUp to steering");
   });
 
   test("260906 (Phase 1): registerPushFlush's agent_settled handler does not flush while compacting", () => {
@@ -1809,7 +1809,7 @@ describe("attachEventListener (the settle-suppression IO gate)", () => {
       last_message: "the last thing it said",
       status: "0 delegated agents still running",
     });
-    assert.equal(h.pi.sent[0].options?.deliverAs, "followUp");
+    assert.equal(h.pi.sent[0].options?.deliverAs, "steer", "the synchronous fake wake confirms start before delivery");
   });
 
   test("Edition: a final is silent until the child's turn ends, then arrives ONCE as the report — never also a settle", async () => {
@@ -1897,11 +1897,11 @@ describe("attachEventListener (the settle-suppression IO gate)", () => {
     assert.equal(h.record.client, undefined, "parked");
   });
 
-  test("a plain progress report is pushed as ws-agent-report/followUp with no settle involved", () => {
+  test("a plain progress report is admitted as followUp and released as ws-agent-report/steer at confirmed start", () => {
     const h = listenerHarness();
     h.emit({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "halfway" } });
     assert.deepEqual(families(h.pi), ["ws-agent-report"]);
-    assert.equal(h.pi.sent[0].options?.deliverAs, "followUp");
+    assert.equal(h.pi.sent[0].options?.deliverAs, "steer");
   });
 
   test("a hook-consumed question (the TUI owner surface) pushes the registration notice as ws-agent-advisory", () => {
@@ -1911,7 +1911,7 @@ describe("attachEventListener (the settle-suppression IO gate)", () => {
     assert.deepEqual(families(h.pi), ["ws-agent-advisory"]);
     assert.equal(h.pi.sent[0].message.details && (h.pi.sent[0].message.details as Record<string, unknown>).advisory, "fork-question-thread");
     assert.equal(h.pi.sent[0].message.details && (h.pi.sent[0].message.details as Record<string, unknown>).detail, "[ws] thread q1 — the owner answers this.");
-    assert.equal(h.pi.sent[0].options?.deliverAs, "followUp");
+    assert.equal(h.pi.sent[0].options?.deliverAs, "steer", "the advisory's followUp admission is overridden only at confirmed start");
   });
 
   test("a dead child's settle transitions it to exited and pushes once (the liveness probe on the transition)", async () => {

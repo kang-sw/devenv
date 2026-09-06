@@ -914,8 +914,9 @@ export function injectDiscussionSummary(
     display: true,
     details: { threadId: thread.threadId, title: thread.title },
   };
-  // The shared path wakes idle leads through user preflight, retaining the
-  // summary's followUp mode and leaving thread side effects immediate.
+  // The shared path wakes idle leads through user preflight. `followUp`
+  // remains this summary's busy-time admission mode; confirmed start releases
+  // the shared held batch as steering. Thread side effects stay immediate.
   sendToLead(pi, message, "followUp");
 
   const agentId = thread.respondentAgentId;

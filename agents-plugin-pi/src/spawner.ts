@@ -1282,7 +1282,7 @@ function requestPushWake(pi: ExtensionAPI): void {
 /** Admit raw summaries through the very same FIFO as family-shaped reports. */
 export function sendToLead(pi: ExtensionAPI, message: Parameters<ExtensionAPI["sendMessage"]>[0], deliverAs: PushDeliverAs): void {
   if (!shouldPushToLead() || !leadIdleRef.current) return;
-  admitPush(pi, { kind: "raw", deliverAs, send: (p) => p.sendMessage(message, { deliverAs, triggerTurn: true }) });
+  admitPush(pi, { kind: "raw", deliverAs, send: (p, deliveryOverride) => p.sendMessage(message, { deliverAs: deliveryOverride ?? deliverAs, triggerTurn: true }) });
 }
 
 function admitPush(pi: ExtensionAPI, held: HeldPush | HeldRawSend): void {
@@ -1349,15 +1349,16 @@ interface HeldPush {
   record: RpcAgentRecord | undefined;
   family: PushFamily;
   payload: Record<string, unknown>;
-  /** Recorded so `flushHeldPushes` resends with the SAME delivery mode it was held under, not a hardcoded one. */
+  /** Admission mode: governs whether busy delivery holds or interrupts. Confirmed-start delivery always overrides it to `steer`. */
   deliverAs: PushDeliverAs;
 }
 
-/** Pre-built summaries share the family-push FIFO and explicitly record their delivery mode. */
+/** Pre-built summaries share the family-push FIFO and record their admission mode. */
 interface HeldRawSend {
   kind: "raw";
   deliverAs: PushDeliverAs;
-  send: (pi: ExtensionAPI) => void;
+  /** The optional override lets confirmed start release summaries as steering without changing admission. */
+  send: (pi: ExtensionAPI, deliveryOverride?: PushDeliverAs) => void;
 }
 
 /**
@@ -1388,7 +1389,7 @@ interface HeldRawSend {
  */
 export const heldPushQueue: Array<HeldPush | HeldRawSend> = [];
 
-/** Build current family status and send into a confirmed streaming run with its recorded mode. */
+/** Build current family status and send into a confirmed streaming run with the requested delivery mode. */
 function sendPush(
   pi: ExtensionAPI,
   registry: RpcAgentRegistry | undefined,
@@ -1434,13 +1435,15 @@ export function flushHeldPushes(pi: ExtensionAPI | undefined, confirmedStart = f
   for (const held of pending) {
     if (held.kind === "raw") {
       try {
-        held.send(pi);
+        held.send(pi, "steer");
       } catch {
         // Best effort, like family pushes; keep delivering the remaining batch.
       }
       continue;
     }
-    sendPush(pi, held.registry, held.record, held.family, held.payload, held.deliverAs);
+    // Admission mode decides busy-time holding or interruption only. A confirmed
+    // start releases every held message as steering before its first response.
+    sendPush(pi, held.registry, held.record, held.family, held.payload, "steer");
   }
   return pending.length;
 }
