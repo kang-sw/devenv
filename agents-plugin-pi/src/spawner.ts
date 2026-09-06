@@ -1205,7 +1205,7 @@ export function buildPushContent(
 
 /**
  * The owning session's idleness accessor, filled from the `session_start` ctx
- * (`ctx.isIdle`) by `index.ts` — the same mutable-ref seam `wsBlockRef` uses
+ * (`ctx.isIdle`) by `index.ts` — the same mutable-ref seam `wsBlockBaseRef` uses
  * for a value only a live ctx can supply. `pushToLead` reads it to decide
  * whether a `followUp` push can go out now or must be HELD (see
  * `heldPushQueue`). Unset (a test, a headless path that never ran
