@@ -462,10 +462,12 @@ once at factory time — the shape differs by who is calling it:
   one-shot record is deleted from the registry right after its own settle
   push (not parked dormant like every other spawn shape), an owner
   `ws-agent-stop` on it deletes it the same way instead of leaving it
-  resumable, and `ws-agent-send` against a one-shot id is refused outright
-  (naming it as an explore) — there is no continuation to send into,
-  `ws-agent-stop` and `ws-agent-transcript` still work against it while it
-  is registered.
+  resumable, a launch failure (`client.start()` or the initial prompt
+  throwing) deletes it the same way right after its own spawn-failed push
+  instead of leaving a permanently parked zombie behind, and `ws-agent-send`
+  against a one-shot id is refused outright (naming it as an explore) —
+  there is no continuation to send into, `ws-agent-stop` and
+  `ws-agent-transcript` still work against it while it is registered.
 - **Worker or execute-worker.** `explore` is the original blocking one-shot
   leaf, unchanged except that the `async` param is gone (its only consumer
   was the lead path now replaced by the preset above): `--no-session` (no

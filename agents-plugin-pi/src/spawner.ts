@@ -1694,9 +1694,13 @@ export function startLivenessProbe(
 }
 
 /**
- * The `spawn-failed` half of `spawnAgent`'s launch-failure handling: park the
- * half-registered record in its resting state and tell the owning session
+ * The `spawn-failed` half of `spawnAgent`'s launch-failure handling: put the
+ * half-registered record into its resting state and tell the owning session
  * once, so the fan-in count is not left waiting on a child that never started.
+ * A non-`oneShot` record is left parked (dormant) there, same as always; a
+ * `oneShot` record (260906) is instead deleted from the registry right after
+ * this push, since it has no dormant-resumable resting state to park in and
+ * would otherwise sit as a permanent zombie no other call site can reach.
  * The caller re-throws the original error unchanged afterwards.
  *
  * Extracted (review relay #1, test partition C2) so this branch has offline
