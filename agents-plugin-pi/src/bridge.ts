@@ -464,11 +464,14 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     // Rendering is TUI-only and display-only. When the nested host package is
     // unavailable (notably node --test), Pi's native fallback remains intact.
     const toolResultTui = await loadToolResultTuiModules();
-    const toolPreviewRenderers = toolResultTui ? createToolPreviewRenderers(toolResultTui) : undefined;
 
     for (const tool of tools) {
       const rawName = tool.name;
       const registeredName = sanitizeToolName(rawName);
+      // Bound per registration: Pi does not add a fallback title when this
+      // renderer succeeds, so the registered provider-visible name belongs in
+      // the call renderer rather than a shared, title-less instance.
+      const toolPreviewRenderers = toolResultTui ? createToolPreviewRenderers(toolResultTui, registeredName) : undefined;
       pi.registerTool({
         name: registeredName,
         label: rawName,

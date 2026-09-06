@@ -4,10 +4,16 @@ import { stringify as stringifyYaml } from "yaml";
 export interface ToolResultTuiModules {
   Text: new (text?: string, paddingX?: number, paddingY?: number) => NativeText;
   stripTerminalSequences(text: string): string;
+  truncateToWidth(text: string, width: number, ellipsis?: string): string;
 }
 
 export interface NativeText {
   setText(text: string): void;
+  render(width: number): string[];
+  invalidate(): void;
+}
+
+export interface NativePreviewComponent {
   render(width: number): string[];
   invalidate(): void;
 }
@@ -30,8 +36,16 @@ interface PreviewState {
   result?: ResultCache;
 }
 
+interface BoundedText extends NativePreviewComponent {
+  text: NativeText;
+  source: string | undefined;
+  cachedWidth: number | undefined;
+  cachedNativeLines: string[] | undefined;
+  cachedLines: string[] | undefined;
+}
+
 const previewStateKey = Symbol("ws-yaml-logical-preview");
-const componentText = new WeakMap<object, string>();
+const components = new WeakMap<object, BoundedText>();
 
 /**
  * Pi catches renderer errors and uses its standard text/image fallback for
@@ -86,19 +100,52 @@ function isSingleTextContent(content: unknown): content is Array<{ type: string;
   return Array.isArray(content) && content.length === 1 && content[0]?.type === "text";
 }
 
-function updateText(
-  tui: ToolResultTuiModules,
-  lastComponent: unknown,
-  source: string,
-): NativeText {
-  const component = isObjectLike(lastComponent) && componentText.has(lastComponent)
-    ? lastComponent as NativeText
-    : new tui.Text("", 0, 0);
-  if (componentText.get(component) !== source) {
-    component.setText(tui.stripTerminalSequences(source));
-    componentText.set(component, source);
-  }
+function createBoundedText(tui: ToolResultTuiModules): BoundedText {
+  const component: BoundedText = {
+    text: new tui.Text("", 0, 0),
+    source: undefined,
+    cachedWidth: undefined,
+    cachedNativeLines: undefined,
+    cachedLines: undefined,
+    render(width: number): string[] {
+      const nativeLines = component.text.render(width);
+      if (component.cachedWidth === width && component.cachedNativeLines === nativeLines && component.cachedLines) {
+        return component.cachedLines;
+      }
+      // Native Text owns layout. This only clips an indivisible grapheme that
+      // is wider than a narrow terminal row; it is not a Unicode engine.
+      const boundedWidth = Math.max(0, Math.floor(width));
+      component.cachedWidth = width;
+      component.cachedNativeLines = nativeLines;
+      component.cachedLines = nativeLines.map((line) => tui.truncateToWidth(line, boundedWidth, ""));
+      return component.cachedLines;
+    },
+    invalidate(): void {
+      component.text.invalidate();
+      component.cachedWidth = undefined;
+      component.cachedNativeLines = undefined;
+      component.cachedLines = undefined;
+    },
+  };
   return component;
+}
+
+function updateText(tui: ToolResultTuiModules, lastComponent: unknown, source: string): BoundedText {
+  const component = isObjectLike(lastComponent) ? components.get(lastComponent) : undefined;
+  const next = component ?? createBoundedText(tui);
+  if (next.source !== source) {
+    next.text.setText(tui.stripTerminalSequences(source));
+    next.source = source;
+    next.cachedWidth = undefined;
+    next.cachedNativeLines = undefined;
+    next.cachedLines = undefined;
+  }
+  components.set(next, next);
+  return next;
+}
+
+function callDisplayText(toolName: string, preview: string): string {
+  return preview ? `${toolName}\n${preview}` : toolName;
 }
 
 export interface PreviewRenderContext {
@@ -110,26 +157,30 @@ export interface PreviewRenderContext {
 }
 
 /** Creates the two Pi renderer hooks once the guarded host import succeeds. */
-export function createToolPreviewRenderers(tui: ToolResultTuiModules, serialize: YamlSerializer = stringifyYaml): {
-  renderCall(args: unknown, theme: unknown, context: PreviewRenderContext): NativeText;
+export function createToolPreviewRenderers(
+  tui: ToolResultTuiModules,
+  toolName: string,
+  serialize: YamlSerializer = stringifyYaml,
+): {
+  renderCall(args: unknown, theme: unknown, context: PreviewRenderContext): NativePreviewComponent;
   renderResult(
     result: { content?: unknown },
     options: { expanded: boolean; isPartial: boolean },
     theme: unknown,
     context: PreviewRenderContext,
-  ): NativeText;
+  ): NativePreviewComponent;
 } {
   return {
     renderCall(args, _theme, context) {
       const state = stateFor(context);
       // Streaming argument objects can be mutated in place. Re-prepare while
       // incomplete; after completion their stable object identity is enough.
-      const text = context.argsComplete && state.input?.args === args
+      const preview = context.argsComplete && state.input?.args === args
         ? state.input.text
         : yamlInputPreview(args, serialize);
-      if (context.argsComplete) state.input = { args, text };
+      if (context.argsComplete) state.input = { args, text: preview };
       else state.input = undefined;
-      return updateText(tui, context.lastComponent, text);
+      return updateText(tui, context.lastComponent, callDisplayText(toolName, preview));
     },
 
     renderResult(result, options, _theme, context) {
@@ -155,7 +206,11 @@ export function createToolPreviewRenderers(tui: ToolResultTuiModules, serialize:
 export async function loadToolResultTuiModules(): Promise<ToolResultTuiModules | undefined> {
   try {
     const tui = await import("@earendil-works/pi-tui") as unknown as ToolResultTuiModules;
-    return typeof tui?.Text === "function" && typeof tui?.stripTerminalSequences === "function" ? tui : undefined;
+    return typeof tui?.Text === "function" &&
+      typeof tui?.stripTerminalSequences === "function" &&
+      typeof tui?.truncateToWidth === "function"
+      ? tui
+      : undefined;
   } catch {
     return undefined;
   }

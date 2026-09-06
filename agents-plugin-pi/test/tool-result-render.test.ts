@@ -1,3 +1,5 @@
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -14,37 +16,55 @@ class FakeText {
   setTextCalls = 0;
   layoutCalls = 0;
   private width: number | undefined;
+  private lines: string[] | undefined;
 
   setText(text: string): void {
     this.text = text;
     this.setTextCalls += 1;
     this.width = undefined;
+    this.lines = undefined;
   }
 
   render(width: number): string[] {
-    if (this.width !== width) {
+    if (this.width !== width || !this.lines) {
       this.width = width;
+      this.lines = [this.text];
       this.layoutCalls += 1;
     }
-    return [this.text];
+    return this.lines;
   }
 
   invalidate(): void {
     this.width = undefined;
+    this.lines = undefined;
   }
 }
 
-function fakeTui(): { tui: ToolResultTuiModules; strips: () => number } {
+function fakeTui(): { tui: ToolResultTuiModules; strips: () => number; texts: FakeText[]; truncations: () => number } {
   let stripCalls = 0;
+  let truncationCalls = 0;
+  const texts: FakeText[] = [];
+  class CapturedText extends FakeText {
+    constructor() {
+      super();
+      texts.push(this);
+    }
+  }
   return {
     tui: {
-      Text: FakeText,
+      Text: CapturedText,
       stripTerminalSequences(text: string): string {
         stripCalls += 1;
         return text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
       },
+      truncateToWidth(text: string, _width: number): string {
+        truncationCalls += 1;
+        return text;
+      },
     },
     strips: () => stripCalls,
+    texts,
+    truncations: () => truncationCalls,
   };
 }
 
@@ -78,72 +98,119 @@ describe("logical YAML preview preparation", () => {
 });
 
 describe("native YAML preview renderers", () => {
+  test("binds the registered title above ten argument lines, including while arguments are absent", () => {
+    const { tui, texts } = fakeTui();
+    const renderers = createToolPreviewRenderers(tui, "ws__git_status");
+    const missing = renderers.renderCall(undefined, undefined, context({ argsComplete: false }));
+    assert.equal(texts[0]?.text, "ws__git_status");
+
+    const args = Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`item${index + 1}`, index + 1]));
+    renderers.renderCall(args, undefined, context({ state: {}, lastComponent: missing }));
+    const lines = texts[0]!.text.split("\n");
+    assert.equal(lines[0], "ws__git_status");
+    assert.equal(lines.length, 11, "title plus ten logical argument lines");
+  });
+
+  test("installed ToolExecutionComponent retains the registered bridge title for missing arguments", async () => {
+    const codingAgentUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
+    const requireFromPi = createRequire(codingAgentUrl);
+    const tui = await import(pathToFileURL(requireFromPi.resolve("@earendil-works/pi-tui")).href) as unknown as ToolResultTuiModules;
+    const theme = await import(new URL("./modes/interactive/theme/theme.js", codingAgentUrl).href) as {
+      initTheme(): void;
+    };
+    theme.initTheme();
+    const toolExecution = await import(new URL("./modes/interactive/components/tool-execution.js", codingAgentUrl).href) as {
+      ToolExecutionComponent: new (
+        toolName: string,
+        toolCallId: string,
+        args: unknown,
+        options: unknown,
+        toolDefinition: unknown,
+        ui: { requestRender(): void },
+        cwd: string,
+      ) => { render(width: number): string[] };
+    };
+    const renderers = createToolPreviewRenderers(tui, "ws__git_status");
+    const component = new toolExecution.ToolExecutionComponent(
+      "ws__git_status",
+      "call-1",
+      undefined,
+      { showImages: false },
+      { renderCall: renderers.renderCall },
+      { requestRender() {} },
+      process.cwd(),
+    );
+
+    assert.match(tui.stripTerminalSequences(component.render(80).join("\n")), /ws__git_status/);
+  });
+
   test("keeps a completed call Text long-lived without reserializing or relaying out unchanged redraws", () => {
-    const { tui } = fakeTui();
+    const { tui, texts, truncations } = fakeTui();
     let serializations = 0;
-    const renderers = createToolPreviewRenderers(tui, (value) => {
+    const renderers = createToolPreviewRenderers(tui, "ws__test", (value) => {
       serializations += 1;
       return `value: ${(value as { value: string }).value}`;
     });
     const args = { value: "large payload" };
     const state = {};
-    const first = renderers.renderCall(args, undefined, context({ state })) as FakeText;
+    const first = renderers.renderCall(args, undefined, context({ state }));
     const second = renderers.renderCall(args, undefined, context({ state, lastComponent: first }));
 
     assert.equal(second, first);
     assert.equal(serializations, 1, "unchanged arguments must not be serialized to form a redraw cache key");
     first.render(24);
     first.render(24);
-    assert.equal(first.layoutCalls, 1, "native Text owns unchanged-width layout caching");
-    assert.equal(first.setTextCalls, 1);
+    assert.equal(texts[0]!.layoutCalls, 1, "native Text owns unchanged-width layout caching");
+    assert.equal(texts[0]!.setTextCalls, 1);
+    assert.equal(truncations(), 1, "post-layout rows are not remapped on an unchanged redraw");
   });
 
   test("reprepares incomplete in-place-mutated arguments, then caches after completion", () => {
-    const { tui } = fakeTui();
+    const { tui, texts } = fakeTui();
     let serializations = 0;
-    const renderers = createToolPreviewRenderers(tui, (value) => {
+    const renderers = createToolPreviewRenderers(tui, "ws__test", (value) => {
       serializations += 1;
       return `step: ${(value as { step: number }).step}`;
     });
     const args = { step: 1 };
     const state = {};
-    const first = renderers.renderCall(args, undefined, context({ state, argsComplete: false })) as FakeText;
+    const first = renderers.renderCall(args, undefined, context({ state, argsComplete: false }));
     args.step = 2;
-    const second = renderers.renderCall(args, undefined, context({ state, lastComponent: first, argsComplete: false })) as FakeText;
-    const third = renderers.renderCall(args, undefined, context({ state, lastComponent: second, argsComplete: true })) as FakeText;
+    const second = renderers.renderCall(args, undefined, context({ state, lastComponent: first, argsComplete: false }));
+    const third = renderers.renderCall(args, undefined, context({ state, lastComponent: second, argsComplete: true }));
     renderers.renderCall(args, undefined, context({ state, lastComponent: third, argsComplete: true }));
 
-    assert.equal(second.text, "step: 2");
+    assert.match(texts[0]!.text, /step: 2/);
     assert.equal(serializations, 3, "partial mutation must not reuse a stale object-identity cache");
   });
 
   test("renders JSON containers as YAML, expands only result output, and invalidates result cache by expansion", () => {
-    const { tui, strips } = fakeTui();
+    const { tui, strips, texts } = fakeTui();
     let serializations = 0;
-    const renderers = createToolPreviewRenderers(tui, (value) => {
+    const renderers = createToolPreviewRenderers(tui, "ws__test", (value) => {
       serializations += 1;
       return `${Array.from({ length: 12 }, (_, index) => `line-${index + 1}: ${(value as { ok: boolean }).ok}`).join("\n")}\x1b[2J`;
     });
     const content = [{ type: "text", text: '{"ok":true}' }];
     const state = {};
-    const first = renderers.renderResult({ content }, { expanded: false, isPartial: false }, undefined, context({ state })) as FakeText;
-    const again = renderers.renderResult({ content }, { expanded: false, isPartial: false }, undefined, context({ state, lastComponent: first })) as FakeText;
-    const collapsedText = again.text;
-    const expanded = renderers.renderResult({ content }, { expanded: true, isPartial: false }, undefined, context({ state, lastComponent: again })) as FakeText;
+    const first = renderers.renderResult({ content }, { expanded: false, isPartial: false }, undefined, context({ state }));
+    const again = renderers.renderResult({ content }, { expanded: false, isPartial: false }, undefined, context({ state, lastComponent: first }));
+    const collapsedText = texts[0]!.text;
+    const expanded = renderers.renderResult({ content }, { expanded: true, isPartial: false }, undefined, context({ state, lastComponent: again }));
 
     assert.equal(again, first);
     assert.equal(collapsedText.split("\n").length, 10);
-    assert.equal(expanded.text.split("\n").length, 12);
+    assert.equal(texts[0]!.text.split("\n").length, 12);
     assert.equal(serializations, 2, "only expansion transition reparses/serializes the result");
     assert.ok(strips() >= 2, "custom YAML text is stripped through Pi's terminal-control seam");
     expanded.render(20);
     expanded.render(40);
-    assert.equal(expanded.layoutCalls, 2, "width changes are delegated to native Text layout");
+    assert.equal(texts[0]!.layoutCalls, 2, "width changes are delegated to native Text layout");
   });
 
   test("keeps errors, scalars, prose, later text blocks, images, and partial results on Pi's native fallback", () => {
     const { tui } = fakeTui();
-    const renderers = createToolPreviewRenderers(tui);
+    const renderers = createToolPreviewRenderers(tui, "ws__test");
     const cases = [
       { content: [{ type: "text", text: '{"ok":true}' }], partial: true },
       { content: [{ type: "text", text: '"scalar"' }], partial: false },
@@ -157,6 +224,20 @@ describe("native YAML preview renderers", () => {
         () => renderers.renderResult({ content: item.content }, { expanded: false, isPartial: item.partial }, undefined, context({ isError: item.error })),
         UseNativeResultFallback,
       );
+    }
+  });
+
+  test("installed Pi TUI seam bounds indivisible CJK and emoji at width one", async () => {
+    const requireFromPi = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
+    const tui = await import(pathToFileURL(requireFromPi.resolve("@earendil-works/pi-tui")).href) as unknown as ToolResultTuiModules & {
+      visibleWidth(text: string): number;
+    };
+    const renderers = createToolPreviewRenderers(tui, "ws__git_status");
+    for (const value of ["界", "👩‍💻"]) {
+      const component = renderers.renderCall({ x: value }, undefined, context());
+      for (const line of component.render(1)) {
+        assert.ok(tui.visibleWidth(line) <= 1, `${JSON.stringify(value)} emitted an overwide row: ${JSON.stringify(line)}`);
+      }
     }
   });
 });
