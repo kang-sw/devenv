@@ -32,4 +32,6 @@
 - Owner-live acceptance remains explicitly pending: run the one-child and simultaneous-two-child checks from the ticket in the shared predecessor-gate session; inspect provider requests/response counts and ws-block continuity rather than inferring them from offline tests.
 
 ## Escalations
-- None.
+- Resolved by owner on 2026-09-06 after relay `f7226a7`: the original plan's whole-batch-before-first-response assertions above are superseded. Pi's default one-at-a-time steering drain delivers the first held message before the initial response and later messages at subsequent steering polls. Acceptance is no blind initial response plus FIFO delivery, not batch coalescing. Global steering settings and payload embedding remain out of scope.
+- Review disposition: finding 1 [fixed] fake fidelity in `f7226a7`, with its scope escalation resolved by the owner decision above; finding 2 [fixed] mixed raw/family FIFO in both orders; finding 3 [fixed] independent user-start with pending wake reservation. No Critical findings. Important findings received one relay, without re-review.
+- Final offline verification: 509 focused and 935 full-suite tests passed with `WS_PI_SPAWN_ROLE` unset for tests, plus `npm pack --dry-run` and `git diff --check`. Live provider request/count and predecessor continuity checks remain pending.
