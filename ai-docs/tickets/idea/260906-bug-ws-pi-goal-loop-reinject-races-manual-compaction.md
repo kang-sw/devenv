@@ -41,23 +41,59 @@ lever prominently enough that the model picked it for a one-word goal at 13%
 context. The advisory percent already exists; the wording may need to make
 "below the advisory point, do not compact" explicit.
 
+The goal reminder is not the only turn-starter that can race. Every
+adapter push (`pushToLead`: child final reports, settle/exited signals,
+approval and headless-question steers, fork-question advisories) goes
+through `pi.sendMessage(..., { triggerTurn: true })`. Pi's
+`sendCustomMessage` routes that to `agent.steer/followUp` only while the
+agent is streaming; otherwise it calls `_runAgentPrompt` directly, which has
+no compaction guard at all (the `Cannot submit a prompt while compaction is
+in progress` check lives in `prompt()` only). During a compaction the agent
+is not streaming, so a child report landing mid-compaction starts a turn
+and is overwritten the same way. The adapter's own `heldPushQueue` already
+holds `followUp` pushes while the lead is mid-turn, keyed on
+`isOwningAgentIdle()` (Pi's `isIdle`, which ignores compaction); `steer`
+pushes are never held. Owner-typed input is already safe once Pi's flag is
+set: the interactive mode queues it via `queueCompactionMessage` (steer /
+followUp) and flushes after compaction, with extension commands executing
+immediately.
+
 ## Proposed direction
 
-- Track an in-flight compaction in goal-loop state, set when the lever fires
-  (before `ctx.compact`) and, defensively, on `session_before_compact` with
-  `reason: "manual"`.
-- `agent_settled` while that flag is set neither re-injects nor advances the
-  runaway streak; it sets a status line (`Goal loop: waiting for
-  compaction`), mirroring the existing yield branch.
-- Re-arm from the completion side: on the lever's `onComplete` (or
-  `session_compact`), clear the flag and send the reminder then, since the
-  abort-triggered settle has already passed and no further `agent_settled`
-  will come. On `onError`/`session_compact_failed`, clear the flag and send
-  the reminder with the failure reason included so the model chooses a
-  terminal lever rather than retrying compaction (covers `Nothing to compact
-  (session too small)` and `Already compacted`).
-- Keep the observe-only posture for Pi's threshold/overflow auto-compaction;
-  this ticket touches only the manual lever path.
+Owner's framing (2026-09-06): while a compaction is in flight, the adapter
+treats the lead exactly as if the agent were mid-turn. Everything that would
+be queued behind a running turn is queued behind the compaction, and is
+released when the compaction ends.
+
+- Track an in-flight compaction in adapter state (a `leadCompactingRef`
+  beside `leadIdleRef`), set when the lever fires (before `ctx.compact`)
+  and, defensively, on `session_before_compact` (any reason); cleared on
+  `session_compact` and `session_compact_failed`.
+- `isOwningAgentIdle()` returns `false` while that flag is set, so
+  `followUp` pushes fall into the existing `heldPushQueue`. `steer` pushes
+  gain the same hold while compacting (they cannot interrupt a compaction
+  usefully, and starting a turn is the defect). The held queue is released
+  on `session_compact`/`session_compact_failed` in addition to the existing
+  `agent_settled` release, with status lines computed at release time as
+  today.
+- Goal loop: `agent_settled` while compacting neither re-injects nor
+  advances the runaway streak; it sets a status line (`Goal loop: waiting
+  for compaction`), mirroring the yield branch. Re-arm from the completion
+  side: on `session_compact` (or the lever's `onComplete`), send the
+  reminder then, since the abort-triggered settle has already passed and no
+  further `agent_settled` will come. On failure, send the reminder with the
+  failure reason included so the model chooses a terminal lever rather than
+  retrying compaction (covers `Nothing to compact (session too small)` and
+  `Already compacted`).
+- Ordering on release: held pushes first, then the goal reminder, so the
+  re-armed turn sees the child reports that arrived during compaction.
+- Owner-typed input needs no adapter work beyond the flag: Pi already queues
+  it while `isCompacting`. The only uncovered window is the synchronous gap
+  between `abort()` resolving and Pi setting its flag, which the adapter's
+  own flag (set before `ctx.compact`) closes for adapter-originated pushes.
+- Pi's threshold/overflow auto-compaction keeps its observe-only posture for
+  the goal loop, but the push hold applies to it as well, since the same
+  race exists there for child reports.
 
 ## Constraints
 
