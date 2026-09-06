@@ -84,6 +84,7 @@ import {
   flushHeldPushes,
   heldPushQueue,
   leadCompactingRef,
+  leadReminderStartPendingRef,
   REPORT_TO_LEAD_TOOL_NAME,
   sendToAgent,
   stopAgent,
@@ -100,10 +101,15 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 // 260906 (compaction push-hold ticket, Phase 1): `leadCompactingRef` and
 // `heldPushQueue` are the same module state `spawner.ts`'s own hold uses —
 // reset both for the same leak-proofing reason.
+//
+// 260906 Phase 1 review relay #1 (Important #2): `leadReminderStartPendingRef`
+// is the goal-loop's boundary guard, now also read by `injectDiscussionSummary`
+// via `composeLeadTurnStartOptions` — reset for the same leak-proofing reason.
 afterEach(() => {
   agentWidgetRefreshRef.current = undefined;
   leadCompactingRef.current = false;
   heldPushQueue.length = 0;
+  leadReminderStartPendingRef.current = false;
 });
 
 function thread(overrides: Partial<ThreadRecord> = {}): ThreadRecord {
@@ -927,6 +933,41 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
       sent[0].options,
       { deliverAs: "followUp", triggerTurn: true },
       "never steer (§6 requires the lead's own turn boundary), and triggerTurn so an idle lead acts on the decision instead of queueing it",
+    );
+  });
+
+  test("260906 Phase 1 review relay #1 (Important #2): the immediate send reads the goal-loop's boundary guard, sending triggerTurn: false while a reminder start is pending", () => {
+    leadReminderStartPendingRef.current = true;
+    const { pi, sent, handle, record } = setup();
+    injectDiscussionSummary(pi, handle, new Map(), record, "we take the second anchor");
+
+    assert.equal(sent.length, 1, "sent immediately — the lead is idle, no compaction in flight");
+    assert.deepEqual(
+      sent[0].options,
+      { deliverAs: "followUp", triggerTurn: false },
+      "a fork's /done completing while the reminder's own sendUserMessage is mid-await must not start a colliding turn",
+    );
+  });
+
+  test("260906 Phase 1 review relay #1 (Important #2): a held raw send reads the boundary guard at FLUSH time, not at hold time", () => {
+    leadReminderStartPendingRef.current = false;
+    leadCompactingRef.current = true;
+    const { pi, sent, handle, record } = setup();
+    injectDiscussionSummary(pi, handle, new Map(), record, "we take the second anchor");
+
+    assert.deepEqual(sent, [], "held — compacting");
+    assert.equal(heldPushQueue.length, 1);
+
+    // The flag flips to true only AFTER the send was held — a closure that
+    // captured `triggerTurn` at hold time would still send `true` here.
+    leadReminderStartPendingRef.current = true;
+    leadCompactingRef.current = false;
+    assert.equal(flushHeldPushes(pi), 1);
+    assert.equal(sent.length, 1, "delivered once released");
+    assert.deepEqual(
+      sent[0].options,
+      { deliverAs: "followUp", triggerTurn: false },
+      "composed fresh at flush time, reflecting the flag's CURRENT value rather than a stale snapshot from hold time",
     );
   });
 

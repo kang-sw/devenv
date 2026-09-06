@@ -642,6 +642,19 @@ interrupt into during a compaction anyway. Held pushes live only in the
 process: they are dropped with it at `session_shutdown`, exactly like Pi's own
 queue.
 
+**A reminder start pending suppresses the turn-start race (260906 Phase 1).**
+`pushToLead`'s `pi.sendMessage` call otherwise always passes `triggerTurn: true`
+for a `followUp`/`steer` push; while the goal loop's own settle-timer reminder
+is between arming its boundary guard and observing the resulting turn start
+(`leadReminderStartPendingRef.current === true`, owned by the goal loop — see
+"Goal loop" below), every push is sent with `triggerTurn: false` instead. This
+prevents a child's push landing in that narrow window from starting a second,
+colliding turn alongside the reminder's own `sendUserMessage`; the push still
+appends to the queue and is picked up by whichever turn starts. The guard
+clears on the next `agent_start` or `agent_settled`, or by its own short
+fallback timeout, so the suppression window is bounded even if the reminder's
+turn never starts.
+
 **Fan-in stays with the model.** Every push whose process has at least one
 delegated agent carries a status line `N delegated agents still running`; with
 no delegated agent the line is omitted from both content and `details`. The
@@ -1125,9 +1138,38 @@ this surface.
   settle outside goal mode is an ordinary stop — the `agent_settled` handler is
   armed **only** while a goal is active, which is what keeps an ordinary Pi session
   from looping.
-- **Re-fire reminder.** While armed, an `agent_settled` re-injects a reminder turn
-  carrying the goal and the levers (naming the terminal tools and the force-stop
-  caveat), then the agent continues.
+- **Re-fire reminder is delayed past settle by a settle timer (260906 Phase
+  1).** An `agent_settled` that would otherwise re-inject no longer sends
+  immediately: it arms a single settle timer (`scheduleTimer`, real
+  `setTimeout`/`unref` by default, injectable for tests) for
+  `settle_delay_ms` and sets the footer to `Goal loop: settling` under the
+  adapter's own status key. This exists because the reminder's own turn start
+  can otherwise race a child's push landing at the same `agent_settled`
+  boundary — see "A reminder start pending suppresses the turn-start race" in
+  the "Child→lead report channel" entry above. The timer is the single fire
+  point for every reminder origin — an ordinary settle, the lever's
+  pending-rearm re-arm, and a swallowed-settle replay all route through it,
+  never sending directly. Only one timer (the settle timer, or its boundary
+  fallback below) is ever active at a time. `agent_start`, the terminal
+  levers (`goal-achieved`/`goal-blocked`), `/goal` re-arming, force-stop, and
+  session shutdown all cancel a pending settle timer outright, since each
+  invalidates the settle that armed it. At fire time the loop re-evaluates
+  its fire condition **fresh** rather than trusting the state at arm time:
+  `ctx.isIdle()`, `!leadCompactingRef.current` (a compaction that started
+  during the delay yields exactly like the ordinary compaction branch,
+  re-arming the release routine instead), and no running delegated child
+  (falls back to the yield outcome). Only when all hold does it set
+  `leadReminderStartPendingRef.current = true` (see the report-channel entry)
+  and send the reminder as an explicit `deliverAs: "followUp"` turn, then
+  immediately arm a short fallback timeout that clears the boundary guard and
+  retries (`Goal loop: reminder did not start a turn, retrying`, followed by
+  re-arming the settle timer) if `agent_start`/`agent_settled` never observed
+  the resulting turn. `agent_start` and `agent_settled` both clear the
+  boundary guard unconditionally as their first action.
+  - **`settle_delay_ms` config knob.** Joins the other goal-loop knobs in
+    `agents-plugin-pi/goal-loop-config.json`, read fresh per arm with the
+    same never-throw fallback (`DEFAULT_SETTLE_DELAY_MS`, 5000ms); a missing,
+    malformed, or non-positive value falls back to the default.
 - **Terminal levers.** Two model-invoked tools registered via `pi.registerTool`
   (zero prose parsing) end the run: `goal-achieved(summary)` and
   `goal-blocked(reason)`. Either disarms the loop, so the next settle is an
@@ -1140,34 +1182,45 @@ this surface.
   read **fresh** per settle; a missing or malformed file, or a non-positive /
   non-finite `runaway_threshold`, falls back to the default rather than
   erroring.
-- **Yield to live children.** While armed, a settle that finds any delegated
-  child still running (the same predicate that drives the
+- **Yield to live children (footer text updated 260906 Phase 1 review relay
+  #1, Minor).** A running-children check (the same predicate that drives the
   `N delegated agents still running` status line of the "Child→lead report
   channel" entry: a registry member with a live client that is mid-turn and
-  not thread-bound) neither re-injects the reminder nor advances the runaway
-  streak; goal state is otherwise unchanged. The footer shows
-  `Goal loop: yielding to running agents` under the adapter's own status key
-  until the next lead turn starts, whatever starts it — an owner prompt or a
-  pushed child message — and the key is cleared unconditionally then. The
-  child's own pushed `ws-agent-settled`/`ws-agent-report` (or, if it died, the
-  liveness probe's `ws-agent-settled` with reason `exited`) is what wakes the
-  lead, and that turn's settle re-evaluates the loop normally. Idle, dormant, or stopped children,
-  a child whose `final` already landed this turn, and thread-bound respondents
-  do not hold the loop. The footer's agent count is not part of this entry.
+  not thread-bound) is one of the settle timer's fire-condition checks (see
+  "Re-fire reminder is delayed past settle by a settle timer" above), not a
+  separate settle-time branch: an `agent_settled` arms the timer
+  unconditionally and the footer reads `Goal loop: settling` throughout. Only
+  at FIRE time, `settle_delay_ms` later, does a still-running child make the
+  fire yield — no reminder, no streak advance, goal state otherwise
+  unchanged, and the footer stays exactly as it was (still `Goal loop:
+  settling`; there is no separate `Goal loop: yielding to running agents`
+  string). The child's own pushed `ws-agent-settled`/`ws-agent-report` (or, if
+  it died, the liveness probe's `ws-agent-settled` with reason `exited`) is
+  what wakes the lead, and that turn's settle re-arms the timer, which
+  re-evaluates the loop normally after the next delay. Idle, dormant, or
+  stopped children, a child whose `final` already landed this turn, and
+  thread-bound respondents do not hold the loop. The footer's agent count is
+  not part of this entry.
 - **Waiting for compaction (260906 Phase 1; swallow marker added in review
-  relay #1).** While armed, a settle that fires while a compaction is in
-  flight (checked before the yield branch above — compaction dominates)
-  neither re-injects the reminder nor advances the runaway streak, mirroring
-  the yield outcome exactly: goal state passes through unchanged and the
-  footer shows `Goal loop: waiting for compaction` under the same status key
-  until the next lead turn starts. This settle can be either the one
-  `ctx.compact()`'s own internal abort produces for the turn it just cut off,
-  or Pi's own threshold/overflow auto-compaction ending a turn outright with
-  nothing queued to follow it — in both cases this outcome is recorded as a
-  SWALLOWED settle so the "Model-driven compaction" entry below can replay
-  it once the compaction actually finishes, instead of the loop stalling
-  forever because no further `agent_settled`/`agent_start` was ever going to
-  fire on its own.
+  relay #1; fire-time variant added in review relay #1 Important #1).** While
+  armed, a settle that fires while a compaction is ALREADY in flight (checked
+  before the yield branch above — compaction dominates) neither re-injects
+  the reminder nor advances the runaway streak, mirroring the yield outcome
+  exactly: goal state passes through unchanged and the footer shows `Goal
+  loop: waiting for compaction` under the same status key until the next lead
+  turn starts. A compaction that instead STARTS during the settle timer's
+  delay (the timer having already armed on an ordinary settle) is marked the
+  same way at fire time, checked before the idle/running-children fire
+  conditions — but leaves the footer reading `Goal loop: settling` rather
+  than switching it to `Goal loop: waiting for compaction`, since the fire
+  callback makes no status change on any of its yields. Either path can be
+  either the settle `ctx.compact()`'s own internal abort produces for the
+  turn it just cut off, or Pi's own threshold/overflow auto-compaction ending
+  a turn outright with nothing queued to follow it — in every case this
+  outcome is recorded as a SWALLOWED settle so the "Model-driven compaction"
+  entry below can replay it once the compaction actually finishes, instead of
+  the loop stalling forever because no further `agent_settled`/`agent_start`
+  was ever going to fire on its own.
 - **Lead-session-only.** The goal loop runs on the lead session only. Every
   spawned child (persistent RPC worker, one-shot explore leaf, or fork) is
   launched with a `WS_PI_SPAWN_ROLE` environment marker carrying its role, and

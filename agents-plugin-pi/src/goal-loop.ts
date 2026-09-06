@@ -76,7 +76,7 @@
 import { readFileSync } from "node:fs";
 import type { ContextUsage, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readSpawnRole } from "./process-role.ts";
-import { flushHeldPushes, hasRunningAgents, leadCompactingRef, type RpcAgentRegistry } from "./spawner.ts";
+import { flushHeldPushes, hasRunningAgents, leadCompactingRef, leadReminderStartPendingRef, type RpcAgentRegistry } from "./spawner.ts";
 
 // ---------------------------------------------------------------------------
 // Config: adapter-owned runaway-threshold data file. Never-hard-fail,
@@ -89,6 +89,14 @@ export interface GoalLoopConfig {
   compaction_advisory_percent?: number;
   /** Optional context-window token override for `computeContextPercent`, used when the model's own `getContextUsage().contextWindow` should be superseded. */
   context_window_override?: number;
+  /**
+   * Delay in milliseconds, after an `agent_settled` fires (goal active, lead
+   * process, not compacting), before the settle timer re-evaluates the loop
+   * and — if the fire condition still holds — sends the reinject reminder
+   * (260906 Phase 1, settle-timer reminder race ticket). Read fresh on every
+   * arm, mirroring `runaway_threshold`'s never-hard-fail shape.
+   */
+  settle_delay_ms?: number;
 }
 
 /** Default number of consecutive no-tool-call re-fires before the loop force-stops, absent (or overridden by) a config file. */
@@ -96,6 +104,9 @@ export const DEFAULT_RUNAWAY_THRESHOLD = 10;
 
 /** Default advisory context-usage percent (adapter-chosen, no ticket-pinned value; config-tunable) surfaced in the reinject reminder. */
 export const DEFAULT_COMPACTION_ADVISORY_PERCENT = 70;
+
+/** Default settle-timer delay in milliseconds, absent (or overridden by) a config file (260906 Phase 1). */
+export const DEFAULT_SETTLE_DELAY_MS = 5000;
 
 /**
  * Reads and parses the goal-loop config data file. Returns `undefined` —
@@ -150,6 +161,18 @@ export function resolveCompactionAdvisoryPercent(config: GoalLoopConfig | undefi
 export function resolveContextWindowOverride(config: GoalLoopConfig | undefined): number | undefined {
   const value = config?.context_window_override;
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+/**
+ * Resolves the effective settle-timer delay: the config file's
+ * `settle_delay_ms` when it is a positive finite number, else
+ * `DEFAULT_SETTLE_DELAY_MS`. Never hard-fails on a malformed value — falls
+ * back to the default instead. Mirrors `resolveRunawayThreshold`'s exact
+ * never-hard-fail shape.
+ */
+export function resolveSettleDelayMs(config: GoalLoopConfig | undefined): number {
+  const value = config?.settle_delay_ms;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : DEFAULT_SETTLE_DELAY_MS;
 }
 
 // ---------------------------------------------------------------------------
@@ -378,6 +401,17 @@ export interface RegisterGoalLoopOptions {
    * `false` and the loop never yields.
    */
   rpcRegistryRef?: { current: RpcAgentRegistry | undefined };
+  /**
+   * Injectable timer seam (260906 Phase 1, settle-timer reminder race
+   * ticket) — test-only; production callers omit both and get the real
+   * `setTimeout`/`clearTimeout`, with `.unref?.()` called on the real handle
+   * so the timer never keeps the process alive (mirrors `spawner.ts`'s
+   * `startLivenessProbe`). A test passes a fake pair that records `{ cb, ms
+   * }` and lets the test invoke `cb()` directly instead of waiting on a real
+   * clock — the fake-clock seam the ticket requires, with no new dependency.
+   */
+  scheduleTimer?: (cb: () => void, ms: number) => NodeJS.Timeout;
+  clearTimer?: (handle: NodeJS.Timeout) => void;
 }
 
 /**
@@ -389,13 +423,17 @@ export interface RegisterGoalLoopOptions {
  */
 export interface GoalLoopShutdownHandle {
   /**
-   * Clears `leadCompactingRef` and both compaction markers
-   * (`pendingRearm`, `settleSwallowedWhileCompacting`). Without this, a
-   * `session_shutdown`/`/reload` that lands while a compaction is still in
-   * flight would leave `leadCompactingRef.current` stuck `true` into the
-   * replacement session, where `isOwningAgentIdle()` (spawner.ts) reports
-   * `false` forever and every `followUp` push plus `ask.ts`'s
-   * `injectDiscussionSummary` is held with nothing left to release them.
+   * Clears `leadCompactingRef` and both compaction markers (`pendingRearm`,
+   * `settleSwallowedWhileCompacting`), cancels a pending settle timer and
+   * boundary-guard fallback timer (260906 Phase 1), and clears
+   * `leadReminderStartPendingRef`. Without this, a `session_shutdown`/
+   * `/reload` that lands while a compaction is still in flight would leave
+   * `leadCompactingRef.current` stuck `true` into the replacement session,
+   * where `isOwningAgentIdle()` (spawner.ts) reports `false` forever and
+   * every `followUp` push plus `ask.ts`'s `injectDiscussionSummary` is held
+   * with nothing left to release them; and a stuck `leadReminderStartPendingRef`
+   * would make every push into the replacement session append inert
+   * (`triggerTurn: false`) with nothing left to consume it.
    */
   resetCompactionStateForShutdown(): void;
 }
@@ -411,8 +449,8 @@ export interface GoalLoopShutdownHandle {
 export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions): GoalLoopShutdownHandle {
   let state: GoalLoopState = initialGoalLoopState();
   // 260906 (compaction push-hold ticket, Phase 1): true only between the
-  // `goal-compact-and-continue` lever setting `leadCompactingRef` and
-  // `releaseAfterCompaction` consuming it — marks a compaction as
+  // `goal-compact-and-continue` lever setting `leadCompactingRef` and the
+  // settle timer's fire callback consuming it — marks a compaction as
   // LEVER-ORIGINATED, the only kind that should ever synthesize the lever's
   // own re-armed reminder text (with a failure reason folded in when
   // present). An owner-typed `/compact` or Pi's own threshold/overflow
@@ -420,78 +458,210 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
   // `session_before_compact`, defensively) but never this flag; see
   // `settleSwallowedWhileCompacting` below for how THOSE compactions still
   // get the loop re-evaluated once they end a turn outright.
+  //
+  // 260906 Phase 1 (settle-timer reminder race ticket): survives from
+  // `releaseAfterCompaction`'s idle branch (which now only arms the settle
+  // timer, never clears this) until the timer's fire callback
+  // (`onSettleTimerFire`) actually consumes it — see that function for why
+  // the marker must outlive the arm-to-fire delay.
   let pendingRearm = false;
 
   /**
+   * The compaction failure reason to fold into the pending lever reminder,
+   * captured by `releaseAfterCompaction` at arm time (260906 Phase 1) and
+   * consumed alongside `pendingRearm` by `onSettleTimerFire` — kept as a
+   * separate variable rather than inside a combined payload object so the
+   * two existing booleans above stay simple flags.
+   */
+  let pendingRearmFailureReason: string | undefined;
+
+  /**
    * 260906 review relay #1 (Critical): true when an `agent_settled` fired
-   * while a compaction was in flight and `decideOnSettle` judged it
-   * `{action:"waiting"}` — this settle's would-be reinject/force-stop
+   * while a compaction was in flight and `decideOnSettle` would have judged
+   * it `{action:"waiting"}` — this settle's would-be reinject/force-stop
    * outcome was SWALLOWED, not merely deferred. This matters because Pi's
    * own threshold/overflow auto-compaction can end a turn outright with
    * nothing queued to follow it (no `willRetry`, no queued owner input): no
    * further `agent_settled`/`agent_start` ever fires to re-evaluate the
    * loop, so without this marker an armed goal would stop dead — stuck on
    * the "waiting for compaction" footer — at the first such auto-compaction.
-   * `releaseAfterCompaction`'s idle branch replays exactly one ordinary
-   * settle decision (same reducer, streak accounting, and force-stop path as
-   * a live `agent_settled`, against a freshly-read context percent) when
-   * this is set and no lever reminder already covers the same settle.
-   * Cleared by whichever path actually sends a reminder for this settle, by
-   * the not-idle handoff, and by the `agent_start` backstop — see each site
-   * below.
+   * `releaseAfterCompaction`'s idle branch arms the settle timer when this is
+   * set and no lever reminder already covers the same settle; the timer's
+   * fire callback (`onSettleTimerFire`, 260906 Phase 1) is what actually
+   * replays exactly one ordinary settle decision (same reducer, streak
+   * accounting, and force-stop path as a live `agent_settled`, against a
+   * freshly-read context percent). Cleared by whichever path in
+   * `onSettleTimerFire` actually resolves this settle, by the not-idle
+   * handoff, and by the `agent_start` backstop — see each site below.
    */
   let settleSwallowedWhileCompacting = false;
 
+  const scheduleTimer =
+    opts.scheduleTimer ??
+    ((cb: () => void, ms: number): NodeJS.Timeout => {
+      const handle = setTimeout(cb, ms);
+      handle.unref?.();
+      return handle;
+    });
+  const clearTimer = opts.clearTimer ?? ((handle: NodeJS.Timeout) => clearTimeout(handle));
+
   /**
-   * Shared decision dispatch between the live `agent_settled` listener and
-   * `releaseAfterCompaction`'s swallowed-settle replay, so the two can never
-   * drift on what a given `SettleDecision` action does.
-   *
-   * `deliveryMode` (review relay #2, Critical): `undefined` for the live
-   * `agent_settled` listener — an ordinary settle's reinject is the start of
-   * a brand-new turn, so no explicit `deliverAs` is needed, matching every
-   * pre-existing call site. The replay path from `releaseAfterCompaction`'s
-   * idle branch passes `"followUp"` instead: that branch calls
-   * `flushHeldPushes(pi)` first, and a flushed push can itself start a turn
-   * synchronously (`sendMessage(..., { triggerTurn: true })`), leaving Pi
-   * mid-stream by the time this reinject reaches `sendUserMessage` — a bare
-   * call would throw ("Agent is already processing…") and silently drop the
-   * reminder. `"followUp"` queues behind whatever the flush just started, and
-   * still starts a turn itself when the flush started nothing, matching the
-   * ticket's mandate for the release routine (same pattern the lever branch
-   * beside this one already uses).
+   * The single settle timer (260906 Phase 1, settle-timer reminder race
+   * ticket): armed by every `agent_settled` that finds goal mode active and
+   * not compacting, and by `releaseAfterCompaction`'s idle branch when a
+   * lever reminder or a swallowed settle is pending release. `undefined`
+   * whenever nothing is pending — the sole condition `resetCompactionStateForShutdown`
+   * and the cancel points below need to check before clearing it.
    */
-  function dispatchSettleDecision(
-    ctx: ExtensionContext,
-    config: GoalLoopConfig | undefined,
-    decision: SettleDecision,
-    deliveryMode?: "followUp",
-  ): void {
+  let settleTimer: NodeJS.Timeout | undefined;
+
+  /**
+   * The boundary-guard's own fallback timer (260906 Phase 1): armed
+   * alongside `leadReminderStartPendingRef.current = true`, right after the
+   * reminder's own `sendUserMessage` call, so a reminder whose run never
+   * actually started (an `agent_start`/`agent_settled` that should have
+   * followed it never arrives within the settle delay) does not leave the
+   * boundary guard — and every subsequent push's `triggerTurn` — stuck
+   * `false` forever.
+   */
+  let reminderTimeoutHandle: NodeJS.Timeout | undefined;
+
+  function cancelSettleTimer(): void {
+    if (settleTimer !== undefined) {
+      clearTimer(settleTimer);
+      settleTimer = undefined;
+    }
+  }
+
+  function cancelReminderTimeout(): void {
+    if (reminderTimeoutHandle !== undefined) {
+      clearTimer(reminderTimeoutHandle);
+      reminderTimeoutHandle = undefined;
+    }
+  }
+
+  /**
+   * Runs a timer callback body inside a try/catch that reports (best effort)
+   * via `ctx.ui.notify` and never throws (260906 Phase 1 review relay #1,
+   * Minor). Unlike an extension event handler, a `setTimeout` callback is not
+   * caught by Pi's own runner error boundary, and Pi's interactive mode
+   * installs an `uncaughtException` listener that calls `process.exit(1)` —
+   * so an unhandled throw here (most realistically a stale captured
+   * `pi`/`ctx` failing `assertActive()` after a reload/session replacement
+   * that beat `session_shutdown`'s cancel) would otherwise crash the whole
+   * process instead of, at worst, leaving the goal loop stalled.
+   */
+  function runTimerCallback(ctx: ExtensionContext, label: string, fn: () => void): void {
+    try {
+      fn();
+    } catch (error) {
+      try {
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.ui.notify(`Goal loop: internal error in ${label}: ${message}`, "error");
+      } catch {
+        // best effort — never let the report itself throw.
+      }
+    }
+  }
+
+  /**
+   * Arms (re-arming cancels any prior pending timer first) the settle timer
+   * that will re-evaluate the loop after `settle_delay_ms` (260906 Phase 1).
+   * Sets the `Goal loop: settling` footer unconditionally — every caller
+   * (the live `agent_settled` listener and `releaseAfterCompaction`'s idle
+   * branch alike) wants this status the instant a re-evaluation is pending.
+   */
+  function armSettleTimer(ctx: ExtensionContext): void {
+    cancelSettleTimer();
+    // 260906 Phase 1 review relay #1 (Minor): a live reminder-fallback timer
+    // has nothing left to guard once the settle timer is (re-)armed — this
+    // path is reached both from a live `agent_settled` (which already cleared
+    // it) and from the fallback timeout's own retry arm (which is about to
+    // become stale the instant this new settle timer takes over) and from
+    // `releaseAfterCompaction` (which could otherwise arm a fresh settle
+    // timer while an unrelated reminder fallback from an earlier cycle was
+    // still ticking). Cancelling here, alongside `fireReminder`'s own cancel
+    // below, makes "at most one timer of each kind" (settle timer, reminder
+    // fallback) an enforced invariant rather than an accident of call order.
+    cancelReminderTimeout();
+    const config = readGoalLoopConfig(opts.goalLoopConfigPath);
+    const delayMs = resolveSettleDelayMs(config);
+    settleTimer = scheduleTimer(() => runTimerCallback(ctx, "settle timer", () => onSettleTimerFire(ctx)), delayMs);
+    ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: settling");
+  }
+
+  /**
+   * Sends the reinject reminder as a `followUp` turn and arms the
+   * boundary-guard fallback timer (260906 Phase 1) — the single call site
+   * for actually dispatching a reminder, used by both `onSettleTimerFire`'s
+   * `pendingRearm` branch and its ordinary/replayed-settle `"reinject"`
+   * branch, so the boundary-guard bookkeeping can never drift between them.
+   * `followUp` is always correct here (not just for the replay case the
+   * pre-timer code distinguished): the timer only ever fires this once
+   * `ctx.isIdle()` is confirmed fresh, so a bare send would also work, but
+   * `followUp` additionally survives a push that raced in and started a
+   * turn between the fire-condition check and this call.
+   */
+  function fireReminder(ctx: ExtensionContext, config: GoalLoopConfig | undefined, reminder: string): void {
+    // 260906 Phase 1 review relay #1 (Minor): cancel a leftover
+    // reminder-fallback timer before arming a fresh one — see
+    // `armSettleTimer`'s matching cancel for the full "at most one timer of
+    // each kind" rationale. `onSettleTimerFire`'s three consumers
+    // (`pendingRearm`, replayed `settleSwallowedWhileCompacting`, ordinary
+    // reinject) all funnel through this one function, so this is the single
+    // place that needs the cancel.
+    cancelReminderTimeout();
+    leadReminderStartPendingRef.current = true;
+    pi.sendUserMessage(reminder, { deliverAs: "followUp" });
+    const delayMs = resolveSettleDelayMs(config);
+    reminderTimeoutHandle = scheduleTimer(
+      () =>
+        runTimerCallback(ctx, "reminder fallback timer", () => {
+          reminderTimeoutHandle = undefined;
+          if (leadReminderStartPendingRef.current) {
+            leadReminderStartPendingRef.current = false;
+            // 260906 Phase 1 review relay #1 (Minor): arm FIRST, set the retry
+            // status LAST — `armSettleTimer`'s own first action overwrites the
+            // status key with "Goal loop: settling", so setting the retry
+            // string before arming made it unobservable (immediately
+            // clobbered in the same synchronous tick). Reversing the order
+            // lets the retry string actually be the status the footer shows
+            // once this callback returns.
+            armSettleTimer(ctx);
+            ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: reminder did not start a turn, retrying");
+          }
+        }),
+      delayMs,
+    );
+  }
+
+  /**
+   * Shared decision dispatch for a `SettleDecision` produced by
+   * `decideOnSettle` at fire time (260906 Phase 1: only ever called from
+   * `onSettleTimerFire`, with `yielding`/`compacting` both `false` since the
+   * fire-time gate already excluded those cases — `"waiting"`/`"yield"` are
+   * therefore unreachable in practice here but handled for defense in depth,
+   * matching the reducer's own full `SettleDecision` union).
+   */
+  function dispatchSettleDecision(ctx: ExtensionContext, config: GoalLoopConfig | undefined, decision: SettleDecision): void {
     if (decision.action === "ignore") return;
     if (decision.action === "waiting") {
       ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: waiting for compaction");
       return;
     }
     if (decision.action === "yield") {
-      // Neither re-injects the reminder nor advances the runaway streak — a
-      // persistent child pushing its own settle/report wakes the lead next
-      // (pushToLead's `triggerTurn: true`), or the liveness probe's `exited`
-      // push does if the child died instead. Either way the very next
-      // `agent_start` clears this status unconditionally, so this yield
-      // status never lingers past that turn.
-      ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: yielding to running agents");
+      // 260906 Phase 1 review relay #1 (Minor): unreachable via this dispatch
+      // path — `decideOnSettle` is only ever called from `onSettleTimerFire`
+      // with `yielding: false` (the fire-time gate already returns before
+      // reaching it for a running child), so this branch never actually
+      // fires. No status string here: the footer is left reading `Goal loop:
+      // settling`, matching what a real yield-at-fire-time now shows. Kept as
+      // a bare no-op only for defense in depth against `SettleDecision`'s
+      // full union.
       return;
     }
     if (decision.action === "force-stop") {
       ctx.ui.notify(`Goal loop force-stopped: ${decision.reason}`, "warning");
-      // Review relay #2 (Minor): a force-stop reached via the swallowed-
-      // settle replay can follow a settle that already set this status
-      // ("waiting for compaction") — disarming here (the caller already set
-      // `state = initialGoalLoopState()`) means no later `agent_start` will
-      // ever see `state.active` true again to clear it through the ordinary
-      // branch below. Harmless no-op for the live listener, which can only
-      // reach `force-stop` from an active, non-compacting state where this
-      // key was never set for the current turn.
       ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, undefined);
       return;
     }
@@ -499,11 +669,86 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
     const contextWindowOverride = resolveContextWindowOverride(config);
     const percent = computeContextPercent(ctx.getContextUsage(), contextWindowOverride);
     const reminder = buildGoalReminder(decision.goal, { percent, advisoryPercent });
-    if (deliveryMode === "followUp") {
-      pi.sendUserMessage(reminder, { deliverAs: "followUp" });
-    } else {
-      pi.sendUserMessage(reminder);
+    fireReminder(ctx, config, reminder);
+  }
+
+  /**
+   * The settle timer's fire callback (260906 Phase 1, settle-timer reminder
+   * race ticket) — the single reminder-dispatch path in this module. Runs
+   * `settle_delay_ms` after whichever `armSettleTimer` call scheduled it.
+   *
+   * Fire condition, evaluated FRESH here (not at arm/settle time): yields —
+   * no send, no status-line change (the footer is left reading `Goal loop:
+   * settling`) — whenever the owning session is not idle or any delegated
+   * child is still running; the next live `agent_settled` re-arms in both
+   * cases. A compaction now in flight is handled separately and FIRST (see
+   * below): it marks `settleSwallowedWhileCompacting` before yielding, since
+   * nothing else will re-arm the timer once a compaction is running (260906
+   * Phase 1 review relay #1, Important #1). This is what lets a child push
+   * that lands during the settle delay, or a compaction that starts during
+   * it, cancel the reminder without a special-cased handler: the timer
+   * itself is the single place that ever decides to send.
+   *
+   * Past the gate, at most one of three origins consumes this fire (each
+   * must survive un-cleared from settle/arm time until here, since the gate
+   * above can yield any number of times first): a lever-originated
+   * `pendingRearm` reminder (with its captured failure reason folded in),
+   * a replayed `settleSwallowedWhileCompacting` settle, or an ordinary
+   * live-settle evaluation — the last two share the same
+   * `decideOnSettle`/`dispatchSettleDecision` path since both need nothing
+   * more than the pure reducer against the current `state`.
+   */
+  function onSettleTimerFire(ctx: ExtensionContext): void {
+    settleTimer = undefined;
+
+    // 260906 Phase 1 review relay #1 (Important #1): a compaction that starts
+    // DURING the settle delay dominates, mirroring `decideOnSettle`'s own
+    // "compacting checked before yielding" ordering. Unlike the `notIdle`/
+    // `yielding` yields below, a compacting yield here would otherwise strand
+    // this settle forever: Pi's `ctx.compact()` never re-enters
+    // `_runAgentPrompt`, so no further `agent_settled`/`agent_start` fires to
+    // re-arm the timer on its own. Marking it swallowed makes
+    // `releaseAfterCompaction`'s idle branch re-arm the timer once the
+    // in-flight compaction actually finishes, exactly as it already does for
+    // a settle that arrived while compacting was already true.
+    if (leadCompactingRef.current) {
+      settleSwallowedWhileCompacting = true;
+      return;
     }
+
+    const notIdle = !ctx.isIdle();
+    const yielding = hasRunningAgents(opts.rpcRegistryRef?.current);
+    if (notIdle || yielding) return;
+
+    const config = readGoalLoopConfig(opts.goalLoopConfigPath);
+
+    if (pendingRearm) {
+      pendingRearm = false;
+      settleSwallowedWhileCompacting = false; // exactly one reminder for this settle
+      const failureReason = pendingRearmFailureReason;
+      pendingRearmFailureReason = undefined;
+      if (!state.active || !state.goal) return; // nothing lever-originated to say
+      const advisoryPercent = resolveCompactionAdvisoryPercent(config);
+      const contextWindowOverride = resolveContextWindowOverride(config);
+      const percent = computeContextPercent(ctx.getContextUsage(), contextWindowOverride);
+      let reminder = buildGoalReminder(state.goal, { percent, advisoryPercent });
+      if (failureReason) {
+        // `failureReason` is caller-formatted (see the lever's `onError` and
+        // the `session_compact_failed` listener below) — Pi's own
+        // `errorMessage` already reads `"Compaction failed: …"` /
+        // `"Auto-compaction failed: …"`, so this must not add a second
+        // prefix on top of it.
+        reminder = `${failureReason} Do not retry goal-compact-and-continue — call goal-achieved or goal-blocked instead.\n${reminder}`;
+      }
+      fireReminder(ctx, config, reminder);
+      return;
+    }
+
+    settleSwallowedWhileCompacting = false; // no-op if it was already false
+    const threshold = resolveRunawayThreshold(config);
+    const { next, decision } = decideOnSettle(state, threshold, false, false);
+    state = next;
+    dispatchSettleDecision(ctx, config, decision);
   }
 
   /**
@@ -517,25 +762,17 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
    * backstop clear, no reminder, no queue touch — see that listener below).
    *
    * Idle branch: flushes every held push (both ordinary family pushes and
-   * `ask.ts`'s raw `ws-thread-summary` send). Then, in order: a
-   * lever-originated compaction (`pendingRearm`) sends the pending goal
-   * reminder as a fresh `followUp`, folding a compaction failure reason into
-   * it when present; otherwise, when this settle's outcome was swallowed
-   * (`settleSwallowedWhileCompacting`), replays exactly one ordinary settle
-   * decision via `dispatchSettleDecision(..., "followUp")` instead — both
-   * reminder paths use `"followUp"` because the flush just above can itself
-   * have started a turn synchronously, and a bare `sendUserMessage` would
-   * throw mid-stream and silently drop the reminder (review relay #2,
-   * Critical). The lever branch wins and also clears the swallow
-   * marker when BOTH are set from the same settle — the abort inside a
-   * lever-triggered `ctx.compact()` produces its own `waiting` settle just
-   * like an auto-compaction would, so without this the same settle could
-   * send two reminders. Not-idle branch: sends nothing and clears both
-   * markers — the agent has ALREADY started a fresh turn by the time this
-   * deferred call lands (e.g. Pi's own `compaction_end` flushed owner-queued
-   * input before `setImmediate` fired), so the held queue and any pending
-   * reminder are left to that turn's own `agent_settled`/`agent_start`
-   * instead of racing it.
+   * `ask.ts`'s raw `ws-thread-summary` send). Then, if a lever-originated
+   * reminder (`pendingRearm`) or a swallowed settle (`settleSwallowedWhileCompacting`)
+   * is pending, arms the settle timer (260906 Phase 1) — it does NOT clear
+   * either marker here; that moved to `onSettleTimerFire`, which needs both
+   * markers to survive the arm-to-fire delay to know what to send once it
+   * actually fires. Not-idle branch: sends nothing and clears both markers
+   * (and the captured failure reason) — the agent has ALREADY started a
+   * fresh turn by the time this deferred call lands (e.g. Pi's own
+   * `compaction_end` flushed owner-queued input before `setImmediate`
+   * fired), so the held queue and any pending reminder are left to that
+   * turn's own `agent_settled` instead of racing it.
    */
   function releaseAfterCompaction(ctx: ExtensionContext, failureReason?: string): void {
     if (!leadCompactingRef.current) return; // idempotent: already released
@@ -547,42 +784,12 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
       // at the idempotency guard above, before ever reaching here).
       pendingRearm = false;
       settleSwallowedWhileCompacting = false;
+      pendingRearmFailureReason = undefined;
       return;
     }
     flushHeldPushes(pi);
-    if (pendingRearm) {
-      pendingRearm = false;
-      settleSwallowedWhileCompacting = false; // exactly one reminder for this settle
-      if (!state.active || !state.goal) return; // nothing lever-originated to say
-      const config = readGoalLoopConfig(opts.goalLoopConfigPath);
-      const advisoryPercent = resolveCompactionAdvisoryPercent(config);
-      const contextWindowOverride = resolveContextWindowOverride(config);
-      const percent = computeContextPercent(ctx.getContextUsage(), contextWindowOverride);
-      let reminder = buildGoalReminder(state.goal, { percent, advisoryPercent });
-      if (failureReason) {
-        // `failureReason` is caller-formatted (see the lever's `onError` and
-        // the `session_compact_failed` listener below) — Pi's own
-        // `errorMessage` already reads `"Compaction failed: …"` /
-        // `"Auto-compaction failed: …"`, so this must not add a second
-        // prefix on top of it.
-        reminder = `${failureReason} Do not retry goal-compact-and-continue — call goal-achieved or goal-blocked instead.\n${reminder}`;
-      }
-      pi.sendUserMessage(reminder, { deliverAs: "followUp" });
-      return;
-    }
-    if (settleSwallowedWhileCompacting) {
-      settleSwallowedWhileCompacting = false;
-      const config = readGoalLoopConfig(opts.goalLoopConfigPath);
-      const threshold = resolveRunawayThreshold(config);
-      const yielding = hasRunningAgents(opts.rpcRegistryRef?.current);
-      const { next, decision } = decideOnSettle(state, threshold, yielding, false);
-      state = next;
-      // Review relay #2 (Critical): "followUp" — the `flushHeldPushes(pi)`
-      // call above can itself have started a turn synchronously, so a bare
-      // `sendUserMessage` here would throw mid-stream and silently drop this
-      // reinject (see `dispatchSettleDecision`'s doc comment).
-      dispatchSettleDecision(ctx, config, decision, "followUp");
-    }
+    if (pendingRearm) pendingRearmFailureReason = failureReason;
+    if (pendingRearm || settleSwallowedWhileCompacting) armSettleTimer(ctx);
   }
 
   pi.registerCommand("goal", {
@@ -597,6 +804,7 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
         ctx.ui.notify("Agent is busy — try again when idle.", "warning");
         return;
       }
+      cancelSettleTimer(); // re-arm cancel point (260906 Phase 1)
       state = armGoal(goal);
       pi.sendUserMessage(buildGoalAnnouncement(goal));
     },
@@ -610,29 +818,39 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
   });
 
   pi.on("agent_settled", (_event, ctx) => {
+    // 260906 Phase 1 (settle-timer reminder race ticket): clear point "on
+    // agent_settled" — a real settle is proof the reminder's run at least
+    // started, so the boundary guard and its own fallback timer have
+    // nothing left to guard against for this cycle. Runs before the
+    // child-process guard below since it is unconditional bookkeeping, not
+    // goal-mode-only.
+    leadReminderStartPendingRef.current = false;
+    cancelReminderTimeout();
+
     // Defense-in-depth: never re-fire inside a spawned child process (the
     // goal-loop is lead-session-only per the ticket's settled cross-ticket
     // fact). Each child also starts with its own inert module-level state,
     // but this guard protects against a `/goal …`-prefixed message reaching
     // a child's input pipeline regardless.
     if (isChildProcess(process.env)) return;
+    if (!state.active) return;
 
-    const config = readGoalLoopConfig(opts.goalLoopConfigPath);
-    const threshold = resolveRunawayThreshold(config);
-    const yielding = hasRunningAgents(opts.rpcRegistryRef?.current);
-    const compacting = leadCompactingRef.current;
-    const { next, decision } = decideOnSettle(state, threshold, yielding, compacting);
-    state = next;
-
-    if (decision.action === "waiting") {
+    if (leadCompactingRef.current) {
       // 260906 review relay #1 (Critical): this settle's outcome (neither a
       // reinject nor a force-stop) is about to be SWALLOWED — see
       // `settleSwallowedWhileCompacting`'s doc comment for why marking this
       // is required (Pi's own threshold/overflow auto-compaction can end the
       // turn outright with nothing else left to re-evaluate the loop).
       settleSwallowedWhileCompacting = true;
+      ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: waiting for compaction");
+      return;
     }
-    dispatchSettleDecision(ctx, config, decision);
+
+    // 260906 Phase 1: arm the settle timer instead of deciding now — the
+    // fire condition (idle / not compacting / no running children) is
+    // re-evaluated fresh at fire time, `settle_delay_ms` later, in
+    // `onSettleTimerFire`.
+    armSettleTimer(ctx);
   });
 
   // Clears the yield status on the very next lead turn regardless of what
@@ -644,7 +862,7 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
   //
   // Review fix (relay 1, minor): `!state.active` is guarded here because the
   // status key can only ever have been SET while a goal is active (the
-  // `agent_settled` handler above returns "ignore" before the yield branch
+  // `agent_settled` handler above returns before the yield/settling branches
   // when `!state.active`), so this listener has nothing to clear for the
   // common case of a session that never armed a goal. Without this guard,
   // `--mode rpc` would emit one no-op `extension_ui_request` notification per
@@ -655,6 +873,15 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
   // terminal lever or force-stop does, both of which run inside a turn whose
   // own `agent_start` already cleared the key on entry.
   pi.on("agent_start", (_event, ctx) => {
+    // 260906 Phase 1 (settle-timer reminder race ticket): cancel points
+    // "on agent_start" for the settle timer, the boundary-guard fallback
+    // timer, and the boundary guard itself — unconditional, before every
+    // check below, since a fresh turn starting is proof neither has
+    // anything left to guard against.
+    cancelSettleTimer();
+    cancelReminderTimeout();
+    leadReminderStartPendingRef.current = false;
+
     // 260906 (compaction push-hold ticket, Phase 1): backstop clear — runs
     // before the goal-mode-only checks below because `leadCompactingRef` can
     // be set defensively by `session_before_compact` for ANY compaction
@@ -673,11 +900,12 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
       // it replay a settle a second time.
       pendingRearm = false;
       settleSwallowedWhileCompacting = false;
+      pendingRearmFailureReason = undefined;
       // Review relay #1 (Minor): clear the footer status BEFORE returning —
       // this turn is proof the loop moved on, so leaving a stale "waiting for
-      // compaction"/"yielding to running agents" footer up for its whole
-      // duration would be a lie the next branch's unconditional clear was
-      // supposed to have already told.
+      // compaction"/"settling" footer up for its whole duration would be a
+      // lie the next branch's unconditional clear was supposed to have
+      // already told.
       ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, undefined);
       return;
     }
@@ -740,6 +968,7 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
     } as never,
     async execute(_toolCallId, params) {
       const p = params as { summary: string };
+      cancelSettleTimer(); // cancel point (260906 Phase 1): terminal lever
       state = disarmGoal();
       return { content: [{ type: "text", text: `Goal achieved: ${p.summary}` }] };
     },
@@ -758,6 +987,7 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
     } as never,
     async execute(_toolCallId, params) {
       const p = params as { reason: string };
+      cancelSettleTimer(); // cancel point (260906 Phase 1): terminal lever
       state = disarmGoal();
       return { content: [{ type: "text", text: `Goal blocked: ${p.reason}` }] };
     },
@@ -822,6 +1052,13 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
       leadCompactingRef.current = false;
       pendingRearm = false;
       settleSwallowedWhileCompacting = false;
+      pendingRearmFailureReason = undefined;
+      // 260906 Phase 1 (settle-timer reminder race ticket): cancel point
+      // "session shutdown" — a replacement session must not inherit a
+      // pending settle/boundary-guard timer from the torn-down one.
+      cancelSettleTimer();
+      cancelReminderTimeout();
+      leadReminderStartPendingRef.current = false;
     },
   };
 }
