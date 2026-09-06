@@ -676,11 +676,19 @@ pushes stay held until settle; busy `steer` pushes still interrupt normally.
 When idle, both families enter the same arrival-ordered held queue. The adapter
 sends one user-message wake carrying the queued count, not the payloads, so Pi
 runs `before_agent_start` and composes the additive ws system-prompt block.
-The queue remains intact until a confirmed `agent_start`, then releases in FIFO
-order with each message's original `followUp`/`steer` mode and freshly rebuilt
-status. Custom messages never directly start the idle run. Discussion summaries
-(`ws-thread-summary`) use this same path while thread closure, fork stopping,
-and persistence still happen immediately, independently of delivery.
+The queue remains intact until a confirmed `agent_start`, then releases every
+held message as `steer` in FIFO order with freshly rebuilt status and
+`triggerTurn: true`. Recorded `followUp`/`steer` modes govern busy-time
+admission, not this confirmed-start release. This also applies when the user
+starts a run while the wake reservation is pending. With Pi's default
+one-at-a-time steering drain, the first held message enters the first model
+request, avoiding a report-free initial response; later held messages enter
+at subsequent steering polls in FIFO order, before follow-ups. The adapter
+does not promise the entire batch in the first request or change Pi's global
+steering settings. Custom messages never directly start the idle run.
+Discussion summaries (`ws-thread-summary`) use this same path while thread
+closure, fork stopping, and persistence still happen immediately,
+independently of delivery.
 
 **One shared wake-start reservation.** A push wake and a goal reminder share
 one pending-start reservation, established with recovery before user-message
@@ -699,8 +707,10 @@ not direct custom delivery; busy release leaves the queue for the run's settle.
 Held pushes live only in the process and are dropped at `session_shutdown`.
 
 > [!note] Verification boundary · 2026-09-06
-> Offline lifecycle and timer coverage verifies preflight-before-flush, FIFO,
-> recovery, and compaction independence. Actual provider-context lifetime across
+> Offline lifecycle, drain-order, and timer coverage verifies preflight-before-
+> flush, first-message-before-response ordering, FIFO, recovery, and compaction
+> independence. Live provider request/response-count acceptance remains pending;
+> fake drain tests do not establish measured token savings. Actual provider-context lifetime across
 > another model call and simultaneous child/lead-settle behavior (including
 > absence of an already-processing error, Esc, and settling status) remain
 > owner-live acceptance checks, not claims established by fake lifecycle tests.
