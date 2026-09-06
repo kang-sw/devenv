@@ -96,6 +96,7 @@ import {
   heldPushQueue,
   leadCompactingRef,
   leadIdleRef,
+  leadReminderStartPendingRef,
   markAgentExited,
   probeAgentLiveness,
   promptAgent,
@@ -1147,6 +1148,18 @@ describe("buildPushContent", () => {
 });
 
 describe("pushToLead", () => {
+  // 260906 Phase 1 (settle-timer reminder race ticket): module state shared
+  // with goal-loop.ts's settle timer, mirroring the existing
+  // `leadCompactingRef`/`heldPushQueue` reset convention elsewhere in this
+  // file.
+  beforeEach(() => {
+    leadReminderStartPendingRef.current = false;
+  });
+
+  afterEach(() => {
+    leadReminderStartPendingRef.current = false;
+  });
+
   test("sends one custom message per family, with details carrying agent_id, the payload, and the status line", () => {
     const pi = fakePi();
     const record = liveRpcRecord({ agentId: "a", running: true });
@@ -1222,6 +1235,32 @@ describe("pushToLead", () => {
     pushToLead(pi.api, registry, record, "ws-agent-report", { report: "halfway" }, "followUp");
 
     assert.equal(pi.sent[0].message.content?.split("\n")[0], "[ws-agent-report] agent a1");
+  });
+
+  test("260906 Phase 1 (settle-timer reminder race ticket): sends with triggerTurn: false while a reminder start is pending", () => {
+    const pi = fakePi();
+    const record = liveRpcRecord({ agentId: "a", running: true });
+    leadReminderStartPendingRef.current = true;
+
+    pushToLead(pi.api, new Map([["a", record]]), record, "ws-agent-report", { report: "halfway" }, "followUp");
+
+    assert.equal(pi.sent.length, 1);
+    assert.deepEqual(
+      pi.sent[0]!.options,
+      { deliverAs: "followUp", triggerTurn: false },
+      "lands via _appendCustomMessage instead of colliding with the reminder's own mid-await prompt() call",
+    );
+  });
+
+  test("260906 Phase 1 (settle-timer reminder race ticket): triggerTurn: true is unchanged when no reminder start is pending", () => {
+    const pi = fakePi();
+    const record = liveRpcRecord({ agentId: "a", running: true });
+    leadReminderStartPendingRef.current = false;
+
+    pushToLead(pi.api, new Map([["a", record]]), record, "ws-agent-report", { report: "halfway" }, "followUp");
+
+    assert.equal(pi.sent.length, 1);
+    assert.deepEqual(pi.sent[0]!.options, { deliverAs: "followUp", triggerTurn: true });
   });
 });
 

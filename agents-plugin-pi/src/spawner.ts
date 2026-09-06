@@ -1232,6 +1232,22 @@ export const leadIdleRef: { current: (() => boolean) | undefined } = { current: 
 export const leadCompactingRef: { current: boolean } = { current: false };
 
 /**
+ * 260906 Phase 1 (settle-timer reminder race ticket): true only between the
+ * goal-loop's settle timer calling `pi.sendUserMessage(reminder, { deliverAs:
+ * "followUp" })` (the reinject reminder's own `prompt()` pre-run awaits,
+ * before the run is actually streaming) and one of that boundary guard's
+ * three clear points landing: `agent_start`, `agent_settled` (a real settle
+ * is proof the reminder's run at least started), or the guard's own fallback
+ * timeout (no `agent_start`/`agent_settled` arrived within the settle delay
+ * of the send). Owned and mutated by `goal-loop.ts`'s settle timer; read
+ * here, at send time, by `sendPush` so a push racing the reminder's own
+ * pre-run await is sent with `triggerTurn: false` — landing via Pi's
+ * `_appendCustomMessage` instead of colliding with the reminder's own
+ * `prompt()` call ("Agent is already processing…").
+ */
+export const leadReminderStartPendingRef: { current: boolean } = { current: false };
+
+/**
  * 260905 (live-agent widget ticket): the same mutable-ref seam as
  * `leadIdleRef`, filled by `index.ts`'s `session_start` (TUI lead only) with
  * a closure that recomputes `agent-widget.ts`'s rows and repaints the
@@ -1332,7 +1348,21 @@ interface HeldRawSend {
  */
 export const heldPushQueue: Array<HeldPush | HeldRawSend> = [];
 
-/** Builds and sends one push immediately, computing its status line right now. */
+/**
+ * Builds and sends one push immediately, computing its status line right
+ * now.
+ *
+ * 260906 Phase 1 (settle-timer reminder race ticket): `triggerTurn` is
+ * `false` while `leadReminderStartPendingRef.current` is `true` — a boundary
+ * guard against this push's own `sendMessage(..., { triggerTurn: true })`
+ * colliding with the goal-loop's settle-timer reminder mid-await in its own
+ * `prompt()` call (`sendUserMessage` has no `triggerTurn` option of its own
+ * to race against). With the ref set, this push instead lands via Pi's
+ * `_appendCustomMessage` (a synchronous, turn-less append onto
+ * `agent.state.messages`) and is picked up once the reminder's own turn
+ * actually starts, rather than throwing "Agent is already processing…" or
+ * silently dropping.
+ */
 function sendPush(
   pi: ExtensionAPI,
   registry: RpcAgentRegistry | undefined,
@@ -1358,7 +1388,7 @@ function sendPush(
         display: true,
         details: details as never,
       },
-      { deliverAs, triggerTurn: true },
+      { deliverAs, triggerTurn: !leadReminderStartPendingRef.current },
     );
   } catch {
     // Best effort: a push that cannot be delivered (a torn-down session, a
