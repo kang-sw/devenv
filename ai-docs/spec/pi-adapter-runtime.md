@@ -1192,32 +1192,46 @@ auto-compaction remains the last-resort backstop.
   fires outside the model's view — reads `Compaction requested; the
   conversation will resume from a summary carrying: <carry_forward>`.
 - **Re-arming after compaction (260906 Phase 1; swallowed-settle replay added
-  in review relay #1).** A manual `ctx.compact` aborts the invoking turn
-  immediately — well before Pi's own compaction bookkeeping finishes — so
-  nothing may send a prompt from inside a `session_*compact*` handler
-  without racing that unwind. Instead, an idempotent release routine runs
-  once compaction actually finishes, deferred past Pi's own compaction flag:
-  it flushes every push held during the compaction window (see
-  "Child→lead report channel" above), then, once the owning session is idle
-  again, does exactly one of two things for the settle that got swallowed
-  while this compaction was in flight (per the previous entry). For a
-  lever-originated compaction it sends the pending goal reminder as a fresh
-  turn — folding a compaction failure reason into it when present. For any
-  other compaction whose settle was swallowed (owner-typed `/compact`, or Pi's
-  own threshold/overflow auto-compaction ending a turn outright with nothing
-  queued to follow it) it instead replays that settle: the same
-  `decideOnSettle` reducer, streak accounting, and force-stop path as a live
-  `agent_settled`, against a freshly-read context percent — this is what lets
-  an armed goal recover from an auto-compaction that would otherwise have
-  left nothing to ever re-evaluate the loop again. When a settle's outcome
-  qualifies for both (the lever's own `ctx.compact()` call produces a
-  swallowed settle for its own invoking turn), the lever reminder wins and
-  the swallow is treated as consumed too — exactly one reminder is sent for
-  that settle. **Accepted race window:** an owner who types `/compact`
-  directly (bypassing the lever) can still race a reminder that was already
-  in flight before the compaction started — this window is accepted as-is,
-  not intercepted; only the lever's own compaction is guaranteed race-free by
-  construction.
+  in review relay #1; `followUp` delivery on the replay added in review relay
+  #2).** A manual `ctx.compact` aborts the invoking turn immediately — well
+  before Pi's own compaction bookkeeping finishes — so nothing may send a
+  prompt from inside a `session_*compact*` handler without racing that
+  unwind. Instead, an idempotent release routine runs once compaction
+  actually finishes, deferred past Pi's own compaction flag. It checks
+  idleness FIRST: if the owning session is not idle (a fresh turn is already
+  underway by the time this deferred call lands), it clears both markers and
+  returns, leaving the held-push queue and any pending reminder to that
+  turn's own `agent_settled`/`registerPushFlush` flush — nothing is flushed
+  or sent on this branch. Only on the idle branch does it flush every push
+  held during the compaction window (see "Child→lead report channel" above)
+  and then, in order, do at most one of two things for the settle that got
+  swallowed while this compaction was in flight (per the previous entry).
+  For a lever-originated compaction it sends the pending goal reminder — for
+  a lever-originated one and the swallowed-settle replay alike, always as an
+  explicit `deliverAs: "followUp"` turn, since the flush just before it can
+  itself have started a turn synchronously (a held push with `triggerTurn:
+  true`), and an unmarked `sendUserMessage` would throw mid-stream and
+  silently drop the reminder — folding a compaction failure reason into it
+  when present. For any other compaction whose settle was swallowed
+  (owner-typed `/compact`, or Pi's own threshold/overflow auto-compaction
+  ending a turn outright with nothing queued to follow it) it instead
+  replays that settle: the same `decideOnSettle` reducer, streak accounting,
+  and force-stop path as a live `agent_settled`, against a freshly-read
+  context percent — this is what lets an armed goal recover from an
+  auto-compaction that would otherwise have left nothing to ever re-evaluate
+  the loop again. When a settle's outcome qualifies for both (the lever's own
+  `ctx.compact()` call produces a swallowed settle for its own invoking
+  turn), the lever reminder wins and the swallow is treated as consumed too
+  — exactly one reminder is sent for that settle. **Accepted race window:**
+  an owner who types `/compact` directly (bypassing the lever) can still
+  race a reminder that was already in flight before the compaction started —
+  this window is accepted as-is, not intercepted; only the lever's own
+  compaction is guaranteed race-free by construction. **Accepted narrow
+  gap:** unlike the lever, a non-lever compaction has no `onComplete`/
+  `onError` backstop of its own — if Pi's `session_compact` lookup were ever
+  to miss (the `savedCompactionEntry` guard it depends on), only
+  `agent_start`'s backstop clear would still recover a stuck flag/marker;
+  noted as a known, narrow gap rather than intercepted.
 - **Advisory surfacing, not a gate.** While armed, the reminder turn carries two
   pieces of information for the model to weigh: the current context usage as a
   percent (from `getContextUsage().percent`, or derived from `tokens` against the

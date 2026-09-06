@@ -50,7 +50,7 @@ import {
   type GoalLoopConfig,
 } from "../src/goal-loop.ts";
 import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
-import { leadCompactingRef, heldPushQueue } from "../src/spawner.ts";
+import { leadCompactingRef, heldPushQueue, isOwningAgentIdle } from "../src/spawner.ts";
 
 const tmpDir = mkdtempSync(join(tmpdir(), "ws-goal-loop-test-"));
 after(() => {
@@ -511,17 +511,30 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
 
   const configPath = join(tmpDir, "does-not-exist-compaction-260906.json");
 
+  /**
+   * `streaming`: models Pi's real `isStreaming`/`prompt()` guard (review
+   * relay #2, Critical) — `sendMessage(..., { triggerTurn: true })` (what a
+   * flushed `HeldPush`/`HeldRawSend` actually calls) flips it true, and
+   * `sendUserMessage` then throws exactly like the real
+   * `agent-session.js:860-863` guard unless called with `deliverAs:
+   * "followUp"` or `"steer"`. Existing tests never call `sendMessage`, so
+   * `streaming` stays false and this is a no-op for them.
+   */
   function fakePi(): {
     api: ExtensionAPI;
     handlers: Map<string, (event: unknown, ctx: ExtensionContext) => void>;
     commands: Map<string, (args: string, ctx: ExtensionContext) => Promise<void> | void>;
     tools: Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>;
     sentUserMessages: Array<{ content: unknown; options?: unknown }>;
+    sentMessages: Array<{ content: unknown; options?: unknown }>;
+    streaming: { current: boolean };
   } {
     const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => void>();
     const commands = new Map<string, (args: string, ctx: ExtensionContext) => Promise<void> | void>();
     const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
     const sentUserMessages: Array<{ content: unknown; options?: unknown }> = [];
+    const sentMessages: Array<{ content: unknown; options?: unknown }> = [];
+    const streaming = { current: false };
     const api = {
       on: (event: string, handler: (event: unknown, ctx: ExtensionContext) => void) => {
         handlers.set(event, handler);
@@ -533,10 +546,20 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
         tools.set(def.name, def);
       },
       sendUserMessage: (content: unknown, options?: unknown) => {
+        const deliverAs = (options as { deliverAs?: string } | undefined)?.deliverAs;
+        if (streaming.current && deliverAs !== "followUp" && deliverAs !== "steer") {
+          throw new Error("Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.");
+        }
         sentUserMessages.push({ content, options });
       },
+      sendMessage: (content: unknown, options?: unknown) => {
+        sentMessages.push({ content, options });
+        if ((options as { triggerTurn?: boolean } | undefined)?.triggerTurn) {
+          streaming.current = true;
+        }
+      },
     };
-    return { api: api as unknown as ExtensionAPI, handlers, commands, tools, sentUserMessages };
+    return { api: api as unknown as ExtensionAPI, handlers, commands, tools, sentUserMessages, sentMessages, streaming };
   }
 
   /**
@@ -830,5 +853,146 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     pi.handlers.get("session_compact")!({ reason: "manual" }, ctx);
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(pi.sentUserMessages.length, 2, "no stale pendingRearm leaking into this unrelated compaction");
+  });
+
+  test("260906 review relay #2 (Critical): the swallowed-settle replay is delivered as followUp, surviving a flush that started a turn synchronously", async () => {
+    const threshold2Path = writeConfig("relay2-threshold-2.json", JSON.stringify({ runaway_threshold: 2 }));
+    const pi = fakePi();
+    registerGoalLoop(pi.api, { goalLoopConfigPath: threshold2Path });
+    const { ctx } = fakeCtx();
+
+    await pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed), streak 0
+
+    // Threshold auto-compaction sequence: session_before_compact ->
+    // session_compact -> agent_settled lands with the flag still true, so the
+    // settle is swallowed (matching the review-relay-1 Critical fix's own
+    // reproduction shape).
+    pi.handlers.get("session_before_compact")!({ reason: "threshold" }, ctx);
+    pi.handlers.get("session_compact")!({ reason: "threshold" }, ctx);
+    pi.handlers.get("agent_settled")!({}, fakeCtx().ctx);
+    assert.equal(pi.sentUserMessages.length, 1, "swallowed, not sent yet");
+
+    // A push held during the compaction window — flushing it starts a turn
+    // SYNCHRONOUSLY, exactly like a real `HeldPush`/`HeldRawSend` calling
+    // `pi.sendMessage(..., { triggerTurn: true })` (`spawner.ts`'s `sendPush`).
+    heldPushQueue.push({
+      kind: "raw",
+      send: (p) => p.sendMessage({ customType: "ws-agent-report" }, { triggerTurn: true }),
+    });
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(pi.streaming.current, true, "the flush started a turn synchronously, as the fake's streaming guard models");
+    assert.equal(pi.sentUserMessages.length, 2, "the replayed reminder was delivered, not thrown away mid-stream");
+    const replay = pi.sentUserMessages[1]!;
+    assert.equal(
+      (replay.options as { deliverAs?: string } | undefined)?.deliverAs,
+      "followUp",
+      "queues behind the flush's turn instead of throwing — a bare call would hit the streaming guard above",
+    );
+
+    // The streak advanced by exactly one for this replay: with
+    // runaway_threshold 2, exactly one more ordinary settle reaches the
+    // threshold and force-stops — it would already have force-stopped on
+    // THIS settle (streak 0 -> 2 in one call is not how the reducer works)
+    // or would still be short of it on the next if the replay had not
+    // advanced the streak at all.
+    const nextSettle = fakeCtx();
+    pi.handlers.get("agent_settled")!({}, nextSettle.ctx);
+    assert.equal(pi.sentUserMessages.length, 2, "force-stop notifies; it does not send a third reminder");
+    assert.equal(nextSettle.notifications.length, 1);
+    assert.match(nextSettle.notifications[0]!.message, /Goal loop force-stopped/);
+  });
+
+  test("260906 review relay #2 (Test Important): the not-idle branch's marker clearing is observable across a later, unrelated compaction", async () => {
+    const pi = fakePi();
+    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath });
+    const { ctx } = fakeCtx();
+
+    await pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed)
+    let compactCall: unknown;
+    (ctx as unknown as { compact: (opts: unknown) => void }).compact = (opts: unknown) => {
+      compactCall = opts;
+    };
+    await pi.tools.get("goal-compact-and-continue")!.execute("call-1", { carry_forward: "x" }, undefined, undefined, ctx);
+    assert.ok(compactCall, "ctx.compact was called");
+    assert.equal(leadCompactingRef.current, true, "pendingRearm is now true");
+
+    // Released while NOT idle: the not-idle branch must clear pendingRearm
+    // (and the swallow marker) even though it sends nothing itself.
+    const notIdle = fakeCtx(() => false).ctx;
+    pi.handlers.get("session_compact")!({ reason: "manual" }, notIdle);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(leadCompactingRef.current, false);
+    assert.equal(pi.sentUserMessages.length, 1, "nothing sent by the not-idle release itself");
+
+    // That turn's own settle re-arms normally — unaffected by the cleared markers.
+    pi.handlers.get("agent_settled")!({}, fakeCtx().ctx);
+    assert.equal(pi.sentUserMessages.length, 2, "the ordinary reinject reminder fires on that turn's own settle");
+
+    // A SECOND, unrelated, non-lever compaction cycle: if the not-idle branch
+    // above had failed to clear pendingRearm, this idle release would
+    // wrongly synthesize a lever reminder that was never requested.
+    pi.handlers.get("session_before_compact")!({ reason: "manual" }, ctx);
+    pi.handlers.get("session_compact")!({ reason: "manual" }, ctx);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(pi.sentUserMessages.length, 2, "no stale pendingRearm fabricating a reminder on this unrelated compaction");
+  });
+
+  test("260906 review relay #2 (Test Important): the agent_start backstop's marker clearing is observable across a later, unrelated compaction", async () => {
+    const pi = fakePi();
+    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath });
+    const { ctx } = fakeCtx();
+
+    await pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed)
+    (ctx as unknown as { compact: (opts: unknown) => void }).compact = () => {};
+    await pi.tools.get("goal-compact-and-continue")!.execute("call-1", { carry_forward: "x" }, undefined, undefined, ctx);
+    assert.equal(leadCompactingRef.current, true, "pendingRearm is now true");
+
+    // agent_start's own backstop fires before session_compact ever does —
+    // it must clear pendingRearm too, not just the flag.
+    pi.handlers.get("agent_start")!({}, ctx);
+    assert.equal(leadCompactingRef.current, false);
+    assert.equal(pi.sentUserMessages.length, 1, "the backstop sends nothing");
+
+    // A later, unrelated, non-lever compaction cycle: a stale pendingRearm
+    // would wrongly synthesize a lever reminder here.
+    pi.handlers.get("session_before_compact")!({ reason: "manual" }, ctx);
+    pi.handlers.get("session_compact")!({ reason: "manual" }, ctx);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(pi.sentUserMessages.length, 1, "no stale pendingRearm fabricating a reminder on this unrelated compaction");
+  });
+
+  test("260906 review relay #2 (Test Minor): GoalLoopShutdownHandle resets the flag and both markers, and a following push is not held", async () => {
+    const pi = fakePi();
+    const handle = registerGoalLoop(pi.api, { goalLoopConfigPath: configPath });
+    const { ctx } = fakeCtx();
+
+    await pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed)
+    (ctx as unknown as { compact: (opts: unknown) => void }).compact = () => {};
+    await pi.tools.get("goal-compact-and-continue")!.execute("call-1", { carry_forward: "x" }, undefined, undefined, ctx);
+    assert.equal(leadCompactingRef.current, true);
+
+    assert.equal(isOwningAgentIdle(), false, "isOwningAgentIdle() is forced false while pendingRearm's compaction is in flight");
+
+    // A shutdown/`/reload` lands mid-compaction, before session_compact ever
+    // fires for it.
+    handle.resetCompactionStateForShutdown();
+    assert.equal(leadCompactingRef.current, false, "the flag is reset");
+
+    // A following push is not held: `spawner.ts`'s `isOwningAgentIdle()` —
+    // the exact predicate `pushToLead`'s `followUp` hold and `ask.ts`'s
+    // `injectDiscussionSummary` both check — is no longer forced false by
+    // the stale flag, so a fresh push would send immediately rather than
+    // queuing on `heldPushQueue`.
+    assert.equal(isOwningAgentIdle(), true, "no longer forced false — a following push is not held");
+
+    // A later, unrelated, non-lever compaction cycle: a stale pendingRearm or
+    // swallow marker (had the handle not cleared them too) would wrongly
+    // synthesize a reminder/replay here.
+    pi.handlers.get("session_before_compact")!({ reason: "manual" }, ctx);
+    pi.handlers.get("session_compact")!({ reason: "manual" }, ctx);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(pi.sentUserMessages.length, 1, "no stale marker fabricating a reminder after the shutdown reset");
   });
 });

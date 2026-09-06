@@ -446,8 +446,27 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
    * Shared decision dispatch between the live `agent_settled` listener and
    * `releaseAfterCompaction`'s swallowed-settle replay, so the two can never
    * drift on what a given `SettleDecision` action does.
+   *
+   * `deliveryMode` (review relay #2, Critical): `undefined` for the live
+   * `agent_settled` listener — an ordinary settle's reinject is the start of
+   * a brand-new turn, so no explicit `deliverAs` is needed, matching every
+   * pre-existing call site. The replay path from `releaseAfterCompaction`'s
+   * idle branch passes `"followUp"` instead: that branch calls
+   * `flushHeldPushes(pi)` first, and a flushed push can itself start a turn
+   * synchronously (`sendMessage(..., { triggerTurn: true })`), leaving Pi
+   * mid-stream by the time this reinject reaches `sendUserMessage` — a bare
+   * call would throw ("Agent is already processing…") and silently drop the
+   * reminder. `"followUp"` queues behind whatever the flush just started, and
+   * still starts a turn itself when the flush started nothing, matching the
+   * ticket's mandate for the release routine (same pattern the lever branch
+   * beside this one already uses).
    */
-  function dispatchSettleDecision(ctx: ExtensionContext, config: GoalLoopConfig | undefined, decision: SettleDecision): void {
+  function dispatchSettleDecision(
+    ctx: ExtensionContext,
+    config: GoalLoopConfig | undefined,
+    decision: SettleDecision,
+    deliveryMode?: "followUp",
+  ): void {
     if (decision.action === "ignore") return;
     if (decision.action === "waiting") {
       ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: waiting for compaction");
@@ -465,12 +484,26 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
     }
     if (decision.action === "force-stop") {
       ctx.ui.notify(`Goal loop force-stopped: ${decision.reason}`, "warning");
+      // Review relay #2 (Minor): a force-stop reached via the swallowed-
+      // settle replay can follow a settle that already set this status
+      // ("waiting for compaction") — disarming here (the caller already set
+      // `state = initialGoalLoopState()`) means no later `agent_start` will
+      // ever see `state.active` true again to clear it through the ordinary
+      // branch below. Harmless no-op for the live listener, which can only
+      // reach `force-stop` from an active, non-compacting state where this
+      // key was never set for the current turn.
+      ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, undefined);
       return;
     }
     const advisoryPercent = resolveCompactionAdvisoryPercent(config);
     const contextWindowOverride = resolveContextWindowOverride(config);
     const percent = computeContextPercent(ctx.getContextUsage(), contextWindowOverride);
-    pi.sendUserMessage(buildGoalReminder(decision.goal, { percent, advisoryPercent }));
+    const reminder = buildGoalReminder(decision.goal, { percent, advisoryPercent });
+    if (deliveryMode === "followUp") {
+      pi.sendUserMessage(reminder, { deliverAs: "followUp" });
+    } else {
+      pi.sendUserMessage(reminder);
+    }
   }
 
   /**
@@ -489,7 +522,11 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
    * reminder as a fresh `followUp`, folding a compaction failure reason into
    * it when present; otherwise, when this settle's outcome was swallowed
    * (`settleSwallowedWhileCompacting`), replays exactly one ordinary settle
-   * decision instead. The lever branch wins and also clears the swallow
+   * decision via `dispatchSettleDecision(..., "followUp")` instead — both
+   * reminder paths use `"followUp"` because the flush just above can itself
+   * have started a turn synchronously, and a bare `sendUserMessage` would
+   * throw mid-stream and silently drop the reminder (review relay #2,
+   * Critical). The lever branch wins and also clears the swallow
    * marker when BOTH are set from the same settle — the abort inside a
    * lever-triggered `ctx.compact()` produces its own `waiting` settle just
    * like an auto-compaction would, so without this the same settle could
@@ -540,7 +577,11 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
       const yielding = hasRunningAgents(opts.rpcRegistryRef?.current);
       const { next, decision } = decideOnSettle(state, threshold, yielding, false);
       state = next;
-      dispatchSettleDecision(ctx, config, decision);
+      // Review relay #2 (Critical): "followUp" — the `flushHeldPushes(pi)`
+      // call above can itself have started a turn synchronously, so a bare
+      // `sendUserMessage` here would throw mid-stream and silently drop this
+      // reinject (see `dispatchSettleDecision`'s doc comment).
+      dispatchSettleDecision(ctx, config, decision, "followUp");
     }
   }
 
@@ -672,6 +713,10 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
   // after), so anything synchronous here would race that same internal
   // state Pi has not finished unwinding yet.
   pi.on("session_compact", (_event, ctx) => {
+    // Review relay #2 (Minor, accepted narrow gap): unlike the lever, a
+    // non-lever compaction has no `onComplete`/`onError` backstop — if Pi's
+    // internal `savedCompactionEntry` lookup ever misses this event outright,
+    // only `agent_start`'s backstop can still clear a stuck flag/marker.
     setImmediate(() => releaseAfterCompaction(ctx));
   });
   pi.on("session_compact_failed", (event, ctx) => {
