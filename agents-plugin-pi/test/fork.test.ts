@@ -57,9 +57,26 @@ import {
   armForkRoleWiring,
   buildForkSpawnCtx,
 } from "../src/fork.ts";
-import { applyRpcEvent, attachEventListener, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { leadIdleRef, registerPushFlush, applyRpcEvent, attachEventListener, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import type { BridgeHandle } from "../src/bridge.ts";
 import type { ExtensionAPI, RpcClient } from "@earendil-works/pi-coding-agent";
+
+// Phase 2: these payload-focused fixtures model a user wake followed by
+// confirmed streaming start, rather than the retired undefined-idle fallback.
+function initializePushLifecycle(pi: ExtensionAPI): void {
+  let idle = true;
+  leadIdleRef.current = () => idle;
+  const handlers = new Map<string, () => void>();
+  pi.on = ((event: string, handler: () => void) => handlers.set(event, handler)) as ExtensionAPI["on"];
+  pi.sendUserMessage = (content, options) => {
+    assert.match(String(content), /^\d+ ws messages waiting;[^\n]+$/);
+    assert.deepEqual(options, { deliverAs: "followUp" });
+    idle = false;
+    handlers.get("agent_start")?.();
+    idle = true;
+  };
+  registerPushFlush(pi, { delayMs: () => 10 });
+}
 
 describe("FORK_TOOL_NAME / FORK_EXCLUDED_TOOL_NAMES", () => {
   test("FORK_TOOL_NAME is the literal ws-fork", () => {
@@ -379,10 +396,8 @@ describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2, 260
       sendMessage(message: { customType?: string; details?: Record<string, unknown> }, options?: { deliverAs?: string; triggerTurn?: boolean }) {
         pushes.push({ ...message, deliverAs: options?.deliverAs, triggerTurn: options?.triggerTurn });
       },
-      sendUserMessage() {
-        throw new Error("wireAntiBleedLoop must push custom messages, never a bare user message");
-      },
     } as unknown as ExtensionAPI;
+    initializePushLifecycle(pi);
     // Two extra live siblings so the status line this loop's registry argument
     // produces is distinguishable from the absent line an empty/wrong registry
     // would render (review relay #1, I4).
@@ -679,6 +694,7 @@ describe("buildForkSpawnCtx (the ws-fork push channel)", () => {
   test("C1: a record wired through that ctx's pi pushes ws-agent-report when the fork's own final turn ends", async () => {
     const sent: Array<{ customType?: string; details?: Record<string, unknown> }> = [];
     const pushPi = { sendMessage: (m: { customType?: string; details?: Record<string, unknown> }) => void sent.push(m) } as unknown as ExtensionAPI;
+    initializePushLifecycle(pushPi);
     const ctx = buildForkSpawnCtx(pushPi, bridge, { cwd: "/repo" }, {
       forkFrom: "/tmp/lead-session.jsonl",
       explicitTools: "read",

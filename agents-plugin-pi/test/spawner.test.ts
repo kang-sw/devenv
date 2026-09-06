@@ -96,7 +96,7 @@ import {
   heldPushQueue,
   leadCompactingRef,
   leadIdleRef,
-  leadReminderStartPendingRef,
+  leadWakeStartPendingRef,
   markAgentExited,
   probeAgentLiveness,
   promptAgent,
@@ -641,17 +641,30 @@ function liveRpcRecord(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord 
  */
 function fakePi(overrides: { sendMessage?: (message: unknown, options?: unknown) => void } = {}): {
   api: Parameters<typeof pushToLead>[0];
+  wakes: unknown[];
   sent: Array<{ message: { customType?: string; content?: string; display?: boolean; details?: unknown }; options?: { deliverAs?: string; triggerTurn?: boolean } }>;
 } {
   const sent: Array<{ message: { customType?: string; content?: string; display?: boolean; details?: unknown }; options?: { deliverAs?: string; triggerTurn?: boolean } }> = [];
+  const wakes: unknown[] = [];
+  leadIdleRef.current ??= () => true;
+  const handlers = new Map<string, () => void>();
   const api = {
+    on: (event: string, handler: () => void) => handlers.set(event, handler),
+    sendUserMessage: (content: unknown) => {
+      wakes.push(content);
+      const accessor = leadIdleRef.current;
+      leadIdleRef.current = () => false;
+      handlers.get("agent_start")?.();
+      leadIdleRef.current = accessor;
+    },
     sendMessage:
       overrides.sendMessage ??
       ((message: unknown, options?: unknown) => {
         sent.push({ message: message as never, options: options as never });
       }),
   };
-  return { api: api as unknown as Parameters<typeof pushToLead>[0], sent };
+  registerPushFlush(api as never, { delayMs: () => 10 });
+  return { api: api as unknown as Parameters<typeof pushToLead>[0], sent, wakes };
 }
 
 describe("applyRpcEvent", () => {
@@ -1169,11 +1182,11 @@ describe("pushToLead", () => {
   // `leadCompactingRef`/`heldPushQueue` reset convention elsewhere in this
   // file.
   beforeEach(() => {
-    leadReminderStartPendingRef.current = false;
+    leadWakeStartPendingRef.current = false;
   });
 
   afterEach(() => {
-    leadReminderStartPendingRef.current = false;
+    leadWakeStartPendingRef.current = false;
   });
 
   test("sends one custom message per family, with details carrying agent_id, the payload, and the status line", () => {
@@ -1253,25 +1266,24 @@ describe("pushToLead", () => {
     assert.equal(pi.sent[0].message.content?.split("\n")[0], "[ws-agent-report] agent a1");
   });
 
-  test("260906 Phase 1 (settle-timer reminder race ticket): sends with triggerTurn: false while a reminder start is pending", () => {
+  test("Phase 2: a pending reminder holds pushes until confirmed start", () => {
     const pi = fakePi();
     const record = liveRpcRecord({ agentId: "a", running: true });
-    leadReminderStartPendingRef.current = true;
+    leadWakeStartPendingRef.current = true;
 
     pushToLead(pi.api, new Map([["a", record]]), record, "ws-agent-report", { report: "halfway" }, "followUp");
 
-    assert.equal(pi.sent.length, 1);
-    assert.deepEqual(
-      pi.sent[0]!.options,
-      { deliverAs: "followUp", triggerTurn: false },
-      "lands via _appendCustomMessage instead of colliding with the reminder's own mid-await prompt() call",
-    );
+    assert.equal(pi.sent.length, 0);
+    assert.equal(heldPushQueue.length, 1, "held until confirmed streaming start");
+    leadWakeStartPendingRef.current = false;
+    flushHeldPushes(pi.api, true);
+    assert.deepEqual(pi.sent[0]!.options, { deliverAs: "followUp", triggerTurn: true });
   });
 
   test("260906 Phase 1 (settle-timer reminder race ticket): triggerTurn: true is unchanged when no reminder start is pending", () => {
     const pi = fakePi();
     const record = liveRpcRecord({ agentId: "a", running: true });
-    leadReminderStartPendingRef.current = false;
+    leadWakeStartPendingRef.current = false;
 
     pushToLead(pi.api, new Map([["a", record]]), record, "ws-agent-report", { report: "halfway" }, "followUp");
 
@@ -1311,7 +1323,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     leadCompactingRef.current = false;
   });
 
-  test("an IDLE lead is pushed to immediately — holding would only delay the wake", () => {
+  test("an IDLE lead receives its push after the fake user wake confirms start", () => {
     const pi = fakePi();
     const record = liveRpcRecord({ agentId: "a", running: true });
     pushToLead(pi.api, new Map([["a", record]]), record, "ws-agent-report", { report: "halfway" }, "followUp");
@@ -1327,25 +1339,26 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     assert.deepEqual(pi.sent, []);
     assert.equal(heldPushQueue.length, 1);
 
-    assert.equal(flushHeldPushes(pi.api), 1);
+    assert.equal(flushHeldPushes(pi.api, true), 1);
     assert.equal(pi.sent.length, 1);
     assert.deepEqual(heldPushQueue, [], "the queue is drained, so a second settle re-sends nothing");
   });
 
-  test("no idleness accessor at all (a headless path, a torn-down session) sends straight through", () => {
-    leadIdleRef.current = undefined;
+  test("no idleness accessor means no send into an uninitialized or torn-down session", () => {
     const pi = fakePi();
+    leadIdleRef.current = undefined;
     pushToLead(pi.api, new Map(), undefined, "ws-agent-orphaned", { count: 1 }, "followUp");
-    assert.equal(pi.sent.length, 1, "a held push nothing ever flushes would be a lost report");
+    assert.equal(pi.sent.length, 0, "uninitialized or torn-down sessions never start custom runs");
   });
 
-  test("a throwing idleness accessor degrades to sending, not to holding", () => {
+  test("a throwing idleness accessor is a torn-down session: no send or hold", () => {
     leadIdleRef.current = () => {
       throw new Error("ctx is gone");
     };
     const pi = fakePi();
     pushToLead(pi.api, new Map(), undefined, "ws-agent-orphaned", { count: 1 }, "followUp");
-    assert.equal(pi.sent.length, 1);
+    assert.equal(pi.sent.length, 0);
+    assert.equal(heldPushQueue.length, 0);
   });
 
   test("steer families (an approval, a headless question) bypass the hold — interrupting is their whole purpose", () => {
@@ -1372,7 +1385,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     assert.equal(heldPushQueue.length, 1);
 
     leadCompactingRef.current = false;
-    assert.equal(flushHeldPushes(pi.api), 1);
+    assert.equal(flushHeldPushes(pi.api, true), 1);
     assert.equal(pi.sent[0]!.options?.deliverAs, "steer", "released with the SAME delivery mode it was held under");
   });
 
@@ -1393,7 +1406,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     assert.equal(heldPushQueue.length, 1);
 
     leadCompactingRef.current = false;
-    assert.equal(flushHeldPushes(pi.api), 1);
+    assert.equal(flushHeldPushes(pi.api, true), 1);
     assert.equal(pi.sent[0]!.options?.deliverAs, "followUp");
   });
 
@@ -1401,11 +1414,13 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     leadCompactingRef.current = true;
     const sent: string[] = [];
     let settled: (() => void) | undefined;
+    let start: (() => void) | undefined;
     const api = {
-      on: (event: string, handler: () => void) => void (event === "agent_settled" && (settled = handler)),
+      on: (event: string, handler: () => void) => { if (event === "agent_settled") settled = handler; if (event === "agent_start") start = handler; },
+      sendUserMessage: () => start?.(),
       sendMessage: (message: { customType?: string }) => void sent.push(message.customType ?? ""),
     } as unknown as Parameters<typeof registerPushFlush>[0];
-    registerPushFlush(api);
+    registerPushFlush(api, { delayMs: () => 10 });
 
     heldPushQueue.push({ kind: "push", registry: undefined, record: undefined, family: "ws-agent-report", payload: { report: "held" }, deliverAs: "followUp" });
     settled?.();
@@ -1435,7 +1450,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     // w3 is still working when the lead's turn ends: the held pair is released
     // now, against the registry as it stands at THIS instant.
     idle = true;
-    assert.equal(flushHeldPushes(pi.api), 2);
+    assert.equal(flushHeldPushes(pi.api, true), 2);
     assert.deepEqual(
       pi.sent.map((entry) => (entry.message.details as { status?: string }).status),
       ["1 delegated agent still running", "1 delegated agent still running"],
@@ -1454,7 +1469,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     idle = false;
     pushToLead(pi.api, registry, w3, "ws-agent-report", { kind: "final", report: "Outcome: w3" }, "followUp");
     idle = true;
-    flushHeldPushes(pi.api);
+    flushHeldPushes(pi.api, true);
 
     assert.equal(
       (pi.sent[2].message.details as { status?: string }).status,
@@ -1477,7 +1492,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     pushToLead(reentrant.api, registry, undefined, "ws-agent-report", { report: "first" }, "followUp");
 
     idle = true;
-    assert.equal(flushHeldPushes(reentrant.api), 1);
+    assert.equal(flushHeldPushes(reentrant.api, true), 1);
     assert.equal(heldPushQueue.length, 1, "the re-entrant push waits for the next settle rather than joining this drain");
   });
 
@@ -1495,7 +1510,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
       heldPushQueue.push({ kind: "push", registry: undefined, record: undefined, family: "ws-agent-report", payload: { report: "stale" }, deliverAs: "followUp" });
       let settled: (() => void) | undefined;
       const api = { on: (event: string, handler: () => void) => void (event === "agent_settled" && (settled = handler)), sendMessage: () => assert.fail("a worker process must not push") };
-      registerPushFlush(api as unknown as Parameters<typeof registerPushFlush>[0]);
+      registerPushFlush(api as unknown as Parameters<typeof registerPushFlush>[0], { delayMs: () => 10 });
       settled?.();
       assert.equal(heldPushQueue.length, 1, "left untouched rather than delivered into a worker's own transcript");
     } finally {
@@ -1505,15 +1520,17 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     }
   });
 
-  test("registerPushFlush releases the held pushes on the lead's own agent_settled", () => {
+  test("registerPushFlush requests a wake on settle and releases at confirmed start", () => {
     idle = false;
     const sent: string[] = [];
     let settled: (() => void) | undefined;
+    let start: (() => void) | undefined;
     const api = {
-      on: (event: string, handler: () => void) => void (event === "agent_settled" && (settled = handler)),
+      on: (event: string, handler: () => void) => { if (event === "agent_settled") settled = handler; if (event === "agent_start") start = handler; },
+      sendUserMessage: () => start?.(),
       sendMessage: (message: { customType?: string }) => void sent.push(message.customType ?? ""),
     } as unknown as Parameters<typeof registerPushFlush>[0];
-    registerPushFlush(api);
+    registerPushFlush(api, { delayMs: () => 10 });
 
     pushToLead(api as never, new Map(), undefined, "ws-agent-report", { report: "held" }, "followUp");
     assert.deepEqual(sent, []);
@@ -1640,6 +1657,8 @@ describe("attachEventListener (the settle-suppression IO gate)", () => {
     h.emit({ type: "agent_settled" });
     await settleDrain();
     assert.deepEqual(families(h.pi), ["ws-agent-settled"], "the answer still arrives as the settle push's last_message");
+    assert.equal(h.pi.wakes.length, 1, "shared-registry explore completion wakes the idle lead through user preflight");
+    assert.match(h.pi.wakes[0] as string, /1 ws messages waiting/);
     assert.equal(h.registry.has("a"), false, "a one-shot explore has no dormant-resumable resting state — it is gone, not parked");
   });
 

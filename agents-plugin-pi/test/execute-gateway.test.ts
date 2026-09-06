@@ -66,7 +66,7 @@ import {
   type PendingApproval,
   type WorkingContext,
 } from "../src/execute-gateway.ts";
-import { GATED_EXEC_TOOL_NAME, TOOL_GROUPS, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { leadIdleRef, registerPushFlush, GATED_EXEC_TOOL_NAME, TOOL_GROUPS, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 describe("buildExecuteWorkerPrompt", () => {
@@ -449,14 +449,26 @@ describe("createApprovalRelay (260905: unconditional ws-agent-approval push)", (
     sent: Array<{ message: { customType?: string; content?: string; details?: Record<string, unknown> }; options?: { deliverAs?: string; triggerTurn?: boolean } }>;
   } {
     const sent: Array<{ message: { customType?: string; content?: string; details?: Record<string, unknown> }; options?: { deliverAs?: string; triggerTurn?: boolean } }> = [];
+    // Phase 2 requires a live accessor and confirmed streaming start before
+    // custom delivery. Keep every approval payload/fan-in assertion below.
+    let idle = true;
+    leadIdleRef.current = () => idle;
+    const handlers = new Map<string, () => void>();
     const api = {
+      on: (event: string, handler: () => void) => handlers.set(event, handler),
       sendMessage: (message: unknown, options?: unknown) => {
+        assert.equal(idle, false, "approval custom message cannot start an idle run");
         sent.push({ message: message as never, options: options as never });
       },
-      sendUserMessage: () => {
-        throw new Error("the approval relay must push a custom message, never a bare user message");
+      sendUserMessage: (content: unknown, options: unknown) => {
+        assert.match(String(content), /^\d+ ws messages waiting;[^\n]+$/);
+        assert.deepEqual(options, { deliverAs: "followUp" });
+        idle = false;
+        handlers.get("agent_start")?.();
+        idle = true;
       },
     } as unknown as ExtensionAPI;
+    registerPushFlush(api, { delayMs: () => 10 });
     return { api, sent };
   }
 

@@ -66,10 +66,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
 import {
   agentWidgetRefreshRef,
-  composeLeadTurnStartOptions,
-  heldPushQueue,
+  sendToLead,
   inheritModelFromToolCtx,
-  isOwningAgentIdle,
   sendToAgent,
   spawnAgent,
   stopAgent,
@@ -901,61 +899,7 @@ export function detachForkRaisedThread(handle: ThreadRegistryHandle, rpcRegistry
   refreshAgentWidget();
 }
 
-/**
- * §6 injection, the `"lead-ask"` half of `/done`: the fork's summary
- * reaches the lead as a Pi CUSTOM message (distinguishable from an owner
- * turn) delivered via `followUp` — never `steer` — so a streaming lead only
- * sees it after its current turn and multiple closes queue in order, and
- * with `triggerTurn: true` so an IDLE lead starts a turn on it at once rather
- * than leaving the owner's decision queued until their next prompt. The lead
- * session is never rewound. The thread itself goes `"dormant"`: retained and
- * reopenable (§9), not deleted.
- *
- * Review relay #1 I5: "dormant" is 260903's `ws-agent-stop` semantics —
- * dormant AND retained — so the respondent's child process is actually
- * stopped here rather than left running idle for the rest of the lead
- * session. `stopAgent` keeps the registry entry (it only drops `client`), and
- * the resume snapshot is captured BEFORE the stop, while the record still
- * carries its live fields, so `/answer` can rehydrate and `sendToAgent`'s
- * dormant branch can relaunch from the same `--session` file. Review relay #2
- * C2 narrowed that stop to `"lead-ask"` threads — it is `closeThreadOnDone`'s
- * job to keep an Entry A task fork out of here.
- *
- * 260906 (compaction push-hold ticket, Phase 1): the outbound
- * `ws-thread-summary` message is held on `spawner.ts`'s `heldPushQueue`
- * (as a `kind: "raw"` entry) whenever `isOwningAgentIdle()` is false — mid-turn
- * OR an in-flight compaction, the same predicate `pushToLead`'s `followUp`
- * hold uses — and released with the rest of that queue on the owning turn's
- * `agent_settled` or on `releaseAfterCompaction`. This call site never had a
- * mid-turn guard before (it never carried a computed status line, so
- * staleness never applied), but an in-flight compaction can abort the very
- * turn a synchronous send here would otherwise race into. The thread's own
- * dormant transition / respondent stop / persistence below runs immediately
- * either way — those side effects are not part of the race being fixed and
- * delaying them would add no safety.
- *
- * 260906 review relay #1 (Minor): the ticket only asked for a hold "while
- * [the compaction flag] is set", but the predicate used here is the general
- * `isOwningAgentIdle()` (mid-turn OR compacting), matching `pushToLead`'s own
- * `followUp` hold rather than a compaction-only check. This is a deliberate,
- * scope-widening choice (the plan's Implementation step 9 flagged it as an
- * open call and recommended it): an ordinary MID-TURN `/done` is now deferred
- * to the adapter's post-settle flush and delivered as a fresh turn, instead
- * of racing straight into Pi's own in-run `agent.followUp()` queue as it did
- * before this ticket. Still safe (the message is never lost, only delayed to
- * the same turn boundary every other held `followUp` already uses), but it
- * changes this call site's turn-boundary behavior beyond the compaction race
- * this ticket set out to fix.
- *
- * 260906 Phase 1 review relay #1 (Important #2): the immediate send AND the
- * held raw closure both build their options via `composeLeadTurnStartOptions`
- * so the goal-loop's boundary guard (`leadReminderStartPendingRef`) is
- * applied here too — a fork's `/done` completing while the reminder's own
- * `sendUserMessage` is mid-await used to be able to start a colliding turn
- * exactly like a child push once could. The closure calls the composer
- * itself (not at hold time) so a held send flushed while the flag is set
- * still reads it fresh at flush time.
- */
+/** Send the summary through the shared hold/wake path. Thread close, respondent stop, snapshot, and persistence remain immediate even when delivery waits. */
 export function injectDiscussionSummary(
   pi: ExtensionAPI,
   handle: ThreadRegistryHandle,
@@ -969,15 +913,9 @@ export function injectDiscussionSummary(
     display: true,
     details: { threadId: thread.threadId, title: thread.title },
   };
-  // `triggerTurn` is what makes an IDLE lead act on the decision: without
-  // it Pi only queues the message and nothing starts a turn until the
-  // owner's next prompt (dogfood 2026-09-05, Pi 0.84.4). `followUp` keeps
-  // the ordering contract for a lead mid-turn — delivered after that turn.
-  if (isOwningAgentIdle()) {
-    pi.sendMessage(message, composeLeadTurnStartOptions("followUp"));
-  } else {
-    heldPushQueue.push({ kind: "raw", send: (p) => p.sendMessage(message, composeLeadTurnStartOptions("followUp")) });
-  }
+  // The shared path wakes idle leads through user preflight, retaining the
+  // summary's followUp mode and leaving thread side effects immediate.
+  sendToLead(pi, message, "followUp");
 
   const agentId = thread.respondentAgentId;
   if (agentId) {
