@@ -56,8 +56,12 @@ tool's error state only when its `execute` throws, so a ws-mcp failure that was
 returned as ordinary text is re-raised rather than reported as success.
 
 Bridged tools provide display-only YAML previews when Pi's native TUI helpers
-are available. The call slot retains the registered tool name above up to ten
-newline-separated argument lines, including during argument streaming. A completed,
+are available. The call slot retains the registered tool name in bold with the
+native `toolTitle` color above up to ten newline-separated argument lines,
+including during argument streaming. YAML argument rows use `toolPendingBg`;
+completed YAML result rows use `toolSuccessBg`, with `toolOutput` text color.
+These child surfaces retain Pi's default parent shell and its pending/success/error
+state presentation. Theme changes restyle the preview without YAML reserialization. A completed,
 non-error result containing exactly one text block is displayed as YAML when that
 text parses as a JSON object or array. Its collapsed preview selects ten logical
 lines before native wrapping; expanded output is complete. These are not ten
