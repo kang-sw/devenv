@@ -451,13 +451,22 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // manual snapshot (degraded bootstrap) — `wsBlockRef.current` is then
     // left untouched, and `computeBeforeAgentStartResult`'s own guard already
     // treats that as "no override" for every `before_agent_start` firing.
+    //
+    // Review cycle 1 (Minor): the guide read is gated the same way the
+    // pre-260906 code gated it — `isLeadOrFork` AND a present manual
+    // snapshot — rather than running for every role. `guideText` is only
+    // ever consumed inside `buildWsBlock`, which itself only runs when
+    // `manualSnapshot` is present, so reading it for `worker`/`explore` or a
+    // degraded bootstrap was pure waste with no observable effect.
     let guideText = "";
-    try {
-      guideText = readFileSync(piLeadGuidePath, "utf8");
-    } catch {
-      // Tolerate a missing guide file (e.g. a dev -e run against a source
-      // tree that hasn't copied it yet) — the manual snapshot alone is
-      // still a strict improvement over no ws block at all.
+    if (isLeadOrFork(bootstrapRole) && handle.manualSnapshotRef.current) {
+      try {
+        guideText = readFileSync(piLeadGuidePath, "utf8");
+      } catch {
+        // Tolerate a missing guide file (e.g. a dev -e run against a source
+        // tree that hasn't copied it yet) — the manual snapshot alone is
+        // still a strict improvement over no ws block at all.
+      }
     }
     const bootstrap = computeSessionBootstrap({
       role: bootstrapRole,
@@ -470,7 +479,15 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     if (bootstrap.wsBlock !== undefined) {
       wsBlockRef.current = bootstrap.wsBlock;
     }
-    pi.setActiveTools(bootstrap.activeTools);
+    // Review cycle 1 (Minor): gated on `isLeadOrFork` again, matching the
+    // pre-260906 code — for `worker`/`explore`, `computeSessionBootstrap`
+    // already returns `activeTools` unchanged, so calling `setActiveTools`
+    // there was a semantic no-op that still re-ran Pi's internal
+    // `_rebuildSystemPrompt` for a role that previously never took that
+    // path at all.
+    if (isLeadOrFork(bootstrapRole)) {
+      pi.setActiveTools(bootstrap.activeTools);
+    }
   });
 
   pi.on("session_shutdown", async (_event, _ctx) => {

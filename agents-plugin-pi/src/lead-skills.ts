@@ -95,7 +95,21 @@ export function resolveSkillEntries(commands: readonly SlashCommandInfo[]): Skil
  * for its own unit tests, only a fake `readFile`. Never throws: a read
  * failure is returned as `{ ok: false, error }`, with `path` folded into the
  * message so `computeWsSkillResult`'s error text names it without having to
- * carry `path` separately.
+ * carry `path` separately. `parseFrontmatter` is wrapped in its OWN `try`
+ * (review cycle 1, Important #1): it calls the `yaml` package's `parse()` on
+ * the frontmatter block and throws `YAMLParseError` on malformed YAML (Pi's
+ * own resource loader tolerates this by dropping the skill at load time —
+ * `dist/core/skills.js`'s `loadSkillFromFile` returns `{skill: null}` on the
+ * same failure — but a live-edited SKILL.md with a YAML typo, or one edited
+ * in the window between resource load and this session's `session_start`,
+ * reaches `loadSkillFile` directly). Left unguarded, that throw would
+ * propagate out of `buildSkillsBlock` and `computeSessionBootstrap`,
+ * aborting `session_start` before `pi.setActiveTools()` ran — losing the
+ * WHOLE lead/fork tool reshape and ws block, not just the one skill — and
+ * out of `ws-skill`'s own `execute()` instead of returning the documented
+ * error string. A parse failure is therefore treated exactly like a read
+ * failure: `{ ok: false, error }`, which `buildSkillsBlock` already skips
+ * silently and `computeWsSkillResult` already reports via `ws-skill`.
  */
 export function loadSkillFile(path: string, readFile: (p: string) => string = (p) => readFileSync(p, "utf8")): LoadedSkill {
   let raw: string;
@@ -104,8 +118,12 @@ export function loadSkillFile(path: string, readFile: (p: string) => string = (p
   } catch (err) {
     return { ok: false, error: `could not read "${path}": ${err instanceof Error ? err.message : String(err)}` };
   }
-  const { frontmatter, body } = parseFrontmatter<SkillFrontmatter>(raw);
-  return { ok: true, body, disableModelInvocation: frontmatter["disable-model-invocation"] === true };
+  try {
+    const { frontmatter, body } = parseFrontmatter<SkillFrontmatter>(raw);
+    return { ok: true, body, disableModelInvocation: frontmatter["disable-model-invocation"] === true };
+  } catch (err) {
+    return { ok: false, error: `could not parse frontmatter in "${path}": ${err instanceof Error ? err.message : String(err)}` };
+  }
 }
 
 function escapeXml(str: string): string {

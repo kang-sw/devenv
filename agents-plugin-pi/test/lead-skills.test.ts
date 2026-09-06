@@ -82,6 +82,20 @@ describe("loadSkillFile", () => {
     assert.match((result as { error: string }).error, /\/skills\/missing\/SKILL\.md/);
     assert.match((result as { error: string }).error, /ENOENT/);
   });
+
+  // Review cycle 1, Important #1: `parseFrontmatter` (the `yaml` package's
+  // `parse()` under the hood) throws `YAMLParseError` on malformed YAML —
+  // verified against the real, unmocked `parseFrontmatter` re-exported from
+  // `@earendil-works/pi-coding-agent` (not a fake), so this proves the
+  // actual dependency's throw is caught, not an assumption about it.
+  const MALFORMED_FRONTMATTER = "---\nfoo: [\nbar\n---\nBody text.";
+
+  test("never throws on malformed YAML frontmatter — reports a parse error naming the path", () => {
+    const result = loadSkillFile("/skills/broken-yaml/SKILL.md", () => MALFORMED_FRONTMATTER);
+    assert.equal(result.ok, false);
+    assert.match((result as { error: string }).error, /\/skills\/broken-yaml\/SKILL\.md/);
+    assert.match((result as { error: string }).error, /parse frontmatter/);
+  });
 });
 
 function fakeLoader(bodies: Record<string, LoadedSkill>): (path: string) => LoadedSkill {
@@ -135,6 +149,25 @@ describe("buildSkillsBlock", () => {
     const block = buildSkillsBlock(entries, fakeLoader({ "/skills/hidden/SKILL.md": { ok: true, body: "b", disableModelInvocation: true } }));
     assert.equal(block, "");
   });
+
+  // Review cycle 1, Important #1: end-to-end against the REAL `loadSkillFile`
+  // (not `fakeLoader`) so this exercises the actual `parseFrontmatter` throw
+  // path this ticket's fix wraps, not a fake that never had the throw to
+  // begin with. Malformed frontmatter must silently drop the entry from the
+  // block — never propagate out of `buildSkillsBlock`.
+  test("a malformed-frontmatter entry (real loadSkillFile) is silently skipped, never throws", () => {
+    const entries: SkillEntry[] = [
+      { name: "broken-yaml", description: "d", path: "/skills/broken-yaml/SKILL.md" },
+      { name: "ok", description: "d2", path: "/skills/ok/SKILL.md" },
+    ];
+    const readFile = (path: string) => (path === "/skills/broken-yaml/SKILL.md" ? "---\nfoo: [\nbar\n---\nBody." : "---\nname: ok\n---\nOk body.");
+    let block = "";
+    assert.doesNotThrow(() => {
+      block = buildSkillsBlock(entries, (path) => loadSkillFile(path, readFile));
+    });
+    assert.doesNotMatch(block, /broken-yaml/);
+    assert.match(block, /<name>ok<\/name>/);
+  });
 });
 
 describe("computeWsSkillResult", () => {
@@ -172,6 +205,19 @@ describe("computeWsSkillResult", () => {
     const failing: SkillEntry[] = [{ name: "broken", description: "d", path: "/skills/broken/SKILL.md" }];
     const result = computeWsSkillResult("broken", undefined, failing, fakeLoader({ "/skills/broken/SKILL.md": { ok: false, error: 'could not read "/skills/broken/SKILL.md": ENOENT' } }));
     assert.equal(result, 'Error loading skill "broken": could not read "/skills/broken/SKILL.md": ENOENT');
+  });
+
+  // Review cycle 1, Important #1: end-to-end against the REAL `loadSkillFile`
+  // — a mid-session `ws-skill` call against a live-edited SKILL.md with a
+  // YAML typo must return the documented error string, never throw out of
+  // the tool's `execute()`.
+  test("a malformed-frontmatter entry (real loadSkillFile) reports an error string, never throws", () => {
+    const broken: SkillEntry[] = [{ name: "broken-yaml", description: "d", path: "/skills/broken-yaml/SKILL.md" }];
+    let result = "";
+    assert.doesNotThrow(() => {
+      result = computeWsSkillResult("broken-yaml", undefined, broken, (path) => loadSkillFile(path, () => "---\nfoo: [\nbar\n---\nBody."));
+    });
+    assert.match(result, /^Error loading skill "broken-yaml": could not parse frontmatter in "\/skills\/broken-yaml\/SKILL\.md"/);
   });
 });
 

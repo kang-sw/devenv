@@ -1,9 +1,9 @@
 /**
- * System-prompt bootstrap (260904 Phase 1, §1/§4/§5): appends a fixed ws
- * block — the session-start `workflow_manual` snapshot plus the Pi lead
- * guide (`pi-lead-guide.md`) — to every `before_agent_start` system prompt,
- * for the host lead and, later, a `fork` child (worker/explore never see
- * it).
+ * Lead/fork session-start bootstrap (260904 Phase 1, §1/§4/§5; scope grew in
+ * 260906 Phase 1 — see below): appends a fixed ws block — the session-start
+ * `workflow_manual` snapshot, the Pi lead guide (`pi-lead-guide.md`), and an
+ * `<available_skills>` block — to every `before_agent_start` system prompt,
+ * for the host lead and a `fork` child (worker/explore never see it).
  *
  * Fetched once per `session_start` (index.ts, after `startBridge` resolves)
  * and held in `wsBlockRef` — a live ref, same convention as
@@ -23,6 +23,18 @@
  * never on `ctx.ui` or any TUI-only field — a headless `--mode rpc` lead
  * (no spawn marker set, same as an interactively-launched lead) gets the
  * exact same ws block.
+ *
+ * 260906 Phase 1 grew this module's scope beyond system-prompt composition:
+ * `computeSessionBootstrap` is now the single pure function `index.ts` calls
+ * once per `session_start` to produce BOTH the ws block above AND the
+ * reshaped lead/fork active-tools surface, threading
+ * `computeLeadActiveTools` (execute-gateway.ts), `addForkToolIfLead`
+ * (fork.ts), `addAskToolsIfLead` (ask.ts), and `addSkillToolIfLeadOrFork`
+ * (lead-skills.ts) in sequence — replacing what used to be three separate
+ * `pi.setActiveTools()`/`pi.getActiveTools()` round-trips in `index.ts`
+ * itself. This module's actual responsibility is therefore "the whole
+ * lead/fork session-start bootstrap, including cross-module active-tools
+ * reshaping," not only "system-prompt block composition."
  */
 
 import type { BeforeAgentStartEventResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -108,7 +120,12 @@ export interface SessionBootstrapResult {
  * `worker`/`explore` short-circuit to `{ wsBlock: undefined, activeTools:
  * [...currentActiveTools] }` — no block, no reshape, tool surface passed
  * through unchanged (matches the pre-260906 behavior: those roles were never
- * touched by any of the four reshape steps).
+ * touched by any of the four reshape steps). `buildSkillsBlock` (one
+ * `readFile` per installed skill) is skipped entirely when `manualSnapshot`
+ * is absent (degraded bootstrap — its output would be discarded anyway,
+ * since no `wsBlock` is built without a manual snapshot to prefix): review
+ * cycle 1 Minor fix, avoiding wasted per-skill IO on a path that never uses
+ * the result.
  */
 export function computeSessionBootstrap(inputs: SessionBootstrapInputs): SessionBootstrapResult {
   const { role, manualSnapshot, guideText, skillEntries, loadSkillFile, currentActiveTools } = inputs;
@@ -116,8 +133,7 @@ export function computeSessionBootstrap(inputs: SessionBootstrapInputs): Session
     return { wsBlock: undefined, activeTools: [...currentActiveTools] };
   }
 
-  const skillsBlock = buildSkillsBlock(skillEntries, loadSkillFile);
-  const wsBlock = manualSnapshot ? buildWsBlock(manualSnapshot, guideText, skillsBlock) : undefined;
+  const wsBlock = manualSnapshot ? buildWsBlock(manualSnapshot, guideText, buildSkillsBlock(skillEntries, loadSkillFile)) : undefined;
 
   let activeTools = computeLeadActiveTools(currentActiveTools);
   activeTools = addForkToolIfLead(activeTools, role);
