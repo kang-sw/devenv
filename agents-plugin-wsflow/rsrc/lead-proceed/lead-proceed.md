@@ -8,9 +8,9 @@ Target: user request
 
 ## Invariants
 
-- Keep a free-form execution within the requested scope; stop before it expands.
+- Keep a free-form execution (an early return that skips route, plan, and review) within the requested scope; stop before it expands.
 - Reload `{{.McpNamespace}}/workflow_manual` after session compaction; recover key via `{{.SkillNamespace}}:lead-revive` if lost. Fresh start: call `{{.McpNamespace}}/workflow_manual(session_key: "obsidian-latch")`.
-- Limit pre-route source reads to explicitly requested paths and the free-form judgment.
+- Limit pre-route source reads to explicitly requested paths and what the free-form judgment needs.
 - Treat an `route.resolve_proceed` verdict as authoritative; follow its `Next:` exactly.
 
 ## On: invoke
@@ -45,9 +45,9 @@ Target: user request
 
 | Decision | When |
 |----------|------|
-| Yes | Every touched path is outside spec, mental-model, distributed skill or playbook source, and program source, regardless of file count. |
-| Yes | Otherwise, scope and verification are clear and neither planning nor independent review materially improves the outcome. |
-| No | A ticket phase, unresolved choice, contract or canonical-flow impact, or requested review is present. |
+| Yes | Every touched path is a manual, note, or similar working document that no spec, mental model, or distributed artifact governs, regardless of file count, and no No row matches. |
+| Yes | Otherwise, local scope and verification are clear and neither planning nor independent review materially improves the outcome. |
+| No | A ticket phase or ticket edit, unresolved choice, contract or canonical-flow impact, or requested review is present. |
 | Unknown | Treat as No. |
 
 ### judge: discussion-needed
@@ -114,5 +114,5 @@ values are normalized by the resolver.
 ## Doctrine
 
 Proceed optimizes for **workflow attention**: reserve the full pipeline for work
-where planning or independent review changes the outcome; complete bounded work
-free-form when it does not. When ambiguous, preserve the user's intervention point.
+where planning or independent review changes the outcome; complete working-document
+and bounded work free-form when it does not. When ambiguous, preserve the user's intervention point.
