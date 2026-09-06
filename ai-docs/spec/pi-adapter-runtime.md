@@ -113,7 +113,12 @@ directly into the lead's system prompt and the handshake becomes unnecessary.
   returns the incoming `systemPrompt` followed by the ws block. Because Pi
   re-assembles the system prompt from its base on every turn, the handler
   re-applies the block each turn from an in-memory snapshot rather than
-  capturing it once.
+  capturing it once. Idle pushed delivery also enters this preflight through a
+  user-message wake before releasing custom messages; it never starts an idle
+  run directly with a custom message. This applies to lead and fork owners,
+  with or without an active goal, including post-compaction pushes. The wake
+  uses the existing manual snapshot and live-discovered skill-path cache; it
+  does not fetch a new manual snapshot.
 - The ws block content, in order:
   1. the **full `workflow_manual` CONTINUE response as of session start** — the
      static manual body plus ws-mcp's session-start dynamic material (`## Session
@@ -666,37 +671,39 @@ all; every later settle or advisory for that record is suppressed as above. A
 child's turn therefore never reaches the lead twice, and within a live
 session no push is dropped or duplicated.
 
-**Delivery is held until the lead's turn settles.** Pi offers no hook at the
-moment a queued followUp is delivered, so a message built while the lead is
-mid-turn would carry a stale status line. A `followUp` push is therefore sent
-at once only when the owning process's agent is idle and no compaction is in
-flight; otherwise the adapter holds it and releases the held pushes, in
-arrival order, from that process's `agent_settled` handler once idle, or
-(compaction case) from the goal loop's post-compaction release routine —
-building each message — status line included — at release time. The first
-release starts the lead's next run; the rest enter Pi's followUp queue and
-drain one per loop iteration, so a fan-out burst still yields one lead run
-that sees the messages in order. `steer` families (approval, question) are
-normally never held — interrupting is their whole purpose — with one
-exception: while a compaction is in flight, a `steer` push is held too, since
-`ctx.compact()`'s custom-message send path bypasses Pi's own mid-compaction
-prompt guard entirely (see "Goal loop" below), and there is no live turn to
-interrupt into during a compaction anyway. Held pushes live only in the
-process: they are dropped with it at `session_shutdown`, exactly like Pi's own
-queue.
+**Idle pushes wake through user preflight (260906 Phase 2).** Busy `followUp`
+pushes stay held until settle; busy `steer` pushes still interrupt normally.
+When idle, both families enter the same arrival-ordered held queue. The adapter
+sends one user-message wake carrying the queued count, not the payloads, so Pi
+runs `before_agent_start` and composes the additive ws system-prompt block.
+The queue remains intact until a confirmed `agent_start`, then releases in FIFO
+order with each message's original `followUp`/`steer` mode and freshly rebuilt
+status. Custom messages never directly start the idle run. Discussion summaries
+(`ws-thread-summary`) use this same path while thread closure, fork stopping,
+and persistence still happen immediately, independently of delivery.
 
-**A reminder start pending suppresses the turn-start race (260906 Phase 1).**
-`pushToLead`'s `pi.sendMessage` call otherwise always passes `triggerTurn: true`
-for a `followUp`/`steer` push; while the goal loop's own settle-timer reminder
-is between arming its boundary guard and observing the resulting turn start
-(`leadReminderStartPendingRef.current === true`, owned by the goal loop — see
-"Goal loop" below), every push is sent with `triggerTurn: false` instead. This
-prevents a child's push landing in that narrow window from starting a second,
-colliding turn alongside the reminder's own `sendUserMessage`; the push still
-appends to the queue and is picked up by whichever turn starts. The guard
-clears on the next `agent_start` or `agent_settled`, or by its own short
-fallback timeout, so the suppression window is bounded even if the reminder's
-turn never starts.
+**One shared wake-start reservation.** A push wake and a goal reminder share
+one pending-start reservation, established with recovery before user-message
+dispatch. While pending, all pushes remain held: neither a second wake nor an
+inert custom append is sent. Confirmed start clears the reservation and flushes
+the queue; settle or a bounded fallback can recover a missing start, including
+a synchronous dispatch failure. Held-push recovery remains available without
+an active goal and for fork owners; cancelling a goal settle timer does not
+cancel push recovery. A push wake does not advance the goal's reminder streak
+or consume pending verbatim carry. Missing or stale idleness context is not
+permission to send into an uninitialized or torn-down session.
+
+Compaction independently holds both families, even if `agent_start` occurs
+before deferred compaction release. Idle release requests the same user wake,
+not direct custom delivery; busy release leaves the queue for the run's settle.
+Held pushes live only in the process and are dropped at `session_shutdown`.
+
+> [!note] Verification boundary · 2026-09-06
+> Offline lifecycle and timer coverage verifies preflight-before-flush, FIFO,
+> recovery, and compaction independence. Actual provider-context lifetime across
+> another model call and simultaneous child/lead-settle behavior (including
+> absence of an already-processing error, Esc, and settling status) remain
+> owner-live acceptance checks, not claims established by fake lifecycle tests.
 
 **Fan-in stays with the model.** Every push whose process has at least one
 delegated agent carries a status line `N delegated agents still running`; with
@@ -1192,12 +1199,13 @@ this surface.
   `settle_delay_ms` and sets the footer to `Goal loop: settling` under the
   adapter's own status key. This exists because the reminder's own turn start
   can otherwise race a child's push landing at the same `agent_settled`
-  boundary — see "A reminder start pending suppresses the turn-start race" in
+  boundary — see "One shared wake-start reservation" in
   the "Child→lead report channel" entry above. The timer is the single fire
   point for every reminder origin — an ordinary settle, the lever's
   pending-rearm re-arm, and a swallowed-settle replay all route through it,
-  never sending directly. Only one timer (the settle timer, or its boundary
-  fallback below) is ever active at a time. `agent_start`, the terminal
+  never sending directly. Only one settle timer is active at a time; shared
+  wake recovery is independently owned so goal cancellation cannot strand
+  held pushes. `agent_start`, the terminal
   levers (`goal-achieved`/`goal-blocked`), `/goal` re-arming, force-stop, and
   session shutdown all cancel a pending settle timer outright, since each
   invalidates the settle that armed it. At fire time the loop re-evaluates
@@ -1205,11 +1213,12 @@ this surface.
   `ctx.isIdle()`, `!leadCompactingRef.current` (a compaction that started
   during the delay yields exactly like the ordinary compaction branch,
   re-arming the release routine instead), and no running delegated child
-  (falls back to the yield outcome). Only when all hold does it set
-  `leadReminderStartPendingRef.current = true` (see the report-channel entry)
-  and send the reminder as an explicit `deliverAs: "followUp"` turn, then
-  immediately arm a short fallback timeout that clears the boundary guard and
-  retries (`Goal loop: reminder did not start a turn, retrying`, followed by
+  (falls back to the yield outcome). Held pushes and a pending wake take
+  priority over a reminder. Only when
+  eligible does it reserve the shared wake start and arm recovery before
+  sending the reminder as an explicit `deliverAs: "followUp"` user turn.
+  The short fallback clears the boundary guard, prioritizes held pushes, or
+  retries an active goal (`Goal loop: reminder did not start a turn, retrying`, followed by
   re-arming the settle timer) if `agent_start`/`agent_settled` never observed
   the resulting turn. `agent_start` and `agent_settled` both clear the
   boundary guard unconditionally as their first action.
@@ -1319,10 +1328,10 @@ auto-compaction remains the last-resort backstop.
   underway by the time this deferred call lands), it clears both markers and
   returns, leaving the held-push queue and any pending reminder to that
   turn's own `agent_settled`/`registerPushFlush` flush — nothing is flushed
-  or sent on this branch. Only on the idle branch does it flush every push
-  held during the compaction window (see "Child→lead report channel" above)
-  and then arms the existing settle timer when a lever reminder or swallowed
-  settle is pending; release itself never sends a reminder. The timer retains
+  or sent on this branch. Only on the idle branch does it request a user wake
+  for pushes held during compaction (see "Child→lead report channel" above),
+  retaining their queue until confirmed start, and then arm the existing
+  settle timer when a lever reminder or swallowed settle is pending; release itself never sends a reminder. The timer retains
   the pending origin and any captured failure reason across its delay and
   re-evaluates idleness, compaction, and running children at fire time, as
   described above. At an eligible fire, a lever-originated compaction sends
@@ -1346,9 +1355,10 @@ auto-compaction remains the last-resort backstop.
   compaction is guaranteed race-free by construction. **Accepted narrow
   gap:** unlike the lever, a non-lever compaction has no `onComplete`/
   `onError` backstop of its own — if Pi's `session_compact` lookup were ever
-  to miss (the `savedCompactionEntry` guard it depends on), only
-  `agent_start`'s backstop clear would still recover a stuck flag/marker;
-  noted as a known, narrow gap rather than intercepted.
+  to miss (the `savedCompactionEntry` guard it depends on), the independent
+  compaction hold could remain stuck until session reset. `agent_start` is
+  deliberately not a compaction-release signal; this narrow gap is not
+  intercepted.
 - **Advisory surfacing, not a gate.** While armed, the reminder turn carries two
   pieces of information for the model to weigh: the current context usage as a
   percent (from `getContextUsage().percent`, or derived from `tokens` against the
