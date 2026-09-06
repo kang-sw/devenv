@@ -25,7 +25,8 @@
  * registration-only and never touches the wire call to ws-mcp.
  */
 
-import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import { keyHint, type ExtensionAPI, type ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import { stringify as stringifyYaml } from "yaml";
 import { spawnWsMcpClient, type McpStdioClient, type McpContentItem, type McpToolCallResult } from "./mcp-stdio-client.ts";
 import { assertVersionPin, readRuntimeContract } from "./version-check.ts";
 import { WS_PI_PARENT_SESSION_KEY_ENV, isLeadOrFork, readSpawnRole, type SpawnRole } from "./process-role.ts";
@@ -92,6 +93,122 @@ function notify(ui: ExtensionUIContext | undefined, message: string, level: "inf
 
 function firstText(result: McpToolCallResult): string | undefined {
   return result.content.find((item) => item.type === "text")?.text;
+}
+
+/**
+ * Converts JSON containers to YAML for Pi's display only. Scalars are left
+ * alone: ws-mcp often returns JSON strings/numbers as intentional prose-like
+ * values, and parsing them is not permission to reformat them.
+ */
+export function yamlDisplayText(text: string): string {
+  try {
+    const value: unknown = JSON.parse(text);
+    if (!Array.isArray(value) && (typeof value !== "object" || value === null)) return text;
+    return stringifyYaml(value);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * Builds the display body from MCP's original ordered content. Only the first
+ * text block is eligible for YAML conversion; later text remains byte-for-byte
+ * raw and non-text content stays in the result for Pi's own image handling.
+ */
+export function renderResultText(content: ReadonlyArray<Pick<McpContentItem, "type" | "text">>, isError: boolean): string {
+  const firstTextIndex = content.findIndex((item) => item.type === "text");
+  return content
+    .filter((item) => item.type === "text")
+    .map((item, textIndex) => textIndex === 0 && firstTextIndex !== -1 && !isError ? yamlDisplayText(item.text ?? "") : (item.text ?? ""))
+    .join("\n");
+}
+
+const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+function graphemeDisplayWidth(grapheme: string): number {
+  if (/^(?:\p{Control}|\p{Mark}|\p{Default_Ignorable_Code_Point})+$/u.test(grapheme)) return 0;
+  const base = grapheme.replace(/^[\p{Control}\p{Mark}\p{Default_Ignorable_Code_Point}]+/u, "");
+  const code = base.codePointAt(0);
+  if (code === undefined) return 0;
+  // Emoji sequences and regional indicators render as a single two-cell glyph.
+  if (/\p{Extended_Pictographic}/u.test(grapheme) || (code >= 0x1f1e6 && code <= 0x1f1ff)) return 2;
+  return (
+    (code >= 0x1100 && code <= 0x115f) ||
+    (code >= 0x2329 && code <= 0x232a) ||
+    (code >= 0x2e80 && code <= 0xa4cf) ||
+    (code >= 0xac00 && code <= 0xd7a3) ||
+    (code >= 0xf900 && code <= 0xfaff) ||
+    (code >= 0xfe10 && code <= 0xfe6f) ||
+    (code >= 0xff01 && code <= 0xff60) ||
+    (code >= 0xffe0 && code <= 0xffe6) ||
+    (code >= 0x20000 && code <= 0x3fffd)
+  ) ? 2 : 1;
+}
+
+/** Width in terminal cells, with ANSI sequences zero-width and graphemes intact. */
+export function visibleDisplayWidth(text: string): number {
+  const plain = text.replace(ANSI_SEQUENCE, "").replace(/\t/g, "   ");
+  let width = 0;
+  for (const { segment } of graphemeSegmenter.segment(plain)) width += graphemeDisplayWidth(segment);
+  return width;
+}
+
+function wrapDisplayLine(text: string, width: number): string[] {
+  const maxWidth = Math.max(1, Math.floor(width));
+  if (text.length === 0) return [""];
+  const rows: string[] = [];
+  let row = "";
+  let rowWidth = 0;
+  let cursor = 0;
+  const appendGraphemes = (chunk: string) => {
+    for (const { segment } of graphemeSegmenter.segment(chunk)) {
+      const segmentWidth = graphemeDisplayWidth(segment);
+      if (rowWidth > 0 && rowWidth + segmentWidth > maxWidth) {
+        rows.push(row);
+        row = "";
+        rowWidth = 0;
+      }
+      // A one-column viewport cannot represent a wide grapheme. Match the
+      // terminal's only width-safe option rather than overflowing its row.
+      if (rowWidth === 0 && segmentWidth > maxWidth) {
+        rows.push("?");
+        continue;
+      }
+      row += segment;
+      rowWidth += segmentWidth;
+    }
+  };
+  for (const match of text.matchAll(ANSI_SEQUENCE)) {
+    appendGraphemes(text.slice(cursor, match.index));
+    row += match[0];
+    cursor = (match.index ?? 0) + match[0].length;
+  }
+  appendGraphemes(text.slice(cursor));
+  if (row.length > 0) rows.push(row);
+  return rows.length > 0 ? rows : [""];
+}
+
+/**
+ * Returns visual display rows for a tool result. The collapsed marker counts
+ * wrapped body rows (not source newlines), so the number remains truthful at
+ * narrow widths and for wide Unicode.
+ */
+export function renderResultRows(
+  content: ReadonlyArray<Pick<McpContentItem, "type" | "text">>,
+  isError: boolean,
+  expanded: boolean,
+  width: number,
+  expandHint = keyHint("app.tools.expand", "to expand"),
+): string[] {
+  const text = renderResultText(content, isError);
+  if (!text) return [];
+  const logicalLines = text.replace(/\r\n?/g, "\n").split("\n");
+  if (logicalLines.at(-1) === "") logicalLines.pop();
+  const bodyRows = logicalLines.flatMap((line) => wrapDisplayLine(line, width));
+  if (expanded || bodyRows.length <= 10) return bodyRows;
+  const remaining = bodyRows.length - 10;
+  return [...bodyRows.slice(0, 10), ...wrapDisplayLine(`… ${remaining} more rows (${expandHint})`, width)];
 }
 
 /**
@@ -477,6 +594,20 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
         // symbols at runtime. ws-mcp's inputSchema is already a plain
         // {type, properties, required} object, so no typebox shim is needed.
         parameters: withOptionalSessionKey(tool.inputSchema) as never,
+        // Structural component intentionally avoids a direct pi-tui import:
+        // Pi owns image blocks from the unmodified content array, while this
+        // component supplies only width-safe text rows for the tool shell.
+        renderResult(result, options, theme, context) {
+          return {
+            render: (width: number) => renderResultRows(
+              result.content as McpContentItem[],
+              context.isError,
+              options.expanded,
+              width,
+            ).map((row) => theme.fg("toolOutput", row)),
+            invalidate: () => {},
+          };
+        },
         async execute(_toolCallId, params, _signal, _onUpdate, toolCtx) {
           // Dispatch always uses the RAW dotted name — sanitization is
           // registration-only, never part of the ws-mcp wire call.

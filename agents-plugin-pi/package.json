@@ -18,7 +18,8 @@
     "execute-worker-guide.md"
   ],
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.4"
+    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "yaml": "2.9.0"
   },
   "scripts": {
     "test": "node --test",
