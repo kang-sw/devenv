@@ -100,8 +100,10 @@ saved.
 
 `pi-adapter-runtime`, the "Idle pushes wake through user preflight"
 paragraph under `{#260904-pi-report-to-lead-channel}`: the queue releases at
-confirmed `agent_start` as steering messages in arrival order, so the batch
-precedes the woken run's first model response; each message's recorded
+confirmed `agent_start` as steering messages in arrival order. With Pi's
+default one-at-a-time drain, the first held message precedes the first
+response and later messages arrive at subsequent steering polls; the whole
+batch need not precede the first response. Each message's recorded
 `followUp`/`steer` mode continues to govern busy-time admission only; the
 same release applies when the confirmed start belongs to a run the user
 started while the wake reservation was pending.
@@ -136,11 +138,40 @@ preserved across mixed modes; update the existing mode-echo assertions
 that currently expect the recorded mode at flush. Add a small fake of
 Pi's drain order (steering drained before the first response and after
 each turn, follow-up only after the inner loop stops, one message per
-drain) and assert on it that the flushed batch precedes the first model
-response and is delivered FIFO, so the two claims this change exists for
-are covered offline, not only by the live check. Live check (owner-run): with one child reporting to
+drain) and assert that the first held message precedes the first model
+response, later held messages arrive at subsequent steering polls, and
+FIFO delivery is preserved. The offline contract is removal of the blind
+initial response, not simultaneous delivery of the whole batch. Live check (owner-run): with one child reporting to
 an idle lead, confirm the woken run's first model request already contains
 the `ws-agent-report` message and that the run produces one response, not a
 bare acknowledgement followed by a second response; with two children
 settling together, confirm both reports arrive before any follow-up and the
-run does not exceed one response per report.
+run does not exceed one response per report in a controlled no-tool-call
+check. Multiple reports need not all precede the first response.
+
+### Result (9b992772) - 2026-09-06
+
+Implemented confirmed-start steering release for family pushes and raw
+thread summaries; recorded delivery modes still govern busy-time admission.
+Relay commit `f7226a7` corrected the drain fake and added mixed raw/family
+FIFO coverage in both orders plus an independent user-start reservation
+race regression.
+
+The owner approved narrowing the contradictory whole-batch-before-first-
+response acceptance on 2026-09-06: remove the blind initial response while
+preserving Pi's default one-at-a-time processing. Batch coalescing is not
+required; neither global steering settings nor payload embedding is added.
+This resolves review finding 1's scope escalation. Findings 2 and 3 are
+[fixed]; correctness and fit reviews were clean. The three Important test
+findings received one relay; no Critical findings or re-review were required.
+
+Verification: focused tests 509 passed; full adapter suite 935 passed;
+`npm pack --dry-run` and `git diff --check` passed. Test commands unset
+`WS_PI_SPAWN_ROLE` because the delegated worker role suppresses lead pushes;
+failures with that role inherited were test-environment failures, not a
+production regression.
+
+Owner-live provider request/response-count checks and the shared predecessor
+provider-context/settle gates remain pending. Offline tests do not establish
+live acceptance or measured token savings. Keep this ticket in `ready/`
+until those checks are completed; no merge or closure is implied.

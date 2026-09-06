@@ -5,7 +5,7 @@ import { registerLeadBootstrap } from '../src/lead-bootstrap.ts';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { heldPushQueue, leadIdleRef, leadCompactingRef, leadWakeStartPendingRef, pushToLead, registerPushFlush } from '../src/spawner.ts';
+import { heldPushQueue, leadIdleRef, leadCompactingRef, leadWakeStartPendingRef, pushToLead, registerPushFlush, sendToLead } from '../src/spawner.ts';
 
 function harness(withGoal = false) {
   const handlers = new Map<string, Function[]>();
@@ -16,6 +16,7 @@ function harness(withGoal = false) {
   let handledInput = false;
   let systemPrompt: string | undefined;
   const users: any[] = [], custom: any[] = [];
+  const steering: any[] = [], followUps: any[] = [], modelTimeline: string[] = [];
   const commands = new Map<string, any>(), tools = new Map<string, any>();
   const notices: string[] = [];
   const ctx: any = { isIdle: () => idle, getContextUsage: () => undefined, compact() {}, ui: {notify(text: string) {notices.push(text);}, setStatus() {}} };
@@ -36,15 +37,32 @@ function harness(withGoal = false) {
         systemPrompt = hook({systemPrompt: systemPrompt ?? 'base', prompt: content}, ctx)?.systemPrompt ?? systemPrompt;
       }
     },
-    sendMessage(message: unknown, options: unknown) { assert.equal(idle, false, 'custom sends never start idle runs'); custom.push({message, options}); },
+    sendMessage(message: unknown, options: unknown) {
+      assert.equal(idle, false, 'custom sends never start idle runs');
+      custom.push({message, options});
+      ((options as {deliverAs?: string}).deliverAs === 'steer' ? steering : followUps).push(message);
+    },
+  };
+  // Pi's default `one-at-a-time` queues drain one steering message before
+  // each response; follow-ups drain only once that steering loop stops.
+  const label = (message: unknown) => (message as {details?: {report?: string}}).details?.report;
+  const drainPi = () => {
+    while (steering.length) {
+      modelTimeline.push(`steer:${label(steering.shift())}`);
+      modelTimeline.push('model-response');
+    }
+    while (followUps.length) {
+      modelTimeline.push(`followUp:${label(followUps.shift())}`);
+      modelTimeline.push('model-response');
+    }
   };
   leadIdleRef.current = () => idle;
   const goal = withGoal ? registerGoalLoop(pi, { goalLoopConfigPath: '/nonexistent/push-wake.json', ...clock }) : undefined;
   registerPushFlush(pi, { delayMs: () => 10, ...clock });
   const emit = (event: string, payload: any = {}) => { let result; for (const fn of handlers.get(event) ?? []) result = fn(payload, ctx) ?? result; return result; };
-  return {pi, users, custom, timers, emit, commands, tools, ctx, goal, notices,
+  return {pi, users, custom, timers, emit, commands, tools, ctx, goal, notices, modelTimeline,
     modelCall: () => systemPrompt,
-    start() { idle = false; emit('agent_start'); },
+    start() { idle = false; emit('agent_start'); drainPi(); },
     settle() { idle = true; emit('agent_settled'); },
     busy() { idle = false; }, fail() { throws = true; }, handleInput() { handledInput = true; },
     tick() { const [key, cb] = [...timers][0]!; timers.delete(key); cb(); },
@@ -58,10 +76,41 @@ for (const modes of [['followUp','steer'], ['steer','followUp']] as const) {
     assert.equal(h.users.length, 1); assert.match(h.users[0].content, /1.*waiting/);
     assert.equal(h.custom.length, 0); assert.equal(heldPushQueue.length, 2);
     h.start(); assert.equal(h.custom.length, 2);
-    assert.deepEqual(h.custom.map(x => x.options), modes.map(deliverAs => ({deliverAs, triggerTurn: true})));
+    assert.deepEqual(h.custom.map(x => x.options), modes.map(() => ({deliverAs: 'steer', triggerTurn: true})));
+    assert.deepEqual(h.modelTimeline, [`steer:${modes[0]}`, 'model-response', `steer:${modes[1]}`, 'model-response'], 'Pi one-at-a-time steering preserves FIFO with one response per delivery');
     assert.equal(h.timers.size, 0); h.emit('session_shutdown');
   });
 }
+for (const order of ['raw-family', 'family-raw'] as const) {
+  test(`confirmed-start steering preserves ${order} shared FIFO order`, () => {
+    const h = harness();
+    const raw = () => sendToLead(h.pi, {customType: 'ws-thread-summary', content: 'raw', display: true, details: {source: 'raw'}}, 'followUp');
+    const family = () => h.push('followUp', 'family');
+    if (order === 'raw-family') { raw(); family(); } else { family(); raw(); }
+
+    assert.equal(heldPushQueue.length, 2);
+    h.start();
+    assert.deepEqual(
+      h.custom.map((entry) => (entry.message as {customType?: string}).customType),
+      order === 'raw-family' ? ['ws-thread-summary', 'ws-agent-report'] : ['ws-agent-report', 'ws-thread-summary'],
+    );
+    assert.deepEqual(h.custom.map((entry) => entry.options), [{deliverAs: 'steer', triggerTurn: true}, {deliverAs: 'steer', triggerTurn: true}]);
+    h.emit('session_shutdown');
+  });
+}
+test('an independent user start clears the pending wake reservation and releases steering', () => {
+  const h = harness();
+  h.push('followUp');
+  assert.equal(leadWakeStartPendingRef.current, true);
+  assert.equal(h.custom.length, 0);
+
+  h.start(); // A user-started run wins before the queued wake itself starts.
+
+  assert.equal(leadWakeStartPendingRef.current, false);
+  assert.deepEqual(h.custom[0].options, {deliverAs: 'steer', triggerTurn: true});
+  assert.equal(h.users.length, 1, 'the pending reservation did not create a second wake');
+  h.emit('session_shutdown');
+});
 for (const failure of ['handled', 'throw']) test(`no-event ${failure} retries without losing pushes`, () => {
   const h = harness(); if (failure === 'throw') h.fail(); else h.handleInput();
   h.push('followUp'); h.push('steer'); h.tick();
@@ -78,8 +127,12 @@ test('start cannot release compaction hold; busy release waits for settle', () =
 });
 test('ordinary busy steer is immediate and followUp waits for settled wake', () => {
   const h = harness(); h.busy(); h.push('followUp'); h.push('steer');
-  assert.equal(h.custom.length, 1); h.settle(); assert.equal(h.users.length, 1);
-  h.start(); assert.equal(h.custom.length, 2); h.emit('session_shutdown');
+  assert.equal(h.custom.length, 1);
+  assert.deepEqual(h.custom[0].options, {deliverAs: 'steer', triggerTurn: true}, 'busy steer keeps its interrupting admission behavior');
+  h.settle(); assert.equal(h.users.length, 1);
+  h.start(); assert.equal(h.custom.length, 2);
+  assert.deepEqual(h.custom[1].options, {deliverAs: 'steer', triggerTurn: true}, 'the held busy followUp is steering only after confirmed start');
+  h.emit('session_shutdown');
 });
 
 for (const order of ['reminder-first', 'push-first']) test(`${order}: one reservation, pushes do not spend reminder streak`, async () => {

@@ -926,7 +926,7 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     } as unknown as RpcAgentRecord;
   }
 
-  test("§6: one custom message, delivered via followUp and triggering a turn, carrying the thread id", () => {
+  test("§6: one custom message, admitted as followUp then released as steering, carrying the thread id", () => {
     const { pi, sent, handle, record } = setup();
     injectDiscussionSummary(pi, handle, new Map(), record, "we take the second anchor");
 
@@ -939,8 +939,8 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     assert.ok(msg.content.includes("we take the second anchor"));
     assert.deepEqual(
       sent[0].options,
-      { deliverAs: "followUp", triggerTurn: true },
-      "never steer (§6 requires the lead's own turn boundary), and triggerTurn so an idle lead acts on the decision instead of queueing it",
+      { deliverAs: "steer", triggerTurn: true },
+      "followUp remains the busy-time admission rule; confirmed start steers the summary before the first response",
     );
   });
 
@@ -953,7 +953,7 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     assert.equal(record.status, "dormant");
     clearWakeStart();
     flushHeldPushes(pi, true);
-    assert.deepEqual(sent[0].options, { deliverAs: "followUp", triggerTurn: true });
+    assert.deepEqual(sent[0].options, { deliverAs: "steer", triggerTurn: true });
   });
 
   test("Phase 2: pending start prevents release of a held raw summary", () => {
@@ -973,7 +973,7 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     assert.equal(sent.length, 0, "still held for pending start");
     clearWakeStart();
     assert.equal(flushHeldPushes(pi, true), 1);
-    assert.deepEqual(sent[0].options, { deliverAs: "followUp", triggerTurn: true });
+    assert.deepEqual(sent[0].options, { deliverAs: "steer", triggerTurn: true });
   });
 
   test("260906 (Phase 1): held while a compaction is in flight, delivered once released — the thread-close side effects run immediately regardless", () => {
@@ -995,7 +995,7 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     assert.equal(msg.customType, "ws-thread-summary");
     assert.equal(msg.details.threadId, "q1");
     assert.ok(msg.content.includes("we take the second anchor"));
-    assert.deepEqual(sent[0].options, { deliverAs: "followUp", triggerTurn: true }, "the recorded delivery mode survives the hold");
+    assert.deepEqual(sent[0].options, { deliverAs: "steer", triggerTurn: true }, "confirmed start overrides the recorded admission mode");
   });
 
   test("Phase 2: an idle summary is delivered after the fake user wake confirms start", () => {

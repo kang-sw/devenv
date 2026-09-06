@@ -491,7 +491,7 @@ describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2, 260
     assert.equal(h.prompts.length, 1, "the new task has produced no completion signal yet");
   });
 
-  test("260905: acknowledge-and-return pushes a ws-agent-advisory (followUp), never a bare steer", () => {
+  test("260905: acknowledge-and-return admits a ws-agent-advisory as followUp, then releases it as steering", () => {
     const h = harness();
     wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
     h.emit({ type: "agent_start" });
@@ -499,12 +499,13 @@ describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2, 260
     h.emit({ type: "agent_settled" });
     assert.deepEqual(advisories(h.pushes), ["acknowledge-and-return"]);
     assert.deepEqual(h.prompts, [], "a turn that did real work is not itself a bleed signal");
-    // I4: the deliverAs half of this test's own name, previously unasserted.
-    assert.equal(h.pushes[0].deliverAs, "followUp", "an advisory is never a steer under the push model");
+    // The fake confirms the idle wake synchronously, so admission's followUp
+    // is overridden to steering at confirmed start.
+    assert.equal(h.pushes[0].deliverAs, "steer", "the advisory reaches the woken run before its first response");
     assert.equal(h.pushes[0].triggerTurn, true, "an idle lead must act on it rather than leaving it queued");
   });
 
-  test("I4: every advisory family is delivered followUp, never steer", () => {
+  test("I4: every idle advisory family is released as steering at confirmed start", () => {
     const h = harness();
     wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, true);
     // final-report-shape
@@ -525,7 +526,7 @@ describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2, 260
     assert.deepEqual(advisories(h.pushes), ["final-report-shape", "expects-commit", "stalled"]);
     assert.deepEqual(
       h.pushes.map((p) => p.deliverAs),
-      ["followUp", "followUp", "followUp"],
+      ["steer", "steer", "steer"],
     );
   });
 
