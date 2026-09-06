@@ -255,6 +255,45 @@ Amend the two Phase 1 spec passages. Owner-run live check: a `/goal` drain
 where a child settles at the same moment as the lead; no `already
 processing` error, Esc still interrupts, the settling status is visible.
 
+### Result (271949cb) - 2026-09-06
+
+Landed in `271949cb` (source, tests), `d1ce1ee4` (spec), and the review-fix
+commit `5e4ed8dd`.
+
+- Every reminder origin (ordinary settle, lever `pendingRearm`,
+  swallowed-settle replay) now goes through one settle timer armed on
+  `agent_settled` and by `releaseAfterCompaction`'s idle branch;
+  `settle_delay_ms` (default 5000) is read from `goal-loop-config.json`.
+  The fire callback re-checks lead idleness, the compacting flag, and
+  running children, yields with status `Goal loop: settling` when any
+  holds, and otherwise sends the reminder with `deliverAs: "followUp"`.
+  The timer is cancelled by `agent_start`, `goal-achieved`,
+  `goal-blocked`, force-stop, `/goal` re-arm, and session shutdown, and
+  at most one timer of each kind is live.
+- `leadReminderStartPendingRef` guards the reminder's turn start:
+  `composeLeadTurnStartOptions` in `spawner.ts` composes push options at
+  send and flush time with `triggerTurn: false` while the flag is set, used
+  by `sendPush` and by `ask.ts`'s `injectDiscussionSummary`. The flag clears
+  on `agent_start`, on `agent_settled`, and by a fallback timeout that
+  re-arms the settle timer and sets the retry status.
+- Review found that a compaction starting inside the delay would leave the
+  loop stuck on `settling`; the fire callback now marks the settle as
+  swallowed so the release routine re-arms. The dead `yielding to running
+  agents` footer was removed; timer callbacks run inside a try/catch.
+- Injectable `scheduleTimer`/`clearTimer` options on the goal-loop
+  registration form the fake-clock seam; the test harness enforces the
+  single-active-timer invariant. Tests: 859 pass (836 before this phase).
+- Accepted without change: a `pendingRearm` failure reason can go stale
+  across a push-woken turn; `steer` pushes are queued rather than
+  interrupting during the sub-millisecond guard window; a synchronous
+  throw from `sendUserMessage` inside the fire callback leaves the guard
+  set until the next `agent_start` or `agent_settled` (fallback is armed
+  after the send).
+- Spec anchors `{#260904-pi-goal-loop-arming-settled-levers}` and
+  `{#260904-pi-report-to-lead-channel}` amended.
+- Live check (owner-run) still pending: a `/goal` drain where a child
+  settles at the same moment as the lead, in a fresh Pi session.
+
 ### Phase 2: Carry the ws block on push-woken runs
 
 Add the idle hold reason to `heldPushQueue`, the one-line
