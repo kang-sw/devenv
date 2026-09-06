@@ -31,4 +31,7 @@
 - Owner live check: call `ws__config_resolve_agent` with `format: "json"` in a Pi lead TUI; confirm YAML preview/expand behavior and that the next model turn still parses the original JSON fields.
 
 ## Escalations
-- None.
+- Resolved by owner on 2026-09-06: the strict visual-row budget and local-width strategy above are superseded by the ticket's clarified contract. Load Pi's authoritative width metric dynamically; if unavailable, keep YAML rendering unconditional, select ten logical lines, escape non-ASCII to ASCII Unicode escapes, then wrap safely. Fallback previews may exceed ten physical rows. Per-row safety and unchanged model payloads remain required.
+- Final implementation uses reusable `src/tool-result-render.ts`, not bridge-local helpers, to avoid future Phase 2 import cycles.
+- Review ceiling reached on Unicode width: final elevation `f34548f4` removes the local model. The five Important findings were fixed in relay 1 without re-review; terminal-control Critical was confirmed fixed. Final width fix has implementer self-verification, not independent review #4. Detailed dispositions are recorded in the ticket Result.
+- Final verification: 955 full-suite tests, 79 focused tests, 45,312 committed comparative cases, 112,640 installed-host normal/fallback probes, Jiti load, pack dry-run, and diff check passed. Owner-live TUI and compiled/bundled host checks remain pending.

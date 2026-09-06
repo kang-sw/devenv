@@ -31,8 +31,8 @@ error flag is on `context.isError`, not on `result`), must return a TUI
 `Component` (`render(width): string[]` plus optional `handleInput`/
 `invalidate`), and is called again when the user toggles the row's expanded
 state. The bridge's registration loop in `startBridge`
-(`agents-plugin-pi/src/bridge.ts`) currently registers only `execute`, so
-every `ws__*` row uses Pi's fallback renderer.
+(`agents-plugin-pi/src/bridge.ts`) registered only `execute` before Phase 1,
+so every `ws__*` row used Pi's fallback renderer.
 
 Why the rows are disruptive today even though that fallback already caps a
 collapsed row at `FALLBACK_PREVIEW_LINES` (10): ws-mcp's `toolJSONResponse`
@@ -42,8 +42,8 @@ rows and the cap never engages. YAML output is many short lines, so a cap on
 rendered rows shows the leading keys instead of the first third of an
 unreadable line.
 
-Two packages this needs are nested under Pi's own `node_modules` and are not
-on the adapter's resolution path: `yaml@2.9.0` (Pi's own dependency) and
+At ticket creation, two packages this needed were nested under Pi's own
+`node_modules` and were not on the adapter's resolution path: `yaml@2.9.0` (Pi's own dependency) and
 `@earendil-works/pi-tui` (the `Text` component). The adapter already
 documents the pi-tui half as an invariant (`push-render.ts`,
 `overlay-chat.ts`: no static pi-tui import, since `node --test` imports these
@@ -82,15 +82,26 @@ it is known.
 - Component shape: a structural object with `render(width)` and no pi-tui
   import, the pattern `overlay-chat.ts` already uses, so `bridge.ts` stays
   importable under `node --test`. Rejected: pinning `@earendil-works/pi-tui`
-  as an adapter dependency (a second copy that drifts from Pi's) and a
-  preloaded dynamic import with conditional registration (more machinery for
-  a component that only emits lines).
-- Collapsed rows show at most 10 **rendered rows at the given width**
-  (owner's directive, 2026-09-06), wrapping counted, followed by a
-  `… N more rows` marker and the standard expand key hint; expanded rows show
-  all of it. The trim applies to both branches, YAML and raw text, so a long
-  single-line result is trimmed by rows where Pi's logical-line cap would not
-  engage. Error results (`context.isError`, where `details` is undefined
+  as an adapter dependency (a second copy that drifts from Pi's). Owner
+  clarification, 2026-09-06: dynamic loading of Pi's own width metric is
+  allowed to avoid maintaining a second Unicode width algorithm. Renderer
+  registration stays unconditional; metric loading failure uses the
+  newline-count fallback below, not Pi's default raw-result renderer.
+- Collapsed rows use a best-effort 10-row preview followed by a
+  `… N more rows` marker and the standard expand key hint; expanded rows
+  show all of it. With Pi's width metric available, count wrapped visual
+  rows at the given width. If metric loading fails, retain YAML conversion
+  and count newline-separated logical lines instead (10 lines plus marker).
+  Marker counts use the same unit as the selected preview mode. On metric
+  loading failure, select the logical preview first, then escape non-ASCII
+  characters to ASCII Unicode escapes and wrap safely to terminal width;
+  expanded output uses the same display-only transformation without the
+  logical-line cap. Sanitize terminal controls and keep markers/hints
+  width-safe too. This last-resort mode sacrifices Unicode readability,
+  not model-result fidelity. Long fallback lines may occupy more than 10
+  terminal rows. The owner approved this on 2026-09-06: exact preview row
+  budgeting is best-effort, but emitting rows that can stop Pi's TUI is not
+  acceptable. Both YAML and raw-text branches use the selected mode. Error results (`context.isError`, where `details` is undefined
   because the bridge throws on `isError`) are not converted and are trimmed
   the same way; Pi paints the error background itself, independent of the
   renderer.
@@ -211,14 +222,57 @@ lines; a JSON array renders as YAML; prose and a bare JSON string render
 unchanged; a malformed JSON-looking text renders unchanged; the collapsed
 `render(width)` output holds at most 10 rows plus the `… N more rows` marker
 and the expanded output holds all, for the YAML branch and the raw-text branch
-alike; a single long line at a narrow width is counted by wrapped rows, not
-logical lines; an error result (`context.isError`, `details` undefined) is not
+alike when Pi's metric is available; a single long line at a narrow width
+is then counted by wrapped rows, not logical lines. Simulate metric loading
+failure and verify unconditional YAML rendering, a 10-newline-line preview,
+a matching omitted-line marker, and expanded full logical output. In this
+fallback, test display-only Unicode escaping and width-safe ASCII wrapping
+(including widths 0 and 1) after logical-line selection; there is no strict
+10-terminal-row cap, but each emitted row must fit. Verify the original
+model payload remains unchanged; an error result (`context.isError`, `details` undefined) is not
 converted but is trimmed the same way; the `execute` return for a JSON result
 is byte-identical before and after; `bridge.ts` has no static pi-tui import. Amend the spec bullet
 under Spec Impact. Live check (owner-run): call `ws__config_resolve_agent`
 with `format: "json"` in a Pi lead session and confirm the row shows YAML,
 expands to the full document, and the model's next turn still parses the
 fields.
+
+### Result (5def1804) - 2026-09-06
+
+Phase 1 implemented; final hardening is `f34548f4`, following `971c94e2`
+and `7480131`. The reusable renderer lives in `src/tool-result-render.ts`;
+bridged registrations consume it without a bridge/spawner import cycle.
+Phase 2 is not implemented.
+
+Owner-approved deviation: exact ten-visual-row budgeting is best-effort.
+Dynamic Pi width loading replaces the incomplete local Unicode width model;
+loading failure retains YAML with the safe ASCII/logical-line fallback
+specified above. This supersedes the original rejection of dynamic loading,
+not the prohibition on conditional renderer registration or model changes.
+
+Review: initial correctness found two Critical issues (width calculation,
+terminal controls), fit found one Important reuse issue, and test review
+found three Important gaps; correctness also found one Important image
+fallback issue. All five Important findings were [fixed] in the single relay
+and were not re-reviewed. Terminal-control Critical was [fixed] and confirmed.
+Two Critical-scoped re-reviews exposed further width cases; the last scoped
+clean verdict did not establish ticket-wide correctness, because its
+excluded modifier-cluster failures were introduced by this ticket. Width
+was elevated at the review ceiling and is [fixed] by implementer self-
+verification in `f34548f4`; no independent review #4 was run. No unresolved
+implementation finding is reported, but final elevation is not described
+as independently reviewed.
+
+Verification: focused 79/79 and full adapter 955/955 tests passed with
+`WS_PI_SPAWN_ROLE` unset; 45,312 committed comparative cases and a separate
+112,640-case installed-Pi normal/fallback width sweep passed. Forced metric-
+load-failure bridge integration covers Unicode YAML, logical previews,
+expansion, narrow widths, and original payload preservation. Jiti loading,
+`npm pack --dry-run` (99 files), and `git diff --check` passed.
+
+Owner-live YAML display/expand/model-follow-up acceptance remains pending;
+compiled/bundled host modes were not live-tested. Keep the ticket ready with
+Phase 2 and its resolver prerequisite unchanged. No merge is implied.
 
 ### Phase 2: Dispatch-tool input summaries and resolved model line
 
