@@ -666,10 +666,13 @@ describe("buildForkSpawnCtx (the ws-fork push channel)", () => {
     client: { callTool: async () => ({ content: [] }) },
   } as unknown as BridgeHandle;
   const pi = { sendMessage() {} } as unknown as ExtensionAPI;
+  const catalog = [{ provider: "p", id: "m", hasAuth: true }];
+  const notifyTierWarning = () => {};
 
   test("carries the spawning session's own pi — without it a fork has no report channel at all", () => {
     const ctx = buildForkSpawnCtx(pi, bridge, { cwd: "/repo" }, {
       forkFrom: "/tmp/lead-session.jsonl",
+      catalog, notifyTierWarning,
       explicitTools: "read,grep",
     });
     assert.equal(ctx.pi, pi, "a ws-fork spawn must push into the session that spawned it");
@@ -678,9 +681,12 @@ describe("buildForkSpawnCtx (the ws-fork push channel)", () => {
   test("carries the fork spawn shape: --fork source, explicit tools, parent session key, spawnRole fork, and the bridge's client", () => {
     const ctx = buildForkSpawnCtx(pi, bridge, { cwd: "/repo" }, {
       forkFrom: "/tmp/lead-session.jsonl",
+      catalog, notifyTierWarning,
       explicitTools: "read,grep",
       inheritModel: "openrouter/some-model",
     });
+    assert.equal(ctx.catalog, catalog);
+    assert.equal(ctx.notifyTierWarning, notifyTierWarning);
     assert.equal(ctx.forkFrom, "/tmp/lead-session.jsonl");
     assert.equal(ctx.explicitTools, "read,grep");
     assert.equal(ctx.parentSessionKey, "amber-otter-canyon");
@@ -697,6 +703,7 @@ describe("buildForkSpawnCtx (the ws-fork push channel)", () => {
     initializePushLifecycle(pushPi);
     const ctx = buildForkSpawnCtx(pushPi, bridge, { cwd: "/repo" }, {
       forkFrom: "/tmp/lead-session.jsonl",
+      catalog, notifyTierWarning,
       explicitTools: "read",
     });
 

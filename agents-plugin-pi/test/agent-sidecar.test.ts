@@ -131,6 +131,7 @@ describe("captureOrphans", () => {
           alias: "scout",
           title: "Reviews the auth module",
           prompt: "Please review src/auth.ts for bugs",
+          warning: "warning: spawn-time only",
           modelBase: "prov/model",
           modelEffort: "high",
           explicitTools: "bash,ws-report-to-lead",
@@ -159,6 +160,20 @@ describe("captureOrphans", () => {
         lastReportAt: new Date(1).toISOString(),
       },
     ]);
+  });
+
+  test("spawn-time warning survives parking but not sidecar rehydration", () => {
+    const live = record({ warning: "warning: spawn-time only", client: {} as RpcClient });
+    const registry = new Map([[live.agentId, live]]);
+    assert.equal(listAgents(registry)[0].warning, live.warning);
+    live.client = undefined;
+    assert.equal(listAgents(registry)[0].warning, live.warning);
+    const [persisted] = parseOrphans(serializeOrphans(captureOrphans(registry)));
+    assert.ok(persisted);
+    assert.equal("warning" in persisted, false);
+    const revived = rehydrateOrphanRecord(persisted);
+    assert.equal("warning" in revived, false);
+    assert.equal("warning" in listAgents(new Map([[revived.agentId, revived]]))[0], false);
   });
 
   test("copies the tool-name list rather than aliasing the live record's array", () => {

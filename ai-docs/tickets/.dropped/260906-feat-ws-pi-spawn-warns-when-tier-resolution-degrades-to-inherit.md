@@ -2,12 +2,15 @@
 title: Pi spawn checks a configured tier model against Pi's catalog and warns with suggestions instead of silently inheriting
 related:
   260905-feat-ws-pi-harness-config-layer: owns resolveModelForAliasViaWsMcp and its genuine-pi-hit guard
+  260906-bug-ws-pi-tier-slug-rejected-children-inherit-parent-model: supersedes the "exactly provider/id" value contract with backend expansion; the deferred Phase 1 spec pass writes that accept rule, not the bare-id-ambiguity sentence
+  260906-bug-ws-pi-model-warning-keeps-reappearing: supersedes the "list row repeats the spawn warning" surface with a tier_rejected row field and a once-per-key advisory; the deferred Phase 1 spec pass writes those forms
 spec:
   - pi-adapter-runtime
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: f00236defb705392
 sage-review-completeness-reviewed: f00236defb705392
+dropped: 2026-09-06
 ---
 
 # Pi spawn checks a configured tier model against Pi's catalog and warns with suggestions instead of silently inheriting
@@ -266,3 +269,8 @@ argument; `exploreLeaf` passes the tier's effort through (mock the ws-mcp
 resolve to return one) and passes nothing on an inherit. Live check
 (owner-run): with `small` configured with an explicit effort, confirm the
 explore child's transcript shows that thinking level.
+
+
+## Resolution (2026-09-06)
+
+Absorbed into 260906-bug-ws-pi-tier-slug-rejected-children-inherit-parent-model on the owner's direction (2026-09-06): a configured tier that Pi's catalog does not know now refuses the spawn instead of warning and inheriting. Phase 1's catalog check, suggestion heuristic, and per-tier advisory report landed in e5e09187 and remain the base the absorbing ticket builds on; its three deferred spec passages and Phase 2 (explore effort pass-through) move there as its Spec Impact and Phase 2.

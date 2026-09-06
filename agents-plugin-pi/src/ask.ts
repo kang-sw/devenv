@@ -64,6 +64,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
+import { modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx } from "./model-catalog.ts";
 import {
   agentWidgetRefreshRef,
   sendToLead,
@@ -1160,6 +1161,8 @@ export async function ensureRespondent(
       pi,
       cwd: sessionCtx.cwd,
       inheritModel: inheritModelFromToolCtx(ctx),
+      catalog: modelCatalogFromToolCtx(ctx),
+      notifyTierWarning: tierWarningNotifierFromToolCtx(ctx),
       wsToolNames: bridge.wsToolNames,
       client: bridge.client,
       forkFrom,
