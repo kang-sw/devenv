@@ -84,12 +84,13 @@ import {
   flushHeldPushes,
   heldPushQueue,
   leadCompactingRef,
-  leadReminderStartPendingRef,
+  leadWakeStartPendingRef,
   REPORT_TO_LEAD_TOOL_NAME,
   sendToAgent,
   stopAgent,
   type RpcAgentRecord,
   type RpcAgentRegistry,
+  leadIdleRef, registerPushFlush, clearWakeStart,
 } from "../src/spawner.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -102,14 +103,14 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 // `heldPushQueue` are the same module state `spawner.ts`'s own hold uses —
 // reset both for the same leak-proofing reason.
 //
-// 260906 Phase 1 review relay #1 (Important #2): `leadReminderStartPendingRef`
+// 260906 Phase 1 review relay #1 (Important #2): `leadWakeStartPendingRef`
 // is the goal-loop's boundary guard, now also read by `injectDiscussionSummary`
 // via `composeLeadTurnStartOptions` — reset for the same leak-proofing reason.
 afterEach(() => {
   agentWidgetRefreshRef.current = undefined;
   leadCompactingRef.current = false;
   heldPushQueue.length = 0;
-  leadReminderStartPendingRef.current = false;
+  leadWakeStartPendingRef.current = false;
 });
 
 function thread(overrides: Partial<ThreadRecord> = {}): ThreadRecord {
@@ -885,7 +886,14 @@ describe("registerAsk (fake pi)", () => {
 describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
   function setup(origin: "lead-ask" | "fork-raised" = "lead-ask") {
     const sent: Array<{ message: unknown; options: unknown }> = [];
-    const pi = { sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }) } as unknown as ExtensionAPI;
+    leadIdleRef.current = () => true;
+    const handlers = new Map<string, () => void>();
+    const pi = {
+      on: (event: string, fn: () => void) => handlers.set(event, fn),
+      sendUserMessage: () => handlers.get("agent_start")?.(),
+      sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }),
+    } as unknown as ExtensionAPI;
+    registerPushFlush(pi, { delayMs: () => 10 });
     const handle = createThreadRegistryHandle();
     const dir = mkdtempSync(join(tmpdir(), "ws-pi-ask-test-"));
     const path = join(dir, "session.jsonl.ws-threads.json");
@@ -936,21 +944,20 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     );
   });
 
-  test("260906 Phase 1 review relay #1 (Important #2): the immediate send reads the goal-loop's boundary guard, sending triggerTurn: false while a reminder start is pending", () => {
-    leadReminderStartPendingRef.current = true;
+  test("Phase 2: a summary arriving during reminder preflight is held until start", () => {
+    leadWakeStartPendingRef.current = true;
     const { pi, sent, handle, record } = setup();
     injectDiscussionSummary(pi, handle, new Map(), record, "we take the second anchor");
 
-    assert.equal(sent.length, 1, "sent immediately — the lead is idle, no compaction in flight");
-    assert.deepEqual(
-      sent[0].options,
-      { deliverAs: "followUp", triggerTurn: false },
-      "a fork's /done completing while the reminder's own sendUserMessage is mid-await must not start a colliding turn",
-    );
+    assert.equal(sent.length, 0, "pending wake holds the summary");
+    assert.equal(record.status, "dormant");
+    clearWakeStart();
+    flushHeldPushes(pi, true);
+    assert.deepEqual(sent[0].options, { deliverAs: "followUp", triggerTurn: true });
   });
 
-  test("260906 Phase 1 review relay #1 (Important #2): a held raw send reads the boundary guard at FLUSH time, not at hold time", () => {
-    leadReminderStartPendingRef.current = false;
+  test("Phase 2: pending start prevents release of a held raw summary", () => {
+    leadWakeStartPendingRef.current = false;
     leadCompactingRef.current = true;
     const { pi, sent, handle, record } = setup();
     injectDiscussionSummary(pi, handle, new Map(), record, "we take the second anchor");
@@ -960,15 +967,13 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
 
     // The flag flips to true only AFTER the send was held — a closure that
     // captured `triggerTurn` at hold time would still send `true` here.
-    leadReminderStartPendingRef.current = true;
+    leadWakeStartPendingRef.current = true;
     leadCompactingRef.current = false;
-    assert.equal(flushHeldPushes(pi), 1);
-    assert.equal(sent.length, 1, "delivered once released");
-    assert.deepEqual(
-      sent[0].options,
-      { deliverAs: "followUp", triggerTurn: false },
-      "composed fresh at flush time, reflecting the flag's CURRENT value rather than a stale snapshot from hold time",
-    );
+    assert.equal(flushHeldPushes(pi), 0);
+    assert.equal(sent.length, 0, "still held for pending start");
+    clearWakeStart();
+    assert.equal(flushHeldPushes(pi, true), 1);
+    assert.deepEqual(sent[0].options, { deliverAs: "followUp", triggerTurn: true });
   });
 
   test("260906 (Phase 1): held while a compaction is in flight, delivered once released — the thread-close side effects run immediately regardless", () => {
@@ -984,8 +989,8 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     assert.equal(loadThreadRegistryFile(path)[0]?.status, "dormant");
 
     leadCompactingRef.current = false;
-    assert.equal(flushHeldPushes(pi), 1);
-    assert.equal(sent.length, 1, "delivered once released");
+    assert.equal(flushHeldPushes(pi), 0, "release requests wake, whose synchronous fake start drains");
+    assert.equal(sent.length, 1, "delivered once started");
     const msg = sent[0].message as { customType: string; content: string; details: { threadId: string } };
     assert.equal(msg.customType, "ws-thread-summary");
     assert.equal(msg.details.threadId, "q1");
@@ -993,7 +998,7 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     assert.deepEqual(sent[0].options, { deliverAs: "followUp", triggerTurn: true }, "the recorded delivery mode survives the hold");
   });
 
-  test("260906 (Phase 1): not held when the lead is idle and no compaction is in flight (baseline behavior unchanged)", () => {
+  test("Phase 2: an idle summary is delivered after the fake user wake confirms start", () => {
     leadCompactingRef.current = false;
     const { pi, sent, handle, record } = setup();
     injectDiscussionSummary(pi, handle, new Map(), record, "decided");

@@ -76,7 +76,7 @@
 import { readFileSync } from "node:fs";
 import type { ContextUsage, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readSpawnRole } from "./process-role.ts";
-import { flushHeldPushes, hasRunningAgents, leadCompactingRef, leadReminderStartPendingRef, type RpcAgentRegistry } from "./spawner.ts";
+import { clearWakeStart, reserveWakeStart, heldPushQueue, flushHeldPushes, hasRunningAgents, leadCompactingRef, leadWakeStartPendingRef, type RpcAgentRegistry } from "./spawner.ts";
 
 // ---------------------------------------------------------------------------
 // Config: adapter-owned runaway-threshold data file. Never-hard-fail,
@@ -428,14 +428,13 @@ export interface GoalLoopShutdownHandle {
    * Clears `leadCompactingRef` and both compaction markers (`pendingRearm`,
    * `settleSwallowedWhileCompacting`), cancels a pending settle timer and
    * boundary-guard fallback timer (260906 Phase 1), and clears
-   * `leadReminderStartPendingRef`. Without this, a `session_shutdown`/
+   * `leadWakeStartPendingRef`. Without this, a `session_shutdown`/
    * `/reload` that lands while a compaction is still in flight would leave
    * `leadCompactingRef.current` stuck `true` into the replacement session,
    * where `isOwningAgentIdle()` (spawner.ts) reports `false` forever and
    * every `followUp` push plus `ask.ts`'s `injectDiscussionSummary` is held
-   * with nothing left to release them; and a stuck `leadReminderStartPendingRef`
-   * would make every push into the replacement session append inert
-   * (`triggerTurn: false`) with nothing left to consume it.
+   * with nothing left to release them; and a stuck `leadWakeStartPendingRef`
+   * would hold every replacement-session push without a live wake.
    */
   resetCompactionStateForShutdown(): void;
 }
@@ -494,7 +493,7 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
    * accounting, and force-stop path as a live `agent_settled`, against a
    * freshly-read context percent). Cleared by whichever path in
    * `onSettleTimerFire` actually resolves this settle, by the not-idle
-   * handoff, and by the `agent_start` backstop — see each site below.
+   * handoff, and by deferred busy release — see each site below.
    */
   let settleSwallowedWhileCompacting = false;
 
@@ -517,28 +516,10 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
    */
   let settleTimer: NodeJS.Timeout | undefined;
 
-  /**
-   * The boundary-guard's own fallback timer (260906 Phase 1): armed
-   * alongside `leadReminderStartPendingRef.current = true`, right after the
-   * reminder's own `sendUserMessage` call, so a reminder whose run never
-   * actually started (an `agent_start`/`agent_settled` that should have
-   * followed it never arrives within the settle delay) does not leave the
-   * boundary guard — and every subsequent push's `triggerTurn` — stuck
-   * `false` forever.
-   */
-  let reminderTimeoutHandle: NodeJS.Timeout | undefined;
-
   function cancelSettleTimer(): void {
     if (settleTimer !== undefined) {
       clearTimer(settleTimer);
       settleTimer = undefined;
-    }
-  }
-
-  function cancelReminderTimeout(): void {
-    if (reminderTimeoutHandle !== undefined) {
-      clearTimer(reminderTimeoutHandle);
-      reminderTimeoutHandle = undefined;
     }
   }
 
@@ -575,17 +556,7 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
    */
   function armSettleTimer(ctx: ExtensionContext): void {
     cancelSettleTimer();
-    // 260906 Phase 1 review relay #1 (Minor): a live reminder-fallback timer
-    // has nothing left to guard once the settle timer is (re-)armed — this
-    // path is reached both from a live `agent_settled` (which already cleared
-    // it) and from the fallback timeout's own retry arm (which is about to
-    // become stale the instant this new settle timer takes over) and from
-    // `releaseAfterCompaction` (which could otherwise arm a fresh settle
-    // timer while an unrelated reminder fallback from an earlier cycle was
-    // still ticking). Cancelling here, alongside `fireReminder`'s own cancel
-    // below, makes "at most one timer of each kind" (settle timer, reminder
-    // fallback) an enforced invariant rather than an accident of call order.
-    cancelReminderTimeout();
+    // Settle evaluation must not cancel recovery for a held-push wake.
     const config = readGoalLoopConfig(opts.goalLoopConfigPath);
     const delayMs = resolveSettleDelayMs(config);
     settleTimer = scheduleTimer(() => runTimerCallback(ctx, "settle timer", () => onSettleTimerFire(ctx)), delayMs);
@@ -605,15 +576,16 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
    * turn between the fire-condition check and this call.
    */
   function fireReminder(ctx: ExtensionContext, config: GoalLoopConfig | undefined, reminder: string): void {
-    // 260906 Phase 1 review relay #1 (Minor): cancel a leftover
-    // reminder-fallback timer before arming a fresh one — see
-    // `armSettleTimer`'s matching cancel for the full "at most one timer of
-    // each kind" rationale. `onSettleTimerFire`'s three consumers
-    // (`pendingRearm`, replayed `settleSwallowedWhileCompacting`, ordinary
-    // reinject) all funnel through this one function, so this is the single
-    // place that needs the cancel.
-    cancelReminderTimeout();
-    leadReminderStartPendingRef.current = true;
+    // Shared reservation and recovery precede dispatch, including a throwing send.
+    if (!reserveWakeStart({ delayMs: () => resolveSettleDelayMs(config), scheduleTimer, clearTimer }, () => {
+      runTimerCallback(ctx, "wake fallback timer", () => {
+        if (heldPushQueue.length) flushHeldPushes(pi);
+        else if (state.active) {
+          armSettleTimer(ctx);
+          ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: reminder did not start a turn, retrying");
+        }
+      });
+    })) return;
     if (state.pendingCarryForward !== undefined) {
       reminder += `\n\nCarried forward verbatim from before compaction:\n${state.pendingCarryForward}`;
     }
@@ -621,26 +593,6 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
     // Consume only after dispatch returns: a synchronous send throw retains
     // the payload for the next eligible reminder, regardless of its origin.
     state.pendingCarryForward = undefined;
-    const delayMs = resolveSettleDelayMs(config);
-    reminderTimeoutHandle = scheduleTimer(
-      () =>
-        runTimerCallback(ctx, "reminder fallback timer", () => {
-          reminderTimeoutHandle = undefined;
-          if (leadReminderStartPendingRef.current) {
-            leadReminderStartPendingRef.current = false;
-            // 260906 Phase 1 review relay #1 (Minor): arm FIRST, set the retry
-            // status LAST — `armSettleTimer`'s own first action overwrites the
-            // status key with "Goal loop: settling", so setting the retry
-            // string before arming made it unobservable (immediately
-            // clobbered in the same synchronous tick). Reversing the order
-            // lets the retry string actually be the status the footer shows
-            // once this callback returns.
-            armSettleTimer(ctx);
-            ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: reminder did not start a turn, retrying");
-          }
-        }),
-      delayMs,
-    );
   }
 
   /**
@@ -726,7 +678,12 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
 
     const notIdle = !ctx.isIdle();
     const yielding = hasRunningAgents(opts.rpcRegistryRef?.current);
-    if (notIdle || yielding) return;
+    if (notIdle || yielding || leadWakeStartPendingRef.current) return;
+    // Pushes own the next wake; do not consume origins, carry, or streak.
+    if (heldPushQueue.length) {
+      flushHeldPushes(pi);
+      return;
+    }
 
     const config = readGoalLoopConfig(opts.goalLoopConfigPath);
 
@@ -760,36 +717,16 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
   }
 
   /**
-   * Idempotent release of an in-flight compaction, deferred past Pi's own
-   * compaction flag by every event-driven caller (never called synchronously
-   * from inside a `session_*compact*` handler — see the two listeners
-   * below). Three callers: the deferred `session_compact`/
-   * `session_compact_failed` listeners, the lever's `onComplete`/`onError`
-   * (backstop — covers the case where Pi never fires those events, e.g. a
-   * compaction that fails before reaching them), and `agent_start` (pure
-   * backstop clear, no reminder, no queue touch — see that listener below).
-   *
-   * Idle branch: flushes every held push (both ordinary family pushes and
-   * `ask.ts`'s raw `ws-thread-summary` send). Then, if a lever-originated
-   * reminder (`pendingRearm`) or a swallowed settle (`settleSwallowedWhileCompacting`)
-   * is pending, arms the settle timer (260906 Phase 1) — it does NOT clear
-   * either marker here; that moved to `onSettleTimerFire`, which needs both
-   * markers to survive the arm-to-fire delay to know what to send once it
-   * actually fires. Not-idle branch: sends nothing and clears both markers
-   * (and the captured failure reason) — the agent has ALREADY started a
-   * fresh turn by the time this deferred call lands (e.g. Pi's own
-   * `compaction_end` flushed owner-queued input before `setImmediate`
-   * fired), so the held queue and any pending reminder are left to that
-   * turn's own `agent_settled` instead of racing it.
+   * Deferred completion/failure owns release of the independent compaction hold.
+   * Idle release requests a push wake without draining, then arms pending goal
+   * evaluation. Busy release leaves pushes to the run's settle and clears only
+   * reminder origins; verbatim carry remains until an eligible reminder.
    */
   function releaseAfterCompaction(ctx: ExtensionContext, failureReason?: string): void {
     if (!leadCompactingRef.current) return; // idempotent: already released
     leadCompactingRef.current = false;
     if (!ctx.isIdle()) {
-      // A fresh turn is already underway — leave everything to it rather
-      // than racing it (see this function's doc comment for why this is NOT
-      // the "agent_start already cleared the flag" case: that case returns
-      // at the idempotency guard above, before ever reaching here).
+      // Preserve settle-time delivery rather than racing an already-busy run.
       pendingRearm = false;
       settleSwallowedWhileCompacting = false;
       pendingRearmFailureReason = undefined;
@@ -832,8 +769,7 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
     // nothing left to guard against for this cycle. Runs before the
     // child-process guard below since it is unconditional bookkeeping, not
     // goal-mode-only.
-    leadReminderStartPendingRef.current = false;
-    cancelReminderTimeout();
+    clearWakeStart();
 
     // Defense-in-depth: never re-fire inside a spawned child process (the
     // goal-loop is lead-session-only per the ticket's settled cross-ticket
@@ -887,36 +823,11 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
     // check below, since a fresh turn starting is proof neither has
     // anything left to guard against.
     cancelSettleTimer();
-    cancelReminderTimeout();
-    leadReminderStartPendingRef.current = false;
+    clearWakeStart();
 
-    // 260906 (compaction push-hold ticket, Phase 1): backstop clear — runs
-    // before the goal-mode-only checks below because `leadCompactingRef` can
-    // be set defensively by `session_before_compact` for ANY compaction
-    // reason regardless of whether a goal is active, and a fresh
-    // `agent_start` is proof the session has moved on from whatever
-    // compaction set it. No reminder, no queue touch here: that is
-    // `releaseAfterCompaction`'s job, and this branch only fires when THAT
-    // never ran (e.g. `session_compact`/`session_compact_failed` never fired
-    // for this compaction) — a pure safety net against a stuck flag.
-    if (leadCompactingRef.current) {
-      leadCompactingRef.current = false;
-      // Review relay #1 (Important/Critical): both markers must die with the
-      // stuck flag they rode in on — otherwise a stale `pendingRearm` makes
-      // the NEXT, unrelated compaction synthesize a lever reminder that was
-      // never requested, and a stale `settleSwallowedWhileCompacting` makes
-      // it replay a settle a second time.
-      pendingRearm = false;
-      settleSwallowedWhileCompacting = false;
-      pendingRearmFailureReason = undefined;
-      // Review relay #1 (Minor): clear the footer status BEFORE returning —
-      // this turn is proof the loop moved on, so leaving a stale "waiting for
-      // compaction"/"settling" footer up for its whole duration would be a
-      // lie the next branch's unconditional clear was supposed to have
-      // already told.
-      ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, undefined);
-      return;
-    }
+    // A run can start before deferred compaction release. Start is not
+    // proof that this independent hold reason has finished.
+    if (leadCompactingRef.current) return;
     if (isChildProcess(process.env)) return;
     if (!state.active) return;
     ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, undefined);
@@ -949,10 +860,7 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
   // after), so anything synchronous here would race that same internal
   // state Pi has not finished unwinding yet.
   pi.on("session_compact", (_event, ctx) => {
-    // Review relay #2 (Minor, accepted narrow gap): unlike the lever, a
-    // non-lever compaction has no `onComplete`/`onError` backstop — if Pi's
-    // internal `savedCompactionEntry` lookup ever misses this event outright,
-    // only `agent_start`'s backstop can still clear a stuck flag/marker.
+    // Defer beyond Pi's own compaction flag; start alone never clears our hold.
     setImmediate(() => releaseAfterCompaction(ctx));
   });
   pi.on("session_compact_failed", (event, ctx) => {
@@ -1069,8 +977,7 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
       // "session shutdown" — a replacement session must not inherit a
       // pending settle/boundary-guard timer from the torn-down one.
       cancelSettleTimer();
-      cancelReminderTimeout();
-      leadReminderStartPendingRef.current = false;
+      clearWakeStart();
     },
   };
 }
