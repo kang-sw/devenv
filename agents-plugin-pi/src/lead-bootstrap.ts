@@ -83,6 +83,12 @@ export interface WsBlockBase {
   guideText: string;
 }
 
+/** `computeSkillsBlockCached`'s cache slot: the rendered block, tagged with the sorted-entry-path key it was built from. */
+export interface SkillsBlockCache {
+  key: string;
+  block: string;
+}
+
 /**
  * Resolves the `<available_skills>` block against Pi's CURRENT
  * `pi.getCommands()` list, called fresh on every `before_agent_start`
@@ -100,35 +106,43 @@ export interface WsBlockBase {
  * is in flight, always after `bindExtensions` has awaited both steps in
  * sequence) sidesteps the ordering entirely.
  *
- * Caching strategy — deliberately the simpler of two considered options:
- * build the block ONCE, on the first `before_agent_start` firing whose live
- * skill-entry list is non-empty, and freeze that result in `cache` for every
- * later firing. The alternative (a per-path cache keyed on the entry list,
- * invalidated whenever the set of paths changes) stays exactly as correct
- * against a mid-session skill-pack hot-reload, but adds a second piece of
- * state (a path->body map plus a diffing step) to buy correctness for an
- * event this adapter has no other reason to support today — nothing else in
- * this codebase reacts to a live-added skill pack mid-session. "Build once
- * after non-empty" needs only one string ref and reads every SKILL.md's
- * frontmatter at most once per session, at the cost of not picking up a
- * skill pack that installs itself after the cache is already frozen (an
- * accepted trade-off; a fresh `session_start`, e.g. `/reload`, gets a fresh
- * `cache` ref from `index.ts` and re-freezes there).
+ * Caching strategy: `cache` holds the last-rendered block tagged with the
+ * KEY it was built from — the live entry list's paths, sorted and joined.
+ * Every call recomputes the current key (a cheap filter+map+sort+join over
+ * `pi.getCommands()`, no IO) and only rebuilds the block (`buildSkillsBlock`,
+ * which reads every entry's SKILL.md) when the key differs from
+ * `cache.current.key`; an unchanged key returns the cached block outright.
+ * Review cycle 1 (Minor #1/#2) replaced an earlier "freeze on first
+ * non-empty read" rule with this key comparison: that rule could, in
+ * principle, latch a list read on a turn that raced ahead of
+ * `extendResourcesFromExtensions`'s merge (`index.ts`'s orphan-revival
+ * `pushToLead(..., "followUp")` can start a turn from inside
+ * `session_start`, before `bindExtensions` reaches the merge step) — a
+ * pre-merge non-empty list (the reported `imagegen`-only case) would then
+ * freeze forever instead of self-healing on the next turn. It also cached an
+ * empty string forever whenever every entry failed to load or was
+ * `disable-model-invocation: true`, since that guard checked
+ * `entries.length`, not the rendered block. Keying on the path set fixes
+ * both: any later merge that adds, removes, or renames a skill path changes
+ * the key and forces a rebuild, regardless of what the previous render
+ * produced.
  */
 export function computeSkillsBlockCached(
   commands: readonly SlashCommandInfo[],
   loadFile: (path: string) => LoadedSkill,
-  cache: { current: string | undefined },
+  cache: { current: SkillsBlockCache | undefined },
 ): string {
-  if (cache.current !== undefined) {
-    return cache.current;
-  }
   const entries = resolveSkillEntries(commands);
-  if (entries.length === 0) {
-    return "";
+  const key = entries
+    .map((e) => e.path)
+    .sort()
+    .join("\n");
+  if (cache.current && cache.current.key === key) {
+    return cache.current.block;
   }
-  cache.current = buildSkillsBlock(entries, loadFile);
-  return cache.current;
+  const block = buildSkillsBlock(entries, loadFile);
+  cache.current = { key, block };
+  return block;
 }
 
 /**
@@ -229,11 +243,19 @@ export function computeSessionBootstrap(inputs: SessionBootstrapInputs): Session
  * same "no override" outcome `computeBeforeAgentStartResult` would reach
  * anyway, reached without the wasted per-skill frontmatter IO on every turn
  * of a role that never uses the result.
+ *
+ * `skillsBlockCacheRef` itself lives at extension-factory scope (created
+ * once in `index.ts`'s factory body, same as `wsBlockBaseRef`), so it
+ * outlives any single `session_start`; it is not reset there. That is fine
+ * because `computeSkillsBlockCached`'s path-set key already invalidates the
+ * cache on its own whenever the live entry list changes — no external reset
+ * is needed for correctness. A fresh ref only ever appears on a full
+ * extension-factory re-invocation (e.g. Pi's `/reload`).
  */
 export function registerLeadBootstrap(
   pi: ExtensionAPI,
   wsBlockBaseRef: { current: WsBlockBase | undefined },
-  skillsBlockCacheRef: { current: string | undefined },
+  skillsBlockCacheRef: { current: SkillsBlockCache | undefined },
 ): void {
   pi.on("before_agent_start", (event) => {
     const role = readSpawnRole(process.env);

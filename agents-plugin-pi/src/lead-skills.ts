@@ -42,9 +42,14 @@
  * each `before_agent_start` firing for the `<available_skills>` block
  * (`lead-bootstrap.ts`'s `computeSkillsBlockCached`) — never captured into a
  * `session_start`-scoped ref. `sourceInfo.path` (the SKILL.md path) is
- * therefore re-resolved on every read too; only the file body is cached (by
- * `computeSkillsBlockCached`, once), for the reverse reason the
- * workflow-manual snapshot caches its body but not its per-call state.
+ * therefore re-resolved on every read too, and no SKILL.md BODY is ever
+ * cached anywhere — `buildSkillsBlock` discards `loaded.body` and keeps only
+ * `ok`/`disableModelInvocation` per entry (see its own doc comment). What
+ * `computeSkillsBlockCached` caches is the already-RENDERED
+ * `<available_skills>` string, keyed on the live entry-path set, so a
+ * `before_agent_start` firing whose path set is unchanged skips re-reading
+ * every SKILL.md rather than skipping a body read that was never being
+ * repeated in the first place.
  *
  * `parseFrontmatter`/`SkillFrontmatter` are imported from
  * `@earendil-works/pi-coding-agent` rather than hand-rolled: it is the exact

@@ -193,7 +193,7 @@ import { buildOrphanPush, captureOrphans, readAndClearSidecar, reviveOrphans, wr
 import { buildDiscussKickoff } from "./discuss.ts";
 import { registerGoalLoop } from "./goal-loop.ts";
 import { resolveSkillsDir } from "./skills-dir.ts";
-import { computeSessionBootstrap, registerLeadBootstrap, type WsBlockBase } from "./lead-bootstrap.ts";
+import { computeSessionBootstrap, registerLeadBootstrap, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
 import { isLeadOrFork, readSpawnRole } from "./process-role.ts";
 import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
 import { armForkRoleWiring, registerFork } from "./fork.ts";
@@ -231,8 +231,12 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   // `pi.getCommands()` read (never a `session_start`-time snapshot — Pi
   // merges this adapter's own skills into `pi.getCommands()` AFTER
   // `session_start` returns, so a snapshot taken here would predate them,
-  // same live-ref convention as `wsBlockBaseRef`/`rpcRegistryRef`).
-  const skillsBlockCacheRef: { current: string | undefined } = { current: undefined };
+  // same live-ref convention as `wsBlockBaseRef`/`rpcRegistryRef`). Lives at
+  // this factory scope (survives across every `session_start` on this loaded
+  // extension instance), but that is fine: `computeSkillsBlockCached` keys
+  // its cache on the live entry-path set and rebuilds on its own whenever
+  // that set changes, so no external reset is needed here.
+  const skillsBlockCacheRef: { current: SkillsBlockCache | undefined } = { current: undefined };
   // 260905 (push model): the shared RPC registry, published as a mutable ref
   // so `createApprovalRelay` — which must be constructed BEFORE
   // `registerAgentTools` creates that registry — can still read it at push

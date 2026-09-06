@@ -38,9 +38,10 @@ import {
   computeSkillsBlockCached,
   registerLeadBootstrap,
   SESSION_START_SNAPSHOT_MARKER,
+  type SkillsBlockCache,
   type WsBlockBase,
 } from "../src/lead-bootstrap.ts";
-import { WS_SKILL_TOOL_NAME } from "../src/lead-skills.ts";
+import { WS_SKILL_TOOL_NAME, type LoadedSkill } from "../src/lead-skills.ts";
 import { FORK_TOOL_NAME } from "../src/fork.ts";
 import { ASK_TOOL_NAME, RESOLVE_TOOL_NAME } from "../src/ask.ts";
 import { APPROVE_TOOL_NAME, EXECUTE_TOOL_NAME, ONE_LINER_EXEC_TOOL_NAME, UGLY_READ_TOOL_NAME } from "../src/execute-gateway.ts";
@@ -182,34 +183,99 @@ describe("computeSessionBootstrap", () => {
 
 /**
  * computeSkillsBlockCached: the dogfood fix's live-read-plus-cache helper.
- * Reads `pi.getCommands()` (here, a plain array standing in for it) fresh
- * every call until the entry list is non-empty, then freezes the rendered
- * block — see this function's own doc comment in lead-bootstrap.ts for why
- * "build once after non-empty" was picked over a per-path cache.
+ * Reads `pi.getCommands()` (here, a plain array standing in for it) fresh on
+ * every call, and rebuilds the rendered block only when the sorted, joined
+ * set of live entry paths differs from the key the cache was last built
+ * from — see this function's own doc comment in lead-bootstrap.ts for why a
+ * path-set key replaced an earlier "freeze on first non-empty read" rule
+ * (review cycle 1, Minor #1/#2: that rule could latch a pre-merge list, and
+ * separately cached an empty string forever when every entry failed to load
+ * or was disabled).
  */
 describe("computeSkillsBlockCached", () => {
-  const loadFile = () => ({ ok: true as const, body: "body", disableModelInvocation: false });
+  const loadFile = (): LoadedSkill => ({ ok: true, body: "body", disableModelInvocation: false });
+  const FAILING_LOAD_FILE = (): LoadedSkill => ({ ok: false, error: "boom" });
 
-  test("returns '' and does not cache while the live list is empty", () => {
-    const cache: { current: string | undefined } = { current: undefined };
+  test("returns '' for an empty live list, and a later non-empty list still invalidates that cached entry", () => {
+    const cache: { current: SkillsBlockCache | undefined } = { current: undefined };
     assert.equal(computeSkillsBlockCached([], loadFile, cache), "");
-    assert.equal(cache.current, undefined, "an empty read must not freeze the cache");
+    assert.equal(cache.current?.key, "", "an empty list is cached under the empty key, same as any other path set");
+
+    const block = computeSkillsBlockCached([skillCommand("lead-proceed", "d", "/skills/lead-proceed/SKILL.md")], loadFile, cache);
+    assert.match(block, /<name>lead-proceed<\/name>/, "a non-empty path set must not be masked by the earlier empty-key cache entry");
   });
 
-  test("builds and freezes the block on the first non-empty read", () => {
-    const cache: { current: string | undefined } = { current: undefined };
+  test("builds the block and stores {key, block} on the first non-empty read", () => {
+    const cache: { current: SkillsBlockCache | undefined } = { current: undefined };
     const commands = [skillCommand("lead-proceed", "d", "/skills/lead-proceed/SKILL.md")];
     const block = computeSkillsBlockCached(commands, loadFile, cache);
     assert.match(block, /<name>lead-proceed<\/name>/);
-    assert.equal(cache.current, block, "the cache must hold the built block after the first non-empty read");
+    assert.equal(cache.current?.block, block);
+    assert.equal(cache.current?.key, "/skills/lead-proceed/SKILL.md");
   });
 
-  test("a later, different live list is ignored once the cache is frozen", () => {
-    const cache: { current: string | undefined } = { current: undefined };
+  // (a) same path set -> cached block reused without rebuilding.
+  test("an unchanged path set returns the cached block without rebuilding", () => {
+    const cache: { current: SkillsBlockCache | undefined } = { current: undefined };
+    const commands = [skillCommand("lead-proceed", "d", "/skills/lead-proceed/SKILL.md")];
+    let loadCalls = 0;
+    const countingLoadFile = (): LoadedSkill => {
+      loadCalls += 1;
+      return { ok: true, body: "body", disableModelInvocation: false };
+    };
+    const first = computeSkillsBlockCached(commands, countingLoadFile, cache);
+    const second = computeSkillsBlockCached([...commands], countingLoadFile, cache);
+    assert.equal(second, first);
+    assert.equal(loadCalls, 1, "a second call with the same path set must not re-read any SKILL.md");
+  });
+
+  // (b) a path added after the first build -> block rebuilt, new skill listed.
+  test("a path added to the live list forces a rebuild and lists the new skill", () => {
+    const cache: { current: SkillsBlockCache | undefined } = { current: undefined };
     const first = computeSkillsBlockCached([skillCommand("lead-proceed", "d", "/skills/lead-proceed/SKILL.md")], loadFile, cache);
-    const second = computeSkillsBlockCached([skillCommand("lead-discuss", "d2", "/skills/lead-discuss/SKILL.md")], loadFile, cache);
-    assert.equal(second, first, "the frozen cache must be returned unchanged, ignoring the new live list");
-    assert.doesNotMatch(second, /lead-discuss/);
+    const second = computeSkillsBlockCached(
+      [skillCommand("lead-proceed", "d", "/skills/lead-proceed/SKILL.md"), skillCommand("lead-discuss", "d2", "/skills/lead-discuss/SKILL.md")],
+      loadFile,
+      cache,
+    );
+    assert.notEqual(second, first);
+    assert.match(second, /<name>lead-proceed<\/name>/);
+    assert.match(second, /<name>lead-discuss<\/name>/, "the newly merged skill must be listed after the rebuild");
+  });
+
+  // (c) first read whose entries all fail to load / are all disabled,
+  // followed by a merge that adds a loadable skill -> the new skill is
+  // listed (the exact "empty string cached forever" case Minor #2 named).
+  test("a first read with only unloadable/disabled entries, followed by a merge adding a loadable skill, lists the new skill", () => {
+    const cache: { current: SkillsBlockCache | undefined } = { current: undefined };
+    const disabledLoadFile = (path: string): LoadedSkill =>
+      path === "/skills/hidden/SKILL.md" ? { ok: true, body: "b", disableModelInvocation: true } : { ok: false, error: "boom" };
+
+    const first = computeSkillsBlockCached(
+      [skillCommand("broken", "d", "/skills/broken/SKILL.md"), skillCommand("hidden", "d2", "/skills/hidden/SKILL.md")],
+      disabledLoadFile,
+      cache,
+    );
+    assert.equal(first, "", "every entry fails to load or is disabled, so the rendered block is empty");
+
+    const second = computeSkillsBlockCached(
+      [
+        skillCommand("broken", "d", "/skills/broken/SKILL.md"),
+        skillCommand("hidden", "d2", "/skills/hidden/SKILL.md"),
+        skillCommand("lead-drain-ready-queue", "d3", "/skills/lead-drain-ready-queue/SKILL.md"),
+      ],
+      (path) => (path === "/skills/lead-drain-ready-queue/SKILL.md" ? { ok: true, body: "b", disableModelInvocation: false } : disabledLoadFile(path)),
+      cache,
+    );
+    assert.match(second, /<name>lead-drain-ready-queue<\/name>/, "the later-merged loadable skill must be listed, not hidden behind a frozen empty cache");
+  });
+
+  test("FAILING_LOAD_FILE alone never throws and yields an empty block", () => {
+    const cache: { current: SkillsBlockCache | undefined } = { current: undefined };
+    assert.doesNotThrow(() => {
+      const block = computeSkillsBlockCached([skillCommand("broken", "d", "/skills/broken/SKILL.md")], FAILING_LOAD_FILE, cache);
+      assert.equal(block, "");
+    });
   });
 });
 
@@ -267,7 +333,7 @@ describe("registerLeadBootstrap (fake pi, dogfood fix)", () => {
     const { pi, fire } = fakePi(() => commands);
 
     const baseRef: { current: WsBlockBase | undefined } = { current: { manualSnapshot: "## Session Key\nlead-1", guideText: "GUIDE-TEXT" } };
-    const cacheRef: { current: string | undefined } = { current: undefined };
+    const cacheRef: { current: SkillsBlockCache | undefined } = { current: undefined };
     registerLeadBootstrap(pi as unknown as ExtensionAPI, baseRef, cacheRef);
 
     // Merged in AFTER session_start/registration returns, BEFORE the first
@@ -293,7 +359,7 @@ describe("registerLeadBootstrap (fake pi, dogfood fix)", () => {
       return [skillCommand("lead-drain-ready-queue", "d", "/skills/lead-drain-ready-queue/SKILL.md")];
     });
     const baseRef: { current: WsBlockBase | undefined } = { current: undefined };
-    const cacheRef: { current: string | undefined } = { current: undefined };
+    const cacheRef: { current: SkillsBlockCache | undefined } = { current: undefined };
     registerLeadBootstrap(pi as unknown as ExtensionAPI, baseRef, cacheRef);
 
     assert.equal(fire("base prompt"), undefined);
