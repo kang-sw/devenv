@@ -260,6 +260,8 @@ export interface GoalLoopState {
   goal?: string;
   noToolCallStreak: number;
   sawToolCallThisCycle: boolean;
+  /** Raw lever payload, retained across waits/yields until the next reminder send; never persisted. */
+  pendingCarryForward?: string;
 }
 
 /** The inert/disarmed state — also the state after a terminal lever fires or the runaway backstop trips. */
@@ -612,7 +614,13 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
     // place that needs the cancel.
     cancelReminderTimeout();
     leadReminderStartPendingRef.current = true;
+    if (state.pendingCarryForward !== undefined) {
+      reminder += `\n\nCarried forward verbatim from before compaction:\n${state.pendingCarryForward}`;
+    }
     pi.sendUserMessage(reminder, { deliverAs: "followUp" });
+    // Consume only after dispatch returns: a synchronous send throw retains
+    // the payload for the next eligible reminder, regardless of its origin.
+    state.pendingCarryForward = undefined;
     const delayMs = resolveSettleDelayMs(config);
     reminderTimeoutHandle = scheduleTimer(
       () =>
@@ -997,11 +1005,11 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
     name: "goal-compact-and-continue",
     label: "goal-compact-and-continue",
     description:
-      "Non-terminal lever: compact context now, carrying <carry_forward> prose into the compaction summary, then continue pursuing the same active goal. Call this at a safe compaction point (phase boundary / merge gate) instead of manually summarizing progress in prose.",
+      "Non-terminal lever: compact context now, using <carry_forward> prose to steer the summary and delivering it verbatim once in the next eligible goal reminder, then continue pursuing the same active goal. Call this at a safe compaction point (phase boundary / merge gate) instead of manually summarizing progress in prose.",
     parameters: {
       type: "object",
       properties: {
-        carry_forward: { type: "string", description: "Prose carried forward into the compaction summary as custom instructions." },
+        carry_forward: { type: "string", description: "Prose passed unchanged as compaction custom instructions and carried verbatim into the next eligible goal reminder." },
       },
       required: ["carry_forward"],
     } as never,
@@ -1009,8 +1017,8 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
       const p = params as { carry_forward: string };
       // Does NOT call disarmGoal() — non-terminal. ctx.compact() aborts the
       // in-flight turn (the one that invoked this very tool call) and, once
-      // compaction completes, `releaseAfterCompaction` (below) sends a fresh
-      // re-armed reminder itself — no separate manual "continue" call is
+      // compaction completes, `releaseAfterCompaction` arms the settle timer
+      // for a fresh reminder — no separate manual "continue" call is
       // needed here beyond returning this tool's own result and triggering
       // the compaction (see this file's top-of-file doc comment's
       // risk-signal note). 260906 review relay #1 (Critical): the invoking
@@ -1025,6 +1033,9 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
       // abort can settle the invoking turn synchronously within this call.
       leadCompactingRef.current = true;
       pendingRearm = true;
+      // Goal-scoped, not rearm-marker-scoped: busy release and agent_start
+      // may clear those markers before an ordinary reminder can carry this.
+      state.pendingCarryForward = p.carry_forward;
       ctx.compact({
         customInstructions: p.carry_forward,
         onComplete: () => {
@@ -1049,6 +1060,7 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
 
   return {
     resetCompactionStateForShutdown() {
+      state.pendingCarryForward = undefined;
       leadCompactingRef.current = false;
       pendingRearm = false;
       settleSwallowedWhileCompacting = false;
