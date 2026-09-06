@@ -28,9 +28,12 @@ None yet. This is a non-hierarchical collection, not an implementation target.
 
 - **Agent row model and usage visibility** — Extend agent rows such as
   `b9b83114 · execute · awaiting approval · 21s` with
-  `<model-name> (<effort>)`. Also show current input-token count and a
-  corresponding monetary cost if available. Intended role: make the model,
-  reasoning effort, and resource usage visible alongside agent status.
+  `<model-name> (<effort>)`. Show input tokens from the most recent model
+  call and cumulative estimated cost for that agent in USD. Explicitly
+  distinguish the estimate from actual billing; display `—` when data is
+  unavailable. The owner confirmed these accounting and fallback semantics.
+  Intended role: make the model, reasoning effort, and resource usage visible
+  alongside agent status.
   Creation condition: the owner moves the collected request into planning;
   this entry does not assert that runtime usage or billing data is available.
 - **Agent count above the agent list** — The owner observes the
@@ -46,8 +49,8 @@ Capture additional owner-supplied UX requests in this same collection before
 implementation planning. No styling implementation or queue promotion is
 requested by this ticket. Specific palette values are not settled.
 Use `ws-ask` for questions requiring owner discussion while gathering these
-requests. Token accounting scope, cost currency, and estimate/unavailable
-presentation need owner clarification before implementation planning.
+requests. Usage display semantics are settled above; implementation remains
+explicitly deferred.
 
 ## Exit Criteria
 
