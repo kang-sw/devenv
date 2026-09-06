@@ -11,6 +11,21 @@ related:
 
 Owner requested these follow-ups after YAML result Phase 1: display input parameters as YAML, visually distinguish input/output backgrounds, give the direct read/run tools ten-line result previews, and make ws-agent-settled background consistent with ws-agent-report. Captured only; no implementation started. Keep this idea separate until its overlap with the existing YAML ticket's Phase 2 is reconciled; do not implement duplicate dispatch headers.
 
+## Scope update - 2026-09-06
+
+Bridged `ws__*` input YAML and logical ten-line input/output previews landed in
+`bbf9a29a`/`2c8c50a`; owner confirmed lag disappeared and both displays worked.
+A suspected JSON exception was stale pre-reload rows, resolved by the owner.
+Bold titles and native-theme input/output backgrounds subsequently landed in
+`4d278c13`; 946 tests and installed-host review passed with one Minor right-padding
+background notch, pending owner-live styling acceptance. Do not duplicate these
+bridged changes or infer a broad registration-unification requirement.
+
+Remaining scope is direct read/run previews and shared push backgrounds, plus
+any explicitly requested broader tool coverage. Preserve the logical-line/native
+cached strategy, not the historical custom ASCII/width fallback described below.
+The following findings record the original capture state.
+
 ## Findings and boundaries
 
 - Bridge registrations currently have renderResult but no renderCall. Pi supports streaming argument rendering through renderCall and context.argsComplete. The observed raw JSON input presentation was not reproduced: inspected Pi defined-tool fallback renders only the tool name; generic missing-definition fallback renders JSON. Confirm the actual affected rows before broadening scope.

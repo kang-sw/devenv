@@ -312,6 +312,28 @@ streaming, expansion, fallback, and model fidelity. Final automated suite:
 live responsiveness and display acceptance of this replacement remain pending.
 No merge or ticket closure is implied.
 
+#### Edition (4d278c13) - 2026-09-06
+
+Owner-live acceptance of the logical-line replacement: lag disappeared and
+input/output displayed correctly. A subsequent apparent JSON input exception
+was resolved by the owner as old rows not rerendering after reload, not a
+missing tool registration; no renderer-unification change was needed.
+
+Owner then authorized only bold tool names and distinct input/output backgrounds.
+`4d278c13` restores bold `toolTitle` names and applies native `toolPendingBg`
+to YAML input and `toolSuccessBg` to completed YAML output. The default parent
+shell, native raw/error/image fallback, logical previews, expansion, and caching
+remain. Theme changes restyle sanitized text without reserializing YAML.
+
+Single review: no Critical/Important findings; one Minor remains. Native child
+Box background reset leaves a terminal-default one-column notch at the parent's
+right padding on YAML rows. Recorded without a relay under the Minor policy.
+Full suite 946/946 passed with `WS_PI_SPAWN_ROLE` unset. Installed-host probes
+verified bold title, dark/light theme updates, distinct surfaces, cache behavior,
+and raw error fallback. New styling owner-live acceptance remains pending;
+prior performance acceptance is not a claim about this later styling change.
+No merge, Phase 2 implementation, or ticket closure.
+
 ### Phase 2: Dispatch-tool input summaries and resolved model line
 
 Depends on Phase 1 and on the tier-warning ticket's Phase 1. Add

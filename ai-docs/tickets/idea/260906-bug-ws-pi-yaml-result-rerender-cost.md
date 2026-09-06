@@ -49,6 +49,16 @@ Final automated suite passed 945 tests. Live responsiveness of this replacement
 is still pending; do not equate these tests with the successful rollback
 comparison. Keep this investigation open until that comparison is completed.
 
+## Owner-live acceptance - 2026-09-06
+
+After loading `2c8c50a`, the owner confirmed that lag disappeared and input/output
+previews displayed correctly in the same session. This satisfies the pending
+replacement comparison above. No exact JavaScript call-site attribution or
+numeric latency benchmark was obtained. Later title/background styling in
+`4d278c13` has separate pending live acceptance. Ticket closure remains a
+separate decision; do not repeat the already successful replacement comparison
+as an unresolved prerequisite.
+
 ## Phases
 
 ### Phase 1: Attribute and reduce avoidable redraw work
