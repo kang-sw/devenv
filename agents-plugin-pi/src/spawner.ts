@@ -45,14 +45,30 @@
  * (`resolveModelForAliasViaWsMcp` below), or omits it to inherit the parent
  * session's model.
  *
- * `explore` is the one exception left untouched: it remains the one-shot
- * `pi --mode json -p --no-session --tools=recon` recon leaf from Phases 2-3
- * (`spawnPiProcess`/`AgentEventLineBuffer`/`handleAgentEvent`/`waitForDone`
- * below), self-reaping, non-recursive (depth <= 2: lead -> worker ->
- * explore-leaf; explore cannot spawn explore, since none of the `ws-agent-*`
- * tools are in `TOOL_GROUPS`). Only its implicit model resolution switches
- * from the old tier lookup to the reframed alias lookup (still keyed on the
- * fixed name `"small"`).
+ * `explore` (260906) is now two different implementations behind one tool
+ * name, keyed on the calling process's own role (`registerAgentTools`
+ * branches on `isLeadOrFork(readSpawnRole(process.env))`):
+ * - Lead or fork: a thin preset over `spawnAgent` below — a regular,
+ *   `oneShot: true` `RpcAgentRecord`, a full registry member counted by the
+ *   fan-in gate while it runs. It returns `{ agent_id, alias }` immediately;
+ *   its answer arrives later as an ordinary settle push. Being `oneShot`
+ *   only changes what happens next: the settle IIFE in
+ *   `attachEventListener` (or `pushSpawnFailed`, on a launch failure)
+ *   deletes it from the registry right after its own push, instead of
+ *   parking it dormant, and `ws-agent-send` refuses it outright.
+ * - Worker or execute-worker: the original one-shot
+ *   `pi --mode json -p --no-session --tools=recon` recon leaf from Phases
+ *   2-3 (`spawnPiProcess`/`AgentEventLineBuffer`/`handleAgentEvent`/
+ *   `waitForDone` below), unchanged, self-reaping, and never a member of the
+ *   RPC-backed registry at all — it lives in its own separate one-shot
+ *   `AgentRegistry`.
+ *
+ * Either shape is non-recursive (depth <= 2: lead -> worker -> explore-leaf,
+ * or lead/fork -> explore child; explore cannot spawn explore, since none of
+ * the `ws-agent-*` tools are in `TOOL_GROUPS`). Only the leaf's implicit
+ * model resolution switches from the old tier lookup to the reframed alias
+ * lookup (still keyed on the fixed name `"small"`); the lead/fork preset
+ * resolves through the ordinary `spawnAgent` path instead.
  *
  * `--tools` per-spawn group curation (`read-only`/`recon`/`full-worker`) is
  * retained unchanged — zero on-disk agent-profile files, curation lives in
@@ -1695,6 +1711,21 @@ export function pushSpawnFailed(
 ): void {
   clearLiveState(record);
   pushToLead(pi, registry, record, "ws-agent-settled", { reason: "spawn-failed", error: err instanceof Error ? err.message : String(err) }, "followUp");
+  // 260906 review relay #1 (Important, correctness): a launch failure on a
+  // `oneShot` spawn (client.start()/attachEventListener/promptAgent
+  // throwing, all still inside spawnAgent's own try/catch) would otherwise
+  // leave the half-registered record parked forever — `attachEventListener`
+  // was never reached (or fired no settle event before the throw), so its
+  // settle IIFE never runs to delete it; the sidecar excludes `oneShot`
+  // records from revival; and `ws-agent-send` refuses it outright. Delete it
+  // here, right after its own spawn-failed push, mirroring the settle
+  // IIFE's own push-then-delete order for a `oneShot` record (see
+  // `attachEventListener` above). `stopAgent`'s "never delete here" (D-C)
+  // invariant is untouched — this is `spawnAgent`'s own failure path, not
+  // `stopAgent`, and a non-`oneShot` record still parks exactly as before.
+  if (record.oneShot && registry) {
+    registry.delete(record.agentId);
+  }
   triggerAgentWidgetRefresh();
 }
 
@@ -2780,12 +2811,17 @@ export interface AgentToolsHandle {
 /**
  * Registers the six RPC-backed delegation tools (`ws-agent-spawn`,
  * `ws-agent-send`, `ws-agent-list`, `ws-agent-stop`, `ws-agent-transcript`,
- * `ws-report-to-lead`) plus the unchanged one-shot `explore` tool, against two
- * separate in-extension registries: `rpcRegistry` (RPC-backed, persistent
- * children) and `exploreRegistry` (one-shot, self-reaping recon leaves). They
- * are kept separate rather than unified because their completion signals are
- * fundamentally different (an `agent_settled` RPC event, pushed to the lead,
- * vs. a child process's `close` event awaited inline by `waitForDone`).
+ * `ws-report-to-lead`) plus a role-keyed `explore` tool (260906): a lead or
+ * fork process registers `explore` as a preset over `spawnAgent` — an
+ * `oneShot: true` member of the SAME `rpcRegistry`, not a separate leaf —
+ * while a worker or execute-worker process still registers the original
+ * one-shot recon leaf against its own separate `exploreRegistry`
+ * (self-reaping, awaited inline by `waitForDone`). The two registries are
+ * kept separate rather than unified because their completion signals are
+ * fundamentally different for the leaf shape (an `agent_settled` RPC event,
+ * pushed to the lead, vs. a child process's `close` event); the lead/fork
+ * preset's completion signal is the ordinary RPC push, so it needs no
+ * separate registry of its own.
  *
  * Phase 2 adds a child->lead report channel: `ws-report-to-lead` is the only
  * child-side tool this ticket adds (registered here but reachable only from
@@ -3078,7 +3114,7 @@ export function registerAgentTools(
     // the dropped `async` param (see `ExploreParams`). Both branches share the
     // same `{query}`-only parameter schema.
     description: isLeadRole
-      ? "Spawn a one-shot, read-only exploration child (recon tool group, no session persisted, no continuation) as an RPC-backed subagent. Returns {agent_id, alias} immediately after the initial prompt is sent. Do not wait for it: end your turn — its answer arrives later on the settle push's last_message."
+      ? "Spawn a one-shot, read-only exploration child (recon tool group, no continuation) as an RPC-backed subagent. Returns {agent_id, alias} immediately after the initial prompt is sent. Do not wait for it: end your turn — its answer arrives later on the settle push's last_message."
       : "One-shot read-only exploration leaf: answers a single scoped question via the explore playbook with the recon tool group, no session persisted, no continuation.",
     parameters: {
       type: "object",

@@ -1843,6 +1843,29 @@ describe("pushSpawnFailed (spawnAgent's launch-failure branch)", () => {
     pushSpawnFailed(pi.api, new Map(), record, "boom");
     assert.equal((pi.sent[0].message.details as { error?: string }).error, "boom");
   });
+
+  test("260906 review relay #1 (Important, correctness): a oneShot record's launch failure leaves no zombie behind — deleted right after its own spawn-failed push", () => {
+    const pi = fakePi();
+    const record = liveRpcRecord({ agentId: "a", oneShot: true, spawnRole: "explore" });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+
+    pushSpawnFailed(pi.api, registry, record, new Error("client.start() failed"));
+
+    assert.equal(pi.sent.length, 1, "the lead still learns the explore failed");
+    assert.equal(pi.sent[0].message.details && (pi.sent[0].message.details as { reason?: string }).reason, "spawn-failed");
+    assert.equal(registry.has("a"), false, "a oneShot record has no dormant-resumable resting state to park in, so it is deleted instead of left as a permanent zombie");
+  });
+
+  test("a non-oneShot record's launch failure still parks (dormant), unaffected by the oneShot deletion path", () => {
+    const pi = fakePi();
+    const record = liveRpcRecord({ agentId: "a", oneShot: false });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+
+    pushSpawnFailed(pi.api, registry, record, new Error("client.start() failed"));
+
+    assert.equal(registry.has("a"), true, "an ordinary spawn failure keeps parking as today");
+    assert.equal(registry.get("a")?.client, undefined);
+  });
 });
 
 describe("promptAgent (the single prompt funnel)", () => {
