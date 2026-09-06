@@ -211,6 +211,24 @@ describe("native YAML preview renderers", () => {
     assert.match(tui.stripTerminalSequences(component.render(80).join("\n")), /ws__git_status/);
   });
 
+  test("adds only a top row and left input padding without asking native text for an impossible width", () => {
+    const { tui, texts, boxes } = fakeTui();
+    const theme = {
+      fg: (_color: string, text: string) => text,
+      bg: (_color: string, text: string) => text,
+      bold: (text: string) => text,
+    };
+    const renderers = createToolPreviewRenderers(tui, "ws__test", () => "first\nsecond");
+    renderers.renderCall({ value: "ignored" }, theme, context());
+
+    assert.deepEqual(boxes[0]!.render(0), []);
+    assert.equal(texts[1]!.layoutCalls, 0, "zero-width input must not reach native Text");
+    assert.deepEqual(boxes[0]!.render(1), ["", " "], "width one keeps only the blank row and left column");
+    assert.equal(texts[1]!.layoutCalls, 0, "one-column input must not ask native Text for width zero");
+    assert.deepEqual(boxes[0]!.render(20), ["", " first\nsecond"], "normal rows have no bottom or right padding");
+    assert.equal(texts[1]!.layoutCalls, 1);
+  });
+
   test("reapplies theme styling without reserializing cached YAML", () => {
     const { tui, texts, boxes } = fakeTui();
     const firstTheme = fakeTheme("first");

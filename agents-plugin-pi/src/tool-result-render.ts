@@ -186,11 +186,30 @@ function isResultPreviewComponent(component: unknown): component is ResultPrevie
   return isObjectLike(component) && "output" in component && "outputBox" in component;
 }
 
+/**
+ * Pi's Box currently has symmetric horizontal/vertical padding only. Keep the
+ * input's asymmetric top/left treatment native-compatible without adding a
+ * second layout implementation: the child still owns all text wrapping.
+ */
+function createInputPadding(input: NativePreviewComponent): NativePreviewComponent {
+  return {
+    render(width: number): string[] {
+      if (width <= 0) return [];
+      if (width <= 1) return ["", " "];
+      const contentWidth = width - 1;
+      return ["", ...input.render(contentWidth).map((line) => ` ${line}`)];
+    },
+    invalidate(): void {
+      input.invalidate();
+    },
+  };
+}
+
 function createCallPreviewComponent(tui: ToolResultTuiModules): CallPreviewComponent {
   const title = createBoundedText(tui);
   const input = createBoundedText(tui);
   const inputBox = new tui.Box(0, 0);
-  inputBox.addChild(input);
+  inputBox.addChild(createInputPadding(input));
   return {
     title,
     input,
