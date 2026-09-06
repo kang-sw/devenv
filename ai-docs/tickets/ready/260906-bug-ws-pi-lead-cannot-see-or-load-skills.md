@@ -4,6 +4,10 @@ related:
   260905-feat-ws-pi-lead-one-liner-exec-escape-hatch: landed the lead tool-surface reshaping that removes native read and bash
 spec:
   - pi-adapter-runtime
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 2b63821756147d8f
+sage-review-completeness-reviewed: 2b63821756147d8f
 ---
 
 # Pi lead cannot see or self-load ws skills because removing native read/bash drops Pi's skills block from the system prompt
@@ -56,24 +60,46 @@ Fork sessions inherit the reshaped surface and are affected like the lead.
 Adapter-only. Give the lead its own skill list and its own skill loader,
 independent of Pi's `read`/`bash` presence check.
 
+- **Skill source is Pi's own loaded set, not a ws-tree scan.**
+  `pi.getCommands()` lists every skill Pi's resource loader found (user,
+  project, package, and settings locations alike) as `{name: "skill:<n>",
+  description, sourceInfo}` with `source: "skill"`, and `sourceInfo.path`
+  is the SKILL.md path. Both the block and `ws-skill` resolve against that
+  list, so the lead sees and can load exactly what Pi would have listed,
+  ws skills and any other installed skill alike. No directory scan, no
+  reliance on `resolveSkillsDir` existing.
 - **`ws-skill` tool** on the lead surface (and forks): `ws-skill(name,
-  args?)` resolves `name` against the same skills tree the adapter hands to
-  `resources_discover`, returns the SKILL.md body (frontmatter stripped) with
+  args?)` looks `name` up in that list, reads the SKILL.md at
+  `sourceInfo.path`, and returns the body (frontmatter stripped) with
   `User: <args>` appended when `args` is given, mirroring what Pi's
   `/skill:<name>` injects. Unknown name returns the available names. This is
   the model-invocable equivalent of Claude's Skill tool and of Pi's
-  user-typed slash command.
+  user-typed slash command. A skill whose frontmatter sets
+  `disable-model-invocation: true` still loads by name, as Pi's slash
+  command does.
 - **Adapter-rendered skills block** appended to the ws system-prompt block
   (`{#260905-pi-lead-bootstrap-system-prompt}`, the `before_agent_start`
   append): the same `<available_skills>` shape Pi would have rendered (name,
   description, location), preceded by one line telling the model to load a
-  skill with `ws-skill <name>` rather than `read`. Rendered only when Pi's
-  own block is absent, which the adapter detects by the lead surface having
-  neither `read` nor `bash` active, so a headless or non-reshaped session
-  never carries two lists.
+  skill with `ws-skill <name>` rather than `read`. Skills with
+  `disable-model-invocation: true` are left out of the block, as in Pi's own
+  renderer (`skills.js` `formatSkillsForPrompt`); the frontmatter is read
+  from `sourceInfo.path` at block-build time. Pi's "resolve relative paths
+  against the skill directory" line is dropped: ws skills reach their
+  bundled assets through ws-mcp, not relative reads.
+- **No `read`/`bash` gate.** The block is emitted wherever the ws
+  system-prompt block is, that is for lead and fork roles
+  (`computeBeforeAgentStartResult`, `isLeadOrFork`), and every lead/fork
+  gets `computeLeadActiveTools`, which removes `read` and `bash`
+  unconditionally, headless `--mode rpc` included. So Pi's own block is
+  never present where the adapter's is, and a gate on the active-tool set
+  would be always-true at best and, if evaluated before the reshape at
+  `index.ts:425` (the ws block is built earlier, around `index.ts:405-415`),
+  always-false, reproducing this bug. The role gate the ws block already
+  has is the whole condition.
 - **Lead guide row**: add `Load and follow a ws skill (lead-proceed,
   lead-drain-ready-queue, lead-write-ticket, ...)` → `ws-skill <name>` to the
-  verb table, and note that `/goal` directives naming a skill are pursued by
+  `## Verb-routing table` in `agents-plugin-pi/pi-lead-guide.md`, and note that `/goal` directives naming a skill are pursued by
   calling `ws-skill` at the start of every cycle.
 - Rejected: keeping a native `read` on the lead so Pi renders its block. The
   reshaping removed it deliberately (`{#260905-pi-lead-tool-surface-execute-gateway}`),
@@ -97,9 +123,12 @@ the skills block as a third ordered item of the ws system-prompt block under
 
 - Adapter-only change in `agents-plugin-pi/`; no change to ws skill text,
   which stays host-neutral.
-- The skills tree is read once per session start (names, descriptions,
-  paths); `ws-skill` reads the body on call so an edited SKILL.md is picked
-  up without restart.
+- The skill list (names, descriptions, paths) comes from `pi.getCommands()`
+  once per session start; `ws-skill` reads the body on call so an edited
+  SKILL.md is picked up without restart.
+- Missing or unreadable SKILL.md at a listed path: the block skips the entry
+  and `ws-skill` returns an error naming the path; neither throws out of
+  `before_agent_start`.
 - Worker/explore surfaces are untouched; the tool and the block are lead/fork
   only.
 
@@ -107,15 +136,20 @@ the skills block as a third ordered item of the ws system-prompt block under
 
 ### Phase 1: ws-skill tool and lead skills block
 
-Add the `ws-skill` tool, the skills-tree scan (reuse `resolveSkillsDir`),
-the adapter-rendered `<available_skills>` block in the ws system-prompt
-block gated on the absence of `read`/`bash`, and the lead guide row. Tests:
-`ws-skill` returns a known skill's body with frontmatter stripped; args are
-appended as `User: <args>`; an unknown name lists available names; the block
-is rendered when neither `read` nor `bash` is active and omitted when either
-is; the block lists every skill directory the resolver exposes with name,
-description, and location; worker/explore surfaces carry neither the tool
-nor the block. Amend the three spec passages under Spec Impact. Live check
+Add the `ws-skill` tool, the skill list taken from `pi.getCommands()`
+entries with `source: "skill"`, the adapter-rendered `<available_skills>`
+block as the third ordered item of the ws system-prompt block (role-gated
+like the rest of it), and the lead guide row. Tests: `ws-skill` returns a
+known skill's body with frontmatter stripped; args are appended as
+`User: <args>`; an unknown name lists available names; a
+`disable-model-invocation: true` skill is loadable by name but absent from
+the block; the block lists every `source: "skill"` entry (ws and non-ws
+alike) with name, description, and location, and skips an entry whose path
+is unreadable; the block is present for lead and fork and absent for
+worker/explore, verified on the post-reshape tool surface (a test that
+drives `before_agent_start` through the real `index.ts` ordering, not only
+the pure helper); worker/explore surfaces carry neither the tool nor the
+block. Amend the three spec passages under Spec Impact. Live check
 (owner-run): in a Pi lead session, ask the lead to drain the ready queue
 without typing `/skill:...` and confirm it calls `ws-skill
 lead-drain-ready-queue` and proceeds; arm `/goal` with a directive naming
