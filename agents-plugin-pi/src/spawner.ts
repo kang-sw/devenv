@@ -1216,6 +1216,22 @@ export function buildPushContent(
 export const leadIdleRef: { current: (() => boolean) | undefined } = { current: undefined };
 
 /**
+ * 260906 (compaction push-hold ticket, Phase 1): tracks whether the owning
+ * session has an in-flight `ctx.compact()` right now. Set by the goal-loop's
+ * `goal-compact-and-continue` lever before it calls `ctx.compact`, and
+ * defensively by `session_before_compact` for ANY compaction reason (owner
+ * `/compact`, Pi's own threshold/overflow auto-compaction) — not just the
+ * lever's own. Cleared only by `goal-loop.ts`'s `releaseAfterCompaction`
+ * (deferred past Pi's own compaction flag) or, as a backstop, by the next
+ * `agent_start`. `isOwningAgentIdle()` folds this in so a `followUp` push
+ * held during ordinary mid-turn work is ALSO held across the whole
+ * compaction window, closing the race where a push or a
+ * `goal-compact-and-continue` reminder could be delivered into the doomed
+ * turn `ctx.compact()`'s internal abort just settled.
+ */
+export const leadCompactingRef: { current: boolean } = { current: false };
+
+/**
  * 260905 (live-agent widget ticket): the same mutable-ref seam as
  * `leadIdleRef`, filled by `index.ts`'s `session_start` (TUI lead only) with
  * a closure that recomputes `agent-widget.ts`'s rows and repaints the
@@ -1244,8 +1260,18 @@ function triggerAgentWidgetRefresh(): void {
   }
 }
 
-/** Whether the owning session's agent is between turns right now. See `leadIdleRef`. */
-function isOwningAgentIdle(): boolean {
+/**
+ * Whether the owning session's agent is between turns right now. See
+ * `leadIdleRef`. 260906 (compaction push-hold ticket, Phase 1): an in-flight
+ * compaction (`leadCompactingRef`) forces `false` regardless of Pi's own
+ * idle read — `ctx.compact()`'s internal abort settles the invoking turn
+ * before the compaction flag is even set, so relying on `leadIdleRef` alone
+ * would read a compacting session as idle for the entire compaction window.
+ * Exported for `goal-loop.ts`'s `releaseAfterCompaction`, which needs the
+ * same read to decide whether to flush now or leave it to the next settle.
+ */
+export function isOwningAgentIdle(): boolean {
+  if (leadCompactingRef.current) return false;
   const isIdle = leadIdleRef.current;
   if (!isIdle) return true;
   try {
@@ -1255,12 +1281,27 @@ function isOwningAgentIdle(): boolean {
   }
 }
 
-/** One `followUp` push deferred until the owning session's current turn settles. */
+/** One `followUp`/`steer` push deferred until the owning session's current turn (or compaction) settles. */
 interface HeldPush {
+  kind: "push";
   registry: RpcAgentRegistry | undefined;
   record: RpcAgentRecord | undefined;
   family: PushFamily;
   payload: Record<string, unknown>;
+  /** Recorded so `flushHeldPushes` resends with the SAME delivery mode it was held under, not a hardcoded one. */
+  deliverAs: PushDeliverAs;
+}
+
+/**
+ * 260906 (compaction push-hold ticket, Phase 1): a pre-built raw send held
+ * alongside family-shaped pushes on the same queue — `ask.ts`'s
+ * `injectDiscussionSummary` builds its `ws-thread-summary` message itself
+ * (it has no `PushFamily`/payload shape to reconstruct at flush time), so it
+ * holds a closure that performs its own `pi.sendMessage` call instead.
+ */
+interface HeldRawSend {
+  kind: "raw";
+  send: (pi: ExtensionAPI) => void;
 }
 
 /**
@@ -1283,8 +1324,13 @@ interface HeldPush {
  * write it. Held pushes are in-memory and die with the process, exactly like
  * the Pi queue they stand in for — `session_shutdown` drops them rather than
  * persisting them (the sidecar carries child IDENTITIES, never reports).
+ *
+ * 260906 (compaction push-hold ticket, Phase 1): also holds `HeldRawSend`
+ * entries (see that type's doc comment) so `ask.ts`'s
+ * `injectDiscussionSummary` can share this same queue/flush-ordering
+ * mechanism instead of maintaining a parallel one.
  */
-export const heldPushQueue: HeldPush[] = [];
+export const heldPushQueue: Array<HeldPush | HeldRawSend> = [];
 
 /** Builds and sends one push immediately, computing its status line right now. */
 function sendPush(
@@ -1322,12 +1368,14 @@ function sendPush(
 }
 
 /**
- * Releases every held push, in arrival order, each with a status line computed
- * NOW. Called from the owning session's `agent_settled` (see
- * `registerPushFlush`): the agent is idle at that instant, so the first send
- * starts a fresh run and the rest land in Pi's own followUp queue behind it —
- * one lead run that sees all of them in order, which is what the one-at-a-time
- * drain was always meant to produce.
+ * Releases every held push, in arrival order — a `HeldPush` with its status
+ * line computed NOW and resent with its recorded `deliverAs`, or a
+ * `HeldRawSend` invoked as-is. Called from the owning session's
+ * `agent_settled` (see `registerPushFlush`) or from `goal-loop.ts`'s
+ * `releaseAfterCompaction`: the agent is idle at that instant, so the first
+ * send starts a fresh run and the rest land in Pi's own followUp queue behind
+ * it — one lead run that sees all of them in order, which is what the
+ * one-at-a-time drain was always meant to produce.
  *
  * The queue is drained BEFORE the first send so a push issued from inside that
  * run is held again for the next settle rather than re-entering this drain.
@@ -1336,7 +1384,11 @@ export function flushHeldPushes(pi: ExtensionAPI | undefined): number {
   const pending = heldPushQueue.splice(0, heldPushQueue.length);
   if (!pi) return 0;
   for (const held of pending) {
-    sendPush(pi, held.registry, held.record, held.family, held.payload, "followUp");
+    if (held.kind === "raw") {
+      held.send(pi);
+      continue;
+    }
+    sendPush(pi, held.registry, held.record, held.family, held.payload, held.deliverAs);
   }
   return pending.length;
 }
@@ -1347,10 +1399,19 @@ export function flushHeldPushes(pi: ExtensionAPI | undefined): number {
  * `session_start`, so a `/reload` cannot stack duplicate handlers. The role
  * gate is re-checked at fire time for the same reason `pushToLead` checks it:
  * a `worker`/`explore` process holds nothing, so it has nothing to flush.
+ *
+ * 260906 (compaction push-hold ticket, Phase 1): also gated on
+ * `leadCompactingRef` — the abort inside `ctx.compact()` fires an
+ * `agent_settled` for the turn it just aborted BEFORE the compaction flag is
+ * set on Pi's own side, so this is the only thing stopping this handler from
+ * flushing the held queue into that doomed turn. `goal-loop.ts`'s
+ * `releaseAfterCompaction` is what flushes it once the compaction actually
+ * finishes.
  */
 export function registerPushFlush(pi: ExtensionAPI): void {
   pi.on("agent_settled", () => {
     if (!shouldPushToLead()) return;
+    if (leadCompactingRef.current) return;
     flushHeldPushes(pi);
   });
 }
@@ -1400,7 +1461,13 @@ export function flushPendingFinal(
  * `agent_settled` with its status line computed at release time. See
  * `heldPushQueue` for why: Pi's own queue would deliver the message later but
  * with an arrival-time status line, which read stale by the time the lead saw
- * it. `steer` pushes are never held; their whole point is to interrupt.
+ * it. `steer` pushes are normally never held — their whole point is to
+ * interrupt — with one 260906 exception: while `leadCompactingRef.current` is
+ * true, a `steer` push is held too, since `ctx.compact()`'s
+ * `sendCustomMessage` path bypasses Pi's own `prompt()` compaction guard
+ * entirely (there is no live turn to interrupt into during a compaction), and
+ * is released once `goal-loop.ts`'s `releaseAfterCompaction` runs. A `steer`
+ * push mid-turn (not compacting) still bypasses the hold as before.
  *
  * Guarded on `shouldPushToLead` and on `pi` being present (a `sendToAgent`
  * resume path may run without one), so a worker-role process and an
@@ -1415,8 +1482,10 @@ export function pushToLead(
   deliverAs: PushDeliverAs,
 ): void {
   if (!pi || !shouldPushToLead()) return;
-  if (deliverAs === "followUp" && !isOwningAgentIdle()) {
-    heldPushQueue.push({ registry, record, family, payload });
+  const holdFollowUp = deliverAs === "followUp" && !isOwningAgentIdle();
+  const holdSteerWhileCompacting = deliverAs === "steer" && leadCompactingRef.current;
+  if (holdFollowUp || holdSteerWhileCompacting) {
+    heldPushQueue.push({ kind: "push", registry, record, family, payload, deliverAs });
     return;
   }
   sendPush(pi, registry, record, family, payload, deliverAs);

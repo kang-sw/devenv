@@ -246,6 +246,48 @@ repeat both dogfood runs and confirm the post-lever conversation is not
 replaced and a child report arriving during compaction is delivered
 afterwards.
 
+### Result (81463a7d) - 2026-09-06
+
+Landed in `81463a7d` (source, tests), `45f7c2ef` (spec, guide), and the two
+review-fix commits `2c8db8c9` and `60216eaa`.
+
+- `leadCompactingRef` sits beside `leadIdleRef` in `spawner.ts`; it is set
+  by the lever before `ctx.compact` and by `session_before_compact` for
+  every compaction, and `isOwningAgentIdle()` (now exported) returns false
+  while it is set. `HeldPush` records `deliverAs`; `steer` pushes are held
+  only while compacting; `registerPushFlush`'s settle flush is gated on the
+  flag. The held queue is a small `push | raw` union so `ask.ts`'s
+  `ws-thread-summary` shares the same hold. `injectDiscussionSummary`
+  holds on the general `!isOwningAgentIdle()` predicate, so an ordinary
+  mid-turn `/done` is now delivered by the post-settle flush instead of
+  Pi's in-run followUp queue; this deliberate widening is recorded in a code
+  comment.
+- `goal-loop.ts` owns `releaseAfterCompaction` (idempotent on the flag),
+  called from deferred `session_compact` / `session_compact_failed`
+  (`setImmediate`), the lever's `onComplete` / `onError`, and the
+  `agent_start` backstop. `registerGoalLoop` returns a shutdown handle that
+  `session_shutdown` uses to reset the flag and markers.
+- Review found that the ticket's auto-compaction premise did not hold:
+  Pi's threshold auto-compaction that ends the turn emits `session_compact`
+  and then `agent_settled` with only microtask hops in between, so the
+  settle is consumed as `waiting` and, with no lever `pendingRearm`, nothing
+  re-armed the loop. The release routine now also replays a settle that was
+  swallowed while compacting (`settleSwallowedWhileCompacting`), sent with
+  `deliverAs: "followUp"` because the preceding flush may have started a
+  turn synchronously; the lever branch consumes both markers so the lever
+  case still sends exactly one reminder, and both markers are cleared on the
+  not-idle branch and the `agent_start` backstop. A replayed force-stop
+  clears the status footer. Accepted narrow gap, comment only: a non-lever
+  compaction whose `session_compact` emit is skipped by Pi's
+  `savedCompactionEntry` guard has no completion callback.
+- Tests: 836 pass (811 before the ticket). Spec anchors
+  `{#260904-pi-report-to-lead-channel}`,
+  `{#260904-pi-goal-loop-arming-settled-levers}`,
+  `{#260904-pi-goal-loop-model-driven-compaction}` and the guide verb-table
+  line amended.
+- Live check (owner-run) still pending: repeat both dogfood runs in a fresh
+  Pi session.
+
 ### Phase 2: Carry the lever's string forward verbatim
 
 Keep `carry_forward` in goal-loop state when the lever fires; fold it
@@ -257,22 +299,3 @@ reminder. Amend the goal-loop anchor in `pi-adapter-runtime` (lever
 sub-anchor) to state the verbatim guarantee. Live check (owner-run):
 `goal-compact-and-continue` with a distinctive sentence and confirm it
 appears byte-for-byte in the first message after compaction.
-
-## Blocked (2026-09-06)
-
-### Design Reviewer — block
-
-| # | Title | Severity | Resolution |
-|---|-------|----------|------------|
-| 1 | Re-arm from session_compact cannot send the reminder (Pi flag still set; agent streaming after push release) | critical | autonomous |
-| 2 | agent_settled held-push release not suppressed while compacting | important | autonomous |
-| 3 | No backstop clears the compacting flag if neither completion event fires | important | autonomous |
-| 4 | session_before_compact set point fires too late for non-lever manual compaction | important | autonomous |
-| 5 | Phase 1 contradicts three live spec sentences; no Spec Impact section | important | autonomous |
-| 6 | Holding steer pushes needs a HeldPush deliverAs field | minor | autonomous |
-
-### Completeness Reviewer — pass
-
-| # | Title | Severity |
-|---|-------|----------|
-| 1 | Advisory-point wording fix has no design bullet | minor |
