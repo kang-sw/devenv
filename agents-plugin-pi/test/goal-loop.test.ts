@@ -676,6 +676,168 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     return { ctx: ctx as unknown as ExtensionContext, notifications, statusCalls };
   }
 
+  const carryHeading = "\n\nCarried forward verbatim from before compaction:\n";
+  const exactCarry = "  Ω preserve\tthis\r\n한글 🦦\n  final\t ";
+
+  function assertCarry(content: unknown, payload: string): void {
+    assert.equal(typeof content, "string");
+    const parts = (content as string).split(carryHeading);
+    assert.equal(parts.length, 2, "exactly one carry heading");
+    assert.equal(parts[1], payload, "raw suffix preserves every character");
+  }
+
+  for (const completion of ["event", "callback", "both", "error", "failed-event"] as const) {
+    test(`verbatim carry is sent once after ${completion} release`, async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      const { ctx } = fakeCtx();
+      await pi.commands.get("goal")!("ship", ctx);
+      let compactCall!: Parameters<ExtensionContext["compact"]>[0];
+      ctx.compact = (opts) => { compactCall = opts; };
+      const result = await pi.tools.get("goal-compact-and-continue")!.execute("carry", { carry_forward: exactCarry }, undefined, undefined, ctx);
+      assert.equal((result as { terminate?: boolean }).terminate, undefined, "lever stays non-terminal");
+      assert.equal(compactCall!.customInstructions, exactCarry, "summary instructions remain unchanged");
+      pi.handlers.get("agent_settled")!({}, ctx);
+      if (completion === "callback" || completion === "both") compactCall!.onComplete!({} as never);
+      if (completion === "error") compactCall!.onError!(new Error("boom"));
+      if (completion === "event" || completion === "both") pi.handlers.get("session_compact")!({ reason: "manual" }, ctx);
+      if (completion === "failed-event") pi.handlers.get("session_compact_failed")!({ errorMessage: "Compaction failed: boom" }, ctx);
+      assert.equal(pi.sentUserMessages.length, 1, "no synchronous event send");
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(pi.sentUserMessages.length, 1, "release only arms the settle timer");
+      clock.fire();
+      assert.equal(pi.sentUserMessages.length, 2);
+      assertCarry(pi.sentUserMessages[1]!.content, exactCarry);
+      assert.deepEqual(pi.sentUserMessages[1]!.options, { deliverAs: "followUp" });
+      if (completion === "error" || completion === "failed-event") {
+        assert.match(pi.sentUserMessages[1]!.content as string, /^Compaction failed: boom Do not retry/);
+      }
+      pi.handlers.get("agent_start")!({}, ctx);
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire();
+      assert.equal(pi.sentUserMessages.length, 3);
+      assert.ok(!(pi.sentUserMessages[2]!.content as string).includes(carryHeading));
+    });
+  }
+
+  test("empty carry is present, captured before compact can synchronously complete and dispatch", async () => {
+    const clock = fakeClock();
+    const pi = fakePi();
+    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+    const { ctx } = fakeCtx();
+    await pi.commands.get("goal")!("ship", ctx);
+    ctx.compact = (opts) => {
+      assert.equal(opts!.customInstructions, "");
+      opts!.onComplete!({} as never);
+      clock.fire(); // Probe capture ordering before ctx.compact returns.
+      assertCarry(pi.sentUserMessages[1]!.content, "");
+    };
+    await pi.tools.get("goal-compact-and-continue")!.execute("carry", { carry_forward: "" }, undefined, undefined, ctx);
+  });
+
+  for (const interruption of ["busy-release", "backstop", "idle-yield", "child-yield"] as const) {
+    test(`carry survives ${interruption} until an eligible ordinary reminder`, async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      const registry = new Map([["child", { threadBound: false, running: false, terminalThisTurn: false }]]) as unknown as RpcAgentRegistry;
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock, rpcRegistryRef: { current: registry } });
+      let idle = true;
+      const { ctx } = fakeCtx(() => idle);
+      await pi.commands.get("goal")!("ship", ctx);
+      await pi.tools.get("goal-compact-and-continue")!.execute("carry", { carry_forward: exactCarry }, undefined, undefined, ctx);
+      if (interruption === "backstop") {
+        pi.handlers.get("agent_start")!({}, ctx);
+      } else {
+        if (interruption === "busy-release") idle = false;
+        pi.handlers.get("session_compact")!({}, ctx);
+        await new Promise((resolve) => setImmediate(resolve));
+        if (interruption === "idle-yield" || interruption === "child-yield") {
+          if (interruption === "idle-yield") idle = false;
+          else registry.get("child")!.running = true;
+          clock.fire();
+        }
+      }
+      assert.equal(pi.sentUserMessages.length, 1, "interruption sends nothing");
+      assert.equal(clock.pendingCount(), 0);
+      idle = true;
+      registry.get("child")!.running = false;
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire();
+      assertCarry(pi.sentUserMessages[1]!.content, exactCarry);
+    });
+  }
+
+  for (const cleanup of ["new-goal", "goal-achieved", "goal-blocked", "shutdown"] as const) {
+    test(`${cleanup} discards unsent carry`, async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      const handle = registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      const { ctx } = fakeCtx();
+      await pi.commands.get("goal")!("old", ctx);
+      await pi.tools.get("goal-compact-and-continue")!.execute("carry", { carry_forward: exactCarry }, undefined, undefined, ctx);
+      if (cleanup === "shutdown") handle.resetCompactionStateForShutdown();
+      else if (cleanup === "new-goal") await pi.commands.get("goal")!("new", ctx);
+      else await pi.tools.get(cleanup)!.execute("stop", { summary: "done", reason: "blocked" });
+      pi.handlers.get("session_compact")!({}, ctx);
+      await new Promise((resolve) => setImmediate(resolve));
+      pi.handlers.get("agent_settled")!({}, ctx);
+      if (clock.pendingCount()) clock.fire();
+      if (cleanup === "goal-achieved" || cleanup === "goal-blocked") {
+        assert.equal(pi.sentUserMessages.length, 1, "terminal lever sends no reminder");
+        await pi.commands.get("goal")!("new", ctx);
+        pi.handlers.get("agent_settled")!({}, ctx);
+        clock.fire();
+      }
+      assert.match(pi.sentUserMessages.at(-1)!.content as string, /Goal yet running/);
+      for (const message of pi.sentUserMessages) assert.ok(!(message.content as string).includes(carryHeading));
+    });
+  }
+
+  test("synchronous send failure does not consume carry", async () => {
+    const clock = fakeClock();
+    const pi = fakePi();
+    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+    const { ctx, notifications } = fakeCtx();
+    await pi.commands.get("goal")!("ship", ctx);
+    await pi.tools.get("goal-compact-and-continue")!.execute("carry", { carry_forward: exactCarry }, undefined, undefined, ctx);
+    pi.handlers.get("session_compact")!({}, ctx);
+    await new Promise((resolve) => setImmediate(resolve));
+    const send = pi.api.sendUserMessage;
+    pi.api.sendUserMessage = () => { throw new Error("send failed"); };
+    clock.fire();
+    assert.match(notifications.at(-1)!.message, /send failed/);
+    assert.equal(pi.sentUserMessages.length, 1);
+    pi.api.sendUserMessage = send;
+    pi.handlers.get("agent_settled")!({}, ctx);
+    clock.fire();
+    assertCarry(pi.sentUserMessages[1]!.content, exactCarry);
+  });
+
+  test("reducer preserves pending carry through waits and tool calls but discards it on force-stop", () => {
+    const pending = { ...armGoal("ship"), pendingCarryForward: exactCarry };
+    assert.equal(recordToolCall(pending).pendingCarryForward, exactCarry);
+    assert.equal(decideOnSettle(pending, 2, false, true).next.pendingCarryForward, exactCarry);
+    assert.equal(decideOnSettle(pending, 2, true).next.pendingCarryForward, exactCarry);
+    const first = decideOnSettle(pending, 2);
+    assert.equal(first.next.pendingCarryForward, exactCarry);
+    const stopped = decideOnSettle(first.next, 2);
+    assert.equal(stopped.decision.action, "force-stop");
+    assert.equal(stopped.next.pendingCarryForward, undefined);
+  });
+
+  test("ordinary reminder without a lever has no carry heading", async () => {
+    const clock = fakeClock();
+    const pi = fakePi();
+    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+    const { ctx } = fakeCtx();
+    await pi.commands.get("goal")!("ship", ctx);
+    pi.handlers.get("agent_settled")!({}, ctx);
+    clock.fire();
+    assert.equal(pi.sentUserMessages.length, 2);
+    assert.ok(!(pi.sentUserMessages[1]!.content as string).includes(carryHeading));
+  });
+
   test("release runs once when both the lever's onComplete and session_compact arrive", async () => {
     const clock = fakeClock();
     const pi = fakePi();
@@ -889,6 +1051,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     clock.fire();
     assert.deepEqual(order, ["flush", "reminder"], "held pushes flush before the pending reminder is sent");
     assert.equal(pi.sentUserMessages.length, 2, "the armed announcement, then the re-armed reminder");
+    assertCarry(pi.sentUserMessages[1]!.content, "x");
   });
 
   test("260906 review relay #1 (Critical): a threshold auto-compaction's swallowed settle is replayed by the deferred release — exactly one ordinary reminder, streak advanced", async () => {
