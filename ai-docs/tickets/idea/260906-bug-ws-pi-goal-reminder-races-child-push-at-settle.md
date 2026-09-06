@@ -4,6 +4,7 @@ spec:
   - pi-adapter-runtime
 related:
   - 260906-bug-ws-pi-lead-cannot-see-or-load-skills
+  - 260906-feat-ws-pi-lead-explore-as-async-rpc-child
 ---
 
 # Pi goal-loop reminder races a child push at agent_settled and spins the runaway backstop
@@ -110,7 +111,9 @@ change). Pi is not patched.
   next `agent_settled` (from whichever wake did fire) re-arms the timer.
   Async explore is not a wake condition: its completion is never pushed,
   only harvested on a later call, so the reminder is the only thing that
-  brings the lead back to poll it.
+  brings the lead back to poll it. This carve-out disappears once
+  `260906-feat-ws-pi-lead-explore-as-async-rpc-child` turns the lead-side
+  explore into an RPC child.
 - **Boundary guard.** The delay shrinks the race to the reminder's own
   `prompt()` await window (auth check, compaction check,
   `before_agent_start`). A push landing there would still collide, and the
