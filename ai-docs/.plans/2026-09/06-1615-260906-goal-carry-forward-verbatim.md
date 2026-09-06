@@ -40,5 +40,6 @@
 
 ## Escalations
 - None. Confidence: high; eight meaningful findings.
+- Lead-authorized closeout: the implementer may read the full target ticket `ai-docs/tickets/ready/260906-bug-ws-pi-goal-loop-reinject-races-manual-compaction.md` solely for Phase 2 Result documentation and assessment of binding owner-run live-check gates and any dated Blocked note. Source, review, and spec work are already landed; source scope is unchanged. This authorization does not waive live-check gates or authorize claiming unperformed checks as complete.
 - Main shortcut risk is clearing carry with `pendingRearm`, which current busy/backstop paths intentionally discard. Goal-scoped carry plus common-send consumption avoids changing settled orchestration.
 - Documentation discrepancy: adjacent spec re-arm prose predates landed timer orchestration. Source and current timer tests govern timing; no mental-model entry supplied a wrong implementation assumption. Inventory has no Pi-specific mental model; `plugin-runtime.md` and `workflow-skills.md` supplied the relevant ancestor boundaries.
