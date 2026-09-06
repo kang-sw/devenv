@@ -1380,6 +1380,122 @@ func TestRouteResolveImplementSchemaIsOpaque(t *testing.T) {
 	assertRouteResolveSchemaIsOpaque(t, callToolsList(t, server), "route.resolve_implement", "ws:lead-implement")
 }
 
+func routeStateSnapshot(t *testing.T, server *Server, key string) string {
+	t.Helper()
+	record, ok := server.sessions.readState(key)
+	if !ok {
+		t.Fatalf("session record not found for %q", key)
+	}
+	payload := struct {
+		Agenda map[string]json.RawMessage `json:"agenda"`
+		Todos  []todoItem                 `json:"todos"`
+	}{Agenda: record.Agenda, Todos: record.Todos}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+func TestRouteResolveWrappedCallsMatchTypedVerdictAndState(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer(root, "test")
+
+	for _, tc := range []struct {
+		name string
+		tool string
+		args func(string) map[string]any
+	}{
+		{name: "proceed", tool: "route.resolve_proceed", args: proceedReadyArgs},
+		{name: "implement", tool: "route.resolve_implement", args: implementReadyArgs},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, format := range []string{"text", "json"} {
+				t.Run(format, func(t *testing.T) {
+					typedKey, _ := parseLoginResponse(t, callLogin(t, server, 100, root, nil))
+					wrappedKey, _ := parseLoginResponse(t, callLogin(t, server, 101, root, nil))
+					typed := callToolWithKey(t, server, 102, typedKey, tc.tool, tc.args(format))
+					wrapped := callToolWithKey(t, server, 103, wrappedKey, tc.tool, map[string]any{"params": tc.args(format)})
+					if wrapped != typed {
+						t.Fatalf("wrapped verdict differed from typed call\ntyped:\n%s\nwrapped:\n%s", typed, wrapped)
+					}
+					if got, want := routeStateSnapshot(t, server, wrappedKey), routeStateSnapshot(t, server, typedKey); got != want {
+						t.Fatalf("wrapped state differed from typed call\ntyped: %s\nwrapped: %s", want, got)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestRouteResolveWrappedMalformedEnvelopeDoesNotMutateState(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	for _, tool := range []string{"route.resolve_proceed", "route.resolve_implement"} {
+		t.Run(tool, func(t *testing.T) {
+			server := NewServer(root, "test")
+			key, _ := parseLoginResponse(t, callLogin(t, server, 200, root, nil))
+			cases := []struct {
+				name string
+				args map[string]any
+				want string
+			}{
+				{name: "null params", args: map[string]any{"params": nil}, want: "params must be an object"},
+				{name: "array params", args: map[string]any{"params": []any{}}, want: "params must be an object"},
+				{name: "string params", args: map[string]any{"params": "invalid"}, want: "params must be an object"},
+				{name: "empty params", args: map[string]any{"params": map[string]any{}}, want: "target is required"},
+				{name: "mixed typed field", args: map[string]any{"params": map[string]any{}, "target": map[string]any{}}, want: "wrapped calls accept only session_key and params"},
+				{name: "mixed legacy field", args: map[string]any{"params": map[string]any{}, "delegation": "delegated"}, want: "wrapped calls accept only session_key and params"},
+				{name: "nested session key", args: map[string]any{"params": map[string]any{"session_key": "inner"}}, want: "params.session_key is not allowed"},
+			}
+			for index, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					before := routeStateSnapshot(t, server, key)
+					got := callToolWithKey(t, server, 201+index, key, tool, tc.args)
+					if !strings.Contains(got, tc.want) {
+						t.Fatalf("error = %q, want %q", got, tc.want)
+					}
+					if after := routeStateSnapshot(t, server, key); after != before {
+						t.Fatalf("malformed wrapper mutated state\nbefore: %s\nafter: %s", before, after)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestRouteResolveWrappedUsesOuterSessionKey(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 300, root, nil))
+
+	for _, tc := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{tool: "route.resolve_proceed", args: proceedReadyArgs("text")},
+		{tool: "route.resolve_implement", args: implementReadyArgs("text")},
+	} {
+		before := routeStateSnapshot(t, server, key)
+		got := callToolWithKey(t, server, 301, "unknown-outer-key", tc.tool, map[string]any{"params": tc.args})
+		if !strings.Contains(got, "session key not found: unknown-outer-key") {
+			t.Fatalf("%s did not authenticate outer key: %s", tc.tool, got)
+		}
+		if after := routeStateSnapshot(t, server, key); after != before {
+			t.Fatalf("unknown outer key mutated known session\nbefore: %s\nafter: %s", before, after)
+		}
+	}
+}
+
 func TestEnterProceedStoresVerdictAgendaAndTodos(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()

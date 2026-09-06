@@ -29,7 +29,7 @@ Target: user request
    - Every phase has `### Result` → `scope_blocked=no-unfinished-phase`; do not route to promotion.
    - Container ticket (epic/workset) → `scope_blocked=container-ticket`.
    - Two or more explicit phases in one request → `scope_blocked=multiple-explicit-phases`.
-5. Call `{{.McpNamespace}}/route.resolve_proceed(session_key: <key>, target: ..., facts: ...)`.
+5. Call `{{.McpNamespace}}/route.resolve_proceed(session_key: <key>, params: {target: ..., facts: ...})`.
 6. Follow `Next:` exactly.
 
 ## Judgments
@@ -69,8 +69,10 @@ Target: user request
 
 `{{.McpNamespace}}/route.resolve_proceed`'s published schema is opaque
 (`params: object`); this table is the authoritative field contract the
-resolver reads. Send `session_key`, `target`, `facts`, and optional `format`
-as top-level call arguments.
+resolver reads. Send an outer `session_key` and one `params` object containing
+`target`, `facts`, and optional `format`; do not put a `session_key` in
+`params` or mix typed fields into the outer envelope. Unwrapped typed calls
+remain compatible.
 
 `target`
 | Field | Type | Notes |

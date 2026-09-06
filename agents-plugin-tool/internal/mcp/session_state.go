@@ -868,6 +868,30 @@ func sessionStateKey(toolName string, args map[string]any) (string, error) {
 	return key, nil
 }
 
+// routeEnvelope normalizes the public opaque route envelope. Wrapped calls
+// authenticate with their outer session_key, while the typed resolver consumes
+// only the inner params map. Unwrapped calls retain their established typed
+// (and, for implement, legacy) shapes.
+func routeEnvelope(toolName string, args map[string]any) (map[string]any, bool, error) {
+	params, wrapped := args["params"]
+	if !wrapped {
+		return args, false, nil
+	}
+	for key := range args {
+		if key != "session_key" && key != "params" {
+			return nil, true, fmt.Errorf("%s: wrapped calls accept only session_key and params", toolName)
+		}
+	}
+	inner, ok := params.(map[string]any)
+	if !ok || inner == nil {
+		return nil, true, fmt.Errorf("%s: params must be an object", toolName)
+	}
+	if _, hasSessionKey := inner["session_key"]; hasSessionKey {
+		return nil, true, fmt.Errorf("%s: params.session_key is not allowed", toolName)
+	}
+	return inner, true, nil
+}
+
 // stringArg returns a trimmed required string argument or an error.
 func stringArg(toolName, name string, args map[string]any) (string, error) {
 	v, _ := args[name].(string)
@@ -1026,17 +1050,21 @@ func (s *Server) handleEnter(id json.RawMessage, tool, mode string, args map[str
 }
 
 func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) response {
-	if _, hasNewTarget := args["target"]; hasNewTarget {
-		const tool = "route.resolve_implement"
-		sessionKey, err := sessionStateKey(tool, args)
-		if err != nil {
-			return toolTextResponse(id, "", err)
-		}
+	const tool = "route.resolve_implement"
+	sessionKey, err := sessionStateKey(tool, args)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	typedArgs, wrapped, err := routeEnvelope(tool, args)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	if _, hasNewTarget := typedArgs["target"]; wrapped || hasNewTarget {
 		record, ok := s.sessions.readState(sessionKey)
 		if !ok {
 			return toolTextResponse(id, "", fmt.Errorf("%s: session key not found: %s", tool, sessionKey))
 		}
-		input, err := parseImplementInput(args)
+		input, err := parseImplementInput(typedArgs)
 		if err != nil {
 			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 		}
@@ -1146,7 +1174,11 @@ func (s *Server) handleEnterProceed(id json.RawMessage, args map[string]any) res
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	input, err := parseProceedInput(args)
+	typedArgs, _, err := routeEnvelope(tool, args)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	input, err := parseProceedInput(typedArgs)
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}

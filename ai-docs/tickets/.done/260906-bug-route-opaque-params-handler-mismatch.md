@@ -2,10 +2,13 @@
 title: Opaque route params do not reach deterministic handlers
 related:
   260904-refactor-enter-affordance-rename-route-opaque: introduced the opaque published schema
+plans:
+  phase-1: 2026-09/06-1600-route-opaque-params-handler-mismatch
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 3e4ea2908bd5cf3f
 sage-review-completeness-reviewed: 3e4ea2908bd5cf3f
+completed: 2026-09-06
 ---
 
 # Opaque route params do not reach deterministic handlers
@@ -79,3 +82,33 @@ MCP and resource/distribution checks. The prior schema-only interpretation in
 260904-refactor-enter-affordance-rename-route-opaque is superseded by the user's
 2026-09-06 authorization to repair this transport mismatch; routing decisions
 themselves remain unchanged.
+
+### Result (1653a118) - 2026-09-06
+
+Both public wrappers now reach the existing typed resolvers. Envelope validation
+retains outer-only session authentication and rejects non-object, mixed, and
+nested-session-key inputs before agenda/todo writes. Wrapped implement calls
+cannot silently select legacy mode entry; unwrapped typed and legacy calls
+remain compatible. Implementation: `24a2392f`; spec reconciliation: `93b09c18`.
+
+Independent correctness and test reviews found the same Important omission:
+the executable call steps still used top-level arguments despite corrected
+Fact Contracts. [fixed] in relay #1 (`1653a118`): both call steps now wrap
+routing fields, rendered-playbook guards reject the old examples, and the
+resource manifest and wsflow mirror were regenerated. Neither review found a
+handler correctness defect. No Critical findings or unresolved dispositions;
+Important closure uses implementer verification without an extra review round.
+
+Verification on final implementation `1653a118`: full
+`go test ./internal/mcp ./internal/wsrsrc -count=1` passed (55.734s/0.339s),
+`go build ./...` passed, wrapper and rendered-playbook regressions passed,
+and wsflow unittest discovery passed all 10 tests. `spec_index.verify` and
+`git diff --check` passed. No pre-fix red test was run; the initial defect was
+reproduced against the connected pre-fix MCP server. Final evidence is from
+the source-built tests/build, not a refreshed downstream installed server.
+
+The implementation branch is retained for review/merge; no merge, push,
+version bump, or release was performed. No separate mental-model update was
+needed because the repaired invariant is covered by the authoritative specs.
+Documentation closeout compaction is skipped: the spec commit precedes a
+source/test fix, and the remaining suffix is a single ticket-closeout commit.
