@@ -1,7 +1,7 @@
 ---
 title: Pi TUI renders JSON-shaped ws tool results as YAML while the model keeps receiving JSON
 related:
-  - 260906-feat-ws-pi-spawn-warns-when-tier-resolution-degrades-to-inherit
+  260906-bug-ws-pi-tier-slug-rejected-children-inherit-parent-model: prerequisite for Phase 2; its Phase 1 adds the resolver's `source` field the resolved-model line reads (it absorbed 260906-feat-ws-pi-spawn-warns-when-tier-resolution-degrades-to-inherit, whose `rejected` detail now aborts the spawn instead of accompanying an inherited child)
 spec:
   - pi-adapter-runtime
 sage-review-design: completed
@@ -134,10 +134,13 @@ it is known.
   anything else, in every state: partial, success, error. `model` and
   `effort` are the effective values: `(inherited lead model)` when the tier
   did not resolve, and `effort: pi-default` when the dispatch applied no
-  thinking level. `inherited` is read from the `rejected` detail that
-  `260906-feat-ws-pi-spawn-warns-when-tier-resolution-degrades-to-inherit`
-  adds to `resolveModelForAliasViaWsMcp`; that ticket lands first, and this
-  phase adds no second inherit signal beyond the row line.
+  thinking level. `inherited` is `source === "inherit"` on the
+  `resolveModelForAliasViaWsMcp` result, the field that
+  `260906-bug-ws-pi-tier-slug-rejected-children-inherit-parent-model`
+  Phase 1 adds; that ticket lands first, and this phase adds no second
+  inherit signal beyond the row line. A `rejected` detail is not an
+  inherit signal: after that ticket a rejected tier refuses the spawn, so
+  the line is never rendered for it.
 - **Resolution callback.** Only `explore` resolves inside its own
   `execute`; `ws-agent-spawn`, `ws-fork`, and `ws-execute` resolve inside
   `spawnAgent`, whose return carries no model. `spawnAgent` gains an
@@ -193,8 +196,8 @@ through `details`.
 - Headless leads (`--mode rpc`, no TUI) are unaffected; the hook is never
   invoked there.
 - Phase 2 depends on Phase 1's helper and on
-  `260906-feat-ws-pi-spawn-warns-when-tier-resolution-degrades-to-inherit`
-  Phase 1 for the `rejected` resolver detail; do not start it before both
+  `260906-bug-ws-pi-tier-slug-rejected-children-inherit-parent-model`
+  Phase 1 for the resolver's `source` field; do not start it before both
   land. Keep the `details` shape additive to whatever each tool already
   returns.
 

@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 9431a5f6d6889cca
 sage-review-design-reviewed: 9431a5f6d6889cca
+dropped: 2026-09-06
 ---
 
 # Pi tier warnings repeat on every workflow_manual call and every ws-agent-list row
@@ -140,3 +141,8 @@ in a session with one rejected tier and confirm the advisory appears on
 the first cycle only; tune the tier to a valid value and confirm no
 further advisory; `ws-agent-list` after two spawns shows two
 `tier_rejected` fields, not two warning lines.
+
+
+## Resolution (2026-09-06)
+
+Absorbed into 260906-bug-ws-pi-tier-slug-rejected-children-inherit-parent-model (2026-09-06). The once-per-key advisory dedupe with compaction re-arm is its Phase 3; the ws-agent-list tier_rejected marker is dropped because a rejected tier now refuses the spawn and leaves no record.
