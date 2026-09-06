@@ -43,6 +43,13 @@ None yet. This is a non-hierarchical collection, not an implementation target.
   Creation condition: the owner moves the collected request into planning;
   feasibility and current widget ordering have not been independently verified.
 
+- **Goal stop/reset control** — The owner could not find a goal reset button
+  and attempted `goal clean` / `goal clear`, which armed new goals instead.
+  Provide a discoverable way to stop/reset the active goal without accidentally
+  replacing it with another goal. Intended role: make goal cancellation explicit.
+  Creation condition: the owner moves this collected UX request into planning;
+  exact control placement and stop/reset semantics are not yet specified.
+
 ## Focus
 
 Capture additional owner-supplied UX requests in this same collection before
