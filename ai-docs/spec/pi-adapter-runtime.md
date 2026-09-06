@@ -626,14 +626,21 @@ session no push is dropped or duplicated.
 **Delivery is held until the lead's turn settles.** Pi offers no hook at the
 moment a queued followUp is delivered, so a message built while the lead is
 mid-turn would carry a stale status line. A `followUp` push is therefore sent
-at once only when the owning process's agent is idle; otherwise the adapter
-holds it and releases the held pushes, in arrival order, from that process's
-`agent_settled` handler, building each message — status line included — at
-release time. The first release starts the lead's next run; the rest enter
-Pi's followUp queue and drain one per loop iteration, so a fan-out burst still
-yields one lead run that sees the messages in order. `steer` families
-(approval, question) are never held. Held pushes live only in the process:
-they are dropped with it at `session_shutdown`, exactly like Pi's own queue.
+at once only when the owning process's agent is idle and no compaction is in
+flight; otherwise the adapter holds it and releases the held pushes, in
+arrival order, from that process's `agent_settled` handler once idle, or
+(compaction case) from the goal loop's post-compaction release routine —
+building each message — status line included — at release time. The first
+release starts the lead's next run; the rest enter Pi's followUp queue and
+drain one per loop iteration, so a fan-out burst still yields one lead run
+that sees the messages in order. `steer` families (approval, question) are
+normally never held — interrupting is their whole purpose — with one
+exception: while a compaction is in flight, a `steer` push is held too, since
+`ctx.compact()`'s custom-message send path bypasses Pi's own mid-compaction
+prompt guard entirely (see "Goal loop" below), and there is no live turn to
+interrupt into during a compaction anyway. Held pushes live only in the
+process: they are dropped with it at `session_shutdown`, exactly like Pi's own
+queue.
 
 **Fan-in stays with the model.** Every push whose process has at least one
 delegated agent carries a status line `N delegated agents still running`; with
@@ -1147,6 +1154,15 @@ this surface.
   lead, and that turn's settle re-evaluates the loop normally. Idle, dormant, or stopped children,
   a child whose `final` already landed this turn, and thread-bound respondents
   do not hold the loop. The footer's agent count is not part of this entry.
+- **Waiting for compaction (260906 Phase 1).** While armed, a settle that
+  fires while a compaction is in flight (checked before the yield branch
+  above — compaction dominates) neither re-injects the reminder nor advances
+  the runaway streak, mirroring the yield outcome exactly: goal state passes
+  through unchanged and the footer shows `Goal loop: waiting for compaction`
+  under the same status key until the next lead turn starts. This settle is
+  the one `ctx.compact()`'s own internal abort produces for the turn it just
+  cut off, not an ordinary turn end; the "Model-driven compaction" entry
+  below owns what re-arms the loop once the compaction actually finishes.
 - **Lead-session-only.** The goal loop runs on the lead session only. Every
   spawned child (persistent RPC worker, one-shot explore leaf, or fork) is
   launched with a `WS_PI_SPAWN_ROLE` environment marker carrying its role, and
@@ -1163,30 +1179,52 @@ auto-compaction remains the last-resort backstop.
 
 - **The lever.** `goal-compact-and-continue(carry_forward)` is a model-invoked
   `pi.registerTool` tool (alongside the Phase-1 terminal levers) that is
-  **non-terminal**: it calls `ctx.compact({ customInstructions: carry_forward })`
-  once and returns without disarming the goal. Because a manual `ctx.compact`
-  aborts the invoking turn, the goal then reaches a fresh settle and the existing
-  armed `agent_settled` reminder re-enters the next goal turn — so compaction folds
-  into the normal loop rather than needing its own continuation path. The tool's
-  returned text — the only in-band evidence of the request, since the
-  `Compaction completed` notification fires outside the model's view — reads
-  `Compaction requested; the conversation will resume from a summary carrying:
-  <carry_forward>`.
+  **non-terminal**: it marks the compaction as lever-originated (arming a
+  pending-rearm marker), then calls
+  `ctx.compact({ customInstructions: carry_forward })` once and returns
+  without disarming the goal. The tool's returned text — the only in-band
+  evidence of the request, since the `Compaction completed` notification
+  fires outside the model's view — reads `Compaction requested; the
+  conversation will resume from a summary carrying: <carry_forward>`.
+- **Re-arming after compaction (260906 Phase 1).** A manual `ctx.compact`
+  aborts the invoking turn immediately — well before Pi's own compaction
+  bookkeeping finishes — so nothing may send a prompt from inside a
+  `session_*compact*` handler without racing that unwind. Instead, an
+  idempotent release routine runs once compaction actually finishes,
+  deferred past Pi's own compaction flag: it flushes every push held during
+  the compaction window (see "Child→lead report channel" above) and, only
+  for a lever-originated compaction whose owning session is idle at that
+  instant, sends the pending goal reminder as a fresh turn — folding a
+  compaction failure reason into it when present — which is what re-enters
+  the goal loop, not that turn's own settle (which reports `waiting`, not
+  `reinject`, per the previous entry). A non-lever compaction (owner-typed
+  `/compact`, Pi's own threshold/overflow auto-compaction) still flushes held
+  pushes through the same routine but never synthesizes a reminder — the
+  goal loop stays observe-only there, and its own next ordinary settle
+  produces the next reminder. **Accepted race window:** an owner who types
+  `/compact` directly (bypassing the lever) can still race a reminder that
+  was already in flight before the compaction started — this window is
+  accepted as-is, not intercepted; only the lever's own compaction is
+  guaranteed race-free by construction.
 - **Advisory surfacing, not a gate.** While armed, the reminder turn carries two
   pieces of information for the model to weigh: the current context usage as a
   percent (from `getContextUsage().percent`, or derived from `tokens` against the
   context window / a configured override when `percent` is null right after a
   compaction), and a static compression-safety heuristic (a phase boundary or
   merge gate is normally safe to compact; a non-phase stop is not). Past a
-  configurable advisory point the percent line reads as a nudge. None of this
-  auto-triggers compaction — the model decides.
+  configurable advisory point the percent line reads as a nudge; below it, the
+  line explicitly tells the model not to call `goal-compact-and-continue`. None
+  of this auto-triggers compaction — the model decides.
 - **`session_before_compact` companion (observe-only).** The adapter subscribes to
   `session_before_compact` purely to observe — it never returns `cancel` or a
   compaction override. Pi forwards a manual compaction's `customInstructions`
   verbatim into this event but hardcodes them empty for its own
   threshold/overflow auto-compaction, and offers no partial "inject state" hook on
   the auto path, so the companion observes Pi's `reason: "threshold"` signal while
-  the manual lever alone carries ws carry-forward state.
+  the manual lever alone carries ws carry-forward state. This same handler also
+  marks the compaction as in-flight (see "Child→lead report channel" above) for
+  ANY compaction reason, unconditionally — the defensive half of the push-hold
+  coverage, since not every compaction goes through the lever.
 - **Config knobs.** Two knobs join the Phase-1 runaway threshold in
   `agents-plugin-pi/goal-loop-config.json`, read fresh per settle with the same
   never-throw fallback: a compaction advisory point (percent, `(0,100]`) and a
