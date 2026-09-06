@@ -105,6 +105,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
+import { modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx } from "./model-catalog.ts";
 import {
   GATED_EXEC_TOOL_NAME,
   WS_PI_APPROVAL_DIR_ENV,
@@ -633,7 +634,7 @@ export function registerExecuteGateway(pi: ExtensionAPI, bridge: BridgeHandle, r
     name: EXECUTE_TOOL_NAME,
     label: EXECUTE_TOOL_NAME,
     description:
-      "Spawn an execute-worker to carry out `prompt`; every shell command it runs elevates through a lead-approval gate (see ws-approve) because it proxies lead-consensus-caliber actions, unlike a general ws-agent-spawn worker. Optionally runs `command` verbatim FIRST, in your own trusted context (no gate), and hands its output to the worker. complex:true inherits your own model instead of the default light one. Returns {agent_id} immediately — end your turn afterwards; its approval requests, reports and settles arrive as pushed messages.",
+      "Spawn an execute-worker to carry out `prompt`; every shell command it runs elevates through a lead-approval gate (see ws-approve) because it proxies lead-consensus-caliber actions, unlike a general ws-agent-spawn worker. Optionally runs `command` verbatim FIRST, in your own trusted context (no gate), and hands its output to the worker. complex:true inherits your own model instead of the default light one. Returns {agent_id, warning?} immediately — end your turn afterwards; its approval requests, reports and settles arrive as pushed messages.",
     parameters: {
       type: "object",
       properties: {
@@ -660,6 +661,8 @@ export function registerExecuteGateway(pi: ExtensionAPI, bridge: BridgeHandle, r
           pi,
           cwd: sessionCtx.cwd,
           inheritModel: inheritModelFromToolCtx(toolCtx),
+          catalog: modelCatalogFromToolCtx(toolCtx),
+          notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx),
           wsToolNames: bridge.wsToolNames,
           client: bridge.client,
           toolGroup: "execute-worker",

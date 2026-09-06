@@ -97,6 +97,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { RpcClient, type RpcClientOptions } from "@earendil-works/pi-coding-agent";
 import type { McpStdioClient, McpToolCallResult } from "./mcp-stdio-client.ts";
 import type { BridgeHandle } from "./bridge.ts";
+import { suggestModels, formatTierWarning, modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx, type ModelCatalogEntry, type TierRejection } from "./model-catalog.ts";
 import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readSpawnRole, type SpawnRole } from "./process-role.ts";
 
 // ---------------------------------------------------------------------------
@@ -355,37 +356,17 @@ export class AgentEventLineBuffer {
 }
 
 /**
- * Async, ws-mcp-backed tier resolution (Phase 4: replaces the old
- * file-catalog-backed `resolveModelForAlias`): when `alias` (one of the four
- * fixed tiers `small|medium|large|xlarge`) is given, calls ws-mcp's
- * `config.resolve_agent` tool (`{tier: alias, format: "json"}`) and accepts
- * its answer only when it is a GENUINE `pi`-labeled hit — `resolved_from ===
- * "pi"` AND the returned model string contains a `/` (Phase 3 Forward (a): a
- * partial `config.tune agents.tier harness:pi` write can seed the `pi`
- * bucket from the codex default, so `resolved_from === "pi"` alone is not
- * proof of a real Pi `provider/id` string — a codex-shaped fallback model
- * carries no `/`).
- *
- * NEVER HARD-FAILS: no alias, an `isError` result, a missing/unparsable text
- * body, a non-`pi` `resolved_from`, or a `pi`-labeled-but-slash-less model
- * all degrade to `{model: inheritModel}` — matching this adapter's existing
- * "the adapter reads the resolution from ws-mcp; missing/unmapped stays
- * inherit, never an error" contract. `effort` is only ever populated
- * alongside a genuine hit, and only when the resolved effort string is
- * non-empty (an empty resolved effort means "no explicit override" — the
- * caller passes no `modelEffort` at all rather than an empty one).
- *
- * Used by both the RPC-backed `spawnAgent`'s `model_name` and `explore`'s
- * fixed `"small"` lookup, and per-tier by `bridge.ts`'s
- * `computePiAliasTableUnset` (the sole "genuine `pi` hit" predicate — see
- * that function's doc comment for why it reuses this resolver instead of
- * reimplementing the guard).
+ * Shared tier resolution for spawn, both explore paths, and the manual advisory.
+ * Accept only pi-labeled exact catalog membership with configured auth. Unknown
+ * or unauthenticated pi values inherit with rejected detail and no tier effort.
+ * Non-pi, omitted tiers and transport/parse failures silently inherit. Registry
+ * and auth reads stay outside this injected-MCP resolver; no config writes.
  */
 /**
  * Minimal `callTool`-shaped interface `resolveModelForAliasViaWsMcp` needs —
  * a real `McpStdioClient` satisfies this structurally, but so does
  * `bridge.ts`'s own duck-typed `callTool` closure (`WorkflowManualMappingDeps["callTool"]`),
- * letting `computePiAliasTableUnset` call this resolver without a circular
+ * letting `computePiAliasTableReport` call this resolver without a circular
  * import (`spawner.ts` already imports `type BridgeHandle` from
  * `bridge.ts` — a type-only import that is erased at build/runtime, so a
  * VALUE import in the other direction, `bridge.ts` importing this function
@@ -395,11 +376,14 @@ export interface ResolveAgentCallToolClient {
   callTool: (name: string, args: Record<string, unknown>) => Promise<McpToolCallResult>;
 }
 
+export interface TierResolution { model?: string; effort?: string; rejected?: TierRejection }
+
 export async function resolveModelForAliasViaWsMcp(
   client: ResolveAgentCallToolClient,
   alias: string | undefined,
   inheritModel: string | undefined,
-): Promise<{ model?: string; effort?: string }> {
+  catalog: readonly ModelCatalogEntry[] = [],
+): Promise<TierResolution> {
   if (!alias) return { model: inheritModel };
   try {
     const result = await client.callTool("config.resolve_agent", { tier: alias, format: "json" });
@@ -412,8 +396,15 @@ export async function resolveModelForAliasViaWsMcp(
     } catch {
       return { model: inheritModel };
     }
-    if (parsed.resolved_from !== "pi" || !parsed.model || !parsed.model.includes("/")) {
+    if (parsed?.resolved_from !== "pi" || typeof parsed.model !== "string") {
       return { model: inheritModel };
+    }
+    const entry = catalog.find(entry => `${entry.provider}/${entry.id}` === parsed.model);
+    if (!entry) {
+      return { model: inheritModel, rejected: { model: parsed.model, resolvedFrom: parsed.resolved_from, why: "unknown", suggestions: suggestModels(parsed.model, catalog) } };
+    }
+    if (!entry.hasAuth) {
+      return { model: inheritModel, rejected: { model: parsed.model, resolvedFrom: parsed.resolved_from, why: "no-auth" } };
     }
     return { model: parsed.model, effort: parsed.effort || undefined };
   } catch {
@@ -763,6 +754,8 @@ export interface RpcAgentRecord {
   systemPromptPath: string;
   /** Resolved `provider/id`, or undefined to inherit pi's own default resolution. Cached so a dormant resume reuses the same model. */
   modelBase?: string;
+  /** Spawn-time diagnostic only; intentionally omitted from persistence and resume notifications. */
+  warning?: string;
   /** Caller-supplied thinking level, applied via `setThinkingLevel()` after every (re)start. */
   modelEffort?: string;
   /** Cached bridge `ws__*` tool names, for `--tools` re-resolution on a dormant resume. */
@@ -1705,6 +1698,10 @@ export interface RpcSpawnCtx {
   cwd: string;
   /** `provider/id`, forwarded from the calling tool-execute ctx.model, or undefined to inherit pi's own default. */
   inheritModel?: string;
+  /** Current execute/command context's live getAll + configured-auth catalog. */
+  catalog: readonly ModelCatalogEntry[];
+  /** UI-only adapter; never a lifecycle push. */
+  notifyTierWarning?: (warning: string) => void;
   /** Bridge's sanitized `ws__*` registered tool names, for the `full-worker` group. */
   wsToolNames: readonly string[];
   /** ws-mcp client used to resolve `model_name` through `config.resolve_agent` (`resolveModelForAliasViaWsMcp`), read fresh per spawn. */
@@ -2339,7 +2336,7 @@ export async function spawnAgent(
   registry: RpcAgentRegistry,
   ctx: RpcSpawnCtx,
   params: SpawnAgentParams,
-): Promise<{ agent_id: string; alias?: string; evicted?: string }> {
+): Promise<{ agent_id: string; alias?: string; evicted?: string; warning?: string }> {
   // Guard clauses first, before any side effect (mkdtempSync/randomUUID) and
   // before `registry.set` — a rejected spawn leaves no trace, including on
   // the previous alias holder (see `runSpawnGuards`'s doc comment).
@@ -2352,7 +2349,9 @@ export async function spawnAgent(
   const sessionDir = mkdtempSync(join(tmpdir(), "ws-pi-agent-"));
   const sessionPath = join(sessionDir, "session.jsonl");
 
-  const { model: modelBase, effort: resolvedEffort } = await resolveModelForAliasViaWsMcp(ctx.client, params.modelName, ctx.inheritModel);
+  const { model: modelBase, effort: resolvedEffort, rejected } = await resolveModelForAliasViaWsMcp(ctx.client, params.modelName, ctx.inheritModel, ctx.catalog);
+  const warning = rejected ? formatTierWarning(params.modelName!, rejected, ctx.inheritModel, ctx.catalog.length === 0) : undefined;
+  if (warning) ctx.notifyTierWarning?.(warning);
 
   const toolGroup: ToolGroup = resolveSpawnToolGroup(ctx.toolGroup);
   const tools = ctx.explicitTools ?? resolveTools(toolGroup, ctx.wsToolNames);
@@ -2363,6 +2362,7 @@ export async function spawnAgent(
     sessionPath,
     systemPromptPath: params.systemPromptPath,
     modelBase,
+    ...(warning ? { warning } : {}),
     // Explicit caller effort always wins over the config-resolved one
     // (effectiveModelEffort's `||` semantics — an empty-string caller value
     // is treated as absent). This is the single fold point: both the
@@ -2430,7 +2430,7 @@ export async function spawnAgent(
   // 260905 (live-agent widget ticket): a brand-new registry member, live and
   // running from its initial prompt — the widget's first sighting of it.
   triggerAgentWidgetRefresh();
-  return { agent_id: agentId, alias: record.alias, evicted: eviction.evictedLabel };
+  return { agent_id: agentId, alias: record.alias, evicted: eviction.evictedLabel, ...(warning ? { warning } : {}) };
 }
 
 /**
@@ -2620,7 +2620,7 @@ async function harvestLastMessage(record: RpcAgentRecord): Promise<string | unde
 export function listAgents(
   registry: RpcAgentRegistry,
   opts?: { includePrompt?: boolean },
-): Array<{ agent_id: string; status: AgentStatus; alias?: string; title?: string; model?: string; last_report_at?: string; prompt?: string }> {
+): Array<{ agent_id: string; status: AgentStatus; alias?: string; title?: string; model?: string; last_report_at?: string; prompt?: string; warning?: string }> {
   return [...registry.entries()].map(([agentId, record]) => {
     const lastReport = record.reportLog[record.reportLog.length - 1];
     const lastReportAt = lastReport ? new Date(lastReport.at).toISOString() : record.lastReportAtOverride;
@@ -2631,6 +2631,7 @@ export function listAgents(
       ...(record.alias ? { alias: record.alias } : {}),
       ...(record.title ? { title: record.title } : {}),
       ...(model ? { model } : {}),
+      ...(record.warning ? { warning: record.warning } : {}),
       ...(lastReportAt ? { last_report_at: lastReportAt } : {}),
       ...(opts?.includePrompt && record.prompt ? { prompt: record.prompt } : {}),
     };
@@ -2808,6 +2809,8 @@ export function registerAgentTools(
    * so this callback simply never fires for them.
    */
   onApprovalPending?: (record: RpcAgentRecord) => void,
+  /** Narrow runner seam: worker exploration tests must never execute the test file as a child Pi. */
+  runExploreLeaf: typeof exploreLeaf = exploreLeaf,
 ): AgentToolsHandle {
   const rpcRegistry: RpcAgentRegistry = new Map();
   const exploreRegistry: AgentRegistry = new Map();
@@ -2830,9 +2833,13 @@ export function registerAgentTools(
    * applies without restarting Pi, matching bridge.ts's advisory's
    * no-caching choice.
    */
-  async function resolveExploreModel(toolCtx: unknown): Promise<string | undefined> {
-    const { model } = await resolveModelForAliasViaWsMcp(bridge.client, "small", inheritModelFromToolCtx(toolCtx));
-    return model;
+  async function resolveExploreModel(toolCtx: unknown): Promise<{ model?: string; warning?: string }> {
+    const inheritModel = inheritModelFromToolCtx(toolCtx);
+    const catalog = modelCatalogFromToolCtx(toolCtx);
+    const { model, rejected } = await resolveModelForAliasViaWsMcp(bridge.client, "small", inheritModel, catalog);
+    const warning = rejected ? formatTierWarning("small", rejected, inheritModel, catalog.length === 0) : undefined;
+    if (warning) tierWarningNotifierFromToolCtx(toolCtx)?.(warning);
+    return { model, ...(warning ? { warning } : {}) };
   }
 
   /**
@@ -2860,7 +2867,7 @@ export function registerAgentTools(
     name: "ws-agent-spawn",
     label: "ws-agent-spawn",
     description:
-      "Spawn a persistent RPC-backed pi subagent from an already-rendered system-prompt file (e.g. via ws/playbook.render). Returns {agent_id, alias?, evicted?} immediately after the initial prompt is sent. Do not wait for it: end your turn, and its reports, questions and completion arrive on their own as ws-agent-* messages carrying a running-count status line.",
+      "Spawn a persistent RPC-backed pi subagent from an already-rendered system-prompt file (e.g. via ws/playbook.render). Returns {agent_id, alias?, evicted?, warning?} immediately after the initial prompt is sent. Do not wait for it: end your turn, and its reports, questions and completion arrive on their own as ws-agent-* messages carrying a running-count status line.",
     parameters: {
       type: "object",
       properties: {
@@ -2906,6 +2913,8 @@ export function registerAgentTools(
           pi,
           cwd: sessionCtx.cwd,
           inheritModel: inheritModelFromToolCtx(toolCtx),
+          catalog: modelCatalogFromToolCtx(toolCtx),
+          notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx),
           wsToolNames: bridge.wsToolNames,
           client: bridge.client,
           onApprovalPending,
@@ -2959,7 +2968,7 @@ export function registerAgentTools(
     name: "ws-agent-list",
     label: "ws-agent-list",
     description:
-      "List every tracked agent_id, its alias/title (when set), status (running/idle/dormant — most agents park to dormant shortly after settling, so idle is transient), model (the model the agent runs on; an inheriting child shows its parent's model), and last_report_at (ISO, absent if it has never reported). Use it to check on a quiet agent — there is no wait tool; every report, question, approval request and completion is pushed to you as a ws-agent-* message on its own.",
+      "List every tracked agent_id, its alias/title (when set), status (running/idle/dormant — most agents park to dormant shortly after settling, so idle is transient), model (the model the agent runs on; an inheriting child shows its parent's model), optional spawn-time warning, and last_report_at (ISO, absent if it has never reported). Use it to check on a quiet agent — there is no wait tool; every report, question, approval request and completion is pushed to you as a ws-agent-* message on its own.",
     parameters: {
       type: "object",
       properties: {
@@ -3061,8 +3070,8 @@ export function registerAgentTools(
     // the dropped `async` param (see `ExploreParams`). Both branches share the
     // same `{query}`-only parameter schema.
     description: isLeadRole
-      ? "Spawn a one-shot, read-only exploration child (recon tool group, no continuation) as an RPC-backed subagent. Returns {agent_id, alias} immediately after the initial prompt is sent. Do not wait for it: end your turn — its answer arrives later on the settle push's last_message."
-      : "One-shot read-only exploration leaf: answers a single scoped question via the explore playbook with the recon tool group, no session persisted, no continuation.",
+      ? "Spawn a one-shot, read-only exploration child (recon tool group, no continuation) as an RPC-backed subagent. Returns {agent_id, alias, warning?} immediately after the initial prompt is sent. Do not wait for it: end your turn — its answer arrives later on the settle push's last_message."
+      : "One-shot read-only exploration leaf: answers a single scoped question via the explore playbook with the recon tool group, no session persisted, no continuation. Result includes an optional spawn-time warning when its tier is rejected.",
     parameters: {
       type: "object",
       properties: {
@@ -3098,6 +3107,8 @@ export function registerAgentTools(
             pi,
             cwd: sessionCtx.cwd,
             inheritModel: inheritModelFromToolCtx(toolCtx),
+            catalog: modelCatalogFromToolCtx(toolCtx),
+            notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx),
             wsToolNames: bridge.wsToolNames,
             client: bridge.client,
             toolGroup: "recon",
@@ -3118,20 +3129,21 @@ export function registerAgentTools(
             title: deriveExploreTitle(p.query),
           },
         );
-        // Literal {agent_id, alias} per the ticket's stated return contract —
+        // Keep the shared spawn-time warning without another resolution/notification.
         // `evicted` is not surfaced here (an explore preset carries no alias
         // collision risk worth reporting the way a caller-aliased
         // `ws-agent-spawn` does).
-        return { content: [{ type: "text", text: JSON.stringify({ agent_id: result.agent_id, alias: result.alias }) }] };
+        return { content: [{ type: "text", text: JSON.stringify({ agent_id: result.agent_id, alias: result.alias, ...(result.warning ? { warning: result.warning } : {}) }) }] };
       }
 
-      const result = await exploreLeaf(
+      const { model, warning } = await resolveExploreModel(toolCtx);
+      const result = await runExploreLeaf(
         bridge.client,
         exploreRegistry,
-        { sessionKey: bridge.defaultSessionKeyRef.current ?? "", cwd: sessionCtx.cwd, model: await resolveExploreModel(toolCtx) },
+        { sessionKey: bridge.defaultSessionKeyRef.current ?? "", cwd: sessionCtx.cwd, model },
         p,
       );
-      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      return { content: [{ type: "text", text: JSON.stringify({ ...result, ...(warning ? { warning } : {}) }) }] };
     },
   });
 

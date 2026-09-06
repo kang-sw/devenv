@@ -23,8 +23,8 @@ import {
   normalizeSessionKey,
   maybeAppendModelCatalogAdvisory,
   MODEL_CATALOG_ADVISORY,
-  computePiAliasTableUnset,
-  computeRawDispatchPiAliasTableUnset,
+  computePiAliasTableReport,
+  computeRawDispatchPiAliasTableReport,
   cutStaticBody,
   prependWorkflowStateLine,
   shouldMapWorkflowManual,
@@ -346,6 +346,7 @@ describe("dispatchMappedWorkflowManual", () => {
           return textResult("HEADER\nSTATIC-BODY\n## Session Key\nlead-1");
         },
         staticBodySnapshot: "STATIC-BODY\n",
+        catalog: [{ provider: "openrouter", id: "cheap-model", hasAuth: true }],
         notifyMappingDegraded: () => assert.fail("notifyMappingDegraded must not be called on a cut hit"),
       },
     );
@@ -370,6 +371,7 @@ describe("dispatchMappedWorkflowManual", () => {
           return textResult("## Session State\ntodos: none");
         },
         staticBodySnapshot: "STATIC-BODY\n",
+        catalog: [{ provider: "openrouter", id: "cheap-model", hasAuth: true }],
         notifyMappingDegraded: () => {
           notified += 1;
         },
@@ -392,6 +394,7 @@ describe("dispatchMappedWorkflowManual", () => {
       {
         callTool: async (name) => (name === "config.resolve_agent" ? noHitResolveAgentResult() : textResult("HEADER\nSTATIC-BODY\nBODY")),
         staticBodySnapshot: "STATIC-BODY\n",
+        catalog: [{ provider: "openrouter", id: "cheap-model", hasAuth: true }],
         notifyMappingDegraded: () => {},
       },
     );
@@ -409,6 +412,7 @@ describe("dispatchMappedWorkflowManual", () => {
           return textResult("HEADER\nSTATIC-BODY\nBODY");
         },
         staticBodySnapshot: "STATIC-BODY\n",
+        catalog: [{ provider: "openrouter", id: "cheap-model", hasAuth: true }],
         notifyMappingDegraded: () => {},
       },
     );
@@ -423,6 +427,7 @@ describe("dispatchMappedWorkflowManual", () => {
           {
             callTool: async () => ({ content: [{ type: "text", text: "boom" }], isError: true }),
             staticBodySnapshot: "STATIC-BODY\n",
+        catalog: [{ provider: "openrouter", id: "cheap-model", hasAuth: true }],
             notifyMappingDegraded: () => {},
           },
         ),
@@ -431,64 +436,93 @@ describe("dispatchMappedWorkflowManual", () => {
   });
 });
 
-describe("computePiAliasTableUnset", () => {
+describe("computePiAliasTableReport", () => {
   function textResult(text: string): McpToolCallResult {
     return { content: [{ type: "text", text }] };
   }
 
   test("a genuine pi hit on any tier -> false", async () => {
-    const result = await computePiAliasTableUnset(async (name, args) => {
+    const result = await computePiAliasTableReport(async (name, args) => {
       assert.equal(name, "config.resolve_agent");
       return args.tier === "medium"
         ? textResult(JSON.stringify({ resolved_from: "pi", model: "openrouter/big" }))
         : textResult(JSON.stringify({ resolved_from: "default" }));
-    });
-    assert.equal(result, false);
+    }, [{ provider: "openrouter", id: "big", hasAuth: true }]);
+    assert.deepEqual(result, { unset: false, rejected: [] });
   });
 
   test("no tier resolves to pi -> true", async () => {
-    const result = await computePiAliasTableUnset(async (name) => {
+    const result = await computePiAliasTableReport(async (name) => {
       assert.equal(name, "config.resolve_agent");
       return textResult(JSON.stringify({ resolved_from: "default", model: "gpt-5.6-terra" }));
     });
-    assert.equal(result, true);
+    assert.deepEqual(result, { unset: true, rejected: [] });
   });
 
-  test("a pi-labeled but slash-less (codex-shaped) model does not count as a hit (Forward (a) guard)", async () => {
-    const result = await computePiAliasTableUnset(async (name) => {
-      assert.equal(name, "config.resolve_agent");
-      return textResult(JSON.stringify({ resolved_from: "pi", model: "gpt-5.6-terra" }));
-    });
-    assert.equal(result, true);
+  test("rejected tiers replace the empty table sentence, even after an accepted tier", async () => {
+    const tiers: unknown[] = [];
+    const catalog = [{ provider: "p", id: "good", hasAuth: true }, { provider: "locked", id: "good", hasAuth: false }];
+    const result = await computePiAliasTableReport(async (_name, args) => {
+      tiers.push(args.tier);
+      const model = { small: "p/good", medium: "good", large: "locked/good", xlarge: "typo/good" }[args.tier as string];
+      return textResult(JSON.stringify({ resolved_from: "pi", model }));
+    }, catalog);
+    assert.deepEqual(tiers, ["small", "medium", "large", "xlarge"]);
+    assert.equal(result.unset, false);
+    assert.deepEqual(result.rejected.map(r => r.alias), ["medium", "large", "xlarge"]);
+    const content = maybeAppendModelCatalogAdvisory("workflow_manual", [], result, "lead/model", false);
+    const text = content[0].text!;
+    assert.equal(text.match(/warning: tier/g)?.length, 3);
+    assert.match(text, /Did you mean p\/good, locked\/good\?/);
+    assert.match(text, /provider locked has no configured auth/);
+    assert.doesNotMatch(text, /has no entries|ws-model-catalog-list/);
   });
+
+  for (const cut of [true, false]) {
+    test(`mapped ${cut ? "cut" : "fallback"} appends one rejection advisory`, async () => {
+      const original = textResult(cut ? "HEADER STATIC FOOTER" : "drifted");
+      const result = await dispatchMappedWorkflowManual({}, {
+        staticBodySnapshot: "STATIC", catalog: [], inheritModel: "lead/model",
+        notifyMappingDegraded: () => {},
+        callTool: async (name, args) => name === "workflow_manual" ? original : name === "workflow_state" ? textResult("state") :
+          textResult(JSON.stringify(args.tier === "xlarge" ? { resolved_from: "pi", model: "bad" } : { resolved_from: "tiers" })),
+      });
+      assert.equal(result.content.length, 2);
+      assert.equal(result.content[1].text!.match(/warning: tier/g)?.length, 1);
+      assert.match(result.content[1].text!, /Pi's model catalog is empty/);
+      assert.doesNotMatch(result.content[1].text!, /has no entries|ws-model-catalog-list/);
+      assert.equal(original.content.length, 1);
+      assert.equal(original.content[0].text, cut ? "HEADER STATIC FOOTER" : "drifted");
+    });
+  }
 
   test("an isError result on a tier is treated as a miss, not a crash", async () => {
-    const result = await computePiAliasTableUnset(async (name) => {
+    const result = await computePiAliasTableReport(async (name) => {
       assert.equal(name, "config.resolve_agent");
       return { content: [{ type: "text", text: "boom" }], isError: true };
     });
-    assert.equal(result, true);
+    assert.deepEqual(result, { unset: true, rejected: [] });
   });
 
   test("unparsable text on a tier is treated as a miss, not a crash", async () => {
-    const result = await computePiAliasTableUnset(async (name) => {
+    const result = await computePiAliasTableReport(async (name) => {
       assert.equal(name, "config.resolve_agent");
       return textResult("not json");
     });
-    assert.equal(result, true);
+    assert.deepEqual(result, { unset: true, rejected: [] });
   });
 
   test("a thrown call is treated as a miss, not a crash (never-hard-fail)", async () => {
-    const result = await computePiAliasTableUnset(async (name) => {
+    const result = await computePiAliasTableReport(async (name) => {
       assert.equal(name, "config.resolve_agent");
       throw new Error("stdio pipe broke");
     });
-    assert.equal(result, true);
+    assert.deepEqual(result, { unset: true, rejected: [] });
   });
 
   test("queries all four fixed tiers with format:json", async () => {
     const seenTiers: unknown[] = [];
-    await computePiAliasTableUnset(async (name, args) => {
+    await computePiAliasTableReport(async (name, args) => {
       assert.equal(name, "config.resolve_agent");
       seenTiers.push(args.tier);
       assert.equal(args.format, "json");
@@ -498,36 +532,36 @@ describe("computePiAliasTableUnset", () => {
   });
 });
 
-describe("computeRawDispatchPiAliasTableUnset (review relay #1, Important/test: the raw-dispatch advisory gate)", () => {
+describe("computeRawDispatchPiAliasTableReport (review relay #1, Important/test: the raw-dispatch advisory gate)", () => {
   function textResult(text: string): McpToolCallResult {
     return { content: [{ type: "text", text }] };
   }
 
   test("a non-workflow_manual rawName never calls callTool at all (no config.resolve_agent round-trip)", async () => {
     let called = false;
-    const result = await computeRawDispatchPiAliasTableUnset("playbook.render", async () => {
+    const result = await computeRawDispatchPiAliasTableReport("playbook.render", async () => {
       called = true;
       return textResult("{}");
     });
-    assert.equal(result, false, "the gate itself must resolve to false without ever invoking callTool");
+    assert.deepEqual(result, { unset: false, rejected: [] }, "the gate itself must resolve to false without ever invoking callTool");
     assert.equal(called, false, "callTool must never be invoked for a rawName other than workflow_manual");
   });
 
-  test("workflow_manual delegates to computePiAliasTableUnset (config.resolve_agent IS called)", async () => {
+  test("workflow_manual delegates to computePiAliasTableReport (config.resolve_agent IS called)", async () => {
     let sawResolveAgentCall = false;
-    const result = await computeRawDispatchPiAliasTableUnset("workflow_manual", async (name) => {
+    const result = await computeRawDispatchPiAliasTableReport("workflow_manual", async (name) => {
       if (name === "config.resolve_agent") sawResolveAgentCall = true;
       return textResult(JSON.stringify({ resolved_from: "default" }));
     });
     assert.equal(sawResolveAgentCall, true, "workflow_manual must trigger the config.resolve_agent round-trips");
-    assert.equal(result, true, "no tier resolved to a genuine pi hit, so the advisory-trigger value is true");
+    assert.deepEqual(result, { unset: true, rejected: [] }, "no tier resolved to a genuine pi hit, so the advisory-trigger value is true");
   });
 });
 
 describe("maybeAppendModelCatalogAdvisory", () => {
   test("appends the advisory for workflow_manual when piAliasTableUnset is true", () => {
     const content = [{ type: "text", text: "manual body" }];
-    const result = maybeAppendModelCatalogAdvisory("workflow_manual", content, true);
+    const result = maybeAppendModelCatalogAdvisory("workflow_manual", content, { unset: true, rejected: [] });
     assert.equal(result.length, 2);
     assert.deepEqual(result[0], { type: "text", text: "manual body" });
     assert.equal(result[1].type, "text");
@@ -536,14 +570,14 @@ describe("maybeAppendModelCatalogAdvisory", () => {
 
   test("appends (not prepends) — the advisory is the last item", () => {
     const content = [{ type: "text", text: "first" }, { type: "text", text: "second" }];
-    const result = maybeAppendModelCatalogAdvisory("workflow_manual", content, true);
+    const result = maybeAppendModelCatalogAdvisory("workflow_manual", content, { unset: true, rejected: [] });
     assert.equal(result[result.length - 1].text, MODEL_CATALOG_ADVISORY);
   });
 
   test("returns a copy — does not mutate the input content array", () => {
     const content = [{ type: "text", text: "manual body" }];
     const contentRef = content;
-    const result = maybeAppendModelCatalogAdvisory("workflow_manual", content, true);
+    const result = maybeAppendModelCatalogAdvisory("workflow_manual", content, { unset: true, rejected: [] });
     assert.equal(content, contentRef, "input array identity must be preserved (not spliced in place)");
     assert.equal(content.length, 1, "input array must not be mutated");
     assert.notEqual(result, content, "must return a fresh array, not the same reference");
@@ -551,21 +585,21 @@ describe("maybeAppendModelCatalogAdvisory", () => {
 
   test("does not append when piAliasTableUnset is false", () => {
     const content = [{ type: "text", text: "manual body" }];
-    const result = maybeAppendModelCatalogAdvisory("workflow_manual", content, false);
+    const result = maybeAppendModelCatalogAdvisory("workflow_manual", content, { unset: false, rejected: [] });
     assert.equal(result, content, "content must be returned unchanged (same reference) when a genuine pi tier exists");
     assert.equal(result.length, 1);
   });
 
   test("does not append for a different tool name, even when piAliasTableUnset is true", () => {
     const content = [{ type: "text", text: "some other tool's body" }];
-    const result = maybeAppendModelCatalogAdvisory("playbook.render", content, true);
+    const result = maybeAppendModelCatalogAdvisory("playbook.render", content, { unset: true, rejected: [] });
     assert.equal(result, content);
     assert.equal(result.length, 1);
   });
 
   test("does not append for the sanitized ws__workflow_manual name — only the raw dotted-less name matches", () => {
     const content = [{ type: "text", text: "manual body" }];
-    const result = maybeAppendModelCatalogAdvisory("ws__workflow_manual", content, true);
+    const result = maybeAppendModelCatalogAdvisory("ws__workflow_manual", content, { unset: true, rejected: [] });
     assert.equal(result, content);
   });
 });
