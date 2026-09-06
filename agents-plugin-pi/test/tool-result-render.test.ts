@@ -40,19 +40,58 @@ class FakeText {
   }
 }
 
-function fakeTui(): { tui: ToolResultTuiModules; strips: () => number; texts: FakeText[]; truncations: () => number } {
+class FakeBox {
+  children: Array<{ render(width: number): string[]; invalidate(): void }> = [];
+  background: ((text: string) => string) | undefined;
+
+  constructor(_paddingX = 0, _paddingY = 0, background?: (text: string) => string) {
+    this.background = background;
+  }
+
+  addChild(component: { render(width: number): string[]; invalidate(): void }): void {
+    this.children.push(component);
+  }
+
+  setBgFn(background?: (text: string) => string): void {
+    this.background = background;
+  }
+
+  render(width: number): string[] {
+    return this.children.flatMap((child) => child.render(width)).map((line) => this.background?.(line) ?? line);
+  }
+
+  invalidate(): void {
+    for (const child of this.children) child.invalidate();
+  }
+}
+
+function fakeTui(): {
+  tui: ToolResultTuiModules;
+  strips: () => number;
+  texts: FakeText[];
+  boxes: FakeBox[];
+  truncations: () => number;
+} {
   let stripCalls = 0;
   let truncationCalls = 0;
   const texts: FakeText[] = [];
+  const boxes: FakeBox[] = [];
   class CapturedText extends FakeText {
     constructor() {
       super();
       texts.push(this);
     }
   }
+  class CapturedBox extends FakeBox {
+    constructor(paddingX = 0, paddingY = 0, background?: (text: string) => string) {
+      super(paddingX, paddingY, background);
+      boxes.push(this);
+    }
+  }
   return {
     tui: {
       Text: CapturedText,
+      Box: CapturedBox,
       stripTerminalSequences(text: string): string {
         stripCalls += 1;
         return text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
@@ -64,7 +103,31 @@ function fakeTui(): { tui: ToolResultTuiModules; strips: () => number; texts: Fa
     },
     strips: () => stripCalls,
     texts,
+    boxes,
     truncations: () => truncationCalls,
+  };
+}
+
+function fakeTheme(id = "one") {
+  const fgCalls: Array<{ color: string; text: string }> = [];
+  const bgCalls: Array<{ color: string; text: string }> = [];
+  const boldCalls: string[] = [];
+  return {
+    fg(color: string, text: string): string {
+      fgCalls.push({ color, text });
+      return `<${id}:fg:${color}>${text}</${id}:fg>`;
+    },
+    bg(color: string, text: string): string {
+      bgCalls.push({ color, text });
+      return `<${id}:bg:${color}>${text}</${id}:bg>`;
+    },
+    bold(text: string): string {
+      boldCalls.push(text);
+      return `<${id}:bold>${text}</${id}:bold>`;
+    },
+    fgCalls,
+    bgCalls,
+    boldCalls,
   };
 }
 
@@ -98,17 +161,20 @@ describe("logical YAML preview preparation", () => {
 });
 
 describe("native YAML preview renderers", () => {
-  test("binds the registered title above ten argument lines, including while arguments are absent", () => {
-    const { tui, texts } = fakeTui();
+  test("styles the registered title and puts ten argument lines in a pending input box", () => {
+    const { tui, texts, boxes } = fakeTui();
+    const theme = fakeTheme();
     const renderers = createToolPreviewRenderers(tui, "ws__git_status");
-    const missing = renderers.renderCall(undefined, undefined, context({ argsComplete: false }));
-    assert.equal(texts[0]?.text, "ws__git_status");
+    const missing = renderers.renderCall(undefined, theme, context({ argsComplete: false }));
+    assert.match(texts[0]?.text ?? "", /ws__git_status/);
+    assert.deepEqual(theme.boldCalls, ["ws__git_status"]);
+    assert.deepEqual(theme.fgCalls[0], { color: "toolTitle", text: "<one:bold>ws__git_status</one:bold>" });
 
     const args = Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`item${index + 1}`, index + 1]));
-    renderers.renderCall(args, undefined, context({ state: {}, lastComponent: missing }));
-    const lines = texts[0]!.text.split("\n");
-    assert.equal(lines[0], "ws__git_status");
-    assert.equal(lines.length, 11, "title plus ten logical argument lines");
+    renderers.renderCall(args, theme, context({ state: {}, lastComponent: missing }));
+    const lines = texts[1]!.text.split("\n");
+    assert.equal(lines.length, 10, "ten logical argument lines");
+    assert.equal(boxes[0]!.background?.("sample"), "<one:bg:toolPendingBg>sample</one:bg>");
   });
 
   test("installed ToolExecutionComponent retains the registered bridge title for missing arguments", async () => {
@@ -141,11 +207,36 @@ describe("native YAML preview renderers", () => {
       process.cwd(),
     );
 
+    assert.equal((component as unknown as { getRenderShell(): string }).getRenderShell(), "default", "bridge leaves Pi's parent shell enabled");
     assert.match(tui.stripTerminalSequences(component.render(80).join("\n")), /ws__git_status/);
+  });
+
+  test("reapplies theme styling without reserializing cached YAML", () => {
+    const { tui, texts, boxes } = fakeTui();
+    const firstTheme = fakeTheme("first");
+    const secondTheme = fakeTheme("second");
+    let serializations = 0;
+    const renderers = createToolPreviewRenderers(tui, "ws__test", (value) => {
+      serializations += 1;
+      return `value: ${(value as { value: string }).value}`;
+    });
+    const args = { value: "cached" };
+    const state = {};
+    const first = renderers.renderCall(args, firstTheme, context({ state }));
+    first.render(20);
+    first.invalidate();
+    const second = renderers.renderCall(args, secondTheme, context({ state, lastComponent: first }));
+
+    assert.equal(second, first);
+    assert.equal(serializations, 1, "theme changes do not reserialize YAML");
+    assert.match(texts[0]!.text, /<second:fg:toolTitle>/);
+    assert.match(texts[1]!.text, /<second:fg:toolOutput>/);
+    assert.equal(boxes[0]!.background?.("sample"), "<second:bg:toolPendingBg>sample</second:bg>");
   });
 
   test("keeps a completed call Text long-lived without reserializing or relaying out unchanged redraws", () => {
     const { tui, texts, truncations } = fakeTui();
+    const theme = fakeTheme();
     let serializations = 0;
     const renderers = createToolPreviewRenderers(tui, "ws__test", (value) => {
       serializations += 1;
@@ -153,20 +244,21 @@ describe("native YAML preview renderers", () => {
     });
     const args = { value: "large payload" };
     const state = {};
-    const first = renderers.renderCall(args, undefined, context({ state }));
-    const second = renderers.renderCall(args, undefined, context({ state, lastComponent: first }));
+    const first = renderers.renderCall(args, theme, context({ state }));
+    const second = renderers.renderCall(args, theme, context({ state, lastComponent: first }));
 
     assert.equal(second, first);
     assert.equal(serializations, 1, "unchanged arguments must not be serialized to form a redraw cache key");
     first.render(24);
     first.render(24);
-    assert.equal(texts[0]!.layoutCalls, 1, "native Text owns unchanged-width layout caching");
-    assert.equal(texts[0]!.setTextCalls, 1);
-    assert.equal(truncations(), 1, "post-layout rows are not remapped on an unchanged redraw");
+    assert.equal(texts[1]!.layoutCalls, 1, "native Text owns unchanged-width YAML layout caching");
+    assert.equal(texts[1]!.setTextCalls, 1);
+    assert.equal(truncations(), 2, "title and YAML rows are not remapped on an unchanged redraw");
   });
 
   test("reprepares incomplete in-place-mutated arguments, then caches after completion", () => {
     const { tui, texts } = fakeTui();
+    const theme = fakeTheme();
     let serializations = 0;
     const renderers = createToolPreviewRenderers(tui, "ws__test", (value) => {
       serializations += 1;
@@ -174,18 +266,19 @@ describe("native YAML preview renderers", () => {
     });
     const args = { step: 1 };
     const state = {};
-    const first = renderers.renderCall(args, undefined, context({ state, argsComplete: false }));
+    const first = renderers.renderCall(args, theme, context({ state, argsComplete: false }));
     args.step = 2;
-    const second = renderers.renderCall(args, undefined, context({ state, lastComponent: first, argsComplete: false }));
-    const third = renderers.renderCall(args, undefined, context({ state, lastComponent: second, argsComplete: true }));
-    renderers.renderCall(args, undefined, context({ state, lastComponent: third, argsComplete: true }));
+    const second = renderers.renderCall(args, theme, context({ state, lastComponent: first, argsComplete: false }));
+    const third = renderers.renderCall(args, theme, context({ state, lastComponent: second, argsComplete: true }));
+    renderers.renderCall(args, theme, context({ state, lastComponent: third, argsComplete: true }));
 
-    assert.match(texts[0]!.text, /step: 2/);
+    assert.match(texts[1]!.text, /step: 2/);
     assert.equal(serializations, 3, "partial mutation must not reuse a stale object-identity cache");
   });
 
   test("renders JSON containers as YAML, expands only result output, and invalidates result cache by expansion", () => {
-    const { tui, strips, texts } = fakeTui();
+    const { tui, strips, texts, boxes } = fakeTui();
+    const theme = fakeTheme();
     let serializations = 0;
     const renderers = createToolPreviewRenderers(tui, "ws__test", (value) => {
       serializations += 1;
@@ -193,16 +286,18 @@ describe("native YAML preview renderers", () => {
     });
     const content = [{ type: "text", text: '{"ok":true}' }];
     const state = {};
-    const first = renderers.renderResult({ content }, { expanded: false, isPartial: false }, undefined, context({ state }));
-    const again = renderers.renderResult({ content }, { expanded: false, isPartial: false }, undefined, context({ state, lastComponent: first }));
+    const first = renderers.renderResult({ content }, { expanded: false, isPartial: false }, theme, context({ state }));
+    const again = renderers.renderResult({ content }, { expanded: false, isPartial: false }, theme, context({ state, lastComponent: first }));
     const collapsedText = texts[0]!.text;
-    const expanded = renderers.renderResult({ content }, { expanded: true, isPartial: false }, undefined, context({ state, lastComponent: again }));
+    const expanded = renderers.renderResult({ content }, { expanded: true, isPartial: false }, theme, context({ state, lastComponent: again }));
 
     assert.equal(again, first);
     assert.equal(collapsedText.split("\n").length, 10);
     assert.equal(texts[0]!.text.split("\n").length, 12);
     assert.equal(serializations, 2, "only expansion transition reparses/serializes the result");
     assert.ok(strips() >= 2, "custom YAML text is stripped through Pi's terminal-control seam");
+    assert.ok(theme.fgCalls.every((call) => !call.text.includes("\x1b")), "styles run after untrusted text is sanitized");
+    assert.equal(boxes[0]!.background?.("sample"), "<one:bg:toolSuccessBg>sample</one:bg>");
     expanded.render(20);
     expanded.render(40);
     assert.equal(texts[0]!.layoutCalls, 2, "width changes are delegated to native Text layout");
@@ -210,6 +305,7 @@ describe("native YAML preview renderers", () => {
 
   test("keeps errors, scalars, prose, later text blocks, images, and partial results on Pi's native fallback", () => {
     const { tui } = fakeTui();
+    const theme = fakeTheme();
     const renderers = createToolPreviewRenderers(tui, "ws__test");
     const cases = [
       { content: [{ type: "text", text: '{"ok":true}' }], partial: true },
@@ -221,7 +317,7 @@ describe("native YAML preview renderers", () => {
     ];
     for (const item of cases) {
       assert.throws(
-        () => renderers.renderResult({ content: item.content }, { expanded: false, isPartial: item.partial }, undefined, context({ isError: item.error })),
+        () => renderers.renderResult({ content: item.content }, { expanded: false, isPartial: item.partial }, theme, context({ isError: item.error })),
         UseNativeResultFallback,
       );
     }
@@ -233,8 +329,9 @@ describe("native YAML preview renderers", () => {
       visibleWidth(text: string): number;
     };
     const renderers = createToolPreviewRenderers(tui, "ws__git_status");
+    const theme = { fg: (_color: string, text: string) => text, bg: (_color: string, text: string) => text, bold: (text: string) => text };
     for (const value of ["界", "👩‍💻"]) {
-      const component = renderers.renderCall({ x: value }, undefined, context());
+      const component = renderers.renderCall({ x: value }, theme, context());
       for (const line of component.render(1)) {
         assert.ok(tui.visibleWidth(line) <= 1, `${JSON.stringify(value)} emitted an overwide row: ${JSON.stringify(line)}`);
       }

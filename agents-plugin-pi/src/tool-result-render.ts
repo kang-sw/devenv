@@ -3,6 +3,7 @@ import { stringify as stringifyYaml } from "yaml";
 /** The tiny host surface required for YAML previews. */
 export interface ToolResultTuiModules {
   Text: new (text?: string, paddingX?: number, paddingY?: number) => NativeText;
+  Box: new (paddingX?: number, paddingY?: number, bgFn?: (text: string) => string) => NativeBox;
   stripTerminalSequences(text: string): string;
   truncateToWidth(text: string, width: number, ellipsis?: string): string;
 }
@@ -16,6 +17,17 @@ export interface NativeText {
 export interface NativePreviewComponent {
   render(width: number): string[];
   invalidate(): void;
+}
+
+export interface NativeBox extends NativePreviewComponent {
+  addChild(component: NativePreviewComponent): void;
+  setBgFn(bgFn?: (text: string) => string): void;
+}
+
+interface ToolPreviewTheme {
+  bold(text: string): string;
+  fg(color: "toolTitle" | "toolOutput", text: string): string;
+  bg(color: "toolPendingBg" | "toolSuccessBg", text: string): string;
 }
 
 export type YamlSerializer = (value: object) => string;
@@ -39,13 +51,25 @@ interface PreviewState {
 interface BoundedText extends NativePreviewComponent {
   text: NativeText;
   source: string | undefined;
+  sanitized: string | undefined;
+  display: string | undefined;
   cachedWidth: number | undefined;
   cachedNativeLines: string[] | undefined;
   cachedLines: string[] | undefined;
 }
 
+interface CallPreviewComponent extends NativePreviewComponent {
+  title: BoundedText;
+  input: BoundedText;
+  inputBox: NativeBox;
+}
+
+interface ResultPreviewComponent extends NativePreviewComponent {
+  output: BoundedText;
+  outputBox: NativeBox;
+}
+
 const previewStateKey = Symbol("ws-yaml-logical-preview");
-const components = new WeakMap<object, BoundedText>();
 
 /**
  * Pi catches renderer errors and uses its standard text/image fallback for
@@ -104,6 +128,8 @@ function createBoundedText(tui: ToolResultTuiModules): BoundedText {
   const component: BoundedText = {
     text: new tui.Text("", 0, 0),
     source: undefined,
+    sanitized: undefined,
+    display: undefined,
     cachedWidth: undefined,
     cachedNativeLines: undefined,
     cachedLines: undefined,
@@ -130,22 +156,69 @@ function createBoundedText(tui: ToolResultTuiModules): BoundedText {
   return component;
 }
 
-function updateText(tui: ToolResultTuiModules, lastComponent: unknown, source: string): BoundedText {
-  const component = isObjectLike(lastComponent) ? components.get(lastComponent) : undefined;
-  const next = component ?? createBoundedText(tui);
-  if (next.source !== source) {
-    next.text.setText(tui.stripTerminalSequences(source));
-    next.source = source;
-    next.cachedWidth = undefined;
-    next.cachedNativeLines = undefined;
-    next.cachedLines = undefined;
+function updateText(
+  tui: ToolResultTuiModules,
+  component: BoundedText,
+  source: string,
+  style: (text: string) => string,
+): void {
+  if (component.source !== source) {
+    component.source = source;
+    component.sanitized = tui.stripTerminalSequences(source);
   }
-  components.set(next, next);
-  return next;
+  // Style only the already-sanitized native text. Re-applying it on redraw
+  // detects theme changes without reserializing or rewrapping YAML.
+  const display = style(component.sanitized ?? "");
+  if (component.display !== display) {
+    component.text.setText(display);
+    component.display = display;
+    component.cachedWidth = undefined;
+    component.cachedNativeLines = undefined;
+    component.cachedLines = undefined;
+  }
 }
 
-function callDisplayText(toolName: string, preview: string): string {
-  return preview ? `${toolName}\n${preview}` : toolName;
+function isCallPreviewComponent(component: unknown): component is CallPreviewComponent {
+  return isObjectLike(component) && "title" in component && "inputBox" in component;
+}
+
+function isResultPreviewComponent(component: unknown): component is ResultPreviewComponent {
+  return isObjectLike(component) && "output" in component && "outputBox" in component;
+}
+
+function createCallPreviewComponent(tui: ToolResultTuiModules): CallPreviewComponent {
+  const title = createBoundedText(tui);
+  const input = createBoundedText(tui);
+  const inputBox = new tui.Box(0, 0);
+  inputBox.addChild(input);
+  return {
+    title,
+    input,
+    inputBox,
+    render(width: number): string[] {
+      return [...title.render(width), ...inputBox.render(width)];
+    },
+    invalidate(): void {
+      title.invalidate();
+      inputBox.invalidate();
+    },
+  };
+}
+
+function createResultPreviewComponent(tui: ToolResultTuiModules): ResultPreviewComponent {
+  const output = createBoundedText(tui);
+  const outputBox = new tui.Box(0, 0);
+  outputBox.addChild(output);
+  return {
+    output,
+    outputBox,
+    render(width: number): string[] {
+      return outputBox.render(width);
+    },
+    invalidate(): void {
+      outputBox.invalidate();
+    },
+  };
 }
 
 export interface PreviewRenderContext {
@@ -171,8 +244,9 @@ export function createToolPreviewRenderers(
   ): NativePreviewComponent;
 } {
   return {
-    renderCall(args, _theme, context) {
+    renderCall(args, theme, context) {
       const state = stateFor(context);
+      const previewTheme = theme as ToolPreviewTheme;
       // Streaming argument objects can be mutated in place. Re-prepare while
       // incomplete; after completion their stable object identity is enough.
       const preview = context.argsComplete && state.input?.args === args
@@ -180,10 +254,17 @@ export function createToolPreviewRenderers(
         : yamlInputPreview(args, serialize);
       if (context.argsComplete) state.input = { args, text: preview };
       else state.input = undefined;
-      return updateText(tui, context.lastComponent, callDisplayText(toolName, preview));
+
+      const component = isCallPreviewComponent(context.lastComponent)
+        ? context.lastComponent
+        : createCallPreviewComponent(tui);
+      updateText(tui, component.title, toolName, (text) => previewTheme.fg("toolTitle", previewTheme.bold(text)));
+      updateText(tui, component.input, preview, (text) => previewTheme.fg("toolOutput", text));
+      component.inputBox.setBgFn((text) => previewTheme.bg("toolPendingBg", text));
+      return component;
     },
 
-    renderResult(result, options, _theme, context) {
+    renderResult(result, options, theme, context) {
       if (options.isPartial || context.isPartial || context.isError || !isSingleTextContent(result.content)) {
         throw new UseNativeResultFallback();
       }
@@ -197,7 +278,14 @@ export function createToolPreviewRenderers(
       if (rendered === undefined) throw new UseNativeResultFallback();
       const text = options.expanded ? rendered.replace(/\r\n?/g, "\n") : logicalPreview(rendered);
       state.result = { content: result.content, expanded: options.expanded, text };
-      return updateText(tui, context.lastComponent, text);
+
+      const component = isResultPreviewComponent(context.lastComponent)
+        ? context.lastComponent
+        : createResultPreviewComponent(tui);
+      const previewTheme = theme as ToolPreviewTheme;
+      updateText(tui, component.output, text, (output) => previewTheme.fg("toolOutput", output));
+      component.outputBox.setBgFn((output) => previewTheme.bg("toolSuccessBg", output));
+      return component;
     },
   };
 }
@@ -207,6 +295,7 @@ export async function loadToolResultTuiModules(): Promise<ToolResultTuiModules |
   try {
     const tui = await import("@earendil-works/pi-tui") as unknown as ToolResultTuiModules;
     return typeof tui?.Text === "function" &&
+      typeof tui?.Box === "function" &&
       typeof tui?.stripTerminalSequences === "function" &&
       typeof tui?.truncateToWidth === "function"
       ? tui
