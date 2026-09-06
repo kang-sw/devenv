@@ -640,14 +640,18 @@ describe("Pi tool-result YAML rendering", () => {
     );
   });
 
-  test("normalizes tabs, keycaps, and terminal control sequences before width-safe rendering", () => {
+  test("normalizes tabs, keycaps, decorated emoji, and terminal control sequences before width-safe rendering", () => {
     const tabs = renderResultRows([{ type: "text", text: "a\tb" }], { isError: false, expanded: true, width: 2, expandHint: plainHint });
     const keycaps = renderResultRows([{ type: "text", text: "1️⃣1️⃣" }], { isError: false, expanded: true, width: 2, expandHint: plainHint });
+    const decoratedEmoji = ["🙂\u0301🙂\u0301", "🙂\uFE0E🙂\uFE0E"].map((text) =>
+      renderResultRows([{ type: "text", text }], { isError: false, expanded: true, width: 2, expandHint: plainHint }),
+    );
     const controls = renderResultRows([{ type: "text", text: "before\x1b[2J\x1b[Hafter\x1b]52;c;clipboard\x07" }], { isError: false, expanded: true, width: 80, expandHint: plainHint });
     assert.deepEqual(tabs, ["a ", "  ", "b"]);
     assert.deepEqual(keycaps, ["1️⃣", "1️⃣"]);
+    assert.deepEqual(decoratedEmoji, [["🙂\u0301", "🙂\u0301"], ["🙂\uFE0E", "🙂\uFE0E"]]);
     assert.deepEqual(controls, ["beforeafter"]);
-    for (const row of [...tabs, ...keycaps, ...controls]) assert.ok(visibleDisplayWidth(row) <= 2 || row === "beforeafter");
+    for (const row of [...tabs, ...keycaps, ...decoratedEmoji.flat(), ...controls]) assert.ok(visibleDisplayWidth(row) <= 2 || row === "beforeafter");
   });
 
   test("preserves an image fallback when Pi image display is disabled", () => {

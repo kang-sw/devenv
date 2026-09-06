@@ -105,6 +105,9 @@ function graphemeDisplayWidth(grapheme: string): number {
   const code = base.codePointAt(0);
   if (code === undefined) return 0;
   if (code >= 0x1f1e6 && code <= 0x1f1ff) return 2;
+  // Pi falls back to East Asian Width when a decorated emoji is no longer an
+  // exact RGI sequence. Its supplementary emoji block is still two cells.
+  if (code >= 0x1f000 && code <= 0x1faff) return 2;
   return (
     (code >= 0x1100 && code <= 0x115f) ||
     (code >= 0x2329 && code <= 0x232a) ||
