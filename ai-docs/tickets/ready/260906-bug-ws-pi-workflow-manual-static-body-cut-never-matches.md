@@ -4,6 +4,10 @@ related:
   260904-feat-ws-pi-lead-bootstrap-system-prompt: introduced the cut and deferred its live check
 spec:
   - pi-adapter-runtime
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-completeness-reviewed: 9be6115af39dfe80
+sage-review-design-reviewed: 9be6115af39dfe80
 ---
 
 # Pi bridge's workflow_manual static-body cut never matches a real render, so every lead session degrades to workflow_state with a false "renderer drift" warning
@@ -42,10 +46,11 @@ Both edits land inside the static body, so `response.indexOf(snapshot)` is
 `-1` for every lead session, and the first model-invoked `ws__workflow_manual`
 call in a session (typically an entry skill such as `lead-discuss` or
 `lead-revive`) takes the fallback: the warning is notified once, the call is
-answered by `workflow_state`, and the per-call advisories (`# Manuals`, repo
-notes, watermark and doc-coverage warnings, skeptical posture, the unset-tier
-advisory's carrier) are lost for the session. Nothing drifted mid-session; the
-cut was wrong from its first run.
+answered by `workflow_state`, and the ws-mcp-side prepends (`# Manuals`, repo
+notes, watermark, doc-coverage and checkpoint warnings, skeptical posture) are
+lost for the session. The adapter's own unset-tier advisory still rides the
+fallback response, since `dispatchMappedWorkflowManual` applies it on both
+branches. Nothing drifted mid-session; the cut was wrong from its first run.
 
 Why it was not caught: the session-key injection landed 2026-06-30
 (`82d399e4`) and the fresh-only strip with the original `workflow_manual`
@@ -63,21 +68,33 @@ Adapter-only. Replace the exact-substring cut with an **anchor cut** that does
 not depend on the body being byte-identical:
 
 - Start anchor: the first non-empty line of the session-start snapshot
-  (today `# Workflow Manual`), located in the response. Keeping the anchor
-  derived from the `playbook.print` render keeps ws-mcp's render the single
-  source of the heading text; the adapter does not hardcode it.
+  (today `# Workflow Manual`), matched as a whole line (line start to
+  newline, not a substring) at its first occurrence in the response. The
+  material ws-mcp prepends is blockquotes and other headings (`# Manuals`,
+  `# Notes`, warning lines), none equal to the body's opening line, and the
+  body's own copy comes before any later mention. Keeping the anchor derived
+  from the `playbook.print` render keeps ws-mcp's render the single source of
+  the heading text; the adapter does not hardcode it.
 - End anchor: the `## Session Key` heading that ws-mcp appends immediately
   after the body in every CONTINUE response (spec `{#260905-pi-workflow-manual-state-mapping}`
   already names it as the first per-call section). The cut removes
   `[start, end)` and keeps everything before the body (advisory blocks that
   ws-mcp prepends) and everything from `## Session Key` on.
-- Fallback stays: when either anchor is missing, or the end anchor precedes
-  the start anchor, the bridge dispatches `workflow_state` as today. The
-  warning text drops "renderer drift" as the stated cause and says which
-  anchor was missing, since the fallback is now the genuine drift signal.
-- `cutStaticBody(response, snapshot)` keeps its signature and purity; only its
-  matching rule changes. `notifyMappingDegraded` gains the missing-anchor
-  reason as an argument.
+- Fallback stays: when exactly one anchor is missing, or the end anchor
+  precedes the start anchor, the bridge dispatches `workflow_state` as today.
+  The warning text drops "renderer drift" as the stated cause and says which
+  anchor was missing.
+- Neither anchor present: the response carries no manual body to cut, so it
+  is forwarded unchanged with the fixed mapping line and no warning. This is
+  the shape of ws-mcp's early return for a key with no restorable state
+  (`## Session State (no restorable state for session key ...)`), which
+  today trips the same fallback and then fail-louds again in
+  `workflow_state`; forwarding it keeps ws-mcp's own notice as the single
+  error surface.
+- `cutStaticBody(response, snapshot)` keeps its parameters and purity; its
+  return gains a `reason` (`"start-anchor" | "end-anchor" | "order" |
+  "no-body"`) beside `text`/`found`, and `notifyMappingDegraded(reason)`
+  carries it into the warning.
 - Rejected: mirroring ws-mcp's two edits onto the snapshot before matching.
   That couples the adapter to Go internals (the key-line wording, the marker
   names, the insertion point) and breaks again on the next such edit; the
@@ -90,7 +107,8 @@ not depend on the body being byte-identical:
 `pi-adapter-runtime` `{#260905-pi-workflow-manual-state-mapping}`: the
 Primary bullet's "exact substring match against a static-body snapshot" becomes
 the anchor cut (snapshot first line to `## Session Key`); the Fallback bullet's
-trigger becomes a missing anchor rather than "the snapshot body is not found".
+trigger becomes exactly one missing anchor rather than "the snapshot body is
+not found", with a response carrying neither anchor forwarded unchanged.
 
 ## Constraints
 
@@ -104,15 +122,21 @@ trigger becomes a missing anchor rather than "the snapshot body is not found".
 ### Phase 1: Anchor cut and real-shaped fixtures
 
 Change `cutStaticBody` to the anchor rule, thread the missing-anchor reason
-into the warning, and replace the synthetic fixtures with a real-shaped pair: a
-snapshot containing the fresh-only region and the `**Session invariant:**`
-blockquote, and a response with that region stripped, the session-key line
-injected, advisory blocks prepended, and `## Session Key` plus state appended.
-Tests: the real-shaped pair cuts to exactly the prepended advisories plus the
+into the warning, and replace the synthetic fixtures with a pair **captured
+from a real ws-mcp render**, not hand-authored: run `playbook.print` and
+`workflow_manual` under one key against this repository, trim the appended
+state and notes to a few lines, and commit both texts as fixtures. The pair
+must show the fresh-only region and the `**Session invariant:**` blockquote in
+the snapshot, and the region stripped, the session-key line injected, advisory
+blocks prepended, and `## Session Key` plus state appended in the response.
+Tests: the captured pair cuts to exactly the prepended advisories plus the
 sections from `## Session Key` on; a response lacking `## Session Key` falls
-back with the end-anchor reason; a response lacking the heading line falls back
-with the start-anchor reason; the existing fallback-dispatch and advisory-keying
-tests keep passing. Amend the spec passage under Spec Impact. Live check
+back with the end-anchor reason; a response with `## Session Key` but no
+heading line falls back with the start-anchor reason; the no-restorable-state
+notice is forwarded unchanged with no warning; the two existing advisory-keying
+tests are reshaped to include `## Session Key` so they cover the cut-hit path
+rather than silently taking the fallback; the fallback-dispatch tests keep
+passing. Amend the spec passage under Spec Impact. Live check
 (owner-run): in a Pi lead session, call an entry skill that invokes
 `workflow_manual` and confirm no warning, a response opening with the fixed
 mapping line followed by the advisories and `## Session Key`, and no manual
