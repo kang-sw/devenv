@@ -55,6 +55,24 @@ a tool failure (a thrown execution), not as a successful result — Pi sets a
 tool's error state only when its `execute` throws, so a ws-mcp failure that was
 returned as ordinary text is re-raised rather than reported as success.
 
+Bridged tool result rows display the first text block as YAML when it parses
+as a JSON object or array. Later text, prose, scalar JSON, malformed JSON,
+and errors are not converted; serialization failure falls back to text.
+This is display-only: execution content and details remain unchanged for
+the model, and Pi retains original image blocks with a textual fallback
+when image display is disabled. Terminal controls are sanitized for display.
+
+Collapsed previews normally show ten wrapped rows plus an omitted-row marker
+and expand hint, using Pi's own width measurement. Expanded rows show the
+full display; an indivisible grapheme wider than the available row uses a
+`?` placeholder. If host width loading is unavailable, YAML rendering remains
+active: select ten newline-separated logical lines, escape non-ASCII text
+as ASCII Unicode escapes, then safely wrap the body and marker/hint. This
+unstyled fallback may occupy more than ten physical rows and has reduced
+Unicode readability; expanding removes the logical-line cap. Nonpositive
+width emits no rows. These transforms never modify the model's result.
+Headless execution does not invoke the TUI renderer.
+
 ## Session key stays optional and caller-controllable {#260903-pi-bridge-session-key-fill-forward}
 
 ws-mcp requires a `session_key` on every root-aware tool. On the Pi side the key
