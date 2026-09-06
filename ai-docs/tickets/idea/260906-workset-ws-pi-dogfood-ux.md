@@ -26,11 +26,28 @@ None yet. This is a non-hierarchical collection, not an implementation target.
   improvement. Creation condition: the owner chooses to move this collected
   request into implementation planning; do not create another ticket now.
 
+- **Agent row model and usage visibility** — Extend agent rows such as
+  `b9b83114 · execute · awaiting approval · 21s` with
+  `<model-name> (<effort>)`. Also show current input-token count and a
+  corresponding monetary cost if available. Intended role: make the model,
+  reasoning effort, and resource usage visible alongside agent status.
+  Creation condition: the owner moves the collected request into planning;
+  this entry does not assert that runtime usage or billing data is available.
+- **Agent count above the agent list** — The owner observes the
+  `ws: 1 agents` row appearing after the `openai-codex-usage` widget. Explore
+  placing that row above the agent list instead of appending it at the tail.
+  Intended role: keep the agent count visually grouped with the agent list.
+  Creation condition: the owner moves the collected request into planning;
+  feasibility and current widget ordering have not been independently verified.
+
 ## Focus
 
 Capture additional owner-supplied UX requests in this same collection before
 implementation planning. No styling implementation or queue promotion is
 requested by this ticket. Specific palette values are not settled.
+Use `ws-ask` for questions requiring owner discussion while gathering these
+requests. Token accounting scope, cost currency, and estimate/unavailable
+presentation need owner clarification before implementation planning.
 
 ## Exit Criteria
 
