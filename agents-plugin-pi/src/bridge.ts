@@ -26,8 +26,6 @@
  */
 
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import { createToolResultComponent, loadToolResultWidth } from "./tool-result-render.ts";
-export { renderResultRows, renderResultText, yamlDisplayText } from "./tool-result-render.ts";
 import { spawnWsMcpClient, type McpStdioClient, type McpContentItem, type McpToolCallResult } from "./mcp-stdio-client.ts";
 import { assertVersionPin, readRuntimeContract } from "./version-check.ts";
 import { WS_PI_PARENT_SESSION_KEY_ENV, isLeadOrFork, readSpawnRole, type SpawnRole } from "./process-role.ts";
@@ -44,8 +42,6 @@ export interface BridgeOptions {
   /** Working directory of the Pi session — used as the ferrule bootstrap root. */
   cwd: string;
   ui?: ExtensionUIContext;
-  /** Optional host/test seam; undefined metric selects the supported logical-line preview. */
-  resultWidthLoader?: typeof loadToolResultWidth;
 }
 
 export interface BridgeHandle {
@@ -464,7 +460,6 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     assertVersionPin(runtime, initResult.serverInfo.version);
 
     tools = filterOutMercenaryTools(await client.listTools());
-    const measureResultWidth = await (opts.resultWidthLoader ?? loadToolResultWidth)();
 
     for (const tool of tools) {
       const rawName = tool.name;
@@ -482,11 +477,6 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
         // symbols at runtime. ws-mcp's inputSchema is already a plain
         // {type, properties, required} object, so no typebox shim is needed.
         parameters: withOptionalSessionKey(tool.inputSchema) as never,
-        // The cycle-free factory is also the Phase 2 reuse seam for Pi-native
-        // dispatch tools; it leaves Pi-owned image blocks in execute content.
-        renderResult(result, options, theme, context) {
-          return createToolResultComponent(result.content, options, theme, context, measureResultWidth);
-        },
         async execute(_toolCallId, params, _signal, _onUpdate, toolCtx) {
           // Dispatch always uses the RAW dotted name — sanitization is
           // registration-only, never part of the ws-mcp wire call.
