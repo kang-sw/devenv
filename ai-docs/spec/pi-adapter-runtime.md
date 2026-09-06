@@ -131,6 +131,22 @@ directly into the lead's system prompt and the handshake becomes unnecessary.
      and a **verb routing table** with one row per Pi lead verb. The guide is
      structured so later tickets extend the verb table with their own rows rather
      than rewriting shared text.
+  3. an **`<available_skills>` block** (260906 Phase 1) — the adapter's own
+     substitute for Pi's own skill-loading system-prompt block, which is never
+     rendered for a ws lead/fork session at all (see "Skill exposure"). Sourced
+     from `pi.getCommands()`'s `source: "skill"` entries, captured once at
+     session start (a live snapshot of the SAME list backing Pi's own
+     `/skill:<name>` slash commands, not a ws-tree scan — every installed
+     skill, ws or otherwise). Each entry's SKILL.md frontmatter is read at
+     block-build time (not cached with the list), and an entry whose
+     frontmatter sets `disable-model-invocation: true` is excluded from the
+     block — still loadable by exact name via `ws-skill`, mirroring Pi's own
+     `formatSkillsForPrompt` exclusion. The block's preamble tells the model to
+     load a skill with `ws-skill <name>`, never `read` (absent from this
+     surface), and omits Pi's own "resolve relative paths against the skill
+     directory" line, since `ws-skill` takes a name, not a path. A
+     missing/unreadable SKILL.md is silently skipped from the block rather
+     than surfaced as an error there.
 - Fetch cadence: the block is assembled **once per session start** and held in
   extension memory; it is not re-fetched per turn. The dynamic material is
   refreshed only when an entry-point skill calls `workflow_manual` (the same
@@ -208,6 +224,24 @@ canonical path unconditionally, so a checkout missing both simply exposes no
 skills rather than failing. ws skill directory names are already hyphen-form
 (`lead-add-rule`, `lead-proceed`, …), which matches Pi's skill-name charset, so
 no renaming is required.
+
+On the reshaped lead/fork tool surface (see "Lead native tool-surface
+reshaping"), native `read` and `bash` are both absent, so Pi's own
+skill-loading path — the `<available_skills>` block instructing the model to
+`read` a listed SKILL.md, and the `/skill:<name>` slash-command expansion a
+human types — is not something the model itself can act on for a `read`-based
+load. Pi's own block is never rendered for a ws lead/fork session in the first
+place: its generation is part of the same system-prompt assembly the ws block
+is appended alongside, not instead of, and with no ws-owned substitute it is
+simply absent, leaving the lead unable to see or load a skill it was not
+already told about via `/skill:<name>`. The adapter closes that gap with its
+own substitute, sourced from the same `pi.getCommands()` list Pi's own
+`/skill:<name>` uses (not a ws-tree directory scan, so it covers ws skills and
+any other installed skill alike): its own `<available_skills>` list appended
+to the ws system-prompt block (see "Lead bootstrap: workflow manual + Pi lead
+guide in the system prompt") and its own `ws-skill(name, args?)` loader,
+gated the same lead-or-fork way as the rest of the reshaped surface (see
+"Lead native tool-surface reshaping").
 
 ## Process lifecycle {#260903-pi-bridge-subprocess-lifecycle}
 
@@ -735,6 +769,13 @@ backgrounds, fixed 4KB output cap) — the read tool and the one-liner exec
 hatch both staying available as soft-discouraged escape hatches, the latter
 with no approval gate for the same reason as `ws-worker-exec`'s exclusion
 below —
+and adds `ws-skill` (260906 Phase 1) — the adapter's own skill loader,
+described under "Skill exposure" — for both the lead and a fork alike, via
+the same `isLeadOrFork` role gate the rest of this reshape uses. `ws-skill`'s
+addition is a separate step from the shared added-tool set above, not folded
+into it: that set is the execute/approve gateway's own module boundary
+(`computeLeadActiveTools`), and `ws-skill` belongs to the skill-exposure
+concern instead —
 and **excludes the worker-only `ws-worker-exec` from the lead's active set**.
 That last exclusion is load-bearing: `ws-worker-exec`
 must be registered so a worker process (loading the same extension) can activate

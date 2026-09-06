@@ -27,6 +27,10 @@
 
 import type { BeforeAgentStartEventResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isLeadOrFork, readSpawnRole, type SpawnRole } from "./process-role.ts";
+import { computeLeadActiveTools } from "./execute-gateway.ts";
+import { addForkToolIfLead } from "./fork.ts";
+import { addAskToolsIfLead } from "./ask.ts";
+import { addSkillToolIfLeadOrFork, buildSkillsBlock, type LoadedSkill, type SkillEntry } from "./lead-skills.ts";
 
 /**
  * Fixed marker line prefixed onto the manual snapshot inside the ws block —
@@ -39,11 +43,16 @@ export const SESSION_START_SNAPSHOT_MARKER =
 
 /**
  * Builds the full ws system-prompt block: the manual snapshot (prefixed by
- * the fixed marker line) first, the Pi lead guide second — order per §1.
- * Pure string composition, no IO.
+ * the fixed marker line) first, the Pi lead guide second, the
+ * `<available_skills>` block (260906 Phase 1, see lead-skills.ts) third —
+ * order per §1/§4/260906. Pure string composition, no IO. `skillsBlock` may
+ * be `""` (no visible skills) — joined in unconditionally, tolerating a
+ * harmless extra blank line, the same tolerance Pi's own
+ * `formatSkillsForPrompt`-into-`buildSystemPrompt` concatenation already has
+ * for an empty skills set.
  */
-export function buildWsBlock(manualSnapshot: string, guideText: string): string {
-  return `${SESSION_START_SNAPSHOT_MARKER}\n\n${manualSnapshot}\n\n${guideText}`;
+export function buildWsBlock(manualSnapshot: string, guideText: string, skillsBlock: string): string {
+  return `${SESSION_START_SNAPSHOT_MARKER}\n\n${manualSnapshot}\n\n${guideText}\n\n${skillsBlock}`;
 }
 
 /**
@@ -64,6 +73,58 @@ export function computeBeforeAgentStartResult(
     return undefined;
   }
   return { systemPrompt: `${systemPrompt}\n\n${wsBlock}` };
+}
+
+/** Inputs to `computeSessionBootstrap` — everything `index.ts`'s `session_start` otherwise threaded through three separate `pi.getActiveTools()`/`pi.setActiveTools()` round-trips plus a standalone `buildWsBlock` call. */
+export interface SessionBootstrapInputs {
+  role: SpawnRole | undefined;
+  /** `handle.manualSnapshotRef.current` — `undefined`/empty means a degraded or not-yet-resolved bootstrap. */
+  manualSnapshot: string | undefined;
+  guideText: string;
+  skillEntries: readonly SkillEntry[];
+  loadSkillFile: (path: string) => LoadedSkill;
+  currentActiveTools: readonly string[];
+}
+
+export interface SessionBootstrapResult {
+  /** `undefined` means "leave `wsBlockRef.current` untouched" — never a mandate to clear it. */
+  wsBlock: string | undefined;
+  activeTools: string[];
+}
+
+/**
+ * 260906 Phase 1 testability extraction: the single pure function that
+ * produces the WHOLE lead/fork session-start outcome — the ws system-prompt
+ * block AND the reshaped tool surface — for a given role, so a test can
+ * drive `index.ts`'s actual sequencing (role gate -> skills block ->
+ * `buildWsBlock` -> `computeLeadActiveTools` -> `addForkToolIfLead` ->
+ * `addAskToolsIfLead` -> `addSkillToolIfLeadOrFork`) without re-implementing
+ * a second copy of that order inside the test itself. `index.ts` calls this
+ * once per `session_start` and applies the result (`wsBlockRef.current =
+ * result.wsBlock` only when it is not `undefined`; a single
+ * `pi.setActiveTools(result.activeTools)`), collapsing what used to be three
+ * separate `pi.setActiveTools()`/`pi.getActiveTools()` round-trips into one.
+ *
+ * `worker`/`explore` short-circuit to `{ wsBlock: undefined, activeTools:
+ * [...currentActiveTools] }` — no block, no reshape, tool surface passed
+ * through unchanged (matches the pre-260906 behavior: those roles were never
+ * touched by any of the four reshape steps).
+ */
+export function computeSessionBootstrap(inputs: SessionBootstrapInputs): SessionBootstrapResult {
+  const { role, manualSnapshot, guideText, skillEntries, loadSkillFile, currentActiveTools } = inputs;
+  if (!isLeadOrFork(role)) {
+    return { wsBlock: undefined, activeTools: [...currentActiveTools] };
+  }
+
+  const skillsBlock = buildSkillsBlock(skillEntries, loadSkillFile);
+  const wsBlock = manualSnapshot ? buildWsBlock(manualSnapshot, guideText, skillsBlock) : undefined;
+
+  let activeTools = computeLeadActiveTools(currentActiveTools);
+  activeTools = addForkToolIfLead(activeTools, role);
+  activeTools = addAskToolsIfLead(activeTools, role);
+  activeTools = addSkillToolIfLeadOrFork(activeTools, role);
+
+  return { wsBlock, activeTools };
 }
 
 /**
