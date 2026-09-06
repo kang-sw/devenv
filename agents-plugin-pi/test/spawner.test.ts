@@ -94,6 +94,7 @@ import {
   hasRunningAgents,
   flushHeldPushes,
   heldPushQueue,
+  leadCompactingRef,
   leadIdleRef,
   markAgentExited,
   probeAgentLiveness,
@@ -1246,11 +1247,13 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     idle = true;
     heldPushQueue.length = 0;
     leadIdleRef.current = () => idle;
+    leadCompactingRef.current = false;
   });
 
   afterEach(() => {
     heldPushQueue.length = 0;
     leadIdleRef.current = undefined;
+    leadCompactingRef.current = false;
   });
 
   test("an IDLE lead is pushed to immediately — holding would only delay the wake", () => {
@@ -1302,6 +1305,61 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
       ["ws-agent-approval", "ws-agent-question"],
     );
     assert.deepEqual(heldPushQueue, [], "a blocked child cannot wait for the lead's turn to end");
+  });
+
+  test("260906 (Phase 1): a steer push is held while a compaction is in flight, even on an otherwise-idle lead", () => {
+    leadCompactingRef.current = true;
+    const pi = fakePi();
+    const record = liveRpcRecord({ agentId: "a", running: true });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+    pushToLead(pi.api, registry, record, "ws-agent-approval", { cmd_id: "c1" }, "steer");
+    assert.deepEqual(pi.sent, [], "sendCustomMessage bypasses Pi's own compaction guard — this hold is the only thing stopping it");
+    assert.equal(heldPushQueue.length, 1);
+
+    leadCompactingRef.current = false;
+    assert.equal(flushHeldPushes(pi.api), 1);
+    assert.equal(pi.sent[0]!.options?.deliverAs, "steer", "released with the SAME delivery mode it was held under");
+  });
+
+  test("260906 (Phase 1): a steer push mid-turn but NOT compacting still bypasses the hold as before", () => {
+    idle = false;
+    leadCompactingRef.current = false;
+    const pi = fakePi();
+    pushToLead(pi.api, new Map(), undefined, "ws-agent-approval", { cmd_id: "c1" }, "steer");
+    assert.equal(pi.sent.length, 1);
+    assert.deepEqual(heldPushQueue, []);
+  });
+
+  test("260906 (Phase 1): a followUp push is held while compacting even when leadIdleRef itself reports idle", () => {
+    leadCompactingRef.current = true;
+    const pi = fakePi();
+    pushToLead(pi.api, new Map(), undefined, "ws-agent-report", { report: "mid-compaction" }, "followUp");
+    assert.deepEqual(pi.sent, []);
+    assert.equal(heldPushQueue.length, 1);
+
+    leadCompactingRef.current = false;
+    assert.equal(flushHeldPushes(pi.api), 1);
+    assert.equal(pi.sent[0]!.options?.deliverAs, "followUp");
+  });
+
+  test("260906 (Phase 1): registerPushFlush's agent_settled handler does not flush while compacting", () => {
+    leadCompactingRef.current = true;
+    const sent: string[] = [];
+    let settled: (() => void) | undefined;
+    const api = {
+      on: (event: string, handler: () => void) => void (event === "agent_settled" && (settled = handler)),
+      sendMessage: (message: { customType?: string }) => void sent.push(message.customType ?? ""),
+    } as unknown as Parameters<typeof registerPushFlush>[0];
+    registerPushFlush(api);
+
+    heldPushQueue.push({ kind: "push", registry: undefined, record: undefined, family: "ws-agent-report", payload: { report: "held" }, deliverAs: "followUp" });
+    settled?.();
+    assert.deepEqual(sent, [], "the abort inside ctx.compact() settles the doomed turn before Pi's own compaction flag is set — this gate is what stops a premature flush into it");
+    assert.equal(heldPushQueue.length, 1, "left for releaseAfterCompaction to flush once the compaction actually finishes");
+
+    leadCompactingRef.current = false;
+    settled?.();
+    assert.deepEqual(sent, ["ws-agent-report"], "an ordinary settle once compaction is over flushes normally");
   });
 
   test("the live-run failure itself: three workers, two finals landing mid-turn, read 1 then 0 — never a premature 0", () => {
@@ -1379,7 +1437,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
       assert.deepEqual(pi.sent, []);
 
       // And the flush handler itself is a no-op there, even with a stale entry.
-      heldPushQueue.push({ registry: undefined, record: undefined, family: "ws-agent-report", payload: { report: "stale" } });
+      heldPushQueue.push({ kind: "push", registry: undefined, record: undefined, family: "ws-agent-report", payload: { report: "stale" }, deliverAs: "followUp" });
       let settled: (() => void) | undefined;
       const api = { on: (event: string, handler: () => void) => void (event === "agent_settled" && (settled = handler)), sendMessage: () => assert.fail("a worker process must not push") };
       registerPushFlush(api as unknown as Parameters<typeof registerPushFlush>[0]);

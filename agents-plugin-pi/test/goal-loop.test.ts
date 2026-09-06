@@ -22,11 +22,12 @@
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
 
-import { test, describe, after } from "node:test";
+import { test, describe, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   readGoalLoopConfig,
   resolveRunawayThreshold,
@@ -43,11 +44,13 @@ import {
   recordToolCall,
   decideOnSettle,
   isChildProcess,
+  registerGoalLoop,
   DEFAULT_RUNAWAY_THRESHOLD,
   DEFAULT_COMPACTION_ADVISORY_PERCENT,
   type GoalLoopConfig,
 } from "../src/goal-loop.ts";
 import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
+import { leadCompactingRef, heldPushQueue } from "../src/spawner.ts";
 
 const tmpDir = mkdtempSync(join(tmpdir(), "ws-goal-loop-test-"));
 after(() => {
@@ -254,9 +257,9 @@ describe("buildGoalReminder", () => {
     assert.match(reminder, /advisory/i);
   });
 
-  test("percent below the advisory point renders a neutral usage line", () => {
+  test("percent below the advisory point explicitly tells the model not to compact", () => {
     const reminder = buildGoalReminder("a goal", { percent: 42, advisoryPercent: 70 });
-    assert.match(reminder, /Context usage: 42% of window\.$/m);
+    assert.match(reminder, /Context usage: 42% of window — below the compaction advisory point \(70%\); do not call goal-compact-and-continue\.$/m);
   });
 
   test("percent at the advisory point renders the stronger nudge phrase", () => {
@@ -418,6 +421,46 @@ describe("decideOnSettle", () => {
     const explicitFalse = decideOnSettle(state, 10, false);
     assert.deepEqual(withDefault, explicitFalse);
   });
+
+  test("260906 (Phase 1): compacting on an active goal neither re-injects nor advances the streak", () => {
+    const state = armGoal("a goal");
+    const { next, decision } = decideOnSettle(state, 10, false, true);
+    assert.deepEqual(decision, { action: "waiting" });
+    // Reference identity, not just structural equality — a true no-op
+    // pass-through, mirroring the yield branch's own assertion shape.
+    assert.equal(next, state);
+  });
+
+  test("260906 (Phase 1): compacting dominates yielding — both true still reports waiting, unchanged", () => {
+    const state = armGoal("a goal");
+    const { next, decision } = decideOnSettle(state, 10, true, true);
+    assert.deepEqual(decision, { action: "waiting" });
+    assert.equal(next, state);
+  });
+
+  test("260906 (Phase 1): compacting on an INACTIVE goal still ignores — compacting never resurrects an inactive loop", () => {
+    const state = initialGoalLoopState();
+    const { next, decision } = decideOnSettle(state, 10, false, true);
+    assert.deepEqual(decision, { action: "ignore" });
+    assert.equal(next, state);
+  });
+
+  test("260906 (Phase 1): sawToolCallThisCycle and noToolCallStreak are untouched by a waiting decision", () => {
+    let state = armGoal("a goal");
+    state = decideOnSettle(state, 10).next; // streak 1
+    state = recordToolCall(state);
+    const { next, decision } = decideOnSettle(state, 10, false, true);
+    assert.deepEqual(decision, { action: "waiting" });
+    assert.equal(next.noToolCallStreak, 1, "unchanged from before the waiting settle");
+    assert.equal(next.sawToolCallThisCycle, true, "unchanged from before the waiting settle");
+  });
+
+  test("260906 (Phase 1): omitting the fourth argument still defaults to false — pre-existing three-argument call sites are unaffected", () => {
+    const state = armGoal("a goal");
+    const withDefault = decideOnSettle(state, 10, true);
+    const explicitFalse = decideOnSettle(state, 10, true, false);
+    assert.deepEqual(withDefault, explicitFalse);
+  });
 });
 
 describe("isChildProcess", () => {
@@ -443,5 +486,214 @@ describe("isChildProcess", () => {
 
   test("false when other env vars are present but the marker is not among them", () => {
     assert.equal(isChildProcess({ PATH: "/usr/bin", HOME: "/home/user" }), false);
+  });
+});
+
+/**
+ * 260906 (compaction push-hold ticket, Phase 1): `registerGoalLoop`'s IO glue
+ * around the compaction race — previously left to the live `pi --mode json`
+ * gate per this file's own top-of-file doc comment, now covered here with a
+ * fake-`pi` + duck-typed `ctx` harness, mirroring `test/ask.test.ts`'s
+ * `describe("closeThreadOnDone / injectDiscussionSummary (fake pi)")` shape.
+ * `leadCompactingRef`/`heldPushQueue` are module state shared with
+ * `spawner.ts`, so every test here resets both.
+ */
+describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1)", () => {
+  beforeEach(() => {
+    leadCompactingRef.current = false;
+    heldPushQueue.length = 0;
+  });
+
+  afterEach(() => {
+    leadCompactingRef.current = false;
+    heldPushQueue.length = 0;
+  });
+
+  const configPath = join(tmpDir, "does-not-exist-compaction-260906.json");
+
+  function fakePi(): {
+    api: ExtensionAPI;
+    handlers: Map<string, (event: unknown, ctx: ExtensionContext) => void>;
+    commands: Map<string, (args: string, ctx: ExtensionContext) => Promise<void> | void>;
+    tools: Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>;
+    sentUserMessages: Array<{ content: unknown; options?: unknown }>;
+  } {
+    const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => void>();
+    const commands = new Map<string, (args: string, ctx: ExtensionContext) => Promise<void> | void>();
+    const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
+    const sentUserMessages: Array<{ content: unknown; options?: unknown }> = [];
+    const api = {
+      on: (event: string, handler: (event: unknown, ctx: ExtensionContext) => void) => {
+        handlers.set(event, handler);
+      },
+      registerCommand: (name: string, def: { handler: (args: string, ctx: ExtensionContext) => Promise<void> | void }) => {
+        commands.set(name, def.handler);
+      },
+      registerTool: (def: { name: string; execute: (...args: unknown[]) => Promise<unknown> }) => {
+        tools.set(def.name, def);
+      },
+      sendUserMessage: (content: unknown, options?: unknown) => {
+        sentUserMessages.push({ content, options });
+      },
+    };
+    return { api: api as unknown as ExtensionAPI, handlers, commands, tools, sentUserMessages };
+  }
+
+  /** A duck-typed `ExtensionContext` with a no-op `compact` — tests override it to capture the lever's callbacks. */
+  function fakeCtx(isIdle: () => boolean = () => true): {
+    ctx: ExtensionContext;
+    notifications: Array<{ message: string; level: string }>;
+  } {
+    const notifications: Array<{ message: string; level: string }> = [];
+    const ctx = {
+      ui: {
+        notify: (message: string, level: string) => notifications.push({ message, level }),
+        setStatus: () => {},
+      },
+      isIdle,
+      getContextUsage: () => undefined,
+      compact: () => {},
+    };
+    return { ctx: ctx as unknown as ExtensionContext, notifications };
+  }
+
+  test("release runs once when both the lever's onComplete and session_compact arrive", async () => {
+    const pi = fakePi();
+    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath });
+    const { ctx } = fakeCtx();
+
+    await pi.commands.get("goal")!("ship the widget", ctx);
+    assert.equal(pi.sentUserMessages.length, 1, "the armed announcement");
+
+    let compactCall: { onComplete?: () => void; onError?: (error: Error) => void } | undefined;
+    (ctx as unknown as { compact: (opts: unknown) => void }).compact = (opts: unknown) => {
+      compactCall = opts as never;
+    };
+    await pi.tools.get("goal-compact-and-continue")!.execute("call-1", { carry_forward: "phase 1 done" }, undefined, undefined, ctx);
+    assert.equal(leadCompactingRef.current, true, "set before ctx.compact is even called");
+
+    compactCall!.onComplete!();
+    assert.equal(leadCompactingRef.current, false);
+    assert.equal(pi.sentUserMessages.length, 2, "the re-armed reminder");
+
+    pi.handlers.get("session_compact")!({ reason: "manual" }, ctx);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(pi.sentUserMessages.length, 2, "already released by onComplete — session_compact's own release is a no-op");
+  });
+
+  test("release triggered by session_compact is deferred — nothing sent synchronously inside that handler", async () => {
+    const pi = fakePi();
+    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath });
+    const { ctx } = fakeCtx();
+
+    await pi.commands.get("goal")!("ship the widget", ctx);
+    (ctx as unknown as { compact: (opts: unknown) => void }).compact = () => {};
+    await pi.tools.get("goal-compact-and-continue")!.execute("call-1", { carry_forward: "x" }, undefined, undefined, ctx);
+    assert.equal(pi.sentUserMessages.length, 1, "only the armed announcement so far");
+
+    pi.handlers.get("session_compact")!({ reason: "manual" }, ctx);
+    assert.equal(pi.sentUserMessages.length, 1, "nothing sent synchronously inside the session_compact handler itself");
+    assert.equal(leadCompactingRef.current, true, "still marked compacting until the deferred release runs");
+
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(pi.sentUserMessages.length, 2, "the deferred release ran after the macrotask queue drained");
+    assert.equal(leadCompactingRef.current, false);
+  });
+
+  test("onError alone releases with the failure reason folded into the reminder", async () => {
+    const pi = fakePi();
+    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath });
+    const { ctx } = fakeCtx();
+
+    await pi.commands.get("goal")!("ship the widget", ctx);
+    let compactCall: { onError?: (error: Error) => void } | undefined;
+    (ctx as unknown as { compact: (opts: unknown) => void }).compact = (opts: unknown) => {
+      compactCall = opts as never;
+    };
+    await pi.tools.get("goal-compact-and-continue")!.execute("call-1", { carry_forward: "x" }, undefined, undefined, ctx);
+
+    compactCall!.onError!(new Error("boom"));
+    assert.equal(leadCompactingRef.current, false);
+    assert.equal(pi.sentUserMessages.length, 2);
+    const reminder = pi.sentUserMessages[1]!.content as string;
+    assert.match(reminder, /Compaction failed: boom/);
+    assert.match(reminder, /Do not retry goal-compact-and-continue/);
+  });
+
+  test("agent_start clears the flag without sending a reminder or touching the held queue", () => {
+    const pi = fakePi();
+    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath });
+    const { ctx } = fakeCtx();
+
+    // A defensively-set flag (e.g. an owner-typed /compact) with the goal
+    // never even armed — the backstop must still fire.
+    pi.handlers.get("session_before_compact")!({ reason: "manual" }, ctx);
+    assert.equal(leadCompactingRef.current, true);
+
+    let flushed = false;
+    heldPushQueue.push({ kind: "raw", send: () => { flushed = true; } });
+
+    pi.handlers.get("agent_start")!({}, ctx);
+    assert.equal(leadCompactingRef.current, false);
+    assert.equal(pi.sentUserMessages.length, 0, "no reminder — this is a pure backstop clear");
+    assert.equal(flushed, false, "no queue touch either — that is releaseAfterCompaction's job, not this backstop's");
+    assert.equal(heldPushQueue.length, 1, "left untouched for that turn's own settle/flush handler");
+  });
+
+  test("a non-lever session_compact (no pendingRearm) releases held pushes but sends no reminder", async () => {
+    const pi = fakePi();
+    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath });
+    const { ctx } = fakeCtx();
+
+    await pi.commands.get("goal")!("ship the widget", ctx); // state active; 1 message so far (armed)
+
+    // Owner-typed /compact: session_before_compact sets the flag defensively,
+    // but pendingRearm is never set — the lever was never called.
+    pi.handlers.get("session_before_compact")!({ reason: "manual" }, ctx);
+    assert.equal(leadCompactingRef.current, true);
+
+    let flushed = false;
+    heldPushQueue.push({ kind: "raw", send: () => { flushed = true; } });
+
+    pi.handlers.get("session_compact")!({ reason: "manual" }, ctx);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(leadCompactingRef.current, false);
+    assert.equal(flushed, true, "held pushes still release on any compaction, lever-originated or not");
+    assert.equal(pi.sentUserMessages.length, 1, "still just the armed announcement — no synthesized reminder for a non-lever compaction");
+  });
+
+  test("release while the agent is not idle sends nothing; a subsequent settle re-arms the loop normally", async () => {
+    const pi = fakePi();
+    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath });
+    const { ctx } = fakeCtx(() => true);
+
+    await pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed)
+    let compactCall: unknown;
+    (ctx as unknown as { compact: (opts: unknown) => void }).compact = (opts: unknown) => {
+      compactCall = opts;
+    };
+    await pi.tools.get("goal-compact-and-continue")!.execute("call-1", { carry_forward: "x" }, undefined, undefined, ctx);
+    assert.ok(compactCall, "ctx.compact was called");
+    assert.equal(leadCompactingRef.current, true);
+
+    let flushed = false;
+    heldPushQueue.push({ kind: "raw", send: () => { flushed = true; } });
+
+    // The release-time ctx reports NOT idle — e.g. agent_start's own backstop
+    // raced this call and a fresh turn is already underway.
+    const notIdle = fakeCtx(() => false).ctx;
+    pi.handlers.get("session_compact")!({ reason: "manual" }, notIdle);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(leadCompactingRef.current, false, "the flag is still cleared even when nothing else fires");
+    assert.equal(pi.sentUserMessages.length, 1, "nothing sent while the agent already looks busy again");
+    assert.equal(flushed, false, "the held queue is left for that turn's own settle, not drained here");
+
+    // A subsequent settle re-evaluates normally: leadCompactingRef is false
+    // again, so decideOnSettle sees compacting=false and reinjects as usual.
+    const settled = fakeCtx(() => true).ctx;
+    pi.handlers.get("agent_settled")!({}, settled);
+    assert.equal(pi.sentUserMessages.length, 2, "the ordinary reinject reminder fires on the next settle");
   });
 });

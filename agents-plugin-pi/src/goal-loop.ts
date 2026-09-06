@@ -76,7 +76,7 @@
 import { readFileSync } from "node:fs";
 import type { ContextUsage, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readSpawnRole } from "./process-role.ts";
-import { hasRunningAgents, type RpcAgentRegistry } from "./spawner.ts";
+import { flushHeldPushes, hasRunningAgents, leadCompactingRef, type RpcAgentRegistry } from "./spawner.ts";
 
 // ---------------------------------------------------------------------------
 // Config: adapter-owned runaway-threshold data file. Never-hard-fail,
@@ -216,7 +216,7 @@ export function buildGoalReminder(goal: string, info: { percent: number | null; 
       ? "Context usage: unknown."
       : percent >= advisoryPercent
         ? `Context usage: ${Math.round(percent)}% of window — at or above the advisory point (${advisoryPercent}%); consider goal-compact-and-continue if you are at a safe compaction point.`
-        : `Context usage: ${Math.round(percent)}% of window.`;
+        : `Context usage: ${Math.round(percent)}% of window — below the compaction advisory point (${advisoryPercent}%); do not call goal-compact-and-continue.`;
   return (
     `Goal yet running: "${goal}". Call goal-achieved <summary> or goal-blocked <reason> for a state ` +
     "transition, or goal-compact-and-continue <carry-forward> to compact context and keep pursuing the " +
@@ -285,22 +285,33 @@ export function recordToolCall(state: GoalLoopState): GoalLoopState {
 export type SettleDecision =
   | { action: "ignore" }
   | { action: "yield" }
+  | { action: "waiting" }
   | { action: "reinject"; goal: string }
   | { action: "force-stop"; reason: string };
 
 /**
  * Pure reducer for an `agent_settled` firing: decides whether to ignore
- * (goal mode inactive), yield (goal mode active but a persistent child is
- * still mid-turn — Phase 2, 260905), re-inject a reminder (under threshold),
- * or force-stop (streak reached `threshold`). Streak resets to 0 whenever a
- * tool call happened this cycle; otherwise it increments.
+ * (goal mode inactive), wait (a compaction is in flight — 260906 Phase 1),
+ * yield (goal mode active but a persistent child is still mid-turn — Phase 2,
+ * 260905), re-inject a reminder (under threshold), or force-stop (streak
+ * reached `threshold`). Streak resets to 0 whenever a tool call happened this
+ * cycle; otherwise it increments.
+ *
+ * `compacting` (default `false`, 260906 Phase 1) is checked BEFORE `yielding`
+ * — compaction dominates: while it holds, nothing about running children
+ * matters, since the settle this reducer is being asked to judge is the one
+ * `ctx.compact()`'s own internal abort just produced, not an ordinary turn
+ * end. The state passes through completely unchanged (no streak mutation, no
+ * `sawToolCallThisCycle` reset) and the decision is `{ action: "waiting" }` —
+ * `goal-loop.ts`'s `releaseAfterCompaction` is what re-injects the reminder
+ * once the compaction actually finishes, not this settle.
  *
  * `yielding` (default `false`) is the Phase 2 fan-in gate: when `true` the
  * state passes through completely unchanged (no streak mutation, no
  * `sawToolCallThisCycle` reset) and the decision is `{ action: "yield" }` —
  * neither re-injecting the reminder nor advancing the runaway streak, exactly
  * as if this settle had never fired. The inactive check runs first, so
- * yielding never resurrects an inactive loop.
+ * neither `compacting` nor `yielding` ever resurrects an inactive loop.
  *
  * The `"reinject"` decision carries only the bare `goal` string, not a
  * precomputed reminder: this reducer has no access to `ctx.getContextUsage()`
@@ -312,9 +323,13 @@ export function decideOnSettle(
   state: GoalLoopState,
   threshold: number,
   yielding = false,
+  compacting = false,
 ): { next: GoalLoopState; decision: SettleDecision } {
   if (!state.active) {
     return { next: state, decision: { action: "ignore" } };
+  }
+  if (compacting) {
+    return { next: state, decision: { action: "waiting" } };
   }
   if (yielding) {
     return { next: state, decision: { action: "yield" } };
@@ -375,6 +390,55 @@ export interface RegisterGoalLoopOptions {
  */
 export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions): void {
   let state: GoalLoopState = initialGoalLoopState();
+  // 260906 (compaction push-hold ticket, Phase 1): true only between the
+  // `goal-compact-and-continue` lever setting `leadCompactingRef` and
+  // `releaseAfterCompaction` consuming it — marks a compaction as
+  // LEVER-ORIGINATED, the only kind that should ever synthesize a re-armed
+  // reminder. An owner-typed `/compact` or Pi's own threshold/overflow
+  // auto-compaction also sets `leadCompactingRef` (via
+  // `session_before_compact`, defensively) but never this flag, so
+  // `releaseAfterCompaction` still flushes held pushes for them but stays
+  // silent otherwise — the goal loop's own next `agent_settled` is what
+  // produces the next ordinary reminder there.
+  let pendingRearm = false;
+
+  /**
+   * Idempotent release of an in-flight compaction, deferred past Pi's own
+   * compaction flag by every event-driven caller (never called synchronously
+   * from inside a `session_*compact*` handler — see the two listeners
+   * below). Three callers: the deferred `session_compact`/
+   * `session_compact_failed` listeners, the lever's `onComplete`/`onError`
+   * (backstop — covers the case where Pi never fires those events, e.g. a
+   * compaction that fails before reaching them), and `agent_start` (pure
+   * backstop clear, no reminder, no queue touch — see that listener below).
+   *
+   * Idle branch: flushes every held push (both ordinary family pushes and
+   * `ask.ts`'s raw `ws-thread-summary` send), then — only for a
+   * lever-originated compaction (`pendingRearm`) — sends the pending goal
+   * reminder as a fresh `followUp`, folding a compaction failure reason into
+   * it when present. Not-idle branch: sends nothing at all — the agent
+   * somehow already started a new turn (e.g. `agent_start`'s own backstop
+   * raced this call and cleared the flag first), so the held queue and any
+   * reminder are left to that turn's own `agent_settled` instead of racing it.
+   */
+  function releaseAfterCompaction(ctx: ExtensionContext, failureReason?: string): void {
+    if (!leadCompactingRef.current) return; // idempotent: already released
+    leadCompactingRef.current = false;
+    if (!ctx.isIdle()) return; // leave the held queue + reminder to that turn's own settle
+    flushHeldPushes(pi);
+    if (!pendingRearm) return;
+    pendingRearm = false;
+    if (!state.active || !state.goal) return; // nothing lever-originated to say
+    const config = readGoalLoopConfig(opts.goalLoopConfigPath);
+    const advisoryPercent = resolveCompactionAdvisoryPercent(config);
+    const contextWindowOverride = resolveContextWindowOverride(config);
+    const percent = computeContextPercent(ctx.getContextUsage(), contextWindowOverride);
+    let reminder = buildGoalReminder(state.goal, { percent, advisoryPercent });
+    if (failureReason) {
+      reminder = `Compaction failed: ${failureReason}. Do not retry goal-compact-and-continue — call goal-achieved or goal-blocked instead.\n${reminder}`;
+    }
+    pi.sendUserMessage(reminder, { deliverAs: "followUp" });
+  }
 
   pi.registerCommand("goal", {
     description: "Arm goal mode: announce <goal> and re-inject a reminder on every settle until goal-achieved/goal-blocked is called.",
@@ -411,10 +475,22 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
     const config = readGoalLoopConfig(opts.goalLoopConfigPath);
     const threshold = resolveRunawayThreshold(config);
     const yielding = hasRunningAgents(opts.rpcRegistryRef?.current);
-    const { next, decision } = decideOnSettle(state, threshold, yielding);
+    const compacting = leadCompactingRef.current;
+    const { next, decision } = decideOnSettle(state, threshold, yielding, compacting);
     state = next;
 
     if (decision.action === "ignore") return;
+    if (decision.action === "waiting") {
+      // 260906 (compaction push-hold ticket, Phase 1): this settle is the one
+      // `ctx.compact()`'s own internal abort produced for the turn it just
+      // cut off — neither re-injecting the reminder nor advancing the
+      // runaway streak. `releaseAfterCompaction` re-arms the reminder (for a
+      // lever-originated compaction) once the compaction actually finishes;
+      // this status mirrors the yield branch below and is cleared by the same
+      // unconditional `agent_start` listener.
+      ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: waiting for compaction");
+      return;
+    }
     if (decision.action === "yield") {
       // Neither re-injects the reminder nor advances the runaway streak — a
       // persistent child pushing its own settle/report wakes the lead next
@@ -455,6 +531,19 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
   // terminal lever or force-stop does, both of which run inside a turn whose
   // own `agent_start` already cleared the key on entry.
   pi.on("agent_start", (_event, ctx) => {
+    // 260906 (compaction push-hold ticket, Phase 1): backstop clear — runs
+    // before the goal-mode-only checks below because `leadCompactingRef` can
+    // be set defensively by `session_before_compact` for ANY compaction
+    // reason regardless of whether a goal is active, and a fresh
+    // `agent_start` is proof the session has moved on from whatever
+    // compaction set it. No reminder, no queue touch here: that is
+    // `releaseAfterCompaction`'s job, and this branch only fires when THAT
+    // never ran (e.g. `session_compact`/`session_compact_failed` never fired
+    // for this compaction) — a pure safety net against a stuck flag.
+    if (leadCompactingRef.current) {
+      leadCompactingRef.current = false;
+      return;
+    }
     if (isChildProcess(process.env)) return;
     if (!state.active) return;
     ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, undefined);
@@ -465,10 +554,32 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
   // compaction (reason: "manual") and Pi's own overflow/threshold
   // auto-compaction backstop — matching the ticket's resolved "not an
   // extension gate" design (see this file's top-of-file doc comment).
+  //
+  // 260906 (compaction push-hold ticket, Phase 1): sets `leadCompactingRef`
+  // unconditionally, as the very first line, for ANY compaction reason (the
+  // lever already set it before calling `ctx.compact()`, so this is
+  // defensive coverage for an owner-typed `/compact` and Pi's own
+  // threshold/overflow auto-compaction, neither of which goes through the
+  // lever). The advisory `ctx.ui.notify` stays gated on goal mode being
+  // active, unchanged.
   pi.on("session_before_compact", (event, ctx) => {
+    leadCompactingRef.current = true;
     if (isChildProcess(process.env)) return;
     if (!state.active || !state.goal) return;
     ctx.ui.notify(buildCompactionObservation(state.goal, event.reason), "info");
+  });
+
+  // 260906 (compaction push-hold ticket, Phase 1): deferred via `setImmediate`
+  // so neither handler ever sends a prompt from inside a `session_*compact*`
+  // event — `session_compact` fires while Pi's own
+  // `_compactionAbortController` is still non-`undefined` (cleared right
+  // after), so anything synchronous here would race that same internal
+  // state Pi has not finished unwinding yet.
+  pi.on("session_compact", (_event, ctx) => {
+    setImmediate(() => releaseAfterCompaction(ctx));
+  });
+  pi.on("session_compact_failed", (event, ctx) => {
+    setImmediate(() => releaseAfterCompaction(ctx, event.errorMessage));
   });
 
   pi.registerTool({
@@ -528,10 +639,24 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
       // manual "continue" call is needed here beyond returning this tool's
       // own result and triggering the compaction (see this file's top-of-file
       // doc comment's risk-signal note).
+      //
+      // 260906 (compaction push-hold ticket, Phase 1): marks this compaction
+      // as LEVER-ORIGINATED (`pendingRearm`) before calling `ctx.compact`, so
+      // `releaseAfterCompaction` knows to synthesize a re-armed reminder once
+      // it finishes — set BEFORE the call since `ctx.compact()`'s own internal
+      // abort can settle the invoking turn synchronously within this call.
+      leadCompactingRef.current = true;
+      pendingRearm = true;
       ctx.compact({
         customInstructions: p.carry_forward,
-        onComplete: () => ctx.ui.notify("Compaction completed", "info"),
-        onError: (error) => ctx.ui.notify(`Compaction failed: ${error.message}`, "error"),
+        onComplete: () => {
+          ctx.ui.notify("Compaction completed", "info");
+          releaseAfterCompaction(ctx);
+        },
+        onError: (error) => {
+          ctx.ui.notify(`Compaction failed: ${error.message}`, "error");
+          releaseAfterCompaction(ctx, error.message);
+        },
       });
       return { content: [{ type: "text", text: buildCompactionLeverResult(p.carry_forward) }] };
     },
