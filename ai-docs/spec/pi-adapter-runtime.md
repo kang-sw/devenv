@@ -131,28 +131,42 @@ directly into the lead's system prompt and the handshake becomes unnecessary.
      and a **verb routing table** with one row per Pi lead verb. The guide is
      structured so later tickets extend the verb table with their own rows rather
      than rewriting shared text.
-  3. an **`<available_skills>` block** (260906 Phase 1) — the adapter's own
-     substitute for Pi's own skill-loading system-prompt block, which is never
-     rendered for a ws lead/fork session at all (see "Skill exposure"). Sourced
-     from `pi.getCommands()`'s `source: "skill"` entries, captured once at
-     session start (a live snapshot of the SAME list backing Pi's own
-     `/skill:<name>` slash commands, not a ws-tree scan — every installed
-     skill, ws or otherwise). Each entry's SKILL.md frontmatter is read at
-     block-build time (not cached with the list), and an entry whose
-     frontmatter sets `disable-model-invocation: true` is excluded from the
-     block — still loadable by exact name via `ws-skill`, mirroring Pi's own
+  3. an **`<available_skills>` block** (260906 Phase 1; live-resolution fixed
+     by a later dogfood correction) — the adapter's own substitute for Pi's
+     own skill-loading system-prompt block, which is never rendered for a ws
+     lead/fork session at all (see "Skill exposure"). Sourced from
+     `pi.getCommands()`'s `source: "skill"` entries — the SAME list backing
+     Pi's own `/skill:<name>` slash commands, not a ws-tree scan — every
+     installed skill, ws or otherwise. Each entry's SKILL.md frontmatter is
+     read at block-build time, and an entry whose frontmatter sets
+     `disable-model-invocation: true` is excluded from the block — still
+     loadable by exact name via `ws-skill`, mirroring Pi's own
      `formatSkillsForPrompt` exclusion. The block's preamble tells the model to
      load a skill with `ws-skill <name>`, never `read` (absent from this
      surface), and omits Pi's own "resolve relative paths against the skill
      directory" line, since `ws-skill` takes a name, not a path. A
      missing/unreadable SKILL.md is silently skipped from the block rather
      than surfaced as an error there.
-- Fetch cadence: the block is assembled **once per session start** and held in
-  extension memory; it is not re-fetched per turn. The dynamic material is
-  refreshed only when an entry-point skill calls `workflow_manual` (the same
-  cadence as on the reference harnesses). Injecting the manual into the system
-  prompt — rather than as a transcript message — is deliberate: the system prompt
-  survives Pi compaction natively, so post-compaction recovery reduces to a
+- Fetch cadence: the manual-snapshot-plus-guide portion of the block is
+  assembled **once per session start** and held in extension memory; it is not
+  re-fetched per turn. The `<available_skills>` portion is deliberately NOT
+  part of that one-time fetch: Pi runs `session_start` and only afterwards
+  merges an extension's own `resources_discover` skills into the live
+  `pi.getCommands()` list, so a skills read taken during `session_start` can
+  predate every ws skill (the adapter shipped exactly this bug once — a lead
+  session that saw only another extension's skills, e.g. `imagegen`, and a
+  `ws-skill` call for a real ws skill answering "Unknown skill"). The block's
+  skills section is instead resolved against a live `pi.getCommands()` read
+  inside the `before_agent_start` handler itself, then cached: built once, on
+  the first `before_agent_start` firing whose live skill list is non-empty,
+  and frozen from then on for that session — a per-turn per-skill SKILL.md
+  re-read was judged not worth paying for the narrower case (a skill pack
+  installing itself mid-session, after that first firing) the cache trades
+  away. The manual/state dynamic material is refreshed only when an
+  entry-point skill calls `workflow_manual` (the same cadence as on the
+  reference harnesses). Injecting the manual into the system prompt — rather
+  than as a transcript message — is deliberate: the system prompt survives Pi
+  compaction natively, so post-compaction recovery reduces to a
   `workflow_state`/`workflow_manual` call.
 - Role gating: the ws block is appended only for the **lead** (no spawn role in
   the environment) and for a **`fork`** (a lead-caliber peer that needs the same
@@ -241,7 +255,13 @@ any other installed skill alike): its own `<available_skills>` list appended
 to the ws system-prompt block (see "Lead bootstrap: workflow manual + Pi lead
 guide in the system prompt") and its own `ws-skill(name, args?)` loader,
 gated the same lead-or-fork way as the rest of the reshaped surface (see
-"Lead native tool-surface reshaping").
+"Lead native tool-surface reshaping"). Both the block and `ws-skill` read
+`pi.getCommands()` **live**, at block-build and at call time respectively,
+never from a snapshot taken at session start: Pi's own startup order runs
+`session_start` before merging an extension's `resources_discover` skills
+into that list, so a snapshot taken any earlier would answer with whatever
+other extension's skills had already registered and nothing this adapter
+exposes.
 
 ## Process lifecycle {#260903-pi-bridge-subprocess-lifecycle}
 

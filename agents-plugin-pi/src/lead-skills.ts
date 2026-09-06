@@ -24,12 +24,32 @@
  * own `/skill:<name>` slash commands — filtered to `source: "skill"`
  * entries, never a ws-tree directory scan. This means the block and the tool
  * cover every installed skill (ws skills and any other skill pack alike),
- * not just `agents-plugin/skills/`. `sourceInfo.path` (the SKILL.md path) is
- * fetched once per `session_start` and cached in `SkillEntry[]`; the file
- * ITSELF is re-read on every `ws-skill` call (never cached), so an edited
- * SKILL.md is picked up live with no restart — same "cache the list, not the
- * body" split the workflow-manual snapshot uses for the reverse reason
- * (there the body is what's cached).
+ * not just `agents-plugin/skills/`.
+ *
+ * Dogfood bug fixed here: `pi.getCommands()` is a LIVE read (confirmed
+ * against the installed `agent-session.js`'s `getCommands` closure, which
+ * reads `this._resourceLoader.getSkills()` fresh on every call), but Pi's
+ * own startup sequence runs `session_start` FIRST and only afterwards calls
+ * `extendResourcesFromExtensions` (which merges THIS adapter's own
+ * `resources_discover` skill path into the resource loader). A ws-skill
+ * lookup or `<available_skills>` block built from a `pi.getCommands()`
+ * snapshot taken AT `session_start` therefore predates the ws skills
+ * entirely, on the affected first-session-of-a-process path — the model
+ * only ever saw `imagegen` (or whatever other extension registered its
+ * skills before ws did) and `ws-skill lead-drain-ready-queue` answered
+ * "Unknown skill". The fix: `resolveSkillEntries(pi.getCommands())` is
+ * called LIVE at ws-skill's own `execute()` time (this file) and again at
+ * each `before_agent_start` firing for the `<available_skills>` block
+ * (`lead-bootstrap.ts`'s `computeSkillsBlockCached`) — never captured into a
+ * `session_start`-scoped ref. `sourceInfo.path` (the SKILL.md path) is
+ * therefore re-resolved on every read too, and no SKILL.md BODY is ever
+ * cached anywhere — `buildSkillsBlock` discards `loaded.body` and keeps only
+ * `ok`/`disableModelInvocation` per entry (see its own doc comment). What
+ * `computeSkillsBlockCached` caches is the already-RENDERED
+ * `<available_skills>` string, keyed on the live entry-path set, so a
+ * `before_agent_start` firing whose path set is unchanged skips re-reading
+ * every SKILL.md rather than skipping a body read that was never being
+ * repeated in the first place.
  *
  * `parseFrontmatter`/`SkillFrontmatter` are imported from
  * `@earendil-works/pi-coding-agent` rather than hand-rolled: it is the exact
@@ -209,13 +229,16 @@ export function addSkillToolIfLeadOrFork(activeTools: readonly string[], role: S
 /**
  * Registers `ws-skill` declaratively (factory scope, same placement as
  * `registerFork`/`registerAsk`) so a fork child's own re-run of
- * `session_start` has it present to activate too. Reads `entriesRef.current`
- * at call time (never captured once at registration), matching
- * `wsBlockRef`'s live-ref convention (`lead-bootstrap.ts`). Whether it is
- * ever ACTIVE for a given session is `addSkillToolIfLeadOrFork`'s job, not
- * this function's.
+ * `session_start` has it present to activate too. Resolves
+ * `pi.getCommands()` LIVE inside `execute()` (never a ref captured at
+ * `session_start`) — see this file's header comment for the dogfood bug this
+ * fixes: Pi merges an extension's skills into `pi.getCommands()` AFTER
+ * `session_start` returns, so a snapshot taken at registration or at
+ * `session_start` time can miss every ws skill on the affected path. Whether
+ * `ws-skill` is ever ACTIVE for a given session is `addSkillToolIfLeadOrFork`'s
+ * job, not this function's.
  */
-export function registerWsSkillTool(pi: ExtensionAPI, entriesRef: { current: SkillEntry[] }): void {
+export function registerWsSkillTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: WS_SKILL_TOOL_NAME,
     label: WS_SKILL_TOOL_NAME,
@@ -231,7 +254,8 @@ export function registerWsSkillTool(pi: ExtensionAPI, entriesRef: { current: Ski
     } as never,
     async execute(_toolCallId, params) {
       const p = params as { name: string; args?: string };
-      const text = computeWsSkillResult(p.name, p.args, entriesRef.current, (path) => loadSkillFile(path));
+      const entries = resolveSkillEntries(pi.getCommands());
+      const text = computeWsSkillResult(p.name, p.args, entries, (path) => loadSkillFile(path));
       return { content: [{ type: "text", text }] };
     },
   });

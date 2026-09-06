@@ -246,7 +246,8 @@ describe("addSkillToolIfLeadOrFork", () => {
 /**
  * `registerWsSkillTool`'s tool body against a fake `pi` (same convention as
  * `test/ask.test.ts`'s "registerAsk (fake pi)" block) — it never spawns
- * anything, so a fake `registerTool` capture is enough.
+ * anything, so a fake `registerTool` capture plus a fake `getCommands` are
+ * enough.
  */
 describe("registerWsSkillTool (fake pi)", () => {
   interface FakeTool {
@@ -254,11 +255,14 @@ describe("registerWsSkillTool (fake pi)", () => {
     execute(id: string, params: unknown): Promise<{ content: Array<{ type: string; text: string }> }>;
   }
 
+  function fakePi(tools: Map<string, FakeTool>, getCommands: () => SlashCommandInfo[]): ExtensionAPI {
+    return { registerTool: (t: FakeTool) => tools.set(t.name, t), getCommands } as unknown as ExtensionAPI;
+  }
+
   test("registers WS_SKILL_TOOL_NAME and its execute() delegates to computeWsSkillResult", async () => {
     const tools = new Map<string, FakeTool>();
-    const pi = { registerTool: (t: FakeTool) => tools.set(t.name, t) } as unknown as ExtensionAPI;
-    const entriesRef: { current: SkillEntry[] } = { current: [{ name: "lead-proceed", description: "d", path: "/skills/lead-proceed/SKILL.md" }] };
-    registerWsSkillTool(pi, entriesRef);
+    const pi = fakePi(tools, () => [skillCommand("lead-proceed", "d", "/skills/lead-proceed/SKILL.md")]);
+    registerWsSkillTool(pi);
 
     const tool = tools.get(WS_SKILL_TOOL_NAME);
     assert.ok(tool, `${WS_SKILL_TOOL_NAME} must be registered`);
@@ -266,18 +270,30 @@ describe("registerWsSkillTool (fake pi)", () => {
     assert.match(result.content[0].text, /Unknown skill "does-not-exist"/);
   });
 
-  test("reads entriesRef.current at call time, not at registration time", async () => {
+  // Dogfood bug this fixes: Pi runs session_start BEFORE merging an
+  // extension's own resources_discover skills into pi.getCommands() (see
+  // this file's header). A ws-skill call must therefore resolve
+  // pi.getCommands() LIVE at call time, not a snapshot captured at
+  // registration or session_start time — otherwise a skill that only
+  // appears in the list after registration answers "Unknown skill" forever,
+  // exactly like the reported `lead-drain-ready-queue` failure.
+  test("resolves pi.getCommands() live at call time — a skill merged in after registration is loadable and listed", async () => {
     const tools = new Map<string, FakeTool>();
-    const pi = { registerTool: (t: FakeTool) => tools.set(t.name, t) } as unknown as ExtensionAPI;
-    const entriesRef: { current: SkillEntry[] } = { current: [] };
-    registerWsSkillTool(pi, entriesRef);
+    let commands: SlashCommandInfo[] = [skillCommand("imagegen", "d", "/skills/imagegen/SKILL.md")];
+    const pi = fakePi(tools, () => commands);
+    registerWsSkillTool(pi);
 
-    // Populated AFTER registration — mirrors index.ts filling skillEntriesRef
-    // inside session_start, after registerWsSkillTool ran at factory scope.
-    entriesRef.current = [{ name: "late-skill", description: "d", path: "/skills/late-skill/SKILL.md" }];
+    // Merged AFTER registration — mirrors Pi's real ordering: session_start
+    // (which registers ws-skill) runs and returns BEFORE
+    // extendResourcesFromExtensions merges the ws skill path into
+    // pi.getCommands().
+    commands = [...commands, skillCommand("lead-drain-ready-queue", "d", "/skills/lead-drain-ready-queue/SKILL.md")];
 
     const tool = tools.get(WS_SKILL_TOOL_NAME)!;
-    const result = await tool.execute("call-1", { name: "does-not-exist" });
-    assert.match(result.content[0].text, /late-skill/);
+    const loadResult = await tool.execute("call-1", { name: "lead-drain-ready-queue" });
+    assert.doesNotMatch(loadResult.content[0].text, /Unknown skill/, "the live-merged skill must resolve, not report Unknown");
+
+    const unknownResult = await tool.execute("call-2", { name: "does-not-exist" });
+    assert.match(unknownResult.content[0].text, /lead-drain-ready-queue/, "the unknown-name listing must include the live-merged skill too");
   });
 });
