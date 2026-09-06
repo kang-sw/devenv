@@ -191,3 +191,21 @@ as `5b8d956c` (feature) plus `410be434` (review fixes), plan `96cd5f1c`.
 - Deferred: the owner-run live checks (lead calls `ws-skill
   lead-drain-ready-queue` without `/skill:`; `/goal` cycles start with a
   `ws-skill` call) remain to be confirmed in a Pi dogfood session.
+
+#### Edition (bcaf9a52) - 2026-09-06
+
+Dogfood on the landed phase: in a real Pi session `ws-skill
+lead-drain-ready-queue` answered "Unknown skill ... Available skills:
+imagegen" and the `<available_skills>` block listed only `imagegen`. Pi
+emits `session_start` before it runs `resources_discover` and merges the
+discovered skill paths (`agent-session.js`, `extendResourcesFromExtensions`
+right after the `session_start` emit), and the ws skills come from this
+adapter's own `resources_discover` handler, so the `pi.getCommands()`
+snapshot taken at `session_start` predated them. Fixed by resolving the
+skill list live: `ws-skill` reads `pi.getCommands()` at call time, and the
+block is built at `before_agent_start` from the current list through a
+cache keyed on the sorted set of skill entry paths, so it is rebuilt only
+when that set changes (follow-up `11ac3ed8` replaced an earlier
+build-once-then-freeze rule that could latch a pre-merge list). Tests cover
+the late-merge scenario, same-set cache reuse, and an all-unloadable first
+read followed by a merge. The owner-run live check is still pending.
