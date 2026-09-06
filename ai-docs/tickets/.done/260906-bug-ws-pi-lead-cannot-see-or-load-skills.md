@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 2b63821756147d8f
 sage-review-completeness-reviewed: 2b63821756147d8f
+completed: 2026-09-06
 ---
 
 # Pi lead cannot see or self-load ws skills because removing native read/bash drops Pi's skills block from the system prompt
@@ -154,3 +155,39 @@ block. Amend the three spec passages under Spec Impact. Live check
 without typing `/skill:...` and confirm it calls `ws-skill
 lead-drain-ready-queue` and proceeds; arm `/goal` with a directive naming
 the skill and confirm each cycle starts with a `ws-skill` call.
+
+### Result (5b8d956c)
+
+Landed on `impl/goal/track/pi-agent/velvet-heron-ridge/yarrow-harbor-ember`
+as `5b8d956c` (feature) plus `410be434` (review fixes), plan `96cd5f1c`.
+
+- Behavior: new `ws-skill(name, args?)` tool on lead and fork, resolving
+  against `pi.getCommands()` `source: "skill"` entries and returning the
+  SKILL.md body with frontmatter stripped via Pi's exported
+  `parseFrontmatter`/`stripFrontmatter`, `User: <args>` appended, unknown
+  name listing the available names, unreadable or malformed file returning
+  an error string that names the path. The ws system-prompt block gained a
+  third ordered item, an `<available_skills>` block (name, description,
+  location, `disable-model-invocation` skills omitted but still loadable),
+  gated on role only (`isLeadOrFork`), never on `read`/`bash` presence.
+- Deviation from the ticket text: the session-start block build and tool
+  reshape were consolidated into one pure `computeSessionBootstrap`
+  (`lead-bootstrap.ts`) so the ordering test drives the same code path
+  `index.ts` runs; `ws-skill` is added to the active set from
+  `lead-skills.ts` rather than inside `computeLeadActiveTools`, whose test
+  pins the count of added tools. Both were planner recommendations.
+- Verification: `npm test` in `agents-plugin-pi` 803/803 (baseline 770;
+  30 new `lead-skills` tests, `computeSessionBootstrap` role matrix, 3
+  malformed-frontmatter tests). Partitioned review (correctness, fit,
+  test): two Important findings (`loadSkillFile` could throw on malformed
+  frontmatter and abort `session_start`; guide row said the block sits
+  above the guide) fixed in `410be434`; minors on per-role IO and
+  `setActiveTools` gating fixed in the same commit; the empty-block
+  trailing newline left as pre-existing.
+- Spec: `{#260903-pi-bridge-skill-exposure}`,
+  `{#260905-pi-lead-bootstrap-system-prompt}`,
+  `{#260905-pi-lead-tool-surface-execute-gateway}` amended in the feature
+  commit.
+- Deferred: the owner-run live checks (lead calls `ws-skill
+  lead-drain-ready-queue` without `/skill:`; `/goal` cycles start with a
+  `ws-skill` call) remain to be confirmed in a Pi dogfood session.
