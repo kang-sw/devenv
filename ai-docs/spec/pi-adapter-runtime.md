@@ -55,6 +55,20 @@ a tool failure (a thrown execution), not as a successful result — Pi sets a
 tool's error state only when its `execute` throws, so a ws-mcp failure that was
 returned as ordinary text is re-raised rather than reported as success.
 
+Bridged tools provide display-only YAML previews when Pi's native TUI helpers
+are available. The call slot retains the registered tool name above up to ten
+newline-separated argument lines, including during argument streaming. A completed,
+non-error result containing exactly one text block is displayed as YAML when that
+text parses as a JSON object or array. Its collapsed preview selects ten logical
+lines before native wrapping; expanded output is complete. These are not ten
+physical-screen-row limits. Native layout is reused on unchanged redraws and
+returned rows are bounded to the available terminal width.
+
+Partial results, errors, prose, scalar/malformed JSON, and mixed or image content
+use Pi's standard result display. If native TUI helpers cannot load, both slots
+retain Pi's standard display. Preview conversion and terminal sanitization never
+change dispatched arguments, model-visible result content, or `details`.
+
 ## Session key stays optional and caller-controllable {#260903-pi-bridge-session-key-fill-forward}
 
 ws-mcp requires a `session_key` on every root-aware tool. On the Pi side the key
