@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 062509868d6e73d0
 sage-review-completeness-reviewed: 062509868d6e73d0
+completed: 2026-09-06
 ---
 
 # A fork-raised owner question never reaches the lead as the promised thread notice
@@ -136,3 +137,8 @@ merged goal branch.
 Phase 1 carries a Result; no autonomous work remains. Closing waits on the
 owner-run acceptance scenario E re-run. Once confirmed, close the ticket to
 `.done/`.
+
+
+## Resolution (2026-09-06)
+
+Owner-run acceptance scenario E re-run on 2026-09-06 passed: the fork's question was registered as a thread (`registered as thread q2`) and the final report carried the owner's answer (`Decisions: color=red`).

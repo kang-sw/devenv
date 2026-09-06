@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 63df6d2f98b0dc3b
 sage-review-completeness-reviewed: 63df6d2f98b0dc3b
+completed: 2026-09-06
 ---
 
 # ws-agent-list shows each agent's model, and a revived orphan keeps its last-report time
@@ -128,3 +129,8 @@ the `/reload` survival check against the merged goal branch.
 
 Phase 1 carries a Result; no autonomous work remains. Closing waits on the
 owner-run live check above. Once confirmed, close the ticket to `.done/`.
+
+
+## Resolution (2026-09-06)
+
+Owner-run live check on 2026-09-06 passed: both agents kept their `provider/id` model strings across the list calls and their last-report timestamps stayed unchanged between reads.

@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 447daa1b31119316
 sage-review-completeness-reviewed: 447daa1b31119316
+completed: 2026-09-06
 ---
 
 # Pi lead regains a soft-discouraged one-liner exec tool next to the ugly-named read
@@ -171,3 +172,8 @@ file and confirm the cap and the `ws-execute` hint.
 
 Phase 1 carries a Result; no autonomous work remains. Closing waits on the
 owner-run live check above. Once confirmed, close the ticket to `.done/`.
+
+
+## Resolution (2026-09-06)
+
+Owner-run live check on 2026-09-06 passed: one-line branch output through the hatch, the 4 KB cap with the `use ws-execute for bulk output` hint, the `(timed out after 30s)` line, the `(interrupted before completion)` wording with `exit code: 0 (killed — not a clean exit)`, and both hatches absent from the child tool inventory.

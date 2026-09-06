@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 3b102d48cf22ba8e
 sage-review-completeness-reviewed: 3b102d48cf22ba8e
+completed: 2026-09-06
 ---
 
 # The /goal announcement "Goal settled" reads as completion
@@ -96,3 +97,8 @@ goal branch.
 
 Phase 1 carries a Result; no autonomous work remains. Closing waits on the
 owner-run `/goal` live check. Once confirmed, close the ticket to `.done/`.
+
+
+## Resolution (2026-09-06)
+
+Owner-run `/goal` live check on 2026-09-06 passed on the ticket's criterion: the lead saw `Goal armed: <goal>` and did not treat the announcement as completion. The same run exposed an unrelated defect in the compaction lever's ordering, tracked in 260906-bug-ws-pi-goal-loop-reinject-races-manual-compaction.

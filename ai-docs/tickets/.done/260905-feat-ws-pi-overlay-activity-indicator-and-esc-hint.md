@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 9210cb30c41eda84
 sage-review-completeness-reviewed: 9210cb30c41eda84
+completed: 2026-09-06
 ---
 
 # Owner overlay shows a working indicator while the respondent thinks and states what Esc does
@@ -139,3 +140,8 @@ marker precedes any text.
 
 Phase 1 carries a Result; no autonomous work remains. Closing waits on the
 owner-run live check above. Once confirmed, close the ticket to `.done/`.
+
+
+## Resolution (2026-09-06)
+
+Owner-run live check on 2026-09-06 passed (owner reported all four overlay checks pass: marker on /answer mid-turn, marker before tool-run text, header hint present once, footer gone).
