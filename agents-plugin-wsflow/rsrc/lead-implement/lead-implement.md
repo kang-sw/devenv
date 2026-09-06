@@ -39,8 +39,11 @@ Review
 
 `{{.McpNamespace}}/route.resolve_implement`'s published schema is opaque
 (`params: object`); this table is the authoritative field contract the
-resolver reads. Send `session_key`, `target`, `facts`, `policy`, and
-`format` as top-level call arguments.
+resolver reads. Send an outer `session_key` and one `params` object containing
+`target`, `facts`, optional `policy`, and `format`; do not put a `session_key`
+in `params` or mix typed or legacy fields into the outer envelope. Unwrapped
+typed calls and the unwrapped legacy mode-entry call remain compatible; a
+wrapped call always uses typed routing.
 
 `target`
 | Field | Type | Notes |
