@@ -85,64 +85,65 @@ ticket.
 Principle, set by the owner on 2026-09-06: the goal-loop reminder is the
 lowest-priority wake. It exists only to keep the lead moving when nothing
 else will; whenever any other item could still wake the lead, the reminder
-must not fire. The existing yield gate is one instance of that rule; this
-ticket makes the rule complete and closes the remaining overlap.
+must not fire. Owner's chosen shape (same day): a deliberate settle delay.
+The reminder is not issued from `agent_settled` itself but from a timer
+armed there; when the timer fires, the reminder goes out only if the lead
+is still idle and every other wake condition is exhausted.
 
 Adapter-only change under `agents-plugin-pi/` (golden rule: no ws-mcp
 change). Pi is not patched.
 
-- **Waker inventory.** A pure function `pendingWakers(registry, wake)`
-  returns the set of things that can still wake the lead:
-  - an RPC child that is `running` and not `terminalThisTurn` (today's
-    gate);
-  - an RPC child whose settle push is still in flight: the settle IIFE
-    increments a `settleInFlight` counter on the record (or on the
-    registry) synchronously in the same tick that clears `running`, and
-    decrements it after `pushToLead` (or after deciding to suppress the
-    push). This closes the `harvestLastMessage` window;
-  - a gated command awaiting `ws-approve` (`record.pendingApproval`): the
-    child is blocked and still `running`, so it is already counted, but the
-    inventory names it explicitly so the rule survives a future change to
-    how approvals are tracked;
-  - a wake already queued in the adapter wake path (below).
-  Async explore is not a waker: its completion is only ever harvested on a
-  later call, never pushed, so the reminder is the only thing that brings
-  the lead back to poll it. It stays outside the inventory, with a note in
-  the spec that making it a push would move it inside.
-- **Goal loop yields to any waker.** `decideOnSettle`'s `yielding` input
-  becomes `pendingWakers(...).size > 0`. The yield path is unchanged
-  otherwise (no reminder, no streak advance, status line set, cleared on
-  the next `agent_start`).
-- **Wake path for everything else.** `src/lead-wake.ts` serializes the
-  adapter's non-goal wakes so they cannot overlap each other or the
-  reminder: `pushToLead`, the `ws-approve` decision push (`ask.ts`), the
-  approval relay (`execute-gateway.ts`), and the reminder itself. Rules,
-  with a `pending` flag and a FIFO owned by the module:
-  - Pi streaming: deliver as `followUp` (or the caller's `steer`); Pi
-    queues, nothing throws.
-  - Pi idle, nothing pending: set `pending`, start the turn through the
-    caller's API.
-  - Pi idle, a start pending: hold in the FIFO; `agent_start` clears
-    `pending` and flushes the FIFO as `followUp`.
-  - `agent_settled` with `pending` still set means the start failed before
-    `agent_start`; clear it and start the next held request.
-  A queued or pending wake is itself a waker for the inventory above, so
-  the reminder never fires while one is outstanding.
+- **Settle delay.** `agent_settled` (goal mode active, lead process) arms a
+  single timer, `settle_delay_ms` from `goal-loop-config.json` (built-in
+  default 5000, read fresh per settle like the threshold). Re-arming
+  cancels the previous timer; `agent_start`, `goal-achieved`,
+  `goal-blocked`, and force-stop cancel it. While the timer is pending the
+  status line reads `Goal loop: settling`. The delay absorbs every
+  short-lived post-settle wake the adapter issues (the `harvestLastMessage`
+  window, the liveness probe, auto-park, a child's own final report) and
+  any it does not yet know about, without an in-flight counter.
+- **Fire condition at the timer.** The reminder is issued only when
+  `ctx.isIdle()` is true AND no other wake condition remains: no RPC child
+  `running` and not `terminalThisTurn` (today's gate), and no
+  `record.pendingApproval` awaiting `ws-approve`. Otherwise the tick is a
+  yield: no reminder, no streak advance, the status line stays, and the
+  next `agent_settled` (from whichever wake did fire) re-arms the timer.
+  Async explore is not a wake condition: its completion is never pushed,
+  only harvested on a later call, so the reminder is the only thing that
+  brings the lead back to poll it.
+- **Boundary guard.** The delay shrinks the race to the reminder's own
+  `prompt()` await window (auth check, compaction check,
+  `before_agent_start`). A push landing there would still collide, and the
+  failure is severe, so it is closed outright: the goal loop sets a
+  `reminderStartPending` flag immediately before `pi.sendUserMessage` and
+  clears it on `agent_start` (and on `agent_settled`, the failed-start
+  fallback). `pushToLead` reads that flag through the same
+  `leadIdleRef`-style seam and, when set, sends with `triggerTurn: false`:
+  Pi appends the custom message to the session at once (the lead is not
+  streaming yet), and the reminder turn that starts moments later sees it
+  in context. One turn start, no collision.
+- **Runaway backstop.** Unchanged: `decideOnSettle`'s streak logic moves to
+  the timer callback (a fired reminder counts, a yield does not).
 - **Phase 2, ws block on push-woken turns.** A turn started by a custom
   push while the lead is idle bypasses `prompt()` and therefore
   `before_agent_start`; `registerLeadBootstrap`'s `<ws>` block is missing
-  from it. The wake path starts such turns by delivering the custom message
-  as `deliverAs: "nextTurn"` and issuing a one-line `sendUserMessage` wake,
-  so the turn runs through `prompt()`. Push rendering (`customType`,
+  from it. Those turns are started by delivering the custom message as
+  `deliverAs: "nextTurn"` and issuing a one-line `sendUserMessage` wake, so
+  the turn runs through `prompt()`. Push rendering (`customType`,
   `display`, `details`) is unchanged; the wake line is the only visible
-  addition. This is why the serializer is needed even with a complete
-  inventory: once pushes go through `prompt()`, two children settling in
-  the same tick would race each other in `prompt()`'s await window.
-- Rejected: fixing only the inventory. It closes the observed race but
-  leaves two non-goal wakes free to overlap (approval relay against a
-  push today; push against push after Phase 2). Rejected: moving the
-  reminder to the custom-message path for its atomic check-and-start; it
-  would drop `before_agent_start` for the goal loop's main turn.
+  addition. Because pushes then share `prompt()`'s await window, two
+  children settling in the same tick would race each other; Phase 2
+  therefore also adds the small adapter wake serializer (`src/lead-wake.ts`:
+  a `pending` flag plus FIFO; idle and nothing pending starts the turn,
+  idle with a start pending holds until `agent_start` and flushes as
+  `followUp`, streaming delivers as `followUp` directly, a settle with
+  `pending` still set releases the next held request). The reminder and
+  the approval relay route through it too.
+- Rejected: an in-flight settle counter feeding the yield gate as Phase 1.
+  It closes only the windows the adapter already knows about and needs a
+  marker on every push site; the delay covers them all. Rejected: moving
+  the reminder to the custom-message path for its atomic check-and-start;
+  it would drop `before_agent_start` for the goal loop's main turn.
 - Upstream: the `_runAgentPrompt` `finally` desync (clearing a flag it
   never set, emitting a settle for a run that never began) is Pi's; file
   it separately at the owner's call. The adapter fix stands without it.
@@ -150,12 +151,13 @@ change). Pi is not patched.
 ## Spec Impact
 
 `pi-adapter-runtime` `{#260904-pi-goal-loop-arming-settled-levers}`: state
-the lowest-priority rule, the waker inventory (running child, settle push
-in flight, pending approval, queued wake; async explore excluded and why),
-and the wake path's pending/FIFO rule with its `agent_start`/`agent_settled`
-clearing. `{#260905-pi-lead-bootstrap-system-prompt}` gains one sentence
-(Phase 2): push-woken idle turns go through `prompt()` so the block is
-present on them too.
+the lowest-priority rule, the settle delay (config key, default, cancel
+points, status line), the fire condition (idle, no running child, no
+pending approval; async explore excluded and why), and the
+`reminderStartPending` guard on `pushToLead`. Phase 2 adds the wake
+serializer's pending/FIFO rule there and one sentence under
+`{#260905-pi-lead-bootstrap-system-prompt}`: push-woken idle turns go
+through `prompt()` so the block is present on them too.
 
 ## Constraints
 
@@ -163,34 +165,37 @@ present on them too.
 - Push rendering and the model-facing content of pushes and reminders are
   unchanged; Phase 2 adds only the one-line wake text.
 - Runaway backstop semantics stay as they are.
-- The inventory is pure and unit-tested; IO listeners are thin glue at
-  factory scope, matching the goal-loop's own listeners.
+- Timer and flag logic is pure and unit-tested with an injectable clock;
+  IO listeners are thin glue at factory scope, matching the goal-loop's
+  own listeners. No timer runs in a spawned child process.
 
 ## Phases
 
-### Phase 1: Goal loop yields to every waker; serialize adapter wakes
+### Phase 1: Delay the reminder past settle and guard the start
 
-Add the `settleInFlight` marker to the settle IIFE, the pure
-`pendingWakers` inventory, and `src/lead-wake.ts`; feed the inventory into
-`decideOnSettle`'s `yielding`; route the reminder, `pushToLead`, the
-`ws-approve` decision push, and the approval relay through the wake path.
-Tests: inventory matrix (running child, settle in flight, pending approval,
-queued wake, async explore only, nothing); a lead settle landing between a
-child's `agent_settled` event and its push yields instead of re-injecting;
-reminder and push in the same settle produce exactly one start and one
-followUp in either arrival order; a failed start releases the next held
-request; a streaming-time push goes straight to followUp. Amend the
-goal-loop spec passage. Owner-run live check: a `/goal` drain where a child
-settles at the same moment as the lead; no `already processing` error, Esc
-still interrupts.
+Add `settle_delay_ms` to the goal-loop config reader, the timer with its
+cancel points and status line, the fire condition, the
+`reminderStartPending` flag, and the `triggerTurn: false` branch in
+`pushToLead`. Tests (fake clock): a settle followed by a push before the
+delay yields and re-arms; a settle with nothing else fires exactly once at
+the delay; `agent_start` and each disarm lever cancel a pending timer; a
+running child or a pending approval at fire time yields; async explore
+alone does not block firing; a push arriving while `reminderStartPending`
+is set is sent with `triggerTurn: false` and appears before the reminder
+in the session; the streak advances on fired reminders only. Amend the
+goal-loop spec passage. Owner-run live check: a `/goal` drain where a
+child settles at the same moment as the lead; no `already processing`
+error, Esc still interrupts, the settling status is visible.
 
 ### Phase 2: Carry the ws block on push-woken turns
 
-Deliver an idle-time custom push as `nextTurn` plus a one-line
-`sendUserMessage` wake so the turn runs through `prompt()` and
-`before_agent_start`. Tests: an idle-time push results in one `nextTurn`
-custom message and one user wake; the fake `before_agent_start` handler
-runs for that turn; two pushes in the same tick still produce one start and
-one followUp; a streaming-time push is unaffected. Amend the bootstrap spec
-passage. Owner-run live check: after a child push wakes an idle lead, the
-lead can still call `ws-skill` and sees the manual block.
+Add `src/lead-wake.ts` and route the reminder, `pushToLead`, the
+`ws-approve` decision push, and the approval relay through it; deliver an
+idle-time custom push as `nextTurn` plus a one-line `sendUserMessage` wake
+so the turn runs through `prompt()` and `before_agent_start`. Tests: an
+idle-time push results in one `nextTurn` custom message and one user wake;
+the fake `before_agent_start` handler runs for that turn; two pushes in the
+same tick produce one start and one followUp in either order; a failed
+start releases the next held request; a streaming-time push is unaffected.
+Amend both spec passages. Owner-run live check: after a child push wakes an
+idle lead, the lead can still call `ws-skill` and sees the manual block.
