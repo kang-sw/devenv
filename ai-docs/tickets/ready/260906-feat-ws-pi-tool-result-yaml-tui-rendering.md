@@ -143,7 +143,11 @@ it is known.
   `spawnAgent`, whose return carries no model. `spawnAgent` gains an
   optional `onModelResolved(resolved)` option, called right after
   resolution; the three tool bodies forward it to `onUpdate`, the non-tool
-  caller in `ask.ts` passes none.
+  caller in `ask.ts` passes none. If
+  `260906-feat-ws-pi-lead-explore-as-async-rpc-child` lands first, the
+  lead-side `explore` also resolves inside `spawnAgent` and takes the
+  callback like the other three; whichever of the two lands second
+  reconciles explore's wiring so it lives in `spawnAgent` once.
 - **Body below the line.** Attaching `renderResult` replaces Pi's fallback
   (the ten-line cap), so Phase 1's shared result renderer (YAML for JSON,
   raw otherwise, row-budget trim) is applied to these five custom tools as
