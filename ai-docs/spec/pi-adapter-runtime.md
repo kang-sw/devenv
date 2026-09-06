@@ -326,7 +326,10 @@ report channel" below):
   (this now includes one the adapter parked automatically after it settled —
   see "Turn completion is gated on RPC idle") auto-resumes it from its on-disk
   session (keeping the same ws `session_key`) and then delivers — so resume is
-  subsumed by send, and there is no separate continue tool.
+  subsumed by send, and there is no separate continue tool. `ws-agent-send`
+  refuses outright against a **one-shot** record (260906; see `explore`
+  below) — a lead/fork explore child has no continuation to send into, and
+  its answer is delivered by its own settle push, not by driving it further.
 - `ws-agent-list({ include_prompt? })` — enumerate registry members with their
   status, alias, title and model. Status vocabulary is `running` / `idle` /
   `dormant`, but `idle` (260905) is now transient rather than a resting state:
@@ -439,17 +442,45 @@ cleared on settle, stop, exit or spawn failure.
 
 ### explore — one-shot recon leaf {#260903-pi-explore-recon-leaf}
 
-`explore({ query, async? })` is a thin one-shot preset over the same engine for
-ephemeral read-only reconnaissance: a fixed `explore` playbook, the `recon` tool
-group, `--no-session` (no continuation state), and self-reaping (the registry
-entry is dropped once the leaf completes). An `explore` leaf has no `continue`
-path, and its own `recon` allowlist excludes `explore` and every `ws-agent-*`
-tool, so an explore leaf spawns neither another explore nor a worker — it is the
-non-recursive terminal of the delegation tree (see bounded depth below).
-`explore` is the one delegation tool a worker itself may reach. An explore leaf
-is not a registry member: it returns through its own tool result, pushes no
-message and is outside the pushed status line's running count; the common
-synchronous `explore` is unaffected.
+`explore({ query })` is a thin one-shot preset for ephemeral read-only
+reconnaissance: a fixed `explore` playbook and the `recon` tool group, no
+continuation. Registration branches on the calling process's own role, fixed
+once at factory time — the shape differs by who is calling it:
+
+- **Lead or fork.** `explore` is a preset over `spawnAgent` (260906): the same
+  RPC-backed engine `ws-agent-spawn` uses, spawned with `toolGroup: "recon"`
+  explicit, the `"small"` alias (or the inherited model when that resolves to
+  no genuine hit, exactly like every other spawn), an auto-generated alias
+  (`explore-1`, `explore-2`, ...), and a title derived from the query. The
+  call returns `{ agent_id, alias }` immediately, the same "do not wait for
+  it" contract as `ws-agent-spawn`. The child IS a registry member — a
+  regular `RpcAgentRecord`, `oneShot: true` — counted by the pushed status
+  line and the goal-loop yield gate like any other delegated agent while it
+  runs. It has no report tool of its own; its answer is delivered by the
+  ordinary settle push's `last_message` (`ws-agent-settled`, `reason: "idle"`
+  in the common case). Being one-shot changes what happens after: a
+  one-shot record is deleted from the registry right after its own settle
+  push (not parked dormant like every other spawn shape), an owner
+  `ws-agent-stop` on it deletes it the same way instead of leaving it
+  resumable, a launch failure (`client.start()` or the initial prompt
+  throwing) deletes it the same way right after its own spawn-failed push
+  instead of leaving a permanently parked zombie behind, and `ws-agent-send`
+  against a one-shot id is refused outright (naming it as an explore) —
+  there is no continuation to send into, `ws-agent-stop` and
+  `ws-agent-transcript` still work against it while it is registered.
+- **Worker or execute-worker.** `explore` is the original blocking one-shot
+  leaf, unchanged except that the `async` param is gone (its only consumer
+  was the lead path now replaced by the preset above): `--no-session` (no
+  continuation state) and self-reaping — the registry entry is dropped once
+  the leaf completes. This leaf is not a member of the RPC-backed registry
+  at all; it lives in its own separate one-shot `AgentRegistry`, returns
+  through its own tool result, pushes no message, and is outside the pushed
+  status line's running count.
+
+Either way, `explore`'s own `recon` allowlist excludes `explore` and every
+`ws-agent-*` tool, so an explore child spawns neither another explore nor a
+worker — it is the non-recursive terminal of the delegation tree (see bounded
+depth below). `explore` is the one delegation tool a worker itself may reach.
 
 ### Per-spawn tool curation {#260903-pi-spawner-tool-groups}
 
@@ -463,22 +494,29 @@ worker's `full-worker` allowlist **excludes every delegation-driving tool**
 spawn or drive a further generation of persistent workers, but it **includes the
 literal `explore` tool** — a pi-native custom tool, not a `ws__*` bridge name, so
 it must be named explicitly to survive Pi's `--tools` allowlist — so a worker may
-spawn a read-only recon leaf. No agent-profile files are written to disk (no
-`.pi/agents/`); all curation is in-memory plus `pi` CLI flags.
+spawn a read-only recon leaf via the blocking `exploreLeaf` shape. The same
+`explore` name in the lead/fork's own surface is registered as the different,
+RPC-backed one-shot-child preset instead (260906; see the `explore` anchor
+above) — same tool name, shape keyed by the calling process's own role. No
+agent-profile files are written to disk (no `.pi/agents/`); all curation is
+in-memory plus `pi` CLI flags.
 
 ### Bounded delegation depth {#260904-pi-spawner-bounded-depth-explore-leaf}
 
-The delegation tree terminates at depth 2 (lead → worker → explore leaf). A
-worker's `--tools` allowlist admits `explore` but no delegation-driving tool, and
-the `explore` leaf's own `recon` allowlist admits neither `explore` nor any
-`ws-agent-*` tool, so no branch of the tree extends past an explore leaf. This is
-enforced entirely by the adapter's per-spawn `--tools` allowlists; the ws-mcp
-core's own keyed-handler role check is untouched. The bound is measured from
-the **root of the delegation tree**, and a side-thread fork (see "Side-thread
-task fork") is lateral rather than a descendant: it inherits the lead's surface,
-so it is itself a root of its own worker → explore-leaf tree and consumes no
-depth budget of the lead's. A fork cannot fork again, because `ws-fork` is
-absent from its surface.
+The delegation tree terminates at depth 2, in either of two equivalent shapes:
+lead/fork → explore child (260906's RPC-backed one-shot preset), or lead/fork →
+worker → explore leaf (the worker's own blocking `exploreLeaf`). A worker's
+`--tools` allowlist admits `explore` but no delegation-driving tool, and
+`explore`'s own `recon` allowlist — the same in both shapes — admits neither
+`explore` nor any `ws-agent-*` tool, so no branch of the tree extends past an
+explore child or leaf. This is enforced entirely by the adapter's per-spawn
+`--tools` allowlists; the ws-mcp core's own keyed-handler role check is
+untouched. The bound is measured from the **root of the delegation tree**, and
+a side-thread fork (see "Side-thread task fork") is lateral rather than a
+descendant: it inherits the lead's surface, so it is itself a root of its own
+worker → explore-leaf (or direct explore-child) tree and consumes no depth
+budget of the lead's. A fork cannot fork again, because `ws-fork` is absent
+from its surface.
 
 ### Model resolution: fixed tier through ws-mcp {#260903-pi-spawner-model-tier-inherit}
 
@@ -513,9 +551,14 @@ contributes an effort value, even if its raw payload happened to carry one.
 
 `explore` is a **role**, not a caller-facing model choice: it resolves its own
 model through the same `config.resolve_agent` path, implicitly keyed on the
-fixed tier name `small`, and exposes no `model_name` parameter. Only the
-model half of that answer reaches the explore leaf: it has no effort
-surface, so a `small` tier's configured `effort` is not applied to explores.
+fixed tier name `small`, and exposes no `model_name` parameter. Which half of
+that answer is applied depends on the calling shape (260906): the worker's
+`exploreLeaf` still takes only the model half — it has no effort surface, so
+a `small` tier's configured `effort` is never applied there. The lead/fork's
+RPC-backed explore child goes through the ordinary `spawnAgent` resolution
+path instead, the same one every other spawn uses, so a genuine `small`-tier
+hit's `effort` IS applied to it via `modelEffort`/`setThinkingLevel`, exactly
+as for a `ws-agent-spawn`-launched worker.
 
 ### Model resolution via ws-mcp config, not an adapter data file {#260903-pi-model-catalog-config-file}
 
@@ -1077,13 +1120,17 @@ of its own: every repaint rebuilds the rows from those registries.
   `/answer <id>` hint appended when the row awaits the owner. `name` is the
   agent's alias, else its title, else the first eight characters of its id; a
   thread with no live respondent is named by the thread title. `role` is
-  `worker`, `execute`, `fork`, or `thread` (a lead-ask discussion respondent,
-  or a thread with no live respondent yet). `state` is `awaiting owner`,
-  `awaiting approval`, or `running`; there is no idle, dormant, or explore
-  row, since an idle child is parked and a one-shot explore never enters the
-  registry. `elapsed` counts from the record's last prompt (`runStartedAt`,
-  stamped by every prompt including the anti-bleed nudge), or from the
-  thread's `touchedAt` for a row that awaits the owner on a thread.
+  `worker`, `execute`, `fork`, `explore`, or `thread` (a lead-ask discussion
+  respondent, or a thread with no live respondent yet) — `explore` (260906)
+  is the lead/fork's own one-shot RPC-backed child, a live row like any other
+  while it runs. `state` is `awaiting owner`, `awaiting approval`, or
+  `running`; there is no idle or dormant row, since an idle child is parked —
+  a lead/fork explore is no exception: it is a `running` row while active and
+  disappears from the registry (hence the widget) at settle, right after its
+  own settle push, rather than lingering dormant like a park-eligible worker.
+  `elapsed` counts from the record's last prompt (`runStartedAt`, stamped by
+  every prompt including the anti-bleed nudge), or from the thread's
+  `touchedAt` for a row that awaits the owner on a thread.
 - **Which records are rows.** An RPC record is a row while it has a live
   client, a pending approval, or is thread-bound (a thread-bound record stays
   a row while parked between messages — it is the owner's action cue). A

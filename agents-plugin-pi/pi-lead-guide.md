@@ -37,7 +37,7 @@ Route a task to the right primitive by what you actually need done:
 | Gracefully stop a subagent (keeps it resumable) | `ws-agent-stop` |
 | Read a subagent's full session transcript | `ws-agent-transcript` |
 | (as a subagent) surface an intermediate finding to your lead | `ws-report-to-lead` |
-| Answer one scoped, read-only exploration question | `explore` |
+| Ask one scoped, read-only exploration question (returns an id right away; the answer arrives later on the settle push) | `explore` |
 | Arm a persistent goal that survives multiple turns | `/goal <goal>` — when the goal names a skill, start every cycle by calling `ws-skill <name>` for it, not by guessing its content from memory |
 | Declare the active goal achieved (terminal) | `goal-achieved <summary>` |
 | Declare the active goal blocked (terminal) | `goal-blocked <reason>` |

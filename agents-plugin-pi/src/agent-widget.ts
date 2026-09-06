@@ -53,8 +53,8 @@ export const AGENT_WIDGET_TICK_MS = 10_000;
 /** `buildWidgetLines`'s width bound when the caller supplies none — Pi's extension surface exposes no live terminal-column read, so this is a conservative fixed default rather than a probed value. */
 export const DEFAULT_AGENT_WIDGET_WIDTH = 80;
 
-/** One live-agent row's display role. `"thread"` overrides the record's own `spawnRole` label only for a `threadBound` record whose bound thread is `origin: "lead-ask"`. */
-export type AgentRowRole = "worker" | "execute" | "fork" | "thread";
+/** One live-agent row's display role. `"thread"` overrides the record's own `spawnRole` label only for a `threadBound` record whose bound thread is `origin: "lead-ask"`. `"explore"` (260906) is a lead/fork one-shot explore's own role — see `roleFromSpawnRole`. */
+export type AgentRowRole = "worker" | "execute" | "fork" | "thread" | "explore";
 
 /** One live-agent row's state, in display precedence order (`awaiting-owner` first). Idle is deliberately not a state here — an idle, non-`threadBound` record is auto-parked (see `spawner.ts`'s `attachEventListener`) before it would ever read this way. */
 export type AgentRowState = "awaiting-owner" | "awaiting-approval" | "running";
@@ -83,10 +83,11 @@ const STATE_LABEL: Record<AgentRowState, string> = {
   running: "running",
 };
 
-/** `worker -> "worker"`, `execute-worker -> "execute"`, `fork -> "fork"`; an unset `spawnRole` (should not happen post-spawn, but never throw) falls back to `"worker"`. */
+/** `worker -> "worker"`, `execute-worker -> "execute"`, `fork -> "fork"`, `explore -> "explore"` (260906); an unset `spawnRole` (should not happen post-spawn, but never throw) falls back to `"worker"`. */
 function roleFromSpawnRole(spawnRole: SpawnAgentRole | undefined): AgentRowRole {
   if (spawnRole === "execute-worker") return "execute";
   if (spawnRole === "fork") return "fork";
+  if (spawnRole === "explore") return "explore";
   return "worker";
 }
 

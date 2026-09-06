@@ -45,14 +45,30 @@
  * (`resolveModelForAliasViaWsMcp` below), or omits it to inherit the parent
  * session's model.
  *
- * `explore` is the one exception left untouched: it remains the one-shot
- * `pi --mode json -p --no-session --tools=recon` recon leaf from Phases 2-3
- * (`spawnPiProcess`/`AgentEventLineBuffer`/`handleAgentEvent`/`waitForDone`
- * below), self-reaping, non-recursive (depth <= 2: lead -> worker ->
- * explore-leaf; explore cannot spawn explore, since none of the `ws-agent-*`
- * tools are in `TOOL_GROUPS`). Only its implicit model resolution switches
- * from the old tier lookup to the reframed alias lookup (still keyed on the
- * fixed name `"small"`).
+ * `explore` (260906) is now two different implementations behind one tool
+ * name, keyed on the calling process's own role (`registerAgentTools`
+ * branches on `isLeadOrFork(readSpawnRole(process.env))`):
+ * - Lead or fork: a thin preset over `spawnAgent` below — a regular,
+ *   `oneShot: true` `RpcAgentRecord`, a full registry member counted by the
+ *   fan-in gate while it runs. It returns `{ agent_id, alias }` immediately;
+ *   its answer arrives later as an ordinary settle push. Being `oneShot`
+ *   only changes what happens next: the settle IIFE in
+ *   `attachEventListener` (or `pushSpawnFailed`, on a launch failure)
+ *   deletes it from the registry right after its own push, instead of
+ *   parking it dormant, and `ws-agent-send` refuses it outright.
+ * - Worker or execute-worker: the original one-shot
+ *   `pi --mode json -p --no-session --tools=recon` recon leaf from Phases
+ *   2-3 (`spawnPiProcess`/`AgentEventLineBuffer`/`handleAgentEvent`/
+ *   `waitForDone` below), unchanged, self-reaping, and never a member of the
+ *   RPC-backed registry at all — it lives in its own separate one-shot
+ *   `AgentRegistry`.
+ *
+ * Either shape is non-recursive (depth <= 2: lead -> worker -> explore-leaf,
+ * or lead/fork -> explore child; explore cannot spawn explore, since none of
+ * the `ws-agent-*` tools are in `TOOL_GROUPS`). Only the leaf's implicit
+ * model resolution switches from the old tier lookup to the reframed alias
+ * lookup (still keyed on the fixed name `"small"`); the lead/fork preset
+ * resolves through the ordinary `spawnAgent` path instead.
  *
  * `--tools` per-spawn group curation (`read-only`/`recon`/`full-worker`) is
  * retained unchanged — zero on-disk agent-profile files, curation lives in
@@ -81,7 +97,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { RpcClient, type RpcClientOptions } from "@earendil-works/pi-coding-agent";
 import type { McpStdioClient, McpToolCallResult } from "./mcp-stdio-client.ts";
 import type { BridgeHandle } from "./bridge.ts";
-import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readSpawnRole } from "./process-role.ts";
+import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readSpawnRole, type SpawnRole } from "./process-role.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers: tool-group resolution, terminal-stopReason classification,
@@ -627,12 +643,6 @@ export interface AgentCallCtx {
 
 export interface ExploreParams {
   query: string;
-  /**
-   * `false`/omitted (default): block until the leaf finishes and return its
-   * output directly. `true`: register a running entry and return
-   * immediately, for the caller to harvest later.
-   */
-  async?: boolean;
 }
 
 function harvestExplore(id: string, record: AgentRecord, registry: AgentRegistry): { output: string; stopReason?: string } {
@@ -648,11 +658,13 @@ function harvestExplore(id: string, record: AgentRecord, registry: AgentRegistry
 /**
  * Thin one-shot `explore` preset: fixed `playbook: "explore"`,
  * `--tools=recon`, `--no-session`, no continuation. The leaf self-reaps from
- * the registry once its output has been harvested — synchronously here by
- * default (Phase 1 drops the shared `ws-agent-wait` integration this used to
- * lean on for `async: true`, since that tool now only tracks the RPC-backed
- * registry below; `async: true` still registers the running entry, it just
- * has no dedicated harvesting tool of its own in this phase).
+ * the registry once its output has been harvested. Always blocks until the
+ * child process closes and returns its output directly — the `async` param
+ * this used to accept is gone (260906: the lead's own `explore` registration
+ * is now a preset over the RPC-backed `spawnAgent` below, which is
+ * async-by-nature; this worker/execute-worker-only leaf never needed a
+ * non-blocking mode of its own, since its one caller — a worker's own
+ * `explore` tool call — was always the sole consumer of `async: true`).
  */
 export async function exploreLeaf(
   client: McpStdioClient,
@@ -697,10 +709,6 @@ export async function exploreLeaf(
     task: params.query,
   });
   spawnPiProcess(record, args, ctx.cwd);
-
-  if (params.async) {
-    return { agentId, state: record.state };
-  }
 
   await waitForDone(record);
   const harvested = harvestExplore(agentId, record, registry);
@@ -970,6 +978,21 @@ export interface RpcAgentRecord {
    * `onApprovalPending` of its own, gets it for free.
    */
   onApprovalPending?: (record: RpcAgentRecord) => void;
+  /**
+   * 260906 (lead explore as an async RPC child): `true` only for the lead/fork
+   * `explore` preset — a spawn with no continuation and no lead-driven
+   * follow-up. Drives three things: `sendToAgent` refuses a `ws-agent-send`
+   * against a one-shot record (its answer is the settle push's
+   * `last_message`, not a driveable conversation); the settle IIFE in
+   * `attachEventListener` deletes the registry entry right after its own
+   * silent `stopAgent` park (instead of leaving it dormant/resumable like
+   * every other record); and the shutdown sidecar (`agent-sidecar.ts`)
+   * excludes it from the orphan snapshot, since a settled-and-deleted or
+   * still-running one-shot has nothing worth reviving. `undefined`/`false`
+   * for every other spawn shape (worker/execute-worker/fork), which all keep
+   * today's dormant-and-resumable resting state.
+   */
+  oneShot?: boolean;
 }
 
 /**
@@ -1016,8 +1039,14 @@ export type AgentStatus = "running" | "idle" | "dormant";
  * the PARENT's classification of what it spawned, and must distinguish an
  * `execute-worker` (approval-gated) from a plain worker so the shutdown
  * sidecar can re-arm the right wiring on revival.
+ *
+ * 260906: `"explore"` is the fourth shape — a lead/fork's `explore` tool call
+ * is itself an RPC-backed spawn (a one-shot preset, `RpcAgentRecord.oneShot`)
+ * rather than the worker/execute-worker leaf's separate one-shot
+ * `AgentRegistry`. The shutdown sidecar excludes `oneShot` records outright
+ * (`agent-sidecar.ts`), so this role never needs its own revival wiring.
  */
-export type SpawnAgentRole = "worker" | "execute-worker" | "fork";
+export type SpawnAgentRole = "worker" | "execute-worker" | "fork" | "explore";
 
 /** Per-agent cap on retained `reportLog` entries (drop-oldest); see `RpcAgentRecord.reportLog`. */
 export const REPORT_LOG_CAP = 64;
@@ -1148,8 +1177,11 @@ function computeFanIn(registry: RpcAgentRegistry | undefined): { present: boolea
  *   `threadBound` — 260905 (alias/park/cap ticket) keys this on registry
  *   membership, not on a live client: a dormant/parked record still counts as
  *   present, since automatic parking (see the settle handler below) now
- *   routinely turns a settled, non-threadBound child dormant. An `explore`
- *   leaf is never in this registry at all (it has its own).
+ *   routinely turns a settled, non-threadBound child dormant. 260906: a
+ *   lead/fork `explore` IS a member of this same registry while it runs (a
+ *   one-shot `RpcAgentRecord`, deleted rather than parked at settle) — only
+ *   the worker/execute-worker leaf's separate one-shot `AgentRegistry` is
+ *   never counted here.
  * - N counts the subset of those that is still `running` and has not yet
  *   filed a `final`/`question` this turn (`terminalThisTurn`), so the agent
  *   whose own terminal report triggered this very push has already removed
@@ -1662,9 +1694,13 @@ export function startLivenessProbe(
 }
 
 /**
- * The `spawn-failed` half of `spawnAgent`'s launch-failure handling: park the
- * half-registered record in its resting state and tell the owning session
+ * The `spawn-failed` half of `spawnAgent`'s launch-failure handling: put the
+ * half-registered record into its resting state and tell the owning session
  * once, so the fan-in count is not left waiting on a child that never started.
+ * A non-`oneShot` record is left parked (dormant) there, same as always; a
+ * `oneShot` record (260906) is instead deleted from the registry right after
+ * this push, since it has no dormant-resumable resting state to park in and
+ * would otherwise sit as a permanent zombie no other call site can reach.
  * The caller re-throws the original error unchanged afterwards.
  *
  * Extracted (review relay #1, test partition C2) so this branch has offline
@@ -1679,6 +1715,21 @@ export function pushSpawnFailed(
 ): void {
   clearLiveState(record);
   pushToLead(pi, registry, record, "ws-agent-settled", { reason: "spawn-failed", error: err instanceof Error ? err.message : String(err) }, "followUp");
+  // 260906 review relay #1 (Important, correctness): a launch failure on a
+  // `oneShot` spawn (client.start()/attachEventListener/promptAgent
+  // throwing, all still inside spawnAgent's own try/catch) would otherwise
+  // leave the half-registered record parked forever — `attachEventListener`
+  // was never reached (or fired no settle event before the throw), so its
+  // settle IIFE never runs to delete it; the sidecar excludes `oneShot`
+  // records from revival; and `ws-agent-send` refuses it outright. Delete it
+  // here, right after its own spawn-failed push, mirroring the settle
+  // IIFE's own push-then-delete order for a `oneShot` record (see
+  // `attachEventListener` above). `stopAgent`'s "never delete here" (D-C)
+  // invariant is untouched — this is `spawnAgent`'s own failure path, not
+  // `stopAgent`, and a non-`oneShot` record still parks exactly as before.
+  if (record.oneShot && registry) {
+    registry.delete(record.agentId);
+  }
   triggerAgentWidgetRefresh();
 }
 
@@ -1767,6 +1818,13 @@ export interface RpcSpawnCtx {
    * is set, `"execute-worker"` for that tool group, `"worker"` otherwise.
    */
   spawnRole?: SpawnAgentRole;
+  /**
+   * 260906: mirrors `spawnRole`'s "recorded on the record, caller-supplied"
+   * convention — set to `true` only by the lead/fork `explore` preset's
+   * `registerAgentTools` call site. See `RpcAgentRecord.oneShot`'s doc
+   * comment for what it drives. `undefined`/`false` for every other spawn.
+   */
+  oneShot?: boolean;
 }
 
 export interface RpcResumeCtx {
@@ -1823,6 +1881,15 @@ export interface RpcResumeCtx {
  * before-a-message clone semantics is the ticket's own named live-
  * verification item (not resolvable offline) — this function only builds
  * the argv, it does not confirm Pi's own `--fork` behavior.
+ *
+ * 260906 (lead explore as an async RPC child) adds the trailing
+ * `spawnRoleOverride` param: when given, it wins outright over the
+ * `forkFrom ? "fork" : "worker"` default — the lead/fork `explore` preset is
+ * the only caller that passes one (`"explore"`, from `process-role.ts`'s
+ * `SpawnRole`), so its RPC child's own env reads as an explore leaf rather
+ * than a plain worker. `undefined` (every other call site: `spawnAgent`'s
+ * non-explore spawns, `sendToAgent`'s dormant-resume branch) leaves the
+ * existing default completely unchanged.
  */
 export function buildRpcClientOptions(
   cwd: string,
@@ -1832,9 +1899,10 @@ export function buildRpcClientOptions(
   tools: string,
   forkFrom?: string,
   parentSessionKey?: string,
+  spawnRoleOverride?: SpawnRole,
 ): RpcClientOptions {
   const env: Record<string, string> = {
-    [WS_PI_SPAWN_ROLE_ENV]: forkFrom ? "fork" : "worker",
+    [WS_PI_SPAWN_ROLE_ENV]: spawnRoleOverride ?? (forkFrom ? "fork" : "worker"),
     [WS_PI_APPROVAL_DIR_ENV]: join(dirname(sessionPath), "approvals"),
   };
   if (forkFrom && parentSessionKey) {
@@ -2125,6 +2193,17 @@ export function attachEventListener(
           } catch {
             // best effort — a park failure must not crash the settle handler.
           }
+          // 260906: a one-shot explore has no dormant-resumable resting
+          // state — its own push (above) already delivered the answer, so
+          // there is nothing left for it to be revived for. Deletion lives
+          // here, in the IIFE, deliberately AFTER the push and AFTER
+          // `stopAgent`'s own teardown — `stopAgent`'s "never delete here"
+          // invariant (D-C) stays literally true; this is a separate,
+          // caller-side cleanup step for the one spawn shape that never
+          // parks dormant.
+          if (record.oneShot) {
+            registry.delete(record.agentId);
+          }
         }
         // 260905 (live-agent widget ticket): fired after the liveness probe
         // and the possible automatic park above, so the widget's re-render
@@ -2351,6 +2430,7 @@ export async function spawnAgent(
     toolGroup,
     explicitTools: ctx.explicitTools,
     spawnRole: ctx.spawnRole ?? (ctx.forkFrom ? "fork" : toolGroup === "execute-worker" ? "execute-worker" : "worker"),
+    oneShot: ctx.oneShot === true,
     streaming: false,
     running: false,
     reportLog: [],
@@ -2359,7 +2439,16 @@ export async function spawnAgent(
   registry.set(agentId, record);
 
   const client = new RpcClient(
-    buildRpcClientOptions(ctx.cwd, modelBase, sessionPath, params.systemPromptPath, tools, ctx.forkFrom, ctx.parentSessionKey),
+    buildRpcClientOptions(
+      ctx.cwd,
+      modelBase,
+      sessionPath,
+      params.systemPromptPath,
+      tools,
+      ctx.forkFrom,
+      ctx.parentSessionKey,
+      ctx.spawnRole === "explore" ? "explore" : undefined,
+    ),
   );
   record.client = client;
 
@@ -2448,6 +2537,17 @@ export async function sendToAgent(
   const record = registry.get(resolvedId);
   if (!record) {
     throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
+  }
+
+  // 260906 (lead explore as an async RPC child): a one-shot explore has no
+  // continuation — its answer is the settle push's `last_message`, not a
+  // driveable conversation. Refuse before any of the live/dormant branches
+  // below so a caller can never race the settle-IIFE deletion by sending into
+  // an explore that is about to (or already did) vanish from the registry.
+  if (record.oneShot) {
+    throw new Error(
+      `ws-pi-agent: ws-agent-send refused: agent ${resolvedId} is a one-shot explore — read its answer from the settle push or ws-agent-transcript`,
+    );
   }
 
   // See `RpcResumeCtx.leadSend`: the lead taking over the exchange releases a
@@ -2715,12 +2815,17 @@ export interface AgentToolsHandle {
 /**
  * Registers the six RPC-backed delegation tools (`ws-agent-spawn`,
  * `ws-agent-send`, `ws-agent-list`, `ws-agent-stop`, `ws-agent-transcript`,
- * `ws-report-to-lead`) plus the unchanged one-shot `explore` tool, against two
- * separate in-extension registries: `rpcRegistry` (RPC-backed, persistent
- * children) and `exploreRegistry` (one-shot, self-reaping recon leaves). They
- * are kept separate rather than unified because their completion signals are
- * fundamentally different (an `agent_settled` RPC event, pushed to the lead,
- * vs. a child process's `close` event awaited inline by `waitForDone`).
+ * `ws-report-to-lead`) plus a role-keyed `explore` tool (260906): a lead or
+ * fork process registers `explore` as a preset over `spawnAgent` — an
+ * `oneShot: true` member of the SAME `rpcRegistry`, not a separate leaf —
+ * while a worker or execute-worker process still registers the original
+ * one-shot recon leaf against its own separate `exploreRegistry`
+ * (self-reaping, awaited inline by `waitForDone`). The two registries are
+ * kept separate rather than unified because their completion signals are
+ * fundamentally different for the leaf shape (an `agent_settled` RPC event,
+ * pushed to the lead, vs. a child process's `close` event); the lead/fork
+ * preset's completion signal is the ordinary RPC push, so it needs no
+ * separate registry of its own.
  *
  * Phase 2 adds a child->lead report channel: `ws-report-to-lead` is the only
  * child-side tool this ticket adds (registered here but reachable only from
@@ -2766,6 +2871,16 @@ export function registerAgentTools(
   const stopLivenessProbe = startLivenessProbe(pi, rpcRegistry);
 
   /**
+   * 260906 (lead explore as an async RPC child): role is fixed for this
+   * process's whole lifetime, so it is read once at factory time rather than
+   * per tool call. `true` for the host lead and a `fork` child — both get the
+   * new RPC-backed preset; every other role (worker, execute-worker, and,
+   * harmlessly, an explore leaf itself, which can never reach this tool per
+   * the depth cap) keeps the blocking `exploreLeaf` behavior unchanged.
+   */
+  const isLeadRole = isLeadOrFork(readSpawnRole(process.env));
+
+  /**
    * IO wrapper around `resolveModelForAliasViaWsMcp` for `explore`'s implicit
    * `"small"` lookup: re-resolves through `config.resolve_agent` fresh on
    * every call (no caching) so a `config.tune agents.tier harness:pi` edit
@@ -2775,6 +2890,27 @@ export function registerAgentTools(
   async function resolveExploreModel(toolCtx: unknown): Promise<string | undefined> {
     const { model } = await resolveModelForAliasViaWsMcp(bridge.client, "small", inheritModelFromToolCtx(toolCtx));
     return model;
+  }
+
+  /**
+   * 260906: per-process counter behind the lead-preset explore's auto alias
+   * (`explore-1`, `explore-2`, ...) — simplest correct approach; a
+   * registry-scan-based alternative would work too but adds no value over a
+   * closure counter scoped to this factory call.
+   */
+  let exploreCounter = 0;
+  function autoExploreAlias(): string {
+    exploreCounter += 1;
+    return `explore-${exploreCounter}`;
+  }
+
+  /** Cap on the head-truncated query used as a spawned explore's display title. */
+  const EXPLORE_TITLE_CAP = 60;
+  const EXPLORE_TITLE_TRUNCATION_MARKER = "…";
+
+  /** Head-truncates `query` to `EXPLORE_TITLE_CAP` characters for use as the spawned record's `title`. */
+  function deriveExploreTitle(query: string): string {
+    return query.length > EXPLORE_TITLE_CAP ? `${query.slice(0, EXPLORE_TITLE_CAP)}${EXPLORE_TITLE_TRUNCATION_MARKER}` : query;
   }
 
   pi.registerTool({
@@ -2912,6 +3048,16 @@ export function registerAgentTools(
       // Non-silent: an explicit stop is a delegation outcome the lead should
       // see land in its transcript like every other settle reason.
       const result = await stopAgent(rpcRegistry, p.agent_id, pi);
+      // 260906: an owner-cancelled one-shot explore has no dormant/resumable
+      // resting state (unlike every other stopped record) — delete it here,
+      // in this tool's own body, right after `stopAgent` returns (same
+      // reason/layer as the settle IIFE's equivalent deletion in
+      // `attachEventListener`, D-C's "never delete in stopAgent itself"
+      // stays unchanged).
+      const resolvedId = resolveAgentId(rpcRegistry, p.agent_id) ?? p.agent_id;
+      if (rpcRegistry.get(resolvedId)?.oneShot) {
+        rpcRegistry.delete(resolvedId);
+      }
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     },
   });
@@ -2965,27 +3111,80 @@ export function registerAgentTools(
   pi.registerTool({
     name: "explore",
     label: "explore",
-    description:
-      "One-shot read-only exploration leaf: answers a single scoped question via the explore playbook with the recon tool group, no session persisted, no continuation.",
+    // 260906 (lead explore as an async RPC child): registration branches on
+    // role, fixed once at factory time (`isLeadRole` above) — a lead/fork
+    // gets the new RPC-backed preset (id now, answer on the settle push); a
+    // worker/execute-worker keeps today's blocking leaf, unchanged except for
+    // the dropped `async` param (see `ExploreParams`). Both branches share the
+    // same `{query}`-only parameter schema.
+    description: isLeadRole
+      ? "Spawn a one-shot, read-only exploration child (recon tool group, no continuation) as an RPC-backed subagent. Returns {agent_id, alias} immediately after the initial prompt is sent. Do not wait for it: end your turn — its answer arrives later on the settle push's last_message."
+      : "One-shot read-only exploration leaf: answers a single scoped question via the explore playbook with the recon tool group, no session persisted, no continuation.",
     parameters: {
       type: "object",
       properties: {
         query: { type: "string", description: "One-shot exploration question." },
-        async: {
-          type: "boolean",
-          description: "When true, returns immediately with a running registry entry instead of blocking until done.",
-        },
       },
       required: ["query"],
     } as never,
     async execute(_toolCallId, params, _signal, _onUpdate, toolCtx) {
       const p = params as ExploreParams;
+
+      if (isLeadRole) {
+        // Same render-then-spawn shape as `exploreLeaf` above (D-A:
+        // `spawnAgent` never renders playbooks itself), duplicated rather
+        // than shared since the two call sites now differ in what they do
+        // with the result (leaf harvests output directly; the preset only
+        // needs the id/alias — its answer is delivered later by the settle
+        // push's `harvestLastMessage`).
+        const renderResult = await bridge.client.callTool("playbook.render", {
+          session_key: bridge.defaultSessionKeyRef.current ?? "",
+          name: "explore",
+        });
+        const text = firstText(renderResult);
+        if (renderResult.isError || !text) {
+          throw new Error(`ws-pi-agent: playbook.render("explore") failed: ${text ?? "no content returned"}`);
+        }
+        const systemPromptPath = text.split("\n")[0]?.trim();
+        if (!systemPromptPath) {
+          throw new Error('ws-pi-agent: playbook.render("explore") returned no prompt path');
+        }
+        const result = await spawnAgent(
+          rpcRegistry,
+          {
+            pi,
+            cwd: sessionCtx.cwd,
+            inheritModel: inheritModelFromToolCtx(toolCtx),
+            wsToolNames: bridge.wsToolNames,
+            client: bridge.client,
+            toolGroup: "recon",
+            spawnRole: "explore",
+            oneShot: true,
+            onApprovalPending,
+          },
+          {
+            systemPromptPath,
+            prompt: p.query,
+            // explore resolves implicitly through the "small" alias — no
+            // caller-facing model param (ticket: explore is a role, not a
+            // caller-supplied alias/tier). Unlike the leaf's own
+            // `resolveExploreModel` IO wrapper, this resolves through
+            // `spawnAgent`'s own internal `resolveModelForAliasViaWsMcp` call.
+            modelName: "small",
+            alias: autoExploreAlias(),
+            title: deriveExploreTitle(p.query),
+          },
+        );
+        // Literal {agent_id, alias} per the ticket's stated return contract —
+        // `evicted` is not surfaced here (an explore preset carries no alias
+        // collision risk worth reporting the way a caller-aliased
+        // `ws-agent-spawn` does).
+        return { content: [{ type: "text", text: JSON.stringify({ agent_id: result.agent_id, alias: result.alias }) }] };
+      }
+
       const result = await exploreLeaf(
         bridge.client,
         exploreRegistry,
-        // explore resolves implicitly through the "small" alias — no
-        // caller-facing model param on ExploreParams (ticket: explore is a
-        // role, not a caller-supplied alias/tier).
         { sessionKey: bridge.defaultSessionKeyRef.current ?? "", cwd: sessionCtx.cwd, model: await resolveExploreModel(toolCtx) },
         p,
       );

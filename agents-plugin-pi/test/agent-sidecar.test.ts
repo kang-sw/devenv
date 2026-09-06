@@ -99,6 +99,17 @@ describe("captureOrphans", () => {
     );
   });
 
+  test("260906: skips a oneShot record (a lead explore) — it has no dormant-resumable resting state to revive; a non-oneShot record is unaffected", () => {
+    const registry: RpcAgentRegistry = new Map([
+      ["worker", record({ agentId: "worker", client: {} as RpcClient })],
+      ["explore", record({ agentId: "explore", client: {} as RpcClient, oneShot: true, spawnRole: "explore" })],
+    ]);
+    assert.deepEqual(
+      captureOrphans(registry).map((o) => o.agentId),
+      ["worker"],
+    );
+  });
+
   test("records the state at shutdown and the last-report time (relay #2: the roll-call needs both)", () => {
     const registry: RpcAgentRegistry = new Map([
       ["busy", record({ agentId: "busy", client: {} as RpcClient, running: true, reportLog: [{ at: 1_000 }, { kind: "final", at: 2_000 }] })],

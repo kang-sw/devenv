@@ -183,3 +183,57 @@ is not in the sidecar snapshot; the worker leaf still blocks and
 self-reaps. Amend the spec passages under Spec Impact. Owner-run live
 check: lead calls `explore`, sees the id at once, and receives the answer
 on the settle push while free to act.
+
+### Result (a7e42cf5) - 2026-09-06
+
+Landed on `impl/track/pi-agent/kestrel-fern-lantern` (plan `8d12af2f`,
+implementation `21488404`, guide and spec `15dec54a`, review fixes
+`1fed78ba` and `a7e42cf5`). `npm test`: 877 pass, 0 fail (baseline 859; 18
+new tests).
+
+What landed:
+
+- Lead and fork processes register `explore` as a preset over `spawnAgent`:
+  explicit `recon` tool group, `small` alias with inherited-model fallback,
+  auto alias `explore-N`, title derived from the query, `spawnRole:
+  "explore"`, `oneShot: true`; returns `{agent_id, alias}` at once. The
+  answer arrives on the `ws-agent-settled` push's `last_message`.
+- Worker and execute-worker processes keep the blocking `exploreLeaf`
+  under the same name, minus the `async` param.
+- One-shot lifecycle: `ws-agent-send` refuses one-shot records; the settle
+  IIFE deletes the record after its push and the silent `stopAgent`; the
+  `ws-agent-stop` tool body deletes a cancelled one-shot after `stopAgent`
+  returns; `pushSpawnFailed` deletes a one-shot whose launch failed after
+  its spawn-failed push (review fix); `captureOrphans` skips one-shot
+  records. `stopAgent` itself is unchanged.
+- `buildRpcClientOptions` takes a `spawnRoleOverride` so the explore child
+  carries `WS_PI_SPAWN_ROLE=explore`; execute-worker children still carry
+  `worker`. `SpawnAgentRole`, `AgentRowRole`, and `roleFromSpawnRole` gain
+  `explore`, so the widget shows an `explore` row while the child runs.
+- The goal-loop yield gate and the fan-in line count a lead explore through
+  the shared registry with no goal-loop code change. The spec's goal-loop
+  passage never carried an async-explore exclusion; the settle-race
+  ticket's carve-out lives only in its own Result-bearing Phase 1 text.
+- Spec: the six `pi-adapter-runtime` anchors under Spec Impact amended;
+  `pi-lead-guide.md` explore row now reads "id now, answer on the settle
+  push".
+
+Review (partitioned, one relay): correctness Important (failed spawn left
+a one-shot record parked forever) fixed in `pushSpawnFailed`; fit Important
+(stale module header, `registerAgentTools` doc comment, and a false "no
+session persisted" clause in the preset description) fixed; a follow-up
+fit finding (spec did not name the spawn-failure deletion trigger) fixed
+in `a7e42cf5`. Recorded
+minors, no action: `ws-agent-stop`/`ws-agent-transcript` throw `unknown
+agentId` when the settle deletion wins the race (previously a no-op);
+`explore-N` has no collision handling against a user-chosen alias;
+`evicted` is not surfaced by the preset (plan-authorized);
+`deriveExploreTitle` slices UTF-16 units; the `explore` playbook still
+tells the child's caller to continue via `ContinueIdiom`, which the
+one-shot refusal now blocks (playbook out of this ticket's scope); the
+worker leaf's blocking behavior is verified structurally only (invoking it
+under `node --test` would re-exec the test file as the Pi child); new
+`registerAgentTools` tests do not call `stopLivenessProbe()`.
+
+Owner-run live check still pending: lead calls `explore`, sees the id at
+once, and receives the answer on the settle push while free to act.

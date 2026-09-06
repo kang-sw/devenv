@@ -65,14 +65,16 @@ describe("buildAgentRows", () => {
     assert.equal(buildAgentRows(registryOf(byUuid), [], NOW)[0].name, "11111111");
   });
 
-  test("roleFromSpawnRole: worker -> worker, execute-worker -> execute, fork -> fork, unset -> worker", () => {
+  test("roleFromSpawnRole: worker -> worker, execute-worker -> execute, fork -> fork, explore -> explore, unset -> worker", () => {
     const worker = record({ client: {} as never, spawnRole: "worker" });
     const exec = record({ client: {} as never, spawnRole: "execute-worker" });
     const fork = record({ client: {} as never, spawnRole: "fork" });
+    const explore = record({ client: {} as never, spawnRole: "explore" });
     const unset = record({ client: {} as never });
     assert.equal(buildAgentRows(registryOf(worker), [], NOW)[0].role, "worker");
     assert.equal(buildAgentRows(registryOf(exec), [], NOW)[0].role, "execute");
     assert.equal(buildAgentRows(registryOf(fork), [], NOW)[0].role, "fork");
+    assert.equal(buildAgentRows(registryOf(explore), [], NOW)[0].role, "explore");
     assert.equal(buildAgentRows(registryOf(unset), [], NOW)[0].role, "worker");
   });
 

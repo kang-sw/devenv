@@ -105,11 +105,17 @@ export function sidecarPath(leadSessionFile: string): string {
  * silently lose every parked (alias/title/prompt included) agent on a
  * restart. Dormant records are already resumable; carrying them through the
  * sidecar too costs nothing and keeps the roll-call complete.
+ *
+ * 260906 (lead explore as an async RPC child): a `oneShot` record is also
+ * skipped — a one-shot explore has no dormant-resumable resting state to
+ * revive (it is deleted at settle or on an owner-cancelled stop; see
+ * `spawner.ts`'s `attachEventListener`/`ws-agent-stop`), so there is nothing
+ * for a session restart to usefully re-register.
  */
 export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
   const orphans: PersistedOrphan[] = [];
   for (const record of registry.values()) {
-    if (record.threadBound) continue;
+    if (record.threadBound || record.oneShot) continue;
     orphans.push({
       agentId: record.agentId,
       alias: record.alias,
