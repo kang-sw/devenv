@@ -290,6 +290,28 @@ Track attribution and eventual repair in
 comparison remains pending. Phase 2 must not start against the reverted
 helper; restore and verify its Phase 1 prerequisite first.
 
+#### Edition (bbf9a29a) - 2026-09-06
+
+After the owner confirmed that the same session became responsive with YAML
+reverted, the owner authorized a smaller replacement: YAML input and output
+previews selected by ten newline-separated logical lines, not physical rows.
+`bbf9a29a` implements that replacement; `2c8c50a` preserves tool titles and
+bounds native output at narrow widths. Native Text caching replaces the old
+custom grapheme/wrapping loop. Input remains capped when output is expanded.
+Only completed single-text JSON-container results convert; other shapes/errors
+and unavailable native helpers retain Pi's standard display. This supersedes
+the historical unconditional YAML fallback and raw-result preview requirements.
+Model payloads and dispatch are unchanged. Phase 2 is still excluded.
+
+Single independent review found zero Critical and two Important findings:
+missing call title and overwide indivisible native rows. Both are [fixed] in
+one relay by implementer report; Important findings were not re-reviewed.
+Review verified installed host loading/composition, native cache reuse,
+streaming, expansion, fallback, and model fidelity. Final automated suite:
+945 passed, zero failed/skipped with `WS_PI_SPAWN_ROLE` unset. Same-session
+live responsiveness and display acceptance of this replacement remain pending.
+No merge or ticket closure is implied.
+
 ### Phase 2: Dispatch-tool input summaries and resolved model line
 
 Depends on Phase 1 and on the tier-warning ticket's Phase 1. Add

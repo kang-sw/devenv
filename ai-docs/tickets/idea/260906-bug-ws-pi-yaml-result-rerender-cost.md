@@ -33,6 +33,22 @@ with the ws extension enabled after rollback to isolate the YAML contribution.
 Owner-live rollback comparison is pending; do not claim restored performance
 from source equivalence or unit tests alone. No caching fix is implemented.
 
+## Follow-up comparison and replacement - 2026-09-06
+
+The owner subsequently confirmed the same session was fast after the YAML
+rollback with the extension enabled. This controlled comparison strongly
+implicates the removed YAML changes; it still does not resolve a specific
+JavaScript call site or establish an asymptotic bound.
+
+The owner authorized a simpler replacement in `bbf9a29a`, hardened in
+`2c8c50a`: ten logical-line YAML previews before native layout, bridged input
+previews, cached completed preparation/native layout, and cached native row
+clipping. This supersedes the custom Unicode/ASCII fallback direction below;
+unavailable helpers or unsupported result shapes use Pi's normal display.
+Final automated suite passed 945 tests. Live responsiveness of this replacement
+is still pending; do not equate these tests with the successful rollback
+comparison. Keep this investigation open until that comparison is completed.
+
 ## Phases
 
 ### Phase 1: Attribute and reduce avoidable redraw work
