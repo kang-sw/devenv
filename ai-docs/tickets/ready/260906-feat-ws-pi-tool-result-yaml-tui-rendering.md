@@ -1,5 +1,7 @@
 ---
 title: Pi TUI renders JSON-shaped ws tool results as YAML while the model keeps receiving JSON
+related:
+  - 260906-feat-ws-pi-spawn-warns-when-tier-resolution-degrades-to-inherit
 spec:
   - pi-adapter-runtime
 sage-review-design: completed
@@ -47,6 +49,27 @@ documents the pi-tui half as an invariant (`push-render.ts`,
 `overlay-chat.ts`: no static pi-tui import, since `node --test` imports these
 modules) and solves it with a purely structural `Component` object.
 
+Second owner feedback, 2026-09-06, same session (absorbed here from
+`260906-feat-ws-pi-tool-call-rows-show-input-summary-and-resolved-model`,
+now dropped): when the lead calls `explore`, `ws-execute`, `ws-agent-spawn`,
+`ws-agent-send`, or `ws-fork`, the row shows the tool name and then only the
+output. What the model asked for is invisible: the exploration question,
+the command and its prompt, the spawned agent's alias/title and prompt, and
+which model and thinking level the child actually runs with. The owner does
+not want debug dumps, but must be able to tell at a glance what input a
+dispatch is running with, and for every subagent which model and effort
+were actually selected. Cause: a registered tool without `renderCall` falls
+back to `createCallFallback()`, which renders nothing but the bold tool
+name; arguments appear only in the copy-to-clipboard text. No adapter
+registration defines `renderCall`. The model and effort are not in the
+arguments at all: they are resolved inside `execute` (`resolveExploreModel`
+for `explore`; `spawnAgent` for the other three) and never surfaced, so a
+`renderCall` over the arguments alone could not show them. Pi's `execute`
+receives `onUpdate(partialResult)` and can stream `details` before it
+returns; `renderResult` receives those `details` for partial and final
+results alike, so the resolved model can be pushed into the row as soon as
+it is known.
+
 ## Proposed direction
 
 - One shared `renderResult` attached to every `ws__*` registration in the
@@ -85,11 +108,75 @@ modules) and solves it with a purely structural `Component` object.
   arguments). The sanitized `ws__` name is already the row label; a header
   redesign is a separate ticket if wanted.
 
+### Dispatch-tool rows (Phase 2)
+
+- **Input summary via `renderCall`** on the five dispatch tools the lead
+  calls from its own TUI: `explore`, `ws-execute`, `ws-agent-spawn`,
+  `ws-agent-send`, `ws-fork`. Each renders one to three lines under the
+  title from its own arguments, in a fixed per-tool shape: `explore` the
+  `query`; `ws-execute` the `command` when given, then the `prompt` head,
+  `complex` as a tag; `ws-agent-spawn` `alias`/`title` when given, the
+  `system_prompt_path` basename, the `prompt` head, and the requested
+  `model_name`/`model_effort`; `ws-agent-send` the target alias/id and the
+  `message` head, `interrupt` as a tag; `ws-fork` the `prompt` head,
+  `model_name`, `expects_commit` as a tag. Long free text is cut to a fixed
+  row budget (two rows for prompts) with `…`; the full arguments stay in
+  Pi's copy output. Streaming arguments (`context.argsComplete === false`)
+  render whatever has arrived. Hooks never throw on partial or malformed
+  arguments.
+- **Resolved model/effort line, mandatory on every child-dispatching
+  tool** (owner directive, 2026-09-06). Immediately after tier resolution
+  the tool calls `onUpdate` with
+  `details: {resolved: {tier, model, effort, inherited: boolean}}` and
+  includes the same object in its final `details`; for `ws-agent-send` it
+  is the target agent's recorded model/effort. The shared `renderResult`
+  prints `→ <tier or "inherit"> · <provider/id> · effort <level>` before
+  anything else, in every state: partial, success, error. `model` and
+  `effort` are the effective values: `(inherited lead model)` when the tier
+  did not resolve, and `effort: pi-default` when the dispatch applied no
+  thinking level. `inherited` is read from the `rejected` detail that
+  `260906-feat-ws-pi-spawn-warns-when-tier-resolution-degrades-to-inherit`
+  adds to `resolveModelForAliasViaWsMcp`; that ticket lands first, and this
+  phase adds no second inherit signal beyond the row line.
+- **Resolution callback.** Only `explore` resolves inside its own
+  `execute`; `ws-agent-spawn`, `ws-fork`, and `ws-execute` resolve inside
+  `spawnAgent`, whose return carries no model. `spawnAgent` gains an
+  optional `onModelResolved(resolved)` option, called right after
+  resolution; the three tool bodies forward it to `onUpdate`, the non-tool
+  caller in `ask.ts` passes none.
+- **Body below the line.** Attaching `renderResult` replaces Pi's fallback
+  (the ten-line cap), so Phase 1's shared result renderer (YAML for JSON,
+  raw otherwise, row-budget trim) is applied to these five custom tools as
+  well, with the resolved line prepended. Phase 1 writes the renderer as a
+  reusable helper for that reason.
+- One helper module (`src/tool-row-render.ts`, pure functions) holds the
+  per-tool summary builders and the resolved-model line as structural
+  `Component`s; registration sites only wire the hooks. `content` is
+  untouched; `details` is UI-only in Pi's contract.
+- Out of scope: the worker-side gated exec tool (`ws-worker-exec`) only
+  runs inside a `--mode rpc` execute-worker, where Pi builds no tool row,
+  and its command and rationale already reach the lead through the
+  approval-request push. A headless `--mode rpc` lead never invokes these
+  hooks either.
+- Rejected: dumping the JSON arguments under the title (the debug text the
+  owner does not want; the copy output already has it). Rejected: embedding
+  the resolved model in the text `content` (grows the model's context for a
+  human-only concern).
+
 ## Spec Impact
 
 `pi-adapter-runtime` `{#260903-pi-bridge-tool-registration}`: add one bullet
 stating that JSON-shaped text results are displayed as YAML in the TUI row via
 `renderResult` while the tool result returned to the model is unchanged.
+
+Phase 2, recorded where each tool is documented rather than under the
+bridge-registration anchor: `{#260903-pi-delegation-spawner-tools}` for
+`explore`, `ws-agent-spawn`, and `ws-agent-send`;
+`{#260905-pi-execute-approval-gateway}` for `ws-execute`;
+`{#260905-pi-side-thread-fork-task-thread}` for `ws-fork`. Each gets one
+sentence: the row carries an argument summary and a mandatory resolved
+model/effort line, both display-only, with the resolution outcome published
+through `details`.
 
 ## Constraints
 
@@ -101,6 +188,11 @@ stating that JSON-shaped text results are displayed as YAML in the TUI row via
   imports; `npm test` must keep passing with `bridge.test.ts` importing it.
 - Headless leads (`--mode rpc`, no TUI) are unaffected; the hook is never
   invoked there.
+- Phase 2 depends on Phase 1's helper and on
+  `260906-feat-ws-pi-spawn-warns-when-tier-resolution-degrades-to-inherit`
+  Phase 1 for the `rejected` resolver detail; do not start it before both
+  land. Keep the `details` shape additive to whatever each tool already
+  returns.
 
 ## Phases
 
@@ -120,3 +212,21 @@ under Spec Impact. Live check (owner-run): call `ws__config_resolve_agent`
 with `format: "json"` in a Pi lead session and confirm the row shows YAML,
 expands to the full document, and the model's next turn still parses the
 fields.
+
+### Phase 2: Dispatch-tool input summaries and resolved model line
+
+Depends on Phase 1 and on the tier-warning ticket's Phase 1. Add
+`src/tool-row-render.ts` with the per-tool summary builders and the
+resolved-model line, wire `renderCall` on the five dispatch tools, add the
+`onModelResolved` option to `spawnAgent`, publish `details.resolved` via
+`onUpdate` and the final result, apply Phase 1's shared result renderer to
+these tools with the resolved line prepended, and amend the three spec
+passages named for Phase 2 under Spec Impact. Tests: each builder's output
+for representative and for empty/partial arguments; row-budget trimming with
+`…`; a builder never throws on `undefined` arguments; the resolved line for
+a tier hit, a `complex:true` inherit, a tier miss, and a dispatch with no
+thinking level (`effort: pi-default`); the line is present on partial,
+success, and error results; a long synchronous `explore` answer is trimmed
+to the row budget below the line. Live check (owner-run): in a Pi session,
+`explore`, `ws-execute`, and `ws-agent-spawn` rows show the input summary
+while running and the resolved model line before the child finishes.

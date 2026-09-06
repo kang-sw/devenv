@@ -39,6 +39,20 @@ hit, and its text says the `pi` tier table has no entries. A slash-less
 entry is not a genuine hit, so a user who did write `small: gpt-5.6-luna`
 is told the table is empty.
 
+Related finding, 2026-09-06, while answering which model and effort
+`explore` runs with (absorbed here instead of a separate bug ticket):
+`explore` drops the tier's effort. `resolveExploreModel` (`spawner.ts`, by
+the `explore` registration) keeps only `model` from
+`resolveModelForAliasViaWsMcp`, and `buildSpawnArgs` knows `--model`,
+`--tools`, `--append-system-prompt`, `--session`/`--no-session`, and the
+task, nothing about thinking, so the explore child runs at Pi's default
+thinking level whatever effort the owner set on `small`. The RPC-backed
+engine applies effort through `setThinkingLevel` after `start()`, and its
+`applyModelEffort` comment says that is because Pi has no launch-time flag;
+that is stale: the installed CLI (`dist/cli/args.js`) accepts
+`--thinking <level>` (`off|minimal|low|medium|high|xhigh|max`), and
+`--model` takes an optional `:<thinking>` suffix.
+
 ## Decisions
 
 Owner's direction (2026-09-06): validate the configured value against the
@@ -166,7 +180,12 @@ carrying `provider` and `id`. No `pi --list-models` subprocess is needed.
 
 ## Spec Impact
 
-`pi-adapter-runtime`: rewrite the genuine-hit paragraph of
+Phase 2: `{#260903-pi-spawner-model-tier-inherit}` also states that a
+resolved tier effort reaches a process-spawned child as `--thinking` at
+launch and an RPC-backed child through `setThinkingLevel`, and that an
+inherit or an empty effort passes no level in either path.
+
+Phase 1: `pi-adapter-runtime`: rewrite the genuine-hit paragraph of
 `{#260903-pi-spawner-model-tier-inherit}` so the accept rule is
 `resolved_from === "pi"` AND exact membership in
 `ctx.modelRegistry.getAll()` (the slash check is subsumed), add the two
@@ -227,6 +246,26 @@ warning names the value, the inherited model, and the
 `openai-codex/gpt-5.6-luna` suggestion, and that the `workflow_manual`
 advisory no longer says the table is empty; then set the suggested
 `provider/id` and confirm the small worker runs on it with no warning.
+
+### Phase 2: Pass the resolved effort to the explore child
+
+Independent of Phase 1's warning work; may land in either order. Extend
+`BuildSpawnArgsOptions` with an optional `thinking` and append
+`--thinking <level>` when it is a non-empty string; have
+`resolveExploreModel` return `{model, effort}` and `exploreLeaf` forward the
+effort; correct the stale `applyModelEffort` comment (the RPC path uses
+`setThinkingLevel` because the level may change per restart, not because
+the CLI lacks a flag); amend the spec sentence under Spec Impact. No
+caller-facing effort parameter is added to `explore`; the tier stays its
+only source of model and effort. A level Pi rejects makes the child exit
+with Pi's own "Invalid thinking level" error through the existing
+spawn-failure path; no adapter-side validation. `buildSpawnArgs` stays pure
+and existing callers are unchanged. Tests: `buildSpawnArgs` emits
+`--thinking` only when the option is a non-empty string, before the task
+argument; `exploreLeaf` passes the tier's effort through (mock the ws-mcp
+resolve to return one) and passes nothing on an inherit. Live check
+(owner-run): with `small` configured with an explicit effort, confirm the
+explore child's transcript shows that thinking level.
 
 ## Blocked (2026-09-06)
 
