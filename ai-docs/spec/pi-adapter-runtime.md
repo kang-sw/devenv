@@ -73,9 +73,12 @@ After display-only control/tab sanitization, previews wrap using a conservative
 estimate of one column per printable ASCII code point and two per non-ASCII code
 point. Complex Unicode may wrap early; exact grapheme width is not promised.
 Input and collapsed YAML output show at most ten content rows, followed by a
-separate `...` row only when truncated. Input stays capped when output expands.
+separate `...` row only when truncated. The input marker is gray `toolOutput`
+and indented four columns relative to the title, independently of the input body
+foreground; the output marker remains unindented. No omitted-row count is
+computed. Input stays capped when output expands.
 At narrow widths indentation reduces to permit progress, and the marker fits on
-one row (`...`, `..`, or `.`). Native final fitting may omit a glyph wider than
+one row (`...`, `..`, or `.`), reducing its indentation when necessary. Native final fitting may omit a glyph wider than
 the available content width, but does not discard subsequent text. Pi's own
 parent-shell minimum-width limitation still applies.
 
