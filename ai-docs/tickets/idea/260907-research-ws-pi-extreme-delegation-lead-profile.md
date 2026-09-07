@@ -265,11 +265,17 @@ since the autonomy urge is usually learned from "asking breaks the flow".
   `totalTokens`) to report, per session, median/p90 per-call context, share of
   resident context that is lead-direct tool results, and cache-read share of
   cost. The profile succeeds when lead-direct tool results stop dominating.
-- **Ceremony share.** On an existing `proceed` transcript, measure the share
-  of lead-side calls and resident tokens that belong to orchestration
-  ceremony (playbook/workflow/relay/verification cycles) versus user-facing
-  judgment; that share is the ceiling of what this design moves off the
-  lead's tier.
+- **Ceremony share: known, not measured.** The `proceed` loop has been the
+  daily driver; owner's figure (2026-09-07) is on the order of **200k tokens
+  accumulated in the lead per phase** — survey reads, then implement/review
+  cycles. Essentially all of it is ceremony, and all of it is resident at
+  lead tier for the rest of the session. Against the per-phase lead
+  footprint sketched in the walkthrough (one spawn call, a few `question`
+  round trips, one `final`, order of a few k tokens), the design moves
+  roughly the whole 200k per phase to a medium-tier context that is
+  discarded at settle. No further measurement gates the split into
+  implementation tickets; the schema-tax and context-budget items above
+  remain as before/after evidence once the profile exists.
 - **Live scenario.** One ticket run end to end as discuss → hand-off →
   orchestrator → report → next decision, with the agent widget showing the
   nested tree, before any playbook text is generalized.
