@@ -3,8 +3,10 @@ import { pathToFileURL } from "node:url";
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  approximateCodePointWidth,
   createToolPreviewRenderers,
-  logicalPreview,
+  physicalPreview,
+  sanitizePreviewText,
   UseNativeResultFallback,
   yamlContainerDisplay,
   yamlInputPreview,
@@ -28,7 +30,7 @@ class FakeText {
   render(width: number): string[] {
     if (this.width !== width || !this.lines) {
       this.width = width;
-      this.lines = [this.text];
+      this.lines = this.text.split("\n");
       this.layoutCalls += 1;
     }
     return this.lines;
@@ -131,6 +133,10 @@ function fakeTheme(id = "one") {
   };
 }
 
+function plain(text: string): string {
+  return text.replace(/<[^>]+>/g, "");
+}
+
 function context(overrides: Partial<{ state: object; lastComponent: unknown; argsComplete: boolean; isPartial: boolean; isError: boolean }> = {}) {
   return {
     state: overrides.state ?? {},
@@ -141,19 +147,58 @@ function context(overrides: Partial<{ state: object; lastComponent: unknown; arg
   };
 }
 
-describe("logical YAML preview preparation", () => {
-  test("selects ten logical CRLF-normalized lines before native layout", () => {
-    const text = Array.from({ length: 12 }, (_, index) => `line-${index + 1}`).join("\r\n");
-    assert.deepEqual(logicalPreview(text).split("\n"), Array.from({ length: 10 }, (_, index) => `line-${index + 1}`));
+const unstyledTheme = {
+  fg: (_color: string, text: string) => text,
+  bg: (_color: string, text: string) => text,
+  bold: (text: string) => text,
+};
+
+describe("bounded YAML preview preparation", () => {
+  test("uses accepted conservative code-point widths", () => {
+    assert.equal(approximateCodePointWidth("a"), 1);
+    assert.equal(approximateCodePointWidth("界"), 2);
+    assert.equal(approximateCodePointWidth("👩"), 2);
+    assert.equal(approximateCodePointWidth("\u0301"), 2, "combining marks deliberately wrap early");
   });
 
-  test("serializes containers only, leaving scalar JSON and prose unclaimed", () => {
+  test("normalizes terminal controls and tabs before row-width accounting", () => {
+    assert.equal(sanitizePreviewText("a\t\u0007b\r\nc"), "a    ?b\nc");
+    assert.deepEqual(
+      physicalPreview(sanitizePreviewText("a\tbc"), 8, { expanded: false, trimOuterWhitespace: false }),
+      ["    a   ", "    bc"],
+    );
+  });
+
+  test("trims only outer input whitespace and indents starts one column beyond continuations", () => {
+    assert.deepEqual(
+      physicalPreview("  first  \nsecond\n  ", 9, { expanded: false, trimOuterWhitespace: true }),
+      ["    first", "     ", "    secon", "   d"],
+    );
+  });
+
+  test("is safe at zero and narrow widths while conservatively splitting emoji sequences", () => {
+    assert.deepEqual(physicalPreview("", 0, { expanded: false, trimOuterWhitespace: false }), [""]);
+    assert.deepEqual(physicalPreview("wide", 3, { expanded: false, trimOuterWhitespace: false }), ["", "..."]);
+    assert.deepEqual(
+      physicalPreview("👩‍💻", 8, { expanded: false, trimOuterWhitespace: false }),
+      ["    👩‍", "   💻"],
+    );
+  });
+
+  test("caps collapsed physical content at ten rows with a separate marker", () => {
+    const ten = Array.from({ length: 10 }, (_, index) => `line-${index}`).join("\n");
+    const eleven = `${ten}\nline-10`;
+    assert.equal(physicalPreview(ten, 80, { expanded: false, trimOuterWhitespace: false }).length, 10);
+    assert.deepEqual(
+      physicalPreview(eleven, 80, { expanded: false, trimOuterWhitespace: false }).slice(-2),
+      ["    line-9", "..."],
+    );
+  });
+
+  test("keeps serializing containers and leaves scalar JSON and prose native", () => {
     assert.match(yamlContainerDisplay('{"task":"render","count":2}') ?? "", /task: render/);
     assert.equal(yamlContainerDisplay('"plain string"'), undefined);
-    assert.equal(yamlContainerDisplay('not json'), undefined);
-  });
-
-  test("input uses YAML while absent or malformed streamed arguments remain safe and empty", () => {
+    assert.equal(yamlContainerDisplay("not json"), undefined);
     assert.match(yamlInputPreview({ nested: { count: 2 } }), /nested:/);
     assert.equal(yamlInputPreview(undefined), "");
     assert.equal(yamlInputPreview(["not", "tool", "arguments"]), "");
@@ -161,122 +206,82 @@ describe("logical YAML preview preparation", () => {
 });
 
 describe("native YAML preview renderers", () => {
-  test("styles the registered title and puts ten argument lines in a pending input box", () => {
+  test("keeps bold tool identity, white input, gray output, separated backgrounds, and exact blank rows", () => {
     const { tui, texts, boxes } = fakeTui();
     const theme = fakeTheme();
-    const renderers = createToolPreviewRenderers(tui, "ws__git_status");
-    const missing = renderers.renderCall(undefined, theme, context({ argsComplete: false }));
-    assert.match(texts[0]?.text ?? "", /ws__git_status/);
-    assert.deepEqual(theme.boldCalls, ["ws__git_status"]);
-    assert.deepEqual(theme.fgCalls[0], { color: "toolTitle", text: "<one:bold>ws__git_status</one:bold>" });
-
-    const args = Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`item${index + 1}`, index + 1]));
-    renderers.renderCall(args, theme, context({ state: {}, lastComponent: missing }));
-    const lines = texts[1]!.text.split("\n");
-    assert.equal(lines.length, 10, "ten logical argument lines");
-    assert.equal(boxes[0]!.background?.("sample"), "<one:bg:toolPendingBg>sample</one:bg>");
-  });
-
-  test("installed ToolExecutionComponent retains the registered bridge title for missing arguments", async () => {
-    const codingAgentUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
-    const requireFromPi = createRequire(codingAgentUrl);
-    const tui = await import(pathToFileURL(requireFromPi.resolve("@earendil-works/pi-tui")).href) as unknown as ToolResultTuiModules;
-    const theme = await import(new URL("./modes/interactive/theme/theme.js", codingAgentUrl).href) as {
-      initTheme(): void;
-    };
-    theme.initTheme();
-    const toolExecution = await import(new URL("./modes/interactive/components/tool-execution.js", codingAgentUrl).href) as {
-      ToolExecutionComponent: new (
-        toolName: string,
-        toolCallId: string,
-        args: unknown,
-        options: unknown,
-        toolDefinition: unknown,
-        ui: { requestRender(): void },
-        cwd: string,
-      ) => { render(width: number): string[] };
-    };
-    const renderers = createToolPreviewRenderers(tui, "ws__git_status");
-    const component = new toolExecution.ToolExecutionComponent(
-      "ws__git_status",
-      "call-1",
-      undefined,
-      { showImages: false },
-      { renderCall: renderers.renderCall },
-      { requestRender() {} },
-      process.cwd(),
+    const renderers = createToolPreviewRenderers(tui, "ws__git_status", (value) =>
+      "value" in value ? "\nfirst\nsecond\n" : "ok: true",
+    );
+    const state = {};
+    const call = renderers.renderCall({ value: "ignored" }, theme, context({ state }));
+    const result = renderers.renderResult(
+      { content: [{ type: "text", text: '{"ok":true}' }] },
+      { expanded: false, isPartial: false },
+      theme,
+      context({ state }),
     );
 
-    assert.equal((component as unknown as { getRenderShell(): string }).getRenderShell(), "default", "bridge leaves Pi's parent shell enabled");
-    assert.match(tui.stripTerminalSequences(component.render(80).join("\n")), /ws__git_status/);
+    const rows = [...call.render(30), ...result.render(30)].map(plain);
+    assert.deepEqual(rows, ["ws__git_status", "", "    first", "    second", "", "    ok: true"]);
+    assert.deepEqual(theme.boldCalls, ["ws__git_status"]);
+    assert.ok(theme.fgCalls.some((call) => call.color === "text" && call.text.includes("first")), "input uses the theme default foreground for dark/light readability");
+    assert.ok(theme.fgCalls.some((call) => call.color === "toolOutput" && call.text.includes("ok: true")), "output stays gray through toolOutput");
+    assert.equal(boxes[0]!.background?.("sample"), "<one:bg:toolPendingBg>sample</one:bg>");
+    assert.equal(boxes[1]!.background?.("sample"), "<one:bg:toolSuccessBg>sample</one:bg>");
+    assert.equal(texts.length, 3);
   });
 
-  test("adds only a top row and left input padding without asking native text for an impossible width", () => {
-    const { tui, texts, boxes } = fakeTui();
-    const theme = {
-      fg: (_color: string, text: string) => text,
-      bg: (_color: string, text: string) => text,
-      bold: (text: string) => text,
-    };
-    const renderers = createToolPreviewRenderers(tui, "ws__test", () => "first\nsecond");
-    renderers.renderCall({ value: "ignored" }, theme, context());
-
-    assert.deepEqual(boxes[0]!.render(0), []);
-    assert.equal(texts[1]!.layoutCalls, 0, "zero-width input must not reach native Text");
-    assert.deepEqual(boxes[0]!.render(1), ["", " "], "width one keeps only the blank row and left column");
-    assert.equal(texts[1]!.layoutCalls, 0, "one-column input must not ask native Text for width zero");
-    assert.deepEqual(boxes[0]!.render(20), ["", " first\nsecond"], "normal rows have no bottom or right padding");
-    assert.equal(texts[1]!.layoutCalls, 1);
-  });
-
-  test("reapplies theme styling without reserializing cached YAML", () => {
-    const { tui, texts, boxes } = fakeTui();
-    const firstTheme = fakeTheme("first");
-    const secondTheme = fakeTheme("second");
-    let serializations = 0;
-    const renderers = createToolPreviewRenderers(tui, "ws__test", (value) => {
-      serializations += 1;
-      return `value: ${(value as { value: string }).value}`;
-    });
-    const args = { value: "cached" };
+  test("wraps long logical rows before the ten-row budget and expands full output", () => {
+    const { tui } = fakeTui();
+    const renderers = createToolPreviewRenderers(tui, "ws__test", () => "abcdefghijklmno");
+    const content = [{ type: "text", text: '{"ok":true}' }];
     const state = {};
-    const first = renderers.renderCall(args, firstTheme, context({ state }));
-    first.render(20);
-    first.invalidate();
-    const second = renderers.renderCall(args, secondTheme, context({ state, lastComponent: first }));
+    const call = renderers.renderCall({ value: "ignored" }, unstyledTheme, context({ state }));
+    assert.deepEqual(call.render(10), ["ws__test", "", "    abcdef", "   ghijklm", "   no"]);
 
-    assert.equal(second, first);
-    assert.equal(serializations, 1, "theme changes do not reserialize YAML");
-    assert.match(texts[0]!.text, /<second:fg:toolTitle>/);
-    assert.match(texts[1]!.text, /<second:fg:toolOutput>/);
-    assert.equal(boxes[0]!.background?.("sample"), "<second:bg:toolPendingBg>sample</second:bg>");
+    const serializer = (_value: object) => Array.from({ length: 11 }, (_, index) => `line-${index}`).join("\n");
+    const capped = createToolPreviewRenderers(tui, "ws__test", serializer);
+    const collapsed = capped.renderResult({ content }, { expanded: false, isPartial: false }, unstyledTheme, context({ state: {} }));
+    assert.deepEqual(collapsed.render(80).slice(-2), ["    line-9", "..."]);
+    const expanded = capped.renderResult({ content }, { expanded: true, isPartial: false }, unstyledTheme, context({ state: {}, lastComponent: collapsed }));
+    assert.equal(expanded.render(80).filter((line) => line.includes("line-")).length, 11);
   });
 
-  test("keeps a completed call Text long-lived without reserializing or relaying out unchanged redraws", () => {
-    const { tui, texts, truncations } = fakeTui();
+  test("preserves input/result payload identity while caching preparation and reusing native layout", () => {
+    const { tui, texts, strips, truncations } = fakeTui();
     const theme = fakeTheme();
     let serializations = 0;
-    const renderers = createToolPreviewRenderers(tui, "ws__test", (value) => {
+    const serialize = (value: object) => {
       serializations += 1;
-      return `value: ${(value as { value: string }).value}`;
-    });
+      return `value: ${(value as { value?: string }).value ?? "true"}`;
+    };
+    const renderers = createToolPreviewRenderers(tui, "ws__test", serialize);
     const args = { value: "large payload" };
+    const content = [{ type: "text", text: '{"value":"unchanged"}' }];
     const state = {};
     const first = renderers.renderCall(args, theme, context({ state }));
+    first.render(24);
     const second = renderers.renderCall(args, theme, context({ state, lastComponent: first }));
-
+    second.render(24);
     assert.equal(second, first);
-    assert.equal(serializations, 1, "unchanged arguments must not be serialized to form a redraw cache key");
-    first.render(24);
-    first.render(24);
-    assert.equal(texts[1]!.layoutCalls, 1, "native Text owns unchanged-width YAML layout caching");
-    assert.equal(texts[1]!.setTextCalls, 1);
-    assert.equal(truncations(), 2, "title and YAML rows are not remapped on an unchanged redraw");
+    assert.equal(serializations, 1);
+    assert.equal(texts[1]!.layoutCalls, 1, "unchanged width stays in the native Text cache");
+
+    const output = renderers.renderResult({ content }, { expanded: false, isPartial: false }, theme, context({ state }));
+    output.render(24);
+    const expanded = renderers.renderResult({ content }, { expanded: true, isPartial: false }, theme, context({ state, lastComponent: output }));
+    expanded.render(24);
+    assert.equal(serializations, 2, "one input and one output serialization; expansion reuses YAML");
+    assert.deepEqual(args, { value: "large payload" });
+    assert.deepEqual(content, [{ type: "text", text: '{"value":"unchanged"}' }]);
+    assert.equal(strips(), 3, "title, input, and output sanitize once each");
+    assert.ok(truncations() > 0, "native terminal-safe final fitting remains active");
   });
 
-  test("reprepares incomplete in-place-mutated arguments, then caches after completion", () => {
+  test("reprepares in-place streamed arguments and rebuilds colors after a theme change", () => {
     const { tui, texts } = fakeTui();
-    const theme = fakeTheme();
+    const firstTheme = fakeTheme("first");
+    const secondTheme = fakeTheme("second");
     let serializations = 0;
     const renderers = createToolPreviewRenderers(tui, "ws__test", (value) => {
       serializations += 1;
@@ -284,46 +289,22 @@ describe("native YAML preview renderers", () => {
     });
     const args = { step: 1 };
     const state = {};
-    const first = renderers.renderCall(args, theme, context({ state, argsComplete: false }));
+    const first = renderers.renderCall(args, firstTheme, context({ state, argsComplete: false }));
+    first.render(30);
     args.step = 2;
-    const second = renderers.renderCall(args, theme, context({ state, lastComponent: first, argsComplete: false }));
-    const third = renderers.renderCall(args, theme, context({ state, lastComponent: second, argsComplete: true }));
-    renderers.renderCall(args, theme, context({ state, lastComponent: third, argsComplete: true }));
+    const second = renderers.renderCall(args, secondTheme, context({ state, lastComponent: first, argsComplete: false }));
+    second.render(30);
+    const completed = renderers.renderCall(args, secondTheme, context({ state, lastComponent: second, argsComplete: true }));
+    completed.render(30);
+    renderers.renderCall(args, secondTheme, context({ state, lastComponent: completed, argsComplete: true })).render(30);
 
     assert.match(texts[1]!.text, /step: 2/);
-    assert.equal(serializations, 3, "partial mutation must not reuse a stale object-identity cache");
+    assert.match(texts[1]!.text, /<second:fg:text>/);
+    assert.equal(serializations, 3, "incomplete mutable arguments reprepare; completed identity then caches");
   });
 
-  test("renders JSON containers as YAML, expands only result output, and invalidates result cache by expansion", () => {
-    const { tui, strips, texts, boxes } = fakeTui();
-    const theme = fakeTheme();
-    let serializations = 0;
-    const renderers = createToolPreviewRenderers(tui, "ws__test", (value) => {
-      serializations += 1;
-      return `${Array.from({ length: 12 }, (_, index) => `line-${index + 1}: ${(value as { ok: boolean }).ok}`).join("\n")}\x1b[2J`;
-    });
-    const content = [{ type: "text", text: '{"ok":true}' }];
-    const state = {};
-    const first = renderers.renderResult({ content }, { expanded: false, isPartial: false }, theme, context({ state }));
-    const again = renderers.renderResult({ content }, { expanded: false, isPartial: false }, theme, context({ state, lastComponent: first }));
-    const collapsedText = texts[0]!.text;
-    const expanded = renderers.renderResult({ content }, { expanded: true, isPartial: false }, theme, context({ state, lastComponent: again }));
-
-    assert.equal(again, first);
-    assert.equal(collapsedText.split("\n").length, 10);
-    assert.equal(texts[0]!.text.split("\n").length, 12);
-    assert.equal(serializations, 2, "only expansion transition reparses/serializes the result");
-    assert.ok(strips() >= 2, "custom YAML text is stripped through Pi's terminal-control seam");
-    assert.ok(theme.fgCalls.every((call) => !call.text.includes("\x1b")), "styles run after untrusted text is sanitized");
-    assert.equal(boxes[0]!.background?.("sample"), "<one:bg:toolSuccessBg>sample</one:bg>");
-    expanded.render(20);
-    expanded.render(40);
-    assert.equal(texts[0]!.layoutCalls, 2, "width changes are delegated to native Text layout");
-  });
-
-  test("keeps errors, scalars, prose, later text blocks, images, and partial results on Pi's native fallback", () => {
+  test("keeps errors, partials, scalars, prose, later text blocks, and images on Pi native fallback", () => {
     const { tui } = fakeTui();
-    const theme = fakeTheme();
     const renderers = createToolPreviewRenderers(tui, "ws__test");
     const cases = [
       { content: [{ type: "text", text: '{"ok":true}' }], partial: true },
@@ -335,24 +316,49 @@ describe("native YAML preview renderers", () => {
     ];
     for (const item of cases) {
       assert.throws(
-        () => renderers.renderResult({ content: item.content }, { expanded: false, isPartial: item.partial }, theme, context({ isError: item.error })),
+        () => renderers.renderResult({ content: item.content }, { expanded: false, isPartial: item.partial }, unstyledTheme, context({ isError: item.error })),
         UseNativeResultFallback,
       );
     }
   });
 
-  test("installed Pi TUI seam bounds indivisible CJK and emoji at width one", async () => {
-    const requireFromPi = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
-    const tui = await import(pathToFileURL(requireFromPi.resolve("@earendil-works/pi-tui")).href) as unknown as ToolResultTuiModules & {
-      visibleWidth(text: string): number;
+  test("uses real installed Pi parent-shell composition and retains its padding", async () => {
+    const codingAgentUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
+    const requireFromPi = createRequire(codingAgentUrl);
+    const tui = await import(pathToFileURL(requireFromPi.resolve("@earendil-works/pi-tui")).href) as unknown as ToolResultTuiModules;
+    const theme = await import(new URL("./modes/interactive/theme/theme.js", codingAgentUrl).href) as { initTheme(): void };
+    theme.initTheme();
+    const toolExecution = await import(new URL("./modes/interactive/components/tool-execution.js", codingAgentUrl).href) as {
+      ToolExecutionComponent: new (
+        toolName: string,
+        toolCallId: string,
+        args: unknown,
+        options: unknown,
+        toolDefinition: unknown,
+        ui: { requestRender(): void },
+        cwd: string,
+      ) => { render(width: number): string[]; getRenderShell(): string; setArgsComplete(): void; updateResult(result: unknown, isPartial: boolean): void };
     };
-    const renderers = createToolPreviewRenderers(tui, "ws__git_status");
-    const theme = { fg: (_color: string, text: string) => text, bg: (_color: string, text: string) => text, bold: (text: string) => text };
-    for (const value of ["界", "👩‍💻"]) {
-      const component = renderers.renderCall({ x: value }, theme, context());
-      for (const line of component.render(1)) {
-        assert.ok(tui.visibleWidth(line) <= 1, `${JSON.stringify(value)} emitted an overwide row: ${JSON.stringify(line)}`);
-      }
-    }
+    const renderers = createToolPreviewRenderers(tui, "ws__git_status", (value) =>
+      "ok" in value ? "ok: true" : "value: abcdefghijk",
+    );
+    const component = new toolExecution.ToolExecutionComponent(
+      "ws__git_status",
+      "call-1",
+      { value: "ignored" },
+      { showImages: false },
+      { renderCall: renderers.renderCall, renderResult: renderers.renderResult },
+      { requestRender() {} },
+      process.cwd(),
+    );
+    component.setArgsComplete();
+    component.updateResult({ content: [{ type: "text", text: '{"ok":true}' }], isError: false }, false);
+
+    assert.equal(component.getRenderShell(), "default");
+    const lines = component.render(24).map((line) => tui.stripTerminalSequences(line));
+    const title = lines.findIndex((line) => line.includes("ws__git_status"));
+    assert.ok(title >= 0);
+    assert.match(lines[title + 2] ?? "", /^ {5}value:/, "parent shell's one-column padding plus four-column input indent");
+    assert.ok(lines.some((line) => line.includes("ok: true")));
   });
 });

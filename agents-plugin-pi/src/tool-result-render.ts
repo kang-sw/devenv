@@ -26,7 +26,7 @@ export interface NativeBox extends NativePreviewComponent {
 
 interface ToolPreviewTheme {
   bold(text: string): string;
-  fg(color: "toolTitle" | "toolOutput", text: string): string;
+  fg(color: "text" | "toolTitle" | "toolOutput", text: string): string;
   bg(color: "toolPendingBg" | "toolSuccessBg", text: string): string;
 }
 
@@ -39,7 +39,6 @@ interface InputCache {
 
 interface ResultCache {
   content: unknown;
-  expanded: boolean;
   text: string;
 }
 
@@ -48,10 +47,17 @@ interface PreviewState {
   result?: ResultCache;
 }
 
+interface PreviewFormat {
+  expanded: boolean;
+  trimOuterWhitespace: boolean;
+}
+
 interface BoundedText extends NativePreviewComponent {
   text: NativeText;
   source: string | undefined;
   sanitized: string | undefined;
+  style: ((text: string) => string) | undefined;
+  format: PreviewFormat | undefined;
   display: string | undefined;
   cachedWidth: number | undefined;
   cachedNativeLines: string[] | undefined;
@@ -69,7 +75,10 @@ interface ResultPreviewComponent extends NativePreviewComponent {
   outputBox: NativeBox;
 }
 
-const previewStateKey = Symbol("ws-yaml-logical-preview");
+const previewStateKey = Symbol("ws-yaml-physical-preview");
+const PREVIEW_ROWS = 10;
+const INPUT_START_INDENT = 4;
+const CONTINUATION_INDENT = 3;
 
 /**
  * Pi catches renderer errors and uses its standard text/image fallback for
@@ -94,8 +103,8 @@ function stateFor(context: { state: unknown }): PreviewState {
   return next;
 }
 
-/** Select logical lines before Pi's native Text component lays them out. */
-export function logicalPreview(text: string, limit = 10): string {
+/** Legacy logical-line helper retained for callers outside the renderer. */
+export function logicalPreview(text: string, limit = PREVIEW_ROWS): string {
   return text.replace(/\r\n?/g, "\n").split("\n").slice(0, limit).join("\n");
 }
 
@@ -110,11 +119,11 @@ export function yamlContainerDisplay(text: string, serialize: YamlSerializer = s
   }
 }
 
-/** Object-shaped call arguments are rendered as a safe ten-logical-line YAML preview. */
+/** Object-shaped call arguments are rendered as YAML; physical row capping happens at layout time. */
 export function yamlInputPreview(args: unknown, serialize: YamlSerializer = stringifyYaml): string {
   if (!isInputObject(args)) return "";
   try {
-    return logicalPreview(serialize(args));
+    return serialize(args);
   } catch {
     return "";
   }
@@ -124,24 +133,106 @@ function isSingleTextContent(content: unknown): content is Array<{ type: string;
   return Array.isArray(content) && content.length === 1 && content[0]?.type === "text";
 }
 
+/** Printable ASCII costs one column; all other code points conservatively cost two. */
+export function approximateCodePointWidth(codePoint: string): number {
+  const value = codePoint.codePointAt(0) ?? 0;
+  return value >= 0x20 && value <= 0x7e ? 1 : 2;
+}
+
+/** Normalize unsafe controls before width accounting; tabs become stable four-column spaces. */
+export function sanitizePreviewText(text: string): string {
+  return text
+    .replace(/\r\n?/g, "\n")
+    .replace(/\t/g, "    ")
+    .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "?");
+}
+
+/**
+ * Wraps logical text into presentation rows. It walks only as far as the
+ * collapsed budget needs, avoiding per-redraw grapheme segmentation.
+ */
+export function physicalPreview(
+  text: string,
+  width: number,
+  { expanded, trimOuterWhitespace }: PreviewFormat,
+): string[] {
+  const source = trimOuterWhitespace ? text.trim() : text;
+  const boundedWidth = Math.max(0, Math.floor(width));
+  const rows: string[] = [];
+  const limit = expanded ? Number.POSITIVE_INFINITY : PREVIEW_ROWS;
+  const appendMarker = (): string[] => [...rows, "..."];
+
+  let lineStart = 0;
+  while (true) {
+    const lineEnd = source.indexOf("\n", lineStart);
+    const logicalLine = lineEnd === -1 ? source.slice(lineStart) : source.slice(lineStart, lineEnd);
+    let firstRow = true;
+    let remainder = logicalLine;
+    do {
+      if (rows.length === limit) return appendMarker();
+      const indent = firstRow ? INPUT_START_INDENT : CONTINUATION_INDENT;
+      const contentWidth = boundedWidth - indent;
+      if (contentWidth <= 0) {
+        rows.push("");
+        const hasHiddenContent = remainder.length > 0 || lineEnd !== -1;
+        return !expanded && hasHiddenContent ? appendMarker() : rows;
+      }
+
+      let consumed = 0;
+      let usedWidth = 0;
+      for (const codePoint of remainder) {
+        const codePointWidth = approximateCodePointWidth(codePoint);
+        if (usedWidth + codePointWidth > contentWidth) break;
+        usedWidth += codePointWidth;
+        consumed += codePoint.length;
+      }
+      // A non-empty line always consumes at least one code point while a
+      // positive width is available: non-ASCII costs two, so width one is a
+      // deliberate conservative early-wrap/truncation case.
+      if (remainder && consumed === 0) {
+        rows.push(" ".repeat(indent));
+        return expanded ? rows : appendMarker();
+      }
+      rows.push(`${" ".repeat(indent)}${remainder.slice(0, consumed)}`);
+      remainder = remainder.slice(consumed);
+      firstRow = false;
+    } while (remainder);
+
+    if (lineEnd === -1) return rows;
+    lineStart = lineEnd + 1;
+  }
+}
+
 function createBoundedText(tui: ToolResultTuiModules): BoundedText {
   const component: BoundedText = {
     text: new tui.Text("", 0, 0),
     source: undefined,
     sanitized: undefined,
+    style: undefined,
+    format: undefined,
     display: undefined,
     cachedWidth: undefined,
     cachedNativeLines: undefined,
     cachedLines: undefined,
     render(width: number): string[] {
-      const nativeLines = component.text.render(width);
-      if (component.cachedWidth === width && component.cachedNativeLines === nativeLines && component.cachedLines) {
+      const boundedWidth = Math.max(0, Math.floor(width));
+      const plain = component.format
+        ? physicalPreview(component.sanitized ?? "", boundedWidth, component.format).join("\n")
+        : component.sanitized ?? "";
+      const display = component.style?.(plain) ?? plain;
+      if (component.display !== display) {
+        component.text.setText(display);
+        component.display = display;
+        component.cachedWidth = undefined;
+        component.cachedNativeLines = undefined;
+        component.cachedLines = undefined;
+      }
+      if (boundedWidth === 0) return [];
+      const nativeLines = component.text.render(boundedWidth);
+      if (component.cachedWidth === boundedWidth && component.cachedNativeLines === nativeLines && component.cachedLines) {
         return component.cachedLines;
       }
-      // Native Text owns layout. This only clips an indivisible grapheme that
-      // is wider than a narrow terminal row; it is not a Unicode engine.
-      const boundedWidth = Math.max(0, Math.floor(width));
-      component.cachedWidth = width;
+      component.cachedWidth = boundedWidth;
       component.cachedNativeLines = nativeLines;
       component.cachedLines = nativeLines.map((line) => tui.truncateToWidth(line, boundedWidth, ""));
       return component.cachedLines;
@@ -161,21 +252,18 @@ function updateText(
   component: BoundedText,
   source: string,
   style: (text: string) => string,
+  format?: PreviewFormat,
 ): void {
   if (component.source !== source) {
     component.source = source;
-    component.sanitized = tui.stripTerminalSequences(source);
-  }
-  // Style only the already-sanitized native text. Re-applying it on redraw
-  // detects theme changes without reserializing or rewrapping YAML.
-  const display = style(component.sanitized ?? "");
-  if (component.display !== display) {
-    component.text.setText(display);
-    component.display = display;
+    component.sanitized = sanitizePreviewText(tui.stripTerminalSequences(source));
+    component.display = undefined;
     component.cachedWidth = undefined;
     component.cachedNativeLines = undefined;
     component.cachedLines = undefined;
   }
+  component.style = style;
+  component.format = format;
 }
 
 function isCallPreviewComponent(component: unknown): component is CallPreviewComponent {
@@ -186,21 +274,15 @@ function isResultPreviewComponent(component: unknown): component is ResultPrevie
   return isObjectLike(component) && "output" in component && "outputBox" in component;
 }
 
-/**
- * Pi's Box currently has symmetric horizontal/vertical padding only. Keep the
- * input's asymmetric top/left treatment native-compatible without adding a
- * second layout implementation: the child still owns all text wrapping.
- */
-function createInputPadding(input: NativePreviewComponent): NativePreviewComponent {
+/** The parent shell supplies its own padding; these rows supply only separators. */
+function createSeparatedPreview(preview: NativePreviewComponent): NativePreviewComponent {
   return {
     render(width: number): string[] {
       if (width <= 0) return [];
-      if (width <= 1) return ["", " "];
-      const contentWidth = width - 1;
-      return ["", ...input.render(contentWidth).map((line) => ` ${line}`)];
+      return ["", ...preview.render(width)];
     },
     invalidate(): void {
-      input.invalidate();
+      preview.invalidate();
     },
   };
 }
@@ -209,7 +291,7 @@ function createCallPreviewComponent(tui: ToolResultTuiModules): CallPreviewCompo
   const title = createBoundedText(tui);
   const input = createBoundedText(tui);
   const inputBox = new tui.Box(0, 0);
-  inputBox.addChild(createInputPadding(input));
+  inputBox.addChild(createSeparatedPreview(input));
   return {
     title,
     input,
@@ -227,7 +309,7 @@ function createCallPreviewComponent(tui: ToolResultTuiModules): CallPreviewCompo
 function createResultPreviewComponent(tui: ToolResultTuiModules): ResultPreviewComponent {
   const output = createBoundedText(tui);
   const outputBox = new tui.Box(0, 0);
-  outputBox.addChild(output);
+  outputBox.addChild(createSeparatedPreview(output));
   return {
     output,
     outputBox,
@@ -265,7 +347,6 @@ export function createToolPreviewRenderers(
   return {
     renderCall(args, theme, context) {
       const state = stateFor(context);
-      const previewTheme = theme as ToolPreviewTheme;
       // Streaming argument objects can be mutated in place. Re-prepare while
       // incomplete; after completion their stable object identity is enough.
       const preview = context.argsComplete && state.input?.args === args
@@ -277,8 +358,12 @@ export function createToolPreviewRenderers(
       const component = isCallPreviewComponent(context.lastComponent)
         ? context.lastComponent
         : createCallPreviewComponent(tui);
+      const previewTheme = theme as ToolPreviewTheme;
       updateText(tui, component.title, toolName, (text) => previewTheme.fg("toolTitle", previewTheme.bold(text)));
-      updateText(tui, component.input, preview, (text) => previewTheme.fg("toolOutput", text));
+      updateText(tui, component.input, preview, (text) => previewTheme.fg("text", text), {
+        expanded: false,
+        trimOuterWhitespace: true,
+      });
       component.inputBox.setBgFn((text) => previewTheme.bg("toolPendingBg", text));
       return component;
     },
@@ -289,20 +374,22 @@ export function createToolPreviewRenderers(
       }
       const raw = result.content[0]?.text ?? "";
       const state = stateFor(context);
-      const rendered = state.result?.content === result.content && state.result.expanded === options.expanded
+      const rendered = state.result?.content === result.content
         ? state.result.text
         : yamlContainerDisplay(raw, serialize);
       // Errors, prose, scalar JSON, later text blocks, and image/mixed output
       // stay on Pi's existing text/image fallback path.
       if (rendered === undefined) throw new UseNativeResultFallback();
-      const text = options.expanded ? rendered.replace(/\r\n?/g, "\n") : logicalPreview(rendered);
-      state.result = { content: result.content, expanded: options.expanded, text };
+      state.result = { content: result.content, text: rendered };
 
       const component = isResultPreviewComponent(context.lastComponent)
         ? context.lastComponent
         : createResultPreviewComponent(tui);
       const previewTheme = theme as ToolPreviewTheme;
-      updateText(tui, component.output, text, (output) => previewTheme.fg("toolOutput", output));
+      updateText(tui, component.output, rendered, (output) => previewTheme.fg("toolOutput", output), {
+        expanded: options.expanded,
+        trimOuterWhitespace: false,
+      });
       component.outputBox.setBgFn((output) => previewTheme.bg("toolSuccessBg", output));
       return component;
     },
