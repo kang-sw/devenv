@@ -111,9 +111,11 @@ using Claude Code as the *host* and Pi as a child (retired direction:
 
 ## Known costs and open questions
 
-- `--fork` from a Claude-backed lead is always a full replay on the Claude
-  side (the 260907 cache fix does not apply; there is no prefix cache to
-  hit across processes here). Subscription limits absorb it; if the SDK
+- `--fork` from a Claude-backed lead is a full replay on the Claude side
+  (the 260907 Pi-side fix does not apply). The spike showed Anthropic's
+  prompt cache *does* hit across claude processes for an identical prefix,
+  so a replay costs cache-read, not full input, as long as the provider
+  replays byte-identically. Subscription limits absorb it; if the SDK
   credit split resumes this becomes the dominant cost of the lead.
 - Pi's `additional_tools` deferred-load channel is meaningless for this
   provider; MCP `tools/list` changes are the equivalent and the SDK server
@@ -135,3 +137,56 @@ and runs `pi -p` in a scratch cwd with `--no-extensions --no-skills
 turn returns; (2) a tool-call round trip completes with Pi executing the
 tool and Claude continuing in the same process; (3) a second Pi turn reuses
 the process. Result recorded below.
+
+### Outcome: all three pass (isolated run, Pi 0.85.1, SDK 0.3.263, subscription login)
+
+Extension: `pi.registerProvider("claude-code", {streamSimple, models:
+[{id: "sonnet"}]})`; one `query()` per Pi session with a push-queue as the
+streaming-input prompt, `tools: []`, `settingSources: []`,
+`strictMcpConfig: true`, `persistSession: false`, `permissionMode:
+"bypassPermissions"`; Pi's two spike tools reflected via
+`createSdkMcpServer` with parking handlers (resolved by tool name, FIFO);
+`session_shutdown` calls `Query.close()`.
+
+Prompt: "call extra_a, then extra_b(word=kiwi), then reply with both
+strings". Pi's session file recorded three assistant calls from one claude
+process; `pi -p` exited 0 with the correct final line.
+
+| Pi call | Claude side | stopReason | usage (input / cacheRead / cacheWrite) |
+|---|---|---|---|
+| 1 | assistant `tool_use extra_a` → MCP handler parks | `toolUse` | 2 / 1,929 / 0 |
+| 2 | Pi executed `extra_a`; handler resolved; next block `tool_use extra_b` | `toolUse` | 2 / 1,929 / 0 |
+| 3 | Pi executed `extra_b`; handler resolved; text | `stop` | 2 / 2,154 / 0 |
+
+- Round trip works exactly as sketched: the handler ends Pi's turn with
+  `toolUse`, Pi runs the tool through its own loop, the following
+  `streamSimple` resolves the parked handler, Claude continues without a
+  new process. `result` reported `num_turns: 3`, one process.
+- **Anthropic-side prompt cache hits across processes.** The first run
+  (same prompt, earlier) wrote 1,929 cache tokens; this run's very first
+  call read them back (`cacheRead 1,929, cacheWrite 0`). So a Claude-backed
+  lead keeps its cache across Pi restarts of the same context, and a
+  resync/replay is cheaper than assumed as long as the prefix is identical.
+- Parallel tool calls arrive as one SDK `assistant` message per
+  `tool_use` block, in sequence, each followed by its handler invocation;
+  treating each block as its own Pi turn gives Pi a serial
+  toolCall/toolResult history while Claude's shadow history holds them as
+  one message. Harmless as long as Pi owns history.
+- `settingSources: []` alone still attached the account's claude.ai
+  connector MCP servers (Drive/Gmail/Calendar, `needs-auth`);
+  `strictMcpConfig: true` removed them. Required for the real provider.
+- Without `Query.close()` on `session_shutdown` the `pi -p` process never
+  exits (the claude child holds the loop). Fixed in the spike; the real
+  provider must also close on `session_shutdown` and on Pi abort signals.
+- Model resolution: Pi model id `sonnet` passed straight through as the SDK
+  `model` option resolved to `claude-sonnet-5`; `SDKResultMessage.
+  total_cost_usd` was $0.003 (estimate; subscription-metered, not billed).
+- Not exercised: a second *user* turn in one Pi session (`-p` has one),
+  thinking-level mapping, `stream_event` partials for live rendering,
+  interrupt/abort, MCP tool-set growth mid-session, resync on Pi
+  compaction/fork. These are the feature ticket's Phase 1 items.
+
+Verdict: the A′ design is viable; promote to a feature ticket once the
+lead-profile ticket lands, since the provider only needs to reflect the
+thin lead surface. Spike artifacts live in the session scratchpad
+(`spike-claude-provider/ext.ts`), not in the repo.
