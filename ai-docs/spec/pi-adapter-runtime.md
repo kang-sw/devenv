@@ -56,17 +56,37 @@ tool's error state only when its `execute` throws, so a ws-mcp failure that was
 returned as ordinary text is re-raised rather than reported as success.
 
 Bridged tools provide display-only YAML previews when Pi's native TUI helpers
-are available. The call slot retains the registered tool name in bold with the
-native `toolTitle` color above up to ten newline-separated argument lines,
-including during argument streaming. YAML argument rows use `toolPendingBg`;
-completed YAML result rows use `toolSuccessBg`, with `toolOutput` text color.
-These child surfaces retain Pi's default parent shell and its pending/success/error
-state presentation. Theme changes restyle the preview without YAML reserialization. A completed,
-non-error result containing exactly one text block is displayed as YAML when that
-text parses as a JSON object or array. Its collapsed preview selects ten logical
-lines before native wrapping; expanded output is complete. These are not ten
-physical-screen-row limits. Native layout is reused on unchanged redraws and
-returned rows are bounded to the available terminal width.
+are available, including argument streaming. The call slot retains the registered
+tool name in bold with native `toolTitle` color. Input uses the theme's normal
+`text` foreground (light on dark themes, readable on light themes), rather than
+gray `toolOutput`; output retains `toolOutput`. Input and output inherit the
+native parent shell's uniform pending/success/error background; neither installs
+a separate background override.
+
+Input display trims outer whitespace only and owns exactly one blank separator
+row above and below its body, independent of whether the result is YAML, native
+raw text, an error, partial output, or not yet available. YAML output adds no
+leading separator. Native outer shell padding and whitespace belonging to native
+fallback content remain unchanged. Input logical-line starts are indented four columns
+relative to the title; automatic continuation rows are indented three columns.
+After display-only control/tab sanitization, previews wrap using a conservative
+estimate of one column per printable ASCII code point and two per non-ASCII code
+point. Complex Unicode may wrap early; exact grapheme width is not promised.
+Input and collapsed YAML output show at most ten content rows, followed by a
+separate `...` row only when truncated. The input marker is gray `toolOutput`
+and indented four columns relative to the title, independently of the input body
+foreground; the output marker remains unindented. No omitted-row count is
+computed. Input stays capped when output expands.
+At narrow widths indentation reduces to permit progress, and the marker fits on
+one row (`...`, `..`, or `.`), reducing its indentation when necessary. Native final fitting may omit a glyph wider than
+the available content width, but does not discard subsequent text. Pi's own
+parent-shell minimum-width limitation still applies.
+
+A completed, non-error result containing exactly one text block is displayed as
+YAML when that text parses as a JSON object or array. Expanded output removes the
+preview limit. Unchanged redraws reuse prepared YAML, approximate row layout, and
+native layout; theme changes restyle without YAML reserialization or repeated
+source wrapping. Content, width, or expansion changes refresh the affected layout.
 
 Partial results, errors, prose, scalar/malformed JSON, and mixed or image content
 use Pi's standard result display. If native TUI helpers cannot load, both slots
