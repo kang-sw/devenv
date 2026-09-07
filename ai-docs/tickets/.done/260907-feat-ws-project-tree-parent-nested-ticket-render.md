@@ -8,6 +8,7 @@ sage-review-completeness: completed
 sage-review-design: completed
 sage-review-design-reviewed: 6159339477912463
 sage-review-completeness-reviewed: 6159339477912463
+completed: 2026-09-07
 ---
 
 # project_tree renders the ticket section as a heavyweight annotated graph; make it a parent-nested `status/stem` tree
@@ -146,6 +147,27 @@ tickets render (none hidden); placeholder and cycle cases; output contains no
 projection on the current backlog — the projection is an order-of-magnitude
 target, so treat within ~20% as pass; a result near the old ~8.6k means the
 related-edge removal or fold-drop did not take effect.
+
+### Result (374ebd9f) - 2026-09-07
+
+Rewrote `renderTickets` (`internal/wsdoc/project_tree.go`) to load the whole
+board via `scanTickets(IncludeDone/IncludeDropped)` and emit one parent-nested
+`status/stem` tree. Dead-parent anchoring uses a memoized `shouldRender`
+(`isLiveStatus OR any live descendant`); missing parents collapse to a single
+shared `?/<stem>` placeholder root; a `parent:` cycle degrades to flat roots via
+a three-color walk (`renderTicketsCycleGuard`) that force-roots only the cycle
+members. Deleted the now-dead `titleSuffix`/`ticketTitle` helpers and corrected
+a stale `internal/mcp/server.go` comment on contact. Spec anchor
+`{#260505-project-context-convention-tools}` prose was revised in the same
+commit (Spec Impact was in-phase scope).
+
+Verification: `go test ./internal/wsdoc/...` and `go build ./...` pass; live
+backlog renders at 8142 chars / ~2036 tokens, inside the ~1.9k ±20% boundary and
+far below the prior ~8.6k, with zero `related:` occurrences. Single full-scope
+review returned clean with two optional minor test-coverage gaps (no fixture for
+a lead-in chain feeding a cycle, and none for a fully-dead placeholder subtree);
+both behaviors are covered by the shared `shouldRender`/cycle logic and verified
+by inspection, not relayed since Minor drives no fix cycle.
 
 ## Related
 
