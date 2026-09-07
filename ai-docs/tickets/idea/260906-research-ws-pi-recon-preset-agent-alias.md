@@ -1,6 +1,7 @@
 ---
 title: Replace lead-only one-shot explore with a recon-restricted preset alias over ordinary ws-agent lifecycle
 related:
+  260907-feat-ws-pi-persistent-explore-deep-research: actionable continuation of the confirmed two-mode persistent preset
   260906-feat-ws-pi-lead-explore-as-async-rpc-child: existing deliberately one-shot lead RPC contract to reconsider
   260906-feat-ws-pi-tool-and-push-tui-polish: coordinate dispatch presentation if tool exposure changes
 ---
@@ -34,3 +35,9 @@ Current fan-in already counts running RPC records and excludes settled dormant r
 Auto-explore alias counter resets after restart; restored explore-1 can collide with a new auto alias. Skip retained aliases or define an equivalent collision-safe strategy if alias continuity is promised. `fafe85bb` recorded this risk.
 
 Tests should cover lead/fork preset restrictions, alias-based continuation, settle/stop/failure retention, sidecar capture/restore, resumed role/tool curation, collision after restart, fan-in, and unchanged worker blocking leaf. Update tool descriptions, lead guidance and runtime spec together once the API is decided. No source-level alias-tool implementation has been attempted.
+
+## Confirmed direction - 2026-09-07
+
+Owner approved retaining `explore` as an ordinary persistent agent preset, with `deep_research?: boolean` defaulting to false, rather than exposing a public tier/model override. False selects small with recon-only tools. True inherits the dispatching lead/fork model and effort at spawn time and permits small-tier blocking exploration for collection; the collection leaf cannot delegate. Both modes remain read-only. Spawn-time inheritance is retained across resume. A small-tier resolution failure must refuse instead of falling back to the expensive parent. The actionable contract and verification are owned by `260907-feat-ws-pi-persistent-explore-deep-research`; earlier open questions above are preserved as discussion history. The owner requested sage review and ready promotion of that implementation ticket, not source implementation in this session.
+
+Follow-up source verification found that the existing `recon` group includes unrestricted bash. Owner approved using the adapter's existing no-bash `read-only` group for default researchers and collection leaves, and an adapter-internal `read-only` plus blocking `explore` composition for deep researchers. No public tool-list override or ws-mcp rsrc change is needed. Owner also approved exposing failure causes through the common resolver, with exploration-only refusal and unrelated caller policies preserved.
