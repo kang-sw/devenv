@@ -5,6 +5,8 @@ related:
   260906-research-ws-pi-recon-preset-agent-alias: the orchestrator's own explore surface; its API decision should not conflict with the orchestrator tool group defined here
   260906-feat-ws-pi-tool-and-push-tui-polish: owns any lineage rendering beyond the minimal parent tag Phase 2 adds
   260906-bug-ws-pi-rsrc-mirror-drift: the orchestrator guide is an adapter-owned package-root file, deliberately outside the byte-identical rsrc/ mirror that ticket guards
+  260907-bug-ws-pi-fork-first-call-prompt-cache-miss: prerequisite for the fork half of the profile — a fork's `tools` array must equal the lead's at spawn, so fork-only tools load after the prefix (see the deferred-tool decision here)
+  260904-feat-ws-pi-side-thread-fork-question-surface: Entry A already names `lead-write-ticket` from Populate onward as the canonical fork task; this ticket makes that the only ticket-authoring path
 ---
 
 # Curate the Pi lead's tool profile and add an orchestrator spawn role that runs ticket phases on the lead's behalf
@@ -19,6 +21,35 @@ a `proceed` of one phase accumulates on the order of 200k tokens in the lead
 today, essentially all orchestration ceremony, resident at lead tier for the
 rest of the session. The lead's fixed first-call baseline is ~24.7k tokens,
 of which the schemas of every registered `ws__*` tool are a large share.
+
+### Evidence: tools activated inside a tool call do not break the prefix (spike, 2026-09-07)
+
+Pi marks a tool result with `addedToolNames` when an extension tool's
+`execute()` grows the active tool set (`core/extensions/wrapper.js`). For
+models whose compat flags say `supportsAdditionalTools` (openai-codex
+gpt-5.6-*/gpt-6-astra) or `supportsToolSearch` (gpt-5.4+), the provider
+adapter then keeps those tools *out of* the top-level `tools` array and
+emits their schemas as an `additional_tools` developer item (or a synthetic
+`tool_search_call/output` pair) in `input`, right after that tool result —
+i.e. after the cached prefix (`splitDeferredTools`, `convertResponsesMessages`).
+The Anthropic adapter maps the same marker to `defer_loading`. Models without
+either flag fall back to the top-level array: the tools still work, the
+prefix just re-hashes once. Isolated spike on gpt-6-astra (scratch cwd, one
+throwaway extension, 3k-token filler prompt):
+
+| call | moment | uncached input | cacheRead |
+|---|---|---|---|
+| 1 | first call, tools = `[load_extra]` | 6,006 | 0 |
+| 2 | after `load_extra` activated `extra_a`,`extra_b` | 306 | 5,888 |
+| 3 | after calling `extra_a` | 211 | 6,016 |
+| 4 | after calling `extra_b` | 116 | 6,144 |
+
+Conditions: the add must happen inside a tool's `execute()` (a
+`session_start` or user-turn `setActiveTools` does not produce the marker);
+an `execute()` that also *removes* a tool produces no marker and the removal
+re-hashes the array; the marker is persisted in the session file, so a
+`--fork` child inherits deferred tools at the same positions. The set is
+therefore monotone within a session: load, never unload.
 
 The implementation is small relative to the role change, so this is one
 ticket with two phases rather than one ticket per mechanism. Every seam
@@ -35,15 +66,47 @@ them to children as `systemPromptPath`.
 - **Lead tool profile is an allowlist in the bridge.** The bridge registers
   on the lead only the tools named by an adapter-owned profile list; every
   other `ws__*` tool is withheld from the lead but still passed to
-  `full-worker`/orchestrator children via `wsToolNames`. Initial profile
-  (validated by dogfood, adjustable without code):
-  `do-i-really-have-to-read-this-myself`,
-  `do-i-really-have-to-run-this-myself`, `playbook.read`, `playbook.render`,
-  `workflow.state`, `lead-workflow-manual`, the `ws-agent-*` driving tools,
-  the ask/human-relay surface, `note.write`, `tickets.create_empty`,
-  `tickets.move`, `git.status`, `git.log`. Children are unaffected: the
-  profile filters registration on the lead process only (role gate via
-  `readSpawnRole`).
+  `full-worker`/orchestrator children via `wsToolNames`. The profile filters
+  registration on the lead process only (role gate via `readSpawnRole`);
+  children are unaffected. The resident set is what the lead's own two
+  playbooks (`lead-discuss`, the thinned `lead-proceed`) and its spawn/relay
+  duties call, nothing else. Initial resident profile (validated by dogfood,
+  adjustable without code):
+  - ws-mcp: `playbook.read`, `workflow_state`, `tickets.move`,
+    `tickets.close`, `git.status`, `note.write`.
+  - adapter-registered (unchanged by the filter): the
+    `do-i-really-have-to-*` pair, `lead-workflow-manual`, the `ws-agent-*`
+    driving tools, `ws-fork`, `ws-ask`/`ws-resolve`, the `goal-*` levers,
+    `ws-skill`.
+  - held for dogfood, not resident by default: `project_tree` (lean render
+    only landed in the dev build), `tickets.query` (discuss-time evidence
+    reads may go through `explore` instead), `git.log`, and the adapter
+    `ws-approve` (moves down with approval attribution below).
+  - **`todo.*` is not resident on the lead.** The todo runbook is installed
+    by `route.resolve_*` and consumed by `lead-proceed`/`lead-implement`/
+    `lead-review`, all of which run in the orchestrator; neither
+    `lead-discuss` nor `lead-write-ticket` references a todo tool. The
+    orchestrator has its own ws session key, so todo state does not collide.
+  - **Ticket authoring is not resident on the lead.** `lead-write-ticket`
+    from Populate onward runs in a `ws-fork` (260904 Entry A); its tools
+    (`tickets.create_empty/template/checklist/verify/sage_gate/sage_stamp/
+    query`, `convention.read`, `playbook.render`, `spec_stem.generate`,
+    `specs.query`, `git.commit`) form a **fork authoring profile** loaded by
+    the mechanism in the next decision, so the lead pays for none of their
+    schemas.
+- **Fork tool surface equals the lead's at spawn; fork-only tools load after
+  the prefix.** Per `260907-bug-ws-pi-fork-first-call-prompt-cache-miss`, a
+  fork's `--tools` list is the lead's active list unchanged (byte-identical
+  `tools` array, so the inherited context hits the prompt cache). The fork
+  authoring profile is activated by the fork's **first tool call**: the
+  fork's initial message instructs it to call one adapter loader tool whose
+  `execute()` registers/activates the profile via `setActiveTools`, which
+  rides in as `additional_tools` after the prefix (evidence above). The
+  loader is add-only (never removes), idempotent, and refuses outside role
+  `fork`. Loader tool name and whether `ws-skill` hosts it are implementation
+  choices. Not decided here: whether the lead itself lazy-loads withheld
+  groups through the same channel — noted as a follow-up once the resident
+  set has been dogfooded.
 - **`orchestrator` is a new spawn role and tool group.** `SpawnRole` gains
   `"orchestrator"`; `TOOL_GROUPS` gains `orchestrator` = `full-worker` plus
   the `ws-agent-*` driving tools. This is the single exception to the
@@ -105,7 +168,13 @@ unchanged; an unknown name in the profile fails loudly at startup; the
 mercenary exclusion still applies on top. Verification: first-call `input`
 token count of a fresh lead session before and after (baseline ~24.7k),
 recorded in the Result; one dogfood session confirms nothing the lead
-actually needs is missing, adjusting the list rather than the code.
+actually needs is missing, adjusting the list rather than the code. Fork
+half: a `ws-fork` from the profiled lead calls the loader, and its next
+assistant `usage` shows `cacheRead` ≥ 90% of `input + cacheRead` while the
+authoring tools are callable (the spike's shape: 306 uncached / 5,888
+cached on the call after the load); a `lead-write-ticket` run inside that
+fork completes end to end. Tests: the loader adds and never removes; a
+non-fork role gets the refusal; the fork's `--tools` equals the lead's.
 
 ### Phase 2: Orchestrator role, guide, and hand-off
 
