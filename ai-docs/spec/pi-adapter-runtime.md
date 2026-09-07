@@ -55,8 +55,15 @@ a tool failure (a thrown execution), not as a successful result — Pi sets a
 tool's error state only when its `execute` throws, so a ws-mcp failure that was
 returned as ordinary text is re-raised rather than reported as success.
 
-Bridged tools provide display-only YAML previews when Pi's native TUI helpers
-are available, including argument streaming. The call slot retains the registered
+Bridged MCP tools and ws-owned Pi-native tools share one display-only presentation
+policy when Pi's native TUI helpers are available, including argument streaming.
+Existing specialized tool renderers retain ownership; Pi built-ins, third-party
+tools, commands, and pushed messages are not intercepted. Arguments appear as
+generic YAML of caller-supplied values only: omitted or internally resolved
+model/effort settings are not fabricated. Optional TUI helpers load independently
+before asynchronous MCP startup; tools registered before helper availability use
+native fallback until the shared helpers become available, without re-registration.
+The call slot retains the registered
 tool name in bold with native `toolTitle` color. Input uses the theme's normal
 `text` foreground (light on dark themes, readable on light themes), rather than
 gray `toolOutput`; output retains `toolOutput`. Input and output inherit the
@@ -64,15 +71,15 @@ native parent shell's uniform pending/success/error background; neither installs
 a separate background override.
 
 Input display trims outer whitespace only and owns exactly one blank separator
-row above and below its body, independent of whether the result is YAML, native
-raw text, an error, partial output, or not yet available. YAML output adds no
+row above and below its body, independent of whether the result is YAML, RAW
+text, an error, partial output, or not yet available. YAML and RAW output add no
 leading separator. Native outer shell padding and whitespace belonging to native
 fallback content remain unchanged. Input logical-line starts are indented four columns
 relative to the title; automatic continuation rows are indented three columns.
 After display-only control/tab sanitization, previews wrap using a conservative
 estimate of one column per printable ASCII code point and two per non-ASCII code
 point. Complex Unicode may wrap early; exact grapheme width is not promised.
-Input and collapsed YAML output show at most ten content rows, followed by a
+Input and collapsed YAML or RAW output show at most ten content rows, followed by a
 separate `...` row only when truncated. The input marker is gray `toolOutput`
 and indented four columns relative to the title, independently of the input body
 foreground; the output marker remains unindented. No omitted-row count is
@@ -83,12 +90,17 @@ the available content width, but does not discard subsequent text. Pi's own
 parent-shell minimum-width limitation still applies.
 
 A completed, non-error result containing exactly one text block is displayed as
-YAML when that text parses as a JSON object or array. Expanded output removes the
-preview limit. Unchanged redraws reuse prepared YAML, approximate row layout, and
-native layout; theme changes restyle without YAML reserialization or repeated
-source wrapping. Content, width, or expansion changes refresh the affected layout.
+YAML when that text parses as a JSON object or array. Other completed single-text
+results (including prose, scalar/malformed JSON, and empty text) use RAW previews:
+text is preserved rather than quoted as a YAML scalar, subject only to display
+sanitization and wrapping. Output does not trim outer whitespace. Expanded YAML
+and RAW output remove the preview limit. Unchanged redraws reuse prepared text,
+approximate row layout, joined text, themed display, and native layout without
+repeated source-sized joins or styling. Theme changes restyle without reparsing,
+YAML reserialization, or repeated source wrapping. Content, width, or expansion
+changes refresh the affected layout.
 
-Partial results, errors, prose, scalar/malformed JSON, and mixed or image content
+Partial results, errors, and mixed, multi-block, or image content
 use Pi's standard result display. If native TUI helpers cannot load, both slots
 retain Pi's standard display. Preview conversion and terminal sanitization never
 change dispatched arguments, model-visible result content, or `details`.
