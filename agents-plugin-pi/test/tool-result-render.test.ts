@@ -73,9 +73,11 @@ function fakeTui(): {
   texts: FakeText[];
   boxes: FakeBox[];
   truncations: () => number;
+  layouts: () => number;
 } {
   let stripCalls = 0;
   let truncationCalls = 0;
+  let physicalLayouts = 0;
   const texts: FakeText[] = [];
   const boxes: FakeBox[] = [];
   class CapturedText extends FakeText {
@@ -102,11 +104,15 @@ function fakeTui(): {
         truncationCalls += 1;
         return text;
       },
+      onPreviewLayout(): void {
+        physicalLayouts += 1;
+      },
     },
     strips: () => stripCalls,
     texts,
     boxes,
     truncations: () => truncationCalls,
+    layouts: () => physicalLayouts,
   };
 }
 
@@ -178,11 +184,21 @@ describe("bounded YAML preview preparation", () => {
 
   test("is safe at zero and narrow widths while conservatively splitting emoji sequences", () => {
     assert.deepEqual(physicalPreview("", 0, { expanded: false, trimOuterWhitespace: false }), [""]);
-    assert.deepEqual(physicalPreview("wide", 3, { expanded: false, trimOuterWhitespace: false }), ["", "..."]);
+    assert.deepEqual(physicalPreview("wide", 3, { expanded: false, trimOuterWhitespace: false }), ["  w", "  i", "  d", "  e"]);
     assert.deepEqual(
       physicalPreview("👩‍💻", 8, { expanded: false, trimOuterWhitespace: false }),
       ["    👩‍", "   💻"],
     );
+  });
+
+  test("preserves expanded narrow output and fits the truncation marker to one row", () => {
+    assert.deepEqual(
+      physicalPreview("界\nTAIL", 5, { expanded: true, trimOuterWhitespace: false }),
+      ["   界", "    T", "   AI", "   L"],
+    );
+    const collapsed = physicalPreview("abcdefghijkl", 1, { expanded: false, trimOuterWhitespace: false });
+    assert.equal(collapsed.length, 11);
+    assert.equal(collapsed.at(-1), ".", "narrow marker stays one terminal-safe row");
   });
 
   test("caps collapsed physical content at ten rows with a separate marker", () => {
@@ -278,6 +294,33 @@ describe("native YAML preview renderers", () => {
     assert.ok(truncations() > 0, "native terminal-safe final fitting remains active");
   });
 
+  test("caches physical layout separately from native layout and theme styling", () => {
+    const { tui, layouts } = fakeTui();
+    const renderers = createToolPreviewRenderers(tui, "ws__test", (value) =>
+      "changed" in value ? "changed" : "x".repeat(200_000),
+    );
+    const state = {};
+    const content = [{ type: "text", text: "{}" }];
+    const output = renderers.renderResult({ content }, { expanded: true, isPartial: false }, unstyledTheme, context({ state }));
+    output.render(80);
+    output.render(80);
+    assert.equal(layouts(), 1, "unchanged expanded redraw reuses its physical layout");
+
+    output.render(79);
+    assert.equal(layouts(), 2, "width changes rebuild layout");
+    const collapsed = renderers.renderResult({ content }, { expanded: false, isPartial: false }, unstyledTheme, context({ state, lastComponent: output }));
+    collapsed.render(79);
+    assert.equal(layouts(), 3, "expansion changes rebuild layout");
+    const changed = renderers.renderResult(
+      { content: [{ type: "text", text: '{"changed":true}' }] },
+      { expanded: false, isPartial: false },
+      unstyledTheme,
+      context({ state, lastComponent: collapsed }),
+    );
+    changed.render(79);
+    assert.equal(layouts(), 4, "source changes rebuild layout");
+  });
+
   test("reprepares in-place streamed arguments and rebuilds colors after a theme change", () => {
     const { tui, texts } = fakeTui();
     const firstTheme = fakeTheme("first");
@@ -320,6 +363,47 @@ describe("native YAML preview renderers", () => {
         UseNativeResultFallback,
       );
     }
+  });
+
+  test("preserves expanded narrow ASCII/CJK output and fits its narrow marker in real Pi composition", async () => {
+    const codingAgentUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
+    const requireFromPi = createRequire(codingAgentUrl);
+    const tui = await import(pathToFileURL(requireFromPi.resolve("@earendil-works/pi-tui")).href) as unknown as ToolResultTuiModules;
+    const theme = await import(new URL("./modes/interactive/theme/theme.js", codingAgentUrl).href) as { initTheme(): void };
+    theme.initTheme();
+    const toolExecution = await import(new URL("./modes/interactive/components/tool-execution.js", codingAgentUrl).href) as {
+      ToolExecutionComponent: new (
+        toolName: string,
+        toolCallId: string,
+        args: unknown,
+        options: unknown,
+        toolDefinition: unknown,
+        ui: { requestRender(): void },
+        cwd: string,
+      ) => { render(width: number): string[]; setArgsComplete(): void; setExpanded(expanded: boolean): void; updateResult(result: unknown, isPartial: boolean): void };
+    };
+    const createComponent = (serialized: string) => {
+      const renderers = createToolPreviewRenderers(tui, "ws__test", (value) => "input" in value ? "" : serialized);
+      const component = new toolExecution.ToolExecutionComponent(
+        "ws__test", "call-1", { input: true }, { showImages: false },
+        { renderCall: renderers.renderCall, renderResult: renderers.renderResult }, { requestRender() {} }, process.cwd(),
+      );
+      component.setArgsComplete();
+      component.updateResult({ content: [{ type: "text", text: "{}" }], isError: false }, false);
+      return component;
+    };
+
+    for (const outerWidth of [5, 6, 7]) {
+      const component = createComponent("界\nTAIL");
+      component.setExpanded(true);
+      const compact = component.render(outerWidth).map((line) => tui.stripTerminalSequences(line)).join("").replace(/\s/g, "");
+      assert.match(compact, /界/, `CJK survives at outer width ${outerWidth}`);
+      assert.match(compact, /T.*A.*I.*L/, `ASCII survives at outer width ${outerWidth}`);
+    }
+
+    const marker = createComponent(Array.from({ length: 11 }, (_, index) => `line-${index}`).join("\n"));
+    const markerLines = marker.render(3).map((line) => tui.stripTerminalSequences(line).trim());
+    assert.equal(markerLines.filter((line) => line === ".").length, 1, "narrow marker renders as one row, not three wrapped dots");
   });
 
   test("uses real installed Pi parent-shell composition and retains its padding", async () => {

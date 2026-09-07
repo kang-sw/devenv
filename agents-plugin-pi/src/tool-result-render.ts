@@ -6,6 +6,8 @@ export interface ToolResultTuiModules {
   Box: new (paddingX?: number, paddingY?: number, bgFn?: (text: string) => string) => NativeBox;
   stripTerminalSequences(text: string): string;
   truncateToWidth(text: string, width: number, ellipsis?: string): string;
+  /** Test-only optional probe for physical-layout cache misses. */
+  onPreviewLayout?: () => void;
 }
 
 export interface NativeText {
@@ -59,6 +61,8 @@ interface BoundedText extends NativePreviewComponent {
   style: ((text: string) => string) | undefined;
   format: PreviewFormat | undefined;
   display: string | undefined;
+  layoutKey: string | undefined;
+  plainLayout: string | undefined;
   cachedWidth: number | undefined;
   cachedNativeLines: string[] | undefined;
   cachedLines: string[] | undefined;
@@ -79,6 +83,16 @@ const previewStateKey = Symbol("ws-yaml-physical-preview");
 const PREVIEW_ROWS = 10;
 const INPUT_START_INDENT = 4;
 const CONTINUATION_INDENT = 3;
+
+function fittedIndent(width: number, preferred: number, remainder: string): number {
+  if (!remainder) return Math.min(preferred, width);
+  const firstCodePoint = String.fromCodePoint(remainder.codePointAt(0)!);
+  return Math.max(0, Math.min(preferred, width - approximateCodePointWidth(firstCodePoint)));
+}
+
+function truncatedMarker(width: number): string {
+  return ".".repeat(Math.max(0, Math.min(3, width)));
+}
 
 /**
  * Pi catches renderer errors and uses its standard text/image fallback for
@@ -160,7 +174,10 @@ export function physicalPreview(
   const boundedWidth = Math.max(0, Math.floor(width));
   const rows: string[] = [];
   const limit = expanded ? Number.POSITIVE_INFINITY : PREVIEW_ROWS;
-  const appendMarker = (): string[] => [...rows, "..."];
+  const appendMarker = (): string[] => {
+    const marker = truncatedMarker(boundedWidth);
+    return marker ? [...rows, marker] : rows;
+  };
 
   let lineStart = 0;
   while (true) {
@@ -170,13 +187,9 @@ export function physicalPreview(
     let remainder = logicalLine;
     do {
       if (rows.length === limit) return appendMarker();
-      const indent = firstRow ? INPUT_START_INDENT : CONTINUATION_INDENT;
+      const preferredIndent = firstRow ? INPUT_START_INDENT : CONTINUATION_INDENT;
+      const indent = fittedIndent(boundedWidth, preferredIndent, remainder);
       const contentWidth = boundedWidth - indent;
-      if (contentWidth <= 0) {
-        rows.push("");
-        const hasHiddenContent = remainder.length > 0 || lineEnd !== -1;
-        return !expanded && hasHiddenContent ? appendMarker() : rows;
-      }
 
       let consumed = 0;
       let usedWidth = 0;
@@ -186,13 +199,10 @@ export function physicalPreview(
         usedWidth += codePointWidth;
         consumed += codePoint.length;
       }
-      // A non-empty line always consumes at least one code point while a
-      // positive width is available: non-ASCII costs two, so width one is a
-      // deliberate conservative early-wrap/truncation case.
-      if (remainder && consumed === 0) {
-        rows.push(" ".repeat(indent));
-        return expanded ? rows : appendMarker();
-      }
+      // At one terminal column a two-column code point cannot fit even with
+      // zero indent. Expanded output still consumes it so later logical lines
+      // are never silently lost; native fitting decides its final appearance.
+      if (remainder && consumed === 0) consumed = String.fromCodePoint(remainder.codePointAt(0)!).length;
       rows.push(`${" ".repeat(indent)}${remainder.slice(0, consumed)}`);
       remainder = remainder.slice(consumed);
       firstRow = false;
@@ -211,14 +221,23 @@ function createBoundedText(tui: ToolResultTuiModules): BoundedText {
     style: undefined,
     format: undefined,
     display: undefined,
+    layoutKey: undefined,
+    plainLayout: undefined,
     cachedWidth: undefined,
     cachedNativeLines: undefined,
     cachedLines: undefined,
     render(width: number): string[] {
       const boundedWidth = Math.max(0, Math.floor(width));
-      const plain = component.format
-        ? physicalPreview(component.sanitized ?? "", boundedWidth, component.format).join("\n")
-        : component.sanitized ?? "";
+      if (boundedWidth === 0) return [];
+      const layoutKey = component.format
+        ? `${boundedWidth}:${component.format.expanded ? "expanded" : "collapsed"}:${component.format.trimOuterWhitespace ? "trim" : "raw"}`
+        : undefined;
+      if (layoutKey !== undefined && (component.layoutKey !== layoutKey || component.plainLayout === undefined)) {
+        tui.onPreviewLayout?.();
+        component.plainLayout = physicalPreview(component.sanitized ?? "", boundedWidth, component.format! as PreviewFormat).join("\n");
+        component.layoutKey = layoutKey;
+      }
+      const plain = component.format ? component.plainLayout ?? "" : component.sanitized ?? "";
       const display = component.style?.(plain) ?? plain;
       if (component.display !== display) {
         component.text.setText(display);
@@ -227,7 +246,6 @@ function createBoundedText(tui: ToolResultTuiModules): BoundedText {
         component.cachedNativeLines = undefined;
         component.cachedLines = undefined;
       }
-      if (boundedWidth === 0) return [];
       const nativeLines = component.text.render(boundedWidth);
       if (component.cachedWidth === boundedWidth && component.cachedNativeLines === nativeLines && component.cachedLines) {
         return component.cachedLines;
@@ -258,6 +276,8 @@ function updateText(
     component.source = source;
     component.sanitized = sanitizePreviewText(tui.stripTerminalSequences(source));
     component.display = undefined;
+    component.layoutKey = undefined;
+    component.plainLayout = undefined;
     component.cachedWidth = undefined;
     component.cachedNativeLines = undefined;
     component.cachedLines = undefined;
