@@ -36,7 +36,7 @@ func TestSpecsListHandlesNestedSpecsAndDuplicateFilenames(t *testing.T) {
 }
 
 // markerContext's looseness is a retained surface: its `planned` and `wip`
-// substring branches feed specs.find match scoring, and the emoji branch alone
+// substring branches feed specs.query match scoring, and the emoji branch alone
 // is only a third of it. TestSpecsListHandlesNestedSpecsAndDuplicateFilenames
 // pins the emoji branch through MarkerContexts; this pins the other two, so a
 // later narrowing of the predicate cannot pass CI unnoticed.

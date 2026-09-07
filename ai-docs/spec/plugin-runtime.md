@@ -112,7 +112,7 @@ generated-sameness exception to the
 otherwise-curated derivative (see `ai-docs/manuals/wsflow-mirroring.md`).
 Distributed `agents-plugin-wsflow/skills/lead-*` files are also converged entry
 shims over that rsrc surface: each shim calls
-`wsflow/playbook.print(name: "<lead-name>")` and leaves procedure behavior to the
+`wsflow/playbook.read(name: "<lead-name>")` and leaves procedure behavior to the
 shared playbook renderer.
 
 Apart from that generated rsrc subtree and the uniform entry-shim skill bodies,
@@ -305,7 +305,7 @@ entries.
 
 ## Serve-Time Skill-Body Transclusion {#260724-serve-time-skill-body-transclusion}
 
-`printPlaybook` (the `playbook.print` MCP tool's implementation) has a
+`printPlaybook` (the `playbook.read` MCP tool's implementation) has a
 code-side pragmatic-concatenation mechanism: after the normal
 render-plus-substitute pass, for specific serving playbook names it loads a
 second body straight from the skills tree via `wsrsrc.LoadSkillBody` and
@@ -327,7 +327,7 @@ differently:
 The appended skills-tree body is read live off disk at serve time (not
 manifest-hash-verified, an accepted trade-off shared with the
 `lead-prefer-subagent` precedent): editing the source `SKILL.md` changes the
-next `playbook.print` response with no separate build or regen step, but also
+next `playbook.read` response with no separate build or regen step, but also
 means `agents-plugin/skills/manifest.json`'s drift gate does not catch a
 content change here the way `agents-plugin/rsrc/manifest.json` catches drift
 in ordinary rsrc playbook bodies.
@@ -369,7 +369,7 @@ Observable contract:
 
 Build time was chosen over serve time for this splice specifically because the
 serve-time hooks live in `printPlaybook`, so using them would force the target
-back into being a `playbook.print` shim — reintroducing the call-skip failure
+back into being a `playbook.read` shim — reintroducing the call-skip failure
 that moving these skills to inline bodies removed, on the most frequently
 served skill in the goal loop.
 

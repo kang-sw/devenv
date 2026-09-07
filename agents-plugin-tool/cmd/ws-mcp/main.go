@@ -20,7 +20,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
-var version = "0.44.4-dev"
+var version = "0.45.2-dev"
 var sourceCommit = "dev"
 
 func main() {
@@ -133,7 +133,7 @@ func runSmoke(root string, out io.Writer) error {
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"runtime.info","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"runtime.read","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"project_tree","arguments":{}}}`,
 	}, "\n") + "\n"
 	var responses bytes.Buffer
@@ -142,7 +142,7 @@ func runSmoke(root string, out io.Writer) error {
 		return fmt.Errorf("stdio smoke failed: %w", err)
 	}
 	text := responses.String()
-	for _, want := range []string{"runtime.info", "project_tree", "ai-docs/"} {
+	for _, want := range []string{"runtime.read", "project_tree", "ai-docs/"} {
 		if !strings.Contains(text, want) {
 			return fmt.Errorf("stdio smoke response missing %q", want)
 		}

@@ -41,6 +41,16 @@ func watchProcessExit(pid int, onExit func()) {
 		return
 	}
 	defer windows.CloseHandle(h)
+	// PID-reuse identity guard: only self-terminate when we witness the process
+	// we opened transition from alive to dead. A zero-timeout wait that reports
+	// WAIT_OBJECT_0 means the handle is *already* signaled at open time, so we did
+	// not open a live parent — we opened an already-exited object (a lingering
+	// process object, or a PID the OS reaped and recycled). Firing here would be a
+	// spurious self-terminate, so disarm instead. startParentDeathWatch arms while
+	// the parent is alive, so a healthy parent is never already-signaled at open.
+	if ev, werr := windows.WaitForSingleObject(h, 0); werr == nil && ev == windows.WAIT_OBJECT_0 {
+		return
+	}
 	// With INFINITE the wait resolves to either WAIT_OBJECT_0 (the process
 	// actually exited) or WAIT_FAILED (a syscall-level error). Only fire onExit
 	// on a real exit signal: on failure, leave the watch silently disarmed

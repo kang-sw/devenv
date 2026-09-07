@@ -6,8 +6,8 @@ description: Advance a goal-pursuit run by one step with batch-parallel worktree
 # Goal Fan-Out Step
 
 Call in parallel:
-- `ws/playbook.print(name: "lead-goal-fan-out-step", session_key: <your key, omit if fresh>)`
+- `ws/playbook.read(name: "lead-goal-fan-out-step", session_key: <your key, omit if fresh>)`
 - `ws/workflow_manual(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>)`
 
-After both return, execute the procedure returned by `ws/playbook.print`.
+After both return, execute the procedure returned by `ws/playbook.read`.
 If this call fails to connect, run `/ws:mcp-server-repair`.

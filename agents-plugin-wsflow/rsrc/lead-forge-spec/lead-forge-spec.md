@@ -59,7 +59,7 @@ Format: markdown bullets grouped by module/area.
 Query 2 — ticket domain survey:
 
 ```text
-Survey all tickets through `{{.McpNamespace}}/tickets.list(include_done: true, include_dropped: true)`.
+Survey all tickets through `{{.McpNamespace}}/tickets.query(include_done: true, include_dropped: true)`.
 
 Extract title, status directory, and public-facing or user-visible behavior.
 Group by inferred behavioral domain.
@@ -103,11 +103,11 @@ Wait for user response. Apply any adjustments. Do not proceed until the user exp
 
 ### 5. Lock the todo list
 
-Call `{{.McpNamespace}}/todo.clear(session_key: <your lead key>)`, then one `{{.McpNamespace}}/todo.append` per confirmed domain, in confirmed order.
+Call `{{.McpNamespace}}/todo.clear(session_key: <your lead key>)`, then one `{{.McpNamespace}}/todo.add` per confirmed domain, in confirmed order.
 The title schema is resume state: `Source paths:` stores comma-separated module paths; `old spec files:` stores comma-separated archived spec paths or `none`.
 
 ```text
-{{.McpNamespace}}/todo.append(session_key: <your lead key>, key: "forge-spec-<domain>", title: "forge-spec-<domain> - Source paths: <paths>; old spec files: <paths or none>")
+{{.McpNamespace}}/todo.add(session_key: <your lead key>, key: "forge-spec-<domain>", title: "forge-spec-<domain> - Source paths: <paths>; old spec files: <paths or none>")
 ```
 
 Proceed immediately to **On: per-domain** with the first domain.
@@ -141,7 +141,7 @@ Query 2 — domain tickets:
 Find tickets relevant to the <domain> domain.
 Module paths: <paths from the `Source paths:` segment of the todo item title>
 
-Use `{{.McpNamespace}}/tickets.find(query: "<domain>")`; filter by module paths when needed.
+Use `{{.McpNamespace}}/tickets.query(query: "<domain>")`; filter by module paths when needed.
 Return features -> ticket status; todo items are ticket-intent evidence.
 ```
 
@@ -263,13 +263,13 @@ Ask the user whether to run `lead-forge-mental-model` next, regardless of how
 this `lead-forge-spec` run was reached (a direct standalone invocation,
 `lead-bootstrap`'s fresh-install suggestion, or the index-health-check
 routing table). On a yes answer, call
-`{{.McpNamespace}}/playbook.print(name: "lead-forge-mental-model")` and
+`{{.McpNamespace}}/playbook.read(name: "lead-forge-mental-model")` and
 execute the returned procedure inline. On a no answer or no response,
 continue to step 4 without invoking it.
 
 ### 4. Suggested next steps
 
-- Run the lead-write-spec procedure via `{{.McpNamespace}}/playbook.print(name: "lead-write-spec")` for any domain surfaces discovered after wrap-up.
+- Run the lead-write-spec procedure via `{{.McpNamespace}}/playbook.read(name: "lead-write-spec")` for any domain surfaces discovered after wrap-up.
 
 ## Judgments
 
@@ -295,7 +295,7 @@ No file arguments. Scans `ai-docs/spec/**/*.md` for duplicate anchors. Run once 
 ### Todo entry
 
 ```text
-{{.McpNamespace}}/todo.append(session_key: <your lead key>, key: "forge-spec-<domain>", title: "forge-spec-<domain> - Source paths: <comma-separated module paths>; old spec files: <comma-separated archived spec paths, or none>")
+{{.McpNamespace}}/todo.add(session_key: <your lead key>, key: "forge-spec-<domain>", title: "forge-spec-<domain> - Source paths: <comma-separated module paths>; old spec files: <comma-separated archived spec paths, or none>")
 ```
 
 ## Doctrine

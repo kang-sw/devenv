@@ -24,7 +24,7 @@ const ticketChecklistIntentItem5Epic = "5. For `epic`, check that detailed imple
 const ticketChecklistIntentItem5Workset = "5. For `workset`, check that it did not create parent-child semantics, decomposition ownership, or implementation phases."
 
 // TicketChecklist returns the checklist item list for a ticket-authoring phase,
-// as data the caller installs into a single todo.append instruction. It mirrors
+// as data the caller installs into a single todo.add instruction. It mirrors
 // TicketTemplate's shape: a pure, root-free switch returning canned markdown
 // text, extracted verbatim from lead-write-ticket.md.
 func TicketChecklist(typeStr, phase string) (string, error) {

@@ -49,7 +49,7 @@ tell the caller that gaps below it need an explicit `..` range.
 
 Oldest first, one group at a time:
 
-1. Print and execute `{{.McpNamespace}}/playbook.print(name: "lead-update-spec")` against `<group-range>`.
+1. Print and execute `{{.McpNamespace}}/playbook.read(name: "lead-update-spec")` against `<group-range>`.
 2. Record the resulting spec commit hash, or `none` when it reported no changes.
 
 ### 4. Sweep mental model once

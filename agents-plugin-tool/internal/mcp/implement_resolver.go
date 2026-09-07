@@ -783,7 +783,7 @@ func parseImplBranchRoot(branch string) (root, stem string, ok bool) {
 // (non-impl/-, non-implement/-prefixed) branch is its own merge root; a
 // name-rooted "impl/<root>/<stem>" branch yields the parsed root; a rootless
 // "impl/<stem>" or any "implement/<stem>" branch yields "" (legacy path,
-// merge target comes solely from caller policy). Used by enter.implement's
+// merge target comes solely from caller policy). Used by route.resolve_implement's
 // preflight to build the correct target branch name before the real
 // observation is taken.
 func implementMergeRootFor(currentBranch string) string {
@@ -923,7 +923,7 @@ func implementNextInstruction(verdict implementVerdict) string {
 	case "stop":
 		if verdict.BranchPlan.SuspectedOwnerStem != "" {
 			return fmt.Sprintf(
-				"Stop before source edits. Do not rename over unmerged work. Resolve branch identity from session context, or dispatch an explore comparing %s's commit history to the target ticket, then re-invoke enter.implement. Suspected prior owner (branch-name encoded, best-effort): %s.",
+				"Stop before source edits. Do not rename over unmerged work. Resolve branch identity from session context, or dispatch an explore comparing %s's commit history to the target ticket, then re-invoke route.resolve_implement. Suspected prior owner (branch-name encoded, best-effort): %s.",
 				verdict.BranchPlan.CurrentBranch, verdict.BranchPlan.SuspectedOwnerStem)
 		}
 		return "Stop before source edits. Report the branch safety blocker in Branch Action and ask for the missing policy or branch cleanup."

@@ -7,7 +7,7 @@ import (
 
 // notesInjectionCap bounds how many highest-priority notes are inlined into
 // the workflow_manual "# Notes" block before the remainder are elided behind
-// a visible count (still retrievable via note.search). An arbitrary,
+// a visible count (still retrievable via note.query). An arbitrary,
 // trivially-tunable implementation constant, not a contract fork (260807
 // Phase 1 plan).
 const notesInjectionCap = 20

@@ -15,7 +15,7 @@ A batch-parallel `{{.SkillNamespace}}:lead-drain-ready-queue`. Its full contract
 ```text
 You are in <worktree> on branch impl/<parent>/<stem>.
 1. Call {{.McpNamespace}}/workflow_manual(session_key: "<worker key>").
-2. Call {{.McpNamespace}}/playbook.print(name: "lead-proceed", session_key: "<worker key>")
+2. Call {{.McpNamespace}}/playbook.read(name: "lead-proceed", session_key: "<worker key>")
    and execute it on ticket <stem>: implement and review to a committed impl/<parent>/<stem>
    branch, editing any ai-docs you touch (spec, AGENTS.md Project Orientation,
    _index.md if present, ticket Result) directly —

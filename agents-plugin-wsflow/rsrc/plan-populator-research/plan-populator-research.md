@@ -57,7 +57,7 @@ The plan path may contain survey output that requested research.
    refining it.
 4. Clip the relevant contract: requirements, non-goals, verification boundary,
    spec impact, and settled decisions that govern the selected phase or inline target.
-5. Use `{{.McpNamespace}}/mental_models.find` for missing mental-model areas.
+5. Use `{{.McpNamespace}}/mental_models.query` for missing mental-model areas.
 6. Consult historical or adjacent artifacts only when the selected authority references them; treat them as context unless explicitly incorporated as binding.
 
 ### 2. Research

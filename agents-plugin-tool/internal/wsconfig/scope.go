@@ -53,7 +53,7 @@ const (
 	ItemSageReviewCompletenessTier = "sage_review_completeness_tier"
 
 	// ItemWorkflowLang is the layered config key for the user's preferred
-	// conversation language. When set, playbook.print injects a language-binding
+	// conversation language. When set, playbook.read injects a language-binding
 	// instruction into the UserPreferenceSection seed of lead-workflow-manual.
 	// Empty string means no binding (no injection). Declared default scope:
 	// ScopeGlobal (language is a cross-project user preference).

@@ -6,7 +6,7 @@ sources:
   - agents-plugin-wsflow/
   - agents-plugin/bin/
 related:
-  mcp-runtime: "Launcher compatibility uses runtime.capabilities first, with runtime.info, tools/list, and CLI probes as fallback checks."
+  mcp-runtime: "Launcher compatibility uses runtime.capabilities first, with runtime.read, tools/list, and CLI probes as fallback checks."
   prompt-bundle: "rsrc is the single prompt source of truth; runtime.json no longer carries prompt bundle metadata (260611 Phase 6b)."
 ---
 
@@ -52,7 +52,7 @@ related:
 ## Extension Points & Change Recipes
 
 - **Add a plugin skill**: add `agents-plugin/skills/<name>/SKILL.md`; keep the manifest pointing at `./skills` unless the bundle layout changes.
-- **Add a runtime requirement**: extend `runtime.json`, then add requirement-specific launcher checks; use `runtime.info` only for runtime metadata the binary can report.
+- **Add a runtime requirement**: extend `runtime.json`, then add requirement-specific launcher checks; use `runtime.read` only for runtime metadata the binary can report.
 - **Change wsflow packaging**: keep `.mcp.json` env, exact `runtime.json`, and the package contract test aligned with no-agent `runtime.capabilities`.
 - **wsflow surface boundary**: wsflow diverges from the full ws MCP surface only for mercenary (`ws.mercenary.*`) and exec / external-process features (`exec.*`). All other MCP tools — including ticket lifecycle, config, git, and spec tools — belong in both the full and wsflow contracts. When adding a new MCP tool, include it in the wsflow `runtime.json` unless it falls into the mercenary/exec exclusion.
 - **Change local plugin marketplace entries**: update `.agents/plugins/marketplace.json` for Codex and `.claude-plugin/marketplace.json` for Claude when the package list changes, then check `ai-docs/ship/ws.md`; do not mirror wsflow into `install.sh` unless the user explicitly reopens Claude auto-install scope. {#260513-wsflow-marketplace-install}

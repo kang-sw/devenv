@@ -74,7 +74,7 @@ restart. `WS_MCP_LAUNCHER_DEBUG=1` prints cold-load diagnostics to stderr.
   replace contention; the source build completes within the startup window).
 - `ws.ferrule` login resolves a session key.
 - Mercenary round-trip: `register` -> `call` -> `wait` -> `result`, plus `cancel`.
-- Workflow bootstrapping: skill invoke -> `playbook.print` / `playbook.render`.
+- Workflow bootstrapping: skill invoke -> `playbook.read` / `playbook.render`.
 
 ## Hard constraint
 

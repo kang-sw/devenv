@@ -93,11 +93,11 @@ Wait for user response. Apply any adjustments. Do not proceed until the user exp
 
 ### 5. Lock the todo list
 
-Call `{{.McpNamespace}}/todo.clear(session_key: <your lead key>)`, then one `{{.McpNamespace}}/todo.append` per confirmed domain, in confirmed order.
+Call `{{.McpNamespace}}/todo.clear(session_key: <your lead key>)`, then one `{{.McpNamespace}}/todo.add` per confirmed domain, in confirmed order.
 The title schema is resume state: `Source paths:` stores comma-separated source paths; `spec available:` stores the cold-start spec gate result (`yes` or `no`).
 
 ```text
-{{.McpNamespace}}/todo.append(session_key: <your lead key>, key: "forge-mental-model-<domain>", title: "forge-mental-model-<domain> - Source paths: <paths>; spec available: <yes | no>")
+{{.McpNamespace}}/todo.add(session_key: <your lead key>, key: "forge-mental-model-<domain>", title: "forge-mental-model-<domain> - Source paths: <paths>; spec available: <yes | no>")
 ```
 
 Proceed immediately to **On: per-domain** with the first domain.

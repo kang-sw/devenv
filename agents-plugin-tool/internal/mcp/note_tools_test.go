@@ -55,7 +55,7 @@ func twoWorktreesOfOneRepo(t *testing.T) (mainRoot, linkedRoot string) {
 
 // TestNoteWriteSearchEraseRoundTripPerLayer verifies the ticket's core
 // verification boundary for both non-tracked layers: a note.write ->
-// note.search round trip returns the written record, and note.erase removes
+// note.query round trip returns the written record, and note.erase removes
 // it so a subsequent search no longer returns it.
 func TestNoteWriteSearchEraseRoundTripPerLayer(t *testing.T) {
 	setupNoteTestEnv(t)
@@ -77,12 +77,12 @@ func TestNoteWriteSearchEraseRoundTripPerLayer(t *testing.T) {
 				t.Fatalf("note.write(%s) confirmation missing key: %s", layer, writeResp)
 			}
 
-			searchResp := callToolWithKey(t, s, 3, key, "note.search", map[string]any{
+			searchResp := callToolWithKey(t, s, 3, key, "note.query", map[string]any{
 				"layer": layer,
 				"glob":  "roundtrip.*",
 			})
 			if !strings.Contains(searchResp, "roundtrip."+layer) || !strings.Contains(searchResp, "hello "+layer) {
-				t.Fatalf("note.search(%s) did not return the written record: %s", layer, searchResp)
+				t.Fatalf("note.query(%s) did not return the written record: %s", layer, searchResp)
 			}
 
 			eraseResp := callToolWithKey(t, s, 4, key, "note.erase", map[string]any{
@@ -93,12 +93,12 @@ func TestNoteWriteSearchEraseRoundTripPerLayer(t *testing.T) {
 				t.Fatalf("note.erase(%s) confirmation missing key: %s", layer, eraseResp)
 			}
 
-			searchAfterErase := callToolWithKey(t, s, 5, key, "note.search", map[string]any{
+			searchAfterErase := callToolWithKey(t, s, 5, key, "note.query", map[string]any{
 				"layer": layer,
 				"glob":  "roundtrip.*",
 			})
 			if strings.Contains(searchAfterErase, "roundtrip."+layer) {
-				t.Fatalf("note.search(%s) after erase still returned the record: %s", layer, searchAfterErase)
+				t.Fatalf("note.query(%s) after erase still returned the record: %s", layer, searchAfterErase)
 			}
 		})
 	}
@@ -110,7 +110,7 @@ func TestNoteWriteSearchEraseRoundTripPerLayer(t *testing.T) {
 // disk under <root>/ai-docs/ws-notes/, `git status --porcelain` reports it
 // as an untracked/added path (genuinely tracked-location, unlike
 // machine/worktree which live outside the working tree entirely),
-// note.search finds it, and note.erase removes the file from disk. It also
+// note.query finds it, and note.erase removes the file from disk. It also
 // proves the reviewed lock-artifact fix: the tracked dir holds exactly the
 // intended .json file (no ".lock"/"*.tmp" sidecar) while the note exists, and
 // nothing at all — not even an orphaned lock file — once it is erased.
@@ -153,12 +153,12 @@ func TestNoteRepoLayerRoundTripAndGitTracking(t *testing.T) {
 		t.Fatalf("git status --porcelain = %q, want no .lock artifact reported under the tracked dir", status)
 	}
 
-	searchResp := callToolWithKey(t, s, 3, key, "note.search", map[string]any{
+	searchResp := callToolWithKey(t, s, 3, key, "note.query", map[string]any{
 		"layer": "repo",
 		"glob":  "repo.roundtrip",
 	})
 	if !strings.Contains(searchResp, "repo.roundtrip") || !strings.Contains(searchResp, "hello repo") {
-		t.Fatalf("note.search(repo) did not return the written record: %s", searchResp)
+		t.Fatalf("note.query(repo) did not return the written record: %s", searchResp)
 	}
 
 	eraseResp := callToolWithKey(t, s, 4, key, "note.erase", map[string]any{
@@ -184,12 +184,12 @@ func TestNoteRepoLayerRoundTripAndGitTracking(t *testing.T) {
 		t.Fatalf("git status --porcelain after erase = %q, want no residue reported under ai-docs/ws-notes/", statusAfterErase)
 	}
 
-	searchAfterErase := callToolWithKey(t, s, 5, key, "note.search", map[string]any{
+	searchAfterErase := callToolWithKey(t, s, 5, key, "note.query", map[string]any{
 		"layer": "repo",
 		"glob":  "repo.roundtrip",
 	})
 	if strings.Contains(searchAfterErase, "repo.roundtrip") {
-		t.Fatalf("note.search(repo) after erase still returned the record: %s", searchAfterErase)
+		t.Fatalf("note.query(repo) after erase still returned the record: %s", searchAfterErase)
 	}
 }
 
@@ -210,22 +210,22 @@ func TestNoteWriteFullOverwriteUpdatesPriority(t *testing.T) {
 		"notes": []any{map[string]any{"key": "overwrite.me", "value": "v2", "priority": 9}},
 	})
 
-	searchResp := callToolWithKey(t, s, 4, key, "note.search", map[string]any{
+	searchResp := callToolWithKey(t, s, 4, key, "note.query", map[string]any{
 		"layer": "machine",
 		"glob":  "overwrite.me",
 	})
 	if !strings.Contains(searchResp, "v2") || !strings.Contains(searchResp, "priority 9") {
-		t.Fatalf("note.search after overwrite = %s, want v2/priority 9 only", searchResp)
+		t.Fatalf("note.query after overwrite = %s, want v2/priority 9 only", searchResp)
 	}
 	if strings.Contains(searchResp, "v1") {
-		t.Fatalf("note.search after overwrite still shows stale v1: %s", searchResp)
+		t.Fatalf("note.query after overwrite still shows stale v1: %s", searchResp)
 	}
 }
 
 // TestNoteWorktreeLayerIsolatedAcrossWorktrees verifies the ticket's
 // headline cross-worktree isolation requirement AT WORKTREE GRANULARITY: a
 // worktree-layer note written under one linked worktree's session key is
-// invisible to note.search under a DIFFERENT worktree OF THE SAME
+// invisible to note.query under a DIFFERENT worktree OF THE SAME
 // REPOSITORY's key, while a machine-layer note written under either key is
 // visible to both. Using two unrelated repos here (as an earlier draft did)
 // would already differ at the ProjectKey level and pass even for a bug that
@@ -248,26 +248,26 @@ func TestNoteWorktreeLayerIsolatedAcrossWorktrees(t *testing.T) {
 	})
 
 	// The worktree note must be visible under the main worktree's own key...
-	searchMainWorktree := callToolWithKey(t, s, 5, keyMain, "note.search", map[string]any{"layer": "worktree", "glob": "wt.only.main"})
+	searchMainWorktree := callToolWithKey(t, s, 5, keyMain, "note.query", map[string]any{"layer": "worktree", "glob": "wt.only.main"})
 	if !strings.Contains(searchMainWorktree, "wt.only.main") {
-		t.Fatalf("note.search(worktree, main) missing its own note: %s", searchMainWorktree)
+		t.Fatalf("note.query(worktree, main) missing its own note: %s", searchMainWorktree)
 	}
 
 	// ...but absent under the linked worktree's key, even though both are the
 	// SAME repository (different worktree note store, same project).
-	searchLinkedWorktree := callToolWithKey(t, s, 6, keyLinked, "note.search", map[string]any{"layer": "worktree", "glob": "wt.only.main"})
+	searchLinkedWorktree := callToolWithKey(t, s, 6, keyLinked, "note.query", map[string]any{"layer": "worktree", "glob": "wt.only.main"})
 	if strings.Contains(searchLinkedWorktree, "wt.only.main") {
-		t.Fatalf("note.search(worktree, linked worktree of the same repo) leaked the main worktree's note: %s", searchLinkedWorktree)
+		t.Fatalf("note.query(worktree, linked worktree of the same repo) leaked the main worktree's note: %s", searchLinkedWorktree)
 	}
 
 	// The machine-layer note is visible under both keys.
-	searchMainMachine := callToolWithKey(t, s, 7, keyMain, "note.search", map[string]any{"layer": "machine", "glob": "machine.shared"})
+	searchMainMachine := callToolWithKey(t, s, 7, keyMain, "note.query", map[string]any{"layer": "machine", "glob": "machine.shared"})
 	if !strings.Contains(searchMainMachine, "machine.shared") {
-		t.Fatalf("note.search(machine, main) missing shared machine note: %s", searchMainMachine)
+		t.Fatalf("note.query(machine, main) missing shared machine note: %s", searchMainMachine)
 	}
-	searchLinkedMachine := callToolWithKey(t, s, 8, keyLinked, "note.search", map[string]any{"layer": "machine", "glob": "machine.shared"})
+	searchLinkedMachine := callToolWithKey(t, s, 8, keyLinked, "note.query", map[string]any{"layer": "machine", "glob": "machine.shared"})
 	if !strings.Contains(searchLinkedMachine, "machine.shared") {
-		t.Fatalf("note.search(machine, linked worktree) missing shared machine note: %s", searchLinkedMachine)
+		t.Fatalf("note.query(machine, linked worktree) missing shared machine note: %s", searchLinkedMachine)
 	}
 }
 
@@ -295,16 +295,16 @@ func TestNoteCloneLayerIsProjectScopedAndWorktreeAgnostic(t *testing.T) {
 	})
 
 	// Visible from the sibling worktree of the same project (worktree-agnostic).
-	searchLinked := callToolWithKey(t, s, 5, keyLinked, "note.search", map[string]any{"layer": "clone", "glob": "clone.shared"})
+	searchLinked := callToolWithKey(t, s, 5, keyLinked, "note.query", map[string]any{"layer": "clone", "glob": "clone.shared"})
 	if !strings.Contains(searchLinked, "clone.shared") {
-		t.Fatalf("note.search(clone, linked worktree of the same project) missing the note written from the main worktree: %s", searchLinked)
+		t.Fatalf("note.query(clone, linked worktree of the same project) missing the note written from the main worktree: %s", searchLinked)
 	}
 
 	// Absent from a different, unrelated project on the same machine
 	// (project-scoped).
-	searchOther := callToolWithKey(t, s, 6, keyOther, "note.search", map[string]any{"layer": "clone", "glob": "clone.shared"})
+	searchOther := callToolWithKey(t, s, 6, keyOther, "note.query", map[string]any{"layer": "clone", "glob": "clone.shared"})
 	if strings.Contains(searchOther, "clone.shared") {
-		t.Fatalf("note.search(clone, unrelated project) leaked a note from a different project: %s", searchOther)
+		t.Fatalf("note.query(clone, unrelated project) leaked a note from a different project: %s", searchOther)
 	}
 
 	// Never staged by git: the clone store lives outside the working tree,
@@ -366,22 +366,22 @@ func TestNoteWriteRestampsWrittenAtOnOverwrite(t *testing.T) {
 	}
 }
 
-// searchSingleNoteRecord runs note.search with format:"json" and returns the
+// searchSingleNoteRecord runs note.query with format:"json" and returns the
 // single matched wsnote.Record, failing the test if the match count is not
 // exactly 1.
 func searchSingleNoteRecord(t *testing.T, s *Server, id int, key, layer, glob string) wsnote.Record {
 	t.Helper()
-	resp := callToolWithKey(t, s, id, key, "note.search", map[string]any{
+	resp := callToolWithKey(t, s, id, key, "note.query", map[string]any{
 		"layer":  layer,
 		"glob":   glob,
 		"format": "json",
 	})
 	var records []wsnote.Record
 	if err := json.Unmarshal([]byte(resp), &records); err != nil {
-		t.Fatalf("unmarshal note.search json response: %v\nresp=%s", err, resp)
+		t.Fatalf("unmarshal note.query json response: %v\nresp=%s", err, resp)
 	}
 	if len(records) != 1 {
-		t.Fatalf("note.search(%s) = %d records, want exactly 1: %s", glob, len(records), resp)
+		t.Fatalf("note.query(%s) = %d records, want exactly 1: %s", glob, len(records), resp)
 	}
 	return records[0]
 }
@@ -438,7 +438,7 @@ func TestNoteWriteMachineLayerRejectsEmptySessionKey(t *testing.T) {
 
 // TestNoteMuteUnmuteRoundTrip verifies note.mute/note.unmute across all
 // four layers: mute drops a note's visible state to false, unmute restores
-// it to true, observed via note.search's json format (note.search itself
+// it to true, observed via note.query's json format (note.query itself
 // never filters on visible, so this exercises the stored field directly).
 func TestNoteMuteUnmuteRoundTrip(t *testing.T) {
 	setupNoteTestEnv(t)
@@ -631,7 +631,7 @@ type taggedNoteRecordJSON struct {
 	Layer     wsnote.Layer `json:"layer"`
 }
 
-// TestNoteSearchOmittedLayerSearchesAllFourTagged verifies note.search's
+// TestNoteSearchOmittedLayerSearchesAllFourTagged verifies note.query's
 // headline multi-layer contract: omitting "layer" entirely searches all four
 // layers and tags each returned record with its originating layer (sub-
 // decision a), in priority-desc order (sub-decision b) — one note per layer,
@@ -654,13 +654,13 @@ func TestNoteSearchOmittedLayerSearchesAllFourTagged(t *testing.T) {
 	writeLayerNote("clone", 2)
 	writeLayerNote("repo", 1)
 
-	resp := callToolWithKey(t, s, id, key, "note.search", map[string]any{
+	resp := callToolWithKey(t, s, id, key, "note.query", map[string]any{
 		"glob":   "omit.all.*",
 		"format": "json",
 	})
 	var records []taggedNoteRecordJSON
 	if err := json.Unmarshal([]byte(resp), &records); err != nil {
-		t.Fatalf("unmarshal note.search json response: %v\nresp=%s", err, resp)
+		t.Fatalf("unmarshal note.query json response: %v\nresp=%s", err, resp)
 	}
 	wantOrder := []struct {
 		key   string
@@ -672,11 +672,11 @@ func TestNoteSearchOmittedLayerSearchesAllFourTagged(t *testing.T) {
 		{"omit.all.repo", wsnote.LayerRepo},
 	}
 	if len(records) != len(wantOrder) {
-		t.Fatalf("note.search(no layer) = %d records, want %d: %s", len(records), len(wantOrder), resp)
+		t.Fatalf("note.query(no layer) = %d records, want %d: %s", len(records), len(wantOrder), resp)
 	}
 	for i, want := range wantOrder {
 		if records[i].Key != want.key || records[i].Layer != want.layer {
-			t.Fatalf("note.search(no layer)[%d] = {key:%q layer:%q}, want {key:%q layer:%q}; full: %s",
+			t.Fatalf("note.query(no layer)[%d] = {key:%q layer:%q}, want {key:%q layer:%q}; full: %s",
 				i, records[i].Key, records[i].Layer, want.key, want.layer, resp)
 		}
 	}
@@ -698,27 +698,27 @@ func TestNoteSearchArrayLayerScopesToThoseLayers(t *testing.T) {
 		id++
 	}
 
-	resp := callToolWithKey(t, s, id, key, "note.search", map[string]any{
+	resp := callToolWithKey(t, s, id, key, "note.query", map[string]any{
 		"layer":  []any{"clone", "repo"},
 		"glob":   "array.scope.*",
 		"format": "json",
 	})
 	var records []taggedNoteRecordJSON
 	if err := json.Unmarshal([]byte(resp), &records); err != nil {
-		t.Fatalf("unmarshal note.search json response: %v\nresp=%s", err, resp)
+		t.Fatalf("unmarshal note.query json response: %v\nresp=%s", err, resp)
 	}
 	if len(records) != 2 {
-		t.Fatalf("note.search(layer:[clone,repo]) = %d records, want 2: %s", len(records), resp)
+		t.Fatalf("note.query(layer:[clone,repo]) = %d records, want 2: %s", len(records), resp)
 	}
 	gotLayers := map[wsnote.Layer]bool{}
 	for _, rec := range records {
 		gotLayers[rec.Layer] = true
 	}
 	if !gotLayers[wsnote.LayerClone] || !gotLayers[wsnote.LayerRepo] {
-		t.Fatalf("note.search(layer:[clone,repo]) layers = %v, want exactly {clone, repo}: %s", gotLayers, resp)
+		t.Fatalf("note.query(layer:[clone,repo]) layers = %v, want exactly {clone, repo}: %s", gotLayers, resp)
 	}
 	if gotLayers[wsnote.LayerMachine] || gotLayers[wsnote.LayerWorktree] {
-		t.Fatalf("note.search(layer:[clone,repo]) leaked an unscoped layer: %v: %s", gotLayers, resp)
+		t.Fatalf("note.query(layer:[clone,repo]) leaked an unscoped layer: %v: %s", gotLayers, resp)
 	}
 }
 
@@ -737,24 +737,24 @@ func TestNoteSearchSingleStringLayerStaysUntagged(t *testing.T) {
 		"notes": []any{map[string]any{"key": "single.untagged", "value": "v", "priority": 1}},
 	})
 
-	resp := callToolWithKey(t, s, 3, key, "note.search", map[string]any{
+	resp := callToolWithKey(t, s, 3, key, "note.query", map[string]any{
 		"layer":  "clone",
 		"glob":   "single.untagged",
 		"format": "json",
 	})
 	if strings.Contains(resp, `"layer"`) {
-		t.Fatalf("note.search(layer:\"clone\") response contains a \"layer\" key, want the untagged plain-Record shape: %s", resp)
+		t.Fatalf("note.query(layer:\"clone\") response contains a \"layer\" key, want the untagged plain-Record shape: %s", resp)
 	}
 	var records []wsnote.Record
 	if err := json.Unmarshal([]byte(resp), &records); err != nil {
-		t.Fatalf("unmarshal note.search json response as plain []wsnote.Record: %v\nresp=%s", err, resp)
+		t.Fatalf("unmarshal note.query json response as plain []wsnote.Record: %v\nresp=%s", err, resp)
 	}
 	if len(records) != 1 || records[0].Key != "single.untagged" {
-		t.Fatalf("note.search(layer:\"clone\") = %#v, want exactly the written record", records)
+		t.Fatalf("note.query(layer:\"clone\") = %#v, want exactly the written record", records)
 	}
 }
 
-// TestNoteSearchMultiLayerIncludesMutedNotes verifies note.search's
+// TestNoteSearchMultiLayerIncludesMutedNotes verifies note.query's
 // no-visible-filtering contract (unchanged by this phase) extends to the
 // multi-layer/array path: a muted note still surfaces via an array "layer"
 // search, mirroring the single-layer mute-search precedent
@@ -773,20 +773,20 @@ func TestNoteSearchMultiLayerIncludesMutedNotes(t *testing.T) {
 		"keys":  []any{"muted.multilayer"},
 	})
 
-	resp := callToolWithKey(t, s, 4, key, "note.search", map[string]any{
+	resp := callToolWithKey(t, s, 4, key, "note.query", map[string]any{
 		"layer":  []any{"clone", "repo"},
 		"glob":   "muted.multilayer",
 		"format": "json",
 	})
 	var records []taggedNoteRecordJSON
 	if err := json.Unmarshal([]byte(resp), &records); err != nil {
-		t.Fatalf("unmarshal note.search json response: %v\nresp=%s", err, resp)
+		t.Fatalf("unmarshal note.query json response: %v\nresp=%s", err, resp)
 	}
 	if len(records) != 1 || records[0].Key != "muted.multilayer" {
-		t.Fatalf("note.search(layer:[clone,repo]) did not return the muted note: %s", resp)
+		t.Fatalf("note.query(layer:[clone,repo]) did not return the muted note: %s", resp)
 	}
 	if records[0].Visible {
-		t.Fatalf("note.search(layer:[clone,repo]) returned the note with Visible=true, want the stored muted (false) state preserved: %s", resp)
+		t.Fatalf("note.query(layer:[clone,repo]) returned the note with Visible=true, want the stored muted (false) state preserved: %s", resp)
 	}
 }
 
@@ -810,7 +810,7 @@ func TestNoteSearchArrayVsSingleLayerOrderParity(t *testing.T) {
 		"notes": notes,
 	})
 
-	singleResp := callToolWithKey(t, s, 3, key, "note.search", map[string]any{
+	singleResp := callToolWithKey(t, s, 3, key, "note.query", map[string]any{
 		"layer":  "clone",
 		"glob":   "parity.*",
 		"format": "json",
@@ -820,7 +820,7 @@ func TestNoteSearchArrayVsSingleLayerOrderParity(t *testing.T) {
 		t.Fatalf("unmarshal single-layer response: %v\nresp=%s", err, singleResp)
 	}
 
-	arrayResp := callToolWithKey(t, s, 4, key, "note.search", map[string]any{
+	arrayResp := callToolWithKey(t, s, 4, key, "note.query", map[string]any{
 		"layer":  []any{"clone"},
 		"glob":   "parity.*",
 		"format": "json",
@@ -851,11 +851,11 @@ func TestNoteSearchRejectsEmptyLayerArray(t *testing.T) {
 	s := NewServer(t.TempDir(), "test")
 	_, key := mintRootKey(t, s, 1)
 
-	resp := callToolWithKey(t, s, 2, key, "note.search", map[string]any{
+	resp := callToolWithKey(t, s, 2, key, "note.query", map[string]any{
 		"layer": []any{},
 	})
 	if !strings.Contains(resp, "non-empty") {
-		t.Fatalf("note.search(layer:[]) = %s, want a non-empty-array error", resp)
+		t.Fatalf("note.query(layer:[]) = %s, want a non-empty-array error", resp)
 	}
 }
 
@@ -898,7 +898,7 @@ func TestNoteWriteSubThresholdDoesNotAppendOversizeChallenge(t *testing.T) {
 		t.Fatalf("note.write(sub-threshold) unexpectedly appended the oversize challenge: %s", resp)
 	}
 
-	searchResp := callToolWithKey(t, s, 3, key, "note.search", map[string]any{
+	searchResp := callToolWithKey(t, s, 3, key, "note.query", map[string]any{
 		"layer": "worktree",
 		"glob":  "small.note",
 	})
@@ -933,7 +933,7 @@ func TestNoteWriteOversizeAppendsChallengeExactlyOnce(t *testing.T) {
 		t.Fatalf("note.write(oversize) challenge missing the not-mute remediation phrasing: %s", resp)
 	}
 
-	searchResp := callToolWithKey(t, s, 3, key, "note.search", map[string]any{
+	searchResp := callToolWithKey(t, s, 3, key, "note.query", map[string]any{
 		"layer": "worktree",
 		"glob":  "big.note",
 	})

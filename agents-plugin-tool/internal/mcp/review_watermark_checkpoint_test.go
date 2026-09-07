@@ -148,24 +148,24 @@ func TestServeStdioEnterImplementNewSchemaReviewWatermarkNudgeSurfacesAndQuiets(
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
 
-	staleText := callToolWithKey(t, server, 2, key, "enter.implement", implementReadyArgs("text"))
+	staleText := callToolWithKey(t, server, 2, key, "route.resolve_implement", implementReadyArgs("text"))
 	if !strings.Contains(staleText, "review-watermark:") {
-		t.Fatalf("enter.implement (new schema) should carry the review-watermark nudge for a stale range: %s", staleText)
+		t.Fatalf("route.resolve_implement (new schema) should carry the review-watermark nudge for a stale range: %s", staleText)
 	}
 
 	runGit(t, root, "checkout", "main")
 	reviewNudgeRestamp(t, root)
 	runGit(t, root, "checkout", "feature/base")
 
-	freshText := callToolWithKey(t, server, 3, key, "enter.implement", implementReadyArgs("text"))
+	freshText := callToolWithKey(t, server, 3, key, "route.resolve_implement", implementReadyArgs("text"))
 	if strings.Contains(freshText, "review-watermark:") {
-		t.Fatalf("enter.implement (new schema) should stay silent right after the ledger was restamped: %s", freshText)
+		t.Fatalf("route.resolve_implement (new schema) should stay silent right after the ledger was restamped: %s", freshText)
 	}
 }
 
 // TestServeStdioEnterImplementLegacyReviewWatermarkNudgeSurfacesAndQuiets
 // covers the third call site's legacy branch (handleEnter, sole caller is
-// enter.implement without a "target" argument).
+// route.resolve_implement without a "target" argument).
 func TestServeStdioEnterImplementLegacyReviewWatermarkNudgeSurfacesAndQuiets(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -177,20 +177,20 @@ func TestServeStdioEnterImplementLegacyReviewWatermarkNudgeSurfacesAndQuiets(t *
 
 	reviewNudgeSeedStaleMarker(t, root, wsreview.SizeThresholdCommits+2)
 
-	staleResp := callToolWithKey(t, server, 2, key, "enter.implement", map[string]any{
+	staleResp := callToolWithKey(t, server, 2, key, "route.resolve_implement", map[string]any{
 		"delegation": "delegated", "need_review": true, "need_doc": false,
 	})
 	if !strings.Contains(staleResp, "review-watermark:") {
-		t.Fatalf("legacy enter.implement should carry the review-watermark nudge for a stale range: %s", staleResp)
+		t.Fatalf("legacy route.resolve_implement should carry the review-watermark nudge for a stale range: %s", staleResp)
 	}
 
 	reviewNudgeRestamp(t, root)
 
-	freshResp := callToolWithKey(t, server, 3, key, "enter.implement", map[string]any{
+	freshResp := callToolWithKey(t, server, 3, key, "route.resolve_implement", map[string]any{
 		"delegation": "delegated", "need_review": true, "need_doc": false,
 	})
 	if strings.Contains(freshResp, "review-watermark:") {
-		t.Fatalf("legacy enter.implement should stay silent right after the ledger was restamped: %s", freshResp)
+		t.Fatalf("legacy route.resolve_implement should stay silent right after the ledger was restamped: %s", freshResp)
 	}
 }
 
@@ -207,16 +207,16 @@ func TestServeStdioEnterProceedReviewWatermarkNudgeSurfacesAndQuiets(t *testing.
 
 	reviewNudgeSeedStaleMarker(t, root, wsreview.SizeThresholdCommits+2)
 
-	staleText := callToolWithKey(t, server, 2, key, "enter.proceed", proceedReadyArgs("text"))
+	staleText := callToolWithKey(t, server, 2, key, "route.resolve_proceed", proceedReadyArgs("text"))
 	if !strings.Contains(staleText, "review-watermark:") {
-		t.Fatalf("enter.proceed should carry the review-watermark nudge for a stale range: %s", staleText)
+		t.Fatalf("route.resolve_proceed should carry the review-watermark nudge for a stale range: %s", staleText)
 	}
 
 	reviewNudgeRestamp(t, root)
 
-	freshText := callToolWithKey(t, server, 3, key, "enter.proceed", proceedReadyArgs("text"))
+	freshText := callToolWithKey(t, server, 3, key, "route.resolve_proceed", proceedReadyArgs("text"))
 	if strings.Contains(freshText, "review-watermark:") {
-		t.Fatalf("enter.proceed should stay silent right after the ledger was restamped: %s", freshText)
+		t.Fatalf("route.resolve_proceed should stay silent right after the ledger was restamped: %s", freshText)
 	}
 }
 

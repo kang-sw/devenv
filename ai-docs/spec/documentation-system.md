@@ -130,10 +130,10 @@ committing. Planned-but-unbuilt behavior stays in the owning ticket's
 `> [!note] Implementation Gap · YYYY-MM-DD` callout.
 
 `ws/spec_stem.generate` creates collision-free anchor stems. `ws/spec_index.verify`
-checks the spec corpus for duplicate anchors. `ws/specs.list`,
-`ws/specs.find`, and `ws/specs.status` provide read-only spec discovery by
-metadata, anchors, ticket references, query matches, and exact
-stem.
+checks the spec corpus for duplicate anchors. `ws/specs.query` provides
+read-only spec discovery by metadata, anchors, ticket references, query matches,
+and exact stem — enumerate (no args), point-resolve (`spec_stem`), and search
+call shapes in one tool.
 
 ## Ticket Document System {#260505-ticket-document-system}
 
@@ -143,7 +143,7 @@ captures rough ideas before triage, `todo/` holds accepted backlog with
 recoverable ticket intent, and `ready/` holds spec-addressed implementation
 work.
 Completed or dropped work moves to `.done/` or `.dropped/`. Active attention is
-discovered from the status directories via `tickets.list`/`project_tree`, not a
+discovered from the status directories via `tickets.query`/`project_tree`, not a
 cached index section; only `ready/` entries are direct implementation targets.
 
 Ticket stems are stable and are referenced by stem rather than path. Actionable
@@ -181,10 +181,10 @@ coordination artifacts exempt from ready spec gating and normally stay in
 `idea/` or `todo/`, not `ready/`.
 {#260524-workset-ticket-conventions}
 
-`ws/tickets.list`, `ws/tickets.find`, and `ws/tickets.status` provide structured
-ticket discovery across active and archived statuses, including phase/result
-state, snippets, relationships, spec links, plans, skeletons, and status
-metadata.
+`ws/tickets.query` provides structured ticket discovery across active and
+archived statuses — enumerate (no args), point-resolve (`ticket_stem`), and
+search call shapes in one tool — including phase/result state, snippets,
+relationships, spec links, plans, skeletons, and status metadata.
 
 ## Mental-Model Document System {#260505-mental-model-document-system}
 
@@ -205,7 +205,7 @@ user-authored prescriptions scoped to that domain. When a sub-domain document is
 loaded, ancestor index documents are loaded first so inherited domain rules are
 visible before work begins.
 
-`ws/mental_models.list`, `ws/mental_models.find`, and
+`ws/mental_models.list`, `ws/mental_models.query`, and
 `ws/mental_models.status` expose domain, path, description, sources, spec
 references, snippets, and hierarchy hints without requiring callers to scan the
 tree manually.

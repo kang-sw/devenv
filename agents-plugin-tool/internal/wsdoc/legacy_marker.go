@@ -174,7 +174,7 @@ func yamlFrontmatterEnd(lines []string) int {
 
 // legacyMarkerLines returns the legacy planned markers in a spec document body.
 // It deliberately does not call markerContext: that helper's looseness
-// (`planned`/`wip` substrings anywhere in a line) still serves specs.find match
+// (`planned`/`wip` substrings anywhere in a line) still serves specs.query match
 // scoring and must stay byte-identical, while this predicate must not inherit
 // it.
 func legacyMarkerLines(text string) []legacyMarker {

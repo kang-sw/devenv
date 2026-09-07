@@ -6,8 +6,8 @@ description: Use when commits have landed without a documentation pass and spec 
 # Backfill Docs
 
 Call in parallel:
-- `wsflow/playbook.print(name: "lead-backfill-docs", session_key: <your key, omit if fresh>)`
+- `wsflow/playbook.read(name: "lead-backfill-docs", session_key: <your key, omit if fresh>)`
 - `wsflow/workflow_manual(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>)`
 
-After both return, execute the procedure returned by `wsflow/playbook.print`.
+After both return, execute the procedure returned by `wsflow/playbook.read`.
 If this call fails to connect, run `/wsflow:mcp-server-repair`.

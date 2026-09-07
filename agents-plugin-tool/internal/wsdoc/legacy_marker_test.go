@@ -264,7 +264,7 @@ func removeLegacyMarkerOwnerTicket(t *testing.T, root string) {
 }
 
 // assertLegacyMarkerSurfaces checks all four advisory surfaces at once so a
-// render point cannot regress in isolation. specs.find is exercised through its
+// render point cannot regress in isolation. specs.query is exercised through its
 // query path, which is a different formatter from the no-query fallback.
 func assertLegacyMarkerSurfaces(t *testing.T, root string, wantContains []string, wantAbsent []string) {
 	t.Helper()

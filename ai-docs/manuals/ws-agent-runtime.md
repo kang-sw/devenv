@@ -300,7 +300,7 @@ MCP tools use server `ws` and the following tool names:
 - `path.generate` — allocate writable workflow artifact paths. Implemented for
   cache artifacts `kind: "review"` and `kind: "prompt"`, plus repo-local plan
   artifacts `kind: "plan"` under `ai-docs/.plans/YYYY-MM/DD-hhmm-<stem>.md`.
-- `runtime.info` — return runtime metadata. Implemented.
+- `runtime.read` — return runtime metadata. Implemented.
 - `api.list` — list existing API documentation cache domains. Implemented.
 - `api.ask` — retired with the agent-backed API documentation manager surface.
 
@@ -342,7 +342,7 @@ tools with `ws/agents.register`, `ws/agents.call`, `ws/agents.wait`,
 `ws/agents.result`, `ws/agents.status`, `ws/agents.interrupt`,
 `ws/agents.tail`, `ws/agents.cancel`, `ws/agents.print`, `ws/agents.erase`,
 `ws/config.list`, `ws/config.tune`,
-`ws/path.generate`, `ws/api.list`, and `ws/runtime.info`.
+`ws/path.generate`, `ws/api.list`, and `ws/runtime.read`.
 
 `agents.call` acquires a short-lived `current/setup.lock`, writes the prompt
 snapshot to `current/prompt.md`, starts an internal `agents run-current` worker
@@ -439,7 +439,7 @@ was supplied.
 
 Registration writes the materialized prompt to `system.md` in the agent
 directory and stores the requested prompt chain in `agent.json` as `prompt_refs`
-for compatibility with the current registry schema. `runtime.info` reports the
+for compatibility with the current registry schema. `runtime.read` reports the
 prompt bundle source commit, content SHA-256, and embedded prompt stem list so a
 plugin launcher can detect runtime drift against `agents-plugin/runtime.json`.
 
