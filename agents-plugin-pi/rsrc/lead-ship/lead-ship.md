@@ -10,7 +10,7 @@ Target: user request
 
 - Never infer a version number without an explicit strategy in the ship config - ask if ambiguous.
 - Never publish or push tags without user confirmation at the final gate.
-- The ship config is the single source of truth; do not improvise steps not listed there.
+- The ship config is the single source of truth; do not improvise steps not listed there — except the **Release gate** below, which is un-omittable regardless of what the loaded config does or does not mention (it is still user-overridable at the gate itself, per its own stop-for-decision step).
 - All written artifacts (ship config, version files) must be in English regardless of conversation language.
 
 ## On: invoke
@@ -28,7 +28,23 @@ Config naming:
    - Multiple configs found -> list them (noting which are local) and ask the user which project to ship.
    - No configs found -> go to **On: no config**.
 
-### 2. Execute
+### 2. Release gate
+
+Un-omittable, user-overridable. Applies only when the loaded project's `AGENTS.md` `### Review Policy` section declares `release-boundary: present`, read as plain prose the same way this skill and `ws.md`-style configs already read project config text — no MCP tool resolves this field. `release-boundary: absent` (or the field unset) skips this section entirely; that project's ship path is unchanged. Run this before **3. Execute** step 1 (Pre-flight), not as one of its bullets — a Pre-flight bullet is defeatable by a config that simply omits it, which is exactly what this gate must not be.
+
+1. Call `{{.McpNamespace}}/review.marker(format: json)` to resolve the review-watermark frontier — read its structured `found` field first, never infer emptiness from the rev-list count below (an empty `head` substituted into `git rev-list --count <frontier-head>..HEAD` resolves the empty side to `HEAD` and silently reports `0`, which would wrongly read as clear).
+2. `found: false` (no ledger entry at all — the common first-ship state on a project that was never bootstrapped) — treat all prior history as review-skipped: **not clear**. **Stop for an explicit user decision** offering exactly these two choices, which do not compose:
+   - **(i) Bootstrap** — call `review.marker(bootstrap: true)` to seed `<HEAD>..<HEAD>` as an explicit accept of all prior history as unreviewed (equivalent to an override, not a review; nothing gets reviewed). This is itself the explicit accept, so it proceeds straight to **3. Execute**.
+   - **(ii) Review** — ask for an explicit base (repo root or a named commit; the empty ledger supplies none), then trigger `{{.SkillNamespace}}:lead-review` over `range: <chosen-base>..HEAD`, which stamps and advances the marker. This is a real review, not an accept-as-is, so its outcome is not automatically clear: apply the same clears/not-clear handling as step 5 below — clears -> proceed to **3. Execute**; still not clear -> surface a strong recommendation and **stop for an explicit user decision** (step 6's override applies here too).
+   Declining either choice stops here without shipping.
+3. `found: true` — run `git rev-list --count <frontier-head>..HEAD`.
+4. Empty (`0`) — proceed to **3. Execute**.
+5. Non-empty — trigger `{{.SkillNamespace}}:lead-review` over `range: <frontier-head>..HEAD`.
+   - Clears (the range now reviews clean) — proceed to **3. Execute**.
+   - Still not clear — surface a strong recommendation against proceeding and **stop for an explicit user decision**.
+6. On an explicit user override (from step 2(ii)'s or step 5's stop): proceed to **3. Execute** anyway. This gate never calls `review.stamp` itself — the marker only ever advances through `{{.SkillNamespace}}:lead-review`'s own step 7 (single-writer invariant), whether that happens via step 2(ii)'s explicit review or step 5's triggered review; an override leaves the marker exactly where the gate found it. No audit record of the override is required or written by this mechanism.
+
+### 3. Execute
 
 Follow the loaded config exactly, section by section:
 
@@ -37,7 +53,7 @@ Follow the loaded config exactly, section by section:
 3. **Tag** - create the git tag per the config. Do not push yet.
 4. **Build / package** - run listed build or package commands.
 5. **Confirm** - show the user: version string, tag, and publish targets. **Wait for explicit approval before proceeding.**
-6. **Publish** - run listed publish commands (e.g. `cargo publish`, `npm publish`, `docker push`).
+6. **Publish** - run listed publish commands (e.g. `cargo publish`, `npm publish`, `docker push`). When a publish step promotes one branch into another (e.g. `develop` -> `main`), pin the release-gate's reviewed through-SHA and re-assert it immediately before the merge, aborting and re-running the gate over the delta if the branch moved since — the project's own config supplies the concrete git incantation.
 7. **Push tag** - `git push origin <tag>`.
 8. **Post-ship** - run any listed post-ship steps.
 

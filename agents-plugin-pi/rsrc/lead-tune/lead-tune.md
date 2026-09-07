@@ -16,6 +16,7 @@ Scope
 Surface
 - Treat `config.list` as the source of supported knob ids, the `config.tune` write contract, field options, and current values.
 - Treat prompt override-point ids as valid only when they appear as `prompt.<pointId>` knobs in `config.list`.
+- Before proposing a `harness` value for any knob, confirm it against that knob's `config.list`-reported selector enum; do not assume `codex`/`claude` are the only accepted names.
 - State that any tuning request that does not map to one of this playbook's handlers is not yet supported.
 
 Storage

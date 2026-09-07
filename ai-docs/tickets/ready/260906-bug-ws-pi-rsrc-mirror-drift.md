@@ -100,3 +100,30 @@ copy fails naming the file; an extra file under the Pi tree fails.
 Verification: `diff -rq` between the two `rsrc/` trees is empty after the
 copy; `npm test` in `agents-plugin-pi/` passes. Live check (owner-run): a
 new Pi session's `lead-review` playbook shows the range scenario.
+
+### Result
+
+Landed on `track/pi-agent` (2026-09-07). Resynced `agents-plugin-pi/rsrc/`
+verbatim from `agents-plugin/rsrc/`. Because this ran right after the
+`develop` -> `track` merge (`faa9f45a`), the source `rsrc/` had already moved
+to develop's 0.45.2 verb-unified vocabulary, so the drift had widened from the
+nine playbooks classified 2026-09-06 to twenty-two files; the fix is the same
+verbatim copy (`cp -r agents-plugin/rsrc/. agents-plugin-pi/rsrc/`), file set
+unchanged (`diff -rq` reports no `Only in` on either side). `manifest.json`
+came along verbatim (its hashes match the copied files). `bin/ws-mcp-launcher.py`
+was already byte-identical and is now guarded.
+
+Widened `test/version-check.test.ts` with a pure two-root `compareTrees`
+comparator (walks the source tree, flags missing / differing / extra files,
+returns sorted messages): the positive case asserts `compareTrees` over the
+committed `rsrc/` trees is empty and the launcher is byte-identical; the
+negative cases (a drifted file, an extra file, a missing file) run against
+`mkdtemp` fixtures. Amended the `{#260903-pi-adapter-package-topology}` spec
+passage: "no automated sync tooling" is now "no automated sync, but automated
+drift detection", naming the guard.
+
+Verification done: `diff -rq agents-plugin/rsrc agents-plugin-pi/rsrc` empty;
+`npm test` = 951 pass / 0 fail (was 947; +4 guard tests). Owner-run live check
+still outstanding: a new Pi session's `lead-review` playbook shows the range
+scenario. The residual-exposure note holds — the guard fires on suite runs,
+not on the upstream edit, so it is run when syncing from `develop`.
