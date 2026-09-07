@@ -48,31 +48,23 @@
  * `explore` (260906) is now two different implementations behind one tool
  * name, keyed on the calling process's own role (`registerAgentTools`
  * branches on `isLeadOrFork(readSpawnRole(process.env))`):
- * - Lead or fork: a thin preset over `spawnAgent` below — a regular,
- *   `oneShot: true` `RpcAgentRecord`, a full registry member counted by the
- *   fan-in gate while it runs. It returns `{ agent_id, alias }` immediately;
- *   its answer arrives later as an ordinary settle push. Being `oneShot`
- *   only changes what happens next: the settle IIFE in
- *   `attachEventListener` (or `pushSpawnFailed`, on a launch failure)
- *   deletes it from the registry right after its own push, instead of
- *   parking it dormant, and `ws-agent-send` refuses it outright.
- * - Worker or execute-worker: the original one-shot
- *   `pi --mode json -p --no-session --tools=recon` recon leaf from Phases
- *   2-3 (`spawnPiProcess`/`AgentEventLineBuffer`/`handleAgentEvent`/
- *   `waitForDone` below), unchanged, self-reaping, and never a member of the
- *   RPC-backed registry at all — it lives in its own separate one-shot
- *   `AgentRegistry`.
+ * - Lead or fork: a persistent researcher over `spawnAgent`. It returns
+ *   `{ agent_id, alias }` immediately; each settled answer arrives as an
+ *   ordinary settle push, then the record parks and remains sendable and
+ *   sidecar-restorable. Simple researchers use authenticated `small` with
+ *   `read-only`; deep researchers freeze the caller's model/effort and use
+ *   `read-only-explore`.
+ * - Worker or execute-worker: the original one-shot `recon` leaf remains
+ *   blocking and self-reaping. A deep researcher may instead invoke the
+ *   terminal, no-bash `read-only` collection leaf. Neither leaf enters the
+ *   persistent RPC registry.
  *
- * Either shape is non-recursive (depth <= 2: lead -> worker -> explore-leaf,
- * or lead/fork -> explore child; explore cannot spawn explore, since none of
- * the `ws-agent-*` tools are in `TOOL_GROUPS`). Only the leaf's implicit
- * model resolution switches from the old tier lookup to the reframed alias
- * lookup (still keyed on the fixed name `"small"`); the lead/fork preset
- * resolves through the ordinary `spawnAgent` path instead.
+ * The tree is non-recursive: lead/fork -> persistent researcher -> optional
+ * deep collection, or lead/fork -> worker -> recon leaf. Only the leaf's
+ * implicit small-tier lookup is performed before its rendering/allocation.
  *
- * `--tools` per-spawn group curation (`read-only`/`recon`/`full-worker`) is
- * retained unchanged — zero on-disk agent-profile files, curation lives in
- * the in-memory `TOOL_GROUPS` table below plus `pi` CLI flags.
+ * `--tools` curation (`read-only`/`read-only-explore`/`recon`/`full-worker`)
+ * lives only in the in-memory `TOOL_GROUPS` table and Pi CLI flags.
  *
  * Phase 2 adds the per-agent child->lead report channel: `ws-report-to-lead`
  * (child-side, `full-worker`-only) is observed purely from the existing
@@ -1058,11 +1050,10 @@ export type AgentStatus = "running" | "idle" | "dormant";
  * `execute-worker` (approval-gated) from a plain worker so the shutdown
  * sidecar can re-arm the right wiring on revival.
  *
- * 260906: `"explore"` is the fourth shape — a lead/fork's `explore` tool call
- * is itself an RPC-backed spawn (a one-shot preset, `RpcAgentRecord.oneShot`)
- * rather than the worker/execute-worker leaf's separate one-shot
- * `AgentRegistry`. The shutdown sidecar excludes `oneShot` records outright
- * (`agent-sidecar.ts`), so this role never needs its own revival wiring.
+ * `"explore"` is the fourth shape: a lead/fork researcher is a persistent
+ * RPC record with a simple/deep mode. Its terminal collection leaf remains in
+ * the separate self-reaping `AgentRegistry`; the persistent record is
+ * sidecar-restored without worker/fork-specific wiring.
  */
 export type SpawnAgentRole = "worker" | "execute-worker" | "fork" | "explore";
 
@@ -1661,11 +1652,9 @@ export function startLivenessProbe(
  * The `spawn-failed` half of `spawnAgent`'s launch-failure handling: put the
  * half-registered record into its resting state and tell the owning session
  * once, so the fan-in count is not left waiting on a child that never started.
- * A non-`oneShot` record is left parked (dormant) there, same as always; a
- * `oneShot` record (260906) is instead deleted from the registry right after
- * this push, since it has no dormant-resumable resting state to park in and
- * would otherwise sit as a permanent zombie no other call site can reach.
- * The caller re-throws the original error unchanged afterwards.
+ * Every persistent record, including a researcher, remains parked/dormant for
+ * ordinary resume and sidecar retention. The caller re-throws the original
+ * error unchanged afterwards.
  *
  * Extracted (review relay #1, test partition C2) so this branch has offline
  * coverage — `spawnAgent` itself constructs a real `RpcClient` and is
@@ -2193,6 +2182,38 @@ async function applyModelEffort(client: RpcClient, modelEffort: string | undefin
 }
 
 /**
+ * Pi acknowledges setThinkingLevel even when it clamps to a model-supported
+ * level. Researchers therefore read the actual RPC state before their first
+ * prompt and on every resume. Simple records adopt the first actual default or
+ * clamp; deep records must exactly retain the lead's captured selection.
+ */
+async function verifyResearchSelection(client: RpcClient, record: RpcAgentRecord, initial: boolean): Promise<void> {
+  if (!record.exploreMode || !record.modelBase) {
+    throw new Error("ws-pi-agent: research record has no frozen model selection");
+  }
+  await applyModelEffort(client, record.modelEffort, true);
+  const state = await client.getState();
+  const model = state.model;
+  const actualModel = model?.provider && model.id ? `${model.provider}/${model.id}` : undefined;
+  const actualEffort = state.thinkingLevel;
+  if (actualModel !== record.modelBase) {
+    throw new Error(`ws-pi-agent: research model mismatch: expected ${record.modelBase}, got ${actualModel ?? "none"}`);
+  }
+  if (typeof actualEffort !== "string" || !actualEffort) {
+    throw new Error("ws-pi-agent: research thinking level is unavailable");
+  }
+  if (record.exploreMode === "simple" && initial) {
+    // The small tier may leave effort unset, and Pi may clamp a requested
+    // effort. Persist what the child actually accepted for all later resumes.
+    record.modelEffort = actualEffort;
+    return;
+  }
+  if (record.modelEffort !== actualEffort) {
+    throw new Error(`ws-pi-agent: research thinking mismatch: expected ${record.modelEffort ?? "default"}, got ${actualEffort}`);
+  }
+}
+
+/**
  * 260905 (alias/park/cap ticket): the alias half of `spawnAgent`'s guard
  * clauses, run before any side effect (`mkdtempSync`/`randomUUID`). No-op
  * (`{ ok: true }`) when `alias` is unset. Otherwise scans for the current
@@ -2388,7 +2409,7 @@ export async function spawnAgent(
     // is treated as absent). This is the single fold point: both the
     // spawn-time and dormant-resume `applyModelEffort` calls read
     // `record.modelEffort` back rather than re-deriving it from `params`.
-    modelEffort: effectiveModelEffort(params.modelEffort, resolvedEffort) ?? (ctx.exploreMode ? "off" : undefined),
+    modelEffort: effectiveModelEffort(params.modelEffort, resolvedEffort),
     wsToolNames: ctx.wsToolNames,
     toolGroup,
     explicitTools: ctx.explicitTools,
@@ -2440,7 +2461,11 @@ export async function spawnAgent(
     // spawned/resumed child should receive (see effectiveModelEffort above
     // and the dormant-resume call site in sendToAgent, which reads the same
     // field).
-    await applyModelEffort(client, record.modelEffort, record.spawnRole === "explore");
+    if (record.spawnRole === "explore") {
+      await verifyResearchSelection(client, record, true);
+    } else {
+      await applyModelEffort(client, record.modelEffort);
+    }
     attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     await promptAgent(record, client, params.prompt);
   } catch (err) {
@@ -2534,7 +2559,11 @@ export async function sendToAgent(
     record.client = client;
     try {
       await client.start();
-      await applyModelEffort(client, record.modelEffort, record.spawnRole === "explore");
+      if (record.spawnRole === "explore") {
+        await verifyResearchSelection(client, record, false);
+      } else {
+        await applyModelEffort(client, record.modelEffort);
+      }
       attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     } catch (err) {
       clearLiveState(record);
@@ -2782,17 +2811,12 @@ export interface AgentToolsHandle {
 /**
  * Registers the six RPC-backed delegation tools (`ws-agent-spawn`,
  * `ws-agent-send`, `ws-agent-list`, `ws-agent-stop`, `ws-agent-transcript`,
- * `ws-report-to-lead`) plus a role-keyed `explore` tool (260906): a lead or
- * fork process registers `explore` as a preset over `spawnAgent` — an
- * `oneShot: true` member of the SAME `rpcRegistry`, not a separate leaf —
- * while a worker or execute-worker process still registers the original
- * one-shot recon leaf against its own separate `exploreRegistry`
- * (self-reaping, awaited inline by `waitForDone`). The two registries are
- * kept separate rather than unified because their completion signals are
- * fundamentally different for the leaf shape (an `agent_settled` RPC event,
- * pushed to the lead, vs. a child process's `close` event); the lead/fork
- * preset's completion signal is the ordinary RPC push, so it needs no
- * separate registry of its own.
+ * `ws-report-to-lead`) plus a role-keyed `explore` tool. A lead or fork gets
+ * the persistent simple/deep researcher preset in the shared `rpcRegistry`;
+ * workers retain their blocking self-reaping recon leaf, while only a deep
+ * researcher gets the terminal no-bash collection leaf in `exploreRegistry`.
+ * The registries remain separate because persistent researchers settle over
+ * RPC and leaves complete on a child-process close event.
  *
  * Phase 2 adds a child->lead report channel: `ws-report-to-lead` is the only
  * child-side tool this ticket adds (registered here but reachable only from
@@ -3024,13 +3048,6 @@ export function registerAgentTools(
       // Non-silent: an explicit stop is a delegation outcome the lead should
       // see land in its transcript like every other settle reason.
       const result = await stopAgent(rpcRegistry, p.agent_id, pi);
-      // 260906: an owner-cancelled one-shot explore has no dormant/resumable
-      // resting state (unlike every other stopped record) — delete it here,
-      // in this tool's own body, right after `stopAgent` returns (same
-      // reason/layer as the settle IIFE's equivalent deletion in
-      // `attachEventListener`, D-C's "never delete in stopAgent itself"
-      // stays unchanged).
-      const resolvedId = resolveAgentId(rpcRegistry, p.agent_id) ?? p.agent_id;
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     },
   });
@@ -3133,7 +3150,7 @@ export function registerAgentTools(
         const result = await runExploreLeaf(
           bridge.client, exploreRegistry,
           { sessionKey: bridge.defaultSessionKeyRef.current ?? "", cwd: sessionCtx.cwd, model: resolved.model },
-          { query: p.query }, { profile: "read-only", effort: resolved.effort },
+          { query: p.query }, { profile: role === "explore" && exploreMode === "deep" ? "read-only" : "recon", effort: resolved.effort },
         );
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       },

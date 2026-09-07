@@ -109,11 +109,9 @@ export function sidecarPath(leadSessionFile: string): string {
  * restart. Dormant records are already resumable; carrying them through the
  * sidecar too costs nothing and keeps the roll-call complete.
  *
- * 260906 (lead explore as an async RPC child): a `oneShot` record is also
- * skipped — a one-shot explore has no dormant-resumable resting state to
- * revive (it is deleted at settle or on an owner-cancelled stop; see
- * `spawner.ts`'s `attachEventListener`/`ws-agent-stop`), so there is nothing
- * for a session restart to usefully re-register.
+ * Persistent simple/deep researchers are captured like every other
+ * non-thread-bound record. Terminal collection leaves remain in their separate
+ * self-reaping registry and are never sidecar records.
  */
 export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
   const orphans: PersistedOrphan[] = [];
@@ -189,10 +187,19 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
     if (typeof o.sessionPath !== "string" || !o.sessionPath) continue;
     if (typeof o.systemPromptPath !== "string") continue;
     const toolGroup = o.toolGroup;
+    const isKnownToolGroup = toolGroup === undefined || toolGroup === "read-only" || toolGroup === "read-only-explore" || toolGroup === "recon" || toolGroup === "full-worker" || toolGroup === "execute-worker";
+    const isKnownRole = o.spawnRole === undefined || o.spawnRole === "worker" || o.spawnRole === "execute-worker" || o.spawnRole === "fork" || o.spawnRole === "explore";
+    if (!isKnownToolGroup || !isKnownRole) continue;
+    const hasExploreMode = Object.prototype.hasOwnProperty.call(o, "exploreMode");
     const exploreMode = o.exploreMode === "simple" || o.exploreMode === "deep" ? o.exploreMode : undefined;
-    const isExplore = o.spawnRole === "explore" || exploreMode !== undefined;
-    // Research restoration must never use the old full-worker fallback.
-    if (isExplore && (!exploreMode || typeof o.modelBase !== "string" || !o.modelBase || typeof o.modelEffort !== "string" || !o.modelEffort || o.explicitTools !== undefined || (exploreMode === "simple" ? toolGroup !== "read-only" : toolGroup !== "read-only-explore"))) continue;
+    // Any research-shaped field makes the entire tuple strict. In particular,
+    // do not discard an invalid mode and accidentally revive it as a worker.
+    const hasResearchMetadata = o.spawnRole === "explore" || hasExploreMode || toolGroup === "read-only" || toolGroup === "read-only-explore";
+    if (hasResearchMetadata && (
+      o.spawnRole !== "explore" || !exploreMode || typeof o.modelBase !== "string" || !o.modelBase ||
+      typeof o.modelEffort !== "string" || !o.modelEffort || Object.prototype.hasOwnProperty.call(o, "explicitTools") ||
+      (exploreMode === "simple" ? toolGroup !== "read-only" : toolGroup !== "read-only-explore")
+    )) continue;
     out.push({
       agentId: o.agentId,
       alias: typeof o.alias === "string" ? o.alias : undefined,

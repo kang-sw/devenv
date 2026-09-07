@@ -6,7 +6,8 @@
  * Subsumes the older `WS_PI_AGENT_CHILD_ENV` marker (spawner.ts,
  * pre-260904): rather than a single boolean "is a child" flag, every spawned
  * child now carries a role value (`"worker"` for the RPC-backed
- * `ws-agent-spawn` path, `"explore"` for the one-shot recon leaf); the host
+ * `ws-agent-spawn` path, `"explore"` for a persistent researcher or terminal
+ * collection leaf); the host
  * lead process carries no marker at all (`readSpawnRole` returns `undefined`
  * there). `"fork"` is reserved by this phase for a not-yet-implemented
  * side-thread fork spawn (`260904-feat-ws-pi-side-thread-fork-question-surface`,

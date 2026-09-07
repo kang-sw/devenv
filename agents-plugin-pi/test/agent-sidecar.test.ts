@@ -107,6 +107,21 @@ describe("captureOrphans", () => {
     assert.deepEqual(captureOrphans(registry).map((o) => o.agentId).sort(), ["explore", "worker"]);
   });
 
+  test("round-trips simple/deep research selections through two sidecar cycles", () => {
+    const source: RpcAgentRegistry = new Map([
+      ["simple", record({ agentId: "simple", spawnRole: "explore", exploreMode: "simple", modelBase: "pi/small", modelEffort: "medium", toolGroup: "read-only" })],
+      ["deep", record({ agentId: "deep", spawnRole: "explore", exploreMode: "deep", modelBase: "pi/lead", modelEffort: "high", toolGroup: "read-only-explore" })],
+    ]);
+    const first = parseOrphans(serializeOrphans(captureOrphans(source)));
+    const revived = new Map<string, RpcAgentRecord>();
+    reviveOrphans(revived, first);
+    const second = parseOrphans(serializeOrphans(captureOrphans(revived)));
+    assert.deepEqual(second.map(({ agentId, spawnRole, exploreMode, toolGroup, modelBase, modelEffort }) => ({ agentId, spawnRole, exploreMode, toolGroup, modelBase, modelEffort })), [
+      { agentId: "simple", spawnRole: "explore", exploreMode: "simple", toolGroup: "read-only", modelBase: "pi/small", modelEffort: "medium" },
+      { agentId: "deep", spawnRole: "explore", exploreMode: "deep", toolGroup: "read-only-explore", modelBase: "pi/lead", modelEffort: "high" },
+    ]);
+  });
+
   test("records the state at shutdown and the last-report time (relay #2: the roll-call needs both)", () => {
     const registry: RpcAgentRegistry = new Map([
       ["busy", record({ agentId: "busy", client: {} as RpcClient, running: true, reportLog: [{ at: 1_000 }, { kind: "final", at: 2_000 }] })],
@@ -238,6 +253,20 @@ describe("serializeOrphans / parseOrphans", () => {
     assert.equal(parsed.alias, undefined);
     assert.equal(parsed.title, undefined);
     assert.equal(parsed.prompt, undefined);
+  });
+
+  test("rejects contradictory research metadata instead of reviving it with worker/fork wiring", () => {
+    const base = { agentId: "research", sessionPath: "/tmp/s.jsonl", systemPromptPath: "/tmp/p.md", wsToolNames: [], modelBase: "pi/model", modelEffort: "high" };
+    const invalid = [
+      { ...base, spawnRole: "worker", exploreMode: "deep", toolGroup: "read-only-explore" },
+      { ...base, spawnRole: "explore", exploreMode: "simple", toolGroup: "read-only-explore" },
+      { ...base, spawnRole: "explore", exploreMode: "bogus", toolGroup: "read-only" },
+      { ...base, spawnRole: "explore", exploreMode: "deep", toolGroup: "read-only-explore", explicitTools: "bash" },
+      { ...base, spawnRole: "fork", toolGroup: "read-only" },
+    ];
+    for (const orphan of invalid) {
+      assert.deepEqual(parseOrphans(JSON.stringify({ version: SIDECAR_VERSION, orphans: [orphan] })), [], JSON.stringify(orphan));
+    }
   });
 
   test("relay #2: an idle orphan with no reports round-trips with lastReportAt absent, not invented", () => {
