@@ -6,6 +6,8 @@ related:
   260906-bug-ws-pi-tier-slug-rejected-children-inherit-parent-model: coordinate shared tier resolver and blocking-leaf effort; this ticket owns stricter exploration failure behavior and deep-mode effort inheritance
 spec:
   - 260903-pi-explore-recon-leaf
+plans:
+  phase-1: 2026-09/07-1531-260907-feat-ws-pi-persistent-explore-deep-research
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 7e08cef8d289588b
@@ -90,3 +92,13 @@ Verification must cover:
 - Goal-loop and widget/fan-in behavior follows ordinary agents: a running research child counts, settled dormant records do not spin the goal loop, and retained records are inspectable as ordinary agents.
 - Existing worker/execute-worker blocking exploration remains blocking, read-only and self-reaping. Shared resolver changes do not accidentally change unrelated spawn callers' policies.
 - Run the adapter tests with realistic tool-surface/lifecycle fixtures, not only flag assertions. Owner-run dogfood: simple explore -> settle -> send follow-up; deep explore -> small blocking collection -> synthesis; stop/resume; restart and follow-up with recorded role/model/effort intact. No implementation completion claim substitutes mocked coverage for the live check.
+
+## Implementation checkpoint - 2026-09-07
+
+Implementation is committed on `impl/track/pi-agent/suave-kooky-halt`: initial implementation `048a9cb2`, review corrections `6998a5b0`, against plan baseline `1083e01a`. The unrelated research-ticket commit `5a962f0a` is preserved and excluded from implementation review scope.
+
+Partitioned review found two Critical issues (effective model/effort verification and accidental worker recon permission removal), plus Important restoration/spec/test gaps. Relay 1 reports every Important fixed; the independent Critical-only second review resolved both Critical findings, with seven focused tests passing. Important dispositions are implementer self-reports, not independently re-reviewed. Detailed dispositions: `ai-docs/.plans/2026-09/07-1531-260907-feat-ws-pi-persistent-explore-deep-research.review-dispositions-cycle-1.md`.
+
+Relay verification reports 946/946 tests passing both normally and with inherited worker/deep environment markers, a no-model dynamic allowlist probe, and successful package dry-run including the new exploration guide. Initial 941-pass evidence was insufficient: review exposed environment-dependent failures and missing coverage, corrected in the relay. Spec index verification passed after the documentation audit.
+
+**Phase 1 remains unfinished pending the mandatory owner-run live provider/restart dogfood above.** Automated tests and the no-model probe do not clear this gate. No Result is recorded and the ticket remains ready until live evidence is recorded. Merge has not been authorized or performed. Spec and adapter guidance are updated; no shared rsrc or ws-mcp code was changed.
