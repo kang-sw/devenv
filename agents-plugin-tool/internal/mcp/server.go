@@ -1026,12 +1026,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		text, err := wsdoc.ProjectTree(root)
 		if err == nil {
-			// Appended here rather than threaded into ProjectTree: renderTickets
-			// walks the filesystem directly and project_tree has no JSON mode,
-			// so the annotation belongs to the tool case. Only the count is
-			// added — a hidden parent:/related: target still renders without its
-			// title suffix, which is a presentation nicety on a discovery
-			// surface.
+			// Appended here rather than threaded into ProjectTree: the
+			// parent-nested ticket tree is filesystem-only and project_tree has
+			// no JSON mode, so the sparse-checkout-hidden-ticket count stays an
+			// out-of-band annotation on the tool case rather than a tree node.
 			text += ticketScopeAnnotation(root, []string{"ready", "todo", "idea"})
 		}
 		return toolTextResponse(req.ID, text, err)

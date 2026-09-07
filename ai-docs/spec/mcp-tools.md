@@ -1183,12 +1183,16 @@ ignored by the repository's Git ignore rules so generated or vendored
 directories do not dominate the readable project context. The spec inventory
 also flags any spec file that still carries a legacy planned marker with the
 same advisory the spec discovery tools emit; the flag is advisory and never
-fails the call. The ticket inventory renders `ready/` and `todo/` tickets in
-full, plus any `idea/` ticket carrying a `parent:` key (epic children); it
-folds remaining orphan `idea/` tickets — those without `parent:`, regardless
-of `related:` — into a single hidden-count line so the raw idea backlog does
-not dominate the tree, and their full bodies remain reachable via
-`tickets.query(statuses: ["idea"])`.
+fails the call. The ticket inventory renders the whole `idea`/`todo`/`ready`
+backlog as a single parent-nested tree, each node labeled `status/stem` (e.g.
+`ready/feat-blah`) and nested under its `parent:` like a filesystem — no
+ticket is hidden or folded. `related:` edges are not rendered here; they stay
+reachable on demand via `tickets_query`. A `.done`/`.dropped` ticket appears
+only as a dead-parent anchor when it has a live (`idea`/`todo`/`ready`)
+descendant, transitively; a fully-dead subtree renders nothing. A `parent:`
+pointing at a stem with no ticket renders as a single shared placeholder root
+(`?/<stem>`) for every ticket naming it, and a `parent:` cycle degrades the
+cycle's nodes to flat roots instead of hanging or erroring.
 
 `infra.read` reads ws infra documents shipped in the rsrc tree by bare stem or
 filename (path-escaping names are rejected). The backing source is the rsrc

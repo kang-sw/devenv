@@ -30,7 +30,9 @@ func ProjectTree(root string) (string, error) {
 		b.WriteString("\n\n")
 	}
 	if isDir(filepath.Join(aiDocs, "tickets")) {
-		renderTickets(&b, filepath.Join(aiDocs, "tickets"))
+		if err := renderTickets(&b, root); err != nil {
+			return "", err
+		}
 	}
 	return strings.TrimRight(b.String(), "\n") + "\n", nil
 }
@@ -215,81 +217,176 @@ func specStats(fm map[string]any) int {
 	return len(features)
 }
 
-func renderTickets(b *strings.Builder, ticketsRoot string) {
+// renderTickets renders the whole ticket backlog as a single parent-nested
+// tree, each node labeled `status/stem` and nested under its `parent:` like a
+// filesystem. `related:` edges are not rendered here — they stay reachable
+// on-demand via tickets_query. A `.done`/`.dropped` node renders only as a
+// dead-parent anchor for a live (idea/todo/ready) descendant; a fully-dead
+// subtree (including a placeholder root for a missing parent) is omitted
+// entirely. Cycle guard: a malformed `parent:` cycle degrades every node on
+// the cycle to a flat root rather than hanging or erroring.
+func renderTickets(b *strings.Builder, root string) error {
 	b.WriteString("tickets:\n")
-	anyTicket := false
-	orphanIdea := 0
-	for _, status := range []string{"ready", "todo", "idea"} {
-		statusDir := filepath.Join(ticketsRoot, status)
-		if !isDir(statusDir) {
+	tickets, err := scanTickets(root, ticketScanOptions{IncludeDone: true, IncludeDropped: true})
+	if err != nil {
+		return err
+	}
+
+	// byStem: one entry per stem, first occurrence wins. scanTickets sorts by
+	// ticketStatusRank, so a duplicate stem across status directories (an
+	// abnormal board) keeps its most-open copy defensively, without crashing.
+	byStem := map[string]TicketInfo{}
+	order := make([]string, 0, len(tickets))
+	for _, ticket := range tickets {
+		if _, seen := byStem[ticket.Stem]; seen {
 			continue
 		}
-		entries := sortedEntries(statusDir)
-		for _, entry := range entries {
-			if filepath.Ext(entry.Name()) != ".md" {
+		byStem[ticket.Stem] = ticket
+		order = append(order, ticket.Stem)
+	}
+
+	forcedRoot := renderTicketsCycleGuard(byStem, order)
+
+	children := map[string][]string{}
+	placeholders := map[string]string{} // placeholder key ("?"+stem) -> missing stem
+	rootSet := map[string]bool{}
+	for _, stem := range order {
+		parent := strings.TrimSpace(byStem[stem].Parent)
+		switch {
+		case forcedRoot[stem] || parent == "":
+			rootSet[stem] = true
+		default:
+			if _, ok := byStem[parent]; ok {
+				children[parent] = append(children[parent], stem)
 				continue
 			}
-			stem := strings.TrimSuffix(entry.Name(), ".md")
-			fm := frontmatter(filepath.Join(statusDir, entry.Name()))
-			parent, _ := fm["parent"].(string)
-			anyTicket = true
-			if status == "idea" && parent == "" {
-				orphanIdea++
-				continue
+			key := "?" + parent
+			if _, exists := placeholders[key]; !exists {
+				placeholders[key] = parent
+				rootSet[key] = true
 			}
-			fmt.Fprintf(b, "  [%s] %s\n", status, stem)
-			if parent != "" {
-				fmt.Fprintf(b, "      parent: %s%s\n", parent, titleSuffix(parent, ticketsRoot))
-			}
-			if related, _ := fm["related"].(map[string]string); len(related) > 0 {
-				keys := make([]string, 0, len(related))
-				for key := range related {
-					keys = append(keys, key)
-				}
-				sort.Strings(keys)
-				for _, key := range keys {
-					note := related[key]
-					parts := []string{}
-					if note != "" {
-						parts = append(parts, note)
-					}
-					if title := ticketTitle(key, ticketsRoot); title != "" {
-						parts = append(parts, title)
-					}
-					suffix := ""
-					if len(parts) > 0 {
-						suffix = "  # " + strings.Join(parts, " · ")
-					}
-					fmt.Fprintf(b, "      related: %s%s\n", key, suffix)
+			children[key] = append(children[key], stem)
+		}
+	}
+	roots := make([]string, 0, len(rootSet))
+	for key := range rootSet {
+		roots = append(roots, key)
+	}
+	sort.Strings(roots)
+
+	memo := map[string]bool{}
+	var shouldRender func(key string) bool
+	shouldRender = func(key string) bool {
+		if v, ok := memo[key]; ok {
+			return v
+		}
+		memo[key] = false // guard: the tree is acyclic by construction
+		result := false
+		if _, isPlaceholder := placeholders[key]; !isPlaceholder && isLiveStatus(byStem[key].Status) {
+			result = true
+		} else {
+			for _, child := range children[key] {
+				if shouldRender(child) {
+					result = true
+					break
 				}
 			}
 		}
+		memo[key] = result
+		return result
 	}
-	if orphanIdea > 0 {
-		fmt.Fprintf(b, "  idea: %d orphan hidden — tickets.query statuses=idea to view\n", orphanIdea)
+
+	printed := false
+	var render func(key string, depth int)
+	render = func(key string, depth int) {
+		if !shouldRender(key) {
+			return
+		}
+		label := renderTicketsLabel(key, byStem, placeholders)
+		fmt.Fprintf(b, "%s%s\n", strings.Repeat("  ", depth), label)
+		printed = true
+		childs := append([]string(nil), children[key]...)
+		sort.Strings(childs)
+		for _, child := range childs {
+			render(child, depth+1)
+		}
 	}
-	if !anyTicket {
+	for _, key := range roots {
+		render(key, 1)
+	}
+	if !printed {
 		b.WriteString("  (none)\n")
 	}
+	return nil
 }
 
-func titleSuffix(stem, ticketsRoot string) string {
-	title := ticketTitle(stem, ticketsRoot)
-	if title == "" {
-		return ""
-	}
-	return "  # " + title
-}
+// renderTicketsCycleGuard runs a three-color (white/gray/black) walk over
+// byStem's functional `parent:` graph (at most one outgoing edge per node) and
+// returns the set of stems that must render as flat roots because they sit on
+// a `parent:` cycle. A gray stem is on the current walk's path; hitting a gray
+// stem again means every stem from that position to the end of the path is
+// part of the cycle and becomes a forced root. Hitting an unresolved parent or
+// an already-black stem ends the walk normally (no forced roots on that path).
+func renderTicketsCycleGuard(byStem map[string]TicketInfo, order []string) map[string]bool {
+	const (
+		white = iota
+		gray
+		black
+	)
+	color := map[string]int{}
+	forcedRoot := map[string]bool{}
 
-func ticketTitle(stem, ticketsRoot string) string {
-	for _, status := range []string{"ready", "todo", "idea", "wip", ".done", ".dropped"} {
-		path := filepath.Join(ticketsRoot, status, stem+".md")
-		if _, err := os.Stat(path); err == nil {
-			title, _ := frontmatter(path)["title"].(string)
-			return title
+	for _, start := range order {
+		if color[start] != white {
+			continue
+		}
+		var path []string
+		current := start
+		for {
+			color[current] = gray
+			path = append(path, current)
+			parent := strings.TrimSpace(byStem[current].Parent)
+			if parent == "" {
+				break
+			}
+			if _, ok := byStem[parent]; !ok {
+				break
+			}
+			switch color[parent] {
+			case white:
+				current = parent
+				continue
+			case gray:
+				for i, stem := range path {
+					if stem == parent {
+						for _, cycleStem := range path[i:] {
+							forcedRoot[cycleStem] = true
+						}
+						break
+					}
+				}
+			}
+			// black (already resolved by an earlier walk) or gray (cycle,
+			// handled above): stop extending this path either way.
+			break
+		}
+		for _, stem := range path {
+			color[stem] = black
 		}
 	}
-	return ""
+	return forcedRoot
+}
+
+func isLiveStatus(status string) bool {
+	return status == "idea" || status == "todo" || status == "ready"
+}
+
+func renderTicketsLabel(key string, byStem map[string]TicketInfo, placeholders map[string]string) string {
+	if missing, ok := placeholders[key]; ok {
+		return "?/" + missing
+	}
+	ticket := byStem[key]
+	return strings.TrimPrefix(ticket.Status, ".") + "/" + ticket.Stem
 }
 
 func sortedEntries(root string) []os.DirEntry {
