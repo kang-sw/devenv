@@ -305,16 +305,17 @@ ai-docs/tickets/.dropped/
   a harness-neutral tier read tool). Such changes carry no host-specific
   logic, land through the normal `develop` release flow, and apply to any
   later host as much as to Pi; the adapter then consumes the released ws.
-  Two further owner clauses (2026-09-07) bind that flow. (1) **Non-Pi-extension
-  code is authored on `develop`.** ws-mcp Go source and shared playbook/rsrc
-  text are edited on `develop` and reach the Pi track only by cherry-pick;
-  they are never authored on the Pi track and merged up. Rationale: the
-  installed/running ws-mcp is the released build, not the Pi track's working
-  copy, so a Pi-track-authored ws-mcp edit cannot be exercised in place. (2)
-  **This Pi-direction guidance is Pi-track-local.** This `Active direction`
-  entry and the harness-peer clause above must be deleted from a non-Pi
-  branch's `AGENTS.md` whenever Pi-track content is absorbed or merged into it
-  (`develop`/`main`); they never travel upward with a merge.
+  Two further owner clauses (2026-09-07) bind that flow. (1) **On the Pi
+  track, non-Pi-extension code is authored on `develop`, not here.** ws-mcp Go
+  source and shared playbook/rsrc text are edited on `develop` and reach the
+  Pi track only by cherry-pick; Pi-track work never authors them here and
+  merges up. Rationale: the installed/running ws-mcp is the released build,
+  not the Pi track's working copy, so a Pi-track-authored ws-mcp edit cannot
+  be exercised in place. (2) **This Pi-direction guidance is Pi-track-local.**
+  Delete this entire `Active direction` bullet — the harness-peer clause and
+  sub-clauses (1) and (2) included — from a non-Pi branch's `AGENTS.md`
+  whenever Pi-track content is absorbed or merged into it (`develop`/`main`);
+  this guidance never travels upward with a merge.
   Mercenary is a deprecated path: not modified for Pi, and not exposed by the
   Pi adapter. The earlier opencode adapter direction is dropped
   (`260801-feat-ws-opencode-adapter`, `.dropped/`).
