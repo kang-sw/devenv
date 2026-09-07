@@ -36,6 +36,29 @@ History: `22987b75` rolled back expensive custom width rendering; `bbf9a29a` / `
 
 Pure wrapping/trim logic: tests first. Cover printable ASCII, CJK, surrogate-pair emoji, combining/ZWJ sequences (conservative counts), tabs/control sanitization, zero/narrow widths and widths smaller than indentation, input logical starts versus continuations, exactly ten versus eleven rows, marker presence only on truncation, outer-whitespace trimming and exact blank separators, white input/gray output, theme changes, full output expansion, payload identity, streaming/error/native fallback, and repeated-render cache reuse. Include real Pi parent-shell/native-component composition to check actual padding and rows. Run full tests and inspect complete output. Owner-live appearance/performance acceptance cannot be claimed from tests alone.
 
+## Owner follow-up: native backgrounds and input-owned separator
+
+After live inspection, the owner explicitly replaces the earlier separated
+background requirement: remove custom input/output background overrides and
+inherit Pi's native parent lifecycle background uniformly. Preserve the accepted
+input/output foregrounds, indentation, approximate wrapping, markers, caches,
+model payloads and native fallback behavior.
+
+Correct the missing input-to-output blank row for raw fallback results such as
+`todo.check`: the input/call component owns one trailing separator independently
+of result shape; remove the YAML result's leading separator to avoid duplication.
+Retain one title-to-input separator and trim outer input display whitespace.
+Verify real installed parent composition for YAML success, raw-text fallback,
+error fallback and pending/no-result states, distinguishing the one owned
+separator from unchanged outer native shell padding. Do not redefine native shell
+padding, lifecycle, or unsupported-result rendering to meet an artificial total
+blank-row count at the end of a pending tool.
+
+This is a same-slice follow-up on the retained implementation branch, with the
+same implementer and independent reviewer; no tickets, new agents, or merge.
+Commit this contract update before source edits, then code/tests; lead updates
+spec after review. Preserve unrelated untracked files.
+
 ## Escalations
 
 No open product decision. Stop and ask the lead if existing renderer constraints prevent this contract or implementation requires changes outside Pi adapter/spec scope. No merge without owner approval. Record any source/history discrepancy and unverified live behavior.
