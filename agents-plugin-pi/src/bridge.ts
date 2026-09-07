@@ -25,7 +25,7 @@
  * registration-only and never touches the wire call to ws-mcp.
  */
 
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { spawnWsMcpClient, type McpStdioClient, type McpContentItem, type McpToolCallResult } from "./mcp-stdio-client.ts";
 import { assertVersionPin, readRuntimeContract } from "./version-check.ts";
@@ -345,16 +345,35 @@ export function wrapLaunchErrorWithLocalDevenvContext(err: unknown, context: Loc
  * diagnosable from the error alone (surfaced to the user via
  * `wrapLaunchErrorWithLocalDevenvContext` above once the build succeeds but
  * a later launch step fails, or directly when the build itself fails).
+ *
+ * Review fix (relay #1, Important #1): genuinely async (`execFile`, not
+ * `execFileSync`) rather than merely returning a resolved-later Promise
+ * around a blocking call. `buildLocalDevenvBootstrap`'s call site is
+ * `notify(...)` immediately followed by `await deps.runBuild(...)`; Pi's
+ * `ui.notify` defers its paint via `process.nextTick(() =>
+ * this.scheduleRender())`, and a `nextTick` callback cannot run while a
+ * synchronous `execFileSync` call still owns the stack. With the old
+ * `execFileSync` version, the "building ws-mcp from ..." notification and
+ * the "finished in Nms" notification both landed together only once the
+ * whole build (and event loop) had already been blocked and released —
+ * exactly the cold-build-vs-hang ambiguity the ticket's notify Decision
+ * exists to prevent. `execFile` spawns without blocking, so the awaited
+ * Promise genuinely suspends `buildLocalDevenvBootstrap` at that `await`,
+ * letting the queued render (and the rest of the event loop) run while the
+ * build is in flight.
  */
-function runGoBuild(argv: string[], opts: { cwd: string }): void {
-  try {
-    execFileSync(argv[0], argv.slice(1), { cwd: opts.cwd, stdio: ["ignore", "pipe", "pipe"] });
-  } catch (err) {
-    const execErr = err as NodeJS.ErrnoException & { stdout?: Buffer | string; stderr?: Buffer | string };
-    const stdout = execErr.stdout ? execErr.stdout.toString() : "";
-    const stderr = execErr.stderr ? execErr.stderr.toString() : "";
-    throw new Error(`ws-pi-bridge: go build failed (${execErr.message})\n--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}`);
-  }
+function runGoBuild(argv: string[], opts: { cwd: string }): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(argv[0], argv.slice(1), { cwd: opts.cwd, encoding: "buffer" }, (err, stdout, stderr) => {
+      if (err) {
+        const stdoutText = stdout ? stdout.toString() : "";
+        const stderrText = stderr ? stderr.toString() : "";
+        reject(new Error(`ws-pi-bridge: go build failed (${err.message})\n--- stdout ---\n${stdoutText}\n--- stderr ---\n${stderrText}`));
+        return;
+      }
+      resolve();
+    });
+  });
 }
 
 const MERCENARY_RAW_PREFIX = "mercenary.";

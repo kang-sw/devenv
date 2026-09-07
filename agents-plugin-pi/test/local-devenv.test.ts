@@ -258,7 +258,7 @@ describe("buildLocalDevenvBootstrap", () => {
     }
   });
 
-  test("runBuild throwing propagates unchanged (fail loud, no cache fallback)", async () => {
+  test("runBuild throwing propagates unchanged and cleans up the partial temp build artifact (fail loud, no cache fallback)", async () => {
     const dir = tempDir("ws-pi-local-devenv-bootstrap-fail-");
     try {
       const sourceRoot = makeSourceRoot(dir);
@@ -267,8 +267,17 @@ describe("buildLocalDevenvBootstrap", () => {
       writeMarker(dir, { schema_version: 1, source_root: sourceRoot, tool_dir: toolDir, go: goPath });
 
       const buildError = new Error("go build: simulated failure");
+      let tmpPathUsed: string | undefined;
       const deps: LocalDevenvBuildDeps = {
-        runBuild: () => {
+        runBuild: (argv) => {
+          // Simulate a partial/interrupted build: `go build -o <tmp>` writes
+          // a (possibly incomplete) file at the declared temp path before
+          // the failure is reported — the review fix's whole point is that
+          // this partial artifact must actually exist for the cleanup
+          // branch to have something to remove; a stub that throws with no
+          // file ever written leaves that branch unexercised.
+          tmpPathUsed = argv[argv.indexOf("-o") + 1];
+          writeFileSync(tmpPathUsed, "partial-binary");
           throw buildError;
         },
       };
@@ -278,7 +287,9 @@ describe("buildLocalDevenvBootstrap", () => {
         return true;
       });
 
-      // No final binary should have been produced.
+      assert.ok(tmpPathUsed, "expected runBuild to have been invoked with an -o temp path");
+      assert.equal(existsSync(tmpPathUsed!), false, "expected the partial temp build artifact to be cleaned up on failure");
+      // No final (renamed) binary should have been produced either.
       assert.equal(existsSync(join(dir, ".runtime", "local-devenv", "ws-mcp")), false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
