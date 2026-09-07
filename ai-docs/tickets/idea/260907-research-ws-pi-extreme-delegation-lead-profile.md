@@ -96,7 +96,8 @@ them rather than replacing anything.
    that returns a recommendation — then hands the ticket/phase to an
    **orchestrator** child. The orchestrator owns the rest of today's `proceed`
    pipeline (implement → review → docs → gate) and reports back at decision
-   points.
+   points. The lead's contribution during a phase is qualitative judgment on
+   technical scenarios the orchestrator raises, not execution.
 
 4. **Spawn gains an explicit recursion model.** The orchestrator role must hold
    `ws-agent-spawn` (today only the lead does). The orchestrator's children do
@@ -130,12 +131,6 @@ reports) is playbook text.
   minimum resident input for ticket/phase selection: the lean `project_tree`
   tree, a child-produced recommendation, or both? The two develop-side diet
   tickets are prerequisites for the first option to be affordable.
-- **Delegation granularity vs spawn baseline.** Each child pays its own
-  ~24.7k-token system-prompt-plus-schema baseline (measured on the lead; a
-  `full-worker` child registering all `ws__*` tools pays a similar one).
-  Micro-delegation of trivial lookups loses money. Where is the threshold,
-  and should the orchestrator batch small tasks? A child-tier baseline
-  measurement is needed; this session had no small-tier cost data.
 - **Orchestrator report shape.** What must an orchestrator's report contain
   for the lead to make the next decision without re-reading anything: phase
   result, verification evidence, open questions, next-phase proposal? The
@@ -145,12 +140,6 @@ reports) is playbook text.
   the path is worker → orchestrator → lead → user. Whether the orchestrator
   may answer on its own within a stated envelope, and how `ws-ask`/the human
   relay gate surfaces a two-hop question, is unsettled.
-- **Where the orchestrator playbook lives.** Shared playbook text is authored
-  on `develop` (Pi-track clause (1)) and mirrored; if the orchestrator
-  playbook is Pi-only, it is a `.pi.md` overlay authored under
-  `agents-plugin/rsrc/` per the mirror-drift ticket's decision, never a
-  diverging mirror. Whether the concept is Pi-only at all, or a harness-neutral
-  role that Codex could also run, is itself a question.
 - **Failure and blocking behavior.** An orchestrator that stalls, loops, or
   exhausts its goal loop must surface to the lead deterministically; the
   existing goal-loop race tickets (260906 reinject/reminder/push-wake) are the
@@ -158,6 +147,35 @@ reports) is playbook text.
 - **Lead-side resumption.** If the lead session compacts or restarts while an
   orchestrator runs, the sidecar must recapture a nested tree, not a flat
   list.
+
+## Confirmed direction - 2026-09-07
+
+Owner follow-up settling two of the questions first drafted above.
+
+- **The orchestrator prompt is adapter-owned, not ws inventory.** The
+  orchestrator's text depends deeply on Pi-extension mechanics (agent
+  messaging, `ws-report-to-lead`, spawn/send/stop lifecycle) that no other
+  harness runs, so it does not belong in the shared `rsrc/` playbook
+  inventory authored on `develop`, and it is not a `.pi.md` overlay of a
+  shared playbook either. It lives in the adapter's own overlay layer: the
+  package-root guide files the extension already ships and hands to children
+  as `systemPromptPath` directly (`pi-lead-guide.md`,
+  `execute-worker-guide.md`, `explore-guide.md`), bypassing
+  `playbook.render`. An `orchestrator-guide.md` beside them is the
+  established pattern, keeps the byte-identical `rsrc/` mirror untouched,
+  and keeps the dependency direction intact. The earlier "harness-neutral
+  role Codex could also run" reading is withdrawn.
+- **The delegation unit is the ticket phase.** One `proceed` of one phase
+  runs a very large number of cycles — playbook reads, workflow state,
+  implement/review relays, verification — and every one of them is billed at
+  the lead's tier and stays resident in the lead's context today. Against
+  that, a child's ~24.7k baseline is noise; the granularity threshold
+  question is moot at phase scale and is dropped. The saving targeted is
+  the orchestration ceremony itself, moved to a medium-tier orchestrator,
+  while the lead's per-phase involvement shrinks to qualitative judgment on
+  the technical scenarios the orchestrator escalates. The hard decisions
+  were made with the lead at discuss/ticket-writing time; the phase is,
+  by construction, execution.
 
 ## Verification plan
 
@@ -169,8 +187,11 @@ reports) is playbook text.
   `totalTokens`) to report, per session, median/p90 per-call context, share of
   resident context that is lead-direct tool results, and cache-read share of
   cost. The profile succeeds when lead-direct tool results stop dominating.
-- **Child baseline.** Measure a `full-worker` and a recon child's first-call
-  `input` to set the delegation-granularity threshold.
+- **Ceremony share.** On an existing `proceed` transcript, measure the share
+  of lead-side calls and resident tokens that belong to orchestration
+  ceremony (playbook/workflow/relay/verification cycles) versus user-facing
+  judgment; that share is the ceiling of what this design moves off the
+  lead's tier.
 - **Live scenario.** One ticket run end to end as discuss → hand-off →
   orchestrator → report → next decision, with the agent widget showing the
   nested tree, before any playbook text is generalized.
