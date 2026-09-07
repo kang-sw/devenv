@@ -211,6 +211,22 @@ describe("bounded YAML preview preparation", () => {
     );
   });
 
+  test("indents input markers while retaining narrow one-row fitting", () => {
+    const source = Array.from({ length: 11 }, (_, index) => `line-${index}`).join("\n");
+    assert.equal(
+      physicalPreview(source, 80, { expanded: false, trimOuterWhitespace: true, markerIndent: 4 }).at(-1),
+      "    ...",
+    );
+    assert.equal(
+      physicalPreview(source, 5, { expanded: false, trimOuterWhitespace: true, markerIndent: 4 }).at(-1),
+      "    .",
+    );
+    assert.equal(
+      physicalPreview(source, 3, { expanded: false, trimOuterWhitespace: true, markerIndent: 4 }).at(-1),
+      "  .",
+    );
+  });
+
   test("keeps serializing containers and leaves scalar JSON and prose native", () => {
     assert.match(yamlContainerDisplay('{"task":"render","count":2}') ?? "", /task: render/);
     assert.equal(yamlContainerDisplay('"plain string"'), undefined);
@@ -246,6 +262,20 @@ describe("native YAML preview renderers", () => {
     assert.equal(boxes[1]!.background, undefined, "output inherits the native parent lifecycle background");
     assert.equal(theme.bgCalls.length, 0, "renderer installs no nested background callbacks");
     assert.equal(texts.length, 3);
+  });
+
+  test("styles the indented input marker gray and reuses its bounded layout", () => {
+    const { tui, layouts } = fakeTui();
+    const theme = fakeTheme();
+    const renderers = createToolPreviewRenderers(tui, "ws__test", () => "x".repeat(200_000));
+    const input = renderers.renderCall({ value: "ignored" }, theme, context());
+    const first = input.render(80).map(plain);
+    const initialLayouts = layouts();
+    input.render(80);
+
+    assert.equal(first.at(-2), "    ...");
+    assert.ok(theme.fgCalls.some((call) => call.color === "toolOutput" && call.text === "    ..."));
+    assert.equal(layouts(), initialLayouts, "unchanged input redraw reuses the bounded physical layout");
   });
 
   test("wraps long logical rows before the ten-row budget and expands full output", () => {
@@ -405,6 +435,43 @@ describe("native YAML preview renderers", () => {
     const marker = createComponent(Array.from({ length: 11 }, (_, index) => `line-${index}`).join("\n"));
     const markerLines = marker.render(3).map((line) => tui.stripTerminalSequences(line).trim());
     assert.equal(markerLines.filter((line) => line === ".").length, 1, "narrow marker renders as one row, not three wrapped dots");
+  });
+
+  test("renders the installed Pi input marker indented, gray, and narrow-safe", async () => {
+    const codingAgentUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
+    const requireFromPi = createRequire(codingAgentUrl);
+    const tui = await import(pathToFileURL(requireFromPi.resolve("@earendil-works/pi-tui")).href) as unknown as ToolResultTuiModules;
+    const themeModule = await import(new URL("./modes/interactive/theme/theme.js", codingAgentUrl).href) as {
+      initTheme(): void;
+      theme: { fg(color: "toolOutput", text: string): string };
+    };
+    themeModule.initTheme();
+    const toolExecution = await import(new URL("./modes/interactive/components/tool-execution.js", codingAgentUrl).href) as {
+      ToolExecutionComponent: new (
+        toolName: string,
+        toolCallId: string,
+        args: unknown,
+        options: unknown,
+        toolDefinition: unknown,
+        ui: { requestRender(): void },
+        cwd: string,
+      ) => { render(width: number): string[]; setArgsComplete(): void };
+    };
+    const renderers = createToolPreviewRenderers(tui, "ws__test", () => Array.from({ length: 11 }, (_, index) => `line-${index}`).join("\n"));
+    const component = new toolExecution.ToolExecutionComponent(
+      "ws__test", "call-1", { input: true }, { showImages: false },
+      { renderCall: renderers.renderCall, renderResult: renderers.renderResult }, { requestRender() {} }, process.cwd(),
+    );
+    component.setArgsComplete();
+
+    const wide = component.render(40);
+    const marker = wide.find((line) => tui.stripTerminalSequences(line).trim() === "...");
+    assert.ok(marker);
+    assert.match(tui.stripTerminalSequences(marker), /^ {5}\.\.\. *$/, "parent padding plus four-column input marker indent");
+    assert.ok(marker.includes(themeModule.theme.fg("toolOutput", "    ...")), "marker uses toolOutput independently of input text");
+
+    const narrowMarkers = component.render(3).filter((line) => tui.stripTerminalSequences(line).trim() === ".");
+    assert.equal(narrowMarkers.length, 1, "narrow input marker remains a single fitted row");
   });
 
   test("uses the input-owned separator for YAML, raw, error, and pending installed Pi rows", async () => {

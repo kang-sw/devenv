@@ -51,6 +51,8 @@ interface PreviewState {
 interface PreviewFormat {
   expanded: boolean;
   trimOuterWhitespace: boolean;
+  markerIndent?: number;
+  markerStyle?: (text: string) => string;
 }
 
 interface BoundedText extends NativePreviewComponent {
@@ -61,7 +63,8 @@ interface BoundedText extends NativePreviewComponent {
   format: PreviewFormat | undefined;
   display: string | undefined;
   layoutKey: string | undefined;
-  plainLayout: string | undefined;
+  plainLayout: string[] | undefined;
+  marker: string | undefined;
   cachedWidth: number | undefined;
   cachedNativeLines: string[] | undefined;
   cachedLines: string[] | undefined;
@@ -89,8 +92,75 @@ function fittedIndent(width: number, preferred: number, remainder: string): numb
   return Math.max(0, Math.min(preferred, width - approximateCodePointWidth(firstCodePoint)));
 }
 
-function truncatedMarker(width: number): string {
-  return ".".repeat(Math.max(0, Math.min(3, width)));
+function truncatedMarker(width: number, preferredIndent = 0): string {
+  if (width <= 0) return "";
+  const indent = Math.max(0, Math.min(preferredIndent, width - 1));
+  return `${" ".repeat(indent)}${".".repeat(Math.min(3, width - indent))}`;
+}
+
+interface PhysicalPreviewLayout {
+  rows: string[];
+  marker: string | undefined;
+}
+
+function physicalPreviewLayout(
+  text: string,
+  width: number,
+  { expanded, trimOuterWhitespace, markerIndent }: PreviewFormat,
+): PhysicalPreviewLayout {
+  const source = trimOuterWhitespace ? text.trim() : text;
+  const boundedWidth = Math.max(0, Math.floor(width));
+  const rows: string[] = [];
+  const limit = expanded ? Number.POSITIVE_INFINITY : PREVIEW_ROWS;
+  const appendMarker = (): PhysicalPreviewLayout => {
+    const marker = truncatedMarker(boundedWidth, markerIndent);
+    return marker ? { rows: [...rows, marker], marker } : { rows, marker: undefined };
+  };
+
+  let lineStart = 0;
+  while (true) {
+    const lineEnd = source.indexOf("\n", lineStart);
+    const logicalLine = lineEnd === -1 ? source.slice(lineStart) : source.slice(lineStart, lineEnd);
+    let firstRow = true;
+    let remainder = logicalLine;
+    do {
+      if (rows.length === limit) return appendMarker();
+      const preferredIndent = firstRow ? INPUT_START_INDENT : CONTINUATION_INDENT;
+      const indent = fittedIndent(boundedWidth, preferredIndent, remainder);
+      const contentWidth = boundedWidth - indent;
+
+      let consumed = 0;
+      let usedWidth = 0;
+      for (const codePoint of remainder) {
+        const codePointWidth = approximateCodePointWidth(codePoint);
+        if (usedWidth + codePointWidth > contentWidth) break;
+        usedWidth += codePointWidth;
+        consumed += codePoint.length;
+      }
+      // At one terminal column a two-column code point cannot fit even with
+      // zero indent. Expanded output still consumes it so later logical lines
+      // are never silently lost; native fitting decides its final appearance.
+      if (remainder && consumed === 0) consumed = String.fromCodePoint(remainder.codePointAt(0)!).length;
+      rows.push(`${" ".repeat(indent)}${remainder.slice(0, consumed)}`);
+      remainder = remainder.slice(consumed);
+      firstRow = false;
+    } while (remainder);
+
+    if (lineEnd === -1) return { rows, marker: undefined };
+    lineStart = lineEnd + 1;
+  }
+}
+
+/**
+ * Wraps logical text into presentation rows. It walks only as far as the
+ * collapsed budget needs, avoiding per-redraw grapheme segmentation.
+ */
+export function physicalPreview(
+  text: string,
+  width: number,
+  format: PreviewFormat,
+): string[] {
+  return physicalPreviewLayout(text, width, format).rows;
 }
 
 /**
@@ -160,58 +230,6 @@ export function sanitizePreviewText(text: string): string {
     .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "?");
 }
 
-/**
- * Wraps logical text into presentation rows. It walks only as far as the
- * collapsed budget needs, avoiding per-redraw grapheme segmentation.
- */
-export function physicalPreview(
-  text: string,
-  width: number,
-  { expanded, trimOuterWhitespace }: PreviewFormat,
-): string[] {
-  const source = trimOuterWhitespace ? text.trim() : text;
-  const boundedWidth = Math.max(0, Math.floor(width));
-  const rows: string[] = [];
-  const limit = expanded ? Number.POSITIVE_INFINITY : PREVIEW_ROWS;
-  const appendMarker = (): string[] => {
-    const marker = truncatedMarker(boundedWidth);
-    return marker ? [...rows, marker] : rows;
-  };
-
-  let lineStart = 0;
-  while (true) {
-    const lineEnd = source.indexOf("\n", lineStart);
-    const logicalLine = lineEnd === -1 ? source.slice(lineStart) : source.slice(lineStart, lineEnd);
-    let firstRow = true;
-    let remainder = logicalLine;
-    do {
-      if (rows.length === limit) return appendMarker();
-      const preferredIndent = firstRow ? INPUT_START_INDENT : CONTINUATION_INDENT;
-      const indent = fittedIndent(boundedWidth, preferredIndent, remainder);
-      const contentWidth = boundedWidth - indent;
-
-      let consumed = 0;
-      let usedWidth = 0;
-      for (const codePoint of remainder) {
-        const codePointWidth = approximateCodePointWidth(codePoint);
-        if (usedWidth + codePointWidth > contentWidth) break;
-        usedWidth += codePointWidth;
-        consumed += codePoint.length;
-      }
-      // At one terminal column a two-column code point cannot fit even with
-      // zero indent. Expanded output still consumes it so later logical lines
-      // are never silently lost; native fitting decides its final appearance.
-      if (remainder && consumed === 0) consumed = String.fromCodePoint(remainder.codePointAt(0)!).length;
-      rows.push(`${" ".repeat(indent)}${remainder.slice(0, consumed)}`);
-      remainder = remainder.slice(consumed);
-      firstRow = false;
-    } while (remainder);
-
-    if (lineEnd === -1) return rows;
-    lineStart = lineEnd + 1;
-  }
-}
-
 function createBoundedText(tui: ToolResultTuiModules): BoundedText {
   const component: BoundedText = {
     text: new tui.Text("", 0, 0),
@@ -222,6 +240,7 @@ function createBoundedText(tui: ToolResultTuiModules): BoundedText {
     display: undefined,
     layoutKey: undefined,
     plainLayout: undefined,
+    marker: undefined,
     cachedWidth: undefined,
     cachedNativeLines: undefined,
     cachedLines: undefined,
@@ -229,15 +248,20 @@ function createBoundedText(tui: ToolResultTuiModules): BoundedText {
       const boundedWidth = Math.max(0, Math.floor(width));
       if (boundedWidth === 0) return [];
       const layoutKey = component.format
-        ? `${boundedWidth}:${component.format.expanded ? "expanded" : "collapsed"}:${component.format.trimOuterWhitespace ? "trim" : "raw"}`
+        ? `${boundedWidth}:${component.format.expanded ? "expanded" : "collapsed"}:${component.format.trimOuterWhitespace ? "trim" : "raw"}:${component.format.markerIndent ?? 0}`
         : undefined;
       if (layoutKey !== undefined && (component.layoutKey !== layoutKey || component.plainLayout === undefined)) {
         tui.onPreviewLayout?.();
-        component.plainLayout = physicalPreview(component.sanitized ?? "", boundedWidth, component.format! as PreviewFormat).join("\n");
+        const layout = physicalPreviewLayout(component.sanitized ?? "", boundedWidth, component.format!);
+        component.plainLayout = layout.rows;
+        component.marker = layout.marker;
         component.layoutKey = layoutKey;
       }
-      const plain = component.format ? component.plainLayout ?? "" : component.sanitized ?? "";
-      const display = component.style?.(plain) ?? plain;
+      const plainRows = component.format ? component.plainLayout ?? [] : undefined;
+      const plain = plainRows ? plainRows.join("\n") : component.sanitized ?? "";
+      const display = component.marker && component.format?.markerStyle && plainRows
+        ? `${component.style?.(plainRows.slice(0, -1).join("\n")) ?? plainRows.slice(0, -1).join("\n")}\n${component.format.markerStyle(component.marker)}`
+        : component.style?.(plain) ?? plain;
       if (component.display !== display) {
         component.text.setText(display);
         component.display = display;
@@ -277,6 +301,7 @@ function updateText(
     component.display = undefined;
     component.layoutKey = undefined;
     component.plainLayout = undefined;
+    component.marker = undefined;
     component.cachedWidth = undefined;
     component.cachedNativeLines = undefined;
     component.cachedLines = undefined;
@@ -382,6 +407,8 @@ export function createToolPreviewRenderers(
       updateText(tui, component.input, preview, (text) => previewTheme.fg("text", text), {
         expanded: false,
         trimOuterWhitespace: true,
+        markerIndent: INPUT_START_INDENT,
+        markerStyle: (marker) => previewTheme.fg("toolOutput", marker),
       });
       return component;
     },
