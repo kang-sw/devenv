@@ -313,9 +313,19 @@ ai-docs/tickets/.dropped/
   not the Pi track's working copy, so a Pi-track-authored ws-mcp edit cannot
   be exercised in place. (2) **This Pi-direction guidance is Pi-track-local.**
   Delete this entire `Active direction` bullet — the harness-peer clause and
-  sub-clauses (1) and (2) included — from a non-Pi branch's `AGENTS.md`
+  sub-clauses (1), (2), and (3) included — from a non-Pi branch's `AGENTS.md`
   whenever Pi-track content is absorbed or merged into it (`develop`/`main`);
-  this guidance never travels upward with a merge.
+  this guidance never travels upward with a merge. (3) **The Pi bundle's
+  ws-mcp version tracks `develop`, not the Pi track.**
+  `agents-plugin-pi/runtime.json` (and the `agents-plugin/runtime.json` it
+  byte-syncs from) pins the ws-mcp version and tool contract of the `develop`
+  root worktree, treated as the release target — never a track-local working
+  version. The Pi adapter runs against that `develop` ws-mcp build, so the Pi
+  track never carries a diverging ws-mcp version or tool vocabulary; this makes
+  the clause-(1) cherry-pick of `develop` ws-mcp changes a standing obligation
+  rather than an occasional one. Rationale: a track-local ws-mcp version that
+  drifts from the root worktree produced persistent version/contract clutter
+  across Pi-track sessions.
   Mercenary is a deprecated path: not modified for Pi, and not exposed by the
   Pi adapter. The earlier opencode adapter direction is dropped
   (`260801-feat-ws-opencode-adapter`, `.dropped/`).
