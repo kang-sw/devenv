@@ -7,8 +7,10 @@ export interface ToolResultTuiModules {
   Box: new (paddingX?: number, paddingY?: number, bgFn?: (text: string) => string) => NativeBox;
   stripTerminalSequences(text: string): string;
   truncateToWidth(text: string, width: number, ellipsis?: string): string;
-  /** Test-only optional probe for physical-layout cache misses. */
+  /** Test-only optional probes for cached preparation/display work. */
   onPreviewLayout?: () => void;
+  onPreviewJoin?: () => void;
+  onPreviewStyle?: () => void;
 }
 
 export interface NativeText {
@@ -72,6 +74,9 @@ interface BoundedText extends NativePreviewComponent {
   style: ((text: string) => string) | undefined;
   format: PreviewFormat | undefined;
   display: string | undefined;
+  displayTheme: unknown;
+  plain: string | undefined;
+  theme: unknown;
   layoutKey: string | undefined;
   plainLayout: string[] | undefined;
   marker: string | undefined;
@@ -259,6 +264,9 @@ function createBoundedText(tui: ToolResultTuiModules): BoundedText {
     style: undefined,
     format: undefined,
     display: undefined,
+    displayTheme: undefined,
+    plain: undefined,
+    theme: undefined,
     layoutKey: undefined,
     plainLayout: undefined,
     marker: undefined,
@@ -275,17 +283,27 @@ function createBoundedText(tui: ToolResultTuiModules): BoundedText {
         tui.onPreviewLayout?.();
         const layout = physicalPreviewLayout(component.sanitized ?? "", boundedWidth, component.format!);
         component.plainLayout = layout.rows;
+        component.plain = undefined;
+        component.display = undefined;
+        component.displayTheme = undefined;
         component.marker = layout.marker;
         component.layoutKey = layoutKey;
       }
       const plainRows = component.format ? component.plainLayout ?? [] : undefined;
-      const plain = plainRows ? plainRows.join("\n") : component.sanitized ?? "";
-      const display = component.marker && component.format?.markerStyle && plainRows
-        ? `${component.style?.(plainRows.slice(0, -1).join("\n")) ?? plainRows.slice(0, -1).join("\n")}\n${component.format.markerStyle(component.marker)}`
-        : component.style?.(plain) ?? plain;
-      if (component.display !== display) {
-        component.text.setText(display);
-        component.display = display;
+      if (component.plain === undefined) {
+        tui.onPreviewJoin?.();
+        component.plain = plainRows ? plainRows.join("\n") : component.sanitized ?? "";
+      }
+      const plain = component.plain;
+      if (component.display === undefined || component.displayTheme !== component.theme) {
+        tui.onPreviewStyle?.();
+        const markerPrefix = component.marker ? `\n${component.marker}` : "";
+        const body = component.marker ? plain.slice(0, -markerPrefix.length) : plain;
+        component.display = component.marker && component.format?.markerStyle
+          ? `${component.style?.(body) ?? body}\n${component.format.markerStyle(component.marker)}`
+          : component.style?.(plain) ?? plain;
+        component.displayTheme = component.theme;
+        component.text.setText(component.display);
         component.cachedWidth = undefined;
         component.cachedNativeLines = undefined;
         component.cachedLines = undefined;
@@ -301,6 +319,8 @@ function createBoundedText(tui: ToolResultTuiModules): BoundedText {
     },
     invalidate(): void {
       component.text.invalidate();
+      component.display = undefined;
+      component.displayTheme = undefined;
       component.cachedWidth = undefined;
       component.cachedNativeLines = undefined;
       component.cachedLines = undefined;
@@ -315,11 +335,14 @@ function updateText(
   source: string,
   style: (text: string) => string,
   format?: PreviewFormat,
+  theme?: unknown,
 ): void {
   if (component.source !== source) {
     component.source = source;
     component.sanitized = sanitizePreviewText(tui.stripTerminalSequences(source));
     component.display = undefined;
+    component.displayTheme = undefined;
+    component.plain = undefined;
     component.layoutKey = undefined;
     component.plainLayout = undefined;
     component.marker = undefined;
@@ -328,6 +351,7 @@ function updateText(
     component.cachedLines = undefined;
   }
   component.style = style;
+  component.theme = theme;
   component.format = format;
 }
 
@@ -424,13 +448,13 @@ export function createToolPreviewRenderers(
         ? context.lastComponent
         : createCallPreviewComponent(tui);
       const previewTheme = theme as ToolPreviewTheme;
-      updateText(tui, component.title, toolName, (text) => previewTheme.fg("toolTitle", previewTheme.bold(text)));
+      updateText(tui, component.title, toolName, (text) => previewTheme.fg("toolTitle", previewTheme.bold(text)), undefined, previewTheme);
       updateText(tui, component.input, preview, (text) => previewTheme.fg("text", text), {
         expanded: false,
         trimOuterWhitespace: true,
         markerIndent: INPUT_START_INDENT,
         markerStyle: (marker) => previewTheme.fg("toolOutput", marker),
-      });
+      }, previewTheme);
       return component;
     },
 
@@ -455,7 +479,7 @@ export function createToolPreviewRenderers(
       updateText(tui, component.output, rendered, (output) => previewTheme.fg("toolOutput", output), {
         expanded: options.expanded,
         trimOuterWhitespace: false,
-      });
+      }, previewTheme);
       return component;
     },
   };

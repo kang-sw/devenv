@@ -77,10 +77,14 @@ function fakeTui(): {
   boxes: FakeBox[];
   truncations: () => number;
   layouts: () => number;
+  joins: () => number;
+  styles: () => number;
 } {
   let stripCalls = 0;
   let truncationCalls = 0;
   let physicalLayouts = 0;
+  let joins = 0;
+  let styles = 0;
   const texts: FakeText[] = [];
   const boxes: FakeBox[] = [];
   class CapturedText extends FakeText {
@@ -110,12 +114,20 @@ function fakeTui(): {
       onPreviewLayout(): void {
         physicalLayouts += 1;
       },
+      onPreviewJoin(): void {
+        joins += 1;
+      },
+      onPreviewStyle(): void {
+        styles += 1;
+      },
     },
     strips: () => stripCalls,
     texts,
     boxes,
     truncations: () => truncationCalls,
     layouts: () => physicalLayouts,
+    joins: () => joins,
+    styles: () => styles,
   };
 }
 
@@ -353,6 +365,26 @@ describe("native YAML preview renderers", () => {
     );
     changed.render(79);
     assert.equal(layouts(), 4, "source changes rebuild layout");
+  });
+
+  test("caches large expanded RAW joins and styling until layout or theme invalidates", () => {
+    const { tui, layouts, joins, styles } = fakeTui();
+    const renderers = createToolPreviewRenderers(tui, "ws__test");
+    const state = {};
+    const raw = "x".repeat(2_250_000);
+    const firstTheme = fakeTheme("first");
+    const content = [{ type: "text", text: raw }];
+    const output = renderers.renderResult({ content }, { expanded: true, isPartial: false }, firstTheme, context({ state }));
+    output.render(80);
+    for (let i = 0; i < 100; i += 1) output.render(80);
+    assert.deepEqual({ layouts: layouts(), joins: joins(), styles: styles() }, { layouts: 1, joins: 1, styles: 1 }, "unchanged RAW redraws must not rebuild source-sized strings or colors");
+
+    const secondTheme = fakeTheme("second");
+    const themed = renderers.renderResult({ content }, { expanded: true, isPartial: false }, secondTheme, context({ state, lastComponent: output }));
+    themed.render(80);
+    assert.deepEqual({ layouts: layouts(), joins: joins(), styles: styles() }, { layouts: 1, joins: 1, styles: 2 }, "theme changes restyle cached plain output without rewrapping or joining");
+    themed.render(79);
+    assert.deepEqual({ layouts: layouts(), joins: joins(), styles: styles() }, { layouts: 2, joins: 2, styles: 3 }, "width changes invalidate layout, joined text, and display");
   });
 
   test("reprepares in-place streamed arguments and rebuilds colors after a theme change", () => {
