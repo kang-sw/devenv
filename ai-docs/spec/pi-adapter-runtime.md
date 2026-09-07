@@ -59,12 +59,15 @@ Bridged tools provide display-only YAML previews when Pi's native TUI helpers
 are available, including argument streaming. The call slot retains the registered
 tool name in bold with native `toolTitle` color. Input uses the theme's normal
 `text` foreground (light on dark themes, readable on light themes), rather than
-gray `toolOutput`; output retains `toolOutput`. YAML argument rows use
-`toolPendingBg`; completed YAML result rows use `toolSuccessBg`. Pi's default
-parent shell and pending/success/error state presentation remain intact.
+gray `toolOutput`; output retains `toolOutput`. Input and output inherit the
+native parent shell's uniform pending/success/error background; neither installs
+a separate background override.
 
-Input display trims outer whitespace only and has exactly one blank separator
-row above and below its body. Input logical-line starts are indented four columns
+Input display trims outer whitespace only and owns exactly one blank separator
+row above and below its body, independent of whether the result is YAML, native
+raw text, an error, partial output, or not yet available. YAML output adds no
+leading separator. Native outer shell padding and whitespace belonging to native
+fallback content remain unchanged. Input logical-line starts are indented four columns
 relative to the title; automatic continuation rows are indented three columns.
 After display-only control/tab sanitization, previews wrap using a conservative
 estimate of one column per printable ASCII code point and two per non-ASCII code
