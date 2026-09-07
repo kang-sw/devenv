@@ -26,6 +26,30 @@ any explicitly requested broader tool coverage. Preserve the logical-line/native
 cached strategy, not the historical custom ASCII/width fallback described below.
 The following findings record the original capture state.
 
+## Owner-requested push presentation
+
+The owner reports that verbatim `ws-agent-settled` and other subagent messages
+currently occupy the human transcript view. These messages address the lead
+agent, not the human, so their presentation should be visually subordinate to
+human-facing conversation.
+
+- Apply a collapsed preview of at most ten newline-separated logical lines to
+  subagent push messages, including `ws-agent-settled` and `ws-agent-report`,
+  following the accepted tool-preview policy. This is not a strict cap of ten
+  wrapped terminal rows. Preserve expansion to the full message.
+- Gray out the foreground of these messages, not merely their background, so
+  agent-to-agent traffic reads as secondary content. Keep the existing shared
+  push-background requirement; foreground dimming is an additional requirement.
+- This is display-only: the lead still receives the complete original message.
+  Preserve message metadata, delivery, wake/settle behavior, and existing
+  interaction controls. Do not summarize or truncate the model-facing payload.
+- Verify short, exactly-ten-line, and longer report/settled messages; collapsed
+  versus expanded display; gray foreground across theme changes; and unchanged
+  model-facing payloads. Retain the logical-line/native cached rendering
+  strategy and redraw-cost checks rather than reviving custom visual-row sizing.
+
+This update authorizes ticket capture only, not implementation or promotion.
+
 ## Findings and boundaries
 
 - Bridge registrations currently have renderResult but no renderCall. Pi supports streaming argument rendering through renderCall and context.argsComplete. The observed raw JSON input presentation was not reproduced: inspected Pi defined-tool fallback renders only the tool name; generic missing-definition fallback renders JSON. Confirm the actual affected rows before broadening scope.
@@ -38,6 +62,6 @@ The following findings record the original capture state.
 
 ### Phase 1: Consistent display-only tool and push presentation
 
-Resolve precise tool coverage and theme/state framing before implementation. Implement the accepted input YAML, distinct input/output regions, direct read/run preview, and shared push background requirements while reusing common helpers. Preserve partial/malformed argument tolerance, model content, error state, existing dispatch behavior, and expansion. Do not add resolved-model plumbing here without reconciling the pending YAML Phase 2 contract.
+Resolve precise tool coverage and theme/state framing before implementation. Implement the accepted input YAML, distinct input/output regions, direct read/run preview, shared push backgrounds, and the ten-logical-line push previews with gray foreground specified above while reusing common helpers. Preserve partial/malformed argument tolerance, model content, error state, existing dispatch behavior, and expansion. Do not add resolved-model plumbing here without reconciling the pending YAML Phase 2 contract.
 
-Verify input streaming, narrow terminals, collapsed/expanded read/run output, error/pending backgrounds, and both report/settled background callbacks. Include redraw-cost regression checks informed by the performance ticket and owner-live TUI acceptance. No further code work was approved in the capture session.
+Verify input streaming, narrow terminals, collapsed/expanded read/run output, error/pending backgrounds, and both report/settled backgrounds, gray foreground, logical-line preview limits, full expansion, and unchanged lead-facing messages. Include redraw-cost regression checks informed by the performance ticket and owner-live TUI acceptance. No further code work was approved in the capture session.
