@@ -316,8 +316,8 @@ children skip this entirely and reuse whatever the lead already built) then:
    file is simply inert, no other behavior change.
 2. Notifies `building ws-mcp from <source_root> @<short-HEAD>`, then runs
    `go build -ldflags "-X main.version=<plugin_version> -X
-   main.sourceCommit=<short HEAD>" -o <tmp> ./cmd/ws-mcp` synchronously (cwd
-   `tool_dir`), atomically renaming the result into
+   main.sourceCommit=<short HEAD>" -o <tmp> ./cmd/ws-mcp` (cwd `tool_dir`)
+   without blocking the session-start event loop, atomically renaming the result into
    `agents-plugin-pi/.runtime/local-devenv/ws-mcp` on success, and reports
    elapsed time.
 3. Sets `WS_MCP_BOOTSTRAP_BINARY` on the launcher child's own spawn `env`

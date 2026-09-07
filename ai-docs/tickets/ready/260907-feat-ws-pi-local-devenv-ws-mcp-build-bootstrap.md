@@ -172,3 +172,49 @@ bootstrap binary and from `runtime info` on the installed file that
 one worker and confirm no second build ran; remove the marker and confirm
 the next session takes the ordinary path. `npm pack --dry-run` must list
 neither the marker nor `.runtime/`.
+
+### Result (492ed0b6) - 2026-09-07
+
+Implemented on `impl/track/pi-agent/much-briar-vowed`: spec `89c61ca1`,
+implementation `cb0a89b7`, review corrections `492ed0b6` (plan baseline
+`a9b2cc09`). `npm test` 974/974. Launcher, `runtime.json`, `rsrc/`,
+`version-check.ts`, and ws-mcp Go are untouched; the byte-identity and
+version-pin tests pass unchanged.
+
+Behavioral delta: `src/local-devenv.ts` reads and validates
+`<pluginDir>/.local-devenv-runtime`, builds ws-mcp from `source_root` with the
+`plugin_version`/short-HEAD ldflags stamp into `.runtime/local-devenv/ws-mcp`
+(pid-scoped temp, rename on success), and returns the
+`WS_MCP_BOOTSTRAP_BINARY` env fragment. `startBridge` runs it for lead/fork
+spawn roles only, passes the env to the launcher child's `spawn` (the `env`
+option is omitted when nothing is injected), and prefixes marker context
+(source root, commit, built path) on any launch or `initialize` failure while
+the marker is active. The `ws-mcp.md` dogfood subsection now describes the
+marker loop.
+
+Deviation from the plan text: the build runs through a promisified
+`execFile` rather than `execFileSync` so the "building ws-mcp from ..."
+notification paints before Go starts (review Important #1); go's stdout and
+stderr are captured into the thrown error instead of inherited, because the
+Pi TUI owns the terminal.
+
+Live verification, partially completed by the executing session on the
+owner's machine (marker written for `/Users/kang-sw/devenv`, stale
+`ws-mcp-0.45.2-386e52e63bfa` and `last-launch-error` deleted): the module
+built in 386 ms and `runtime info` on the output reported `0.45.2` /
+`b3670d4b`; the launcher run with the injected env installed it as the new
+`ws-mcp-0.45.2-386e52e63bfa`, wrote `.compatibility.json`, and answered
+`initialize` with serverInfo version `0.45.2`; a second launcher run with no
+env reused the installed binary without rebuilding. `npm pack --dry-run`
+lists neither the marker nor `.runtime/`. Note that `/Users/kang-sw/devenv`
+was checked out on `impl/develop/agony-pesky-lend` (develop `41db217a` plus
+three project_tree commits) at build time, so the installed binary is that
+branch's state; the marker follows the root worktree's checkout by
+convention, as decided. Still owner-run: start a real Pi lead session and
+confirm the bridge-side notification and pin pass in the TUI, then remove the
+marker and confirm the next session takes the release path.
+
+Unresolved review minors, deferred: `source_root` is not validated as a
+directory (an invalid path surfaces as git's own error), `execFile` keeps
+its default 1 MiB output buffer, and a SIGKILL during the build can orphan
+`ws-mcp.<pid>.tmp` under `.runtime/local-devenv/`.
