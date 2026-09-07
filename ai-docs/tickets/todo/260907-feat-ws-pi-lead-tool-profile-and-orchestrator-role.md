@@ -75,13 +75,19 @@ them to children as `systemPromptPath`.
   - ws-mcp: `playbook.read`, `workflow_state`, `tickets.move`,
     `tickets.close`, `git.status`, `note.write`.
   - adapter-registered (unchanged by the filter): the
-    `do-i-really-have-to-*` pair, `lead-workflow-manual`, the `ws-agent-*`
-    driving tools, `ws-fork`, `ws-ask`/`ws-resolve`, the `goal-*` levers,
-    `ws-skill`.
+    `do-i-really-have-to-*` friction series (four tools, see the native
+    surface decision below), `lead-workflow-manual`, the `ws-agent-*`
+    driving tools, `explore`, `ws-fork`, `ws-ask`/`ws-resolve`,
+    `ws-execute`/`ws-approve`, the `goal-*` levers, `ws-skill`.
+    `ws-execute`/`ws-approve` stay resident on purpose (owner, 2026-09-07):
+    their context cost is small, they are the lead's second-busiest surface
+    in the dogfood record (45 `ws-approve` / 29 `ws-execute` calls over 33
+    lead sessions), and a "hotfix mode" lead with no execute path is worse
+    than one with it. Approval *attribution* still moves down for work
+    under an orchestrator (decision below); the tool itself remains.
   - held for dogfood, not resident by default: `project_tree` (lean render
     only landed in the dev build), `tickets.query` (discuss-time evidence
-    reads may go through `explore` instead), `git.log`, and the adapter
-    `ws-approve` (moves down with approval attribution below).
+    reads may go through `explore` instead), `git.log`.
   - **`todo.*` is not resident on the lead.** The todo runbook is installed
     by `route.resolve_*` and consumed by `lead-proceed`/`lead-implement`/
     `lead-review`, all of which run in the orchestrator; neither
@@ -107,6 +113,33 @@ them to children as `systemPromptPath`.
   choices. Not decided here: whether the lead itself lazy-loads withheld
   groups through the same channel — noted as a follow-up once the resident
   set has been dogfooded.
+- **Lead native surface: `ls` only; `edit`/`write` join the friction
+  series; `grep`/`find` are removed.** Today `computeLeadActiveTools`
+  (execute-gateway.ts) removes native `bash`/`read` and adds
+  `ws-execute`/`ws-approve` plus the two `do-i-really-have-to-*` tools. It
+  now also removes `edit`, `write`, `grep`, `find`, and adds
+  `do-i-really-have-to-edit-this-myself` and
+  `do-i-really-have-to-write-this-myself` (names follow the existing pair).
+  Intent is inertia removal: the lead should reach for `explore` (evidence)
+  and delegation (change) first, and the friction name plus a description in
+  the style of the existing read wrapper ("... is a fallback, not your first
+  move; consider `explore` / a spawned agent before calling this") is what
+  steers a model that would otherwise edit by habit. Dogfood record over 33
+  lead sessions: `edit` 30 / `write` 12 (25 of the edits on one day of
+  in-lead ticket authoring and implementation — exactly the work this ticket
+  moves to the fork and orchestrator), `grep`/`find`/`ls` 0 each, and the
+  read wrapper already called as often as `explore` (27 / 27). `grep`/`find`
+  therefore get no wrapper: nothing to redirect, and a wrapper would keep
+  their schemas resident. `ls` stays native (owner's call; cheap
+  orientation). Implementation: the edit/write wrappers delegate to Pi's
+  exported `createEditTool`/`createWriteTool` implementations (rename and
+  re-describe, do not re-implement exact-match edit semantics); the
+  `tool_call` hook's `block` option was considered and rejected — it keeps
+  the appealing native name, and the point is the name. Consequence for
+  forks: a fork inherits this friction-only array, and its loader activates
+  native `edit`/`write` (and whatever else its profile needs) after the
+  prefix — `splitDeferredTools` keys on names, so native tools defer the
+  same way adapter tools do.
 - **`orchestrator` is a new spawn role and tool group.** `SpawnRole` gains
   `"orchestrator"`; `TOOL_GROUPS` gains `orchestrator` = `full-worker` plus
   the `ws-agent-*` driving tools. This is the single exception to the
@@ -162,10 +195,18 @@ them to children as `systemPromptPath`.
 ### Phase 1: Lead tool profile
 
 Add the adapter-owned profile list and the lead-only registration filter in
-`bridge.ts`; keep the full `wsToolNames` for children. Tests: a lead-role
-registration exposes exactly the profile; a child-role registration is
-unchanged; an unknown name in the profile fails loudly at startup; the
-mercenary exclusion still applies on top. Verification: first-call `input`
+`bridge.ts`; keep the full `wsToolNames` for children. Extend
+`computeLeadActiveTools` per the native-surface decision (remove
+`edit`/`write`/`grep`/`find`, add the two new friction wrappers delegating
+to Pi's exported tool factories; `ls` untouched) and give the fork loader
+native `edit`/`write` in its profile. Tests: a lead-role registration
+exposes exactly the profile; a child-role registration is unchanged; an
+unknown name in the profile fails loudly at startup; the mercenary
+exclusion still applies on top; the reshaped lead array contains `ls` and
+the four friction tools and none of `bash`/`read`/`edit`/`write`/`grep`/
+`find`; the edit wrapper performs a real exact-match edit through the
+native implementation; worker/orchestrator groups still carry native
+`edit`/`write`/`grep`/`find`. Verification: first-call `input`
 token count of a fresh lead session before and after (baseline ~24.7k),
 recorded in the Result; one dogfood session confirms nothing the lead
 actually needs is missing, adjusting the list rather than the code. Fork
