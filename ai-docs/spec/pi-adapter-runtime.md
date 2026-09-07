@@ -248,6 +248,50 @@ fails loudly at load — it raises synchronously, registers no tools, and does n
 silently fall back to a partially-compatible server. The check reuses the value
 already returned by the handshake, so it costs no extra round-trip.
 
+### Developer-machine source build behind the same pin {#260907-pi-local-devenv-build-bootstrap}
+
+On a developer machine the adapter can run a ws-mcp built from local source
+instead of the release binary named by `runtime.json`, without relaxing the
+pin. Opt-in is a package-local marker file, `agents-plugin-pi/.local-devenv-runtime`,
+with the same schema as the launcher's own marker:
+`{"schema_version": 1, "source_root": <abs>, "tool_dir": <abs>, "go": <abs>}`.
+The launcher never honors this file here (its local-devenv gate excludes
+this package); the adapter reads it itself.
+
+Observable behavior:
+
+- **No marker**: inert. The launcher is spawned exactly as before and takes its
+  ordinary release-download path.
+- **Marker present, lead or fork role**: before the launcher is spawned, the
+  adapter builds `./cmd/ws-mcp` under `tool_dir` with `go`, stamping the
+  binary's reported version with the bundled `plugin_version` and its source
+  commit with `source_root`'s short `HEAD`, so `runtime info` answers which
+  source commit is running. The build output is renamed atomically into
+  `agents-plugin-pi/.runtime/local-devenv/ws-mcp`, and that path is handed to
+  the launcher as `WS_MCP_BOOTSTRAP_BINARY` on the launcher child's
+  environment only; the adapter's own process environment is unchanged, so
+  the variable never reaches child Pi processes. The launcher then performs
+  its normal bootstrap install (stamp clear, copy, exact-version and
+  capabilities check, re-stamp). A notification names the source root and
+  commit before the build and the elapsed time after; the build does not
+  block the session-start event loop. There is no fingerprint cache: every
+  lead/fork session start rebuilds, relying on Go's build cache.
+- **Marker present, worker or explore role**: the marker is not consulted; the
+  child's launcher reuses the binary the lead's launch installed.
+- **Invalid marker** (bad JSON, wrong `schema_version`, a missing or relative
+  path field, `tool_dir` without `cmd/ws-mcp`, or a `go` that is not an
+  executable file) or a **failed build**: session start fails loudly with the
+  offending field or the captured build output; there is no fallback to a
+  cached binary.
+- **Launch failure while the marker is active**: the error carries the source
+  root, short commit, and built path ahead of the launcher's own message, so a
+  source tree that no longer satisfies the pinned tool contract is
+  attributable to the marker rather than reported as a generic incompatible
+  runtime.
+
+The marker and the build output are gitignored and outside the package's
+`files` whitelist, so a published package neither carries nor honors them.
+
 ## Skill exposure {#260903-pi-bridge-skill-exposure}
 
 The adapter answers Pi's `resources_discover` event with the path to a ws skills
@@ -297,7 +341,9 @@ The ws-mcp child process is bound to a Pi session, not to extension load:
 - A spawn failure (missing interpreter, bad launcher path, failed runtime
   install) fails loudly and promptly: the pending `initialize` and any in-flight
   requests are rejected rather than left hanging, since a failed spawn emits no
-  normal exit event.
+  normal exit event. A developer-machine source build that fails, or an invalid
+  local-devenv marker, is one more spawn-time fail-loud case (see
+  "Developer-machine source build behind the same pin" under the version pin).
 
 The stdio transport reads the child's stdout as newline-delimited JSON-RPC (one
 message per line, no Content-Length framing) and decodes it so that multibyte
@@ -1477,6 +1523,15 @@ uses the canonical tree only for dev `-e` runs. The copy script is Node-builtins
 only, so it runs under a consumer's `npm install --omit=dev`, and no-ops when the
 canonical source is absent (packing from an already-vendored tarball). `npm pack`
 fires both hooks, so the copy runs redundantly but idempotently.
+
+Two further package-local files are developer-machine-only and never shipped:
+the `.local-devenv-runtime` marker and the `.runtime/local-devenv/` build
+output (see "Developer-machine source build behind the same pin" under the
+version pin). Both are gitignored and
+outside the `files` whitelist. The adapter, not the carried launcher copy, owns
+that developer bypass, because the launcher's own local-devenv path is gated to
+plugin-cache install locations and excludes this package; the launcher copy
+stays byte-identical.
 
 > [!note] Constraints
 > - This contract covers the bridge, the delegation spawner (upgraded to
