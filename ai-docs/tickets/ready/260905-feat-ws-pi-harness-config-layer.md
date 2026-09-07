@@ -446,12 +446,25 @@ Captured as `260906-bug-ws-pi-rsrc-mirror-drift`.
 
 ## Blocked (2026-09-06) — owner sign-off pending, not a work item
 
-All four phases carry a Result; no autonomous work remains. Closing waits
-on the owner-run live checks listed in Phases 1, 2 and 4 (each spawn kind
-against a ws-mcp whose version string matches the adapter pin, see the
-Phase 4 Result caveat) and on the AGENTS.md owner-clause wording question
-raised in the Decisions section. Once those are done, close the ticket to
-`.done/`.
+All four phases carry a Result. Closing waits on the owner-run live checks
+listed in Phases 1, 2 and 4 (each spawn kind against a ws-mcp whose version
+string matches the adapter pin, see the Phase 4 Result caveat) and on the
+items below. Once those are done, close the ticket to `.done/`.
+
+The AGENTS.md owner-clause wording question raised in the Decisions section
+is settled (owner, 2026-09-07): the harness-peer clause wording is accepted,
+and two clauses were added to the `Active direction` entry — non-Pi-extension
+code is authored on `develop` and cherry-picked to the Pi track, and the
+Pi-direction guidance is stripped when absorbed into a non-Pi branch.
+
+Remaining work item (owner, 2026-09-07): the Phase 2/3 ws-mcp Go changes
+(`07e75de3` pi harness bucket, `5767d7b4` `config.resolve_agent`, `0bd5d65e`
+prompt-override bucket widening) currently live only on `track/pi-agent`, not
+on `develop`. The new authoring-direction clause supersedes the earlier
+golden-rule exception ("every phase lands on the Pi track"): these commits
+must be re-homed onto `develop` and cherry-picked back to the Pi track before
+this ticket closes, satisfying the harness-peer clause's own "land through the
+normal `develop` release flow" requirement and restoring in-place testability.
 
 ## Non-goals
 
