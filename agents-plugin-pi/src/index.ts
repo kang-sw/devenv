@@ -8,8 +8,8 @@
  *     background processes from the top-level factory).
  *   - Re-registers every ws-mcp tool via pi.registerTool (bridge.ts) under a
  *     provider-legal sanitized name derived from the `ws/<tool>` prose form
- *     (`/` -> `__`, `.` -> `_`, e.g. `ws__playbook_print`) — SKILL.md prose
- *     stays untouched as literal `ws/playbook.print(...)` calls; the model
+ *     (`/` -> `__`, `.` -> `_`, e.g. `ws__playbook_read`) — SKILL.md prose
+ *     stays untouched as literal `ws/playbook.read(...)` calls; the model
  *     maps that prose to the sanitized registered name itself.
  *   - Exposes ws skills through resources_discover via a package-local-first
  *     resolver (src/skills-dir.ts): prefers a pack-time-copied

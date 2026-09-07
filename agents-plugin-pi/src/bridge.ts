@@ -3,7 +3,7 @@
  * it, lists its tools, and re-registers each one on Pi under a sanitized
  * name derived from "ws/" + rawName.
  *
- * SKILL.md prose is written as the literal `ws/playbook.print(...)` /
+ * SKILL.md prose is written as the literal `ws/playbook.read(...)` /
  * `ws/workflow_manual(...)` call syntax (see
  * ai-docs/spec/mcp-tools.md's McpNamespace template and
  * agents-plugin/skills/*), but that prose form is not itself a legal
@@ -15,10 +15,10 @@
  *
  * The REGISTERED name is therefore sanitized (`/` -> `__` namespace
  * separator, `.` -> `_` within-tool separator: `registeredName = "ws__" +
- * rawName.replaceAll(".", "_")`, e.g. `playbook.print` -> `ws__playbook_print`),
+ * rawName.replaceAll(".", "_")`, e.g. `playbook.read` -> `ws__playbook_read`),
  * matching the shape the reference harnesses already use for these same
- * tools (Claude Code registers them as `mcp__plugin_ws_ws__playbook_print`).
- * The model maps the unmodified `ws/playbook.print(...)` SKILL.md prose to
+ * tools (Claude Code registers them as `mcp__plugin_ws_ws__playbook_read`).
+ * The model maps the unmodified `ws/playbook.read(...)` SKILL.md prose to
  * the sanitized registered name itself (prose is not rewritten here — it is
  * not this bridge's to rewrite). Dispatch to ws-mcp always uses the RAW
  * dotted `rawName` (`client.callTool(rawName, ...)`) — sanitization is
@@ -74,7 +74,7 @@ export interface BridgeHandle {
    */
   manualSnapshotRef: { current: string | undefined };
   /**
-   * The static manual-body snapshot (`playbook.print("lead-workflow-manual")`),
+   * The static manual-body snapshot (`playbook.read("lead-workflow-manual")`),
    * fetched in lockstep with `manualSnapshotRef` (same gate, same
    * all-or-nothing degraded fallback). Used by the workflow_manual->
    * workflow_state mapping's `cutStaticBody` call — `undefined` disables the
@@ -241,7 +241,7 @@ export function shouldMapWorkflowManual(rawName: string, hasSnapshot: boolean, r
 export interface WorkflowManualMappingDeps {
   /** Duck-typed subset of `McpStdioClient` — lets tests supply a stub with no real subprocess. */
   callTool: (name: string, args: Record<string, unknown>) => Promise<McpToolCallResult>;
-  /** The `playbook.print("lead-workflow-manual")` snapshot fetched once at session_start. */
+  /** The `playbook.read("lead-workflow-manual")` snapshot fetched once at session_start. */
   staticBodySnapshot: string;
   catalog?: readonly ModelCatalogEntry[];
   inheritModel?: string;
@@ -590,7 +590,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     if (defaultKeyRef.current && isLeadOrFork(readSpawnRole(process.env))) {
       try {
         const manualResult = await client.callTool("workflow_manual", { session_key: defaultKeyRef.current });
-        const staticBodyResult = await client.callTool("playbook.print", {
+        const staticBodyResult = await client.callTool("playbook.read", {
           name: "lead-workflow-manual",
           session_key: defaultKeyRef.current,
         });

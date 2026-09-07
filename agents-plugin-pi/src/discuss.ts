@@ -11,7 +11,7 @@
  * single message therefore drives all three MVP gate actions in one run:
  *   (a) skills-load    — the `/skill:lead-discuss` expansion loads the skill;
  *   (b) bridge call    — the discuss skill body itself calls the bridged
- *                        `ws__playbook_print` / `ws__workflow_manual` tools;
+ *                        `ws__playbook_read` / `ws__workflow_manual` tools;
  *   (c) spawn round-trip — the appended instruction tells the model to dispatch
  *                        one `explore` recon leaf and report its result.
  *
