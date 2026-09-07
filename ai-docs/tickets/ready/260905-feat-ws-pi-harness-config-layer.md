@@ -457,14 +457,21 @@ and two clauses were added to the `Active direction` entry — non-Pi-extension
 code is authored on `develop` and cherry-picked to the Pi track, and the
 Pi-direction guidance is stripped when absorbed into a non-Pi branch.
 
-Remaining work item (owner, 2026-09-07): the Phase 2/3 ws-mcp Go changes
-(`07e75de3` pi harness bucket, `5767d7b4` `config.resolve_agent`, `0bd5d65e`
-prompt-override bucket widening) currently live only on `track/pi-agent`, not
-on `develop`. The new authoring-direction clause supersedes the earlier
-golden-rule exception ("every phase lands on the Pi track"): these commits
-must be re-homed onto `develop` and cherry-picked back to the Pi track before
-this ticket closes, satisfying the harness-peer clause's own "land through the
-normal `develop` release flow" requirement and restoring in-place testability.
+Re-home to `develop` (owner, 2026-09-07): DONE. The Phase 2/3 ws-mcp Go
+changes (`07e75de3` pi harness bucket, `0bd5d65e` prompt-override widening,
+`5767d7b4` `config.resolve_agent`) were cherry-picked onto `develop`, adapted
+to develop's post-fork MCP refactors: `config.resolve_agent` registered under
+develop's current version range (`>=0.45.2-dev <0.46.0`) in both
+`runtime.json` manifests, and the `server_test.go` visible-tools assertion
+kept develop's `tickets.query`/`playbook.read` renames while adding the new
+tool. Verified with the full `agents-plugin-tool` Go suite green on the
+develop base and pushed to `origin/develop` (`b1dae422..f268ffd2`). This
+satisfies the harness-peer clause's "land through the normal `develop`
+release flow" requirement and, via the local devenv dogfood loop, restores
+in-place testability. `track/pi-agent` still carries the original commits; no
+cherry-pick back is needed, and the two copies reconcile at the next
+`track` ↔ `develop` integration. Remaining before close: the owner-run live
+checks listed above.
 
 ## Non-goals
 
