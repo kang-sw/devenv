@@ -271,6 +271,43 @@ This path exists only for the repository-local Codex or Claude plugin
 development loop. The marker file is gitignored and should not exist in normal
 GitHub release installs, downstream repositories, or Windows installs.
 
+### Pi adapter dogfood (Pi-track-local)
+
+> Pi-track-local: this subsection describes `agents-plugin-pi/`, which exists
+> only on the Pi track. Strip it when this manual is absorbed into a non-Pi
+> branch (`develop`/`main`), the same discipline the AGENTS.md Pi bullet
+> follows.
+
+The Pi adapter spawns its ws-mcp through
+`agents-plugin-pi/bin/ws-mcp-launcher.py` from the project tree, not from a
+`.codex`/`.claude` plugin cache, so the `.local-devenv-runtime` marker loop
+above does not apply (the marker is honored only under a plugin-cache path).
+The adapter also pins its ws-mcp by an exact string match (`assertVersionPin`
+in `src/version-check.ts`), so a source build reporting a `-dev` suffix is
+rejected against the pinned release version. Dogfood the adapter's ws-mcp with
+a release-version-stamped build fed through `WS_MCP_BOOTSTRAP_BINARY`:
+
+1. Build the ws-mcp source stamped at the pinned version — the `plugin_version`
+   in `agents-plugin-pi/runtime.json`, which per AGENTS.md tracks `develop`:
+
+   ```sh
+   cd agents-plugin-tool
+   go build -ldflags "-X main.version=$(python3 -c 'import json;print(json.load(open("../agents-plugin-pi/runtime.json"))["plugin_version"])')" \
+     -o /tmp/ws-mcp ./cmd/ws-mcp
+   ```
+
+2. Launch Pi once with `WS_MCP_BOOTSTRAP_BINARY` set; the launcher installs the
+   binary into `agents-plugin-pi/.runtime/<platform>/` and later launches reuse
+   it without the variable:
+
+   ```sh
+   WS_MCP_BOOTSTRAP_BINARY=/tmp/ws-mcp pi -e agents-plugin-pi/src/index.ts ...
+   ```
+
+Rebuild and repeat step 2 after editing the ws-mcp source, or whenever the
+`.runtime/` cache is cleared. Once a ws-mcp release carrying the pinned version
+exists, the ordinary download path serves it and the stamp is no longer needed.
+
 ## Development Verification
 
 Use three verification levels while developing `ws-mcp` and plugin-managed
