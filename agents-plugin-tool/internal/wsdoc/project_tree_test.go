@@ -29,17 +29,19 @@ func TestProjectTreeRendersCoreSections(t *testing.T) {
 		"spec:",
 		"  demo.md  - Demo  [2f]",
 		"tickets:",
-		"  [ready] 260503-feat-demo",
-		"      parent: 260503-epic-demo  # Epic demo",
-		"      related: 260503-research-demo  # source · Research demo",
+		"  todo/260503-epic-demo",
+		"    ready/260503-feat-demo",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("ProjectTree output missing %q\n%s", want, got)
 		}
 	}
+	if strings.Contains(got, "related:") {
+		t.Fatalf("ProjectTree output unexpectedly included related: edges\n%s", got)
+	}
 }
 
-func TestProjectTreeFoldsOrphanIdeaTickets(t *testing.T) {
+func TestProjectTreeRendersFullBacklogNoOrphanFold(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
 	mustWrite(t, root, "ai-docs/tickets/ready/260503-feat-demo.md", "---\ntitle: Demo ticket\n---\n# Demo ticket\n")
@@ -54,47 +56,25 @@ func TestProjectTreeFoldsOrphanIdeaTickets(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"  [ready] 260503-feat-demo",
-		"  [todo] 260503-epic-demo",
-		"  [idea] 260503-child-demo",
-		"      parent: 260503-epic-demo  # Epic demo",
-		"      related: 260503-feat-demo  # source · Demo ticket",
-		"  idea: 2 orphan hidden — tickets.query statuses=idea to view",
+		"  ready/260503-feat-demo",
+		"  todo/260503-epic-demo",
+		"    idea/260503-child-demo",
+		"  idea/260503-orphan-one",
+		"  idea/260503-orphan-two",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("ProjectTree output missing %q\n%s", want, got)
 		}
 	}
-	for _, forbidden := range []string{
-		"[idea] 260503-orphan-one",
-		"[idea] 260503-orphan-two",
-	} {
-		if strings.Contains(got, forbidden) {
-			t.Fatalf("ProjectTree output included folded orphan %q\n%s", forbidden, got)
-		}
+	if strings.Contains(got, "orphan hidden") {
+		t.Fatalf("ProjectTree output unexpectedly folded orphan idea tickets\n%s", got)
+	}
+	if strings.Contains(got, "related:") {
+		t.Fatalf("ProjectTree output unexpectedly included related: edges\n%s", got)
 	}
 }
 
-func TestProjectTreeOrphanOnlyIdeaSuppressesNone(t *testing.T) {
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
-	mustWrite(t, root, "ai-docs/tickets/idea/260503-orphan-one.md", "---\ntitle: Orphan one\n---\n# Orphan one\n")
-	mustWrite(t, root, "ai-docs/tickets/idea/260503-orphan-two.md", "---\ntitle: Orphan two\n---\n# Orphan two\n")
-
-	got, err := ProjectTree(root)
-	if err != nil {
-		t.Fatalf("ProjectTree returned error: %v", err)
-	}
-
-	if !strings.Contains(got, "  idea: 2 orphan hidden — tickets.query statuses=idea to view") {
-		t.Fatalf("ProjectTree output missing orphan count line\n%s", got)
-	}
-	if strings.Contains(got, "(none)") {
-		t.Fatalf("ProjectTree output unexpectedly included (none) alongside folded orphans\n%s", got)
-	}
-}
-
-func TestProjectTreeNoOrphanIdeaCountLineWhenZero(t *testing.T) {
+func TestProjectTreeNoneOnlyWhenNothingRenders(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
 	mustWrite(t, root, "ai-docs/tickets/idea/260503-child-demo.md", "---\ntitle: Child idea\nparent: 260503-epic-demo\n---\n# Child idea\n")
@@ -103,12 +83,126 @@ func TestProjectTreeNoOrphanIdeaCountLineWhenZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProjectTree returned error: %v", err)
 	}
-
-	if !strings.Contains(got, "  [idea] 260503-child-demo") {
-		t.Fatalf("ProjectTree output missing parented idea line\n%s", got)
+	if !strings.Contains(got, "?/260503-epic-demo") {
+		t.Fatalf("ProjectTree output missing placeholder root\n%s", got)
 	}
-	if strings.Contains(got, "orphan hidden") {
-		t.Fatalf("ProjectTree output unexpectedly included orphan count line\n%s", got)
+	if strings.Contains(got, "(none)") {
+		t.Fatalf("ProjectTree output unexpectedly included (none) alongside a rendered ticket\n%s", got)
+	}
+}
+
+func TestProjectTreeNoneWhenTicketDirsEmpty(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	if err := os.MkdirAll(filepath.Join(root, "ai-docs", "tickets", "idea"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ProjectTree(root)
+	if err != nil {
+		t.Fatalf("ProjectTree returned error: %v", err)
+	}
+	if !strings.Contains(got, "  (none)") {
+		t.Fatalf("ProjectTree output missing (none) line for an empty backlog\n%s", got)
+	}
+}
+
+func TestProjectTreeDeadParentAnchorsLiveDescendant(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	mustWrite(t, root, "ai-docs/tickets/.done/260503-done-parent.md", "---\ntitle: Done parent\n---\n# Done parent\n")
+	mustWrite(t, root, "ai-docs/tickets/ready/260503-live-child.md", "---\ntitle: Live child\nparent: 260503-done-parent\n---\n# Live child\n")
+
+	got, err := ProjectTree(root)
+	if err != nil {
+		t.Fatalf("ProjectTree returned error: %v", err)
+	}
+	if !strings.Contains(got, "  done/260503-done-parent") {
+		t.Fatalf("ProjectTree output missing done anchor\n%s", got)
+	}
+	if !strings.Contains(got, "    ready/260503-live-child") {
+		t.Fatalf("ProjectTree output missing nested live child\n%s", got)
+	}
+}
+
+func TestProjectTreeDeadSubtreeWithNoLiveDescendantOmitted(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	mustWrite(t, root, "ai-docs/tickets/.done/260503-done-parent.md", "---\ntitle: Done parent\n---\n# Done parent\n")
+	mustWrite(t, root, "ai-docs/tickets/.done/260503-done-child.md", "---\ntitle: Done child\nparent: 260503-done-parent\n---\n# Done child\n")
+
+	got, err := ProjectTree(root)
+	if err != nil {
+		t.Fatalf("ProjectTree returned error: %v", err)
+	}
+	for _, forbidden := range []string{"260503-done-parent", "260503-done-child"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("ProjectTree output unexpectedly rendered dead-only subtree %q\n%s", forbidden, got)
+		}
+	}
+	if !strings.Contains(got, "  (none)") {
+		t.Fatalf("ProjectTree output missing (none) line for a fully-pruned backlog\n%s", got)
+	}
+}
+
+func TestProjectTreeMultiLevelDeadAncestorChain(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	mustWrite(t, root, "ai-docs/tickets/.dropped/260503-dropped-grandparent.md", "---\ntitle: Dropped grandparent\n---\n# Dropped grandparent\n")
+	mustWrite(t, root, "ai-docs/tickets/.done/260503-done-parent.md", "---\ntitle: Done parent\nparent: 260503-dropped-grandparent\n---\n# Done parent\n")
+	mustWrite(t, root, "ai-docs/tickets/ready/260503-live-child.md", "---\ntitle: Live child\nparent: 260503-done-parent\n---\n# Live child\n")
+	mustWrite(t, root, "ai-docs/tickets/.done/260503-dead-sibling.md", "---\ntitle: Dead sibling\nparent: 260503-dropped-grandparent\n---\n# Dead sibling\n")
+
+	got, err := ProjectTree(root)
+	if err != nil {
+		t.Fatalf("ProjectTree returned error: %v", err)
+	}
+	for _, want := range []string{
+		"  dropped/260503-dropped-grandparent",
+		"    done/260503-done-parent",
+		"      ready/260503-live-child",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("ProjectTree output missing %q\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "260503-dead-sibling") {
+		t.Fatalf("ProjectTree output unexpectedly rendered dead sibling with no live descendant\n%s", got)
+	}
+}
+
+func TestProjectTreeSharedPlaceholderForMissingParent(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	mustWrite(t, root, "ai-docs/tickets/idea/260503-orphan-a.md", "---\ntitle: Orphan A\nparent: 260503-missing\n---\n# Orphan A\n")
+	mustWrite(t, root, "ai-docs/tickets/idea/260503-orphan-b.md", "---\ntitle: Orphan B\nparent: 260503-missing\n---\n# Orphan B\n")
+
+	got, err := ProjectTree(root)
+	if err != nil {
+		t.Fatalf("ProjectTree returned error: %v", err)
+	}
+	if strings.Count(got, "?/260503-missing") != 1 {
+		t.Fatalf("ProjectTree output expected exactly one shared placeholder root\n%s", got)
+	}
+	for _, want := range []string{"idea/260503-orphan-a", "idea/260503-orphan-b"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("ProjectTree output missing %q\n%s", want, got)
+		}
+	}
+}
+
+func TestProjectTreeParentCycleDegradesToFlatRoots(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	mustWrite(t, root, "ai-docs/tickets/idea/260503-cycle-a.md", "---\ntitle: Cycle A\nparent: 260503-cycle-b\n---\n# Cycle A\n")
+	mustWrite(t, root, "ai-docs/tickets/idea/260503-cycle-b.md", "---\ntitle: Cycle B\nparent: 260503-cycle-a\n---\n# Cycle B\n")
+
+	got, err := ProjectTree(root)
+	if err != nil {
+		t.Fatalf("ProjectTree returned error: %v", err)
+	}
+	if !strings.Contains(got, "  idea/260503-cycle-a") || !strings.Contains(got, "  idea/260503-cycle-b") {
+		t.Fatalf("ProjectTree output expected both cycle members as flat roots\n%s", got)
 	}
 }
 
