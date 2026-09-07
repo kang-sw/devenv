@@ -1,3 +1,4 @@
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { stringify as stringifyYaml } from "yaml";
 
 /** The tiny host surface required for YAML previews. */
@@ -6,8 +7,10 @@ export interface ToolResultTuiModules {
   Box: new (paddingX?: number, paddingY?: number, bgFn?: (text: string) => string) => NativeBox;
   stripTerminalSequences(text: string): string;
   truncateToWidth(text: string, width: number, ellipsis?: string): string;
-  /** Test-only optional probe for physical-layout cache misses. */
+  /** Test-only optional probes for cached preparation/display work. */
   onPreviewLayout?: () => void;
+  onPreviewJoin?: () => void;
+  onPreviewStyle?: () => void;
 }
 
 export interface NativeText {
@@ -19,6 +22,15 @@ export interface NativeText {
 export interface NativePreviewComponent {
   render(width: number): string[];
   invalidate(): void;
+}
+
+/** A late-filled TUI reference lets native tools register before MCP startup. */
+export interface ToolPreviewTuiRef {
+  current: ToolResultTuiModules | undefined;
+}
+
+export function createToolPreviewTuiRef(): ToolPreviewTuiRef {
+  return { current: undefined };
 }
 
 export interface NativeBox extends NativePreviewComponent {
@@ -62,6 +74,9 @@ interface BoundedText extends NativePreviewComponent {
   style: ((text: string) => string) | undefined;
   format: PreviewFormat | undefined;
   display: string | undefined;
+  displayTheme: unknown;
+  plain: string | undefined;
+  theme: unknown;
   layoutKey: string | undefined;
   plainLayout: string[] | undefined;
   marker: string | undefined;
@@ -191,7 +206,7 @@ export function logicalPreview(text: string, limit = PREVIEW_ROWS): string {
   return text.replace(/\r\n?/g, "\n").split("\n").slice(0, limit).join("\n");
 }
 
-/** YAML only JSON containers; scalar JSON and non-JSON prose stay native. */
+/** YAML only JSON containers; scalar JSON and non-JSON prose stay RAW. */
 export function yamlContainerDisplay(text: string, serialize: YamlSerializer = stringifyYaml): string | undefined {
   try {
     const value: unknown = JSON.parse(text);
@@ -200,6 +215,17 @@ export function yamlContainerDisplay(text: string, serialize: YamlSerializer = s
   } catch {
     return undefined;
   }
+}
+
+export interface CompletedTextPreview {
+  kind: "yaml" | "raw";
+  text: string;
+}
+
+/** Every completed single text block previews: containers as YAML, all else RAW. */
+export function completedTextPreview(text: string, serialize: YamlSerializer = stringifyYaml): CompletedTextPreview {
+  const yaml = yamlContainerDisplay(text, serialize);
+  return yaml === undefined ? { kind: "raw", text } : { kind: "yaml", text: yaml };
 }
 
 /** Object-shaped call arguments are rendered as YAML; physical row capping happens at layout time. */
@@ -238,6 +264,9 @@ function createBoundedText(tui: ToolResultTuiModules): BoundedText {
     style: undefined,
     format: undefined,
     display: undefined,
+    displayTheme: undefined,
+    plain: undefined,
+    theme: undefined,
     layoutKey: undefined,
     plainLayout: undefined,
     marker: undefined,
@@ -254,17 +283,27 @@ function createBoundedText(tui: ToolResultTuiModules): BoundedText {
         tui.onPreviewLayout?.();
         const layout = physicalPreviewLayout(component.sanitized ?? "", boundedWidth, component.format!);
         component.plainLayout = layout.rows;
+        component.plain = undefined;
+        component.display = undefined;
+        component.displayTheme = undefined;
         component.marker = layout.marker;
         component.layoutKey = layoutKey;
       }
       const plainRows = component.format ? component.plainLayout ?? [] : undefined;
-      const plain = plainRows ? plainRows.join("\n") : component.sanitized ?? "";
-      const display = component.marker && component.format?.markerStyle && plainRows
-        ? `${component.style?.(plainRows.slice(0, -1).join("\n")) ?? plainRows.slice(0, -1).join("\n")}\n${component.format.markerStyle(component.marker)}`
-        : component.style?.(plain) ?? plain;
-      if (component.display !== display) {
-        component.text.setText(display);
-        component.display = display;
+      if (component.plain === undefined) {
+        tui.onPreviewJoin?.();
+        component.plain = plainRows ? plainRows.join("\n") : component.sanitized ?? "";
+      }
+      const plain = component.plain;
+      if (component.display === undefined || component.displayTheme !== component.theme) {
+        tui.onPreviewStyle?.();
+        const markerPrefix = component.marker ? `\n${component.marker}` : "";
+        const body = component.marker ? plain.slice(0, -markerPrefix.length) : plain;
+        component.display = component.marker && component.format?.markerStyle
+          ? `${component.style?.(body) ?? body}\n${component.format.markerStyle(component.marker)}`
+          : component.style?.(plain) ?? plain;
+        component.displayTheme = component.theme;
+        component.text.setText(component.display);
         component.cachedWidth = undefined;
         component.cachedNativeLines = undefined;
         component.cachedLines = undefined;
@@ -280,6 +319,8 @@ function createBoundedText(tui: ToolResultTuiModules): BoundedText {
     },
     invalidate(): void {
       component.text.invalidate();
+      component.display = undefined;
+      component.displayTheme = undefined;
       component.cachedWidth = undefined;
       component.cachedNativeLines = undefined;
       component.cachedLines = undefined;
@@ -294,11 +335,14 @@ function updateText(
   source: string,
   style: (text: string) => string,
   format?: PreviewFormat,
+  theme?: unknown,
 ): void {
   if (component.source !== source) {
     component.source = source;
     component.sanitized = sanitizePreviewText(tui.stripTerminalSequences(source));
     component.display = undefined;
+    component.displayTheme = undefined;
+    component.plain = undefined;
     component.layoutKey = undefined;
     component.plainLayout = undefined;
     component.marker = undefined;
@@ -307,6 +351,7 @@ function updateText(
     component.cachedLines = undefined;
   }
   component.style = style;
+  component.theme = theme;
   component.format = format;
 }
 
@@ -403,13 +448,13 @@ export function createToolPreviewRenderers(
         ? context.lastComponent
         : createCallPreviewComponent(tui);
       const previewTheme = theme as ToolPreviewTheme;
-      updateText(tui, component.title, toolName, (text) => previewTheme.fg("toolTitle", previewTheme.bold(text)));
+      updateText(tui, component.title, toolName, (text) => previewTheme.fg("toolTitle", previewTheme.bold(text)), undefined, previewTheme);
       updateText(tui, component.input, preview, (text) => previewTheme.fg("text", text), {
         expanded: false,
         trimOuterWhitespace: true,
         markerIndent: INPUT_START_INDENT,
         markerStyle: (marker) => previewTheme.fg("toolOutput", marker),
-      });
+      }, previewTheme);
       return component;
     },
 
@@ -421,10 +466,10 @@ export function createToolPreviewRenderers(
       const state = stateFor(context);
       const rendered = state.result?.content === result.content
         ? state.result.text
-        : yamlContainerDisplay(raw, serialize);
-      // Errors, prose, scalar JSON, later text blocks, and image/mixed output
-      // stay on Pi's existing text/image fallback path.
-      if (rendered === undefined) throw new UseNativeResultFallback();
+        : completedTextPreview(raw, serialize).text;
+      // Errors, partials, and non-text/mixed content retain Pi's native
+      // fallback. Completed single text blocks always preview, preserving RAW
+      // prose/scalars byte-for-byte before display-only sanitization.
       state.result = { content: result.content, text: rendered };
 
       const component = isResultPreviewComponent(context.lastComponent)
@@ -434,10 +479,46 @@ export function createToolPreviewRenderers(
       updateText(tui, component.output, rendered, (output) => previewTheme.fg("toolOutput", output), {
         expanded: options.expanded,
         trimOuterWhitespace: false,
-      });
+      }, previewTheme);
       return component;
     },
   };
+}
+
+type ToolDefinition = Parameters<ExtensionAPI["registerTool"]>[0];
+
+/**
+ * Register a ws-owned tool through the one presentation seam. Existing custom
+ * renderers are deliberately left untouched; unavailable helpers throw into
+ * Pi's documented per-slot native fallback.
+ */
+export function registerWsTool(
+  pi: Pick<ExtensionAPI, "registerTool">,
+  definition: ToolDefinition,
+  tuiRef: ToolPreviewTuiRef,
+): void {
+  const existing = definition as ToolDefinition & { renderCall?: unknown; renderResult?: unknown };
+  if (existing.renderCall || existing.renderResult) {
+    pi.registerTool(definition);
+    return;
+  }
+
+  let cachedTui: ToolResultTuiModules | undefined;
+  let cachedRenderers: ReturnType<typeof createToolPreviewRenderers> | undefined;
+  const renderers = () => {
+    const tui = tuiRef.current;
+    if (!tui) throw new UseNativeResultFallback();
+    if (cachedTui !== tui || !cachedRenderers) {
+      cachedTui = tui;
+      cachedRenderers = createToolPreviewRenderers(tui, definition.name);
+    }
+    return cachedRenderers;
+  };
+  pi.registerTool({
+    ...definition,
+    renderCall: (...args: Parameters<ReturnType<typeof createToolPreviewRenderers>["renderCall"]>) => renderers().renderCall(...args),
+    renderResult: (...args: Parameters<ReturnType<typeof createToolPreviewRenderers>["renderResult"]>) => renderers().renderResult(...args),
+  } as ToolDefinition);
 }
 
 /** Guarded because Pi resolves its nested TUI package only while loading us. */

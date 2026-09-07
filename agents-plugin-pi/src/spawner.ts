@@ -89,6 +89,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { RpcClient, type RpcClientOptions } from "@earendil-works/pi-coding-agent";
 import type { McpStdioClient, McpToolCallResult } from "./mcp-stdio-client.ts";
 import type { BridgeHandle } from "./bridge.ts";
+import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 import { suggestModels, formatExploreTierRefusal, formatTierWarning, modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx, type ModelCatalogEntry, type TierFailure, type TierRejection } from "./model-catalog.ts";
 import { WS_PI_EXPLORE_MODE_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readExploreMode, readSpawnRole, type ExploreMode, type SpawnRole } from "./process-role.ts";
 
@@ -2860,6 +2861,8 @@ export function registerAgentTools(
   runExploreLeaf: typeof exploreLeaf = exploreLeaf,
   /** Adapter-owned persistent-research guide, wired by index.ts. */
   exploreGuidePath = "explore-guide.md",
+  /** Shared ws-owned native/MCP presentation seam. */
+  toolPreviewTuiRef: ToolPreviewTuiRef = createToolPreviewTuiRef(),
 ): AgentToolsHandle {
   const rpcRegistry: RpcAgentRegistry = new Map();
   const exploreRegistry: AgentRegistry = new Map();
@@ -2911,7 +2914,7 @@ export function registerAgentTools(
     return `${method}\n\nQuestion:\n${query}`;
   }
 
-  pi.registerTool({
+  registerWsTool(pi, {
     name: "ws-agent-spawn",
     label: "ws-agent-spawn",
     description:
@@ -2978,9 +2981,9 @@ export function registerAgentTools(
       );
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     },
-  });
+  }, toolPreviewTuiRef);
 
-  pi.registerTool({
+  registerWsTool(pi, {
     name: "ws-agent-send",
     label: "ws-agent-send",
     description:
@@ -3010,9 +3013,9 @@ export function registerAgentTools(
       );
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     },
-  });
+  }, toolPreviewTuiRef);
 
-  pi.registerTool({
+  registerWsTool(pi, {
     name: "ws-agent-list",
     label: "ws-agent-list",
     description:
@@ -3031,9 +3034,9 @@ export function registerAgentTools(
       const result = listAgents(rpcRegistry, { includePrompt: p.include_prompt });
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     },
-  });
+  }, toolPreviewTuiRef);
 
-  pi.registerTool({
+  registerWsTool(pi, {
     name: "ws-agent-stop",
     label: "ws-agent-stop",
     description:
@@ -3050,9 +3053,9 @@ export function registerAgentTools(
       const result = await stopAgent(rpcRegistry, p.agent_id, pi);
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     },
-  });
+  }, toolPreviewTuiRef);
 
-  pi.registerTool({
+  registerWsTool(pi, {
     name: "ws-agent-transcript",
     label: "ws-agent-transcript",
     description:
@@ -3067,9 +3070,9 @@ export function registerAgentTools(
       const result = getAgentTranscriptPath(rpcRegistry, p.agent_id);
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     },
-  });
+  }, toolPreviewTuiRef);
 
-  pi.registerTool({
+  registerWsTool(pi, {
     name: REPORT_TO_LEAD_TOOL_NAME,
     label: REPORT_TO_LEAD_TOOL_NAME,
     description:
@@ -3096,13 +3099,13 @@ export function registerAgentTools(
       // not touch the registry.
       return { content: [{ type: "text", text: "reported" }] };
     },
-  });
+  }, toolPreviewTuiRef);
 
   // Tool registration is role/mode gated, while the CLI allowlist remains the
   // enforcement layer. A simple researcher and a terminal collector get no
   // explore tool at all; only workers and deep researchers can collect.
   if (isLeadRole || role === "worker" || (role === "explore" && exploreMode === "deep")) {
-    pi.registerTool({
+    registerWsTool(pi, {
       name: "explore",
       label: "explore",
       description: isLeadRole
@@ -3154,7 +3157,7 @@ export function registerAgentTools(
         );
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       },
-    });
+    }, toolPreviewTuiRef);
   }
 
   return {

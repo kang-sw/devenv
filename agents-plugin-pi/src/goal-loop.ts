@@ -76,6 +76,7 @@
 import { readFileSync } from "node:fs";
 import type { ContextUsage, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readSpawnRole } from "./process-role.ts";
+import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 import { clearWakeStart, reserveWakeStart, heldPushQueue, flushHeldPushes, hasRunningAgents, leadCompactingRef, leadWakeStartPendingRef, type RpcAgentRegistry } from "./spawner.ts";
 
 // ---------------------------------------------------------------------------
@@ -447,7 +448,11 @@ export interface GoalLoopShutdownHandle {
  * (not inside `session_start`) — command/tool registration is declarative
  * here, same as every other command/tool in index.ts.
  */
-export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions): GoalLoopShutdownHandle {
+export function registerGoalLoop(
+  pi: ExtensionAPI,
+  opts: RegisterGoalLoopOptions,
+  toolPreviewTuiRef: ToolPreviewTuiRef = createToolPreviewTuiRef(),
+): GoalLoopShutdownHandle {
   let state: GoalLoopState = initialGoalLoopState();
   // 260906 (compaction push-hold ticket, Phase 1): true only between the
   // `goal-compact-and-continue` lever setting `leadCompactingRef` and the
@@ -871,7 +876,7 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
     setImmediate(() => releaseAfterCompaction(ctx, event.errorMessage));
   });
 
-  pi.registerTool({
+  registerWsTool(pi, {
     name: "goal-achieved",
     label: "goal-achieved",
     description: "Terminal lever: declare the active goal achieved and stop the goal-loop re-injection. Call this instead of describing completion in prose.",
@@ -888,9 +893,9 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
       state = disarmGoal();
       return { content: [{ type: "text", text: `Goal achieved: ${p.summary}` }] };
     },
-  });
+  }, toolPreviewTuiRef);
 
-  pi.registerTool({
+  registerWsTool(pi, {
     name: "goal-blocked",
     label: "goal-blocked",
     description: "Terminal lever: declare the active goal blocked and stop the goal-loop re-injection. Call this instead of describing a blocker in prose.",
@@ -907,9 +912,9 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
       state = disarmGoal();
       return { content: [{ type: "text", text: `Goal blocked: ${p.reason}` }] };
     },
-  });
+  }, toolPreviewTuiRef);
 
-  pi.registerTool({
+  registerWsTool(pi, {
     name: "goal-compact-and-continue",
     label: "goal-compact-and-continue",
     description:
@@ -964,7 +969,7 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
       });
       return { content: [{ type: "text", text: buildCompactionLeverResult(p.carry_forward) }] };
     },
-  });
+  }, toolPreviewTuiRef);
 
   return {
     resetCompactionStateForShutdown() {
