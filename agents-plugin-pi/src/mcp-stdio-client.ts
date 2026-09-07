@@ -164,6 +164,25 @@ export class PendingRequestRegistry {
   }
 }
 
+/**
+ * Node-level `spawn` options for the ws-mcp child. Pulled out of the
+ * `McpStdioClient` constructor as a small pure helper so "no env injected ->
+ * spawn options carry no `env` key at all" (byte-for-byte identical to
+ * pre-local-devenv behavior) is directly unit-testable without a real
+ * subprocess. When `env` is provided, it is merged on top of a copy of
+ * `process.env` — never replacing it — matching every other env-carrying
+ * spawn in this codebase (e.g. spawner.ts's child launches).
+ */
+export function buildStdioSpawnOptions(
+  cwd: string,
+  env?: Record<string, string>,
+): { cwd: string; stdio: ["pipe", "pipe", "pipe"]; env?: NodeJS.ProcessEnv } {
+  if (env === undefined) {
+    return { cwd, stdio: ["pipe", "pipe", "pipe"] };
+  }
+  return { cwd, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...env } };
+}
+
 export class McpStdioClient {
   private readonly proc: ChildProcessWithoutNullStreams;
   private readonly registry = new PendingRequestRegistry();
@@ -173,12 +192,9 @@ export class McpStdioClient {
   constructor(
     command: string,
     args: string[],
-    options: { cwd: string; onStderr?: (line: string) => void },
+    options: { cwd: string; env?: Record<string, string>; onStderr?: (line: string) => void },
   ) {
-    this.proc = spawn(command, args, {
-      cwd: options.cwd,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    this.proc = spawn(command, args, buildStdioSpawnOptions(options.cwd, options.env));
 
     this.lineBuffer = new JsonRpcLineBuffer(
       (msg) => this.handleMessage(msg as JsonRpcResponse),
@@ -283,11 +299,15 @@ export function spawnWsMcpClient(
   launcherPath: string,
   pluginDir: string,
   onStderr?: (line: string) => void,
+  env?: Record<string, string>,
 ): McpStdioClient {
   // Mirrors agents-plugin/.mcp.json's launch shape: python3 <launcher>
   // serve --stdio, run with cwd set to the launcher's own plugin directory.
+  // `env` is the local-devenv bootstrap fragment (bridge.ts), applied only
+  // when the caller has something to inject — see buildStdioSpawnOptions.
   return new McpStdioClient("python3", [launcherPath, "serve", "--stdio"], {
     cwd: pluginDir,
     onStderr,
+    env,
   });
 }

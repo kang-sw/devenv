@@ -25,9 +25,11 @@
  * registration-only and never touches the wire call to ws-mcp.
  */
 
+import { execFileSync } from "node:child_process";
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { spawnWsMcpClient, type McpStdioClient, type McpContentItem, type McpToolCallResult } from "./mcp-stdio-client.ts";
 import { assertVersionPin, readRuntimeContract } from "./version-check.ts";
+import { buildLocalDevenvBootstrap, type LocalDevenvContext } from "./local-devenv.ts";
 import { WS_PI_PARENT_SESSION_KEY_ENV, isLeadOrFork, readSpawnRole, type SpawnRole } from "./process-role.ts";
 // Value import from spawner.ts is safe: spawner.ts only imports `type
 // BridgeHandle` from this file (type-only, erased at build/runtime), so no
@@ -308,6 +310,53 @@ export function sanitizeToolName(rawName: string): string {
   return `ws__${rawName.replaceAll(".", "_")}`;
 }
 
+/**
+ * Prefixes local-devenv source/commit/built-path context onto a launcher or
+ * `initialize`/`assertVersionPin`/`listTools` failure, so the launcher's own
+ * generic "incompatible ws-mcp runtime after repair" (or any other startup
+ * failure) becomes actionable for a developer running against a source
+ * build instead of a release download. `context` is `undefined` whenever
+ * the local-devenv marker was absent or the caller's role skipped it
+ * (worker/explore) — in that case `err` passes through unchanged (coerced to
+ * `Error` if it wasn't already one, so the return type is always an `Error`
+ * regardless of what was thrown).
+ *
+ * Extracted as its own pure function (matching this file's established
+ * gate-extraction convention, e.g. `shouldMapWorkflowManual`) because
+ * `startBridge` spawns a real subprocess and cannot be exercised in
+ * `node --test`.
+ */
+export function wrapLaunchErrorWithLocalDevenvContext(err: unknown, context: LocalDevenvContext | undefined): Error {
+  const original = err instanceof Error ? err : new Error(String(err));
+  if (!context) return original;
+  return new Error(
+    `ws-pi-bridge: local-devenv build active (source_root=${context.sourceRoot}, commit=${context.sourceCommit}, ` +
+      `built=${context.builtPath}): ${original.message}`,
+  );
+}
+
+/**
+ * Real `LocalDevenvBuildDeps.runBuild` implementation for `startBridge`'s
+ * call site. Deviates from an earlier `stdio: "inherit"` sketch: Pi's TUI
+ * owns the terminal at session-start time, so inheriting stdio here would
+ * corrupt the TUI's rendering instead of showing build output. Captures
+ * stdout/stderr via pipe instead and folds both streams into the thrown
+ * `Error`'s message on a non-zero exit, so a build failure stays fully
+ * diagnosable from the error alone (surfaced to the user via
+ * `wrapLaunchErrorWithLocalDevenvContext` above once the build succeeds but
+ * a later launch step fails, or directly when the build itself fails).
+ */
+function runGoBuild(argv: string[], opts: { cwd: string }): void {
+  try {
+    execFileSync(argv[0], argv.slice(1), { cwd: opts.cwd, stdio: ["ignore", "pipe", "pipe"] });
+  } catch (err) {
+    const execErr = err as NodeJS.ErrnoException & { stdout?: Buffer | string; stderr?: Buffer | string };
+    const stdout = execErr.stdout ? execErr.stdout.toString() : "";
+    const stderr = execErr.stderr ? execErr.stderr.toString() : "";
+    throw new Error(`ws-pi-bridge: go build failed (${execErr.message})\n--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}`);
+  }
+}
+
 const MERCENARY_RAW_PREFIX = "mercenary.";
 
 /**
@@ -429,9 +478,33 @@ export function resolveSessionKey(
 
 export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promise<BridgeHandle> {
   const runtime = readRuntimeContract(opts.runtimeJsonPath);
-  const client = spawnWsMcpClient(opts.launcherPath, opts.pluginDir, (line) => {
-    console.error(`[ws-mcp] ${line.trimEnd()}`);
-  });
+
+  // Lead/fork-only: a worker/explore child never consults the local-devenv
+  // marker or builds ws-mcp itself — it reuses whatever the launcher already
+  // installed for the lead via the compatibility stamp. Runs before the
+  // launcher is spawned so a defined result's env fragment can be threaded
+  // into spawnWsMcpClient below.
+  let localDevenvContext: LocalDevenvContext | undefined;
+  let launcherEnv: Record<string, string> | undefined;
+  if (isLeadOrFork(readSpawnRole(process.env))) {
+    const bootstrap = await buildLocalDevenvBootstrap(opts.pluginDir, runtime.plugin_version, {
+      runBuild: runGoBuild,
+      notify: (m) => notify(opts.ui, `ws-pi-bridge: ${m}`),
+    });
+    if (bootstrap) {
+      launcherEnv = bootstrap.env;
+      localDevenvContext = bootstrap.context;
+    }
+  }
+
+  const client = spawnWsMcpClient(
+    opts.launcherPath,
+    opts.pluginDir,
+    (line) => {
+      console.error(`[ws-mcp] ${line.trimEnd()}`);
+    },
+    launcherEnv,
+  );
 
   let shutdownCalled = false;
   const shutdown = () => {
@@ -618,7 +691,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     notify(opts.ui, `ws-pi-bridge: registered ${tools.length} ws__* tools from ws-mcp ${initResult.serverInfo.version}`);
   } catch (err) {
     shutdown();
-    throw err;
+    throw wrapLaunchErrorWithLocalDevenvContext(err, localDevenvContext);
   }
 
   return {
