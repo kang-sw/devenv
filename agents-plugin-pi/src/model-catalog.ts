@@ -11,11 +11,27 @@ export type TierRejection = {
   resolvedFrom: string;
 } & ({ why: "unknown"; suggestions: string[] } | { why: "no-auth" });
 
+export type TierFailure = {
+  kind: "transport" | "parse" | "unset" | "unknown" | "no-auth";
+  model?: string;
+  resolvedFrom?: string;
+  catalogEmpty?: boolean;
+};
+
 /** Read current runtime membership and configured-auth presence, never cached availability or scoped models. */
 export function modelCatalogFromToolCtx(toolCtx: unknown): ModelCatalogEntry[] {
   const registry = (toolCtx as ExtensionContext | undefined)?.modelRegistry;
   if (!registry) return [];
-  return registry.getAll().map(model => ({ provider: model.provider, id: model.id, hasAuth: registry.hasConfiguredAuth(model) }));
+  try {
+    const models = registry.getAll();
+    if (!Array.isArray(models)) return [];
+    return models.map(model => ({ provider: model.provider, id: model.id, hasAuth: registry.hasConfiguredAuth(model) }));
+  } catch {
+    // Callers that require a configured tier treat this as an empty/unavailable
+    // catalog and refuse before allocating a child. Ordinary spawns preserve
+    // their historical inherit fallback.
+    return [];
+  }
 }
 
 /** Keep receiver binding and Pi's TUI/RPC-only notification gate. The slash-command pointer is human-only. */
@@ -79,4 +95,20 @@ export function formatTierWarning(alias: string, rejected: TierRejection, inheri
   const tail = catalogEmpty ? " Pi's model catalog is empty." : rejected.suggestions.length
     ? ` Did you mean ${rejected.suggestions.map(oneLine).join(", ")}?` : " No close match in Pi's model catalog.";
   return `${base}which is not a provider/id entry in Pi's model catalog; ${inherited}${tail}`;
+}
+
+/** Exploration fails closed: unlike ordinary workers it must never replace an
+ * unavailable cheap tier with the caller's potentially expensive model. */
+export function formatExploreTierRefusal(alias: string, failure: TierFailure | undefined, rejected: TierRejection | undefined): string {
+  const model = rejected?.model ?? failure?.model;
+  const detail = failure?.kind === "no-auth" || rejected?.why === "no-auth"
+    ? `provider ${oneLine((model ?? "configured model").split("/")[0]!)} has no configured auth`
+    : failure?.catalogEmpty
+      ? "Pi's model catalog is empty or unavailable"
+      : failure?.kind === "unknown" || rejected?.why === "unknown"
+        ? `configured model ${quoted(model ?? "unknown")} is not in Pi's model catalog`
+        : failure?.kind === "unset"
+          ? "small is not configured for harness pi"
+          : "small resolution failed";
+  return `explore refused: tier ${oneLine(alias)} cannot select an authenticated cheap Pi model: ${detail}. Configure agents.tier for harness pi via config.tune or lead-tune.`;
 }

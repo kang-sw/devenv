@@ -29,6 +29,17 @@ export type SpawnRole = "worker" | "explore" | "fork";
 /** Env var carrying the spawned child's role. Absent on the host lead process. */
 export const WS_PI_SPAWN_ROLE_ENV = "WS_PI_SPAWN_ROLE";
 
+/** Internal exploration preset mode. It is meaningful only for an explore-role process. */
+export const WS_PI_EXPLORE_MODE_ENV = "WS_PI_EXPLORE_MODE";
+export type ExploreMode = "simple" | "deep";
+
+/** Reads the internal mode only for a correctly marked explore process. */
+export function readExploreMode(env: NodeJS.ProcessEnv): ExploreMode | undefined {
+  if (readSpawnRole(env) !== "explore") return undefined;
+  const value = env[WS_PI_EXPLORE_MODE_ENV];
+  return value === "simple" || value === "deep" ? value : undefined;
+}
+
 /**
  * Env var carrying the lead's own session key, delivered to a `fork` child
  * only (reserved by this phase — no spawn path sets it yet; see this file's

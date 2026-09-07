@@ -463,12 +463,18 @@ adapter issues a prompt to the child (every prompt site goes through one
 just-launched child reads as not running), confirmed by `agent_start`, and
 cleared on settle, stop, exit or spawn failure.
 
-### explore — one-shot recon leaf {#260903-pi-explore-recon-leaf}
+### explore — persistent two-mode research {#260903-pi-explore-recon-leaf}
 
-`explore({ query })` is a thin one-shot preset for ephemeral read-only
-reconnaissance: a fixed `explore` playbook and the `recon` tool group, no
-continuation. Registration branches on the calling process's own role, fixed
-once at factory time — the shape differs by who is calling it:
+`explore({ query, deep_research? })` is a persistent research preset. It returns
+exactly `{ agent_id, alias }` after the initial RPC prompt is accepted; the
+record parks, resumes through `ws-agent-send`, persists through the sidecar, and
+its settle `last_message` is an exploration answer. Omitted/false is **simple**:
+configured authenticated `small` and exactly `read, grep, find, ls`; missing,
+unavailable, malformed, or unauthenticated small fails before allocation. True is
+**deep**: the dispatching lead/fork's concrete model and thinking level are
+captured together and frozen; it has those reads plus `explore`, and can use one
+blocking authenticated-small, no-bash collection leaf. Registration branches on
+the calling process role and internal mode:
 
 - **Lead or fork.** `explore` is a preset over `spawnAgent` (260906): the same
   RPC-backed engine `ws-agent-spawn` uses, spawned with `toolGroup: "recon"`
@@ -500,15 +506,15 @@ once at factory time — the shape differs by who is calling it:
   through its own tool result, pushes no message, and is outside the pushed
   status line's running count.
 
-Either way, `explore`'s own `recon` allowlist excludes `explore` and every
-`ws-agent-*` tool, so an explore child spawns neither another explore nor a
-worker — it is the non-recursive terminal of the delegation tree (see bounded
-depth below). `explore` is the one delegation tool a worker itself may reach.
+A simple researcher has no explore tool. A deep researcher alone has the
+internal `read-only-explore` group and may invoke one terminal collection leaf;
+the leaf clears the deep marker and uses the genuinely no-bash `read-only`
+profile. Recon remains the worker leaf profile and retains bash.
 
 ### Per-spawn tool curation {#260903-pi-spawner-tool-groups}
 
 The `--tools` allowlist for each spawn resolves from an adapter-owned tool-group
-table — `read-only`, `recon`, and `full-worker` — mapping each group to a Pi
+table — `read-only`, `read-only-explore`, `recon`, and `full-worker` — mapping each group to a Pi
 tool-name allowlist. Built-in Pi tools are named directly; the `full-worker` group
 additionally includes the bridge's live `ws__*` tool names, taken from the running
 bridge rather than hardcoded so the group tracks the actual ws-mcp tool set. A
@@ -619,8 +625,8 @@ four failed round-trips (a server without the tool, a broken stdio) also fire
 the advisory rather than suppressing it. The advisory is appended after the
 tool's own content (never prepended, never mutating the original in place)
 and is added only on a successful `workflow_manual` result, never on an error
-response. Spawns and explores still degrade silently to inherit while every
-tier is unset; the advisory is the only pressure and never blocks work.
+response. Ordinary spawns still degrade silently to inherit while every tier is unset;
+simple explore and deep collection instead fail closed before child allocation.
 
 ### Child→lead report channel {#260904-pi-report-to-lead-channel}
 

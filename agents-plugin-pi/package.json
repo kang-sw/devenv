@@ -15,7 +15,8 @@
     "runtime.json",
     "goal-loop-config.json",
     "pi-lead-guide.md",
-    "execute-worker-guide.md"
+    "execute-worker-guide.md",
+    "explore-guide.md"
   ],
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.84.4",

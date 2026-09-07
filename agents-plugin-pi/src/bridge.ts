@@ -105,9 +105,9 @@ function firstText(result: McpToolCallResult): string | undefined {
  */
 export const MODEL_CATALOG_ADVISORY =
   "> [!note]\n" +
-  "> **Pi's model tier table has no entries.** ws-agent-spawn and explore " +
-  "currently silently inherit the parent session's model for every " +
-  "delegated agent — costly for cheap recon/explore work. Configure at " +
+  "> **Pi's model tier table has no entries.** ws-agent-spawn currently " +
+  "inherits the parent session's model for unmapped tiers; simple explore " +
+  "instead refuses rather than spending an inherited model. Configure at "
   "least a `small` tier for harness `pi` via `config.tune agents.tier " +
   "harness:pi` (see lead-tune) to route explore/recon to a cheaper model; " +
   "the other three fixed tiers (`medium`/`large`/`xlarge`) are yours to " +

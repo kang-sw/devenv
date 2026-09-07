@@ -99,15 +99,12 @@ describe("captureOrphans", () => {
     );
   });
 
-  test("260906: skips a oneShot record (a lead explore) — it has no dormant-resumable resting state to revive; a non-oneShot record is unaffected", () => {
+  test("persistent explore records are captured for restart alongside workers", () => {
     const registry: RpcAgentRegistry = new Map([
       ["worker", record({ agentId: "worker", client: {} as RpcClient })],
-      ["explore", record({ agentId: "explore", client: {} as RpcClient, oneShot: true, spawnRole: "explore" })],
+      ["explore", record({ agentId: "explore", client: {} as RpcClient, spawnRole: "explore", exploreMode: "simple", modelBase: "p/m", modelEffort: "off", toolGroup: "read-only" })],
     ]);
-    assert.deepEqual(
-      captureOrphans(registry).map((o) => o.agentId),
-      ["worker"],
-    );
+    assert.deepEqual(captureOrphans(registry).map((o) => o.agentId).sort(), ["explore", "worker"]);
   });
 
   test("records the state at shutdown and the last-report time (relay #2: the roll-call needs both)", () => {
