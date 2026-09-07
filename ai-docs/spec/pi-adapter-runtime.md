@@ -349,10 +349,10 @@ report channel" below):
   (this now includes one the adapter parked automatically after it settled —
   see "Turn completion is gated on RPC idle") auto-resumes it from its on-disk
   session (keeping the same ws `session_key`) and then delivers — so resume is
-  subsumed by send, and there is no separate continue tool. `ws-agent-send`
-  refuses outright against a **one-shot** record (260906; see `explore`
-  below) — a lead/fork explore child has no continuation to send into, and
-  its answer is delivered by its own settle push, not by driving it further.
+  subsumed by send, and there is no separate continue tool. Persistent
+  researchers use this same send path after settling or restart; their answer
+  is delivered by `ws-agent-settled.last_message`, and a send starts the next
+  research turn without re-resolving or retuning them.
 - `ws-agent-list({ include_prompt? })` — enumerate registry members with their
   status, alias, title and model. Status vocabulary is `running` / `idle` /
   `dormant`, but `idle` (260905) is now transient rather than a resting state:
@@ -384,8 +384,9 @@ ends its turn, and is woken by the pushed message.
 
 Each spawned child inherits a **process-role marker** in its environment so the
 extension running inside it can tell what kind of process it is: `WS_PI_SPAWN_ROLE`
-carries `worker` (a `ws-agent-spawn` child), `explore` (a recon leaf), or `fork`
-(a lead-caliber side-thread peer); its absence marks the host **lead** process.
+carries `worker` (including execute-worker records), `explore` (a persistent
+researcher or terminal collection leaf), or `fork` (a lead-caliber side-thread
+peer); its absence marks the host **lead** process.
 A `fork` additionally carries `WS_PI_PARENT_SESSION_KEY` (the lead's key), which
 feeds the fork's key-normalization parent-key case and lets the bridge mint the
 fork's key with lead lineage. This single marker is the source for both the
@@ -463,52 +464,48 @@ adapter issues a prompt to the child (every prompt site goes through one
 just-launched child reads as not running), confirmed by `agent_start`, and
 cleared on settle, stop, exit or spawn failure.
 
-### explore — one-shot recon leaf {#260903-pi-explore-recon-leaf}
+### explore — persistent two-mode research {#260903-pi-explore-recon-leaf}
 
-`explore({ query })` is a thin one-shot preset for ephemeral read-only
-reconnaissance: a fixed `explore` playbook and the `recon` tool group, no
-continuation. Registration branches on the calling process's own role, fixed
-once at factory time — the shape differs by who is calling it:
+`explore({ query, deep_research? })` is a persistent research preset. It returns
+exactly `{ agent_id, alias }` after the initial RPC prompt is accepted; the
+record parks, resumes through `ws-agent-send`, persists through the sidecar, and
+its settle `last_message` is an exploration answer. Omitted/false is **simple**:
+configured authenticated `small` and exactly `read, grep, find, ls`; missing,
+unavailable, malformed, or unauthenticated small fails before allocation. True is
+**deep**: the dispatching lead/fork's concrete model and thinking level are
+captured together and frozen; it has those reads plus `explore`, and can use one
+blocking authenticated-small, no-bash collection leaf. Registration branches on
+the calling process role and internal mode:
 
-- **Lead or fork.** `explore` is a preset over `spawnAgent` (260906): the same
-  RPC-backed engine `ws-agent-spawn` uses, spawned with `toolGroup: "recon"`
-  explicit, the `"small"` alias (or the inherited model when that resolves to
-  no genuine hit, exactly like every other spawn), an auto-generated alias
-  (`explore-1`, `explore-2`, ...), and a title derived from the query. The
-  call returns `{ agent_id, alias }` immediately, the same "do not wait for
-  it" contract as `ws-agent-spawn`. The child IS a registry member — a
-  regular `RpcAgentRecord`, `oneShot: true` — counted by the pushed status
-  line and the goal-loop yield gate like any other delegated agent while it
-  runs. It has no report tool of its own; its answer is delivered by the
-  ordinary settle push's `last_message` (`ws-agent-settled`, `reason: "idle"`
-  in the common case). Being one-shot changes what happens after: a
-  one-shot record is deleted from the registry right after its own settle
-  push (not parked dormant like every other spawn shape), an owner
-  `ws-agent-stop` on it deletes it the same way instead of leaving it
-  resumable, a launch failure (`client.start()` or the initial prompt
-  throwing) deletes it the same way right after its own spawn-failed push
-  instead of leaving a permanently parked zombie behind, and `ws-agent-send`
-  against a one-shot id is refused outright (naming it as an explore) —
-  there is no continuation to send into, `ws-agent-stop` and
-  `ws-agent-transcript` still work against it while it is registered.
-- **Worker or execute-worker.** `explore` is the original blocking one-shot
-  leaf, unchanged except that the `async` param is gone (its only consumer
-  was the lead path now replaced by the preset above): `--no-session` (no
-  continuation state) and self-reaping — the registry entry is dropped once
-  the leaf completes. This leaf is not a member of the RPC-backed registry
-  at all; it lives in its own separate one-shot `AgentRegistry`, returns
-  through its own tool result, pushes no message, and is outside the pushed
-  status line's running count.
+- **Lead or fork.** `explore` is a persistent `spawnAgent` preset with an
+  auto-generated alias (`explore-1`, `explore-2`, ...) and a query-derived
+  title. Simple records use `toolGroup: "read-only"`, resolve authenticated
+  `small` exactly once, and refuse before guards/allocation on every bad
+  resolution. Deep records use `"read-only-explore"` and freeze the caller's
+  concrete model and thinking level without looking up `small`. Both return
+  `{ agent_id, alias }` after prompt acceptance. They remain ordinary registry
+  records: a settle delivers `last_message`, then parks; send/stop/resume,
+  transcript, aliases, sidecars, widgets and failure transitions retain the
+  same identity. Their model and effective thinking level are verified with
+  `RpcClient.getState()` before the first prompt and every resumed prompt:
+  simple captures the actual default or clamp once, while deep must match its
+  captured selection.
+- **Worker or execute-worker.** `explore` remains the blocking, self-reaping
+  `recon` leaf (`--no-session`) and therefore retains bash. A deep researcher
+  alone registers the same query-only tool for one terminal collection; it
+  resolves authenticated `small` before rendering/allocation, forwards its
+  resolved effort, and runs the no-bash `read-only` profile. A failed
+  collection throws to the researcher and never launches an inherited leaf.
 
-Either way, `explore`'s own `recon` allowlist excludes `explore` and every
-`ws-agent-*` tool, so an explore child spawns neither another explore nor a
-worker — it is the non-recursive terminal of the delegation tree (see bounded
-depth below). `explore` is the one delegation tool a worker itself may reach.
+A simple researcher has no explore tool. A deep researcher alone has the
+internal `read-only-explore` group and may invoke one terminal collection leaf;
+the leaf clears the deep marker and uses the genuinely no-bash `read-only`
+profile. Recon remains the worker leaf profile and retains bash.
 
 ### Per-spawn tool curation {#260903-pi-spawner-tool-groups}
 
 The `--tools` allowlist for each spawn resolves from an adapter-owned tool-group
-table — `read-only`, `recon`, and `full-worker` — mapping each group to a Pi
+table — `read-only`, `read-only-explore`, `recon`, and `full-worker` — mapping each group to a Pi
 tool-name allowlist. Built-in Pi tools are named directly; the `full-worker` group
 additionally includes the bridge's live `ws__*` tool names, taken from the running
 bridge rather than hardcoded so the group tracks the actual ws-mcp tool set. A
@@ -518,28 +515,22 @@ spawn or drive a further generation of persistent workers, but it **includes the
 literal `explore` tool** — a pi-native custom tool, not a `ws__*` bridge name, so
 it must be named explicitly to survive Pi's `--tools` allowlist — so a worker may
 spawn a read-only recon leaf via the blocking `exploreLeaf` shape. The same
-`explore` name in the lead/fork's own surface is registered as the different,
-RPC-backed one-shot-child preset instead (260906; see the `explore` anchor
-above) — same tool name, shape keyed by the calling process's own role. No
-agent-profile files are written to disk (no `.pi/agents/`); all curation is
-in-memory plus `pi` CLI flags.
+`explore` name on a lead/fork is the persistent two-mode preset, while a
+worker gets the recon leaf and a deep researcher gets its no-bash collection
+leaf. Role plus internal mode controls registration; Pi's dynamic `--tools`
+allowlist is the enforcement layer. No agent-profile files are written to disk
+(no `.pi/agents/`); all curation is in-memory plus Pi CLI flags.
 
 ### Bounded delegation depth {#260904-pi-spawner-bounded-depth-explore-leaf}
 
-The delegation tree terminates at depth 2, in either of two equivalent shapes:
-lead/fork → explore child (260906's RPC-backed one-shot preset), or lead/fork →
-worker → explore leaf (the worker's own blocking `exploreLeaf`). A worker's
-`--tools` allowlist admits `explore` but no delegation-driving tool, and
-`explore`'s own `recon` allowlist — the same in both shapes — admits neither
-`explore` nor any `ws-agent-*` tool, so no branch of the tree extends past an
-explore child or leaf. This is enforced entirely by the adapter's per-spawn
-`--tools` allowlists; the ws-mcp core's own keyed-handler role check is
-untouched. The bound is measured from the **root of the delegation tree**, and
-a side-thread fork (see "Side-thread task fork") is lateral rather than a
-descendant: it inherits the lead's surface, so it is itself a root of its own
-worker → explore-leaf (or direct explore-child) tree and consumes no depth
-budget of the lead's. A fork cannot fork again, because `ws-fork` is absent
-from its surface.
+The delegation tree terminates at depth 2: lead/fork → persistent simple
+researcher, lead/fork → deep researcher → terminal collection leaf, or
+lead/fork → worker → recon leaf. Workers admit `explore` but no
+worker-driving tools; simple researchers and terminal leaves admit no
+`explore`; only deep researchers have `read-only-explore`, whose single
+collection leaf clears the deep marker. This is enforced by per-spawn Pi
+`--tools` allowlists; ws-mcp's keyed-handler role check is untouched. A
+side-thread fork is lateral and cannot fork again, so it starts its own tree.
 
 ### Model resolution: fixed tier through ws-mcp {#260903-pi-spawner-model-tier-inherit}
 
@@ -572,16 +563,14 @@ non-empty `effort` field (`low`/`medium`/`high`/`xhigh`) is applied as
 leaving the child's own default effort untouched. A non-genuine hit never
 contributes an effort value, even if its raw payload happened to carry one.
 
-`explore` is a **role**, not a caller-facing model choice: it resolves its own
-model through the same `config.resolve_agent` path, implicitly keyed on the
-fixed tier name `small`, and exposes no `model_name` parameter. Which half of
-that answer is applied depends on the calling shape (260906): the worker's
-`exploreLeaf` still takes only the model half — it has no effort surface, so
-a `small` tier's configured `effort` is never applied there. The lead/fork's
-RPC-backed explore child goes through the ordinary `spawnAgent` resolution
-path instead, the same one every other spawn uses, so a genuine `small`-tier
-hit's `effort` IS applied to it via `modelEffort`/`setThinkingLevel`, exactly
-as for a `ws-agent-spawn`-launched worker.
+`explore` is a **role**, not a caller-facing model choice. Simple persistent
+research and every blocking collection resolve the fixed `small` tier through
+the same path, require an authenticated exact catalog hit, and apply its
+resolved effort. Simple persistent research freezes the actual post-start
+model/effort (including Pi defaults or clamping); collection forwards effort
+as `--thinking`. Deep persistent research does not resolve `small` at
+creation: it freezes and verifies the dispatcher's actual model and thinking
+level, and may later request one separately fail-closed cheap collection.
 
 ### Model resolution via ws-mcp config, not an adapter data file {#260903-pi-model-catalog-config-file}
 
@@ -619,8 +608,8 @@ four failed round-trips (a server without the tool, a broken stdio) also fire
 the advisory rather than suppressing it. The advisory is appended after the
 tool's own content (never prepended, never mutating the original in place)
 and is added only on a successful `workflow_manual` result, never on an error
-response. Spawns and explores still degrade silently to inherit while every
-tier is unset; the advisory is the only pressure and never blocks work.
+response. Ordinary spawns still degrade silently to inherit while every tier is unset;
+simple explore and deep collection instead fail closed before child allocation.
 
 ### Child→lead report channel {#260904-pi-report-to-lead-channel}
 
@@ -1156,13 +1145,11 @@ of its own: every repaint rebuilds the rows from those registries.
   agent's alias, else its title, else the first eight characters of its id; a
   thread with no live respondent is named by the thread title. `role` is
   `worker`, `execute`, `fork`, `explore`, or `thread` (a lead-ask discussion
-  respondent, or a thread with no live respondent yet) — `explore` (260906)
-  is the lead/fork's own one-shot RPC-backed child, a live row like any other
-  while it runs. `state` is `awaiting owner`, `awaiting approval`, or
-  `running`; there is no idle or dormant row, since an idle child is parked —
-  a lead/fork explore is no exception: it is a `running` row while active and
-  disappears from the registry (hence the widget) at settle, right after its
-  own settle push, rather than lingering dormant like a park-eligible worker.
+  respondent, or a thread with no live respondent yet). A persistent
+  researcher is an `explore` row while it has a live client; after settle it
+  parks and disappears from the live widget but stays in the registry for
+  transcript, send and restart. `state` is `awaiting owner`, `awaiting
+  approval`, or `running`; idle/dormant records have no row.
   `elapsed` counts from the record's last prompt (`runStartedAt`, stamped by
   every prompt including the anti-bleed nudge), or from the thread's
   `touchedAt` for a row that awaits the owner on a thread.
@@ -1306,8 +1293,9 @@ this surface.
   the loop stalling forever because no further `agent_settled`/`agent_start`
   was ever going to fire on its own.
 - **Lead-session-only.** The goal loop runs on the lead session only. Every
-  spawned child (persistent RPC worker, one-shot explore leaf, or fork) is
-  launched with a `WS_PI_SPAWN_ROLE` environment marker carrying its role, and
+  spawned child (persistent RPC worker or researcher, terminal collection
+  leaf, or fork) is launched with a `WS_PI_SPAWN_ROLE` environment marker
+  carrying its role, and
   the `agent_settled` handler no-ops whenever any role is present — so a
   child's own settles never arm a loop or a reminder, matching the delegation
   model where children are driven by the lead through `ws-agent-send`, with

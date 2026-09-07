@@ -37,7 +37,7 @@ Route a task to the right primitive by what you actually need done:
 | Gracefully stop a subagent (keeps it resumable) | `ws-agent-stop` |
 | Read a subagent's full session transcript | `ws-agent-transcript` |
 | (as a subagent) surface an intermediate finding to your lead | `ws-report-to-lead` |
-| Ask one scoped, read-only exploration question (returns an id right away; the answer arrives later on the settle push) | `explore` |
+| Start persistent exploration (returns `{agent_id, alias}` right away; later sends resume it) | `explore({query, deep_research?})` — simple uses authenticated `small` with read-only tools; deep freezes your current model/thinking and may make one cheap no-bash evidence collection |
 | Arm a persistent goal that survives multiple turns | `/goal <goal>` — when the goal names a skill, start every cycle by calling `ws-skill <name>` for it, not by guessing its content from memory |
 | Declare the active goal achieved (terminal) | `goal-achieved <summary>` |
 | Declare the active goal blocked (terminal) | `goal-blocked <reason>` |
@@ -77,7 +77,7 @@ substitute for it. Each child signal arrives on its own as a message:
 | Message | What it means |
 | --- | --- |
 | `ws-agent-report` | The child called `ws-report-to-lead`. Its `kind` is `final` (the completion signal — the only thing you may treat as a result), `question`, or absent (plain progress). Progress arrives as it is filed; a `final` arrives when the child's turn actually ends, carrying `settled_reason`: `idle` (it finished normally), `stopped` (you stopped it mid-wrap-up), `exited` (its process died after it reported). So a `final` you receive is never from a child still working. |
-| `ws-agent-settled` | The child's run ended. `reason`: `idle` (turn finished with no terminal report — NOT a result, send it a follow-up or judge it stalled), `stopped` (you stopped it), `exited` (its process died — the work is gone), `spawn-failed` (it never started; `error` says why). |
+| `ws-agent-settled` | The child's run ended. `reason`: `idle` normally means a worker needs a follow-up or stall judgment; for a retained exploration researcher, `last_message` is its answer and you may send a follow-up by its id/alias. `stopped`, `exited`, and `spawn-failed` retain their ordinary meanings. |
 | `ws-agent-question` | A child needs an answer to continue. In an interactive session this is instead handled by the owner and you get a thread notice — see below. |
 | `ws-agent-approval` | An `ws-execute` worker is blocked on a shell command. It carries `cmd_id`; answer with `ws-approve`. Nothing else unblocks it. |
 | `ws-agent-advisory` | The adapter's own judgment about a child: a malformed `kind:"final"`, a missing `Commit:`, a fork that went idle without reporting, a stall. Advisories are about the child, never from it. |

@@ -217,6 +217,7 @@ const runtimeJsonPath = join(pluginDir, "runtime.json");
 const goalLoopConfigPath = join(pluginDir, "goal-loop-config.json");
 const piLeadGuidePath = join(pluginDir, "pi-lead-guide.md");
 const executeWorkerGuidePath = join(pluginDir, "execute-worker-guide.md");
+const exploreGuidePath = join(pluginDir, "explore-guide.md");
 
 export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   let handle: BridgeHandle | undefined;
@@ -352,7 +353,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // dormant-resumed execute-worker needs the SAME callback wired through
     // ws-agent-send's auto-resume branch, not just ws-execute's own spawn.
     const onApprovalPending = createApprovalRelay(pi, { cwd: ctx.cwd }, rpcRegistryRef);
-    agentTools = registerAgentTools(pi, handle, { cwd: ctx.cwd }, onApprovalPending);
+    agentTools = registerAgentTools(pi, handle, { cwd: ctx.cwd }, onApprovalPending, undefined, exploreGuidePath);
     rpcRegistryRef.current = agentTools.rpcRegistry;
     registerExecuteGateway(pi, handle, agentTools.rpcRegistry, {
       cwd: ctx.cwd,

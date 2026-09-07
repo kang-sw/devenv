@@ -15,14 +15,15 @@
     "runtime.json",
     "goal-loop-config.json",
     "pi-lead-guide.md",
-    "execute-worker-guide.md"
+    "execute-worker-guide.md",
+    "explore-guide.md"
   ],
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.84.4",
     "yaml": "2.9.0"
   },
   "scripts": {
-    "test": "node --test",
+    "test": "env -u WS_PI_SPAWN_ROLE -u WS_PI_EXPLORE_MODE node --test",
     "copy-skills": "node scripts/copy-skills.mjs",
     "prepack": "npm run copy-skills",
     "prepare": "npm run copy-skills"

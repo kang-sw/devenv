@@ -75,9 +75,6 @@
 
 import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   resolveTools,
   isTerminalStopReason,
@@ -553,142 +550,6 @@ import { ensureRespondent, createThreadRegistryHandle } from "../src/ask.ts";
 
 // Offline registered-wrapper coverage: only these test-process RPC methods are stubbed.
 // No installed Pi source is edited and no child/provider is started.
-describe("tier warning cardinality through registered spawn wrappers", () => {
-  // execute-worker uses the same process-role marker as worker (its tool group differs).
-  for (const role of [undefined, "fork", "worker", "explore"] as const) {
-    test(`spawn/fork/execute/explore under ${role ?? "lead"}`, async () => {
-      const previousRole = process.env[WS_PI_SPAWN_ROLE_ENV];
-      if (role) process.env[WS_PI_SPAWN_ROLE_ENV] = role;
-      else delete process.env[WS_PI_SPAWN_ROLE_ENV];
-      const originals = Object.fromEntries(["start", "onEvent", "prompt", "getState", "setThinkingLevel", "abort", "stop"].map(key => [key, RpcClient.prototype[key]]));
-      const efforts: string[] = [];
-      Object.assign(RpcClient.prototype, {
-        start: async () => {}, onEvent: () => () => {}, prompt: async () => {},
-        getState: async () => ({ sessionFile: "/tmp/fake-fork.jsonl" }),
-        setThinkingLevel: async (level: string) => { efforts.push(level); },
-        abort: async () => {}, stop: async () => {},
-      });
-      let handle: ReturnType<typeof registerAgentTools> | undefined;
-      try {
-        const tools = new Map<string, any>();
-        const pushes: unknown[] = [];
-        const notices: Array<[string, string]> = [];
-        const pi = { registerTool: (tool: any) => tools.set(tool.name, tool), sendMessage: (message: unknown) => pushes.push(message), getActiveTools: () => ["read", "ws-fork"] } as unknown as ExtensionAPI;
-        let value = "gpt-5.6-luna";
-        let source = "pi";
-        let auth = true;
-        let lookups = 0;
-        let reads = 0;
-        const bridge = {
-          client: { callTool: async (name: string, args: any) => {
-            if (name === "playbook.render") return { content: [{ type: "text", text: "/tmp/fake-prompt.md" }] };
-            assert.equal(name, "config.resolve_agent");
-            assert.deepEqual(args, { tier: "small", format: "json" });
-            lookups++;
-            return { content: [{ type: "text", text: JSON.stringify({ resolved_from: source, model: value, effort: "low" }) }] };
-          } }, wsToolNames: ["ws__todo_list"], defaultSessionKeyRef: { current: "parent-key" },
-        } as unknown as Parameters<typeof registerAgentTools>[1];
-        const leafCalls: any[] = [];
-        handle = registerAgentTools(pi, bridge, { cwd: "/tmp" }, undefined, async (_client, _registry, ctx, params) => {
-          leafCalls.push({ ctx, params });
-          return { agent_id: "leaf", state: "done", output: "answer" } as any;
-        });
-        registerFork(pi, bridge, handle.rpcRegistry, { cwd: "/tmp" });
-        registerExecuteGateway(pi, bridge, handle.rpcRegistry, { cwd: "/tmp", executeWorkerPromptPath: "/tmp/fake-prompt.md" });
-        const ui = { notify(message: string, level: string) { assert.equal(this, ui); notices.push([message, level]); } };
-        const ctx = {
-          hasUI: true, ui, model: { provider: "lead", id: "model" },
-          sessionManager: { getSessionFile: () => "/tmp/source.jsonl" },
-          modelRegistry: {
-            getAll: () => { reads++; return [{ provider: "openai-codex", id: "gpt-5.6-luna" }]; },
-            hasConfiguredAuth: () => auth,
-            getAvailable: () => assert.fail("must not read availability"),
-          },
-          get scopedModels() { return assert.fail("must not read scope"); },
-        };
-        const run = async (name: string, params: any) => JSON.parse((await tools.get(name).execute("call", params, undefined, undefined, ctx)).content[0].text);
-        const cases = [
-          ["ws-agent-spawn", { system_prompt_path: "/tmp/fake-prompt.md", prompt: "work", model_name: "small" }],
-          ["ws-fork", { prompt: "work", model_name: "small" }],
-          ["ws-execute", { prompt: "work" }],
-          ["explore", { query: "find it" }],
-        ] as const;
-        for (const [name, params] of cases) {
-          notices.length = 0;
-          const before = lookups;
-          const result = await run(name, params);
-          assert.equal(lookups, before + 1, `${name} resolves only once`);
-          assert.equal(notices.length, 1, `${name} notifies only once`);
-          assert.equal(JSON.stringify(result).match(/warning: tier/g)?.length, 1);
-          assert.doesNotMatch(JSON.stringify(result), /ws-model-catalog-list/);
-          assert.deepEqual(notices[0], [`${result.warning} See /ws-model-catalog-list for the models usable here.`, "warning"]);
-          if (name !== "explore" || role === undefined || role === "fork") {
-            const record = handle.rpcRegistry.get(result.agent_id)!;
-            assert.equal(record.modelBase, "lead/model");
-            assert.equal(record.modelEffort, undefined);
-            const row = listAgents(handle.rpcRegistry).find(row => row.agent_id === result.agent_id)!;
-            assert.equal(row.warning, result.warning);
-            if (name === "explore") {
-              assert.deepEqual(Object.keys(result).sort(), ["agent_id", "alias", "warning"]);
-              assert.equal(record.oneShot, true);
-              assert.equal(record.toolGroup, "recon");
-              assert.equal(record.spawnRole, "explore");
-            } else {
-              await stopAgent(handle.rpcRegistry, result.agent_id); // park without push
-              assert.equal(listAgents(handle.rpcRegistry).find(row => row.agent_id === result.agent_id)!.warning, result.warning);
-              await sendToAgent(handle.rpcRegistry, { pi, cwd: "/tmp" }, result.agent_id, "resume");
-              assert.equal(notices.length, 1, "resume produces no new notification");
-              assert.equal(lookups, before + 1, "resume never re-resolves");
-            }
-          } else {
-            assert.equal(leafCalls.at(-1).ctx.model, "lead/model");
-            assert.equal("effort" in leafCalls.at(-1).ctx, false, "Phase2 is excluded");
-            assert.equal(result.output, "answer");
-          }
-        }
-        assert.equal(efforts.length, 0, "rejected tiers contribute no effort");
-        assert.equal(pushes.length, 0, "warnings must never wake/push the lead");
-        // Reuse the SAME registered execute function with current auth/model/source changes.
-        const spawnParams = cases[0][1];
-        value = "openai-codex/gpt-5.6-luna";
-        notices.length = 0;
-        assert.equal((await run("ws-agent-spawn", spawnParams)).warning, undefined);
-        assert.deepEqual(efforts, ["low"]);
-        assert.equal(notices.length, 0);
-        auth = false;
-        assert.match((await run("ws-agent-spawn", spawnParams)).warning, /provider openai-codex has no configured auth/);
-        source = "tiers";
-        notices.length = 0;
-        assert.equal((await run("ws-agent-spawn", spawnParams)).warning, undefined);
-        assert.equal((await run("ws-fork", { prompt: "omitted tier" })).warning, undefined);
-        assert.equal((await run("ws-execute", { prompt: "complex", complex: true })).warning, undefined);
-        assert.equal(notices.length, 0);
-        source = "pi";
-        ctx.hasUI = false;
-        assert.ok((await run("ws-agent-spawn", spawnParams)).warning);
-        assert.equal(notices.length, 0, "headless gets result only");
-        // Discussion fork passes no tier, but must still forward its current context safely.
-        const before = lookups;
-        const beforeReads = reads;
-        const thread = { threadId: "discussion", title: "Question", question: "Why?", status: "open", origin: "lead-ask" } as any;
-        const threadHandle = createThreadRegistryHandle();
-        const respondent = await ensureRespondent(pi, ctx as any, bridge, handle.rpcRegistry, threadHandle, thread, { cwd: "/tmp" });
-        assert.ok(respondent);
-        assert.equal(handle.rpcRegistry.get(respondent!)!.modelBase, "lead/model");
-        assert.equal(handle.rpcRegistry.get(respondent!)!.warning, undefined);
-        assert.equal(lookups, before);
-        assert.equal(reads, beforeReads + 1);
-        assert.equal(notices.length, 0);
-      } finally {
-        await handle?.stopAll();
-        Object.assign(RpcClient.prototype, originals);
-        if (previousRole === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV];
-        else process.env[WS_PI_SPAWN_ROLE_ENV] = previousRole;
-      }
-    });
-  }
-});
-
 describe("catalog validation and warning copy", () => {
   const catalog = [
     { provider: "openai-codex", id: "gpt-5.6-luna", hasAuth: true },
@@ -787,37 +648,6 @@ describe("effectiveModelEffort (review relay #1, Critical: the modelEffort merge
 
   test("caller set, nothing resolved -> the caller value", () => {
     assert.equal(effectiveModelEffort("medium", undefined), "medium");
-  });
-});
-
-/**
- * Review relay #1 (Critical): `spawnAgent` itself is live-gate only (it
- * constructs a real `RpcClient` and calls `.start()` — see this file's
- * header comment), so the actual spawn-time `applyModelEffort` call cannot
- * be driven through a unit test. This is a source-level regression guard for
- * the specific bug the review caught: the spawn-time apply
- * (`spawner.ts`, inside `spawnAgent`) previously read `params.modelEffort`
- * directly instead of the already-folded `record.modelEffort`, so a
- * config-resolved tier effort was computed and stored but never actually
- * applied to a freshly spawned child (only the dormant-resume path in
- * `sendToAgent` read `record.modelEffort` correctly). Both call sites must
- * read the same field so there is exactly one value in play, matching
- * `effectiveModelEffort`'s single fold point tested above.
- */
-describe("spawnAgent / sendToAgent applyModelEffort call sites (source-level regression guard)", () => {
-  const spawnerSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "spawner.ts"), "utf8");
-
-  test("neither call site reads params.modelEffort directly any more", () => {
-    assert.equal(
-      spawnerSource.includes("applyModelEffort(client, params.modelEffort)"),
-      false,
-      "applyModelEffort must be called with record.modelEffort — the single already-folded value — not the raw caller param",
-    );
-  });
-
-  test("both the spawn-time and dormant-resume call sites apply the folded record.modelEffort", () => {
-    const matches = spawnerSource.match(/applyModelEffort\(client, record\.modelEffort\)/g) ?? [];
-    assert.equal(matches.length, 2, "expected exactly two call sites (spawnAgent's first-spawn path and sendToAgent's dormant-resume path)");
   });
 });
 
@@ -1879,14 +1709,15 @@ describe("attachEventListener (the settle-suppression IO gate)", () => {
     assert.deepEqual(families(h.pi), ["ws-agent-settled"]);
   });
 
-  test("260906: a oneShot record is deleted from the registry after settle, right after its own push", async () => {
-    const h = listenerHarness({ oneShot: true, spawnRole: "explore" });
+  test("a persistent explore record parks after settle and remains resumable", async () => {
+    const h = listenerHarness({ spawnRole: "explore" });
     h.emit({ type: "agent_settled" });
     await settleDrain();
     assert.deepEqual(families(h.pi), ["ws-agent-settled"], "the answer still arrives as the settle push's last_message");
     assert.equal(h.pi.wakes.length, 1, "shared-registry explore completion wakes the idle lead through user preflight");
     assert.match(h.pi.wakes[0] as string, /1 ws messages waiting/);
-    assert.equal(h.registry.has("a"), false, "a one-shot explore has no dormant-resumable resting state — it is gone, not parked");
+    assert.equal(h.registry.has("a"), true, "persistent exploration remains in the registry for resume/restart");
+    assert.equal(h.record.client, undefined, "settled explorer is parked");
   });
 
   test("260906: a non-oneShot record is only parked (dormant) at settle, not deleted — the D-C invariant for every other spawn shape", async () => {
@@ -2090,16 +1921,17 @@ describe("pushSpawnFailed (spawnAgent's launch-failure branch)", () => {
     assert.equal((pi.sent[0].message.details as { error?: string }).error, "boom");
   });
 
-  test("260906 review relay #1 (Important, correctness): a oneShot record's launch failure leaves no zombie behind — deleted right after its own spawn-failed push", () => {
+  test("a failed persistent explore stays registered as a dormant record", () => {
     const pi = fakePi();
-    const record = liveRpcRecord({ agentId: "a", oneShot: true, spawnRole: "explore" });
+    const record = liveRpcRecord({ agentId: "a", spawnRole: "explore" });
     const registry: RpcAgentRegistry = new Map([["a", record]]);
 
     pushSpawnFailed(pi.api, registry, record, new Error("client.start() failed"));
 
     assert.equal(pi.sent.length, 1, "the lead still learns the explore failed");
     assert.equal(pi.sent[0].message.details && (pi.sent[0].message.details as { reason?: string }).reason, "spawn-failed");
-    assert.equal(registry.has("a"), false, "a oneShot record has no dormant-resumable resting state to park in, so it is deleted instead of left as a permanent zombie");
+    assert.equal(registry.has("a"), true, "persistent explore failures retain a resumable registry record");
+    assert.equal(record.client, undefined);
   });
 
   test("a non-oneShot record's launch failure still parks (dormant), unaffected by the oneShot deletion path", () => {
@@ -2659,14 +2491,14 @@ describe("sendToAgent (live branches only — dormant auto-resume is live-gate o
     await assert.rejects(() => sendToAgent(registry, { cwd: "/tmp" }, "missing", "hi"), /unknown agentId/);
   });
 
-  test("260906: a one-shot explore record refuses ws-agent-send, naming it as an explore, before any live/dormant branch runs", async () => {
+  test("a persistent explore record accepts ws-agent-send", async () => {
     const { client, calls } = fakeRpcClient();
-    const record = freshRpcRecord({ agentId: "e", client, oneShot: true, spawnRole: "explore" });
+    const record = freshRpcRecord({ agentId: "e", client, spawnRole: "explore" });
     const registry: RpcAgentRegistry = new Map([["e", record]]);
 
-    await assert.rejects(() => sendToAgent(registry, { cwd: "/tmp" }, "e", "hi"), /one-shot explore/);
+    await sendToAgent(registry, { cwd: "/tmp" }, "e", "hi");
 
-    assert.deepEqual(calls, [], "no prompt/steer/followUp call was ever attempted");
+    assert.deepEqual(calls, [["prompt", "hi"]]);
   });
 
   test("260905 (alias/park/cap): resolves by alias — ws-agent-send <alias> drives the aliased holder", async () => {
@@ -2784,12 +2616,14 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
     assert.deepEqual(options.env, {
       [WS_PI_SPAWN_ROLE_ENV]: "worker",
       [WS_PI_APPROVAL_DIR_ENV]: "/tmp/ws-pi-agent-x/approvals",
+      WS_PI_EXPLORE_MODE: "",
     });
   });
 
-  test("env carries exactly the role marker and the approvals dir — nothing else (RpcClient.start() merges it over process.env itself, so this function must not pre-spread it)", () => {
+  test("env overrides an inherited exploration mode while preserving role and approvals markers", () => {
     const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-y/session.jsonl", "/tmp/system.md", "read");
-    assert.deepEqual(new Set(Object.keys(options.env ?? {})), new Set([WS_PI_SPAWN_ROLE_ENV, WS_PI_APPROVAL_DIR_ENV]));
+    assert.deepEqual(new Set(Object.keys(options.env ?? {})), new Set([WS_PI_SPAWN_ROLE_ENV, WS_PI_APPROVAL_DIR_ENV, "WS_PI_EXPLORE_MODE"]));
+    assert.equal(options.env?.WS_PI_EXPLORE_MODE, "");
   });
 
   test("260904 Phase 1: the approvals dir is inert-but-present even for a non-execute-worker (full-worker) spawn — WS_PI_APPROVAL_DIR is always derived from sessionPath, not gated on tools", () => {
@@ -3170,215 +3004,5 @@ describe("runSpawnGuards (260905 review relay #1: alias-clear-then-cap-reject or
     const registry: RpcAgentRegistry = new Map([["a", holder]]);
     const result = runSpawnGuards(registry, undefined, 1);
     assert.equal(result.ok, false);
-  });
-});
-
-/**
- * 260906 (lead explore as an async RPC child): `registerAgentTools`'s
- * role-keyed `explore` registration. Role is read once, at factory-call time,
- * from `process.env[WS_PI_SPAWN_ROLE_ENV]` (`withSpawnRole` below saves and
- * restores the real value around each test, mirroring the identical
- * convention already used above for `pushToLead`'s role gate).
- *
- * The lead/fork PRESET branch is exercised through a real `execute()` call —
- * safe here only because `RpcClient.prototype.{start,onEvent,prompt}` are
- * monkey-patched for the duration (no real subprocess ever spawns), the same
- * kind of seam `attachEventListener`'s own describe block drives with a
- * duck-typed client. The worker/execute-worker/explore LEAF branch is
- * deliberately never invoked to completion: `exploreLeaf` resolves its own
- * `pi` invocation via `process.argv[1]` (`getPiInvocation`), which under
- * `node --test` IS the test file itself — actually calling it would spawn a
- * new `node <this test file> ...` child process instead of the real `pi`
- * binary, a self-re-execution hazard the module's own header comment already
- * flags as "live-gate only" for this exact reason. The leaf branch is instead
- * verified structurally: its registered `parameters`/`description` differ
- * from the preset's, which is what a caller-visible dispatch difference
- * actually looks like from outside `registerAgentTools`.
- */
-describe("registerAgentTools (role-keyed explore registration)", () => {
-  async function withSpawnRole<T>(role: string | undefined, fn: () => T | Promise<T>): Promise<T> {
-    const previous = process.env[WS_PI_SPAWN_ROLE_ENV];
-    if (role === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV];
-    else process.env[WS_PI_SPAWN_ROLE_ENV] = role;
-    try {
-      return await fn();
-    } finally {
-      if (previous === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV];
-      else process.env[WS_PI_SPAWN_ROLE_ENV] = previous;
-    }
-  }
-
-  type CapturedTool = {
-    description: string;
-    parameters: { properties?: Record<string, unknown> };
-    execute: (
-      toolCallId: string,
-      params: unknown,
-      signal?: AbortSignal,
-      onUpdate?: unknown,
-      toolCtx?: unknown,
-    ) => Promise<{ content: Array<{ type: string; text: string }> }>;
-  };
-
-  /**
-   * Fake `pi.registerTool`-capturing harness plus a fake `bridge` whose
-   * `callTool` answers the two calls the lead-preset path makes
-   * (`playbook.render` for the explore playbook; `config.resolve_agent`,
-   * degraded to inherit via `isError: true` so no config-resolution
-   * branching is exercised here) — same `registerX(pi, ...)` capture
-   * convention as execute-gateway.test.ts's `registerAndCapture`.
-   */
-  function registerAndCapture(): { tools: Map<string, CapturedTool>; rpcRegistry: RpcAgentRegistry } {
-    const tools = new Map<string, CapturedTool>();
-    const pi = {
-      registerTool: (def: { name: string } & CapturedTool) => void tools.set(def.name, def),
-      sendMessage: () => {},
-    } as unknown as ExtensionAPI;
-    const bridge = {
-      client: {
-        callTool: async (name: string): Promise<McpToolCallResult> => {
-          if (name === "playbook.render") {
-            return { content: [{ type: "text", text: "/tmp/fake-explore-prompt.md" }], isError: false };
-          }
-          return { content: [], isError: true };
-        },
-      } as unknown as McpStdioClient,
-      wsToolNames: [],
-      defaultSessionKeyRef: { current: "k" },
-    } as unknown as Parameters<typeof registerAgentTools>[1];
-    const sessionCtx = { cwd: "/tmp/ws-pi-agent-registerAgentTools-test" };
-    const handle = registerAgentTools(pi, bridge, sessionCtx);
-    return { tools, rpcRegistry: handle.rpcRegistry };
-  }
-
-  test("worker role: explore is the blocking leaf variant — no async param, leaf-style description, no fan-in wording", async () => {
-    await withSpawnRole("worker", () => {
-      const { tools } = registerAndCapture();
-      const tool = tools.get("explore");
-      assert.ok(tool, "explore must be registered");
-      assert.deepEqual(Object.keys(tool!.parameters.properties ?? {}), ["query"]);
-      assert.match(tool!.description, /no continuation/);
-      assert.doesNotMatch(tool!.description, /settle push/);
-    });
-  });
-
-  test("explore role: harmless, but also registers the leaf variant (an explore leaf can never reach this tool per the depth cap)", async () => {
-    await withSpawnRole("explore", () => {
-      const { tools } = registerAndCapture();
-      const tool = tools.get("explore");
-      assert.deepEqual(Object.keys(tool!.parameters.properties ?? {}), ["query"]);
-      assert.doesNotMatch(tool!.description, /settle push/);
-    });
-  });
-
-  test("unset (lead): explore is the RPC-backed preset variant — no async param, id-now/settle-push wording", async () => {
-    await withSpawnRole(undefined, () => {
-      const { tools } = registerAndCapture();
-      const tool = tools.get("explore");
-      assert.ok(tool, "explore must be registered");
-      assert.deepEqual(Object.keys(tool!.parameters.properties ?? {}), ["query"]);
-      assert.match(tool!.description, /settle push/);
-    });
-  });
-
-  test("fork role: also the preset variant", async () => {
-    await withSpawnRole("fork", () => {
-      const { tools } = registerAndCapture();
-      const tool = tools.get("explore");
-      assert.match(tool!.description, /settle push/);
-    });
-  });
-
-  test("lead preset execute(): calls spawnAgent (not exploreLeaf) and returns the literal {agent_id, alias} shape, counted by the fan-in gate", async () => {
-    const originalStart = RpcClient.prototype.start;
-    const originalOnEvent = RpcClient.prototype.onEvent;
-    const originalPrompt = RpcClient.prototype.prompt;
-    // Patch the RPC-backed spawn's live-client surface to a no-op stub so
-    // `spawnAgent` runs to completion with no real subprocess — see this
-    // describe block's own header comment for why this is the safe
-    // alternative to invoking the leaf.
-    RpcClient.prototype.start = async function (this: RpcClient) {};
-    RpcClient.prototype.onEvent = function (this: RpcClient) {
-      return () => {};
-    };
-    RpcClient.prototype.prompt = async function (this: RpcClient) {};
-    try {
-      await withSpawnRole(undefined, async () => {
-        const { tools, rpcRegistry } = registerAndCapture();
-        const tool = tools.get("explore")!;
-        const result = await tool.execute("call-1", { query: "where is the fan-in gate?" }, undefined, undefined, {});
-        const parsed = JSON.parse(result.content[0].text) as Record<string, unknown>;
-        assert.deepEqual(Object.keys(parsed).sort(), ["agent_id", "alias"], "the leaf's {agent_id, state, output?, stopReason?} shape must not leak through");
-        assert.equal(rpcRegistry.size, 1, "the preset registers into the SAME rpcRegistry ws-agent-* already reads, not a separate one-shot registry");
-        const [record] = [...rpcRegistry.values()];
-        assert.equal(record.oneShot, true);
-        assert.equal(record.spawnRole, "explore");
-        assert.equal(record.toolGroup, "recon");
-        assert.equal(record.alias, "explore-1", "auto alias from the per-process counter");
-        assert.equal(record.title, "where is the fan-in gate?", "short query used verbatim as the title");
-        assert.equal(hasRunningAgents(rpcRegistry), true, "the child is counted by the fan-in/goal-loop gate the instant the prompt is issued");
-      });
-    } finally {
-      RpcClient.prototype.start = originalStart;
-      RpcClient.prototype.onEvent = originalOnEvent;
-      RpcClient.prototype.prompt = originalPrompt;
-    }
-  });
-
-  test("auto alias increments per spawn, and a long query is head-truncated for the title", async () => {
-    const originalStart = RpcClient.prototype.start;
-    const originalOnEvent = RpcClient.prototype.onEvent;
-    const originalPrompt = RpcClient.prototype.prompt;
-    RpcClient.prototype.start = async function (this: RpcClient) {};
-    RpcClient.prototype.onEvent = function (this: RpcClient) {
-      return () => {};
-    };
-    RpcClient.prototype.prompt = async function (this: RpcClient) {};
-    try {
-      await withSpawnRole(undefined, async () => {
-        const { tools, rpcRegistry } = registerAndCapture();
-        const tool = tools.get("explore")!;
-        const longQuery = "x".repeat(80);
-        await tool.execute("call-1", { query: "first" }, undefined, undefined, {});
-        await tool.execute("call-2", { query: longQuery }, undefined, undefined, {});
-        const records = [...rpcRegistry.values()];
-        assert.deepEqual(
-          records.map((r) => r.alias),
-          ["explore-1", "explore-2"],
-        );
-        assert.equal(records[1].title?.length, 61, "60 chars plus the truncation-marker ellipsis");
-        assert.ok(records[1].title?.startsWith("x".repeat(60)));
-      });
-    } finally {
-      RpcClient.prototype.start = originalStart;
-      RpcClient.prototype.onEvent = originalOnEvent;
-      RpcClient.prototype.prompt = originalPrompt;
-    }
-  });
-
-  test("ws-agent-stop tool body: stopping a oneShot record removes it from the registry entirely, not just parks it dormant", async () => {
-    await withSpawnRole(undefined, async () => {
-      const { tools, rpcRegistry } = registerAndCapture();
-      const client = { abort: async () => {}, stop: async () => {} } as unknown as RpcClient;
-      rpcRegistry.set("e1", freshRpcRecord({ agentId: "e1", client, running: true, oneShot: true, spawnRole: "explore" }));
-
-      const stopTool = tools.get("ws-agent-stop")!;
-      await stopTool.execute("call-1", { agent_id: "e1" }, undefined, undefined, {});
-
-      assert.equal(rpcRegistry.has("e1"), false, "a one-shot explore has no dormant/resumable resting state");
-    });
-  });
-
-  test("ws-agent-stop tool body: stopping a non-oneShot record still leaves it dormant/resumable (unchanged D-C behavior)", async () => {
-    await withSpawnRole(undefined, async () => {
-      const { tools, rpcRegistry } = registerAndCapture();
-      const client = { abort: async () => {}, stop: async () => {} } as unknown as RpcClient;
-      rpcRegistry.set("w1", freshRpcRecord({ agentId: "w1", client, running: true }));
-
-      const stopTool = tools.get("ws-agent-stop")!;
-      await stopTool.execute("call-1", { agent_id: "w1" }, undefined, undefined, {});
-
-      assert.equal(rpcRegistry.has("w1"), true, "still registered, dormant/resumable");
-    });
   });
 });

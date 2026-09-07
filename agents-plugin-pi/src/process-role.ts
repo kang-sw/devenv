@@ -6,7 +6,8 @@
  * Subsumes the older `WS_PI_AGENT_CHILD_ENV` marker (spawner.ts,
  * pre-260904): rather than a single boolean "is a child" flag, every spawned
  * child now carries a role value (`"worker"` for the RPC-backed
- * `ws-agent-spawn` path, `"explore"` for the one-shot recon leaf); the host
+ * `ws-agent-spawn` path, `"explore"` for a persistent researcher or terminal
+ * collection leaf); the host
  * lead process carries no marker at all (`readSpawnRole` returns `undefined`
  * there). `"fork"` is reserved by this phase for a not-yet-implemented
  * side-thread fork spawn (`260904-feat-ws-pi-side-thread-fork-question-surface`,
@@ -28,6 +29,17 @@ export type SpawnRole = "worker" | "explore" | "fork";
 
 /** Env var carrying the spawned child's role. Absent on the host lead process. */
 export const WS_PI_SPAWN_ROLE_ENV = "WS_PI_SPAWN_ROLE";
+
+/** Internal exploration preset mode. It is meaningful only for an explore-role process. */
+export const WS_PI_EXPLORE_MODE_ENV = "WS_PI_EXPLORE_MODE";
+export type ExploreMode = "simple" | "deep";
+
+/** Reads the internal mode only for a correctly marked explore process. */
+export function readExploreMode(env: NodeJS.ProcessEnv): ExploreMode | undefined {
+  if (readSpawnRole(env) !== "explore") return undefined;
+  const value = env[WS_PI_EXPLORE_MODE_ENV];
+  return value === "simple" || value === "deep" ? value : undefined;
+}
 
 /**
  * Env var carrying the lead's own session key, delivered to a `fork` child

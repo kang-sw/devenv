@@ -53,7 +53,7 @@ export const AGENT_WIDGET_TICK_MS = 10_000;
 /** `buildWidgetLines`'s width bound when the caller supplies none — Pi's extension surface exposes no live terminal-column read, so this is a conservative fixed default rather than a probed value. */
 export const DEFAULT_AGENT_WIDGET_WIDTH = 80;
 
-/** One live-agent row's display role. `"thread"` overrides the record's own `spawnRole` label only for a `threadBound` record whose bound thread is `origin: "lead-ask"`. `"explore"` (260906) is a lead/fork one-shot explore's own role — see `roleFromSpawnRole`. */
+/** One live-agent row's display role. `"thread"` overrides the record's own `spawnRole` label only for a `threadBound` record whose bound thread is `origin: "lead-ask"`. `"explore"` is a persistent researcher role — see `roleFromSpawnRole`. */
 export type AgentRowRole = "worker" | "execute" | "fork" | "thread" | "explore";
 
 /** One live-agent row's state, in display precedence order (`awaiting-owner` first). Idle is deliberately not a state here — an idle, non-`threadBound` record is auto-parked (see `spawner.ts`'s `attachEventListener`) before it would ever read this way. */

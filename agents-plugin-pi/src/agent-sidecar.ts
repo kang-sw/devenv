@@ -39,6 +39,7 @@
 
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { RpcAgentRecord, RpcAgentRegistry, SpawnAgentRole, ToolGroup } from "./spawner.ts";
+import type { ExploreMode } from "./process-role.ts";
 
 /** Sidecar file version. Bumped only on a breaking shape change; a mismatch is treated as "no sidecar". */
 export const SIDECAR_VERSION = 1;
@@ -63,6 +64,8 @@ export interface PersistedOrphan {
   toolGroup: ToolGroup;
   explicitTools?: string;
   spawnRole?: SpawnAgentRole;
+  /** Persistent explore identity; only valid with the coherent explore tuple. */
+  exploreMode?: ExploreMode;
   /**
    * What the child was doing when the session went away: `"running"` means a
    * prompt was outstanding (`RpcAgentRecord.running`), `"idle"` means it was
@@ -106,16 +109,14 @@ export function sidecarPath(leadSessionFile: string): string {
  * restart. Dormant records are already resumable; carrying them through the
  * sidecar too costs nothing and keeps the roll-call complete.
  *
- * 260906 (lead explore as an async RPC child): a `oneShot` record is also
- * skipped — a one-shot explore has no dormant-resumable resting state to
- * revive (it is deleted at settle or on an owner-cancelled stop; see
- * `spawner.ts`'s `attachEventListener`/`ws-agent-stop`), so there is nothing
- * for a session restart to usefully re-register.
+ * Persistent simple/deep researchers are captured like every other
+ * non-thread-bound record. Terminal collection leaves remain in their separate
+ * self-reaping registry and are never sidecar records.
  */
 export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
   const orphans: PersistedOrphan[] = [];
   for (const record of registry.values()) {
-    if (record.threadBound || record.oneShot) continue;
+    if (record.threadBound) continue;
     orphans.push({
       agentId: record.agentId,
       alias: record.alias,
@@ -129,6 +130,7 @@ export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
       toolGroup: record.toolGroup,
       explicitTools: record.explicitTools,
       spawnRole: record.spawnRole,
+      ...(record.exploreMode ? { exploreMode: record.exploreMode } : {}),
       state: record.running ? "running" : "idle",
       // `undefined` (never reported) rather than an omitted key, matching every
       // other optional field above — `JSON.stringify` drops it on the way out
@@ -184,6 +186,20 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
     if (typeof o.agentId !== "string" || !o.agentId) continue;
     if (typeof o.sessionPath !== "string" || !o.sessionPath) continue;
     if (typeof o.systemPromptPath !== "string") continue;
+    const toolGroup = o.toolGroup;
+    const isKnownToolGroup = toolGroup === undefined || toolGroup === "read-only" || toolGroup === "read-only-explore" || toolGroup === "recon" || toolGroup === "full-worker" || toolGroup === "execute-worker";
+    const isKnownRole = o.spawnRole === undefined || o.spawnRole === "worker" || o.spawnRole === "execute-worker" || o.spawnRole === "fork" || o.spawnRole === "explore";
+    if (!isKnownToolGroup || !isKnownRole) continue;
+    const hasExploreMode = Object.prototype.hasOwnProperty.call(o, "exploreMode");
+    const exploreMode = o.exploreMode === "simple" || o.exploreMode === "deep" ? o.exploreMode : undefined;
+    // Any research-shaped field makes the entire tuple strict. In particular,
+    // do not discard an invalid mode and accidentally revive it as a worker.
+    const hasResearchMetadata = o.spawnRole === "explore" || hasExploreMode || toolGroup === "read-only" || toolGroup === "read-only-explore";
+    if (hasResearchMetadata && (
+      o.spawnRole !== "explore" || !exploreMode || typeof o.modelBase !== "string" || !o.modelBase ||
+      typeof o.modelEffort !== "string" || !o.modelEffort || Object.prototype.hasOwnProperty.call(o, "explicitTools") ||
+      (exploreMode === "simple" ? toolGroup !== "read-only" : toolGroup !== "read-only-explore")
+    )) continue;
     out.push({
       agentId: o.agentId,
       alias: typeof o.alias === "string" ? o.alias : undefined,
@@ -197,6 +213,7 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
       toolGroup: (o.toolGroup ?? "full-worker") as ToolGroup,
       explicitTools: typeof o.explicitTools === "string" ? o.explicitTools : undefined,
       spawnRole: o.spawnRole,
+      ...(exploreMode ? { exploreMode } : {}),
       // An older sidecar (or a corrupt value) has no state to trust; "idle" is
       // the conservative read — it claims nothing about outstanding work.
       state: o.state === "running" ? "running" : "idle",
@@ -242,6 +259,7 @@ export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
     toolGroup: orphan.toolGroup,
     explicitTools: orphan.explicitTools,
     spawnRole: orphan.spawnRole,
+    exploreMode: orphan.exploreMode,
     streaming: false,
     running: false,
     reportLog: [],
@@ -284,7 +302,7 @@ export function reviveOrphans(registry: RpcAgentRegistry, orphans: PersistedOrph
     if (registry.has(orphan.agentId)) continue;
     const record = rehydrateOrphanRecord(orphan);
     registry.set(orphan.agentId, record);
-    const arm = orphan.spawnRole === "fork" ? wiring.fork : orphan.spawnRole === "execute-worker" ? wiring.executeWorker : wiring.worker;
+    const arm = orphan.spawnRole === "fork" ? wiring.fork : orphan.spawnRole === "execute-worker" ? wiring.executeWorker : orphan.spawnRole === "explore" ? undefined : wiring.worker;
     try {
       arm?.(record);
     } catch {
