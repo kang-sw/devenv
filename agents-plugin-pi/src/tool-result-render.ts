@@ -29,7 +29,6 @@ export interface NativeBox extends NativePreviewComponent {
 interface ToolPreviewTheme {
   bold(text: string): string;
   fg(color: "text" | "toolTitle" | "toolOutput", text: string): string;
-  bg(color: "toolPendingBg" | "toolSuccessBg", text: string): string;
 }
 
 export type YamlSerializer = (value: object) => string;
@@ -294,12 +293,12 @@ function isResultPreviewComponent(component: unknown): component is ResultPrevie
   return isObjectLike(component) && "output" in component && "outputBox" in component;
 }
 
-/** The parent shell supplies its own padding; these rows supply only separators. */
-function createSeparatedPreview(preview: NativePreviewComponent): NativePreviewComponent {
+/** The call owns both separators so every result path follows the same input boundary. */
+function createInputPreview(preview: NativePreviewComponent): NativePreviewComponent {
   return {
     render(width: number): string[] {
       if (width <= 0) return [];
-      return ["", ...preview.render(width)];
+      return ["", ...preview.render(width), ""];
     },
     invalidate(): void {
       preview.invalidate();
@@ -311,7 +310,7 @@ function createCallPreviewComponent(tui: ToolResultTuiModules): CallPreviewCompo
   const title = createBoundedText(tui);
   const input = createBoundedText(tui);
   const inputBox = new tui.Box(0, 0);
-  inputBox.addChild(createSeparatedPreview(input));
+  inputBox.addChild(createInputPreview(input));
   return {
     title,
     input,
@@ -329,7 +328,7 @@ function createCallPreviewComponent(tui: ToolResultTuiModules): CallPreviewCompo
 function createResultPreviewComponent(tui: ToolResultTuiModules): ResultPreviewComponent {
   const output = createBoundedText(tui);
   const outputBox = new tui.Box(0, 0);
-  outputBox.addChild(createSeparatedPreview(output));
+  outputBox.addChild(output);
   return {
     output,
     outputBox,
@@ -384,7 +383,6 @@ export function createToolPreviewRenderers(
         expanded: false,
         trimOuterWhitespace: true,
       });
-      component.inputBox.setBgFn((text) => previewTheme.bg("toolPendingBg", text));
       return component;
     },
 
@@ -410,7 +408,6 @@ export function createToolPreviewRenderers(
         expanded: options.expanded,
         trimOuterWhitespace: false,
       });
-      component.outputBox.setBgFn((output) => previewTheme.bg("toolSuccessBg", output));
       return component;
     },
   };

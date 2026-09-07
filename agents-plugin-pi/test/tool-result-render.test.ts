@@ -222,7 +222,7 @@ describe("bounded YAML preview preparation", () => {
 });
 
 describe("native YAML preview renderers", () => {
-  test("keeps bold tool identity, white input, gray output, separated backgrounds, and exact blank rows", () => {
+  test("keeps bold tool identity, white input, gray output, native backgrounds, and exact blank rows", () => {
     const { tui, texts, boxes } = fakeTui();
     const theme = fakeTheme();
     const renderers = createToolPreviewRenderers(tui, "ws__git_status", (value) =>
@@ -242,8 +242,9 @@ describe("native YAML preview renderers", () => {
     assert.deepEqual(theme.boldCalls, ["ws__git_status"]);
     assert.ok(theme.fgCalls.some((call) => call.color === "text" && call.text.includes("first")), "input uses the theme default foreground for dark/light readability");
     assert.ok(theme.fgCalls.some((call) => call.color === "toolOutput" && call.text.includes("ok: true")), "output stays gray through toolOutput");
-    assert.equal(boxes[0]!.background?.("sample"), "<one:bg:toolPendingBg>sample</one:bg>");
-    assert.equal(boxes[1]!.background?.("sample"), "<one:bg:toolSuccessBg>sample</one:bg>");
+    assert.equal(boxes[0]!.background, undefined, "input inherits the native parent lifecycle background");
+    assert.equal(boxes[1]!.background, undefined, "output inherits the native parent lifecycle background");
+    assert.equal(theme.bgCalls.length, 0, "renderer installs no nested background callbacks");
     assert.equal(texts.length, 3);
   });
 
@@ -253,7 +254,7 @@ describe("native YAML preview renderers", () => {
     const content = [{ type: "text", text: '{"ok":true}' }];
     const state = {};
     const call = renderers.renderCall({ value: "ignored" }, unstyledTheme, context({ state }));
-    assert.deepEqual(call.render(10), ["ws__test", "", "    abcdef", "   ghijklm", "   no"]);
+    assert.deepEqual(call.render(10), ["ws__test", "", "    abcdef", "   ghijklm", "   no", ""]);
 
     const serializer = (_value: object) => Array.from({ length: 11 }, (_, index) => `line-${index}`).join("\n");
     const capped = createToolPreviewRenderers(tui, "ws__test", serializer);
@@ -404,6 +405,63 @@ describe("native YAML preview renderers", () => {
     const marker = createComponent(Array.from({ length: 11 }, (_, index) => `line-${index}`).join("\n"));
     const markerLines = marker.render(3).map((line) => tui.stripTerminalSequences(line).trim());
     assert.equal(markerLines.filter((line) => line === ".").length, 1, "narrow marker renders as one row, not three wrapped dots");
+  });
+
+  test("uses the input-owned separator for YAML, raw, error, and pending installed Pi rows", async () => {
+    const codingAgentUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
+    const requireFromPi = createRequire(codingAgentUrl);
+    const tui = await import(pathToFileURL(requireFromPi.resolve("@earendil-works/pi-tui")).href) as unknown as ToolResultTuiModules;
+    const theme = await import(new URL("./modes/interactive/theme/theme.js", codingAgentUrl).href) as { initTheme(): void };
+    theme.initTheme();
+    const toolExecution = await import(new URL("./modes/interactive/components/tool-execution.js", codingAgentUrl).href) as {
+      ToolExecutionComponent: new (
+        toolName: string,
+        toolCallId: string,
+        args: unknown,
+        options: unknown,
+        toolDefinition: unknown,
+        ui: { requestRender(): void },
+        cwd: string,
+      ) => { render(width: number): string[]; setArgsComplete(): void; updateResult(result: unknown, isPartial: boolean): void };
+    };
+    const createComponent = () => {
+      const renderers = createToolPreviewRenderers(tui, "ws__test", (value) => "input" in value ? "input: one" : "yaml: success");
+      const component = new toolExecution.ToolExecutionComponent(
+        "ws__test", "call-1", { input: true }, { showImages: false },
+        { renderCall: renderers.renderCall, renderResult: renderers.renderResult }, { requestRender() {} }, process.cwd(),
+      );
+      component.setArgsComplete();
+      return component;
+    };
+    const rows = (component: { render(width: number): string[] }) =>
+      component.render(40).map((line) => tui.stripTerminalSequences(line));
+    const assertInputBoundary = (lines: string[], output: string) => {
+      const title = lines.findIndex((line) => line.includes("ws__test"));
+      const input = lines.findIndex((line) => line.includes("input: one"));
+      const result = lines.findIndex((line) => line.includes(output));
+      assert.ok(title >= 0 && input > title && result > input);
+      assert.equal(lines[title + 1]?.trim(), "", "one title/input separator");
+      assert.equal(result, input + 2, "input's trailing separator is the only input/result separator");
+      assert.equal(lines[input + 1]?.trim(), "");
+    };
+
+    const yaml = createComponent();
+    yaml.updateResult({ content: [{ type: "text", text: '{"yaml":true}' }], isError: false }, false);
+    assertInputBoundary(rows(yaml), "yaml: success");
+
+    const raw = createComponent();
+    raw.updateResult({ content: [{ type: "text", text: "raw fallback" }], isError: false }, false);
+    assertInputBoundary(rows(raw), "raw fallback");
+
+    const error = createComponent();
+    error.updateResult({ content: [{ type: "text", text: "error fallback" }], isError: true }, false);
+    assertInputBoundary(rows(error), "error fallback");
+
+    const pending = rows(createComponent());
+    const pendingTitle = pending.findIndex((line) => line.includes("ws__test"));
+    const pendingInput = pending.findIndex((line) => line.includes("input: one"));
+    assert.equal(pending[pendingTitle + 1]?.trim(), "", "pending keeps the title/input separator");
+    assert.equal(pending[pendingInput + 1]?.trim(), "", "pending keeps the input-owned trailing separator");
   });
 
   test("uses real installed Pi parent-shell composition and retains its padding", async () => {
