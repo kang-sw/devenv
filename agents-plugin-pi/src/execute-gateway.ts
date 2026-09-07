@@ -105,6 +105,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
+import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 import { modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx } from "./model-catalog.ts";
 import {
   GATED_EXEC_TOOL_NAME,
@@ -583,8 +584,14 @@ export function createApprovalRelay(
  * mirrors `registerAgentTools`'s own unconditional call (the tools are
  * simply never exposed to a worker/explore's own `--tools`).
  */
-export function registerExecuteGateway(pi: ExtensionAPI, bridge: BridgeHandle, rpcRegistry: RpcAgentRegistry, sessionCtx: ExecuteGatewaySessionCtx): void {
-  pi.registerTool({
+export function registerExecuteGateway(
+  pi: ExtensionAPI,
+  bridge: BridgeHandle,
+  rpcRegistry: RpcAgentRegistry,
+  sessionCtx: ExecuteGatewaySessionCtx,
+  toolPreviewTuiRef: ToolPreviewTuiRef = createToolPreviewTuiRef(),
+): void {
+  registerWsTool(pi, {
     name: GATED_EXEC_TOOL_NAME,
     label: GATED_EXEC_TOOL_NAME,
     description:
@@ -628,9 +635,9 @@ export function registerExecuteGateway(pi: ExtensionAPI, bridge: BridgeHandle, r
         ],
       };
     },
-  });
+  }, toolPreviewTuiRef);
 
-  pi.registerTool({
+  registerWsTool(pi, {
     name: EXECUTE_TOOL_NAME,
     label: EXECUTE_TOOL_NAME,
     description:
@@ -676,9 +683,9 @@ export function registerExecuteGateway(pi: ExtensionAPI, bridge: BridgeHandle, r
       );
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     },
-  });
+  }, toolPreviewTuiRef);
 
-  pi.registerTool({
+  registerWsTool(pi, {
     name: APPROVE_TOOL_NAME,
     label: APPROVE_TOOL_NAME,
     description:
@@ -719,9 +726,9 @@ export function registerExecuteGateway(pi: ExtensionAPI, bridge: BridgeHandle, r
 
       return { content: [{ type: "text", text: JSON.stringify({ ok: true }) }] };
     },
-  });
+  }, toolPreviewTuiRef);
 
-  pi.registerTool({
+  registerWsTool(pi, {
     name: UGLY_READ_TOOL_NAME,
     label: "read",
     description:
@@ -741,9 +748,9 @@ export function registerExecuteGateway(pi: ExtensionAPI, bridge: BridgeHandle, r
       const raw = readFileSync(absolutePath, "utf8");
       return { content: [{ type: "text", text: sliceLines(raw, p.offset, p.limit) }] };
     },
-  });
+  }, toolPreviewTuiRef);
 
-  pi.registerTool({
+  registerWsTool(pi, {
     name: ONE_LINER_EXEC_TOOL_NAME,
     label: "exec",
     description:
@@ -775,5 +782,5 @@ export function registerExecuteGateway(pi: ExtensionAPI, bridge: BridgeHandle, r
       }
       return { content: [{ type: "text", text: lines.join("\n") }] };
     },
-  });
+  }, toolPreviewTuiRef);
 }

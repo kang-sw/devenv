@@ -36,7 +36,7 @@ import { WS_PI_PARENT_SESSION_KEY_ENV, isLeadOrFork, readSpawnRole, type SpawnRo
 // runtime circular import is created in either direction.
 import { resolveModelForAliasViaWsMcp, inheritModelFromToolCtx } from "./spawner.ts";
 import { modelCatalogFromToolCtx, formatTierWarning, type ModelCatalogEntry, type TierRejection } from "./model-catalog.ts";
-import { createToolPreviewRenderers, loadToolResultTuiModules } from "./tool-result-render.ts";
+import { registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 
 export interface BridgeOptions {
   launcherPath: string;
@@ -44,6 +44,8 @@ export interface BridgeOptions {
   runtimeJsonPath: string;
   /** Working directory of the Pi session — used as the ferrule bootstrap root. */
   cwd: string;
+  /** Filled independently before MCP startup; native fallback remains available when absent. */
+  toolPreviewTuiRef: ToolPreviewTuiRef;
   ui?: ExtensionUIContext;
 }
 
@@ -553,18 +555,12 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     assertVersionPin(runtime, initResult.serverInfo.version);
 
     tools = filterOutMercenaryTools(await client.listTools());
-    // Rendering is TUI-only and display-only. When the nested host package is
-    // unavailable (notably node --test), Pi's native fallback remains intact.
-    const toolResultTui = await loadToolResultTuiModules();
-
     for (const tool of tools) {
       const rawName = tool.name;
       const registeredName = sanitizeToolName(rawName);
-      // Bound per registration: Pi does not add a fallback title when this
-      // renderer succeeds, so the registered provider-visible name belongs in
-      // the call renderer rather than a shared, title-less instance.
-      const toolPreviewRenderers = toolResultTui ? createToolPreviewRenderers(toolResultTui, registeredName) : undefined;
-      pi.registerTool({
+      // The common seam supplies this sanitized provider-visible title while
+      // preserving bridge dispatch and all original tool definition fields.
+      registerWsTool(pi, {
         name: registeredName,
         label: rawName,
         description: tool.description ?? rawName,
@@ -577,7 +573,6 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
         // symbols at runtime. ws-mcp's inputSchema is already a plain
         // {type, properties, required} object, so no typebox shim is needed.
         parameters: withOptionalSessionKey(tool.inputSchema) as never,
-        ...(toolPreviewRenderers ?? {}),
         async execute(_toolCallId, params, _signal, _onUpdate, toolCtx) {
           // Dispatch always uses the RAW dotted name — sanitization is
           // registration-only, never part of the ws-mcp wire call.
@@ -638,7 +633,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
           const content = maybeAppendModelCatalogAdvisory(rawName, result.content, piAliasTableReport, inheritModel, catalog.length === 0);
           return { content, details: result };
         },
-      });
+      }, opts.toolPreviewTuiRef);
     }
 
     // Default-fill key bootstrap: mint a session_key via ferrule so that

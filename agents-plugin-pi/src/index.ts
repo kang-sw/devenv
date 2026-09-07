@@ -207,6 +207,7 @@ import {
   threadRegistryPath,
 } from "./ask.ts";
 import { registerWsSkillTool } from "./lead-skills.ts";
+import { createToolPreviewTuiRef, loadToolResultTuiModules } from "./tool-result-render.ts";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const pluginDir = dirname(srcDir); // agents-plugin-pi/
@@ -220,6 +221,9 @@ const executeWorkerGuidePath = join(pluginDir, "execute-worker-guide.md");
 const exploreGuidePath = join(pluginDir, "explore-guide.md");
 
 export default function wsPiBridgeExtension(pi: ExtensionAPI) {
+  // Filled before the bridge starts so native tool renderers are available
+  // independently of async MCP startup; absent helpers retain Pi fallback.
+  const toolPreviewTuiRef = createToolPreviewTuiRef();
   let handle: BridgeHandle | undefined;
   let agentTools: AgentToolsHandle | undefined;
   // The manual-snapshot + guide-text half of the ws block, filled once per
@@ -295,7 +299,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     },
   });
 
-  const goalLoopHandle = registerGoalLoop(pi, { goalLoopConfigPath, rpcRegistryRef });
+  const goalLoopHandle = registerGoalLoop(pi, { goalLoopConfigPath, rpcRegistryRef }, toolPreviewTuiRef);
   registerLeadBootstrap(pi, wsBlockBaseRef, skillsBlockCacheRef);
   // 260906 Phase 1: declarative/global, same placement as registerFork/
   // registerAsk above it — a fork child re-runs session_start too and needs
@@ -303,7 +307,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   // activate. Whether it is ever ACTIVE is that gate's job, not this call's.
   // Dogfood fix: takes only `pi` now — it reads `pi.getCommands()` live
   // inside its own `execute()`, never a ref filled at `session_start`.
-  registerWsSkillTool(pi);
+  registerWsSkillTool(pi, toolPreviewTuiRef);
   // 260905 Edition: releases the child pushes that arrived while this session
   // was mid-turn, each with a status line computed at release time. Factory
   // scope (like registerGoalLoop above, never inside session_start) so a
@@ -339,11 +343,16 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
         });
     }
 
+    // Do not make native presentation depend on a connected MCP bridge. The
+    // helper is optional, so cold/import failures preserve Pi's fallback.
+    toolPreviewTuiRef.current = await loadToolResultTuiModules();
+
     handle = await startBridge(pi, {
       launcherPath,
       pluginDir,
       runtimeJsonPath,
       cwd: ctx.cwd,
+      toolPreviewTuiRef,
       ui: ctx.ui,
     });
 
@@ -353,13 +362,13 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // dormant-resumed execute-worker needs the SAME callback wired through
     // ws-agent-send's auto-resume branch, not just ws-execute's own spawn.
     const onApprovalPending = createApprovalRelay(pi, { cwd: ctx.cwd }, rpcRegistryRef);
-    agentTools = registerAgentTools(pi, handle, { cwd: ctx.cwd }, onApprovalPending, undefined, exploreGuidePath);
+    agentTools = registerAgentTools(pi, handle, { cwd: ctx.cwd }, onApprovalPending, undefined, exploreGuidePath, toolPreviewTuiRef);
     rpcRegistryRef.current = agentTools.rpcRegistry;
     registerExecuteGateway(pi, handle, agentTools.rpcRegistry, {
       cwd: ctx.cwd,
       executeWorkerPromptPath: executeWorkerGuidePath,
       onApprovalPending,
-    });
+    }, toolPreviewTuiRef);
     // 260904 Phase 1 (side-thread fork): registered declaratively/globally,
     // same pattern as registerExecuteGateway above — a fork child re-runs
     // session_start too and needs ws-fork registered so computeForkToolSurface's
@@ -383,7 +392,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       const thread = handleForkRaisedQuestion(threadHandle, agentTools!.rpcRegistry, agentId, message, pi);
       return threadHandle.ctxRef.current?.mode === "tui" ? buildForkQuestionLeadNotice(agentId, thread.threadId) : undefined;
     };
-    registerFork(pi, handle, agentTools.rpcRegistry, { cwd: ctx.cwd }, onForkQuestion);
+    registerFork(pi, handle, agentTools.rpcRegistry, { cwd: ctx.cwd }, onForkQuestion, toolPreviewTuiRef);
 
     // 260904 Phase 2 (owner question surface), same declarative/global
     // registration placement as registerFork above: ws-ask/ws-resolve must
@@ -449,7 +458,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
         agentWidgetHandle.refresh();
       }
     }
-    registerAsk(pi, threadHandle, agentTools.rpcRegistry);
+    registerAsk(pi, threadHandle, agentTools.rpcRegistry, toolPreviewTuiRef);
     registerThreadCommands(pi, handle, agentTools.rpcRegistry, threadHandle, { cwd: ctx.cwd });
 
     // §1/§4/260906: one pure call produces BOTH the ws block's static base

@@ -1,3 +1,4 @@
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { stringify as stringifyYaml } from "yaml";
 
 /** The tiny host surface required for YAML previews. */
@@ -19,6 +20,15 @@ export interface NativeText {
 export interface NativePreviewComponent {
   render(width: number): string[];
   invalidate(): void;
+}
+
+/** A late-filled TUI reference lets native tools register before MCP startup. */
+export interface ToolPreviewTuiRef {
+  current: ToolResultTuiModules | undefined;
+}
+
+export function createToolPreviewTuiRef(): ToolPreviewTuiRef {
+  return { current: undefined };
 }
 
 export interface NativeBox extends NativePreviewComponent {
@@ -191,7 +201,7 @@ export function logicalPreview(text: string, limit = PREVIEW_ROWS): string {
   return text.replace(/\r\n?/g, "\n").split("\n").slice(0, limit).join("\n");
 }
 
-/** YAML only JSON containers; scalar JSON and non-JSON prose stay native. */
+/** YAML only JSON containers; scalar JSON and non-JSON prose stay RAW. */
 export function yamlContainerDisplay(text: string, serialize: YamlSerializer = stringifyYaml): string | undefined {
   try {
     const value: unknown = JSON.parse(text);
@@ -200,6 +210,17 @@ export function yamlContainerDisplay(text: string, serialize: YamlSerializer = s
   } catch {
     return undefined;
   }
+}
+
+export interface CompletedTextPreview {
+  kind: "yaml" | "raw";
+  text: string;
+}
+
+/** Every completed single text block previews: containers as YAML, all else RAW. */
+export function completedTextPreview(text: string, serialize: YamlSerializer = stringifyYaml): CompletedTextPreview {
+  const yaml = yamlContainerDisplay(text, serialize);
+  return yaml === undefined ? { kind: "raw", text } : { kind: "yaml", text: yaml };
 }
 
 /** Object-shaped call arguments are rendered as YAML; physical row capping happens at layout time. */
@@ -421,10 +442,10 @@ export function createToolPreviewRenderers(
       const state = stateFor(context);
       const rendered = state.result?.content === result.content
         ? state.result.text
-        : yamlContainerDisplay(raw, serialize);
-      // Errors, prose, scalar JSON, later text blocks, and image/mixed output
-      // stay on Pi's existing text/image fallback path.
-      if (rendered === undefined) throw new UseNativeResultFallback();
+        : completedTextPreview(raw, serialize).text;
+      // Errors, partials, and non-text/mixed content retain Pi's native
+      // fallback. Completed single text blocks always preview, preserving RAW
+      // prose/scalars byte-for-byte before display-only sanitization.
       state.result = { content: result.content, text: rendered };
 
       const component = isResultPreviewComponent(context.lastComponent)
@@ -438,6 +459,42 @@ export function createToolPreviewRenderers(
       return component;
     },
   };
+}
+
+type ToolDefinition = Parameters<ExtensionAPI["registerTool"]>[0];
+
+/**
+ * Register a ws-owned tool through the one presentation seam. Existing custom
+ * renderers are deliberately left untouched; unavailable helpers throw into
+ * Pi's documented per-slot native fallback.
+ */
+export function registerWsTool(
+  pi: Pick<ExtensionAPI, "registerTool">,
+  definition: ToolDefinition,
+  tuiRef: ToolPreviewTuiRef,
+): void {
+  const existing = definition as ToolDefinition & { renderCall?: unknown; renderResult?: unknown };
+  if (existing.renderCall || existing.renderResult) {
+    pi.registerTool(definition);
+    return;
+  }
+
+  let cachedTui: ToolResultTuiModules | undefined;
+  let cachedRenderers: ReturnType<typeof createToolPreviewRenderers> | undefined;
+  const renderers = () => {
+    const tui = tuiRef.current;
+    if (!tui) throw new UseNativeResultFallback();
+    if (cachedTui !== tui || !cachedRenderers) {
+      cachedTui = tui;
+      cachedRenderers = createToolPreviewRenderers(tui, definition.name);
+    }
+    return cachedRenderers;
+  };
+  pi.registerTool({
+    ...definition,
+    renderCall: (...args: Parameters<ReturnType<typeof createToolPreviewRenderers>["renderCall"]>) => renderers().renderCall(...args),
+    renderResult: (...args: Parameters<ReturnType<typeof createToolPreviewRenderers>["renderResult"]>) => renderers().renderResult(...args),
+  } as ToolDefinition);
 }
 
 /** Guarded because Pi resolves its nested TUI package only while loading us. */

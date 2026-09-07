@@ -55,6 +55,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
+import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 import { modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx, type ModelCatalogEntry } from "./model-catalog.ts";
 import {
   REPORT_TO_LEAD_TOOL_NAME,
@@ -658,8 +659,9 @@ export function registerFork(
   sessionCtx: ForkSessionCtx,
   /** 260904 Phase 2: see `ForkQuestionCallback`. Omitted keeps Phase 1 behavior unchanged. */
   onQuestion?: ForkQuestionCallback,
+  toolPreviewTuiRef: ToolPreviewTuiRef = createToolPreviewTuiRef(),
 ): void {
-  pi.registerTool({
+  registerWsTool(pi, {
     name: FORK_TOOL_NAME,
     label: FORK_TOOL_NAME,
     description:
@@ -715,5 +717,5 @@ export function registerFork(
 
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     },
-  });
+  }, toolPreviewTuiRef);
 }

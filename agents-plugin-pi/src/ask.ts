@@ -64,6 +64,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
+import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 import { modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx } from "./model-catalog.ts";
 import {
   agentWidgetRefreshRef,
@@ -756,8 +757,13 @@ export function handleForkRaisedQuestion(
  * `ws-ask` REGISTERS ONLY — no spawn (§1/§9). The discussion fork is spawned
  * lazily by `/answer`, at the lead's tip at OPEN time.
  */
-export function registerAsk(pi: ExtensionAPI, handle: ThreadRegistryHandle, rpcRegistry?: RpcAgentRegistry): void {
-  pi.registerTool({
+export function registerAsk(
+  pi: ExtensionAPI,
+  handle: ThreadRegistryHandle,
+  rpcRegistry?: RpcAgentRegistry,
+  toolPreviewTuiRef: ToolPreviewTuiRef = createToolPreviewTuiRef(),
+): void {
+  registerWsTool(pi, {
     name: ASK_TOOL_NAME,
     label: ASK_TOOL_NAME,
     description:
@@ -811,9 +817,9 @@ export function registerAsk(pi: ExtensionAPI, handle: ThreadRegistryHandle, rpcR
 
       return { content: [{ type: "text", text: JSON.stringify({ question_id: record.threadId }) }] };
     },
-  });
+  }, toolPreviewTuiRef);
 
-  pi.registerTool({
+  registerWsTool(pi, {
     name: RESOLVE_TOOL_NAME,
     label: RESOLVE_TOOL_NAME,
     description:
@@ -841,7 +847,7 @@ export function registerAsk(pi: ExtensionAPI, handle: ThreadRegistryHandle, rpcR
       refreshAgentWidget();
       return { content: [{ type: "text", text: JSON.stringify({ question_id: record.threadId, status: record.status }) }] };
     },
-  });
+  }, toolPreviewTuiRef);
 }
 
 /**

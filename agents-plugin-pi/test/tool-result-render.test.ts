@@ -4,8 +4,11 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import {
   approximateCodePointWidth,
+  completedTextPreview,
   createToolPreviewRenderers,
+  createToolPreviewTuiRef,
   physicalPreview,
+  registerWsTool,
   sanitizePreviewText,
   UseNativeResultFallback,
   yamlContainerDisplay,
@@ -377,23 +380,74 @@ describe("native YAML preview renderers", () => {
     assert.equal(serializations, 3, "incomplete mutable arguments reprepare; completed identity then caches");
   });
 
-  test("keeps errors, partials, scalars, prose, later text blocks, and images on Pi native fallback", () => {
+  test("renders every completed single text result as YAML or RAW and preserves the original payload", () => {
     const { tui } = fakeTui();
     const renderers = createToolPreviewRenderers(tui, "ws__test");
-    const cases = [
+    const rawCases = ["plain prose", '"scalar"', "{ malformed", "", "line\twith\u0007control", "literal...dots\n界"];
+    for (const raw of rawCases) {
+      const content = [{ type: "text", text: raw }];
+      const component = renderers.renderResult({ content }, { expanded: true, isPartial: false }, unstyledTheme, context());
+      const displayed = component.render(80).join("\n");
+      assert.equal(completedTextPreview(raw).kind, "raw");
+      assert.equal(
+        displayed,
+        physicalPreview(sanitizePreviewText(raw), 80, { expanded: true, trimOuterWhitespace: false }).join("\n"),
+      );
+      assert.deepEqual(content, [{ type: "text", text: raw }], "rendering must not alter model-visible payload text");
+    }
+
+    const yaml = renderers.renderResult(
+      { content: [{ type: "text", text: '{"ok":true}' }] },
+      { expanded: false, isPartial: false },
+      unstyledTheme,
+      context(),
+    );
+    assert.match(yaml.render(80).join("\n"), /ok: true/);
+
+    const fallbackCases = [
       { content: [{ type: "text", text: '{"ok":true}' }], partial: true },
-      { content: [{ type: "text", text: '"scalar"' }], partial: false },
       { content: [{ type: "text", text: '{"ok":true}' }], partial: false, error: true },
-      { content: [{ type: "text", text: "plain error text" }], partial: false },
       { content: [{ type: "text", text: "{}" }, { type: "text", text: "later text" }], partial: false },
       { content: [{ type: "text", text: "{}" }, { type: "image", data: "abc", mimeType: "image/png" }], partial: false },
     ];
-    for (const item of cases) {
+    for (const item of fallbackCases) {
       assert.throws(
         () => renderers.renderResult({ content: item.content }, { expanded: false, isPartial: item.partial }, unstyledTheme, context({ isError: item.error })),
         UseNativeResultFallback,
       );
     }
+  });
+
+  test("uses the shared registration seam while preserving specialized renderers and cold fallback", () => {
+    const { tui } = fakeTui();
+    const ref = createToolPreviewTuiRef();
+    const registered: Array<Record<string, unknown>> = [];
+    const pi = { registerTool: (definition: Record<string, unknown>) => registered.push(definition) };
+    const definition = {
+      name: "ws-agent-send",
+      label: "ws-agent-send",
+      description: "send",
+      parameters: {},
+      async execute() { return { content: [{ type: "text", text: "ok" }] }; },
+    };
+    registerWsTool(pi as never, definition as never, ref);
+    assert.equal(typeof registered[0]?.renderCall, "function");
+    assert.equal(typeof registered[0]?.renderResult, "function");
+    assert.throws(() => (registered[0]?.renderCall as Function)({}, unstyledTheme, context()), UseNativeResultFallback);
+
+    ref.current = tui;
+    const call = (registered[0]?.renderCall as Function)({ message: "hello" }, unstyledTheme, context());
+    assert.match(call.render(80).join("\n"), /message: hello/);
+    const raw = (registered[0]?.renderResult as Function)(
+      { content: [{ type: "text", text: "RAW text" }] }, { expanded: false, isPartial: false }, unstyledTheme, context(),
+    );
+    assert.match(raw.render(80).join("\n"), /RAW text/);
+
+    const custom = () => ({ render: () => [], invalidate() {} });
+    const specialized = { ...definition, name: "ws-special", renderCall: custom };
+    registerWsTool(pi as never, specialized as never, ref);
+    assert.equal(registered[1]?.renderCall, custom, "specialized renderer is never overwritten");
+    assert.equal(registered[1]?.renderResult, undefined);
   });
 
   test("preserves expanded narrow ASCII/CJK output and fits its narrow marker in real Pi composition", async () => {

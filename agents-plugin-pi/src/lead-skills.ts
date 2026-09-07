@@ -79,6 +79,7 @@ import { readFileSync } from "node:fs";
 import type { ExtensionAPI, SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import { parseFrontmatter, type SkillFrontmatter } from "@earendil-works/pi-coding-agent";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
+import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 
 /** Lead-facing tool name (pi-lead-guide.md), registered below. */
 export const WS_SKILL_TOOL_NAME = "ws-skill";
@@ -238,8 +239,8 @@ export function addSkillToolIfLeadOrFork(activeTools: readonly string[], role: S
  * `ws-skill` is ever ACTIVE for a given session is `addSkillToolIfLeadOrFork`'s
  * job, not this function's.
  */
-export function registerWsSkillTool(pi: ExtensionAPI): void {
-  pi.registerTool({
+export function registerWsSkillTool(pi: ExtensionAPI, toolPreviewTuiRef: ToolPreviewTuiRef = createToolPreviewTuiRef()): void {
+  registerWsTool(pi, {
     name: WS_SKILL_TOOL_NAME,
     label: WS_SKILL_TOOL_NAME,
     description:
@@ -258,5 +259,5 @@ export function registerWsSkillTool(pi: ExtensionAPI): void {
       const text = computeWsSkillResult(p.name, p.args, entries, (path) => loadSkillFile(path));
       return { content: [{ type: "text", text }] };
     },
-  });
+  }, toolPreviewTuiRef);
 }
