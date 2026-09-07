@@ -59,6 +59,21 @@ same implementer and independent reviewer; no tickets, new agents, or merge.
 Commit this contract update before source edits, then code/tests; lead updates
 spec after review. Preserve unrelated untracked files.
 
+## Owner hotfix: input truncation marker
+
+The owner approves a same-slice input-only marker correction. When collapsed
+input reaches its ten-content-row budget, render the marker at the four-column
+input-start indent and style it with `toolOutput`, independently from the
+normal input `text` foreground. Do not count omitted rows by scanning or
+wrapping the remainder: use gray `...`, not a count-bearing marker. Output
+markers retain their current formatting.
+
+The marker must still fit a single physical row at narrow widths by reducing
+indentation and marker length as needed. Preserve the existing content budget,
+physical-layout cache behavior, native backgrounds, call-owned separators, and
+payload/fallback contracts. Add focused fake and installed-Pi composition tests
+for input marker indent/color, narrow fitting, and unchanged redraw cost.
+
 ## Escalations
 
 No open product decision. Stop and ask the lead if existing renderer constraints prevent this contract or implementation requires changes outside Pi adapter/spec scope. No merge without owner approval. Record any source/history discrepancy and unverified live behavior.
