@@ -131,10 +131,12 @@ Policy rules:
 
 - Stop for unresolved binding decisions before source edits.
 - If a plan artifact was created, commit it before Edit.
-- Before implementer dispatch, adjudicate every plan-populator `## Escalations`
-  entry: rule on the entry, write the ruling directly under it in the plan's
-  `## Escalations` section, and continue. Stop for the user only when
-  resolving the entry would itself change the ticket.
+- Before implementer dispatch, adjudicate each settled-vs-open
+  `## Escalations` entry (an `[escalate-to-lead]` entry that narrows,
+  inverts, or reframes something the ticket already settled): rule on the
+  entry, write the ruling directly under it in the plan's `## Escalations`
+  section, and continue. Stop for the user only when resolving the entry
+  would itself change the ticket.
 
 ### 4. Edit And Verify
 

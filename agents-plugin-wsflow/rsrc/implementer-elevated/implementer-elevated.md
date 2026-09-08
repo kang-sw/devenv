@@ -70,7 +70,7 @@ Per-finding disposition — one line per finding:
 - `[fixed]` — addressed and committed.
 - `[won't fix: <reason>]` — refused; reason must cite a specific local pattern or scope boundary.
 - `[deferred: <reason>]` — not addressed this cycle; state the resolution condition.
-- `[escalate: <reason>]` — needs a plan update or ticket material; the lead decides the plan-scope question before the next review.
+- `[escalate: <reason>]` — needs a plan update, or a change the ticket itself would need; the lead decides the plan-scope question before the next review.
 
 Attempt record — one line per relayed finding, written whatever the disposition:
 - The cause you targeted, the approach you applied this cycle, and how it differs from the prior attempt.
