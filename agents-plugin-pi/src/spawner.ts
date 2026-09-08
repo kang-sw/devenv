@@ -88,6 +88,7 @@ import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { RpcClient, type RpcClientOptions } from "@earendil-works/pi-coding-agent";
+import { attachFirstTaskForkCacheNotice, type ForkCacheNoticeOwner } from "./fork-cache-notice.ts";
 import type { McpStdioClient, McpToolCallResult } from "./mcp-stdio-client.ts";
 import type { BridgeHandle } from "./bridge.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
@@ -1697,6 +1698,8 @@ export interface SpawnAgentParams {
 }
 
 export interface RpcSpawnCtx {
+  /** Parent TUI only; initial task-fork observation, never persisted or resumed. */
+  forkCacheNoticeOwner?: ForkCacheNoticeOwner;
   /**
    * 260905: the spawning session's own `ExtensionAPI`, needed so every signal
    * this child produces can be PUSHED back into that session (`pushToLead`).
@@ -2533,6 +2536,7 @@ export async function spawnAgent(
     }
     if (forkLaunch) await captureForkSelection(client, record);
     attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
+    attachFirstTaskForkCacheNotice(record, client, ctx.forkCacheNoticeOwner);
     await promptAgent(record, client, params.prompt);
   } catch (err) {
     clearLiveState(record);

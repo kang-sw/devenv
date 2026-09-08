@@ -577,7 +577,7 @@ export function buildForkSpawnCtx(
   pi: ExtensionAPI,
   bridge: BridgeHandle,
   sessionCtx: ForkSessionCtx,
-  opts: { forkFrom: string; forkSourceEntries?: unknown[]; explicitTools: string; inheritModel?: string; catalog: readonly ModelCatalogEntry[]; notifyTierWarning?: (warning: string) => void; forkContext?: ReturnType<typeof captureForkContext> },
+  opts: { forkFrom: string; forkSourceEntries?: unknown[]; explicitTools: string; inheritModel?: string; catalog: readonly ModelCatalogEntry[]; notifyTierWarning?: (warning: string) => void; forkCacheNoticeOwner?: Parameters<typeof spawnAgent>[1]["forkCacheNoticeOwner"]; forkContext?: ReturnType<typeof captureForkContext> },
 ): Parameters<typeof spawnAgent>[1] {
   return {
     // Load-bearing: the fork's whole report channel back to the lead.
@@ -586,6 +586,7 @@ export function buildForkSpawnCtx(
     inheritModel: opts.inheritModel,
     catalog: opts.catalog,
     notifyTierWarning: opts.notifyTierWarning,
+    forkCacheNoticeOwner: opts.forkCacheNoticeOwner,
     wsToolNames: bridge.wsToolNames,
     client: bridge.client,
     forkFrom: opts.forkFrom,
@@ -722,6 +723,7 @@ export function registerFork(
           inheritModel: inheritModelFromToolCtx(toolCtx),
           catalog: modelCatalogFromToolCtx(toolCtx),
           notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx),
+          forkCacheNoticeOwner: { mode: toolCtx.mode, hasUI: toolCtx.hasUI, ui: toolCtx.ui },
           forkContext,
         }),
         {
