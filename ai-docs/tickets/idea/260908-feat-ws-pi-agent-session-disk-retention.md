@@ -68,9 +68,18 @@ so the adapter treats these files as durable, while `tmpdir()` is the one
 place the OS is entitled to delete under it; a revived orphan whose file
 was reaped fails for a reason the lead cannot see. It also splits one
 concept across two locations (workers in `/tmp`, forks in Pi's own session
-directory), and it was chosen only because `mkdtempSync` was the cheapest
-way to get a private directory in the first spawner commit (`13b4e67f`),
-not on any retention reasoning.
+directory), and it deviated silently from a recorded decision. The research
+anchor (`260802-research-ws-pi-native-framework`, "ws subagent sessions
+placed at `~/.pi/agent/ws-sessions/<agentId>.jsonl` (sibling of
+`sessions/`)") and the MVP Phase 2 plan text (`260902-feat-ws-pi-native-mvp`,
+"`--session <ws-owned-path>` (sibling of `~/.pi/agent/sessions/`, hidden
+from the `/resume` picker)") both named a durable sibling directory. The
+implementing commit `13b4e67f` used `tmpdir()` instead with no rationale in
+its message, doc comment, or the ticket's Result "Deviations" list; every
+later ticket (RPC resume, approval dir, sidecar, park/cap, fork readiness)
+reasoned about the file and never about its directory. Postmortem
+(2026-09-08, owner-requested) recorded in the commit that lands this
+paragraph.
 
 Pi already provides what a proper home needs: the lead-side
 `ctx.sessionManager.getSessionDir()` (the `~/.pi/agent/sessions/<cwd>/`
