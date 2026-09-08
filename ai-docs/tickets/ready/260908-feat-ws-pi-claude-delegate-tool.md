@@ -173,3 +173,38 @@ prompt is loaded from the canonical review playbook rather than embedded.
 Verification: a resumed agent continues with prior context (a fact stated in the
 first call is available in the follow-up); an unknown stem errors cleanly; the
 `design-review` preset's prompt matches the playbook source.
+
+## Blocked (2026-09-09)
+
+Blocked on an owner-run precondition that gates all Phase 1 building, not on
+remaining agent work. Phase 1 explicitly gates implementation on a live
+billing-path probe: "Gate before building anything else: a throwaway SDK probe
+confirming that the `claude_code` preset plus a small natural task-frame append
+does **not** trigger the `400 out of extra usage` classification." That probe -
+and Phase 1's separate owner-run live gate (an `audit` and a `consult` item
+returning against a real ticket under subscription login) - both require an
+authenticated Claude subscription and a real `claude -p` / Agent-SDK call.
+
+In an away-owner autonomous goal run there is no path to satisfy either:
+initiating a live billing-path call is an owner-gated, outward-facing action,
+and the ticket's sage-settled design makes the probe a hard precondition BEFORE
+any build. Building the fake-SDK-tested code first would override that settled
+sequencing and re-introduce exactly the dead-on-arrival waste the reverted
+provider path (`260908-feat-ws-pi-claude-code-lead-provider`) hit when the
+classifier refused its framing - the risk this gate exists to retire.
+
+Secondary landing-gate note: this ticket's `sage-review-design` and
+`sage-review-completeness` are still `recommended`, not `completed`/`skipped`, so
+`ws` ticket-verify rejects it at the ready sage-posture gate - it was not cleanly
+ready-landed. That gate is a human/authoring decision (run or explicitly skip the
+recommended sage review), left untouched here; it must be resolved before this
+ticket is properly dispatchable regardless of the probe.
+
+Owner action to unblock: run the throwaway SDK probe under subscription login
+and confirm the small-natural-append framing does not trigger the 400. Once
+confirmed, clear this note; Phase 1 building (register `ws-claude` with
+`audit`/`consult`, array-in/array-out fan-out with `Promise.allSettled` + the
+concurrency cap, the closed-tool profile with `strictMcpConfig`, 3-word stem
+handles, embedded prompts, and fake-SDK tests for result alignment / per-item
+error isolation) is agent-advanceable, with the owner-run live gate remaining
+as post-build acceptance.
