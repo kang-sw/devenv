@@ -2621,12 +2621,13 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
       WS_PI_FORK_READY_PATH: "",
       WS_PI_FORK_READY_NONCE: "",
       WS_PI_FORK_AFFINITY: "",
+      [WS_PI_PARENT_SESSION_KEY_ENV]: "",
     });
   });
 
   test("env overrides an inherited exploration mode while preserving role and approvals markers", () => {
     const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-y/session.jsonl", "/tmp/system.md", "read");
-    assert.deepEqual(new Set(Object.keys(options.env ?? {})), new Set([WS_PI_SPAWN_ROLE_ENV, WS_PI_APPROVAL_DIR_ENV, "WS_PI_EXPLORE_MODE", "WS_PI_FORK_CONTEXT", "WS_PI_FORK_READY_PATH", "WS_PI_FORK_READY_NONCE", "WS_PI_FORK_AFFINITY"]));
+    assert.deepEqual(new Set(Object.keys(options.env ?? {})), new Set([WS_PI_SPAWN_ROLE_ENV, WS_PI_APPROVAL_DIR_ENV, "WS_PI_EXPLORE_MODE", "WS_PI_FORK_CONTEXT", "WS_PI_FORK_READY_PATH", "WS_PI_FORK_READY_NONCE", "WS_PI_FORK_AFFINITY", WS_PI_PARENT_SESSION_KEY_ENV]));
     assert.equal(options.env?.WS_PI_EXPLORE_MODE, "");
   });
 
@@ -2644,7 +2645,7 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
       "read,bash",
       "/lead/session.jsonl",
     );
-    assert.deepEqual(options.args, ["--fork", "/lead/session.jsonl", "--append-system-prompt", "/tmp/system.md", "--tools", "read,bash"]);
+    assert.deepEqual(options.args, ["--fork", "/lead/session.jsonl", "--extension", new URL("../src/index.ts", import.meta.url).pathname, "--tools", "read,bash"]);
     assert.equal(options.env?.[WS_PI_SPAWN_ROLE_ENV], "fork");
   });
 
@@ -2661,16 +2662,16 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
     assert.equal(options.env?.[WS_PI_PARENT_SESSION_KEY_ENV], "lead-key-123");
   });
 
-  test("forkFrom without a parentSessionKey omits WS_PI_PARENT_SESSION_KEY_ENV entirely", () => {
+  test("forkFrom without a parentSessionKey clears inherited WS_PI_PARENT_SESSION_KEY_ENV", () => {
     const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-w3/session.jsonl", "/tmp/system.md", "read", "/lead/session.jsonl");
-    assert.equal(WS_PI_PARENT_SESSION_KEY_ENV in (options.env ?? {}), false);
+    assert.equal(options.env?.[WS_PI_PARENT_SESSION_KEY_ENV], "");
   });
 
   test("no forkFrom (the existing worker/execute-worker path): --session branch and role=worker are unchanged", () => {
     const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-w4/session.jsonl", "/tmp/system.md", "read");
     assert.deepEqual(options.args, ["--session", "/tmp/ws-pi-agent-w4/session.jsonl", "--append-system-prompt", "/tmp/system.md", "--tools", "read"]);
     assert.equal(options.env?.[WS_PI_SPAWN_ROLE_ENV], "worker");
-    assert.equal(WS_PI_PARENT_SESSION_KEY_ENV in (options.env ?? {}), false);
+    assert.equal(options.env?.[WS_PI_PARENT_SESSION_KEY_ENV], "");
   });
 
   test("260906 (lead explore as an async RPC child): spawnRoleOverride:\"explore\" wins outright over the forkFrom?fork:worker default", () => {

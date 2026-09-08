@@ -25,6 +25,8 @@ describe("ForkContext", () => {
     assert.equal(parseForkContext(undefined), undefined, "only absent metadata is legacy");
     assert.throws(() => parseForkContext('{'), /malformed/);
     assert.throws(() => parseForkContext({ version: 1 }), /malformed/);
+    assert.throws(() => parseForkContext(null), /malformed/);
+    assert.throws(() => parseForkContext(""), /malformed/);
   });
 
   test("captures actual registrations in active order and exposes drift", () => {
@@ -52,7 +54,7 @@ describe("ForkContext", () => {
   });
 
   test("rewrites only compatible Codex body affinity", () => {
-    const payload = { prompt_cache_key: "child", instructions: "same", tools: [] };
+    const payload = { prompt_cache_key: "child", instructions: "same", tools: [], input: [], model: "x" };
     assert.deepEqual(applyForkAffinity(payload, context, context.modelDescriptor, "child-affinity"), { ...payload, prompt_cache_key: "affinity" });
     assert.equal(applyForkAffinity(payload, context, { ...context.modelDescriptor, api: "openai-completions" }, "child-affinity"), undefined);
     assert.equal(applyForkAffinity({ instructions: "same" }, context, context.modelDescriptor, "child-affinity"), undefined);

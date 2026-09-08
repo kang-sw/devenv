@@ -66,8 +66,8 @@ import {
   type RpcAgentRegistry,
 } from "./spawner.ts";
 import { readSpawnRole, type SpawnRole } from "./process-role.ts";
-import { captureForkContext, captureRegisteredTools } from "./fork-context.ts";
-import type { LeadPromptCapture } from "./lead-bootstrap.ts";
+import { captureForkContext, captureRegisteredTools, captureUnflushedForkSource, effectiveForkDescriptor } from "./fork-context.ts";
+import type { LeadPromptRef } from "./lead-bootstrap.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers. Unit-tested directly (test/fork.test.ts) with no
@@ -315,7 +315,7 @@ export function buildForkInitialMessage(leadPrompt: string): string {
 
 export interface ForkSessionCtx {
   cwd: string;
-  effectivePromptRef?: { current: LeadPromptCapture | undefined };
+  effectivePromptRef?: LeadPromptRef;
 }
 
 /**
@@ -577,7 +577,7 @@ export function buildForkSpawnCtx(
   pi: ExtensionAPI,
   bridge: BridgeHandle,
   sessionCtx: ForkSessionCtx,
-  opts: { forkFrom: string; explicitTools: string; inheritModel?: string; catalog: readonly ModelCatalogEntry[]; notifyTierWarning?: (warning: string) => void; forkContext?: ReturnType<typeof captureForkContext> },
+  opts: { forkFrom: string; forkSourceEntries?: unknown[]; explicitTools: string; inheritModel?: string; catalog: readonly ModelCatalogEntry[]; notifyTierWarning?: (warning: string) => void; forkContext?: ReturnType<typeof captureForkContext> },
 ): Parameters<typeof spawnAgent>[1] {
   return {
     // Load-bearing: the fork's whole report channel back to the lead.
@@ -589,6 +589,7 @@ export function buildForkSpawnCtx(
     wsToolNames: bridge.wsToolNames,
     client: bridge.client,
     forkFrom: opts.forkFrom,
+    forkSourceEntries: opts.forkSourceEntries,
     explicitTools: opts.explicitTools,
     parentSessionKey: bridge.defaultSessionKeyRef.current,
     spawnRole: "fork",
@@ -665,7 +666,7 @@ export function registerFork(
     name: FORK_TOOL_NAME,
     label: FORK_TOOL_NAME,
     description:
-      'Spawn a lateral task-thread fork that inherits your full current context (a clone of your own session) to work a sub-task alongside you — not a worker (no depth-budget consumption). Its own tool surface excludes ws-fork (no recursive forking). It reports back only via ws-report-to-lead(kind:"question"|"final"); expects_commit:true flags a kind:"final" report whose Commit field is missing or "none" as incomplete. Returns {agent_id, warning?} immediately — end your turn afterwards; its reports and settles arrive as pushed messages.',
+      'Spawn a lateral task-thread fork that inherits your full current context (a clone of your own session) to work a sub-task alongside you — not a worker (no depth-budget consumption). It retains the lead tool surface but refuses ws-fork, ws-ask, and ws-resolve in fork role. It reports back only via ws-report-to-lead(kind:"question"|"final"); expects_commit:true flags a kind:"final" report whose Commit field is missing or "none" as incomplete. Returns {agent_id, warning?} immediately — end your turn afterwards; its reports and settles arrive as pushed messages.',
     parameters: {
       type: "object",
       properties: {
@@ -695,26 +696,28 @@ export function registerFork(
       }
 
       const tools = computeForkToolSurface(pi.getActiveTools());
-      const captured = sessionCtx.effectivePromptRef?.current;
+      const captured = sessionCtx.effectivePromptRef?.resolve?.(toolCtx) ?? sessionCtx.effectivePromptRef?.current;
       const forkContext = captured
         ? captureForkContext({
             kind: "task",
             effectiveSystemPrompt: captured.effectiveSystemPrompt,
             basePromptOptions: captured.basePromptOptions,
             wsBlock: captured.wsBlock,
-            parentSessionKey: bridge.defaultSessionKeyRef.current,
+            parentSessionKey: captured.parentSessionKey ?? bridge.defaultSessionKeyRef.current,
+            parentSessionKeys: [...new Set([captured.parentSessionKey, bridge.defaultSessionKeyRef.current].filter((key): key is string => typeof key === "string"))],
+            parentPiSessionId: toolCtx.sessionManager.getSessionId(),
+            parentAffinityId: toolCtx.sessionManager.getSessionId(),
+            thinkingLevel: pi.getThinkingLevel(),
             activeTools: tools,
             registeredTools: captureRegisteredTools(tools, pi.getAllTools()),
-            modelDescriptor: (() => {
-              const model = (toolCtx as { model?: { provider?: string; id?: string; api?: string; baseUrl?: string; compat?: unknown } }).model;
-              return model ? { provider: model.provider, model: model.id, api: model.api, endpoint: model.baseUrl, compat: model.compat } : {};
-            })(),
+            modelDescriptor: await effectiveForkDescriptor(toolCtx, pi.getThinkingLevel()),
           })
         : undefined;
       const result = await spawnAgent(
         rpcRegistry,
         buildForkSpawnCtx(pi, bridge, sessionCtx, {
           forkFrom,
+          forkSourceEntries: captureUnflushedForkSource(toolCtx),
           explicitTools: tools.join(","),
           inheritModel: inheritModelFromToolCtx(toolCtx),
           catalog: modelCatalogFromToolCtx(toolCtx),

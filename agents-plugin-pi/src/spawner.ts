@@ -80,7 +80,8 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -92,7 +93,7 @@ import type { BridgeHandle } from "./bridge.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 import { suggestModels, formatExploreTierRefusal, formatTierWarning, modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx, type ModelCatalogEntry, type TierFailure, type TierRejection } from "./model-catalog.ts";
 import { WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readExploreMode, readSpawnRole, type ExploreMode, type SpawnRole } from "./process-role.ts";
-import { captureForkContext, writePrivateJson, type ForkContext } from "./fork-context.ts";
+import { captureForkContext, compareForkRegistrations, removeForkTransport, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers: tool-group resolution, terminal-stopReason classification,
@@ -150,6 +151,7 @@ export function buildChildProcessEnv(baseEnv: NodeJS.ProcessEnv): NodeJS.Process
   // deep marker that would re-enable recursive collection.
   const env = { ...baseEnv, [WS_PI_SPAWN_ROLE_ENV]: "explore" };
   delete env[WS_PI_EXPLORE_MODE_ENV];
+  for (const marker of [WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_AFFINITY_ENV]) delete env[marker];
   return env;
 }
 
@@ -1727,6 +1729,8 @@ export interface RpcSpawnCtx {
    * `--session` behavior).
    */
   forkFrom?: string;
+  /** Private launch-only source for Pi's not-yet-flushed first-turn branch. */
+  forkSourceEntries?: unknown[];
   /**
    * 260904 Phase 1 (side-thread fork): pre-computed `--tools` value that
    * bypasses `resolveTools(toolGroup, wsToolNames)` when set — see
@@ -1839,6 +1843,42 @@ export interface RpcResumeCtx {
  * non-explore spawns, `sendToAgent`'s dormant-resume branch) leaves the
  * existing default completely unchanged.
  */
+export function prepareForkLaunch(context: ForkContext | undefined) {
+  const directory = mkdtempSync(join(tmpdir(), "ws-pi-fork-launch-"));
+  const nonce = randomUUID();
+  const contextPath = join(directory, "context.json");
+  const readinessPath = join(directory, "ready.json");
+  writePrivateJson(contextPath, { context: context ? captureForkContext(context) : undefined, ...(context ? {} : { legacy: true }), nonce, readinessPath });
+  return { contextPath, readinessPath, nonce, affinityId: context?.parentAffinityId };
+}
+
+export function validateForkReadiness(launch: ReturnType<typeof prepareForkLaunch>, record: RpcAgentRecord, state: { sessionFile?: string; sessionId?: string }): void {
+  let ready: ForkReadiness;
+  try { ready = JSON.parse(readFileSync(launch.readinessPath, "utf8")); }
+  catch { throw new Error("ws-pi-agent: fork did not publish readiness"); }
+  if (ready.nonce !== launch.nonce || !ready.ownSessionKey?.trim() || ready.error ||
+      !state.sessionFile || ready.sessionPath !== state.sessionFile || !ready.sessionId ||
+      ready.ownSessionKey === record.forkContext?.parentSessionKey || record.forkContext?.parentSessionKeys?.includes(ready.ownSessionKey) || ready.sessionId === record.forkContext?.parentPiSessionId ||
+      (state.sessionId && ready.sessionId !== state.sessionId)) {
+    throw new Error(`ws-pi-agent: fork readiness rejected (${ready.error ?? "nonce/key/session mismatch"})`);
+  }
+  if (record.forkContext) {
+    const mismatch = !Array.isArray(ready.registeredTools) || JSON.stringify(ready.activeTools) !== JSON.stringify(record.forkContext.activeTools)
+      ? "missing or reordered callable tools" : compareForkRegistrations(record.forkContext.registeredTools, ready.registeredTools);
+    if (mismatch) throw new Error(`ws-pi-agent: fork readiness rejected (${mismatch})`);
+  }
+  record.sessionPath = state.sessionFile;
+  removeForkTransport(launch.contextPath);
+  removeForkTransport(launch.readinessPath);
+  rmSync(dirname(launch.contextPath), { recursive: true, force: true });
+}
+
+async function captureForkSelection(client: RpcClient, record: RpcAgentRecord): Promise<void> {
+  const state = await client.getState();
+  if (state.model?.provider && state.model.id) record.modelBase = `${state.model.provider}/${state.model.id}`;
+  if (typeof state.thinkingLevel === "string") record.modelEffort = state.thinkingLevel;
+}
+
 export function buildRpcClientOptions(
   cwd: string,
   model: string | undefined,
@@ -1852,6 +1892,7 @@ export function buildRpcClientOptions(
   forkLaunch?: { contextPath: string; readinessPath: string; nonce: string; affinityId?: string },
 ): RpcClientOptions {
   const role = spawnRoleOverride ?? (forkFrom ? "fork" : "worker");
+  forkLaunch = role === "fork" ? forkLaunch : undefined;
   const env: Record<string, string> = {
     [WS_PI_SPAWN_ROLE_ENV]: role,
     [WS_PI_APPROVAL_DIR_ENV]: join(dirname(sessionPath), "approvals"),
@@ -1864,11 +1905,10 @@ export function buildRpcClientOptions(
   env[WS_PI_FORK_READY_PATH_ENV] = forkLaunch?.readinessPath ?? "";
   env[WS_PI_FORK_READY_NONCE_ENV] = forkLaunch?.nonce ?? "";
   env[WS_PI_FORK_AFFINITY_ENV] = forkLaunch?.affinityId ?? "";
-  if (forkFrom && parentSessionKey) {
-    env[WS_PI_PARENT_SESSION_KEY_ENV] = parentSessionKey;
-  }
+  env[WS_PI_PARENT_SESSION_KEY_ENV] = role === "fork" ? parentSessionKey ?? "" : "";
   const args = forkFrom ? ["--fork", forkFrom] : ["--session", sessionPath];
-  if (systemPromptPath) args.push("--append-system-prompt", systemPromptPath);
+  if (role === "fork") args.push("--extension", fileURLToPath(new URL("./index.ts", import.meta.url)));
+  else if (systemPromptPath) args.push("--append-system-prompt", systemPromptPath);
   args.push("--tools", tools);
   return {
     cliPath: RPC_CLI_PATH,
@@ -2408,15 +2448,12 @@ export async function spawnAgent(
   const agentId = randomUUID();
   const sessionDir = mkdtempSync(join(tmpdir(), "ws-pi-agent-"));
   const sessionPath = join(sessionDir, "session.jsonl");
-  const forkLaunch = ctx.forkContext
-    ? (() => {
-        const nonce = randomUUID();
-        const contextPath = join(sessionDir, "fork-context.json");
-        const readinessPath = join(sessionDir, "fork-ready.json");
-        writePrivateJson(contextPath, { context: captureForkContext(ctx.forkContext!), nonce, readinessPath });
-        return { contextPath, readinessPath, nonce, affinityId: ctx.forkContext!.parentAffinityId };
-      })()
-    : undefined;
+  const forkLaunch = ctx.forkFrom || ctx.spawnRole === "fork" ? prepareForkLaunch(ctx.forkContext) : undefined;
+  let forkSourcePath = ctx.forkFrom;
+  if (forkLaunch && ctx.forkSourceEntries) {
+    forkSourcePath = join(dirname(forkLaunch.contextPath), "source.jsonl");
+    writeFileSync(forkSourcePath, ctx.forkSourceEntries.map(entry => JSON.stringify(entry)).join("\n") + "\n", { mode: 0o600 });
+  }
   const modelBase = resolution.model;
   const resolvedEffort = resolution.effort;
   const toolGroup: ToolGroup = resolveSpawnToolGroup(ctx.toolGroup);
@@ -2455,8 +2492,8 @@ export async function spawnAgent(
       sessionPath,
       params.systemPromptPath,
       tools,
-      ctx.forkFrom,
-      ctx.parentSessionKey,
+      forkSourcePath,
+      ctx.forkContext?.parentSessionKey ?? ctx.parentSessionKey,
       ctx.spawnRole === "explore" ? "explore" : undefined,
       ctx.exploreMode,
       forkLaunch,
@@ -2481,14 +2518,7 @@ export async function spawnAgent(
         );
       }
       record.sessionPath = forkedSessionFile;
-      if (forkLaunch) {
-        let readiness: { nonce?: unknown; ownSessionKey?: unknown; error?: unknown; sessionPath?: unknown; registeredTools?: unknown };
-        try { readiness = JSON.parse(readFileSync(forkLaunch.readinessPath, "utf8")) as typeof readiness; } catch { throw new Error("ws-pi-agent: fork spawn did not publish readiness"); }
-        if (readiness.nonce !== forkLaunch.nonce || typeof readiness.ownSessionKey !== "string" || readiness.error) {
-          throw new Error(`ws-pi-agent: fork readiness rejected (${typeof readiness.error === "string" ? readiness.error : "nonce/key mismatch"})`);
-        }
-        if (typeof readiness.sessionPath === "string" && readiness.sessionPath) record.sessionPath = readiness.sessionPath;
-      }
+      if (forkLaunch) validateForkReadiness(forkLaunch, record, state);
     }
 
     // Read the already-folded record value, not params.modelEffort directly
@@ -2501,6 +2531,7 @@ export async function spawnAgent(
     } else {
       await applyModelEffort(client, record.modelEffort);
     }
+    if (forkLaunch) await captureForkSelection(client, record);
     attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     await promptAgent(record, client, params.prompt);
   } catch (err) {
@@ -2508,6 +2539,8 @@ export async function spawnAgent(
     try { await client.stop(); } catch { /* best effort */ }
     pushSpawnFailed(ctx.pi, registry, record, err);
     throw err;
+  } finally {
+    if (forkLaunch) rmSync(dirname(forkLaunch.contextPath), { recursive: true, force: true });
   }
 
   // 260905 (live-agent widget ticket): a brand-new registry member, live and
@@ -2571,6 +2604,7 @@ export async function sendToAgent(
   if (ctx.leadSend && record.threadBound) record.threadBound = false;
 
   if (!record.client) {
+    const forkLaunch = record.spawnRole === "fork" ? prepareForkLaunch(record.forkContext) : undefined;
     // 260904 Phase 1 (side-thread fork): `forkFrom` is deliberately never
     // passed here — a dormant resume (including a stopped fork) always
     // resumes via `--session record.sessionPath` (the fork's own
@@ -2586,25 +2620,30 @@ export async function sendToAgent(
         record.systemPromptPath,
         record.explicitTools ?? resolveTools(record.toolGroup, record.wsToolNames),
         undefined,
-        undefined,
+        record.forkContext?.parentSessionKey,
         record.spawnRole === "fork" ? "fork" : record.spawnRole === "explore" ? "explore" : "worker",
         record.exploreMode,
+        forkLaunch,
       ),
     );
     record.client = client;
     try {
       await client.start();
+      if (forkLaunch) validateForkReadiness(forkLaunch, record, await client.getState());
       if (record.spawnRole === "explore") {
         await verifyResearchSelection(client, record, false);
       } else {
         await applyModelEffort(client, record.modelEffort);
       }
+      if (forkLaunch) await captureForkSelection(client, record);
       attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     } catch (err) {
       clearLiveState(record);
       try { await client.stop(); } catch { /* best effort */ }
       pushSpawnFailed(ctx.pi, registry, record, err);
       throw err;
+    } finally {
+      if (forkLaunch) rmSync(dirname(forkLaunch.contextPath), { recursive: true, force: true });
     }
     // Role wiring that needs a live client (a revived fork's anti-bleed loop —
     // see `RpcAgentRecord.onResume`). Best effort: a wiring failure must not

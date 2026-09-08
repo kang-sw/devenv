@@ -78,8 +78,8 @@ import {
 import { computeForkToolSurface, getForkSourceSessionFile } from "./fork.ts";
 import { readSpawnRole, type SpawnRole } from "./process-role.ts";
 import { openOverlayChat, type ForkChannel, type OverlayHandle, type TranscriptEntry } from "./overlay-chat.ts";
-import { captureForkContext, captureRegisteredTools, type ForkContext } from "./fork-context.ts";
-import type { LeadPromptCapture } from "./lead-bootstrap.ts";
+import { captureForkContext, captureRegisteredTools, captureUnflushedForkSource, effectiveForkDescriptor, type ForkContext } from "./fork-context.ts";
+import type { LeadPromptRef } from "./lead-bootstrap.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers. Unit-tested directly (test/ask.test.ts) with no
@@ -690,7 +690,7 @@ function nowIso(): string {
 
 export interface AskSessionCtx {
   cwd: string;
-  effectivePromptRef?: { current: LeadPromptCapture | undefined };
+  effectivePromptRef?: LeadPromptRef;
 }
 
 /**
@@ -1169,18 +1169,21 @@ export async function ensureRespondent(
   }
 
   const tools = computeForkToolSurface(pi.getActiveTools());
-  const captured = sessionCtx.effectivePromptRef?.current;
-  const model = (ctx as { model?: { provider?: string; id?: string; api?: string; baseUrl?: string; compat?: unknown } }).model;
+  const captured = sessionCtx.effectivePromptRef?.resolve?.(ctx) ?? sessionCtx.effectivePromptRef?.current;
   const forkContext = captured
     ? captureForkContext({
         kind: "discussion",
         effectiveSystemPrompt: captured.effectiveSystemPrompt,
         basePromptOptions: captured.basePromptOptions,
         wsBlock: captured.wsBlock,
-        parentSessionKey: bridge.defaultSessionKeyRef.current,
+        parentSessionKey: captured.parentSessionKey ?? bridge.defaultSessionKeyRef.current,
+        parentSessionKeys: [...new Set([captured.parentSessionKey, bridge.defaultSessionKeyRef.current].filter((key): key is string => typeof key === "string"))],
+        parentPiSessionId: (ctx as { sessionManager?: { getSessionId(): string } }).sessionManager?.getSessionId(),
+        parentAffinityId: (ctx as { sessionManager?: { getSessionId(): string } }).sessionManager?.getSessionId(),
+        thinkingLevel: pi.getThinkingLevel(),
         activeTools: tools,
         registeredTools: captureRegisteredTools(tools, pi.getAllTools()),
-        modelDescriptor: model ? { provider: model.provider, model: model.id, api: model.api, endpoint: model.baseUrl, compat: model.compat } : {},
+        modelDescriptor: await effectiveForkDescriptor(ctx as never, pi.getThinkingLevel()),
       })
     : undefined;
   const result = await spawnAgent(
@@ -1194,6 +1197,7 @@ export async function ensureRespondent(
       wsToolNames: bridge.wsToolNames,
       client: bridge.client,
       forkFrom,
+      forkSourceEntries: captureUnflushedForkSource(ctx),
       explicitTools: tools.join(","),
       forkContext,
       parentSessionKey: bridge.defaultSessionKeyRef.current,

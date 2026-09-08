@@ -38,7 +38,11 @@ import { resolveModelForAliasViaWsMcp, inheritModelFromToolCtx } from "./spawner
 import { modelCatalogFromToolCtx, formatTierWarning, type ModelCatalogEntry, type TierRejection } from "./model-catalog.ts";
 import { registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 
+import type { ForkContext } from "./fork-context.ts";
+
 export interface BridgeOptions {
+  forkContext?: ForkContext;
+  previousOwnKeys?: readonly string[];
   launcherPath: string;
   pluginDir: string;
   runtimeJsonPath: string;
@@ -439,6 +443,7 @@ export interface NormalizeSessionKeyOptions {
   sentinel: string;
   /** The env-delivered parent lead key (fork-only, `WS_PI_PARENT_SESSION_KEY`), when set. */
   parentLeadKey?: string;
+  parentLeadKeys?: readonly string[];
   /** Earlier child-owned keys, never inferred from transcript text. */
   previousOwnKeys?: readonly string[];
 }
@@ -447,23 +452,16 @@ export interface NormalizeSessionKeyOptions {
 export function forkSessionKeyRefusal(provided: unknown, opts: NormalizeSessionKeyOptions): string | undefined {
   if (readSpawnRole(process.env) !== "fork" || typeof provided !== "string") return undefined;
   const current = opts.ownKey ? ` Use current fork key "${opts.ownKey}".` : " Fork bootstrap is not ready yet.";
-  if (opts.parentLeadKey && provided === opts.parentLeadKey) return `ws-pi-agent: fork refuses its parent session key.${current}`;
+  if ((opts.parentLeadKey && provided === opts.parentLeadKey) || opts.parentLeadKeys?.includes(provided)) return `ws-pi-agent: fork refuses its parent session key.${current}`;
   if (opts.previousOwnKeys?.includes(provided) && provided !== opts.ownKey) return `ws-pi-agent: fork refuses its stale prior session key.${current}`;
   return undefined;
 }
 
 /**
- * Rewrites exactly two explicit `session_key` values to the bridge's own key,
- * ahead of `resolveSessionKey`'s fill-or-forward: the fresh-bootstrap sentinel
- * (`opts.sentinel`), and — fork-only — the env-delivered parent lead key
- * (`opts.parentLeadKey`). Every other explicit key (including an explicit
- * child key) passes through completely untouched — widening this to any other
- * rewrite case is explicitly rejected by the ticket contract.
- *
- * When `opts.ownKey` is unset (degraded bootstrap: the bridge's own ferrule
- * mint hasn't resolved, or failed), both rewrites are disabled and `params` is
- * returned unchanged — the sentinel self-heals exactly as today (ws-mcp's own
- * fresh-bootstrap path still recognizes it directly).
+ * Refuses parent and historical own keys in fork role, even before bootstrap.
+ * Only the fresh-bootstrap sentinel is rewritten to a ready own key. Ordinary
+ * leads and unrelated explicit worker keys retain fill-or-forward behavior.
+ * Without an own key, the sentinel still reaches ws-mcp's bootstrap fallback.
  *
  * Never mutates `params` — copy-on-write, same contract as
  * `resolveSessionKey`.
@@ -472,11 +470,11 @@ export function normalizeSessionKey(
   params: Record<string, unknown> | undefined,
   opts: NormalizeSessionKeyOptions,
 ): Record<string, unknown> | undefined {
-  if (!opts.ownKey) {
-    return params;
-  }
   const provided = params?.session_key;
-  if (provided === opts.sentinel || (opts.parentLeadKey !== undefined && provided === opts.parentLeadKey)) {
+  const refusal = forkSessionKeyRefusal(provided, opts);
+  if (refusal) throw new Error(refusal);
+  if (!opts.ownKey) return params;
+  if (provided === opts.sentinel) {
     return { ...(params ?? {}), session_key: opts.ownKey };
   }
   return params;
@@ -587,15 +585,15 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
         async execute(_toolCallId, params, _signal, _onUpdate, toolCtx) {
           // Dispatch always uses the RAW dotted name — sanitization is
           // registration-only, never part of the ws-mcp wire call.
-          // normalizeSessionKey runs in front of resolveSessionKey's own
-          // fill-or-forward: it rewrites the two ticket-mandated sentinel/
-          // parent-key explicit cases to the bridge's own key, then
-          // resolveSessionKey handles the (separate) omitted-key fill.
+          // Refuse inherited/stale fork keys before sentinel normalization and
+          // omitted-key fill. Explicit unrelated keys are never rewritten.
           const rawParams = params as Record<string, unknown> | undefined;
           const refusal = forkSessionKeyRefusal(rawParams?.session_key, {
             ownKey: defaultKeyRef.current,
             sentinel: FRESH_BOOTSTRAP_SENTINEL,
-            parentLeadKey: process.env[WS_PI_PARENT_SESSION_KEY_ENV],
+            parentLeadKey: opts.forkContext?.parentSessionKey ?? process.env[WS_PI_PARENT_SESSION_KEY_ENV],
+            previousOwnKeys: opts.previousOwnKeys,
+            parentLeadKeys: opts.forkContext?.parentSessionKeys,
           });
           if (refusal) throw new Error(refusal);
           const normalized = normalizeSessionKey(rawParams, {
@@ -694,7 +692,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     // the workflow_manual mapping degrade together, not independently.
     if (defaultKeyRef.current && isLeadOrFork(readSpawnRole(process.env))) {
       // A delivered fork prompt is immutable and must not be replaced by a child mapping fetch.
-      const inheritedPrompt = readSpawnRole(process.env) === "fork" && Boolean(process.env.WS_PI_FORK_CONTEXT);
+      const inheritedPrompt = readSpawnRole(process.env) === "fork" && Boolean(opts.forkContext);
       if (!inheritedPrompt) {
         try {
           const manualResult = await client.callTool("workflow_manual", { session_key: defaultKeyRef.current });

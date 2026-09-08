@@ -207,12 +207,12 @@ describe("normalizeSessionKey", () => {
     assert.equal(result?.session_key, "own-key-1");
   });
 
-  test("rewrites an explicit parentLeadKey (fork-only) to the bridge's own key", () => {
+  test("ordinary leads forward explicit keys even when parent metadata is present", () => {
     const result = normalizeSessionKey(
       { session_key: "parent-lead-key" },
       { ownKey: "own-key-1", sentinel: SENTINEL, parentLeadKey: "parent-lead-key" },
     );
-    assert.equal(result?.session_key, "own-key-1");
+    assert.equal(result?.session_key, "parent-lead-key");
   });
 
   test("leaves an unrelated explicit (child) key completely unchanged — regression: must still reach ws-mcp unchanged", () => {

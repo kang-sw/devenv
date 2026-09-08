@@ -1,0 +1,262 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { RpcClient } from "@earendil-works/pi-coding-agent";
+
+// Only the MCP and RPC transports are substituted. The copied adapter source,
+// resource loader, extension runner, SessionManager and serializers are real.
+// Copying isolates changed child resources and the test-only MCP launcher.
+for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-agent"), "/home/linuxbrew/.linuxbrew/lib/node_modules/@earendil-works/pi-coding-agent"]) for (const [providerName, apiName] of [["openrouter", "openai-completions"], ["openai-codex", "openai-codex-responses"], ["anthropic", "anthropic-messages"]]) {
+  test(`production fork lifecycle ${JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version}/${apiName}`,  async () => {
+    const directory = mkdtempSync(join(tmpdir(), "ws-pi-lifecycle-"));
+    const plugin = join(directory, "plugin");
+    mkdirSync(plugin);
+    for (const name of ["src", "runtime.json", "goal-loop-config.json", "pi-lead-guide.md", "execute-worker-guide.md", "explore-guide.md"]) cpSync(join(process.cwd(), name), join(plugin, name), { recursive: true });
+    symlinkSync(join(process.cwd(), "node_modules"), join(plugin, "node_modules"));
+    mkdirSync(join(plugin, "bin"));
+    const version = JSON.parse(readFileSync(join(plugin, "runtime.json"), "utf8")).plugin_version;
+    writeFileSync(join(plugin, "bin/ws-mcp-launcher.py"), `import sys,json,uuid,os\nkey='own-'+str(uuid.uuid4())\nfor line in sys.stdin:\n q=json.loads(line); m=q['method']; p=q.get('params',{}); r={}\n if m=='initialize': r={'serverInfo':{'name':'offline','version':${JSON.stringify(version)}},'capabilities':{}}\n elif m=='tools/list': r={'tools':[{'name':'probe','description':'Offline routing probe','inputSchema':{'type':'object','properties':{'session_key':{'type':'string'}}}}]}\n elif m=='tools/call':\n  n=p['name']; a=p.get('arguments',{}); text=json.dumps({'session_key':key}) if n=='ferrule' else ('lead manual '+key if n=='workflow_manual' else (json.dumps(a) if n=='probe' else '{}'))\n  r={'content':[{'type':'text','text':text}],'isError':False}\n  if n=='ferrule' and os.path.exists(${JSON.stringify(join(directory, "fail-key"))}): r={'isError':True,'content':[{'type':'text','text':'offline failed ferrule'}]}\n  if n=='playbook.read' and os.path.exists(${JSON.stringify(join(directory, "fail-map"))}): r={'isError':True,'content':[{'type':'text','text':'offline failed mapping'}]}\n print(json.dumps({'jsonrpc':'2.0','id':q['id'],'result':r}),flush=True)\n`);
+    const sdk = await import(join(root, "dist/index.js"));
+    const spawner = await import(join(plugin, "src/spawner.ts"));
+    const sidecar = await import(join(plugin, "src/agent-sidecar.ts"));
+    const ask = await import(join(plugin, "src/ask.ts"));
+    const originalEnv = { ...process.env };
+    const prototypes = [...new Set([RpcClient.prototype, sdk.RpcClient.prototype])];
+    const originals = prototypes.map(proto => Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel", "steer", "followUp"].map(name => [name, (proto as any)[name]])));
+    const sessions: any[] = [];
+    const children: any[] = [];
+    const errors: string[] = [];
+    const payloads: any[] = [];
+    let sends = 0;
+    const apiKey = providerName === "openai-codex" ? `e30.${Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "offline" } })).toString("base64url")}.x` : "offline-test-key";
+    const model = { provider: providerName, api: apiName, id: "offline-model", name: "offline", reasoning: false, input: ["text", "image"], contextWindow: 128000, maxTokens: 8192, baseUrl: "https://offline.invalid/v1", cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+    const chunks = join(root, "dist/bundle/chunks");
+    const serializer = await import(join(chunks, readdirSync(chunks).find(name => name.startsWith(apiName + "-") && name.endsWith(".js"))!));
+    async function withEnv<T>(env: Record<string, string>, fn: () => Promise<T>): Promise<T> {
+      const saved = { ...process.env };
+      Object.assign(process.env, env);
+      try { return await fn(); } finally { for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key]; Object.assign(process.env, saved); }
+    }
+    async function makeSession(sm: any, env: any = {}, tools?: string[], append = "Explicit append Ω\r\ntrailing  ", discovered = false) {
+      return withEnv(env, async () => {
+        const agentDir = join(directory, `config-${sessions.length}`); mkdirSync(agentDir);
+        const settings = sdk.SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false }, ...(discovered ? { extensions: [join(plugin, "src/index.ts")] } : {}) });
+        if (providerName === "openai-codex") writeFileSync(join(agentDir, "auth.json"), JSON.stringify({ "openai-codex": { type: "oauth", access: apiKey, refresh: "unused-offline", expires: Date.now() + 86400000 } }));
+        const runtime = await sdk.ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json"), modelsStorePath: join(agentDir, "store.json"), allowModelNetwork: false });
+        if (providerName !== "openai-codex") await runtime.setRuntimeApiKey(providerName, apiKey);
+        let api: any;
+        let partialPrompt: string | undefined;
+        const loader = new sdk.DefaultResourceLoader({ cwd: directory, agentDir, settingsManager: settings, noSkills: true, noThemes: true, noPromptTemplates: true, noContextFiles: true, additionalExtensionPaths: discovered ? [] : [join(plugin, "src/index.ts"), join(plugin, "src/index.ts")], systemPrompt: "Custom base\r\n", appendSystemPrompt: [append], extensionFactories: [(pi: any) => { api = pi; pi.on("before_agent_start", (e: any) => { partialPrompt = e.systemPrompt; return env.WS_PI_SPAWN_ROLE === "fork" ? undefined : { systemPrompt: e.systemPrompt + "\nLater handler Ω  " }; }); }] });
+        await loader.reload();
+        assert.deepEqual(loader.getExtensions().errors, []);
+        assert.equal(loader.getExtensions().extensions.filter((e: any) => e.path === join(plugin, "src/index.ts")).length, 1, "source/discovery deduplicates the adapter");
+        const { session } = await sdk.createAgentSession({ cwd: directory, agentDir, sessionManager: sm, resourceLoader: loader, modelRuntime: runtime, model, thinkingLevel: "off", settingsManager: settings, ...(tools ? { tools } : {}) });
+        const h: any = { session, sm, env, api, get beforePrompt() { return partialPrompt; }, requests: [] as any[] };
+        sessions.push(h);
+        session.agent.streamFunction = async (m: any, context: any, options: any) => (h.rawStream = serializer.stream(m, context, { ...options, apiKey, cacheRetention: "short", fetch: async () => { sends++; throw new Error("network forbidden"); }, onPayload: async (payload: any) => {
+          const actual = await options.onPayload?.(payload, m) ?? payload;
+          h.requests.push({ context: { ...context, messages: structuredClone(context.messages), tools: [...context.tools] }, payload: structuredClone(actual) }); payloads.push(actual);
+          throw new Error("direct serializer capture before network");
+        } }));
+        const noop = () => {};
+        const ui = new Proxy({ notify: (message: string) => { if (message.includes("not ready") || message.includes("differs")) errors.push(message); }, custom: async () => undefined }, { get: (target: any, key) => target[key] ?? noop });
+        await session.bindExtensions({ mode: env.WS_PI_SPAWN_ROLE === "fork" ? "rpc" : "tui", uiContext: ui, onError: (e: any) => errors.push(String(e.message ?? e)) });
+        return h;
+      });
+    }
+    async function prompt(h: any, text: string) {
+      const before = h.requests.length;
+      const keys = h.sm.getEntries().findLast((e: any) => e.customType === "ws-pi-fork-keys" && e.data.sessionId === h.sm.getSessionId());
+      // Independently defined new-message fixture, never copied from child payload.
+      const framed = h.referenceHistory && !h.hasInput ? `Current fork-owned ws session_key: ${keys?.data.current}. Use this key, not the inherited parent or any historical own key. ws-fork, ws-ask, and ws-resolve are refused in fork role; report to the lead instead.\n\n${text}` : text;
+      await withEnv(h.env, () => h.session.prompt(text));
+      if (h.referenceHistory && h.requests.length > before) {
+        const user = { role: "user", content: [{ type: "text", text: framed }], timestamp: 1 };
+        let expected: any;
+        const context = { systemPrompt: h.oracle.systemPrompt, tools: h.oracle.tools, messages: [...h.referenceHistory, user] };
+        for await (const _event of serializer.stream(model, context, { apiKey, sessionId: h.parentAffinityId, cacheRetention: "short", fetch: async () => { sends++; throw Error("network forbidden"); }, onPayload: (body: any) => { expected = structuredClone(body); throw Error("independent direct capture"); } })) {}
+        assert.ok(expected);
+        assert.deepEqual(h.requests.at(-1).payload, expected, "entire raw provider request equals independently accumulated continuation");
+        h.referenceHistory.push(user, structuredClone(await h.rawStream.result()));
+        h.hasInput = true;
+      }
+    }
+    async function stop(h: any) { if (!h.stopped) { h.stopped = true; await withEnv(h.env, () => h.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" })); h.session.dispose(); } }
+    const transport = {
+      async start(this: any) {
+        const args = this.options.args; const env = this.options.env;
+        assert.equal(args.includes("--append-system-prompt"), false);
+        assert.equal(args[args.indexOf("--extension") + 1], join(plugin, "src/index.ts"));
+        const fork = args.indexOf("--fork");
+        const sm = fork >= 0 ? sdk.SessionManager.forkFrom(args[fork + 1], directory, join(directory, "sessions")) : sdk.SessionManager.open(args[args.indexOf("--session") + 1]);
+        this.harness = await makeSession(sm, env, args[args.indexOf("--tools") + 1].split(","), "CHANGED CHILD APPEND");
+        const sourcePath = fork >= 0 ? args[fork + 1] : sm.getSessionFile();
+        const sourceId = JSON.parse(readFileSync(sourcePath, "utf8").split("\n")[0]).id;
+        const source = sessions.findLast(h => h !== this.harness && (h.sm.getSessionFile() === sourcePath || h.sm.getSessionId() === sourceId));
+        this.harness.oracle = source.oracle ?? source.requests[0]?.context;
+        this.harness.parentAffinityId = source.parentAffinityId ?? source.sm.getSessionId();
+        this.harness.referenceHistory = this.harness.oracle ? structuredClone(source.referenceHistory ?? source.sm.buildSessionContext().messages) : undefined;
+        children.push(this.harness);
+      },
+      async stop(this: any) { if (this.harness) await stop(this.harness); }, async abort() {}, onEvent() { return () => {}; },
+      async getState(this: any) { return { sessionFile: this.harness.sm.getSessionFile(), sessionId: this.harness.sm.getSessionId(), model, thinkingLevel: this.harness.session.thinkingLevel }; },
+      async setThinkingLevel(this: any, level: string) { this.harness.session.setThinkingLevel(level); },
+      async prompt(this: any, text: string) { await prompt(this.harness, text); },
+      async steer(this: any, text: string) { await prompt(this.harness, text); }, async followUp(this: any, text: string) { await prompt(this.harness, text); },
+    };
+    for (const proto of prototypes) Object.assign(proto, transport);
+    try {
+      process.env.PI_OFFLINE = "1";
+      for (const key of Object.keys(process.env)) if (key.startsWith("WS_PI_FORK_") || key === "WS_PI_PARENT_SESSION_KEY" || key === "WS_PI_SPAWN_ROLE") delete process.env[key];
+      const lead = await makeSession(sdk.SessionManager.create(directory, join(directory, "sessions")));
+      await prompt(lead, "Original lead history Ω");
+      assert.equal(lead.requests.length, 1, errors.join("\n") + JSON.stringify(lead.session.messages));
+      const observed = lead.requests[0];
+      const capture = lead.sm.getEntries().findLast((e: any) => e.customType === "ws-pi-lead-prompt").data;
+      assert.equal(capture.effectiveSystemPrompt, observed.context.systemPrompt);
+      assert.equal(capture.basePromptOptions.appendSystemPrompt, "Explicit append Ω\r\ntrailing  ");
+      assert.ok(capture.effectiveSystemPrompt.endsWith("Later handler Ω  "));
+      assert.notEqual(lead.beforePrompt, capture.effectiveSystemPrompt, "before-agent observation is partial; persisted capture is post-chain");
+      // Original SessionManager branch oracle includes native metadata and mixed
+      // content, not just a hand-authored provider payload.
+      lead.sm.appendMessage({ role: "assistant", api: apiName, provider: providerName, model: model.id, providerThinkingLevel: "low", stopReason: "toolUse", timestamp: 2, content: [...(providerName === "anthropic" ? [{ type: "thinking", thinking: "original private reasoning", thinkingSignature: "original-signed-thinking" }] : []), { type: "toolCall", id: "call_original_1", name: "ws__probe", arguments: {} }, { type: "toolCall", id: "call_original_2", name: "ws__probe", arguments: {} }] });
+      for (const toolCallId of ["call_original_1", "call_original_2"]) lead.sm.appendMessage({ role: "toolResult", toolCallId, toolName: "ws__probe", content: [{ type: "text", text: "original result Ω\r\n  " }], isError: false, timestamp: 3 });
+      lead.sm.appendMessage({ role: "user", content: [{ type: "text", text: "" }, { type: "image", mimeType: "image/png", data: "AQ==" }], timestamp: 4 });
+      writeFileSync(join(plugin, "pi-lead-guide.md"), "CHANGED GUIDE");
+      writeFileSync(join(directory, "fail-map"), "fail");
+      const sourceHistory = structuredClone(lead.sm.buildSessionContext().messages);
+      const forkTool = lead.session.agent.state.tools.find((t: any) => t.name === "ws-fork");
+      assert.ok(forkTool);
+      const result = await forkTool.execute("task", { prompt: "Inspect task" });
+      const id = JSON.parse(result.content[0].text).agent_id;
+      assert.ok(id, JSON.stringify(result));
+      const child = children.at(-1);
+      assert.equal(child.requests.length, 1, errors.join("\n"));
+      assert.equal(child.requests[0].context.systemPrompt, observed.context.systemPrompt);
+      assert.deepEqual(child.requests[0].payload.tools, observed.payload.tools);
+      assert.deepEqual(child.sm.buildSessionContext().messages.slice(0, sourceHistory.length), sourceHistory);
+      const childContext = child.sm.getEntries().findLast((e: any) => e.customType === "ws-pi-fork-context").data.context;
+      assert.equal(childContext.parentAffinityId, lead.sm.getSessionId());
+      assert.equal(childContext.thinkingLevel, "off");
+      const ownKey = (h: any) => h.sm.getEntries().findLast((e: any) => e.customType === "ws-pi-fork-keys").data.current;
+      const firstKey = ownKey(child);
+      assert.match(JSON.stringify(child.requests[0].context.messages.at(-1)), new RegExp(firstKey));
+      await prompt(child, "Second task turn");
+      assert.equal(child.requests[1].context.systemPrompt, observed.context.systemPrompt);
+      assert.deepEqual(child.requests[1].context.messages.at(-1).content, [{ type: "text", text: "Second task turn" }], "only the first new input of a process receives the frame");
+      const callsBefore = children.length;
+      const entriesBeforeRefusals = structuredClone(child.sm.getEntries());
+      const childThreadsPath = ask.threadRegistryPath(child.sm.getSessionFile());
+      const threadSnapshot = () => existsSync(childThreadsPath) ? readFileSync(childThreadsPath, "utf8") : undefined;
+      const threadsBeforeRefusals = threadSnapshot();
+      const listTool = child.session.agent.state.tools.find((t: any) => t.name === "ws-agent-list");
+      const registryBeforeRefusals = await withEnv(child.env, () => listTool.execute("list", {}));
+      for (const name of ["ws-fork", "ws-ask", "ws-resolve"]) await withEnv(child.env, async () => {
+        const tool = child.session.agent.state.tools.find((t: any) => t.name === name);
+        assert.ok(tool, `${name} remains callable`);
+        await assert.rejects(() => tool.execute("refuse", {}), /unavailable in a fork/);
+      });
+      assert.equal(children.length, callsBefore);
+      assert.deepEqual(child.sm.getEntries(), entriesBeforeRefusals, "refusals do not mutate session state");
+      assert.equal(threadSnapshot(), threadsBeforeRefusals, "refusals do not mutate the thread store");
+      assert.deepEqual(await withEnv(child.env, () => listTool.execute("list", {})), registryBeforeRefusals, "refusals do not allocate or mutate the agent registry");
+      const probe = child.session.agent.state.tools.find((t: any) => t.name === "ws__probe");
+      await withEnv(child.env, () => assert.rejects(() => probe.execute("parent", { session_key: childContext.parentSessionKey }), /parent session key/));
+      await withEnv(child.env, async () => {
+        for (const value of [undefined, firstKey, "separately-issued-worker-key"]) {
+          const result = await probe.execute("forward", value ? { session_key: value } : {});
+          assert.match(JSON.stringify(result), new RegExp(value ?? firstKey));
+        }
+      });
+      await stop(lead); // Actual shutdown writes the task sidecar.
+      let orphans = sidecar.readAndClearSidecar(lead.sm.getSessionFile());
+      assert.equal(orphans.length, 1);
+      for (let generation = 0; generation < 2; generation++) {
+        const registry = new Map(); sidecar.reviveOrphans(registry, sidecar.parseOrphans(sidecar.serializeOrphans(orphans)));
+        await spawner.sendToAgent(registry, { cwd: directory }, id, `Resume ${generation}`);
+        const resumed = children.at(-1);
+        assert.equal(resumed.requests[0].context.systemPrompt, observed.context.systemPrompt);
+        assert.deepEqual(resumed.requests[0].payload.tools, observed.payload.tools);
+        assert.notEqual(ownKey(resumed), firstKey);
+        const tool = resumed.session.agent.state.tools.find((t: any) => t.name === "ws__probe");
+        await withEnv(resumed.env, () => assert.rejects(() => tool.execute("stale", { session_key: firstKey }), /stale prior session key/));
+        assert.match(JSON.stringify(resumed.requests[0].context.messages.at(-1)), new RegExp(ownKey(resumed)));
+        orphans = sidecar.captureOrphans(registry);
+        assert.deepEqual(orphans[0].forkContext, childContext);
+        await stop(resumed);
+      }
+      // Lead restart before a new model turn: discussion dispatch must read the durable capture.
+      const restarted = await makeSession(sdk.SessionManager.open(lead.sm.getSessionFile()));
+      restarted.oracle = observed.context;
+      restarted.parentAffinityId = lead.sm.getSessionId();
+      const askTool = restarted.session.agent.state.tools.find((t: any) => t.name === "ws-ask");
+      const question = await askTool.execute("question", { title: "Choice", question: "Which choice?" });
+      assert.ok(question);
+      await prompt(restarted, "/answer");
+      const discussion = children.at(-1);
+      assert.equal(discussion.sm.getEntries().findLast((e: any) => e.customType === "ws-pi-fork-context").data.context.kind, "discussion", errors.join("\n"));
+      assert.equal(discussion.requests[0].context.systemPrompt, observed.context.systemPrompt);
+      const discussionContext = discussion.sm.getEntries().findLast((e: any) => e.customType === "ws-pi-fork-context").data.context;
+      assert.equal(discussionContext.parentSessionKey, childContext.parentSessionKey, "the original captured parent key survives lead restart");
+      assert.equal(discussionContext.parentSessionKeys.length, 2, "also retain the restarting lead's current key for refusal");
+      for (const key of discussionContext.parentSessionKeys) await withEnv(discussion.env, () => assert.rejects(() => discussion.session.agent.state.tools.find((t: any) => t.name === "ws__probe").execute("parent", { session_key: key }), /parent session key/));
+      await stop(restarted);
+      const threads = ask.loadThreadRegistryFile(ask.threadRegistryPath(restarted.sm.getSessionFile()));
+      assert.ok(threads[0].forkResume);
+      for (let generation = 0; generation < 2; generation++) {
+        const roundtrip = ask.parseThreadRegistry(ask.serializeThreadRegistry(threads));
+        const record = ask.rehydrateForkRecord("discussion", roundtrip[0].forkResume);
+        const registry = new Map([[record.agentId, record]]);
+        await spawner.sendToAgent(registry, { cwd: directory }, record.agentId, "Continue owner dialogue");
+        const resumed = children.at(-1);
+        assert.equal(resumed.requests[0].context.systemPrompt, observed.context.systemPrompt);
+        threads[0].forkResume = ask.captureForkResume(record);
+        if (generation === 0) await stop(resumed);
+      }
+      const drifted = children.at(-1);
+      // Post-resource-merge registration drift is handled by the actual SDK input
+      // hook, before any provider callback (throwing a hook would not suffice).
+      const driftCount = drifted.requests.length;
+      await withEnv(drifted.env, async () => { drifted.api.setActiveTools([...drifted.api.getActiveTools()].reverse()); await drifted.session.prompt("must block drift"); });
+      assert.equal(drifted.requests.length, driftCount);
+      const noPrior = await makeSession(sdk.SessionManager.create(directory, join(directory, "sessions")), {}, undefined, "Never-paid explicit Ω\r\n  ", true);
+      await noPrior.session.agent.state.tools.find((t: any) => t.name === "ws-ask").execute("new-discussion", { title: "Before first turn", question: "Discuss without prior turn" });
+      await prompt(noPrior, "/answer");
+      const composed = children.at(-1);
+      const composedContext = composed.sm.getEntries().findLast((e: any) => e.customType === "ws-pi-fork-context").data.context;
+      assert.equal(composedContext.kind, "discussion");
+      assert.match(composed.requests[0].context.systemPrompt, /Never-paid explicit Ω\r\n  /);
+      assert.match(composed.requests[0].context.systemPrompt, /CHANGED GUIDE/);
+      assert.equal(noPrior.requests.length, 0, "no paid turn manufactured to capture an initial discussion prefix");
+      const legacyEnv = { WS_PI_SPAWN_ROLE: "fork", WS_PI_FORK_CONTEXT: "", WS_PI_FORK_AFFINITY: "", WS_PI_PARENT_SESSION_KEY: "legacy-parent" };
+      writeFileSync(join(directory, "fail-key"), "fail");
+      const failedLegacy = await makeSession(sdk.SessionManager.create(directory, join(directory, "sessions")), legacyEnv);
+      await prompt(failedLegacy, "No own key must block");
+      assert.equal(failedLegacy.requests.length, 0);
+      await withEnv(legacyEnv, () => assert.rejects(() => failedLegacy.session.agent.state.tools.find((t: any) => t.name === "ws__probe").execute("parent", { session_key: "legacy-parent" }), /bootstrap is not ready/));
+      rmSync(join(directory, "fail-key"));
+      const legacy = await makeSession(sdk.SessionManager.create(directory, join(directory, "sessions")), legacyEnv);
+      await prompt(legacy, "Legacy local fallback remains enabled");
+      assert.equal(legacy.requests.length, 1);
+      assert.match(legacy.requests[0].context.systemPrompt, /CHANGED GUIDE/);
+      assert.match(JSON.stringify(legacy.requests[0].context.messages.at(-1)), new RegExp(ownKey(legacy)));
+      const malformedPath = join(directory, "bad.json"); writeFileSync(malformedPath, "{");
+      const malformed = await makeSession(sdk.SessionManager.create(directory, join(directory, "sessions")), { ...legacyEnv, WS_PI_FORK_CONTEXT: malformedPath });
+      await prompt(malformed, "Malformed present metadata must block");
+      assert.equal(malformed.requests.length, 0);
+      const worker = await makeSession(sdk.SessionManager.create(directory, join(directory, "sessions")), { ...legacyEnv, WS_PI_SPAWN_ROLE: "worker", WS_PI_FORK_CONTEXT: "/missing-poison-file" });
+      await prompt(worker, "Worker ignores poisoned fork envelope");
+      assert.equal(worker.requests.length, 1);
+      assert.equal(sends, 0);
+      assert.ok(payloads.length >= 8);
+    } finally {
+      for (const h of sessions.reverse()) await stop(h);
+      prototypes.forEach((proto, i) => Object.assign(proto, originals[i]));
+      for (const key of Object.keys(process.env)) if (!(key in originalEnv)) delete process.env[key];
+      Object.assign(process.env, originalEnv);
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+}
