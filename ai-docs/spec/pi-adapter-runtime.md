@@ -1378,6 +1378,61 @@ of its own: every repaint rebuilds the rows from those registries.
 > the 10-second clock under a running child, and `/reload` re-arming — these
 > are owner-run checks recorded in the ticket's Phase 1 Result.
 
+## Shared conversation-view component {#260909-pi-conversation-view-component}
+
+The adapter renders child-agent conversations through one shared component,
+`ConversationViewComponent` (a pi-tui `Component`: `render(width)`,
+`handleInput(data)`). It is the single rendering surface behind both the
+owner-question overlay and the subagent audit window; neither keeps a
+transcript renderer of its own.
+
+- **Message model.** The transcript is a list of `ConversationItem`s, each a
+  plain data record of one kind: `user` (a line the owner typed into the view),
+  `lead-message` (a message the lead sent the child, carried under a `lead ›`
+  label so it is never mistaken for the owner's own line or the child's text),
+  `assistant` (the child's own text, rendered as Markdown), `tool-call`
+  (`id`, `name`, `args`), `tool-result` (`id`, `name`, `content`, optional
+  `isError`), and `note` (an adapter note such as a question seed or status,
+  rendered dim). The partial streaming tail of the child's current turn is
+  render-time state, never an item. Persistence is the consumer's concern.
+- **Collapsed tool items.** `tool-call` and `tool-result` items collapse to a
+  one-line head by default and expand individually. Both the head and the
+  expanded body come from the adapter's existing tool-preview rendering (the
+  same previews the push/tool-result surface produces); the component supplies
+  only the collapse/expand chrome, never a preview of its own. `Tab` /
+  `Shift+Tab` move a selection highlight across the collapsible items
+  newest-first, `Space` toggles the selected item, and `Ctrl+O` toggles all of
+  them at once.
+- **Two modes.** `view` has no input line and never sends; `interactive` shows
+  an editor and delivers the owner's typed lines through the channel. Mode is
+  set at construction and may be raised from `view` to `interactive` on the
+  same instance (history, scroll position, expand state and the event
+  subscription survive); it is never lowered. In `view` mode the collapse keys
+  are always the component's and `Enter` routes to an `onEnter` callback; in
+  `interactive` mode `Tab` / `Shift+Tab` act only while the editor is empty,
+  `Space` acts only while a selection is active, any other typed character
+  clears the selection and goes to the editor, and `Ctrl+O` acts in both modes.
+- **Liveness is read every render.** The component reads a three-state
+  `liveness()` from its channel at render time (`running`,
+  `idle-awaiting-owner`, `settled`) rather than reacting to a start event, so
+  attaching mid-turn or after a dormant relaunch still renders correctly. A
+  `working…` marker shows only while `running` with an empty streaming tail and
+  is replaced by the first streamed delta. `idle-awaiting-owner` renders
+  prominently — in the header and at the transcript foot — so the owner
+  notices; `settled` renders quietly.
+- **Key contract.** `Esc` routes to a consumer `onEscape` callback (kitty-safe
+  detection); `\x03` (Ctrl+C) is swallowed in both modes and never forwarded,
+  so a focused overlay cannot trip Pi's double-Ctrl+C exit; `/done` typed in
+  `interactive` mode routes to an `onDone` callback. Scrolling uses the
+  transcript's own bindings and the whole history scrolls (no fixed tail cut).
+  The consumer supplies the one-line `headerHint` string, rendered once under
+  the title, so the overlay and the audit window state their own key hints.
+- **Direct pi-tui dependency.** The component builds on pi-tui primitives
+  (`ScrollView` / `Markdown` / `Text` / `Editor`) resolved through the host's
+  pi-tui instance at runtime, so a rendered child tree carries the host's own
+  component types; the primitives are injectable (defaulting to the real
+  classes) so the component renders under an offline test harness with no TTY.
+
 ## Goal loop {#260904-pi-goal-loop-arming-settled-levers}
 
 The adapter drives a **lead-session goal loop**: while a goal is active, each time
