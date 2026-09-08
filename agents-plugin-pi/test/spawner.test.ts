@@ -141,6 +141,8 @@ import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV } from "../src/proce
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { McpStdioClient, McpToolCallResult } from "../src/mcp-stdio-client.ts";
+import { readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 function freshRunningRecord(): AgentRecord {
   return {
@@ -484,8 +486,62 @@ describe("resolveModelForAliasViaWsMcp", () => {
     });
   });
 
-  test("a non-pi resolved_from inherits", async () => {
+  test("a non-pi resolved_from still returns the inherit model, but now reports an unset rejection (the resolver never decides to refuse — callers do)", async () => {
     const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "codex", model: "gpt-5.6-terra" })));
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model", tierCatalog), {
+      model: "inherited/model", rejected: { model: "gpt-5.6-terra", resolvedFrom: "codex", why: "unset" },
+    });
+  });
+
+  test("source is 'tier' only on a genuine accepted pi hit; every other outcome (unset/unknown/no-auth/transport/parse/omitted) is 'inherit'", async () => {
+    const hit = await resolveModelForAliasViaWsMcp(stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "openrouter/cheap-model" }))), "small", "inherited/model", tierCatalog);
+    assert.equal(hit.source, "tier");
+    const unset = await resolveModelForAliasViaWsMcp(stubClient(async () => textResult(JSON.stringify({ resolved_from: "codex", model: "gpt-5.6-terra" }))), "small", "inherited/model", tierCatalog);
+    assert.equal(unset.source, "inherit");
+    const unknown = await resolveModelForAliasViaWsMcp(stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "gpt-5.6-terra" }))), "small", "inherited/model", []);
+    assert.equal(unknown.source, "inherit");
+    const transportFailure = await resolveModelForAliasViaWsMcp(stubClient(async () => { throw new Error("boom"); }), "small", "inherited/model", tierCatalog);
+    assert.equal(transportFailure.source, "inherit");
+    const omitted = await resolveModelForAliasViaWsMcp(stubClient(async () => textResult("{}")), undefined, "inherited/model");
+    assert.equal(omitted.source, "inherit");
+  });
+
+  test("backend expansion: a slash-less model prefixes via the fixed codex/claude provider map before the catalog check", async () => {
+    const codexClient = stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "gpt-5.6-high", backend: "codex" })));
+    const codexResult = await resolveModelForAliasViaWsMcp(codexClient, "small", "inherited/model", [{ provider: "openai-codex", id: "gpt-5.6-high", hasAuth: true }]);
+    assert.equal(codexResult.model, "openai-codex/gpt-5.6-high");
+    assert.equal(codexResult.rejected, undefined);
+    const claudeClient = stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "opus", backend: "claude" })));
+    const claudeResult = await resolveModelForAliasViaWsMcp(claudeClient, "small", "inherited/model", [{ provider: "anthropic", id: "opus", hasAuth: true }]);
+    assert.equal(claudeResult.model, "anthropic/opus");
+    assert.equal(claudeResult.rejected, undefined);
+  });
+
+  test("backend expansion never re-prefixes an already-slashed model", async () => {
+    const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "openrouter/cheap-model", backend: "codex" })));
+    const result = await resolveModelForAliasViaWsMcp(client, "small", "inherited/model", tierCatalog);
+    assert.equal(result.model, "openrouter/cheap-model");
+    assert.equal(result.rejected, undefined);
+  });
+
+  test("an empty or unmapped backend leaves a slash-less model as-is, so it fails the catalog check as unknown (not silently passed through)", async () => {
+    for (const backend of [undefined, "", "pi", "some-unmapped-backend"]) {
+      const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "gpt-5.6-terra", ...(backend === undefined ? {} : { backend }) })));
+      const result = await resolveModelForAliasViaWsMcp(client, "small", "inherited/model", []);
+      assert.equal(result.rejected?.why, "unknown", `backend ${JSON.stringify(backend)}`);
+      assert.equal(result.rejected?.model, "gpt-5.6-terra", `backend ${JSON.stringify(backend)}`);
+      assert.equal(result.rejected?.stored, undefined, `backend ${JSON.stringify(backend)}: no expansion happened, so no stored raw value`);
+    }
+  });
+
+  test("a rejected expansion carries the raw configured value as `stored`, distinct from the expanded/checked `model`", async () => {
+    const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "gpt-5.6-high", backend: "codex" })));
+    const result = await resolveModelForAliasViaWsMcp(client, "small", "inherited/model", []);
+    assert.deepEqual(result.rejected, { model: "openai-codex/gpt-5.6-high", stored: "gpt-5.6-high", resolvedFrom: "pi", why: "unknown", suggestions: [] });
+  });
+
+  test("a non-string backend field is a parse failure, like the other malformed fields", async () => {
+    const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "gpt-5.6-high", backend: 5 })));
     assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model", tierCatalog), { model: "inherited/model" });
   });
 
@@ -533,7 +589,7 @@ describe("resolveModelForAliasViaWsMcp", () => {
   test("effort is absent from a non-pi (inherit) resolution even if the payload carried one", async () => {
     const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "codex", model: "gpt-5.6-terra", effort: "high" })));
     const resolved = await resolveModelForAliasViaWsMcp(client, "large", "inherited/model", tierCatalog);
-    assert.deepEqual(resolved, { model: "inherited/model" });
+    assert.deepEqual(resolved, { model: "inherited/model", rejected: { model: "gpt-5.6-terra", resolvedFrom: "codex", why: "unset" } });
   });
 
   test("an arbitrary tier name still resolves normally (no closed vocabulary enforced by this function itself)", async () => {
@@ -574,20 +630,27 @@ describe("catalog validation and warning copy", () => {
     assert.deepEqual(await resolve("openai-codex/gpt-5.6-luna"), { model: "openai-codex/gpt-5.6-luna", effort: "low" });
   });
   for (const source of ["codex", "default", "tiers", "claude", ""]) {
-    test(`${source} stays silent`, async () => assert.deepEqual(await resolve("gpt-5.6-luna", source), { model: "lead/model" }));
+    test(`${source || "empty"} resolved_from reports an unset rejection while still returning the inherit model`, async () =>
+      assert.deepEqual(await resolve("gpt-5.6-luna", source), { model: "lead/model", rejected: { model: "gpt-5.6-luna", resolvedFrom: source, why: "unset" } }));
   }
   test("no-auth names provider and has no suggestion tail", async () => {
     const result = await resolve("locked/gpt-5.6-luna");
     assert.deepEqual(result, { model: "lead/model", rejected: { model: "locked/gpt-5.6-luna", resolvedFrom: "pi", why: "no-auth" } });
-    assert.equal(formatTierWarning("small", result.rejected!, result.model, false), 'warning: tier small is set to "locked/gpt-5.6-luna" for harness pi, but provider locked has no configured auth; inherited lead/model.');
+    assert.equal(
+      formatTierWarning("small", result.rejected!, result.model, false),
+      'warning: tier small is set to "locked/gpt-5.6-luna" for harness pi, but provider locked has no configured auth. Set it via config.tune(key: "agents.tier", harness: "pi", value: {tier: "small", model: "<provider/id>"}).',
+    );
   });
   test("exact unknown copy and all three tails", async () => {
     const result = await resolve("gpt-5.6-luna");
-    assert.equal(formatTierWarning("small", result.rejected!, result.model, false), 'warning: tier small is set to "gpt-5.6-luna" for harness pi, which is not a provider/id entry in Pi\'s model catalog; inherited lead/model. Did you mean openai-codex/gpt-5.6-luna, locked/gpt-5.6-luna?');
+    assert.equal(
+      formatTierWarning("small", result.rejected!, result.model, false),
+      'warning: tier small is set to "gpt-5.6-luna" for harness pi, which is not a provider/id entry in Pi\'s model catalog. Did you mean openai-codex/gpt-5.6-luna, locked/gpt-5.6-luna? Set it via config.tune(key: "agents.tier", harness: "pi", value: {tier: "small", model: "<provider/id>"}).',
+    );
     const far = await resolve("far-away-model-name");
-    assert.match(formatTierWarning("small", far.rejected!, far.model, false), / No close match in Pi's model catalog\.$/);
+    assert.match(formatTierWarning("small", far.rejected!, far.model, false), / No close match in Pi's model catalog\. Set it via config\.tune\(/);
     const empty = await resolve("", "pi", []);
-    assert.match(formatTierWarning("small", empty.rejected!, empty.model, true), / Pi's model catalog is empty\.$/);
+    assert.match(formatTierWarning("small", empty.rejected!, empty.model, true), / Pi's model catalog is empty\. Set it via config\.tune\(/);
   });
   test("one-line escaping preserves raw detail", async () => {
     const raw = 'bad"\n\r\t\x1b\u0085\u2028\u2029/value';
@@ -626,6 +689,98 @@ describe("catalog validation and warning copy", () => {
     tierWarningNotifierFromToolCtx({ hasUI: true, ui })!("warning");
     assert.deepEqual(notices, [["warning See /ws-model-catalog-list for the models usable here.", "warning"]]);
     assert.equal(tierWarningNotifierFromToolCtx({ hasUI: false, ui }), undefined);
+  });
+});
+
+/**
+ * `ws-agent-spawn` tool-level coverage of the drain-bug fix itself: an
+ * ordinary (non-explore) spawn given a NAMED tier that `resolveModelForAliasViaWsMcp`
+ * comes back `rejected` on now throws before any side effect, instead of the
+ * old warn-and-inherit behavior. Drives the real registered tool wrapper
+ * (`registerAgentTools`) with only `RpcClient`'s process transport replaced
+ * (same technique as `test/persistent-explore.test.ts`'s `installRpcHarness`
+ * — no real subprocess, no provider credentials needed) so `spawnAgent`'s
+ * actual guard ordering (resolve -> refuse-or-continue -> alias/cap guards ->
+ * `mkdtempSync` -> registry.set) runs for real, not just its pure resolver.
+ */
+describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses instead of inheriting", () => {
+  interface CapturedTool {
+    name: string;
+    execute: (id: string, params: unknown, signal?: AbortSignal, update?: unknown, ctx?: unknown) => Promise<{ content: Array<{ text: string }> }>;
+  }
+
+  function installRpcHarness() {
+    const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
+    Object.assign(RpcClient.prototype, {
+      start: async () => {}, stop: async () => {}, abort: async () => {},
+      onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {},
+      getState: async () => ({ model: { provider: "pi", id: "small" }, thinkingLevel: "medium", sessionFile: "/tmp/ws-pi-agent-test/session.jsonl" }),
+    });
+    return { restore: () => Object.assign(RpcClient.prototype, original) };
+  }
+
+  function jsonResult(payload: unknown): McpToolCallResult {
+    return { content: [{ type: "text", text: JSON.stringify(payload) }] };
+  }
+
+  function harness(callTool: McpStdioClient["callTool"]) {
+    const tools = new Map<string, CapturedTool>();
+    const pi = { registerTool: (tool: CapturedTool) => tools.set(tool.name, tool), sendMessage() {}, sendUserMessage() {} } as unknown as ExtensionAPI;
+    const bridge = { client: { callTool }, wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" } } as never;
+    const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" });
+    const ctx = { model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.6-high" }], hasConfiguredAuth: () => true } };
+    return { tool: tools.get("ws-agent-spawn")!, handle, ctx };
+  }
+
+  test("a named tier resolved 'unset' (resolved_from !== pi) refuses BEFORE any side effect: throws, no registry record, no session directory, no alias hold", async () => {
+    const rpc = installRpcHarness();
+    try {
+      const before = readdirSync(tmpdir()).filter(name => name.startsWith("ws-pi-agent-")).length;
+      const { tool, handle, ctx } = harness(async (name) => { assert.equal(name, "config.resolve_agent"); return jsonResult({ resolved_from: "default", model: "gpt-5.6-terra" }); });
+      await assert.rejects(
+        () => tool.execute("call", { system_prompt_path: "/tmp/p.md", prompt: "hi", model_name: "small", alias: "wanted-alias" }, undefined, undefined, ctx),
+        /ws-pi-agent: ws-agent-spawn rejected:/,
+      );
+      assert.equal(handle.rpcRegistry.size, 0, "a rejected spawn creates no registry entry");
+      assert.equal([...handle.rpcRegistry.values()].some(r => r.alias === "wanted-alias"), false, "no alias hold either");
+      assert.equal(readdirSync(tmpdir()).filter(name => name.startsWith("ws-pi-agent-")).length, before, "a rejected spawn allocates no session directory");
+    } finally { rpc.restore(); }
+  });
+
+  test("an unknown or no-auth named tier also refuses — not only the unset case", async () => {
+    const rpc = installRpcHarness();
+    try {
+      const { tool, handle, ctx } = harness(async () => jsonResult({ resolved_from: "pi", model: "not-in-catalog" }));
+      await assert.rejects(
+        () => tool.execute("call", { system_prompt_path: "/tmp/p.md", prompt: "hi", model_name: "small" }, undefined, undefined, ctx),
+        /ws-pi-agent: ws-agent-spawn rejected:/,
+      );
+      assert.equal(handle.rpcRegistry.size, 0);
+    } finally { rpc.restore(); }
+  });
+
+  test("an omitted model_name never calls config.resolve_agent and still spawns on the inherited model", async () => {
+    const rpc = installRpcHarness();
+    try {
+      let called = false;
+      const { tool, handle, ctx } = harness(async () => { called = true; return jsonResult({}); });
+      const parsed = JSON.parse((await tool.execute("call", { system_prompt_path: "/tmp/p.md", prompt: "hi" }, undefined, undefined, ctx)).content[0]!.text);
+      assert.equal(called, false);
+      assert.ok(parsed.agent_id);
+      assert.equal(handle.rpcRegistry.size, 1);
+      await handle.stopAll();
+    } finally { rpc.restore(); }
+  });
+
+  test("a transport/parse failure on a named tier still inherits and spawns — only a genuine `rejected` verdict refuses", async () => {
+    const rpc = installRpcHarness();
+    try {
+      const { tool, handle, ctx } = harness(async () => { throw new Error("transport down"); });
+      const parsed = JSON.parse((await tool.execute("call", { system_prompt_path: "/tmp/p.md", prompt: "hi", model_name: "small" }, undefined, undefined, ctx)).content[0]!.text);
+      assert.ok(parsed.agent_id);
+      assert.equal(handle.rpcRegistry.size, 1);
+      await handle.stopAll();
+    } finally { rpc.restore(); }
   });
 });
 

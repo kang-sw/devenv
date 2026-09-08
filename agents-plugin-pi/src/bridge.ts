@@ -113,9 +113,10 @@ function firstText(result: McpToolCallResult): string | undefined {
  */
 export const MODEL_CATALOG_ADVISORY =
   "> [!note]\n" +
-  "> **Pi's model tier table has no entries.** ws-agent-spawn currently " +
-  "inherits the parent session's model for unmapped tiers; simple explore " +
-  "instead refuses rather than spending an inherited model. Configure at "
+  "> **Pi's model tier table has no entries.** ws-agent-spawn (and ws-fork/" +
+  "ws-execute) now refuse a named tier that has no genuine pi entry instead " +
+  "of silently inheriting the parent session's model; simple explore refuses " +
+  "the same way. Configure at " +
   "least a `small` tier for harness `pi` via `config.tune agents.tier " +
   "harness:pi` (see lead-tune) to route explore/recon to a cheaper model; " +
   "the other three fixed tiers (`medium`/`large`/`xlarge`) are yours to " +
@@ -134,6 +135,15 @@ const PI_TIERS = ["small", "medium", "large", "xlarge"] as const;
  * transport failures) retains the empty-table advisory. No notifications here.
  */
 export interface PiAliasTableReport {
+  /**
+   * True when every one of the four fixed tiers is rejected `unset` (i.e.
+   * every `config.resolve_agent` call answers with a non-`pi` `resolved_from`
+   * — no tier has ever been targeted at harness pi at all). A genuine pi
+   * accept, or an `unknown`/`no-auth` rejection on ANY tier, flips this to
+   * `false` even while other tiers remain unset — the all-unset guidance
+   * block and the per-tier rejected-rows table are mutually exclusive (see
+   * `maybeAppendModelCatalogAdvisory`).
+   */
   unset: boolean;
   rejected: Array<{ alias: string; rejected: TierRejection }>;
 }
@@ -142,7 +152,12 @@ export async function computePiAliasTableReport(callTool: WorkflowManualMappingD
   const report: PiAliasTableReport = { unset: true, rejected: [] };
   for (const alias of PI_TIERS) {
     const { model, rejected } = await resolveModelForAliasViaWsMcp({ callTool }, alias, undefined, catalog);
-    if (model !== undefined || rejected) report.unset = false;
+    // A genuine pi accept, or any rejection OTHER than "unset", proves the
+    // table isn't all-unset; a "unset" rejection (resolved_from !== "pi")
+    // still gets a row in `report.rejected` but does not by itself disprove
+    // "every tier is rejected unset" — see `PiAliasTableReport.unset`'s
+    // redefinition.
+    if (model !== undefined || (rejected && rejected.why !== "unset")) report.unset = false;
     if (rejected) report.rejected.push({ alias, rejected });
   }
   return report;
@@ -168,14 +183,21 @@ export async function computeRawDispatchPiAliasTableReport(
 
 /**
  * Append one advisory text item on a copy, only for workflow_manual.
- * Rejections take precedence over the old empty-table copy; accepted-only
- * tables return the original content reference. No human command pointer.
+ * `report.unset` (every tier rejected `unset`, or every tier a bare
+ * transport/parse miss) selects the guidance block; any other
+ * non-all-unset table with at least one rejection (including a `unset` one
+ * sitting alongside a genuine hit or an `unknown`/`no-auth` rejection)
+ * selects the per-tier rows instead — the two forms are exclusive, keyed on
+ * `unset`, NOT on whether `rejected` happens to be non-empty (an all-unset
+ * table's `rejected` is non-empty too, once `unset` rejections are tracked).
+ * An accepted-only table (no rejections, not all-unset) returns the
+ * original content reference. No human command pointer.
  */
 export function maybeAppendModelCatalogAdvisory(rawName: string, content: McpContentItem[], report: PiAliasTableReport, inheritModel?: string, catalogEmpty = true): McpContentItem[] {
   if (rawName !== "workflow_manual" || (!report.unset && report.rejected.length === 0)) return content;
-  const text = report.rejected.length
-    ? "> [!note]\n" + report.rejected.map(({ alias, rejected }) => `> ${formatTierWarning(alias, rejected, inheritModel, catalogEmpty)}`).join("\n")
-    : MODEL_CATALOG_ADVISORY;
+  const text = report.unset
+    ? MODEL_CATALOG_ADVISORY
+    : "> [!note]\n" + report.rejected.map(({ alias, rejected }) => `> ${formatTierWarning(alias, rejected, inheritModel, catalogEmpty)}`).join("\n");
   return [...content, { type: "text", text }];
 }
 

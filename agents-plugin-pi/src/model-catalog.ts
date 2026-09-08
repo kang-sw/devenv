@@ -9,7 +9,9 @@ export interface ModelCatalogEntry {
 export type TierRejection = {
   model: string;
   resolvedFrom: string;
-} & ({ why: "unknown"; suggestions: string[] } | { why: "no-auth" });
+  /** The raw configured value, present only when backend expansion changed it into `model` (the checked/expanded string). */
+  stored?: string;
+} & ({ why: "unknown"; suggestions: string[] } | { why: "no-auth" } | { why: "unset" });
 
 export type TierFailure = {
   kind: "transport" | "parse" | "unset" | "unknown" | "no-auth";
@@ -85,16 +87,28 @@ function quoted(value: string): string {
 }
 function oneLine(value: string): string { return quoted(value).slice(1, -1); }
 
-/** Canonical tool/list/advisory warning, with no human command pointer. */
+/**
+ * Canonical tool/list/advisory rejection line, with no human command pointer
+ * and no head — a caller that refuses the spawn prepends its own head
+ * (`ws-pi-agent: ws-agent-spawn rejected: ...`); the advisory reuses this
+ * line bare. No longer names an inherit fallback (`inheritModel` is unused):
+ * inheriting is now the caller's decision, not something every rejection
+ * line documents.
+ */
 export function formatTierWarning(alias: string, rejected: TierRejection, inheritModel: string | undefined, catalogEmpty: boolean): string {
-  const base = `warning: tier ${oneLine(alias)} is set to ${quoted(rejected.model)} for harness pi, `;
-  const inherited = `inherited ${oneLine(inheritModel ?? "Pi default")}.`;
+  void inheritModel;
+  const hint = ` Set it via config.tune(key: "agents.tier", harness: "pi", value: {tier: ${quoted(alias)}, model: "<provider/id>"}).`;
+  if (rejected.why === "unset") {
+    return `warning: tier ${oneLine(alias)} is not configured for harness pi (resolved from ${quoted(rejected.resolvedFrom)}, value ${quoted(rejected.model)}).${hint}`;
+  }
+  const storedNote = rejected.stored !== undefined ? ` (configured as ${quoted(rejected.stored)})` : "";
+  const base = `warning: tier ${oneLine(alias)} is set to ${quoted(rejected.model)}${storedNote} for harness pi, `;
   if (rejected.why === "no-auth") {
-    return `${base}but provider ${oneLine(rejected.model.slice(0, rejected.model.indexOf("/")))} has no configured auth; ${inherited}`;
+    return `${base}but provider ${oneLine(rejected.model.slice(0, rejected.model.indexOf("/")))} has no configured auth.${hint}`;
   }
   const tail = catalogEmpty ? " Pi's model catalog is empty." : rejected.suggestions.length
     ? ` Did you mean ${rejected.suggestions.map(oneLine).join(", ")}?` : " No close match in Pi's model catalog.";
-  return `${base}which is not a provider/id entry in Pi's model catalog; ${inherited}${tail}`;
+  return `${base}which is not a provider/id entry in Pi's model catalog.${tail}${hint}`;
 }
 
 /** Exploration fails closed: unlike ordinary workers it must never replace an
@@ -108,7 +122,7 @@ export function formatExploreTierRefusal(alias: string, failure: TierFailure | u
       : failure?.kind === "unknown" || rejected?.why === "unknown"
         ? `configured model ${quoted(model ?? "unknown")} is not in Pi's model catalog`
         : failure?.kind === "unset"
-          ? "small is not configured for harness pi"
+          ? `not configured for harness pi (resolved from ${quoted(failure?.resolvedFrom ?? rejected?.resolvedFrom ?? "unknown")}); set it via config.tune(key: "agents.tier", harness: "pi", value: {tier: ${quoted(alias)}, model: "<provider/id>"})`
           : "small resolution failed";
   return `explore refused: tier ${oneLine(alias)} cannot select an authenticated cheap Pi model: ${detail}. Configure agents.tier for harness pi via config.tune or lead-tune.`;
 }

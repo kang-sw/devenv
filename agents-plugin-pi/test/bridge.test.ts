@@ -402,7 +402,7 @@ describe("dispatchMappedWorkflowManual", () => {
     assert.equal(result.content[1].text, MODEL_CATALOG_ADVISORY);
   });
 
-  test("advisory is suppressed when at least one tier has a genuine pi entry", async () => {
+  test("the all-unset GUIDANCE BLOCK is suppressed once at least one tier has a genuine pi entry — but the other, still-unset tiers still get their own per-tier rows (partial table, no guidance block)", async () => {
     const result = await dispatchMappedWorkflowManual(
       { session_key: "lead-1" },
       {
@@ -416,7 +416,9 @@ describe("dispatchMappedWorkflowManual", () => {
         notifyMappingDegraded: () => {},
       },
     );
-    assert.equal(result.content.length, 1, "no advisory item when a genuine pi tier exists");
+    assert.equal(result.content.length, 2, "the three still-unset tiers each get a per-tier advisory row");
+    assert.equal(result.content[1].text!.match(/warning: tier/g)?.length, 3);
+    assert.doesNotMatch(result.content[1].text!, /has no entries/, "the all-unset guidance block must not render alongside a genuine hit");
   });
 
   test("throws when the workflow_manual dispatch itself errors", async () => {
@@ -451,12 +453,14 @@ describe("computePiAliasTableReport", () => {
     assert.deepEqual(result, { unset: false, rejected: [] });
   });
 
-  test("no tier resolves to pi -> true", async () => {
+  test("no tier resolves to pi -> true, and every tier still gets its own unset rejection row", async () => {
     const result = await computePiAliasTableReport(async (name) => {
       assert.equal(name, "config.resolve_agent");
       return textResult(JSON.stringify({ resolved_from: "default", model: "gpt-5.6-terra" }));
     });
-    assert.deepEqual(result, { unset: true, rejected: [] });
+    assert.equal(result.unset, true);
+    assert.deepEqual(result.rejected.map(r => r.alias), ["small", "medium", "large", "xlarge"]);
+    assert.ok(result.rejected.every(r => r.rejected.why === "unset" && r.rejected.resolvedFrom === "default"));
   });
 
   test("rejected tiers replace the empty table sentence, even after an accepted tier", async () => {
