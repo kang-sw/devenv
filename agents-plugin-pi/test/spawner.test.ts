@@ -517,6 +517,15 @@ describe("resolveModelForAliasViaWsMcp", () => {
     assert.equal(claudeResult.rejected, undefined);
   });
 
+  test("backend expansion carries the tier's effort through on a genuine hit (the expansion path, not just the pre-slashed one)", async () => {
+    const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "gpt-5.6-luna", backend: "codex", effort: "high" })));
+    const result = await resolveModelForAliasViaWsMcp(client, "small", "inherited/model", [{ provider: "openai-codex", id: "gpt-5.6-luna", hasAuth: true }]);
+    assert.equal(result.model, "openai-codex/gpt-5.6-luna");
+    assert.equal(result.rejected, undefined);
+    assert.equal(result.effort, "high");
+    assert.equal(result.source, "tier");
+  });
+
   test("backend expansion never re-prefixes an already-slashed model", async () => {
     const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "openrouter/cheap-model", backend: "codex" })));
     const result = await resolveModelForAliasViaWsMcp(client, "small", "inherited/model", tierCatalog);
@@ -534,10 +543,26 @@ describe("resolveModelForAliasViaWsMcp", () => {
     }
   });
 
-  test("a rejected expansion carries the raw configured value as `stored`, distinct from the expanded/checked `model`", async () => {
-    const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "gpt-5.6-high", backend: "codex" })));
-    const result = await resolveModelForAliasViaWsMcp(client, "small", "inherited/model", []);
-    assert.deepEqual(result.rejected, { model: "openai-codex/gpt-5.6-high", stored: "gpt-5.6-high", resolvedFrom: "pi", why: "unknown", suggestions: [] });
+  test("expanded no-auth: a slash-less backend-tagged model whose expanded provider/id IS in the catalog but has no auth", async () => {
+    const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "gpt-5.6-luna", backend: "codex" })));
+    const result = await resolveModelForAliasViaWsMcp(client, "small", "inherited/model", [{ provider: "openai-codex", id: "gpt-5.6-luna", hasAuth: false }]);
+    assert.deepEqual(result.rejected, { model: "openai-codex/gpt-5.6-luna", stored: "gpt-5.6-luna", resolvedFrom: "pi", why: "no-auth" });
+    assert.equal(
+      formatTierWarning("small", result.rejected!, result.model, false),
+      'warning: tier small is set to "openai-codex/gpt-5.6-luna" (configured as "gpt-5.6-luna") for harness pi, but provider openai-codex has no configured auth. Set it via config.tune(key: "agents.tier", harness: "pi", value: {tier: "small", model: "<provider/id>"}).',
+    );
+  });
+
+  test("a rejected expansion carries the raw configured value as `stored`, distinct from the expanded/checked `model`, and suggestions run against the EXPANDED string", async () => {
+    const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "gpt-5.6-lunar", backend: "codex" })));
+    const result = await resolveModelForAliasViaWsMcp(client, "small", "inherited/model", [{ provider: "openai-codex", id: "gpt-5.6-luna", hasAuth: true }]);
+    assert.deepEqual(result.rejected, {
+      model: "openai-codex/gpt-5.6-lunar",
+      stored: "gpt-5.6-lunar",
+      resolvedFrom: "pi",
+      why: "unknown",
+      suggestions: ["openai-codex/gpt-5.6-luna"],
+    });
   });
 
   test("a non-string backend field is a parse failure, like the other malformed fields", async () => {
@@ -2531,6 +2556,13 @@ describe("listAgents", () => {
   test("260905 (list-model/last-report-fidelity): a record with neither modelBase nor modelEffort has no model key", () => {
     const registry: RpcAgentRegistry = new Map([["a", freshRpcRecord({ agentId: "a" })]]);
     assert.deepEqual(listAgents(registry), [{ agent_id: "a", status: "dormant" }]);
+  });
+
+  test("an ordinary spawned record's row carries no `warning` key (the field was removed: children never report parent-model substitution as a list-row warning)", () => {
+    const registry: RpcAgentRegistry = new Map([["a", freshRpcRecord({ agentId: "a" })]]);
+    const [row] = listAgents(registry);
+    assert.deepEqual(row, { agent_id: "a", status: "dormant" });
+    assert.ok(!("warning" in row), "listAgents row must never carry a warning key");
   });
 });
 
