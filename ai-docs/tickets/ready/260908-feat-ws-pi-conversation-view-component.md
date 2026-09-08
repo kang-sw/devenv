@@ -318,3 +318,70 @@ owner-run live checks named in Constraints (`260904` runbook item 1 and the
 four activity-indicator checks) packaged as a one-shot owner runbook at
 closeout, plus: open `/answer` on a fork that ran a tool and confirm the
 tool call and result appear as collapsed items and expand.
+
+### Result (770d8fc3) - 2026-09-09
+
+Migrated the `/answer` overlay onto the Phase-1 `ConversationViewComponent`;
+`overlay-chat.ts` and `test/overlay-chat.test.ts` are deleted with no remaining
+importer. Range `c0120804..5b0de95c` (feat `770d8fc3`, test migration
+`22def4f0`, spec `5e2b8c18` + lead completion `d35aee6b`, relay fix
+`5b0de95c`). Golden rule held: `agents-plugin-tool/` untouched;
+`spawner.ts` record semantics (`streaming`/`threadBound`/`overlayAttached`)
+unchanged.
+
+`ask.ts`: `openThread` rebuilt on `ctx.ui.custom` + the component in
+`interactive` mode; `createForkChannel` returns a `ConversationChannel`
+(`liveness()` via the extracted `resolveChildLiveness`); live render primitives
+are host-resolved through `pi-tui.ts`'s `loadHostPiTui()` (the dual-package
+rule applied to render classes, not `DEFAULT_PRIMITIVES`). The
+summarize-then-close state machine, `OverlayHandle`, `EMPTY_SUMMARY_TEXT`,
+`buildDoneSummaryPrompt`, and `formatSpawnTime` were ported in unchanged before
+deletion; `summarizeOnDone` semantics preserved. `ThreadRecord.transcript` is
+now `ConversationItem[]`; `normalizeTranscript` accepts both the native shape
+(per-kind validation) and the legacy `{who,text}` shape (`you`→`user`,
+`thread`→`assistant`, `note`→`note`), capped newest-first. `conversation-view.ts`
+gained additive options only (`markdownTheme`, `userLineBg`, `onItemsChange`)
+plus `tool_execution_start`/`_end` → `tool-call`/`tool-result` item wiring.
+
+Deviation (lead-owned split): the spec "Overlay chat" bullet was finished by
+the lead (`d35aee6b`) per lead-update-spec, not in the implementer relay — the
+implementer's `5e2b8c18` did only the `liveness()` rename.
+
+Review (partitioned correctness=opus/fit+test=sonnet): review #1 returned 1
+Critical (the fork's summary turn double-appended to view+transcript on the
+`/done` happy path, from two listeners on one channel) + several Important
+(leaked summarize listener / lost at-most-once idempotency; `summarizeOnDone
+=== false` untested; dropped "no-op once finished" regression test; missing
+malformed native `tool-call`/`tool-result` normalization coverage; spec-bullet
+completeness). Relay #1 fixed all in `5b0de95c` via an `alreadyRendered` flag
+on `closeWithSummary`, a shared `finished` guard on `buildOverlayHandle` with a
+pending-listener teardown hook, routing `Esc` through the guarded `close()`,
+and an extracted `resolveDoneAction`; the spec Important was resolved lead-side.
+Critical-scoped review #2 returned [resolved]/clean, no new defect. Minors
+recorded only (two doc-comment typos fixed in passing; one cosmetic
+`JSON.stringify` assertion deferred).
+
+Verification: `env -u WS_PI_SPAWN_ROLE node --test test/ask.test.ts
+test/conversation-view.test.ts` 173/173; full `npm test` 1209/1339 with the
+same ~130 pre-existing WS_PI_SPAWN_ROLE/fork-prefix env failures (byte-identical
+failing-test-name set to baseline), zero regressions introduced.
+
+## Blocked (2026-09-09)
+
+Both phases are implemented and review-clean, but this ticket cannot close to
+`.done/` until the **owner-run acceptance runbook** passes — these checks are
+human-only and were never agent-cleared:
+
+1. Phase 1 live instance-identity check: in a lead session, confirm the host
+   `tui` satisfies `tui instanceof TuiMainScreen || tui instanceof TuiAltScreen`
+   (classes re-exported from `pi-tui.ts`).
+2. `260904` runbook item 1: open `/answer`, two turns, `Esc`, reopen onto the
+   same fork, `/done`, confirm the summary injection into the lead.
+3. The four `260905` activity-indicator checks (working… / idle-awaiting-owner
+   / settled states and the header Esc hint).
+4. Open `/answer` on a fork that ran a tool and confirm the tool call and its
+   result appear as collapsed items and expand.
+
+The Phase 2 code is merged into the goal track (impl→goal per-cycle merge); this
+blocker gates only the ticket's `.done/` transition, not the merge. Clear this
+note and move the ticket to `.done/` once the owner reports the runbook green.
