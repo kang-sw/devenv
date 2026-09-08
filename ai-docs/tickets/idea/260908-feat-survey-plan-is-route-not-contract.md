@@ -1,11 +1,15 @@
 ---
-title: "Survey plan is a route, not the contract: quote the ticket verbatim, implement to the ticket, review the plan against it"
+title: "Survey plan is a route, not the contract: cite the ticket by line range, implement to the cited text, review the diff against the ticket"
 parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260908-feat-ws-pi-agent-session-disk-retention: the Pi-track incident that exposed this (child session files landed in tmpdir although the ticket said otherwise)
+  260729-bug-survey-plan-drops-verbatim-contract-text: same lossy step seen on an inline contract; the inline paste rule here is its fix, and this ticket supersedes it
+  260731-bug-implementer-ticket-result-read-authorization: second case where the implementer's ticket-read ban blocks required work; the cited-range rule here replaces that ban
+related-mental-model:
+  - workflow-skills
 ---
 
-# Survey plan is a route, not the contract: quote the ticket verbatim, implement to the ticket, review the plan against it
+# Survey plan is a route, not the contract: cite the ticket by line range, implement to the cited text, review the diff against the ticket
 
 ## Background
 
@@ -20,85 +24,121 @@ consistent, the ticket Result listed no deviation, and five later tickets
 built durability (resume, sidecar revival, approval dir, cap eviction) on a
 file living in the one directory the OS may delete.
 
-Two sage reviewers on the ticket and three code reviewers on the diff did
-not catch it because none of them is asked to compare the plan with the
-ticket, and the current playbooks make the plan the contract:
+The plan already cited the ticket range (`#L207-215`) next to its
+restatement. A citation on its own did not stop the paraphrase; the
+restatement is what the implementer read.
 
-- `agents-plugin/rsrc/plan-populator-survey/plan-populator-survey.md:94`
-  and `:116`: `## Relevant Ticket Contract` is a "clipped authority
-  requirement", i.e. the survey paraphrases the contract in its own words.
-  Paraphrase is where the location was lost.
-- `agents-plugin/rsrc/implementer/implementer.md:27` and `:31`: "The plan
-  and its listed references are the task contract" and "Do not read
-  ticket files directly unless the plan's `Escalations` section explicitly
-  authorizes ticket-file reading". The implementer cannot see the ticket,
-  so a plan-level rewording is law. Same lines in `implementer-relay` and
-  `implementer-elevated`.
-- `agents-plugin/rsrc/lead-implement/lead-implement.md` reviewer prompt
-  frame: "Review the supplied authority, plan contract, and diff together"
-  plus "Plan guardrails were not bypassed" and "Each specified authority
-  requirement is implemented". Nothing says the ticket wins where the plan
-  differs, or that a difference is itself a finding; with a plan in hand,
-  plan-versus-diff is what a reviewer actually does.
+Where the current playbooks make the plan the contract (verified against
+source 2026-09-08):
 
-Owner direction (2026-09-08): adding a fourth reviewer on the plan is the
-wrong shape; the pipeline already stacks reviewers and still misses. The
-survey should be a compressor and a guide, sweeping the codebase for what
-a code reviewer would miss (reuse points, hidden constraints, patterns,
-shortcut risks), and nothing more. The ticket stays the contract. The
-implementer implements along the route the survey proposes but achieves
-the ticket contract. Code reviewers read ticket and survey together and
-judge the diff against the ticket.
+- `plan-populator-survey`: step "Clip the relevant contract" and the plan
+  template's `## Relevant Ticket Contract` heading with its "clipped
+  authority requirement" placeholder. The survey restates the contract in
+  its own words, and that restatement is where the location was lost.
+- `implementer`: "The plan and its listed references are the task
+  contract" and "Do not read ticket files directly unless the plan's
+  `Escalations` section explicitly authorizes ticket-file reading". The
+  implementer cannot see the ticket, so a plan-level rewording is law.
+  `implementer-relay` and `implementer-elevated` share only the ticket-read
+  ban; their scope rule is "inside the scope defined by the plan, review
+  findings, and disposition notes" and their `[escalate]` disposition sends
+  the worker to the lead when ticket material is needed.
+- `lead-implement` reviewer prompt frame: "Review the supplied authority,
+  plan contract, and diff together" plus "Plan guardrails were not
+  bypassed". Reviewers do receive the ticket as authority, and spec
+  `{#260619-stateless-implement-review-continuity}` already says an
+  unimplemented authority requirement is a blocking finding. Three
+  reviewers held ticket, plan, and diff under that rule and still missed
+  the location clause: with a plan in hand, plan-versus-diff is what a
+  reviewer actually does.
 
-## Direction
+The ticket-read ban was introduced in `c3d49a18` to keep the rendered
+implementer prompt self-contained and the fresh worker's context free of
+ticket noise (background, unsettled options, future phases). That purpose
+survives this ticket; the mechanism changes.
 
-1. **Survey quotes, never paraphrases.** `## Relevant Ticket Contract`
-   carries the selected phase's requirement text verbatim (with the
-   ticket path and line range), plus verbatim Decisions/Constraints lines
-   that govern the phase. Any survey judgment about the contract goes to
-   `## Codebase Findings` or `## Escalations`, never into the contract
-   section. The plan template's "clipped" wording changes to "quoted".
-2. **Plan steps are the route; the quoted contract governs.** In
-   `implementer` (and `-relay`, `-elevated`): the quoted contract section
-   is the task contract; `## Implementation Plan` is the recommended path.
-   Where a step and the quoted contract disagree, the contract wins and
-   the implementer reports the disagreement instead of following the
-   step. The "do not read ticket files" rule can stay, because the
-   contract now travels verbatim inside the plan, which keeps the context
-   budget the rule exists for.
-3. **Reviewer checks the plan against the ticket, as one existing check.**
-   The reviewer prompt frame's required checks gain one line: the plan's
-   quoted contract matches the ticket phase text, and any implementation
-   step that contradicts the ticket is a finding even when the diff
-   matches the step. No new reviewer, no new partition; the full-scope
-   reviewer and the Correctness partition own it.
-4. **Result "Deviations" is plan-diffed.** `executor-wrapup` asks for
-   deviations as the difference between the ticket phase text and what
-   landed, not as what the implementer recalls.
+## Decisions
 
-Not in scope: sage reviewers on tickets, review allocation counts,
-research-populator behavior beyond inheriting rule 1 when it refines a
-survey plan.
+- **The plan carries no contract text.** `## Relevant Ticket Contract`
+  becomes a citation list: ticket path plus line ranges. The selected
+  phase's full text range is mandatory; the `## Decisions` and
+  `## Constraints` lines that govern the phase are cited as further ranges.
+  The survey never restates, summarizes, or rewords cited text. Survey
+  judgment about the contract goes to `## Codebase Findings` or
+  `## Escalations`.
+  - Rejected: quoting the phase verbatim into the plan. It removes the
+    rewording loss but keeps a second copy that the reviewer must diff
+    against the ticket, costs plan length, and does nothing the citation
+    does not do once the implementer may read the cited ranges.
+  - Rejected: a fourth reviewer on the plan. The pipeline already stacks
+    reviewers and still missed; the fix is to stop making the plan
+    authoritative, not to guard it harder.
+  - Rejected: one more line in the reviewer prompt frame asking to compare
+    plan and ticket. An equivalent rule already existed and failed; with
+    no contract text in the plan there is nothing to compare.
+- **The implementer reads the cited ranges.** The ticket-read ban in
+  `implementer`, `implementer-relay`, and `implementer-elevated` becomes:
+  read the ticket ranges the plan cites; do not read the rest of the
+  ticket unless the plan's `Escalations` section authorizes it. The cited
+  text is the task contract; `## Implementation Plan` is the recommended
+  route. Where a step and the cited text disagree, the cited text wins and
+  the implementer reports the disagreement instead of following the step.
+- **Inline contracts are pasted verbatim.** An inline target has no ticket
+  file, so `## Relevant Ticket Contract` holds the accepted inline contract
+  character for character, never a summary. This is the fix for
+  `260729-bug-survey-plan-drops-verbatim-contract-text`.
+- **Reviewers judge the diff against the ticket; the plan is the route.**
+  The reviewer prompt frame's required checks say the authority governs
+  and the plan is the route taken; a plan that restates contract text, or
+  an implementation step that contradicts the cited text, is a finding
+  even when the diff matches the step. No new reviewer, no new partition.
+- **Result "Deviations" is ticket-diffed.** `executor-wrapup` asks for
+  deviations as the difference between the cited ticket text and what
+  landed, not as what the implementer recalls.
 
-## Open questions
+## Constraints
 
-- Whether `## Relevant Ticket Contract` should quote the whole phase or
-  only the requirement sentences; a whole-phase quote is simplest and the
-  phases this repo writes are short.
-- Whether the same verbatim rule applies to inline contracts (probably
-  yes: the accepted inline text is pasted, not restated).
+- Residual loss stays in range selection: the survey still chooses which
+  `## Decisions` and `## Constraints` lines govern the phase, so an omitted
+  governing line is not caught by the citation itself. The mandatory
+  whole-phase range removes omission inside the phase; reviewers reading
+  the ticket remain the guard for omitted governing lines.
+- Editing `agents-plugin/rsrc/` playbooks requires the rsrc manifest regen
+  and the byte-identical `agents-plugin-wsflow/rsrc/` mirror regen, plus
+  the Go golden tests that pin the implementer wording (search
+  `agents-plugin-tool/internal/mcp/` for "The plan and its listed references
+  are the task contract" and "Do not read ticket files directly").
+- Spec addressing at ready promotion: anchors
+  `{#260505-implementation-workflow-skills}` (the implementer "reads the
+  plan and listed references as the task contract; does not read the
+  ticket directly" sentences) and
+  `{#260619-stateless-implement-review-continuity}` (the survey "clips the
+  selected authority" sentence and the "plan is the implementer's sole
+  context source ... clips the relevant ticket contract" paragraph). Both
+  describe the semantics this ticket changes.
+- Not in scope: sage reviewers on tickets, review allocation counts, and
+  `plan-populator-research` beyond inheriting the citation rule when it
+  refines a survey plan.
+- Citation is a deliberate duplication-free shape: a later playbook diet
+  must not reintroduce a contract summary in the plan on token grounds.
 
 ## Phases
 
-### Phase 1: Survey quotes and implementer follows the quoted contract
+### Phase 1: Survey cites and the implementer reads the cited ranges
 
-Rules 1 and 2. Edit `plan-populator-survey`, `implementer`,
-`implementer-relay`, `implementer-elevated`; run the plugin tests that pin
-playbook text; update `ai-docs/manuals/skill-authoring.md` invariants if
-the contract wording is listed there.
+Decisions 1 to 3. Edit `plan-populator-survey` (the clip step, the plan
+template heading and placeholder, the inline paste rule), the
+`lead-implement` Plan contract section that describes
+`Relevant Ticket Contract`, and the ticket-read rule plus contract
+sentence in `implementer`, `implementer-relay`, `implementer-elevated`.
+Update the pinned golden tests, regen the rsrc manifest and wsflow mirror,
+and check `ai-docs/manuals/skill-authoring.md` for invariant lines that
+name the old wording. Verification: the plugin test suites that render
+these playbooks pass, and a rendered survey plan for a ticket target
+contains a citation list and no restated contract text.
 
 ### Phase 2: Reviewer frame and wrap-up deviations
 
-Rules 3 and 4. Edit the reviewer prompt frame in `lead-implement`,
-`code-reviewer`, and `executor-wrapup`; update `ai-docs/spec/workflow-skills.md`
-where the review frame is specified.
+Decisions 4 and 5. Depends on Phase 1 (the frame refers to cited text).
+Edit the reviewer prompt frame in `lead-implement`, `code-reviewer`, and
+`executor-wrapup`; update the two spec anchors named in Constraints.
