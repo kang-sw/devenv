@@ -684,7 +684,11 @@ resolved effort. Simple persistent research freezes the actual post-start
 model/effort (including Pi defaults or clamping); collection forwards effort
 as `--thinking`. Deep persistent research does not resolve `small` at
 creation: it freezes and verifies the dispatcher's actual model and thinking
-level, and may later request one separately fail-closed cheap collection.
+level, and may later request one separately fail-closed cheap collection. A
+resolved tier effort reaches a **process-spawned** child (the ephemeral
+collection leaf) as the `--thinking <level>` launch flag and a **persistent,
+RPC-backed** child through a post-start `setThinkingLevel` call; an inherit or
+an empty effort passes no level in either path.
 
 ### Model resolution via ws-mcp config, not an adapter data file {#260903-pi-model-catalog-config-file}
 
