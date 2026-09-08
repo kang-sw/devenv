@@ -1260,8 +1260,8 @@ channel for an owner question: it registers and carries on.
   overlay. Pasted input is delivered as one message. While the respondent's
   turn is running and no text has streamed yet, the overlay shows one
   `working…` line in the streaming-tail slot — the first text delta replaces
-  it and settle clears it; the state is read from `ForkChannel.isStreaming()`
-  at render time (the registry's streaming flag), not derived from
+  it and settle clears it; the state is read from `ConversationChannel.liveness()`
+  at render time (derived from the registry's streaming flag), not derived from
   `agent_start`/`agent_settled` events the component itself receives, because
   attaching to a live fork mid-turn or a dormant thread's first message never
   delivers a start event to the component. The transcript is
