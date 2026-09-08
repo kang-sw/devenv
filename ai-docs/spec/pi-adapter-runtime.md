@@ -479,6 +479,16 @@ poll-with-timeout loop both came from it), so the approval-pending wake, the
 idle edge-consume flag and the waiter bookkeeping went with it. The lead spawns,
 ends its turn, and is woken by the pushed message.
 
+The `ws-agent-spawn`, `ws-agent-send`, and `explore` dispatch rows each render a
+display-only per-tool argument summary in their call slot in place of the generic
+YAML argument dump, and each carries a mandatory resolved model/effort line
+reporting the child's effective model and reasoning effort — or that the child
+inherited the parent's model. Both are display-only: the resolution outcome is
+published through the tool result's `details` and never alters the model-visible
+content. `ws-agent-send`, which resolves no model of its own, builds the line
+from the target record's recorded model/effort, defaulting to an inherited
+reading when the record predates that field.
+
 Each spawned child inherits a **process-role marker** in its environment so the
 extension running inside it can tell what kind of process it is: `WS_PI_SPAWN_ROLE`
 carries `worker` (including execute-worker records), `explore` (a persistent
@@ -911,7 +921,11 @@ Two lead verbs are registered:
   blocks the lead's turn awaiting approvals; the worker's report is delivered
   later through the report channel. A `command?` supplied here runs in the lead's
   own process **without** a gate — the lead itself supplied that exact string, at
-  the lead's own trust level.
+  the lead's own trust level. The `ws-execute` dispatch row renders a
+  display-only argument summary (the anchored `command` when given, the `prompt`
+  head, and the `complex` tier) alongside a mandatory resolved model/effort line
+  for the spawned worker, both published through `details` without altering the
+  model-visible result.
 - `ws-approve({ agent_id, cmd_id, decision, reason?, command? })` — adjudicate one
   pending worker command. `decision` is one of `approve` / `deny` / `run-instead`.
   `deny` requires `reason` and returns the worker a re-plan instruction without
@@ -1037,7 +1051,10 @@ optional `expects_commit` flag, and spawns a spawn-family RPC child using Pi's
 to the fresh-context `--session` spawns the delegation spawner uses. Pi names the
 forked session file itself; the adapter discovers the real path after the child
 starts and fails loud if it is absent. A fork is lateral, not a worker: it does
-not consume delegation depth.
+not consume delegation depth. The `ws-fork` dispatch row renders a display-only
+argument summary (the `prompt` head, `model_name`, and the `expects_commit`
+flag) alongside a mandatory resolved model/effort line for the forked child,
+both published through `details` without altering the model-visible result.
 
 - **Own lead-scope key, never the lead's.** Initial and dormant launches must
   establish a distinct current own key and actual child session identity before
