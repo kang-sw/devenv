@@ -2379,16 +2379,29 @@ export function reserveAgentAlias(
 }
 
 /**
+ * 260908 (subagent audit window ticket): `max(lastLeadPromptAt, last
+ * reportLog entry, or — for a revived orphan with no reportLog yet — its
+ * lastReportAtOverride)`, pulled out of `evictForCapacity` below as its own
+ * exported pure helper so the audit picker's dormant-tier sort (`260908`
+ * sibling ticket) reuses the identical "last activity" formula rather than a
+ * second, potentially-drifting copy. Pure refactor: `evictForCapacity`'s own
+ * behavior is unchanged.
+ */
+export function lastActivityAt(record: RpcAgentRecord): number {
+  const lastReportActivity = record.reportLog.at(-1)?.at ?? (record.lastReportAtOverride ? Date.parse(record.lastReportAtOverride) : 0);
+  return Math.max(record.lastLeadPromptAt ?? 0, lastReportActivity);
+}
+
+/**
  * 260905 (alias/park/cap ticket): the registry-cap half of `spawnAgent`'s
  * guard clauses. While the registry is at or over `cap`, evicts the dormant
  * (`!record.client`), non-`running`, non-`threadBound` record with the
- * oldest last-activity stamp (`max(lastLeadPromptAt, last reportLog entry, or —
- * for a revived orphan with no reportLog yet — its lastReportAtOverride)`)
- * until the new spawn fits. Never evicts a `running`/`threadBound` record —
- * when none remain to evict, the spawn fails outright rather than silently
- * exceeding the cap. Only forgets the registry entry (never touches the
- * evicted agent's on-disk session file). Exported for direct unit coverage
- * without a real `RpcClient`.
+ * oldest last-activity stamp (`lastActivityAt`, above) until the new spawn
+ * fits. Never evicts a `running`/`threadBound` record — when none remain to
+ * evict, the spawn fails outright rather than silently exceeding the cap.
+ * Only forgets the registry entry (never touches the evicted agent's
+ * on-disk session file). Exported for direct unit coverage without a real
+ * `RpcClient`.
  */
 export function evictForCapacity(registry: RpcAgentRegistry, cap: number): { ok: true; evictedLabel?: string } | { ok: false; error: string } {
   const evictedLabels: string[] = [];
@@ -2397,8 +2410,7 @@ export function evictForCapacity(registry: RpcAgentRegistry, cap: number): { ok:
     let candidateActivity = Number.POSITIVE_INFINITY;
     for (const record of registry.values()) {
       if (record.client || record.running || record.threadBound) continue;
-      const lastReportActivity = record.reportLog.at(-1)?.at ?? (record.lastReportAtOverride ? Date.parse(record.lastReportAtOverride) : 0);
-      const activity = Math.max(record.lastLeadPromptAt ?? 0, lastReportActivity);
+      const activity = lastActivityAt(record);
       if (activity < candidateActivity) {
         candidate = record;
         candidateActivity = activity;

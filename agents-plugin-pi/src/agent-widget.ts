@@ -91,9 +91,27 @@ function roleFromSpawnRole(spawnRole: SpawnAgentRole | undefined): AgentRowRole 
   return "worker";
 }
 
-/** `alias > title > shortened uuid` — the ticket's name-precedence rule, mirroring `ask.ts:351`'s `agentId.slice(0, 8)` convention. */
-function rowName(record: RpcAgentRecord): string {
+/** `alias > title > shortened uuid` — the ticket's name-precedence rule, mirroring `ask.ts:351`'s `agentId.slice(0, 8)` convention. Exported (260908 audit-window ticket) so the audit picker reuses the identical naming rule verbatim. */
+export function rowName(record: RpcAgentRecord): string {
   return record.alias ?? record.title ?? record.agentId.slice(0, 8);
+}
+
+/**
+ * 260908 (subagent audit window ticket): the row-inclusion/state
+ * classification half of `buildAgentRows`'s per-record loop below, pulled
+ * out as its own pure predicate so the audit picker's three live tiers
+ * (`260908` sibling ticket) reuse the identical inclusion rule and state
+ * precedence rather than a second copy. `undefined` means "not included by
+ * the widget" — i.e. the record is dormant (`client === undefined &&
+ * !threadBound && pendingApproval === undefined`), exactly the complement
+ * `buildAgentRows`'s own doc comment already describes. Pure refactor:
+ * `buildAgentRows`'s own output is unchanged.
+ */
+export function classifyRegistryRowState(record: RpcAgentRecord): AgentRowState | undefined {
+  if (record.threadBound === true) return "awaiting-owner";
+  if (record.pendingApproval !== undefined) return "awaiting-approval";
+  if (record.client !== undefined) return "running";
+  return undefined;
 }
 
 /** A thread the widget still owes the owner an answer on — the two `countPending`-adjacent statuses that ever yield a row. Dormant/closed threads never do. */
@@ -160,15 +178,14 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
   const coveredThreadIds = new Set<string>();
 
   for (const record of records.values()) {
-    const included = record.threadBound === true || record.pendingApproval !== undefined || record.client !== undefined;
-    if (!included) continue;
+    const state = classifyRegistryRowState(record);
+    if (state === undefined) continue;
 
     const boundThread = record.threadBound
       ? threads.find((t) => t.respondentAgentId === record.agentId && isLiveThreadStatus(t.status))
       : undefined;
     if (boundThread) coveredThreadIds.add(boundThread.threadId);
 
-    const state: AgentRowState = record.threadBound ? "awaiting-owner" : record.pendingApproval !== undefined ? "awaiting-approval" : "running";
     const isAwaitingOwnerWithThread = state === "awaiting-owner" && boundThread !== undefined;
 
     const elapsedMs = isAwaitingOwnerWithThread ? clampElapsed(now - Date.parse(boundThread!.touchedAt)) : clampElapsed(now - (record.runStartedAt ?? now));
