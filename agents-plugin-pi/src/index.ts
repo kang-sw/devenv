@@ -371,8 +371,11 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     leadIdleRef.current = () => ctx.isIdle();
     // TUI only: replace Pi's default custom-message rendering for the six
     // push families, whose own content already opens with the family label
-    // the default would print again. No-op (default rendering stands) when
-    // pi-tui cannot be loaded — see push-render.ts.
+    // the default would print again. `registerPushMessageRenderers` now
+    // always resolves `pi-tui` through `pi-tui.ts`'s `loadHostPiTui()` (see
+    // that file's Addendum doc comment) rather than degrading to a no-op —
+    // the `.catch()` below still guards a genuinely different failure mode
+    // (a runtime rejection during teardown), not import-unavailability.
     if (!pushRenderersRegistered && ctx.mode === "tui" && isLeadOrFork(readSpawnRole(process.env))) {
       pushRenderersRegistered = true;
       void registerPushMessageRenderers(pi)
@@ -387,8 +390,10 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
         });
     }
 
-    // Do not make native presentation depend on a connected MCP bridge. The
-    // helper is optional, so cold/import failures preserve Pi's fallback.
+    // Do not make native presentation depend on a connected MCP bridge.
+    // `loadToolResultTuiModules` always resolves `pi-tui` through
+    // `pi-tui.ts`'s `loadHostPiTui()` now (see that file's Addendum doc
+    // comment).
     toolPreviewTuiRef.current = await loadToolResultTuiModules();
 
     handle = await startBridge(pi, {

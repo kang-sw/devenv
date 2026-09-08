@@ -15,14 +15,17 @@
  * `customMessageLabel` color, the payload lines under it, and the status line
  * dim.
  *
- * `@earendil-works/pi-tui` is reached through a guarded dynamic `import()`
- * for exactly the reason `overlay-chat.ts`'s `loadMarkdownRenderer` documents:
- * that package is not resolvable from this one under `node --test` (it is
- * nested inside `pi-coding-agent`'s own `node_modules`, and its runtime
- * exports only become reachable once Pi loads this extension through jiti). A
- * failed import means no renderer is registered and Pi's default is used, and
- * a renderer that cannot make sense of a message returns `undefined`, which
- * `CustomMessageComponent.rebuild()` treats the same way.
+ * `@earendil-works/pi-tui` is reached through `./pi-tui.ts`'s
+ * `loadHostPiTui()` — the one resolution point that resolves the package
+ * through the host at runtime (see that file's Addendum doc comment for why:
+ * `pi-coding-agent`'s own `npm-shrinkwrap.json` makes a single deduped
+ * on-disk copy unattainable, so the live-instance identity guarantee comes
+ * from routing through the host, not from `npm ls` reporting one copy).
+ * `loadHostPiTui()` always resolves (falling back to this package's own
+ * static copy only if the host import ever fails), so `loadPushTuiModules`
+ * no longer has an "unavailable" branch; a renderer that cannot make sense
+ * of a message still returns `undefined`, which `CustomMessageComponent.rebuild()`
+ * treats as "use Pi's default".
  *
  * The theme is NOT imported: Pi hands the live `Theme` to the renderer as its
  * third argument (it is not part of `pi-coding-agent`'s public export surface
@@ -34,6 +37,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { loadHostPiTui } from "./pi-tui.ts";
 import { PUSH_FAMILIES } from "./spawner.ts";
 
 /** The three visual bands of a pushed message, split out of its plain-text content. */
@@ -90,7 +94,7 @@ export function buildPushRenderLines(message: { content?: unknown; details?: unk
   };
 }
 
-/** The `pi-tui` surface this module needs, as reached through the dynamic import below. */
+/** The `pi-tui` surface this module needs, as reached through `./pi-tui.ts`'s `loadHostPiTui()`. */
 export interface PushTuiModules {
   Box: new (paddingX?: number, paddingY?: number, bgFn?: (text: string) => string) => {
     addChild(child: unknown): void;
@@ -106,19 +110,11 @@ export interface PushRenderTheme {
 }
 
 /**
- * Guarded dynamic `import()` of `pi-tui`. Resolves to `undefined` when the
- * package is not reachable (see this module's header) so the caller can leave
- * Pi's default rendering in place.
+ * `./pi-tui.ts`'s `loadHostPiTui()`, narrowed to the slice this module needs.
+ * Always resolves — see `pi-tui.ts`'s Addendum doc comment.
  */
-export async function loadPushTuiModules(): Promise<PushTuiModules | undefined> {
-  let tui: PushTuiModules | undefined;
-  try {
-    tui = (await import("@earendil-works/pi-tui")) as unknown as PushTuiModules;
-  } catch {
-    return undefined;
-  }
-  if (typeof tui?.Box !== "function" || typeof tui?.Text !== "function") return undefined;
-  return tui;
+export async function loadPushTuiModules(): Promise<PushTuiModules> {
+  return (await loadHostPiTui()) as unknown as PushTuiModules;
 }
 
 /**
@@ -153,12 +149,15 @@ export function buildPushComponent(
 /**
  * Registers the compact renderer for every push family. Call only from a TUI
  * process (`ctx.mode === "tui"`) — there is no component to draw anywhere
- * else. Returns `false` when `pi-tui` could not be loaded and Pi's default
- * rendering therefore stands.
+ * else. The `Promise<boolean>` return is no longer an "unavailable" signal
+ * (`loadPushTuiModules` always resolves — see `pi-tui.ts`'s Addendum doc
+ * comment); it stays `Promise<boolean>` only so `index.ts`'s
+ * `pushRenderersRegistered` retry-on-teardown guard (a genuine, still-live
+ * failure mode: a rejection from e.g. `assertActive()` during teardown) keeps
+ * its existing `.then((registered) => ...)` wiring unchanged.
  */
 export async function registerPushMessageRenderers(pi: ExtensionAPI, tuiModules?: PushTuiModules): Promise<boolean> {
   const tui = tuiModules ?? (await loadPushTuiModules());
-  if (!tui) return false;
   for (const family of PUSH_FAMILIES) {
     pi.registerMessageRenderer(family, (message, _options, theme) =>
       buildPushComponent(tui, message as { content?: unknown; details?: unknown }, theme as unknown as PushRenderTheme) as never,
