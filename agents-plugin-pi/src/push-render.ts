@@ -11,9 +11,10 @@
  * content is deliberately left alone (the model sees only `content`, as a user
  * message; changing it to satisfy the TUI would change what the lead reads),
  * so the duplicate is removed on the RENDER side instead:
- * `pi.registerMessageRenderer(family, ...)` draws the head once in the
- * `customMessageLabel` color, the payload lines under it, and the status line
- * dim.
+ * `pi.registerMessageRenderer(family, ...)` draws the head once, the payload
+ * body underneath it (capped at ten logical lines, full recovery on
+ * expansion), and the status line — all three muted/gray, on a shared
+ * theme-aware `customMessageBg` background (260906 Phase 1).
  *
  * `@earendil-works/pi-tui` is reached through `./pi-tui.ts`'s
  * `loadHostPiTui()` — the one resolution point that resolves the package
@@ -39,6 +40,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadHostPiTui } from "./pi-tui.ts";
 import { PUSH_FAMILIES } from "./spawner.ts";
+import { createBoundedText, updateText, type NativeBox, type NativeText } from "./tool-result-render.ts";
 
 /** The three visual bands of a pushed message, split out of its plain-text content. */
 export interface PushRenderLines {
@@ -94,18 +96,25 @@ export function buildPushRenderLines(message: { content?: unknown; details?: unk
   };
 }
 
-/** The `pi-tui` surface this module needs, as reached through `./pi-tui.ts`'s `loadHostPiTui()`. */
+/**
+ * The `pi-tui` surface this module needs, as reached through `./pi-tui.ts`'s
+ * `loadHostPiTui()`. Widened (260906 Phase 1) with the two extra methods
+ * `ToolResultTuiModules` already declares — always present at runtime, since
+ * both come from the same host module — so a value of this shape can be
+ * passed straight into `createBoundedText`/`updateText` for the shared
+ * ten-logical-line body preview instead of re-implementing that caching.
+ */
 export interface PushTuiModules {
-  Box: new (paddingX?: number, paddingY?: number, bgFn?: (text: string) => string) => {
-    addChild(child: unknown): void;
-    render(width: number): string[];
-  };
-  Text: new (text?: string, paddingX?: number, paddingY?: number) => unknown;
+  Box: new (paddingX?: number, paddingY?: number, bgFn?: (text: string) => string) => NativeBox;
+  Text: new (text?: string, paddingX?: number, paddingY?: number) => NativeText;
+  stripTerminalSequences(text: string): string;
+  truncateToWidth(text: string, width: number, ellipsis?: string): string;
 }
 
-/** Duck-typed slice of Pi's `Theme` (only the two colors this renderer paints with). */
+/** Duck-typed slice of Pi's `Theme` (only the colors this renderer paints with). */
 export interface PushRenderTheme {
   fg?(color: string, text: string): string;
+  bg?(color: string, text: string): string;
   bold?(text: string): string;
 }
 
@@ -118,15 +127,27 @@ export async function loadPushTuiModules(): Promise<PushTuiModules> {
 }
 
 /**
- * Assembles one message's component: a one-column-padded box holding the head
- * line in `customMessageLabel`, the payload lines plain, and the status line
- * dim. Returns `undefined` when the message is unrecognizable, which is Pi's
- * "use the default" signal.
+ * Assembles one message's component: a one-column-padded box, painted with
+ * the shared theme-aware `customMessageBg` background, holding the head line,
+ * the payload body (capped at ten logical lines with full recovery on
+ * expansion — the same shared bounded-preview seam `tool-result-render.ts`
+ * uses), and the status line — all three in a subdued/gray foreground so the
+ * whole pushed message reads as muted, on top of the shared background.
+ * Returns `undefined` when the message is unrecognizable, which is Pi's "use
+ * the default" signal.
+ *
+ * `expanded` mirrors `MessageRenderOptions.expanded`: `CustomMessageComponent`
+ * calls this renderer fresh on every expand toggle and every theme change
+ * (no cross-call `context`/`lastComponent` reuse is available or needed
+ * here, unlike the tool renderCall/renderResult hooks) — the `BoundedText`
+ * body's own internal width-keyed cache is what pays for itself across
+ * ordinary same-content redraws within one call's returned component.
  */
 export function buildPushComponent(
   tui: PushTuiModules,
   message: { content?: unknown; details?: unknown },
   theme: PushRenderTheme | undefined,
+  expanded = false,
 ): unknown {
   const parts = buildPushRenderLines(message);
   if (!parts) return undefined;
@@ -137,10 +158,26 @@ export function buildPushComponent(
       return text;
     }
   };
-  const box = new tui.Box(1, 0);
-  box.addChild(new tui.Text(paint("customMessageLabel", parts.head), 0, 0));
-  for (const line of parts.body) {
-    box.addChild(new tui.Text(paint("customMessageText", line), 0, 0));
+  const paintBg = (color: string, text: string): string => {
+    try {
+      return theme?.bg?.(color, text) ?? text;
+    } catch {
+      return text;
+    }
+  };
+  const box = new tui.Box(1, 0, (text) => paintBg("customMessageBg", text));
+  box.addChild(new tui.Text(paint("muted", parts.head), 0, 0));
+  if (parts.body.length > 0) {
+    const body = createBoundedText(tui);
+    updateText(tui, body, parts.body.join("\n"), (text) => paint("muted", text), {
+      expanded,
+      trimOuterWhitespace: false,
+      lineBudget: "logical",
+      startIndent: 0,
+      continuationIndent: 0,
+      markerStyle: (marker) => paint("muted", marker),
+    }, theme);
+    box.addChild(body);
   }
   if (parts.status) box.addChild(new tui.Text(paint("dim", parts.status), 0, 0));
   return box;
@@ -159,8 +196,8 @@ export function buildPushComponent(
 export async function registerPushMessageRenderers(pi: ExtensionAPI, tuiModules?: PushTuiModules): Promise<boolean> {
   const tui = tuiModules ?? (await loadPushTuiModules());
   for (const family of PUSH_FAMILIES) {
-    pi.registerMessageRenderer(family, (message, _options, theme) =>
-      buildPushComponent(tui, message as { content?: unknown; details?: unknown }, theme as unknown as PushRenderTheme) as never,
+    pi.registerMessageRenderer(family, (message, options, theme) =>
+      buildPushComponent(tui, message as { content?: unknown; details?: unknown }, theme as unknown as PushRenderTheme, (options as { expanded?: boolean } | undefined)?.expanded) as never,
     );
   }
   return true;
