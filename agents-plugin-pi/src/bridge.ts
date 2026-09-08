@@ -213,20 +213,75 @@ export function prependWorkflowStateLine(text: string): string {
 }
 
 /**
- * Removes the first exact-substring occurrence of `staticBodySnapshot` from
- * `response`. `found: false` (the static manual body no longer appears
- * byte-identical inside a live `workflow_manual` response — e.g. renderer
- * drift between the session-start snapshot and a later call) is the
- * ticket's own trigger for the `workflow_state` fallback dispatch. Pure,
- * synchronous, no IO — the mapping's IO wrapper below calls this on an
+ * The reasons `cutStaticBody` can fail to produce a cut. `"no-body"` is not
+ * a fallback trigger — it means ws-mcp rendered no manual body at all (its
+ * no-restorable-state notice), so the caller forwards the response
+ * unchanged instead of dispatching `workflow_state`.
+ */
+export type StaticBodyCutMissReason = "start-anchor" | "end-anchor" | "order" | "no-body";
+
+/**
+ * Anchor-cut, not substring-cut: the start anchor is `staticBodySnapshot`'s
+ * first non-empty line, matched as a whole line at its first occurrence in
+ * `response`; the end anchor is the literal `## Session Key` heading line
+ * (ws-mcp always appends `\n\n## Session Key\n<key>` after the manual body,
+ * per `injectSessionKeyLine` — see `workflow_manual.go`). Everything ws-mcp
+ * prepends (warnings, `# Manuals`, skeptical-posture block) stays ahead of
+ * the start anchor; everything it appends (`## Session Key` onward: session
+ * state, notes) stays from the end anchor onward — the byte-identical
+ * substring assumption this replaced could not survive ws-mcp re-wrapping
+ * or re-flowing the manual body between the session-start snapshot and a
+ * later call, even though the render always keeps this line-anchored shape.
+ *
+ * Four outcomes:
+ * - Both anchors found, in order (end anchor at or after the start anchor's
+ *   line): `found: true`, `text` is the response with everything from the
+ *   start-anchor line up to (not including) the end-anchor line removed —
+ *   the end-anchor line itself is kept, in the retained tail.
+ * - Only the start anchor missing: `reason: "start-anchor"`.
+ * - Only the end anchor missing: `reason: "end-anchor"`.
+ * - Both found but out of order (end anchor's line is at or before the
+ *   start anchor's line): `reason: "order"`.
+ * - Neither anchor present: `reason: "no-body"` — ws-mcp's
+ *   no-restorable-state notice shape; the caller must NOT treat this as a
+ *   renderer-drift fallback trigger (see `dispatchMappedWorkflowManual`).
+ *
+ * Pure, synchronous, no IO — the mapping's IO wrapper below calls this on an
  * already-fetched response body.
  */
-export function cutStaticBody(response: string, staticBodySnapshot: string): { text: string; found: boolean } {
-  const index = response.indexOf(staticBodySnapshot);
-  if (index === -1) {
-    return { text: response, found: false };
+export function cutStaticBody(response: string, staticBodySnapshot: string): { text: string; found: boolean; reason?: StaticBodyCutMissReason } {
+  const startLine = staticBodySnapshot.split("\n").find((line) => line.length > 0);
+
+  const lines = response.split("\n");
+  let startOffset = -1;
+  let endOffset = -1;
+  let offset = 0;
+  for (const line of lines) {
+    if (startOffset === -1 && startLine !== undefined && line === startLine) {
+      startOffset = offset;
+    }
+    if (endOffset === -1 && line === "## Session Key") {
+      endOffset = offset;
+    }
+    offset += line.length + 1; // +1 for the "\n" split away by String.split.
   }
-  return { text: response.slice(0, index) + response.slice(index + staticBodySnapshot.length), found: true };
+
+  const startFound = startOffset !== -1;
+  const endFound = endOffset !== -1;
+
+  if (!startFound && !endFound) {
+    return { text: response, found: false, reason: "no-body" };
+  }
+  if (!startFound) {
+    return { text: response, found: false, reason: "start-anchor" };
+  }
+  if (!endFound) {
+    return { text: response, found: false, reason: "end-anchor" };
+  }
+  if (endOffset <= startOffset) {
+    return { text: response, found: false, reason: "order" };
+  }
+  return { text: response.slice(0, startOffset) + response.slice(endOffset), found: true };
 }
 
 /**
@@ -275,21 +330,33 @@ export interface WorkflowManualMappingDeps {
   staticBodySnapshot: string;
   catalog?: readonly ModelCatalogEntry[];
   inheritModel?: string;
-  /** Invoked on a cut-miss fallback (renderer drift) — the caller is responsible for the "notify once per session" dedupe (a closure flag in `startBridge`), not this function. */
-  notifyMappingDegraded: () => void;
+  /**
+   * Invoked on a cut-miss fallback (one anchor missing, or the anchors are
+   * out of order) — never on `reason: "no-body"`, which is not a fallback
+   * trigger. The caller is responsible for the "notify once per session"
+   * dedupe (a closure flag in `startBridge`), not this function.
+   */
+  notifyMappingDegraded: (reason: Exclude<StaticBodyCutMissReason, "no-body">) => void;
 }
 
 /**
  * IO wrapper for the `workflow_manual` -> `workflow_state` mapping (§3).
  * Dispatches `workflow_manual` with `args` (already normalized/resolved by
- * the caller) and cuts `deps.staticBodySnapshot` out of the response:
+ * the caller) and anchor-cuts `deps.staticBodySnapshot`'s start line out of
+ * the response (see `cutStaticBody`), branching three ways on the result:
  *
  * - Cut found: returns `prependWorkflowStateLine(cut text)`, re-wrapped
  *   through `maybeAppendModelCatalogAdvisory` keyed on the literal
  *   `"workflow_manual"` name (§3: the advisory still rides the mapped
  *   response, keyed on the tool's *registered* — i.e. ws-mcp's own raw
  *   dotted — name, not on which tool was actually dispatched to).
- * - Cut miss (renderer drift): calls `deps.notifyMappingDegraded()`, then
+ * - `reason: "no-body"` (ws-mcp rendered no manual body at all — its
+ *   no-restorable-state notice): forwards the original response unchanged
+ *   (through the same fixed-line prepend and advisory keying) — no
+ *   `notifyMappingDegraded` call, no `workflow_state` dispatch. There is no
+ *   manual body to fall back away from.
+ * - Any other miss (`"start-anchor"` / `"end-anchor"` / `"order"` —
+ *   renderer drift): calls `deps.notifyMappingDegraded(cut.reason)`, then
  *   dispatches `workflow_state` instead — dropping `root` and any other
  *   `workflow_manual`-only arg by only forwarding `session_key` — prepends
  *   the same fixed line, and applies the same advisory keying.
@@ -316,7 +383,12 @@ export async function dispatchMappedWorkflowManual(
     return { content: maybeAppendModelCatalogAdvisory("workflow_manual", content, piAliasTableReport, deps.inheritModel, !deps.catalog?.length), details: manualResult };
   }
 
-  deps.notifyMappingDegraded();
+  if (cut.reason === "no-body") {
+    const content = replaceFirstTextItem(manualResult.content, prependWorkflowStateLine(manualText));
+    return { content: maybeAppendModelCatalogAdvisory("workflow_manual", content, piAliasTableReport, deps.inheritModel, !deps.catalog?.length), details: manualResult };
+  }
+
+  deps.notifyMappingDegraded(cut.reason as Exclude<StaticBodyCutMissReason, "no-body">);
   const stateArgs: Record<string, unknown> = args.session_key === undefined ? {} : { session_key: args.session_key };
   const stateResult = await deps.callTool("workflow_state", stateArgs);
   if (stateResult.isError) {
@@ -644,12 +716,18 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
               // can't see through the predicate call, so this cast is safe
               // and load-bearing only for the type checker, not runtime.
               staticBodySnapshot: staticBodySnapshotRef.current as string,
-              notifyMappingDegraded: () => {
+              notifyMappingDegraded: (reason) => {
                 if (!notifiedMappingDegraded) {
                   notifiedMappingDegraded = true;
+                  const missing =
+                    reason === "start-anchor"
+                      ? "the manual body's start heading (its first non-empty line) is missing from the response"
+                      : reason === "end-anchor"
+                        ? "the '## Session Key' end heading is missing from the response"
+                        : "the '## Session Key' end heading appears before the manual body's start heading";
                   notify(
                     opts.ui,
-                    "ws-pi-bridge: workflow_manual's static manual body no longer matches the session-start snapshot (renderer drift) — falling back to workflow_state; per-call advisories are unavailable for the rest of this session",
+                    `ws-pi-bridge: workflow_manual's response could not be anchor-cut (${missing}) — falling back to workflow_state; per-call advisories are unavailable for the rest of this session`,
                     "warning",
                   );
                 }
