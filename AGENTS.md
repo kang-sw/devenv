@@ -167,34 +167,39 @@ not stage it unless explicitly requested.
    names and host-neutral behavior. Treat Claude-specific commands and paths as
    adapter or fallback behavior.
 4. **Shipped surfaces are downstream-first. This is not negotiable.**
-   Everything under `agents-plugin/` and `agents-plugin-wsflow/`, every
-   embedded convention or template, and every string `agents-plugin-tool/`
-   emits to an agent (todo instructions, advisories, banners, doctor checks,
-   tool descriptions) runs inside projects that are not this one and that
-   hold only what bootstrap installs. Such text MUST NOT depend on anything
-   that exists only in this repository. Forbidden in shipped text, without
-   exception:
-   - any concrete ticket: a `26xxxx-...` stem, an `ai-docs/tickets/...` path
-     to a ticket, an epic name, or a bare ticket number used as a citation;
+   Every playbook, skill, convention, and template under `agents-plugin/`
+   and `agents-plugin-wsflow/`, every embedded convention, and every string
+   `agents-plugin-tool/` emits to an agent (todo instructions, advisories,
+   banners, doctor checks, tool descriptions) runs inside projects that are
+   not this one and that hold only what bootstrap installs. The test for every sentence of such
+   text: **does it depend on something a downstream project does not
+   have?** If yes, it is a leak. Concretely, shipped text MUST NOT name:
+   - a ticket of this repository: a real `26xxxx-...` stem, an
+     `ai-docs/tickets/...` path to one, an epic name, or a bare ticket
+     number used as a citation (example stems that resolve to nothing are
+     fine; ticket-directory names and `<status>/<stem>` placeholders are
+     ws conventions and fine);
    - a commit hash;
-   - this repository's own paths and files: `agents-plugin/`,
-     `agents-plugin-tool/`, `agents-plugin-wsflow/`, `ai-docs/ref/`,
-     `ai-docs/manuals/`, `claude-plugin/`, `install.sh`, marketplace
-     identities, the `skill-authoring` manual, `wsflow-mirroring`;
+   - a specific file of this repository that bootstrap does not install
+     (`ai-docs/ref/worktree-ticket-scope.md`, the `skill-authoring` manual),
+     or this repository's own layout and tooling: `agents-plugin/`,
+     `agents-plugin-tool/`, `agents-plugin-wsflow/`, `claude-plugin/`,
+     `install.sh`, `wsflow-mirroring`;
    - this repository's migration vocabulary as a rule: migration anchor,
      native-subagent pivot, spawn-removal, host-neutral migration, adapter
      boundaries, retired Claude tree, Codex-first.
    A rule this file imposes on sessions in this repository is a rule for this
    repository, not a rule the shipped playbooks impose on every project. When
    shipped text needs project-specific input it reads it through a generic
-   hook (mental-model lookup, `infra.read`, `convention.read`, a `config.list`
-   key, the downstream `AGENTS.md`) and this repository declares its own value
-   behind that hook. A ticket that asks shipped playbooks to "honor" or
-   "enforce" a rule from this file is asking for a leak; push back and
-   redirect it to a hook. A test that pins shipped text pins the leak too: a
-   pinned devenv-only string is a bug in the test as well as in the text.
-   Before committing any change under the shipped surfaces, re-read the
-   changed text as a lead in a project that has never heard of devenv.
+   hook (mental-model lookup, `infra.read`, `convention.read`, a declared
+   `AGENTS.md` section, a `config.list` key) and this repository declares its
+   own value behind that hook. A ticket that asks shipped playbooks to
+   "honor" or "enforce" a rule from this file is asking for a leak; push
+   back and redirect it to a hook. A test that pins shipped text pins the
+   leak too: a pinned devenv-only string is a bug in the test as well as in
+   the text. Before committing any change under the shipped surfaces,
+   re-read the changed text as a lead in a project that has never heard of
+   devenv.
 5. **Shell state is ephemeral.** Shell state does not persist between tool calls;
    values needed later must be captured from output and passed explicitly.
 6. **Retired Claude tree.** Do not reintroduce `claude-plugin/`; preserve
