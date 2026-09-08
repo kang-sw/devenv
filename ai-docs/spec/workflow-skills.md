@@ -735,7 +735,7 @@ or modules, public types/functions/handlers/tools when applicable, reusable
 mechanisms, forbidden temporary/fallback/mock-data wiring, implementation
 steps, and verification expectations. Implementers treat the ticket's
 selected phase as the execution contract and the plan as the route through
-it, and reviewers compare the ticket, plan, and diff together.
+it, and reviewers compare the ticket and diff together.
 {#260512-skeleton-inside-implement-branch}
 
 Ticket `skeletons:` frontmatter is a backward-compatible legacy artifact map.
@@ -868,12 +868,14 @@ relay" independent of severity). That playbook remains in the tree but this
 loop does not invoke it.
 {#260612-reviewer-allocation-tier-default}
 
-Delegates in the review fix-loop are stateless by contract: each implementer and
-reviewer dispatch is fed entirely by its relay prompt plus the self-contained
-artifact set (plan, review findings, committed diff), and the loop stays
-correct when every cycle is a fresh spawn. When the host supports same-agent
-resume, `lead-implement` may reuse the prior implementer or reviewer for fix and
-re-review loops to reduce latency, but resume never carries required state. Loop
+Delegates in the review fix-loop are stateless by contract: each dispatch is
+fed entirely by its relay prompt plus a self-contained artifact set — plan,
+review findings, and committed diff for the implementer; ticket or inline
+authority, review findings, and committed diff for the reviewer — and the
+loop stays correct when every cycle is a fresh spawn. When the host supports
+same-agent resume, `lead-implement` may reuse the prior implementer or
+reviewer for fix and re-review loops to reduce latency, but resume never
+carries required state. Loop
 continuity is lead-owned — reconstructed from commit `## AI Context`, not from
 agent conversation memory. The implementer records each fix-cycle disposition
 (won't-fix or deferred, with reason) inline in the fix commit `## AI Context`.
@@ -950,7 +952,7 @@ would itself change the ticket. It also stops and escalates when
 implementation would likely pursue a wrong contract, bypass existing project
 mechanisms, or rely on a shortcut path. Review
 remains an enforcement step: reviewers compare the implementation against the
-selected authority, plan, and diff to catch implementation-time shortcut drift, but known
+selected authority and diff to catch implementation-time shortcut drift, but known
 plan-time risks are handled before source work begins.
 
 The implementation plan is a route back to the ticket, not a ticket summary
@@ -959,9 +961,11 @@ ticket path and selected phase heading (or, for an inline target, the verbatim
 inline contract) and records implementation strategy, codebase findings,
 verification expectations, escalations, and explicit out-of-scope boundaries,
 naming later-phase headings, adjacent ticket stems, and nearby concerns as
-pointers only. In ticket-driven runs, reviewers read the ticket and
-plan, then treat any specified authority requirement that is not implemented
-and does not carry an explicit, authorized deferral as a blocking finding
+pointers only. In ticket-driven runs, reviewers read the ticket's selected
+phase, `## Decisions`, and `## Constraints` — not the plan — treating later
+phases as out of scope, and treat any specified authority requirement that is
+not implemented and does not carry an explicit, lead-authorized deferral
+named in the reviewer prompt's Review focus lines as a blocking finding
 within their assigned partitions.
 
 `lead-implement` runs the documentation pre-pass after the Edit and Review
