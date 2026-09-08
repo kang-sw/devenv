@@ -17,7 +17,6 @@ Mode: user request
 - Index health checks are legacy/coexistence-only, apply only when a project still has `ai-docs/_index.md`, and are advisory; first pass reads `_index.md` only.
 - Index cleanup writes only `ai-docs/_index.md`, when present; semantic migration routes through owning workflow skills.
 - Commit each logical unit separately following the repository commit rules.
-- Retired Claude plugin artifacts are out of support for this skill; do not reintroduce `claude-plugin/`.
 - A project tag above this skill's own `AGENTS.template.md` head, or one that does not parse, is a stop-and-report condition (see `## On: refuse`) enforced only by this instruction and the code-level staleness warning; there is no mechanical block on reconcile/restamp.
 
 ## On: invoke

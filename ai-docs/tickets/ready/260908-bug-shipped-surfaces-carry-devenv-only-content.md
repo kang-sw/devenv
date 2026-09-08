@@ -440,6 +440,54 @@ under `{#260810-scope-announcement-idea-inclusion}`. Verification:
 agents-plugin-wsflow/rsrc` empty; `grep -rn worktree-ticket-scope
 ai-docs/spec agents-plugin agents-plugin-wsflow` returns nothing.
 
+### Result (0a3d2cdc) - 2026-09-09
+
+Behavioral delta: all twelve Decision-3 point-leak sites are de-leaked, so
+no shipped string names a devenv ticket stem, repo path, commit hash, or
+layout/tooling term. `ws-mcp doctor`/`smoke` no longer require an
+`agents-plugin/` directory and return OK on a bare downstream project
+(`ai-docs/` + `AGENTS.md`); the sparse-checkout scope-announcement banner
+states its hazard inline instead of pointing at a devenv reference file;
+the legacy-marker advisory drops the retiring-ticket stem; `lead-update-spec`
+resolves its cross-reference through `playbook.read(name: "lead-write-spec")`
+instead of a raw repo path; and the `lead-tune`, `lead-review`,
+`lead-bootstrap`, `lead-scope-worktree` prose plus the
+`mental-model-conventions` analogy and the two `mcp-tools.md` bare
+ticket-number citations are now downstream-neutral. devenv's own review
+behavior is preserved by writing its Landing Lens clause to the gitignored
+`ai-docs/_review.local.md` (not tracked; recorded here per the phase plan),
+not by leaving a leak in shipped text.
+
+Deviations from the phase plan: none material; two ticket-vs-code naming
+mismatches were resolved in-scope as same-decision corrections. (1) The
+ticket named `TestLegacyMarkerLinesIgnoreMechanismProseFile` for the
+legacy-marker stem drop, but the pinned strings actually live in the
+`legacyMarkerAdvisoryPrefix` constant duplicated across
+`legacy_marker_test.go` (wsdoc) and `legacy_marker_render_test.go` (mcp) —
+both updated in lockstep. (2) The survey missed
+`TestPlaybookPrintGoldenLeadUpdateSpec` (`playbook_tools_test.go`), which
+pinned the removed raw rsrc path's presence; per Architecture Rule 4 (a test
+that pins a leak is itself a bug) it was re-pointed to assert the
+`playbook.read` reference and to forbid both the raw rsrc path and the stale
+`SKILL.md` path.
+
+Review dispositions: partitioned (correctness opus/large, fit sonnet/medium,
+test sonnet/medium) all clean, no findings, no relay. Fit (the central
+partition here) confirmed every site de-leaked, the mirror byte-identical,
+and the Rule-4 test correction sound; correctness confirmed doctor still
+fails on a missing `AGENTS.md` and both advisory-constant copies match; test
+confirmed no test still pins a removed leak substring.
+
+Verification: `go test ./... -count=1` in `agents-plugin-tool` green across
+all 14 packages; wsflow python bundle 10/10; `ws-mcp doctor --root <scratch>`
+(only `ai-docs/` + `AGENTS.md`) OK/exit 0 (was exit 1 "missing
+agents-plugin"); `diff -rq agents-plugin/rsrc agents-plugin-wsflow/rsrc`
+byte-identical (manifest included); grep audits for `worktree-ticket-scope`,
+`260611-...`, `claude-plugin/`, `599fb453|260825`, `CLAUDE.md`, and the two
+`mcp-tools.md` citations all clean in shipped/spec surfaces (remaining
+`260726` hits are Go source comments, outside emitted-string scope). Phase 3
+(the mechanical guard test) remains.
+
 ### Phase 3: Guard
 
 Add `agents-plugin/tests/test_shipped_surfaces_downstream_neutral.py` per

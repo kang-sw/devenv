@@ -71,9 +71,9 @@ Examples:
 
 ## On: unsupported axis
 
-1. State that the request is not a supported tuning knob today.
-2. If it is per-role tier tuning (a `(role) -> tier` override), point to research ticket `260611-research-ws-per-role-delegation-tuning-config`.
-3. Do not fabricate a tool for an unsupported knob.
+1. State that the request is not a supported tuning knob today. Per-role tier
+   tuning (a `(role) -> tier` override) is one such unsupported axis.
+2. Do not fabricate a tool for an unsupported knob.
 
 ## Judgments
 

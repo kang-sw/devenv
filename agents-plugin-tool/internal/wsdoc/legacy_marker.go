@@ -405,7 +405,7 @@ func (r *legacyMarkerResolver) advise(specPath string, markers []legacyMarker) s
 	}
 	sort.SliceStable(matched, func(i, j int) bool { return matched[i] < matched[j] })
 	prefix := fmt.Sprintf(
-		"legacy planned marker (contract-first planned-entry mechanism being retired by 260726-refactor-retire-spec-planned-marker-mechanism): %d marker(s) %s",
+		"legacy planned marker (contract-first planned-entry mechanism being retired): %d marker(s) %s",
 		len(markers), legacyMarkerLineList(markers))
 	if len(matched) > 0 {
 		return prefix + fmt.Sprintf(

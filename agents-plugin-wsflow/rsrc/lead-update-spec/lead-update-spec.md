@@ -19,7 +19,7 @@ Target: user request
 
 ### 1. Load conventions
 
-Call `{{.McpNamespace}}/convention.read(name: "spec-conventions")`. Read `agents-plugin/rsrc/lead-write-spec/lead-write-spec.md`.
+Call `{{.McpNamespace}}/convention.read(name: "spec-conventions")`. Call `{{.McpNamespace}}/playbook.read(name: "lead-write-spec")`.
 
 ### 2. Resolve commit range
 
