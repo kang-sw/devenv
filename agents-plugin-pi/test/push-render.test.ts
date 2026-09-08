@@ -9,26 +9,19 @@
  * what stops Pi's default component from printing the family label a second
  * time above it.
  *
- * `pi-tui` is not resolvable from this package under `node --test` (it is
- * nested inside `pi-coding-agent`'s own `node_modules`), which is exactly why
- * the import is dynamic and guarded — so `buildPushComponent` and
+ * `pi-tui` is reached through `./pi-tui.ts`'s `loadHostPiTui()` (see that
+ * file's Addendum doc comment), so `buildPushComponent` and
  * `registerPushMessageRenderers` are driven here with an injected duck-typed
- * stand-in, and `loadPushTuiModules` is asserted to degrade to `undefined`
- * rather than throw (same convention as overlay-chat.test.ts's
- * `loadMarkdownRenderer` case).
+ * stand-in rather than exercising the real host resolution — this suite
+ * never needs an "unavailable" case any more (`loadPushTuiModules` always
+ * resolves now).
  *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import {
-  buildPushComponent,
-  buildPushRenderLines,
-  loadPushTuiModules,
-  registerPushMessageRenderers,
-  type PushTuiModules,
-} from "../src/push-render.ts";
+import { buildPushComponent, buildPushRenderLines, registerPushMessageRenderers, type PushTuiModules } from "../src/push-render.ts";
 import { buildPushContent, PUSH_FAMILIES } from "../src/spawner.ts";
 
 describe("buildPushRenderLines", () => {
@@ -196,14 +189,5 @@ describe("registerPushMessageRenderers", () => {
     );
     assert.ok(rendered);
     assert.deepEqual(tui.boxes[0].children, ["[ws-agent-settled] agent a1", "reason: idle"]);
-  });
-
-  test("with pi-tui unavailable nothing is registered and the caller is told the default stands", async () => {
-    const pi = { registerMessageRenderer: () => assert.fail("nothing may be registered without a component library") };
-    assert.equal(await registerPushMessageRenderers(pi as never), false);
-  });
-
-  test("loadPushTuiModules resolves to undefined under node --test (pi-tui is not resolvable here) instead of throwing", async () => {
-    assert.equal(await loadPushTuiModules(), undefined);
   });
 });

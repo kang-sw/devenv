@@ -828,8 +828,14 @@ describe("markdown rendering for thread text", () => {
     assert.ok(bogus.component.render(80).join("\n").includes("also visible"));
   });
 
-  test("loadMarkdownRenderer resolves to undefined under node --test (pi-tui is not resolvable here) instead of throwing", async () => {
-    assert.equal(await loadMarkdownRenderer(), undefined);
+  test("loadMarkdownRenderer resolves gracefully under node --test instead of throwing", async () => {
+    // `260908-feat-ws-pi-conversation-view-component` Phase 1 pinned
+    // `@earendil-works/pi-tui` as a top-level dependency, so it is now
+    // resolvable via plain Node resolution here too; loadMarkdownRenderer
+    // returns a real renderer function rather than `undefined`. The
+    // intent this test guards — graceful resolution, never a throw — is
+    // unchanged.
+    assert.equal(typeof (await loadMarkdownRenderer()), "function");
   });
 
   test("openOverlayChat falls back to plain thread text and hands back an OverlayHandle", async () => {

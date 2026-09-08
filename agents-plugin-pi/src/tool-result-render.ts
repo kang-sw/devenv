@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { stringify as stringifyYaml } from "yaml";
+import { loadHostPiTui } from "./pi-tui.ts";
 
 /** The tiny host surface required for YAML previews. */
 export interface ToolResultTuiModules {
@@ -633,17 +634,12 @@ export function registerWsTool(
   } as ToolDefinition);
 }
 
-/** Guarded because Pi resolves its nested TUI package only while loading us. */
-export async function loadToolResultTuiModules(): Promise<ToolResultTuiModules | undefined> {
-  try {
-    const tui = await import("@earendil-works/pi-tui") as unknown as ToolResultTuiModules;
-    return typeof tui?.Text === "function" &&
-      typeof tui?.Box === "function" &&
-      typeof tui?.stripTerminalSequences === "function" &&
-      typeof tui?.truncateToWidth === "function"
-      ? tui
-      : undefined;
-  } catch {
-    return undefined;
-  }
+/**
+ * `./pi-tui.ts`'s `loadHostPiTui()`, narrowed to the slice this module needs.
+ * Always resolves — see `pi-tui.ts`'s Addendum doc comment (the "unavailable"
+ * branch this function used to have was its own guarded dynamic import;
+ * that duplication now lives in `pi-tui.ts` alone).
+ */
+export async function loadToolResultTuiModules(): Promise<ToolResultTuiModules> {
+  return (await loadHostPiTui()) as unknown as ToolResultTuiModules;
 }
