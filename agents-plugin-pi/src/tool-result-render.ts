@@ -58,6 +58,8 @@ interface ResultCache {
 interface PreviewState {
   input?: InputCache;
   result?: ResultCache;
+  /** 260906 Phase 2: last-seen resolved-model line, sticky across calls that report none (see `ToolPreviewOverrides.resolvedLine`). */
+  resolvedLine?: string;
 }
 
 interface PreviewFormat {
@@ -94,6 +96,20 @@ interface CallPreviewComponent extends NativePreviewComponent {
 interface ResultPreviewComponent extends NativePreviewComponent {
   output: BoundedText;
   outputBox: NativeBox;
+}
+
+/**
+ * 260906 Phase 2: the resolved-model-line variant of `ResultPreviewComponent`
+ * — a distinct shape (`resolvedLine` field) so `isResolvedResultComponent`
+ * never collides with the plain `isResultPreviewComponent` check used on the
+ * unmodified default path. `hasBody` toggles per render: a partial/error
+ * call shows only `resolvedLine`, a completed single-text result shows both.
+ */
+interface ResolvedResultComponent extends NativePreviewComponent {
+  resolvedLine: BoundedText;
+  output: BoundedText;
+  outputBox: NativeBox;
+  hasBody: boolean;
 }
 
 const previewStateKey = Symbol("ws-yaml-physical-preview");
@@ -363,6 +379,10 @@ function isResultPreviewComponent(component: unknown): component is ResultPrevie
   return isObjectLike(component) && "output" in component && "outputBox" in component;
 }
 
+function isResolvedResultComponent(component: unknown): component is ResolvedResultComponent {
+  return isObjectLike(component) && "resolvedLine" in component && "outputBox" in component;
+}
+
 /** The call owns both separators so every result path follows the same input boundary. */
 function createInputPreview(preview: NativePreviewComponent): NativePreviewComponent {
   return {
@@ -411,6 +431,34 @@ function createResultPreviewComponent(tui: ToolResultTuiModules): ResultPreviewC
   };
 }
 
+/**
+ * 260906 Phase 2: `resolvedLine` renders alone when `hasBody` is `false`
+ * (partial/error results), or with a blank separator plus the existing
+ * YAML/RAW body box beneath it once a completed single-text result arrives
+ * — same input/output separator convention `createInputPreview` uses.
+ */
+function createResolvedResultComponent(tui: ToolResultTuiModules): ResolvedResultComponent {
+  const resolvedLine = createBoundedText(tui);
+  const output = createBoundedText(tui);
+  const outputBox = new tui.Box(0, 0);
+  outputBox.addChild(output);
+  const component: ResolvedResultComponent = {
+    resolvedLine,
+    output,
+    outputBox,
+    hasBody: false,
+    render(width: number): string[] {
+      const lineRows = resolvedLine.render(width);
+      return component.hasBody ? [...lineRows, "", ...outputBox.render(width)] : lineRows;
+    },
+    invalidate(): void {
+      resolvedLine.invalidate();
+      outputBox.invalidate();
+    },
+  };
+  return component;
+}
+
 export interface PreviewRenderContext {
   state: unknown;
   lastComponent: unknown;
@@ -419,15 +467,39 @@ export interface PreviewRenderContext {
   isError?: boolean;
 }
 
+/**
+ * 260906 Phase 2 (YAML/TUI dispatch-row rendering): optional per-tool
+ * overrides to `createToolPreviewRenderers`'s two hooks. Both fields
+ * default to `undefined`, in which case behavior is byte-identical to the
+ * pre-Phase-2 generic YAML-dump renderer (every other `registerWsTool`
+ * caller, e.g. `ws-approve`/read/exec, stays on that unmodified default
+ * path).
+ */
+export interface ToolPreviewOverrides {
+  /** Replaces `yamlInputPreview(args, serialize)` as the call-preview text. */
+  buildCallPreview?: (args: unknown, context: PreviewRenderContext) => string;
+  /**
+   * Computes the resolved-model line for a result. Called on every
+   * `renderResult` invocation (partial, success, error alike); a `undefined`
+   * return leaves the last cached line in place (the cross-call cache path —
+   * a later error/partial call with no `result.details` still shows the
+   * last-seen line). When this returns/has ever returned a defined line,
+   * `renderResult` no longer throws `UseNativeResultFallback` purely because
+   * of `isPartial`/`isError`.
+   */
+  resolvedLine?: (result: { details?: unknown }, context: PreviewRenderContext) => string | undefined;
+}
+
 /** Creates the two Pi renderer hooks once the guarded host import succeeds. */
 export function createToolPreviewRenderers(
   tui: ToolResultTuiModules,
   toolName: string,
   serialize: YamlSerializer = stringifyYaml,
+  overrides?: ToolPreviewOverrides,
 ): {
   renderCall(args: unknown, theme: unknown, context: PreviewRenderContext): NativePreviewComponent;
   renderResult(
-    result: { content?: unknown },
+    result: { content?: unknown; details?: unknown },
     options: { expanded: boolean; isPartial: boolean },
     theme: unknown,
     context: PreviewRenderContext,
@@ -440,7 +512,9 @@ export function createToolPreviewRenderers(
       // incomplete; after completion their stable object identity is enough.
       const preview = context.argsComplete && state.input?.args === args
         ? state.input.text
-        : yamlInputPreview(args, serialize);
+        : overrides?.buildCallPreview
+          ? overrides.buildCallPreview(args, context)
+          : yamlInputPreview(args, serialize);
       if (context.argsComplete) state.input = { args, text: preview };
       else state.input = undefined;
 
@@ -459,27 +533,65 @@ export function createToolPreviewRenderers(
     },
 
     renderResult(result, options, theme, context) {
-      if (options.isPartial || context.isPartial || context.isError || !isSingleTextContent(result.content)) {
+      const previewTheme = theme as ToolPreviewTheme;
+      const state = stateFor(context);
+
+      if (!overrides?.resolvedLine) {
+        // Byte-identical to the pre-Phase-2 behavior: errors, partials, and
+        // non-text/mixed content retain Pi's native fallback. Completed
+        // single text blocks always preview, preserving RAW prose/scalars
+        // byte-for-byte before display-only sanitization.
+        if (options.isPartial || context.isPartial || context.isError || !isSingleTextContent(result.content)) {
+          throw new UseNativeResultFallback();
+        }
+        const raw = result.content[0]?.text ?? "";
+        const rendered = state.result?.content === result.content
+          ? state.result.text
+          : completedTextPreview(raw, serialize).text;
+        state.result = { content: result.content, text: rendered };
+
+        const component = isResultPreviewComponent(context.lastComponent)
+          ? context.lastComponent
+          : createResultPreviewComponent(tui);
+        updateText(tui, component.output, rendered, (output) => previewTheme.fg("toolOutput", output), {
+          expanded: options.expanded,
+          trimOuterWhitespace: false,
+        }, previewTheme);
+        return component;
+      }
+
+      // 260906 Phase 2: a resolved line is available (now or from a prior
+      // call on this same context) — a mandatory display, so partial/error
+      // results still render it instead of falling back to Pi's native
+      // display.
+      const computed = overrides.resolvedLine(result, context);
+      if (computed !== undefined) state.resolvedLine = computed;
+      const resolvedLineText = state.resolvedLine;
+
+      const bodyAvailable = !options.isPartial && !context.isPartial && !context.isError && isSingleTextContent(result.content);
+      if (resolvedLineText === undefined && !bodyAvailable) {
         throw new UseNativeResultFallback();
       }
-      const raw = result.content[0]?.text ?? "";
-      const state = stateFor(context);
-      const rendered = state.result?.content === result.content
-        ? state.result.text
-        : completedTextPreview(raw, serialize).text;
-      // Errors, partials, and non-text/mixed content retain Pi's native
-      // fallback. Completed single text blocks always preview, preserving RAW
-      // prose/scalars byte-for-byte before display-only sanitization.
-      state.result = { content: result.content, text: rendered };
 
-      const component = isResultPreviewComponent(context.lastComponent)
+      const component = isResolvedResultComponent(context.lastComponent)
         ? context.lastComponent
-        : createResultPreviewComponent(tui);
-      const previewTheme = theme as ToolPreviewTheme;
-      updateText(tui, component.output, rendered, (output) => previewTheme.fg("toolOutput", output), {
-        expanded: options.expanded,
-        trimOuterWhitespace: false,
-      }, previewTheme);
+        : createResolvedResultComponent(tui);
+      updateText(tui, component.resolvedLine, resolvedLineText ?? "", (text) => previewTheme.fg("toolOutput", text), undefined, previewTheme);
+
+      if (bodyAvailable) {
+        const raw = (result.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
+        const rendered = state.result?.content === result.content
+          ? state.result.text
+          : completedTextPreview(raw, serialize).text;
+        state.result = { content: result.content, text: rendered };
+        component.hasBody = true;
+        updateText(tui, component.output, rendered, (output) => previewTheme.fg("toolOutput", output), {
+          expanded: options.expanded,
+          trimOuterWhitespace: false,
+        }, previewTheme);
+      } else {
+        component.hasBody = false;
+      }
       return component;
     },
   };
