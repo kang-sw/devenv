@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
 // implementPrepGuardrails is the Prep-guardrail base sentence with no binding
@@ -185,14 +186,16 @@ func TestDeriveImplementTodoInstructionsPrepGuardrails(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		depth        string
+		delegation   string
 		anchorClause string
 		wantTail     string
 		wantAnchor   bool
 	}{
 		{
-			name:     "none no declaration",
-			depth:    "none",
-			wantTail: "Confirm the direct-edit facts are still accurate",
+			name:       "none no declaration",
+			depth:      "none",
+			delegation: "direct-edit",
+			wantTail:   "Confirm the direct-edit facts are still accurate",
 		},
 		{
 			name:     "survey no declaration",
@@ -213,8 +216,12 @@ func TestDeriveImplementTodoInstructionsPrepGuardrails(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			delegation := tc.delegation
+			if delegation == "" {
+				delegation = "delegated"
+			}
 			got := deriveImplementTodosFromVerdict(implementTodoVerdict{
-				Delegation:          "delegated",
+				Delegation:          delegation,
 				BranchPlan:          implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
 				PlanDepth:           tc.depth,
 				ReviewAlloc:         "lead-only",
@@ -235,6 +242,97 @@ func TestDeriveImplementTodoInstructionsPrepGuardrails(t *testing.T) {
 				t.Fatalf("prep instruction for %s unexpectedly rendered an anchor clause: %q", tc.name, prep)
 			}
 		})
+	}
+}
+
+func TestDeriveImplementTodoInstructionsDelegatedNoneStub(t *testing.T) {
+	got := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		TargetKind:  "ticket",
+		Delegation:  "delegated",
+		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
+		PlanDepth:   "none",
+		ReviewAlloc: "lead-only",
+		DocMode:     "skipped",
+	})
+	prep := requireInstruction(t, todoByKey(t, got, "prep"))
+	for _, want := range []string{
+		"mental-model lookup",
+		`infra.read("impl-playbook")`,
+		"## Relevant Ticket Contract",
+		"## Out of Scope",
+		"## Codebase Findings",
+		"## Implementation Plan",
+		"## Verification Plan",
+		"## Escalations",
+		"Skipped: the ticket localizes the change (facts:",
+		"Skipped: no binding constraint from Prep reads",
+		"do not dispatch a planner",
+	} {
+		if !strings.Contains(prep, want) {
+			t.Fatalf("delegated-none prep instruction missing %q: %q", want, prep)
+		}
+	}
+	if strings.Contains(prep, "plan-populator") {
+		t.Fatalf("delegated-none prep instruction should dispatch no planner: %q", prep)
+	}
+	edit := requireInstruction(t, todoByKey(t, got, "edit"))
+	if edit != "Render implementer with PlanPath and dispatch the delegated implementer; capture the implemented commit range for review and relays." {
+		t.Fatalf("delegated-none edit instruction = %q", edit)
+	}
+}
+
+// TestDelegatedNoneStubHeadingsMatchSurveyTemplate pins the lead-written stub's
+// six section headings (named in implementPrepInstruction's delegated-none
+// branch) to the plan-populator-survey template's declared heading set, read
+// through the shipped rsrc loader. A future rename of any of the six headings
+// in the template — without a matching stub-instruction update — fails here.
+func TestDelegatedNoneStubHeadingsMatchSurveyTemplate(t *testing.T) {
+	knownSix := []string{
+		"## Relevant Ticket Contract",
+		"## Out of Scope",
+		"## Codebase Findings",
+		"## Implementation Plan",
+		"## Verification Plan",
+		"## Escalations",
+	}
+	known := make(map[string]bool, len(knownSix))
+	for _, h := range knownSix {
+		known[h] = true
+	}
+
+	pb, err := wsrsrc.Load(shippedRsrcRootForTest(), "plan-populator-survey", "", nil)
+	if err != nil {
+		t.Fatalf("load plan-populator-survey: %v", err)
+	}
+	// Filter to the known six names to sidestep the template's top-level
+	// Process headings (## Render Inputs, ## Purpose, ## Rules, ## Process,
+	// ## Doctrine), which are also literal `## ` lines in the same file.
+	templateSet := map[string]bool{}
+	for _, line := range strings.Split(pb.Body, "\n") {
+		h := strings.TrimSpace(line)
+		if known[h] {
+			templateSet[h] = true
+		}
+	}
+	for _, h := range knownSix {
+		if !templateSet[h] {
+			t.Fatalf("plan-populator-survey template no longer declares heading %q; stub drift", h)
+		}
+	}
+	if len(templateSet) != len(knownSix) {
+		t.Fatalf("template heading set = %v, want exactly the six stub headings", templateSet)
+	}
+
+	prep := implementPrepInstruction(implementTodoVerdict{
+		TargetKind: "ticket",
+		Delegation: "delegated",
+		BranchPlan: implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
+		PlanDepth:  "none",
+	})
+	for _, h := range knownSix {
+		if !strings.Contains(prep, h) {
+			t.Fatalf("delegated-none stub instruction missing template heading %q: %q", h, prep)
+		}
 	}
 }
 
@@ -1959,6 +2057,27 @@ func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
 		"need_review":  true,
 	}); !strings.Contains(got, `invalid plan_depth "research" for delegated legacy enter`) || !strings.Contains(got, `[escalate-to-research]`) {
 		t.Fatalf("legacy research plan_depth should be rejected with survey escalation guidance, got: %s", got)
+	}
+
+	// Delegated + plan_depth=none is now accepted on the legacy enter path (was
+	// rejected with "want survey" before the localized-ticket skip landed): the
+	// lead-written stub replaces planner dispatch, so the verdict carries
+	// plan_depth none — the prep todo is the plain "Prep" (no "(survey plan)"
+	// label and no planner path) alongside a delegated edit. The full stub
+	// instruction body is asserted directly in
+	// TestDeriveImplementTodoInstructionsDelegatedNoneStub (the tool response
+	// only previews the first 60 runes of each instruction).
+	if got := callToolWithKey(t, server, 8, key, "route.resolve_implement", map[string]any{
+		"delegation":   "delegated",
+		"plan_depth":   "none",
+		"review_alloc": "single",
+		"need_review":  true,
+	}); strings.Contains(got, "invalid plan_depth") {
+		t.Fatalf("legacy delegated+none plan_depth should now be accepted, got: %s", got)
+	} else if !strings.Contains(got, "- [ ] {prep} Prep") || !strings.Contains(got, "- [ ] {edit} Edit (delegated)") {
+		t.Fatalf("legacy delegated+none should render delegated prep/edit todos, got: %s", got)
+	} else if strings.Contains(got, "Prep (survey plan)") || strings.Contains(got, "plan-populator-survey") {
+		t.Fatalf("legacy delegated+none exposed the survey planner path instead of the lead-written stub: %s", got)
 	}
 
 	if got := callToolWithKey(t, server, 5, key, "route.resolve_implement", map[string]any{

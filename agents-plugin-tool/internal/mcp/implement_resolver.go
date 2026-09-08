@@ -511,7 +511,7 @@ func resolveImplement(input implementInput, obs implementBranchObservation) impl
 		ScopeSlug:  n.ScopeSlug,
 	}
 	delegation := deriveImplementDelegation(n)
-	planDepth := deriveImplementPlanDepth(n, delegation)
+	planDepth := deriveImplementPlanDepth(n, delegation, input.Target.Kind)
 	reviewAlloc := deriveImplementReviewAlloc(n, delegation)
 	docMode := deriveImplementDocMode(n)
 	branchPlan := deriveResolvedImplementBranchPlan(input.Target.Kind, n, obs)
@@ -681,14 +681,24 @@ func deriveResolvedImplementBranchPlan(targetKind string, n normalizedImplementF
 	}
 }
 
-func deriveImplementPlanDepth(n normalizedImplementFacts, delegation string) string {
-	if delegation == "delegated" {
-		return "survey"
-	}
-	if n.ChangePoints == "clear" && n.SideEffectRisk == "low" {
+func deriveImplementPlanDepth(n normalizedImplementFacts, delegation, targetKind string) string {
+	if delegation != "delegated" {
 		return "none"
 	}
-	return "none"
+	// Delegated preparation defaults to a survey plan. A delegated ticket
+	// target skips the survey planner (plan_depth: none, lead-written stub)
+	// only when all four complexity facts hold at their strongest value; any
+	// weaker value (including unknown) on any one keeps survey. Inline targets
+	// always keep survey — an inline contract has no file for a stub to point
+	// at (Decision 3).
+	if targetKind == "ticket" &&
+		n.ChangePoints == "clear" &&
+		(n.ReusePoints == "confirmed" || n.ReusePoints == "not-applicable") &&
+		n.StrategyShape == "single-obvious" &&
+		n.SideEffectRisk == "low" {
+		return "none"
+	}
+	return "survey"
 }
 
 func deriveImplementReviewAlloc(n normalizedImplementFacts, delegation string) string {
