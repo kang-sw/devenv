@@ -379,19 +379,21 @@ describe("isEntryLive / extractEntryText / buildVerbatimExcerpt (§7 compaction 
 });
 
 describe("addAskToolsIfLead (role-differentiated, never folded into computeLeadActiveTools)", () => {
-  test("the true top lead (role undefined) gains both tools", () => {
-    assert.deepEqual(addAskToolsIfLead(["bash"], undefined), ["bash", ASK_TOOL_NAME, RESOLVE_TOOL_NAME]);
+  test("the true top lead (role undefined) retains ws-resolve but does not gain ws-ask", () => {
+    assert.deepEqual(addAskToolsIfLead(["bash"], undefined), ["bash", RESOLVE_TOOL_NAME]);
   });
 
-  test("neither is duplicated when already present", () => {
-    const result = addAskToolsIfLead(["bash", ASK_TOOL_NAME], undefined);
-    assert.equal(result.filter((name) => name === ASK_TOOL_NAME).length, 1);
+  test("removes every exact ws-ask entry while preserving ws-resolve and unrelated names", () => {
+    assert.deepEqual(
+      addAskToolsIfLead(["bash", ASK_TOOL_NAME, "ws-ask-extra", RESOLVE_TOOL_NAME, ASK_TOOL_NAME], undefined),
+      ["bash", "ws-ask-extra", RESOLVE_TOOL_NAME],
+    );
   });
 
   test('a "fork"/"worker"/"explore" role never gains them (a fork\'s only question path is ws-report-to-lead)', () => {
     for (const role of ["fork", "worker", "explore"] as const) {
-      const result = addAskToolsIfLead(["bash"], role);
-      assert.deepEqual(result, ["bash"], `role ${role} must not gain the owner-question tools`);
+      const result = addAskToolsIfLead(["bash", ASK_TOOL_NAME], role);
+      assert.deepEqual(result, ["bash"], `role ${role} must not expose the owner-question tools`);
     }
   });
 });
