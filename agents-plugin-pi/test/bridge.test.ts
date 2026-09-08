@@ -487,7 +487,11 @@ describe("dispatchMappedWorkflowManual", () => {
         callTool: async (name) => (name === "config.resolve_agent" ? noHitResolveAgentResult() : textResult("HEADER\nSTATIC-BODY\nBODY\n## Session Key\nlead-1")),
         staticBodySnapshot: "STATIC-BODY\n",
         catalog: [{ provider: "openrouter", id: "cheap-model", hasAuth: true }],
-        notifyMappingDegraded: () => {},
+        // maybeAppendModelCatalogAdvisory produces the same {content.length===2, [1].text}
+        // shape on both the cut-hit and fallback branches, so a silent no-op stub here
+        // would not catch this fixture regressing into the fallback path — fail fast
+        // instead, pinning this as a cut-hit test the same way the "cut found" test does.
+        notifyMappingDegraded: () => assert.fail("notifyMappingDegraded must not be called on a cut hit"),
       },
     );
     assert.equal(result.content.length, 2, "advisory must be appended as an additional content item");
@@ -506,7 +510,9 @@ describe("dispatchMappedWorkflowManual", () => {
         },
         staticBodySnapshot: "STATIC-BODY\n",
         catalog: [{ provider: "openrouter", id: "cheap-model", hasAuth: true }],
-        notifyMappingDegraded: () => {},
+        // See the comment on the previous test: fail fast rather than a
+        // silent no-op, so this stays pinned to the cut-hit branch.
+        notifyMappingDegraded: () => assert.fail("notifyMappingDegraded must not be called on a cut hit"),
       },
     );
     assert.equal(result.content.length, 2, "the three still-unset tiers each get a per-tier advisory row");
