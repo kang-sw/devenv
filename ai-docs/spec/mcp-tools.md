@@ -166,8 +166,8 @@ Gating).
 >   (`#260610-mercenary-delegation-surface`); a delegate cannot self-bootstrap or
 >   escalate from a contained context. Re-bootstrap for recovery uses the caller's
 >   own already-known root.
-> - The bootstrap tool name is deliberately obscure (260617 obscurity, soft
->   guard): semantically disconnected from "session start" and taught only in
+> - The bootstrap tool name is deliberately obscure: semantically disconnected
+>   from "session start" and taught only in
 >   `ws:workflow-manual`. The three subagent-reachable surfaces must not leak it —
 >   the `tools/list` description is inert, error-guidance strings name no tool and
 >   route the lead to the manual, and the rendered delegate prompt carries a
@@ -493,7 +493,7 @@ resolve on the filesystem with normal git tooling instead of any
 merge/conflict logic inside MCP — writing/erasing a key writes/removes
 exactly that key's file, and staging/committing it rides the caller's
 ordinary `git.commit` flow; no new git-mutation MCP verb is added anywhere in
-this family (260605 pivot constraint). A note key can contain arbitrary
+this family. A note key can contain arbitrary
 characters (including `/` and `.`), so the repo layer encodes each key into
 its filename as hex of the key's raw UTF-8 bytes plus a `.json` suffix (e.g.
 key `a/b.c` becomes `612f622e63.json`) — deterministic across every
@@ -689,7 +689,7 @@ When `core.sparseCheckout` is set for the working root, both **fresh with
 root** and **continue** additionally render a sparse-checkout scope
 announcement — a short block naming the hidden ticket count and stems under
 `ai-docs/tickets/ready/`, `ai-docs/tickets/todo/`, and `ai-docs/tickets/idea/`,
-pointing to `ai-docs/ref/worktree-ticket-scope.md`, the `git sparse-checkout
+the `git sparse-checkout
 disable` restore path, and a `git sparse-checkout list` pointer to the
 worktree's active re-include patterns — using the same
 `injectBootstrapStalenessWarning` no-op-when-empty injector already used for

@@ -2581,12 +2581,16 @@ func TestPlaybookPrintGoldenLeadUpdateSpec(t *testing.T) {
 	if !strings.Contains(body, "spec coverage at commit boundaries") {
 		t.Errorf("body %q: expected doctrine text 'spec coverage at commit boundaries'", body)
 	}
-	// Verify the dead-path fix: updated rsrc path, not old SKILL.md path.
-	if !strings.Contains(body, "agents-plugin/rsrc/lead-write-spec/lead-write-spec.md") {
-		t.Errorf("body %q: expected updated rsrc path reference", body)
+	// Verify the dead-path fix: the cross-playbook reference resolves through
+	// playbook.read, not a raw repo path or a stale SKILL.md path.
+	if !strings.Contains(body, `playbook.read(name: "lead-write-spec")`) {
+		t.Errorf("body %q: expected playbook.read(lead-write-spec) reference", body)
 	}
 	if strings.Contains(body, "agents-plugin/skills/lead-write-spec/SKILL.md") {
 		t.Errorf("body %q: must not contain stale SKILL.md path reference", body)
+	}
+	if strings.Contains(body, "agents-plugin/rsrc/lead-write-spec/lead-write-spec.md") {
+		t.Errorf("body %q: must not contain raw rsrc path reference", body)
 	}
 	// delegates:false — no tip.
 	if strings.Contains(body, "Continuity tip") {
