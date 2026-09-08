@@ -288,3 +288,56 @@
 ## Escalations
 
 - None.
+
+## Addendum — dual-package resolution (lead decision, 2026-09-09)
+
+**Blocker found at step 1:** `@earendil-works/pi-coding-agent` ships an
+`npm-shrinkwrap.json` that pins its own nested `@earendil-works/pi-tui@0.84.4`.
+npm treats a shrinkwrapped nested subtree as authoritative and will not
+hoist/dedupe it, so adding a top-level `pi-tui` dependency yields **two physical
+copies** (confirmed: fresh install, `npm dedupe`, and `overrides` all leave it
+nested; both copies are byte-identical `0.84.4`). The two are different physical
+files, so classes re-exported from a top-level *static* import are not the same
+class objects the host's `tui` is built from — `npm ls … == one copy` is
+physically unattainable by pin alignment.
+
+**Decision (governed by the ticket's sage-settled "Runtime instance" clause, so
+pre-authorized — not a contract change):** adopt the ticket's explicitly named
+"only acceptable fallback." `pi-tui.ts` is the single resolution point that
+**resolves pi-tui through the host at runtime** (the existing guarded dynamic
+`import("@earendil-works/pi-tui")` shim shape that `push-render.ts` /
+`tool-result-render.ts` / `overlay-chat.ts`'s `loadMarkdownRenderer` already use
+to reach the host's modules) while exposing a **static import path for
+tests/types**. Runtime therefore uses the host's single instance — "not a
+duplicated instance" is satisfied at the level that matters (the instance in
+use), even though two copies sit on disk. Option (b) (accept two copies, amend
+the "never two copies" gate) is rejected: it reverses a sage-settled ticket
+decision.
+
+**Consequences for the steps below:**
+- Step 1 gate: record the two-on-disk topology + this rationale; do NOT treat
+  two-copies-on-disk as a ship blocker, because runtime routes through the host.
+- Step 2 `pi-tui.ts`: not a bare "one static import." It keeps the host-runtime
+  dynamic resolution as the runtime path and a static import as the
+  test/types/default path, and re-exports the value classes
+  (`TuiMainScreen`/`TuiAltScreen`/`ScrollView`/`Markdown`/`Text`/`Editor`/`Box`
+  + helpers) and types from that single point.
+- Steps 3–5 (importer migration): the three importers consume `pi-tui.ts`'s
+  single resolution point instead of each carrying its own dynamic-import +
+  unavailable branch — the per-importer duplication collapses into `pi-tui.ts`,
+  which is the ticket's "one resolution point" intent. Keep whatever guard the
+  offline `node --test` path needs (the static path covers tests); the live
+  host always has pi-tui.
+- Step 8 (component): the component takes its primitives via the mandated
+  injectable `primitives` factory, so it never needs a synchronous static class
+  import — the default is `pi-tui.ts`'s static classes (fine for tests and as a
+  default), and live wiring (Phase 2 / child B) can feed host-resolved classes
+  when the owner-run identity check requires it. This is the seam that makes the
+  dual-package reconciliation invisible to the component's own code.
+- Step 7 (owner-run identity check): unchanged and still owner-run; with the
+  host-runtime resolution it is now expected to pass.
+
+If, while implementing, the host-runtime resolution proves mechanically
+impossible for a specific consumer (a hard technical obstacle, not a
+preference), stop and report that specific obstacle rather than falling back to
+option (b).
