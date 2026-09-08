@@ -417,8 +417,11 @@ report channel" below):
   -> { agent_id, alias?, evicted? }` — start a persistent worker. `system_prompt_path` is the
   lead-rendered playbook file, passed as `--append-system-prompt`; `prompt` is the
   raw task text, delivered as the child's first turn. `model_name` is an optional
-  alias resolved through the catalog (see below) to `--model`, omitted → inherit
-  the parent's model; `model_effort` is an optional reasoning-effort override
+  alias resolved through the catalog (see below) to `--model`: a named tier
+  that does not resolve to a genuine Pi model **refuses the spawn** (throws
+  before any side effect — no session directory, no registry record, no alias
+  hold) rather than inheriting, while omitting `model_name` → inherit the
+  parent's model. `model_effort` is an optional reasoning-effort override
   applied after launch. `alias` and `title` (260905) are optional, purely
   lead-supplied labels — never derived from prompt text — persisted on the
   registry record for `ws-agent-list` and for alias-or-uuid resolution
@@ -456,8 +459,9 @@ report channel" below):
   launched with, omitted only when the record carries no model at all —
   either a sidecar written before the field existed, or a fresh spawn whose
   inherited-model lookup itself came back empty (no tool-context model to
-  fall back to); an inheriting child (no catalog entry for its alias) shows
-  the parent's own concrete model, not an absent
+  fall back to); an inheriting child — now only one spawned with no
+  `model_name`, since a named-but-unresolvable tier refuses instead of
+  inheriting — shows the parent's own concrete model, not an absent
   field. `include_prompt` (default `false`) additionally surfaces each
   record's original spawn prompt, stored head-truncated to 4KB.
 - `ws-agent-stop(agent_id)` — halt a child's process while retaining its registry
@@ -637,15 +641,32 @@ detected session harness (`pi`, set at `initialize` time), so a harness typo
 elsewhere cannot silently misroute this call.
 
 The adapter accepts the tool's answer only as a **genuine `pi` hit**: the
-response's `resolved_from` must equal `"pi"` AND its `model` string must
-contain a `/` (a `provider/id` shape). A partial `config.tune agents.tier
-harness:pi` write can seed the `pi` bucket from a codex-shaped default model
-(no `/`), so `resolved_from === "pi"` alone is not proof of a real Pi model
-string — the slash check is what tells the two apart. Every other outcome —
-an `isError` result, missing/unparsable response text, a non-`pi`
-`resolved_from`, a `pi`-labeled-but-slash-less model, or an omitted/unmapped
-`model_name` — degrades to inheriting the parent's active model. Resolution
-never hard-fails.
+response's `resolved_from` must equal `"pi"` AND its `model` must name a model
+the running Pi session actually knows — an exact entry in Pi's live model
+registry whose provider has configured auth, checked live at resolution time.
+A `model` with no `/` is first **backend-expanded** to `<provider>/<model>`
+through a fixed map (`codex` → `openai-codex`, `claude` → `anthropic`) and the
+expanded string is what the registry membership and auth checks see; a `model`
+that already contains a `/` is used as written and never re-prefixed. A
+slash-less `model` whose `backend` is empty, `pi`, or outside the map is not
+expanded and fails the membership check.
+
+A **named tier that does not resolve to a genuine hit refuses the spawn** and
+never inherits. Three refusal cases: a `pi`-labeled model that is not a
+registry entry (`unknown`) or whose provider lacks auth (`no-auth`), and a
+named tier whose answer is not `resolved_from: "pi"` at all (`unset` — ws seeds
+`default`/`codex`/`claude` for every tier, so this is the never-configured
+case). A refusal throws before any side effect (see the spawner tool below) and
+surfaces a one-line error naming the stored value (and the expanded string when
+it differs), the reason, at most three suggested catalog models or the
+no-match/empty-catalog wording, and the `config.tune(key: "agents.tier",
+harness: "pi", ...)` call that fixes it; an empty registry refuses every
+configured tier for the same reason. Only two outcomes still inherit the
+parent's active model: an **omitted/unmapped `model_name`** (the lead's explicit
+choice) and a **transport or parse failure** (an `isError` result or
+missing/unparsable response text), which is loud on its own across every ws
+tool. The resolver reports which path it took as a `source` of `"tier"` on a
+genuine hit and `"inherit"` on every other outcome.
 
 `model_effort` follows the same "explicit caller wins" rule: a caller-supplied
 `model_effort` on the spawn call always overrides whatever the config
@@ -687,22 +708,27 @@ at is gone; it performs no writes either way.
 
 ### Unset-tier advisory on workflow_manual {#260903-pi-model-catalog-unset-advisory}
 
-While harness `pi`'s `agents.tier` table has no genuine `pi` entry on any of
-the four fixed tiers, the adapter appends a strong advisory to every
-`workflow_manual` response (and only that tool's response), mirroring the
-cadence of the ws-mcp core's bootstrap-version-behind advisory — recomputed
-and re-appended on every call while the condition holds, not once per
-session. The condition itself is sourced from the same `config.resolve_agent`
-tool the spawn path uses: the adapter calls it once per fixed tier
-(`small`/`medium`/`large`/`xlarge`, four local stdio round-trips), applying
-the identical genuine-`pi`-hit guard, and fires the advisory only when none of
-the four comes back as a real Pi model. A failed lookup counts as a miss, so
+While any of harness `pi`'s four fixed tiers resolves to a rejected entry, the
+adapter appends a strong advisory to every `workflow_manual` response (and only
+that tool's response), mirroring the cadence of the ws-mcp core's
+bootstrap-version-behind advisory — recomputed and re-appended on every call
+while the condition holds, not once per session. The condition is sourced from
+the same `config.resolve_agent` tool the spawn path uses, with the same backend
+expansion: the adapter calls it once per fixed tier
+(`small`/`medium`/`large`/`xlarge`, four local stdio round-trips), applies the
+identical genuine-`pi`-hit guard, and fires when any tier comes back rejected —
+a model Pi's registry does not know or whose provider lacks auth
+(`unknown`/`no-auth`), or a tier with no `pi` entry (`unset`). The report lists
+each rejected tier — its `unset` tiers included — with the same one-line reason
+the refusal uses; when all four are `unset` it renders a single empty-table
+guidance block ("configure at least a `small` tier") instead of four
+near-identical rows. A failed lookup counts as a miss, so
 four failed round-trips (a server without the tool, a broken stdio) also fire
 the advisory rather than suppressing it. The advisory is appended after the
 tool's own content (never prepended, never mutating the original in place)
 and is added only on a successful `workflow_manual` result, never on an error
-response. Ordinary spawns still degrade silently to inherit while every tier is unset;
-simple explore and deep collection instead fail closed before child allocation.
+response. A named tier now refuses the spawn whether it is `unset` or otherwise
+rejected; only an omitted `model_name` inherits.
 
 ### Child→lead report channel {#260904-pi-report-to-lead-channel}
 

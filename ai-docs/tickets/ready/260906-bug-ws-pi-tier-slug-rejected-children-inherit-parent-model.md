@@ -342,6 +342,72 @@ its `pi` entry) and confirm both refuse as `unset` with the hint while
 confirm the `workflow_manual` advisory lists the affected tier in each
 state.
 
+### Result (ba2d9d3f) - 2026-09-08
+
+Phase 1 implemented on `ba2d9d3f`, with the review-relay test additions on
+`58ca4c9b`. Behavioral delta: an ordinary `spawnAgent` (`ws-agent-spawn` /
+`ws-fork` / `ws-execute`) with a named `model_name` that resolves rejected now
+**throws before any side effect** (no session directory, registry record, or
+alias hold) instead of warning-and-inheriting; only an omitted `model_name` or
+a transport/parse failure still inherits. Added the `codex` → `openai-codex`,
+`claude` → `anthropic` backend expansion applied to a slash-less resolved model
+before the live registry-membership + auth check; widened `TierRejection` with
+an `unset` arm (named tier whose answer is not `resolved_from: "pi"`) plus an
+optional `stored` raw-value field; the rejected detail's `model` is the checked
+(expanded) string; added `source: "tier" | "inherit"` to the resolver result;
+redefined `report.unset` to "every tier rejected `unset`" so a partially
+configured table renders per-tier rows (previously folded away) while an
+all-unset table renders the guidance block; reworded the line into refusal form
+with the `config.tune` hint; removed the now-dead `warning` field from
+`RpcAgentRecord` and the `ws-agent-list` row.
+
+Survey finding carried into scope: groundwork adjacent to Phase 1/2 had already
+shipped in later unrelated commits (`abee6d7e` moved resolution ahead of
+`mkdtempSync`, made both `explore` paths fail closed, and landed Phase 2's
+`--thinking` forwarding; `a62bf770`), so the actual remaining diff was narrower
+than this ticket's Background implies. Documented in the committed plan's
+Codebase Findings, not treated as scope drift.
+
+Spec (`73f8567f`): amended `{#260903-pi-spawner-model-tier-inherit}` (accept
+rule = `resolved_from: "pi"` AND live registry membership after backend
+expansion AND configured auth; named-tier refusal on `unknown`/`no-auth`/
+`unset`; inherit only for omitted `model_name` or transport/parse failure;
+`source` report), `{#260903-pi-delegation-spawner-tools}` (spawn refusal;
+inheriting-child clause now only the no-`model_name` child), and
+`{#260903-pi-model-catalog-unset-advisory}` (fires on any rejected tier with
+expansion; per-tier rows or the all-unset guidance block; refusal replaces the
+silent-inherit sentence). `{#260903-pi-explore-recon-leaf}` needed no change:
+later persistent-exploration work already rewrote it to fail closed on every
+bad resolution, matching the post-Phase-1 target — the e5e09187 warning-ticket
+spec pass this ticket inherited had never been written, so these are the first
+spec text for the behavior. Phase 2/3 spec parts (thinking-level sentence,
+advisory dedupe cadence) deliberately deferred to their phases.
+
+Review: correctness and fit clean; test found four Important coverage gaps of
+enumerated Phase 1 tests (backend-expanded hit's effort, suggestion against the
+expanded string, the expanded no-auth branch, and the absent `warning` list
+field), all `[fixed]` in relay #1 (`58ca4c9b`) and not re-reviewed (Important
+policy); two Minor advisory-scenario gaps recorded, not relayed. Deviations
+(both within plan boundaries): the implementer kept `formatTierWarning`'s now-
+unused `inheritModel` parameter to avoid rippling call sites, and fixed a
+pre-existing missing-`+` truncation bug in `MODEL_CATALOG_ADVISORY` while
+rewording it.
+
+Verification: targeted `node --test` on `spawner.test.ts` / `bridge.test.ts` /
+`agent-sidecar.test.ts` → 384/384 pass, 0 fail/skip, with `WS_PI_SPAWN_ROLE`
+unset. Full `npm test` showed 130 failures, all pre-existing and
+environment-bound (linuxbrew-hardcoded fork-prefix tests + one lead-bootstrap
+assertion), confirmed via a `git stash` baseline diff (identical failing set
+before/after: 0 new, 0 fixed).
+
+Owner-live acceptance of the ticket's Live-check items (backend-keyed `small`
+runs on the expanded model; a typo'd `small` refuses with the suggestion and no
+new list row; a reset `small` refuses `unset` while an omitted `model_name`
+still runs; the advisory lists the affected tier) remains pending. Phase 2
+(independent; largely landed already via `abee6d7e` — verify and close its
+remaining delta) and Phase 3 (after the static-body ticket) remain; ticket
+stays in `ready/`. No merge implied.
+
 ### Phase 2: Pass the resolved effort to the explore child
 
 Independent of Phase 1; may land in either order. Extend

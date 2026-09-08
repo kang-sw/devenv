@@ -383,6 +383,20 @@ export interface ResolveAgentCallToolClient {
   callTool: (name: string, args: Record<string, unknown>) => Promise<McpToolCallResult>;
 }
 
+/**
+ * Fixed backend-tag -> provider-id expansion applied to a slash-less
+ * `config.resolve_agent` `model` value once `resolved_from === "pi"`, before
+ * the catalog membership check — `config.resolve_agent` can answer a bare
+ * model id (e.g. `gpt-5.6-high`) tagged with which backend it came from
+ * (`backend: "codex"`), and the catalog only ever holds `provider/id` pairs.
+ * A slashed model is never re-prefixed; a slash-less model with an
+ * empty/`"pi"`/unmapped `backend` is left as-is (and therefore fails the
+ * catalog check as `unknown`, not silently passed through). Exported so
+ * `resolveModelForAliasViaWsMcp`'s two real provider ids are one shared
+ * source for tests/advisory rather than duplicated literals.
+ */
+export const BACKEND_TO_PROVIDER: Record<string, string> = { codex: "openai-codex", claude: "anthropic" };
+
 export interface TierResolution {
   model?: string;
   effort?: string;
@@ -416,28 +430,38 @@ export async function resolveModelForAliasViaWsMcp(
   if (result.isError) return tierResolution({ model: inheritModel }, "inherit", { kind: "transport" });
   const text = result.content.find((item) => item.type === "text")?.text;
   if (!text) return tierResolution({ model: inheritModel }, "inherit", { kind: "parse" });
-  let parsed: { model?: unknown; effort?: unknown; resolved_from?: unknown };
+  let parsed: { model?: unknown; effort?: unknown; resolved_from?: unknown; backend?: unknown };
   try {
-    parsed = JSON.parse(text) as { model?: unknown; effort?: unknown; resolved_from?: unknown };
+    parsed = JSON.parse(text) as { model?: unknown; effort?: unknown; resolved_from?: unknown; backend?: unknown };
   } catch {
     return tierResolution({ model: inheritModel }, "inherit", { kind: "parse" });
   }
-  if (!parsed || typeof parsed !== "object" || typeof parsed.resolved_from !== "string" || typeof parsed.model !== "string" || (parsed.effort !== undefined && typeof parsed.effort !== "string")) {
+  if (
+    !parsed || typeof parsed !== "object" || typeof parsed.resolved_from !== "string" || typeof parsed.model !== "string" ||
+    (parsed.effort !== undefined && typeof parsed.effort !== "string") || (parsed.backend !== undefined && typeof parsed.backend !== "string")
+  ) {
     return tierResolution({ model: inheritModel }, "inherit", { kind: "parse" });
   }
   if (parsed.resolved_from !== "pi") {
-    return tierResolution({ model: inheritModel }, "inherit", { kind: "unset", model: parsed.model, resolvedFrom: parsed.resolved_from });
+    const rejected: TierRejection = { model: parsed.model, resolvedFrom: parsed.resolved_from, why: "unset" };
+    return tierResolution({ model: inheritModel, rejected }, "inherit", { kind: "unset", model: parsed.model, resolvedFrom: parsed.resolved_from });
   }
-  const entry = catalog.find(entry => `${entry.provider}/${entry.id}` === parsed.model);
+  // Backend expansion only applies here — between the resolved_from === "pi"
+  // gate above and the catalog check below — never to the non-pi "unset"
+  // branch, whose raw value never reaches the catalog at all.
+  const provider = parsed.model.includes("/") ? undefined : BACKEND_TO_PROVIDER[parsed.backend ?? ""];
+  const checkedModel = provider ? `${provider}/${parsed.model}` : parsed.model;
+  const stored = provider ? parsed.model : undefined;
+  const entry = catalog.find(entry => `${entry.provider}/${entry.id}` === checkedModel);
   if (!entry) {
-    const rejected: TierRejection = { model: parsed.model, resolvedFrom: parsed.resolved_from, why: "unknown", suggestions: suggestModels(parsed.model, catalog) };
-    return tierResolution({ model: inheritModel, rejected }, "inherit", { kind: "unknown", model: parsed.model, resolvedFrom: parsed.resolved_from, catalogEmpty: catalog.length === 0 });
+    const rejected: TierRejection = { model: checkedModel, resolvedFrom: parsed.resolved_from, why: "unknown", suggestions: suggestModels(checkedModel, catalog), ...(stored !== undefined ? { stored } : {}) };
+    return tierResolution({ model: inheritModel, rejected }, "inherit", { kind: "unknown", model: checkedModel, resolvedFrom: parsed.resolved_from, catalogEmpty: catalog.length === 0 });
   }
   if (!entry.hasAuth) {
-    const rejected: TierRejection = { model: parsed.model, resolvedFrom: parsed.resolved_from, why: "no-auth" };
-    return tierResolution({ model: inheritModel, rejected }, "inherit", { kind: "no-auth", model: parsed.model, resolvedFrom: parsed.resolved_from });
+    const rejected: TierRejection = { model: checkedModel, resolvedFrom: parsed.resolved_from, why: "no-auth", ...(stored !== undefined ? { stored } : {}) };
+    return tierResolution({ model: inheritModel, rejected }, "inherit", { kind: "no-auth", model: checkedModel, resolvedFrom: parsed.resolved_from });
   }
-  return tierResolution({ model: parsed.model, effort: parsed.effort || undefined }, "tier");
+  return tierResolution({ model: checkedModel, effort: parsed.effort || undefined }, "tier");
 }
 
 /**
@@ -789,8 +813,6 @@ export interface RpcAgentRecord {
   systemPromptPath?: string;
   /** Resolved `provider/id`, or undefined to inherit pi's own default resolution. Cached so a dormant resume reuses the same model. */
   modelBase?: string;
-  /** Spawn-time diagnostic only; intentionally omitted from persistence and resume notifications. */
-  warning?: string;
   /** Caller-supplied thinking level, applied via `setThinkingLevel()` after every (re)start. */
   modelEffort?: string;
   /** Cached bridge `ws__*` tool names, for `--tools` re-resolution on a dormant resume. */
@@ -2428,18 +2450,26 @@ export async function spawnAgent(
   registry: RpcAgentRegistry,
   ctx: RpcSpawnCtx,
   params: SpawnAgentParams,
-): Promise<{ agent_id: string; alias?: string; evicted?: string; warning?: string }> {
+): Promise<{ agent_id: string; alias?: string; evicted?: string }> {
   // Resolve exactly once before any guard, alias transfer, eviction, UUID, or
   // session allocation. Exploration's caller-specific policy is fail-closed;
-  // ordinary spawns keep their historical warning/inherit behavior.
+  // an ordinary spawn now refuses too, but only on a NAMED tier that comes
+  // back `rejected` (unknown/no-auth/unset) — an omitted `model_name` (or a
+  // transport/parse failure, which never sets `rejected`) still inherits.
   const resolution = await resolveModelForAliasViaWsMcp(ctx.client, params.modelName, ctx.inheritModel, ctx.catalog);
   if (ctx.requireTier && (resolution.source !== "tier" || !resolution.model || resolution.failure || resolution.rejected)) {
     const refusal = formatExploreTierRefusal(params.modelName ?? "small", resolution.failure, resolution.rejected);
     ctx.notifyTierWarning?.(refusal);
     throw new Error(`ws-pi-agent: ${refusal}`);
   }
-  const warning = resolution.rejected ? formatTierWarning(params.modelName!, resolution.rejected, ctx.inheritModel, ctx.catalog.length === 0) : undefined;
-  if (warning) ctx.notifyTierWarning?.(warning);
+  if (!ctx.requireTier && params.modelName && resolution.rejected) {
+    // Same head convention as `reserveAgentAlias`/`evictForCapacity` below,
+    // regardless of which tool (`ws-agent-spawn`/`ws-fork`/`ws-execute`)
+    // actually called `spawnAgent` — no per-caller head special-casing.
+    const rejection = formatTierWarning(params.modelName, resolution.rejected, ctx.inheritModel, ctx.catalog.length === 0);
+    ctx.notifyTierWarning?.(rejection);
+    throw new Error(`ws-pi-agent: ws-agent-spawn rejected: ${rejection}`);
+  }
 
   const alias = params.alias ?? (ctx.aliasPrefix ? nextGeneratedAlias(registry, ctx.aliasPrefix) : undefined);
   const eviction = runSpawnGuards(registry, alias, resolveAgentRegistryCap());
@@ -2468,7 +2498,6 @@ export async function spawnAgent(
     sessionPath,
     systemPromptPath: params.systemPromptPath,
     modelBase,
-    ...(warning ? { warning } : {}),
     // Explicit caller effort always wins over the config-resolved one
     // (effectiveModelEffort's `||` semantics — an empty-string caller value
     // is treated as absent). This is the single fold point: both the
@@ -2550,7 +2579,7 @@ export async function spawnAgent(
   // 260905 (live-agent widget ticket): a brand-new registry member, live and
   // running from its initial prompt — the widget's first sighting of it.
   triggerAgentWidgetRefresh();
-  return { agent_id: agentId, alias: record.alias, evicted: eviction.evictedLabel, ...(warning ? { warning } : {}) };
+  return { agent_id: agentId, alias: record.alias, evicted: eviction.evictedLabel };
 }
 
 /**
@@ -2750,7 +2779,7 @@ async function harvestLastMessage(record: RpcAgentRecord): Promise<string | unde
 export function listAgents(
   registry: RpcAgentRegistry,
   opts?: { includePrompt?: boolean },
-): Array<{ agent_id: string; status: AgentStatus; alias?: string; title?: string; model?: string; last_report_at?: string; prompt?: string; warning?: string }> {
+): Array<{ agent_id: string; status: AgentStatus; alias?: string; title?: string; model?: string; last_report_at?: string; prompt?: string }> {
   return [...registry.entries()].map(([agentId, record]) => {
     const lastReport = record.reportLog[record.reportLog.length - 1];
     const lastReportAt = lastReport ? new Date(lastReport.at).toISOString() : record.lastReportAtOverride;
@@ -2761,7 +2790,6 @@ export function listAgents(
       ...(record.alias ? { alias: record.alias } : {}),
       ...(record.title ? { title: record.title } : {}),
       ...(model ? { model } : {}),
-      ...(record.warning ? { warning: record.warning } : {}),
       ...(lastReportAt ? { last_report_at: lastReportAt } : {}),
       ...(opts?.includePrompt && record.prompt ? { prompt: record.prompt } : {}),
     };
@@ -2995,7 +3023,7 @@ export function registerAgentTools(
     name: "ws-agent-spawn",
     label: "ws-agent-spawn",
     description:
-      "Spawn a persistent RPC-backed pi subagent from an already-rendered system-prompt file (e.g. via ws/playbook.render). Returns {agent_id, alias?, evicted?, warning?} immediately after the initial prompt is sent. Do not wait for it: end your turn, and its reports, questions and completion arrive on their own as ws-agent-* messages carrying a running-count status line.",
+      "Spawn a persistent RPC-backed pi subagent from an already-rendered system-prompt file (e.g. via ws/playbook.render). Returns {agent_id, alias?, evicted?} immediately after the initial prompt is sent. A named model_name that config.resolve_agent rejects (unknown/no-auth/not configured for harness pi) throws instead of spawning on an inherited model — leave model_name unset to inherit the parent session's model on purpose. Do not wait for it: end your turn, and its reports, questions and completion arrive on their own as ws-agent-* messages carrying a running-count status line.",
     parameters: {
       type: "object",
       properties: {
@@ -3096,7 +3124,7 @@ export function registerAgentTools(
     name: "ws-agent-list",
     label: "ws-agent-list",
     description:
-      "List every tracked agent_id, its alias/title (when set), status (running/idle/dormant — most agents park to dormant shortly after settling, so idle is transient), model (the model the agent runs on; an inheriting child shows its parent's model), optional spawn-time warning, and last_report_at (ISO, absent if it has never reported). Use it to check on a quiet agent — there is no wait tool; every report, question, approval request and completion is pushed to you as a ws-agent-* message on its own.",
+      "List every tracked agent_id, its alias/title (when set), status (running/idle/dormant — most agents park to dormant shortly after settling, so idle is transient), model (the model the agent runs on; an inheriting child shows its parent's model), and last_report_at (ISO, absent if it has never reported). Use it to check on a quiet agent — there is no wait tool; every report, question, approval request and completion is pushed to you as a ws-agent-* message on its own.",
     parameters: {
       type: "object",
       properties: {
