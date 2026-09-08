@@ -88,7 +88,7 @@ indented under their parent to surface the relationship to callers.
 A domain doc may carry a `## Domain Rules` section containing user-authored
 prescriptions for AI agents working in that domain. Rules describe patterns
 the agent must follow when implementing code in this domain — analogous to
-`## Architecture Rules` in `CLAUDE.md`, but scoped to the domain the doc
+`## Architecture Rules` in `AGENTS.md`, but scoped to the domain the doc
 covers.
 
 Authoring and modification invariants:
