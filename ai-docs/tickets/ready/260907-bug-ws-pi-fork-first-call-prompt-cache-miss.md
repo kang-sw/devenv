@@ -339,3 +339,75 @@ Verification:
   260907-feat-ws-pi-lead-tool-profile-and-orchestrator-role.
 - Regression: worker/execute-worker argv and `systemPromptPath` handling
   unchanged; full adapter test suite green.
+
+### Result (58c5a5d8) - 2026-09-08
+
+Phase 1 implementation is reviewable at `58c5a5d8`; live acceptance is **not
+complete** and this ticket remains in `ready/`. Source range:
+`7e7788b1299cf722e9c2f5955d59cd0c4cfe98a1..58c5a5d8ec3650f1d46c3cc96210d7ed6fc17d24`
+on `impl/track/pi-agent/charm-muck-keg`.
+
+Task and discussion forks now reuse the full effective lead prompt and actual
+ordered callable definitions, move directives into their distinct first-message
+forms, establish a current own key before work, and refuse parent/stale keys
+rather than rewriting them. Original captures survive dormant and repeated
+recovery; fork-only metadata is cleared from worker/explore descendants. Fork
+source-extension loading works without a new global-install requirement. Guarded
+Codex body affinity is independent of prompt restoration and preserves child
+transport identity. The four linked spec anchors describe this implemented
+contract; historical verification is explicitly distinguished from current gates.
+
+The accepted legacy absent-metadata local-snapshot/no-affinity exception remains.
+Malformed present context does not enter that fallback. No general fail-closed
+paid-prefix policy, historical cache-annotation freezing, provider replacement,
+or Decision 8 loader/profile implementation was adopted. Native Anthropic marker
+advancement and Codex continuation deltas remain intentional, explicitly tested
+representations, not normalized-away differences. Worker/execute-worker prompt
+contracts remain unchanged; no shared Go/rsrc or historical done-ticket edits.
+
+Review dispositions at the completed source head:
+
+- C1 — independently clean: first new process input carries the current own key
+  and role refusals without changing inherited history or duplicating later frames.
+- C2 — independently clean: initial/resume readiness and actual-registration
+  checks precede work; invalid input readiness blocks a provider turn.
+- C3 — independently clean: child-bound historical own keys and known parent keys
+  are refused across recovery, while ordinary explicit-key forwarding remains.
+- C4 — independently clean: final effective prompt capture, rendered inputs,
+  restarted-lead capture and never-paid initial discussion composition.
+- C5 — independently clean: effective configuration/effort checks and supported
+  body-only affinity, including disabled-cache and changed-model continuations.
+- C6 — independently clean: source-extension spawn/resume loading and discovery
+  deduplication without fork directive append.
+- I1–I5 — **implementer-reported fixed, not independently re-reviewed**:
+  descendant environment isolation; canonical environment bindings; actual
+  production adapter/SDK lifecycle coverage; side-effect-free role-handler
+  refusal coverage; exact provider-native transition/recovery assertions.
+
+Verification evidence (offline, not a cache-hit or billing verdict):
+
+- Read the complete final relay log
+  `a98fa8d2-02-fork-cache-relay-verification.log` under
+  `/home/swkang/.cache/ws@kang-sw-devenv/proj/dac18b1d@9f097df0/review-paths/`:
+  full `npm test` with a compact reporter, **1260 passed, 0 failed, cancelled,
+  skipped or todo; 173 suites**. This is reused source verification, not a fresh
+  documentation-delegate test run; adapter source/tests are unchanged at closeout.
+- Read sibling `a98fa8d2-01-fork-cache-review-dispositions.md` and
+  `a98fa8d2-03-fork-cache-critical-rereview.md`. Independent re-review reports
+  **12 passed** across six Critical regressions and six actual-SDK lifecycle
+  cases, with no remaining C1–C6 defect or correction-induced Critical regression.
+  Important findings were outside that re-review; it is not release acceptance.
+- Bounded offline coverage uses SDK 0.84.4 and 0.85.1 with Codex Responses,
+  OpenAI Completions and Anthropic Messages. Real adapter/resource/session and
+  serializer paths run with substituted local MCP/RPC transport; entire raw
+  continuation requests are compared to independent references. The evidence
+  records zero provider-send attempts; no paid probes were run for closeout.
+
+**Owner acceptance pending:** first NEW task/discussion/resume usage on at least
+20k gpt-6-astra lead context, excluding inherited JSONL entries; the specified
+cacheRead target and billing investigation with model/API, timing, compaction
+and suffix conditions; previously affected task anti-bleed and final-report
+behavior; and discussion completion. Offline client equality cannot certify
+provider retention, routing, expiry, billing or a cache hit. Do not close the
+ticket on this Result alone. Deferred-load verification remains with the
+lead-tool-profile consumer ticket.

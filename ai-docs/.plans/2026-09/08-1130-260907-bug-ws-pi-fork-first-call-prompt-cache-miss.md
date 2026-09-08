@@ -202,6 +202,8 @@ With at least 20k lead context on gpt-6-astra, task fork, discussion fork and re
 
 ## Escalations
 
+Documentation-closeout authorization (lead, 2026-09-08): read/update `ai-docs/tickets/ready/260907-bug-ws-pi-fork-first-call-prompt-cache-miss.md` for the Phase 1 implementation Result; read ticket/spec conventions and their template references, relevant review evidence, and the mental-model parent index for an update assessment. Documentation edits may use local read/shell/edit/write tools and remain uncommitted for lead-run ws verification and commit. The lead separately owns the observed fork tool-surface idea ticket. No source/test edits or paid probes are authorized.
+
 **Outcome: complete source-grounded implementation plan for the existing approved contract.** The bounded Anthropic lifecycle question is resolved by official API documentation plus actual serializer/recovery probes: native breakpoint advancement is compatible with exact unchanged effective prompt content and must remain intact. Historical annotation freezing was an unapproved extra requirement in the earlier plan, not a necessary fix. No non-Codex exclusion, normalization bypass, cache-management redesign, or rewind workaround is selected.
 
 No owner decision is required to continue implementing Decisions 1–7 under the existing compatibility policy. One exact optional policy point remains with the owner: when historical prefix evidence is unavailable, especially an old lead with no new metadata, should the currently approved local-snapshot/no-affinity fallback remain, or should a new no-paid-request/explicit-authorization rule supersede it? **Until decided, retain the current fallback.** Do not block all implementation on that proposed policy change or silently adopt it.
