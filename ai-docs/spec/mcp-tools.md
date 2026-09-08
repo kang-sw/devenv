@@ -1631,7 +1631,15 @@ excluded from the comparison — a frontmatter-only edit never trips
 staleness, and the new field can never perturb posture parsing or its own
 digest. The result names the affected completed stage(s), the review
 baseline (a digest sentinel or a commit), and an instruction to inspect the
-diff and decide whether to rerun those stage(s). Missing Git history or an
+diff and decide whether to rerun those stage(s). The freshness question is
+answered on re-invocation the same way a `recommended` ask is: `answer: yes`
+returns `run` with `reviewers` set to the listed stale stage(s), `mode` =
+`combined` when two are listed and `standalone` when one is, carrying the same
+non-waivable `advisory` every other run does. `answer: no` writes nothing — the
+`completed` posture and its `-reviewed` digest stay as they are, so
+`tickets.verify` keeps warning until a fresh `tickets.sage_stamp` — and the gate
+then resolves any remaining pending stage normally, so a still-pending
+`required` or `recommended` stage is never swallowed by the decline. Missing Git history or an
 unreadable historical blob on the fallback path degrades to the prior
 no-warning path. Backward compatibility is by construction: a ticket stamped
 before this change has no recorded digest, so it resolves through the
@@ -1656,7 +1664,8 @@ at `ws/config.list` for the `sage_review` config that governs it), that design
 review checks coherence, right-problem framing, and executability, that
 completeness review checks structure, fields, and clarity, and that neither
 judges whether the underlying research itself is settled. It rides every `run`
-result — `required`'s direct run and a `recommended` stage's accepted run alike
+result — `required`'s direct run, a `recommended` stage's accepted run, and a
+stale completed stage's accepted freshness rerun alike
 — and every `recommended` `ask` prompt, so it reaches the path an agent actually
 takes: posture `required` never asks, so a decline-only placement would be dead
 text. `skip` and `stop_blocked` carry no advisory. The identical text rides the

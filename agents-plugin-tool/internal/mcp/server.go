@@ -2841,7 +2841,7 @@ func sageGateNextInstruction(result wsdoc.SageGateResult) string {
 	case "run":
 		return "next_instruction: Spawn the listed reviewer(s) via On: Reviewer Spawn, then call tickets.sage_stamp(stem, stage, verdicts) with stage=" + sageStageForReviewers(result) + "." + sageGatePostureUncommittedNote
 	case "check_review_required":
-		return "next_instruction: Inspect the ticket diff against review_baseline and decide whether to rerun the listed sage review stage(s); do not treat the prior completed review as current until that decision is made." + sageGatePostureUncommittedNote
+		return "next_instruction: Inspect the ticket diff against review_baseline and decide whether to rerun the listed sage review stage(s), then call tickets.sage_gate again with the same stem/landing plus answer=yes|no; do not treat the prior completed review as current until that decision is made." + sageGatePostureUncommittedNote
 	default:
 		return "next_instruction: Unrecognized action; stop and report."
 	}

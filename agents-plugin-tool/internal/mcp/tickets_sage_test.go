@@ -120,6 +120,7 @@ func TestFormatSageGateRoundTrip(t *testing.T) {
 		"review_baseline: abc12345",
 		"review_instruction: Inspect the ticket diff",
 		"decide whether to rerun the listed sage review stage(s)",
+		"call tickets.sage_gate again with the same stem/landing plus answer=yes|no",
 	} {
 		if !strings.Contains(checkOut, want) {
 			t.Fatalf("formatSageGate freshness output missing %q:\n%s", want, checkOut)
