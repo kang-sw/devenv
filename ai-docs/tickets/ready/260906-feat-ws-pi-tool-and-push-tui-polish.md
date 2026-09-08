@@ -199,6 +199,42 @@ separate-background acceptance gate. Repeat a long-session responsiveness
 comparison and report observations separately from
 automated test evidence. This live acceptance remains pending at ready landing.
 
+### Result (465d8c31) - 2026-09-09
+
+Phase 1 code slice complete on branch
+`impl/goal/track/pi-agent/copper-lantern-drift/prior-dress-ounce`, range
+`c7368760..465d8c31`. Heading hash is the branch tip (fully reviewed state);
+constituent commits:
+
+- `3217e5d1` - additive `lineBudget: "physical" | "logical"` seam in
+  `tool-result-render.ts` (`PreviewFormat`/`ToolPreviewOverrides`/`registerWsTool`
+  optional 4th arg; `layoutKey` includes the budget). The two direct tools
+  (`do-i-really-have-to-read-this-myself`, `do-i-really-have-to-run-this-myself`)
+  cap their OUTPUT preview at ten newline-separated logical lines via
+  `resultLineBudget: "logical"` in `execute-gateway.ts`. Default stays
+  `"physical"`; the other `registerWsTool` callers render byte-identically.
+- `f756e1bb` - `push-render.ts` `buildPushComponent` collapses the pushed-message
+  body to ten logical lines (indent 0), takes an `expanded` param mirrored from
+  `MessageRenderOptions.expanded`, and paints head/body/status on the shared
+  theme-aware `customMessageBg` background with `muted`/`dim` foreground; head and
+  status stay uncapped single rows.
+- `465d8c31` - strengthened the direct-tool end-to-end registration test fixture
+  (long first logical line wrapping past ten physical rows) so it discriminates
+  the logical budget from the physical default (review-cycle-1 test finding).
+
+Verification: `env -u WS_PI_SPAWN_ROLE node --test test/tool-result-render.test.ts
+test/native-tool-registration.test.ts test/push-render.test.ts` -> 51/51 pass; the
+reviewer's differential check confirms the strengthened test fails when the
+logical-budget wiring is reverted to `c7368760`. Partitioned review
+(correctness/fit/test) returned clean after one best-effort test-coverage relay;
+one Minor (no dedicated push theme-change re-render test) recorded, not acted on.
+Spec captured in `pi-adapter-runtime.md` (new `{#260906-pi-push-display-polish}`
+subsection + the two-direct-tools addendum, drafted `fadd329a`, lead-finalized at
+doc pre-pass, `spec_index.verify` ok).
+
+Owner-live acceptance in a real Pi TUI is human-only and remains pending; see
+`## Blocked (2026-09-09)` below. Ticket stays in `ready/` (not `.done/`).
+
 ## Resolved review decision (2026-09-08)
 
 The owner settled the background-policy gap: retain the September 7 uniform
@@ -217,3 +253,23 @@ reviews both passed after the owner-confirmed correction.
 
 | # | Title | Severity |
 |---|-------|----------|
+
+## Blocked (2026-09-09)
+
+Blocked on a human-only gate, not on remaining agent work. Phase 1's automated
+verification and partitioned review are complete and clean (see Phase 1
+`### Result (465d8c31)`); the only outstanding item is the Phase 1 **owner-live
+acceptance gate**, which the ticket itself marks "pending at ready landing":
+
+In a fresh/reloaded real Pi TUI, confirm the two direct tools' read/run preview
+and expansion, compact subdued report/settled messages with matching
+`customMessageBg` backgrounds and usable approval/question/error controls, and
+retained bridged YAML input/output styling across light/dark themes with the
+uniform native parent background, foreground distinction and separators intact.
+Repeat a long-session responsiveness observation and report it separately from
+the automated test evidence.
+
+Until the owner runs and records this acceptance, the ticket stays in `ready/`
+(NOT moved to `.done/`, no `completed:` frontmatter) and must not be
+re-dispatched for implementation - the code slice is done. Clear this note once
+the owner records the live acceptance.
