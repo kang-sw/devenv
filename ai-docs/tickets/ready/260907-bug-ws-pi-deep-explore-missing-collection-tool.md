@@ -90,17 +90,72 @@ Restore `260903-pi-explore-recon-leaf` in `ai-docs/spec/pi-adapter-runtime.md`, 
 
 ## Phases
 
-### Phase 1: Restore actual deep-child blocking collection and prove the launch path
+Split 2026-09-08 after the source trace (see Investigation). Phase 1 is the
+structural fix that stands regardless of the exact trigger and can land now;
+Phase 2 is blocked on live dogfood evidence and may reduce to a delegation
+once that evidence lands.
 
-Reproduce with a newly created deep researcher after a full Pi process restart while resuming the same session. Establish actual parent/child executable and extension source paths, process start times, launch allowlist, deep role/mode environment and registration timing. Inspect only relevant environment keys; do not dump credentials or whole environments. Distinguish a source/runtime registration bug from a loaded-copy mismatch with concrete evidence. A parked child may require a fresh controlled probe rather than inferring its lost launch environment from source.
+### Phase 1: Fail loud when a child's custom-tool registration does not complete
 
-Correct the demonstrated failure at its owning adapter/launch boundary, retaining all approved permission, lifecycle and model-selection constraints. If the issue is deployment/source resolution rather than implementation, document and verify the concrete correction rather than making speculative code changes.
+Guard the `session_start` seam so a child that fails to register this
+extension's custom tools never comes up silently presenting only Pi's
+builtin `--tools`. Today `index.ts` awaits `startBridge` with no `try/catch`
+(`src/index.ts:350`) ahead of `registerAgentTools` (`src/index.ts:365`), and
+Pi's extension runner swallows a thrown `session_start` handler
+(`dist/core/extensions/runner.js:631-649`), so a bridge-launch failure drops
+every custom tool and the child looks like a healthy simple researcher. Make
+that failure visible at its owning adapter boundary: on a `startBridge` (or
+`registerAgentTools`) failure in a spawned child, fail the child loudly with
+the underlying launch error rather than continuing toolless — for an explore
+child specifically, a researcher whose blocking `explore` (deep) or expected
+read surface did not register must surface an error to its parent, not a
+silent partial surface. Retain all approved permission, lifecycle and
+model-selection constraints; do not widen any tool group as a workaround.
 
 Verification:
 
-- Exercise the actual extension launch/registration path used by deep researchers, not merely a generic custom-tool allowlist or static group string assertion. A regression fixture must fail for the reproduced cause and pass after the correction.
-- Fresh simple researcher: only read/grep/find/ls; no bash or explore. Fresh deep researcher: those reads plus functional query-only blocking explore.
-- Invoke deep blocking collection against a small read-only repository question. Observe the collection's actual tool surface, small model and effort; no bash or recursive explore. Confirm its result reaches the researcher for synthesis.
-- Repeat after stop/send and full process exit/reopen of the same session; retain identity, mode, permissions and frozen model/effort. Verify ordinary worker recon leaves remain unchanged.
-- Run the adapter suite with clean and inherited role/mode environments. Record full output and actual live evidence separately. Never claim a passed provider/restart gate from mocked tests or child self-report of unobservable model state.
-- Record findings back on the prerequisite feature ticket. Its mandatory live acceptance remains incomplete until supported by evidence; this bug's capture does not mark it done.
+- A regression fixture drives the real `session_start` registration path (not
+  a generic custom-tool allowlist or static group-string assertion) with a
+  forced `startBridge` failure, and asserts the child fails loudly / the
+  parent sees an error instead of a toolless researcher. It must fail before
+  the guard and pass after.
+- With `startBridge` succeeding, a fresh simple researcher still shows only
+  read/grep/find/ls (no bash, no explore) and a fresh deep researcher shows
+  those reads plus a registered blocking `explore`.
+- Run the adapter suite with clean and inherited role/mode environments;
+  record full output. Ordinary worker/execute-worker recon leaves unchanged.
+
+### Phase 2 (blocked — pending live dogfood evidence): confirm the live trigger and restore deep collection if a defect remains
+
+Blocked until a live deep researcher failure is reproduced with the Phase 1
+guard in place, so the child's **actual** launch error is captured instead of
+inferred. The source trace found the deep-group registration chain correct
+(`TOOL_GROUPS`, `WS_PI_EXPLORE_MODE` propagation, the role/mode gate), so the
+detailed proximate cause is unresolved: candidates are the stale-bootstrap
+launcher failure (`260907-bug-ws-pi-children-inherit-stale-bootstrap-binary-env`),
+a live-vs-tested engine build difference (`RPC_CLI_PATH` re-execs the lead's
+`pi`), and a fresh-spawn-vs-dormant-resume difference. If the captured error
+shows the trigger is owned by another ticket (most likely the stale-bootstrap
+bug), this ticket's remaining work is to delegate there and verify the deep
+surface once launch succeeds — there may be no deep-group defect to fix. If a
+genuine deep-group registration defect remains after launch succeeds, restore
+the approved contract here.
+
+Verification (live, owner-run; not satisfiable by mocked tests or a child's
+self-report of unobservable model state):
+
+- Reproduce a deep researcher after a full Pi process exit/reopen of the same
+  session; with the Phase 1 guard, capture the child's actual launch error
+  and the concrete parent/child executable, extension source path, launch
+  allowlist, and deep role/mode environment. Inspect only relevant
+  environment keys; do not dump credentials or whole environments.
+- Once launch succeeds, invoke deep blocking collection against a small
+  read-only repository question: observe the collection leaf's actual tool
+  surface (no bash, no recursive explore), small model and effort, and
+  confirm its result reaches the researcher for synthesis. Repeat after
+  stop/send and full exit/reopen; identity, mode, permissions and frozen
+  model/effort retained.
+- Record findings back on the prerequisite feature ticket
+  (`260907-feat-ws-pi-persistent-explore-deep-research`); its mandatory live
+  acceptance remains incomplete until supported by evidence, and this bug's
+  capture does not mark it done.
