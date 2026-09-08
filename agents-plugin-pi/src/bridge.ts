@@ -182,6 +182,41 @@ export async function computeRawDispatchPiAliasTableReport(
 }
 
 /**
+ * Per-session dedup memory for `maybeAppendModelCatalogAdvisory`: `current`
+ * holds the last emitted advisory key (see `buildAdvisoryKey`), or
+ * `undefined` when no advisory has been emitted since the last reset (a
+ * clean table, or a compaction boundary). Owned by `startBridge` (one holder
+ * per session) and passed in as a parameter so the function it gates stays
+ * IO-free/pure for the existing direct-call tests — an omitted holder means
+ * "no dedup memory," i.e. always append while a rejection exists (today's
+ * behavior, unchanged).
+ */
+export type AdvisoryKeyHolder = { current: string | undefined };
+
+/**
+ * Stable string key for a `PiAliasTableReport`'s rejected set, used to dedupe
+ * advisory emission per session. Three distinct shapes:
+ * - Clean table (no `unset`, no rejections): `""` — a dedicated sentinel so a
+ *   holder can be reset back to "no advisory emitted."
+ * - `report.unset === true` with an EMPTY `rejected` array (every tier hit a
+ *   transport/parse miss, not a genuine `unset` `config.resolve_agent`
+ *   answer — see `computePiAliasTableReport`'s doc comment): `"unset"`, its
+ *   own sentinel, distinct from the clean-table `""` key even though both
+ *   have an empty `rejected` array.
+ * - Otherwise (rejected has one or more rows, whether or not `unset` is also
+ *   true): a sorted, joined `<alias>=<model or "->:<why>` key so tier order
+ *   in `report.rejected` never causes a spurious "changed" key.
+ */
+export function buildAdvisoryKey(report: PiAliasTableReport): string {
+  if (!report.unset && report.rejected.length === 0) return ""; // clean table
+  if (report.rejected.length === 0) return "unset"; // all-miss/empty-catalog, no per-tier detail
+  return [...report.rejected]
+    .sort((a, b) => a.alias.localeCompare(b.alias))
+    .map(({ alias, rejected }) => `${alias}=${rejected.model || "-"}:${rejected.why}`)
+    .join(",");
+}
+
+/**
  * Append one advisory text item on a copy, only for workflow_manual.
  * `report.unset` (every tier rejected `unset`, or every tier a bare
  * transport/parse miss) selects the guidance block; any other
@@ -192,9 +227,34 @@ export async function computeRawDispatchPiAliasTableReport(
  * table's `rejected` is non-empty too, once `unset` rejections are tracked).
  * An accepted-only table (no rejections, not all-unset) returns the
  * original content reference. No human command pointer.
+ *
+ * `holder`, when supplied, gates emission to once per distinct rejected set
+ * (see `buildAdvisoryKey`): a repeat call with the same key is a no-op
+ * (returns `content` unchanged, same reference); a changed key re-appends
+ * and updates the holder; a clean table resets the holder to `undefined` so
+ * a later rejection warns again. Omitting `holder` preserves today's
+ * behavior exactly — always append while a rejection exists — so every
+ * existing direct-call test keeps passing unchanged.
  */
-export function maybeAppendModelCatalogAdvisory(rawName: string, content: McpContentItem[], report: PiAliasTableReport, inheritModel?: string, catalogEmpty = true): McpContentItem[] {
-  if (rawName !== "workflow_manual" || (!report.unset && report.rejected.length === 0)) return content;
+export function maybeAppendModelCatalogAdvisory(
+  rawName: string,
+  content: McpContentItem[],
+  report: PiAliasTableReport,
+  inheritModel?: string,
+  catalogEmpty = true,
+  holder?: AdvisoryKeyHolder,
+): McpContentItem[] {
+  if (rawName !== "workflow_manual") return content;
+  const hasRejection = report.unset || report.rejected.length > 0;
+  if (!hasRejection) {
+    if (holder) holder.current = undefined;
+    return content;
+  }
+  if (holder) {
+    const key = buildAdvisoryKey(report);
+    if (key === holder.current) return content;
+    holder.current = key;
+  }
   const text = report.unset
     ? MODEL_CATALOG_ADVISORY
     : "> [!note]\n" + report.rejected.map(({ alias, rejected }) => `> ${formatTierWarning(alias, rejected, inheritModel, catalogEmpty)}`).join("\n");
@@ -337,6 +397,8 @@ export interface WorkflowManualMappingDeps {
    * dedupe (a closure flag in `startBridge`), not this function.
    */
   notifyMappingDegraded: (reason: Exclude<StaticBodyCutMissReason, "no-body">) => void;
+  /** Threaded into every `maybeAppendModelCatalogAdvisory` call this dispatch makes, so all three call sites share one per-session dedup holder. */
+  advisoryKeyHolder?: AdvisoryKeyHolder;
 }
 
 /**
@@ -380,12 +442,12 @@ export async function dispatchMappedWorkflowManual(
 
   if (cut.found) {
     const content = replaceFirstTextItem(manualResult.content, prependWorkflowStateLine(cut.text));
-    return { content: maybeAppendModelCatalogAdvisory("workflow_manual", content, piAliasTableReport, deps.inheritModel, !deps.catalog?.length), details: manualResult };
+    return { content: maybeAppendModelCatalogAdvisory("workflow_manual", content, piAliasTableReport, deps.inheritModel, !deps.catalog?.length, deps.advisoryKeyHolder), details: manualResult };
   }
 
   if (cut.reason === "no-body") {
     const content = replaceFirstTextItem(manualResult.content, prependWorkflowStateLine(manualText));
-    return { content: maybeAppendModelCatalogAdvisory("workflow_manual", content, piAliasTableReport, deps.inheritModel, !deps.catalog?.length), details: manualResult };
+    return { content: maybeAppendModelCatalogAdvisory("workflow_manual", content, piAliasTableReport, deps.inheritModel, !deps.catalog?.length, deps.advisoryKeyHolder), details: manualResult };
   }
 
   deps.notifyMappingDegraded(cut.reason as Exclude<StaticBodyCutMissReason, "no-body">);
@@ -396,7 +458,7 @@ export async function dispatchMappedWorkflowManual(
   }
   const stateText = firstText(stateResult) ?? "";
   const content = replaceFirstTextItem(stateResult.content, prependWorkflowStateLine(stateText));
-  return { content: maybeAppendModelCatalogAdvisory("workflow_manual", content, piAliasTableReport, deps.inheritModel, !deps.catalog?.length), details: stateResult };
+  return { content: maybeAppendModelCatalogAdvisory("workflow_manual", content, piAliasTableReport, deps.inheritModel, !deps.catalog?.length, deps.advisoryKeyHolder), details: stateResult };
 }
 
 /**
@@ -477,6 +539,19 @@ function runGoBuild(argv: string[], opts: { cwd: string }): Promise<void> {
 }
 
 const MERCENARY_RAW_PREFIX = "mercenary.";
+
+/**
+ * Module-level (not `startBridge`-local) one-time-registration guard for the
+ * `pi.on("session_compact", ...)` listener that resets the active session's
+ * advisory-key holder. `startBridge` runs inside `session_start`, which can
+ * fire more than once per process (`/reload`), and `pi.on` returns no
+ * unsubscribe handle — registering unconditionally inside `startBridge`
+ * would stack one listener per reload. `activeAdvisoryKeyHolder` is
+ * reassigned by every `startBridge` call so the (singly-registered) listener
+ * always resets whichever session's holder is currently live.
+ */
+let compactionListenerRegistered = false;
+let activeAdvisoryKeyHolder: AdvisoryKeyHolder | undefined;
 
 /**
  * Drops every ws-mcp tool whose raw (pre-sanitization) name starts with
@@ -649,6 +724,19 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
   // cut-miss fallback — a closure flag scoped to this startBridge call
   // (one bridge per Pi session), not a module-level global.
   let notifiedMappingDegraded = false;
+  // Per-session advisory-key dedup memory (see `maybeAppendModelCatalogAdvisory`).
+  // The listener that resets it on compaction is module-scoped (see
+  // `compactionListenerRegistered`'s doc comment) so a `/reload`-driven
+  // re-entry into `session_start` (and thus this function) never stacks a
+  // second `pi.on` registration; this holder itself is still fresh per call.
+  const advisoryKeyHolder: AdvisoryKeyHolder = { current: undefined };
+  activeAdvisoryKeyHolder = advisoryKeyHolder;
+  if (!compactionListenerRegistered) {
+    compactionListenerRegistered = true;
+    pi.on("session_compact", () => {
+      if (activeAdvisoryKeyHolder) activeAdvisoryKeyHolder.current = undefined;
+    });
+  }
 
   try {
     const initResult = await client.initialize({
@@ -716,6 +804,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
               // can't see through the predicate call, so this cast is safe
               // and load-bearing only for the type checker, not runtime.
               staticBodySnapshot: staticBodySnapshotRef.current as string,
+              advisoryKeyHolder,
               notifyMappingDegraded: (reason) => {
                 if (!notifiedMappingDegraded) {
                   notifiedMappingDegraded = true;
@@ -746,7 +835,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
           // call pays for an unrelated MCP round-trip — see
           // computeRawDispatchPiAliasTableReport's doc comment.
           const piAliasTableReport = await computeRawDispatchPiAliasTableReport(rawName, (name, callArgs) => client.callTool(name, callArgs), catalog);
-          const content = maybeAppendModelCatalogAdvisory(rawName, result.content, piAliasTableReport, inheritModel, catalog.length === 0);
+          const content = maybeAppendModelCatalogAdvisory(rawName, result.content, piAliasTableReport, inheritModel, catalog.length === 0, advisoryKeyHolder);
           return { content, details: result };
         },
       }, opts.toolPreviewTuiRef);
