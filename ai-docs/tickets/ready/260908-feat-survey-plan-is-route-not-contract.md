@@ -351,20 +351,3 @@ named in Constraints. Verification: the golden reviewer-frame
 render carries no plan line, the plugin test suites pass, and one
 partitioned review on a ticket target completes with ticket plus diff
 only.
-
-## Blocked (2026-09-08)
-
-### Design Reviewer — block
-
-| # | Title | Severity | Resolution |
-|---|-------|----------|------------|
-| 1 | Decision 6 names a plan section but no exit signal, so the rule may never gate anything | important | missing |
-| 2 | ## Out of Scope still restates ticket text, contradicting Decision 2 and Phase 1's own verification | important | autonomous |
-| 3 | Constraints attribute three spec sentences to the wrong anchor and miss the one {#260619} sentence Decision 4 invalidates | minor | autonomous |
-| 4 | Both spec anchors are updated in Phase 2 although Phase 1 changes what they state | minor | autonomous |
-| 5 | The implementer's new read-the-ticket step is unconditional as written, but inline targets have no ticket | minor | autonomous |
-
-### Completeness Reviewer — pass
-
-| # | Title | Severity |
-|---|-------|----------|
