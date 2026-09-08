@@ -1,5 +1,6 @@
 ---
 title: "tickets.sage_gate offers no rerun path for a stale completed review"
+completed: 2026-09-09
 parent: 260605-epic-ws-playbook-factory-pivot
 spec:
   - 260720-sage-gate-record-tools
@@ -112,3 +113,42 @@ dogfood run on a `ready/` ticket edited after its stamp, showing
 `tickets.sage_gate(answer: yes)` returning `run` for exactly the stale
 stages and `tickets.sage_gate(answer: no)` returning `skip` with
 `tickets.verify` still warning.
+
+### Result (6350046c) - 2026-09-09
+
+Threaded `answer` through `sageGateFreshnessResult`, which now returns
+`(SageGateResult, bool, error)` — the `consumed` bool is true whenever a
+freshness question was posed. When the completed stage(s) are stale:
+`answer: yes` returns a non-waivable `run` over exactly the stale stages
+(`mode: combined` for two, `standalone` for one, built through
+`stageOutcome` so it carries `sageReviewNonWaivableAdvisory`); `answer: no`
+writes nothing (posture and `-reviewed` digest stay as they are, so
+`tickets.verify` keeps warning) and the caller resets `answer` to `""` before
+resolving any remaining pending stage, so a still-pending `required` or
+`recommended` stage is never swallowed by the decline; unanswered still
+returns `check_review_required`. `gateResultFromStage` was generalized to
+`gateResultFromStageReviewers` (multi-reviewer) for the two-element stale-stage
+list; `resolveStage` is unchanged. `sageGateNextInstruction`'s
+`check_review_required` branch gained the `answer=yes|no` re-invoke sentence
+while preserving the pinned `decide whether to rerun the listed sage review
+stage(s)` substring. Spec `mcp-tools.md` `{#260720-sage-gate-record-tools}`
+documents both answers and lists the freshness rerun among advisory-bearing
+runs.
+
+Commits: `6350046c` (feat: implementation + spec), `fa15b5ce` (test: pins the
+`answer=""` reset via a `recommended`-downstream discriminating case, plus a
+single-stage `standalone` yes-case). Range `6350046c..fa15b5ce`.
+
+Verification: `go test ./internal/wsdoc/ -count=1` and
+`go test ./internal/mcp/ -count=1` in `agents-plugin-tool/` both pass; the
+`internal/mcp` run is required because `TestFormatSageGateRoundTrip` pins the
+edited next-instruction text. Partitioned review: correctness clean; test
+partition raised one Important (the decline-reset regression was not exercised)
+and one Minor (standalone yes-mode uncovered), both fixed in `fa15b5ce`.
+
+The Phase's dogfood step (calling `tickets.sage_gate(answer: ...)` on a stale
+`ready/` ticket through the live tool) is deferred: the installed MCP tool
+serves the published plugin version, which does not yet carry this change, so a
+live call would exercise the old behavior. The unit tests exercise the new
+`SageGate` path directly and are the authoritative verification until the
+change is published; the dogfood belongs to the post-publish smoke check.
