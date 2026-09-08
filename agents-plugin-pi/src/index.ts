@@ -209,6 +209,7 @@ import {
 } from "./ask.ts";
 import { registerWsSkillTool } from "./lead-skills.ts";
 import { createToolPreviewTuiRef, loadToolResultTuiModules } from "./tool-result-render.ts";
+import { registerClaudeCodeProvider } from "./claude-code-provider.ts";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const pluginDir = dirname(srcDir); // agents-plugin-pi/
@@ -222,6 +223,12 @@ const executeWorkerGuidePath = join(pluginDir, "execute-worker-guide.md");
 const exploreGuidePath = join(pluginDir, "explore-guide.md");
 
 export default function wsPiBridgeExtension(pi: ExtensionAPI) {
+  // 260908: the `claude-code/<model>` provider (Claude Agent SDK over the
+  // subscription-authenticated `claude` CLI). Registered in every role at
+  // load — registration is cheap and the claude child only starts on the
+  // first streamSimple call, so a child whose tier points elsewhere never
+  // spawns one. Its own session_shutdown handler closes the process.
+  registerClaudeCodeProvider(pi);
   // Filled before the bridge starts so native tool renderers are available
   // independently of async MCP startup; absent helpers retain Pi fallback.
   const toolPreviewTuiRef = createToolPreviewTuiRef();
