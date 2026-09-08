@@ -32,6 +32,8 @@ import {
   prependWorkflowStateLine,
   shouldMapWorkflowManual,
   dispatchMappedWorkflowManual,
+  buildAdvisoryKey,
+  type AdvisoryKeyHolder,
 } from "../src/bridge.ts";
 import type { McpToolCallResult } from "../src/mcp-stdio-client.ts";
 
@@ -704,5 +706,122 @@ describe("maybeAppendModelCatalogAdvisory", () => {
     const content = [{ type: "text", text: "manual body" }];
     const result = maybeAppendModelCatalogAdvisory("ws__workflow_manual", content, { unset: true, rejected: [] });
     assert.equal(result, content);
+  });
+
+  test("no holder argument still appends every time a rejection exists (regression guard)", () => {
+    const content = [{ type: "text", text: "manual body" }];
+    const first = maybeAppendModelCatalogAdvisory("workflow_manual", content, { unset: true, rejected: [] });
+    const second = maybeAppendModelCatalogAdvisory("workflow_manual", content, { unset: true, rejected: [] });
+    assert.equal(first.length, 2);
+    assert.equal(second.length, 2, "an omitted holder must never dedupe — always append while a rejection exists");
+  });
+});
+
+describe("buildAdvisoryKey / maybeAppendModelCatalogAdvisory per-session dedup (Phase 3)", () => {
+  function unsetRejection(alias: string, model = "bad"): { alias: string; rejected: { model: string; resolvedFrom: string; why: "unset" } } {
+    return { alias, rejected: { model, resolvedFrom: "tiers", why: "unset" } };
+  }
+  function noAuthRejection(alias: string, model = "locked/model"): { alias: string; rejected: { model: string; resolvedFrom: string; why: "no-auth" } } {
+    return { alias, rejected: { model, resolvedFrom: "default", why: "no-auth" } };
+  }
+
+  test("two consecutive calls with the same rejected set append once, then no-op", () => {
+    const holder: AdvisoryKeyHolder = { current: undefined };
+    const content = [{ type: "text", text: "manual body" }];
+    const report = { unset: false, rejected: [unsetRejection("small")] };
+    const first = maybeAppendModelCatalogAdvisory("workflow_manual", content, report, undefined, false, holder);
+    assert.equal(first.length, 2, "first call must append");
+    const second = maybeAppendModelCatalogAdvisory("workflow_manual", first, report, undefined, false, holder);
+    assert.equal(second, first, "same reference — second call with the same key is a no-op");
+  });
+
+  test("a changed rejected set appends again", () => {
+    const holder: AdvisoryKeyHolder = { current: undefined };
+    const content = [{ type: "text", text: "manual body" }];
+    const report1 = { unset: false, rejected: [unsetRejection("small")] };
+    const first = maybeAppendModelCatalogAdvisory("workflow_manual", content, report1, undefined, false, holder);
+    const report2 = { unset: false, rejected: [unsetRejection("small"), noAuthRejection("medium")] };
+    const second = maybeAppendModelCatalogAdvisory("workflow_manual", first, report2, undefined, false, holder);
+    assert.equal(second.length, 3, "a changed key must append again on top of the prior emission");
+    assert.notEqual(second, first);
+  });
+
+  test("a clean table after a rejected one appends nothing and resets the key, so a later rejection warns again", () => {
+    const holder: AdvisoryKeyHolder = { current: undefined };
+    const content = [{ type: "text", text: "manual body" }];
+    const rejectedReport = { unset: false, rejected: [unsetRejection("small")] };
+    const afterFirst = maybeAppendModelCatalogAdvisory("workflow_manual", content, rejectedReport, undefined, false, holder);
+    assert.equal(afterFirst.length, 2, "first rejected call appends");
+    assert.notEqual(holder.current, undefined);
+
+    const cleanReport = { unset: false, rejected: [] };
+    const afterClean = maybeAppendModelCatalogAdvisory("workflow_manual", afterFirst, cleanReport, undefined, false, holder);
+    assert.equal(afterClean, afterFirst, "clean table never appends");
+    assert.equal(holder.current, undefined, "clean table resets the holder's key");
+
+    const afterSecondRejection = maybeAppendModelCatalogAdvisory("workflow_manual", afterClean, rejectedReport, undefined, false, holder);
+    assert.equal(afterSecondRejection.length, 3, "the same rejected set warns again after the reset, proving a real reset, not just a no-op");
+  });
+
+  test("a simulated compaction reset (holder.current manually cleared) makes the next call append again with the same set", () => {
+    const holder: AdvisoryKeyHolder = { current: undefined };
+    const content = [{ type: "text", text: "manual body" }];
+    const report = { unset: false, rejected: [unsetRejection("small")] };
+    const first = maybeAppendModelCatalogAdvisory("workflow_manual", content, report, undefined, false, holder);
+    assert.equal(first.length, 2);
+
+    // Stand-in for the real `pi.on("session_compact", ...)` reset wired
+    // inside `startBridge` (not exercisable in `node --test`, same boundary
+    // this file already draws for other startBridge-internal wiring).
+    holder.current = undefined;
+
+    const second = maybeAppendModelCatalogAdvisory("workflow_manual", first, report, undefined, false, holder);
+    assert.equal(second.length, 3, "post-reset call with the same rejected set must append again");
+  });
+
+  test("the report.unset===true, rejected:[] (all-miss/empty-catalog) case dedupes and resets identically", () => {
+    const holder: AdvisoryKeyHolder = { current: undefined };
+    const content = [{ type: "text", text: "manual body" }];
+    const allMissReport = { unset: true, rejected: [] as { alias: string; rejected: { model: string; resolvedFrom: string; why: "unset" } }[] };
+
+    const first = maybeAppendModelCatalogAdvisory("workflow_manual", content, allMissReport, undefined, true, holder);
+    assert.equal(first.length, 2, "first call appends the guidance block");
+    const second = maybeAppendModelCatalogAdvisory("workflow_manual", first, allMissReport, undefined, true, holder);
+    assert.equal(second, first, "repeat all-miss call is a no-op");
+
+    const cleanReport = { unset: false, rejected: [] as { alias: string; rejected: { model: string; resolvedFrom: string; why: "unset" } }[] };
+    const afterClean = maybeAppendModelCatalogAdvisory("workflow_manual", second, cleanReport, undefined, true, holder);
+    assert.equal(afterClean, second, "clean table still doesn't append");
+    assert.equal(holder.current, undefined, "clean table resets even from the all-miss sentinel key");
+
+    const afterReRejection = maybeAppendModelCatalogAdvisory("workflow_manual", afterClean, allMissReport, undefined, true, holder);
+    assert.equal(afterReRejection.length, 3, "the all-miss sentinel must be a distinct key from the clean-table key, so it warns again after reset");
+  });
+
+  test("buildAdvisoryKey gives report.unset===true with an empty rejected array its own sentinel, distinct from the clean-table key", () => {
+    const cleanKey = buildAdvisoryKey({ unset: false, rejected: [] });
+    const allMissKey = buildAdvisoryKey({ unset: true, rejected: [] });
+    assert.equal(cleanKey, "");
+    assert.equal(allMissKey, "unset");
+    assert.notEqual(cleanKey, allMissKey);
+  });
+
+  test("buildAdvisoryKey sorts by alias so tier order never causes a spurious key change", () => {
+    const keyA = buildAdvisoryKey({ unset: false, rejected: [noAuthRejection("medium"), unsetRejection("small")] });
+    const keyB = buildAdvisoryKey({ unset: false, rejected: [unsetRejection("small"), noAuthRejection("medium")] });
+    assert.equal(keyA, keyB);
+  });
+
+  test("the raw-dispatch call shape is gated by the same holder as the mapped path", () => {
+    const holder: AdvisoryKeyHolder = { current: undefined };
+    const content = [{ type: "text", text: "raw manual body" }];
+    // Shape matches what `computeRawDispatchPiAliasTableReport` returns for a
+    // "workflow_manual" rawName — the raw-dispatch path has no separate
+    // gating logic of its own; it shares this same function.
+    const report = { unset: false, rejected: [unsetRejection("large")] };
+    const first = maybeAppendModelCatalogAdvisory("workflow_manual", content, report, undefined, false, holder);
+    assert.equal(first.length, 2, "raw-dispatch path appends on first call");
+    const second = maybeAppendModelCatalogAdvisory("workflow_manual", first, report, undefined, false, holder);
+    assert.equal(second, first, "raw-dispatch path is deduped identically to the mapped path");
   });
 });
