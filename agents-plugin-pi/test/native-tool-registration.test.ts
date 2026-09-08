@@ -78,6 +78,40 @@ test("actual native registrations retain schemas/executors while sharing cold an
   agents.stopAll();
 });
 
+test("260906 Phase 1: the two direct tools cap their real registered OUTPUT preview at ten logical lines, not ten physical rows", () => {
+  const { tools, pi, bridge } = harness();
+  const ref = createToolPreviewTuiRef();
+  const agents = registerAgentTools(pi, bridge, { cwd: "/tmp" }, undefined, async () => ({ agentId: "leaf", state: "done", output: "ok" }), "/tmp/explore.md", ref);
+  registerExecuteGateway(pi, bridge, agents.rpcRegistry, { cwd: "/tmp", executeWorkerPromptPath: "/tmp/execute.md" }, ref);
+  ref.current = tui;
+
+  const theme = { bold: (x: string) => x, fg: (_: string, x: string) => x };
+  const eleven = Array.from({ length: 11 }, (_, index) => `line-${index}`).join("\n");
+  for (const name of ["do-i-really-have-to-read-this-myself", "do-i-really-have-to-run-this-myself"]) {
+    const tool = tools.get(name)!;
+    const collapsed = tool.renderResult!(
+      { content: [{ type: "text", text: eleven }] },
+      { expanded: false, isPartial: false },
+      theme,
+      { state: {}, argsComplete: true, isPartial: false },
+    ) as { render(width: number): string[] };
+    const collapsedLines = collapsed.render(80).join("\n");
+    for (let index = 0; index < 10; index += 1) assert.match(collapsedLines, new RegExp(`line-${index}\\b`), `${name}: logical line ${index} survives the collapse`);
+    assert.doesNotMatch(collapsedLines, /line-10\b/, `${name}: the 11th logical line is cut`);
+    assert.match(collapsedLines, /\.\.\./, `${name}: an overflow marker is shown`);
+
+    const expanded = tool.renderResult!(
+      { content: [{ type: "text", text: eleven }] },
+      { expanded: true, isPartial: false },
+      theme,
+      { state: {}, argsComplete: true, isPartial: false, lastComponent: collapsed },
+    ) as { render(width: number): string[] };
+    const expandedLines = expanded.render(80).join("\n");
+    for (let index = 0; index < 11; index += 1) assert.match(expandedLines, new RegExp(`line-${index}\\b`), `${name}: expansion recovers logical line ${index}`);
+  }
+  agents.stopAll();
+});
+
 test("actual MCP startup registers through the same cold then late-filled shared ref", async () => {
   const { tools, pi } = harness();
   const dir = mkdtempSync(join(tmpdir(), "ws-pi-mcp-preview-"));

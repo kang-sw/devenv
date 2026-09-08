@@ -756,7 +756,7 @@ export function registerExecuteGateway(
       const raw = readFileSync(absolutePath, "utf8");
       return { content: [{ type: "text", text: sliceLines(raw, p.offset, p.limit) }] };
     },
-  }, toolPreviewTuiRef);
+  }, toolPreviewTuiRef, { resultLineBudget: "logical" });
 
   registerWsTool(pi, {
     name: ONE_LINER_EXEC_TOOL_NAME,
@@ -790,5 +790,5 @@ export function registerExecuteGateway(
       }
       return { content: [{ type: "text", text: lines.join("\n") }] };
     },
-  }, toolPreviewTuiRef);
+  }, toolPreviewTuiRef, { resultLineBudget: "logical" });
 }
