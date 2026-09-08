@@ -20,6 +20,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: d7ffdd0dbd5daee3
 sage-review-completeness-reviewed: d7ffdd0dbd5daee3
+completed: 2026-09-09
 ---
 
 # Shipped ws surfaces carry devenv-only tickets, paths, and migration vocabulary
@@ -499,3 +500,57 @@ pre-Phase-1 guardrail sentence into `session_state.go` fails it; a
 `// 260605` comment, the `ticket-conventions.md` example stem
 `260115-feat-foo-bar`, and a line naming `ai-docs/manuals/` as a
 directory each pass; the plugin suites pass.
+
+### Result (4f587a04) - 2026-09-09
+
+Behavioral delta: `agents-plugin/tests/test_shipped_surfaces_downstream_neutral.py`
+is now the mechanical form of AGENTS.md Architecture Rule 4. It scans the
+four non-Go shipped text trees line-by-line and the string-literal content
+(Go comments excluded) of every non-test `.go` file under
+`agents-plugin-tool/`, classifying each line against Decision 4's four rules:
+a real ticket-stem/spec-anchor resolution, a git-tracked non-bootstrap-installed
+`ai-docs/` file path, a bare ticket-number citation resolving to a real
+ticket, and repo layout/tooling names plus migration vocabulary. There is no
+allowlist; the permitted forms pass because they resolve to nothing (example
+stems), end in `/` (directory names), or are placeholders. The comment-aware
+Go string-literal extractor is load-bearing against real pre-existing comments
+(`legacy_marker.go`, `git.go`) that would otherwise false-positive. The
+`skill-authoring` manual gained a seventh invariant-checklist item,
+**Resolvable downstream** ("all six" -> "all seven").
+
+Deviations from the phase plan: none material. Two ticket-vs-code naming
+facts were derived dynamically rather than trusted: (1) the bootstrap-installed
+`ai-docs/` set is `{ai-docs/WORKFLOW.md, ai-docs/mental-model.md}` (the
+template's MIGRATION block lists both concrete filenames, not just
+`WORKFLOW.md` as the plan's finding said), and the test parses it from the
+template and pins the actual set; (2) the guard lives in `agents-plugin/tests/`,
+outside every scanned/shipped tree and unreferenced by `plugin.json`, so it
+neither ships nor self-trips.
+
+Review dispositions: partitioned (correctness opus/large, fit sonnet/medium,
+test sonnet/medium). Fit clean. Correctness clean +1 Minor (rule 3's
+leading-hyphen skip is cosmetically over-permissive with no reachable false
+negative; recorded, no change). Test non-clean review #1: one Important
+(rule 2 -- the `ai-docs/`-specific-file leak rule behind most of the ticket's
+cited point-leak sites -- had no positive-trip unit case, so a future silent
+regression there would go uncaught) plus one Minor (the bootstrap-set golden
+literal is not self-deriving; reviewer marked no action). Relay #1 fixed the
+Important [fixed]: added `test_rule2_nonbootstrap_ai_docs_path_is_flagged`
+asserting `classify_line` returns a rule-2 reason for a real tracked,
+non-installed `ai-docs/` path -- test coverage only, no production logic
+changed (rule 2 already tripped correctly). No Critical, so no re-review;
+Minors recorded only.
+
+Verification: the guard passes 7/7 on the current tree; reinserting the
+recovered pre-Phase-1 guardrail sentence into `session_state.go` makes
+`test_go_string_literals_downstream_neutral` fail naming
+`session_state.go:534: 260605 (rule 3)`, then passes again after revert (tree
+left clean); the three allowed forms (a `// 260605` comment, the example stem
+`260115-feat-foo-bar`, a bare `ai-docs/manuals/` directory line) each pass;
+`go test ./... -count=1` in `agents-plugin-tool` green across all 14 packages;
+wsflow python bundle 10/10. One pre-existing, unrelated failure in the
+`agents-plugin` python suite (`test_proceed_keeps_implementation_route_only`,
+which pins pre-diet `lead-proceed.md` strings and fails identically on
+`develop`) was surfaced during this phase and captured as idea ticket
+`260909-bug-proceed-contract-test-pins-pre-diet-lead-proceed-strings`; it is
+out of Phase 3 scope. All three phases of this ticket are now complete.
