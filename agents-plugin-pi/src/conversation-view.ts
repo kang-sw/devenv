@@ -14,6 +14,18 @@
  * against a fake `ConversationChannel` and a fake `tui`.
  *
  * Shape decisions:
+ *   - `ConversationItem` has six kinds, per the ticket's Decisions message
+ *     model: `"user"` (an owner turn), `"assistant"` (the CHILD's own
+ *     finalized text — rendered as Markdown, no label), `"lead-message"` (a
+ *     message the LEAD sent the child — carries a `lead:` label precisely so
+ *     it is never mistaken for the child's own text), `"note"` (an adapter
+ *     note), `"tool-call"` and `"tool-result"` (both carry an `id: string` so
+ *     a later phase can correlate a call with its result; `tool-result`'s
+ *     payload field is `content`, matching the ticket's field name). The
+ *     child's streamed `text_delta`/`agent_settled` turn is committed and
+ *     rendered as `"assistant"`, never `"lead-message"` — `overlay-chat.ts`
+ *     commits the identical stream as the child's own turn (`who: "thread"`),
+ *     and this component preserves that direction.
  *   - `ConversationChannel` is `overlay-chat.ts`'s `ForkChannel` with
  *     `isStreaming(): boolean` widened to `liveness(): ChildLiveness` — a
  *     3-state read (`"running" | "idle-awaiting-owner" | "settled"`) taken
@@ -23,7 +35,9 @@
  *     works around). Producing `"idle-awaiting-owner"` from a real registry
  *     is child B's ownership rule (`260908` sibling ticket) — this phase only
  *     defines the type and renders its three states structurally against a
- *     fake channel.
+ *     fake channel. `send` is OPTIONAL on the interface (`"interactive" mode
+ *     only`) so a `"view"`-mode-only consumer (e.g. child B's audit window)
+ *     is not forced to implement it.
  *   - `mode` is `"view" | "interactive"`, and `setMode` is RAISE-ONLY: once
  *     `"interactive"`, a later `setMode("view")` call is a no-op. A view a
  *     host already promoted to accept typed input must never be silently
@@ -35,25 +49,29 @@
  *     collapse/expand chrome around them, never its own preview logic. A
  *     `"tool-call"` item is expandable only when `yamlInputPreview` produces
  *     a non-empty body (object-shaped args); a `"tool-result"` item is
- *     expandable only when `yamlContainerDisplay` recognizes its text as a
+ *     expandable only when `yamlContainerDisplay` recognizes its content as a
  *     JSON container. A non-expandable item never enters focus cycling.
  *   - `isEscapeKey` (kitty-protocol-safe Esc detection) is COPIED from
  *     `overlay-chat.ts` rather than imported: `overlay-chat.ts` stays running
  *     untouched until Phase 2 deletes it, and importing from a
  *     soon-to-be-deleted file would just move the coupling problem to Phase
  *     2 instead of avoiding it now.
- *   - Key-handling precedence (both modes): `\x03` (Ctrl+C) is swallowed
- *     first; `isEscapeKey` next, invoking `onEscape`; then `Ctrl+O` (`\x0f`)
- *     toggles collapse/expand for every expandable item at once — these three
- *     are non-printable chords that can never be legitimate typed content, so
- *     they are intercepted before mode-specific routing regardless of mode.
- *     In `"view"` mode (no `Editor` capturing input) the remaining keys are
- *     component navigation: Tab/Shift+Tab cycle focus among expandable items,
- *     Space toggles the focused item, Enter calls `onEnter` (there is no
- *     input box to submit). In `"interactive"` mode every other key is
- *     forwarded to the `Editor`, whose own `onSubmit` intercepts a trimmed
- *     `/done` (calls `onDone`) and otherwise appends an `"owner"` item and
- *     `channel.send`s it.
+ *   - Key-handling precedence: `\x03` (Ctrl+C) is swallowed first in both
+ *     modes; `isEscapeKey` next, invoking `onEscape`, in both modes; then
+ *     `Ctrl+O` (`\x0f`) toggles collapse/expand for every expandable item at
+ *     once, in both modes — these three are non-printable chords that can
+ *     never be legitimate typed content. In `"view"` mode (no `Editor`
+ *     capturing input) the remaining keys are component navigation:
+ *     Tab/Shift+Tab move the item selection (newest expandable item first),
+ *     Space toggles the selected item, Enter calls `onEnter` (there is no
+ *     input box to submit). In `"interactive"` mode the ticket's precedence
+ *     table applies: Tab/Shift+Tab move the selection only while the
+ *     `Editor` is EMPTY; Space toggles the selection only while a selection
+ *     is ACTIVE; any other typed character (including Tab/Shift+Tab/Space in
+ *     the states above) first clears the selection, then is forwarded to
+ *     `this.editor.handleInput`. The `Editor`'s own `onSubmit` intercepts a
+ *     trimmed `/done` (calls `onDone`) and otherwise appends a `"user"` item
+ *     and `channel.send`s it.
  *   - `Editor` is the one `pi-tui` primitive that needs the FULL `TUI`
  *     surface (`showOverlay`, `setFocus`, 20+ members) — the fake `tui` the
  *     test tier drives (`requestRender` only) does not implement it, while
@@ -115,13 +133,14 @@ const SHIFT_TAB = "\x1b[Z";
 /** `mode` values `ConversationViewComponent` can be in. See `setMode`'s raise-only contract. */
 export type ConversationViewMode = "view" | "interactive";
 
-/** One line-group in the transcript. */
+/** One line-group in the transcript. See this file's header for the kind-by-kind rationale. */
 export type ConversationItem =
-  | { kind: "owner"; text: string }
+  | { kind: "user"; text: string }
+  | { kind: "assistant"; text: string }
   | { kind: "lead-message"; text: string }
   | { kind: "note"; text: string }
-  | { kind: "tool-call"; name: string; args: unknown }
-  | { kind: "tool-result"; name: string; text: string; isError?: boolean };
+  | { kind: "tool-call"; id: string; name: string; args: unknown }
+  | { kind: "tool-result"; id: string; name: string; content: string; isError?: boolean };
 
 /**
  * A child's liveness, read fresh on every `render()` — never cached. Producing
@@ -141,8 +160,8 @@ export interface ConversationChannel {
   onEvent(listener: (evt: unknown) => void): () => void;
   /** Read fresh on every render — see the type doc above. */
   liveness(): ChildLiveness;
-  /** Deliver one owner message to the child. */
-  send(text: string): Promise<void>;
+  /** Deliver one owner message to the child. Optional: `"interactive"` mode only — a `"view"`-only consumer need not implement it. */
+  send?(text: string): Promise<void>;
 }
 
 /** Minimal `pi-tui` `TUI` surface this component needs directly. The real `TUI` (needed by the real `Editor`) is a structural superset — see the `primitives` doc below. */
@@ -213,6 +232,15 @@ export interface ConversationViewOptions {
   primitives?: Partial<ConversationViewPrimitives>;
   /** Transcript to seed at construction (Phase 2's hydration path). */
   initialItems?: readonly ConversationItem[];
+  /**
+   * The single hint line rendered in the header. Consumer-supplied because
+   * different hosts need different text for the same key contract — e.g. the
+   * `/answer` binding passes `Esc: close view (thread stays open) · /done: end
+   * thread`, the audit window passes its own. Defaults to a generic,
+   * mode-dependent hint describing this component's own key contract when
+   * omitted.
+   */
+  headerHint?: string;
   /** Enter in `"view"` mode (no `Editor` to consume it) — e.g. a host promoting the view to `"interactive"`. */
   onEnter?: () => void;
   /** Esc, in either mode. */
@@ -226,7 +254,7 @@ function isToolCallExpandable(item: Extract<ConversationItem, { kind: "tool-call
 }
 
 function isToolResultExpandable(item: Extract<ConversationItem, { kind: "tool-result" }>): boolean {
-  return yamlContainerDisplay(item.text) !== undefined;
+  return yamlContainerDisplay(item.content) !== undefined;
 }
 
 function toolCallHead(item: Extract<ConversationItem, { kind: "tool-call" }>): string {
@@ -241,14 +269,14 @@ function toolCallBody(item: Extract<ConversationItem, { kind: "tool-call" }>): s
 }
 
 function toolResultHead(item: Extract<ConversationItem, { kind: "tool-result" }>): string {
-  const preview = completedTextPreview(item.text);
+  const preview = completedTextPreview(item.content);
   const first = logicalPreview(preview.text, 1);
   const marker = item.isError ? "✗" : "✓";
   return `${marker} ${item.name} ${first}`.trimEnd();
 }
 
 function toolResultBody(item: Extract<ConversationItem, { kind: "tool-result" }>): string[] {
-  const yaml = yamlContainerDisplay(item.text);
+  const yaml = yamlContainerDisplay(item.content);
   return yaml !== undefined ? yaml.split("\n") : [];
 }
 
@@ -356,7 +384,10 @@ export class ConversationViewComponent implements Component {
     if (e.type !== "agent_settled") return;
     const settled = this.streaming.trim();
     this.streaming = "";
-    if (settled.length > 0) this.appendItem({ kind: "lead-message", text: settled });
+    // The CHILD's own finalized turn — always "assistant", never "lead-message"
+    // (that kind is reserved for a message the LEAD sends the child; see this
+    // file's header and `overlay-chat.ts`'s identical `who: "thread"` direction).
+    if (settled.length > 0) this.appendItem({ kind: "assistant", text: settled });
     else this.tui.requestRender();
   }
 
@@ -373,7 +404,27 @@ export class ConversationViewComponent implements Component {
       return;
     }
     if (this.mode === "interactive" && this.editor) {
-      this.editor.handleInput(data);
+      const editor = this.editor;
+      // Ticket key-precedence table for "interactive" mode: Tab/Shift+Tab
+      // move the selection only while the Editor is empty; Space toggles the
+      // selection only while one is active; anything else first clears the
+      // selection (a stale selection carried over from "view" mode must not
+      // silently linger once the owner starts typing), then goes to the
+      // Editor.
+      const editorEmpty = editor.getText().length === 0;
+      if ((data === "\t" || data === SHIFT_TAB) && editorEmpty) {
+        this.focusNext(data === "\t" ? 1 : -1);
+        return;
+      }
+      if (data === " " && this.focusIndex !== undefined) {
+        this.toggleFocused();
+        return;
+      }
+      if (this.focusIndex !== undefined) {
+        this.focusIndex = undefined;
+        this.tui.requestRender();
+      }
+      editor.handleInput(data);
       return;
     }
     // "view" mode navigation — no Editor is capturing input.
@@ -407,8 +458,8 @@ export class ConversationViewComponent implements Component {
       this.options.onDone?.();
       return;
     }
-    this.appendItem({ kind: "owner", text: trimmed });
-    void this.options.channel.send(trimmed);
+    this.appendItem({ kind: "user", text: trimmed });
+    void this.options.channel.send?.(trimmed);
   }
 
   private expandableIndices(): number[] {
@@ -427,12 +478,13 @@ export class ConversationViewComponent implements Component {
   }
 
   private focusNext(direction: 1 | -1): void {
-    const indices = this.expandableIndices();
-    if (indices.length === 0) return;
-    const currentPos = this.focusIndex === undefined ? -1 : indices.indexOf(this.focusIndex);
+    // Newest expandable item first: traverse in descending (highest-index-first) order.
+    const order = this.expandableIndices().reverse();
+    if (order.length === 0) return;
+    const currentPos = this.focusIndex === undefined ? -1 : order.indexOf(this.focusIndex);
     const basePos = currentPos === -1 ? (direction === 1 ? -1 : 0) : currentPos;
-    const nextPos = (basePos + direction + indices.length) % indices.length;
-    this.focusIndex = indices[nextPos];
+    const nextPos = (basePos + direction + order.length) % order.length;
+    this.focusIndex = order[nextPos];
     this.tui.requestRender();
   }
 
@@ -458,24 +510,31 @@ export class ConversationViewComponent implements Component {
 
   render(width: number): string[] {
     const w = Math.max(1, width);
+    const liveness = this.options.channel.liveness();
+    const banner = this.bannerFor(liveness);
     const lines: string[] = [];
     lines.push(...this.textLines(this.hintText(), w));
-    const banner = this.livenessBanner();
     if (banner) lines.push(...this.textLines(banner, w));
     lines.push(...this.scrollView.render(w));
+    // "idle-awaiting-owner" must be visibly louder than the other two states:
+    // render it at the transcript foot too, not just the header.
+    if (liveness === "idle-awaiting-owner" && banner) lines.push(...this.textLines(banner, w));
     if (this.mode === "interactive" && this.editor) lines.push(...this.editor.render(w));
     return lines.map((line) => (visibleWidth(line) > w ? truncateToWidth(line, w) : line));
   }
 
   private hintText(): string {
+    if (this.options.headerHint !== undefined) return this.options.headerHint;
     return this.mode === "interactive"
       ? `Tab/Shift+Tab: focus item · Space: expand/collapse · Ctrl+O: expand all · Esc: close · ${DONE_COMMAND}: end`
       : `Tab/Shift+Tab: focus item · Space: expand/collapse · Ctrl+O: expand all · Esc: close · Enter: interact`;
   }
 
-  private livenessBanner(): string | undefined {
-    const liveness = this.options.channel.liveness();
-    if (liveness === "running") return "working…";
+  private bannerFor(liveness: ChildLiveness): string | undefined {
+    // "working…" is replaced by the first streamed delta — once there is a
+    // non-empty streaming tail, the tail itself is the "child is working"
+    // signal, so the marker must not linger alongside it.
+    if (liveness === "running" && this.streaming.trim() === "") return "working…";
     if (liveness === "idle-awaiting-owner") return "── AWAITING OWNER ──";
     return undefined;
   }
@@ -486,7 +545,7 @@ export class ConversationViewComponent implements Component {
       lines.push(...this.renderItem(this.items[i], i, width));
     }
     if (this.streaming.trim().length > 0) {
-      lines.push(...this.textLines("lead:", width));
+      // Partial "assistant" text: Markdown, no label — same as the settled kind.
       lines.push(...this.markdownLines(this.streaming.trim(), width));
     }
     return lines;
@@ -495,10 +554,13 @@ export class ConversationViewComponent implements Component {
   private renderItem(item: ConversationItem, index: number, width: number): string[] {
     const focusMarker = this.focusIndex === index ? "> " : "";
     switch (item.kind) {
-      case "owner":
+      case "user":
         return this.textLines(`you: ${item.text}`, width);
       case "note":
         return this.textLines(`· ${item.text}`, width);
+      case "assistant":
+        // The child's own finalized text — Markdown, no "lead:" label (see this file's header).
+        return this.markdownLines(item.text, width);
       case "lead-message": {
         const lines = this.textLines("lead:", width);
         return [...lines, ...this.markdownLines(item.text, width)];
