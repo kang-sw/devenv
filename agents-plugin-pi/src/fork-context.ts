@@ -109,15 +109,18 @@ export function readForkLaunchContext(env: NodeJS.ProcessEnv): { context: ForkCo
   if (typeof envelope.nonce !== "string" || !envelope.nonce || typeof envelope.readinessPath !== "string" || !envelope.readinessPath) {
     throw new Error("ws-pi-fork: malformed launch envelope");
   }
-  return { context: parseForkContext(envelope.context) as ForkContext, nonce: envelope.nonce, readinessPath: envelope.readinessPath };
+  const context = parseForkContext(envelope.context);
+  if (!context) throw new Error("ws-pi-fork: malformed launch envelope");
+  return { context, nonce: envelope.nonce, readinessPath: envelope.readinessPath };
 }
 
-/** Reads the latest child-owned custom entry; parent-copied entries are not trusted. */
-export function restoreForkContext(entries: readonly unknown[]): ForkContext | undefined {
+/** Reads only data persisted by this child session; inherited parent entries are not trusted. */
+export function restoreForkContext(entries: readonly unknown[], ownSessionId: string | undefined): ForkContext | undefined {
+  if (!ownSessionId) return undefined;
   for (const entry of [...entries].reverse()) {
-    const e = entry as { type?: unknown; customType?: unknown; data?: unknown } | null;
-    if (e?.type !== "custom" || e.customType !== FORK_CONTEXT_ENTRY) continue;
-    return parseForkContext(e.data);
+    const e = entry as { type?: unknown; customType?: unknown; data?: { sessionId?: unknown; context?: unknown } } | null;
+    if (e?.type !== "custom" || e.customType !== FORK_CONTEXT_ENTRY || e.data?.sessionId !== ownSessionId) continue;
+    return parseForkContext(e.data.context);
   }
   return undefined;
 }

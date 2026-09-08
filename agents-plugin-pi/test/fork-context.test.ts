@@ -1,6 +1,9 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { applyForkAffinity, captureForkContext, captureRegisteredTools, compareForkRegistrations, parseForkContext } from "../src/fork-context.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { applyForkAffinity, captureForkContext, captureRegisteredTools, compareForkRegistrations, parseForkContext, readForkLaunchContext, restoreForkContext, writePrivateJson } from "../src/fork-context.ts";
 
 describe("ForkContext", () => {
   const context = captureForkContext({
@@ -29,6 +32,23 @@ describe("ForkContext", () => {
     assert.equal(compareForkRegistrations(context.registeredTools, actual), undefined);
     assert.match(compareForkRegistrations(context.registeredTools, [...actual].reverse()) ?? "", /index 0/);
     assert.match(compareForkRegistrations(context.registeredTools, [{ ...actual[0], description: "changed" }, actual[1]]) ?? "", /index 0/);
+  });
+
+  test("rejects an envelope that omits present context rather than taking the legacy path", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ws-pi-fork-context-"));
+    try {
+      const path = join(directory, "launch.json");
+      writePrivateJson(path, { nonce: "nonce", readinessPath: join(directory, "ready.json") });
+      assert.throws(() => readForkLaunchContext({ WS_PI_FORK_CONTEXT: path }), /malformed launch envelope/);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("does not trust a parent-copied durable entry", () => {
+    const entry = { type: "custom", customType: "ws-pi-fork-context", data: { sessionId: "parent", context } };
+    assert.equal(restoreForkContext([entry], "child"), undefined);
+    assert.deepEqual(restoreForkContext([entry], "parent"), context);
   });
 
   test("rewrites only compatible Codex body affinity", () => {

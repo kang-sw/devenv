@@ -248,7 +248,9 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   const deliveredFork = readForkLaunchContext(process.env);
   const durableForkContextRef: { current: ForkContext | undefined } = { current: deliveredFork?.context };
   const inheritedForkPromptRef: { current: string | undefined } = { current: deliveredFork?.context.effectiveSystemPrompt };
-  let forkReady = readSpawnRole(process.env) !== "fork";
+  // Legacy forks deliberately keep their approved local-bootstrap fallback;
+  // only a metadata-bearing fork waits for its explicit readiness publication.
+  let forkReady = readSpawnRole(process.env) !== "fork" || !deliveredFork;
   // 260905 (push model): the shared RPC registry, published as a mutable ref
   // so `createApprovalRelay` — which must be constructed BEFORE
   // `registerAgentTools` creates that registry — can still read it at push
@@ -337,7 +339,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     if (readSpawnRole(process.env) === "fork" && !durableForkContextRef.current) {
-      durableForkContextRef.current = restoreForkContext(ctx.sessionManager.getEntries());
+      durableForkContextRef.current = restoreForkContext(ctx.sessionManager.getEntries(), ctx.sessionManager.getSessionId());
       inheritedForkPromptRef.current = durableForkContextRef.current?.effectiveSystemPrompt;
     }
     // 260905 Edition: hand the spawner this session's idleness accessor (the
@@ -546,7 +548,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
         ...(registrationError ? { error: registrationError } : {}),
       };
       // Child entries, rather than parent transcript copies or launch files, own restart lifetime.
-      pi.appendEntry("ws-pi-fork-context", deliveredFork.context);
+      pi.appendEntry("ws-pi-fork-context", { sessionId: ctx.sessionManager.getSessionId(), context: deliveredFork.context });
       pi.appendEntry("ws-pi-fork-keys", { current: handle.defaultSessionKeyRef.current, previous: [] });
       writePrivateJson(deliveredFork.readinessPath, readiness);
       removeForkTransport(process.env.WS_PI_FORK_CONTEXT);
