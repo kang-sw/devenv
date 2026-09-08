@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: db933d4c79ded81c
 sage-review-completeness-reviewed: db933d4c79ded81c
+completed: 2026-09-08
 ---
 
 # goal-compact-and-continue re-injects the goal reminder before compaction finishes, and the late compaction overwrites the turn it raced
@@ -358,3 +359,8 @@ explicitly require these live checks, and neither has recorded completion:
 The owner must provide the live observations before this block can be cleared
 and closure reassessed. These checks have not been performed or waived; keep
 this ticket open and skip it in the automated ready-queue drain meanwhile.
+
+
+## Resolution (2026-09-08)
+
+Owner-directed inventory consolidation (2026-09-08): close this implemented slice and transfer the still-unverified live checks to 260908-research-ws-pi-lifecycle-race-monitoring in todo. This explicitly supersedes the historical Blocked section's closure prohibition; it is an owner-accepted monitoring handoff, not a claim that either live phase gate passed. Original Results, accepted manual-/compact window, and automated evidence are preserved. No runtime changes or fresh verification were performed during closure.

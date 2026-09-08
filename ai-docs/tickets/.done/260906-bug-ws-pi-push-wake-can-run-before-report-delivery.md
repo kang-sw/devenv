@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: d4c80bb87ff94838
 sage-review-completeness-reviewed: d4c80bb87ff94838
+completed: 2026-09-08
 ---
 
 # Pi Push Wake Runs a Blind Model Response Before the Held Reports Are Delivered
@@ -175,3 +176,8 @@ Owner-live provider request/response-count checks and the shared predecessor
 provider-context/settle gates remain pending. Offline tests do not establish
 live acceptance or measured token savings. Keep this ticket in `ready/`
 until those checks are completed; no merge or closure is implied.
+
+
+## Resolution (2026-09-08)
+
+Owner-directed inventory consolidation (2026-09-08): close this implemented slice and transfer provider request/response-count monitoring and shared predecessor live gates to 260908-research-ws-pi-lifecycle-race-monitoring in todo. This supersedes the historical instruction to remain in ready. Live counts, provider-context continuity, and measured token savings are not established by this closure; the owner accepted archival with those checks still unverified. Original Results and the one-at-a-time steering contract remain unchanged. No runtime changes or fresh verification were performed during closure.

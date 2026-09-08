@@ -13,6 +13,7 @@ sage-review-design: completed
 sage-review-design-reviewed: 0419eaf97cb3d6e3
 sage-review-completeness: completed
 sage-review-completeness-reviewed: b65918c686bc149b
+completed: 2026-09-08
 ---
 
 # Add `pi` as a first-class harness bucket in ws-mcp and unify the Pi adapter's model table on ws config (config.tune, model aliases, rsrc harness variants)
@@ -596,3 +597,8 @@ issues autonomous. The table is the original round-1 record.
 | 5 | golden-rule justification answers a different question (branch ordering, not exception grant); no `## Spec Impact` section / `spec:` frontmatter | important | missing |
 | 6 | effort vocabulary mismatch (ws none|low|medium|high|xhigh vs Pi off|minimal|…|max) and precedence against the surviving `model_effort` spawn parameter | minor | autonomous |
 | 7 | frontmatter `related:` entry for 260903 contradicts the body on the catalog's fate | minor | autonomous |
+
+
+## Resolution (2026-09-08)
+
+The owner confirmed that the config layer works in live Pi use and authorized closure during the 2026-09-08 ticket inventory review. This supersedes the historical owner-sign-off block above. The four implementation Results and their automated evidence remain unchanged; no new test run or per-spawn trace is claimed by this closure.

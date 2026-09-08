@@ -101,7 +101,7 @@ Verification: `diff -rq` between the two `rsrc/` trees is empty after the
 copy; `npm test` in `agents-plugin-pi/` passes. Live check (owner-run): a
 new Pi session's `lead-review` playbook shows the range scenario.
 
-### Result
+### Result (88e193fe) - 2026-09-07
 
 Landed on `track/pi-agent` (2026-09-07). Resynced `agents-plugin-pi/rsrc/`
 verbatim from `agents-plugin/rsrc/`. Because this ran right after the
@@ -127,3 +127,13 @@ Verification done: `diff -rq agents-plugin/rsrc agents-plugin-pi/rsrc` empty;
 still outstanding: a new Pi session's `lead-review` playbook shows the range
 scenario. The residual-exposure note holds — the guard fires on suite runs,
 not on the upstream edit, so it is run when syncing from `develop`.
+
+## Owner dogfood follow-up - 2026-09-08
+
+The owner reports that the issue is not resolved and error messages still
+appear. Keep this ticket open in ready; do not treat the historical resync and
+951-test pass as successful live acceptance. The exact current error text,
+loaded package/runtime identity, and reproduction context have not yet been
+provided, so this report does not establish that stale mirrored files are the
+current root cause. Diagnosis and live acceptance remain outstanding; this
+inventory update makes no source changes and claims no new verification.

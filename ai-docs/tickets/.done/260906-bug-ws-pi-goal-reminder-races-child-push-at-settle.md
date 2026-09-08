@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: d5132429581a8bf9
 sage-review-completeness-reviewed: d5132429581a8bf9
+completed: 2026-09-08
 ---
 
 # Pi goal-loop reminder races a child push at agent_settled and spins the runaway backstop
@@ -376,3 +377,8 @@ live acceptance results from a fresh Pi session:
 No owner evidence for either gate has been supplied. Unit tests and clean
 reviews do not discharge these gates; record the owner's observed outcomes
 before reassessing closure. No upstream Pi patch or UX work is included here.
+
+
+## Resolution (2026-09-08)
+
+Owner-directed inventory consolidation (2026-09-08): close this implemented slice and transfer simultaneous-settle and provider-context live acceptance to 260908-research-ws-pi-lifecycle-race-monitoring in todo. These observations remain unverified. This explicitly supersedes the historical Blocked section's requirement to remain in ready; it does not turn offline tests into live acceptance. Original implementation Results and limitations remain unchanged. No runtime changes or fresh verification were performed during closure.

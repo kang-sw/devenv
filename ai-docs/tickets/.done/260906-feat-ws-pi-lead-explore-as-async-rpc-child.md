@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: ba2a307381422fcf
 sage-review-completeness-reviewed: ba2a307381422fcf
+completed: 2026-09-08
 ---
 
 # Lead-side explore becomes an async RPC child; the blocking leaf stays worker-only
@@ -237,3 +238,8 @@ under `node --test` would re-exec the test file as the Pi child); new
 
 Owner-run live check still pending: lead calls `explore`, sees the id at
 once, and receives the answer on the settle push while free to act.
+
+
+## Resolution (2026-09-08)
+
+The owner confirmed that lead-side async explore is resolved in live use during the 2026-09-08 inventory review. The outstanding owner acceptance gate is discharged on that confirmation. This closes the original async-dispatch slice, not the separate persistent/deep-research follow-up or its remaining gates. Historical one-shot behavior in the Result is preserved as implementation history.
