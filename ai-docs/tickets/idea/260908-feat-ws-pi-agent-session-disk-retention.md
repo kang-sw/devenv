@@ -61,8 +61,37 @@ keeps everything).
 
 ## Direction
 
-Three independent pieces, smallest first:
+Owner question (2026-09-08, on reading the numbers above): is `tmpdir()`
+a sensible home for these files at all? Assessment: no. The sidecar
+revival and dormant auto-resume both relaunch from `record.sessionPath`,
+so the adapter treats these files as durable, while `tmpdir()` is the one
+place the OS is entitled to delete under it; a revived orphan whose file
+was reaped fails for a reason the lead cannot see. It also splits one
+concept across two locations (workers in `/tmp`, forks in Pi's own session
+directory), and it was chosen only because `mkdtempSync` was the cheapest
+way to get a private directory in the first spawner commit (`13b4e67f`),
+not on any retention reasoning.
 
+Pi already provides what a proper home needs: the lead-side
+`ctx.sessionManager.getSessionDir()` (the `~/.pi/agent/sessions/<cwd>/`
+directory) and the child-side `--session-dir <dir>` CLI flag, which
+`SessionManager.create`/`open` honor for `--session` and `--fork` alike.
+
+Four pieces, relocation first because it makes the retention pieces
+almost trivial:
+
+0. **Relocate to a ws-owned, lead-keyed tree.** Put every child under
+   `<lead session dir>/ws-agents/<lead session id>/<agent id>/` (worker
+   `session.jsonl`, approvals, and, via `--session-dir`, the fork copy),
+   so one lead session owns one subtree. Retention then reads as "the
+   lead session file is gone, or its subtree is older than the TTL, so
+   the subtree goes"; no per-file bookkeeping and no index for forks.
+   Sidecar-revival and dormant-resume paths keep reading
+   `record.sessionPath` unchanged. Decide whether the lead-session-keyed
+   layout should live beside the lead file (`getSessionDir()`) or under a
+   sibling root such as `~/.pi/agent/ws-agents/`; the former keeps Pi's
+   `/tmp`-free invariant and makes `rm` of a lead session's material
+   obvious, the latter keeps Pi's own directory listing clean.
 1. **Drop the spawn directory when it is not the session home.** When a
    spawn ends up `--no-session` or `--fork`, remove the mkdtemp directory
    at the point the record stops needing it as approval dir (explore
@@ -86,7 +115,8 @@ Three independent pieces, smallest first:
    in Pi's directory cannot be swept safely without an index; either keep
    an append-only ws-owned index of fork session paths
    (`~/.pi/agent/ws-agents-index.jsonl` or similar) or leave forks to piece
-   2 only and say so.
+   2 only and say so. With piece 0 landed, fork copies live in the same
+   subtree and this special case disappears.
 
 Out of scope here but worth a sibling hygiene ticket: the test suite's
 `/tmp/ws-pi-ask-test-*` leak (1224 directories), which is a test-fixture
@@ -107,16 +137,25 @@ cleanup problem, not a runtime one.
 
 ## Phases
 
-### Phase 1: Drop empty spawn directories and delete on cap eviction
+### Phase 1: Relocate child sessions under the lead session
+
+Piece 0. Record the chosen root here. Tests: worker, fork, and explore
+spawns all resolve under the lead-keyed subtree; `--session-dir` is passed
+for fork launches and the recorded `sessionPath` is inside the subtree;
+sidecar revival relaunches from the new location. Live check (owner-run):
+`/tmp` gains no `ws-pi-agent-*` directory across a worker, a fork, and an
+explore.
+
+### Phase 2: Drop empty spawn directories and delete on cap eviction
 
 Pieces 1 and 2 above. Tests: explore self-reap and fork readiness leave no
 `ws-pi-agent-*` directory behind; an evicted worker's directory is gone and
 an evicted fork's `sessionPath` file is gone while the lead session file
 is untouched; a delete failure is swallowed and the spawn still succeeds.
 
-### Phase 2: Age-based prune on session start
+### Phase 3: Age-based prune on session start
 
-Piece 3, with the knob, the conservative default, and a decision recorded
-here on whether fork copies get an index or stay eviction-only. Live check
-(owner-run): after a `session_start` with the knob set low, only stale
-`ws-pi-agent-*` directories are gone.
+Piece 3 over the lead-keyed subtree: a subtree whose lead session file no
+longer exists, or whose newest child activity is older than the TTL, is
+removed. Live check (owner-run): after a `session_start` with the knob set
+low, only stale subtrees are gone and the current lead's subtree is intact.
