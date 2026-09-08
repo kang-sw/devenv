@@ -54,7 +54,7 @@ async function loadRenderedAppend(root: string, append: string): Promise<{ syste
   return { systemPrompt: loader.getSystemPrompt(), append: loader.getAppendSystemPrompt() };
 }
 
-async function capturePayload(root: string, provider: ProviderCase, context: unknown, sessionId: string): Promise<unknown> {
+async function capturePayload(root: string, provider: ProviderCase, context: unknown, sessionId: string, matrix?: { oauth: boolean; retention: string; midEffort: boolean }): Promise<unknown> {
   const mod = await import(serializerPath(root, provider.chunk));
   const stream = mod.stream as (model: unknown, context: unknown, options: unknown) => AsyncIterable<unknown>;
   let payload: unknown;
@@ -63,15 +63,17 @@ async function capturePayload(root: string, provider: ProviderCase, context: unk
     provider: provider.provider,
     api: provider.api,
     id: provider.name === "anthropic" ? "claude-prefix-test" : "prefix-test",
-    baseUrl: "https://pi-prefix-test.invalid/v1",
+    baseUrl: matrix ? "https://api.anthropic.com" : "https://pi-prefix-test.invalid/v1",
+    ...(matrix ? { reasoning: true, compat: { forceAdaptiveThinking: true, supportsMidConvoEffort: matrix.midEffort } } : {}),
     input: ["text", "image"],
     maxTokens: 8192,
     contextWindow: 128000,
   };
   const result = stream(model, context, {
-    apiKey: provider.name === "codex" ? codexTestToken() : "offline-prefix-test",
+    apiKey: provider.name === "codex" ? codexTestToken() : matrix?.oauth ? "sk-ant-oat-offline" : "offline-prefix-test",
     sessionId,
-    cacheRetention: "short",
+    cacheRetention: matrix?.retention ?? "short",
+    ...(matrix ? { thinkingEnabled: true, effort: "medium" } : {}),
     fetch: async () => {
       fetchCalls += 1;
       throw new Error("network transport must not run in fork-prefix integration coverage");
@@ -104,14 +106,14 @@ function actualForkRegistrations(): RegisteredTool[] {
 }
 
 function continuationHistories(): Array<[string, unknown[]]> {
-  const toolCall = { role: "assistant", content: [{ type: "toolCall", id: "call_1", name: "ws-fork", arguments: { prompt: "inspect" } }] };
+  const toolCall = { role: "assistant", api: "anthropic-messages", provider: "anthropic", model: "claude-prefix-test", providerThinkingLevel: "low", stopReason: "toolUse", content: [{ type: "toolCall", id: "call_1", name: "ws-fork", arguments: { prompt: "inspect" } }, { type: "toolCall", id: "call_2", name: "ws-fork", arguments: { prompt: "inspect again" } }] };
   return [
     ["string-user", [{ role: "user", content: "Lead context with CRLF\r\nand trailing space " }]],
     ["block-user", [{ role: "user", content: [{ type: "text", text: "Lead context with CRLF\r\nand trailing space " }] }]],
     ["consecutive-users", [{ role: "user", content: "First context." }, { role: "user", content: "Second context." }]],
-    ["grouped-tool-results", [toolCall, { role: "toolResult", toolCallId: "call_1", toolName: "ws-fork", content: [{ type: "text", text: "tool result" }] }]],
+    ["grouped-tool-results", [toolCall, { role: "toolResult", toolCallId: "call_1", toolName: "ws-fork", content: [{ type: "text", text: "tool result" }] }, { role: "toolResult", toolCallId: "call_2", toolName: "ws-fork", content: [{ type: "text", text: "second result" }] }]],
     ["image-user", [{ role: "user", content: [{ type: "image", mimeType: "image/png", data: "AQ==" }] }]],
-    ["empty-text-and-thinking", [{ role: "user", content: [{ type: "text", text: "" }] }, { role: "assistant", content: [{ type: "thinking", thinking: "private reasoning", thinkingSignature: "signature" }] }]],
+    ["empty-text-and-thinking", [{ role: "user", content: [{ type: "text", text: "" }] }, { role: "assistant", api: "anthropic-messages", provider: "anthropic", model: "claude-prefix-test", providerThinkingLevel: "low", stopReason: "stop", content: [{ type: "thinking", thinking: "private reasoning", thinkingSignature: "signature" }] }]],
     ["empty-tool-result", [toolCall, { role: "toolResult", toolCallId: "call_1", toolName: "ws-fork", content: [] }]],
   ];
 }
@@ -179,6 +181,23 @@ describe("fork prefix actual SDK serializers (offline)", () => {
   });
 
   for (const [sdkName, root] of [["local-0.84.4", LOCAL_SDK], ["global-0.85.1", GLOBAL_SDK]] as const) {
+    for (const oauth of [false, true]) for (const retention of ["none", "short", "long"]) for (const midEffort of [false, true]) for (const [shape, history] of continuationHistories()) {
+      test(`${sdkName}/Anthropic matrix/${oauth ? "OAuth" : "API-key"}/${retention}/${midEffort}/${shape}: three exact recovery generations`, async () => {
+        const referenceHistory = structuredClone(history);
+        let recoveredHistory = JSON.parse(JSON.stringify(history));
+        const configuration = { oauth, retention, midEffort };
+        for (let generation = 0; generation < 3; generation++) {
+          const fixture = { role: "user", content: `Independent suffix ${generation} Ω\r\n  ` };
+          referenceHistory.push(structuredClone(fixture));
+          recoveredHistory = JSON.parse(JSON.stringify([...recoveredHistory, fixture]));
+          const expected = await capturePayload(root, PROVIDERS[0], context(exactPrompt, referenceHistory, providerTools(registrations)), "lead-reference", configuration);
+          const actual = await capturePayload(root, PROVIDERS[0], context(exactPrompt, recoveredHistory, providerTools(registrations)), "fork-child", configuration);
+          assert.deepEqual(actual, expected);
+          assert.deepEqual(recoveredHistory, referenceHistory);
+          assert.deepEqual((actual as { output_config: unknown }).output_config, { effort: midEffort && sdkName === "global-0.85.1" ? "high" : "medium" });
+        }
+      });
+    }
     for (const provider of PROVIDERS) {
       for (const kind of ["task", "discussion"] as const) {
         for (const [shape, originalHistory] of continuationHistories()) {
