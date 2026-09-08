@@ -89,6 +89,17 @@ export interface SkillsBlockCache {
   block: string;
 }
 
+/** Latest post-handler prompt capture; used as the exact fork source, never reconstructed. */
+export interface LeadPromptCapture {
+  effectiveSystemPrompt: string;
+  basePromptOptions?: unknown;
+  wsBlock?: string;
+}
+
+export function captureEffectivePrompt(ctx: { getSystemPrompt(): string }, basePromptOptions: unknown, wsBlock: string | undefined): LeadPromptCapture {
+  return { effectiveSystemPrompt: ctx.getSystemPrompt(), basePromptOptions, wsBlock };
+}
+
 /**
  * Resolves the `<available_skills>` block against Pi's CURRENT
  * `pi.getCommands()` list, called fresh on every `before_agent_start`
@@ -216,6 +227,8 @@ export function computeSessionBootstrap(inputs: SessionBootstrapInputs): Session
   }
 
   const wsBlockBase: WsBlockBase | undefined = manualSnapshot ? { manualSnapshot, guideText } : undefined;
+  // The spawn provided this ordered list. Do not re-profile, add, remove, or dedupe it.
+  if (role === "fork") return { wsBlockBase, activeTools: [...currentActiveTools] };
 
   let activeTools = computeLeadActiveTools(currentActiveTools);
   activeTools = addForkToolIfLead(activeTools, role);
@@ -256,9 +269,14 @@ export function registerLeadBootstrap(
   pi: ExtensionAPI,
   wsBlockBaseRef: { current: WsBlockBase | undefined },
   skillsBlockCacheRef: { current: SkillsBlockCache | undefined },
+  effectivePromptRef?: { current: LeadPromptCapture | undefined },
+  inheritedForkPrompt?: { current: string | undefined },
 ): void {
   pi.on("before_agent_start", (event) => {
     const role = readSpawnRole(process.env);
+    if (role === "fork" && inheritedForkPrompt?.current !== undefined) {
+      return { systemPrompt: inheritedForkPrompt.current };
+    }
     const base = wsBlockBaseRef.current;
     if (!isLeadOrFork(role) || !base) {
       return computeBeforeAgentStartResult(event.systemPrompt, undefined, role);
@@ -266,5 +284,17 @@ export function registerLeadBootstrap(
     const skillsBlock = computeSkillsBlockCached(pi.getCommands(), (path) => loadSkillFile(path), skillsBlockCacheRef);
     const wsBlock = buildWsBlock(base.manualSnapshot, base.guideText, skillsBlock);
     return computeBeforeAgentStartResult(event.systemPrompt, wsBlock, role);
+  });
+  pi.on("context", (event, ctx) => {
+    if (readSpawnRole(process.env) === "fork") return undefined;
+    // context runs after the before-agent chain, so this is the final Pi string.
+    if (effectivePromptRef) {
+      const captured = captureEffectivePrompt(ctx, (event as { systemPromptOptions?: unknown }).systemPromptOptions, wsBlockBaseRef.current ? buildWsBlock(wsBlockBaseRef.current.manualSnapshot, wsBlockBaseRef.current.guideText, computeSkillsBlockCached(pi.getCommands(), (path) => loadSkillFile(path), skillsBlockCacheRef)) : undefined);
+      if (effectivePromptRef.current?.effectiveSystemPrompt !== captured.effectiveSystemPrompt) {
+        effectivePromptRef.current = captured;
+        pi.appendEntry("ws-pi-lead-prompt", captured);
+      }
+    }
+    return undefined;
   });
 }

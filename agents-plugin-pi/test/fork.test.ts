@@ -83,40 +83,21 @@ describe("FORK_TOOL_NAME / FORK_EXCLUDED_TOOL_NAMES", () => {
     assert.equal(FORK_TOOL_NAME, "ws-fork");
   });
 
-  test("excludes ws-fork itself plus Phase 2's ws-ask/ws-resolve (a fork's only question path is ws-report-to-lead)", () => {
-    assert.deepEqual([...FORK_EXCLUDED_TOOL_NAMES].sort(), [FORK_TOOL_NAME, "ws-ask", "ws-resolve"].sort());
+  test("has no schema exclusions: role handlers refuse side-thread operations", () => {
+    assert.deepEqual([...FORK_EXCLUDED_TOOL_NAMES], []);
   });
 });
 
 describe("computeForkToolSurface", () => {
-  test("removes ws-fork from the lead's active tools and adds ws-report-to-lead", () => {
-    const result = computeForkToolSurface(["bash", "edit", FORK_TOOL_NAME, "ws-agent-spawn"]);
-    assert.ok(!result.includes(FORK_TOOL_NAME), "a fork's own surface must never include ws-fork (no recursive forking)");
-    assert.ok(result.includes(REPORT_TO_LEAD_TOOL_NAME));
-    assert.ok(result.includes("bash"));
-    assert.ok(result.includes("edit"));
-    assert.ok(result.includes("ws-agent-spawn"));
+  test("returns an ordered copy unchanged, including duplicate and role-restricted registrations", () => {
+    const source = ["bash", "ws-ask", FORK_TOOL_NAME, "ws-ask"];
+    const result = computeForkToolSurface(source);
+    assert.deepEqual(result, source);
+    assert.notEqual(result, source);
   });
 
-  test("never duplicates ws-report-to-lead if the lead's active tools already carry it", () => {
-    const result = computeForkToolSurface(["bash", REPORT_TO_LEAD_TOOL_NAME]);
-    assert.equal(result.filter((name) => name === REPORT_TO_LEAD_TOOL_NAME).length, 1);
-  });
-
-  test("an empty lead tool list still ends up with exactly ws-report-to-lead", () => {
-    assert.deepEqual(computeForkToolSurface([]), [REPORT_TO_LEAD_TOOL_NAME]);
-  });
-
-  test("also removes the Phase 2 owner-question primitives ws-ask/ws-resolve", () => {
-    const result = computeForkToolSurface(["bash", "ws-ask", "ws-resolve", FORK_TOOL_NAME]);
-    assert.ok(!result.includes("ws-ask"), 'a fork\'s only question path is ws-report-to-lead(kind:"question")');
-    assert.ok(!result.includes("ws-resolve"));
-    assert.deepEqual([...result].sort(), ["bash", REPORT_TO_LEAD_TOOL_NAME].sort());
-  });
-
-  test("a lead surface with no ws-fork present is unaffected besides the ws-report-to-lead addition", () => {
-    const result = computeForkToolSurface(["bash", "edit", "write"]);
-    assert.deepEqual([...result].sort(), ["bash", "edit", REPORT_TO_LEAD_TOOL_NAME, "write"].sort());
+  test("empty input remains empty", () => {
+    assert.deepEqual(computeForkToolSurface([]), []);
   });
 });
 

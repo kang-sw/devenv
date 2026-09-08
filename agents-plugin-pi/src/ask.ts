@@ -59,9 +59,7 @@
  * attach) is left to the plan's tmux/owner-runbook gates.
  */
 
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
@@ -78,8 +76,9 @@ import {
   type ToolGroup,
 } from "./spawner.ts";
 import { computeForkToolSurface, getForkSourceSessionFile } from "./fork.ts";
-import type { SpawnRole } from "./process-role.ts";
+import { readSpawnRole, type SpawnRole } from "./process-role.ts";
 import { openOverlayChat, type ForkChannel, type OverlayHandle, type TranscriptEntry } from "./overlay-chat.ts";
+import { parseForkContext, type ForkContext } from "./fork-context.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers. Unit-tested directly (test/ask.test.ts) with no
@@ -244,7 +243,8 @@ export function normalizeTranscript(value: unknown): TranscriptEntry[] | undefin
  */
 export interface PersistedForkResume {
   sessionPath: string;
-  systemPromptPath: string;
+  systemPromptPath?: string;
+  forkContext?: ForkContext;
   explicitTools?: string;
   wsToolNames: string[];
   toolGroup: ToolGroup;
@@ -488,7 +488,7 @@ export function buildDiscussionForkDirectiveText(): string {
  * entry has fallen out of live context; it is omitted entirely otherwise.
  */
 export function buildDiscussionForkInitialMessage(context: string | undefined, question: string, excerpt?: string): string {
-  const lines: string[] = ["The owner opened a side discussion about this question."];
+  const lines: string[] = [buildDiscussionForkDirectiveText(), "", "The owner opened a side discussion about this question."];
   if (context && context.trim().length > 0) {
     lines.push("", `Context: ${context.trim()}`);
   }
@@ -533,6 +533,7 @@ export function captureForkResume(record: RpcAgentRecord): PersistedForkResume {
   return {
     sessionPath: record.sessionPath,
     systemPromptPath: record.systemPromptPath,
+    ...(record.forkContext ? { forkContext: record.forkContext } : {}),
     explicitTools: record.explicitTools,
     wsToolNames: [...record.wsToolNames],
     toolGroup: record.toolGroup,
@@ -555,6 +556,7 @@ export function rehydrateForkRecord(agentId: string, resume: PersistedForkResume
     client: undefined,
     sessionPath: resume.sessionPath,
     systemPromptPath: resume.systemPromptPath,
+    ...(resume.forkContext ? { forkContext: resume.forkContext } : {}),
     modelBase: resume.modelBase,
     modelEffort: resume.modelEffort,
     wsToolNames: [...resume.wsToolNames],
@@ -782,6 +784,9 @@ export function registerAsk(
       required: ["title", "question"],
     } as never,
     async execute(_toolCallId, params, _signal, _onUpdate, toolCtx) {
+      if (readSpawnRole(process.env) === "fork") {
+        throw new Error(`ws-pi-agent: ${ASK_TOOL_NAME} is unavailable in a fork; report to the lead instead.`);
+      }
       const p = params as { title: string; question: string; context?: string };
       const now = nowIso();
       const record: ThreadRecord = {
@@ -832,6 +837,9 @@ export function registerAsk(
       required: ["question_id"],
     } as never,
     async execute(_toolCallId, params, _signal, _onUpdate, _toolCtx) {
+      if (readSpawnRole(process.env) === "fork") {
+        throw new Error(`ws-pi-agent: ${RESOLVE_TOOL_NAME} is unavailable in a fork; report to the lead instead.`);
+      }
       const p = params as { question_id: string };
       const record = handle.threads.get(p.question_id);
       if (!record) {
@@ -1158,10 +1166,6 @@ export async function ensureRespondent(
     }
   }
 
-  const directiveDir = mkdtempSync(join(tmpdir(), "ws-pi-discuss-"));
-  const directivePath = join(directiveDir, "discussion-directive.md");
-  writeFileSync(directivePath, buildDiscussionForkDirectiveText());
-
   const result = await spawnAgent(
     rpcRegistry,
     {
@@ -1180,9 +1184,7 @@ export async function ensureRespondent(
       spawnRole: "fork",
     },
     {
-      systemPromptPath: directivePath,
-      // Entry B: plain text, no structural frame, and no wireAntiBleedLoop
-      // call afterwards — see this file's header.
+      // Entry B remains a conversational message; task-only completion fields stay absent.
       prompt: buildDiscussionForkInitialMessage(thread.context, thread.question ?? thread.title, excerpt),
     },
   );

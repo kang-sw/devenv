@@ -439,6 +439,17 @@ export interface NormalizeSessionKeyOptions {
   sentinel: string;
   /** The env-delivered parent lead key (fork-only, `WS_PI_PARENT_SESSION_KEY`), when set. */
   parentLeadKey?: string;
+  /** Earlier child-owned keys, never inferred from transcript text. */
+  previousOwnKeys?: readonly string[];
+}
+
+/** Forks never forward parent/stale keys; the caller turns this into a Pi tool error. */
+export function forkSessionKeyRefusal(provided: unknown, opts: NormalizeSessionKeyOptions): string | undefined {
+  if (readSpawnRole(process.env) !== "fork" || typeof provided !== "string") return undefined;
+  const current = opts.ownKey ? ` Use current fork key "${opts.ownKey}".` : " Fork bootstrap is not ready yet.";
+  if (opts.parentLeadKey && provided === opts.parentLeadKey) return `ws-pi-agent: fork refuses its parent session key.${current}`;
+  if (opts.previousOwnKeys?.includes(provided) && provided !== opts.ownKey) return `ws-pi-agent: fork refuses its stale prior session key.${current}`;
+  return undefined;
 }
 
 /**
@@ -580,7 +591,14 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
           // fill-or-forward: it rewrites the two ticket-mandated sentinel/
           // parent-key explicit cases to the bridge's own key, then
           // resolveSessionKey handles the (separate) omitted-key fill.
-          const normalized = normalizeSessionKey(params as Record<string, unknown> | undefined, {
+          const rawParams = params as Record<string, unknown> | undefined;
+          const refusal = forkSessionKeyRefusal(rawParams?.session_key, {
+            ownKey: defaultKeyRef.current,
+            sentinel: FRESH_BOOTSTRAP_SENTINEL,
+            parentLeadKey: process.env[WS_PI_PARENT_SESSION_KEY_ENV],
+          });
+          if (refusal) throw new Error(refusal);
+          const normalized = normalizeSessionKey(rawParams, {
             ownKey: defaultKeyRef.current,
             sentinel: FRESH_BOOTSTRAP_SENTINEL,
             // WS_PI_PARENT_SESSION_KEY_ENV is unset until a future
@@ -675,30 +693,23 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     // static-body snapshot, or vice versa) — the ws system-prompt block and
     // the workflow_manual mapping degrade together, not independently.
     if (defaultKeyRef.current && isLeadOrFork(readSpawnRole(process.env))) {
-      try {
-        const manualResult = await client.callTool("workflow_manual", { session_key: defaultKeyRef.current });
-        const staticBodyResult = await client.callTool("playbook.read", {
-          name: "lead-workflow-manual",
-          session_key: defaultKeyRef.current,
-        });
-        const manualText = !manualResult.isError ? firstText(manualResult) : undefined;
-        const staticBodyText = !staticBodyResult.isError ? firstText(staticBodyResult) : undefined;
-        if (manualText && staticBodyText) {
-          manualSnapshotRef.current = manualText;
-          staticBodySnapshotRef.current = staticBodyText;
-        } else {
-          notify(
-            opts.ui,
-            "ws-pi-bridge: session-start manual/static-body snapshot fetch returned no text — ws system-prompt block and workflow_manual mapping disabled for this session",
-            "warning",
-          );
+      // A delivered fork prompt is immutable and must not be replaced by a child mapping fetch.
+      const inheritedPrompt = readSpawnRole(process.env) === "fork" && Boolean(process.env.WS_PI_FORK_CONTEXT);
+      if (!inheritedPrompt) {
+        try {
+          const manualResult = await client.callTool("workflow_manual", { session_key: defaultKeyRef.current });
+          const manualText = !manualResult.isError ? firstText(manualResult) : undefined;
+          if (manualText) manualSnapshotRef.current = manualText;
+        } catch (err) {
+          notify(opts.ui, `ws-pi-bridge: session-start manual snapshot fetch threw: ${(err as Error).message}`, "warning");
         }
+      }
+      try {
+        const staticBodyResult = await client.callTool("playbook.read", { name: "lead-workflow-manual", session_key: defaultKeyRef.current });
+        const staticBodyText = !staticBodyResult.isError ? firstText(staticBodyResult) : undefined;
+        if (staticBodyText) staticBodySnapshotRef.current = staticBodyText;
       } catch (err) {
-        notify(
-          opts.ui,
-          `ws-pi-bridge: session-start manual/static-body snapshot fetch threw: ${(err as Error).message} — ws system-prompt block and workflow_manual mapping disabled for this session`,
-          "warning",
-        );
+        notify(opts.ui, `ws-pi-bridge: session-start static-body fetch threw: ${(err as Error).message}`, "warning");
       }
     }
 

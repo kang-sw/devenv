@@ -144,16 +144,10 @@ describe("computeSessionBootstrap", () => {
     }
   });
 
-  test("fork role: produces a ws block base and ws-skill, but never ws-fork/ws-ask/ws-resolve", () => {
+  test("fork role: preserves its explicit ordered surface unchanged", () => {
     const result = run("fork");
     assert.notEqual(result.wsBlockBase, undefined);
-    assert.ok(!result.activeTools.includes("bash"));
-    assert.ok(!result.activeTools.includes("read"));
-    assert.ok(result.activeTools.includes(WS_SKILL_TOOL_NAME), "ws-skill must be present for a fork");
-    assert.ok(result.activeTools.includes(EXECUTE_TOOL_NAME), "the shared lead/fork added-set must still apply to a fork");
-    for (const name of [FORK_TOOL_NAME, ASK_TOOL_NAME, RESOLVE_TOOL_NAME]) {
-      assert.ok(!result.activeTools.includes(name), `${name} must never be present on a fork's own surface`);
-    }
+    assert.deepEqual(result.activeTools, RAW_LEAD_TOOLS);
   });
 
   test("worker role: no ws block base, tool surface passed through unchanged", () => {

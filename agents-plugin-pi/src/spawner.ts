@@ -80,7 +80,7 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -91,7 +91,8 @@ import type { McpStdioClient, McpToolCallResult } from "./mcp-stdio-client.ts";
 import type { BridgeHandle } from "./bridge.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 import { suggestModels, formatExploreTierRefusal, formatTierWarning, modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx, type ModelCatalogEntry, type TierFailure, type TierRejection } from "./model-catalog.ts";
-import { WS_PI_EXPLORE_MODE_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readExploreMode, readSpawnRole, type ExploreMode, type SpawnRole } from "./process-role.ts";
+import { WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readExploreMode, readSpawnRole, type ExploreMode, type SpawnRole } from "./process-role.ts";
+import { captureForkContext, writePrivateJson, type ForkContext } from "./fork-context.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers: tool-group resolution, terminal-stopReason classification,
@@ -782,7 +783,7 @@ export interface RpcAgentRecord {
   /** Absolute path to the ws-owned `--session` file, reused unchanged across every (re)start. */
   sessionPath: string;
   /** Lead-rendered playbook prompt path, passed via `--append-system-prompt`; reused unchanged across resumes (no re-render). */
-  systemPromptPath: string;
+  systemPromptPath?: string;
   /** Resolved `provider/id`, or undefined to inherit pi's own default resolution. Cached so a dormant resume reuses the same model. */
   modelBase?: string;
   /** Spawn-time diagnostic only; intentionally omitted from persistence and resume notifications. */
@@ -805,6 +806,8 @@ export interface RpcAgentRecord {
    * `toolGroup`/`wsToolNames` exactly as before.
    */
   explicitTools?: string;
+  /** Immutable task/discussion capture retained across dormant recovery. */
+  forkContext?: ForkContext;
   /**
    * 260905: which spawn shape produced this record, recorded at spawn time
    * rather than re-derived from `toolGroup`/`explicitTools` heuristics. Read
@@ -1673,7 +1676,8 @@ export function pushSpawnFailed(
 }
 
 export interface SpawnAgentParams {
-  systemPromptPath: string;
+  /** Fork-family prompts live in their first user message; workers still require this path. */
+  systemPromptPath?: string;
   prompt: string;
   modelName?: string;
   modelEffort?: string;
@@ -1767,6 +1771,8 @@ export interface RpcSpawnCtx {
   aliasPrefix?: string;
   /** Persistent exploration metadata; never supplied by the public schema. */
   exploreMode?: ExploreMode;
+  /** Immutable lead capture supplied only to a task/discussion fork. */
+  forkContext?: ForkContext;
 }
 
 export interface RpcResumeCtx {
@@ -1837,12 +1843,13 @@ export function buildRpcClientOptions(
   cwd: string,
   model: string | undefined,
   sessionPath: string,
-  systemPromptPath: string,
+  systemPromptPath: string | undefined,
   tools: string,
   forkFrom?: string,
   parentSessionKey?: string,
   spawnRoleOverride?: SpawnRole,
   exploreMode?: ExploreMode,
+  forkLaunch?: { contextPath: string; readinessPath: string; nonce: string; affinityId?: string },
 ): RpcClientOptions {
   const role = spawnRoleOverride ?? (forkFrom ? "fork" : "worker");
   const env: Record<string, string> = {
@@ -1852,12 +1859,17 @@ export function buildRpcClientOptions(
   // RpcClient merges this object over process.env. An explicit empty marker
   // therefore clears an inherited deep mode for every non-research launch.
   env[WS_PI_EXPLORE_MODE_ENV] = role === "explore" && exploreMode ? exploreMode : "";
+  // Explicitly clear every fork-only marker for worker/explore descendants.
+  env[WS_PI_FORK_CONTEXT_ENV] = forkLaunch?.contextPath ?? "";
+  env[WS_PI_FORK_READY_PATH_ENV] = forkLaunch?.readinessPath ?? "";
+  env[WS_PI_FORK_READY_NONCE_ENV] = forkLaunch?.nonce ?? "";
+  env[WS_PI_FORK_AFFINITY_ENV] = forkLaunch?.affinityId ?? "";
   if (forkFrom && parentSessionKey) {
     env[WS_PI_PARENT_SESSION_KEY_ENV] = parentSessionKey;
   }
-  const args = forkFrom
-    ? ["--fork", forkFrom, "--append-system-prompt", systemPromptPath, "--tools", tools]
-    : ["--session", sessionPath, "--append-system-prompt", systemPromptPath, "--tools", tools];
+  const args = forkFrom ? ["--fork", forkFrom] : ["--session", sessionPath];
+  if (systemPromptPath) args.push("--append-system-prompt", systemPromptPath);
+  args.push("--tools", tools);
   return {
     cliPath: RPC_CLI_PATH,
     cwd,
@@ -2390,9 +2402,21 @@ export async function spawnAgent(
   const eviction = runSpawnGuards(registry, alias, resolveAgentRegistryCap());
   if (!eviction.ok) throw new Error(eviction.error);
 
+  if (!params.systemPromptPath && !ctx.forkContext && !ctx.forkFrom) {
+    throw new Error("ws-pi-agent: systemPromptPath is required for a non-fork spawn");
+  }
   const agentId = randomUUID();
   const sessionDir = mkdtempSync(join(tmpdir(), "ws-pi-agent-"));
   const sessionPath = join(sessionDir, "session.jsonl");
+  const forkLaunch = ctx.forkContext
+    ? (() => {
+        const nonce = randomUUID();
+        const contextPath = join(sessionDir, "fork-context.json");
+        const readinessPath = join(sessionDir, "fork-ready.json");
+        writePrivateJson(contextPath, { context: captureForkContext(ctx.forkContext!), nonce, readinessPath });
+        return { contextPath, readinessPath, nonce, affinityId: ctx.forkContext!.parentAffinityId };
+      })()
+    : undefined;
   const modelBase = resolution.model;
   const resolvedEffort = resolution.effort;
   const toolGroup: ToolGroup = resolveSpawnToolGroup(ctx.toolGroup);
@@ -2416,6 +2440,7 @@ export async function spawnAgent(
     explicitTools: ctx.explicitTools,
     spawnRole: ctx.spawnRole ?? (ctx.forkFrom ? "fork" : toolGroup === "execute-worker" ? "execute-worker" : "worker"),
     exploreMode: ctx.exploreMode,
+    forkContext: ctx.forkContext,
     streaming: false,
     running: false,
     reportLog: [],
@@ -2434,6 +2459,7 @@ export async function spawnAgent(
       ctx.parentSessionKey,
       ctx.spawnRole === "explore" ? "explore" : undefined,
       ctx.exploreMode,
+      forkLaunch,
     ),
   );
   record.client = client;
@@ -2455,6 +2481,14 @@ export async function spawnAgent(
         );
       }
       record.sessionPath = forkedSessionFile;
+      if (forkLaunch) {
+        let readiness: { nonce?: unknown; ownSessionKey?: unknown; error?: unknown; sessionPath?: unknown; registeredTools?: unknown };
+        try { readiness = JSON.parse(readFileSync(forkLaunch.readinessPath, "utf8")) as typeof readiness; } catch { throw new Error("ws-pi-agent: fork spawn did not publish readiness"); }
+        if (readiness.nonce !== forkLaunch.nonce || typeof readiness.ownSessionKey !== "string" || readiness.error) {
+          throw new Error(`ws-pi-agent: fork readiness rejected (${typeof readiness.error === "string" ? readiness.error : "nonce/key mismatch"})`);
+        }
+        if (typeof readiness.sessionPath === "string" && readiness.sessionPath) record.sessionPath = readiness.sessionPath;
+      }
     }
 
     // Read the already-folded record value, not params.modelEffort directly

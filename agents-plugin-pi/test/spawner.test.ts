@@ -2617,12 +2617,16 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
       [WS_PI_SPAWN_ROLE_ENV]: "worker",
       [WS_PI_APPROVAL_DIR_ENV]: "/tmp/ws-pi-agent-x/approvals",
       WS_PI_EXPLORE_MODE: "",
+      WS_PI_FORK_CONTEXT: "",
+      WS_PI_FORK_READY_PATH: "",
+      WS_PI_FORK_READY_NONCE: "",
+      WS_PI_FORK_AFFINITY: "",
     });
   });
 
   test("env overrides an inherited exploration mode while preserving role and approvals markers", () => {
     const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-y/session.jsonl", "/tmp/system.md", "read");
-    assert.deepEqual(new Set(Object.keys(options.env ?? {})), new Set([WS_PI_SPAWN_ROLE_ENV, WS_PI_APPROVAL_DIR_ENV, "WS_PI_EXPLORE_MODE"]));
+    assert.deepEqual(new Set(Object.keys(options.env ?? {})), new Set([WS_PI_SPAWN_ROLE_ENV, WS_PI_APPROVAL_DIR_ENV, "WS_PI_EXPLORE_MODE", "WS_PI_FORK_CONTEXT", "WS_PI_FORK_READY_PATH", "WS_PI_FORK_READY_NONCE", "WS_PI_FORK_AFFINITY"]));
     assert.equal(options.env?.WS_PI_EXPLORE_MODE, "");
   });
 

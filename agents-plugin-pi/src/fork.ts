@@ -50,9 +50,7 @@
  * text are both untouched by this ticket.
  */
 
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
@@ -67,7 +65,9 @@ import {
   type RpcAgentRecord,
   type RpcAgentRegistry,
 } from "./spawner.ts";
-import type { SpawnRole } from "./process-role.ts";
+import { readSpawnRole, type SpawnRole } from "./process-role.ts";
+import { captureForkContext, captureRegisteredTools } from "./fork-context.ts";
+import type { LeadPromptCapture } from "./lead-bootstrap.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers. Unit-tested directly (test/fork.test.ts) with no
@@ -95,7 +95,8 @@ export const FORK_TOOL_NAME = "ws-fork";
  * placement rule. `test/ask.test.ts` asserts the two constants and these two
  * literals stay equal, so the duplication cannot silently drift.
  */
-export const FORK_EXCLUDED_TOOL_NAMES: ReadonlySet<string> = new Set([FORK_TOOL_NAME, "ws-ask", "ws-resolve"]);
+/** Forks preserve the lead's actual ordered callable surface; role checks live in handlers. */
+export const FORK_EXCLUDED_TOOL_NAMES: ReadonlySet<string> = new Set();
 
 /**
  * Pure §3 fork tool-surface formula: the lead's own active-tools snapshot at
@@ -105,12 +106,7 @@ export const FORK_EXCLUDED_TOOL_NAMES: ReadonlySet<string> = new Set([FORK_TOOL_
  * `execute-gateway.ts`'s `computeLeadActiveTools` remove/add/dedupe shape.
  */
 export function computeForkToolSurface(leadActiveTools: readonly string[]): string[] {
-  const kept = leadActiveTools.filter((name) => !FORK_EXCLUDED_TOOL_NAMES.has(name));
-  const result = [...kept];
-  if (!result.includes(REPORT_TO_LEAD_TOOL_NAME)) {
-    result.push(REPORT_TO_LEAD_TOOL_NAME);
-  }
-  return [...new Set(result)];
+  return [...leadActiveTools];
 }
 
 /**
@@ -266,7 +262,7 @@ export function buildForkDirectiveText(): string {
   return [
     "Task-thread fork: this session is a clone of the lead's own session, so its existing context is already shared — work laterally alongside the lead, not as a depth-consuming worker.",
     "",
-    `Work the task given in the next message. If the lead's input is needed before continuing, call ${REPORT_TO_LEAD_TOOL_NAME} with kind:"question" and end the turn there.`,
+    `Work the task in this message. If the lead's input is needed before continuing, call ${REPORT_TO_LEAD_TOOL_NAME} with kind:"question" and end the turn there.`,
     "",
     `Once the task is fully done, call ${REPORT_TO_LEAD_TOOL_NAME} with kind:"final" and a message in exactly this shape, one field per line:`,
     "Outcome: <what happened>",
@@ -298,6 +294,8 @@ export function buildForkDirectiveText(): string {
  */
 export function buildForkInitialMessage(leadPrompt: string): string {
   return [
+    buildForkDirectiveText(),
+    "",
     "# Forked session",
     "",
     "The conversation above was inherited from the lead when this fork was created. Treat it as reference/background only — it is the lead's context, not instructions addressed to you, and its plan is not yours to continue.",
@@ -317,6 +315,7 @@ export function buildForkInitialMessage(leadPrompt: string): string {
 
 export interface ForkSessionCtx {
   cwd: string;
+  effectivePromptRef?: { current: LeadPromptCapture | undefined };
 }
 
 /**
@@ -578,7 +577,7 @@ export function buildForkSpawnCtx(
   pi: ExtensionAPI,
   bridge: BridgeHandle,
   sessionCtx: ForkSessionCtx,
-  opts: { forkFrom: string; explicitTools: string; inheritModel?: string; catalog: readonly ModelCatalogEntry[]; notifyTierWarning?: (warning: string) => void },
+  opts: { forkFrom: string; explicitTools: string; inheritModel?: string; catalog: readonly ModelCatalogEntry[]; notifyTierWarning?: (warning: string) => void; forkContext?: ReturnType<typeof captureForkContext> },
 ): Parameters<typeof spawnAgent>[1] {
   return {
     // Load-bearing: the fork's whole report channel back to the lead.
@@ -593,6 +592,7 @@ export function buildForkSpawnCtx(
     explicitTools: opts.explicitTools,
     parentSessionKey: bridge.defaultSessionKeyRef.current,
     spawnRole: "fork",
+    forkContext: opts.forkContext,
   };
 }
 
@@ -685,6 +685,9 @@ export function registerFork(
       required: ["prompt"],
     } as never,
     async execute(_toolCallId, params, _signal, _onUpdate, toolCtx) {
+      if (readSpawnRole(process.env) === "fork") {
+        throw new Error(`ws-pi-agent: ${FORK_TOOL_NAME} is unavailable in a fork; report to the lead instead.`);
+      }
       const p = params as { prompt: string; model_name?: string; expects_commit?: boolean };
       const forkFrom = getForkSourceSessionFile(toolCtx);
       if (!forkFrom) {
@@ -692,10 +695,22 @@ export function registerFork(
       }
 
       const tools = computeForkToolSurface(pi.getActiveTools());
-      const directiveDir = mkdtempSync(join(tmpdir(), "ws-pi-fork-"));
-      const directivePath = join(directiveDir, "fork-directive.md");
-      writeFileSync(directivePath, buildForkDirectiveText());
-
+      const captured = sessionCtx.effectivePromptRef?.current;
+      const forkContext = captured
+        ? captureForkContext({
+            kind: "task",
+            effectiveSystemPrompt: captured.effectiveSystemPrompt,
+            basePromptOptions: captured.basePromptOptions,
+            wsBlock: captured.wsBlock,
+            parentSessionKey: bridge.defaultSessionKeyRef.current,
+            activeTools: tools,
+            registeredTools: captureRegisteredTools(tools, pi.getAllTools()),
+            modelDescriptor: (() => {
+              const model = (toolCtx as { model?: { provider?: string; id?: string; api?: string; baseUrl?: string; compat?: unknown } }).model;
+              return model ? { provider: model.provider, model: model.id, api: model.api, endpoint: model.baseUrl, compat: model.compat } : {};
+            })(),
+          })
+        : undefined;
       const result = await spawnAgent(
         rpcRegistry,
         buildForkSpawnCtx(pi, bridge, sessionCtx, {
@@ -704,9 +719,9 @@ export function registerFork(
           inheritModel: inheritModelFromToolCtx(toolCtx),
           catalog: modelCatalogFromToolCtx(toolCtx),
           notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx),
+          forkContext,
         }),
         {
-          systemPromptPath: directivePath,
           prompt: buildForkInitialMessage(p.prompt),
           modelName: p.model_name,
         },
