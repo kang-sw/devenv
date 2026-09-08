@@ -55,7 +55,7 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
         const { session } = await sdk.createAgentSession({ cwd: directory, agentDir, sessionManager: sm, resourceLoader: loader, modelRuntime: runtime, model, thinkingLevel: "off", settingsManager: settings, ...(tools ? { tools } : {}) });
         const h: any = { session, sm, env, api, get beforePrompt() { return partialPrompt; }, requests: [] as any[] };
         sessions.push(h);
-        session.agent.streamFunction = async (m: any, context: any, options: any) => (h.rawStream = serializer.stream(m, context, { ...options, apiKey, cacheRetention: "short", fetch: async () => { sends++; throw new Error("network forbidden"); }, onPayload: async (payload: any) => {
+        session.agent.streamFunction = async (m: any, context: any, options: any) => (h.rawStream = serializer.stream(m, context, { ...options, apiKey, cacheRetention: h.retention ?? "short", fetch: async () => { sends++; throw new Error("network forbidden"); }, onPayload: async (payload: any) => {
           const actual = await options.onPayload?.(payload, m) ?? payload;
           h.requests.push({ context: { ...context, messages: structuredClone(context.messages), tools: [...context.tools] }, payload: structuredClone(actual) }); payloads.push(actual);
           throw new Error("direct serializer capture before network");
@@ -76,7 +76,7 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
         const user = { role: "user", content: [{ type: "text", text: framed }], timestamp: 1 };
         let expected: any;
         const context = { systemPrompt: h.oracle.systemPrompt, tools: h.oracle.tools, messages: [...h.referenceHistory, user] };
-        for await (const _event of serializer.stream(model, context, { apiKey, sessionId: h.parentAffinityId, cacheRetention: "short", fetch: async () => { sends++; throw Error("network forbidden"); }, onPayload: (body: any) => { expected = structuredClone(body); throw Error("independent direct capture"); } })) {}
+        for await (const _event of serializer.stream(h.oracleModel ?? model, context, { apiKey, sessionId: h.oracleSessionId ?? h.parentAffinityId, cacheRetention: h.retention ?? "short", fetch: async () => { sends++; throw Error("network forbidden"); }, onPayload: (body: any) => { expected = structuredClone(body); throw Error("independent direct capture"); } })) {}
         assert.ok(expected);
         assert.deepEqual(h.requests.at(-1).payload, expected, "entire raw provider request equals independently accumulated continuation");
         h.referenceHistory.push(user, structuredClone(await h.rawStream.result()));
@@ -216,6 +216,19 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
         if (generation === 0) await stop(resumed);
       }
       const drifted = children.at(-1);
+      drifted.retention = "none";
+      drifted.oracleSessionId = drifted.sm.getSessionId();
+      await prompt(drifted, "Continue with caching disabled");
+      assert.equal(drifted.requests.at(-1).context.systemPrompt, observed.context.systemPrompt);
+      if (providerName === "openai-codex") assert.equal(drifted.requests.at(-1).payload.prompt_cache_key, undefined);
+      drifted.retention = "short";
+      drifted.oracleModel = { ...model, id: "explicit-model-override" };
+      await withEnv(drifted.env, () => drifted.session.setModel(drifted.oracleModel));
+      await prompt(drifted, "Continue with explicit model override");
+      assert.equal(drifted.requests.at(-1).context.systemPrompt, observed.context.systemPrompt);
+      assert.deepEqual(drifted.requests.at(-1).payload.tools, observed.payload.tools);
+      assert.equal(drifted.requests.at(-1).payload.model, "explicit-model-override");
+      if (providerName === "openai-codex") assert.equal(drifted.requests.at(-1).payload.prompt_cache_key, drifted.sm.getSessionId(), "incompatible model preserves prompt/tools but receives no parent affinity");
       // Post-resource-merge registration drift is handled by the actual SDK input
       // hook, before any provider callback (throwing a hook would not suffice).
       const driftCount = drifted.requests.length;
