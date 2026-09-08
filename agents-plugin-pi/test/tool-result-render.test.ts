@@ -226,6 +226,42 @@ describe("bounded YAML preview preparation", () => {
     );
   });
 
+  test("260906 Phase 1: lineBudget 'logical' lets a single long logical line render past ten physical rows", () => {
+    const longLine = Array.from({ length: 80 }, (_, index) => String(index % 10)).join("");
+    const rows = physicalPreview(longLine, 10, { expanded: false, trimOuterWhitespace: false, lineBudget: "logical" });
+    assert.ok(rows.length > 10, "wraps past the physical-row budget since it is the only logical line");
+    assert.equal(rows.map((row) => row.trimStart()).join(""), longLine, "no premature cut: the whole logical line survives");
+    assert.ok(!rows.some((row) => row.trim() === "..."), "a single logical line never hits the marker");
+  });
+
+  test("260906 Phase 1: lineBudget 'logical' renders ten short logical lines fully with no marker", () => {
+    const ten = Array.from({ length: 10 }, (_, index) => `line-${index}`).join("\n");
+    const rows = physicalPreview(ten, 80, { expanded: false, trimOuterWhitespace: false, lineBudget: "logical" });
+    assert.equal(rows.length, 10);
+    assert.ok(!rows.some((row) => row.trim() === "..."));
+  });
+
+  test("260906 Phase 1: lineBudget 'logical' caps at the 11th logical line regardless of how many physical rows the first ten consumed", () => {
+    const longFirst = Array.from({ length: 80 }, (_, index) => String(index % 10)).join("");
+    const middle = Array.from({ length: 9 }, (_, index) => `line-${index + 1}`);
+    const tenLines = [longFirst, ...middle].join("\n");
+    const elevenLines = [...tenLines.split("\n"), "overflow"].join("\n");
+
+    const withoutEleventh = physicalPreview(tenLines, 10, { expanded: false, trimOuterWhitespace: false, lineBudget: "logical" });
+    const withEleventh = physicalPreview(elevenLines, 10, { expanded: false, trimOuterWhitespace: false, lineBudget: "logical" });
+
+    assert.ok(withoutEleventh.length > 10, "the first ten logical lines alone already exceed ten physical rows");
+    assert.deepEqual(withEleventh.slice(0, withoutEleventh.length), withoutEleventh, "every physical row of the first ten logical lines renders unmodified");
+    assert.equal(withEleventh.length, withoutEleventh.length + 1, "exactly one marker row is appended");
+    assert.equal(withEleventh.at(-1)?.trim(), "...");
+  });
+
+  test("260906 Phase 1: lineBudget 'logical' expanded removes the cap entirely", () => {
+    const many = Array.from({ length: 20 }, (_, index) => `line-${index}`).join("\n");
+    const rows = physicalPreview(many, 80, { expanded: true, trimOuterWhitespace: false, lineBudget: "logical" });
+    assert.equal(rows.length, 20);
+  });
+
   test("indents input markers while retaining narrow one-row fitting", () => {
     const source = Array.from({ length: 11 }, (_, index) => `line-${index}`).join("\n");
     assert.equal(
@@ -657,6 +693,42 @@ describe("native YAML preview renderers", () => {
       () => overriddenAbsent.renderResult({ content }, { expanded: false, isPartial: true }, unstyledTheme, context()),
       UseNativeResultFallback,
     );
+  });
+
+  test("260906 Phase 1: overrides.resultLineBudget changes only the OUTPUT format", () => {
+    const { tui } = fakeTui();
+    const serializer = (_value: object) => Array.from({ length: 11 }, (_, index) => `line-${index}`).join("\n");
+    const plainRenderers = createToolPreviewRenderers(tui, "ws-test", serializer);
+    const loggedRenderers = createToolPreviewRenderers(tui, "ws-test", serializer, { resultLineBudget: "logical" });
+
+    // Input/title formatting is untouched by the result-only override.
+    const plainCall = plainRenderers.renderCall({ value: "x" }, unstyledTheme, context()).render(80);
+    const loggedCall = loggedRenderers.renderCall({ value: "x" }, unstyledTheme, context()).render(80);
+    assert.deepEqual(plainCall, loggedCall);
+
+    // Partial/error/non-text/mixed-content fallback (line 439-450's table) is unaffected.
+    const okContent = [{ type: "text", text: '{"ok":true}' }];
+    const fallbackCases = [
+      { content: okContent, partial: true },
+      { content: okContent, partial: false, error: true },
+      { content: [{ type: "text", text: "{}" }, { type: "text", text: "later text" }], partial: false },
+      { content: [{ type: "text", text: "{}" }, { type: "image", data: "abc", mimeType: "image/png" }], partial: false },
+    ];
+    for (const item of fallbackCases) {
+      assert.throws(
+        () => loggedRenderers.renderResult({ content: item.content }, { expanded: false, isPartial: item.partial }, unstyledTheme, context({ isError: item.error })),
+        UseNativeResultFallback,
+      );
+    }
+
+    // The OUTPUT itself changes: a single logical line spanning many
+    // physical rows renders in full under "logical" instead of being cut
+    // mid-wrap under the default "physical" budget.
+    const single = { content: [{ type: "text", text: "abcdefghij".repeat(20) }] };
+    const plainOutput = plainRenderers.renderResult(single, { expanded: false, isPartial: false }, unstyledTheme, context()).render(10);
+    const loggedOutput = loggedRenderers.renderResult(single, { expanded: false, isPartial: false }, unstyledTheme, context()).render(10);
+    assert.ok(plainOutput.some((row) => row.trim() === "..."), "physical budget still cuts a single long logical line");
+    assert.ok(!loggedOutput.some((row) => row.trim() === "..."), "logical budget lets the one logical line render in full");
   });
 
   test("uses real installed Pi parent-shell composition and retains its padding", async () => {

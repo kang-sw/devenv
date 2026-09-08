@@ -63,14 +63,28 @@ interface PreviewState {
   resolvedLine?: string;
 }
 
-interface PreviewFormat {
+export interface PreviewFormat {
   expanded: boolean;
   trimOuterWhitespace: boolean;
   markerIndent?: number;
   markerStyle?: (text: string) => string;
+  /**
+   * 260906 Phase 1: `"physical"` (the default, applied whenever this field is
+   * left unset — every pre-existing caller) caps the collapsed preview at
+   * `PREVIEW_ROWS` wrapped terminal rows, matching the byte-identical
+   * pre-Phase-1 behavior. `"logical"` caps it at `PREVIEW_ROWS`
+   * newline-separated logical lines instead — a logical line, once started,
+   * always finishes wrapping, so the cap only ever falls on a logical-line
+   * boundary (see `physicalPreviewLayout`).
+   */
+  lineBudget?: "physical" | "logical";
+  /** Defaults to `INPUT_START_INDENT` when unset — see `physicalPreviewLayout`. */
+  startIndent?: number;
+  /** Defaults to `CONTINUATION_INDENT` when unset — see `physicalPreviewLayout`. */
+  continuationIndent?: number;
 }
 
-interface BoundedText extends NativePreviewComponent {
+export interface BoundedText extends NativePreviewComponent {
   text: NativeText;
   source: string | undefined;
   sanitized: string | undefined;
@@ -138,26 +152,35 @@ interface PhysicalPreviewLayout {
 function physicalPreviewLayout(
   text: string,
   width: number,
-  { expanded, trimOuterWhitespace, markerIndent }: PreviewFormat,
+  { expanded, trimOuterWhitespace, markerIndent, lineBudget, startIndent, continuationIndent }: PreviewFormat,
 ): PhysicalPreviewLayout {
   const source = trimOuterWhitespace ? text.trim() : text;
   const boundedWidth = Math.max(0, Math.floor(width));
   const rows: string[] = [];
   const limit = expanded ? Number.POSITIVE_INFINITY : PREVIEW_ROWS;
+  const logical = lineBudget === "logical";
+  const resolvedStartIndent = startIndent ?? INPUT_START_INDENT;
+  const resolvedContinuationIndent = continuationIndent ?? CONTINUATION_INDENT;
   const appendMarker = (): PhysicalPreviewLayout => {
     const marker = truncatedMarker(boundedWidth, markerIndent);
     return marker ? { rows: [...rows, marker], marker } : { rows, marker: undefined };
   };
 
   let lineStart = 0;
+  let logicalLineIndex = 0;
   while (true) {
+    // Logical-line budget checks once per logical line, before it starts
+    // wrapping, so a line already underway always finishes — the cap only
+    // ever falls on a logical-line boundary, never mid-wrap.
+    if (logical && logicalLineIndex === limit) return appendMarker();
+
     const lineEnd = source.indexOf("\n", lineStart);
     const logicalLine = lineEnd === -1 ? source.slice(lineStart) : source.slice(lineStart, lineEnd);
     let firstRow = true;
     let remainder = logicalLine;
     do {
-      if (rows.length === limit) return appendMarker();
-      const preferredIndent = firstRow ? INPUT_START_INDENT : CONTINUATION_INDENT;
+      if (!logical && rows.length === limit) return appendMarker();
+      const preferredIndent = firstRow ? resolvedStartIndent : resolvedContinuationIndent;
       const indent = fittedIndent(boundedWidth, preferredIndent, remainder);
       const contentWidth = boundedWidth - indent;
 
@@ -177,6 +200,7 @@ function physicalPreviewLayout(
       remainder = remainder.slice(consumed);
       firstRow = false;
     } while (remainder);
+    logicalLineIndex += 1;
 
     if (lineEnd === -1) return { rows, marker: undefined };
     lineStart = lineEnd + 1;
@@ -273,7 +297,7 @@ export function sanitizePreviewText(text: string): string {
     .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "?");
 }
 
-function createBoundedText(tui: ToolResultTuiModules): BoundedText {
+export function createBoundedText(tui: ToolResultTuiModules): BoundedText {
   const component: BoundedText = {
     text: new tui.Text("", 0, 0),
     source: undefined,
@@ -294,7 +318,7 @@ function createBoundedText(tui: ToolResultTuiModules): BoundedText {
       const boundedWidth = Math.max(0, Math.floor(width));
       if (boundedWidth === 0) return [];
       const layoutKey = component.format
-        ? `${boundedWidth}:${component.format.expanded ? "expanded" : "collapsed"}:${component.format.trimOuterWhitespace ? "trim" : "raw"}:${component.format.markerIndent ?? 0}`
+        ? `${boundedWidth}:${component.format.expanded ? "expanded" : "collapsed"}:${component.format.trimOuterWhitespace ? "trim" : "raw"}:${component.format.markerIndent ?? 0}:${component.format.lineBudget ?? "physical"}`
         : undefined;
       if (layoutKey !== undefined && (component.layoutKey !== layoutKey || component.plainLayout === undefined)) {
         tui.onPreviewLayout?.();
@@ -346,7 +370,7 @@ function createBoundedText(tui: ToolResultTuiModules): BoundedText {
   return component;
 }
 
-function updateText(
+export function updateText(
   tui: ToolResultTuiModules,
   component: BoundedText,
   source: string,
@@ -489,6 +513,15 @@ export interface ToolPreviewOverrides {
    * of `isPartial`/`isError`.
    */
   resolvedLine?: (result: { details?: unknown }, context: PreviewRenderContext) => string | undefined;
+  /**
+   * 260906 Phase 1: overrides the default `renderResult` OUTPUT format's
+   * `lineBudget` (see `PreviewFormat.lineBudget`). Left `undefined` by every
+   * pre-Phase-1 `registerWsTool` caller, which keeps today's physical-row
+   * collapse policy byte-identical; only the two direct tools
+   * (`do-i-really-have-to-read-this-myself`/`do-i-really-have-to-run-this-myself`)
+   * set `"logical"`.
+   */
+  resultLineBudget?: "physical" | "logical";
 }
 
 /** Creates the two Pi renderer hooks once the guarded host import succeeds. */
@@ -557,6 +590,7 @@ export function createToolPreviewRenderers(
         updateText(tui, component.output, rendered, (output) => previewTheme.fg("toolOutput", output), {
           expanded: options.expanded,
           trimOuterWhitespace: false,
+          lineBudget: overrides?.resultLineBudget,
         }, previewTheme);
         return component;
       }
@@ -609,6 +643,7 @@ export function registerWsTool(
   pi: Pick<ExtensionAPI, "registerTool">,
   definition: ToolDefinition,
   tuiRef: ToolPreviewTuiRef,
+  overrides?: ToolPreviewOverrides,
 ): void {
   const existing = definition as ToolDefinition & { renderCall?: unknown; renderResult?: unknown };
   if (existing.renderCall || existing.renderResult) {
@@ -623,7 +658,7 @@ export function registerWsTool(
     if (!tui) throw new UseNativeResultFallback();
     if (cachedTui !== tui || !cachedRenderers) {
       cachedTui = tui;
-      cachedRenderers = createToolPreviewRenderers(tui, definition.name);
+      cachedRenderers = createToolPreviewRenderers(tui, definition.name, undefined, overrides);
     }
     return cachedRenderers;
   };

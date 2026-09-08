@@ -78,6 +78,56 @@ test("actual native registrations retain schemas/executors while sharing cold an
   agents.stopAll();
 });
 
+test("260906 Phase 1: the two direct tools cap their real registered OUTPUT preview at ten logical lines, not ten physical rows", () => {
+  const { tools, pi, bridge } = harness();
+  const ref = createToolPreviewTuiRef();
+  const agents = registerAgentTools(pi, bridge, { cwd: "/tmp" }, undefined, async () => ({ agentId: "leaf", state: "done", output: "ok" }), "/tmp/explore.md", ref);
+  registerExecuteGateway(pi, bridge, agents.rpcRegistry, { cwd: "/tmp", executeWorkerPromptPath: "/tmp/execute.md" }, ref);
+  ref.current = tui;
+
+  const theme = { bold: (x: string) => x, fg: (_: string, x: string) => x };
+  // Review relay cycle 1: the fixture MUST include a single logical line
+  // that wraps past ten physical rows on its own (mirroring the pure-helper
+  // test "260906 Phase 1: lineBudget 'logical' lets a single long logical
+  // line render past ten physical rows" at test/tool-result-render.test.ts).
+  // 11 short single-row lines cannot discriminate `resultLineBudget:
+  // "logical"` from the old physical-row default — both stop at row/line 10
+  // and append the same marker for that shape. With a long first logical
+  // line, the OLD physical-row cap (10 rows total) would cut TAILMARKEND
+  // off mid-line-0 and never reach line-1..line-9 at all; only the NEW
+  // logical-line cap renders line-0 in full (however many physical rows it
+  // takes) before counting it as one logical line toward the ten-line budget.
+  const longFirstLine = `${"x".repeat(900)}TAILMARKEND`;
+  const shortLines = Array.from({ length: 9 }, (_, index) => `line-${index + 1}`);
+  const eleven = [longFirstLine, ...shortLines, "overflow-marker-line"].join("\n");
+  for (const name of ["do-i-really-have-to-read-this-myself", "do-i-really-have-to-run-this-myself"]) {
+    const tool = tools.get(name)!;
+    const collapsed = tool.renderResult!(
+      { content: [{ type: "text", text: eleven }] },
+      { expanded: false, isPartial: false },
+      theme,
+      { state: {}, argsComplete: true, isPartial: false },
+    ) as { render(width: number): string[] };
+    const collapsedLines = collapsed.render(80).join("\n");
+    assert.match(collapsedLines, /TAILMARKEND/, `${name}: the long first logical line renders in full, not cut mid-wrap`);
+    for (let index = 1; index <= 9; index += 1) assert.match(collapsedLines, new RegExp(`line-${index}\\b`), `${name}: logical line ${index} survives the collapse`);
+    assert.doesNotMatch(collapsedLines, /overflow-marker-line/, `${name}: the 11th logical line is cut`);
+    assert.match(collapsedLines, /\.\.\./, `${name}: an overflow marker is shown`);
+
+    const expanded = tool.renderResult!(
+      { content: [{ type: "text", text: eleven }] },
+      { expanded: true, isPartial: false },
+      theme,
+      { state: {}, argsComplete: true, isPartial: false, lastComponent: collapsed },
+    ) as { render(width: number): string[] };
+    const expandedLines = expanded.render(80).join("\n");
+    assert.match(expandedLines, /TAILMARKEND/, `${name}: expansion keeps the long first logical line`);
+    for (let index = 1; index <= 9; index += 1) assert.match(expandedLines, new RegExp(`line-${index}\\b`), `${name}: expansion recovers logical line ${index}`);
+    assert.match(expandedLines, /overflow-marker-line/, `${name}: expansion recovers the 11th logical line`);
+  }
+  agents.stopAll();
+});
+
 test("actual MCP startup registers through the same cold then late-filled shared ref", async () => {
   const { tools, pi } = harness();
   const dir = mkdtempSync(join(tmpdir(), "ws-pi-mcp-preview-"));
