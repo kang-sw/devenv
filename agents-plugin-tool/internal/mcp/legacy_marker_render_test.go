@@ -11,8 +11,7 @@ import (
 
 // legacyMarkerAdvisoryPrefix mirrors wsdoc's note prefix, including the marker's
 // 1-based line number, so a render-side change to the note is caught here too.
-const legacyMarkerAdvisoryPrefix = "legacy planned marker (contract-first planned-entry mechanism being retired by " +
-	"260726-refactor-retire-spec-planned-marker-mechanism): 1 marker(s) at line 10"
+const legacyMarkerAdvisoryPrefix = "legacy planned marker (contract-first planned-entry mechanism being retired): 1 marker(s) at line 10"
 
 func legacyMarkerRenderRoot(t *testing.T) string {
 	t.Helper()

@@ -20,7 +20,6 @@ func Doctor(root string) DoctorReport {
 	}{
 		{"repo root", root, true},
 		{"ai-docs", filepath.Join(root, "ai-docs"), true},
-		{"agents-plugin", filepath.Join(root, "agents-plugin"), true},
 		{"root context", filepath.Join(root, "AGENTS.md"), false},
 	}
 

@@ -1,5 +1,6 @@
 ---
 title: "Delegated implement targets skip the survey plan when the ticket already localizes the change"
+completed: 2026-09-09
 sage-review-design: completed
 sage-review-completeness: completed
 parent: 260605-epic-ws-playbook-factory-pivot
@@ -200,3 +201,61 @@ rather than bouncing the plan back to the lead as defective (the stub's
 own sentence is the only text telling it so; if the dogfood run bounces,
 the implementer playbook gains one sentence and the no-playbook-change
 constraint is amended by Edition).
+
+### Result (6ab19fc5) - 2026-09-09
+
+`deriveImplementPlanDepth` gained a `targetKind` parameter and now returns
+`plan_depth: none` for a delegated **ticket** target when all four complexity
+facts hold at their strongest value (`change_points=clear`,
+`reuse_points=confirmed|not-applicable`, `strategy_shape=single-obvious`,
+`side_effect_risk=low`); any weaker value (including `unknown`) or a delegated
+inline target keeps `survey` (Decision 3). The dead two-arm branch was deleted.
+`implementPrepInstruction` gained a delegated-`none` branch instructing the
+lead to allocate a plan path via `path.generate` and write the six-section
+lead-written stub with no planner dispatch; the stub's `## Codebase Findings`
+carry-over of binding constraints is worded generically in terms of the Prep
+guardrail reads (mental-model lookup, `infra.read("impl-playbook")`, any
+declared `AGENTS.md` anchor doc), never a project-specific anchor, per
+AGENTS.md Rule 4. `implementEditInstruction`'s delegated `default` branch now
+names `PlanPath` (activating a branch that was previously dead for delegated
+targets); `parseLegacyImplementPlanDepth` accepts `none` for delegated
+(`research` still errors). No new `route.resolve_implement` input, enum, or
+output field; no `agents-plugin/rsrc` playbook body edit.
+
+Spec updated: `mcp-tools.md` `{#260625-session-state-tools}`,
+`workflow-skills.md` `{#260505-implementation-workflow-skills}` (two sentences)
+and `{#260519-proceed-implementation-dispatch-precheck}`;
+`ai-docs/mental-model/workflow-skills.md` gained the four-fact skip as the
+exception to the survey-planner default. A drift-pin test
+(`TestDelegatedNoneStubHeadingsMatchSurveyTemplate`) asserts the stub's heading
+set equals the `plan-populator-survey` rsrc template heading set, so a later
+template rename fails here rather than shipping a stale stub.
+
+Commits: `6ab19fc5` (feat: resolver/instruction/tests), `44caf4af` (docs: spec
++ mental-model), `90d41cf3` (test: legacy-enter delegated+none accept path,
+added in review fix cycle). Range `6ab19fc5..90d41cf3`.
+
+Verification: `go build ./...` and full `go test ./... -count=1` in
+`agents-plugin-tool/` — all 14 packages pass, including the edited pinned
+`TestDeriveImplementTodoInstructionsPrepGuardrails` (the `none no declaration`
+subtest pinned to `direct-edit`), the new resolver test (four-strongest -> none,
+each fact weakened incl. unknown -> survey, `not-applicable` -> none, inline ->
+survey), `TestDeriveImplementTodoInstructionsDelegatedNoneStub`, the drift-pin
+test, and the extended `TestServeStdioEnterImplementVerdictLabels`. Partitioned
+review: correctness clean (one informational Minor on the legacy empty-TargetKind
+path, consistent with pre-existing legacy ticket-flavored defaults); test
+partition raised one Important (the legacy delegated+none accept flip had zero
+coverage; the plan's `-run` filter named a non-existent test), fixed in
+`90d41cf3`.
+
+The Phase's live dogfood step (confirming a real `route.resolve_implement`
+returns `Plan Depth: none` and the implementer proceeds from the stub) is
+deferred: the installed MCP tool serves the published plugin version, which
+does not yet carry this change, so a live verdict would still show the old
+every-delegated-surveys behavior. The unit and integration tests exercise the
+new resolver and instruction paths directly and are the authoritative
+verification until the change is published; the dogfood belongs to the
+post-publish smoke check. Because a live bounce cannot be observed pre-publish,
+the ticket's conditional "if the dogfood run bounces, the implementer playbook
+gains one sentence" contingency is carried forward to that post-publish check
+rather than resolved here.

@@ -166,8 +166,8 @@ Gating).
 >   (`#260610-mercenary-delegation-surface`); a delegate cannot self-bootstrap or
 >   escalate from a contained context. Re-bootstrap for recovery uses the caller's
 >   own already-known root.
-> - The bootstrap tool name is deliberately obscure (260617 obscurity, soft
->   guard): semantically disconnected from "session start" and taught only in
+> - The bootstrap tool name is deliberately obscure: semantically disconnected
+>   from "session start" and taught only in
 >   `ws:workflow-manual`. The three subagent-reachable surfaces must not leak it —
 >   the `tools/list` description is inert, error-guidance strings name no tool and
 >   route the lead to the manual, and the rendered delegate prompt carries a
@@ -319,7 +319,13 @@ behavior for compatibility.
   `delegation`, `branch_plan`, `plan_depth`, `review_alloc`, `need_review`, and
   `doc_mode`, stores the implement agenda, and replaces the todo list with the
   derived lead-implement checklist. `plan_depth` is `none` for direct edit and
-  `survey` for reachable delegated preparation; delegated preparation creates a
+  `survey` for reachable delegated preparation, with one exception: a delegated
+  **ticket** target also resolves to `none` when all four complexity facts hold
+  at their strongest value (`change_points: clear`, `reuse_points: confirmed` or
+  `not-applicable`, `strategy_shape: single-obvious`, `side_effect_risk: low`),
+  in which case the lead writes the stub plan itself and no planner is
+  dispatched; any weaker value (including `unknown`) on any one fact, or an
+  inline target, keeps `survey`. Delegated survey preparation creates a
   plan path, renders `plan-populator-survey` to write the light implementation
   plan, and renders `plan-populator-research` on the same authority and plan
   path only when
@@ -333,8 +339,9 @@ behavior for compatibility.
   branch-stop todos describe the blocker instead of telling the caller to
   continue source edits. Non-stop prep instructions carry required
   runbook-loading guardrails, including mental-model lookup, ancestor reads,
-  conditional migration-anchor loading, and implementation-runbook loading
-  before edits or delegate dispatch. Text output is the canonical raw verdict
+  conditional binding-anchor loading when the project declares one, and
+  implementation-runbook loading before edits or delegate dispatch. Text output
+  is the canonical raw verdict
   beginning `Implementation Verdict`, with `Mode`, `Branch Action`, `Plan Depth`,
   `Review Allocation`, `Doc Mode`, and a concrete `Next:` instruction; JSON
   output returns the structured result plus `next_instruction` and the identical
@@ -416,7 +423,7 @@ behavior for compatibility.
   inside `params` and derives the same typed verdict, agenda, and todos as an
   equivalent top-level compatibility call. It normalizes the
   current proceed route vocabulary (`target-kind`, `ticket-missing`,
-  `has-ticket`, `status`, `migration-anchor`, `actionable`,
+  `has-ticket`, `status`, `binding-anchor`, `actionable`,
   `discussion-needed`, `needs-ticket`, `freshness`, `category`, `slice`, and
   `scope-blocked`), resolves one deterministic route, emits non-blocking
   warnings for contradictory or inapplicable facts, stores the selected route
@@ -492,7 +499,7 @@ resolve on the filesystem with normal git tooling instead of any
 merge/conflict logic inside MCP — writing/erasing a key writes/removes
 exactly that key's file, and staging/committing it rides the caller's
 ordinary `git.commit` flow; no new git-mutation MCP verb is added anywhere in
-this family (260605 pivot constraint). A note key can contain arbitrary
+this family. A note key can contain arbitrary
 characters (including `/` and `.`), so the repo layer encodes each key into
 its filename as hex of the key's raw UTF-8 bytes plus a `.json` suffix (e.g.
 key `a/b.c` becomes `612f622e63.json`) — deterministic across every
@@ -688,7 +695,7 @@ When `core.sparseCheckout` is set for the working root, both **fresh with
 root** and **continue** additionally render a sparse-checkout scope
 announcement — a short block naming the hidden ticket count and stems under
 `ai-docs/tickets/ready/`, `ai-docs/tickets/todo/`, and `ai-docs/tickets/idea/`,
-pointing to `ai-docs/ref/worktree-ticket-scope.md`, the `git sparse-checkout
+the `git sparse-checkout
 disable` restore path, and a `git sparse-checkout list` pointer to the
 worktree's active re-include patterns — using the same
 `injectBootstrapStalenessWarning` no-op-when-empty injector already used for
@@ -1630,7 +1637,15 @@ excluded from the comparison — a frontmatter-only edit never trips
 staleness, and the new field can never perturb posture parsing or its own
 digest. The result names the affected completed stage(s), the review
 baseline (a digest sentinel or a commit), and an instruction to inspect the
-diff and decide whether to rerun those stage(s). Missing Git history or an
+diff and decide whether to rerun those stage(s). The freshness question is
+answered on re-invocation the same way a `recommended` ask is: `answer: yes`
+returns `run` with `reviewers` set to the listed stale stage(s), `mode` =
+`combined` when two are listed and `standalone` when one is, carrying the same
+non-waivable `advisory` every other run does. `answer: no` writes nothing — the
+`completed` posture and its `-reviewed` digest stay as they are, so
+`tickets.verify` keeps warning until a fresh `tickets.sage_stamp` — and the gate
+then resolves any remaining pending stage normally, so a still-pending
+`required` or `recommended` stage is never swallowed by the decline. Missing Git history or an
 unreadable historical blob on the fallback path degrades to the prior
 no-warning path. Backward compatibility is by construction: a ticket stamped
 before this change has no recorded digest, so it resolves through the
@@ -1655,7 +1670,8 @@ at `ws/config.list` for the `sage_review` config that governs it), that design
 review checks coherence, right-problem framing, and executability, that
 completeness review checks structure, fields, and clarity, and that neither
 judges whether the underlying research itself is settled. It rides every `run`
-result — `required`'s direct run and a `recommended` stage's accepted run alike
+result — `required`'s direct run, a `recommended` stage's accepted run, and a
+stale completed stage's accepted freshness rerun alike
 — and every `recommended` `ask` prompt, so it reaches the path an agent actually
 takes: posture `required` never asks, so a decline-only placement would be dead
 text. `skip` and `stop_blocked` carry no advisory. The identical text rides the

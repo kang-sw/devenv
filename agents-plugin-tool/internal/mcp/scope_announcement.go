@@ -32,7 +32,7 @@ func scopeAnnouncement(root string) string {
 			info.Hidden, strings.Join(info.HiddenStems, ", "),
 		))
 	}
-	sb.WriteString(" See ai-docs/ref/worktree-ticket-scope.md; restore full visibility with `git sparse-checkout disable`.")
+	sb.WriteString(" No pattern shape is provably safe against a rare hide-too-much failure, so verify by listing after every apply; restore full visibility with `git sparse-checkout disable`.")
 	sb.WriteString(" Run `git sparse-checkout list` to see this worktree's active re-include patterns.")
 	return sb.String()
 }

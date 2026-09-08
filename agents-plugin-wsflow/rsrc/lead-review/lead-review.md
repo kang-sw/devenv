@@ -99,8 +99,8 @@ Diff is consistent with ai-docs/spec and mental-model docs.
 No breaking changes, security issues, or missing tests without justification.
 
 ## Landing Lens                        ← optional to customize; range scenario always runs it (built-in default below if omitted); branch scenario never runs it
-Diff follows repo conventions (AGENTS.md, skill-authoring, wsflow-mirroring
-where applicable). Caller-visible behavior changes have a matching spec update
+Diff follows the repo's own conventions (`AGENTS.md` and any authoring manual it
+names). Caller-visible behavior changes have a matching spec update
 (spec describes caller-visible behavior); workflow-system modification-relevant
 changes have a matching mental-model update (mental model captures
 modification-relevant operational knowledge) — each doc updated per its own

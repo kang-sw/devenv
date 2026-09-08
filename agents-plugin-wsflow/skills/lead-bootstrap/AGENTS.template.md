@@ -131,16 +131,6 @@ Adapt structure to the project; this is a starting point, not a schema.
      Preserve project-specific Architecture Rules and standards; merge
      surgically and mark conflicts instead of overwriting.
 
-     Equivalence note: through v0008, this template tracked a wsflow-local
-     consolidated baseline (its own independent v0001..v0008 numbering,
-     folded from the ws lineage reset in commit 599fb453). That baseline is
-     equivalent through ws v0047 below - the convergence audit for ticket
-     260825 found no ws checklist entry through v0047 that applies beyond
-     what the baseline already established. From here this checklist shares
-     ws's single lineage instead of numbering independently; the entries
-     below are the full ws `v0001..v0047` checklist with ws-prefixed tool
-     tokens substituted for the wsflow-prefixed equivalents.
-
 - v0001: If `ai-docs/_memory.md` exists, merge useful content into `_index.md`, then delete it.
 - v0002: [obsoleted]
 - v0003: If tickets lack `plans:` frontmatter, add entries only for phases with existing plan docs. Keep discussion decisions in tickets; codebase-derived detail belongs in plans.

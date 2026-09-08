@@ -20,6 +20,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: d7ffdd0dbd5daee3
 sage-review-completeness-reviewed: d7ffdd0dbd5daee3
+completed: 2026-09-09
 ---
 
 # Shipped ws surfaces carry devenv-only tickets, paths, and migration vocabulary
@@ -370,6 +371,60 @@ fixtures that exercise the parser, and `grep -rn 'migration.anchor'
 ai-docs/spec agents-plugin agents-plugin-wsflow agents-plugin-tool`
 returning nothing.
 
+### Result (eceadf11) - 2026-09-09
+
+Behavioral delta: shipped surfaces no longer carry devenv's migration
+anchor. Projects declare a binding anchor in `AGENTS.md` under a new
+`### Binding Anchor` section (two fail-open `key: value` lines, `anchor:`
+and `topics:`), parsed by `wsreview.ReadAgentsBindingAnchor` exactly as
+`### Review Policy` is parsed. The `route.resolve_implement` Prep guardrail
+and the `route.resolve_proceed` gate render the anchor clause/route only
+from that parsed declaration and omit it otherwise; a Go-only
+`AnchorDeclared` flag forces the proceed `binding_anchor` fact to `n/a`
+before the conflict warning and route selection whenever no section is
+declared, even if the lead supplies `missing`/`conflict`. The
+`migration_anchor` fact, routes, warning, condition, and verdict label were
+renamed to `binding_anchor`/`Binding Anchor` across both resolvers,
+`lead-discuss.md`, `lead-proceed.md`, their byte-identical wsflow mirrors,
+the spec, and the mental model. devenv declares its own `260605` anchor
+with its four topics in `AGENTS.md` and points the `## Project Memory`
+bullet at the section, so its own behavior is unchanged while no shipped
+string names that anchor.
+
+Deviations from the phase plan: none material. Naming detail the ticket
+left open was resolved in-scope: the new type is `wsreview.BindingAnchor`
+(fit review noted it omits the precedent's `Agents` prefix — recorded
+Minor, not changed) and the pre-rendered clause plumbing uses an
+`AnchorDeclared` flag. The `## Spec Impact` paragraph was authored by the
+delegated implementer from plan semantics (the installed implementer frame
+still bans ticket reading), then reconciled by the lead against the
+ticket's verbatim intent during the doc pre-pass (added the "settled
+decisions bind implementation" framing); it carries the ticket's exact
+anchor slug `{#260908-project-binding-anchor-declaration}`.
+
+Review dispositions: partitioned (correctness opus/large, fit sonnet/medium,
+test sonnet/medium). Correctness clean +1 Minor (legacy-path comment
+imprecision; behavior correct). Fit clean +1 Minor (type name lacks
+`Agents` prefix). Test non-clean review #1: one Important (the AGENTS.md-read
+wiring at the three production call sites was never exercised end-to-end,
+contradicting the phase constraint that a test pins the legacy path) plus
+one Minor (no proceed `n/a`-override case). Relay #1 fixed both
+[fixed]: three `t.TempDir()` integration tests now drive the real handlers
+through `NewServer`/`callToolWithKey` and assert the rendered clause/route
+at `session_state.go:1101`/`:1145`/`:1204`, and a `TestResolveProceedRoutes`
+case proves force-to-`n/a` overrides a supplied non-`n/a` value. No
+Critical, so no re-review; Minors recorded only. The reviewer-noted
+`readState` empty-root fail-open edge is a pre-existing pattern, not
+introduced here — left out of scope.
+
+Verification: `go test ./... -count=1` in `agents-plugin-tool` green across
+all 14 packages; wsflow python bundle 10/10; `diff -rq agents-plugin/rsrc
+agents-plugin-wsflow/rsrc` byte-identical (manifest included); `grep -rn
+260605 agents-plugin agents-plugin-wsflow agents-plugin-tool` hits only
+parser test fixtures and the pre-existing wsflow epic comment; `grep -rn
+'migration.anchor' ai-docs/spec agents-plugin agents-plugin-wsflow
+agents-plugin-tool` clean. Phases 2 (point leaks) and 3 (guard) remain.
+
 ### Phase 2: Point leaks
 
 Apply Decision 3 to the twelve point-leak sites and mirror every rsrc
@@ -386,6 +441,54 @@ under `{#260810-scope-announcement-idea-inclusion}`. Verification:
 agents-plugin-wsflow/rsrc` empty; `grep -rn worktree-ticket-scope
 ai-docs/spec agents-plugin agents-plugin-wsflow` returns nothing.
 
+### Result (0a3d2cdc) - 2026-09-09
+
+Behavioral delta: all twelve Decision-3 point-leak sites are de-leaked, so
+no shipped string names a devenv ticket stem, repo path, commit hash, or
+layout/tooling term. `ws-mcp doctor`/`smoke` no longer require an
+`agents-plugin/` directory and return OK on a bare downstream project
+(`ai-docs/` + `AGENTS.md`); the sparse-checkout scope-announcement banner
+states its hazard inline instead of pointing at a devenv reference file;
+the legacy-marker advisory drops the retiring-ticket stem; `lead-update-spec`
+resolves its cross-reference through `playbook.read(name: "lead-write-spec")`
+instead of a raw repo path; and the `lead-tune`, `lead-review`,
+`lead-bootstrap`, `lead-scope-worktree` prose plus the
+`mental-model-conventions` analogy and the two `mcp-tools.md` bare
+ticket-number citations are now downstream-neutral. devenv's own review
+behavior is preserved by writing its Landing Lens clause to the gitignored
+`ai-docs/_review.local.md` (not tracked; recorded here per the phase plan),
+not by leaving a leak in shipped text.
+
+Deviations from the phase plan: none material; two ticket-vs-code naming
+mismatches were resolved in-scope as same-decision corrections. (1) The
+ticket named `TestLegacyMarkerLinesIgnoreMechanismProseFile` for the
+legacy-marker stem drop, but the pinned strings actually live in the
+`legacyMarkerAdvisoryPrefix` constant duplicated across
+`legacy_marker_test.go` (wsdoc) and `legacy_marker_render_test.go` (mcp) —
+both updated in lockstep. (2) The survey missed
+`TestPlaybookPrintGoldenLeadUpdateSpec` (`playbook_tools_test.go`), which
+pinned the removed raw rsrc path's presence; per Architecture Rule 4 (a test
+that pins a leak is itself a bug) it was re-pointed to assert the
+`playbook.read` reference and to forbid both the raw rsrc path and the stale
+`SKILL.md` path.
+
+Review dispositions: partitioned (correctness opus/large, fit sonnet/medium,
+test sonnet/medium) all clean, no findings, no relay. Fit (the central
+partition here) confirmed every site de-leaked, the mirror byte-identical,
+and the Rule-4 test correction sound; correctness confirmed doctor still
+fails on a missing `AGENTS.md` and both advisory-constant copies match; test
+confirmed no test still pins a removed leak substring.
+
+Verification: `go test ./... -count=1` in `agents-plugin-tool` green across
+all 14 packages; wsflow python bundle 10/10; `ws-mcp doctor --root <scratch>`
+(only `ai-docs/` + `AGENTS.md`) OK/exit 0 (was exit 1 "missing
+agents-plugin"); `diff -rq agents-plugin/rsrc agents-plugin-wsflow/rsrc`
+byte-identical (manifest included); grep audits for `worktree-ticket-scope`,
+`260611-...`, `claude-plugin/`, `599fb453|260825`, `CLAUDE.md`, and the two
+`mcp-tools.md` citations all clean in shipped/spec surfaces (remaining
+`260726` hits are Go source comments, outside emitted-string scope). Phase 3
+(the mechanical guard test) remains.
+
 ### Phase 3: Guard
 
 Add `agents-plugin/tests/test_shipped_surfaces_downstream_neutral.py` per
@@ -397,3 +500,57 @@ pre-Phase-1 guardrail sentence into `session_state.go` fails it; a
 `// 260605` comment, the `ticket-conventions.md` example stem
 `260115-feat-foo-bar`, and a line naming `ai-docs/manuals/` as a
 directory each pass; the plugin suites pass.
+
+### Result (4f587a04) - 2026-09-09
+
+Behavioral delta: `agents-plugin/tests/test_shipped_surfaces_downstream_neutral.py`
+is now the mechanical form of AGENTS.md Architecture Rule 4. It scans the
+four non-Go shipped text trees line-by-line and the string-literal content
+(Go comments excluded) of every non-test `.go` file under
+`agents-plugin-tool/`, classifying each line against Decision 4's four rules:
+a real ticket-stem/spec-anchor resolution, a git-tracked non-bootstrap-installed
+`ai-docs/` file path, a bare ticket-number citation resolving to a real
+ticket, and repo layout/tooling names plus migration vocabulary. There is no
+allowlist; the permitted forms pass because they resolve to nothing (example
+stems), end in `/` (directory names), or are placeholders. The comment-aware
+Go string-literal extractor is load-bearing against real pre-existing comments
+(`legacy_marker.go`, `git.go`) that would otherwise false-positive. The
+`skill-authoring` manual gained a seventh invariant-checklist item,
+**Resolvable downstream** ("all six" -> "all seven").
+
+Deviations from the phase plan: none material. Two ticket-vs-code naming
+facts were derived dynamically rather than trusted: (1) the bootstrap-installed
+`ai-docs/` set is `{ai-docs/WORKFLOW.md, ai-docs/mental-model.md}` (the
+template's MIGRATION block lists both concrete filenames, not just
+`WORKFLOW.md` as the plan's finding said), and the test parses it from the
+template and pins the actual set; (2) the guard lives in `agents-plugin/tests/`,
+outside every scanned/shipped tree and unreferenced by `plugin.json`, so it
+neither ships nor self-trips.
+
+Review dispositions: partitioned (correctness opus/large, fit sonnet/medium,
+test sonnet/medium). Fit clean. Correctness clean +1 Minor (rule 3's
+leading-hyphen skip is cosmetically over-permissive with no reachable false
+negative; recorded, no change). Test non-clean review #1: one Important
+(rule 2 -- the `ai-docs/`-specific-file leak rule behind most of the ticket's
+cited point-leak sites -- had no positive-trip unit case, so a future silent
+regression there would go uncaught) plus one Minor (the bootstrap-set golden
+literal is not self-deriving; reviewer marked no action). Relay #1 fixed the
+Important [fixed]: added `test_rule2_nonbootstrap_ai_docs_path_is_flagged`
+asserting `classify_line` returns a rule-2 reason for a real tracked,
+non-installed `ai-docs/` path -- test coverage only, no production logic
+changed (rule 2 already tripped correctly). No Critical, so no re-review;
+Minors recorded only.
+
+Verification: the guard passes 7/7 on the current tree; reinserting the
+recovered pre-Phase-1 guardrail sentence into `session_state.go` makes
+`test_go_string_literals_downstream_neutral` fail naming
+`session_state.go:534: 260605 (rule 3)`, then passes again after revert (tree
+left clean); the three allowed forms (a `// 260605` comment, the example stem
+`260115-feat-foo-bar`, a bare `ai-docs/manuals/` directory line) each pass;
+`go test ./... -count=1` in `agents-plugin-tool` green across all 14 packages;
+wsflow python bundle 10/10. One pre-existing, unrelated failure in the
+`agents-plugin` python suite (`test_proceed_keeps_implementation_route_only`,
+which pins pre-diet `lead-proceed.md` strings and fails identically on
+`develop`) was surfaced during this phase and captured as idea ticket
+`260909-bug-proceed-contract-test-pins-pre-diet-lead-proceed-strings`; it is
+out of Phase 3 scope. All three phases of this ticket are now complete.

@@ -131,6 +131,12 @@ Policy rules:
 
 - Stop for unresolved binding decisions before source edits.
 - If a plan artifact was created, commit it before Edit.
+- Before implementer dispatch, adjudicate each settled-vs-open
+  `## Escalations` entry (an `[escalate-to-lead]` entry that narrows,
+  inverts, or reframes something the ticket already settled): rule on the
+  entry, write the ruling directly under it in the plan's `## Escalations`
+  section, and continue. Stop for the user only when resolving the entry
+  would itself change the ticket.
 
 ### 4. Edit And Verify
 
@@ -180,7 +186,11 @@ Run after a confirmed merge to reduce branch accumulation.
 Path: `ai-docs/.plans/YYYY-MM/DD-hhmm-<stem-or-short-slug>.md`
 
 Required sections: `Relevant Ticket Contract`, `Out of Scope`, `Codebase Findings`, `Implementation Plan`, `Verification Plan`, and `Escalations`.
-For inline plans, `Relevant Ticket Contract` contains the accepted inline contract.
+For a ticket target, `Relevant Ticket Contract` names only the ticket path and
+selected phase heading — never restated, summarized, or reworded ticket text;
+the plan is a route to the ticket, not a contract substitute for it. For an
+inline target, `Relevant Ticket Contract` contains the accepted inline
+contract character-for-character.
 
 ### Plan prompts
 
@@ -210,38 +220,37 @@ expectations, commit-range guidance, and reporting requirements.
 | Partition | Reviewer name | Render playbook | Required check |
 |-----------|---------------|-----------------|----------------|
 | Full scope | `reviewer` | `reviewer` (includes `code-reviewer`) | Correctness, fit, and test against the supplied authority |
-| Correctness | `reviewer-correctness` | `code-review-correctness` | Supplied authority, plan, and correctness invariants |
-| Fit | `reviewer-fit` | `code-review-fit` | Supplied authority decisions, plan guardrails, and future-phase fit |
-| Test | `reviewer-test` | `code-review-test` | Supplied authority and plan verification coverage |
+| Correctness | `reviewer-correctness` | `code-review-correctness` | Supplied authority and correctness invariants |
+| Fit | `reviewer-fit` | `code-review-fit` | Supplied authority decisions and future-phase fit as a compatibility consideration only, never an unimplemented requirement |
+| Test | `reviewer-test` | `code-review-test` | Supplied authority's verification expectations |
 
 ### Reviewer prompt frame
 
-**Generated plan:** choose exactly one authority line.
+Choose exactly one authority line; no plan artifact is dispatched to the reviewer.
 ```text
 Read First: <rendered reviewer playbook path>
 Review scope: <Full scope: correctness, fit, test|Correctness|Fit|Test>
 Diff range: <parent-of-first-commit>..<last-commit>
 Authority: Ticket path <ticket-path>
 Authority: Inline contract <accepted scope, constraints, non-goals, verification boundary>
-Plan path: <plan-path>
+Selected phase: <phase heading> (ticket targets only; omit for inline authority)
 Findings path: <review-output-path>
 
 Review focus:
 - <2-4 scope-specific risks>
+- <any lead-authorized deferral or scope reduction, named explicitly>
 
 Required checks:
 - <required check from the Reviewer table>
-- Review the supplied authority, plan contract, and diff together.
-- Plan guardrails were not bypassed.
+- The selected phase plus the ticket's `## Decisions` and `## Constraints` are the requirement set; later phases are out of scope, not unimplemented requirements.
 - Each specified authority requirement is implemented, or carries an explicit, authorized deferral.
+- An authorized deferral or scope reduction not named in Review focus is a finding.
 
 Instructions:
-- For inline authority, do not read or require a ticket path.
+- For inline authority, do not read or require a ticket path or Selected phase.
 - For a partition, ignore outside it unless directly broken by the diff.
 - Write detailed findings to the findings path.
 ```
-
-**Direct edit with no generated plan:** use the same frame, omit `Plan path`, and require authority-plus-diff review without a plan artifact.
 
 ### Review relay dispatch
 

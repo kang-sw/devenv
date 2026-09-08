@@ -24,11 +24,16 @@ that satisfies its contracts.
 
 ## Constraints
 
-- The plan and its listed references are the task contract.
-- Do not re-research design alternatives; the plan owns the decisions.
 - Do not modify files outside the task scope without escalating.
 - Follow root instructions and project conventions already provided by the host, plan, or listed references.
-- Do not read ticket files directly unless the plan's `Escalations` section explicitly authorizes ticket-file reading.
+- When `## Relevant Ticket Contract` names a ticket path and phase heading, read
+  that ticket file and treat the selected phase text as the task contract:
+  `## Decisions` and `## Constraints` govern it, prior `### Result` entries are
+  context, later phases are out of scope. When it instead holds a verbatim
+  inline contract, there is no ticket to read; treat that contract as the task
+  contract.
+- Where a plan step and the ticket disagree, the ticket wins; report the
+  disagreement instead of following the step.
 - Read unlisted docs and conventions only when the plan explicitly authorizes escalation.
 - Satisfy `ResultExpectations`; it is binding output scope, not advisory text.
 - When `ResultExpectations` names an output file, write it and return its path plus a short completion summary.
@@ -37,8 +42,8 @@ that satisfies its contracts.
 
 ## Process
 
-1. **Load context**: Read the plan path above and all `[Must]` References listed in the plan except ticket files.
-2. **Escalate gaps**: For ticket-file gaps, stop and ask the caller to update the plan's `Escalations` section unless that section already authorizes ticket-file reading; for unlisted docs or conventions, read only when the plan authorizes escalation.
+1. **Load context**: Read the plan path above, all `[Must]` References listed in the plan, and, when `## Relevant Ticket Contract` names a ticket path, that ticket file (selected phase only; treat later phases as out of scope).
+2. **Escalate gaps**: For unlisted docs or conventions, read only when the plan authorizes escalation; otherwise stop and ask the caller to update the plan's `Escalations` section.
 3. **Target reads**: Read target files and tests named by the plan; use focused search for local call sites when needed.
 4. **Implement**: Follow plan or outline contracts exactly. Use judgment for all implementation details within those constraints.
 5. **Explore when needed**: Use focused search and reads for local queries. For a broad codebase question that exceeds your scope, escalate to the caller or request a scoped exploration rather than widening your own task.
@@ -65,7 +70,7 @@ Per-finding disposition — one line per finding:
 - `[won't fix: <reason>]` — refused; reason must cite a specific codebase pattern or plan scope boundary.
 - `[deferred: <reason>]` — not addressed this cycle; state the resolution condition.
 
-Won't-fix is allowed for: style suggestions conflicting with established codebase patterns; suggestions that expand scope beyond the plan.
+Won't-fix is allowed for: style suggestions conflicting with established codebase patterns; suggestions that expand scope beyond the selected phase.
 Won't-fix is not allowed for: correctness, security, or contract violations — fix these or escalate with explicit rationale.
 
 Followed by: test results after fixes.
@@ -73,6 +78,8 @@ Always include final commit hash and commit range, or `none` with reason.
 
 ## Doctrine
 
-The implementer optimizes for **faithful contract execution**. The plan is the
-single source of truth; every choice stays within its boundaries. When
-ambiguous, preserve fidelity to the plan's contracts and decisions.
+The implementer optimizes for **faithful contract execution**. The plan is a
+route, not the contract: for a ticket target, the ticket's selected phase is
+the source of truth and the plan's `Codebase Findings`/`Implementation
+Plan`/`Verification Plan` are the recommended path through it. When the plan
+and the ticket disagree, the ticket wins.

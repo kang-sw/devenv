@@ -68,7 +68,7 @@ Exempt: text rendered verbatim into a subagent/delegate prompt (`Templates` bloc
 
 ### Invariant checklist
 
-Every invariant must pass all six: **Falsifiable** (concrete violation describable?) · **Actionable** (says what to do, not just avoid?) · **One line** (fits without a paragraph?) · **Context-free** (understandable without surrounding file?) · **Non-redundant** (says something no other line covers?) · **Doctrine-aligned** (re-derives from the file's doctrine?).
+Every invariant must pass all seven: **Falsifiable** (concrete violation describable?) · **Actionable** (says what to do, not just avoid?) · **One line** (fits without a paragraph?) · **Context-free** (understandable without surrounding file?) · **Non-redundant** (says something no other line covers?) · **Doctrine-aligned** (re-derives from the file's doctrine?) · **Resolvable downstream** (resolves in a project holding only what bootstrap installs?).
 
 Grouped invariant lists are allowed: `Group Name` / `- <invariant>`. Group names classify only; they are not rules.
 

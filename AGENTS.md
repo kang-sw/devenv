@@ -29,12 +29,12 @@ Read at every session start, before other action:
    `ai-docs/manuals/` for procedures, and generated ticket/spec inventories for
    current status. Keep only context a session must not re-derive.
 2. **Project arc** - run `git log --oneline --graph -50`.
-3. **Migration anchor** - read
-   `ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md` (under epic
-   `260605-epic-ws-playbook-factory-pivot`) when the task touches plugin
-   architecture, host-neutral migration, the spawn-removal pivot, or adapter
-   boundaries. The prior anchor `260429-research-host-neutral-ws-plugin` is
-   absorbed into this epic and archived under `.done/`.
+3. **Binding anchor** - read this project's declared binding anchor
+   (`## Workflow` -> `### Binding Anchor`) when the task touches one of its
+   declared topics. The declared anchor sits under epic
+   `260605-epic-ws-playbook-factory-pivot`; the prior anchor
+   `260429-research-host-neutral-ws-plugin` is absorbed into this epic and
+   archived under `.done/`.
 
 ## Response Discipline
 
@@ -122,6 +122,22 @@ since it to be clear. `rendezvous-backend: canary` uses the append-only
 review-ledger canary (no GitHub branch-protection config needed) rather than
 the `platform` backend, matching this project's current
 single-maintainer-serial posture.
+
+### Binding Anchor
+
+```text
+anchor: ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md
+topics: plugin architecture, host-neutral migration, spawn-removal, adapter boundaries
+```
+
+`anchor` names the ticket a lead must read before answering or editing when a
+target touches one of the `topics`. `lead-discuss`, `lead-proceed`, and
+`lead-implement` read this declaration through the generic binding-anchor hook
+(`ai-docs/spec/workflow-skills.md`
+`{#260908-project-binding-anchor-declaration}`) rather than naming this
+repository's anchor in shipped text. Both keys are required: a project that
+declares no such section (or only one key) has no binding-anchor gate, and the
+proceed fact normalizes to `n/a`.
 
 ### Commit Rules
 

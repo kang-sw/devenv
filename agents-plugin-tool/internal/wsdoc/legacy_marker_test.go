@@ -230,8 +230,7 @@ const legacyMarkerSpecBody = "---\ntitle: Demo\n---\n# Demo\n\n" +
 
 // legacyMarkerAdvisoryPrefix is the note's leading clause, including the marker
 // line number the caller needs in order to act on "strip the marker".
-const legacyMarkerAdvisoryPrefix = "legacy planned marker (contract-first planned-entry mechanism being retired by " +
-	"260726-refactor-retire-spec-planned-marker-mechanism): 1 marker(s) at line 10"
+const legacyMarkerAdvisoryPrefix = "legacy planned marker (contract-first planned-entry mechanism being retired): 1 marker(s) at line 10"
 
 func legacyMarkerCorpus(t *testing.T) string {
 	t.Helper()

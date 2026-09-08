@@ -164,10 +164,13 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 		}
 		design, _ := effectiveSageReviewPostures(frontmatter(ticketAbs))
 		if design == "completed" {
-			if result, err := sageGateFreshnessResult(root, ticketRel, []string{"design"}); err != nil {
+			if result, consumed, err := sageGateFreshnessResult(root, ticketRel, []string{"design"}, answer); err != nil {
 				return SageGateResult{}, err
-			} else if result.Action != "" {
-				return result, nil
+			} else if consumed {
+				if result.Action != "" {
+					return result, nil
+				}
+				answer = ""
 			}
 		}
 		return sageGateStandalone(ticketAbs, "design", "sage-review-design", design, resolvedSageReviewConfig, answer)
@@ -183,10 +186,13 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 		// epic: design-only. Skip when design posture is already terminal.
 		if design == "completed" || design == "skipped" {
 			if design == "completed" {
-				if result, err := sageGateFreshnessResult(root, ticketRel, []string{"design"}); err != nil {
+				if result, consumed, err := sageGateFreshnessResult(root, ticketRel, []string{"design"}, answer); err != nil {
 					return SageGateResult{}, err
-				} else if result.Action != "" {
-					return result, nil
+				} else if consumed {
+					if result.Action != "" {
+						return result, nil
+					}
+					answer = ""
 				}
 			}
 			return SageGateResult{Action: "skip"}, nil
@@ -205,10 +211,17 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 			completed = append(completed, "completeness")
 		}
 		if len(completed) > 0 {
-			if result, err := sageGateFreshnessResult(root, ticketRel, completed); err != nil {
+			if result, consumed, err := sageGateFreshnessResult(root, ticketRel, completed, answer); err != nil {
 				return SageGateResult{}, err
-			} else if result.Action != "" {
-				return result, nil
+			} else if consumed {
+				if result.Action != "" {
+					return result, nil
+				}
+				// Freshness question declined: the answer was spent on it, so
+				// reset before the completeness stage below resolves — otherwise
+				// a `no` meant for freshness would wrongly decline a still-pending
+				// recommended completeness stage.
+				answer = ""
 			}
 		}
 		return sageGateStandalone(ticketAbs, "completeness", "sage-review-completeness", completeness, resolvedSageReviewConfig, answer)
@@ -279,9 +292,18 @@ func sageGateStandalone(ticketAbs, reviewer, field, posture, resolvedConfig, ans
 }
 
 func gateResultFromStage(out stageOutcome, reviewer, mode string) SageGateResult {
+	return gateResultFromStageReviewers(out, []string{reviewer}, mode)
+}
+
+// gateResultFromStageReviewers is the multi-reviewer generalization of
+// gateResultFromStage: it maps a stageOutcome to a SageGateResult carrying the
+// supplied reviewer list. The freshness `run` result uses it to set Reviewers
+// to the (possibly two-element) stale-stage list, which the single-reviewer
+// gateResultFromStage cannot express.
+func gateResultFromStageReviewers(out stageOutcome, reviewers []string, mode string) SageGateResult {
 	switch out.action {
 	case "run":
-		return SageGateResult{Action: "run", Reviewers: []string{reviewer}, Mode: mode, Advisory: out.advisory}
+		return SageGateResult{Action: "run", Reviewers: reviewers, Mode: mode, Advisory: out.advisory}
 	case "ask":
 		return SageGateResult{Action: "ask", AskPrompt: out.askPrompt, Advisory: out.advisory}
 	case "stop_blocked":
