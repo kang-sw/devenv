@@ -704,6 +704,104 @@ and is added only on a successful `workflow_manual` result, never on an error
 response. Ordinary spawns still degrade silently to inherit while every tier is unset;
 simple explore and deep collection instead fail closed before child allocation.
 
+### Claude Code as a lead model: the `claude-code` provider {#260908-pi-claude-code-provider}
+
+The adapter registers a Pi provider named `claude-code` in every process that
+loads the extension (lead, fork, ask, workers). It wraps the `claude` CLI —
+subscription-authenticated, driven through the Claude Agent SDK's stream-json
+protocol client — as a Pi model so the lead can run on Claude while Pi keeps
+owning history, tools, hooks, the TUI and the delegation layer. Three model
+ids are exposed, `opus`, `sonnet` and `haiku`, passed straight through as the
+SDK `model` option (the CLI resolves the alias, e.g. `sonnet` →
+`claude-sonnet-5`); all three are `reasoning: true`, text-only input, and
+carry zero cost rates because usage is subscription-metered, not
+dollar-billed. The provider declares a placeholder API key so Pi's
+`hasConfiguredAuth` reports true and the tier resolver accepts a
+`claude-code/<id>` entry (see "Model resolution: fixed tier through ws-mcp"
+above) without any Pi login flow; real authentication is the CLI's own login
+(`claude auth status`). Selecting it is configuration only — Pi
+`defaultProvider`/`defaultModel`, `/model`, or a harness-`pi` `agents.tier`
+entry — and switching back to another provider is the same configuration
+change; nothing in the adapter special-cases the provider by name outside its
+own module.
+
+**One claude process per Pi session, Pi owns history.** The claude child is
+started lazily on the first `streamSimple` call, so a child Pi process whose
+tier points elsewhere never spawns one. Claude Code's built-in tools,
+settings, CLAUDE.md, hooks and the account's connector MCP servers are all
+off; Pi's system prompt is passed through verbatim (it already carries
+AGENTS.md and the ws block). Every Pi tool in the request's tool list is
+reflected as an in-process SDK MCP tool (`mcp__pi__<name>`; nested
+object/array parameters are accepted as opaque values rather than dropped).
+A reflected tool's handler executes nothing: it *parks*. The `tool_use` block
+ends the current Pi turn with `stopReason: "toolUse"`, Pi's own loop executes
+the tool (hooks, wrappers, execute gateway, `addedToolNames`, TUI all intact),
+and the next `streamSimple` call whose trailing messages are `toolResult`s
+resolves the parked handler by `tool_use` id with the result text (error
+results are forwarded as MCP tool errors), so Claude continues inside the
+same process. Parallel `tool_use` blocks arrive one per SDK frame and become
+sequential Pi turns, in order; Pi's history holds them serially while
+Claude's shadow history holds one message. A trailing `user` message is
+pushed to the process as a new SDK user turn; tool results plus a steer
+message in the same call resolve the handlers and queue the message, and the
+Pi turn stays open until the last queued Claude turn's result arrives.
+
+**Streaming and usage.** Phase 1 emits content at block granularity: one
+`text_start/delta/end` per SDK text block, one `thinking_*` triple per
+thinking block (signature preserved), one `toolcall_*` triple per `tool_use`
+block. Pi's thinking level maps to the SDK `effort` option — `off`/absent
+disables thinking, `minimal` and `low` both map to `low`, `medium`, `high`,
+`xhigh` and `max` pass through one-to-one. Each SDK assistant message's
+input, output, cache-read and cache-creation tokens are summed into the Pi
+turn's usage once per API message id (the SDK delivers one frame per content
+block, each carrying the same usage), so Pi's context and cache displays and
+the fork cache notice keep working; cost stays zero. `onPayload` is invoked
+before anything is handed to the SDK (with the options and messages about to
+be sent; a returned replacement is honored) and `onResponse` after the first
+SDK message of the turn, matching built-in providers.
+
+**Resync rule.** A call continues the live process only when all hold: the
+process is alive; the new message list extends the last-seen list — the
+provider's own previous assistant turn plus appended `toolResult`s and/or one
+trailing `user` message; every appended `toolResult` has a parked handler; and
+the system prompt, the tool-name set, the model id and the mapped effort are
+unchanged. Otherwise (Pi compaction, a `--fork` child's first call, a history
+edit, a tool set that grew through the deferred-load channel, a `/model` or
+thinking change, a dead process) the provider closes the process and starts a
+new one whose first user message replays Pi's prior history as a
+`<conversation_transcript>` block — prior user turns, assistant text, tool
+calls with their arguments and ids, and tool results, in order; thinking is
+not replayed — followed by the new trailing user message (or a fixed
+"continue" instruction when the history ends in a tool result). The SDK
+accepts only user input, so prior assistant turns cannot be re-injected
+natively; the replay is the accepted lossy path. The transcript is
+byte-stable for identical histories, which is what lets Anthropic's prompt
+cache absorb a replay (the cache prefix also includes the process's working
+directory, so a resync keeps the same cwd). Every resync is logged with its
+reason.
+
+**Lifecycle and failure.** `session_shutdown` closes the process
+(`Query.close()`); the claude child must not outlive the Pi session. A Pi
+abort signal interrupts the process (`Query.interrupt()`), ends the current
+turn `aborted`, rejects any handler parked or arriving for that turn so the
+SDK side sees a tool error instead of hanging, and discards the interrupted
+Claude turn's trailing result; the process itself is kept and the next call's
+extension check decides continue versus resync. A start or SDK failure (SDK
+module missing, binary missing, not logged in, transport failure, process
+exit mid-turn) ends the turn as `error` with a message naming the cause and
+the remedy — `claude auth login`, installing Claude Code, or switching the
+tier back; there is no silent fallback to another provider. A `result` with
+`is_error` ends the turn as `error` carrying the SDK's error text, and the
+process is kept for the next call's check.
+
+**Non-goals.** No Claude Code built-in tools, settings, hooks or connector
+MCP servers; no adapter special-casing outside the provider module; no live
+partial deltas and no in-place tool-set growth (both Phase 2 of the ticket —
+a grown tool set resyncs today). The SDK is a protocol client for the
+`claude` CLI, not a policy surface: unit coverage runs against an injected
+fake of its three entry points (`query`, `createSdkMcpServer`, `tool`), and
+the live gate (`WS_PI_LIVE_CLAUDE=1`) runs only on demand.
+
 ### Child→lead report channel {#260904-pi-report-to-lead-channel}
 
 A worker can push an out-of-band message to its lead mid-run through the child-side
@@ -1612,6 +1710,8 @@ stays byte-identical.
 > - This contract covers the bridge, the delegation spawner (upgraded to
 >   persistent RPC children with bounded depth ≤ 2, a child→lead report channel,
 >   and a path-only transcript accessor), the model catalog alias table, the
+>   `claude-code` lead-model provider (Phase 1: block-level streaming, parked
+>   tool handlers, resync-with-replay, shutdown/abort/error lifecycle), the
 >   `/ws-discuss` PoC command, and the lead-session goal loop (arming, the
 >   `agent_settled` re-fire, the terminal levers, the runaway backstop, and the
 >   model-driven compaction lever with its advisory surfacing, config knobs, and

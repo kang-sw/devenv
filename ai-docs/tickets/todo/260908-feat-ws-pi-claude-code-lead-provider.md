@@ -208,3 +208,50 @@ Verification: fake-SDK tests for delta ordering across interleaved text
 and tool_use blocks; live gate showing incremental rendering in `pi`
 TUI; owner-run dogfood of a deferred-tool load (fork-only tools) without
 a process restart, or the documented resync fallback.
+
+## Implementation checkpoint - 2026-09-08
+
+Phase 1 is implemented on `impl/track/pi-agent/claude-code-provider` in a
+separate worktree: provider, tests, dependencies and the `index.ts`
+registration in `98a5306f`; spec section
+`{#260908-pi-claude-code-provider}` and this checkpoint in the follow-up
+docs commit. Base is `9e3cb14b` (the ticket-opening commit on
+`track/pi-agent`). Not merged, not pushed.
+
+Fake-SDK suite (`test/claude-code-provider.test.ts`): 28/28 pass, covering
+every Phase 1 list item. Full `npm test` in `agents-plugin-pi/`: 1292 tests,
+1162 pass, 129 fail, 1 skipped (the live gate). Every failure is
+pre-existing and environment-bound: `fork-prefix.integration`,
+`fork-lifecycle.integration` and `fork-native-transitions` hard-code the
+owner's Linux global SDK path
+(`/home/linuxbrew/.linuxbrew/lib/node_modules/@earendil-works/pi-coding-agent`),
+which does not exist on the macOS machine this ran on; the `local-0.84.4`
+variants of the same tests pass. No provider-related failure.
+
+Live gate run once (`WS_PI_LIVE_CLAUDE=1`, `claude-code/sonnet`, isolated
+`pi -p`, throwaway root, subscription login, 185 s parked wait): pass in
+194.6 s. First run: exit 0 in 189.8 s, answer
+`extra_a says: alpha-7731 extra_b echoes: kiwi`, one claude process
+(model resolved `claude-sonnet-5`, MCP server `pi` connected), no resync,
+stop reasons `toolUse, toolUse, stop`; the `extra_a` handler parked
+10:19:04 -> 10:22:09 and still resolved (no MCP timeout). Usage per call:
+1 `{input:2, output:23, cacheRead:0, cacheWrite:1889}`, 2 identical (both
+`tool_use` blocks belong to the same API message), 3 `{input:2, output:1,
+cacheRead:1889, cacheWrite:225}`. Second identical run: exit 0 in 4.8 s,
+call 1 `cacheRead:1889, cacheWrite:0`, call 3 `cacheRead:2114`. The MCP
+request `_meta` key carrying the `tool_use` id is `claudecode/toolUseId`.
+An ad-hoc SDK check confirmed `Query.interrupt()` yields a trailing
+`error_during_execution` result, which the abort path discards.
+
+Deviations from the plan text, recorded in the commit `## AI Context`:
+usage summed once per SDK `message.id` rather than per frame; handler
+pairing by `_meta` id with a per-name FIFO fallback; `@earendil-works/pi-ai`
+imported from its main entry (no subpath export); `alwaysLoad: true` on the
+MCP server; the live gate shares one cwd across runs because Claude Code
+folds cwd into the cached prefix.
+
+**Remaining, owner-run:** the Phase 1 dogfood (a ws lead session on
+`claude-code/opus` with the full ws tool surface; `explore`, `ws-fork`
+and `ws-ask` round-trips; a mid-session `/model` switch back to the
+OpenAI tier resyncing without history loss) and the merge decision. No
+`### Result` is recorded; Phase 2 is untouched.
