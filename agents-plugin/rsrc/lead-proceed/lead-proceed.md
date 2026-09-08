@@ -55,7 +55,7 @@ Target: user request
 | Decision | When |
 |----------|------|
 | Yes | User-blocking design choice, scope boundary, acceptance criterion, trade-off, or delegation decision remains open |
-| Yes | Migration-anchor conflicts with the requested route |
+| Yes | The project's declared binding anchor conflicts with the requested route |
 | No | Missing spec addressing, frontmatter, focus hygiene, tests, or local implementation details can be resolved autonomously |
 | No | Ticket promotion is mechanical or can be handled by `lead-write-ticket` |
 
@@ -100,7 +100,7 @@ remain compatible.
 | `discussion_needed` | `yes\|no\|unknown` |
 | `needs_ticket` | `yes\|no\|n/a\|unknown` |
 | `scope_blocked` | `none\|container-ticket\|multiple-explicit-phases\|too-broad\|no-unfinished-phase\|phase-already-complete\|unknown` |
-| `migration_anchor` | `loaded\|n/a\|missing\|conflict\|unknown` |
+| `binding_anchor` | `loaded\|n/a\|missing\|conflict\|unknown` |
 
 `facts.work`
 | Field | Enum |

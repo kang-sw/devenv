@@ -10,6 +10,12 @@ type proceedInput struct {
 	Target proceedTargetInput `json:"target"`
 	Facts  proceedFactsInput  `json:"facts,omitempty"`
 	Format string             `json:"format,omitempty"`
+	// AnchorDeclared is a Go-only plumbing flag (not part of the lead-facing
+	// JSON contract) set by the handler from the project's `### Binding Anchor`
+	// declaration. When false, normalizeProceedFacts forces the binding-anchor
+	// fact to n/a regardless of the supplied facts.gates.binding_anchor value,
+	// so a project that declares no anchor is never routed to the anchor gate.
+	AnchorDeclared bool `json:"-"`
 }
 
 type proceedTargetInput struct {
@@ -39,7 +45,7 @@ type proceedGateFactsInput struct {
 	DiscussionNeeded factString `json:"discussion_needed,omitempty"`
 	NeedsTicket      factString `json:"needs_ticket,omitempty"`
 	ScopeBlocked     factString `json:"scope_blocked,omitempty"`
-	MigrationAnchor  factString `json:"migration_anchor,omitempty"`
+	BindingAnchor    factString `json:"binding_anchor,omitempty"`
 }
 
 type proceedWorkFactsInput struct {
@@ -89,7 +95,7 @@ type normalizedProceedFacts struct {
 	TicketMissing    string
 	HasTicket        string
 	Status           string
-	MigrationAnchor  string
+	BindingAnchor    string
 	Actionable       string
 	DiscussionNeeded string
 	NeedsTicket      string
@@ -261,7 +267,7 @@ func parseProceedGateFacts(m map[string]any) (proceedGateFactsInput, error) {
 	if out.ScopeBlocked, err = parseEnumFact(m, "scope_blocked", []string{"none", "container-ticket", "multiple-explicit-phases", "too-broad", "no-unfinished-phase", "phase-already-complete", "unknown"}); err != nil {
 		return out, fmt.Errorf("facts.gates.%w", err)
 	}
-	if out.MigrationAnchor, err = parseEnumFact(m, "migration_anchor", []string{"loaded", "n/a", "missing", "conflict", "unknown"}); err != nil {
+	if out.BindingAnchor, err = parseEnumFact(m, "binding_anchor", []string{"loaded", "n/a", "missing", "conflict", "unknown"}); err != nil {
 		return out, fmt.Errorf("facts.gates.%w", err)
 	}
 	return out, nil
@@ -372,7 +378,7 @@ func normalizeProceedFacts(input proceedInput) (normalizedProceedFacts, []string
 		TicketMissing:    factOr(t.TicketMissing, "unknown"),
 		HasTicket:        factOr(t.HasTicket, "unknown"),
 		Status:           factOr(t.Status, "unknown"),
-		MigrationAnchor:  factOr(g.MigrationAnchor, "n/a"),
+		BindingAnchor:    factOr(g.BindingAnchor, "n/a"),
 		Actionable:       factOr(t.Actionable, "unknown"),
 		DiscussionNeeded: factOr(g.DiscussionNeeded, "unknown"),
 		NeedsTicket:      factOr(g.NeedsTicket, "unknown"),
@@ -380,6 +386,13 @@ func normalizeProceedFacts(input proceedInput) (normalizedProceedFacts, []string
 		Category:         factOr(t.Category, "unknown"),
 		Slice:            factOr(w.Slice, strings.TrimSpace(t.Phase.Value)),
 		ScopeBlocked:     factOr(g.ScopeBlocked, "unknown"),
+	}
+	// A project that declares no `### Binding Anchor` cannot have a binding-anchor
+	// gate: force the fact to n/a even when the lead supplied loaded/missing/
+	// conflict, so the anchor routes and the conflict-forces-discussion warning
+	// only fire for declaring projects.
+	if !input.AnchorDeclared {
+		n.BindingAnchor = "n/a"
 	}
 	if n.Slice == "" {
 		n.Slice = "unknown"
@@ -438,8 +451,8 @@ func normalizeProceedFacts(input proceedInput) (normalizedProceedFacts, []string
 		n.TargetKind = "unknown"
 	}
 
-	if n.MigrationAnchor == "conflict" && n.DiscussionNeeded != "yes" {
-		warnings = append(warnings, "discussion-needed normalized to yes because migration-anchor=conflict")
+	if n.BindingAnchor == "conflict" && n.DiscussionNeeded != "yes" {
+		warnings = append(warnings, "discussion-needed normalized to yes because binding-anchor=conflict")
 		n.DiscussionNeeded = "yes"
 	}
 	if n.Category == "epic" || n.Category == "workset" {
@@ -484,11 +497,11 @@ func selectProceedRoute(n normalizedProceedFacts) (route, next, reason string) {
 	if n.Category == "epic" || n.Category == "workset" {
 		return "container-ticket." + n.Category, "stop", "category=" + n.Category
 	}
-	if n.MigrationAnchor == "missing" {
-		return "anchor-discussion.migration-anchor-missing", "stop", "migration-anchor=missing"
+	if n.BindingAnchor == "missing" {
+		return "anchor-discussion.binding-anchor-missing", "stop", "binding-anchor=missing"
 	}
-	if n.MigrationAnchor == "conflict" {
-		return "anchor-discussion.migration-anchor-conflict", "lead-discuss", "migration-anchor=conflict"
+	if n.BindingAnchor == "conflict" {
+		return "anchor-discussion.binding-anchor-conflict", "lead-discuss", "binding-anchor=conflict"
 	}
 	if n.DiscussionNeeded == "yes" {
 		return "anchor-discussion.discussion-needed", "lead-discuss", "discussion-needed=yes"
@@ -520,7 +533,7 @@ func proceedConditions(n normalizedProceedFacts) []string {
 		"ticket-missing=" + n.TicketMissing,
 		"has-ticket=" + n.HasTicket,
 		"status=" + n.Status,
-		"migration-anchor=" + n.MigrationAnchor,
+		"binding-anchor=" + n.BindingAnchor,
 		"actionable=" + n.Actionable,
 		"discussion-needed=" + n.DiscussionNeeded,
 		"needs-ticket=" + n.NeedsTicket,

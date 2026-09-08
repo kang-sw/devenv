@@ -388,6 +388,11 @@ type implementTodoVerdict struct {
 	DocMode     string
 	DocReason   string
 	NeedDoc     bool
+	// BindingAnchorClause is the pre-rendered Prep-guardrail anchor clause,
+	// empty when the project declares no `### Binding Anchor` in AGENTS.md. It
+	// is filled by the route.resolve_implement handlers (which hold the session
+	// root) so that implementPrepInstruction stays pure and root-free.
+	BindingAnchorClause string
 }
 
 // deriveImplementTodos builds the standard lead-implement checklist. The
@@ -526,7 +531,7 @@ func implementPrepInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not prepare further implementation work until the branch blocker is resolved: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
-	const guardrails = `Before edits or dispatch, run mental-model lookup, read returned docs ancestors first, read the 260605 migration anchor when target touches plugin architecture, host-neutral migration, spawn-removal, or adapter boundaries, and read infra.read("impl-playbook"). `
+	guardrails := `Before edits or dispatch, run mental-model lookup, read returned docs ancestors first, ` + verdict.BindingAnchorClause + `and read infra.read("impl-playbook"). `
 	switch strings.ToLower(strings.TrimSpace(verdict.PlanDepth)) {
 	case "none", "":
 		return guardrails + "Confirm the direct-edit facts are still accurate, identify the focused verification command, and proceed without a separate brief, survey, or research plan."
@@ -1084,15 +1089,16 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 			return toolTextResponse(id, "", fmt.Errorf("%s: agenda is not JSON-encodable: %w", tool, err))
 		}
 		todos := deriveImplementTodosFromVerdict(implementTodoVerdict{
-			TargetKind:  result.Target.Kind,
-			Delegation:  result.Verdict.Delegation,
-			BranchPlan:  result.Verdict.BranchPlan,
-			PlanDepth:   result.Verdict.PlanDepth,
-			ReviewAlloc: result.Verdict.ReviewAlloc,
-			NeedReview:  result.Verdict.NeedReview,
-			DocMode:     result.Verdict.DocMode,
-			DocReason:   result.Agenda.DocReason,
-			NeedDoc:     result.Verdict.DocMode == "standard",
+			TargetKind:          result.Target.Kind,
+			Delegation:          result.Verdict.Delegation,
+			BranchPlan:          result.Verdict.BranchPlan,
+			PlanDepth:           result.Verdict.PlanDepth,
+			ReviewAlloc:         result.Verdict.ReviewAlloc,
+			NeedReview:          result.Verdict.NeedReview,
+			DocMode:             result.Verdict.DocMode,
+			DocReason:           result.Agenda.DocReason,
+			NeedDoc:             result.Verdict.DocMode == "standard",
+			BindingAnchorClause: wsreview.ReadAgentsBindingAnchor(record.Root).PrepClause(),
 		})
 		if err := s.sessions.enterMode(sessionKey, "implement", rawAgenda, todos); err != nil {
 			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
@@ -1125,12 +1131,18 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 	args["delegation"] = delegation
 	args["plan_depth"] = planDepth
 	args["review_alloc"] = reviewAlloc
+	// The legacy top-level path has no record in scope; read the session state
+	// (fail-open to an empty root, which renders no clause) so the Prep
+	// guardrail names the declared binding anchor in a declaring project,
+	// mirroring the typed path above.
+	record, _ := s.sessions.readState(sessionKey)
 	todos := deriveImplementTodosFromVerdict(implementTodoVerdict{
-		Delegation:  delegation,
-		PlanDepth:   planDepth,
-		ReviewAlloc: reviewAlloc,
-		NeedReview:  needReview,
-		NeedDoc:     needDoc,
+		Delegation:          delegation,
+		PlanDepth:           planDepth,
+		ReviewAlloc:         reviewAlloc,
+		NeedReview:          needReview,
+		NeedDoc:             needDoc,
+		BindingAnchorClause: wsreview.ReadAgentsBindingAnchor(record.Root).PrepClause(),
 	})
 	return s.handleEnter(id, "route.resolve_implement", "implement", args, todos)
 }
@@ -1182,6 +1194,15 @@ func (s *Server) handleEnterProceed(id json.RawMessage, args map[string]any) res
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
+	// Read session state before resolving so the binding-anchor gate reflects
+	// whether this project declares a `### Binding Anchor`; when it does not,
+	// resolveProceed normalizes the anchor fact to n/a regardless of the
+	// supplied facts.gates.binding_anchor value. The same record feeds the
+	// review-watermark nudge below (no duplicate read).
+	record, haveRecord := s.sessions.readState(sessionKey)
+	if haveRecord {
+		input.AnchorDeclared = wsreview.ReadAgentsBindingAnchor(record.Root).Declared
+	}
 	result := resolveProceed(input)
 	rawAgenda, err := json.Marshal(result.Agenda)
 	if err != nil {
@@ -1197,7 +1218,7 @@ func (s *Server) handleEnterProceed(id json.RawMessage, args map[string]any) res
 	// branch left the two formats out of parity whenever the nudge is
 	// non-empty — latent until 260830 made the baseline arm reachable on
 	// trackless repos.
-	if record, ok := s.sessions.readState(sessionKey); ok {
+	if haveRecord {
 		if reviewNudge := wsreview.CheckpointNudge(context.Background(), record.Root); reviewNudge != "" {
 			result.Raw += "review-watermark: " + reviewNudge + "\n"
 		}
