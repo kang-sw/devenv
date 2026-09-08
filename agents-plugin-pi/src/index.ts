@@ -175,7 +175,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { startBridge, type BridgeHandle } from "./bridge.ts";
 import {
   agentWidgetRefreshRef,
@@ -195,7 +195,7 @@ import { registerGoalLoop, readGoalLoopConfig, resolveSettleDelayMs } from "./go
 import { resolveSkillsDir } from "./skills-dir.ts";
 import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
 import { applyForkAffinity, captureRegisteredTools, compareForkRegistrations, effectiveForkDescriptor, frameForkInput, readForkLaunchContext, removeForkTransport, restoreForkContext, restoreForkKeys, writePrivateJson, type ForkContext } from "./fork-context.ts";
-import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV } from "./process-role.ts";
+import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, type SpawnRole } from "./process-role.ts";
 import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
 import { armForkRoleWiring, registerFork } from "./fork.ts";
 import {
@@ -220,6 +220,43 @@ const goalLoopConfigPath = join(pluginDir, "goal-loop-config.json");
 const piLeadGuidePath = join(pluginDir, "pi-lead-guide.md");
 const executeWorkerGuidePath = join(pluginDir, "execute-worker-guide.md");
 const exploreGuidePath = join(pluginDir, "explore-guide.md");
+
+/**
+ * `260907-bug-ws-pi-deep-explore-missing-collection-tool` Phase 1: guards the
+ * `session_start` seam so a `startBridge`/`registerAgentTools` failure never
+ * leaves a session up with a partial/toolless surface. On failure this
+ * always notifies loudly (`ctx.ui.notify(..., "error")`); for a spawned
+ * child (`role !== undefined` — `worker`/`explore`/`fork`, every role with an
+ * RPC-connected parent process) it ALSO calls `exitProcess` so the process
+ * actually terminates, which makes the parent's `RpcClient` (already-tested
+ * exit-rejection machinery, see spawner.ts's use of it) surface a real error
+ * to the `ws-agent-spawn`/`explore` caller instead of a silent toolless
+ * researcher. The host lead (`role === undefined`) has no RPC parent to
+ * signal, so it only gets the notify + an early `return` from the caller
+ * (see the `if (!bootstrap) return;` guard below) — loud, but not a crash of
+ * the user's own interactive terminal.
+ *
+ * Kept dependency-free of any per-`session_start` closure state (no refs, no
+ * `pi` beyond what `bootstrap()` itself captures) — mirrors
+ * `registerAgentTools`'s injectable `runExploreLeaf` parameter
+ * (spawner.ts), which is what makes this testable without a full fake
+ * `ExtensionAPI`/`ExtensionContext`.
+ */
+export async function bootstrapOrFailLoud<T>(
+  ui: Pick<ExtensionUIContext, "notify">,
+  role: SpawnRole | undefined,
+  bootstrap: () => Promise<T>,
+  exitProcess: (code: number) => never = (code) => process.exit(code),
+): Promise<T | undefined> {
+  try {
+    return await bootstrap();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    ui.notify(`ws-pi-agent: session bootstrap failed — this session has no ws-mcp bridge or custom tools (${message})`, "error");
+    if (role !== undefined) exitProcess(1);
+    return undefined;
+  }
+}
 
 export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   // Filled before the bridge starts so native tool renderers are available
@@ -396,25 +433,34 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // comment).
     toolPreviewTuiRef.current = await loadToolResultTuiModules();
 
-    handle = await startBridge(pi, {
-      launcherPath,
-      pluginDir,
-      runtimeJsonPath,
-      cwd: ctx.cwd,
-      toolPreviewTuiRef,
-      ui: ctx.ui,
-      forkContext: durableForkContextRef.current,
-      previousOwnKeys,
-    });
-    sessionKeyRef.current = handle.defaultSessionKeyRef.current;
-
-    // Built BEFORE registerAgentTools (not after, unlike registerExecuteGateway
-    // below) so it can be threaded into that call too — see
-    // spawner.ts's registerAgentTools doc comment for why a
-    // dormant-resumed execute-worker needs the SAME callback wired through
+    // 260907 Phase 1: guard the seam so a `startBridge`/`registerAgentTools`
+    // failure never falls through into a partial/toolless registration — see
+    // `bootstrapOrFailLoud`'s doc comment above. `createApprovalRelay` stays
+    // built BEFORE `registerAgentTools` inside the guarded closure (not
+    // after, unlike registerExecuteGateway below) so it can be threaded into
+    // that call too — see spawner.ts's registerAgentTools doc comment for why
+    // a dormant-resumed execute-worker needs the SAME callback wired through
     // ws-agent-send's auto-resume branch, not just ws-execute's own spawn.
-    const onApprovalPending = createApprovalRelay(pi, { cwd: ctx.cwd }, rpcRegistryRef);
-    agentTools = registerAgentTools(pi, handle, { cwd: ctx.cwd }, onApprovalPending, undefined, exploreGuidePath, toolPreviewTuiRef);
+    const sessionBootstrap = await bootstrapOrFailLoud(ctx.ui, readSpawnRole(process.env), async () => {
+      const h = await startBridge(pi, {
+        launcherPath,
+        pluginDir,
+        runtimeJsonPath,
+        cwd: ctx.cwd,
+        toolPreviewTuiRef,
+        ui: ctx.ui,
+        forkContext: durableForkContextRef.current,
+        previousOwnKeys,
+      });
+      const approval = createApprovalRelay(pi, { cwd: ctx.cwd }, rpcRegistryRef);
+      const tools = registerAgentTools(pi, h, { cwd: ctx.cwd }, approval, undefined, exploreGuidePath, toolPreviewTuiRef);
+      return { handle: h, agentTools: tools, onApprovalPending: approval };
+    });
+    if (!sessionBootstrap) return; // notified (and, for a spawned child, already exited) inside bootstrapOrFailLoud — never fall through to a partial/toolless registration.
+    handle = sessionBootstrap.handle;
+    sessionKeyRef.current = handle.defaultSessionKeyRef.current;
+    const onApprovalPending = sessionBootstrap.onApprovalPending;
+    agentTools = sessionBootstrap.agentTools;
     rpcRegistryRef.current = agentTools.rpcRegistry;
     registerExecuteGateway(pi, handle, agentTools.rpcRegistry, {
       cwd: ctx.cwd,
