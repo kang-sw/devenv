@@ -1131,6 +1131,24 @@ func TestResolveProceedRoutes(t *testing.T) {
 			wantCond:       "discussion-needed=yes",
 		},
 		{
+			// A project that declares no `### Binding Anchor` (anchorDeclared
+			// left false) must have the supplied non-n/a anchor fact forced to
+			// n/a, so no downstream project can hit the anchor gate by default.
+			name: "undeclared project forces supplied anchor fact to n/a",
+			args: proceedArgs("ticket-path", "supplied anchor no declaration", map[string]any{
+				"ticket_stem": "260101-feat-demo",
+				"ticket_path": "ai-docs/tickets/ready/260101-feat-demo.md",
+			}, map[string]any{
+				"ticket": map[string]any{"ticket_missing": "no", "has_ticket": "yes", "status": "ready", "category": "other", "actionable": "yes", "freshness": "current"},
+				"gates":  map[string]any{"binding_anchor": "missing", "scope_blocked": "none", "discussion_needed": "no"},
+				"work":   map[string]any{"slice": "Phase 1: Demo"},
+			}),
+			wantRoute:  "implementation-dispatch.ready-actionable",
+			wantNext:   "lead-implement",
+			wantReason: "status=ready",
+			wantCond:   "binding-anchor=n/a",
+		},
+		{
 			name: "discussion needed routes to discussion",
 			args: proceedArgs("ticket-path", "needs discussion", nil, map[string]any{
 				"ticket": map[string]any{"status": "ready", "category": "other", "freshness": "current"},
@@ -4368,5 +4386,186 @@ func TestWorkflowStateToolSchema(t *testing.T) {
 	properties := toolPropertiesByName(t, callToolsList(t, server), "workflow_state")
 	if _, ok := properties["session_key"]; !ok {
 		t.Fatalf("workflow_state schema missing session_key property: %#v", properties)
+	}
+}
+
+// --- binding-anchor production-wiring integration tests -----------------------
+//
+// These drive the real handlers (NewServer + callToolWithKey) against a
+// t.TempDir() root whose AGENTS.md either declares a `### Binding Anchor` or
+// omits it, so the AGENTS.md-read wiring added at the three route.resolve_*
+// call sites is exercised end-to-end — not the pure parser and not a
+// hand-constructed verdict/input struct with the field pre-set.
+
+const bindingAnchorTestPath = "ai-docs/tickets/idea/000000-demo-anchor.md"
+const bindingAnchorTestTopics = "alpha topic, beta topic"
+
+// bindingAnchorTestClause is the Prep-guardrail clause a declaring root must
+// render (matching wsreview.BindingAnchor.PrepClause's format).
+const bindingAnchorTestClause = "read " + bindingAnchorTestPath + " when target touches " + bindingAnchorTestTopics + ", "
+
+func writeBindingAnchorAGENTS(t *testing.T, root string) {
+	t.Helper()
+	content := "# AGENTS.md\n\n## Workflow\n\n### Binding Anchor\nanchor: " + bindingAnchorTestPath + "\ntopics: " + bindingAnchorTestTopics + "\n\n### Commit Rules\nother content\n"
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+}
+
+func writeSectionlessAGENTS(t *testing.T, root string) {
+	t.Helper()
+	content := "# AGENTS.md\n\n## Workflow\n\n### Review Policy\nreview-track: develop\n"
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+}
+
+func readPrepInstruction(t *testing.T, server *Server, id int, key string) string {
+	t.Helper()
+	readPrep := callToolWithKey(t, server, id, key, "todo.read", map[string]any{"key": "prep"})
+	var prepPayload todoReadPayload
+	if err := json.Unmarshal([]byte(readPrep), &prepPayload); err != nil {
+		t.Fatalf("prep todo read did not parse: %v\n%s", err, readPrep)
+	}
+	if prepPayload.Instruction == nil {
+		t.Fatalf("prep todo has no instruction:\n%s", readPrep)
+	}
+	return *prepPayload.Instruction
+}
+
+func assertPrepAnchorClause(t *testing.T, prep string, declared bool) {
+	t.Helper()
+	if declared {
+		if !strings.Contains(prep, bindingAnchorTestClause) {
+			t.Fatalf("declaring root: prep instruction missing rendered clause %q:\n%s", bindingAnchorTestClause, prep)
+		}
+		return
+	}
+	for _, forbidden := range []string{bindingAnchorTestPath, "when target touches", "alpha topic"} {
+		if strings.Contains(prep, forbidden) {
+			t.Fatalf("sectionless root: prep instruction unexpectedly contains %q:\n%s", forbidden, prep)
+		}
+	}
+}
+
+// TestEnterImplementTypedPathRendersDeclaredBindingAnchor exercises the typed
+// route.resolve_implement path (session_state.go:1101): the clause is read from
+// record.Root's AGENTS.md.
+func TestEnterImplementTypedPathRendersDeclaredBindingAnchor(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		declared bool
+	}{
+		{name: "declared", declared: true},
+		{name: "sectionless", declared: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			useLeadProfile(t)
+			root := t.TempDir()
+			initGit(t, root)
+			runGit(t, root, "switch", "-c", "feature/base")
+			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+			if tc.declared {
+				writeBindingAnchorAGENTS(t, root)
+			} else {
+				writeSectionlessAGENTS(t, root)
+			}
+			server := NewServer(root, "test")
+			key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+			callToolWithKey(t, server, 2, key, "route.resolve_implement", implementReadyArgs("text"))
+			assertPrepAnchorClause(t, readPrepInstruction(t, server, 3, key), tc.declared)
+		})
+	}
+}
+
+// TestEnterImplementLegacyPathRendersDeclaredBindingAnchor exercises the legacy
+// top-level route.resolve_implement path (session_state.go:1145), which reads
+// session state itself; this is the path the ticket constraint requires a test
+// to pin.
+func TestEnterImplementLegacyPathRendersDeclaredBindingAnchor(t *testing.T) {
+	legacyArgs := func() map[string]any {
+		return map[string]any{
+			"delegation":   "delegated",
+			"plan_depth":   "survey",
+			"review_alloc": "partitioned",
+			"need_review":  true,
+			"need_doc":     true,
+		}
+	}
+	for _, tc := range []struct {
+		name     string
+		declared bool
+	}{
+		{name: "declared", declared: true},
+		{name: "sectionless", declared: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			useLeadProfile(t)
+			root := t.TempDir()
+			initGit(t, root)
+			runGit(t, root, "switch", "-c", "implement/demo")
+			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+			if tc.declared {
+				writeBindingAnchorAGENTS(t, root)
+			} else {
+				writeSectionlessAGENTS(t, root)
+			}
+			server := NewServer(root, "test")
+			key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+			callToolWithKey(t, server, 2, key, "route.resolve_implement", legacyArgs())
+			assertPrepAnchorClause(t, readPrepInstruction(t, server, 3, key), tc.declared)
+		})
+	}
+}
+
+// TestEnterProceedReadsDeclaredBindingAnchorGate exercises the handleEnterProceed
+// wiring (session_state.go:1204): AnchorDeclared is read from the session root's
+// AGENTS.md before resolveProceed. A declaring root routes a supplied
+// binding_anchor=missing to the anchor gate; a sectionless root forces the fact
+// to n/a even though the lead supplied missing, so the gate never fires.
+func TestEnterProceedReadsDeclaredBindingAnchorGate(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		declared bool
+	}{
+		{name: "declared routes to anchor gate", declared: true},
+		{name: "sectionless forces n/a", declared: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			useLeadProfile(t)
+			root := t.TempDir()
+			initGit(t, root)
+			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+			if tc.declared {
+				writeBindingAnchorAGENTS(t, root)
+			} else {
+				writeSectionlessAGENTS(t, root)
+			}
+			server := NewServer(root, "test")
+			key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+			args := proceedReadyArgs("text")
+			// Lead supplies a non-n/a anchor fact; whether the gate fires must
+			// depend on the project's AGENTS.md declaration, not this input.
+			args["facts"].(map[string]any)["gates"].(map[string]any)["binding_anchor"] = "missing"
+			text := callToolWithKey(t, server, 2, key, "route.resolve_proceed", args)
+			if tc.declared {
+				if !strings.Contains(text, "Route: anchor-discussion.binding-anchor-missing") {
+					t.Fatalf("declaring root should route to binding-anchor-missing:\n%s", text)
+				}
+				if !strings.Contains(text, "binding-anchor=missing") {
+					t.Fatalf("declaring root should keep binding-anchor=missing condition:\n%s", text)
+				}
+			} else {
+				if strings.Contains(text, "anchor-discussion.binding-anchor-missing") {
+					t.Fatalf("sectionless root must not hit the binding-anchor gate:\n%s", text)
+				}
+				if !strings.Contains(text, "binding-anchor=n/a") {
+					t.Fatalf("sectionless root should force binding-anchor to n/a:\n%s", text)
+				}
+				if !strings.Contains(text, "Route: implementation-dispatch.ready-actionable") {
+					t.Fatalf("sectionless ready ticket should route to implementation dispatch:\n%s", text)
+				}
+			}
+		})
 	}
 }
