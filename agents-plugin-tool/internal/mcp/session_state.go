@@ -531,7 +531,7 @@ func implementPrepInstruction(verdict implementTodoVerdict) string {
 	case "none", "":
 		return guardrails + "Confirm the direct-edit facts are still accurate, identify the focused verification command, and proceed without a separate brief, survey, or research plan."
 	case "survey":
-		return guardrails + "Call path.generate(kind: \"plan\", stems: [target stem or scope]) to create the plan path, render plan-populator-survey with " + plannerAuthorityInputs(verdict.TargetKind) + ", and dispatch it to write the light implementation plan. If survey returns [escalate-to-research] for low confidence or strategic uncertainty, render plan-populator-research with the same authority and plan path before implementer dispatch. Do not create a separate brief."
+		return guardrails + "Call path.generate(kind: \"plan\", stems: [target stem or scope]) to create the plan path, render plan-populator-survey with " + plannerAuthorityInputs(verdict.TargetKind) + ", and dispatch it to write the light implementation plan. If survey returns [escalate-to-research] for low confidence or strategic uncertainty, render plan-populator-research with the same authority and plan path before implementer dispatch. If survey returns [escalate-to-lead], adjudicate the escalation in place before implementer dispatch. Do not create a separate brief."
 	case "research":
 		return guardrails + "Render plan-populator-research with " + plannerAuthorityInputs(verdict.TargetKind) + ", then dispatch it to refine or replace the same implementation plan before implementer dispatch. Do not create a separate brief."
 	default:

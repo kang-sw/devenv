@@ -39,6 +39,16 @@ strategy, contract, or reuse judgment, exit to research.
   `[ok]`. A "first cut" or phased subset is legitimate only when the ticket
   or lead already authorized the phasing — never when the survey invents it.
 - Treat material outside the selected authority and future phases as out of scope unless the accepted target explicitly depends on them.
+- A conclusion that narrows, inverts, or reframes something the ticket's
+  `## Decisions` or `## Constraints` already settled is an escalation, not a
+  finding: record it only in `## Escalations` and report
+  `[escalate-to-lead]`, never `[escalate-to-research]`, regardless of
+  confidence — it never lands in `## Codebase Findings` or
+  `## Implementation Plan` as a settled fact. `## Escalations` is never
+  non-`None` when reporting `[ok]`. A conclusion that fills a gap the
+  ticket leaves open either way is allowed and must be marked as
+  gap-filling, distinct from a conclusion that changes something already
+  settled.
 - Write one plan file at the provided plan path.
 - Exit to research when confidence is low, strategy is unclear, contract facts
   conflict, or reuse judgment needs a deeper planner.
@@ -54,8 +64,10 @@ strategy, contract, or reuse judgment, exit to research.
 
 1. Select authority from `{{.target_kind}}`: for `ticket`, read `{{.ticket_path}}` and `{{.selected_phase}}`; for `inline`, use `{{.inline_contract}}` and do not read a ticket.
 2. Read prior phase results only when ticket authority needs them to understand the requested slice.
-3. Clip the relevant contract: requirements, non-goals, verification boundary,
-   spec impact, and settled decisions that govern the selected phase or inline target.
+3. Understand the requirements, non-goals, verification boundary, spec
+   impact, and settled decisions that govern the selected phase or inline
+   target — this understanding drives your judgment; it is not text to
+   restate into the plan.
 4. Use `{{.McpNamespace}}/mental_models.query` for missing mental-model areas.
 5. Treat historical or adjacent artifacts as inputs only when the selected authority explicitly references them.
 
@@ -91,10 +103,13 @@ If survey is sufficient:
     # Plan: <authority title>
 
     ## Relevant Ticket Contract
-    - <clipped authority requirement, decision, non-goal, or verification boundary>
+    - For a `ticket` target: `<ticket path>` — `<selected phase heading>`. No
+      restated, summarized, or reworded ticket text.
+    - For an `inline` target: `<inline contract, pasted verbatim>`.
 
     ## Out of Scope
-    - <authority content, adjacent phase, or nearby concern intentionally excluded>
+    - <later-phase heading, adjacent ticket stem, or nearby concern, named as a
+      pointer only — never restated authority content>
 
     ## Codebase Findings
     - `path/to/file.rs#L5-L15` — <component, interface, pattern, constraint, or risk signal>
@@ -113,10 +128,13 @@ If research is needed:
     # Plan: <authority title>
 
     ## Relevant Ticket Contract
-    - <clipped authority requirement, decision, non-goal, or verification boundary>
+    - For a `ticket` target: `<ticket path>` — `<selected phase heading>`. No
+      restated, summarized, or reworded ticket text.
+    - For an `inline` target: `<inline contract, pasted verbatim>`.
 
     ## Out of Scope
-    - <authority content, adjacent phase, or nearby concern intentionally excluded>
+    - <later-phase heading, adjacent ticket stem, or nearby concern, named as a
+      pointer only — never restated authority content>
 
     ## Codebase Findings
     - `path/to/file.rs#L40-L55` — <evidence that makes light planning unsafe>
@@ -132,7 +150,7 @@ If research is needed:
     - Reason: <why the survey cannot safely support implementation>
     - Research should decide: <specific strategy, contract, or mechanism question>
 
-Always include all six plan headings. `Escalations` may contain `None`; an empty Implementation Plan or Verification Plan requires escalation.
+Always include all six plan headings. `Escalations` may contain `None` only when reporting `[ok]`; a settled-vs-open conflict is never `None` under `[ok]` and reports `[escalate-to-lead]` instead, distinct from an allowed gap-fill conclusion which must be marked as such. An empty Implementation Plan or Verification Plan requires escalation.
 
 ### 4. Report
 
@@ -142,8 +160,8 @@ Return to the lead:
 - Confidence: `<high|medium|low>`
 - Escalation rationale when returning `[escalate-to-research]`
 - Escalation rationale when returning `[escalate-to-lead]` (the scope-reduction
-  decision surfaced, and why it is a lead call rather than an authorized
-  phasing)
+  decision or settled-vs-open conflict surfaced, and why it is a lead call
+  rather than an authorized phasing or an allowed gap-fill)
 - Count of meaningful codebase findings
 - Any risk signal that may require lead or research judgment before
   implementation starts

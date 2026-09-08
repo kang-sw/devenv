@@ -1325,10 +1325,15 @@ func TestRenderPlaybookShippedImplementerDeclaredContext(t *testing.T) {
 		"Verification instructions: go test ./internal/mcp -run TestRenderPlaybookShippedImplementerDeclaredContext",
 		"Binding result expectations: Report outcome, files changed, commits, verification, and blockers.",
 		"Commit-range reporting requirement: Report <first-commit>..<last-commit> after committing logical checkpoints.",
-		"The plan and its listed references are the task contract.",
-		"Read the plan path above and all `[Must]` References listed in the plan except ticket files.",
-		"Do not read ticket files directly unless the plan's `Escalations` section explicitly authorizes ticket-file reading.",
-		"ask the caller to update the plan's `Escalations` section unless that section already authorizes ticket-file reading",
+		"When `## Relevant Ticket Contract` names a ticket path and phase heading, read",
+		"that ticket file and treat the selected phase text as the task contract:",
+		"When it instead holds a verbatim",
+		"inline contract, there is no ticket to read; treat that contract as the task",
+		"Where a plan step and the ticket disagree, the ticket wins; report the",
+		"disagreement instead of following the step.",
+		"Read the plan path above, all `[Must]` References listed in the plan, and, when `## Relevant Ticket Contract` names a ticket path, that ticket file",
+		"otherwise stop and ask the caller to update the plan's `Escalations` section.",
+		"suggestions that expand scope beyond the selected phase.",
 		"Satisfy `ResultExpectations`; it is binding output scope, not advisory text.",
 		"Normal completion report:",
 		"If `ResultExpectations` names an output file, also include its path plus a short completion summary.",
@@ -1346,6 +1351,11 @@ func TestRenderPlaybookShippedImplementerDeclaredContext(t *testing.T) {
 		"plan or brief",
 		"Do not read ticket files directly, even when a ticket path appears",
 		"caller explicitly authorizes ticket-file reading",
+		"The plan and its listed references are the task contract.",
+		"Do not re-research design alternatives; the plan owns the decisions.",
+		"Do not read ticket files directly unless the plan's `Escalations` section explicitly authorizes ticket-file reading.",
+		"Read the plan path above and all `[Must]` References listed in the plan except ticket files.",
+		"suggestions that expand scope beyond the plan.",
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("implementer render retained old brief/implicit-ticket contract %q:\n%s", forbidden, body)
@@ -1384,9 +1394,9 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 		"Result expectations: Report per-finding dispositions, fix commits, updated range, verification, and blockers.",
 		"Rely only on this prompt and named paths; do not depend on prior conversation.",
 		"Read the plan and every non-clean review path directly.",
-		"Won't-fix is allowed only for style suggestions conflicting with local patterns, findings that require scope expansion beyond the plan, or findings disproven by specific evidence.",
-		"Do not read ticket files directly unless the plan's `Escalations` section explicitly authorizes ticket-file reading.",
-		"escalate for a plan update if a required fix needs ticket material or a plan deviation.",
+		"Won't-fix is allowed only for style suggestions conflicting with local patterns, findings that require scope expansion beyond the selected phase, or findings disproven by specific evidence.",
+		"When `## Relevant Ticket Contract` names a ticket path and phase heading, read that ticket file and treat the selected phase text as the task contract.",
+		"escalate for a plan update if a required fix needs a plan deviation.",
 		"Won't-fix is not allowed for correctness, security, contract, regression, or required-test violations.",
 		"records the relevant per-finding dispositions known at that checkpoint",
 		"`[fixed]`",
@@ -1396,7 +1406,7 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 		// Output bullet. A single unanchored Contains would pass with only one site
 		// updated — the exact drift that made the escalation token invisible before.
 		"decide `[fixed]`, `[won't fix: <reason>]`, `[deferred: <reason>]`, or `[escalate: <reason>]`.",
-		"- `[escalate: <reason>]` — needs a plan update or ticket material; the lead decides the plan-scope question before the next review.",
+		"- `[escalate: <reason>]` — needs a plan update, or a change the ticket itself would need; the lead decides the plan-scope question before the next review.",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("implementer-relay render missing %q:\n%s", want, body)
@@ -1412,6 +1422,11 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 		"Read the brief",
 		"scope expansion beyond the brief",
 		"findings, or disposition notes explicitly authorize ticket-file reading",
+		"Do not read ticket files directly unless the plan's `Escalations` section explicitly authorizes ticket-file reading.",
+		"scope expansion beyond the plan.",
+		"escalate for a plan update if a required fix needs ticket material or a plan deviation.",
+		"Keep fixes inside the scope defined by the plan, review findings, and disposition notes.",
+		"needs a plan update or ticket material",
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("implementer-relay render retained old brief contract %q:\n%s", forbidden, body)
@@ -1478,7 +1493,7 @@ func TestRenderPlaybookShippedImplementerElevatedDeclaredContext(t *testing.T) {
 		"when this cycle's attempt also failed — what failed this time and the evidence that showed it",
 		// Lead-side parity: the same four disposition tokens as implementer-relay.
 		"decide `[fixed]`, `[won't fix: <reason>]`, `[deferred: <reason>]`, or `[escalate: <reason>]`.",
-		"- `[escalate: <reason>]` — needs a plan update or ticket material; the lead decides the plan-scope question before the next review.",
+		"- `[escalate: <reason>]` — needs a plan update, or a change the ticket itself would need; the lead decides the plan-scope question before the next review.",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("implementer-elevated render missing %q:\n%s", want, body)
@@ -1942,12 +1957,25 @@ func TestRenderPlaybookFullWsPlannerContext(t *testing.T) {
 				t.Fatalf("%s full ws render missing %q:\n%s", name, want, body)
 			}
 		}
-		for _, forbidden := range []string{"brief_path", "BriefPath", "brief path", "Brief path"} {
+		for _, forbidden := range []string{
+			"brief_path", "BriefPath", "brief path", "Brief path",
+			// Decision 2's core fix: the plan must never restate ticket contract
+			// text. This is the exact regression string the ticket is named for.
+			"<clipped authority requirement",
+		} {
 			if strings.Contains(body, forbidden) {
 				t.Fatalf("%s full ws render retained brief dependency %q:\n%s", name, forbidden, body)
 			}
 		}
 	}
+
+	// Decision 2's contract-free `## Relevant Ticket Contract` body: for a
+	// ticket target it names only the ticket path and selected phase heading,
+	// never restated ticket text. Pinned separately per delegate because
+	// survey and research phrase the same rule in different template shapes
+	// (bulleted vs. prose).
+	const surveyTicketContractBody = "    - For a `ticket` target: `<ticket path>` — `<selected phase heading>`. No\n      restated, summarized, or reworded ticket text.\n    - For an `inline` target: `<inline contract, pasted verbatim>`."
+	const researchTicketContractBody = "    For a `ticket` target: the ticket path and selected phase heading only — no\n    restated, summarized, or reworded ticket text. For an `inline` target: the\n    inline contract, pasted verbatim."
 
 	assertPlanner("plan-populator-survey", "medium", []string{
 		"[ok]`, `[escalate-to-research]`, or `[escalate-to-lead]`",
@@ -1959,13 +1987,15 @@ func TestRenderPlaybookFullWsPlannerContext(t *testing.T) {
 		"an implementation\n  fallback (a scope shortcut or temporary path substituted for the real\n  target)",
 		"A ticket's required\n  runtime fallback — a specified execution branch such as graceful\n  degradation — is not a shortcut signal and must be planned in full.",
 		"Exit to research when confidence is low, strategy is unclear, contract facts\n  conflict, or reuse judgment needs a deeper planner.",
+		surveyTicketContractBody,
 	})
 	assertPlanner("plan-populator-research", "large", []string{
 		"[ok]` or `[escalate-to-lead]`",
-		"Include `None` when no blocker remains. Otherwise include the blocker,",
+		"Include `None` when no blocker remains and reporting `[ok]`;",
 		"Do not encode a temporary, implementation-fallback (scope shortcut), mock-data,\n  or duplicated-glue path as the implementation.",
 		"A ticket's required runtime\n  fallback — a specified execution branch such as graceful degradation — is not\n  a shortcut and must be planned in full.",
 		"or when a fully-specified, multi-part requirement\n  cannot be carried whole into the plan and only a confident subset can be\n  planned; a \"first cut\" is legitimate only when the ticket or lead already\n  authorized the phasing.",
+		researchTicketContractBody,
 	})
 
 	for _, name := range []string{"plan-populator-survey", "plan-populator-research"} {
@@ -2686,6 +2716,13 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 		"Treat the installed todo list as the ordered runbook",
 		"Stop for unresolved binding decisions before source edits.",
 		"If a plan artifact was created, commit it before Edit.",
+		// Decision 6 lead-adjudication window (260908 Phase 1): rules on each
+		// settled-vs-open escalation before implementer dispatch instead of
+		// deferring it or treating it as a settled finding.
+		"Before implementer dispatch, adjudicate each settled-vs-open\n  `## Escalations` entry (an `[escalate-to-lead]` entry that narrows,\n  inverts, or reframes something the ticket already settled): rule on the\n  entry, write the ruling directly under it in the plan's `## Escalations`\n  section, and continue. Stop for the user only when resolving the entry\n  would itself change the ticket.",
+		// Decision 2 (260908 Phase 1): the Plan contract section states the
+		// contract-free-for-ticket / verbatim-for-inline split explicitly.
+		"For a ticket target, `Relevant Ticket Contract` names only the ticket path and\nselected phase heading — never restated, summarized, or reworded ticket text;\nthe plan is a route to the ticket, not a contract substitute for it. For an\ninline target, `Relevant Ticket Contract` contains the accepted inline\ncontract character-for-character.",
 		"Delegate dispatch",
 		"Implementer spawn prompt",
 		"Rendered implementer prompt: <prompt-path>",

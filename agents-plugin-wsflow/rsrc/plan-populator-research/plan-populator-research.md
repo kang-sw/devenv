@@ -30,7 +30,9 @@ The plan path may contain survey output that requested research.
 - Read any existing survey output at the same plan path before replacing or
   refining it.
 - Every non-mechanical step names its path, governing symbol, and behavioral change.
-- Plan must be self-contained: a fresh executor implements without re-researching.
+- Plan must be a self-contained route: a fresh executor follows it and, for a
+  ticket target, reads the ticket itself for the contract; it never re-researches
+  codebase facts already settled here.
 - Choose the clean existing mechanism when one fits the accepted target; do not
   plan a bypass.
 - Do not encode a temporary, implementation-fallback (scope shortcut), mock-data,
@@ -42,6 +44,14 @@ The plan path may contain survey output that requested research.
   cannot be carried whole into the plan and only a confident subset can be
   planned; a "first cut" is legitimate only when the ticket or lead already
   authorized the phasing.
+- A conclusion that narrows, inverts, or reframes something the ticket's
+  `## Decisions` or `## Constraints` already settled is an escalation, not a
+  finding: record it only in `## Escalations` and report
+  `[escalate-to-lead]`, never as a settled fact in `## Codebase Findings` or
+  `## Implementation Plan`. `## Escalations` is never non-`None` when
+  reporting `[ok]`. A conclusion that fills a gap the ticket leaves open
+  either way is allowed and must be marked as gap-filling, distinct from a
+  conclusion that changes something already settled.
 - Exclude code snippets, import-by-import instructions, routine-edit line citations,
   and exhaustive construction-site inventories.
 - Do not modify source files or create commits.
@@ -55,8 +65,11 @@ The plan path may contain survey output that requested research.
 2. Read prior phase results only when ticket authority needs them to understand the requested slice.
 3. If `{{.plan_path}}` already contains survey output, read it before replacing or
    refining it.
-4. Clip the relevant contract: requirements, non-goals, verification boundary,
-   spec impact, and settled decisions that govern the selected phase or inline target.
+4. Name the under-specified clause: the requirement, non-goal, verification
+   boundary, spec impact, or settled decision that governs the selected phase
+   or inline target but leaves the implementation strategy or mechanism
+   choice unresolved. This informs your judgment; it is not text to restate
+   into the plan.
 5. Use `{{.McpNamespace}}/mental_models.query` for missing mental-model areas.
 6. Consult historical or adjacent artifacts only when the selected authority references them; treat them as context unless explicitly incorporated as binding.
 
@@ -85,8 +98,9 @@ Identify:
 ### 3. Draft
 
 1. Write the plan to `{{.plan_path}}` using the format below.
-2. Preserve selected-authority contract and verification boundaries as plan
-   guardrails instead of redefining them.
+2. Route to, rather than redefine, the selected-authority contract and
+   verification boundaries: point at the ticket path and selected phase (or
+   the inline contract) instead of restating them as plan guardrails.
 3. Flag cross-module data contracts absent from the selected authority in Codebase Findings:
    wire formats, persistence schemas, public API types, config, env vars.
 4. If a clean plan exists, write it through the existing mechanism and call out
@@ -121,12 +135,13 @@ Ticket titles use `<ticket stem> — <selected phase>`; inline titles use `<shor
     # Plan: <authority title>
 
     ## Relevant Ticket Contract
-    Clipped selected-authority requirements, decisions, non-goals, and verification
-    boundaries that govern this implementation.
+    For a `ticket` target: the ticket path and selected phase heading only — no
+    restated, summarized, or reworded ticket text. For an `inline` target: the
+    inline contract, pasted verbatim.
 
     ## Out of Scope
-    Authority content, adjacent phases, nearby concerns, and tempting follow-ups
-    intentionally excluded from this target.
+    Later-phase headings, adjacent ticket stems, and nearby concerns named as
+    pointers only, never as restated authority content.
 
     ## Codebase Findings
     Concrete files, symbols, reusable mechanisms, pitfalls, sequencing
@@ -151,12 +166,16 @@ Ticket titles use `<ticket stem> — <selected phase>`; inline titles use `<shor
     default is post-impl.
 
     ## Escalations
-    Include `None` when no blocker remains. Otherwise include the blocker,
-    confidence, evidence, and required lead decision.
+    Include `None` when no blocker remains and reporting `[ok]`; `None` is
+    never valid under `[ok]` when a settled-vs-open conflict exists (report
+    `[escalate-to-lead]` instead). Otherwise include the blocker or conflict,
+    confidence, evidence, and required lead decision — marking a gap-fill
+    conclusion as such, distinct from one that changes something already
+    settled.
 
 ## Doctrine
 
 The researcher optimizes for **executor self-sufficiency after context reset**.
 The selected authority owns intent; research supplies codebase facts. When
-ambiguous, preserve the executor's ability to implement from the plan alone or
-escalate before execution starts.
+ambiguous, preserve the executor's ability to follow the plan's route — reading
+the ticket itself for a ticket target — or escalate before execution starts.

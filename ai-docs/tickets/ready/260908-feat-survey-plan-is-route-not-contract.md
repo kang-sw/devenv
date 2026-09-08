@@ -330,6 +330,49 @@ escalation rule with its `[escalate-to-lead]` pairing and the
 plan's-own-choice marking, and the rendered `lead-implement` carries the
 adjudication window.
 
+### Result (3a8c517f) - 2026-09-08
+
+Landed on `impl/goal/develop/copper-lantern-drift/clock-front-worry`
+(range `b154ea85..3a8c517f`). The survey and research plan populators no
+longer restate ticket contract text: for a ticket target
+`## Relevant Ticket Contract` renders only `<ticket path> — <phase heading>`,
+and for an inline target the verbatim contract. Both planners carry the
+Decision 6 settled-vs-open `[escalate-to-lead]` rule with the
+never-non-`None`-under-`[ok]` invariant and the plan's-own-choice marking;
+the research "Clip the relevant contract" step became "name the
+under-specified clause". `implementer`, `implementer-relay`, and
+`implementer-elevated` dropped the ticket-read ban for a positive
+conditional read (ticket wins on plan/ticket disagreement), byte-identical
+across the three per 260727. `lead-implement` gained the Prep-stage
+lead-adjudication window (scoped to settled-vs-open entries, matching the
+spec) and a contract-free/verbatim `### Plan contract` section. The Go Prep
+todo instruction (`session_state.go` survey case) names `[escalate-to-lead]`
+beside `[escalate-to-research]`. Spec `{#260505-implementation-workflow-skills}`
+and the `{#260512}`/`{#260519}` removed-rule sentences were reconciled;
+mental-models `mcp-runtime`, `workflow-skills`, and `prompt-bundle` updated.
+
+Deviations from the plan: (1) the edit-instruction site
+(`session_state.go` `implementEditInstruction`) was left untouched per lead
+ruling — only strings that already named `[escalate-to-research]` as a plan
+exit signal gained `[escalate-to-lead]`; (2) the shared `[escalate]` Output
+bullet in relay/elevated still cited "ticket material" (a Decision 1 ground
+that was removed) — caught in review and reworded to "a change the ticket
+itself would need"; (3) golden pins were added beyond the plan's original
+list for the contract-free `## Relevant Ticket Contract` body and the
+`lead-implement` Decision 6 window, since leaving this ticket's own
+replacement behavior unpinned reproduced the failure mode one layer up (test
+reviewer, both Important, fixed in `3a8c517f`); (4) `prompt-bundle.md` line
+63, a drift point not named in Constraints, was updated to match Decision 2.
+
+Review: partitioned correctness (clean, 1 minor -> fixed), fit (clean), test
+(2 important -> fixed, 1 minor -> fixed); relay #1 resolved all four.
+Verification: `go test ./... -count=1` all 14 packages pass (twice),
+`agents-plugin`/`agents-plugin-wsflow` rsrc byte-identity verified,
+`claude plugin validate agents-plugin` pass, manual render checks confirmed
+the ticket-target/inline split and the escalation rules.
+
+Phase 2 (reviewer frame without the plan, ticket-diffed deviations) remains.
+
 ### Phase 2: Reviewer frame without the plan, and wrap-up deviations
 
 Decisions 4 and 5. Depends on Phase 1 (the implementer must already hold
