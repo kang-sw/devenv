@@ -125,7 +125,55 @@ Verification:
 - Run the adapter suite with clean and inherited role/mode environments;
   record full output. Ordinary worker/execute-worker recon leaves unchanged.
 
-### Phase 2 (blocked — pending live dogfood evidence): confirm the live trigger and restore deep collection if a defect remains
+### Result (55172110) - 2026-09-09
+
+Phase 1 complete on branch
+`impl/goal/track/pi-agent/copper-lantern-drift/expel-cycle-patio`, range
+`4384ac46..55172110` (single source+test commit).
+
+Guarded the `session_start` seam in `agents-plugin-pi/src/index.ts` with a new
+exported helper `bootstrapOrFailLoud<T>(ui, role, bootstrap, exitProcess?)` that
+wraps the `startBridge` -> `createApprovalRelay` -> `registerAgentTools`
+sequence: on any throw it notifies loudly, and for a spawned child
+(`readSpawnRole(process.env) !== undefined`, i.e. `worker`/`explore`/`fork`)
+calls `process.exit(1)` so the parent's existing `RpcClient` exit-rejection
+surfaces a real spawn/dispatch error — no new IPC/readiness protocol. The
+interactive host lead (`role === undefined`, no RPC parent) gets the loud
+notify plus an early `return` rather than a process crash. `if
+(!sessionBootstrap) return;` short-circuits the rest of the handler so no
+partial/toolless registration path remains. Local binding renamed
+`bootstrap` -> `sessionBootstrap` to avoid colliding with the existing
+`computeSessionBootstrap` result (cosmetic). No `TOOL_GROUPS`/`resolveTools`,
+ws-mcp, or shared-rsrc changes; no tool group widened.
+
+New `agents-plugin-pi/test/session-bootstrap-guard.test.ts` (5 cases) drives the
+**real** `startBridge` against a broken fake launcher (`sys.exit(1)`, no
+JSON-RPC) so `client.initialize()` genuinely rejects — not a mocked allowlist:
+spawned-child exit+notify (exitSpy once with 1), host-lead notify-without-exit,
+happy-path passthrough, and healthy simple (no `explore`/`bash`) vs deep
+(`explore` present, no `bash`) tool-surface parity.
+
+Verification: targeted `env -u WS_PI_SPAWN_ROLE -u WS_PI_EXPLORE_MODE node
+--test` over the new file + `native-tool-registration` + `persistent-explore`
+(+ `execute-gateway`) green across clean / `WS_PI_SPAWN_ROLE=worker` /
+`explore+deep` env runs; full `npm test` failing-test-name set byte-identical to
+the documented ~130-failure baseline before vs after in every env => zero
+regressions. Fails-before/passes-after confirmed by differential (reverting
+`index.ts` removes the `bootstrapOrFailLoud` export; a reproduction of the
+pre-guard unguarded shape fires neither notify nor exit). Partitioned review:
+correctness clean (1 Minor), fit clean, test clean (2 Minor) — no
+Critical/Important. Minors recorded, not acted on: (1) a post-`startBridge`
+`registerAgentTools` throw on the host-lead path leaves the started bridge
+unshut (pre-existing leak pattern, undocumented failure mode, optional
+`h.shutdown()`); (2) exit branch asserted only for `role="explore"`, not
+per-role; (3) test temp dirs not cleaned (matches existing convention).
+
+Phase 2 remains blocked on owner-run live dogfood (see `## Blocked
+(2026-09-09)` below); this structural guard does not close Phase 2.
+
+### Phase 2: confirm the live trigger and restore deep collection if a defect remains
+
+_Status: blocked — pending live dogfood evidence (see `## Blocked (2026-09-09)`)._
 
 Blocked until a live deep researcher failure is reproduced with the Phase 1
 guard in place, so the child's **actual** launch error is captured instead of
@@ -159,3 +207,24 @@ self-report of unobservable model state):
   (`260907-feat-ws-pi-persistent-explore-deep-research`); its mandatory live
   acceptance remains incomplete until supported by evidence, and this bug's
   capture does not mark it done.
+
+## Blocked (2026-09-09)
+
+Blocked on a human/owner-run gate, not on remaining agent work. Phase 1 (the
+structural fail-loud guard that stands regardless of the exact trigger) is
+complete, reviewed clean, and recorded above (`### Result (55172110)`). The only
+remaining work is **Phase 2**, which the ticket itself scopes as blocked
+"pending live dogfood evidence": reproducing a live deep-researcher failure
+after a full Pi process exit/reopen — with the Phase 1 guard now in place to
+capture the child's actual launch error — is owner-run (a live Pi session,
+subscription/runtime login) and not satisfiable by mocked tests or a child's
+self-report. Only once that evidence lands can Phase 2 either delegate to the
+stale-bootstrap trigger ticket
+(`260907-bug-ws-pi-children-inherit-stale-bootstrap-binary-env`) or, if a
+genuine deep-group registration defect remains, restore the approved contract.
+
+Ticket stays in `ready/` (Phase 2 incomplete, so not moved to `.done/`) and must
+not be re-dispatched for implementation until the owner captures the live
+evidence. Clear this note when that evidence is recorded on the prerequisite
+feature ticket (`260907-feat-ws-pi-persistent-explore-deep-research`) and Phase 2
+becomes actionable.
