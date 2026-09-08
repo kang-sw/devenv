@@ -774,7 +774,11 @@ internal-only changes.
 Delegated mode: the lead selects ticket authority (ticket plus phase) or inline
 authority (a self-contained accepted contract), generates a plan path,
 dispatches a planner to write or refine that single implementation plan, spawns
-an implementer agent with the plan, and captures the resulting commit range.
+an implementer agent with the plan, and captures the resulting commit range. A
+delegated ticket target that meets the four-fact skip condition (all four
+complexity facts at their strongest value) is the one exception: the lead writes
+a stub plan itself at the generated plan path — no planner is dispatched — before
+spawning the implementer.
 Ticket scope facts freeze from the ticket before source reading; inline scope
 facts may use the accepted request, loaded context, focused source inspection,
 and command output before `route.resolve_implement`. The MCP verdict normally keeps
@@ -903,7 +907,12 @@ plus a short execute instruction to the implementation owner. Reviewer findings
 remain file inputs, not copied prompt prose.
 {#260619-stateless-implement-review-continuity}
 
-Plan population defaults to the survey planner for delegated mode. The same
+Plan population defaults to the survey planner for delegated mode, except that a
+delegated ticket target whose four complexity facts all hold at their strongest
+value (`change_points: clear`, `reuse_points: confirmed` or `not-applicable`,
+`strategy_shape: single-obvious`, `side_effect_risk: low`) skips the survey
+planner: the lead writes the six-section stub plan itself and dispatches no
+planner. The same
 render contract carries `target_kind`, ticket path/selected phase, inline
 contract, and plan path; inactive authority fields are passed explicitly empty.
 Ticket mode reads the ticket and selected phase. Inline mode uses the supplied
@@ -1133,7 +1142,10 @@ expressed through the delegated `lead-implement` implementation plan.
 when the target touches its declared topics. Delegated implementation has a
 required plan artifact; when the binding anchor is read, binding implementation
 constraints from the anchor are copied into the plan and the anchor is listed as
-a `[Must]` reference before plan population or implementer dispatch. Delegated
+a `[Must]` reference before plan population or implementer dispatch. When the
+delegated ticket target skips the survey planner, the lead-written stub is that
+plan artifact and the copied-in binding constraints land in its
+`## Codebase Findings` section. Delegated
 implementers receive the
 plan as task input, may read additional documents listed in the plan, and,
 when the plan's `Relevant Ticket Contract` names a ticket path and phase

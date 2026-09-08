@@ -319,7 +319,13 @@ behavior for compatibility.
   `delegation`, `branch_plan`, `plan_depth`, `review_alloc`, `need_review`, and
   `doc_mode`, stores the implement agenda, and replaces the todo list with the
   derived lead-implement checklist. `plan_depth` is `none` for direct edit and
-  `survey` for reachable delegated preparation; delegated preparation creates a
+  `survey` for reachable delegated preparation, with one exception: a delegated
+  **ticket** target also resolves to `none` when all four complexity facts hold
+  at their strongest value (`change_points: clear`, `reuse_points: confirmed` or
+  `not-applicable`, `strategy_shape: single-obvious`, `side_effect_risk: low`),
+  in which case the lead writes the stub plan itself and no planner is
+  dispatched; any weaker value (including `unknown`) on any one fact, or an
+  inline target, keeps `survey`. Delegated survey preparation creates a
   plan path, renders `plan-populator-survey` to write the light implementation
   plan, and renders `plan-populator-research` on the same authority and plan
   path only when
