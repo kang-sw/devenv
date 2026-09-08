@@ -1,52 +1,63 @@
 ---
-title: "Attention alert (terminal bell / desktop notification) when a child or the lead is waiting on the owner"
+title: "Visually loud widget rows when a child or the lead is waiting on the owner"
 related:
-  260908-epic-ws-pi-subagent-conversation-view: owns the in-TUI rendering of `idle-awaiting-owner`; this ticket adds an out-of-band alert on the same transitions, not another widget state
-  260908-feat-ws-pi-subagent-audit-window-and-owner-steering: introduces `lastWriter`/owner-held liveness; the alert keys off the liveness it defines
-  260905-feat-ws-pi-live-agent-widget: the `awaiting owner`/`awaiting approval` rows that today are the only signal
+  260908-epic-ws-pi-subagent-conversation-view: specifies prominent rendering for `idle-awaiting-owner` (owner-held children) only, styling left open; this ticket covers the other waits and pins the styling
+  260908-feat-ws-pi-subagent-audit-window-and-owner-steering: introduces `lastWriter`/owner-held liveness; its `idle-awaiting-owner` rows should get the same treatment
+  260905-feat-ws-pi-live-agent-widget: the widget whose `awaiting owner` / `awaiting approval` rows are the surface being changed
   260906-workset-ws-pi-dogfood-ux: polishing board
 ---
 
-# Attention alert (terminal bell / desktop notification) when a child or the lead is waiting on the owner
+# Visually loud widget rows when a child or the lead is waiting on the owner
 
 ## Background
 
-Owner request (2026-09-08): agents waiting on the owner — a `ws-ask`
-question, a `ws-approve` approval, an owner-held child that went
-`idle-awaiting-owner` — are announced only inside the TUI: a widget row
-(`agent-widget.ts`, `awaiting owner` / `awaiting approval`) and, per the
-conversation-view epic, a prominent row style plus a `ctx.ui.notify` toast
-on owner-held settles. All of that is invisible when the terminal is not
-in front of the owner. The owner wants these waits to be "louder".
+Owner request (2026-09-08): when an agent is waiting on the owner — a
+`ws-ask` question, a `ws-approve` approval, an owner-held child that
+went `idle-awaiting-owner` — the below-editor widget should look loud
+enough that the owner cannot miss it: a rainbow or pulsing highlight,
+not a plain row. This is about visual salience inside the TUI; no sound
+or OS notification is asked for.
 
-Checked against existing tickets: the conversation-view epic and the
-audit-window child render the wait prominently but say nothing about an
-audible or OS-level signal, so this is not covered. Pi itself
-(0.85.1) has no bell or notification setting: the only terminal sequence
-it emits is the OSC 9;4 progress indicator (`pi-tui` `terminal.js`,
-behind `showTerminalProgress`).
+What exists today (`agent-widget.ts`): `awaiting owner` and `awaiting
+approval` rows sort first, are never trimmed by the display cap, carry
+the `/answer <id>` hint, and repaint every 10 s for their elapsed clock.
+They are styled like any other row.
+
+Checked against existing tickets: the conversation-view epic says
+`idle-awaiting-owner` "is rendered prominently — clearly more salient
+than the other two ... exact styling is implementation detail", and only
+for owner-held children; the ask question row and the approval row are
+not mentioned. So this is uncovered for those two, and the styling is
+unpinned for the third.
 
 ## Direction
 
-- Fire an alert on the transitions where an agent starts waiting on the
-  owner: a `ws-ask` question registered, a `ws-approve` request pending,
-  a child entering `idle-awaiting-owner` (once the audit-window ticket
-  lands), and optionally the lead's own turn end (Pi has no such alert
-  either). One alert per transition, never repeated while the wait
-  persists.
-- Channels, by preference and platform availability: terminal BEL
-  (`\x07`, written by the extension process to the TTY; most terminals
-  map it to a sound or a dock bounce), then an OSC 9 / OSC 777 desktop
-  notification for terminals that support it (iTerm2, WezTerm, kitty,
-  ghostty), then a macOS user notification via `osascript` as the last
-  resort. Configurable per channel and off by default for children of
-  the lead (forks, workers) so only the owner's own Pi rings.
-- Configuration lives in the adapter's harness config layer
-  (`260905-feat-ws-pi-harness-config-layer`) rather than a new file.
+- Treat all three waits the same: `awaiting-owner` (ask question),
+  `awaiting-approval` (ws-approve), and `idle-awaiting-owner` (owner-held
+  child, once the audit-window ticket lands) share one "needs the owner"
+  style. The footer `ws: N agents` status segment gets the same
+  emphasis while any such row exists.
+- Style: an animated highlight on the row (cycling hue across the row
+  text, or a two-phase pulse between the theme's accent and warning
+  colors), with the elapsed clock kept. The widget already uses the
+  `(tui, theme) => Component` factory overload, so the component owns a
+  timer (a few hundred ms, only while a waiting row exists) and calls
+  the TUI's re-render request; the 10 s elapsed tick stays as is.
+- Off switch: a single adapter config flag (harness config layer,
+  `260905-feat-ws-pi-harness-config-layer`) that falls back to a static
+  bold/colored row for owners who find animation distracting or run in a
+  terminal that renders it badly.
+- Children of the lead (forks, workers) do not animate; only the owner's
+  own Pi does.
 
 ## Open questions
 
-- Whether Pi's TUI swallows a BEL written outside its render path, and
-  whether it should go through `ctx.ui` instead (no such API today).
-- Rate limiting when several children wait at once.
-- Whether the owner wants the lead's own turn end to ring by default.
+- Color source: the factory's `theme` exposes `fg(ThemeColor, text)` and
+  `bold` over the named palette (`accent`, `warning`, `error`, `success`,
+  ...), and `render(width)` returns raw strings, so a hue cycle can use
+  either the palette (theme-safe, few steps) or direct truecolor escapes
+  (smooth, but ignores the theme). Decide which at implementation time.
+- Whether the animation should stop after some minutes and settle into
+  the static style, to avoid a permanently flashing row on a long wait.
+- Whether the lead's own turn end (Pi idle, waiting for the owner's next
+  message) deserves the same treatment; Pi itself gives no cue.
