@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 9be6115af39dfe80
 sage-review-design-reviewed: 9be6115af39dfe80
+completed: 2026-09-09
 ---
 
 # Pi bridge's workflow_manual static-body cut never matches a real render, so every lead session degrades to workflow_state with a false "renderer drift" warning
@@ -141,3 +142,52 @@ passing. Amend the spec passage under Spec Impact. Live check
 `workflow_manual` and confirm no warning, a response opening with the fixed
 mapping line followed by the advisories and `## Session Key`, and no manual
 body.
+
+### Result (7425aa6c) - 2026-09-09
+
+Landed across `5ebebfaa..7425aa6c` (adapter-only, `agents-plugin-pi/`).
+
+- `cutStaticBody` (`src/bridge.ts`) rewritten from an exact-substring match to a
+  whole-line **anchor cut**: start anchor = the session-start snapshot's first
+  non-empty line (`# Workflow Manual`), end anchor = the literal `## Session Key`
+  heading. Its return gains a `reason` (`start-anchor | end-anchor | order |
+  no-body`) beside `text`/`found`; the function stays pure and keeps its
+  `(response, snapshot)` signature. Exported `StaticBodyCutMissReason`.
+- `dispatchMappedWorkflowManual` now branches three ways: cut hit (unchanged);
+  `no-body` → forward the original response unchanged (fixed mapping line
+  prepended, no `workflow_state` dispatch, no degraded notice), matching
+  ws-mcp's no-restorable-state notice shape; any other miss → the prior fallback
+  shape, now passing the specific reason into `notifyMappingDegraded`. The
+  `startBridge` warning closure names the missing anchor instead of "renderer
+  drift" and keeps its once-per-session dedupe.
+- Tests: the three synthetic `cutStaticBody` tests replaced with five against a
+  **real captured ws-mcp render pair** (`playbook.read("lead-workflow-manual")`
+  + CONTINUE-mode `workflow_manual`, captured via a throwaway `spawnWsMcpClient`
+  + `ferrule` script, stored as `test/fixtures/workflow-manual-*.txt`); a
+  dispatch-level `no-body` test; and the two advisory-keying tests reshaped to
+  include a `## Session Key` line so they take the cut-hit path, now guarded with
+  a fail-fast `notifyMappingDegraded` stub (review relay #1) so a regression into
+  the fallback branch cannot pass silently. An `order`-reason test was added
+  (optional per plan).
+
+Deviation: fixtures stored as `test/fixtures/*.txt` read via `readFileSync`
+(the `version-check.test.ts` pattern) rather than inline constants, since the
+real captured pair totals ~36KB — the plan authorizes this fallback above its
+inline-size threshold.
+
+Verification: `cd agents-plugin-pi && env -u WS_PI_SPAWN_ROLE node --test
+test/bridge.test.ts` → 62/62 pass. Full suite's ~130 failures are the
+pre-existing linuxbrew-path fork/lead-bootstrap failures, unrelated to this
+diff. Owner-run live TUI check remains outstanding (per ticket).
+
+Review: correctness (opus) and fit (sonnet) clean (one fit Minor recorded only);
+test (sonnet) one Important (reshaped advisory tests did not assert the cut-hit
+branch), [fixed] in relay #1 at 7425aa6c. Spec: `{#260905-pi-workflow-manual-state-mapping}`
+Primary/Fallback bullets amended to the anchor cut in the lead doc pre-pass.
+
+Out-of-scope follow-up flagged (not fixed, not ticketed): the parametrized
+`computePiAliasTableReport` "mapped cut/fallback" test
+(`test/bridge.test.ts:485-501`) now lands both iterations on `no-body` under the
+new algorithm, so its `cut`/`fallback` parametrization no longer matches its
+name though its branch-agnostic assertions still pass — worth a future
+test-hygiene pass.

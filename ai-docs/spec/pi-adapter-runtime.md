@@ -260,18 +260,28 @@ only the **state-and-advisories view** — everything ws-mcp recomputes per call
 and never the manual body a second time:
 
 - Primary: the bridge forwards the call to ws-mcp `workflow_manual` with the
-  (normalized) key and **cuts the static manual body out of the response** by
-  exact substring match against a static-body snapshot taken at session start
-  (the `playbook.print("lead-workflow-manual")` render, which `workflow_manual`
-  produces internally). What remains is the per-call material — `## Session Key`,
-  `## Session State`, repo notes, and the advisory blocks — so ws-mcp's contract
-  that those are recomputed on every call is preserved.
-- Fallback: if the snapshot body is not found in the response (the renderer
-  changed mid-session), the bridge dispatches ws-mcp `workflow_state` instead —
-  a state-only view with no FRESH mode that never mints — and drops the
+  (normalized) key and **cuts the static manual body out of the response** with
+  an **anchor cut**: it removes everything from the first whole line equal to the
+  session-start snapshot's first non-empty line (the `# Workflow Manual` heading
+  of the `playbook.print("lead-workflow-manual")` render taken at session start)
+  up to — but not including — the `## Session Key` heading ws-mcp appends after
+  the body. The anchor cut does not require the body to be byte-identical, so it
+  tolerates the in-place edits ws-mcp makes to the render (stripping the
+  fresh-only region, injecting the session-key line) that an exact-substring
+  match never survived. What remains is the per-call material — the advisory
+  blocks ws-mcp prepends, `## Session Key`, `## Session State`, and repo notes —
+  so ws-mcp's contract that those are recomputed on every call is preserved.
+- Fallback: if exactly one anchor is present (the other missing), or the end
+  anchor precedes the start anchor, the bridge dispatches ws-mcp `workflow_state`
+  instead — a state-only view with no FRESH mode that never mints — and drops the
   `workflow_manual`-only arguments (`root`) from that call, forwarding only the
-  session key. `workflow_state`'s own fail-loud error path for an unresolvable
-  key is surfaced unchanged.
+  session key. The one-time degraded notice names which anchor was missing rather
+  than attributing the miss to renderer drift. A response carrying **neither**
+  anchor is not a manual body to cut — it is ws-mcp's own no-restorable-state
+  notice — so it is forwarded unchanged with the fixed mapping line and no
+  degraded notice, keeping ws-mcp's notice as the single error surface.
+  `workflow_state`'s own fail-loud error path for an unresolvable key is surfaced
+  unchanged.
 - The bridge prepends one fixed line to the mapped response — that the workflow
   manual is in the system prompt and this is the current session state — so a
   model expecting the manual is not confused by its absence.
