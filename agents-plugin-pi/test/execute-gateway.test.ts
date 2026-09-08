@@ -34,6 +34,14 @@
  * approve/deny round-trip remains the manual gate named in the plan's
  * Verification Plan.
  *
+ * 260906 Phase 2 addendum: `ws-execute`'s `execute()` body threads through
+ * `spawnAgent`, whose only non-injectable dependency is `RpcClient`'s real
+ * subprocess transport — the same seam `test/spawner.test.ts`'s
+ * `installRpcHarness` monkey-patches. Reusing that technique (own local
+ * copy, below) makes `ws-execute`'s `onModelResolved` forwarding
+ * unit-testable without a live session, narrowing the "live-gate only" note
+ * above to just the gated-exec/approve/read tool bodies.
+ *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
 
@@ -67,6 +75,7 @@ import {
   type WorkingContext,
 } from "../src/execute-gateway.ts";
 import { leadIdleRef, registerPushFlush, GATED_EXEC_TOOL_NAME, TOOL_GROUPS, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 describe("buildExecuteWorkerPrompt", () => {
@@ -627,5 +636,95 @@ describe("do-i-really-have-to-run-this-myself (the one-liner exec hatch's execut
     await tool.execute("call-5", { command: "pwd", why: "confirm cwd/timeout wiring" });
     assert.equal(capturedOptions?.cwd, "/tmp/ws-pi-agent-one-liner-test");
     assert.equal(capturedOptions?.timeout, ONE_LINER_TIMEOUT_MS);
+  });
+});
+
+/**
+ * 260906 Phase 2 (dispatch-row rendering): `ws-execute`'s `onModelResolved`
+ * forwarding, both for a named `complex:false` tier hit and a `complex:true`
+ * inherit — mirrors `test/spawner.test.ts`'s "spawnAgent: onModelResolved"
+ * describe block, driven at the `ws-execute` tool level instead.
+ */
+describe("ws-execute: onModelResolved forwarding (260906 Phase 2)", () => {
+  interface CapturedTool {
+    execute: (
+      id: string,
+      params: unknown,
+      signal?: AbortSignal,
+      update?: (partial: { content: unknown[]; details?: unknown }) => void,
+      ctx?: unknown,
+    ) => Promise<{ content: Array<{ type: string; text: string }>; details?: unknown }>;
+  }
+
+  function installRpcHarness() {
+    const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
+    Object.assign(RpcClient.prototype, {
+      start: async () => {}, stop: async () => {}, abort: async () => {},
+      onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {},
+      getState: async () => ({ model: { provider: "pi", id: "small" }, thinkingLevel: "medium", sessionFile: "/tmp/ws-pi-agent-test/session.jsonl" }),
+    });
+    return { restore: () => Object.assign(RpcClient.prototype, original) };
+  }
+
+  function harness(callTool: (name: string, args?: unknown) => Promise<{ content: Array<{ type: string; text: string }> }>) {
+    const tools = new Map<string, CapturedTool & { name: string }>();
+    const pi = {
+      registerTool: (def: { name: string } & CapturedTool) => tools.set(def.name, def),
+      sendMessage() {}, sendUserMessage() {},
+      exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    } as unknown as ExtensionAPI;
+    const bridge = { client: { callTool }, wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" } } as unknown as Parameters<typeof registerExecuteGateway>[1];
+    const registry: RpcAgentRegistry = new Map();
+    registerExecuteGateway(pi, bridge, registry, { cwd: "/tmp", executeWorkerPromptPath: "/tmp/fake-execute-worker-guide.md" });
+    const ctx = { model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.6-high" }, { provider: "pi", id: "small" }], hasConfiguredAuth: () => true } };
+    return { tool: tools.get(EXECUTE_TOOL_NAME)!, registry, ctx };
+  }
+
+  test("complex:false resolves the 'small' alias and forwards onModelResolved as onUpdate details and the final return", async () => {
+    const rpc = installRpcHarness();
+    try {
+      const { tool, registry, ctx } = harness(async (name) => { assert.equal(name, "config.resolve_agent"); return { content: [{ type: "text", text: JSON.stringify({ resolved_from: "pi", model: "gpt-5.6-high", backend: "codex" }) }] }; });
+      const updates: Array<{ content: unknown[]; details?: unknown }> = [];
+      const raw = await tool.execute("call", { prompt: "investigate", complex: false }, undefined, (partial) => updates.push(partial), ctx);
+      const parsed = JSON.parse(raw.content[0]!.text);
+      assert.ok(parsed.agent_id);
+      const expected = { tier: "small", model: "openai-codex/gpt-5.6-high", effort: undefined, inherited: false };
+      assert.equal(updates.length, 1, "onModelResolved fires exactly once");
+      assert.deepEqual((updates[0]!.details as { resolved: unknown }).resolved, expected);
+      assert.deepEqual((raw.details as { resolved?: unknown } | undefined)?.resolved, expected, "the final return repeats the same shape");
+      const record = registry.get(parsed.agent_id)!;
+      assert.equal(record.modelTier, "small");
+      assert.equal(record.modelSource, "tier");
+    } finally { rpc.restore(); }
+  });
+
+  test("complex:true inherits the lead's own model, never calls config.resolve_agent, and still publishes an inherited resolved line", async () => {
+    const rpc = installRpcHarness();
+    try {
+      const { tool, registry, ctx } = harness(async () => { assert.fail("config.resolve_agent must not be called for complex:true"); });
+      const updates: Array<{ content: unknown[]; details?: unknown }> = [];
+      const raw = await tool.execute("call", { prompt: "investigate", complex: true }, undefined, (partial) => updates.push(partial), ctx);
+      const parsed = JSON.parse(raw.content[0]!.text);
+      assert.ok(parsed.agent_id);
+      assert.equal(updates.length, 1);
+      const resolved = (updates[0]!.details as { resolved: { tier: string; model?: string; effort?: string; inherited: boolean } }).resolved;
+      assert.equal(resolved.tier, "inherit");
+      assert.equal(resolved.inherited, true);
+      assert.equal(resolved.model, "lead/large", "inherits the ctx.model snapshot");
+      assert.deepEqual((raw.details as { resolved?: unknown } | undefined)?.resolved, resolved);
+      const record = registry.get(parsed.agent_id)!;
+      assert.equal(record.modelTier, undefined);
+      assert.equal(record.modelSource, "inherit");
+    } finally { rpc.restore(); }
+  });
+
+  test("an omitted complex forwards the same 'small' alias behavior as complex:false", async () => {
+    const rpc = installRpcHarness();
+    try {
+      const { tool, ctx } = harness(async () => ({ content: [{ type: "text", text: JSON.stringify({ resolved_from: "pi", model: "pi/small" }) }] }));
+      const updates: unknown[] = [];
+      await tool.execute("call", { prompt: "investigate" }, undefined, (partial) => updates.push(partial), ctx);
+      assert.equal(updates.length, 1);
+    } finally { rpc.restore(); }
   });
 });
