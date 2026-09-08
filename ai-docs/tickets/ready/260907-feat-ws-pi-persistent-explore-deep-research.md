@@ -102,3 +102,22 @@ Partitioned review found two Critical issues (effective model/effort verificatio
 Relay verification reports 946/946 tests passing both normally and with inherited worker/deep environment markers, a no-model dynamic allowlist probe, and successful package dry-run including the new exploration guide. Initial 941-pass evidence was insufficient: review exposed environment-dependent failures and missing coverage, corrected in the relay. Spec index verification passed after the documentation audit.
 
 **Phase 1 remains unfinished pending the mandatory owner-run live provider/restart dogfood above.** Automated tests and the no-model probe do not clear this gate. No Result is recorded and the ticket remains ready until live evidence is recorded. Merge has not been authorized or performed. Spec and adapter guidance are updated; no shared rsrc or ws-mcp code was changed.
+
+## Blocked (2026-09-09)
+
+Blocked on a human-only gate, not on agent-doable work. Phase 1's automated
+slice is already complete on `impl/track/pi-agent/suave-kooky-halt` (impl
+`048a9cb2`, review corrections `6998a5b0`, plan baseline `1083e01a`):
+partitioned review closed both Critical findings, Important dispositions are
+implementer self-reports, 946/946 adapter tests pass, and the spec plus adapter
+guidance are updated. The sole remaining item is the **mandatory owner-run live
+provider/restart dogfood** the Phase 1 verification list names (simple explore →
+settle → send follow-up; deep explore → small blocking collection → synthesis;
+stop/resume; restart and follow-up with recorded role/model/effort intact) —
+explicitly a live check that mocked coverage cannot substitute. No Result can be
+recorded and no merge authorized until the owner runs that dogfood and records
+the evidence, so this queue turn cannot advance it further.
+
+Unblocks when: the owner runs the live dogfood and records the evidence (append
+the Phase 1 Result and clear this note). Drain-queue selector should skip this
+ticket until then.
