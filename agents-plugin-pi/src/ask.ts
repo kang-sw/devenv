@@ -78,7 +78,8 @@ import {
 import { computeForkToolSurface, getForkSourceSessionFile } from "./fork.ts";
 import { readSpawnRole, type SpawnRole } from "./process-role.ts";
 import { openOverlayChat, type ForkChannel, type OverlayHandle, type TranscriptEntry } from "./overlay-chat.ts";
-import { parseForkContext, type ForkContext } from "./fork-context.ts";
+import { captureForkContext, captureRegisteredTools, type ForkContext } from "./fork-context.ts";
+import type { LeadPromptCapture } from "./lead-bootstrap.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers. Unit-tested directly (test/ask.test.ts) with no
@@ -689,6 +690,7 @@ function nowIso(): string {
 
 export interface AskSessionCtx {
   cwd: string;
+  effectivePromptRef?: { current: LeadPromptCapture | undefined };
 }
 
 /**
@@ -1166,6 +1168,21 @@ export async function ensureRespondent(
     }
   }
 
+  const tools = computeForkToolSurface(pi.getActiveTools());
+  const captured = sessionCtx.effectivePromptRef?.current;
+  const model = (ctx as { model?: { provider?: string; id?: string; api?: string; baseUrl?: string; compat?: unknown } }).model;
+  const forkContext = captured
+    ? captureForkContext({
+        kind: "discussion",
+        effectiveSystemPrompt: captured.effectiveSystemPrompt,
+        basePromptOptions: captured.basePromptOptions,
+        wsBlock: captured.wsBlock,
+        parentSessionKey: bridge.defaultSessionKeyRef.current,
+        activeTools: tools,
+        registeredTools: captureRegisteredTools(tools, pi.getAllTools()),
+        modelDescriptor: model ? { provider: model.provider, model: model.id, api: model.api, endpoint: model.baseUrl, compat: model.compat } : {},
+      })
+    : undefined;
   const result = await spawnAgent(
     rpcRegistry,
     {
@@ -1177,7 +1194,8 @@ export async function ensureRespondent(
       wsToolNames: bridge.wsToolNames,
       client: bridge.client,
       forkFrom,
-      explicitTools: computeForkToolSurface(pi.getActiveTools()).join(","),
+      explicitTools: tools.join(","),
+      forkContext,
       parentSessionKey: bridge.defaultSessionKeyRef.current,
       // Entry B's discussion fork belongs to the owner surface, never to the
       // lead's fan-in — bound before its first turn can produce a settle.

@@ -479,7 +479,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       }
     }
     registerAsk(pi, threadHandle, agentTools.rpcRegistry, toolPreviewTuiRef);
-    registerThreadCommands(pi, handle, agentTools.rpcRegistry, threadHandle, { cwd: ctx.cwd });
+    registerThreadCommands(pi, handle, agentTools.rpcRegistry, threadHandle, { cwd: ctx.cwd, effectivePromptRef });
 
     // §1/§4/260906: one pure call produces BOTH the ws block's static base
     // (manual snapshot + Pi lead guide) AND the fully reshaped lead/fork
