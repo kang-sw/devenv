@@ -231,6 +231,46 @@ describe("createDispatchToolPreview", () => {
     assert.match(error.render(80).join("\n"), /→ small · provider\/id · effort high/);
   });
 
+  test("a long completed explore answer body is still capped at the shared row budget, beneath the resolved line", () => {
+    // Review relay #1 (Important): the ticket's "Tests:" item asks for a
+    // long synchronous explore ANSWER (the result BODY, not the query) to be
+    // trimmed to the row budget below the resolved line. The pre-existing
+    // "resolved line renders across partial/success/error" test above only
+    // ever feeds a short body ({"agent_id":"a1"}), so it never exercises
+    // tool-result-render.ts's PREVIEW_ROWS(10)/truncatedMarker cap through
+    // this new resolvedLine/hasBody path — only that the two can coexist at
+    // all. This drives a genuinely long (15-line) RAW body through it.
+    const ref = createToolPreviewTuiRef();
+    ref.current = fakeTui();
+    const preview = createDispatchToolPreview(ref, "explore", buildExploreSummary);
+    const resolved: ResolvedModelInfo = { tier: "small", model: "provider/id", effort: "high", inherited: false };
+    const longAnswer = Array.from({ length: 15 }, (_, i) => `line-${i}`).join("\n");
+
+    const result = preview.renderResult(
+      { content: [{ type: "text", text: longAnswer }], details: { resolved } },
+      { expanded: false, isPartial: false },
+      unstyledTheme,
+      context(),
+    );
+    const lines = result.render(80).join("\n").split("\n");
+
+    // Row 0 is the mandatory resolved line; row 1 is the blank separator
+    // shared with the plain (non-resolved) body layout below it.
+    assert.match(lines[0]!, /→ small · provider\/id · effort high/);
+    assert.equal(lines[1], "");
+
+    // The body itself: the cap does not count the resolved line or the
+    // separator against its own 10-row budget — exactly 10 content rows
+    // plus one truncation marker row are expected beneath them.
+    const bodyLines = lines.slice(2);
+    assert.equal(bodyLines.length, 11, "10 capped content rows plus one truncation marker row");
+    for (let i = 0; i < 10; i++) {
+      assert.match(bodyLines[i]!, new RegExp(`line-${i}$`), `row ${i} of the body must be the ${i}-th input line`);
+    }
+    assert.equal(bodyLines[10], "...", "the 11th body row is the truncation marker, not an 11th content line");
+    assert.ok(!lines.join("\n").includes("line-10"), "line-10 (the 11th input line) must be cut by the cap — proving it was actually applied, not just present under a big enough budget");
+  });
+
   test("with no resolved line ever published and no body available, still falls back to native", () => {
     const ref = createToolPreviewTuiRef();
     ref.current = fakeTui();
