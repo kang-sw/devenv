@@ -8,7 +8,11 @@ spec:
   - 260905-pi-side-thread-fork-task-thread
   - 260905-pi-side-thread-owner-question-surface
   - 260905-pi-lead-bootstrap-system-prompt
-sage-review-design: recommended
+  - 260903-pi-bridge-session-key-fill-forward
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-completeness-reviewed: aa6350281b58e25b
+sage-review-design-reviewed: aa6350281b58e25b
 ---
 
 # Pi fork's first model call is a full prompt-cache miss over the whole inherited lead context
@@ -110,11 +114,13 @@ The fork's `instructions` and `tools` must be byte-identical to the lead's at
 spawn time; the only new bytes are the appended first user message.
 
 1. **No fork-specific `--append-system-prompt`.** `ws-fork` and the discussion
-   fork stop writing the directive temp file; the fork argv carries no
-   `--append-system-prompt`, which also restores the lead's discovered
-   `APPEND_SYSTEM.md`. `systemPromptPath` becomes optional on the spawn/resume
-   record for fork-family spawns; worker/execute-worker spawns keep their
-   rendered playbook file unchanged.
+   fork stop writing the directive temp file and stop passing that directive
+   as a system-prompt append. Preserve the lead's effective append bytes,
+   whether discovered or explicitly supplied, under Review closure; the
+   choice of transport must not impose a new launch restriction.
+   `systemPromptPath` becomes optional on the spawn/resume record for
+   fork-family spawns; worker/execute-worker spawns keep their rendered
+   playbook file unchanged.
 2. **Directive moves into the first message.** `buildForkInitialMessage`
    (and the discussion-fork equivalent) prepends the directive text, the
    fork's own ws session key, and a plain-prose "do not call `ws-fork`,
@@ -123,13 +129,13 @@ spawn time; the only new bytes are the appended first user message.
    framing, no ALL-CAPS overrides, both `kind` values named, all
    `REQUIRED_FINAL_REPORT_FIELDS` listed) now govern the merged message.
 3. **Lead's ws block verbatim.** The fork does not fetch its own
-   `workflow_manual` snapshot for the system prompt. The lead passes its
-   rendered `manualSnapshot` (the exact string in its own `wsBlockBaseRef`)
-   to the fork out-of-band — a file whose path travels in a new env var next
-   to `WS_PI_PARENT_SESSION_KEY` — and the fork's bootstrap uses it as
-   `manualSnapshot`. The guide text and skills block are already computed
-   identically. The `staticBodySnapshot` path (`playbook.read
-   lead-workflow-manual`) is unaffected. Consequence: the fork's system prompt
+   `workflow_manual` snapshot for the inherited system prompt. Transfer the
+   lead's complete rendered block out-of-band, including manual, guide and
+   skills. The guide is locally loaded and skills are live-resolved from
+   each process's command list, so independent reconstruction does not
+   guarantee equality. Preserve the separate `staticBodySnapshot` mapping
+   path (`playbook.read lead-workflow-manual`) without coupling its success
+   to inherited-block availability. Consequence: the fork's system prompt
    names the *lead's* session key; the correction is item 4.
 4. **Fail-loud key correction, own key issued.** The fork still gets its own
    lead-scope ws session key (unchanged). A ws call from a fork that carries
@@ -175,6 +181,68 @@ decided, and not needed for the cache); keeping the silent parent-key rewrite
 the lead, and the refusal re-anchors its identity at the moment it slips —
 worth more than the one turn the rewrite would save).
 
+### Review closure (owner-approved)
+
+The following refinements supersede narrower or unconditional wording in
+Decisions 1–7 above; the first-message directive and fail-loud parent-key
+refusal remain settled. These are implementation-completeness corrections,
+not a new policy or a reason to widen this fix into the lead-profile work.
+
+- **Full effective prefix.** Transfer the complete rendered ws block actually
+  used by the lead (manual, guide and skills), not only `manualSnapshot`.
+  Do not rebuild its guide/skills from the child's current files. A failed
+  independent static-body mapping fetch must not discard a delivered block.
+  Preserve effective lead prompt bytes/inputs, including explicit append
+  overrides: dropping the fork-specific append restores discovery but does
+  not alone prove equality. Test changed resources and explicit overrides.
+  No fork-specific directive belongs in the system prompt. A general
+  extension-cloning framework is out of scope; if preservation requires
+  rejecting a supported launch or restricting functionality, escalate that
+  policy choice rather than silently changing behavior.
+- **Key readiness.** Acquire the child's own key before the first new message
+  reaches the provider, through deterministic child-side transformation or
+  a readiness exchange. The parent cannot assume a key minted only after
+  child startup is already available. The exact readiness/transformation
+  boundary is an implementation choice, verified before the first provider
+  call rather than a pending owner policy decision. Never insert a
+  placeholder or parent key; missing own-key readiness must not let a
+  parent-key call through.
+  After restart establish the current own key without rewriting inherited
+  messages; stale historical own keys must not route into another session.
+- **Persistent fork metadata.** Retain the original full rendered block,
+  effective prompt inputs, parent ws key and cache-affinity id through
+  dormant resume, task sidecar serialization/parsing/rehydration and
+  discussion-thread capture/rehydration, including repeated restarts.
+  Do not substitute the restarting lead's current snapshot or identity.
+  `systemPromptPath` optionality covers every fork recovery reader, not only
+  spawn types. Snapshot lifetime must survive temporary-file cleanup and
+  sidecar transitions for the fork's lifetime.
+- **Bounded equality guarantee.** Preserve actual serialized tool definitions
+  and order, not just names. Verify child registration and schema equality.
+  Cache-prefix equality applies to the same effective provider/model/API
+  compatibility configuration. Explicit model overrides remain supported
+  but are outside the cross-model cache-reuse guarantee.
+- **Body affinity only.** Role-gate the request hook to forks and restrict
+  `prompt_cache_key` rewriting to supported cache-enabled API payloads.
+  Missing metadata, unsupported providers and disabled caching are no-ops.
+  This does not share transport/session identity or eliminate provider-side
+  routing uncertainty. Clear fork-only metadata from descendant worker and
+  explore environments. Effective prefix comparisons must accommodate
+  provider continuation/delta transports rather than assume every wire
+  request contains full history.
+- **Task versus discussion.** Task forks keep both report kinds and all
+  required final fields. Discussion forks keep the existing owner dialogue
+  and short decision-summary behavior, not task-final fields or a task
+  completion directive. Both receive their own-key correction and role
+  refusal reminders without changing their distinct completion semantics.
+- **Scope and evidence.** Decision 8 is a consumer interface, not this phase's
+  implementation or acceptance gate. The lead-tool-profile ticket already
+  owns its loader and post-load live verification and is not a prerequisite
+  of this fix. Historical cache measurements are not a fresh reproduction.
+  The adapter guarantees prefix preservation under the stated conditions;
+  provider retention/routing, cache expiry, compaction and new suffix size
+  still affect observed hits and billing.
+
 ## Constraints
 
 - Adapter-only (`agents-plugin-pi/`); no ws-mcp or shared rsrc edits.
@@ -216,40 +284,58 @@ worth more than the one turn the rewrite would save).
 `ai-docs/spec/pi-adapter-runtime.md`: rewrite the directive/tool-surface
 passages of `{#260905-pi-side-thread-fork-task-thread}` and
 `{#260905-pi-side-thread-owner-question-surface}` (no fork
-`--append-system-prompt`; directive and own-key statement in the first
+directive `--append-system-prompt`; directive and own-key statement in the first
 message; tool array equals the lead's; role-keyed refusals; cache-key
 affinity), and add to `{#260905-pi-lead-bootstrap-system-prompt}` that a fork
-reuses the lead's rendered manual snapshot verbatim and refuses parent-key ws
-calls. Caller-visible change: a fork sees `ws-fork`/`ws-ask`/`ws-resolve` in
-its tool list but gets a refusal on use; a fork's first call is billed at
-cached-read price for the inherited context.
+reuses the lead's full rendered ws block and effective prompt inputs verbatim
+and refuses parent-key ws calls. Include restart metadata lifetime, own-key
+readiness, provider guards and the same-model boundary from Review closure.
+Also update `{#260903-pi-bridge-session-key-fill-forward}`: replace its
+silent parent-key rewrite promise with the fork's fail-loud refusal while
+preserving ordinary lead fill-or-forward behavior.
+Caller-visible change: a fork sees `ws-fork`/`ws-ask`/`ws-resolve` in its tool
+list but gets a refusal on use; the preserved inherited prefix is eligible
+for cached reads without guaranteeing provider billing.
 
 ## Phases
 
 ### Phase 1: Byte-identical fork prefix with fail-loud role and key correction
 
-Implement Decisions 1–7 for both `ws-fork` and the discussion fork, update the
-tests listed under Prior Art, and update the spec passages under Spec Impact.
+Implement Decisions 1–7 as refined by Review closure for both task and
+discussion forks, including dormant and restart recovery. Update tests and
+spec passages under Spec Impact. Decision 8 is owned by the lead-profile
+consumer ticket and does not block this phase.
 
 Verification:
 
-- Unit: fork argv has no `--append-system-prompt`; `computeForkToolSurface` is
-  identity; `buildForkInitialMessage` output contains the directive, the
-  fork's own key, both report `kind`s and all required final fields, and no
-  identity framing / ALL-CAPS; role-`fork` calls to `ws-fork`/`ws-ask`/
-  `ws-resolve` return the refusal; a ws call with the parent key from a fork
-  returns the refusal naming the own key, while the same call from a lead is
-  unaffected; the fork bootstrap uses the delivered snapshot when the env is
-  set and falls back to its own fetch when unset; `before_provider_request`
-  rewrites `prompt_cache_key` only when the lead id env is set.
-- Live (owner-run, gpt-6-astra): from a lead with ≥20k context, spawn a
-  `ws-fork`; the fork's first assistant `usage` in its session jsonl must show
-  `cacheRead` ≥ 90% of `input + cacheRead`. Repeat once for the discussion
-  fork and once for a fork resume. Confirm no role-bleed on a task that
-  previously bled (fork does its own task, reports `final`).
-- Live, deferred load: with a loader present, the fork's call right after
-  the loader shows `cacheRead` ≥ 90% of `input + cacheRead` and the loaded
-  tools are callable; the session file carries `addedToolNames` on the
-  loader's tool result.
+- Unit: no fork-specific directive append; effective explicit lead append
+  configuration is preserved; `computeForkToolSurface` is identity; task
+  initial messages contain the own key, directive, both report kinds and
+  required final fields without identity framing / ALL-CAPS. Discussion
+  messages retain their dialogue/summary semantics. All three forbidden
+  side-thread tools refuse in fork handlers; parent-key ws calls refuse and
+  name the current own key; lead behavior is unchanged. Key readiness
+  precedes the first new provider call, and missing readiness never forwards
+  the parent key. Delivered full-block reuse and legacy absent-metadata
+  fallback are covered. Affinity rewriting is fork-only, provider-aware,
+  cache-enabled and metadata-dependent; other cases are no-ops.
+- Offline integration: compare effective provider-prefix bytes and actual
+  serialized tool definitions/order for task spawn, discussion spawn,
+  dormant resume, task-sidecar restart and discussion restart, including
+  repeated recovery. Cover explicit append overrides, changed guide/skills
+  resources, current/stale own keys, snapshot lifetime, missing or changed
+  tool registration, absent metadata, unsupported providers, disabled
+  caching, model overrides and descendant env isolation.
+- Live (owner-run, gpt-6-astra): from a lead with at least 20k context,
+  spawn a task fork, discussion fork and resume a fork. Identify the first
+  NEW assistant usage in each JSONL, excluding inherited entries. Target
+  `cacheRead >= 90% of input + cacheRead`; record model/API, timing,
+  compaction and uncached suffix conditions. Investigate lower ratios
+  without treating them alone as proof of unequal bytes. Confirm no
+  task-role bleed on a previously affected task (own task, final report)
+  and correct discussion behavior. Record unrun live checks as pending,
+  never as passed by offline tests.
+- Deferred-load live verification remains exclusively in
+  260907-feat-ws-pi-lead-tool-profile-and-orchestrator-role.
 - Regression: worker/execute-worker argv and `systemPromptPath` handling
   unchanged; full adapter test suite green.
