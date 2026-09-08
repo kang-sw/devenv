@@ -35,7 +35,7 @@
 
 import { countPending, type ThreadRecord } from "./ask.ts";
 import type { RpcAgentRecord, RpcAgentRegistry, SpawnAgentRole } from "./spawner.ts";
-import { visibleWidth } from "./overlay-chat.ts";
+import { visibleWidth } from "./text-width.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
 
 /** `ctx.ui.setWidget` key for the live-agent panel (`belowEditor`, not a footer/header replacement). */
