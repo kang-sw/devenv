@@ -241,6 +241,64 @@ routes to `onEnter`; `setMode("interactive")` keeps items, scroll and expand
 state and shows the editor; `\x03` changes nothing and is not forwarded;
 `agent_start` requests a render.
 
+### Result (124598df) - 2026-09-09
+
+Landed the pi-tui dependency and the shared `ConversationViewComponent` as one
+slice; `overlay-chat.ts` left running (Phase 2 owns its deletion),
+`spawner.ts` record semantics and `agents-plugin-tool/` untouched. Range
+`1d1352b3..c45c3a0d` (feat pi-tui.ts `6df13053`, refactor importers
+`243c507a`, drop push-render unavailable tests `31c342c1`, component
+`124598df`, overlay-chat assertion `27388d81`, review-fix `c45c3a0d`).
+
+Component: `ConversationItem` model (`user`/`lead-message`/`assistant`/
+`tool-call`/`tool-result`/`note`, tool items carrying `id`), `view`/`interactive`
+modes with raise-only `setMode`, render-time `ChildLiveness` (`running`/
+`idle-awaiting-owner`/`settled`) via `ConversationChannel`, collapsible tool
+items reusing `tool-result-render.ts` previews (no new preview logic), the full
+key-precedence contract (Tab/Shift+Tab newest-first, Space, Ctrl+O; interactive
+editor-empty/selection-active gating; Esc via isEscapeKey; \x03 swallowed;
+/done; Enter-in-view), consumer-supplied `headerHint`, built on
+`ScrollView`/`Markdown`/`Text`/`Editor` through an injectable `primitives`
+factory. `visibleWidth` moved to `text-width.ts`; `agent-widget.ts` repointed.
+The three guarded dynamic importers now route through `pi-tui.ts`.
+
+Deviation 1 (dual-package, lead-approved — plan addendum + commit `1d1352b3`):
+`pi-coding-agent`'s npm-shrinkwrap nests its own `pi-tui`, so a top-level dep
+yields two physical copies that no pin alignment can dedupe. Per the ticket's
+sage-settled Runtime-instance fallback, `pi-tui.ts` resolves pi-tui through the
+host at runtime (`loadHostPiTui()` shim) with a static import for
+types/tests/defaults — no duplicated instance in use at runtime. Recorded as a
+repo gotcha note (`gotcha.pi-tui-dual-package`).
+
+Deviation 2 (forced test edit, lead-approved): the top-level pi-tui dep makes
+`overlay-chat.ts`'s own `loadMarkdownRenderer` resolvable under `node --test`, so
+`test/overlay-chat.test.ts`'s one "resolves to undefined" assertion was updated
+to expect a renderer (source untouched); the plan's "unmodified" expectation for
+that file is superseded by this recorded decision.
+
+Review (partitioned, correctness=opus/fit+test=sonnet): review #1 returned 2
+Critical + several Important. Critical C1 (missing `assistant` kind; child text
+mislabeled as `lead-message`) and C2 (interactive key-precedence unimplemented)
+were relayed and fixed in `c45c3a0d`; Critical re-review #2 returned both
+[resolved], no new issues, clean. Five Important (working… empty-tail guard, Tab
+newest-first, idle-at-foot rendering, consumer headerHint, send optional, plus
+paste-as-one-send and tool-preview-pinning test coverage) self-reported [fixed]
+in the same commit (best-effort, not re-reviewed). Minors recorded only.
+
+Verification: `node --test test/conversation-view.test.ts` 44/44; targeted run
+(conversation-view, push-render, tool-result-render, agent-widget, overlay-chat,
+native-tool-registration) 182/182; full `npm test` 1240/1370 with the same 130
+pre-existing environment failures (127 fork-prefix "missing installed Pi SDK
+chunks" + 3 others), zero introduced.
+
+Pending owner-run (not agent-cleared): the live instance-identity check inside a
+lead session — `tui instanceof TuiMainScreen || tui instanceof TuiAltScreen`
+(classes re-exported from `pi-tui.ts`) — expected to pass given the host-runtime
+resolution. Phase 2 (ask overlay migration, overlay-chat deletion, transcript
+hydration, the {#260905-pi-side-thread-owner-question-surface} spec-bullet
+amendment) remains; ticket stays in `ready/`. No merge to the parent track
+implied.
+
 ### Phase 2: migrate the ask overlay
 
 Rebind `ask.ts` to the component: `createForkChannel` becomes a
