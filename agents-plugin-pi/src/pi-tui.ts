@@ -21,9 +21,9 @@
  * The ticket's own "Runtime instance" clause pre-committed the fix: this
  * file resolves `pi-tui` through the host AT RUNTIME (the same guarded
  * dynamic `import("@earendil-works/pi-tui")` shim shape `push-render.ts`'s
- * `loadPushTuiModules`, `tool-result-render.ts`'s `loadToolResultTuiModules`,
- * and `overlay-chat.ts`'s `loadMarkdownRenderer` already use to reach host
- * modules — Pi's own jiti-based extension loading resolves that dynamic
+ * `loadPushTuiModules` and `tool-result-render.ts`'s `loadToolResultTuiModules`
+ * already use to reach host modules — Pi's own jiti-based extension loading
+ * resolves that dynamic
  * import against the SAME nested copy `pi-coding-agent`'s own code uses,
  * independent of whatever this package's own `node_modules` layout is),
  * while ALSO exposing a plain static import for the test/types/default path
@@ -44,10 +44,12 @@
  * ticket names) now go through this file's `loadHostPiTui()` instead of each
  * carrying its own dynamic import + "unavailable" fallback branch — the
  * per-importer duplication collapses into this one resolution point.
- * `overlay-chat.ts`'s own `loadMarkdownRenderer` dynamic import is
- * deliberately NOT one of those two — it stays exactly as-is until Phase 2
- * deletes the file with the rest of the pre-`ConversationViewComponent`
- * overlay.
+ *
+ * Phase 2 (`260908-feat-ws-pi-conversation-view-component`) added a third
+ * caller: `ask.ts`'s live `ConversationViewComponent` factory now calls
+ * `loadHostPiTui()` for its render primitives too, replacing the old
+ * per-thread overlay module's own guarded `loadMarkdownRenderer` dynamic
+ * import (that module, and its dynamic import, are deleted).
  */
 
 import * as piTuiStatic from "@earendil-works/pi-tui";

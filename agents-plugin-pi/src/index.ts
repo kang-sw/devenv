@@ -85,12 +85,12 @@
  * surface never regains `ws-fork` (no recursive forking; see fork.ts's own
  * doc comment for the full risk-signal trace).
  *
- * That ticket's Phase 2 adds the owner-question surface (src/ask.ts +
- * src/overlay-chat.ts): `ws-ask`/`ws-resolve`, a persisted per-lead-session
- * thread registry, `/thread`, `/answer <id>` (which
- * lazily forks a discussion thread at the lead's tip AT OPEN TIME and
- * attaches an overlay chat to it), and the `/done` summary injected back
- * into the lead as a Pi custom message. `session_start` re-captures `ctx`
+ * That ticket's Phase 2 adds the owner-question surface (src/ask.ts, built on
+ * src/conversation-view.ts's shared component): `ws-ask`/`ws-resolve`, a
+ * persisted per-lead-session thread registry, `/thread`, `/answer <id>`
+ * (which lazily forks a discussion thread at the lead's tip AT OPEN TIME and
+ * attaches a live conversation view to it), and the `/done` summary injected
+ * back into the lead as a Pi custom message. `session_start` re-captures `ctx`
  * into the registry handle on every firing (§5's captured-ctx staleness
  * rule), hydrates the registry from its sibling state file, threads
  * `handleForkRaisedQuestion` into `registerFork` as its new `onQuestion`
