@@ -455,6 +455,20 @@ class ShippedSurfacesDownstreamNeutralTest(unittest.TestCase):
         )
         self.assertIsNotNone(self._classify(leak))
 
+    def test_rule2_nonbootstrap_ai_docs_path_is_flagged(self):
+        # Positive control for rule 2 (the rule behind most cited point-leak
+        # sites): naming a git-tracked ai-docs file bootstrap does not install
+        # must trip, and be attributed to rule 2. Both files below are tracked
+        # today and absent from the bootstrap-installed set. The ref file trips
+        # rule 2 only (no repo-name token), so it isolates the rule cleanly.
+        for line in (
+            "See ai-docs/ref/worktree-ticket-scope.md for the sparse-checkout hazard.",
+            "Read ai-docs/manuals/skill-authoring.md before editing skills.",
+        ):
+            reason = self._classify(line)
+            self.assertIsNotNone(reason, f"rule 2 failed to trip on: {line}")
+            self.assertIn("rule 2", reason, f"wrong rule attributed for: {line}")
+
     def test_text_trees_downstream_neutral(self):
         failures = []
         for tree in TEXT_TREES:
