@@ -126,6 +126,7 @@ import {
   DEFAULT_AGENT_REGISTRY_CAP,
   PROMPT_STORAGE_CAP_BYTES,
   registerAgentTools,
+  exploreLeaf,
   type AgentRecord,
   type RpcAgentRecord,
   type RpcAgentRegistry,
@@ -363,6 +364,28 @@ describe("buildSpawnArgs", () => {
       task: "final positional check",
     });
     assert.equal(args[args.length - 1], "final positional check");
+  });
+
+  // 260906 Phase 2 (tier-slug closeout): `thinking` forwards an ephemeral
+  // collection leaf's resolved effort as a launch-time `--thinking` flag
+  // (`exploreLeaf` passes `options.effort` through, see that function's
+  // `buildSpawnArgs` call). Placed before the task positional, matching
+  // `--model`'s own placement immediately above it.
+  test("--thinking <level> is emitted before the task positional when thinking is a non-empty string", () => {
+    const args = buildSpawnArgs({
+      mode: "explore",
+      noSession: true,
+      task: "q",
+      thinking: "high",
+    });
+    assert.ok(args.includes("--thinking"));
+    assert.equal(args[args.indexOf("--thinking") + 1], "high");
+    assert.equal(args[args.length - 1], "q", "--thinking sits before the task positional, not after");
+  });
+
+  test("--thinking is absent when thinking is empty or omitted (an inherited/no effort)", () => {
+    assert.ok(!buildSpawnArgs({ mode: "explore", noSession: true, task: "q", thinking: "" }).includes("--thinking"));
+    assert.ok(!buildSpawnArgs({ mode: "explore", noSession: true, task: "q" }).includes("--thinking"));
   });
 });
 
@@ -806,6 +829,98 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
       assert.equal(handle.rpcRegistry.size, 1);
       await handle.stopAll();
     } finally { rpc.restore(); }
+  });
+});
+
+/**
+ * 260906 Phase 2 (tier-slug closeout): the one-shot `exploreLeaf` itself is
+ * NOT unit-testable in isolation — it calls the private, non-exported
+ * `spawnPiProcess`, which always does a real `node:child_process` `spawn()`
+ * with no injectable seam (unlike the RPC-backed path's `RpcClient`, whose
+ * prototype methods are monkey-patchable, see `installRpcHarness` above).
+ * The plan's own fallback ("cover the behavior through `buildSpawnArgs` +
+ * `resolveRequiredExploreModel`, and record why a direct `exploreLeaf` unit
+ * test is not added") is exactly this file's split: `buildSpawnArgs`'s
+ * `--thinking` cases above, and `resolveModelForAliasViaWsMcp`'s
+ * effort-carried-through-only-on-tier-hit cases (this file's "config.resolve_agent
+ * (Phase 4)" describe block) already cover the two ends of the pipe.
+ *
+ * What neither of those two covers is the WIRING between them: does the
+ * worker-role `explore` tool's `execute()` actually thread
+ * `resolveRequiredExploreModel`'s resolved `effort` into `runExploreLeaf`'s
+ * `ExploreLeafOptions.effort`? That IS unit-testable, because
+ * `registerAgentTools`'s `runExploreLeaf` parameter (`src/spawner.ts:2966`,
+ * defaulted to the real `exploreLeaf`) is a DI seam the real live process
+ * never needs to run through — a fake `runExploreLeaf` replaces the whole
+ * function, so `spawnPiProcess` is never reached at all. This describe block
+ * exercises exactly that seam.
+ */
+describe("registerAgentTools 'explore' tool (worker role): effort forwarding into runExploreLeaf", () => {
+  interface CapturedTool {
+    name: string;
+    execute: (id: string, params: unknown, signal?: AbortSignal, update?: unknown, ctx?: unknown) => Promise<{ content: Array<{ text: string }> }>;
+  }
+
+  /** Runs `fn` with `WS_PI_SPAWN_ROLE=worker` for the duration — `registerAgentTools` reads the role once, at factory time. */
+  function withWorkerRole<T>(fn: () => T): T {
+    const previous = process.env[WS_PI_SPAWN_ROLE_ENV];
+    process.env[WS_PI_SPAWN_ROLE_ENV] = "worker";
+    try {
+      return fn();
+    } finally {
+      if (previous === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV];
+      else process.env[WS_PI_SPAWN_ROLE_ENV] = previous;
+    }
+  }
+
+  /** A minimal successful `config.resolve_agent` catalog hit — `provider/id` must be present in `ctx.modelRegistry` below. */
+  function resolvePayload(effort?: string) {
+    return { resolved_from: "pi", model: "provider/id", ...(effort !== undefined ? { effort } : {}) };
+  }
+
+  function harness(payload: unknown, fakeRunExploreLeaf: typeof exploreLeaf) {
+    const tools = new Map<string, CapturedTool>();
+    const pi = { registerTool: (tool: CapturedTool) => tools.set(tool.name, tool) } as unknown as ExtensionAPI;
+    const bridge = {
+      client: { callTool: async (name: string) => { assert.equal(name, "config.resolve_agent"); return { content: [{ type: "text", text: JSON.stringify(payload) }] }; } },
+      wsToolNames: [],
+      defaultSessionKeyRef: { current: "lead-key" },
+    } as never;
+    const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" }, undefined, fakeRunExploreLeaf);
+    return { tool: tools.get("explore")!, handle };
+  }
+
+  const modelCtx = { modelRegistry: { getAll: () => [{ provider: "provider", id: "id" }], hasConfiguredAuth: () => true } };
+
+  test("a tier resolution carrying an effort forwards it as ExploreLeafOptions.effort", async () => {
+    let captured: { profile?: string; effort?: string } | undefined;
+    const fakeRunExploreLeaf = (async (_client, _registry, _ctx, _params, options) => {
+      captured = options;
+      return { agentId: "x", state: "done" as const, output: "ok" };
+    }) as unknown as typeof exploreLeaf;
+    const { tool, handle } = withWorkerRole(() => harness(resolvePayload("high"), fakeRunExploreLeaf));
+    try {
+      const result = await tool.execute("call", { query: "why does this fail" }, undefined, undefined, modelCtx);
+      assert.deepEqual(JSON.parse(result.content[0]!.text), { agentId: "x", state: "done", output: "ok" });
+      assert.equal(captured?.effort, "high");
+    } finally {
+      await handle.stopAll();
+    }
+  });
+
+  test("a tier resolution with no effort (empty resolved effort) forwards nothing — matches an inherit's no-level behavior", async () => {
+    let captured: { profile?: string; effort?: string } | undefined;
+    const fakeRunExploreLeaf = (async (_client, _registry, _ctx, _params, options) => {
+      captured = options;
+      return { agentId: "y", state: "done" as const, output: "ok" };
+    }) as unknown as typeof exploreLeaf;
+    const { tool, handle } = withWorkerRole(() => harness(resolvePayload(""), fakeRunExploreLeaf));
+    try {
+      await tool.execute("call", { query: "why does this fail" }, undefined, undefined, modelCtx);
+      assert.equal(captured?.effort, undefined);
+    } finally {
+      await handle.stopAll();
+    }
   });
 });
 

@@ -2241,13 +2241,19 @@ export function attachEventListener(
 }
 
 /**
- * Best-effort `setThinkingLevel()` after `start()`: Pi has no separate
- * `--reasoning-effort` CLI launch flag, so `model_effort` is applied as a
- * live post-start RPC call instead (decoupled from whether `model_name` was
- * also given). Never hard-fails — an unsupported/unrecognized level string
- * degrades to a no-op, matching the ticket's own fallback wording (Out of
- * Scope: validating against Pi's exact `ThinkingLevel` enum is not this
- * phase's job; the caller's string is forwarded as-is).
+ * Best-effort `setThinkingLevel()` after `start()`, for the RPC-backed
+ * persistent-child path only. A launch-time `--thinking <level>` CLI flag
+ * DOES exist — `buildSpawnArgs`'s `thinking` option, which the ephemeral
+ * one-shot `exploreLeaf` collection leaf uses directly (260906 Phase 2) —
+ * but this RPC path applies `model_effort` as a live post-start RPC call
+ * instead, because a persistent child's effort can change across a
+ * later resume/restart (dormant-resume `applyModelEffort` calls below),
+ * unlike the one-shot leaf's single fixed launch. Decoupled from whether
+ * `model_name` was also given. Never hard-fails — an unsupported/
+ * unrecognized level string degrades to a no-op, matching the ticket's own
+ * fallback wording (Out of Scope: validating against Pi's exact
+ * `ThinkingLevel` enum is not this phase's job; the caller's string is
+ * forwarded as-is).
  */
 async function applyModelEffort(client: RpcClient, modelEffort: string | undefined, strict = false): Promise<void> {
   if (!modelEffort) return;
