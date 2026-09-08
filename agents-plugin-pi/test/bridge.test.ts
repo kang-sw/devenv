@@ -15,6 +15,9 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   sanitizeToolName,
   filterOutMercenaryTools,
@@ -31,6 +34,22 @@ import {
   dispatchMappedWorkflowManual,
 } from "../src/bridge.ts";
 import type { McpToolCallResult } from "../src/mcp-stdio-client.ts";
+
+// Real captured pair, not synthetic: `test/fixtures/workflow-manual-static-body.txt`
+// is a live `playbook.read({name: "lead-workflow-manual"})` render (this
+// repo's own lead playbook), and `test/fixtures/workflow-manual-response.txt`
+// is a live CONTINUE-mode `workflow_manual` response for the same session key
+// against this repo — both captured via a throwaway spawnWsMcpClient() +
+// initialize() + ferrule + the two calls, the same technique this file's
+// LIVE_TOOL_NAMES comment (below) says was already used once. The response
+// fixture's `## Session Key` onward (session state + notes) is trimmed to a
+// few representative lines; everything before it (ws-mcp's prepended
+// warnings/manuals block, then the full manual body) is untouched, so the
+// anchor cut is exercised against a genuinely real-shaped response, not a
+// hand-authored stand-in.
+const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
+const REAL_STATIC_BODY_SNAPSHOT = readFileSync(join(FIXTURES_DIR, "workflow-manual-static-body.txt"), "utf8");
+const REAL_WORKFLOW_MANUAL_RESPONSE = readFileSync(join(FIXTURES_DIR, "workflow-manual-response.txt"), "utf8");
 
 // Live snapshot of ws-mcp's tools/list response (60 tools), captured via a
 // direct spawnWsMcpClient() probe against this repo's ws-mcp launcher. Not
@@ -259,22 +278,69 @@ describe("normalizeSessionKey", () => {
 });
 
 describe("cutStaticBody", () => {
-  test("removes the first occurrence of the static body substring", () => {
-    const result = cutStaticBody("HEADER\nSTATIC BODY\nFOOTER", "STATIC BODY\n");
+  // The real static body's first non-empty line — the algorithm's start
+  // anchor. Confirmed (by direct inspection of the fixtures) to occur
+  // exactly once in the captured response, as a whole line.
+  const REAL_START_LINE = REAL_STATIC_BODY_SNAPSHOT.split("\n").find((line) => line.length > 0)!;
+
+  // ws-mcp's own no-restorable-state FAIL-LOUD notice shape
+  // (workflow_manual.go's handleWorkflowManual: a syntactically valid but
+  // unresolvable session_key never renders a manual body at all) — contains
+  // neither the manual's start heading nor a literal `## Session Key` line
+  // (`## Session State` is a different heading), so this is the concrete
+  // `reason: "no-body"` fixture.
+  const NO_RESTORABLE_STATE_NOTICE =
+    '## Session State\n(no restorable state for session key "some-key"; this key resolves to no stored session record — do not assume prior agenda/todo. If you are the lead recovering after compaction, re-run lead-revive to restore your session.)\n';
+
+  test("real captured pair: anchor-cuts the manual body, keeping the prepended advisories and the ## Session Key tail", () => {
+    const result = cutStaticBody(REAL_WORKFLOW_MANUAL_RESPONSE, REAL_STATIC_BODY_SNAPSHOT);
     assert.equal(result.found, true);
-    assert.equal(result.text, "HEADER\nFOOTER");
+    assert.equal(result.reason, undefined);
+
+    // Expected shape, computed independently of cutStaticBody's own
+    // line-array algorithm: everything before the response's start-anchor
+    // line, concatenated with everything from the "## Session Key" line
+    // onward.
+    const startOffset = REAL_WORKFLOW_MANUAL_RESPONSE.indexOf(`\n${REAL_START_LINE}\n`) + 1;
+    const endOffset = REAL_WORKFLOW_MANUAL_RESPONSE.indexOf("\n## Session Key\n") + 1;
+    assert.ok(startOffset > 0 && endOffset > startOffset, "test fixture sanity: both anchors must be present and ordered");
+    const expected = REAL_WORKFLOW_MANUAL_RESPONSE.slice(0, startOffset) + REAL_WORKFLOW_MANUAL_RESPONSE.slice(endOffset);
+
+    assert.equal(result.text, expected);
+    assert.ok(!result.text.includes(REAL_START_LINE), "the manual body's start heading must be cut out");
+    assert.ok(result.text.startsWith("review watermark"), "the prepended advisory block ahead of the manual body must survive");
+    assert.ok(result.text.includes("## Session Key\nwooing-lunchbox-parsnip"), "the ## Session Key tail must survive, end-anchor line included");
   });
 
-  test("found:false when the static body does not appear (renderer drift)", () => {
-    const result = cutStaticBody("HEADER\nsomething else\nFOOTER", "STATIC BODY\n");
+  test("reason: end-anchor when the response's ## Session Key heading is missing", () => {
+    const withoutEndAnchor = REAL_WORKFLOW_MANUAL_RESPONSE.replace("\n## Session Key\n", "\n## Not A Session Key Heading\n");
+    const result = cutStaticBody(withoutEndAnchor, REAL_STATIC_BODY_SNAPSHOT);
     assert.equal(result.found, false);
-    assert.equal(result.text, "HEADER\nsomething else\nFOOTER");
+    assert.equal(result.reason, "end-anchor");
+    assert.equal(result.text, withoutEndAnchor);
   });
 
-  test("only removes the first occurrence when the substring repeats", () => {
-    const result = cutStaticBody("Xabc Xabc", "Xabc");
-    assert.equal(result.found, true);
-    assert.equal(result.text, " Xabc");
+  test("reason: start-anchor when the response's start heading is missing (## Session Key still present)", () => {
+    const withoutStartAnchor = REAL_WORKFLOW_MANUAL_RESPONSE.replace(`\n${REAL_START_LINE}\n`, `\n${REAL_START_LINE} (renamed)\n`);
+    const result = cutStaticBody(withoutStartAnchor, REAL_STATIC_BODY_SNAPSHOT);
+    assert.equal(result.found, false);
+    assert.equal(result.reason, "start-anchor");
+    assert.equal(result.text, withoutStartAnchor);
+  });
+
+  test("reason: no-body for ws-mcp's no-restorable-state notice (neither anchor present)", () => {
+    const result = cutStaticBody(NO_RESTORABLE_STATE_NOTICE, REAL_STATIC_BODY_SNAPSHOT);
+    assert.equal(result.found, false);
+    assert.equal(result.reason, "no-body");
+    assert.equal(result.text, NO_RESTORABLE_STATE_NOTICE);
+  });
+
+  test("reason: order when the ## Session Key line appears before the start anchor line", () => {
+    const outOfOrder = `## Session Key\nlead-1\n\n${REAL_START_LINE}\nbody`;
+    const result = cutStaticBody(outOfOrder, REAL_STATIC_BODY_SNAPSHOT);
+    assert.equal(result.found, false);
+    assert.equal(result.reason, "order");
+    assert.equal(result.text, outOfOrder);
   });
 });
 
@@ -388,11 +454,37 @@ describe("dispatchMappedWorkflowManual", () => {
     assert.ok(text?.includes("## Session State"));
   });
 
+  test("reason no-body: forwards ws-mcp's no-restorable-state notice unchanged, no notify, no workflow_state dispatch", async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const notice =
+      '## Session State\n(no restorable state for session key "some-key"; this key resolves to no stored session record — do not assume prior agenda/todo. If you are the lead recovering after compaction, re-run lead-revive to restore your session.)\n';
+    const result = await dispatchMappedWorkflowManual(
+      { session_key: "some-key" },
+      {
+        callTool: async (name, args) => {
+          calls.push({ name, args });
+          if (name === "config.resolve_agent") return noHitResolveAgentResult();
+          return textResult(notice);
+        },
+        staticBodySnapshot: "STATIC-BODY\n",
+        catalog: [{ provider: "openrouter", id: "cheap-model", hasAuth: true }],
+        notifyMappingDegraded: () => assert.fail("notifyMappingDegraded must not be called on reason: no-body"),
+      },
+    );
+    const wsCalls = calls.filter((c) => c.name !== "config.resolve_agent");
+    assert.deepEqual(wsCalls, [{ name: "workflow_manual", args: { session_key: "some-key" } }], "no workflow_state dispatch on reason: no-body");
+    const text = result.content.find((item) => item.type === "text")?.text;
+    assert.equal(text, `Workflow manual is in your system prompt; this is your current session state.\n\n${notice}`);
+  });
+
   test("advisory still appends on the mapped response when no tier has a genuine pi entry", async () => {
     const result = await dispatchMappedWorkflowManual(
       { session_key: "lead-1" },
       {
-        callTool: async (name) => (name === "config.resolve_agent" ? noHitResolveAgentResult() : textResult("HEADER\nSTATIC-BODY\nBODY")),
+        // "## Session Key\nlead-1" is the required end anchor — without it
+        // this fixture would silently slide into the fallback path under
+        // the anchor-cut algorithm instead of exercising the cut-hit path.
+        callTool: async (name) => (name === "config.resolve_agent" ? noHitResolveAgentResult() : textResult("HEADER\nSTATIC-BODY\nBODY\n## Session Key\nlead-1")),
         staticBodySnapshot: "STATIC-BODY\n",
         catalog: [{ provider: "openrouter", id: "cheap-model", hasAuth: true }],
         notifyMappingDegraded: () => {},
@@ -409,7 +501,8 @@ describe("dispatchMappedWorkflowManual", () => {
         callTool: async (name, args) => {
           if (name === "config.resolve_agent" && args.tier === "large") return hitResolveAgentResult();
           if (name === "config.resolve_agent") return noHitResolveAgentResult();
-          return textResult("HEADER\nSTATIC-BODY\nBODY");
+          // Required end anchor — see the comment on the previous test.
+          return textResult("HEADER\nSTATIC-BODY\nBODY\n## Session Key\nlead-1");
         },
         staticBodySnapshot: "STATIC-BODY\n",
         catalog: [{ provider: "openrouter", id: "cheap-model", hasAuth: true }],
