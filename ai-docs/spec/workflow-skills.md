@@ -729,11 +729,13 @@ skeleton obligation. {#260510-skeleton-contract-populator-flow}
 
 `lead-implement` delegated mode absorbs the useful skeleton role through plan authoring.
 For public interface, cross-module boundary, or new type contract changes, the
-generated plan carries the relevant ticket contract, expected files or modules,
-public types/functions/handlers/tools when applicable, reusable mechanisms,
-forbidden temporary/fallback/mock-data wiring, implementation steps, and
-verification expectations. Implementers treat the plan as the execution
-contract, and reviewers compare the ticket, plan, and diff together.
+generated plan routes to the relevant ticket contract (ticket path and
+selected phase heading, not restated ticket text) and records expected files
+or modules, public types/functions/handlers/tools when applicable, reusable
+mechanisms, forbidden temporary/fallback/mock-data wiring, implementation
+steps, and verification expectations. Implementers treat the ticket's
+selected phase as the execution contract and the plan as the route through
+it, and reviewers compare the ticket, plan, and diff together.
 {#260512-skeleton-inside-implement-branch}
 
 Ticket `skeletons:` frontmatter is a backward-compatible legacy artifact map.
@@ -799,10 +801,13 @@ Initial implementer dispatch is file-first: the lead renders the `implementer`
 playbook with plan path, verification hint, result expectations, and
 commit-range hint as declared render inputs, then sends the worker only the
 rendered prompt path plus the instruction to execute it. The rendered
-implementer prompt reads the plan and listed references as the task contract; it
-does not read the ticket directly unless the plan's `Escalations` section
-explicitly authorizes ticket-file reading. Otherwise the lead updates the plan
-before ticket material is needed. Recommended tier remains dispatch
+implementer prompt reads the plan and listed references as a route, not the
+task contract: when the plan's `Relevant Ticket Contract` names a ticket path
+and phase heading, the implementer reads that ticket file and the selected
+phase governs; when it instead holds a verbatim inline contract, that
+contract governs and there is no ticket to read. Where a plan step and the
+ticket disagree, the ticket wins and the implementer reports the
+disagreement. Recommended tier remains dispatch
 metadata for the lead or transport, not worker-facing task input.
 
 After fact gathering and before preparation or source inspection,
@@ -900,17 +905,25 @@ render contract carries `target_kind`, ticket path/selected phase, inline
 contract, and plan path; inactive authority fields are passed explicitly empty.
 Ticket mode reads the ticket and selected phase. Inline mode uses the supplied
 accepted scope, constraints, non-goals, and verification boundary and never
-reads a placeholder ticket path. `plan-populator-survey` clips the selected
-authority, explores source, writes a light implementation plan with `Relevant
-Ticket Contract`, `Out of Scope`, `Codebase Findings`, `Implementation Plan`,
-`Verification Plan`, and `Escalations`, then returns `[ok]`,
-`[escalate-to-research]`, or `[escalate-to-lead]` with confidence and
-rationale. `[escalate-to-lead]` is a lead-directed scope-reduction signal,
-distinct from `[escalate-to-research]`'s strategy/contract-uncertainty scope:
-a fully-specified, multi-part requirement must be carried whole into the plan,
-and a confident planner decision to implement only a subset is a scope
-decision for the lead, never a unilateral planner choice, unless the ticket or
-lead already authorized the phasing. If survey cannot safely support
+reads a placeholder ticket path. `plan-populator-survey` never restates the
+selected authority into the plan — for a ticket target `Relevant Ticket
+Contract` names only the ticket path and selected phase heading, for an
+inline target it holds the verbatim inline contract — explores source, and
+writes a light implementation plan with `Relevant Ticket Contract`, `Out of
+Scope`, `Codebase Findings`, `Implementation Plan`, `Verification Plan`, and
+`Escalations`, then returns `[ok]`, `[escalate-to-research]`, or
+`[escalate-to-lead]` with confidence and rationale. `[escalate-to-lead]`
+covers two signals distinct from `[escalate-to-research]`'s
+strategy/contract-uncertainty scope: a lead-directed scope-reduction signal
+(a fully-specified, multi-part requirement must be carried whole into the
+plan, and a confident planner decision to implement only a subset is a scope
+decision for the lead, never a unilateral planner choice, unless the ticket
+or lead already authorized the phasing), and a settled-vs-open signal (a
+conclusion that narrows, inverts, or reframes a ticket `## Decisions`/`##
+Constraints` entry the ticket already settled is an escalation, never a
+finding, and `## Escalations` is never `None` under `[ok]` when one exists;
+a conclusion that only fills a gap the ticket leaves open either way is
+allowed and marked as gap-filling instead). If survey cannot safely support
 implementation without strategy, contract, or reuse judgment, `lead-implement`
 routes to `plan-populator-research` on the same plan path before spawning the
 implementer.
@@ -930,18 +943,23 @@ artifact path with the research plan; it does not create a
 research-suffixed plan filename or append research to a survey plan.
 
 Before spawning the implementer, `lead-implement` handles plan-populator exit
-signals. It stops and escalates when implementation would likely pursue a wrong
-contract, bypass existing project mechanisms, or rely on a shortcut path. Review
+signals. For each settled-vs-open `## Escalations` entry, it adjudicates in
+place — ruling on the entry and writing the ruling directly under it in the
+plan — and continues; it stops for the user only when resolving the entry
+would itself change the ticket. It also stops and escalates when
+implementation would likely pursue a wrong contract, bypass existing project
+mechanisms, or rely on a shortcut path. Review
 remains an enforcement step: reviewers compare the implementation against the
 selected authority, plan, and diff to catch implementation-time shortcut drift, but known
 plan-time risks are handled before source work begins.
 
-The implementation plan is the implementer's sole context source, but it is not
-a lossy ticket summary. For the selected implementation scope, the plan clips the
-relevant ticket contract and records implementation strategy, codebase findings,
-verification expectations, escalations, and explicit out-of-scope boundaries.
-Ticket noise such as background discussion, unsettled options, and unrelated
-future phases is stripped. In ticket-driven runs, reviewers read the ticket and
+The implementation plan is a route back to the ticket, not a ticket summary
+substituting for it. For the selected implementation scope, the plan names the
+ticket path and selected phase heading (or, for an inline target, the verbatim
+inline contract) and records implementation strategy, codebase findings,
+verification expectations, escalations, and explicit out-of-scope boundaries,
+naming later-phase headings, adjacent ticket stems, and nearby concerns as
+pointers only. In ticket-driven runs, reviewers read the ticket and
 plan, then treat any specified authority requirement that is not implemented
 and does not carry an explicit, authorized deferral as a blocking finding
 within their assigned partitions.
@@ -1109,10 +1127,11 @@ the target touches plugin architecture, host-neutral migration, spawn-removal,
 or adapter boundaries. Delegated implementation has a required plan artifact;
 when the migration anchor is read, binding implementation constraints from the
 anchor are copied into the plan and the anchor is listed as a `[Must]` reference before
-plan population or implementer dispatch. Delegated implementers receive only the
-plan as task input, may read additional documents listed in the plan, and must
-not read the ticket directly unless the plan's `Escalations` section explicitly
-authorizes ticket-file reading.
+plan population or implementer dispatch. Delegated implementers receive the
+plan as task input, may read additional documents listed in the plan, and,
+when the plan's `Relevant Ticket Contract` names a ticket path and phase
+heading, read that ticket file and treat the selected phase as the task
+contract; where a plan step and the ticket disagree, the ticket wins.
 
 For every normal route, `lead-proceed` calls `ws.route.resolve_proceed` after lead-owned
 fact gathering and receives a deterministic raw verdict with exactly one
