@@ -10,7 +10,7 @@ spec:
 related:
   260908-feat-survey-plan-is-route-not-contract: prerequisite, both phases; Phase 1 makes the implementer read the ticket so a stub plan is enough, Phase 2 removes the plan from reviewer input and makes wrap-up deviations ticket-diffed so the stub is never judged as a contract
   260903-epic-mcp-tool-surface-affordance-reduction: policy source for "no new input field"; the skip condition reuses the existing complexity facts
-  260908-bug-shipped-prep-guardrail-hardcodes-devenv-migration-anchor: why the stub's Codebase Findings rule names the Prep reads rather than any one project's anchor
+  260908-bug-shipped-surfaces-carry-devenv-only-content: why the stub's Codebase Findings rule names the Prep reads rather than any one project's anchor
 related-mental-model:
   - workflow-skills
 sage-review-completeness-reviewed: a02e844dc8406cab
@@ -95,7 +95,7 @@ state all four at their strongest value, a survey has nothing left to find.
   constraint from Prep reads". The rule is stated in terms of the Prep
   reads, not of any one project's anchor, because the plugin ships to
   projects that declare different anchors or none
-  (`260908-bug-shipped-prep-guardrail-hardcodes-devenv-migration-anchor`).
+  (`260908-bug-shipped-surfaces-carry-devenv-only-content`).
   The stub is lead-written, so the planner playbooks' output rules
   describe planner output and are not amended. The implementer is then rendered with
   `PlanPath` exactly as after a survey; with `260908` Phase 2 landed,
@@ -156,7 +156,7 @@ state all four at their strongest value, a survey has nothing left to find.
   `[Must]` reference before plan population or implementer dispatch",
   which gains the lead-written stub's `## Codebase Findings` as the plan
   section the copy lands in; if
-  `260908-bug-shipped-prep-guardrail-hardcodes-devenv-migration-anchor`
+  `260908-bug-shipped-surfaces-carry-devenv-only-content`
   rewords that sentence first, the stub clause follows the reworded
   text). Both
   workflow-skills anchors are rewritten by `260908` Phase 1; this ticket
