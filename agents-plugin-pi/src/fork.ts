@@ -54,6 +54,7 @@ import { readFileSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
+import { buildForkSummary, createDispatchToolPreview } from "./tool-row-render.ts";
 import { modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx, type ModelCatalogEntry } from "./model-catalog.ts";
 import {
   REPORT_TO_LEAD_TOOL_NAME,
@@ -62,6 +63,7 @@ import {
   pushToLead,
   reportKindsSinceLeadPrompt,
   spawnAgent,
+  type ResolvedModelInfo,
   type RpcAgentRecord,
   type RpcAgentRegistry,
 } from "./spawner.ts";
@@ -577,7 +579,7 @@ export function buildForkSpawnCtx(
   pi: ExtensionAPI,
   bridge: BridgeHandle,
   sessionCtx: ForkSessionCtx,
-  opts: { forkFrom: string; forkSourceEntries?: unknown[]; explicitTools: string; inheritModel?: string; catalog: readonly ModelCatalogEntry[]; notifyTierWarning?: (warning: string) => void; forkCacheNoticeOwner?: Parameters<typeof spawnAgent>[1]["forkCacheNoticeOwner"]; forkContext?: ReturnType<typeof captureForkContext> },
+  opts: { forkFrom: string; forkSourceEntries?: unknown[]; explicitTools: string; inheritModel?: string; catalog: readonly ModelCatalogEntry[]; notifyTierWarning?: (warning: string) => void; forkCacheNoticeOwner?: Parameters<typeof spawnAgent>[1]["forkCacheNoticeOwner"]; forkContext?: ReturnType<typeof captureForkContext>; onModelResolved?: Parameters<typeof spawnAgent>[1]["onModelResolved"] },
 ): Parameters<typeof spawnAgent>[1] {
   return {
     // Load-bearing: the fork's whole report channel back to the lead.
@@ -595,6 +597,7 @@ export function buildForkSpawnCtx(
     parentSessionKey: bridge.defaultSessionKeyRef.current,
     spawnRole: "fork",
     forkContext: opts.forkContext,
+    onModelResolved: opts.onModelResolved,
   };
 }
 
@@ -686,7 +689,7 @@ export function registerFork(
       },
       required: ["prompt"],
     } as never,
-    async execute(_toolCallId, params, _signal, _onUpdate, toolCtx) {
+    async execute(_toolCallId, params, _signal, onUpdate, toolCtx) {
       if (readSpawnRole(process.env) === "fork") {
         throw new Error(`ws-pi-agent: ${FORK_TOOL_NAME} is unavailable in a fork; report to the lead instead.`);
       }
@@ -714,6 +717,7 @@ export function registerFork(
             modelDescriptor: await effectiveForkDescriptor(toolCtx, pi.getThinkingLevel()),
           })
         : undefined;
+      let resolvedInfo: ResolvedModelInfo | undefined;
       const result = await spawnAgent(
         rpcRegistry,
         buildForkSpawnCtx(pi, bridge, sessionCtx, {
@@ -725,6 +729,10 @@ export function registerFork(
           notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx),
           forkCacheNoticeOwner: { mode: toolCtx.mode, hasUI: toolCtx.hasUI, ui: toolCtx.ui },
           forkContext,
+          onModelResolved: (resolved) => {
+            resolvedInfo = resolved;
+            onUpdate?.({ content: [], details: { resolved } });
+          },
         }),
         {
           prompt: buildForkInitialMessage(p.prompt),
@@ -735,7 +743,8 @@ export function registerFork(
       const record = rpcRegistry.get(result.agent_id);
       if (record) armForkRoleWiring(pi, rpcRegistry, record, onQuestion, p.expects_commit ?? false);
 
-      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      return { content: [{ type: "text", text: JSON.stringify(result) }], details: { resolved: resolvedInfo } };
     },
+    ...createDispatchToolPreview(toolPreviewTuiRef, FORK_TOOL_NAME, buildForkSummary),
   }, toolPreviewTuiRef);
 }

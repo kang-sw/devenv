@@ -7,6 +7,7 @@ import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerAgentTools } from "../src/spawner.ts";
 import { registerExecuteGateway } from "../src/execute-gateway.ts";
+import { registerFork } from "../src/fork.ts";
 import { startBridge } from "../src/bridge.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolResultTuiModules } from "../src/tool-result-render.ts";
 
@@ -45,8 +46,18 @@ test("actual native registrations retain schemas/executors while sharing cold an
   const ref = createToolPreviewTuiRef();
   const agents = registerAgentTools(pi, bridge, { cwd: "/tmp" }, undefined, async () => ({ agentId: "leaf", state: "done", output: "ok" }), "/tmp/explore.md", ref);
   registerExecuteGateway(pi, bridge, agents.rpcRegistry, { cwd: "/tmp", executeWorkerPromptPath: "/tmp/execute.md" }, ref);
+  registerFork(pi, bridge, agents.rpcRegistry, { cwd: "/tmp" }, undefined, ref);
 
-  for (const name of ["ws-agent-send", "explore", "ws-approve", "do-i-really-have-to-read-this-myself", "do-i-really-have-to-run-this-myself"]) {
+  for (const name of [
+    "ws-agent-send",
+    "ws-agent-spawn",
+    "explore",
+    "ws-approve",
+    "ws-execute",
+    "ws-fork",
+    "do-i-really-have-to-read-this-myself",
+    "do-i-really-have-to-run-this-myself",
+  ]) {
     const tool = tools.get(name);
     assert.ok(tool?.execute, `${name} remains an executable production registration`);
     assert.ok(tool?.parameters, `${name} retains its production schema`);
@@ -57,9 +68,13 @@ test("actual native registrations retain schemas/executors while sharing cold an
   assert.ok("agent_id" in (send.parameters!.properties ?? {}), "ws-agent-send schema is preserved");
 
   ref.current = tui;
-  const rendered = send.renderCall!({ agent_id: "agent-1", model: "caller-only", effort: "high" }, { bold: (x: string) => x, fg: (_: string, x: string) => x }, { state: {}, argsComplete: true, isPartial: false }) as { render(width: number): string[] };
-  assert.match(rendered.render(120).join("\n"), /model: caller-only/, "only caller-supplied model metadata is displayed");
-  assert.match(rendered.render(120).join("\n"), /effort: high/);
+  // 260906 Phase 2: ws-agent-send now owns its own custom renderCall (target
+  // agent + message head), not the generic raw-arg YAML dump — this proves
+  // the SAME captured closure sees the late-filled ref for its own summary.
+  const rendered = send.renderCall!({ agent_id: "agent-1", message: "hello there" }, { bold: (x: string) => x, fg: (_: string, x: string) => x }, { state: {}, argsComplete: true, isPartial: false }) as { render(width: number): string[] };
+  const renderedText = rendered.render(120).join("\n");
+  assert.match(renderedText, /target: agent-1/, "ws-agent-send's own custom summary renders the target agent");
+  assert.match(renderedText, /message: hello there/);
   agents.stopAll();
 });
 

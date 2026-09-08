@@ -617,6 +617,48 @@ describe("native YAML preview renderers", () => {
     assert.equal(pending[pendingInput + 1]?.trim(), "", "pending keeps the input-owned trailing separator");
   });
 
+  test("260906 Phase 2: overrides.buildCallPreview changes the rendered input text", () => {
+    const { tui } = fakeTui();
+    const renderers = createToolPreviewRenderers(tui, "ws-test-dispatch", undefined, {
+      buildCallPreview: (args) => `custom: ${(args as { value?: string }).value ?? "none"}`,
+    });
+    const call = renderers.renderCall({ value: "hello" }, unstyledTheme, context());
+    assert.match(call.render(80).join("\n"), /custom: hello/);
+  });
+
+  test("260906 Phase 2: overrides.resolvedLine present bypasses the isPartial/isError throw", () => {
+    const { tui } = fakeTui();
+    const renderers = createToolPreviewRenderers(tui, "ws-test-dispatch", undefined, {
+      resolvedLine: (result) => (result.details as { resolved?: string } | undefined)?.resolved,
+    });
+    const partial = renderers.renderResult({ content: [], details: { resolved: "→ small · x · effort high" } }, { expanded: false, isPartial: true }, unstyledTheme, context());
+    assert.match(partial.render(80).join("\n"), /small · x · effort high/);
+
+    const errored = renderers.renderResult({ content: [{ type: "text", text: "boom" }], details: { resolved: "→ small · x · effort high" } }, { expanded: false, isPartial: false }, unstyledTheme, context({ isError: true }));
+    assert.match(errored.render(80).join("\n"), /small · x · effort high/);
+  });
+
+  test("260906 Phase 2: overrides absent is byte-identical to the pre-Phase-2 behavior", () => {
+    const { tui } = fakeTui();
+    const plainRenderers = createToolPreviewRenderers(tui, "ws-test-dispatch");
+    const overriddenAbsent = createToolPreviewRenderers(tui, "ws-test-dispatch", undefined, undefined);
+    const content = [{ type: "text", text: '{"ok":true}' }];
+
+    const plainCall = plainRenderers.renderCall({ value: "x" }, unstyledTheme, context()).render(80);
+    const overriddenCall = overriddenAbsent.renderCall({ value: "x" }, unstyledTheme, context()).render(80);
+    assert.deepEqual(plainCall, overriddenCall);
+
+    const plainResult = plainRenderers.renderResult({ content }, { expanded: false, isPartial: false }, unstyledTheme, context()).render(80);
+    const overriddenResult = overriddenAbsent.renderResult({ content }, { expanded: false, isPartial: false }, unstyledTheme, context()).render(80);
+    assert.deepEqual(plainResult, overriddenResult);
+
+    // The default path still throws on partial/error exactly as before.
+    assert.throws(
+      () => overriddenAbsent.renderResult({ content }, { expanded: false, isPartial: true }, unstyledTheme, context()),
+      UseNativeResultFallback,
+    );
+  });
+
   test("uses real installed Pi parent-shell composition and retains its padding", async () => {
     const codingAgentUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
     const requireFromPi = createRequire(codingAgentUrl);

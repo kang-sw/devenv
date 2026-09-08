@@ -106,6 +106,7 @@ import { StringDecoder } from "node:string_decoder";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
+import { buildExecuteSummary, createDispatchToolPreview } from "./tool-row-render.ts";
 import { modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx } from "./model-catalog.ts";
 import {
   GATED_EXEC_TOOL_NAME,
@@ -114,6 +115,7 @@ import {
   pushToLead,
   resolveAgentId,
   spawnAgent,
+  type ResolvedModelInfo,
   type RpcAgentRecord,
   type RpcAgentRegistry,
 } from "./spawner.ts";
@@ -654,7 +656,7 @@ export function registerExecuteGateway(
       },
       required: ["prompt"],
     } as never,
-    async execute(_toolCallId, params, _signal, _onUpdate, toolCtx) {
+    async execute(_toolCallId, params, _signal, onUpdate, toolCtx) {
       const p = params as { command?: string; prompt: string; complex?: boolean };
       let output: string | undefined;
       if (p.command !== undefined) {
@@ -662,6 +664,7 @@ export function registerExecuteGateway(
         output = `${execResult.stdout}${execResult.stderr}`;
       }
       const initialPrompt = buildExecuteWorkerPrompt({ command: p.command, output, prompt: p.prompt });
+      let resolvedInfo: ResolvedModelInfo | undefined;
       const result = await spawnAgent(
         rpcRegistry,
         {
@@ -674,6 +677,10 @@ export function registerExecuteGateway(
           client: bridge.client,
           toolGroup: "execute-worker",
           onApprovalPending: sessionCtx.onApprovalPending,
+          onModelResolved: (resolved) => {
+            resolvedInfo = resolved;
+            onUpdate?.({ content: [], details: { resolved } });
+          },
         },
         {
           systemPromptPath: sessionCtx.executeWorkerPromptPath,
@@ -681,8 +688,9 @@ export function registerExecuteGateway(
           modelName: resolveExecuteModelAlias(p.complex),
         },
       );
-      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      return { content: [{ type: "text", text: JSON.stringify(result) }], details: { resolved: resolvedInfo } };
     },
+    ...createDispatchToolPreview(toolPreviewTuiRef, EXECUTE_TOOL_NAME, buildExecuteSummary),
   }, toolPreviewTuiRef);
 
   registerWsTool(pi, {

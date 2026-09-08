@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 59a494f2524cf132
 sage-review-completeness-reviewed: 59a494f2524cf132
+completed: 2026-09-09
 ---
 
 # Pi TUI renders JSON-shaped ws tool results as YAML while the model keeps receiving JSON
@@ -351,3 +352,48 @@ success, and error results; a long synchronous `explore` answer is trimmed
 to the row budget below the line. Live check (owner-run): in a Pi session,
 `explore`, `ws-execute`, and `ws-agent-spawn` rows show the input summary
 while running and the resolved model line before the child finishes.
+
+### Result (506376d1) - 2026-09-09
+
+Landed across `9552079e..506376d1` (adapter-only, `agents-plugin-pi/`).
+
+- New `src/tool-row-render.ts`: five per-tool call-summary builders
+  (`explore`, `ws-execute`, `ws-agent-spawn`, `ws-agent-send`, `ws-fork`),
+  `formatResolvedLine`, a shared head-truncator, and
+  `createDispatchToolPreview` — all pure, no `pi-tui` static import, and
+  defensive against `undefined`/partial/malformed args.
+- `createToolPreviewRenderers` (`src/tool-result-render.ts`) gained an
+  optional `overrides` param (`buildCallPreview`, `resolvedLine`); the default
+  path is byte-identical, so every other `registerWsTool` caller is untouched.
+  The five dispatch tools opt out of the generic YAML args dump via the
+  existing `registerWsTool` renderer gate and supply their own hooks.
+- `spawnAgent` gained `RpcSpawnCtx.onModelResolved`, fired after both refusal
+  guards pass (never on a rejected tier) and before side effects; `inherited`
+  reads `TierResolution.source === "inherit"`, never `rejected`.
+  `RpcAgentRecord` gained `modelTier`/`modelSource` (not persisted to the
+  sidecar; a revived record degrades to an inherit reading). Wired through
+  `ws-agent-spawn`, both `explore` branches (lead-role via `spawnAgent`,
+  worker-leaf via direct `resolveRequiredExploreModel`), `ws-execute`, and
+  `ws-fork`; `ws-agent-send` reconstructs the line from the target record.
+  The resolved line publishes through `onUpdate` partials and the final
+  `details.resolved`.
+
+Deviation: the "long synchronous `explore` answer trimmed below the line" test
+gap surfaced in review relay #1 and was closed at `506376d1` — the resolved
+line and body compute independent preview layouts, so the row-budget cap was
+never actually shared/miscounted; the added test locks that in rather than
+fixing a bug.
+
+Verification: targeted `node --test` on the six touched files
+(`tool-row-render`, `tool-result-render`, `spawner`, `execute-gateway`,
+`fork`, `native-tool-registration`) with `WS_PI_SPAWN_ROLE` unset — green
+(465/465, then 43/43 after the relay test). Full suite's ~130 failures are the
+pre-existing linuxbrew-path fork/lead-bootstrap failures, unrelated to this
+diff. Owner-run live TUI check remains outstanding (per ticket).
+
+Review: correctness (opus) and fit (sonnet) clean; test (sonnet) one Important
+coverage gap, [fixed] in relay #1. Two Minor test findings recorded only.
+Spec: three Phase 2 passages amended under
+`{#260903-pi-delegation-spawner-tools}` (spawn/send/explore),
+`{#260905-pi-execute-approval-gateway}` (execute), and
+`{#260905-pi-side-thread-fork-task-thread}` (fork).
