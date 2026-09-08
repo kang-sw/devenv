@@ -440,15 +440,13 @@ export function buildVerbatimExcerpt(entryId: string, branch: readonly { id: str
  * for the same reason: `execute-gateway.ts`'s shared
  * `computeLeadActiveTools`/`LEAD_ADDED_TOOL_NAMES` are applied to lead AND
  * fork roles alike, so folding these two in there would hand a fork the very
- * tools `FORK_EXCLUDED_TOOL_NAMES` exists to keep away from it. `ws-ask` is
- * removed from every role's active list; only the true top lead
- * (`role === undefined`) retains the lead-only `ws-resolve` addition.
+ * tools `FORK_EXCLUDED_TOOL_NAMES` exists to keep away from it. Both tools
+ * are removed from every role's active list; this helper appends neither.
+ * The role parameter remains part of the role-differentiated call shape.
  */
 export function addAskToolsIfLead(activeTools: readonly string[], role: SpawnRole | undefined): string[] {
-  const result = activeTools.filter((name) => name !== ASK_TOOL_NAME);
-  if (role !== undefined) return result;
-  if (!result.includes(RESOLVE_TOOL_NAME)) result.push(RESOLVE_TOOL_NAME);
-  return result;
+  void role;
+  return activeTools.filter((name) => name !== ASK_TOOL_NAME && name !== RESOLVE_TOOL_NAME);
 }
 
 /**
