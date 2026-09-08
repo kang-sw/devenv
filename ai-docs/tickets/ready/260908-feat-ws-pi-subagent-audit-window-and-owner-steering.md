@@ -228,6 +228,51 @@ the second `/audit` closes the first overlay. Live check (owner-run, isolated tm
 mid-task, watch a tool call appear and expand it, Esc, reopen, and confirm
 the lead transcript received nothing from the viewer.
 
+### Result (33ae460e) - 2026-09-09
+
+Added `agents-plugin-pi/src/audit.ts`: `parseSessionFile` (best-effort JSONL
+read — missing/unreadable file or malformed line yields `[]`/skips, never
+throws — mapping `assistant` text+`toolCall` blocks in order, `toolResult` via
+the shared `toolResultContentText`, and every user-side entry as `lead-message`
+per the Phase-1 no-owner-sends contract; non-chat entry types and non-chat
+message roles are skipped), `createAuditChannel` (the `ask.ts` `createForkChannel`
+shape minus `send`, `liveness()` delegating to `resolveChildLiveness`; a dormant
+record with `client === undefined` attaches no listener, so opening it resumes
+nothing), `buildAuditPickerItems` (the three live tiers reusing
+`classifyRegistryRowState` + `rowName` ordering plus a fourth picker-only dormant
+tier by `lastActivityAt` descending), `shouldRegisterAudit` (true only for a true
+lead `readSpawnRole(process.env) === undefined` and `mode === "tui"` — stricter
+than `isLeadOrFork`, so no fork/worker/explore/headless registration), and
+`openPicker`/`openViewer` (a `ctx.ui.custom` `SelectList` picker and the
+`view`-mode `ConversationViewComponent` overlay with `ask.ts`'s geometry and a
+module-level active-overlay singleton so a second `/audit` closes the first; Esc
+closes directly with no modal, Enter raises to `interactive` via `setMode`
+without mutating the record; no `pi.sendMessage`/no send path). Registered from
+`index.ts` on `session_start`. Supporting behavior-preserving extractions:
+`spawner.ts` `lastActivityAt`, `agent-widget.ts` `rowName`/
+`classifyRegistryRowState` exports, `conversation-view.ts` `toolResultContentText`
+export, `pi-tui.ts` `SelectList`/`SelectItem` re-export.
+
+Deviations: `openPicker`/`openViewer` dropped the plan's descriptive
+`sessionCtx`/`pi` params (Phase 1 needs neither — no `send`, no cwd-dependent
+spawn); `STATE_RANK`/`STATE_LABEL` were re-declared locally in `audit.ts` rather
+than shared from `agent-widget.ts` (flagged Minor by fit review — deferred, no
+behavior impact).
+
+Verification: 28 new tests in `test/audit.test.ts` cover the full Phase-1 test
+list (parser mapping, picker naming/ordering incl. dormant tier, shortcut opens
+picker, dormant resumes nothing, live events append, Esc-no-modal,
+Enter-raises-without-touching-record, second-`/audit`-closes-first,
+`shouldRegisterAudit` truth table). Targeted run (`audit` + `agent-widget` +
+`ask` + `conversation-view` + `spawner`) green; full-suite failing-test-name set
+byte-identical to the ~130-failure pre-existing baseline (missing installed Pi
+SDK bundle) — DELTA = 0 regressions, +28 passing. Test review independently
+mutation-verified the parser and gate assertions catch realistic defects (not
+tautological). Review: partitioned (correctness/fit/test) all clean — 4 Minor
+recorded, 0 Critical/Important, no relay.
+
+The owner-run isolated-tmux live check remains pending (see `## Blocked`).
+
 ### Phase 2: owner steering, ownership, modal
 
 Depends on Phase 1 and on `260908-feat-ws-pi-conversation-view-component`
@@ -264,3 +309,21 @@ rendering and the toast when it settles with no lead turn, reopen and
 `finish`, confirm the lead receives the child's next settle or report and
 the widget row returns to the lead's fan-in; `interrupt` a streaming child
 and confirm it stops mid-turn with the view still open.
+
+## Blocked (2026-09-09)
+
+Phase 1 automated slice is complete and merged (`### Result (33ae460e)`), but
+its **owner-run live check is a post-build acceptance gate that only a human on
+a real TUI can clear**: `/audit` a worker mid-task on an isolated tmux socket
+(`tmux -L ws-probe-<pid>`), watch a tool call appear and expand it, Esc, reopen,
+and confirm the lead transcript received nothing from the viewer. No automated
+harness can drive the live TUI overlay + RPC event stream end-to-end, so this
+sign-off is owner-only.
+
+The ticket also stays out of `.done/` because **Phase 2 (owner steering,
+ownership, modal) is not yet implemented** — and Phase 2 additionally depends on
+`260908-feat-ws-pi-conversation-view-component` Phase 2, whose own owner
+acceptance is likewise pending. This ticket therefore remains in `ready/` with
+Phase 1 code landed; a drain selector should skip it (blocked note present)
+until the owner clears the Phase 1 live check and Phase 2's prerequisites are
+met.
