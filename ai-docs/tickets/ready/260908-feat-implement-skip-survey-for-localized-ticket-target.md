@@ -14,7 +14,7 @@ related:
 related-mental-model:
   - workflow-skills
 sage-review-completeness-reviewed: a02e844dc8406cab
-sage-review-design-reviewed: a02e844dc8406cab
+sage-review-design-reviewed: 149405a7396b2fa6
 ---
 
 # Delegated implement targets skip the survey plan when the ticket already localizes the change
@@ -146,7 +146,11 @@ state all four at their strongest value, a survey has nothing left to find.
   direct edit and `survey` for reachable delegated preparation");
   `ai-docs/spec/workflow-skills.md` `{#260505-implementation-workflow-skills}`
   (the sentence "Plan population defaults to the survey planner for
-  delegated mode") and `{#260519-proceed-implementation-dispatch-precheck}`
+  delegated mode", and the delegated-mode sentence "generates a plan
+  path, dispatches a planner to write or refine that single implementation
+  plan, spawns an implementer agent with the plan", which gains the
+  lead-written stub as the no-planner case) and
+  `{#260519-proceed-implementation-dispatch-precheck}`
   (the binding-constraints sentence "binding implementation constraints
   from the anchor are copied into the plan and the anchor is listed as a
   `[Must]` reference before plan population or implementer dispatch",
@@ -178,7 +182,11 @@ the plan path, write the stub with the sections Decision 2 lists including
 the `## Codebase Findings` carry-over of binding constraints from the Prep
 reads, no planner dispatch) and make the delegated
 `default` branch of `implementEditInstruction` render `implementer` with
-`PlanPath`. Update the three spec sentences named in Constraints. Tests: a resolver test that the four strongest
+`PlanPath`. Update the four spec sentences named in Constraints. Add a drift pin: a
+Go test asserting the stub's section headings equal the heading set of the
+`plan-populator-survey` template variants (read through the rsrc loader),
+so a later planner-template rename fails here rather than shipping a
+stale stub. Tests: a resolver test that the four strongest
 values yield `plan_depth: none` for a delegated ticket target and that
 weakening any one of them (including `unknown`) yields `survey`; a todo
 derivation test for the delegated `none` Prep and Edit instructions; the
