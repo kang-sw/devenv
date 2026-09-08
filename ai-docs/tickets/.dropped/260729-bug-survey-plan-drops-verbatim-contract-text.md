@@ -4,6 +4,7 @@ related:
   260605-research-ws-native-subagent-pivot: plans are the self-contained artifact a fresh delegate reads; this is a hole in that premise
 related-mental-model:
   - workflow-skills
+dropped: 2026-09-08
 ---
 
 # plan-populator-survey paraphrases verbatim-mandated contract text out of the plan
@@ -61,3 +62,8 @@ Not yet decided; options seen so far:
 - Do not generalize this into "plans should quote everything." The survey's
   summarizing is normally correct and keeps plans readable; the defect is
   specific to text the contract marked as verbatim-binding.
+
+
+## Resolution (2026-09-08)
+
+Superseded by 260908-feat-survey-plan-is-route-not-contract. The plan no longer carries contract text for ticket targets (it cites the ticket by line range, and the implementer reads the cited ranges); for inline targets the accepted inline contract is pasted verbatim, which is the fix this ticket asked for. The Notes caution here against generalizing to "plans should quote everything" is overtaken: the successor removes restatement entirely rather than expanding quoting.
