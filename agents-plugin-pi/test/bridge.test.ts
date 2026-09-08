@@ -537,6 +537,57 @@ describe("dispatchMappedWorkflowManual", () => {
       /boom/,
     );
   });
+
+  test("a shared deps.advisoryKeyHolder dedupes the advisory across two dispatch calls on the cut-hit branch", async () => {
+    const holder: AdvisoryKeyHolder = { current: undefined };
+    const deps = {
+      // "## Session Key\nlead-1" is the required end anchor — keeps both
+      // calls pinned to the cut-hit branch (see the comment on "advisory
+      // still appends..." above).
+      callTool: async (name: string) => (name === "config.resolve_agent" ? noHitResolveAgentResult() : textResult("HEADER\nSTATIC-BODY\nBODY\n## Session Key\nlead-1")),
+      staticBodySnapshot: "STATIC-BODY\n",
+      catalog: [{ provider: "openrouter", id: "cheap-model", hasAuth: true }],
+      notifyMappingDegraded: () => assert.fail("notifyMappingDegraded must not be called on a cut hit"),
+      advisoryKeyHolder: holder,
+    };
+    const first = await dispatchMappedWorkflowManual({ session_key: "lead-1" }, deps);
+    assert.equal(first.content.length, 2, "first dispatch call appends the advisory");
+    assert.equal(first.content[1].text, MODEL_CATALOG_ADVISORY);
+
+    const second = await dispatchMappedWorkflowManual({ session_key: "lead-1" }, deps);
+    assert.equal(second.content.length, 1, "second dispatch call with the same holder and the same rejected set must NOT append again — dedup survives the dispatch layer");
+  });
+
+  test("a shared deps.advisoryKeyHolder dedupes across the cut-hit branch then the fallback branch, catching a per-branch fresh-holder regression", async () => {
+    const holder: AdvisoryKeyHolder = { current: undefined };
+    const notifyCalls: string[] = [];
+    const cutHitDeps = {
+      callTool: async (name: string) => (name === "config.resolve_agent" ? noHitResolveAgentResult() : textResult("HEADER\nSTATIC-BODY\nBODY\n## Session Key\nlead-1")),
+      staticBodySnapshot: "STATIC-BODY\n",
+      catalog: [{ provider: "openrouter", id: "cheap-model", hasAuth: true }],
+      notifyMappingDegraded: () => assert.fail("notifyMappingDegraded must not be called on a cut hit"),
+      advisoryKeyHolder: holder,
+    };
+    const first = await dispatchMappedWorkflowManual({ session_key: "lead-1" }, cutHitDeps);
+    assert.equal(first.content.length, 2, "cut-hit branch appends on the first call");
+
+    const fallbackDeps = {
+      callTool: async (name: string) => {
+        if (name === "workflow_manual") return textResult("HEADER\nsomething drifted\n## Session Key\nlead-1");
+        if (name === "config.resolve_agent") return noHitResolveAgentResult();
+        return textResult("## Session State\ntodos: none");
+      },
+      staticBodySnapshot: "STATIC-BODY\n",
+      catalog: [{ provider: "openrouter", id: "cheap-model", hasAuth: true }],
+      notifyMappingDegraded: () => {
+        notifyCalls.push("degraded");
+      },
+      advisoryKeyHolder: holder,
+    };
+    const second = await dispatchMappedWorkflowManual({ session_key: "lead-1" }, fallbackDeps);
+    assert.equal(notifyCalls.length, 1, "the fallback branch itself still fires as usual");
+    assert.equal(second.content.length, 1, "the fallback branch shares the SAME holder as the cut-hit branch — a per-branch fresh holder would wrongly append here again");
+  });
 });
 
 describe("computePiAliasTableReport", () => {
