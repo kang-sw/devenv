@@ -1276,8 +1276,9 @@ never blocks the call it rides on.
 
 A project declares its binding anchor in the same tracked `AGENTS.md` home under
 a `### Binding Anchor` section, parsed fail-open like `### Review Policy`: two
-`key: value` lines, `anchor: <path>` and `topics: <comma-separated phrases>`,
-both required for the declaration to take effect (a missing file, missing
+`key: value` lines, `anchor: <path>` (a document whose settled decisions
+bind implementation on the declared topics) and `topics: <comma-separated
+phrases>`, both required for the declaration to take effect (a missing file, missing
 section, or a single missing key leaves the project with no declared anchor). The
 shipped `lead-discuss`/`lead-proceed`/`lead-implement` playbooks and the
 `route.resolve_implement`/`route.resolve_proceed` resolvers never name a specific

@@ -370,6 +370,60 @@ fixtures that exercise the parser, and `grep -rn 'migration.anchor'
 ai-docs/spec agents-plugin agents-plugin-wsflow agents-plugin-tool`
 returning nothing.
 
+### Result (eceadf11) - 2026-09-09
+
+Behavioral delta: shipped surfaces no longer carry devenv's migration
+anchor. Projects declare a binding anchor in `AGENTS.md` under a new
+`### Binding Anchor` section (two fail-open `key: value` lines, `anchor:`
+and `topics:`), parsed by `wsreview.ReadAgentsBindingAnchor` exactly as
+`### Review Policy` is parsed. The `route.resolve_implement` Prep guardrail
+and the `route.resolve_proceed` gate render the anchor clause/route only
+from that parsed declaration and omit it otherwise; a Go-only
+`AnchorDeclared` flag forces the proceed `binding_anchor` fact to `n/a`
+before the conflict warning and route selection whenever no section is
+declared, even if the lead supplies `missing`/`conflict`. The
+`migration_anchor` fact, routes, warning, condition, and verdict label were
+renamed to `binding_anchor`/`Binding Anchor` across both resolvers,
+`lead-discuss.md`, `lead-proceed.md`, their byte-identical wsflow mirrors,
+the spec, and the mental model. devenv declares its own `260605` anchor
+with its four topics in `AGENTS.md` and points the `## Project Memory`
+bullet at the section, so its own behavior is unchanged while no shipped
+string names that anchor.
+
+Deviations from the phase plan: none material. Naming detail the ticket
+left open was resolved in-scope: the new type is `wsreview.BindingAnchor`
+(fit review noted it omits the precedent's `Agents` prefix — recorded
+Minor, not changed) and the pre-rendered clause plumbing uses an
+`AnchorDeclared` flag. The `## Spec Impact` paragraph was authored by the
+delegated implementer from plan semantics (the installed implementer frame
+still bans ticket reading), then reconciled by the lead against the
+ticket's verbatim intent during the doc pre-pass (added the "settled
+decisions bind implementation" framing); it carries the ticket's exact
+anchor slug `{#260908-project-binding-anchor-declaration}`.
+
+Review dispositions: partitioned (correctness opus/large, fit sonnet/medium,
+test sonnet/medium). Correctness clean +1 Minor (legacy-path comment
+imprecision; behavior correct). Fit clean +1 Minor (type name lacks
+`Agents` prefix). Test non-clean review #1: one Important (the AGENTS.md-read
+wiring at the three production call sites was never exercised end-to-end,
+contradicting the phase constraint that a test pins the legacy path) plus
+one Minor (no proceed `n/a`-override case). Relay #1 fixed both
+[fixed]: three `t.TempDir()` integration tests now drive the real handlers
+through `NewServer`/`callToolWithKey` and assert the rendered clause/route
+at `session_state.go:1101`/`:1145`/`:1204`, and a `TestResolveProceedRoutes`
+case proves force-to-`n/a` overrides a supplied non-`n/a` value. No
+Critical, so no re-review; Minors recorded only. The reviewer-noted
+`readState` empty-root fail-open edge is a pre-existing pattern, not
+introduced here — left out of scope.
+
+Verification: `go test ./... -count=1` in `agents-plugin-tool` green across
+all 14 packages; wsflow python bundle 10/10; `diff -rq agents-plugin/rsrc
+agents-plugin-wsflow/rsrc` byte-identical (manifest included); `grep -rn
+260605 agents-plugin agents-plugin-wsflow agents-plugin-tool` hits only
+parser test fixtures and the pre-existing wsflow epic comment; `grep -rn
+'migration.anchor' ai-docs/spec agents-plugin agents-plugin-wsflow
+agents-plugin-tool` clean. Phases 2 (point leaks) and 3 (guard) remain.
+
 ### Phase 2: Point leaks
 
 Apply Decision 3 to the twelve point-leak sites and mirror every rsrc
