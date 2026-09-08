@@ -31,6 +31,15 @@
  * `RpcClient`). Exercised only by the plan's documented manual verification
  * gate (no provider credentials in this sandbox — deferred, not faked).
  *
+ * 260906 Phase 2 addendum: narrows the above — `registerFork`'s
+ * `onModelResolved` forwarding IS unit-testable via the same
+ * `installRpcHarness` `RpcClient.prototype` monkey-patch technique used by
+ * test/spawner.test.ts and test/execute-gateway.test.ts, since `spawnAgent`'s
+ * only non-injectable dependency is that same transport. See the
+ * "ws-fork: onModelResolved forwarding" describe block below. The rest of
+ * `registerFork`'s execute() (anti-bleed wiring, question routing, etc.)
+ * remains live-gate only.
+ *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
 
@@ -57,9 +66,13 @@ import {
   armForkRoleWiring,
   buildForkSpawnCtx,
 } from "../src/fork.ts";
+import { registerFork } from "../src/fork.ts";
 import { leadIdleRef, registerPushFlush, applyRpcEvent, attachEventListener, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV } from "../src/process-role.ts";
 import type { BridgeHandle } from "../src/bridge.ts";
-import type { ExtensionAPI, RpcClient } from "@earendil-works/pi-coding-agent";
+import { RpcClient } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { writeFileSync } from "node:fs";
 
 // Phase 2: these payload-focused fixtures model a user wake followed by
 // confirmed streaming start, rather than the retired undefined-idle fallback.
@@ -832,5 +845,118 @@ describe("armForkRoleWiring (fresh spawn and sidecar revival)", () => {
     listener?.({ type: "agent_settled" });
     assert.equal(prompts.length, 1, "the nudge fired through the re-armed loop on the resumed client");
     assert.equal(dormant.running, true, "promptAgent (inside the nudge) latched running on the resumed record");
+  });
+});
+
+/**
+ * 260906 Phase 2 (dispatch-row rendering): `ws-fork`'s `onModelResolved`
+ * forwarding, both for a named `model_name` tier hit and an omitted-tier
+ * inherit — mirrors `test/spawner.test.ts`'s "spawnAgent: onModelResolved"
+ * and `test/execute-gateway.test.ts`'s "ws-execute: onModelResolved
+ * forwarding" describe blocks, driven at the `ws-fork` tool level.
+ */
+describe("ws-fork: onModelResolved forwarding (260906 Phase 2)", () => {
+  interface CapturedTool {
+    execute: (
+      id: string,
+      params: unknown,
+      signal?: AbortSignal,
+      update?: (partial: { content: unknown[]; details?: unknown }) => void,
+      ctx?: unknown,
+    ) => Promise<{ content: Array<{ type: string; text: string }>; details?: unknown }>;
+  }
+
+  // A `ws-fork` spawn adds one extra handshake beyond the ordinary
+  // RpcClient-transport seam `test/spawner.test.ts`'s own `installRpcHarness`
+  // patches: `validateForkReadiness` (spawner.ts) reads a real
+  // `ready.json` file that a genuine forked child process would write via
+  // `WS_PI_FORK_READY_PATH_ENV`/`WS_PI_FORK_READY_NONCE_ENV` (its own env,
+  // set by `buildRpcClientOptions`). `prepareForkLaunch` creates that
+  // directory and writes the nonce/path BEFORE `client.start()` runs, so the
+  // patched `start()` below can safely write the matching readiness file
+  // itself once it exists — no real child process needed. `this.options` is
+  // a private TS field but a plain runtime property; reading it here is the
+  // only way to recover the per-spawn nonce/path pair from inside a
+  // patched prototype method with no other injectable seam.
+  function installRpcHarness() {
+    const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
+    Object.assign(RpcClient.prototype, {
+      async start(this: { options?: { env?: Record<string, string> } }) {
+        const env = this.options?.env;
+        const readinessPath = env?.[WS_PI_FORK_READY_PATH_ENV];
+        const nonce = env?.[WS_PI_FORK_READY_NONCE_ENV];
+        if (readinessPath && nonce) {
+          writeFileSync(readinessPath, JSON.stringify({
+            nonce,
+            ownSessionKey: "fork-child-key",
+            sessionPath: "/tmp/ws-pi-agent-test/session.jsonl",
+            sessionId: "fork-child-session-id",
+          }));
+        }
+      },
+      stop: async () => {}, abort: async () => {},
+      onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {},
+      getState: async () => ({ model: { provider: "pi", id: "small" }, thinkingLevel: "medium", sessionFile: "/tmp/ws-pi-agent-test/session.jsonl" }),
+    });
+    return { restore: () => Object.assign(RpcClient.prototype, original) };
+  }
+
+  function harness(callTool: (name: string, args?: unknown) => Promise<{ content: Array<{ type: string; text: string }> }>) {
+    const tools = new Map<string, CapturedTool & { name: string }>();
+    const pi = {
+      registerTool: (def: { name: string } & CapturedTool) => tools.set(def.name, def),
+      sendMessage() {}, sendUserMessage() {}, on() {},
+      getActiveTools: () => ["bash", "read", "edit", "ws-agent-spawn"],
+      getAllTools: () => [],
+      getThinkingLevel: () => "high",
+    } as unknown as ExtensionAPI;
+    const bridge = { client: { callTool }, wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" } } as unknown as BridgeHandle;
+    const registry: RpcAgentRegistry = new Map();
+    registerFork(pi, bridge, registry, { cwd: "/tmp" });
+    const toolCtx = {
+      sessionManager: { getSessionFile: () => "/tmp/fake-fork-source.jsonl" },
+      model: { provider: "lead", id: "large" },
+      thinkingLevel: "high",
+      modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.6-high" }, { provider: "pi", id: "small" }], hasConfiguredAuth: () => true },
+    };
+    return { tool: tools.get(FORK_TOOL_NAME)!, registry, toolCtx };
+  }
+
+  test("a named model_name tier hit forwards onModelResolved as onUpdate details and the final return", async () => {
+    const rpc = installRpcHarness();
+    try {
+      const { tool, registry, toolCtx } = harness(async (name) => { assert.equal(name, "config.resolve_agent"); return { content: [{ type: "text", text: JSON.stringify({ resolved_from: "pi", model: "gpt-5.6-high", backend: "codex" }) }] }; });
+      const updates: Array<{ content: unknown[]; details?: unknown }> = [];
+      const raw = await tool.execute("call", { prompt: "work on this", model_name: "small" }, undefined, (partial) => updates.push(partial), toolCtx);
+      const parsed = JSON.parse(raw.content[0]!.text);
+      assert.ok(parsed.agent_id);
+      const expected = { tier: "small", model: "openai-codex/gpt-5.6-high", effort: undefined, inherited: false };
+      assert.equal(updates.length, 1, "onModelResolved fires exactly once");
+      assert.deepEqual((updates[0]!.details as { resolved: unknown }).resolved, expected);
+      assert.deepEqual((raw.details as { resolved?: unknown } | undefined)?.resolved, expected, "the final return repeats the same shape");
+      const record = registry.get(parsed.agent_id)!;
+      assert.equal(record.modelTier, "small");
+      assert.equal(record.modelSource, "tier");
+    } finally { rpc.restore(); }
+  });
+
+  test("an omitted model_name never calls config.resolve_agent and publishes an inherited resolved line", async () => {
+    const rpc = installRpcHarness();
+    try {
+      const { tool, registry, toolCtx } = harness(async () => { assert.fail("config.resolve_agent must not be called for an omitted model_name"); });
+      const updates: Array<{ content: unknown[]; details?: unknown }> = [];
+      const raw = await tool.execute("call", { prompt: "work on this" }, undefined, (partial) => updates.push(partial), toolCtx);
+      const parsed = JSON.parse(raw.content[0]!.text);
+      assert.ok(parsed.agent_id);
+      assert.equal(updates.length, 1);
+      const resolved = (updates[0]!.details as { resolved: { tier: string; model?: string; effort?: string; inherited: boolean } }).resolved;
+      assert.equal(resolved.tier, "inherit");
+      assert.equal(resolved.inherited, true);
+      assert.equal(resolved.model, "lead/large", "inherits the ctx.model snapshot");
+      assert.deepEqual((raw.details as { resolved?: unknown } | undefined)?.resolved, resolved);
+      const record = registry.get(parsed.agent_id)!;
+      assert.equal(record.modelTier, undefined);
+      assert.equal(record.modelSource, "inherit");
+    } finally { rpc.restore(); }
   });
 });
