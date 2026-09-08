@@ -265,8 +265,15 @@ function isSingleTextContent(content: unknown): content is Array<{ type: string;
   return Array.isArray(content) && content.length === 1 && content[0]?.type === "text";
 }
 
-/** `tool_execution_end`'s `result` -> the `"tool-result"` item's `content` text: the single-text-content precedent, else a best-effort stringification. */
-function toolResultContentText(result: unknown): string {
+/**
+ * `tool_execution_end`'s `result` -> the `"tool-result"` item's `content`
+ * text: the single-text-content precedent, else a best-effort
+ * stringification. Exported (260908 audit-window ticket) so `audit.ts`'s
+ * session-file parser converts a persisted `toolResult` message's `content`
+ * array (identical `{ content?: unknown }` shape) through the exact same
+ * rule the live event path already uses, rather than a second copy.
+ */
+export function toolResultContentText(result: unknown): string {
   const content = (result as { content?: unknown } | null)?.content;
   if (isSingleTextContent(content)) return content[0]?.text ?? "";
   try {

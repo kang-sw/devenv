@@ -59,6 +59,7 @@ import type {
   EditorTheme,
   MarkdownTheme,
   ScrollViewOptions,
+  SelectItem,
   SelectListTheme,
   TUI,
 } from "@earendil-works/pi-tui";
@@ -71,9 +72,20 @@ export type PiTuiModule = typeof piTuiStatic;
 // (no live Pi host to resolve through) and as `conversation-view.ts`'s
 // default `primitives` — see the Addendum above for why this is NOT the path
 // an owner-run live identity check should ever be run against.
-export const { Box, Editor, Markdown, ScrollView, Text, TuiAltScreen, TuiMainScreen, stripTerminalSequences, truncateToWidth, visibleWidth } =
-  piTuiStatic;
-export type { Component, EditorOptions, EditorTheme, MarkdownTheme, ScrollViewOptions, SelectListTheme, TUI };
+export const {
+  Box,
+  Editor,
+  Markdown,
+  ScrollView,
+  SelectList,
+  Text,
+  TuiAltScreen,
+  TuiMainScreen,
+  stripTerminalSequences,
+  truncateToWidth,
+  visibleWidth,
+} = piTuiStatic;
+export type { Component, EditorOptions, EditorTheme, MarkdownTheme, ScrollViewOptions, SelectItem, SelectListTheme, TUI };
 
 /**
  * Runtime path: resolves `@earendil-works/pi-tui` through the host (see the

@@ -207,6 +207,7 @@ import {
   registerThreadCommands,
   threadRegistryPath,
 } from "./ask.ts";
+import { registerAuditCommands } from "./audit.ts";
 import { registerWsSkillTool } from "./lead-skills.ts";
 import { createToolPreviewTuiRef, loadToolResultTuiModules } from "./tool-result-render.ts";
 
@@ -562,6 +563,12 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     }
     registerAsk(pi, threadHandle, agentTools.rpcRegistry, toolPreviewTuiRef);
     registerThreadCommands(pi, handle, agentTools.rpcRegistry, threadHandle, { cwd: ctx.cwd, effectivePromptRef });
+    // 260908 (subagent audit window ticket): stricter than `isLeadOrFork`
+    // above — `shouldRegisterAudit` requires a true lead (no spawn-role
+    // marker at all), so a fork child never registers `/audit`. Neither
+    // `pi.registerCommand` nor `pi.registerShortcut` is called when the gate
+    // is false (see `audit.ts`'s own doc comment).
+    registerAuditCommands(pi, agentTools.rpcRegistry, readSpawnRole(process.env), ctx.mode);
 
     // §1/§4/260906: one pure call produces BOTH the ws block's static base
     // (manual snapshot + Pi lead guide) AND the fully reshaped lead/fork
