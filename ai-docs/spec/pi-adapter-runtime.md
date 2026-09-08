@@ -105,6 +105,21 @@ use Pi's standard result display. If native TUI helpers cannot load, both slots
 retain Pi's standard display. Preview conversion and terminal sanitization never
 change dispatched arguments, model-visible result content, or `details`.
 
+**Two direct tools cap their OUTPUT preview by logical line, not physical row
+(260906 Phase 1).** `do-i-really-have-to-read-this-myself` and
+`do-i-really-have-to-run-this-myself` share every other rule in this section
+(native cache reuse, YAML/RAW selection, partial/error/mixed-content fallback,
+headless safety) except one: their completed single-text result collapses to
+at most ten **newline-separated logical lines**, not ten wrapped terminal
+rows — a long logical line that would itself wrap past ten rows still renders
+in full so long as it is one of the first ten logical lines; the cap only ever
+falls on a logical-line boundary. A truncation marker and full recovery on
+expansion work the same as the generic ten-content-row policy above. Every
+other bridged or dispatch tool keeps the physical-row policy unchanged, and
+this Phase 1 addition does not touch the `ws-agent-spawn`/`ws-agent-send`/
+`explore`/`ws-execute`/`ws-fork` dispatch rows' own custom summary/mandatory
+resolved-model-line contract (YAML Phase 2, described below).
+
 ## Session key stays optional and caller-controllable {#260903-pi-bridge-session-key-fill-forward}
 
 ws-mcp requires a `session_key` on every root-aware tool. On the Pi side the key
@@ -808,9 +823,11 @@ Every pushed message names its sender as `<alias> (<id>)` when an alias was
 given and as the bare uuid otherwise; the orphan roll-call and `ws-agent-list`
 use the same form. In a TUI process the six families are drawn by an
 adapter-registered message renderer (one `[family] agent <sender>` label, the
-payload lines, the status line dimmed) so the transcript does not repeat Pi's default `[customType]` header;
-the message content the model reads is unchanged, and the default rendering
-stands wherever the TUI modules cannot be loaded.
+payload lines, the status line) so the transcript does not repeat Pi's default
+`[customType]` header; the message content the model reads is unchanged, and
+the default rendering stands wherever the TUI modules cannot be loaded. See
+"Pushed-message display: logical-line cap, shared background, muted
+foreground" below for that renderer's collapse and coloring contract.
 
 The report branch consults the record's owner-thread hooks first: a report the
 hook consumes (a `lead-ask` thread's final, which becomes the `ws-thread-summary`
@@ -904,6 +921,27 @@ gone — on every registry transition and on a coarse timer (order of 30 s) whil
 N > 0, and treats the rejection of any in-flight request the same way; a dead
 running child is transitioned to `exited` and pushed. This replaces the timeout
 the removed wait tool used to provide.
+
+### Pushed-message display: logical-line cap, shared background, muted foreground {#260906-pi-push-display-polish}
+
+260906 Phase 1, display-only: none of this changes the pushed message's
+model-facing `content`/`details`, delivery, wake/settle ordering, report
+dedup, or fan-in — only how the six families above render in a TUI process.
+
+The payload body (the `key: value` lines between the head and the status
+line) collapses to at most ten **newline-separated logical lines**, the same
+budget and logical-line-boundary rule as the two direct tools above, with a
+truncation marker and full recovery on expansion through Pi's own expand
+control (`MessageRenderOptions.expanded`, wired through to the renderer on
+every expand toggle). The head and status lines are single fixed-shape rows
+and carry no cap.
+
+The whole message — head, body, and status — paints on a theme-aware shared
+background (the `customMessageBg` token, the same one Pi's own default
+custom-message box uses) with a subdued/gray foreground (`muted`/`dim`
+tokens), replacing the prior `customMessageLabel`/`customMessageText`
+coloring. Family/agent identity, status meaning, and every existing
+interaction control are retained.
 
 ### Transcript path accessor {#260904-pi-agent-transcript-path}
 
