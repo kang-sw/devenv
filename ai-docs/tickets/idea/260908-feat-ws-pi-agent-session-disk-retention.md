@@ -74,9 +74,12 @@ placed at `~/.pi/agent/ws-sessions/<agentId>.jsonl` (sibling of
 `sessions/`)") and the MVP Phase 2 plan text (`260902-feat-ws-pi-native-mvp`,
 "`--session <ws-owned-path>` (sibling of `~/.pi/agent/sessions/`, hidden
 from the `/resume` picker)") both named a durable sibling directory. The
-implementing commit `13b4e67f` used `tmpdir()` instead with no rationale in
-its message, doc comment, or the ticket's Result "Deviations" list; every
-later ticket (RPC resume, approval dir, sidecar, park/cap, fork readiness)
+survey plan for that phase (`acc421c7`) restated the requirement as
+"ws-owned `sessionPath` (fresh temp path outside `~/.pi/agent/sessions/`)",
+keeping the purpose clause (hidden from `/resume`) and dropping the
+location; the implementing commit `13b4e67f` followed the plan exactly,
+so plan-versus-diff review saw no deviation and the ticket's Result
+"Deviations" list has none. Every later ticket (RPC resume, approval dir, sidecar, park/cap, fork readiness)
 reasoned about the file and never about its directory. Postmortem
 (2026-09-08, owner-requested) recorded in the commit that lands this
 paragraph.
