@@ -1389,7 +1389,7 @@ interface AskCustomUiCtx {
  * the summary (the old M11 guard), with no explicit reset needed: this
  * listener simply never saw those earlier events.
  */
-function summarizeThenClose(component: ConversationViewComponent, channel: ConversationChannel, overlay: OverlayHandle): void {
+export function summarizeThenClose(component: ConversationViewComponent, channel: ConversationChannel, overlay: OverlayHandle): void {
   component.appendItem({ kind: "note", text: "ending the thread — asking for a summary…" });
   let streaming = "";
   const unsubscribe = channel.onEvent((evt) => {
@@ -1415,7 +1415,7 @@ function summarizeThenClose(component: ConversationViewComponent, channel: Conve
  * the old, now-deleted per-thread overlay module's own: a non-empty summary is appended as the child's own
  * turn before the thread itself closes.
  */
-function buildOverlayHandle(
+export function buildOverlayHandle(
   pi: ExtensionAPI,
   handle: ThreadRegistryHandle,
   rpcRegistry: RpcAgentRegistry,

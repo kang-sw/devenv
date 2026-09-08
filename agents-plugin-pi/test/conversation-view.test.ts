@@ -760,4 +760,180 @@ describe("ConversationViewComponent — channel events", () => {
     fire({ type: "agent_settled" });
     assert.deepEqual(view.getItems(), []);
   });
+
+  test("tool_execution_start appends a tool-call item with the wire event's id/name/args", () => {
+    const { channel, fire } = fakeChannel();
+    const view = new ConversationViewComponent(fakeTui(), { channel });
+    fire({ type: "tool_execution_start", toolCallId: "c1", toolName: "ws-read", args: { path: "a.txt" } });
+    assert.deepEqual(view.getItems(), [{ kind: "tool-call", id: "c1", name: "ws-read", args: { path: "a.txt" } }]);
+  });
+
+  test("tool_execution_end appends a tool-result item, deriving content text from a single-text-part result", () => {
+    const { channel, fire } = fakeChannel();
+    const view = new ConversationViewComponent(fakeTui(), { channel });
+    fire({ type: "tool_execution_end", toolCallId: "c1", toolName: "ws-read", result: { content: [{ type: "text", text: "line 1\nline 2" }] } });
+    assert.deepEqual(view.getItems(), [{ kind: "tool-result", id: "c1", name: "ws-read", content: "line 1\nline 2", isError: undefined }]);
+  });
+
+  test("tool_execution_end carries isError through, and falls back to JSON.stringify for a non-single-text result", () => {
+    const { channel, fire } = fakeChannel();
+    const view = new ConversationViewComponent(fakeTui(), { channel });
+    fire({ type: "tool_execution_end", toolCallId: "c2", toolName: "ws-write", result: { ok: false }, isError: true });
+    assert.deepEqual(view.getItems(), [{ kind: "tool-result", id: "c2", name: "ws-write", content: JSON.stringify({ content: undefined, ok: false }), isError: true }]);
+  });
+
+  test("a malformed tool_execution_start/end (missing toolCallId or toolName) is ignored rather than appending a broken item", () => {
+    const { channel, fire } = fakeChannel();
+    const view = new ConversationViewComponent(fakeTui(), { channel });
+    fire({ type: "tool_execution_start", toolCallId: "c1" });
+    fire({ type: "tool_execution_start", toolName: "ws-read" });
+    fire({ type: "tool_execution_end", toolCallId: "c1" });
+    assert.deepEqual(view.getItems(), []);
+  });
+});
+
+describe("ConversationViewComponent — userLineBg option", () => {
+  // Wrapped in real ANSI (SGR) codes rather than visible bracket characters:
+  // `applyBackgroundToLine` pads the line to the FULL render width before
+  // handing it to the bg painter, so a painter that adds visible characters
+  // pushes the line's visible width past that render width and trips the
+  // module's own defensive final `truncateToWidth` pass (real `pi-tui`
+  // behavior, not specific to this component) — exactly what an ANSI-only
+  // paint (invisible to `visibleWidth`) is meant to avoid in real usage.
+  const ANSI_OPEN = "\x1b[45m";
+  const ANSI_CLOSE = "\x1b[0m";
+  const paint = (text: string) => `${ANSI_OPEN}${text}${ANSI_CLOSE}`;
+
+  test("a supplied bg painter wraps the full-width 'you: ' line, at 40/80/120 columns", () => {
+    for (const width of WIDTHS) {
+      const { channel } = fakeChannel();
+      const view = new ConversationViewComponent(fakeTui(), {
+        channel,
+        initialItems: [{ kind: "user", text: "hello" }],
+        userLineBg: paint,
+      });
+      const lines = view.render(width);
+      assert.ok(
+        lines.some((l) => l.startsWith(ANSI_OPEN) && l.endsWith(ANSI_CLOSE) && l.includes("you: hello")),
+        `width ${width}: no line shows the bg wrapper: ${JSON.stringify(lines)}`,
+      );
+    }
+  });
+
+  test("a long user turn wraps across multiple lines, every wrapped line individually painted", () => {
+    const { channel } = fakeChannel();
+    const view = new ConversationViewComponent(fakeTui(), {
+      channel,
+      initialItems: [{ kind: "user", text: "word ".repeat(30).trim() }],
+      userLineBg: paint,
+    });
+    const lines = view.render(40).filter((l) => l.startsWith(ANSI_OPEN) && l.endsWith(ANSI_CLOSE));
+    assert.ok(lines.length > 1, "the long turn must wrap onto more than one painted line");
+  });
+
+  test("omitting userLineBg leaves 'you:' lines unpainted (no wrapper text)", () => {
+    const { channel } = fakeChannel();
+    const view = new ConversationViewComponent(fakeTui(), { channel, initialItems: [{ kind: "user", text: "hello" }] });
+    const lines = view.render(80);
+    assert.ok(lines.some((l) => l.includes("you: hello")));
+    assert.ok(!lines.some((l) => l.includes("<<") || l.includes("[you")));
+  });
+
+  test("a painted user line stays width-bounded (the bg fn only recolors, ANSI does not count toward width)", () => {
+    const { channel } = fakeChannel();
+    const view = new ConversationViewComponent(fakeTui(), {
+      channel,
+      initialItems: [{ kind: "user", text: "hello" }],
+      userLineBg: (text) => `\x1b[7m${text}\x1b[0m`,
+    });
+    for (const width of WIDTHS) {
+      assertWidthBounded(view.render(width), width, `width ${width}`);
+    }
+  });
+});
+
+describe("ConversationViewComponent — markdownTheme option", () => {
+  test("a supplied theme's bold function is applied to an 'assistant' item's markdown", () => {
+    const { channel } = fakeChannel();
+    const view = new ConversationViewComponent(fakeTui(), {
+      channel,
+      initialItems: [{ kind: "assistant", text: "**bold word**" }],
+      markdownTheme: {
+        heading: (t) => t, link: (t) => t, linkUrl: (t) => t, code: (t) => t, codeBlock: (t) => t, codeBlockBorder: (t) => t,
+        quote: (t) => t, quoteBorder: (t) => t, hr: (t) => t, listBullet: (t) => t,
+        bold: (t) => `<B>${t}</B>`, italic: (t) => t, strikethrough: (t) => t, underline: (t) => t,
+      },
+    });
+    assert.ok(view.render(80).some((l) => l.includes("<B>bold word</B>")));
+  });
+
+  test("a supplied theme also styles a 'lead-message' item's markdown, not just 'assistant'", () => {
+    const { channel } = fakeChannel();
+    const view = new ConversationViewComponent(fakeTui(), {
+      channel,
+      initialItems: [{ kind: "lead-message", text: "*emphasis*" }],
+      markdownTheme: {
+        heading: (t) => t, link: (t) => t, linkUrl: (t) => t, code: (t) => t, codeBlock: (t) => t, codeBlockBorder: (t) => t,
+        quote: (t) => t, quoteBorder: (t) => t, hr: (t) => t, listBullet: (t) => t,
+        bold: (t) => t, italic: (t) => `<I>${t}</I>`, strikethrough: (t) => t, underline: (t) => t,
+      },
+    });
+    assert.ok(view.render(80).some((l) => l.includes("<I>emphasis</I>")));
+  });
+
+  test("omitting markdownTheme falls back to the identity theme — markdown formatting characters are stripped but no styling is added", () => {
+    const { channel } = fakeChannel();
+    const view = new ConversationViewComponent(fakeTui(), { channel, initialItems: [{ kind: "assistant", text: "**bold word**" }] });
+    const lines = view.render(80);
+    assert.ok(lines.some((l) => l.includes("bold word")));
+    assert.ok(!lines.some((l) => l.includes("**")), "markdown syntax markers are consumed by the renderer even under the identity theme");
+  });
+});
+
+describe("ConversationViewComponent — onItemsChange option", () => {
+  test("fires with a full copy of the transcript after every appendItem, never for the streaming tail", () => {
+    const { channel, fire } = fakeChannel();
+    const snapshots: ConversationItem[][] = [];
+    const view = new ConversationViewComponent(fakeTui(), {
+      channel,
+      initialItems: [{ kind: "note", text: "seed" }],
+      onItemsChange: (items) => snapshots.push([...items]),
+    });
+    fire({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "partial" } });
+    assert.equal(snapshots.length, 0, "a streaming delta alone never appends an item, so no callback yet");
+
+    fire({ type: "agent_settled" });
+    assert.equal(snapshots.length, 1, "the settle commits one assistant item");
+    assert.deepEqual(snapshots[0], [{ kind: "note", text: "seed" }, { kind: "assistant", text: "partial" }]);
+
+    fire({ type: "tool_execution_start", toolCallId: "c1", toolName: "ws-read", args: {} });
+    assert.equal(snapshots.length, 2);
+    assert.deepEqual(snapshots[1].at(-1), { kind: "tool-call", id: "c1", name: "ws-read", args: {} });
+  });
+
+  test("a snapshot is a copy, not a live reference — later appends do not mutate an already-delivered snapshot", () => {
+    const { channel, fire } = fakeChannel();
+    let captured: ConversationItem[] | undefined;
+    const view = new ConversationViewComponent(fakeTui(), {
+      channel,
+      onItemsChange: (items) => {
+        captured = items as ConversationItem[];
+      },
+    });
+    fire({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "first" } });
+    fire({ type: "agent_settled" });
+    const firstSnapshotLength = captured!.length;
+    fire({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "second" } });
+    fire({ type: "agent_settled" });
+    assert.equal(captured!.length, firstSnapshotLength + 1, "the new snapshot grew");
+    assert.equal(view.getItems().length, firstSnapshotLength + 1);
+  });
+
+  test("omitting onItemsChange is safe — appends still work with no callback to invoke", () => {
+    const { channel, fire } = fakeChannel();
+    const view = new ConversationViewComponent(fakeTui(), { channel });
+    fire({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "x" } });
+    fire({ type: "agent_settled" });
+    assert.deepEqual(view.getItems(), [{ kind: "assistant", text: "x" }]);
+  });
 });
