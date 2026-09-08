@@ -423,6 +423,48 @@ return one) and passes nothing on an inherit. Live check (owner-run): with
 `small` configured with an explicit effort, confirm the explore child's
 transcript shows that thinking level.
 
+### Result (d249fb88) - 2026-09-08
+
+Landed as a closeout: the forwarding **substance had already shipped** in
+unrelated later work (`abee6d7e`) — `BuildSpawnArgsOptions.thinking` and
+`buildSpawnArgs` appending `--thinking <level>` when non-empty, `exploreLeaf`
+forwarding `options.effort`, and `resolveRequiredExploreModel` (renamed from
+`resolveExploreModel`) returning `{model, effort}`. This phase supplied the
+delta the earlier work skipped: the enumerated `buildSpawnArgs` `--thinking`
+tests (emitted only for a non-empty string, before the task positional; absent
+when empty/omitted) and an effort-forwarding test, plus rewording the stale
+`applyModelEffort` comment (comment-only, no behavior change). Code `d249fb88`,
+spec `466641dd`.
+
+Deviation (plan-sanctioned): a direct unit test of `exploreLeaf` is infeasible —
+it calls the private, non-exported `spawnPiProcess` with no injectable seam, so
+it always spawns a live process. Per the plan's fallback, the test instead uses
+the `registerAgentTools` `runExploreLeaf` DI parameter (`src/spawner.ts:2966`):
+a fake `runExploreLeaf` replaces the real one so the worker-role `explore`
+tool's real `execute()` wiring (`resolveRequiredExploreModel` → `runExploreLeaf`)
+runs end-to-end and the resolved effort is asserted to reach the leaf's `effort`
+option (and to be omitted on an empty-effort resolution), with no live process.
+
+Spec (`466641dd`): `{#260903-pi-spawner-model-tier-inherit}` gained the explicit
+two-path forwarding sentence — a process-spawned collection leaf gets
+`--thinking`, a persistent RPC-backed child gets `setThinkingLevel`, and an
+inherit or empty effort passes no level either way; the `--thinking` half was
+already present from the Phase 1 pass.
+
+Review: one full-scope review, clean with one Minor (the empty-effort test's
+`effort === undefined` assertion would also hold if the fake were never called;
+it is backed by the sibling test in the same describe block that proves the fake
+is invoked). Minor recorded, not relayed.
+
+Verification: `node --test test/spawner.test.ts test/bridge.test.ts
+test/agent-sidecar.test.ts` with `WS_PI_SPAWN_ROLE` unset → 388/388 pass, 0
+fail/skip (four new tests over the Phase 1 baseline of 384).
+
+Owner-live acceptance of the Phase 2 Live-check (an explore child's transcript
+shows the configured thinking level) remains pending. Phase 3 (advisory dedupe,
+after `260906-bug-ws-pi-workflow-manual-static-body-cut-never-matches`) remains;
+ticket stays in `ready/`. No merge implied.
+
 ### Phase 3: Dedupe the advisory per session
 
 Lands after the static-body ticket. Add the key holder to the bridge,
