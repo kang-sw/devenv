@@ -131,3 +131,19 @@ postures and a rendered table warns; a `todo/` ticket with a completed
 design posture and a rendered table warns; a ticket whose design posture
 reads `blocked` does not warn; a prose-only note never warns. Amend the
 three spec passages under Spec Impact.
+
+## Blocked (2026-09-09)
+
+Not advanceable on the Pi track. This ticket's entire fix is host-neutral
+ws-mcp Go source under `agents-plugin-tool/`
+(`internal/wsdoc/tickets_sage.go`, `tickets_verify.go`) plus the `mcp-tools`
+spec — the ticket's own "Proposed direction" states it "lands through
+`develop`". Per AGENTS.md (Pi-track clause 1), non-Pi-extension code is
+authored on `develop`, not on the Pi track, and reaches the Pi track only by
+cherry-pick; the installed/running ws-mcp is the released `develop` build, so
+a Pi-track-authored ws-mcp edit cannot be exercised in place.
+
+A `goal/track/pi-agent/*` drain therefore cannot author this. Route it to a
+`develop` work session; once it lands on `develop` and the Pi bundle's ws-mcp
+pin advances, this note can be cleared. (No technical blocker — a track-routing
+block only.)
