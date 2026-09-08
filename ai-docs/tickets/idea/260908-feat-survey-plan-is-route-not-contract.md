@@ -87,11 +87,22 @@ survives this ticket; the mechanism changes.
   file, so `## Relevant Ticket Contract` holds the accepted inline contract
   character for character, never a summary. This is the fix for
   `260729-bug-survey-plan-drops-verbatim-contract-text`.
-- **Reviewers judge the diff against the ticket; the plan is the route.**
-  The reviewer prompt frame's required checks say the authority governs
-  and the plan is the route taken; a plan that restates contract text, or
-  an implementation step that contradicts the cited text, is a finding
-  even when the diff matches the step. No new reviewer, no new partition.
+- **Reviewers do not receive the plan.** The plan (survey or research) is
+  implementer input only. The reviewer prompt frame drops the `Plan path`
+  line and the "Review the supplied authority, plan contract, and diff
+  together" and "Plan guardrails were not bypassed" checks; every reviewer
+  compares the diff with the authority (ticket or inline contract) and
+  reports each specified requirement that is not implemented or that the
+  diff contradicts. The existing "direct edit with no generated plan" frame
+  becomes the only frame. Authorized deferrals and scope reductions are
+  lead decisions: the lead writes them into the frame's `Review focus`
+  lines, and a deferral that appears nowhere the reviewer can see is a
+  finding. The Test partition checks the authority's verification
+  expectations instead of the plan's `Verification Plan`; the Fit partition
+  re-derives reuse points itself instead of reading `Codebase Findings`.
+  - Rejected: keeping the plan as reviewer input with a "plan is the route"
+    gloss. With a plan in hand, plan-versus-diff is what a reviewer does;
+    removing the input removes the pattern instead of warning against it.
 - **Result "Deviations" is ticket-diffed.** `executor-wrapup` asks for
   deviations as the difference between the cited ticket text and what
   landed, not as what the implementer recalls.
@@ -113,9 +124,11 @@ survives this ticket; the mechanism changes.
   plan and listed references as the task contract; does not read the
   ticket directly" sentences) and
   `{#260619-stateless-implement-review-continuity}` (the survey "clips the
-  selected authority" sentence and the "plan is the implementer's sole
-  context source ... clips the relevant ticket contract" paragraph). Both
-  describe the semantics this ticket changes.
+  selected authority" sentence, the "plan is the implementer's sole
+  context source ... clips the relevant ticket contract" paragraph, and the
+  sentences that have reviewers compare "the selected authority, plan, and
+  diff" and "read the ticket and plan"). Both describe the semantics this
+  ticket changes.
 - Not in scope: sage reviewers on tickets, review allocation counts, and
   `plan-populator-research` beyond inheriting the citation rule when it
   refines a survey plan.
@@ -137,8 +150,19 @@ name the old wording. Verification: the plugin test suites that render
 these playbooks pass, and a rendered survey plan for a ticket target
 contains a citation list and no restated contract text.
 
-### Phase 2: Reviewer frame and wrap-up deviations
+### Phase 2: Reviewer frame without the plan, and wrap-up deviations
 
-Decisions 4 and 5. Depends on Phase 1 (the frame refers to cited text).
-Edit the reviewer prompt frame in `lead-implement`, `code-reviewer`, and
-`executor-wrapup`; update the two spec anchors named in Constraints.
+Decisions 4 and 5. Depends on Phase 1 (deviations are stated against the
+cited text). Edit `lead-implement`: the reviewer prompt frame (remove
+`Plan path`, the two plan checks, and the separate "direct edit with no
+generated plan" case, and add the `Review focus` rule for lead-authorized
+deferrals), the Reviewer table's required checks (Test reads the
+authority's verification expectations, Fit drops "plan guardrails"), and
+the reviewer dispatch text that passes a plan path. Edit `code-reviewer`
+(the "when a plan path is named" constraint and the process step that
+reads the plan) and the partition playbooks only where they name the plan.
+Edit `executor-wrapup` for ticket-diffed deviations. Update the two spec
+anchors named in Constraints. Verification: the golden reviewer-frame
+render carries no plan line, the plugin test suites pass, and one
+partitioned review on a ticket target completes with ticket plus diff
+only.
