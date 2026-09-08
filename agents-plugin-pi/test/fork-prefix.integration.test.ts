@@ -103,11 +103,16 @@ function actualForkRegistrations(): RegisteredTool[] {
   return definitions.map(({ name, description, parameters }) => ({ name, description, parameters }));
 }
 
-function continuationHistory(): unknown[] {
+function continuationHistories(): Array<[string, unknown[]]> {
+  const toolCall = { role: "assistant", content: [{ type: "toolCall", id: "call_1", name: "ws-fork", arguments: { prompt: "inspect" } }] };
   return [
-    { role: "user", content: [{ type: "text", text: "Lead context with CRLF\r\nand trailing space " }] },
-    { role: "assistant", content: [{ type: "text", text: "An inherited assistant decision." }] },
-    { role: "user", content: [{ type: "text", text: "The complete original task context." }] },
+    ["string-user", [{ role: "user", content: "Lead context with CRLF\r\nand trailing space " }]],
+    ["block-user", [{ role: "user", content: [{ type: "text", text: "Lead context with CRLF\r\nand trailing space " }] }]],
+    ["consecutive-users", [{ role: "user", content: "First context." }, { role: "user", content: "Second context." }]],
+    ["grouped-tool-results", [toolCall, { role: "toolResult", toolCallId: "call_1", toolName: "ws-fork", content: [{ type: "text", text: "tool result" }] }]],
+    ["image-user", [{ role: "user", content: [{ type: "image", mimeType: "image/png", data: "AQ==" }] }]],
+    ["empty-text-and-thinking", [{ role: "user", content: [{ type: "text", text: "" }] }, { role: "assistant", content: [{ type: "thinking", thinking: "private reasoning", thinkingSignature: "signature" }] }]],
+    ["empty-tool-result", [toolCall, { role: "toolResult", toolCallId: "call_1", toolName: "ws-fork", content: [] }]],
   ];
 }
 
@@ -130,7 +135,6 @@ describe("fork prefix actual SDK serializers (offline)", () => {
   const registrations = actualForkRegistrations();
   const activeTools = registrations.map((tool) => tool.name);
   const exactPrompt = "Custom base\r\nExplicit append keeps these bytes.  \r\n<ws>manual-old</ws>\n";
-  const originalHistory = continuationHistory();
   const captured = captureForkContext({
     kind: "task",
     effectiveSystemPrompt: exactPrompt,
@@ -177,7 +181,8 @@ describe("fork prefix actual SDK serializers (offline)", () => {
   for (const [sdkName, root] of [["local-0.84.4", LOCAL_SDK], ["global-0.85.1", GLOBAL_SDK]] as const) {
     for (const provider of PROVIDERS) {
       for (const kind of ["task", "discussion"] as const) {
-        test(`${sdkName}/${provider.name}: task/discussion, dormant and repeated JSON recovery exactly match an independent continuation`, async () => {
+        for (const [shape, originalHistory] of continuationHistories()) {
+        test(`${sdkName}/${provider.name}/${shape}: ${kind}, dormant and repeated JSON recovery exactly match an independent continuation`, async () => {
           const newMessage = continuationMessage(kind);
           // Oracle: independently accumulated lead history plus the same new message.
           const referenceMessages = [...structuredClone(originalHistory), { role: "user", content: newMessage }];
@@ -205,8 +210,9 @@ describe("fork prefix actual SDK serializers (offline)", () => {
           // Earlier lead request remains visible separately. Native serializers may legitimately advance
           // cache annotations for the added suffix; the exact continuation comparison above is the oracle.
           const earlier = await capturePayload(root, provider, context(exactPrompt, structuredClone(originalHistory), providerTools(registrations)), "lead-transport-id");
-          assert.notDeepEqual(earlier, reference, `${sdkName}/${provider.name}/${kind}: added suffix unexpectedly produced an identical raw request`);
+          assert.notDeepEqual(earlier, reference, `${sdkName}/${provider.name}/${shape}/${kind}: added suffix unexpectedly produced an identical raw request`);
         });
+        }
       }
     }
   }
