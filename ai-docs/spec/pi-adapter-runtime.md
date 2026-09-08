@@ -1255,21 +1255,26 @@ channel for an owner question: it registers and carries on.
   an owner overlay is attached, the fork's anti-bleed loop treats the fork's
   turns as owner-driven (no nudge, no fail-loud) and re-arms the moment the
   overlay detaches.
-- **Overlay chat.** Owner text goes to the respondent as a `prompt` when it is
+- **Overlay chat.** The overlay is the shared conversation-view component (see
+  "Shared conversation-view component" below), opened in its interactive mode.
+  Owner text goes to the respondent as a `prompt` when it is
   idle and as a `steer` when it is streaming; child text deltas render into the
-  overlay. Pasted input is delivered as one message. While the respondent's
+  overlay. Pasted input is delivered as one message; `Ctrl+C` is swallowed —
+  never forwarded to the editor and never an interrupt. While the respondent's
   turn is running and no text has streamed yet, the overlay shows one
   `working…` line in the streaming-tail slot — the first text delta replaces
   it and settle clears it; the state is read from `ConversationChannel.liveness()`
   at render time (derived from the registry's streaming flag), not derived from
   `agent_start`/`agent_settled` events the component itself receives, because
   attaching to a live fork mid-turn or a dormant thread's first message never
-  delivers a start event to the component. The transcript is
-  persisted per thread (on the thread record, newest 200 entries), so a reopen
+  delivers a start event to the component. The transcript scrolls in
+  full — there is no 24-line tail cut — and its items carry the
+  `ConversationItem` model, so the child's tool calls and their results appear
+  as collapsible items alongside the message turns. It is
+  persisted per thread (on the thread record, newest 200 items), so a reopen
   after `Esc` or after a lead restart shows the conversation so far; owner
-  lines are styled with the host's user-message background; thread text is
-  rendered as Markdown when the host's renderer is available (plain wrapped
-  text otherwise). The header states, once, directly after the `opened <time>`
+  lines are styled with the host's user-message background, and child text is
+  rendered as Markdown with the host theme. The header states, once, directly after the `opened <time>`
   line when present, `Esc: close view (thread stays open) · /done: end thread`
   — there is no footer hint. `Esc` closes the view only: the thread stays
   `open` and the fork keeps running, reattachable at any time. `/done` typed
