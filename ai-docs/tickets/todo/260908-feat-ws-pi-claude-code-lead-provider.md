@@ -307,3 +307,14 @@ Consequences:
   owner points a tier or `/model` at `claude-code/*`. The remaining
   Phase 1 dogfood and Phase 2 are moot unless the billing state changes;
   the owner decides whether to drop the ticket or park it.
+
+### Reverted on the docs branch - 2026-09-08
+
+The owner decided to revert the Phase 1 implementation given the finding
+above. The provider merge (`72e9327c`) is reverted here with
+`git revert -m 1` — provider source, tests, the SDK/zod dependency bumps,
+the `index.ts` registration, and the spec section
+`{#260908-pi-claude-code-provider}` are all removed — while this ticket
+(with the research spike, the Phase plan, and the finding) is kept for the
+record. The ticket stays in `todo/`: it is not dropped, only parked, and
+becomes actionable again only if the billing/classification state changes.

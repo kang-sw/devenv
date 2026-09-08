@@ -5,9 +5,7 @@
   "type": "module",
   "description": "Pi extension that bridges ws-mcp (harness-neutral, Go source untouched) onto Pi via a self-owned stdio MCP client, re-registering every ws-mcp tool as sanitized ws__<tool> names (raw dotted name dispatch preserved) so existing ws/<tool> SKILL.md prose still maps and dispatches.",
   "pi": {
-    "extensions": [
-      "./src/index.ts"
-    ]
+    "extensions": ["./src/index.ts"]
   },
   "files": [
     "src/",
@@ -21,11 +19,8 @@
     "explore-guide.md"
   ],
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.263",
-    "@earendil-works/pi-ai": "0.84.4",
     "@earendil-works/pi-coding-agent": "^0.84.4",
-    "yaml": "2.9.0",
-    "zod": "4.5.4"
+    "yaml": "2.9.0"
   },
   "scripts": {
     "test": "env -u WS_PI_SPAWN_ROLE -u WS_PI_EXPLORE_MODE node --test",
