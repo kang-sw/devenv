@@ -220,7 +220,7 @@ function formatRow(row: AgentRow): string {
 
 /**
  * Truncates `text` to at most `width` display columns (`visibleWidth`,
- * reused from `overlay-chat.ts` rather than duplicated), appending a single
+ * reused from `text-width.ts` rather than duplicated), appending a single
  * ellipsis character when truncation actually occurs. Never throws or
  * produces a wider-than-`width` result, even for `width <= 1`.
  */
@@ -308,7 +308,7 @@ export function shouldArmAgentWidget(role: SpawnRole | undefined, mode: string |
 /**
  * Duck-typed `Component` surface this controller's `setWidget` factory
  * returns — mirrors `pi-tui`'s `Component.render(width)` contract, the same
- * one `overlay-chat.ts`'s `OverlayChatComponent.render` implements.
+ * one `conversation-view.ts`'s `ConversationViewComponent.render` implements.
  */
 export interface AgentWidgetComponent {
   render(width: number): string[];

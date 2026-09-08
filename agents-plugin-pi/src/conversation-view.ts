@@ -6,12 +6,12 @@
  * `"interactive"` mode, routes typed input back to it through a
  * `ConversationChannel`.
  *
- * Out of THIS phase (see the plan's Out of Scope section): `ask.ts` rebinding
- * onto this component, `overlay-chat.ts` deletion, `TranscriptEntry[]` ->
- * `ConversationItem[]` hydration, the audit window, the owner-steering
- * ownership rule, and the Esc modal — all Phase 2 / child B. This file only
- * defines the shared component and its structural contract, tested offline
- * against a fake `ConversationChannel` and a fake `tui`.
+ * Phase 2 (`ask.ts` rebinding onto this component, the old per-thread overlay
+ * module's deletion, legacy transcript hydration into `ConversationItem[]`)
+ * has since landed; the audit window, the owner-steering ownership rule, and
+ * the Esc modal remain child B's. This file defines the shared component and
+ * its structural contract, tested offline against a fake `ConversationChannel`
+ * and a fake `tui`.
  *
  * Shape decisions:
  *   - `ConversationItem` has six kinds, per the ticket's Decisions message
@@ -23,16 +23,16 @@
  *     a later phase can correlate a call with its result; `tool-result`'s
  *     payload field is `content`, matching the ticket's field name). The
  *     child's streamed `text_delta`/`agent_settled` turn is committed and
- *     rendered as `"assistant"`, never `"lead-message"` — `overlay-chat.ts`
- *     commits the identical stream as the child's own turn (`who: "thread"`),
- *     and this component preserves that direction.
- *   - `ConversationChannel` is `overlay-chat.ts`'s `ForkChannel` with
+ *     rendered as `"assistant"`, never `"lead-message"` — the old per-thread
+ *     overlay component committed the identical stream as the child's own
+ *     turn (`who: "thread"`), and this component preserves that direction.
+ *   - `ConversationChannel` is the old overlay component's `ForkChannel` with
  *     `isStreaming(): boolean` widened to `liveness(): ChildLiveness` — a
  *     3-state read (`"running" | "idle-awaiting-owner" | "settled"`) taken
  *     FRESH on every `render()`, never cached across a call, so a state flip
  *     with no accompanying event still shows up on the very next repaint
- *     (the same class of gap `overlay-chat.ts`'s own `cachedStreaming` field
- *     works around). Producing `"idle-awaiting-owner"` from a real registry
+ *     (the same class of gap the old overlay component's own `cachedStreaming`
+ *     field worked around). Producing `"idle-awaiting-owner"` from a real registry
  *     is child B's ownership rule (`260908` sibling ticket) — this phase only
  *     defines the type and renders its three states structurally against a
  *     fake channel. `send` is OPTIONAL on the interface (`"interactive" mode
@@ -51,11 +51,11 @@
  *     a non-empty body (object-shaped args); a `"tool-result"` item is
  *     expandable only when `yamlContainerDisplay` recognizes its content as a
  *     JSON container. A non-expandable item never enters focus cycling.
- *   - `isEscapeKey` (kitty-protocol-safe Esc detection) is COPIED from
- *     `overlay-chat.ts` rather than imported: `overlay-chat.ts` stays running
- *     untouched until Phase 2 deletes it, and importing from a
- *     soon-to-be-deleted file would just move the coupling problem to Phase
- *     2 instead of avoiding it now.
+ *   - `isEscapeKey` (kitty-protocol-safe Esc detection) is COPIED from the
+ *     old per-thread overlay component rather than imported: that module was
+ *     always slated for Phase 2 deletion, and importing from a
+ *     soon-to-be-deleted file would just have moved the coupling problem to
+ *     Phase 2 instead of avoiding it up front.
  *   - Key-handling precedence: `\x03` (Ctrl+C) is swallowed first in both
  *     modes; `isEscapeKey` next, invoking `onEscape`, in both modes; then
  *     `Ctrl+O` (`\x0f`) toggles collapse/expand for every expandable item at
@@ -87,8 +87,9 @@
  *     `pi-tui`'s own `Text`/`Markdown` already pad/wrap to exactly `width`
  *     (confirmed against their compiled output), but `render()` still runs a
  *     defensive final `truncateToWidth` pass over every line — the same
- *     belt-and-suspenders discipline `overlay-chat.ts`'s `renderThreadText`
- *     already uses for a host-supplied renderer it does not fully trust.
+ *     belt-and-suspenders discipline the old overlay component's
+ *     `renderThreadText` used for a host-supplied renderer it did not fully
+ *     trust.
  */
 
 import {
@@ -105,18 +106,18 @@ import {
 import { completedTextPreview, logicalPreview, yamlContainerDisplay, yamlInputPreview } from "./tool-result-render.ts";
 import { visibleWidth } from "./text-width.ts";
 
-/** The literal the owner types to end an interactive session (mirrors `overlay-chat.ts`'s `DONE_COMMAND`). */
+/** The literal the owner types to end an interactive session (mirrors the old overlay component's own `DONE_COMMAND`). */
 export const DONE_COMMAND = "/done";
 
 /**
  * Kitty keyboard-protocol CSI-u key report, and the modifyOtherKeys escape
- * report — copied from `overlay-chat.ts`'s well-tested `isEscapeKey` (see
+ * report — copied from the old overlay component's well-tested `isEscapeKey` (see
  * this file's header for why it is copied rather than imported).
  */
 const KITTY_CSI_U = /^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u$/;
 const MODIFY_OTHER_KEYS_ESCAPE = "\x1b[27;1;27~";
 
-/** Whether one input chunk is an unmodified Escape press — see `overlay-chat.ts`'s `isEscapeKey` for the full rationale. */
+/** Whether one input chunk is an unmodified Escape press — see the old overlay component's `isEscapeKey` for the full rationale. */
 export function isEscapeKey(data: string): boolean {
   if (data === "\x1b" || data === MODIFY_OTHER_KEYS_ESCAPE) return true;
   const match = KITTY_CSI_U.exec(data);
@@ -150,7 +151,7 @@ export type ConversationItem =
 export type ChildLiveness = "running" | "idle-awaiting-owner" | "settled";
 
 /**
- * The component's only route to its child. `overlay-chat.ts`'s `ForkChannel`
+ * The component's only route to its child. The old overlay component's `ForkChannel`
  * widened to a 3-state `liveness()` in place of `isStreaming()` — everything
  * else (`onEvent`, `send`) is unchanged, so the same wire events
  * (`message_update`/`text_delta`, `agent_start`, `agent_settled`) drive both.
@@ -185,7 +186,7 @@ export interface EditorLike extends Component {
 export interface ConversationViewPrimitives {
   ScrollView: new (component: Component) => Component;
   Markdown: new (text: string, paddingX: number, paddingY: number, theme: MarkdownTheme) => Component;
-  Text: new (text?: string, paddingX?: number, paddingY?: number) => Component;
+  Text: new (text?: string, paddingX?: number, paddingY?: number, customBgFn?: (text: string) => string) => Component;
   Editor: new (tui: unknown, theme: EditorTheme) => EditorLike;
 }
 
@@ -247,6 +248,32 @@ export interface ConversationViewOptions {
   onEscape?: () => void;
   /** `/done`, typed and submitted while `"interactive"`. */
   onDone?: () => void;
+  /** Host Markdown theme for `"assistant"`/`"lead-message"` items. Defaults to the identity theme (Phase 1's plain-text baseline) when omitted. */
+  markdownTheme?: MarkdownTheme;
+  /** Background painter for `"user"` items — e.g. `(text) => theme.bg("userMessageBg", text)`. Left unpainted when omitted. */
+  userLineBg?: (text: string) => string;
+  /** Fired with a full copy of the transcript after every append — never for the streaming tail. Lets a host persist the transcript as it grows. */
+  onItemsChange?: (items: readonly ConversationItem[]) => void;
+}
+
+/**
+ * Copied from `tool-result-render.ts`'s own private `isSingleTextContent` —
+ * this component must not import a private helper from a file it does not
+ * otherwise couple to (the same convention already used for `isEscapeKey`).
+ */
+function isSingleTextContent(content: unknown): content is Array<{ type: string; text?: string }> {
+  return Array.isArray(content) && content.length === 1 && content[0]?.type === "text";
+}
+
+/** `tool_execution_end`'s `result` -> the `"tool-result"` item's `content` text: the single-text-content precedent, else a best-effort stringification. */
+function toolResultContentText(result: unknown): string {
+  const content = (result as { content?: unknown } | null)?.content;
+  if (isSingleTextContent(content)) return content[0]?.text ?? "";
+  try {
+    return JSON.stringify(result) ?? String(result);
+  } catch {
+    return String(result);
+  }
 }
 
 function isToolCallExpandable(item: Extract<ConversationItem, { kind: "tool-call" }>): boolean {
@@ -341,6 +368,7 @@ export class ConversationViewComponent implements Component {
   /** Appends one item to the transcript and requests a repaint. */
   appendItem(item: ConversationItem): void {
     this.items.push(item);
+    this.options.onItemsChange?.([...this.items]);
     this.tui.requestRender();
   }
 
@@ -371,7 +399,15 @@ export class ConversationViewComponent implements Component {
   // ---- channel events -------------------------------------------------
 
   private handleEvent(evt: unknown): void {
-    const e = evt as { type?: string; assistantMessageEvent?: { type?: string; delta?: string } };
+    const e = evt as {
+      type?: string;
+      assistantMessageEvent?: { type?: string; delta?: string };
+      toolCallId?: string;
+      toolName?: string;
+      args?: unknown;
+      result?: unknown;
+      isError?: boolean;
+    };
     if (e.type === "message_update" && e.assistantMessageEvent?.type === "text_delta" && typeof e.assistantMessageEvent.delta === "string") {
       this.streaming += e.assistantMessageEvent.delta;
       this.tui.requestRender();
@@ -381,12 +417,20 @@ export class ConversationViewComponent implements Component {
       this.tui.requestRender();
       return;
     }
+    if (e.type === "tool_execution_start" && typeof e.toolCallId === "string" && typeof e.toolName === "string") {
+      this.appendItem({ kind: "tool-call", id: e.toolCallId, name: e.toolName, args: e.args });
+      return;
+    }
+    if (e.type === "tool_execution_end" && typeof e.toolCallId === "string" && typeof e.toolName === "string") {
+      this.appendItem({ kind: "tool-result", id: e.toolCallId, name: e.toolName, content: toolResultContentText(e.result), isError: e.isError });
+      return;
+    }
     if (e.type !== "agent_settled") return;
     const settled = this.streaming.trim();
     this.streaming = "";
     // The CHILD's own finalized turn — always "assistant", never "lead-message"
     // (that kind is reserved for a message the LEAD sends the child; see this
-    // file's header and `overlay-chat.ts`'s identical `who: "thread"` direction).
+    // file's header and the old overlay component's identical `who: "thread"` direction).
     if (settled.length > 0) this.appendItem({ kind: "assistant", text: settled });
     else this.tui.requestRender();
   }
@@ -555,7 +599,7 @@ export class ConversationViewComponent implements Component {
     const focusMarker = this.focusIndex === index ? "> " : "";
     switch (item.kind) {
       case "user":
-        return this.textLines(`you: ${item.text}`, width);
+        return this.textLines(`you: ${item.text}`, width, this.options.userLineBg);
       case "note":
         return this.textLines(`· ${item.text}`, width);
       case "assistant":
@@ -582,11 +626,11 @@ export class ConversationViewComponent implements Component {
     }
   }
 
-  private textLines(text: string, width: number): string[] {
-    return new this.primitives.Text(text, 0, 0).render(width);
+  private textLines(text: string, width: number, bg?: (text: string) => string): string[] {
+    return new this.primitives.Text(text, 0, 0, bg).render(width);
   }
 
   private markdownLines(text: string, width: number): string[] {
-    return new this.primitives.Markdown(text, 0, 0, IDENTITY_MARKDOWN_THEME).render(width);
+    return new this.primitives.Markdown(text, 0, 0, this.options.markdownTheme ?? IDENTITY_MARKDOWN_THEME).render(width);
   }
 }

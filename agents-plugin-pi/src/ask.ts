@@ -44,7 +44,7 @@
  * here.
  *
  * Golden rule / placement: this module imports FROM `spawner.ts`,
- * `fork.ts`, `process-role.ts` and `overlay-chat.ts` only, never the
+ * `fork.ts`, `process-role.ts` and `conversation-view.ts` only, never the
  * reverse (`fork.ts` duplicates the two tool-name literals for exactly this
  * reason — see its `FORK_EXCLUDED_TOOL_NAMES` comment).
  * `agents-plugin-tool/` (ws-mcp Go) and `agents-plugin/skills/` canonical
@@ -61,6 +61,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 import { modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx } from "./model-catalog.ts";
@@ -77,7 +78,15 @@ import {
 } from "./spawner.ts";
 import { computeForkToolSurface, getForkSourceSessionFile } from "./fork.ts";
 import { readSpawnRole, type SpawnRole } from "./process-role.ts";
-import { openOverlayChat, type ForkChannel, type OverlayHandle, type TranscriptEntry } from "./overlay-chat.ts";
+import {
+  ConversationViewComponent,
+  DONE_COMMAND,
+  type ChildLiveness,
+  type ConversationChannel,
+  type ConversationItem,
+  type ConversationViewTui,
+} from "./conversation-view.ts";
+import { loadHostPiTui, type MarkdownTheme } from "./pi-tui.ts";
 import { captureForkContext, captureRegisteredTools, captureUnflushedForkSource, effectiveForkDescriptor, type ForkContext } from "./fork-context.ts";
 import type { LeadPromptRef } from "./lead-bootstrap.ts";
 
@@ -120,6 +129,50 @@ export function checkContextLength(context: string | undefined, limit = MAX_CONT
   if (!context || context.length <= limit) return undefined;
   return `ws: question context is ${context.length} chars (over the ${limit}-char guideline) — it is stored in full, but a shorter one is easier for the owner to answer.`;
 }
+
+/**
+ * What the overlay's `ctx.ui.custom` `done` callback + the summarize-then-
+ * close helper are wrapped as, handed to `onOpened` (moved verbatim from the
+ * old per-thread overlay module, now deleted, with no shape change):
+ * `close()` closes the view only (the fork and its thread are untouched);
+ * `closeWithSummary(summary)` ends the thread with a supplied summary.
+ * Reused unchanged by `handleRespondentFinalReport`'s
+ * `overlay.closeWithSummary(message)` path.
+ */
+export interface OverlayHandle {
+  /** Close the view only (the thread is untouched). */
+  close(): void;
+  /** End the view with a supplied summary. */
+  closeWithSummary(summary: string): void;
+}
+
+/**
+ * Review relay #1 I4: owner-facing rendering of a thread's registration time
+ * in the overlay's header (moved verbatim from the old, now-deleted per-thread overlay module).
+ * Deliberately UTC-and-labeled rather than locale-formatted so the header is
+ * identical in a test run, a CI container and the owner's terminal.
+ * `undefined` for a missing or unparseable timestamp — an old registry entry
+ * must not break the header.
+ */
+export function formatSpawnTime(iso: string | undefined): string | undefined {
+  if (!iso) return undefined;
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return undefined;
+  return `${at.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
+/**
+ * The fixed message sent to the fork when the owner types `/done` on a
+ * `summarizeOnDone` thread. One round-trip only: the fork's next settled
+ * turn IS the summary — there is no separate hand-shake protocol. Moved
+ * verbatim from the old, now-deleted per-thread overlay module.
+ */
+export function buildDoneSummaryPrompt(): string {
+  return "The owner ended the discussion. Write a concise summary of what was decided now — a few sentences, no preamble, no questions back.";
+}
+
+/** Fallback when the fork settles the `/done` turn without producing any text. Moved verbatim from the old, now-deleted per-thread overlay module. */
+export const EMPTY_SUMMARY_TEXT = "(the discussion ended without a summary from the thread)";
 
 /**
  * Review relay #1 I6: what the LEAD sees in place of a fork-raised question's
@@ -168,13 +221,16 @@ export interface ThreadRecord {
   /** Denormalized resume fields for `respondentAgentId` — see this file's header. */
   forkResume?: PersistedForkResume;
   /**
-   * The overlay transcript (owner lines, settled thread turns, adapter notes),
-   * newest last and capped at `THREAD_TRANSCRIPT_CAP` entries. Persisted with
-   * the record so a reopen after Esc — or after a lead restart — shows the
-   * conversation so far instead of an empty view (dogfood 2026-09-05). Absent
-   * until the thread is first opened.
+   * The `ConversationViewComponent` transcript (owner turns, settled child
+   * turns, tool calls/results, adapter notes), newest last and capped at
+   * `THREAD_TRANSCRIPT_CAP` entries. Persisted with the record so a reopen
+   * after Esc — or after a lead restart — shows the conversation so far
+   * instead of an empty view (dogfood 2026-09-05). Absent until the thread is
+   * first opened. A record written before this ticket carries the legacy
+   * `{who,text}[]` shape instead — `normalizeTranscript` converts it on
+   * hydrate.
    */
-  transcript?: TranscriptEntry[];
+  transcript?: ConversationItem[];
   createdAt: string;
   /** Last open/answer/close touch — orders the "reopen the most recent" shortcut. */
   touchedAt: string;
@@ -218,21 +274,80 @@ export function normalizeThreadOrigin(value: unknown): ThreadOrigin {
 /** Newest transcript entries kept per thread (`ThreadRecord.transcript`); older ones are dropped on write and on parse. */
 export const THREAD_TRANSCRIPT_CAP = 200;
 
+/** Maps a legacy `TranscriptEntry.who` value onto its `ConversationItem.kind` equivalent — see `normalizeTranscript`. */
+const LEGACY_WHO_TO_KIND: Record<string, "user" | "assistant" | "note"> = {
+  you: "user",
+  thread: "assistant",
+  note: "note",
+};
+
+/**
+ * One persisted transcript entry, tolerantly converted to a `ConversationItem`
+ * or dropped (`undefined`) when malformed. Accepts BOTH shapes: the legacy
+ * `{who,text}` entry (`"you"`->`{kind:"user",...}`, `"thread"`->
+ * `{kind:"assistant",...}`, `"note"`->`{kind:"note",...}`) written before this
+ * ticket, and the native `ConversationItem` `{kind,...}` shape, validated
+ * per-kind (`tool-call` needs `id`/`name`; `tool-result` needs `id`/`name`/
+ * `content`, `isError` optional; the rest need `text: string`).
+ */
+function normalizeTranscriptEntry(entry: unknown): ConversationItem | undefined {
+  const candidate = entry as
+    | { who?: unknown; kind?: unknown; text?: unknown; id?: unknown; name?: unknown; args?: unknown; content?: unknown; isError?: unknown }
+    | null;
+  if (!candidate || typeof candidate !== "object") return undefined;
+  if (typeof candidate.who === "string") {
+    const kind = LEGACY_WHO_TO_KIND[candidate.who];
+    return kind && typeof candidate.text === "string" ? ({ kind, text: candidate.text } as ConversationItem) : undefined;
+  }
+  switch (candidate.kind) {
+    case "user":
+    case "assistant":
+    case "lead-message":
+    case "note":
+      return typeof candidate.text === "string" ? ({ kind: candidate.kind, text: candidate.text } as ConversationItem) : undefined;
+    case "tool-call":
+      return typeof candidate.id === "string" && typeof candidate.name === "string"
+        ? { kind: "tool-call", id: candidate.id, name: candidate.name, args: candidate.args }
+        : undefined;
+    case "tool-result":
+      return typeof candidate.id === "string" && typeof candidate.name === "string" && typeof candidate.content === "string"
+        ? {
+            kind: "tool-result",
+            id: candidate.id,
+            name: candidate.name,
+            content: candidate.content,
+            ...(typeof candidate.isError === "boolean" ? { isError: candidate.isError } : {}),
+          }
+        : undefined;
+    default:
+      return undefined;
+  }
+}
+
 /**
  * Tolerant read of a persisted `transcript`: a non-array is `undefined`
  * (the field is simply absent), malformed entries are dropped, and the
  * result is capped to the newest `THREAD_TRANSCRIPT_CAP` — a hand-edited or
- * older registry file must never make a thread unopenable.
+ * older registry file must never make a thread unopenable. See
+ * `normalizeTranscriptEntry` for the legacy/native per-entry conversion.
  */
-export function normalizeTranscript(value: unknown): TranscriptEntry[] | undefined {
+export function normalizeTranscript(value: unknown): ConversationItem[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  const entries = value
-    .filter((entry): entry is TranscriptEntry => {
-      const candidate = entry as Partial<TranscriptEntry> | null;
-      return (candidate?.who === "you" || candidate?.who === "thread" || candidate?.who === "note") && typeof candidate.text === "string";
-    })
-    .map((entry) => ({ who: entry.who, text: entry.text }));
+  const entries = value.map((entry) => normalizeTranscriptEntry(entry)).filter((entry): entry is ConversationItem => entry !== undefined);
   return entries.length > THREAD_TRANSCRIPT_CAP ? entries.slice(entries.length - THREAD_TRANSCRIPT_CAP) : entries;
+}
+
+/**
+ * The `ConversationViewComponent` initial transcript for opening/reopening a
+ * thread: the persisted transcript when there is one, else a single seeded
+ * `note` from `thread.question` (never seeded twice — a non-empty transcript
+ * already carries it as its first entry), else empty. Exported for direct
+ * testing (pure — no component/channel needed).
+ */
+export function buildInitialConversationItems(thread: Pick<ThreadRecord, "transcript" | "question">): ConversationItem[] {
+  if (thread.transcript && thread.transcript.length > 0) return thread.transcript;
+  if (thread.question) return [{ kind: "note", text: thread.question }];
+  return [];
 }
 
 /**
@@ -968,7 +1083,12 @@ export function injectDiscussionSummary(
  * has no `client` at open time — it only gets one once `sendToAgent`
  * relaunches the child.
  */
-function createForkChannel(pi: ExtensionAPI, rpcRegistry: RpcAgentRegistry, cwd: string, agentId: string): ForkChannel {
+/** `ConversationChannel.liveness()`'s two-state read off the registry's `streaming` flag — `"idle-awaiting-owner"` is child B's ownership rule, not this ticket's. Pulled out as a small exported pure helper matching the file's own `resolveOwnerSendInterrupt` precedent. */
+export function resolveChildLiveness(streaming: boolean): ChildLiveness {
+  return streaming ? "running" : "settled";
+}
+
+function createForkChannel(pi: ExtensionAPI, rpcRegistry: RpcAgentRegistry, cwd: string, agentId: string): ConversationChannel {
   const listeners = new Set<(evt: unknown) => void>();
   let attached: unknown;
   let detach: (() => void) | undefined;
@@ -997,8 +1117,8 @@ function createForkChannel(pi: ExtensionAPI, rpcRegistry: RpcAgentRegistry, cwd:
         }
       };
     },
-    isStreaming() {
-      return rpcRegistry.get(agentId)?.streaming === true;
+    liveness() {
+      return resolveChildLiveness(rpcRegistry.get(agentId)?.streaming === true);
     },
     async send(text) {
       await sendToAgent(rpcRegistry, { pi, cwd }, agentId, text, resolveOwnerSendInterrupt(rpcRegistry.get(agentId)?.streaming === true));
@@ -1232,6 +1352,88 @@ function bindThread(rpcRegistry: RpcAgentRegistry, agentId: string, bound: boole
 }
 
 /**
+ * Duck-typed slice of `ctx.ui.custom`'s real signature
+ * (`ExtensionUIContext.custom`) — kept minimal like every other `ctx` seam in
+ * this module, and narrowed to what `openThread` needs: a `tui` structurally
+ * compatible with `ConversationViewTui` (the real host `TUI` is a superset),
+ * a `theme` exposing `bg`, and a factory that may return its component
+ * asynchronously (the real signature allows `Component | Promise<Component>`
+ * — needed here because building the live component awaits
+ * `loadHostPiTui()`).
+ */
+interface AskCustomUiCtx {
+  ui: {
+    custom<T>(
+      factory: (
+        tui: ConversationViewTui,
+        theme: { bg?(color: string, text: string): string } | undefined,
+        keybindings: unknown,
+        done: (result: T) => void,
+      ) => ConversationViewComponent | Promise<ConversationViewComponent>,
+      options?: { overlay?: boolean; overlayOptions?: unknown },
+    ): Promise<T>;
+  };
+}
+
+/**
+ * `/done`'s summarize-then-close state machine — ported from the deleted
+ * the old, now-deleted per-thread overlay module's `submit()`/`handleEvent()`
+ * exactly: appends the
+ * "ending the thread…" note, sends the fixed `buildDoneSummaryPrompt()`
+ * through the channel, and subscribes ONCE MORE to `channel.onEvent` (a
+ * second, independent listener alongside the component's own internal one —
+ * harmless, since each accumulates its own private `streaming` buffer) to
+ * take the very next `agent_settled` as the summary. Starting this listener
+ * fresh at `/done` time — rather than reusing any buffer accumulated before
+ * it — is what keeps a half-streamed pre-`/done` turn from ever leaking into
+ * the summary (the old M11 guard), with no explicit reset needed: this
+ * listener simply never saw those earlier events.
+ */
+function summarizeThenClose(component: ConversationViewComponent, channel: ConversationChannel, overlay: OverlayHandle): void {
+  component.appendItem({ kind: "note", text: "ending the thread — asking for a summary…" });
+  let streaming = "";
+  const unsubscribe = channel.onEvent((evt) => {
+    const e = evt as { type?: string; assistantMessageEvent?: { type?: string; delta?: string } };
+    if (e.type === "message_update" && e.assistantMessageEvent?.type === "text_delta" && typeof e.assistantMessageEvent.delta === "string") {
+      streaming += e.assistantMessageEvent.delta;
+      return;
+    }
+    if (e.type !== "agent_settled") return;
+    unsubscribe();
+    const settled = streaming.trim();
+    overlay.closeWithSummary(settled.length > 0 ? settled : EMPTY_SUMMARY_TEXT);
+  });
+  void channel.send?.(buildDoneSummaryPrompt());
+}
+
+/**
+ * Wraps a live `ConversationViewComponent` + the `ctx.ui.custom` `done`
+ * callback as an `OverlayHandle` — the external contract
+ * `handleRespondentFinalReport`'s `overlay.closeWithSummary` path (and a
+ * second `/answer` closing the first overlay) drive without reaching into
+ * the component itself. `closeWithSummary` mirrors the deleted
+ * the old, now-deleted per-thread overlay module's own: a non-empty summary is appended as the child's own
+ * turn before the thread itself closes.
+ */
+function buildOverlayHandle(
+  pi: ExtensionAPI,
+  handle: ThreadRegistryHandle,
+  rpcRegistry: RpcAgentRegistry,
+  thread: ThreadRecord,
+  component: ConversationViewComponent,
+  done: (result: undefined) => void,
+): OverlayHandle {
+  return {
+    close: () => done(undefined),
+    closeWithSummary: (summary) => {
+      if (summary.trim().length > 0) component.appendItem({ kind: "assistant", text: summary.trim() });
+      closeThreadOnDone(pi, handle, rpcRegistry, thread, summary);
+      done(undefined);
+    },
+  };
+}
+
+/**
  * Opens (or reopens) one thread's overlay chat. Never auto-popped — only a
  * `/answer`, or the reopen shortcut, reaches here.
  */
@@ -1279,31 +1481,65 @@ async function openThread(
   const attachedRecord = rpcRegistry.get(agentId);
   if (attachedRecord) attachedRecord.overlayAttached = true;
 
+  const channel = createForkChannel(pi, rpcRegistry, sessionCtx.cwd, agentId);
+  // The transcript lives on the record, not in the view: restored here (or
+  // seeded from the question when there is no transcript yet), and persisted
+  // on every append so Esc/reopen and a lead restart both show the
+  // conversation so far.
+  const initialItems = buildInitialConversationItems(thread);
+  const opened = formatSpawnTime(thread.createdAt);
+  const headerHint = [
+    `ws thread ${thread.threadId} · ${thread.title}`,
+    ...(opened ? [`  opened ${opened}`] : []),
+    `Esc: close view (thread stays open) · ${DONE_COMMAND}: end thread`,
+  ].join("\n");
+  // Review relay #2 C2: only a discussion fork this surface owns is asked
+  // for a summary. A live task fork is mid-task — asking it to summarize
+  // (and then acting on that turn) would derail the work the lead is
+  // waiting on.
+  const summarizeOnDone = thread.origin === "lead-ask";
+  // Best effort: `conversation-view.ts`'s `markdownLines()` falls back to its
+  // own identity theme when this is `undefined`, so a throwing/missing host
+  // theme must not block opening the thread.
+  let markdownTheme: MarkdownTheme | undefined;
   try {
-    await openOverlayChat(ctx as never, {
-      title: thread.title,
-      threadId: thread.threadId,
-      question: thread.question,
-      createdAt: thread.createdAt,
-      // Review relay #2 C2: only a discussion fork this surface owns is asked
-      // for a summary. A live task fork is mid-task — asking it to summarize
-      // (and then acting on that turn) would derail the work the lead is
-      // waiting on.
-      summarizeOnDone: thread.origin === "lead-ask",
-      channel: createForkChannel(pi, rpcRegistry, sessionCtx.cwd, agentId),
-      onDone: (summary) => closeThreadOnDone(pi, handle, rpcRegistry, thread, summary),
-      // The transcript lives on the record, not in the view: restored here,
-      // and persisted on every append so Esc/reopen and a lead restart both
-      // show the conversation so far.
-      initialEntries: thread.transcript,
-      onTranscriptChange: (entries) => {
-        thread.transcript = entries.length > THREAD_TRANSCRIPT_CAP ? entries.slice(entries.length - THREAD_TRANSCRIPT_CAP) : entries;
-        persistThreads(handle);
+    markdownTheme = getMarkdownTheme();
+  } catch {
+    // best effort — see doc comment above.
+  }
+
+  try {
+    await (ctx as unknown as AskCustomUiCtx).ui.custom<undefined>(
+      async (tui, theme, _keybindings, done) => {
+        const hostPiTui = await loadHostPiTui();
+        let overlayHandle: OverlayHandle | undefined;
+        const component: ConversationViewComponent = new ConversationViewComponent(tui, {
+          channel,
+          initialItems,
+          headerHint,
+          markdownTheme,
+          userLineBg: (text) => theme?.bg?.("userMessageBg", text) ?? text,
+          primitives: { ScrollView: hostPiTui.ScrollView, Markdown: hostPiTui.Markdown, Text: hostPiTui.Text, Editor: hostPiTui.Editor },
+          onEscape: () => done(undefined),
+          onDone: () => {
+            if (!summarizeOnDone) {
+              overlayHandle?.closeWithSummary("");
+              return;
+            }
+            summarizeThenClose(component, channel, overlayHandle!);
+          },
+          onItemsChange: (items) => {
+            thread.transcript = items.length > THREAD_TRANSCRIPT_CAP ? items.slice(-THREAD_TRANSCRIPT_CAP) : [...items];
+            persistThreads(handle);
+          },
+        });
+        component.setMode("interactive");
+        overlayHandle = buildOverlayHandle(pi, handle, rpcRegistry, thread, component, done);
+        activeOverlay = { token, threadId: thread.threadId, handle: overlayHandle };
+        return component;
       },
-      onOpened: (overlay) => {
-        activeOverlay = { token, threadId: thread.threadId, handle: overlay };
-      },
-    });
+      { overlay: true, overlayOptions: { width: "80%", maxHeight: "80%", anchor: "center" } },
+    );
   } finally {
     // Cleared on every exit path — `/done` (which also stops the fork), a
     // plain close, or a throw out of the overlay.
@@ -1319,7 +1555,7 @@ async function openThread(
  * most recently touched thread. `/done` is NOT a Pi command — it is
  * intercepted inside the overlay's own input handling, because
  * `ctx.ui.custom` takes keyboard focus away from the main editor Pi's
- * slash-command dispatch runs on (see overlay-chat.ts).
+ * slash-command dispatch runs on (see `conversation-view.ts`).
  */
 export function registerThreadCommands(
   pi: ExtensionAPI,
