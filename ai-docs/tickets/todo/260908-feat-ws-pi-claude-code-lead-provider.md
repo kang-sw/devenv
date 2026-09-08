@@ -255,3 +255,66 @@ folds cwd into the cached prefix.
 and `ws-ask` round-trips; a mid-session `/model` switch back to the
 OpenAI tier resyncing without history loss) and the merge decision. No
 `### Result` is recorded; Phase 2 is untouched.
+
+## Finding - 2026-09-08: the subscription refuses Pi's built-in system prompt
+
+Owner dogfood on the merged Phase 1 (`72e9327c`): every turn on
+`claude-code/opus` and `claude-code/sonnet`, from a fresh Pi session with
+the prompt `hi`, failed with
+
+```
+API Error: 400 You're out of extra usage. Add more at claude.ai/settings/usage and keep going.
+```
+
+The 400 arrives before any tokens are consumed (`usage` all zero). The
+rejection was bisected with a throwaway SDK probe (`query()` with the
+same options the provider uses, `env -i`, subscription login, no API
+key), one variable at a time:
+
+| request | result |
+|---|---|
+| default Claude Code prompt, sonnet / opus, effort xhigh / max | pass |
+| short custom `systemPrompt` (one sentence) | pass |
+| 57 ws-mcp tools reflected as SDK MCP tools | pass |
+| Pi lead system prompt as captured from the failing session (64k chars) | **400 out of extra usage** |
+| prefix of that prompt: 2,361 chars | pass |
+| prefix of that prompt: 2,393 chars (mid-sentence, inside Pi's own default prompt) | **400** |
+| natural text of 2,300 / 2,600 / 4,000 chars (AGENTS.md body) | pass |
+| the ws manual block alone (23.6k chars) | pass |
+| the Pi lead guide alone (20.5k chars) | pass |
+| `{type: "preset", preset: "claude_code", append: <Pi prompt>}`, 5k and 64k chars | **400** |
+
+So the trigger is neither size nor the adapter's own text: it is Pi's
+built-in default system prompt ("You are an expert coding assistant
+operating inside pi, a coding agent harness ..."), which the API
+classifies as third-party-harness usage and routes to extra usage. Any
+request whose system prompt contains enough of that text is refused on a
+subscription without an extra-usage balance, whether it replaces or
+appends to Claude Code's own prompt. The spike and the Phase 1 live gate
+passed only because `pi -p --no-extensions ...` in a throwaway cwd
+produces a much shorter default prompt than the lead's.
+
+Consequences:
+
+- The provider works as built, but only with extra usage enabled, i.e.
+  at API list rates. At that point Pi's native `anthropic` provider with
+  an API key is the simpler and equivalent path, and the owner's reason
+  for this ticket (using the subscription for the lead) is gone.
+- Rewriting or trimming Pi's default prompt so the classifier no longer
+  recognizes the harness would be evading a usage control Anthropic has
+  deliberately put in place; this ticket does not pursue that.
+- The provider stays merged and inert: nothing selects it unless the
+  owner points a tier or `/model` at `claude-code/*`. The remaining
+  Phase 1 dogfood and Phase 2 are moot unless the billing state changes;
+  the owner decides whether to drop the ticket or park it.
+
+### Reverted on the docs branch - 2026-09-08
+
+The owner decided to revert the Phase 1 implementation given the finding
+above. The provider merge (`72e9327c`) is reverted here with
+`git revert -m 1` — provider source, tests, the SDK/zod dependency bumps,
+the `index.ts` registration, and the spec section
+`{#260908-pi-claude-code-provider}` are all removed — while this ticket
+(with the research spike, the Phase plan, and the finding) is kept for the
+record. The ticket stays in `todo/`: it is not dropped, only parked, and
+becomes actionable again only if the billing/classification state changes.
