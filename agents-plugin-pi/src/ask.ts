@@ -133,17 +133,32 @@ export function checkContextLength(context: string | undefined, limit = MAX_CONT
 /**
  * What the overlay's `ctx.ui.custom` `done` callback + the summarize-then-
  * close helper are wrapped as, handed to `onOpened` (moved verbatim from the
- * old per-thread overlay module, now deleted, with no shape change):
+ * old per-thread overlay module, now deleted, with one shape addition):
  * `close()` closes the view only (the fork and its thread are untouched);
  * `closeWithSummary(summary)` ends the thread with a supplied summary.
  * Reused unchanged by `handleRespondentFinalReport`'s
  * `overlay.closeWithSummary(message)` path.
+ *
+ * Review relay #2 C1/I1: `closeWithSummary`'s `alreadyRendered` parameter
+ * (default `false`, so every EXISTING caller keeps its old append-then-close
+ * behavior unchanged) exists for exactly one caller —
+ * `summarizeThenClose`'s own settled-turn completion — whose summary text
+ * was ALREADY appended to the view by the component's own internal
+ * `agent_settled` handling (the same event, a separate listener registered
+ * first). Passing `true` there skips the redundant second append that used
+ * to double the summary turn on screen and in `thread.transcript`; the
+ * thread-close side effects (`closeThreadOnDone`, `done`) still run exactly
+ * as before.
  */
 export interface OverlayHandle {
   /** Close the view only (the thread is untouched). */
   close(): void;
-  /** End the view with a supplied summary. */
-  closeWithSummary(summary: string): void;
+  /**
+   * End the view with a supplied summary. `alreadyRendered: true` (used only
+   * by `summarizeThenClose`) skips appending `summary` to the view — it is
+   * already there, appended by the component's own settle handling.
+   */
+  closeWithSummary(summary: string, alreadyRendered?: boolean): void;
 }
 
 /**
@@ -1376,20 +1391,52 @@ interface AskCustomUiCtx {
 }
 
 /**
- * `/done`'s summarize-then-close state machine — ported from the deleted
- * the old, now-deleted per-thread overlay module's `submit()`/`handleEvent()`
- * exactly: appends the
+ * §5's `/done`-vs-live-task-fork branching, pulled out as its own pure
+ * decision (review relay #2 I3, mirroring `resolveChildLiveness`'s
+ * precedent) so `openThread`'s `onDone` closure is a thin dispatch over an
+ * independently unit-testable result rather than an untested inline `if`:
+ * `"summarize"` asks the (owned) discussion fork for a summary turn before
+ * closing; `"close-empty"` closes the view on the spot, with nothing sent to
+ * a live task fork this surface does not own (review relay #2 C2).
+ */
+export type DoneAction = "summarize" | "close-empty";
+export function resolveDoneAction(summarizeOnDone: boolean): DoneAction {
+  return summarizeOnDone ? "summarize" : "close-empty";
+}
+
+/**
+ * `/done`'s summarize-then-close state machine — ported from the old,
+ * now-deleted per-thread overlay module's `submit()`/`handleEvent()`, with
+ * one correctness fix (review relay #2 Critical/Important): appends the
  * "ending the thread…" note, sends the fixed `buildDoneSummaryPrompt()`
  * through the channel, and subscribes ONCE MORE to `channel.onEvent` (a
- * second, independent listener alongside the component's own internal one —
- * harmless, since each accumulates its own private `streaming` buffer) to
- * take the very next `agent_settled` as the summary. Starting this listener
- * fresh at `/done` time — rather than reusing any buffer accumulated before
- * it — is what keeps a half-streamed pre-`/done` turn from ever leaking into
- * the summary (the old M11 guard), with no explicit reset needed: this
- * listener simply never saw those earlier events.
+ * second, independent listener alongside the component's own internal one,
+ * registered first) to take the very next `agent_settled` as the summary.
+ * Starting this listener fresh at `/done` time — rather than reusing any
+ * buffer accumulated before it — is what keeps a half-streamed pre-`/done`
+ * turn from ever leaking into the summary (the old M11 guard), with no
+ * explicit reset needed: this listener simply never saw those earlier
+ * events.
+ *
+ * On that same `agent_settled`, the component's OWN internal listener (it
+ * saw the identical event first — registered in the constructor, before
+ * this function is ever called) already appended the settled text as an
+ * ordinary `"assistant"` item and persisted it via `onItemsChange` — exactly
+ * the render the summary turn needs. `closeWithSummary(..., true)` below
+ * tells `buildOverlayHandle` that text is ALREADY on screen, so it must not
+ * append it a second time (the review relay #2 Critical: the old
+ * single-listener component only ever appended a settled turn once, then
+ * called `finish()` with no further append — this restores that same
+ * "append at most once" invariant across the new two-listener split).
+ *
+ * Returns the fresh listener's `unsubscribe`, so a caller that closes the
+ * overlay before this settle ever arrives (Esc) can tear it down — otherwise
+ * a LATER settle would still fire this callback and call
+ * `overlay.closeWithSummary`, which would now be silently absorbed by
+ * `buildOverlayHandle`'s own `finished` guard (review relay #2 Important:
+ * closing early must not just be swallowed, it must stop listening).
  */
-export function summarizeThenClose(component: ConversationViewComponent, channel: ConversationChannel, overlay: OverlayHandle): void {
+export function summarizeThenClose(component: ConversationViewComponent, channel: ConversationChannel, overlay: OverlayHandle): () => void {
   component.appendItem({ kind: "note", text: "ending the thread — asking for a summary…" });
   let streaming = "";
   const unsubscribe = channel.onEvent((evt) => {
@@ -1401,19 +1448,34 @@ export function summarizeThenClose(component: ConversationViewComponent, channel
     if (e.type !== "agent_settled") return;
     unsubscribe();
     const settled = streaming.trim();
-    overlay.closeWithSummary(settled.length > 0 ? settled : EMPTY_SUMMARY_TEXT);
+    overlay.closeWithSummary(settled.length > 0 ? settled : EMPTY_SUMMARY_TEXT, /* alreadyRendered */ true);
   });
   void channel.send?.(buildDoneSummaryPrompt());
+  return unsubscribe;
 }
 
 /**
  * Wraps a live `ConversationViewComponent` + the `ctx.ui.custom` `done`
  * callback as an `OverlayHandle` — the external contract
- * `handleRespondentFinalReport`'s `overlay.closeWithSummary` path (and a
- * second `/answer` closing the first overlay) drive without reaching into
- * the component itself. `closeWithSummary` mirrors the deleted
- * the old, now-deleted per-thread overlay module's own: a non-empty summary is appended as the child's own
- * turn before the thread itself closes.
+ * `handleRespondentFinalReport`'s `overlay.closeWithSummary` path, a pending
+ * `summarizeThenClose` settle, an owner Esc, and a second `/answer` closing
+ * the first overlay all drive without reaching into the component itself.
+ * `closeWithSummary` mirrors the old, now-deleted per-thread overlay
+ * module's own: a non-empty summary is appended as the child's own turn
+ * before the thread itself closes — UNLESS `alreadyRendered` says the
+ * component's own settle handling already put it there (see
+ * `summarizeThenClose`'s doc comment).
+ *
+ * Review relay #2 Important (I1a/I1b/I4): a private `finished` flag makes
+ * `close`/`closeWithSummary` a no-op after either has already run once —
+ * whichever of the three real races wins (an owner Esc during the summary
+ * wait, the fork's own `kind:"final"` report arriving mid-wait via
+ * `handleRespondentFinalReport`, or the summary settle itself) is the ONLY
+ * one that runs `closeThreadOnDone`/injects a summary/calls `done`, exactly
+ * mirroring the old component's own `finished` guard. `onFinish` — called
+ * exactly once, by whichever path wins — is `openThread`'s hook to tear down
+ * a still-pending `summarizeThenClose` listener so a late settle never even
+ * reaches this guard (belt-and-suspenders with the guard itself).
  */
 export function buildOverlayHandle(
   pi: ExtensionAPI,
@@ -1422,11 +1484,21 @@ export function buildOverlayHandle(
   thread: ThreadRecord,
   component: ConversationViewComponent,
   done: (result: undefined) => void,
+  onFinish?: () => void,
 ): OverlayHandle {
+  let finished = false;
   return {
-    close: () => done(undefined),
-    closeWithSummary: (summary) => {
-      if (summary.trim().length > 0) component.appendItem({ kind: "assistant", text: summary.trim() });
+    close: () => {
+      if (finished) return;
+      finished = true;
+      onFinish?.();
+      done(undefined);
+    },
+    closeWithSummary: (summary, alreadyRendered = false) => {
+      if (finished) return;
+      finished = true;
+      onFinish?.();
+      if (!alreadyRendered && summary.trim().length > 0) component.appendItem({ kind: "assistant", text: summary.trim() });
       closeThreadOnDone(pi, handle, rpcRegistry, thread, summary);
       done(undefined);
     },
@@ -1513,6 +1585,13 @@ async function openThread(
       async (tui, theme, _keybindings, done) => {
         const hostPiTui = await loadHostPiTui();
         let overlayHandle: OverlayHandle | undefined;
+        // Review relay #2 I1a: the one `summarizeThenClose` listener that may
+        // be waiting on a settle at any given moment. Torn down by
+        // `buildOverlayHandle`'s `onFinish` hook the instant ANY close path
+        // wins, so an owner Esc (or a racing final report) during the wait
+        // stops this listener rather than leaving it to fire later into an
+        // already-guarded (but still leaked) `closeWithSummary`.
+        let pendingSummarizeUnsubscribe: (() => void) | undefined;
         const component: ConversationViewComponent = new ConversationViewComponent(tui, {
           channel,
           initialItems,
@@ -1520,13 +1599,18 @@ async function openThread(
           markdownTheme,
           userLineBg: (text) => theme?.bg?.("userMessageBg", text) ?? text,
           primitives: { ScrollView: hostPiTui.ScrollView, Markdown: hostPiTui.Markdown, Text: hostPiTui.Text, Editor: hostPiTui.Editor },
-          onEscape: () => done(undefined),
+          // Routed through `overlayHandle.close()` (rather than the raw
+          // `done` callback) so an Esc during a pending summary wait
+          // participates in the SAME `finished` guard `closeWithSummary`
+          // uses — otherwise Esc would close the view here while a later
+          // settle still injected a summary into the lead behind it.
+          onEscape: () => overlayHandle?.close(),
           onDone: () => {
-            if (!summarizeOnDone) {
+            if (resolveDoneAction(summarizeOnDone) === "close-empty") {
               overlayHandle?.closeWithSummary("");
               return;
             }
-            summarizeThenClose(component, channel, overlayHandle!);
+            pendingSummarizeUnsubscribe = summarizeThenClose(component, channel, overlayHandle!);
           },
           onItemsChange: (items) => {
             thread.transcript = items.length > THREAD_TRANSCRIPT_CAP ? items.slice(-THREAD_TRANSCRIPT_CAP) : [...items];
@@ -1534,7 +1618,10 @@ async function openThread(
           },
         });
         component.setMode("interactive");
-        overlayHandle = buildOverlayHandle(pi, handle, rpcRegistry, thread, component, done);
+        overlayHandle = buildOverlayHandle(pi, handle, rpcRegistry, thread, component, done, () => {
+          pendingSummarizeUnsubscribe?.();
+          pendingSummarizeUnsubscribe = undefined;
+        });
         activeOverlay = { token, threadId: thread.threadId, handle: overlayHandle };
         return component;
       },

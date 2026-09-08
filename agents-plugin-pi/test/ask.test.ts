@@ -80,10 +80,12 @@ import {
   EMPTY_SUMMARY_TEXT,
   summarizeThenClose,
   buildOverlayHandle,
+  resolveDoneAction,
   type ThreadRecord,
   type OverlayHandle,
+  type DoneAction,
 } from "../src/ask.ts";
-import type { ConversationItem, ConversationChannel } from "../src/conversation-view.ts";
+import { ConversationViewComponent, type ConversationItem, type ConversationChannel } from "../src/conversation-view.ts";
 import { FORK_EXCLUDED_TOOL_NAMES } from "../src/fork.ts";
 import {
   agentWidgetRefreshRef,
@@ -230,6 +232,29 @@ describe("threadRegistryPath / serialize / parse", () => {
       }),
     );
     assert.deepEqual(mixed.transcript, [{ kind: "user", text: "ok" }]);
+  });
+
+  test("review relay #2 I5: a malformed native tool-call/tool-result is dropped, never poisoning a well-formed neighbor", () => {
+    const [record] = parseThreadRegistry(
+      JSON.stringify({
+        threads: [
+          {
+            ...thread({ threadId: "q4" }),
+            transcript: [
+              { kind: "tool-call", name: "ws-read", args: {} }, // missing id
+              { kind: "tool-call", id: "c1", name: "ws-read", args: { path: "a.txt" } }, // well-formed
+              { kind: "tool-result", id: "c1", name: "ws-read", content: { not: "a string" } }, // non-string content
+              { kind: "tool-result", id: "c1", name: "ws-read", content: "ok" }, // well-formed
+              { kind: "tool-result", id: "c2" }, // missing name/content
+            ],
+          },
+        ],
+      }),
+    );
+    assert.deepEqual(record.transcript, [
+      { kind: "tool-call", id: "c1", name: "ws-read", args: { path: "a.txt" } },
+      { kind: "tool-result", id: "c1", name: "ws-read", content: "ok" },
+    ]);
   });
 
   test("legacy {who,text}[] entries hydrate to their ConversationItem.kind equivalents (records written before Phase 2)", () => {
@@ -1469,11 +1494,15 @@ describe("summarizeThenClose (/done's single fixed round-trip)", () => {
 
   function fakeOverlay() {
     const summaries: string[] = [];
+    const alreadyRenderedFlags: (boolean | undefined)[] = [];
     const overlay: OverlayHandle = {
       close: () => {},
-      closeWithSummary: (summary: string) => summaries.push(summary),
+      closeWithSummary: (summary: string, alreadyRendered?: boolean) => {
+        summaries.push(summary);
+        alreadyRenderedFlags.push(alreadyRendered);
+      },
     };
-    return { overlay, summaries };
+    return { overlay, summaries, alreadyRenderedFlags };
   }
 
   test("appends the ending note, sends exactly the fixed summary request, then takes the fork's next settled turn as the summary", async () => {
@@ -1481,7 +1510,8 @@ describe("summarizeThenClose (/done's single fixed round-trip)", () => {
     const ch = fakeChannel();
     const ov = fakeOverlay();
 
-    summarizeThenClose(component as never, ch.channel, ov.overlay);
+    const unsubscribe = summarizeThenClose(component as never, ch.channel, ov.overlay);
+    assert.equal(typeof unsubscribe, "function", "the fresh listener's own unsubscribe is returned so an owner Esc can tear it down early");
 
     assert.deepEqual(component.items, [{ kind: "note", text: "ending the thread — asking for a summary…" }]);
     assert.deepEqual(ch.sent, [buildDoneSummaryPrompt()]);
@@ -1491,6 +1521,11 @@ describe("summarizeThenClose (/done's single fixed round-trip)", () => {
     ch.settle();
     assert.deepEqual(ov.summaries, ["We agreed to merge and keep both histories."]);
     assert.equal(ch.unsubscribed, 1, "the fresh event subscription is released once it fires");
+    assert.deepEqual(
+      ov.alreadyRenderedFlags,
+      [true],
+      "review relay #2 C1: the settled text was already appended by the component's own internal listener on this same agent_settled — closeWithSummary must be told not to append it again",
+    );
   });
 
   test("a settled turn producing no text still closes the thread, with an explicit placeholder", () => {
@@ -1602,6 +1637,175 @@ describe("buildOverlayHandle (wraps a live component + the ctx.ui.custom done ca
     assert.deepEqual(sent, [], "fork-raised: no summary is injected to the lead");
     assert.equal(record.status, "dormant");
     assert.equal(doneCalls, 1);
+  });
+
+  test("review relay #2 I1b/I4: close() then a later closeWithSummary() — the second call is a full no-op (finished guard)", () => {
+    const { pi, sent, handle, record } = setup("lead-ask");
+    const component = fakeComponent();
+    let doneCalls = 0;
+    let finishCalls = 0;
+    const overlay = buildOverlayHandle(pi, handle, new Map(), record, component as never, () => (doneCalls += 1), () => (finishCalls += 1));
+
+    overlay.close();
+    overlay.closeWithSummary("late summary, after the owner already left");
+
+    assert.equal(doneCalls, 1, "the second call must not fire done again");
+    assert.equal(finishCalls, 1, "onFinish runs exactly once, for whichever call wins the race");
+    assert.deepEqual(component.items, [], "a late summary must never be appended once the overlay is finished");
+    assert.deepEqual(sent, [], "no injection from the losing call");
+    assert.equal(record.status, "open", "close() won the race — the thread stays open");
+  });
+
+  test("review relay #2 I1b/I4: closeWithSummary() then a later close() — the second call is a full no-op", () => {
+    const { pi, sent, handle, record } = setup("lead-ask");
+    const component = fakeComponent();
+    let doneCalls = 0;
+    const overlay = buildOverlayHandle(pi, handle, new Map(), record, component as never, () => (doneCalls += 1));
+
+    overlay.closeWithSummary("Decided: merge.");
+    overlay.close();
+
+    assert.equal(doneCalls, 1, "the second call must not fire done again");
+    assert.deepEqual(component.items, [{ kind: "assistant", text: "Decided: merge." }], "not appended again, and not retracted by the losing close()");
+    assert.equal(sent.length, 1, "exactly one injection, from the winning call");
+    assert.equal(record.status, "dormant", "closeWithSummary() won the race — close() afterward must not undo it");
+  });
+});
+
+describe("resolveDoneAction (review relay #2 I3: the summarizeOnDone branch, extracted for direct unit testing)", () => {
+  test("summarizeOnDone === true resolves to 'summarize'; false resolves to 'close-empty'", () => {
+    const summarize: DoneAction = resolveDoneAction(true);
+    assert.equal(summarize, "summarize");
+    const closeEmpty: DoneAction = resolveDoneAction(false);
+    assert.equal(closeEmpty, "close-empty");
+  });
+});
+
+/**
+ * Review relay #2 — Critical + Important, exercised together against the
+ * REAL `ConversationViewComponent` sharing ONE channel with `summarizeThenClose`
+ * (exactly `openThread`'s own wiring), rather than the fakes the describe
+ * blocks above use: those fakes each isolate one function, which is exactly
+ * why the original bug — the component's own internal listener and
+ * `summarizeThenClose`'s fresh listener both reacting to the SAME
+ * `agent_settled` — was invisible to them. `pendingUnsubscribe`/`onFinish`
+ * below reproduce `openThread`'s own local wiring so these tests exercise the
+ * real interaction, not a re-description of it.
+ */
+describe("summarizeThenClose + buildOverlayHandle + ConversationViewComponent wiring (the shared-channel races)", () => {
+  function sharedChannel(): { channel: ConversationChannel; fire: (evt: unknown) => void; sent: string[] } {
+    const listeners = new Set<(evt: unknown) => void>();
+    const sent: string[] = [];
+    const channel: ConversationChannel = {
+      onEvent: (l) => {
+        listeners.add(l);
+        return () => listeners.delete(l);
+      },
+      liveness: () => "running",
+      send: async (text) => {
+        sent.push(text);
+      },
+    };
+    return { channel, fire: (evt) => { for (const l of [...listeners]) l(evt); }, sent };
+  }
+
+  function setup(origin: "lead-ask" | "fork-raised" = "lead-ask") {
+    const sent: Array<{ message: unknown; options: unknown }> = [];
+    leadIdleRef.current = () => true;
+    const handlers = new Map<string, () => void>();
+    const pi = {
+      on: (event: string, fn: () => void) => handlers.set(event, fn),
+      sendUserMessage: () => handlers.get("agent_start")?.(),
+      sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }),
+    } as unknown as ExtensionAPI;
+    registerPushFlush(pi, { delayMs: () => 10 });
+    const handle = createThreadRegistryHandle();
+    const record = thread({ threadId: "q1", question: "Which anchor?", context: "background", origin, status: "open" });
+    handle.threads.set(record.threadId, record);
+    return { pi, sent, handle, record };
+  }
+
+  test("C1: the fork's summary turn appears exactly once in the view and is injected exactly once — no double-append regression", () => {
+    const { pi, sent, handle, record } = setup("lead-ask");
+    const ch = sharedChannel();
+    const component = new ConversationViewComponent({ requestRender: () => {} }, { channel: ch.channel });
+    let doneCalls = 0;
+    const overlay = buildOverlayHandle(pi, handle, new Map(), record, component, () => (doneCalls += 1));
+
+    summarizeThenClose(component, ch.channel, overlay);
+    assert.deepEqual(ch.sent, [buildDoneSummaryPrompt()]);
+
+    ch.fire({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "We agreed to merge and keep both histories." } });
+    ch.fire({ type: "agent_settled" });
+
+    const assistantItems = component.getItems().filter((item) => item.kind === "assistant");
+    assert.deepEqual(
+      assistantItems,
+      [{ kind: "assistant", text: "We agreed to merge and keep both histories." }],
+      "the summary turn must appear exactly once, not twice",
+    );
+    assert.equal(sent.length, 1, "exactly one ws-thread-summary injection");
+    assert.equal(record.status, "dormant");
+    assert.equal(doneCalls, 1);
+  });
+
+  test("I1a: an owner Esc during the pending summary wait tears down the listener — the thread stays open and a later settle is inert", () => {
+    const { pi, sent, handle, record } = setup("lead-ask");
+    const ch = sharedChannel();
+    const component = new ConversationViewComponent({ requestRender: () => {} }, { channel: ch.channel });
+    let doneCalls = 0;
+    let pendingUnsubscribe: (() => void) | undefined;
+    const overlay = buildOverlayHandle(pi, handle, new Map(), record, component, () => (doneCalls += 1), () => {
+      pendingUnsubscribe?.();
+      pendingUnsubscribe = undefined;
+    });
+    // openThread's onDone: summarizeOnDone === true -> summarizeThenClose,
+    // whose returned unsubscribe is stored exactly like openThread's own
+    // `pendingSummarizeUnsubscribe`.
+    pendingUnsubscribe = summarizeThenClose(component, ch.channel, overlay);
+
+    // openThread's onEscape routes Esc through overlay.close(), not the raw `done`.
+    overlay.close();
+    assert.equal(doneCalls, 1);
+    assert.equal(record.status, "open", "Esc closes the VIEW only — the thread itself is untouched");
+    assert.deepEqual(sent, []);
+
+    // The fork answers the summary request anyway, after the owner left.
+    ch.fire({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "late answer" } });
+    ch.fire({ type: "agent_settled" });
+
+    assert.deepEqual(sent, [], "the late settle must inject nothing — its listener was torn down by onFinish");
+    assert.equal(record.status, "open", "still open — a later settle must not silently dormant the thread behind the owner's back");
+    assert.equal(doneCalls, 1, "done must not fire a second time");
+  });
+
+  test("I1b/I4: the fork's own final report (an external closeWithSummary) racing a pending /done wins — no duplicate injection, and the later settle is inert", () => {
+    const { pi, sent, handle, record } = setup("lead-ask");
+    const ch = sharedChannel();
+    const component = new ConversationViewComponent({ requestRender: () => {} }, { channel: ch.channel });
+    let doneCalls = 0;
+    let pendingUnsubscribe: (() => void) | undefined;
+    const overlay = buildOverlayHandle(pi, handle, new Map(), record, component, () => (doneCalls += 1), () => {
+      pendingUnsubscribe?.();
+      pendingUnsubscribe = undefined;
+    });
+    pendingUnsubscribe = summarizeThenClose(component, ch.channel, overlay);
+    assert.equal(ch.sent.length, 1);
+
+    // handleRespondentFinalReport's path: the fork's kind:"final" report
+    // arrives out-of-band (never a channel event) and wins the race.
+    overlay.closeWithSummary("We go with the second anchor.");
+    assert.equal(sent.length, 1);
+    assert.equal(record.status, "dormant");
+    assert.equal(doneCalls, 1);
+
+    // The summary turn the owner was waiting on settles anyway, after the
+    // race is already decided.
+    ch.fire({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "late" } });
+    ch.fire({ type: "agent_settled" });
+
+    assert.equal(sent.length, 1, "no duplicate ws-thread-summary injection");
+    assert.equal(doneCalls, 1, "done must not fire a second time");
   });
 });
 
