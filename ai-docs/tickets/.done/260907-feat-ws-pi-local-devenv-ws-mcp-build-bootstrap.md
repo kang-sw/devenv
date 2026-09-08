@@ -12,6 +12,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 35758d31cc5525b6
 sage-review-completeness-reviewed: 35758d31cc5525b6
+completed: 2026-09-08
 ---
 
 # Dev-machine-only ws-mcp source build for the Pi adapter, injected through the launcher's existing bootstrap seam
@@ -218,3 +219,8 @@ Unresolved review minors, deferred: `source_root` is not validated as a
 directory (an invalid path surfaces as git's own error), `execFile` keeps
 its default 1 MiB output buffer, and a SIGKILL during the build can orphan
 `ws-mcp.<pid>.tmp` under `.runtime/local-devenv/`.
+
+
+## Resolution (2026-09-08)
+
+Owner acceptance and scope transfer (2026-09-08): the owner confirmed the development build applies in real Pi use. The owner explicitly has not verified marker removal followed by ordinary release-path fallback and requested transferring that check to 260903-research-ws-pi-adapter-npm-distribution rather than keeping this implemented slice in ready. Close on that accepted transfer; do not claim fallback passed. The implementation Result, automated evidence, partially completed live probes, and non-gating review minors remain preserved above. No new runtime or packaging changes were made during closure.

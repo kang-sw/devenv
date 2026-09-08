@@ -4,6 +4,7 @@ parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260802-research-ws-pi-native-framework: design anchor for the Pi adapter this ticket packages
   260902-feat-ws-pi-native-mvp: the MVP whose composition is proven but which ships dev-load (-e) only
+  260907-feat-ws-pi-local-devenv-ws-mcp-build-bootstrap: owns the implemented developer build path; its unverified marker-removal acceptance is transferred here
 related-mental-model:
   - plugin-runtime
   - claude-compatibility
@@ -250,3 +251,21 @@ skills copy stays as npm-subdir-path insurance.
 - These join the still-pending publish-metadata items (deps→`dependencies`, Pi
   core→`peerDependencies: "*"`, `license`/`repository`/`engines`) under
   remaining-work item 2 above.
+
+## Transferred release-path acceptance - 2026-09-08
+
+The owner confirmed that the local-devenv ws-mcp build applies successfully in
+real Pi use, but explicitly has not verified removing the development marker
+and returning to the ordinary release path. The owner requested transferring
+that remaining check from `260907-feat-ws-pi-local-devenv-ws-mcp-build-bootstrap`
+to this existing packaging ticket and closing the implemented bootstrap slice.
+This is a transfer of unverified acceptance, not a passed fallback test.
+
+Remaining check: remove the adapter's `.local-devenv-runtime` marker, start a
+subsequent Pi session, and confirm the normal launcher release path works
+without the developer build override. Record the observed runtime/version and
+launch behavior; historical no-env launcher reuse is not the same as this
+real-session marker-removal check. Preserve the default release path and the
+bootstrap ticket's package-local, gitignored, never-packed developer artifacts.
+No publication, package metadata change, or new runtime implementation is
+authorized by this transfer.
