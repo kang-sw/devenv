@@ -653,8 +653,7 @@ func TestRenderGoldenShippedReviewPartitionIncludesBase(t *testing.T) {
 			}
 			for _, want := range []string{
 				"Use only the authority named by the prompt frame: ticket or accepted inline contract.",
-				"When a plan path is named, review authority, plan, and diff together; otherwise review the direct edit without requiring a plan.",
-				"Read the ticket or inline contract and any plan path named by the prompt frame; never require a ticket for inline authority.",
+				"Read the ticket or inline contract named by the prompt frame; never require a ticket for inline authority.",
 			} {
 				if !strings.Contains(body, want) {
 					t.Errorf("%s missing reviewer base contract %q:\n%s", name, want, body)

@@ -2733,14 +2733,12 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 		"| `ticket` | `ticket_path`, `selected_phase`, empty `inline_contract`, `plan_path` |",
 		"| `inline` | empty `ticket_path`/`selected_phase`, self-contained `inline_contract`, `plan_path` |",
 		"Full scope | `reviewer` | `reviewer` (includes `code-reviewer`)",
-		"Generated plan:",
 		"Authority: Ticket path <ticket-path>",
 		"Authority: Inline contract <accepted scope, constraints, non-goals, verification boundary>",
+		"Selected phase: <phase heading>",
 		"Each specified authority requirement is implemented, or carries an explicit, authorized deferral.",
-		"Direct edit with no generated plan:",
+		"An authorized deferral or scope reduction not named in Review focus is a finding.",
 		"Reviewer prompt frame",
-		"Review the supplied authority, plan contract, and diff together.",
-		"without a plan artifact",
 		"Review relay dispatch",
 		"Render `implementer-relay` with declared inputs",
 		"implementer-elevated` gets **Review relay dispatch** when the Critical ceiling fires (review #3 still reports the Critical finding non-clean)",
@@ -2781,6 +2779,20 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("lead-implement full ws render retained unreachable adjudicator routing prose, or the superseded capacity/root-cause trigger wording, %q:\n%s", forbidden, body)
+		}
+	}
+	// 260908 Phase 2 (Decision 4): reviewers no longer receive a plan artifact —
+	// the reviewer prompt frame is unified (no plan path, no generated/direct-edit
+	// split) and the required-check rows drop the plan reference.
+	for _, forbidden := range []string{
+		"Plan path:",
+		"Plan guardrails were not bypassed.",
+		"Generated plan:",
+		"Direct edit with no generated plan:",
+		"Review the supplied authority, plan contract, and diff together.",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("lead-implement full ws render retained superseded reviewer-plan prose %q:\n%s", forbidden, body)
 		}
 	}
 	// 260831: the reviewer-frame coverage line was operationalized against
@@ -2882,7 +2894,7 @@ func TestShippedExecutorWrapupResultIncludesBehavioralDelta(t *testing.T) {
 	}
 	body := string(data)
 	for _, want := range []string{
-		"`Result` records the completed phase's behavioral delta; `Edition` records only\nits follow-up pass's delta. For either, include deviations, verification evidence,\nunresolved findings, and deferred follow-ups; do not restate unchanged plan or spec content.",
+		"`Result` records the completed phase's behavioral delta; `Edition` records only\nits follow-up pass's delta. For either, include deviations — diffed between the\nticket's selected phase text and what landed, not recalled from the implementer —\nverification evidence, unresolved findings, and deferred follow-ups; do not\nrestate unchanged plan or spec content.",
 		"#### Edition (<short-hash>) - YYYY-MM-DD` under that phase's Result area.\n   Use the result commit supplied by the caller.",
 	} {
 		if !strings.Contains(body, want) {
