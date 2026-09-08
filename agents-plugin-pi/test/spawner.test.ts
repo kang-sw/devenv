@@ -924,6 +924,241 @@ describe("registerAgentTools 'explore' tool (worker role): effort forwarding int
   });
 });
 
+/**
+ * 260906 Phase 2 (YAML/TUI dispatch-row rendering): `spawnAgent`'s
+ * `ctx.onModelResolved` callback and the two new `RpcAgentRecord` fields it
+ * feeds (`modelTier`/`modelSource`). Reuses the same `installRpcHarness`
+ * monkey-patch technique as the "ordinary rejection" describe block above
+ * (own local copy — that block's helpers are scoped to its own callback).
+ */
+describe("spawnAgent: onModelResolved (260906 Phase 2 dispatch-row rendering)", () => {
+  interface CapturedTool {
+    name: string;
+    execute: (
+      id: string,
+      params: unknown,
+      signal?: AbortSignal,
+      update?: (partial: { content: unknown[]; details?: unknown }) => void,
+      ctx?: unknown,
+    ) => Promise<{ content: Array<{ text: string }>; details?: unknown }>;
+  }
+
+  function installRpcHarness() {
+    const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
+    Object.assign(RpcClient.prototype, {
+      start: async () => {}, stop: async () => {}, abort: async () => {},
+      onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {},
+      getState: async () => ({ model: { provider: "pi", id: "small" }, thinkingLevel: "medium", sessionFile: "/tmp/ws-pi-agent-test/session.jsonl" }),
+    });
+    return { restore: () => Object.assign(RpcClient.prototype, original) };
+  }
+
+  function jsonResult(payload: unknown): McpToolCallResult {
+    return { content: [{ type: "text", text: JSON.stringify(payload) }] };
+  }
+
+  function harness(callTool: McpStdioClient["callTool"]) {
+    const tools = new Map<string, CapturedTool>();
+    const pi = { registerTool: (tool: CapturedTool) => tools.set(tool.name, tool), sendMessage() {}, sendUserMessage() {} } as unknown as ExtensionAPI;
+    const bridge = { client: { callTool }, wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" } } as never;
+    const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" });
+    const ctx = { model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.6-high" }], hasConfiguredAuth: () => true } };
+    return { tool: tools.get("ws-agent-spawn")!, sendTool: tools.get("ws-agent-send")!, handle, ctx };
+  }
+
+  test("a tier hit invokes onModelResolved once with the correct shape, forwarded as onUpdate details and repeated in the final return; records modelTier/modelSource", async () => {
+    const rpc = installRpcHarness();
+    try {
+      const { tool, handle, ctx } = harness(async (name) => { assert.equal(name, "config.resolve_agent"); return jsonResult({ resolved_from: "pi", model: "gpt-5.6-high", backend: "codex" }); });
+      const updates: Array<{ content: unknown[]; details?: unknown }> = [];
+      const raw = await tool.execute("call", { system_prompt_path: "/tmp/p.md", prompt: "hi", model_name: "small", model_effort: "high" }, undefined, (partial) => updates.push(partial), ctx);
+      const parsed = JSON.parse(raw.content[0]!.text);
+      assert.ok(parsed.agent_id);
+      const expected = { tier: "small", model: "openai-codex/gpt-5.6-high", effort: "high", inherited: false };
+      assert.equal(updates.length, 1, "onModelResolved fires exactly once, before mkdtempSync/registry.set");
+      assert.deepEqual((updates[0]!.details as { resolved: unknown }).resolved, expected);
+      assert.deepEqual((raw.details as { resolved?: unknown } | undefined)?.resolved, expected, "the final return repeats the same shape");
+      const record = handle.rpcRegistry.get(parsed.agent_id)!;
+      assert.equal(record.modelTier, "small");
+      assert.equal(record.modelSource, "tier");
+      assert.equal(record.modelEffort, "high", "record.modelEffort reuses the same resolvedEffort onModelResolved was called with");
+      await handle.stopAll();
+    } finally { rpc.restore(); }
+  });
+
+  test("an omitted model_name inherit publishes tier:\"inherit\"/inherited:true and records modelSource:\"inherit\" with no modelTier", async () => {
+    const rpc = installRpcHarness();
+    try {
+      const { tool, handle, ctx } = harness(async () => { assert.fail("config.resolve_agent must not be called for an omitted model_name"); });
+      const updates: Array<{ content: unknown[]; details?: unknown }> = [];
+      const raw = await tool.execute("call", { system_prompt_path: "/tmp/p.md", prompt: "hi" }, undefined, (partial) => updates.push(partial), ctx);
+      const parsed = JSON.parse(raw.content[0]!.text);
+      assert.equal(updates.length, 1);
+      const resolved = (updates[0]!.details as { resolved: { tier: string; model?: string; effort?: string; inherited: boolean } }).resolved;
+      assert.equal(resolved.tier, "inherit");
+      assert.equal(resolved.inherited, true);
+      assert.equal(resolved.model, "lead/large", "inherits the ctx.model snapshot");
+      const record = handle.rpcRegistry.get(parsed.agent_id)!;
+      assert.equal(record.modelTier, undefined);
+      assert.equal(record.modelSource, "inherit");
+      await handle.stopAll();
+    } finally { rpc.restore(); }
+  });
+
+  test("a transport-failure-forced inherit on a NAMED tier still publishes tier:\"inherit\"/source:\"inherit\" (never the raw requested tier name)", async () => {
+    const rpc = installRpcHarness();
+    try {
+      const { tool, handle, ctx } = harness(async () => { throw new Error("transport down"); });
+      const updates: Array<{ content: unknown[]; details?: unknown }> = [];
+      const raw = await tool.execute("call", { system_prompt_path: "/tmp/p.md", prompt: "hi", model_name: "small" }, undefined, (partial) => updates.push(partial), ctx);
+      const parsed = JSON.parse(raw.content[0]!.text);
+      assert.equal(updates.length, 1);
+      const resolved = (updates[0]!.details as { resolved: { tier: string; inherited: boolean } }).resolved;
+      assert.equal(resolved.tier, "inherit", "source is \"inherit\" despite a named tier having been requested");
+      assert.equal(resolved.inherited, true);
+      const record = handle.rpcRegistry.get(parsed.agent_id)!;
+      assert.equal(record.modelTier, "small", "the raw requested tier is still recorded on the record even though resolution fell back");
+      assert.equal(record.modelSource, "inherit");
+      await handle.stopAll();
+    } finally { rpc.restore(); }
+  });
+
+  test("onModelResolved is never invoked when the ordinary-spawn refusal guard throws first", async () => {
+    const rpc = installRpcHarness();
+    try {
+      const { tool, ctx } = harness(async () => jsonResult({ resolved_from: "default", model: "gpt-5.6-terra" }));
+      const updates: unknown[] = [];
+      await assert.rejects(
+        () => tool.execute("call", { system_prompt_path: "/tmp/p.md", prompt: "hi", model_name: "small" }, undefined, (partial) => updates.push(partial), ctx),
+        /ws-pi-agent: ws-agent-spawn rejected:/,
+      );
+      assert.equal(updates.length, 0);
+    } finally { rpc.restore(); }
+  });
+
+  test("ws-agent-send reconstructs the target's resolved line from the record, including the no-modelSource revived-record fallback", async () => {
+    const rpc = installRpcHarness();
+    try {
+      const { tool, sendTool, handle, ctx } = harness(async () => jsonResult({ resolved_from: "pi", model: "gpt-5.6-high", backend: "codex" }));
+      const spawnRaw = await tool.execute("call", { system_prompt_path: "/tmp/p.md", prompt: "hi", model_name: "small" }, undefined, undefined, ctx);
+      const spawned = JSON.parse(spawnRaw.content[0]!.text);
+
+      const sendRaw = await sendTool.execute("call2", { agent_id: spawned.agent_id, message: "hello" });
+      assert.deepEqual((sendRaw.details as { resolved?: unknown } | undefined)?.resolved, { tier: "small", model: "openai-codex/gpt-5.6-high", effort: undefined, inherited: false });
+
+      // Simulate a record revived from a sidecar snapshot (modelTier/modelSource are NOT persisted there).
+      const record = handle.rpcRegistry.get(spawned.agent_id)!;
+      record.modelTier = undefined;
+      record.modelSource = undefined;
+      const revivedSendRaw = await sendTool.execute("call3", { agent_id: spawned.agent_id, message: "hi again" });
+      assert.deepEqual(
+        (revivedSendRaw.details as { resolved?: unknown } | undefined)?.resolved,
+        { tier: "inherit", model: "openai-codex/gpt-5.6-high", effort: undefined, inherited: true },
+        "missing modelSource degrades to inherited:true/tier:\"inherit\" rather than throwing or guessing",
+      );
+      await handle.stopAll();
+    } finally { rpc.restore(); }
+  });
+});
+
+/**
+ * 260906 Phase 2: the `explore` tool's two independent resolved-line
+ * publishing paths — the lead-role branch (through `spawnAgent`'s
+ * `onModelResolved`) and the worker-leaf branch (direct
+ * `resolveRequiredExploreModel`, no `spawnAgent` at all).
+ */
+describe("explore tool: onModelResolved / resolved-line publishing (260906 Phase 2)", () => {
+  interface CapturedTool {
+    name: string;
+    execute: (
+      id: string,
+      params: unknown,
+      signal?: AbortSignal,
+      update?: (partial: { content: unknown[]; details?: unknown }) => void,
+      ctx?: unknown,
+    ) => Promise<{ content: Array<{ text: string }>; details?: unknown }>;
+  }
+
+  function installRpcHarness() {
+    const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
+    Object.assign(RpcClient.prototype, {
+      start: async () => {}, stop: async () => {}, abort: async () => {},
+      onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {},
+      getState: async () => ({ model: { provider: "pi", id: "small" }, thinkingLevel: "medium", sessionFile: "/tmp/ws-pi-agent-test/session.jsonl" }),
+    });
+    return { restore: () => Object.assign(RpcClient.prototype, original) };
+  }
+
+  test("lead-role (simple) explore publishes the resolved line through spawnAgent's onModelResolved and repeats it in the final details", async () => {
+    const rpc = installRpcHarness();
+    try {
+      const tools = new Map<string, CapturedTool>();
+      const pi = { registerTool: (tool: CapturedTool) => tools.set(tool.name, tool), sendMessage() {}, sendUserMessage() {} } as unknown as ExtensionAPI;
+      const bridge = {
+        client: { callTool: async (name: string) => { assert.equal(name, "config.resolve_agent"); return { content: [{ type: "text", text: JSON.stringify({ resolved_from: "pi", model: "pi/small" }) }] }; } },
+        wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" },
+      } as never;
+      const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" });
+      // Matches installRpcHarness's fixed `getState()` model — spawnRole
+      // "explore"'s post-start `verifyResearchSelection` compares against it.
+      const ctx = { model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "pi", id: "small" }], hasConfiguredAuth: () => true } };
+      const tool = tools.get("explore")!;
+      const updates: Array<{ content: unknown[]; details?: unknown }> = [];
+      const raw = await tool.execute("call", { query: "why does this fail" }, undefined, (partial) => updates.push(partial), ctx);
+      const expected = { tier: "small", model: "pi/small", effort: undefined, inherited: false };
+      assert.equal(updates.length, 1);
+      assert.deepEqual((updates[0]!.details as { resolved: unknown }).resolved, expected);
+      assert.deepEqual((raw.details as { resolved?: unknown } | undefined)?.resolved, expected);
+      await handle.stopAll();
+    } finally { rpc.restore(); }
+  });
+
+  test("worker-leaf explore publishes its own always-non-inherited \"small\" line, independent of the spawnAgent-based plumbing", async () => {
+    const previousRole = process.env[WS_PI_SPAWN_ROLE_ENV];
+    process.env[WS_PI_SPAWN_ROLE_ENV] = "worker";
+    try {
+      const tools = new Map<string, CapturedTool>();
+      const pi = { registerTool: (tool: CapturedTool) => tools.set(tool.name, tool) } as unknown as ExtensionAPI;
+      const bridge = {
+        client: { callTool: async () => ({ content: [{ type: "text", text: JSON.stringify({ resolved_from: "pi", model: "provider/id", effort: "high" }) }] }) },
+        wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" },
+      } as never;
+      const fakeRunExploreLeaf = (async () => ({ agentId: "x", state: "done" as const, output: "ok" })) as unknown as typeof exploreLeaf;
+      const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" }, undefined, fakeRunExploreLeaf);
+      const ctx = { modelRegistry: { getAll: () => [{ provider: "provider", id: "id" }], hasConfiguredAuth: () => true } };
+      const tool = tools.get("explore")!;
+      const updates: Array<{ content: unknown[]; details?: unknown }> = [];
+      const raw = await tool.execute("call", { query: "why does this fail" }, undefined, (partial) => updates.push(partial), ctx);
+      const expected = { tier: "small", model: "provider/id", effort: "high", inherited: false };
+      assert.equal(updates.length, 1);
+      assert.deepEqual((updates[0]!.details as { resolved: unknown }).resolved, expected);
+      assert.deepEqual((raw.details as { resolved?: unknown } | undefined)?.resolved, expected);
+      await handle.stopAll();
+    } finally {
+      if (previousRole === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV]; else process.env[WS_PI_SPAWN_ROLE_ENV] = previousRole;
+    }
+  });
+
+  test("a long synchronous explore query is head-truncated in the registered tool's own call-row summary", async () => {
+    const { createDispatchToolPreview } = await import("../src/tool-row-render.ts");
+    const { createToolPreviewTuiRef } = await import("../src/tool-result-render.ts");
+    const { buildExploreSummary } = await import("../src/tool-row-render.ts");
+    const ref = createToolPreviewTuiRef();
+    ref.current = {
+      Text: class { text = ""; setText(t: string) { this.text = t; } render() { return this.text.split("\n"); } invalidate() {} },
+      Box: class { children: Array<{ render(width: number): string[] }> = []; addChild(c: { render(width: number): string[] }) { this.children.push(c); } setBgFn() {} render(width: number) { return this.children.flatMap((c) => c.render(width)); } invalidate() {} },
+      stripTerminalSequences: (t: string) => t,
+      truncateToWidth: (t: string) => t,
+    } as never;
+    const preview = createDispatchToolPreview(ref, "explore", buildExploreSummary);
+    const longQuery = "why does this fail ".repeat(20);
+    const call = preview.renderCall({ query: longQuery }, { fg: (_: string, x: string) => x, bold: (x: string) => x }, { state: {}, argsComplete: true, isPartial: false, lastComponent: undefined });
+    const rendered = (call as { render(width: number): string[] }).render(200).join("\n");
+    assert.ok(rendered.includes("…"), "the long query is head-truncated with the ellipsis marker");
+    assert.ok(!rendered.includes(longQuery.trim()), "the untruncated full query never appears");
+  });
+});
+
 describe("effectiveModelEffort (review relay #1, Critical: the modelEffort merge rule)", () => {
   test("an explicit, non-empty caller effort wins over a resolved one", () => {
     assert.equal(effectiveModelEffort("high", "low"), "high");

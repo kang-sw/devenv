@@ -92,6 +92,7 @@ import { attachFirstTaskForkCacheNotice, type ForkCacheNoticeOwner } from "./for
 import type { McpStdioClient, McpToolCallResult } from "./mcp-stdio-client.ts";
 import type { BridgeHandle } from "./bridge.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
+import { buildAgentSendSummary, buildAgentSpawnSummary, buildExploreSummary, createDispatchToolPreview } from "./tool-row-render.ts";
 import { suggestModels, formatExploreTierRefusal, formatTierWarning, modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx, type ModelCatalogEntry, type TierFailure, type TierRejection } from "./model-catalog.ts";
 import { WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readExploreMode, readSpawnRole, type ExploreMode, type SpawnRole } from "./process-role.ts";
 import { captureForkContext, compareForkRegistrations, removeForkTransport, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
@@ -403,6 +404,23 @@ export interface TierResolution {
   rejected?: TierRejection;
   source: "tier" | "inherit";
   failure?: TierFailure;
+}
+
+/**
+ * 260906 Phase 2 (YAML/TUI dispatch-row rendering): the display-only shape
+ * `ctx.onModelResolved` hands back the instant `spawnAgent` finishes
+ * resolving a tier (both refusal guards already passed, so `rejected` is
+ * guaranteed absent). `tier` is the raw tier name on a tier hit, or the
+ * literal `"inherit"` when `resolution.source === "inherit"` — never derived
+ * from `resolution.rejected`, which cannot be set at this point. `effort` is
+ * the *effective* value (`effectiveModelEffort(params.modelEffort,
+ * resolution.effort)`), matching `record.modelEffort` exactly.
+ */
+export interface ResolvedModelInfo {
+  tier: string;
+  model?: string;
+  effort?: string;
+  inherited: boolean;
 }
 
 function tierResolution(base: { model?: string; effort?: string; rejected?: TierRejection }, source: TierResolution["source"], failure?: TierFailure): TierResolution {
@@ -815,6 +833,23 @@ export interface RpcAgentRecord {
   modelBase?: string;
   /** Caller-supplied thinking level, applied via `setThinkingLevel()` after every (re)start. */
   modelEffort?: string;
+  /**
+   * 260906 Phase 2 (YAML/TUI dispatch-row rendering): the raw tier name
+   * (`params.modelName`) requested at spawn, or `undefined` for an inherit
+   * spawn — display-only, reconstructs `ws-agent-send`'s resolved-model line
+   * for a target agent without a live resolution. NOT persisted to the
+   * sidecar (`agent-sidecar.ts`); a record revived after a restart carries
+   * neither field (see `modelSource`'s doc comment for the degrade rule).
+   */
+  modelTier?: string;
+  /**
+   * 260906 Phase 2: mirrors `TierResolution.source` at spawn time
+   * (`"tier" | "inherit"`). NOT persisted to the sidecar — a `ws-agent-send`
+   * to a record revived from a sidecar snapshot after a restart finds this
+   * field `undefined` and treats that as `"inherit"` (the safe default),
+   * never throwing or guessing a tier name.
+   */
+  modelSource?: "tier" | "inherit";
   /** Cached bridge `ws__*` tool names, for `--tools` re-resolution on a dormant resume. */
   wsToolNames: readonly string[];
   /** Curated `--tools` group this record was spawned with; reused unchanged on a dormant resume so `resolveTools` never silently widens/narrows a resumed child's tool surface. Set at spawn (`ctx.toolGroup ?? "full-worker"`), never mutated afterward. */
@@ -1789,6 +1824,16 @@ export interface RpcSpawnCtx {
    */
   onApprovalPending?: (record: RpcAgentRecord) => void;
   /**
+   * 260906 Phase 2 (YAML/TUI dispatch-row rendering): fired once, right after
+   * `spawnAgent` resolves the model (both refusal guards already passed) and
+   * before any launch side effect (`runSpawnGuards`/`mkdtempSync`). Every
+   * tool-level `spawnAgent` caller forwards this into its own `onUpdate`
+   * partial `details.resolved` and repeats it in the final `details` so the
+   * dispatch row can show the resolved model/effort before the child
+   * finishes. Never invoked when a refusal guard throws first.
+   */
+  onModelResolved?: (resolved: ResolvedModelInfo) => void;
+  /**
    * 260905: recorded on the record as `spawnRole` so the shutdown sidecar can
    * re-arm the right wiring on revival. Defaults to `"fork"` when `forkFrom`
    * is set, `"execute-worker"` for that tool group, `"worker"` otherwise.
@@ -2477,6 +2522,19 @@ export async function spawnAgent(
     throw new Error(`ws-pi-agent: ws-agent-spawn rejected: ${rejection}`);
   }
 
+  // 260906 Phase 2: both refusal guards above have passed, so `resolution`
+  // is a genuine launch — `resolution.rejected` is guaranteed absent here.
+  // `resolvedEffort` is computed once and reused below (`record.modelEffort`)
+  // rather than recomputed, so the pushed line and the stored record can
+  // never drift apart.
+  const resolvedEffort = effectiveModelEffort(params.modelEffort, resolution.effort);
+  ctx.onModelResolved?.({
+    tier: resolution.source === "tier" ? params.modelName! : "inherit",
+    model: resolution.model,
+    effort: resolvedEffort,
+    inherited: resolution.source === "inherit",
+  });
+
   const alias = params.alias ?? (ctx.aliasPrefix ? nextGeneratedAlias(registry, ctx.aliasPrefix) : undefined);
   const eviction = runSpawnGuards(registry, alias, resolveAgentRegistryCap());
   if (!eviction.ok) throw new Error(eviction.error);
@@ -2494,7 +2552,6 @@ export async function spawnAgent(
     writeFileSync(forkSourcePath, ctx.forkSourceEntries.map(entry => JSON.stringify(entry)).join("\n") + "\n", { mode: 0o600 });
   }
   const modelBase = resolution.model;
-  const resolvedEffort = resolution.effort;
   const toolGroup: ToolGroup = resolveSpawnToolGroup(ctx.toolGroup);
   const tools = ctx.explicitTools ?? resolveTools(toolGroup, ctx.wsToolNames);
   const record: RpcAgentRecord = {
@@ -2509,7 +2566,11 @@ export async function spawnAgent(
     // is treated as absent). This is the single fold point: both the
     // spawn-time and dormant-resume `applyModelEffort` calls read
     // `record.modelEffort` back rather than re-deriving it from `params`.
-    modelEffort: effectiveModelEffort(params.modelEffort, resolvedEffort),
+    // Reuses the SAME `resolvedEffort` already pushed to `onModelResolved`
+    // above rather than recomputing it.
+    modelEffort: resolvedEffort,
+    modelTier: params.modelName,
+    modelSource: resolution.source,
     wsToolNames: ctx.wsToolNames,
     toolGroup,
     explicitTools: ctx.explicitTools,
@@ -3060,7 +3121,7 @@ export function registerAgentTools(
       },
       required: ["system_prompt_path", "prompt"],
     } as never,
-    async execute(_toolCallId, params, _signal, _onUpdate, toolCtx) {
+    async execute(_toolCallId, params, _signal, onUpdate, toolCtx) {
       const p = params as {
         system_prompt_path: string;
         prompt: string;
@@ -3069,6 +3130,7 @@ export function registerAgentTools(
         alias?: string;
         title?: string;
       };
+      let resolvedInfo: ResolvedModelInfo | undefined;
       const result = await spawnAgent(
         rpcRegistry,
         {
@@ -3080,6 +3142,10 @@ export function registerAgentTools(
           wsToolNames: bridge.wsToolNames,
           client: bridge.client,
           onApprovalPending,
+          onModelResolved: (resolved) => {
+            resolvedInfo = resolved;
+            onUpdate?.({ content: [], details: { resolved } });
+          },
         },
         {
           systemPromptPath: p.system_prompt_path,
@@ -3090,8 +3156,9 @@ export function registerAgentTools(
           title: p.title,
         },
       );
-      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      return { content: [{ type: "text", text: JSON.stringify(result) }], details: { resolved: resolvedInfo } };
     },
+    ...createDispatchToolPreview(toolPreviewTuiRef, "ws-agent-spawn", buildAgentSpawnSummary),
   }, toolPreviewTuiRef);
 
   registerWsTool(pi, {
@@ -3122,8 +3189,22 @@ export function registerAgentTools(
         p.message,
         p.interrupt,
       );
-      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      // 260906 Phase 2: ws-agent-send never resolves a model itself — the
+      // line reconstructs the TARGET agent's recorded model/effort instead.
+      // A record revived from a sidecar snapshot (restart survivor) carries
+      // no `modelSource`; that degrades to `inherited: true`/`tier:
+      // "inherit"` rather than throwing or guessing a tier name.
+      const record = rpcRegistry.get(result.agent_id);
+      const inherited = record?.modelSource === undefined ? true : record.modelSource === "inherit";
+      const resolved: ResolvedModelInfo = {
+        tier: inherited ? "inherit" : record?.modelTier ?? "?",
+        model: record?.modelBase,
+        effort: record?.modelEffort,
+        inherited,
+      };
+      return { content: [{ type: "text", text: JSON.stringify(result) }], details: { resolved } };
     },
+    ...createDispatchToolPreview(toolPreviewTuiRef, "ws-agent-send", buildAgentSendSummary),
   }, toolPreviewTuiRef);
 
   registerWsTool(pi, {
@@ -3230,7 +3311,7 @@ export function registerAgentTools(
         },
         required: ["query"],
       } as never,
-      async execute(_toolCallId, params, _signal, _onUpdate, toolCtx) {
+      async execute(_toolCallId, params, _signal, onUpdate, toolCtx) {
         const p = params as ExploreParams & { deep_research?: boolean };
         if (isLeadRole) {
           const mode: ExploreMode = p.deep_research === true ? "deep" : "simple";
@@ -3241,6 +3322,7 @@ export function registerAgentTools(
           if (mode === "deep" && (!inherited || typeof effort !== "string")) {
             throw new Error("ws-pi-agent: deep explore requires a concrete current model and thinking level");
           }
+          let resolvedInfo: ResolvedModelInfo | undefined;
           const result = await spawnAgent(
             rpcRegistry,
             {
@@ -3249,6 +3331,10 @@ export function registerAgentTools(
               notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx), wsToolNames: bridge.wsToolNames, client: bridge.client,
               toolGroup: mode === "deep" ? "read-only-explore" : "read-only", spawnRole: "explore", exploreMode: mode,
               requireTier: mode === "simple", aliasPrefix: "explore", onApprovalPending,
+              onModelResolved: (resolved) => {
+                resolvedInfo = resolved;
+                onUpdate?.({ content: [], details: { resolved } });
+              },
             },
             {
               systemPromptPath: exploreGuidePath,
@@ -3258,16 +3344,26 @@ export function registerAgentTools(
               title: deriveExploreTitle(p.query),
             },
           );
-          return { content: [{ type: "text", text: JSON.stringify({ agent_id: result.agent_id, alias: result.alias }) }] };
+          return {
+            content: [{ type: "text", text: JSON.stringify({ agent_id: result.agent_id, alias: result.alias }) }],
+            details: { resolved: resolvedInfo },
+          };
         }
+        // Worker-leaf branch never calls `spawnAgent` — `resolveRequiredExploreModel`
+        // always succeeds with a genuine tier hit (throws otherwise, `requireTier`
+        // semantics), so this line is always a non-inherited "small" hit. Published
+        // independently of the `spawnAgent`-based `onModelResolved` plumbing above.
         const resolved = await resolveRequiredExploreModel(toolCtx);
+        const resolvedInfo: ResolvedModelInfo = { tier: "small", model: resolved.model, effort: resolved.effort, inherited: false };
+        onUpdate?.({ content: [], details: { resolved: resolvedInfo } });
         const result = await runExploreLeaf(
           bridge.client, exploreRegistry,
           { sessionKey: bridge.defaultSessionKeyRef.current ?? "", cwd: sessionCtx.cwd, model: resolved.model },
           { query: p.query }, { profile: role === "explore" && exploreMode === "deep" ? "read-only" : "recon", effort: resolved.effort },
         );
-        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }], details: { resolved: resolvedInfo } };
       },
+      ...createDispatchToolPreview(toolPreviewTuiRef, "explore", buildExploreSummary),
     }, toolPreviewTuiRef);
   }
 
