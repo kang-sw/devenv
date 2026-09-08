@@ -13,18 +13,20 @@ the earlier instruction to implement report styling immediately.
 
 ## Tickets
 
-None yet. This is a non-hierarchical collection, not an implementation target.
+- `260906-feat-ws-pi-tool-and-push-tui-polish` — owns the overlapping
+  compact/muted push presentation and shared backgrounds; the owner requested
+  ready promotion of its full remaining scope on 2026-09-08. This is inclusion,
+  not a parent/child relationship. Other collected requests below are unchanged.
 
 ## Planned References
 
-- **Report message visual distinction** — Make `ws-agent-report` easier to
-  distinguish in the conversation using a separate header color and a subtle,
-  theme-aware background. Keep other notification families unchanged and
-  preserve model-visible message content and asynchronous delivery behavior.
-  The owner selected this report-specific recommendation rather than changing
-  colors for every notification family. Intended role: a rendering-only UX
-  improvement. Creation condition: the owner chooses to move this collected
-  request into implementation planning; do not create another ticket now.
+- **Report message visual distinction** — The common-background and subdued
+  push treatment is now owned by `260906-feat-ws-pi-tool-and-push-tui-polish`.
+  The older report-only background restriction is superseded by the later
+  shared-push request reaffirmed on 2026-09-08. Preserve model-visible content
+  and asynchronous delivery. Preserve the separate report-header-color request
+  here as a historical capture; the polish ticket does not specify a new header
+  redesign. Do not create duplicate compact/background styling work here.
 
 - **Agent row model and usage visibility** — Extend agent rows such as
   `b9b83114 · execute · awaiting approval · 21s` with
@@ -50,18 +52,18 @@ None yet. This is a non-hierarchical collection, not an implementation target.
   Creation condition: the owner moves this collected UX request into planning;
   exact control placement and stop/reset semantics are not yet specified.
 
-- **Compact user-visible agent output** — Trim agent output shown to the
-  human to 10 lines, alongside the collected report-color treatment. The owner
-  finds the full output low-value in the conversation UI. Intended role:
-  reduce visual noise; this request concerns human-visible rendering, not
-  truncation of model-visible reports. Creation condition: move into planning
-  only on owner direction; overflow/expansion presentation is not yet specified.
+- **Compact user-visible agent output** — Routed to
+  `260906-feat-ws-pi-tool-and-push-tui-polish` by owner direction on 2026-09-08:
+  ten logical lines, full expansion, muted foreground and common push background;
+  no truncation of model-visible reports. This entry is no longer an unassigned
+  creation request.
 
 ## Focus
 
-Capture additional owner-supplied UX requests in this same collection before
-implementation planning. No styling implementation or queue promotion is
-requested by this ticket. Specific palette values are not settled.
+Capture additional owner-supplied UX requests in this same collection. The
+included polish ticket owns the approved ready-promotion request; this board
+is not an implementation target. Unrelated widget, usage and goal-control
+requests remain capture-only. Specific palette values are not fixed here.
 Use `ws-ask` for questions requiring owner discussion while gathering these
 requests. Usage display semantics are settled above; implementation remains
 explicitly deferred.
