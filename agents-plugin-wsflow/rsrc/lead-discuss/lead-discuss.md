@@ -15,7 +15,7 @@ Scope
 - With user agreement, unimplemented ticket phases may be edited during Capture. Phase plan text before a `### Result` is frozen; append a `#### Edition` for later tweaks.
 
 Evidence
-- Architecture/migration/spawn-removal/adapter-boundary topics → read `ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md` before answering.
+- Topics matching the project's declared `### Binding Anchor` (`AGENTS.md`) → read the declared anchor path before answering.
 - Commit history is a project memory tier: `## AI Context` bodies carry decision rationale docs may not yet reflect. Access via Explore-type subagent dispatch.
 - When docs are stale or insufficient, say so; do not speculate. When the
   staleness traces to commits that never had a doc pass, name

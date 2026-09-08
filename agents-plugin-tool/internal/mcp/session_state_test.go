@@ -14,7 +14,11 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 )
 
-const implementPrepGuardrails = `Before edits or dispatch, run mental-model lookup, read returned docs ancestors first, read the 260605 migration anchor when target touches plugin architecture, host-neutral migration, spawn-removal, or adapter boundaries, and read infra.read("impl-playbook"). `
+// implementPrepGuardrails is the Prep-guardrail base sentence with no binding
+// anchor declared (the default when a verdict carries an empty
+// BindingAnchorClause). The declared-anchor path is exercised separately in
+// TestDeriveImplementTodoInstructionsPrepGuardrails.
+const implementPrepGuardrails = `Before edits or dispatch, run mental-model lookup, read returned docs ancestors first, and read infra.read("impl-playbook"). `
 
 // keysOf extracts the ordered key sequence of a todo list for assertions.
 func keysOf(list []todoItem) []string {
@@ -174,40 +178,61 @@ func TestDeriveImplementTodoInstructionsDelegatedSurvey(t *testing.T) {
 }
 
 func TestDeriveImplementTodoInstructionsPrepGuardrails(t *testing.T) {
+	// declaredClause is the pre-rendered anchor clause a declaring project's
+	// route.resolve_implement handler would splice in; the no-declaration cases
+	// leave BindingAnchorClause empty so the clause is omitted entirely.
+	const declaredClause = "read ai-docs/tickets/idea/260605-demo.md when target touches plugin architecture, adapter boundaries, "
 	for _, tc := range []struct {
-		name     string
-		depth    string
-		wantTail string
+		name         string
+		depth        string
+		anchorClause string
+		wantTail     string
+		wantAnchor   bool
 	}{
 		{
-			name:     "none",
+			name:     "none no declaration",
 			depth:    "none",
 			wantTail: "Confirm the direct-edit facts are still accurate",
 		},
 		{
-			name:     "survey",
+			name:     "survey no declaration",
 			depth:    "survey",
 			wantTail: `render plan-populator-survey with target_kind=ticket, ticket_path, selected_phase, inline_contract="", and plan_path`,
 		},
 		{
-			name:     "research",
+			name:     "research no declaration",
 			depth:    "research",
 			wantTail: `Render plan-populator-research with target_kind=ticket, ticket_path, selected_phase, inline_contract="", and plan_path`,
+		},
+		{
+			name:         "survey declared anchor",
+			depth:        "survey",
+			anchorClause: declaredClause,
+			wantTail:     `render plan-populator-survey with target_kind=ticket, ticket_path, selected_phase, inline_contract="", and plan_path`,
+			wantAnchor:   true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := deriveImplementTodosFromVerdict(implementTodoVerdict{
-				Delegation:  "delegated",
-				BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
-				PlanDepth:   tc.depth,
-				ReviewAlloc: "lead-only",
-				DocMode:     "skipped",
+				Delegation:          "delegated",
+				BranchPlan:          implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
+				PlanDepth:           tc.depth,
+				ReviewAlloc:         "lead-only",
+				DocMode:             "skipped",
+				BindingAnchorClause: tc.anchorClause,
 			})
 			prep := requireInstruction(t, todoByKey(t, got, "prep"))
-			for _, want := range []string{"mental-model lookup", "260605 migration anchor", `infra.read("impl-playbook")`, tc.wantTail} {
+			for _, want := range []string{"mental-model lookup", `infra.read("impl-playbook")`, tc.wantTail} {
 				if !strings.Contains(prep, want) {
 					t.Fatalf("prep instruction for %s missing %q: %q", tc.name, want, prep)
 				}
+			}
+			if tc.wantAnchor {
+				if !strings.Contains(prep, tc.anchorClause) {
+					t.Fatalf("prep instruction for %s missing declared anchor clause %q: %q", tc.name, tc.anchorClause, prep)
+				}
+			} else if strings.Contains(prep, "when target touches") {
+				t.Fatalf("prep instruction for %s unexpectedly rendered an anchor clause: %q", tc.name, prep)
 			}
 		})
 	}
@@ -952,12 +977,18 @@ func TestEnterModeReplacesTodos(t *testing.T) {
 
 func TestResolveProceedRoutes(t *testing.T) {
 	cases := []struct {
-		name       string
-		args       map[string]any
-		wantRoute  string
-		wantNext   string
-		wantReason string
-		wantCond   string
+		name string
+		args map[string]any
+		// anchorDeclared mirrors the handler-set proceedInput.AnchorDeclared:
+		// the binding-anchor gate only fires for projects that declare a
+		// `### Binding Anchor`, so the two anchor cases set it true. All other
+		// cases leave it false (anchor normalizes to n/a) — matching their
+		// n/a expectations.
+		anchorDeclared bool
+		wantRoute      string
+		wantNext       string
+		wantReason     string
+		wantCond       string
 	}{
 		{
 			name:       "ready ticket routes to implement",
@@ -1074,34 +1105,54 @@ func TestResolveProceedRoutes(t *testing.T) {
 			wantCond:   "scope-blocked=container-ticket",
 		},
 		{
-			name: "migration anchor missing stops",
+			name: "binding anchor missing stops",
 			args: proceedArgs("ticket-path", "anchor missing", nil, map[string]any{
 				"ticket": map[string]any{"status": "ready", "category": "other", "freshness": "current"},
-				"gates":  map[string]any{"migration_anchor": "missing", "scope_blocked": "none", "discussion_needed": "no"},
+				"gates":  map[string]any{"binding_anchor": "missing", "scope_blocked": "none", "discussion_needed": "no"},
 				"work":   map[string]any{"slice": "Phase 1: Demo"},
 			}),
-			wantRoute:  "anchor-discussion.migration-anchor-missing",
-			wantNext:   "stop",
-			wantReason: "migration-anchor=missing",
-			wantCond:   "migration-anchor=missing",
+			anchorDeclared: true,
+			wantRoute:      "anchor-discussion.binding-anchor-missing",
+			wantNext:       "stop",
+			wantReason:     "binding-anchor=missing",
+			wantCond:       "binding-anchor=missing",
 		},
 		{
-			name: "migration anchor conflict routes to discussion",
+			name: "binding anchor conflict routes to discussion",
 			args: proceedArgs("ticket-path", "anchor conflict", nil, map[string]any{
 				"ticket": map[string]any{"status": "ready", "category": "other", "freshness": "current"},
-				"gates":  map[string]any{"migration_anchor": "conflict", "scope_blocked": "none", "discussion_needed": "no"},
+				"gates":  map[string]any{"binding_anchor": "conflict", "scope_blocked": "none", "discussion_needed": "no"},
 				"work":   map[string]any{"slice": "Phase 1: Demo"},
 			}),
-			wantRoute:  "anchor-discussion.migration-anchor-conflict",
-			wantNext:   "lead-discuss",
-			wantReason: "migration-anchor=conflict",
-			wantCond:   "discussion-needed=yes",
+			anchorDeclared: true,
+			wantRoute:      "anchor-discussion.binding-anchor-conflict",
+			wantNext:       "lead-discuss",
+			wantReason:     "binding-anchor=conflict",
+			wantCond:       "discussion-needed=yes",
+		},
+		{
+			// A project that declares no `### Binding Anchor` (anchorDeclared
+			// left false) must have the supplied non-n/a anchor fact forced to
+			// n/a, so no downstream project can hit the anchor gate by default.
+			name: "undeclared project forces supplied anchor fact to n/a",
+			args: proceedArgs("ticket-path", "supplied anchor no declaration", map[string]any{
+				"ticket_stem": "260101-feat-demo",
+				"ticket_path": "ai-docs/tickets/ready/260101-feat-demo.md",
+			}, map[string]any{
+				"ticket": map[string]any{"ticket_missing": "no", "has_ticket": "yes", "status": "ready", "category": "other", "actionable": "yes", "freshness": "current"},
+				"gates":  map[string]any{"binding_anchor": "missing", "scope_blocked": "none", "discussion_needed": "no"},
+				"work":   map[string]any{"slice": "Phase 1: Demo"},
+			}),
+			wantRoute:  "implementation-dispatch.ready-actionable",
+			wantNext:   "lead-implement",
+			wantReason: "status=ready",
+			wantCond:   "binding-anchor=n/a",
 		},
 		{
 			name: "discussion needed routes to discussion",
 			args: proceedArgs("ticket-path", "needs discussion", nil, map[string]any{
 				"ticket": map[string]any{"status": "ready", "category": "other", "freshness": "current"},
-				"gates":  map[string]any{"migration_anchor": "n/a", "scope_blocked": "none", "discussion_needed": "yes"},
+				"gates":  map[string]any{"binding_anchor": "n/a", "scope_blocked": "none", "discussion_needed": "yes"},
 				"work":   map[string]any{"slice": "Phase 1: Demo"},
 			}),
 			wantRoute:  "anchor-discussion.discussion-needed",
@@ -1199,6 +1250,7 @@ func TestResolveProceedRoutes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			input.AnchorDeclared = tc.anchorDeclared
 			got := resolveProceed(input)
 			if got.Route != tc.wantRoute || got.Next != tc.wantNext {
 				t.Fatalf("route/next = %s/%s, want %s/%s\nraw:\n%s", got.Route, got.Next, tc.wantRoute, tc.wantNext, got.Raw)
@@ -1609,7 +1661,7 @@ func proceedReadyArgs(format string) map[string]any {
 			"discussion_needed": "no",
 			"needs_ticket":      "n/a",
 			"scope_blocked":     "none",
-			"migration_anchor":  "n/a",
+			"binding_anchor":    "n/a",
 		},
 		"work": map[string]any{
 			"category": "implementation",
@@ -4334,5 +4386,186 @@ func TestWorkflowStateToolSchema(t *testing.T) {
 	properties := toolPropertiesByName(t, callToolsList(t, server), "workflow_state")
 	if _, ok := properties["session_key"]; !ok {
 		t.Fatalf("workflow_state schema missing session_key property: %#v", properties)
+	}
+}
+
+// --- binding-anchor production-wiring integration tests -----------------------
+//
+// These drive the real handlers (NewServer + callToolWithKey) against a
+// t.TempDir() root whose AGENTS.md either declares a `### Binding Anchor` or
+// omits it, so the AGENTS.md-read wiring added at the three route.resolve_*
+// call sites is exercised end-to-end — not the pure parser and not a
+// hand-constructed verdict/input struct with the field pre-set.
+
+const bindingAnchorTestPath = "ai-docs/tickets/idea/000000-demo-anchor.md"
+const bindingAnchorTestTopics = "alpha topic, beta topic"
+
+// bindingAnchorTestClause is the Prep-guardrail clause a declaring root must
+// render (matching wsreview.BindingAnchor.PrepClause's format).
+const bindingAnchorTestClause = "read " + bindingAnchorTestPath + " when target touches " + bindingAnchorTestTopics + ", "
+
+func writeBindingAnchorAGENTS(t *testing.T, root string) {
+	t.Helper()
+	content := "# AGENTS.md\n\n## Workflow\n\n### Binding Anchor\nanchor: " + bindingAnchorTestPath + "\ntopics: " + bindingAnchorTestTopics + "\n\n### Commit Rules\nother content\n"
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+}
+
+func writeSectionlessAGENTS(t *testing.T, root string) {
+	t.Helper()
+	content := "# AGENTS.md\n\n## Workflow\n\n### Review Policy\nreview-track: develop\n"
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+}
+
+func readPrepInstruction(t *testing.T, server *Server, id int, key string) string {
+	t.Helper()
+	readPrep := callToolWithKey(t, server, id, key, "todo.read", map[string]any{"key": "prep"})
+	var prepPayload todoReadPayload
+	if err := json.Unmarshal([]byte(readPrep), &prepPayload); err != nil {
+		t.Fatalf("prep todo read did not parse: %v\n%s", err, readPrep)
+	}
+	if prepPayload.Instruction == nil {
+		t.Fatalf("prep todo has no instruction:\n%s", readPrep)
+	}
+	return *prepPayload.Instruction
+}
+
+func assertPrepAnchorClause(t *testing.T, prep string, declared bool) {
+	t.Helper()
+	if declared {
+		if !strings.Contains(prep, bindingAnchorTestClause) {
+			t.Fatalf("declaring root: prep instruction missing rendered clause %q:\n%s", bindingAnchorTestClause, prep)
+		}
+		return
+	}
+	for _, forbidden := range []string{bindingAnchorTestPath, "when target touches", "alpha topic"} {
+		if strings.Contains(prep, forbidden) {
+			t.Fatalf("sectionless root: prep instruction unexpectedly contains %q:\n%s", forbidden, prep)
+		}
+	}
+}
+
+// TestEnterImplementTypedPathRendersDeclaredBindingAnchor exercises the typed
+// route.resolve_implement path (session_state.go:1101): the clause is read from
+// record.Root's AGENTS.md.
+func TestEnterImplementTypedPathRendersDeclaredBindingAnchor(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		declared bool
+	}{
+		{name: "declared", declared: true},
+		{name: "sectionless", declared: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			useLeadProfile(t)
+			root := t.TempDir()
+			initGit(t, root)
+			runGit(t, root, "switch", "-c", "feature/base")
+			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+			if tc.declared {
+				writeBindingAnchorAGENTS(t, root)
+			} else {
+				writeSectionlessAGENTS(t, root)
+			}
+			server := NewServer(root, "test")
+			key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+			callToolWithKey(t, server, 2, key, "route.resolve_implement", implementReadyArgs("text"))
+			assertPrepAnchorClause(t, readPrepInstruction(t, server, 3, key), tc.declared)
+		})
+	}
+}
+
+// TestEnterImplementLegacyPathRendersDeclaredBindingAnchor exercises the legacy
+// top-level route.resolve_implement path (session_state.go:1145), which reads
+// session state itself; this is the path the ticket constraint requires a test
+// to pin.
+func TestEnterImplementLegacyPathRendersDeclaredBindingAnchor(t *testing.T) {
+	legacyArgs := func() map[string]any {
+		return map[string]any{
+			"delegation":   "delegated",
+			"plan_depth":   "survey",
+			"review_alloc": "partitioned",
+			"need_review":  true,
+			"need_doc":     true,
+		}
+	}
+	for _, tc := range []struct {
+		name     string
+		declared bool
+	}{
+		{name: "declared", declared: true},
+		{name: "sectionless", declared: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			useLeadProfile(t)
+			root := t.TempDir()
+			initGit(t, root)
+			runGit(t, root, "switch", "-c", "implement/demo")
+			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+			if tc.declared {
+				writeBindingAnchorAGENTS(t, root)
+			} else {
+				writeSectionlessAGENTS(t, root)
+			}
+			server := NewServer(root, "test")
+			key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+			callToolWithKey(t, server, 2, key, "route.resolve_implement", legacyArgs())
+			assertPrepAnchorClause(t, readPrepInstruction(t, server, 3, key), tc.declared)
+		})
+	}
+}
+
+// TestEnterProceedReadsDeclaredBindingAnchorGate exercises the handleEnterProceed
+// wiring (session_state.go:1204): AnchorDeclared is read from the session root's
+// AGENTS.md before resolveProceed. A declaring root routes a supplied
+// binding_anchor=missing to the anchor gate; a sectionless root forces the fact
+// to n/a even though the lead supplied missing, so the gate never fires.
+func TestEnterProceedReadsDeclaredBindingAnchorGate(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		declared bool
+	}{
+		{name: "declared routes to anchor gate", declared: true},
+		{name: "sectionless forces n/a", declared: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			useLeadProfile(t)
+			root := t.TempDir()
+			initGit(t, root)
+			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+			if tc.declared {
+				writeBindingAnchorAGENTS(t, root)
+			} else {
+				writeSectionlessAGENTS(t, root)
+			}
+			server := NewServer(root, "test")
+			key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+			args := proceedReadyArgs("text")
+			// Lead supplies a non-n/a anchor fact; whether the gate fires must
+			// depend on the project's AGENTS.md declaration, not this input.
+			args["facts"].(map[string]any)["gates"].(map[string]any)["binding_anchor"] = "missing"
+			text := callToolWithKey(t, server, 2, key, "route.resolve_proceed", args)
+			if tc.declared {
+				if !strings.Contains(text, "Route: anchor-discussion.binding-anchor-missing") {
+					t.Fatalf("declaring root should route to binding-anchor-missing:\n%s", text)
+				}
+				if !strings.Contains(text, "binding-anchor=missing") {
+					t.Fatalf("declaring root should keep binding-anchor=missing condition:\n%s", text)
+				}
+			} else {
+				if strings.Contains(text, "anchor-discussion.binding-anchor-missing") {
+					t.Fatalf("sectionless root must not hit the binding-anchor gate:\n%s", text)
+				}
+				if !strings.Contains(text, "binding-anchor=n/a") {
+					t.Fatalf("sectionless root should force binding-anchor to n/a:\n%s", text)
+				}
+				if !strings.Contains(text, "Route: implementation-dispatch.ready-actionable") {
+					t.Fatalf("sectionless ready ticket should route to implementation dispatch:\n%s", text)
+				}
+			}
+		})
 	}
 }

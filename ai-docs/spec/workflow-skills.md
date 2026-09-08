@@ -308,9 +308,10 @@ architecture fact, or cross-ticket constraint that is not loaded, `lead-discuss`
 searches the ticket/spec/mental-model cascade before answering. Commit history is
 an additional project memory tier: `## AI Context` bodies carry decision rationale
 that docs may not yet reflect; `lead-discuss` accesses this tier through
-Explore-type subagent dispatch rather than inline reads. Migration topics such as
-plugin architecture, host-neutral migration, spawn-removal, or adapter boundaries
-load the native-subagent pivot anchor before the lead states a direction. If the
+Explore-type subagent dispatch rather than inline reads. Topics matching the
+project's declared binding anchor (`AGENTS.md` `### Binding Anchor`) load that
+declared anchor before the lead states a direction; a project that declares no
+binding anchor has no such load. If the
 cascade has no documented answer, the reply says that before making an inference
 or proposing the next lookup.
 
@@ -1112,10 +1113,12 @@ continues scope resolution. When freshness is uncertain, it stops for
 discussion instead of delegating hidden conversation context to a background subagent.
 Unconfirmed mechanisms or future-scope hints are not settled decisions; they
 make freshness uncertain rather than authorizing a ticket write.
-For migration-sensitive targets, `lead-proceed` reads the native-subagent pivot
-anchor as an artifact-only check, reports `Migration Anchor` in the Routing
-Verdict, stops when the anchor is missing, and treats absent binding anchor
-decisions as missing settled decisions.
+For targets touching the project's declared binding-anchor topics,
+`lead-proceed` reads the declared binding anchor as an artifact-only check,
+reports `Binding Anchor` in the Routing Verdict, stops when the anchor is
+missing, and treats absent binding-anchor decisions as missing settled
+decisions. When the project declares no binding anchor, the fact normalizes to
+`n/a` and the gate never fires.
 {#260513-proceed-ticket-freshness-gate}
 
 Except for a free-form early return, implementation routes through
@@ -1126,12 +1129,12 @@ decide delegated plan depth, or invoke implementation primitives before
 blocks safe implementation. Public or cross-module contract checkpoints are
 expressed through the delegated `lead-implement` implementation plan.
 
-`lead-implement` also loads the native-subagent pivot anchor before editing when
-the target touches plugin architecture, host-neutral migration, spawn-removal,
-or adapter boundaries. Delegated implementation has a required plan artifact;
-when the migration anchor is read, binding implementation constraints from the
-anchor are copied into the plan and the anchor is listed as a `[Must]` reference before
-plan population or implementer dispatch. Delegated implementers receive the
+`lead-implement` also loads the project's declared binding anchor before editing
+when the target touches its declared topics. Delegated implementation has a
+required plan artifact; when the binding anchor is read, binding implementation
+constraints from the anchor are copied into the plan and the anchor is listed as
+a `[Must]` reference before plan population or implementer dispatch. Delegated
+implementers receive the
 plan as task input, may read additional documents listed in the plan, and,
 when the plan's `Relevant Ticket Contract` names a ticket path and phase
 heading, read that ticket file and treat the selected phase as the task
@@ -1147,7 +1150,7 @@ fields inside `params`, with `session_key` outside the payload. The MCP resolver
 deterministic route-row precedence, normalization warnings, raw verdict text,
 the JSON `next_instruction`, proceed agenda storage, and proceed todo
 replacement; the playbook owns artifact reads, uncertain judgments,
-conversation freshness, migration-anchor checks, and user-facing discussion.
+conversation freshness, binding-anchor checks, and user-facing discussion.
 `lead-proceed` does not restate a separate Routing Verdict or print a full route
 chain as the active execution instruction. It follows MCP's `Next:` instruction,
 which includes the route announcement, downstream invocation, verification,
@@ -1270,6 +1273,22 @@ When the `review-track` field is unset, `workflow_manual` surfaces a
 non-blocking, session-scoped nudge advising the project to configure a review
 track; the nudge fires at most once per session (not once per checkpoint) and
 never blocks the call it rides on.
+
+A project declares its binding anchor in the same tracked `AGENTS.md` home under
+a `### Binding Anchor` section, parsed fail-open like `### Review Policy`: two
+`key: value` lines, `anchor: <path>` (a document whose settled decisions
+bind implementation on the declared topics) and `topics: <comma-separated
+phrases>`, both required for the declaration to take effect (a missing file, missing
+section, or a single missing key leaves the project with no declared anchor). The
+shipped `lead-discuss`/`lead-proceed`/`lead-implement` playbooks and the
+`route.resolve_implement`/`route.resolve_proceed` resolvers never name a specific
+project's anchor; they read the declared values through this hook and render the
+clause "read `<anchor>` when target touches `<topics>`" only when both keys
+parse, omitting the clause otherwise. `lead-proceed`'s binding-anchor gate
+normalizes to `n/a` for any project that declares no section, regardless of the
+`facts.gates.binding_anchor` value a lead supplies, so the anchor routes and the
+conflict-forces-discussion warning fire only for declaring projects.
+{#260908-project-binding-anchor-declaration}
 
 `lead-review` scales review depth automatically. When commits lack `## AI
 Context` and conventional commit format (`judge: follows-ws-workflow` does not

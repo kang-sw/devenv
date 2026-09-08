@@ -333,8 +333,9 @@ behavior for compatibility.
   branch-stop todos describe the blocker instead of telling the caller to
   continue source edits. Non-stop prep instructions carry required
   runbook-loading guardrails, including mental-model lookup, ancestor reads,
-  conditional migration-anchor loading, and implementation-runbook loading
-  before edits or delegate dispatch. Text output is the canonical raw verdict
+  conditional binding-anchor loading when the project declares one, and
+  implementation-runbook loading before edits or delegate dispatch. Text output
+  is the canonical raw verdict
   beginning `Implementation Verdict`, with `Mode`, `Branch Action`, `Plan Depth`,
   `Review Allocation`, `Doc Mode`, and a concrete `Next:` instruction; JSON
   output returns the structured result plus `next_instruction` and the identical
@@ -416,7 +417,7 @@ behavior for compatibility.
   inside `params` and derives the same typed verdict, agenda, and todos as an
   equivalent top-level compatibility call. It normalizes the
   current proceed route vocabulary (`target-kind`, `ticket-missing`,
-  `has-ticket`, `status`, `migration-anchor`, `actionable`,
+  `has-ticket`, `status`, `binding-anchor`, `actionable`,
   `discussion-needed`, `needs-ticket`, `freshness`, `category`, `slice`, and
   `scope-blocked`), resolves one deterministic route, emits non-blocking
   warnings for contradictory or inapplicable facts, stores the selected route
