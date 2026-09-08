@@ -13,6 +13,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 7c1d31609df40761
 sage-review-completeness-reviewed: 7c1d31609df40761
+completed: 2026-09-09
 ---
 
 # Pi tier resolution reads ws's backend-keyed slugs and refuses a spawn whose configured tier is not in Pi's catalog
@@ -479,3 +480,50 @@ raw-dispatch path is gated the same way. Live check (owner-run): arm a
 goal in a session with one rejected tier and confirm the advisory appears
 on the first cycle only; tune the tier to a valid value and confirm no
 further advisory.
+
+### Result (1efca72a) - 2026-09-09
+
+The advisory now emits once per distinct rejected set per session instead of on
+every `workflow_manual` call. A bridge-owned `AdvisoryKeyHolder` carries the last
+emitted key; `buildAdvisoryKey` composes a stable string from the sorted
+`<alias>=<checked model or ->:<why>` pairs (a clean table keys as the empty
+string; an all-`unset` table as a distinct `unset` sentinel, kept separate from
+the clean-table key). `maybeAppendModelCatalogAdvisory` gained a trailing optional
+`holder` parameter and appends only when the computed key differs from
+`holder.current`, updating it on emit and clearing it on a clean table; an omitted
+holder preserves the prior always-append behavior for the existing direct-call
+tests. The holder is threaded through all four call sites — the three mapped
+`dispatchMappedWorkflowManual` branches (cut-hit, no-body, fallback) and the
+raw-dispatch path in `startBridge`. `startBridge` allocates a fresh holder per
+session, points a module-level `activeAdvisoryKeyHolder` at it, and registers a
+single guarded `pi.on("session_compact", ...)` that resets the active holder's
+key — the one-time module-level guard mirrors index.ts's factory-scope let-handle
+precedent because `startBridge` re-fires on `/reload` and `pi.on` has no
+unsubscribe.
+
+Deviation from the plan's "two branches" wording: the prerequisite static-body
+rewrite had already split the mapped dispatch into three branches, so the holder
+threads through four call sites, not three.
+
+Spec: amended `{#260903-pi-model-catalog-unset-advisory}` — the "recomputed and
+re-appended on every call while the condition holds" cadence is replaced by the
+per-session key rule plus the compaction re-arm.
+
+Review: correctness (opus) clean; fit (sonnet) clean with 1 Minor recorded; test
+(sonnet) returned 1 Important — the dispatch-layer holder threading was unproven
+(all Phase 3 tests called `maybeAppendModelCatalogAdvisory` directly) — relayed
+once and fixed in `268b8b1f`, which adds two tests calling
+`dispatchMappedWorkflowManual` twice with a shared `deps.advisoryKeyHolder`, one
+crossing the cut-hit then fallback branch to catch a per-branch fresh-holder
+regression. 3 Minors recorded, not relayed (raw-dispatch test name overstates its
+coverage; the compaction-guard registration has no automated coverage; the
+changed-set test adds a tier rather than retuning an already-rejected one).
+
+Verification: `node --test test/bridge.test.ts` with `WS_PI_SPAWN_ROLE` unset →
+73/73 pass (was 71); targeted `spawner.test.ts + bridge.test.ts +
+agent-sidecar.test.ts` → 410/410 pass. Full `npm test` → 1198/1328, the same 130
+pre-existing linuxbrew-path failures as the baseline, no new failures.
+
+Owner-run live check (arm a goal with one rejected tier: advisory on the first
+cycle only; tune the tier valid: no further advisory) remains pending owner
+acceptance. All three phases complete; ticket moves to `.done/`.

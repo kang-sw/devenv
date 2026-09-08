@@ -733,10 +733,16 @@ at is gone; it performs no writes either way.
 ### Unset-tier advisory on workflow_manual {#260903-pi-model-catalog-unset-advisory}
 
 While any of harness `pi`'s four fixed tiers resolves to a rejected entry, the
-adapter appends a strong advisory to every `workflow_manual` response (and only
-that tool's response), mirroring the cadence of the ws-mcp core's
-bootstrap-version-behind advisory — recomputed and re-appended on every call
-while the condition holds, not once per session. The condition is sourced from
+adapter appends a strong advisory to a `workflow_manual` response (and only
+that tool's response), but only once per distinct rejected set per session
+rather than on every call. The adapter keeps the last emitted advisory key — a
+stable string over the sorted rejected tiers paired with their reasons — and
+re-appends only when that key changes, so the block emits on the first
+qualifying call, again when a tier is tuned into, out of, or to a different
+value within the rejected set, and not on repeat calls whose rejected set is
+unchanged. A clean table (no tier rejected) appends nothing and clears the key,
+and the adapter's compaction boundary resets the key so the next qualifying
+call re-arms the advisory. The condition is sourced from
 the same `config.resolve_agent` tool the spawn path uses, with the same backend
 expansion: the adapter calls it once per fixed tier
 (`small`/`medium`/`large`/`xlarge`, four local stdio round-trips), applies the
