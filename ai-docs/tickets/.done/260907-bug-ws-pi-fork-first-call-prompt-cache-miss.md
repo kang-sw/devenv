@@ -13,6 +13,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: aa6350281b58e25b
 sage-review-design-reviewed: aa6350281b58e25b
+completed: 2026-09-08
 ---
 
 # Pi fork's first model call is a full prompt-cache miss over the whole inherited lead context
@@ -411,3 +412,21 @@ behavior; and discussion completion. Offline client equality cannot certify
 provider retention, routing, expiry, billing or a cache hit. Do not close the
 ticket on this Result alone. Deferred-load verification remains with the
 lead-tool-profile consumer ticket.
+
+
+## Resolution (2026-09-08)
+
+Owner closed this work track at the verified client-side boundary on 2026-09-08, retaining the implementation and stopping further cache experiments. This is an owner-accepted partial-outcome closure, NOT a claim that the original live cache-hit acceptance passed or that all possible hypotheses were exhausted. It supersedes the prior Result's pending administrative disposition without rewriting its historical evidence. No merge or push is authorized.
+
+Client-side preservation was verified against complete captured outgoing decompressed HTTP JSON, not just reconstructed requests or hashes. For lead -> first fork and first -> second fork, exact serialized non-input field spans, key order and inherited input item spans match; only new input suffixes append. This includes instructions, ordered tools, model, reasoning and prompt_cache_key. Each after-hook capture equals its decoded HTTP body bytes. Fork hooks change only prompt_cache_key to the parent's value. The captured safe request headers differ across parent/child only at session-id and x-client-request-id; they remain identical within the child. Compressed transport bytes, uncaptured headers and backend routing are not proven identical.
+
+Live evidence on installed bundled Pi 0.85.1, openai-codex/gpt-6-astra:
+- Direct ws-fork from the ongoing lead conversation: last lead input 253/cacheRead 73600; first NEW child input 74430/cacheRead 0; second child input 277/cacheRead 74240. The child reported successfully. Historical wire requests for this specific run were not captured.
+- Full raw pair through programmatic invocation of the production registered handler: first child input 73168/cacheRead 0 despite equal shared body fields/prefix. This was not model-selected tool dispatch.
+- Full raw triplet through actual parent-model ws-fork toolCall and the ordinary SDK tool loop: parent input 72855/cacheRead 0; first NEW child input 73444/cacheRead 0; second child input 189/cacheRead 73344 (99.74297% cached). A successful fork tool result, child report result and parent report receipt were recorded; subsequent parent model processing was quota-blocked. This lead was a private continuation copy, not the ongoing interactive lead. Therefore this triplet does not supply a cache-hit parent request as its control.
+
+The original >=90% first-fork target remains unmet. Identical body/cache key does not establish guaranteed backend reuse. Session-header/connection routing and server cache behavior remain unisolated hypotheses; no header-identity workaround or structural impossibility conclusion was established. Resume/discussion live acceptance, broader task anti-bleed acceptance and actual billing remain unverified, not silently passed. The originally authorized six experimental sends plus three additionally authorized sends were consumed; no further experiments are planned in this closed track.
+
+Ephemeral local evidence (raw inherited content is not committed): /tmp/ws-pi-live-acceptance-KrltZbQ3/capture-live/raw/ and triplet-live/raw/, with their sibling summary.json, run-result.json and session/observation files. The independent lead audit compared raw JSON value spans without normalizing field differences away. Direct smoke child session: 2026-09-08T06-41-51-917Z_01a07fc0-6b2c-7056-94b3-e736faf79658.jsonl.
+
+Bounded public community research found analogous reporter observations, not maintainer-confirmed backend semantics or a verified workaround: https://github.com/openai/codex/issues/29377 (fixed-key fresh-thread reuse sometimes high, sometimes low); https://github.com/openai/codex/issues/30425 (stable-key misses, duplicate of 29377); https://github.com/openai/codex/issues/20301#issuecomment-4515349136 (stable request fingerprint/cache key with cache collapse and recovery); https://github.com/openai/codex/issues/33821 (WebSocket reused/fresh connection comparison, not evidence of an SSE-specific cause). Different-key sibling partial reuse in the original Background remains evidence against claiming categorical cross-session impossibility. No separate follow-up implementation or changes to the consumer ticket are authorized by this closure.
