@@ -534,6 +534,14 @@ func implementPrepInstruction(verdict implementTodoVerdict) string {
 	guardrails := `Before edits or dispatch, run mental-model lookup, read returned docs ancestors first, ` + verdict.BindingAnchorClause + `and read infra.read("impl-playbook"). `
 	switch strings.ToLower(strings.TrimSpace(verdict.PlanDepth)) {
 	case "none", "":
+		if strings.ToLower(strings.TrimSpace(verdict.Delegation)) == "delegated" {
+			return guardrails + "No survey or research plan is needed: this delegated ticket target localizes the change. " +
+				"Call path.generate(kind: \"plan\", stems: [target stem or scope]) to create the plan path, then write the plan stub yourself with all six sections and dispatch no planner. " +
+				"Fill \"## Relevant Ticket Contract\" with the ticket path and selected phase heading only. " +
+				"In \"## Out of Scope\", \"## Implementation Plan\", and \"## Verification Plan\", write the line \"Skipped: the ticket localizes the change (facts: change_points=clear, reuse_points=<value>, strategy_shape=single-obvious, side_effect_risk=low)\", filling <value> from the reuse-points condition in this verdict's Conditions. " +
+				"In \"## Codebase Findings\", record one line per binding constraint the Prep reads surfaced — from the mental-model lookup documents, infra.read(\"impl-playbook\"), and any declared AGENTS.md anchor document — or \"Skipped: no binding constraint from Prep reads\" when none applies. " +
+				"Write \"None.\" in \"## Escalations\". Then render implementer with the stub plan path; do not dispatch a planner."
+		}
 		return guardrails + "Confirm the direct-edit facts are still accurate, identify the focused verification command, and proceed without a separate brief, survey, or research plan."
 	case "survey":
 		return guardrails + "Call path.generate(kind: \"plan\", stems: [target stem or scope]) to create the plan path, render plan-populator-survey with " + plannerAuthorityInputs(verdict.TargetKind) + ", and dispatch it to write the light implementation plan. If survey returns [escalate-to-research] for low confidence or strategic uncertainty, render plan-populator-research with the same authority and plan path before implementer dispatch. If survey returns [escalate-to-lead], adjudicate the escalation in place before implementer dispatch. Do not create a separate brief."
@@ -561,7 +569,7 @@ func implementEditInstruction(verdict implementTodoVerdict) string {
 		case "research":
 			return "After the research plan is ready on the same plan path, render implementer with PlanPath and dispatch the delegated implementer; capture the implemented commit range for review and relays."
 		default:
-			return "Dispatch the delegated implementer with Delegate dispatch and the Implementer spawn prompt, using the resolved implementation context; capture the implemented commit range for review and relays."
+			return "Render implementer with PlanPath and dispatch the delegated implementer; capture the implemented commit range for review and relays."
 		}
 	default:
 		return "Execute the selected implementation path and verify the changed behavior before review or documentation closeout."
@@ -1163,10 +1171,10 @@ func parseLegacyImplementPlanDepth(delegation string, raw string) (string, error
 		switch normalized {
 		case "", "survey":
 			return "survey", nil
+		case "none":
+			return "none", nil
 		case "research":
 			return "", fmt.Errorf("invalid plan_depth %q for delegated legacy enter: start with survey and escalate to research only after survey returns [escalate-to-research]", raw)
-		case "none":
-			return "", fmt.Errorf("invalid plan_depth %q for delegated: want survey", raw)
 		default:
 			return "", fmt.Errorf("invalid plan_depth %q: want one of none, survey", raw)
 		}

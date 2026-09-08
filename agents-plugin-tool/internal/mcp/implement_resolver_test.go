@@ -252,6 +252,95 @@ func TestResolveImplementDelegatedDefaultsToSurveyPlan(t *testing.T) {
 	}
 }
 
+func delegatedLocalizedTicketInput(kind string, mutate func(*implementComplexityFactsInput)) implementInput {
+	complexity := implementComplexityFactsInput{
+		ChangePoints:   factString{Value: "clear", Present: true},
+		ReusePoints:    factString{Value: "confirmed", Present: true},
+		StrategyShape:  factString{Value: "single-obvious", Present: true},
+		SideEffectRisk: factString{Value: "low", Present: true},
+		ColdContext:    factString{Value: "no", Present: true},
+	}
+	if mutate != nil {
+		mutate(&complexity)
+	}
+	return implementInput{
+		Target: implementTargetInput{Kind: kind, Label: "feature", TicketPath: "ai-docs/tickets/ready/feature.md", ScopeLabel: "Phase 1", ScopeSlug: "feature"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:                      factString{Value: "multi-file", Present: true},
+				Surface:                   factString{Value: "public-interface", Present: true},
+				NewPublicSymbol:           factString{Value: "no", Present: true},
+				NewTypeContract:           factString{Value: "no", Present: true},
+				TestSurface:               factString{Value: "existing", Present: true},
+				ExplicitDelegationRequest: factString{Value: "no", Present: true},
+			},
+			Complexity: complexity,
+			Risk: implementRiskFactsInput{
+				Correctness:        factString{Value: "moderate", Present: true},
+				Fit:                factString{Value: "moderate", Present: true},
+				Test:               factString{Value: "moderate", Present: true},
+				SecurityOrContract: factString{Value: "moderate", Present: true},
+			},
+		},
+	}
+}
+
+func TestResolveImplementDelegatedLocalizedTicketSkipsSurveyPlan(t *testing.T) {
+	obs := implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"}
+
+	base := resolveImplement(delegatedLocalizedTicketInput("ticket", nil), obs)
+	if base.Verdict.Delegation != "delegated" {
+		t.Fatalf("delegation = %q, want delegated", base.Verdict.Delegation)
+	}
+	if base.Verdict.PlanDepth != "none" {
+		t.Fatalf("all-four-strongest plan depth = %q, want none", base.Verdict.PlanDepth)
+	}
+
+	// Weakening any single fact (including to unknown) keeps survey.
+	for _, tc := range []struct {
+		name   string
+		mutate func(*implementComplexityFactsInput)
+	}{
+		{"change-points unknown", func(c *implementComplexityFactsInput) { c.ChangePoints = factString{} }},
+		{"reuse-points unconfirmed", func(c *implementComplexityFactsInput) {
+			c.ReusePoints = factString{Value: "unconfirmed", Present: true}
+		}},
+		{"strategy-shape multiple-viable", func(c *implementComplexityFactsInput) {
+			c.StrategyShape = factString{Value: "multiple-viable", Present: true}
+		}},
+		{"side-effect-risk moderate", func(c *implementComplexityFactsInput) {
+			c.SideEffectRisk = factString{Value: "moderate", Present: true}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveImplement(delegatedLocalizedTicketInput("ticket", tc.mutate), obs)
+			if got.Verdict.Delegation != "delegated" {
+				t.Fatalf("delegation = %q, want delegated", got.Verdict.Delegation)
+			}
+			if got.Verdict.PlanDepth != "survey" {
+				t.Fatalf("plan depth = %q, want survey when %s", got.Verdict.PlanDepth, tc.name)
+			}
+		})
+	}
+
+	// not-applicable is the second accepted strongest reuse_points value.
+	notApplicable := resolveImplement(delegatedLocalizedTicketInput("ticket", func(c *implementComplexityFactsInput) {
+		c.ReusePoints = factString{Value: "not-applicable", Present: true}
+	}), obs)
+	if notApplicable.Verdict.PlanDepth != "none" {
+		t.Fatalf("reuse_points=not-applicable plan depth = %q, want none", notApplicable.Verdict.PlanDepth)
+	}
+
+	// Inline target keeps survey even with all four facts at strongest (Decision 3).
+	inline := resolveImplement(delegatedLocalizedTicketInput("inline", nil), obs)
+	if inline.Verdict.Delegation != "delegated" {
+		t.Fatalf("inline delegation = %q, want delegated", inline.Verdict.Delegation)
+	}
+	if inline.Verdict.PlanDepth != "survey" {
+		t.Fatalf("inline plan depth = %q, want survey (ticket targets only)", inline.Verdict.PlanDepth)
+	}
+}
+
 func TestResolveImplementInlineDelegatedNextDefersPlannerAuthorityToPrep(t *testing.T) {
 	input := implementInput{
 		Target: implementTargetInput{Kind: "inline", Label: "bounded multi-file edit", ScopeLabel: "bounded edit", ScopeSlug: "bounded-edit"},
