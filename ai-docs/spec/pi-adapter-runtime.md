@@ -416,6 +416,24 @@ The ws-mcp child process is bound to a Pi session, not to extension load:
   normal exit event. A developer-machine source build that fails, or an invalid
   local-devenv marker, is one more spawn-time fail-loud case (see
   "Developer-machine source build behind the same pin" under the version pin).
+- A `session_start` bootstrap failure that throws *after* the child process is
+  already up — the bridge launch (`startBridge`) or the custom-tool
+  registration that follows it — is made visible rather than swallowed.
+  {#260909-pi-child-registration-failure-fail-loud} Pi's extension runner
+  catches a thrown `session_start` handler and keeps the process running, so
+  without a guard a spawned child would come up alive but presenting only Pi's
+  builtin `--tools` (`read`/`grep`/`find`/`ls` and the parallel wrapper) —
+  indistinguishable from a healthy simple researcher, and in particular a deep
+  researcher silently missing its blocking `explore` collection tool. The
+  adapter guards the whole seam: on any such failure a **spawned child**
+  (`worker`/`explore`/`fork`) exits its process with a loud error, which its
+  RPC parent surfaces as a real spawn/dispatch error to the lead instead of a
+  toolless child; the **interactive host lead** (which has no RPC parent to
+  signal) raises a loud notification and comes up without the ws bridge or
+  custom tools rather than crashing the user's terminal. Either way a
+  partial/toolless session is never presented as healthy. This guard changes
+  only failure visibility; a successful session's tool surface per role/mode is
+  unchanged.
 
 The stdio transport reads the child's stdout as newline-delimited JSON-RPC (one
 message per line, no Content-Length framing) and decodes it so that multibyte
