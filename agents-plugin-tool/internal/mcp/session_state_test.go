@@ -164,7 +164,7 @@ func TestDeriveImplementTodoInstructionsDelegatedSurvey(t *testing.T) {
 		NeedDoc:     true,
 	})
 	prep := requireInstruction(t, todoByKey(t, got, "prep"))
-	if prep != implementPrepGuardrails+"Call path.generate(kind: \"plan\", stems: [target stem or scope]) to create the plan path, render plan-populator-survey with "+plannerAuthorityInputs("ticket")+", and dispatch it to write the light implementation plan. If survey returns [escalate-to-research] for low confidence or strategic uncertainty, render plan-populator-research with the same authority and plan path before implementer dispatch. Do not create a separate brief." {
+	if prep != implementPrepGuardrails+"Call path.generate(kind: \"plan\", stems: [target stem or scope]) to create the plan path, render plan-populator-survey with "+plannerAuthorityInputs("ticket")+", and dispatch it to write the light implementation plan. If survey returns [escalate-to-research] for low confidence or strategic uncertainty, render plan-populator-research with the same authority and plan path before implementer dispatch. If survey returns [escalate-to-lead], adjudicate the escalation in place before implementer dispatch. Do not create a separate brief." {
 		t.Fatalf("prep instruction = %q", prep)
 	}
 	edit := requireInstruction(t, todoByKey(t, got, "edit"))
@@ -1991,7 +1991,7 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 	if err := json.Unmarshal([]byte(readPrep), &prepPayload); err != nil {
 		t.Fatalf("prep todo read did not parse: %v\n%s", err, readPrep)
 	}
-	if prepPayload.Instruction == nil || *prepPayload.Instruction != implementPrepGuardrails+"Call path.generate(kind: \"plan\", stems: [target stem or scope]) to create the plan path, render plan-populator-survey with "+plannerAuthorityInputs("ticket")+", and dispatch it to write the light implementation plan. If survey returns [escalate-to-research] for low confidence or strategic uncertainty, render plan-populator-research with the same authority and plan path before implementer dispatch. Do not create a separate brief." {
+	if prepPayload.Instruction == nil || *prepPayload.Instruction != implementPrepGuardrails+"Call path.generate(kind: \"plan\", stems: [target stem or scope]) to create the plan path, render plan-populator-survey with "+plannerAuthorityInputs("ticket")+", and dispatch it to write the light implementation plan. If survey returns [escalate-to-research] for low confidence or strategic uncertainty, render plan-populator-research with the same authority and plan path before implementer dispatch. If survey returns [escalate-to-lead], adjudicate the escalation in place before implementer dispatch. Do not create a separate brief." {
 		t.Fatalf("prep instruction = %#v", prepPayload.Instruction)
 	}
 	full := callToolWithKey(t, server, 5, key, "todo.list", map[string]any{"mode": "full"})

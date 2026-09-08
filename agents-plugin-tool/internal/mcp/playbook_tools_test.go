@@ -1976,7 +1976,7 @@ func TestRenderPlaybookFullWsPlannerContext(t *testing.T) {
 	})
 	assertPlanner("plan-populator-research", "large", []string{
 		"[ok]` or `[escalate-to-lead]`",
-		"Include `None` when no blocker remains. Otherwise include the blocker,",
+		"Include `None` when no blocker remains and reporting `[ok]`;",
 		"Do not encode a temporary, implementation-fallback (scope shortcut), mock-data,\n  or duplicated-glue path as the implementation.",
 		"A ticket's required runtime\n  fallback — a specified execution branch such as graceful degradation — is not\n  a shortcut and must be planned in full.",
 		"or when a fully-specified, multi-part requirement\n  cannot be carried whole into the plan and only a confident subset can be\n  planned; a \"first cut\" is legitimate only when the ticket or lead already\n  authorized the phasing.",
