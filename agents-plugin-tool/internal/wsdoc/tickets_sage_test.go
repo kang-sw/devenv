@@ -497,6 +497,69 @@ func TestSageGateStaleAnswerNoWritesNothingAndResolvesRemaining(t *testing.T) {
 	}
 }
 
+func TestSageGateStaleAnswerYesSingleStageRerunsStandalone(t *testing.T) {
+	// Only design is stale (completeness is still pending required, never
+	// completed, so it is not in the freshness set). The yes-path must set
+	// mode="standalone" for a single stale stage — a bug that always emitted
+	// "combined" on the yes-path would be caught here.
+	root := t.TempDir()
+	stem := "260101-feat-stale-yes-solo"
+	path := writeSageTicket(t, root, stem, map[string]string{
+		"sage-review-design":       "completed",
+		"sage-review-completeness": "required",
+	})
+	initSageFreshnessRepo(t, root)
+	commitSageFreshnessRepo(t, root, "design completed")
+	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: required\n---\n\n# Sample\n\nChanged before completeness.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready", Answer: "yes"}, "auto")
+	if err != nil {
+		t.Fatalf("SageGate: %v", err)
+	}
+	if res.Action != "run" {
+		t.Fatalf("action = %q, want run", res.Action)
+	}
+	if strings.Join(res.Reviewers, ",") != "design" {
+		t.Fatalf("reviewers = %v, want design only", res.Reviewers)
+	}
+	if res.Mode != "standalone" {
+		t.Fatalf("mode = %q, want standalone for a single stale stage", res.Mode)
+	}
+	if res.Advisory != sageReviewNonWaivableAdvisory {
+		t.Fatalf("advisory = %q, want non-waivable advisory", res.Advisory)
+	}
+}
+
+func TestSageGateStaleAnswerNoDoesNotSwallowRecommendedStage(t *testing.T) {
+	// Discriminating test for the answer reset (tickets_sage.go): a stale
+	// completed design paired with a *recommended* completeness stage. Because
+	// resolveStage's `recommended` branch reads `answer`, a `no` meant for the
+	// freshness question would decline the pending completeness stage (returning
+	// skip) if the reset were dropped. Asserting `ask` proves the answer was
+	// reset and did not swallow the recommended stage.
+	root := t.TempDir()
+	stem := "260101-feat-stale-no-rec"
+	path := writeSageTicket(t, root, stem, map[string]string{
+		"sage-review-design":       "completed",
+		"sage-review-completeness": "recommended",
+	})
+	initSageFreshnessRepo(t, root)
+	commitSageFreshnessRepo(t, root, "design completed")
+	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: recommended\n---\n\n# Sample\n\nChanged before completeness.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready", Answer: "no"}, "auto")
+	if err != nil {
+		t.Fatalf("SageGate: %v", err)
+	}
+	if res.Action != "ask" {
+		t.Fatalf("action = %q, want ask — the declined freshness answer must not swallow the pending recommended completeness stage", res.Action)
+	}
+}
+
 func TestSageGateWarnsOnUncommittedPostStampEdit(t *testing.T) {
 	root := t.TempDir()
 	stem := "260101-feat-uncommitted"
