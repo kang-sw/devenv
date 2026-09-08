@@ -2,7 +2,7 @@
 title: "Pi adapter: shared subagent conversation view — owner audit window and owner steering built on the ask overlay"
 parent: 260605-epic-ws-playbook-factory-pivot
 related:
-  260904-feat-ws-pi-side-thread-fork-question-surface: owns the ask overlay (`overlay-chat.ts`, `ask.ts`) this epic rebuilds into a shared component; its Esc / `/done` / `overlayAttached` semantics are superseded here
+  260904-feat-ws-pi-side-thread-fork-question-surface: owns the ask overlay (`overlay-chat.ts`, `ask.ts`) this epic rebuilds into a shared component; its Esc / `/done` semantics are superseded here and its dead `overlayAttached` flag removed
   260905-feat-ws-pi-overlay-activity-indicator-and-esc-hint: the `working…` marker and header Esc hint read `ForkChannel.isStreaming()`; both are re-expressed on the 3-state liveness input
   260905-feat-ws-pi-agent-alias-park-and-registry-cap: park-at-idle rule and its thread-bound exemption; an owner-held child must be exempt the same way
   260905-feat-ws-pi-push-only-child-reports: settle push suppression is keyed on `threadBound` today; this epic keys settle ownership on the last writer
@@ -138,8 +138,10 @@ ownership rule has one implementation).
   lead path unchanged (the viewer has no approve verb; the lead still answers
   approvals). The settles a child produces while the owner is talking to it
   are never replayed to the lead — they were addressed to the owner.
-  This replaces the `overlayAttached`-keyed settle suppression of
-  `260904`; **closing the viewer does not hand the child back to the lead**.
+  This generalizes the thread-lifetime suppression keyed on `threadBound`
+  today (`260905-…-alias-park`, `260905-…-push-only`) to any child; the
+  view-scoped `overlayAttached` flag of `260904` (set but no longer read) is
+  removed. **Closing the viewer does not hand the child back to the lead.**
   Ownership returns to the lead only through `finish` (below) or a lead-side
   send.
   While owner-held, a child is treated like a thread-bound one on these
@@ -161,9 +163,12 @@ ownership rule has one implementation).
   detail) that sets `lastWriter: "lead"`, so the child runs one more turn and
   its next settle or report reaches the lead through the normal path (queued
   after the current turn when the child is running, a fresh prompt when it is
-  idle). The flip governs turns from the handoff message onward: when the
-  owner finishes mid-turn, the settle of that owner-prompted turn is still an
-  owner toast. Threads keep today's origin routing: a `lead-ask` discussion
+  idle). The handoff is sent only when the child is actually owner-held; a
+  `finish` on a child the owner never wrote to just closes the view. Settle
+  routing reads `lastWriter` at settle time: a handoff queued into a running
+  run is processed before that run ends, so the run's settle carries the
+  child's reply to the handoff and takes the lead path. Threads keep today's
+  origin routing: a `lead-ask` discussion
   thread's `finish` is `/done` (summary turn, `ws-thread-summary` injection —
   the same one-more-turn shape, no generic handoff message); a `fork-raised`
   thread gets the generic handoff like any other child (today `/done` only
