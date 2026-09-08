@@ -89,6 +89,24 @@ export interface SkillsBlockCache {
   block: string;
 }
 
+/** Latest post-handler prompt capture; used as the exact fork source, never reconstructed. */
+export interface LeadPromptCapture {
+  sessionId?: string;
+  parentSessionKey?: string;
+  effectiveSystemPrompt: string;
+  basePromptOptions?: unknown;
+  wsBlock?: string;
+}
+
+export interface LeadPromptRef {
+  current: LeadPromptCapture | undefined;
+  resolve?: (ctx: { getSystemPrompt(): string; getSystemPromptOptions?: () => unknown }) => LeadPromptCapture;
+}
+
+export function captureEffectivePrompt(ctx: { getSystemPrompt(): string }, basePromptOptions: unknown, wsBlock: string | undefined): LeadPromptCapture {
+  return { effectiveSystemPrompt: ctx.getSystemPrompt(), basePromptOptions, wsBlock };
+}
+
 /**
  * Resolves the `<available_skills>` block against Pi's CURRENT
  * `pi.getCommands()` list, called fresh on every `before_agent_start`
@@ -216,6 +234,8 @@ export function computeSessionBootstrap(inputs: SessionBootstrapInputs): Session
   }
 
   const wsBlockBase: WsBlockBase | undefined = manualSnapshot ? { manualSnapshot, guideText } : undefined;
+  // The spawn provided this ordered list. Do not re-profile, add, remove, or dedupe it.
+  if (role === "fork") return { wsBlockBase, activeTools: [...currentActiveTools] };
 
   let activeTools = computeLeadActiveTools(currentActiveTools);
   activeTools = addForkToolIfLead(activeTools, role);
@@ -256,15 +276,59 @@ export function registerLeadBootstrap(
   pi: ExtensionAPI,
   wsBlockBaseRef: { current: WsBlockBase | undefined },
   skillsBlockCacheRef: { current: SkillsBlockCache | undefined },
+  effectivePromptRef?: LeadPromptRef,
+  inheritedForkPrompt?: { current: string | undefined },
+  sessionKeyRef?: { current: string | undefined },
 ): void {
+  let usedOptions: unknown;
+  let usedBlock: string | undefined;
+  const currentBlock = () => {
+    const base = wsBlockBaseRef.current;
+    return base ? buildWsBlock(base.manualSnapshot, base.guideText, computeSkillsBlockCached(pi.getCommands(), (path) => loadSkillFile(path), skillsBlockCacheRef)) : undefined;
+  };
+  if (effectivePromptRef) effectivePromptRef.resolve = (ctx) => {
+    if (effectivePromptRef.current) return effectivePromptRef.current;
+    const wsBlock = currentBlock();
+    const result = computeBeforeAgentStartResult(ctx.getSystemPrompt(), wsBlock, readSpawnRole(process.env));
+    return { effectiveSystemPrompt: result?.systemPrompt ?? ctx.getSystemPrompt(), basePromptOptions: ctx.getSystemPromptOptions?.(), wsBlock, parentSessionKey: sessionKeyRef?.current };
+  };
+  pi.on("session_start", (_event, ctx) => {
+    if (!effectivePromptRef || readSpawnRole(process.env) === "fork") return;
+    effectivePromptRef.current = undefined;
+    for (const entry of ctx.sessionManager.getEntries()) {
+      if (entry.type !== "custom" || entry.customType !== "ws-pi-lead-prompt") continue;
+      const data = entry.data as LeadPromptCapture;
+      const owned = data?.sessionId === ctx.sessionManager.getSessionId() ||
+        (data?.sessionId === undefined && !ctx.sessionManager.getHeader()?.parentSession);
+      if (owned && typeof data?.effectiveSystemPrompt === "string") effectivePromptRef.current = JSON.parse(JSON.stringify(data));
+    }
+  });
   pi.on("before_agent_start", (event) => {
+    usedOptions = JSON.parse(JSON.stringify(event.systemPromptOptions ?? null));
+    usedBlock = undefined;
     const role = readSpawnRole(process.env);
+    if (role === "fork" && inheritedForkPrompt?.current !== undefined) {
+      return { systemPrompt: inheritedForkPrompt.current };
+    }
     const base = wsBlockBaseRef.current;
     if (!isLeadOrFork(role) || !base) {
       return computeBeforeAgentStartResult(event.systemPrompt, undefined, role);
     }
     const skillsBlock = computeSkillsBlockCached(pi.getCommands(), (path) => loadSkillFile(path), skillsBlockCacheRef);
     const wsBlock = buildWsBlock(base.manualSnapshot, base.guideText, skillsBlock);
+    usedBlock = wsBlock;
     return computeBeforeAgentStartResult(event.systemPrompt, wsBlock, role);
+  });
+  pi.on("context", (event, ctx) => {
+    if (readSpawnRole(process.env) === "fork") return undefined;
+    // context runs after the before-agent chain, so this is the final Pi string.
+    if (effectivePromptRef) {
+      const captured = { ...captureEffectivePrompt(ctx, usedOptions, usedBlock), sessionId: ctx.sessionManager.getSessionId(), parentSessionKey: sessionKeyRef?.current };
+      if (JSON.stringify(effectivePromptRef.current) !== JSON.stringify(captured)) {
+        effectivePromptRef.current = captured;
+        pi.appendEntry("ws-pi-lead-prompt", captured);
+      }
+    }
+    return undefined;
   });
 }

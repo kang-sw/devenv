@@ -193,8 +193,9 @@ import { buildOrphanPush, captureOrphans, readAndClearSidecar, reviveOrphans, wr
 import { buildDiscussKickoff } from "./discuss.ts";
 import { registerGoalLoop, readGoalLoopConfig, resolveSettleDelayMs } from "./goal-loop.ts";
 import { resolveSkillsDir } from "./skills-dir.ts";
-import { computeSessionBootstrap, registerLeadBootstrap, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
-import { isLeadOrFork, readSpawnRole } from "./process-role.ts";
+import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
+import { applyForkAffinity, captureRegisteredTools, compareForkRegistrations, effectiveForkDescriptor, frameForkInput, readForkLaunchContext, removeForkTransport, restoreForkContext, restoreForkKeys, writePrivateJson, type ForkContext } from "./fork-context.ts";
+import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV } from "./process-role.ts";
 import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
 import { armForkRoleWiring, registerFork } from "./fork.ts";
 import {
@@ -242,6 +243,19 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   // its cache on the live entry-path set and rebuilds on its own whenever
   // that set changes, so no external reset is needed here.
   const skillsBlockCacheRef: { current: SkillsBlockCache | undefined } = { current: undefined };
+  const effectivePromptRef: LeadPromptRef = { current: undefined };
+  const sessionKeyRef: { current: string | undefined } = { current: undefined };
+  // Present malformed metadata is a launch error, while no metadata remains the legacy fallback.
+  let forkContextError: string | undefined;
+  let deliveredFork: ReturnType<typeof readForkLaunchContext>;
+  try { deliveredFork = readSpawnRole(process.env) === "fork" ? readForkLaunchContext(process.env) : undefined; }
+  catch (error) { forkContextError = String(error); }
+  const durableForkContextRef: { current: ForkContext | undefined } = { current: deliveredFork?.context };
+  const inheritedForkPromptRef: { current: string | undefined } = { current: deliveredFork?.context?.effectiveSystemPrompt };
+  // Absence keeps local prompt fallback, never a missing own-key bypass.
+  let forkReady = readSpawnRole(process.env) !== "fork";
+  let firstForkInput = true;
+  let previousOwnKeys: string[] = [];
   // 260905 (push model): the shared RPC registry, published as a mutable ref
   // so `createApprovalRelay` — which must be constructed BEFORE
   // `registerAgentTools` creates that registry — can still read it at push
@@ -300,7 +314,27 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   });
 
   const goalLoopHandle = registerGoalLoop(pi, { goalLoopConfigPath, rpcRegistryRef }, toolPreviewTuiRef);
-  registerLeadBootstrap(pi, wsBlockBaseRef, skillsBlockCacheRef);
+  registerLeadBootstrap(pi, wsBlockBaseRef, skillsBlockCacheRef, effectivePromptRef, inheritedForkPromptRef, sessionKeyRef);
+  pi.on("input", (event, ctx) => {
+    if (readSpawnRole(process.env) !== "fork") return undefined;
+    let error = forkContextError ?? (!forkReady || !handle?.defaultSessionKeyRef.current?.trim() ? "fork bootstrap is not ready: no valid own key" : undefined);
+    try {
+      if (!error && durableForkContextRef.current) error = compareForkRegistrations(durableForkContextRef.current.registeredTools, captureRegisteredTools(pi.getActiveTools(), pi.getAllTools()));
+    } catch (cause) { error = String(cause); }
+    if (error) {
+      ctx.ui.notify(`ws-pi-agent: ${error}`, "error");
+      return { action: "handled" };
+    }
+    if (firstForkInput) {
+      firstForkInput = false;
+      return { action: "transform", text: frameForkInput(event.text, handle!.defaultSessionKeyRef.current!), images: event.images };
+    }
+    return undefined;
+  });
+  pi.on("before_provider_request", async (event, ctx) => {
+    if (readSpawnRole(process.env) !== "fork") return undefined;
+    return applyForkAffinity(event.payload, durableForkContextRef.current, await effectiveForkDescriptor(ctx, pi.getThinkingLevel()), ctx.sessionManager.getSessionId());
+  });
   // 260906 Phase 1: declarative/global, same placement as registerFork/
   // registerAsk above it — a fork child re-runs session_start too and needs
   // ws-skill registered so addSkillToolIfLeadOrFork has something to
@@ -320,6 +354,16 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   let pushRenderersRegistered = false;
 
   pi.on("session_start", async (_event, ctx) => {
+    if (forkContextError) { ctx.ui.notify(forkContextError, "error"); return; }
+    if (readSpawnRole(process.env) === "fork" && !durableForkContextRef.current) {
+      durableForkContextRef.current = restoreForkContext(ctx.sessionManager.getEntries(), ctx.sessionManager.getSessionId());
+      inheritedForkPromptRef.current = durableForkContextRef.current?.effectiveSystemPrompt;
+    }
+    if (readSpawnRole(process.env) === "fork") {
+      forkReady = false;
+      firstForkInput = true;
+      previousOwnKeys = restoreForkKeys(ctx.sessionManager.getEntries(), ctx.sessionManager.getSessionId());
+    }
     // 260905 Edition: hand the spawner this session's idleness accessor (the
     // same captured-ctx-per-session_start seam wsBlockBaseRef uses), so a
     // followUp push raised while this session is mid-turn is held until its
@@ -354,7 +398,10 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       cwd: ctx.cwd,
       toolPreviewTuiRef,
       ui: ctx.ui,
+      forkContext: durableForkContextRef.current,
+      previousOwnKeys,
     });
+    sessionKeyRef.current = handle.defaultSessionKeyRef.current;
 
     // Built BEFORE registerAgentTools (not after, unlike registerExecuteGateway
     // below) so it can be threaded into that call too — see
@@ -392,7 +439,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       const thread = handleForkRaisedQuestion(threadHandle, agentTools!.rpcRegistry, agentId, message, pi);
       return threadHandle.ctxRef.current?.mode === "tui" ? buildForkQuestionLeadNotice(agentId, thread.threadId) : undefined;
     };
-    registerFork(pi, handle, agentTools.rpcRegistry, { cwd: ctx.cwd }, onForkQuestion, toolPreviewTuiRef);
+    registerFork(pi, handle, agentTools.rpcRegistry, { cwd: ctx.cwd, effectivePromptRef }, onForkQuestion, toolPreviewTuiRef);
 
     // 260904 Phase 2 (owner question surface), same declarative/global
     // registration placement as registerFork above: ws-ask/ws-resolve must
@@ -438,7 +485,11 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
           // containing cut-off work is announced — see buildOrphanPush.
           const orphanPush = buildOrphanPush(orphans);
           if (orphanPush) {
-            pushToLead(pi, agentTools.rpcRegistry, undefined, "ws-agent-orphaned", orphanPush, "followUp");
+            if (readSpawnRole(process.env) === "fork") {
+              // Startup custom messages bypass input; queue without triggering a
+              // model turn so restored work first passes the own-key guard.
+              pi.sendMessage({ customType: "ws-agent-orphaned", content: orphanPush, display: true }, { deliverAs: "nextTurn" });
+            } else pushToLead(pi, agentTools.rpcRegistry, undefined, "ws-agent-orphaned", orphanPush, "followUp");
           }
         }
       }
@@ -459,7 +510,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       }
     }
     registerAsk(pi, threadHandle, agentTools.rpcRegistry, toolPreviewTuiRef);
-    registerThreadCommands(pi, handle, agentTools.rpcRegistry, threadHandle, { cwd: ctx.cwd });
+    registerThreadCommands(pi, handle, agentTools.rpcRegistry, threadHandle, { cwd: ctx.cwd, effectivePromptRef });
 
     // §1/§4/260906: one pure call produces BOTH the ws block's static base
     // (manual snapshot + Pi lead guide) AND the fully reshaped lead/fork
@@ -511,6 +562,30 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // path at all.
     if (isLeadOrFork(bootstrapRole)) {
       pi.setActiveTools(bootstrap.activeTools);
+    }
+
+    if (bootstrapRole === "fork") {
+      const actual = captureRegisteredTools(pi.getActiveTools(), pi.getAllTools());
+      const registrationError = durableForkContextRef.current ? compareForkRegistrations(durableForkContextRef.current.registeredTools, actual) : undefined;
+      const ownKey = handle.defaultSessionKeyRef.current;
+      const keyError = !ownKey?.trim() || ownKey === (durableForkContextRef.current?.parentSessionKey ?? process.env[WS_PI_PARENT_SESSION_KEY_ENV]) || previousOwnKeys.includes(ownKey) || durableForkContextRef.current?.parentSessionKeys?.includes(ownKey)
+        ? "fork bootstrap did not issue a distinct current own key" : undefined;
+      const readinessError = registrationError ?? keyError;
+      const readiness = {
+        nonce: deliveredFork?.nonce,
+        sessionId: ctx.sessionManager.getSessionId(),
+        sessionPath: ctx.sessionManager.getSessionFile(),
+        ownSessionKey: handle.defaultSessionKeyRef.current,
+        activeTools: [...pi.getActiveTools()],
+        registeredTools: actual,
+        ...(readinessError ? { error: readinessError } : {}),
+      };
+      // Child entries, rather than parent transcript copies or launch files, own restart lifetime.
+      if (durableForkContextRef.current) pi.appendEntry("ws-pi-fork-context", { sessionId: ctx.sessionManager.getSessionId(), context: durableForkContextRef.current });
+      pi.appendEntry("ws-pi-fork-keys", { sessionId: ctx.sessionManager.getSessionId(), current: handle.defaultSessionKeyRef.current, previous: previousOwnKeys });
+      if (deliveredFork) writePrivateJson(deliveredFork.readinessPath, readiness);
+      removeForkTransport(process.env[WS_PI_FORK_CONTEXT_ENV]);
+      forkReady = !readinessError;
     }
   });
 

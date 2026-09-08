@@ -13,6 +13,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: aa6350281b58e25b
 sage-review-design-reviewed: aa6350281b58e25b
+completed: 2026-09-08
 ---
 
 # Pi fork's first model call is a full prompt-cache miss over the whole inherited lead context
@@ -339,3 +340,136 @@ Verification:
   260907-feat-ws-pi-lead-tool-profile-and-orchestrator-role.
 - Regression: worker/execute-worker argv and `systemPromptPath` handling
   unchanged; full adapter test suite green.
+
+### Result (58c5a5d8) - 2026-09-08
+
+Phase 1 implementation is reviewable at `58c5a5d8`; live acceptance is **not
+complete** and this ticket remains in `ready/`. Source range:
+`7e7788b1299cf722e9c2f5955d59cd0c4cfe98a1..58c5a5d8ec3650f1d46c3cc96210d7ed6fc17d24`
+on `impl/track/pi-agent/charm-muck-keg`.
+
+Task and discussion forks now reuse the full effective lead prompt and actual
+ordered callable definitions, move directives into their distinct first-message
+forms, establish a current own key before work, and refuse parent/stale keys
+rather than rewriting them. Original captures survive dormant and repeated
+recovery; fork-only metadata is cleared from worker/explore descendants. Fork
+source-extension loading works without a new global-install requirement. Guarded
+Codex body affinity is independent of prompt restoration and preserves child
+transport identity. The four linked spec anchors describe this implemented
+contract; historical verification is explicitly distinguished from current gates.
+
+The accepted legacy absent-metadata local-snapshot/no-affinity exception remains.
+Malformed present context does not enter that fallback. No general fail-closed
+paid-prefix policy, historical cache-annotation freezing, provider replacement,
+or Decision 8 loader/profile implementation was adopted. Native Anthropic marker
+advancement and Codex continuation deltas remain intentional, explicitly tested
+representations, not normalized-away differences. Worker/execute-worker prompt
+contracts remain unchanged; no shared Go/rsrc or historical done-ticket edits.
+
+Review dispositions at the completed source head:
+
+- C1 — independently clean: first new process input carries the current own key
+  and role refusals without changing inherited history or duplicating later frames.
+- C2 — independently clean: initial/resume readiness and actual-registration
+  checks precede work; invalid input readiness blocks a provider turn.
+- C3 — independently clean: child-bound historical own keys and known parent keys
+  are refused across recovery, while ordinary explicit-key forwarding remains.
+- C4 — independently clean: final effective prompt capture, rendered inputs,
+  restarted-lead capture and never-paid initial discussion composition.
+- C5 — independently clean: effective configuration/effort checks and supported
+  body-only affinity, including disabled-cache and changed-model continuations.
+- C6 — independently clean: source-extension spawn/resume loading and discovery
+  deduplication without fork directive append.
+- I1–I5 — **implementer-reported fixed, not independently re-reviewed**:
+  descendant environment isolation; canonical environment bindings; actual
+  production adapter/SDK lifecycle coverage; side-effect-free role-handler
+  refusal coverage; exact provider-native transition/recovery assertions.
+
+Verification evidence (offline, not a cache-hit or billing verdict):
+
+- Read the complete final relay log
+  `a98fa8d2-02-fork-cache-relay-verification.log` under
+  `/home/swkang/.cache/ws@kang-sw-devenv/proj/dac18b1d@9f097df0/review-paths/`:
+  full `npm test` with a compact reporter, **1260 passed, 0 failed, cancelled,
+  skipped or todo; 173 suites**. This is reused source verification, not a fresh
+  documentation-delegate test run; adapter source/tests are unchanged at closeout.
+- Read sibling `a98fa8d2-01-fork-cache-review-dispositions.md` and
+  `a98fa8d2-03-fork-cache-critical-rereview.md`. Independent re-review reports
+  **12 passed** across six Critical regressions and six actual-SDK lifecycle
+  cases, with no remaining C1–C6 defect or correction-induced Critical regression.
+  Important findings were outside that re-review; it is not release acceptance.
+- Bounded offline coverage uses SDK 0.84.4 and 0.85.1 with Codex Responses,
+  OpenAI Completions and Anthropic Messages. Real adapter/resource/session and
+  serializer paths run with substituted local MCP/RPC transport; entire raw
+  continuation requests are compared to independent references. The evidence
+  records zero provider-send attempts; no paid probes were run for closeout.
+
+**Owner acceptance pending:** first NEW task/discussion/resume usage on at least
+20k gpt-6-astra lead context, excluding inherited JSONL entries; the specified
+cacheRead target and billing investigation with model/API, timing, compaction
+and suffix conditions; previously affected task anti-bleed and final-report
+behavior; and discussion completion. Offline client equality cannot certify
+provider retention, routing, expiry, billing or a cache hit. Do not close the
+ticket on this Result alone. Deferred-load verification remains with the
+lead-tool-profile consumer ticket.
+
+
+## Resolution (2026-09-08)
+
+Owner closed this work track at the verified client-side boundary on 2026-09-08, retaining the implementation and stopping further cache experiments. This is an owner-accepted partial-outcome closure, NOT a claim that the original live cache-hit acceptance passed or that all possible hypotheses were exhausted. It supersedes the prior Result's pending administrative disposition without rewriting its historical evidence. No merge or push is authorized.
+
+Client-side preservation was verified against complete captured outgoing decompressed HTTP JSON, not just reconstructed requests or hashes. For lead -> first fork and first -> second fork, exact serialized non-input field spans, key order and inherited input item spans match; only new input suffixes append. This includes instructions, ordered tools, model, reasoning and prompt_cache_key. Each after-hook capture equals its decoded HTTP body bytes. Fork hooks change only prompt_cache_key to the parent's value. The captured safe request headers differ across parent/child only at session-id and x-client-request-id; they remain identical within the child. Compressed transport bytes, uncaptured headers and backend routing are not proven identical.
+
+Live evidence on installed bundled Pi 0.85.1, openai-codex/gpt-6-astra:
+- Direct ws-fork from the ongoing lead conversation: last lead input 253/cacheRead 73600; first NEW child input 74430/cacheRead 0; second child input 277/cacheRead 74240. The child reported successfully. Historical wire requests for this specific run were not captured.
+- Full raw pair through programmatic invocation of the production registered handler: first child input 73168/cacheRead 0 despite equal shared body fields/prefix. This was not model-selected tool dispatch.
+- Full raw triplet through actual parent-model ws-fork toolCall and the ordinary SDK tool loop: parent input 72855/cacheRead 0; first NEW child input 73444/cacheRead 0; second child input 189/cacheRead 73344 (99.74297% cached). A successful fork tool result, child report result and parent report receipt were recorded; subsequent parent model processing was quota-blocked. This lead was a private continuation copy, not the ongoing interactive lead. Therefore this triplet does not supply a cache-hit parent request as its control.
+
+The original >=90% first-fork target remains unmet. Identical body/cache key does not establish guaranteed backend reuse. Session-header/connection routing and server cache behavior remain unisolated hypotheses; no header-identity workaround or structural impossibility conclusion was established. Resume/discussion live acceptance, broader task anti-bleed acceptance and actual billing remain unverified, not silently passed. The originally authorized six experimental sends plus three additionally authorized sends were consumed; no further experiments are planned in this closed track.
+
+Ephemeral local evidence (raw inherited content is not committed): /tmp/ws-pi-live-acceptance-KrltZbQ3/capture-live/raw/ and triplet-live/raw/, with their sibling summary.json, run-result.json and session/observation files. The independent lead audit compared raw JSON value spans without normalizing field differences away. Direct smoke child session: 2026-09-08T06-41-51-917Z_01a07fc0-6b2c-7056-94b3-e736faf79658.jsonl.
+
+Bounded public community research found analogous reporter observations, not maintainer-confirmed backend semantics or a verified workaround: https://github.com/openai/codex/issues/29377 (fixed-key fresh-thread reuse sometimes high, sometimes low); https://github.com/openai/codex/issues/30425 (stable-key misses, duplicate of 29377); https://github.com/openai/codex/issues/20301#issuecomment-4515349136 (stable request fingerprint/cache key with cache collapse and recovery); https://github.com/openai/codex/issues/33821 (WebSocket reused/fresh connection comparison, not evidence of an SSE-specific cause). Different-key sibling partial reuse in the original Background remains evidence against claiming categorical cross-session impossibility. No separate follow-up implementation or changes to the consumer ticket are authorized by this closure.
+
+## Upstream Lead Review Handoff - 2026-09-08
+
+Owner requested this appendix before the approved merge to `track/pi-agent` so a returning lead can review the implementation separately from its unsuccessful cache-hit outcome. This adds subsequent evidence and approval; it does not rewrite the frozen Phase 1 Result or imply that its unrun gates passed. The owner has now authorized the parent-track merge, but not a push or promotion to `develop`/`main`.
+
+### Implementation to review
+
+- Main implementation and lifecycle repairs: `7e7788b1..58c5a5d8`. Preserve effective lead prompt bytes and actual ordered callable tools; move fork role/key correction into the first new input; enforce role/key refusal without deleting tools; preserve restart metadata and original-parent identity; guard Codex body affinity while retaining distinct child transport identity. Review the final source rather than the initial implementation alone: six Critical and five distinct Important omissions were found after the first test-green version.
+- Initial tests reported 1076 passing. After fixes, the relay reported 1260 passing across 173 suites. The independent Critical re-review ran 12 tests with SDK 0.84.4/0.85.1 and cleared C1–C6. I1–I5 remain implementer-reported fixed rather than independently re-reviewed. These are offline client/lifecycle tests, not a provider cache acceptance test.
+- Documentation at `6ea890a4` and closure at `a2521f26` explicitly separate prefix eligibility from backend reuse. The closure is owner acceptance of a partial outcome, not proof that the original cache bug is fixed.
+- Subsequent owner-only cosmetic notification: `deaf5a86`. `fork-cache-notice.ts` observes only the first new task-fork assistant `message_end` on initial spawn, computes `cacheRead / (input + cacheRead)`, and calls the parent TUI's `ui.notify`. Missing/error/invalid/zero-total usage is unknown, not a miss. No `pushToLead`, custom model message, wakeup or extra inference is introduced. The callback is ephemeral, absent for non-TUI owners, normal resumes and discussion forks; UI exceptions are isolated. Inspect `fork.ts`, `spawner.ts` and `test/fork-cache-notice.test.ts` for integration. Exactly-once persistence across process restarts was deliberately not added.
+- Notification verification: the implementer reported 343 targeted and 1271 full-suite tests passing; the lead independently ran the new 11-test file successfully. After reloading, the owner requested a real `ws-fork` smoke (`72714086-4f0e-423c-8a16-84c44f58333e`), received its final report, and visually confirmed the owner-only `cache 0.0%` notice. This confirms display in that run, not improved reuse or general release acceptance.
+
+### Attempts, in chronological order
+
+1. Offline serializer/prefix and production lifecycle testing. Early broad comparisons and zero-network probes established candidate serialization equality but initially missed wiring defects; independent review drove the repairs above. No offline equality result is evidence of provider retention or billing.
+2. Zero-paid startup verification established a working production extension/MCP startup on Pi 0.85.1. `--offline` was found not to prohibit model sends; endpoint/attempt guards, not that flag or hook exceptions, were used for paid experiments.
+3. Initial paid synthetic pair (two sends): lead input 72691/cacheRead 0; first new child input 73171/cacheRead 0. The real registered `ws-fork.execute` was invoked programmatically after the lead returned `LEAD_READY`; the lead model did not choose the tool. The handler then used production `spawnAgent`/RPC with native Pi `--fork`. This was not a standalone interactive `/fork` test. Only selected parsed-body hashes/prefix counts were retained, not historical raw requests. Lead dispatch-to-child dispatch was 5.295 seconds and lead completion-to-child dispatch 1.613 seconds, so a delay exceeding five minutes did not explain this pair. Full report delivery was not accepted by this first harness.
+4. Direct `ws-fork` from the actual ongoing lead (two child sends): the last parent response had input 253/cacheRead 73600; first NEW child 74430/0; next child 277/74240. This independently reproduced a boundary miss while both the parent and subsequent child calls could hit. Report delivery succeeded. No HTTP originals for these calls were saved, so session JSONL cannot prove their transmitted prefix equality.
+5. Offline reconstruction of that real session found 253 shared input items and three appended child items, using persisted metadata and the current SDK. This was not historical wire evidence: parent tools were reconstructed, unpersisted hooks/transport were not replayed, auth was not verified, and affinity application was assumed in one variant. The reconstruction also exposed a harness entry-point mismatch (unbundled versus installed bundled Pi), corrected for later captures. Temporary capture work expanded unnecessarily and was stopped before resuming a bounded raw-capture task; reconstruction was not promoted into proof.
+6. Raw HTTP pair (two sends): native bundled Pi 0.85.1, SSE, direct invocation of the registered handler, first child 73168/0. Captured full before/after-hook JSON and decompressed outgoing HTTP bodies plus allowlisted headers. Parent/child common body fields and input prefix matched; only appended input and the two session-related request headers differed. No cache hit resulted. Subsequent child sends were blocked by the guard.
+7. Raw model-driven triplet (three additionally authorized sends): private continuation copy of the prior lead, real model `ws-fork` toolCall, ordinary SDK tool execution, production child. Parent 72855/0; first child 73444/0; second child 189/73344 (99.74297% cached). Input item counts 3 -> 6 -> 8. Full raw value-span comparison showed no non-input body differences and byte-identical inherited item spans for both transitions; after-hook bytes equal decoded outgoing body bytes. Across parent/child only the captured `session-id` and `x-client-request-id` headers differed; within the child all captured request headers matched. The parent was cold, so this is not a raw three-way comparison beginning with an already-hitting parent. Child report call/result and parent receipt were observed; parent follow-up model requests were blocked. Repeated native `--fork` ancestry is an implementation detail, not a substitute for the verified model toolCall in this run.
+8. Bounded community research fetched public issue bodies/comments linked in Resolution. Analogous instability and occasional cross-thread reuse were reported, but no maintainer-confirmed cache-routing contract or reliable workaround was found. The WebSocket report cannot establish an SSE cause. Latest public guide text was not freshly retrieved; installed official SDK descriptions and Pi source were consulted instead.
+9. Cosmetic live smoke after owner reload, separately requested after the nine-send investigation allowance was exhausted: owner confirmed the displayed 0.0% ratio. Do not count this later authorization as part of the earlier experimental quota or infer an audited final cumulative send count from it.
+
+### What passed, what did not, and what was not attempted
+
+**Passed within the measured scope:** preservation of transmitted common body fields and inherited input spans in the raw synthetic pair/triplet; actual model-selected task-fork dispatch in the triplet; same-child second-call caching; successful simple task report delivery; owner-only notification display; the stated offline tests and scoped Critical re-review.
+
+**Did not pass:** the first-new-fork >=90% cache-read target. Every newly measured first fork request above was a miss. No implementation change was shown to improve first-call billing or eliminate the boundary miss. The experiment did not establish a causal relationship between either session header and caching. Stable body/key is not a provider reuse guarantee.
+
+**Not attempted or not established:** an isolated change of `session-id`/`x-client-request-id`; a controlled transport-identity or backend-routing experiment; raw capture of a warm ongoing interactive parent followed by its first child; discussion TUI completion and cache measurement; dormant/restart live cache acceptance; a broad adversarial task anti-bleed live test; independent Important re-review; exact billed charges; compressed wire byte equality; backend tokenization, cache residency, expiry or guarantees. The branch-summary workaround remains idea-only (`260908-research-ws-pi-agent-driven-branch-summary-return`). Observed delegate tool-surface failures are captured separately in `260908-bug-ws-pi-delegated-tool-surface-unavailable`; no root cause was established here. Deferred fork-only tool loading remains the separate lead-profile consumer's scope.
+
+### Review evidence locations and interpretation
+
+- Main source range and the exact test/review artifacts are in the frozen Result above. Notification source/test commit is `deaf5a86`.
+- `/tmp/ws-pi-live-acceptance-KrltZbQ3/live/`: initial hash-only pair; `driver.mjs`, `run.py`, `guard.mjs`, `preload.mjs` are temporary evolving harness files, not release implementation. Later harness content does not by itself prove earlier execution behavior.
+- `/tmp/ws-fork-miss-8Q7zNkFU/comparison.json`: explicitly limited offline reconstruction.
+- `/tmp/ws-pi-live-acceptance-KrltZbQ3/capture-live/`: first complete raw pair, including observations, summaries and per-role raw captures.
+- `/tmp/ws-pi-live-acceptance-KrltZbQ3/triplet-live/`: model-driven raw triplet; `sessions/lead-continuation.jsonl` contains the actual parent toolCall/toolResult. Child session `2026-09-08T07-26-21-325Z_01a07fe9-2682-71d1-93f7-74a22ccf7626.jsonl` contains the two new responses. `raw/lead-1--fork-1.comparison.json` and `raw/fork-1--fork-2.comparison.json` accompany the full captures; the lead also independently checked raw JSON value spans locally.
+- Raw captures are private local files, not committed artifacts, and may expire. Durable numerical results and verification limits are recorded above so loss of `/tmp` does not convert an unrepeatable claim into a passed gate. Captures contain decompressed request bodies and allowlisted response metadata, not full response bodies or all transport headers. `cf-cache-status: DYNAMIC` concerns HTTP/CDN caching and is not a model prompt-cache verdict.
+
+Review the correctness and maintainability of the retained implementation on its own merits. Neither ticket closure nor the owner's merge approval should be read as a cache-fix claim, a release approval, or authorization for another paid investigation.

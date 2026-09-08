@@ -126,11 +126,10 @@ function thread(overrides: Partial<ThreadRecord> = {}): ThreadRecord {
 }
 
 describe("tool names", () => {
-  test("are the literals fork.ts duplicates in its exclusion set (the intentional-duplication pin)", () => {
+  test("retain identical registered names; fork role handlers refuse execution instead of hiding schemas", () => {
     assert.equal(ASK_TOOL_NAME, "ws-ask");
     assert.equal(RESOLVE_TOOL_NAME, "ws-resolve");
-    assert.ok(FORK_EXCLUDED_TOOL_NAMES.has(ASK_TOOL_NAME), "fork.ts must exclude ws-ask from a fork's own surface");
-    assert.ok(FORK_EXCLUDED_TOOL_NAMES.has(RESOLVE_TOOL_NAME), "fork.ts must exclude ws-resolve from a fork's own surface");
+    assert.equal(FORK_EXCLUDED_TOOL_NAMES.size, 0);
   });
 });
 

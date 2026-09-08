@@ -113,37 +113,33 @@ the caller's view:
 
 - When a call omits `session_key`, the bridge fills in its own default key,
   minted once at startup via `ferrule` against the session's working root.
-- When a call supplies an explicit `session_key`, the bridge forwards it
-  verbatim; it is not overwritten by the default. This preserves both subagent
+- Outside the narrow normalization/refusal cases below, an explicit
+  `session_key` is forwarded verbatim; it is not overwritten by the default.
+  This preserves both subagent
   parent→child key lineage and lead multi-track orchestration, where distinct
   keys must reach ws-mcp unchanged.
 
-In front of that fill-or-forward rule the bridge runs a **narrow, mechanical
-key normalization** that rewrites exactly two explicit-key values — both
-recognized by string equality against values the adapter knows out-of-band —
-to the bridge's own default key:
+Before fill-or-forward, the bridge normalizes the fresh-bootstrap sentinel
+`obsidian-latch` to its own key when ready, avoiding a second lead-key mint.
+Without an own key this normalization is disabled, preserving the ordinary
+lead's FRESH bootstrap fallback.
 
-| explicit `session_key` value | rewritten to | why |
-| --- | --- | --- |
-| the fresh-bootstrap sentinel `obsidian-latch` | own key | a lead that follows the canonical skill text literally passes the FRESH sentinel; forwarding it would make ws-mcp mint a **second** lead key while the bridge already holds one, splitting the session's ws state across two keys |
-| the **parent lead's key** (present only in a process spawned as a side-thread fork, delivered through the spawn environment) | own key | the fork inherits a transcript that names the lead's key, and ws-mcp keys agenda/todos per key, so forwarding it would clobber the lead's state |
-
-Every other explicit key — including a lead driving a child by that child's
-key — passes through untouched; widening the rewrite beyond these two cases is
-rejected. The rewrite is a pure function
-(`normalizeSessionKey(params, { ownKey, sentinel, parentLeadKey? })`) applied
-strictly before fill-or-forward, and is a bridge-layer mechanism, never a prompt
-instruction. When the startup `ferrule` bootstrap fails and the own key is unset
-(see below), the sentinel rewrite is **disabled** so the model's own FRESH call
-self-heals; the parent-key case is likewise a no-op when no parent key is present.
+In **fork role**, a call carrying a known parent lead key or a stale previously
+issued own key is instead **refused before dispatch**, never silently rewritten.
+The error names the current fork-owned key, or states that bootstrap is not ready.
+This protects the parent's agenda/todos even before readiness. Own-key history is
+bound to the child session and survives restart; inherited messages are not
+rewritten. The current key, omitted keys, and unrelated explicitly issued worker
+keys retain fill-or-forward behavior. Ordinary leads still forward explicit
+child keys unchanged.
 
 Because Pi validates tool-call arguments against the registered parameter schema
 *before* the tool executes, and ws-mcp advertises `session_key` as a required
 property, the bridge relaxes each registered schema so `session_key` is listed in
 `properties` but **not** in `required`. Without this, Pi's own validator would
 reject an omitted-`session_key` call before the fill-or-forward logic ran,
-defeating the optional-key contract. An explicit key still validates and flows
-through unchanged.
+defeating the optional-key contract. An explicit key still validates; dispatch
+applies the narrow sentinel normalization and fork refusals above.
 
 If the startup `ferrule` bootstrap fails, the default key is left unset rather
 than faked; a later omitted-`session_key` call then surfaces ws-mcp's own
@@ -157,10 +153,29 @@ session-key handshake, because those hosts give the plugin no hook on the lead's
 system prompt. On Pi the adapter owns the extension, so the manual is injected
 directly into the lead's system prompt and the handshake becomes unnecessary.
 
+The composition rules below apply to ordinary leads and legacy forks without
+inherited prompt metadata. A metadata-bearing task or discussion fork instead
+restores the lead's **full effective system prompt verbatim on every turn**,
+including discovered or explicit append overrides and the complete rendered
+manual/guide/skills block (or its captured absence). Child resource changes do
+not reconstruct or append to that frozen prompt. The capture reflects the final
+effective lead prompt after prompt handlers; a restarted lead can reuse its last
+persisted capture before another turn. With no prior effective turn, discussion
+launch composes the ordinary current bootstrap without manufacturing a model call.
+
+The fork still mints its own key, but does not fetch its own `workflow_manual`
+for the inherited prompt. The independent static-body mapping fetch can fail
+without discarding the inherited prompt/block. Original prompt inputs, parent ws
+keys, parent Pi affinity identity and ordered callable definitions survive dormant
+resume, task-sidecar and discussion recovery, including repeated restarts and
+launch-file cleanup. Worker and explore descendants do not inherit fork-only
+metadata. Missing legacy metadata retains local-snapshot/no-affinity behavior;
+malformed present metadata is not treated as legacy absence.
+
 - Hook: the adapter appends a **ws block** to the lead's system prompt on every
   agent run (Pi's `before_agent_start`, whose result may return a `systemPrompt`
-  chained across extensions). The extension **appends, never replaces**: it
-  returns the incoming `systemPrompt` followed by the ws block. Because Pi
+  chained across extensions). For ordinary composition the extension **appends,
+  never replaces**: it returns the incoming `systemPrompt` followed by the ws block. Because Pi
   re-assembles the system prompt from its base on every turn, the handler
   re-applies the block each turn from an in-memory snapshot rather than
   capturing it once. Idle pushed delivery also enters this preflight through a
@@ -466,7 +481,7 @@ carries `worker` (including execute-worker records), `explore` (a persistent
 researcher or terminal collection leaf), or `fork` (a lead-caliber side-thread
 peer); its absence marks the host **lead** process.
 A `fork` additionally carries `WS_PI_PARENT_SESSION_KEY` (the lead's key), which
-feeds the fork's key-normalization parent-key case and lets the bridge mint the
+feeds the fork's parent-key refusal and lets the bridge mint the
 fork's key with lead lineage. This single marker is the source for both the
 system-prompt role gate (only lead and fork receive the ws block) and the goal
 loop's lead-only gating (any role present marks a child, whose settle handler
@@ -994,24 +1009,40 @@ forked session file itself; the adapter discovers the real path after the child
 starts and fails loud if it is absent. A fork is lateral, not a worker: it does
 not consume delegation depth.
 
-- **Own lead-scope key, never the lead's.** The fork spawns carrying the fork
-  role marker and the parent lead's session key as the parent-session-key
-  environment value; it mints its **own** lead-scope key rather than reusing the
-  lead's. The session-key normalization described under "Session key stays
-  optional and caller-controllable" rewrites an explicit key equal to that
-  parent value to the fork's own key, so the fork's todo/agenda/state are its
-  own and the lead's are left untouched.
-- **Tool surface = lead's, minus the fork verbs, plus the report channel.** A
-  fork's active tools are the lead's exact active surface at spawn time minus the
-  side-thread verbs (`ws-fork`, `ws-ask`, `ws-resolve`) plus
-  `ws-report-to-lead`. `ws-fork` is added to the **top lead
-  only** (a role-differentiated step, kept separate from the shared lead
-  tool-surface reshaping described under "Lead native tool-surface reshaping" so
-  it is never re-added to a fork), which is also what makes recursion fail at the
-  tool layer: a fork has no `ws-fork` in its allowlist, so it cannot fork again.
-  Because the fork loads the same extension as a lead-or-fork role, it inherits
-  the reshaped lead surface (no native `bash`/`read`; `ws-execute`/`ws-approve`
-  and the ugly-named direct read tool present).
+- **Own lead-scope key, never the lead's.** Initial and dormant launches must
+  establish a distinct current own key and actual child session identity before
+  delivering work. Invalid readiness blocks the new provider turn with a
+  diagnostic. The first new message of each process states the current key and
+  the three side-thread refusals; later messages do not repeat that frame.
+  Parent and stale own-key calls are refused as described above, not rewritten.
+- **Tool surface = lead's exactly.** Forks preserve the lead's actual callable
+  names, descriptions, schemas and order without adding, deleting or deduplicating
+  tools. Actual registrations are checked before work delivery and again at input
+  after resource merging; missing or changed registrations are visible failures,
+  not synthetic schema replay. `ws-fork`, `ws-ask` and `ws-resolve` remain visible
+  with identical metadata but throw fork-role tool errors before allocating a
+  child or mutating a thread. Task questions use `ws-report-to-lead` instead.
+- **Prefix and cache boundary.** Task and discussion forks preserve the captured
+  effective prompt and inherited message content under the same effective
+  provider/model/API compatibility configuration. Provider-native continuation
+  representations remain intact: Anthropic cache breakpoints advance to the new
+  suffix, and Codex may send a continuation delta rather than full history.
+  Historical wire annotations are not frozen. Compatible, cache-enabled
+  `openai-codex` / `openai-codex-responses` requests reuse the parent's Pi id only
+  in the existing nonempty body `prompt_cache_key`; transport identity and
+  continuation ids remain the child's. Missing affinity metadata, unsupported
+  providers/payloads, disabled caching, or differing model/auth/endpoint/compatibility/
+  effort configuration leave affinity unchanged without losing the prompt.
+  Explicit model overrides remain supported, outside cross-model cache reuse.
+  Legacy absent metadata uses local bootstrap without affinity and cannot certify
+  unavailable historical prefix bytes. These client guarantees do not guarantee
+  provider retention, routing, cache hits or billing; no general paid-prefix
+  admission policy or deferred-tool loader is introduced.
+- **Launch and recovery.** Fork spawn and resume load this adapter explicitly,
+  including when the lead used source `-e`; no global-install prerequisite is
+  added for forks. Neither path passes a fork directive through
+  `--append-system-prompt`. Fork recovery needs no directive file; worker and
+  execute-worker rendered-playbook argv and prompt-path requirements are unchanged.
 - **Approval routing follows the spawning parent.** A mutation-approval request
   from a worker that a fork itself spawned through the lead-execute approval
   gateway routes to that **fork**, not the top lead. This is emergent from the
@@ -1029,25 +1060,28 @@ not consume delegation depth.
   the fork's own session, at most twice) and then fails loud to the lead with a
   transcript tail rather than looping forever. A fork that reaches idle without
   having emitted a `kind:"final"` report is surfaced to the lead as an incomplete
-  run and is never harvested as a result. The **system-prompt directive**
-  (`--append-system-prompt`) is short, task-focused natural language: no identity
+  run and is never harvested as a result. The **first-message directive**
+  includes both report kinds and all required final fields. It uses short,
+  task-focused natural language: no identity
   or persona framing and no XML or all-caps override language, which were found to
   backfire on the Claude host.
 - **Structural anti-bleed frame (fork initial message).** Because a fork inherits
-  the lead's full transcript *and* the lead-guide block the session-start hook
-  appends to any lead/fork process, an inherited lead-orchestration script can
+  the lead's full transcript *and* its captured lead-guide block, an inherited
+  lead-orchestration script can
   push a fork into role-bleed (it re-runs the lead's plan instead of its own
   task). The mitigation is not an identity override in the system prompt but a
   structural frame on the fork's **initial user message**: it demotes the
   inherited conversation to reference-only and fences the actual task as an
   explicit "message from the lead", so the fork separates its task from the
   lead's inherited plan without any all-caps identity shouting. This message-level
-  frame (not the system-prompt directive) is where fork identity is handled; it
-  was live-verified to stop role-bleed on both a weak model and a top-frontier
-  model, and it complements the completion loop above rather than replacing it.
+  frame and the directive both live in the first message, not the system prompt.
+  The frame complements the completion loop rather than replacing it. Historical
+  anti-bleed verification predates this combined message; owner-run re-verification
+  of the current message-only directive remains pending.
 
 > [!note] Live verification · 2026-09-05
-> The Phase 1 live gate was run against the installed adapter on a real Pi
+> Historical evidence, predating the fork-prefix correction: the Phase 1 live
+> gate was run against the installed adapter on a real Pi
 > session (`pi 0.84.4`, `openai-codex` subscription provider). Confirmed
 > end-to-end: `pi --fork <lead-session>` copy-on-fork composition produces a new
 > forked session that inherits the lead's full transcript; the fork's tool
@@ -1067,7 +1101,10 @@ not consume delegation depth.
 > project's `package.json` `pi.extensions`; an ad-hoc `-e` lead run therefore
 > leaves children without `ws-report-to-lead` and the report round-trip silently
 > fails. The report/relay channel is available to spawned agents only under an
-> installed adapter.
+> installed adapter. The current fork spawn/resume explicitly loads the adapter,
+> superseding that fork-only precondition; the historical excluded-tool surface
+> above is also superseded by exact tool identity and handler refusals. Current
+> paid cache/billing and task anti-bleed acceptance remain owner-run and pending.
 >
 > The owner-question surface built on top of this fork (next section) has its
 > own live-verification status recorded there.
@@ -1087,10 +1124,9 @@ channel for an owner question: it registers and carries on.
   spawns nothing and never blocks. `ws-resolve(question_id)` withdraws a
   question the lead answered by itself (status `closed`, removed from the
   pending count, no owner notification, no injection); an unknown id is an
-  error. Both are added to the **top lead only** through the same
-  role-differentiated step pattern as `ws-fork`, and both are excluded from a
-  fork's surface (see "Tool surface" above), so a fork cannot ask the owner
-  through the lead's tool — it raises questions through `ws-report-to-lead`.
+  error. Both remain in a fork's inherited callable surface with unchanged
+  schemas/descriptions, but their handlers refuse fork-role calls before thread
+  mutation. A task fork raises questions through `ws-report-to-lead` instead.
 - **`context` is bounded by warning, not truncation.** The lead-authored
   `context` (2–3 sentences, no paths or hashes) is stored unchanged; past an
   adapter-side character budget (400) the lead receives a warning notification.
@@ -1101,8 +1137,11 @@ channel for an owner question: it registers and carries on.
   registration (lead-ask only), a status (`pending` → `open` → `dormant` |
   `closed`), the respondent agent id once known, an `origin` (`lead-ask` |
   `fork-raised`), and — once a respondent has run — a denormalized resume
-  snapshot (session path, system-prompt path, tool surface, ws tool names,
-  tool group, model, effort). The registry is written on every transition to
+  snapshot (session path, optional legacy system-prompt path, tool surface,
+  ws tool names, tool group, model, effort, and original fork prompt/context
+  metadata). Repeated recovery retains the original capture rather than the
+  restarting lead's current prompt or identity. The registry is written on every
+  transition to
   `<lead session file>.ws-threads.json` and reloaded on `session_start`; load
   and save never throw (a missing or malformed file reads as empty; an
   unwritable target is a no-op). A record with no recognizable `origin`
@@ -1124,13 +1163,17 @@ channel for an owner question: it registers and carries on.
 - **Lazy discussion fork at the lead's tip (lead-ask threads).** A registered
   question costs nothing until the owner opens it. Opening a `lead-ask` thread
   for the first time forks a **discussion** fork from the lead's *current* tip
-  (`pi --fork`), carrying the lead's surface minus the side-thread verbs plus
-  the report channel; its first message is `context + question` and, when the
+  (`pi --fork`), preserving the lead's full effective prompt and exact callable
+  surface under the same readiness, key-refusal and affinity rules as task forks.
+  Its first message carries the conversational directive, current own key and
+  role-refusal reminders, followed by `context + question` and, when the
   thread's `entry_id` is no longer on the lead's live branch (a compaction has
   passed it), a **verbatim excerpt** of the lead-session entries around that id,
   read from the append-only session file. A discussion fork gets **no**
-  structural anti-bleed frame and **no** completion loop (it converses; it does
-  not report), and it is spawned only from a TUI lead.
+  task structural anti-bleed frame and **no** task completion loop or required
+  task-final fields. It retains owner dialogue, `/done` and a short 2–4 sentence
+  decision summary, including after recovery, and is spawned only from a TUI lead.
+  Owner-run discussion acceptance for the message-only directive remains pending.
 - **Attach to a live task fork (fork-raised threads).** When a `ws-fork` task
   fork reports `kind:"question"` from a TUI lead, the adapter registers a
   `fork-raised` thread whose respondent is that fork, increments the pending

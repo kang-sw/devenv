@@ -39,6 +39,7 @@
 
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { RpcAgentRecord, RpcAgentRegistry, SpawnAgentRole, ToolGroup } from "./spawner.ts";
+import { parseForkContext, type ForkContext } from "./fork-context.ts";
 import type { ExploreMode } from "./process-role.ts";
 
 /** Sidecar file version. Bumped only on a breaking shape change; a mismatch is treated as "no sidecar". */
@@ -57,7 +58,8 @@ export interface PersistedOrphan {
   /** Head-truncated at spawn (`truncatePromptForStorage`); round-trips verbatim, no re-truncation on revival. */
   prompt?: string;
   sessionPath: string;
-  systemPromptPath: string;
+  systemPromptPath?: string;
+  forkContext?: ForkContext;
   modelBase?: string;
   modelEffort?: string;
   wsToolNames: string[];
@@ -124,6 +126,7 @@ export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
       prompt: record.prompt,
       sessionPath: record.sessionPath,
       systemPromptPath: record.systemPromptPath,
+      ...(record.forkContext ? { forkContext: record.forkContext } : {}),
       modelBase: record.modelBase,
       modelEffort: record.modelEffort,
       wsToolNames: [...record.wsToolNames],
@@ -185,7 +188,10 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
     if (!o || typeof o !== "object") continue;
     if (typeof o.agentId !== "string" || !o.agentId) continue;
     if (typeof o.sessionPath !== "string" || !o.sessionPath) continue;
-    if (typeof o.systemPromptPath !== "string") continue;
+    if (o.systemPromptPath !== undefined && typeof o.systemPromptPath !== "string") continue;
+    let forkContext: ForkContext | undefined;
+    try { forkContext = parseForkContext(o.forkContext); } catch { continue; }
+    if (!o.systemPromptPath && !forkContext) continue;
     const toolGroup = o.toolGroup;
     const isKnownToolGroup = toolGroup === undefined || toolGroup === "read-only" || toolGroup === "read-only-explore" || toolGroup === "recon" || toolGroup === "full-worker" || toolGroup === "execute-worker";
     const isKnownRole = o.spawnRole === undefined || o.spawnRole === "worker" || o.spawnRole === "execute-worker" || o.spawnRole === "fork" || o.spawnRole === "explore";
@@ -207,6 +213,7 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
       prompt: typeof o.prompt === "string" ? o.prompt : undefined,
       sessionPath: o.sessionPath,
       systemPromptPath: o.systemPromptPath,
+      ...(forkContext ? { forkContext } : {}),
       modelBase: typeof o.modelBase === "string" ? o.modelBase : undefined,
       modelEffort: typeof o.modelEffort === "string" ? o.modelEffort : undefined,
       wsToolNames: Array.isArray(o.wsToolNames) ? o.wsToolNames.filter((n): n is string => typeof n === "string") : [],
@@ -253,6 +260,7 @@ export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
     client: undefined,
     sessionPath: orphan.sessionPath,
     systemPromptPath: orphan.systemPromptPath,
+    ...(orphan.forkContext ? { forkContext: orphan.forkContext } : {}),
     modelBase: orphan.modelBase,
     modelEffort: orphan.modelEffort,
     wsToolNames: [...orphan.wsToolNames],
