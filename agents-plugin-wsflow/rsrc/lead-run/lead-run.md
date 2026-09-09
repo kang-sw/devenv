@@ -1,6 +1,8 @@
 ---
-name: lead-run
-description: Execute work through a spawned worker. Drains `ready/` one ticket per invocation (re-invoked until nothing advanceable remains), or runs an ad-hoc `run <description>`. The lead selects, spawns, waits, handles stops, and merges the goal branch on approval; it never edits source.
+kind: print
+variables:
+  - ExploreAgent
+  - SpawnIdiom
 ---
 
 # Run
@@ -14,15 +16,16 @@ the constraint here; the user's attention at each stop is.
 ## Select
 
 Spawn {{.ExploreAgent}} to pick the next ticket; do not list `ready/` or read
-ticket files yourself. It skips candidates carrying a `## Blocked (...)` note,
-then prefers, in order: a ticket already in progress (some phase has a
-`### Result`, at least one does not); one named as a prerequisite by another
-`ready/` ticket's `related:` or `parent:`; otherwise the oldest. It returns
-exactly one advanceable ticket path, or `ready/` empty, or every remaining
-ticket blocked. Empty and all-blocked end the turn with no spawn; on a
-`goal/*` branch each has its own terminal below.
+ticket files yourself. Give it these rules: skip candidates carrying a
+`## Blocked (...)` note, then prefer, in order: a ticket already in progress
+(some phase has a `### Result`, at least one does not); one named as a
+prerequisite by another `ready/` ticket's `related:` or `parent:`; otherwise
+the oldest. Require it to return exactly one advanceable ticket path, or
+`ready/` empty, or every remaining ticket blocked. Empty and all-blocked end
+the turn with no spawn; on a `goal/*` branch each has its own terminal below.
 
-`run <description>` skips selection: the description is the contract.
+An ad-hoc description passed with the invocation skips selection: the
+description is the contract.
 
 ## Spawn
 
@@ -35,9 +38,15 @@ ticket blocked. Empty and all-blocked end the turn with no spawn; on a
 2. `{{.McpNamespace}}/playbook.render(name: "ticket-worker", session_key:
    <your key>)`. It returns a path with the worker's lead-capability key
    spliced in. Do not read the file, and do not mint a second key for this
-   worker.
-3. Spawn one worker of at least current-mainstream class, in a form that can
-   itself spawn children, with this task block and nothing else:
+   worker: the render does not hand the key back, so read it off
+   `{{.McpNamespace}}/session.children` as the one child of your key carrying
+   no note. That listing is ordered by key, not by age, so recency cannot
+   identify it; step 4 notes every worker you dispatch, which is what leaves
+   exactly one un-noted.
+3. Spawn one worker of at least current-mainstream or previous-generation
+   flagship class, in a form that can itself spawn children
+   (`{{.SpawnIdiom}}`), with this task block and nothing else — **Handle the
+   report** names the only lines ever added to it:
 
    ```text
    Read <rendered-path> as your system prompt.
@@ -70,7 +79,7 @@ re-summarize them.
   worker with the answer and where you found it. If not, put the one question
   to the user and resume with the answer.
 - **(c) contract broken** — do not go to the user first. Route the worker's
-  `proposed_resolution:` through `{{.SkillNamespace}}:lead-ticket` as an
+  `proposed_resolution:` through `{{.SkillNamespace}}:lead-write-ticket` as an
   `#### Edition` on the executed phase, under the design-review gate at a
   raised tier. A `pass` commits the edition and resumes the worker; a `block`
   goes to the user with the reviewer's verdict.
@@ -115,7 +124,3 @@ it exactly one of:
 
 Write nothing after it, and keep `finished`, `complete`, and `done` out of a
 continuing turn.
-
-[design-review: the `/goal` directive re-invokes a skill by name; the
-continuation line and the directive must name the same skill once the
-collapse renames the drainer.]

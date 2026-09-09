@@ -315,6 +315,116 @@ this ticket in turn.
   session-auth Go files, `ai-docs/manuals/wsflow-mirroring.md`,
   `ai-docs/manuals/skill-authoring.md`.
 
+### Result (d1e13fab) - 2026-09-09
+
+`lead-run` replaces `lead-drain-ready-queue`. It ships as
+`agents-plugin/rsrc/lead-run/lead-run.md` (`kind: print`, `variables:
+ExploreAgent`/`SpawnIdiom`) plus `playbook.read` shims of the `lead-discuss`
+shape in both packages; `lead-drain-ready-queue` and its wsflow mirror are
+deleted, together with `test_drain_ready_queue_is_inlined_static_body`, the
+`composedSkills` splice entry, and `TestComposedTargetKeepsTurnEndingLast`.
+The body is the committed draft moved, not rewritten; the draft and its README
+row are gone. Landed across d1e13fab, 0a9ee632, 6976f113, 14c183f4.
+
+**Decisions taken.**
+
+- Three changes the placement forced, none of them rewrites: the draft's
+  `[design-review: ...]` marker is resolved (both final lines and the loop
+  directive name `lead-run`) and dropped; `lead-ticket` does not exist, so the
+  stop-(c) route names the extant `lead-write-ticket`; `{{.SpawnIdiom}}` is
+  added to the spawn step, since the design review settled that the
+  harness-idiom variable is the host-neutral spawn hook and the draft did not
+  actually use it.
+- The fan-out serve-time transclusion is retargeted, not dropped. Hook 2 now
+  renders the `lead-run` rsrc body instead of loading a `SKILL.md`, because
+  `lead-run`'s `SKILL.md` carries the dispatch call rather than the procedure;
+  the overlay's own three references were renamed with it. Dropping the hook
+  here was rejected: it would leave fan-out overlaying nothing for the window
+  before Phase 2 retires it.
+- `delegates: true` was set on the new playbook and then removed. The flag
+  appends the harness delegation tip, whose unconditional mercenary-path
+  paragraph contradicts Decision 6, and it landed a second copy inside the
+  fan-out transclusion right after the final-line contract.
+- The worker's child session key is read off `session.children` as the one
+  child of the lead's key carrying no note. `playbook.render` returns only the
+  path, the recommended tier, and the recommended model, so a lead forbidden
+  to read the rendered file has no other source; `session.children` orders by
+  (depth, key) with no timestamp, so recency cannot identify it, while step 4's
+  note on every dispatched worker leaves exactly one un-noted. Changing
+  `playbook.render` to return the key is the cleaner contract but is a runtime
+  response-shape change owned by the ticket that introduced the render mint.
+- `composedSkills` is emptied, not deleted. The mechanism, generator, and drift
+  guard stay for the next entry; `ComposeSkillBody`'s happy path moved to a
+  synthetic fixture so coverage no longer depends on the mapping being
+  non-empty.
+- Spec and mental-model text is untouched, per the completeness review that
+  removed those touchpoints.
+
+**Behavior dropped with no new home.** The retired drainer's `## Posture`
+carried mid-run ticket curation and bug routing (curate through
+`lead-write-ticket`; blocking or goal-relevant bugs to `ready/`, incidental to
+`idea/`, deferred captured only). The autonomy half is absorbed by the worker
+stop protocol; the curation half is in neither `lead-run` nor `ticket-worker`.
+It is dropped from the lead deliberately — the lead no longer executes work —
+and is **not** re-homed on the worker here, because `ticket-worker` is owned by
+`260909-refactor-lead-surface-collapse-worker-stop-protocol`. Re-homing it on
+the worker is a follow-up for that ticket or a new one.
+
+**Verification.**
+
+- `go build ./...` and `go test ./... -count=1` from `agents-plugin-tool/`:
+  clean, all 14 packages.
+- `python3 -m unittest discover agents-plugin-wsflow/tests`: 10 tests, OK.
+- `python3 -m unittest discover agents-plugin/tests`: 53 tests, 1 failure —
+  `test_skill_dispatch_contracts.py::test_proceed_keeps_implementation_route_only`,
+  the pre-existing failure recorded in
+  `260909-bug-proceed-contract-test-pins-pre-diet-lead-proceed-strings`,
+  confirmed failing identically on `epic/refound` and not absorbed here.
+- Regenerated in the mandatory order (compose, wsflow skills mirror, rsrc
+  manifest, wsflow rsrc mirror, skills manifest), each `-count=1`;
+  `TestComposedSkillsUpToDate`, `TestWsflowSkillsMirrorUpToDate`,
+  `TestWsflowRsrcMirrorUpToDate`, `TestSkillsManifestDriftIsVisible` all green
+  afterward.
+- `test_shipped_surfaces_downstream_neutral.py` green.
+- Fresh-reader audit run once on the placed file before it landed: 32 findings,
+  3 fixed (selection rules stated as instructions rather than assertions about
+  the explorer; the worker-key source; the "nothing else" task-block rule
+  reconciled with the lines the report handler adds), the rest classified as
+  risk-accepted, intentional, or out of scope — Layer 1/2 restatement the
+  authoring standard deletes, vocabulary the worker protocol and ticket
+  conventions own by pointer, compressed goal-branch and final-line rules the
+  shipped drainer already had, and the ad-hoc path's reconciliation that the
+  sibling ticket owns.
+- Review: one full-scope reviewer, two rounds. Round 1 returned 1 critical and
+  3 important; round 2 confirmed all fixed except the critical, which it graded
+  partially fixed (the key-identification rule named recency, which the
+  listing does not carry) and which 14c183f4 closes. No critical open.
+
+**Dogfood: not run end to end — carried to the lead.** The live MCP server in
+this session serves the installed plugin snapshot, not the working tree: both
+`playbook.read(name: "lead-run")` and `playbook.render(name: "ticket-worker")`
+return "no such rsrc playbook" against it, so no spawned worker in this session
+can resolve the rendered prompt. Completing the expectation needs a
+user-performed plugin cache refresh first. What was verified instead, all
+against a server built from the working tree:
+
+- Selection: a real explorer dispatch with the body's rules returned exactly
+  one advanceable path
+  (`ai-docs/tickets/ready/260909-refactor-lead-surface-collapse-worker-stop-protocol.md`)
+  and cited the in-progress rule, matching the specified return shape.
+- Render and key sourcing: `playbook.render(name: "ticket-worker")` by a lead
+  key mints a `scope: control`, `depth: 1` child; two renders plus one note
+  produced a listing in which the second-minted child sorted first and the
+  un-noted child was the only distinguishable one.
+- Render output: the served body substitutes every variable, carries no
+  literal `{{.}}` token and no `[design-review:` marker, and ends on the
+  final-line contract with nothing appended after it.
+- Spawn, task block, and terminal report: exercised one level up — this phase
+  was itself executed by a worker spawned from `ticket-worker` with the task
+  block this playbook specifies, on a branch named in that block, returning the
+  terminal report the handler consumes.
+
+
 ### Phase 2: retire the fan-out entry point and its bespoke Go hook
 
 Sequentially dependent on Phase 1: the entry point is only removable once its

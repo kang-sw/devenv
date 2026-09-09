@@ -461,9 +461,9 @@ const (
 	preferSubagentPlaybookTitle = "Prefer Subagent"
 	preferSubagentEnabledValue  = "on"
 
-	goalFanOutStepPlaybookName   = "lead-goal-fan-out-step"
-	drainReadyQueuePlaybookName  = "lead-drain-ready-queue"
-	drainReadyQueuePlaybookTitle = "Drain Ready Queue"
+	goalFanOutStepPlaybookName = "lead-goal-fan-out-step"
+	runPlaybookName            = "lead-run"
+	runPlaybookTitle           = "Run"
 )
 
 // builtinPromptOverrideDefaults returns code-owned default override values for
@@ -876,16 +876,19 @@ func workflowPreferSubagentEnabled(configOpts wsconfig.Options) (bool, error) {
 
 // printPlaybook loads a playbook and returns its rendered body text inline.
 //
-// It has two code-side pragmatic concatenation hooks that append a
-// skills-tree SKILL.md body (via wsrsrc.LoadSkillBody) wrapped in a visible
-// <playbook name=... title=...> boundary, applied post-substitution so the
-// appended static prose (no {{.}} placeholders) never trips the
+// It has two code-side pragmatic concatenation hooks that append a body
+// wrapped in a visible <playbook name=... title=...> boundary — hook 1 a
+// skills-tree SKILL.md via wsrsrc.LoadSkillBody, hook 2 a rendered rsrc
+// playbook — applied post-substitution so the appended text never trips the
 // undeclared-var guard:
 //  1. lead-workflow-manual: gated by the global workflow.prefer_subagent
 //     preference — appends lead-prefer-subagent only when the preference is on.
 //  2. lead-goal-fan-out-step: unconditional on the name — always appends
-//     lead-drain-ready-queue, since the fan-out overlay transcludes that
-//     skill's full contract verbatim rather than restating it.
+//     lead-run, since the fan-out overlay transcludes that playbook's full
+//     contract verbatim rather than restating it. Unlike hook 1 this one
+//     renders an rsrc playbook body rather than loading a SKILL.md: lead-run
+//     ships as a playbook.read shim, so its SKILL.md carries the dispatch
+//     call, not the procedure.
 //
 // printPlaybook never mints child keys (mintRoot="") and ignores preferMercenary.
 //
@@ -916,15 +919,11 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 		}
 	}
 	if name == goalFanOutStepPlaybookName {
-		skillsRoot, err := wsrsrc.ResolveSkillsRoot()
+		appendBody, _, err := renderPlaybookBody(s, rsrcRoot, runPlaybookName, nil, configOpts, "", "", false, workflowLang, overrideLookup)
 		if err != nil {
-			return "", "", fmt.Errorf("resolve skills root for appended %s: %w", drainReadyQueuePlaybookName, err)
+			return "", "", fmt.Errorf("render appended %s: %w", runPlaybookName, err)
 		}
-		appendBody, err := wsrsrc.LoadSkillBody(skillsRoot, drainReadyQueuePlaybookName)
-		if err != nil {
-			return "", "", fmt.Errorf("load appended %s: %w", drainReadyQueuePlaybookName, err)
-		}
-		body += "\n\n" + wsrsrc.WrapForConcatenation(drainReadyQueuePlaybookName, drainReadyQueuePlaybookTitle, appendBody)
+		body += "\n\n" + wsrsrc.WrapForConcatenation(runPlaybookName, runPlaybookTitle, appendBody)
 	}
 	return body, recommendedTier, nil
 }

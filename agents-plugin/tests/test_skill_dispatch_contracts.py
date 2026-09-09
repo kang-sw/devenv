@@ -64,18 +64,26 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn("Treat user preference as input, not evidence.", text)
         self.assertIn("Build the strongest concise countercase", text)
 
-    def test_drain_ready_queue_is_inlined_static_body(self):
-        # lead-drain-ready-queue's body is inlined directly in SKILL.md (no
-        # rsrc playbook, no playbook.read indirection), mirroring the
-        # lead-verify-discussion inline-body shape.
-        text = (SKILLS_DIR / "lead-drain-ready-queue" / "SKILL.md").read_text(encoding="utf-8")
+    def test_run_dispatches_through_playbook_read(self):
+        # lead-run is a playbook.read shim over an rsrc body, not an inline
+        # SKILL.md: the body uses harness-idiom template variables, and those
+        # are substituted only on the playbook.read/playbook.render path.
+        shim = (SKILLS_DIR / "lead-run" / "SKILL.md").read_text(encoding="utf-8")
+        text = (RSRC_DIR / "lead-run" / "lead-run.md").read_text(encoding="utf-8")
 
-        self.assertNotIn('ws/playbook.read(name: "lead-drain-ready-queue")', text)
-        self.assertIn("light-tier Explore-style subagent", text)
-        self.assertIn("(FIFO)", text)
+        self.assertIn('ws/playbook.read(name: "lead-run", session_key:', shim)
+        self.assertIn("{{.ExploreAgent}}", text)
+        self.assertIn("{{.SpawnIdiom}}", text)
+        self.assertIn('{{.McpNamespace}}/playbook.render(name: "ticket-worker"', text)
+        self.assertIn("{{.McpNamespace}}/session.note(session_key:", text)
+        self.assertIn("One worker in flight per invocation.", text)
         self.assertIn("prerequisite", text)
-        self.assertIn("lead-prefer-subagent", text)
-        self.assertIn("Do not list", text)
+        self.assertIn("do not list `ready/` or read", text)
+        self.assertIn(
+            "next cycle: {{.SkillNamespace}}:lead-run.",
+            text,
+        )
+        self.assertNotIn("[design-review:", text)
 
 
 if __name__ == "__main__":
