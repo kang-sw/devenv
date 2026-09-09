@@ -407,7 +407,7 @@ func deriveImplementTodosFromVerdict(verdict implementTodoVerdict) []todoItem {
 	items := []todoItem{
 		{Key: "route", Title: "Route", Instruction: implementInstructionPtr(implementRouteInstruction(verdict))},
 		{Key: "prep", Title: "Prep", Instruction: implementInstructionPtr(implementPrepInstruction(verdict))},
-		{Key: "edit", Title: implementEditTitle(verdict.Delegation), Instruction: implementInstructionPtr(implementEditInstruction(verdict))},
+		{Key: "edit", Title: "Edit", Instruction: implementInstructionPtr(implementEditInstruction(verdict))},
 	}
 	if verdict.NeedReview {
 		items = append(items, todoItem{Key: "review", Title: implementReviewTitle(verdict.ReviewAlloc), Instruction: implementInstructionPtr(implementReviewInstruction(verdict))})
@@ -451,15 +451,6 @@ func parseImplementReviewAlloc(raw string) (string, error) {
 		return "partitioned", nil
 	default:
 		return "", fmt.Errorf("invalid review_alloc %q: want one of single, partitioned", raw)
-	}
-}
-
-func implementEditTitle(delegation string) string {
-	switch strings.ToLower(strings.TrimSpace(delegation)) {
-	case implementDelegationMode:
-		return "Edit (delegated)"
-	default:
-		return "Edit"
 	}
 }
 
@@ -514,18 +505,15 @@ func implementPrepInstruction(verdict implementTodoVerdict) string {
 		return fmt.Sprintf("Do not prepare further implementation work until the branch blocker is resolved: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
 	return implementPrepGuardrails(verdict.BindingAnchorClause) +
-		"Then start from the target's own contract: no survey, research, or planning stage runs before the edits. " +
-		"Survey only what the target leaves open, and resolve a target decision that source contradicts before editing rather than working around it."
+		"Then start from the target's own contract: no survey, research, or planning stage runs before the edits — the target is the plan. " +
+		"Read only what the target leaves open, and resolve a target decision that source contradicts before editing rather than working around it."
 }
 
 func implementEditInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not start source edits while branch action is stop: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
-	if strings.EqualFold(strings.TrimSpace(verdict.Delegation), implementDelegationMode) {
-		return "Apply the source edits, verify them against the project's build and test commands, commit each logical checkpoint with ## AI Context, and capture the resulting commit range for review and relays."
-	}
-	return "Execute the selected implementation path and verify the changed behavior before review or documentation closeout."
+	return "Apply the source edits, verify them against the project's build and test commands, commit each logical checkpoint with ## AI Context, and capture the resulting commit range for review and relays."
 }
 
 // implementReviewDispositionClause states the disposition-marker requirement for
@@ -635,7 +623,6 @@ func implementMergeInstruction(verdict implementTodoVerdict) string {
 func isBranchStop(verdict implementTodoVerdict) bool {
 	return strings.EqualFold(strings.TrimSpace(verdict.BranchPlan.Action), "stop")
 }
-
 
 func formatReviewPartitions(reviewAlloc string) string {
 	raw := strings.TrimSpace(reviewAlloc)
@@ -1068,9 +1055,13 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 		return toolTextResponse(id, "", fmt.Errorf("route.resolve_implement: %w", err))
 	}
 	args["delegation"] = delegation
-	// plan_depth selected a planning stage that no longer exists. Drop it
-	// rather than validate it, so a legacy caller that still sends one neither
-	// errors nor leaves a stage name behind in the stored agenda.
+	// The three removed axes are handled asymmetrically on purpose. delegation
+	// and review_alloc still select behavior, so a legacy value that no longer
+	// exists ("direct-edit", "lead-only") is an error rather than a silent
+	// downgrade of what the caller asked for. plan_depth selected a planning
+	// stage that no longer exists at all, so there is nothing to downgrade:
+	// drop it rather than validate it, and a legacy caller that still sends
+	// one neither errors nor leaves a stage name behind in the stored agenda.
 	delete(args, "plan_depth")
 	args["review_alloc"] = reviewAlloc
 	// The legacy top-level path has no record in scope; read the session state

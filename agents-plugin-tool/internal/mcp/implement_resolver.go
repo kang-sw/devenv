@@ -385,6 +385,10 @@ func parseImplementPolicy(raw any) (implementPolicyInput, error) {
 			return out, fmt.Errorf("policy.review must be an object")
 		}
 		var err error
+		// "lead-only" is gone from this enum with the allocation it named: the
+		// caller executes the change, so an allocation that made the caller its
+		// own reviewer can no longer resolve. A caller that still sends it gets
+		// the enum error rather than a silent promotion to independent review.
 		if out.Review.Override, err = parseEnumFact(gm, "override", []string{"auto", "single", "partitioned"}); err != nil {
 			return out, fmt.Errorf("policy.review.%w", err)
 		}
@@ -494,6 +498,11 @@ func observeImplementBranch(root string, targetBranch string) (implementBranchOb
 // existed only for a caller that edited source inline instead of delegating,
 // and the review allocation it enabled would have had that caller review its
 // own edits. Independent review is now unconditional.
+//
+// The value names how the caller was reached — the work was delegated to it —
+// not what the caller does with it: the caller edits source itself. Nothing
+// downstream branches on the value; it stays a stable field so a stored agenda
+// keeps its shape, and no emitted todo title repeats it.
 const implementDelegationMode = "delegated"
 
 func resolveImplement(input implementInput, obs implementBranchObservation) implementResult {

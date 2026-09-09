@@ -89,7 +89,7 @@ func TestDeriveImplementTodosFromVerdictTitles(t *testing.T) {
 	})
 	wantTitles := map[string]string{
 		"prep":   "Prep",
-		"edit":   "Edit (delegated)",
+		"edit":   "Edit",
 		"review": "Review (single)",
 	}
 	for _, item := range got {
@@ -147,6 +147,7 @@ func TestDeriveImplementTodoInstructionsPrepGuardrails(t *testing.T) {
 		})
 	}
 }
+
 func TestDeriveImplementTodoInstructionsPartitionedReview(t *testing.T) {
 	got := deriveImplementTodosFromVerdict(implementTodoVerdict{
 		Delegation:  "delegated",
@@ -1568,10 +1569,10 @@ func implementReadyArgs(format string) map[string]any {
 		},
 		"facts": map[string]any{
 			"scope": map[string]any{
-				"span":                        "multi-file",
-				"surface":                     "public-interface",
-				"new_public_symbol":           "no",
-				"new_type_contract":           "yes",
+				"span":              "multi-file",
+				"surface":           "public-interface",
+				"new_public_symbol": "no",
+				"new_type_contract": "yes",
 				"test_surface":      "existing",
 			},
 			"complexity": map[string]any{
@@ -1611,10 +1612,10 @@ func implementSkipDocsArgs(format string) map[string]any {
 		},
 		"facts": map[string]any{
 			"scope": map[string]any{
-				"span":                        "single-file",
-				"surface":                     "internal",
-				"new_public_symbol":           "no",
-				"new_type_contract":           "no",
+				"span":              "single-file",
+				"surface":           "internal",
+				"new_public_symbol": "no",
+				"new_type_contract": "no",
 				"test_surface":      "none",
 			},
 			"complexity": map[string]any{
@@ -1812,7 +1813,7 @@ func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
 	})
 	for _, want := range []string{
 		"- [ ] {prep} Prep",
-		"- [ ] {edit} Edit (delegated)",
+		"- [ ] {edit} Edit",
 		"- [ ] {review} Review (single)",
 	} {
 		if !strings.Contains(enter, want) {
@@ -1843,7 +1844,7 @@ func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
 			"review_alloc": "single",
 			"need_review":  true,
 		})
-		if !strings.Contains(got, "- [ ] {prep} Prep") || !strings.Contains(got, "- [ ] {edit} Edit (delegated)") {
+		if !strings.Contains(got, "- [ ] {prep} Prep") || !strings.Contains(got, "- [ ] {edit} Edit") {
 			t.Fatalf("legacy plan_depth=%q did not render the collapsed todos, got: %s", depth, got)
 		}
 		for _, forbidden := range []string{"Prep (survey plan)", "Prep (research plan)", "plan-populator"} {
@@ -1860,6 +1861,7 @@ func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
 		t.Fatalf("invalid review_alloc error expected, got: %s", got)
 	}
 }
+
 func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -1923,7 +1925,7 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 	full := callToolWithKey(t, server, 5, key, "todo.list", map[string]any{"mode": "full"})
 	for _, want := range []string{
 		"- [ ] {prep} Prep\n      " + implementPrepGuardrails(""),
-		"- [ ] {edit} Edit (delegated)\n      Apply the source edits",
+		"- [ ] {edit} Edit\n      Apply the source edits",
 	} {
 		if !strings.Contains(full, want) {
 			t.Fatalf("full todo list missing enter-derived instruction %q:\n%s", want, full)
@@ -1932,6 +1934,39 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 	for _, forbidden := range []string{"Prep (brief", "implementation brief"} {
 		if strings.Contains(full, forbidden) {
 			t.Fatalf("full todo list retained old brief wording %q:\n%s", forbidden, full)
+		}
+	}
+}
+
+// TestEnterImplementTicketTargetTodosCarryNoPlanningStage pins the collapsed
+// route shape for a ticket target: the installed list opens route -> prep ->
+// edit -> review with no stage in between, and no todo mints or names a plan.
+// The target is the plan.
+func TestEnterImplementTicketTargetTodosCarryNoPlanningStage(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	runGit(t, root, "switch", "-c", "feature/base")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+	callToolWithKey(t, server, 2, key, "route.resolve_implement", implementReadyArgs("text"))
+
+	record, ok := server.sessions.readState(key)
+	if !ok {
+		t.Fatal("session record not found")
+	}
+	keys := keysOf(record.Todos)
+	for i, want := range []string{"route", "prep", "edit", "review"} {
+		if i >= len(keys) || keys[i] != want {
+			t.Fatalf("todo list = %v, want it to open with route, prep, edit, review", keys)
+		}
+	}
+	full := callToolWithKey(t, server, 3, key, "todo.list", map[string]any{"mode": "full"})
+	for _, forbidden := range []string{"plan-populator", "path.generate", "Plan Depth", "plan_depth", "survey plan", "research plan", "{plan}"} {
+		if strings.Contains(full, forbidden) {
+			t.Fatalf("todo list retained planning-stage text %q:\n%s", forbidden, full)
 		}
 	}
 }
@@ -2083,6 +2118,7 @@ func TestEnterImplementSkippedDocsOmitsDocTodos(t *testing.T) {
 		}
 	}
 }
+
 func TestEnterImplementUnbornRepositoryUsesStandardCreatePath(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -4303,7 +4339,7 @@ func assertPrepAnchorClause(t *testing.T, prep string, declared bool) {
 }
 
 // TestEnterImplementTypedPathRendersDeclaredBindingAnchor exercises the typed
-// route.resolve_implement path (session_state.go:1101): the clause is read from
+// route.resolve_implement path in handleEnterImplement: the clause is read from
 // record.Root's AGENTS.md.
 func TestEnterImplementTypedPathRendersDeclaredBindingAnchor(t *testing.T) {
 	for _, tc := range []struct {
@@ -4333,7 +4369,7 @@ func TestEnterImplementTypedPathRendersDeclaredBindingAnchor(t *testing.T) {
 }
 
 // TestEnterImplementLegacyPathRendersDeclaredBindingAnchor exercises the legacy
-// top-level route.resolve_implement path (session_state.go:1145), which reads
+// top-level route.resolve_implement path in handleEnterImplement, which reads
 // session state itself; this is the path the ticket constraint requires a test
 // to pin.
 func TestEnterImplementLegacyPathRendersDeclaredBindingAnchor(t *testing.T) {
@@ -4373,7 +4409,7 @@ func TestEnterImplementLegacyPathRendersDeclaredBindingAnchor(t *testing.T) {
 }
 
 // TestEnterProceedReadsDeclaredBindingAnchorGate exercises the handleEnterProceed
-// wiring (session_state.go:1204): AnchorDeclared is read from the session root's
+// wiring: AnchorDeclared is read from the session root's
 // AGENTS.md before resolveProceed. A declaring root routes a supplied
 // binding_anchor=missing to the anchor gate; a sectionless root forces the fact
 // to n/a even though the lead supplied missing, so the gate never fires.

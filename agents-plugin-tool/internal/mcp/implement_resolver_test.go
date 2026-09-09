@@ -11,17 +11,19 @@ import (
 // collapse: the fact set that used to select the caller-edits/caller-reviews
 // fast path — single-file, internal, no new public symbol or type contract, and
 // all four risk axes genuinely low — now resolves to the one execution mode with
-// an independent reviewer allocated. No fact combination may drop review.
+// an independent reviewer allocated. No fact combination reaching this resolver
+// may drop review; the legacy top-level enter path still honors an explicit
+// need_review=false from its caller and is out of this test's scope.
 func TestResolveImplementSmallestSafeChangeStillGetsIndependentReview(t *testing.T) {
 	input := implementInput{
 		Target: implementTargetInput{Kind: "inline", Label: "tiny edit", ScopeLabel: "tiny edit", ScopeSlug: "tiny-edit"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "single-file", Present: true},
-				Surface:                   factString{Value: "internal", Present: true},
-				NewPublicSymbol:           factString{Value: "no", Present: true},
-				NewTypeContract:           factString{Value: "no", Present: true},
-				TestSurface:               factString{Value: "none", Present: true},
+				Span:            factString{Value: "single-file", Present: true},
+				Surface:         factString{Value: "internal", Present: true},
+				NewPublicSymbol: factString{Value: "no", Present: true},
+				NewTypeContract: factString{Value: "no", Present: true},
+				TestSurface:     factString{Value: "none", Present: true},
 			},
 			Complexity: implementComplexityFactsInput{
 				ChangePoints:   factString{Value: "clear", Present: true},
@@ -255,8 +257,8 @@ func TestResolveImplementBranchStopOmitsPlannerInstructions(t *testing.T) {
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "feature"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
@@ -279,8 +281,8 @@ func TestResolveImplementBranchRenameDefaultsToAllowedWhenUnset(t *testing.T) {
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "feature"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
@@ -298,8 +300,8 @@ func TestResolveImplementAheadOfMergeRootBlocksRenameRegardlessOfAllowRename(t *
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 2", ScopeSlug: "new", TicketStem: "260900-feat-new-thing"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
@@ -330,8 +332,8 @@ func TestResolveImplementNoAheadOfMergeRootAllowsRename(t *testing.T) {
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 2", ScopeSlug: "new"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
@@ -350,8 +352,8 @@ func TestResolveImplementSameScopeContinuesRegardlessOfAheadOfMergeRoot(t *testi
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "old"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
@@ -370,8 +372,8 @@ func TestResolveImplementAheadOfMergeRootInertOnCreatePath(t *testing.T) {
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "new"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
 			},
 		},
 	}
@@ -387,8 +389,8 @@ func TestResolveImplementMergeConfirmDefaultsToAskWhenUnset(t *testing.T) {
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "feature"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
@@ -406,8 +408,8 @@ func TestResolveImplementMergeConfirmSkipHonored(t *testing.T) {
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "feature"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
@@ -428,8 +430,8 @@ func TestResolveImplementMergeConfirmNonSkipStillAsks(t *testing.T) {
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "feature"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
@@ -450,11 +452,11 @@ func TestResolveImplementMergeTargetPolicyIgnoredOutsideImplementBranchWarns(t *
 		Target: implementTargetInput{Kind: "inline", Label: "tiny edit", ScopeLabel: "tiny edit", ScopeSlug: "tiny-edit"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "single-file", Present: true},
-				Surface:                   factString{Value: "internal", Present: true},
-				NewPublicSymbol:           factString{Value: "no", Present: true},
-				NewTypeContract:           factString{Value: "no", Present: true},
-				TestSurface:               factString{Value: "none", Present: true},
+				Span:            factString{Value: "single-file", Present: true},
+				Surface:         factString{Value: "internal", Present: true},
+				NewPublicSymbol: factString{Value: "no", Present: true},
+				NewTypeContract: factString{Value: "no", Present: true},
+				TestSurface:     factString{Value: "none", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
@@ -482,11 +484,11 @@ func TestResolveImplementMergeTargetPolicyHonoredOnImplementBranchNoWarning(t *t
 		Target: implementTargetInput{Kind: "inline", Label: "tiny edit", ScopeLabel: "tiny edit", ScopeSlug: "tiny-edit"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "single-file", Present: true},
-				Surface:                   factString{Value: "internal", Present: true},
-				NewPublicSymbol:           factString{Value: "no", Present: true},
-				NewTypeContract:           factString{Value: "no", Present: true},
-				TestSurface:               factString{Value: "none", Present: true},
+				Span:            factString{Value: "single-file", Present: true},
+				Surface:         factString{Value: "internal", Present: true},
+				NewPublicSymbol: factString{Value: "no", Present: true},
+				NewTypeContract: factString{Value: "no", Present: true},
+				TestSurface:     factString{Value: "none", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
@@ -721,11 +723,11 @@ func TestResolveImplementDocSkipAndWarnings(t *testing.T) {
 		},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "internal", Present: true},
-				NewPublicSymbol:           factString{Value: "no", Present: true},
-				NewTypeContract:           factString{Value: "no", Present: true},
-				TestSurface:               factString{Value: "existing", Present: true},
+				Span:            factString{Value: "multi-file", Present: true},
+				Surface:         factString{Value: "internal", Present: true},
+				NewPublicSymbol: factString{Value: "no", Present: true},
+				NewTypeContract: factString{Value: "no", Present: true},
+				TestSurface:     factString{Value: "existing", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
@@ -768,8 +770,8 @@ func ticketPhaseInput(ticketStem, scopeLabel string) implementInput {
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: scopeLabel, TicketStem: ticketStem},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{

@@ -1796,7 +1796,6 @@ func TestWsflowModePlaybookRenderAbsorbsPromptRenderContext(t *testing.T) {
 	if strings.Contains(codeReviewerText, "ws.mercenary.") || strings.Contains(codeReviewerText, "exec.") {
 		t.Fatalf("code-reviewer playbook render exposed hidden full-ws guidance:\n%s", codeReviewerText)
 	}
-
 }
 
 func TestPlaybookRenderReturnsResolvedNativeBindings(t *testing.T) {
