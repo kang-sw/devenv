@@ -39,7 +39,7 @@
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { startOwnedSessionObserver, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole, type ToolGroup } from "./spawner.ts";
+import { refreshAgentTelemetry, startOwnedSessionObserver, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole, type ToolGroup } from "./spawner.ts";
 import { parseForkContext, type ForkContext } from "./fork-context.ts";
 import type { ExploreMode } from "./process-role.ts";
 import { readOwnership, updateOwnership, validDescriptor, type AgentOwnership } from "./agent-storage.ts";
@@ -280,7 +280,7 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
  * reports again for real.
  */
 export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
-  return {
+  const record: RpcAgentRecord = {
     agentId: orphan.agentId,
     alias: orphan.alias,
     title: orphan.title,
@@ -307,6 +307,10 @@ export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
     reportLog: [],
     lastReportAtOverride: orphan.lastReportAt,
   };
+  // A parked record can gain a flushed final entry between sidecar capture
+  // and process exit. Reconcile it before any recovery consumer renders it.
+  if (record.telemetry) refreshAgentTelemetry(record);
+  return record;
 }
 
 /**
