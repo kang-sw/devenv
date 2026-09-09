@@ -9,6 +9,7 @@ related:
 sage-review-completeness: completed
 sage-review-design-reviewed: 5fb4afc0098c7c4a
 sage-review-completeness-reviewed: 5fb4afc0098c7c4a
+completed: 2026-09-09
 ---
 
 # Git-history workflow-cost measurement manual, plus the pre-removal baseline run
@@ -265,3 +266,178 @@ this ticket's.
   by grepping `agents-plugin-tool/` for `manuals`.
 - Expected to change: nothing under `agents-plugin/`,
   `agents-plugin-wsflow/`, or `agents-plugin-tool/`.
+
+### Result (c96b4db2) - 2026-09-09
+
+**Behavioral delta.** `ai-docs/manuals/workflow-cost-measurement.md` exists and
+is listed by the manuals inventory surface. The draft under
+`ai-docs/ref/refound-drafts/` is gone and its README row with it (plus a new
+placement rule there so the next child drops its row too). Nothing under
+`agents-plugin/`, `agents-plugin-wsflow/`, or `agents-plugin-tool/` changed.
+
+**Run header.** Measured branch `develop` at `84b1f825`, 2026-09-09. Executed
+from worktree HEAD `49f48229` on `epic/refound` (`develop` is an ancestor of
+it), so `TICKETS` was a read-only `git archive develop` copy, not the working
+tree; `.done/` is byte-identical between the two refs (384 files both sides).
+Commit convention in force for the window: lead-authored commits, roughly one
+per phase plus a separate `docs(ticket)` closure commit, with implementation
+landing on `impl/*`/`goal/*` branches merged `--no-ff`.
+
+**Window.** 20 stems, `completed:` 2026-08-30 through 2026-09-09 (11 calendar
+days), oldest first: `260824-feat-lead-review-range-scenario`,
+`260824-feat-review-release-gate-policy`, `260824-feat-review-watermark-ledger`,
+`260828-refactor-per-slice-review-relay`,
+`260830-bug-review-nudge-trackless-bootstrap-gap`,
+`260830-feat-sage-freshness-content-baseline`,
+`260831-bug-survey-plan-unilateral-scope-reduction`,
+`260831-refactor-severity-graded-per-slice-review-relay`,
+`260901-feat-note-oversize-layer-aware-clone-path`,
+`260903-refactor-mcp-read-surface-collapse`,
+`260903-refactor-mcp-todo-signature-merge`,
+`260903-refactor-mcp-verb-vocabulary-unification`,
+`260904-bug-windows-parent-watch-pid-reuse-flake`,
+`260904-refactor-enter-affordance-rename-route-opaque`,
+`260906-bug-route-opaque-params-handler-mismatch`,
+`260907-feat-ws-project-tree-parent-nested-ticket-render`,
+`260908-feat-survey-plan-is-route-not-contract`,
+`260908-bug-sage-gate-stale-completed-has-no-rerun-path`,
+`260908-bug-shipped-surfaces-carry-devenv-only-content`,
+`260908-feat-implement-skip-survey-for-localized-ticket-target`.
+48 closed actionable tickets were skipped for lacking `completed:` — every one
+predates the convention, so the window is unaffected, but the after-run must
+report the same figure or the two windows span different periods.
+
+**1. Ticket latency.** Days (stem date → `completed:`): min 0, median 0.5,
+max 6; distribution 0×10, 1×6, 2×1, 6×3. First-parent commit gap: min 0,
+median 14, max 57. The three 6-day / 34–57-commit rows are the `260824`
+review-watermark epic children, which sat in `todo/` after a user demotion; the
+median row is a same-or-next-day close. Read as latency, not effort.
+
+**2. Commits per ticket, by type.** 137 stem-referencing commits across the 20
+tickets: `docs` 81 (59%), `chore` 17, `merge` 17, `feat` 10, `fix` 4,
+`refactor` 4, `test` 3, `plan` 1. Seven of twenty tickets have *no* commit
+typed as product work at all on `develop` (`260828-refactor-per-slice-review-relay`,
+`260831-refactor-severity-graded-per-slice-review-relay`,
+`260903-refactor-mcp-todo-signature-merge`,
+`260906-bug-route-opaque-params-handler-mismatch`,
+`260907-feat-ws-project-tree-parent-nested-ticket-render`,
+`260908-bug-sage-gate-stale-completed-has-no-rerun-path`,
+`260908-feat-implement-skip-survey-for-localized-ticket-target`) — the same
+seven that indicator 3 reports as `unavailable`. This is the single most load-bearing
+number in the baseline: under the current convention the pipeline's visible
+git output is overwhelmingly ticket bookkeeping, and product commits reach
+`develop` inside merges that do not name the stem.
+
+**3. Corrective share.** 1 corrective commit out of 52 post-implementation
+commits across the 12 measurable tickets; only
+`260824-feat-review-watermark-ledger` has one (`fix(260824): validate Ref
+shape…`, 1 of 8). 7 tickets are `unavailable (no implementation commit)` and 1
+is `n/a (no post-implementation commits)` — so 8 of 20 (40%) of the window
+cannot be measured on the epic's Dropped-condition indicator at all, because
+their implementation commits never name the stem. **A after-run that reports a
+higher corrective share must first check this count**: if the worker-interpreter
+convention has one worker naming the stem in its own commits, `unavailable`
+falls and `corrective` rises without any change in re-work.
+
+**4. Escalations recorded in `### Result`.** 18 measurable; 2
+`unavailable (no phase Result)` (`260830-bug-review-nudge-trackless-bootstrap-gap`,
+`260904-bug-windows-parent-watch-pid-reuse-flake` — single-commit tickets whose
+close carries no Result section). 2 tickets nonzero, 10 matching lines total
+(`260831-bug-survey-plan-unilateral-scope-reduction` 4,
+`260908-feat-survey-plan-is-route-not-contract` 6). Every one of the 10 lines
+was read: all are the tickets' own design vocabulary (`[escalate-to-lead]`,
+`[escalate-to-research]`) discussed in the abstract, not a recorded stop. The
+honest baseline figure is therefore **zero recorded escalations in 20 tickets**,
+with 10 false-positive lines, and the indicator's stated
+"abstract-discussion counts" limit is not theoretical.
+
+**5. Judgment items in `## AI Context`.** 326 bullets across 115 commits.
+Classified by four independent readers over four equal partitions, each given
+the manual's rule verbatim and nothing else: 172 judgment, 154 narration (53%).
+The per-partition judgment share ranged 41%–69% (34/83, 40/79, 41/81, 57/83),
+which is the indicator's stated measurer-dependence made visible; an after-run
+must classify the same way (four blind readers, one rule, no cross-talk) or the
+halves are not comparable. Borderline cases the readers flagged, with the class
+assigned: *"Delegated survey plan (plan-populator-survey, sonnet); confidence
+high, no escalate-to-research."* → judgment, because it names a routing
+alternative not taken; *"Single-phase ticket; Phase 1 landing completes it, so
+it closes to done rather than staying in ready/."* → narration, because the
+named alternative is a mechanical consequence of a rule, not a choice among
+workable options. That second line is the boundary the after-run should hold:
+a `because` clause is not by itself a judgment item.
+
+**6. Aborted-run indicators.** Blocked notes 9; dropped phases 8; dropped
+tickets carrying implementation commits 9; `merge(goal)` merges on `develop`
+14; `goal/*` branches not merged into `develop` 5 —
+`goal/drain-ready-queue`, `goal/ws-dashboard-dev/copper-heron-vale`,
+`goal/ws-dashboard-dev/marlin-cove-thistle`, `goal/ws-dashboard-related-tickets`,
+`goal/ws-dashboard-tickets`. All five last committed in July and sit hundreds
+of commits off `develop`: abandoned, not in flight. These are whole-tree
+cumulative counts; the after-run compares them only as a difference.
+
+**Deviations from the phase plan.** None in scope; the plan said to fix what
+the run exposed in the placed copy, and it did. The corrections are listed in
+`c96b4db2`'s `## AI Context`.
+
+**Where the manual's own wording proved wrong (its first usability test).**
+Every one of these was found by running it, not by reading it:
+- *Self-name vocabulary collision.* The draft's corrective rule matched
+  `relay`/`review round` anywhere in subject or body. Every commit that
+  references a ticket reproduces the ticket's title, so
+  `260831-refactor-severity-graded-per-slice-review-relay` scored 4 of 4
+  corrective with zero actual re-work, and restricting to the subject line
+  only lowered it to 3 of 4 — the feature's own name is in the subject too.
+  Fixed by stripping the stem's words before matching.
+- *Lifecycle commits read as implementation.* The draft excluded only `docs`
+  and `merge`, so `chore(<other-stem>): promote … to ready` became a ticket's
+  "first implementation commit". Fixed with an allow-list of product types,
+  shared by indicators 3 and 6.
+- *Administrative drop sweeps read as aborts.* Indicator 6 reported 19 dropped
+  tickets with implementation commits; a single
+  `chore(ticket): … drop libws/agent/leaf tickets` sweep accounted for four of
+  them. With the shared selector the count is 9, and two of those nine are
+  still package-scoped commits that merely mention the stem — a stated residual.
+- *Wrapped bullets truncated.* Indicator 5's rule emitted only lines starting
+  with `- `; commit bodies are hard-wrapped, so most bullets arrived cut
+  mid-sentence and the first classification pass was made on half-sentences.
+  Fixed by rejoining continuations, and the classification was re-run.
+- *A merged branch counted as unmerged.* `git branch --list 'goal/*'` never
+  tests merged-ness; `goal/develop/amber-lantern-drift` is fully merged and was
+  counted as an abort. Fixed with `--no-merged`.
+- *Absent conventions reported as zero.* The Rules said missing conventions are
+  `unavailable`, but no indicator command could express it. Indicators 3, 4 and
+  5 now carry explicit guards.
+- *Branch/tree split.* The commit indicators read `$BRANCH` while the ticket
+  reads came from the working tree, which disagree whenever the run is taken off
+  the tracked branch — exactly this run's situation. The manual now
+  parameterizes `TICKETS` and gives a read-only materialization step, and warns
+  that git pathspecs must stay repo-relative.
+- *No end state.* The draft said "record" repeatedly and never said where or
+  what finished looks like. A `## Record` section now does.
+
+**Verification.**
+- Every `sh` block in the placed manual extracted in document order and run
+  verbatim from the repository root under `sh`, `bash` and `dash`: identical
+  output in all three, no errors, no stderr beyond the documented
+  `skipped (no completed:)` lines.
+- Manuals inventory (`wsdoc.ManualsList`) lists the file with its one-line
+  `summary:` alongside the five existing manuals.
+- Leak greps on the manual: no `26xxxx` stem, no `agents-plugin*`, no
+  `install.sh`, no `wsflow`, no `devenv`, no migration vocabulary. A
+  fresh-reader review that saw only this one file, with no repository access,
+  raised no reference it could not resolve from the file itself.
+- Go suite `./...` green uncached (14 packages).
+- Repository tree unmodified by the run: `git status` shows only the manual,
+  the drafts README, and a pre-existing untracked `ws-mcp` build artifact.
+
+**Unresolved / carried forward.** `agents-plugin/tests/test_skill_dispatch_contracts.py::test_proceed_keeps_implementation_route_only` fails on
+`develop` and on this branch, asserting a sentence
+("Route only; do not implement or plan here.") that no longer exists in the
+`lead-proceed` playbook. `agents-plugin/` is byte-identical between `develop`
+and this branch and this phase touched nothing there, so the failure predates
+this work; it belongs to whichever child edits that surface.
+
+**The matching after-run is the epic's, not this ticket's.** Its Completion
+Criteria own it, and its Cross-Child Decision 19 names the hand-dogfood run of
+the removal children as the first after-sample — which includes this ticket's
+own execution.
