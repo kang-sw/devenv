@@ -133,6 +133,10 @@ export const GATED_EXEC_TOOL_NAME = "ws-worker-exec";
  */
 export const WS_PI_APPROVAL_DIR_ENV = "WS_PI_APPROVAL_DIR";
 
+/** Parent-shell bootstrap overrides select a forced ws-mcp install. They are
+ * lead-launch policy, never child-launch policy. */
+const CHILD_BOOTSTRAP_OVERRIDE_ENVS = ["WS_MCP_BOOTSTRAP_BINARY", "WS_MCP_BOOTSTRAP_URL"] as const;
+
 /**
  * Pure env-builder for the one-shot `explore` path's `spawn(...)` call
  * (`spawnPiProcess` below): merges the `explore` process-role marker
@@ -152,6 +156,7 @@ export function buildChildProcessEnv(baseEnv: NodeJS.ProcessEnv): NodeJS.Process
   // A collection leaf remains explore-role but is terminal: never inherit a
   // deep marker that would re-enable recursive collection.
   const env = { ...baseEnv, [WS_PI_SPAWN_ROLE_ENV]: "explore" };
+  for (const override of CHILD_BOOTSTRAP_OVERRIDE_ENVS) delete env[override];
   delete env[WS_PI_EXPLORE_MODE_ENV];
   for (const marker of [WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_AFFINITY_ENV]) delete env[marker];
   return env;
@@ -1976,6 +1981,9 @@ export function buildRpcClientOptions(
   env[WS_PI_FORK_READY_NONCE_ENV] = forkLaunch?.nonce ?? "";
   env[WS_PI_FORK_AFFINITY_ENV] = forkLaunch?.affinityId ?? "";
   env[WS_PI_PARENT_SESSION_KEY_ENV] = role === "fork" ? parentSessionKey ?? "" : "";
+  // RpcClient overlays env onto process.env, so deletion here would preserve a
+  // stale parent value. Empty values neutralize forced bootstrap selection.
+  for (const override of CHILD_BOOTSTRAP_OVERRIDE_ENVS) env[override] = "";
   const args = forkFrom ? ["--fork", forkFrom] : ["--session", sessionPath];
   if (role === "fork") args.push("--extension", fileURLToPath(new URL("./index.ts", import.meta.url)));
   else if (systemPromptPath) args.push("--append-system-prompt", systemPromptPath);

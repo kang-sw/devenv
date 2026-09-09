@@ -3,11 +3,14 @@ title: Pi worker/explore children inherit a stale shell WS_MCP_BOOTSTRAP_BINARY 
 spec:
   - pi-adapter-runtime
 related:
-  260907-feat-ws-pi-local-devenv-ws-mcp-build-bootstrap: the lead-side marker build overrides the variable for the lead's launcher only; children spawn with the unmodified process.env
+  260907-feat-ws-pi-local-devenv-ws-mcp-build-bootstrap: marker bootstrap remains launcher-scoped; this ticket neutralizes stale shell overrides at child boundaries
+plans:
+  phase-1: 2026-09/09-2217-260907-bug-ws-pi-children-inherit-stale-bootstrap-binary-env
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 95376d2d498939c7
 sage-review-completeness-reviewed: 95376d2d498939c7
+completed: 2026-09-09
 ---
 
 # Pi worker/explore children inherit a stale shell WS_MCP_BOOTSTRAP_BINARY and force-reinstall the wrong ws-mcp
@@ -54,7 +57,7 @@ shell-selected binary into the cache slot merely by inheriting these values.
   solved by environment sanitization. No launcher/shared ws-mcp change is
   authored on this Pi track.
 
-## Also observed
+## Also observed (historical, 2026-09-07)
 
 `agents-plugin-pi/runtime.json` (byte-synced from develop) lists
 `config.resolve_agent`, which develop added after the v0.45.2 tag, so the
@@ -86,3 +89,51 @@ resume paths; prove parent process.env and intentional lead bootstrap values
 are unchanged. A fixture launcher must reuse the selected compatible install
 instead of replacing it with a stale binary. Real Pi dogfood is a post-build
 acceptance check; absence of a newer public release is recorded separately.
+
+### Result (649ca5cf) - 2026-09-09
+
+Implemented in `bf811a0b` with launcher-regression follow-up `649ca5cf`.
+Direct child environments delete the inherited bootstrap binary/URL overrides;
+RPC options explicitly empty them so the SDK's parent-environment merge cannot
+restore stale values. The shared boundaries cover fresh worker/fork/persistent
+exploration, one-shot collection and dormant resume without mutating the parent
+environment or disabling a fork's own marker-driven bootstrap.
+
+Verification:
+
+- Focused spawner and local-devenv suites: **323/323 passed**.
+- Real launcher fixture: raw stale overrides force the expected failure;
+  sanitized child environment reuses the selected compatible runtime unchanged.
+- Isolated live startup: installed Pi **0.85.1** started through its real
+  `RpcClient` with the adapter extension and a copied local **0.45.2** runtime.
+  The copy independently matched the bundled version, protocol, tools and
+  commands. With stale parent binary/URL inputs, the direct builder removed
+  both and the effective RPC environment carried empty overrides. `getState()`
+  succeeded, the launcher wrote its compatibility stamp, the runtime content
+  remained unchanged and no launch-error breadcrumb appeared. All mutable
+  Pi/WS state was temporary and removed after clean process shutdown; no model
+  prompt, download or owner-cache mutation was used. This verifies real startup
+  and bootstrap reuse, not interactive conversation UX or a new public release.
+- Full package run: **1276 passed, 130 failed**. The unchanged environmental
+  baseline comprises 129 cases/import failures requiring the missing hardcoded
+  Linux global Pi SDK fixture and one `lead-bootstrap.test.ts` expectation that
+  the host lead exposes `ws-ask`. The latter reproduced standalone with
+  `expected ws-ask on the host lead's reshaped surface`; current filtering of
+  `ws-ask`/`ws-resolve` is intentional. No build/typecheck script or project
+  tsconfig exists. These failures are not reported as a passing full suite.
+
+Review: correctness clean; two Important findings were [fixed] in the single
+relay/documentation pass: add the real launcher fixture and document child
+bootstrap isolation. No Critical or unresolved implementation findings remain.
+Spec `260907-pi-local-devenv-build-bootstrap` was updated in `3507ec9c`; the
+spec index passed. No separate mental-model entry was needed because the
+invariant is covered by the spec.
+
+Deviations: no implementation scope change. The separate historical release
+tool-contract mismatch is not claimed resolved, and the existing full-suite
+fixture/tool-surface failures remain outside this ticket.
+
+
+## Resolution (2026-09-09)
+
+Child bootstrap environment isolation is implemented, independently reviewed, and verified with helper, launcher-fixture and isolated real-Pi startup evidence. Preserve the separately recorded full-suite baseline failures and historical release mismatch as limitations, not unresolved scope of this fix.

@@ -350,6 +350,15 @@ Observable behavior:
   lead/fork session start rebuilds, relying on Go's build cache.
 - **Marker present, worker or explore role**: the marker is not consulted; the
   child's launcher reuses the binary the lead's launch installed.
+- **Inherited bootstrap overrides at child launch**: direct exploration and RPC
+  worker, fork, persistent-explore and dormant-resume launches neutralize the
+  parent shell's `WS_MCP_BOOTSTRAP_BINARY` and `WS_MCP_BOOTSTRAP_URL`. Direct
+  child environments omit these keys; RPC overrides use empty values so the
+  parent-environment merge cannot restore them. A stale shell selection cannot
+  force a child to replace the selected compatible runtime. Unrelated environment
+  values and the parent process remain unchanged. A fork's own valid marker can
+  still build and select its runtime for its launcher; normal compatibility
+  checks, cache reuse and release selection remain in force.
 - **Invalid marker** (bad JSON, wrong `schema_version`, a missing or relative
   path field, `tool_dir` without `cmd/ws-mcp`, or a `go` that is not an
   executable file) or a **failed build**: session start fails loudly with the
