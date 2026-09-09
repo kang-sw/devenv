@@ -134,7 +134,11 @@ into playbook text the worker actually reads.
    release is a low-reversibility action whose stop belongs to the lead and
    user. The worker's lead-capability key is minted by `playbook.render` when
    the spawner renders the worker playbook; this ticket's stop protocol and
-   worker playbooks assume that key and never mint another.
+   worker playbooks assume that key and never mint another. The host agent
+   id needed to resume a stopped worker is recorded by the lead in the
+   per-session `session.note` carry-over section alongside the
+   worker-to-ticket assignment (epic Cross-Child Decision 16); re-spawn with
+   a recap remains the fallback when the host offers no resume.
    *Rejected: `ferrule` before spawn plus a render-time mint* — two keys for
    one worker with no rule for which one `session.children` tracks.
 
@@ -465,9 +469,3 @@ and the delegation-posture skill.
   set of playbooks worth converting in Phase 1 depends on their landing order,
   and converting a playbook that a sibling then deletes is wasted review. Fix
   the ordering at design review.
-- **Where the host agent id is recorded.** Resuming a stopped worker needs the
-  host's agent id, the runtime keeps no registry, and the continuity tip pushes
-  the burden onto the lead's workflow state. Whether the stop protocol requires
-  the lead to record it (and where) or accepts re-spawn-with-recap as the
-  normal path is unsettled, and it decides whether the resume half of Decision 4
-  is real or aspirational.

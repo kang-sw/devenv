@@ -129,9 +129,13 @@ removed.
    edits source and never reads procedure playbooks. Spawn depth is
    recommended at one level (worker spawns Explore-class children for
    survey and review); deeper nesting is discouraged in prose, not blocked.
-5. **Closed stop list.** The worker stops only on: (a) a merge whose
-   reversibility is low (`main`-class; goal-run and impl-branch merges stay
-   worker-autonomous under `merge_confirm`); (b) an `[escalate-to-lead]`
+5. **Closed stop list.** The worker stops only on: (a) a merge into a
+   parent branch: the goal branch `goal/<parent>/<stem>` merging into
+   `<parent>` requires user approval whatever `<parent>` is, because the
+   parent is workflow convention, not a downstream choice, and this merge is
+   the veto point for the worker's autonomous decisions; `main`-class merges
+   likewise; impl-branch merges into the goal branch stay worker-autonomous
+   under `merge_confirm`; (b) an `[escalate-to-lead]`
    entry or an Open Decision Queue during promotion; (c) a ticket decision
    contradicted by code reality so it cannot be executed as written; (d) an
    irreversible action per the Approval Protocol's always-ask category; (e)
@@ -184,9 +188,13 @@ removed.
     drain turn spawns the worker and waits for the host's completion or
     interim notification; it neither blocks in a tool call nor polls. One
     `session.note` section per lead session records the in-flight
-    worker-to-ticket assignments so a compacted or restarted lead can
-    rebuild them; it is not a live progress board, and the terminal is the
-    host notification.
+    worker-to-ticket assignments and the host agent id needed to resume
+    each worker, so a compacted or restarted lead can rebuild them; it is
+    not a live progress board, and the terminal is the host notification.
+17. **The goal-to-parent merge terminal stays with the lead.** It is outside
+    any single worker's ticket, so drain keeps it: the lead aggregates the
+    workers' reports into the merge-stop report, obtains user approval, and
+    performs the merge. This is a git action, not source editing.
 
 ## Completion Criteria
 
