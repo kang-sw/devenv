@@ -2788,6 +2788,7 @@ export async function sendToAgent(
   // thread bind the owner surface will never close (the headless
   // fork-raised-question path).
   if (ctx.leadSend && record.threadBound) record.threadBound = false;
+  if (record.ownership) touchOwnership(record.ownership.home);
 
   if (!record.client) {
     const forkLaunch = record.spawnRole === "fork" ? prepareForkLaunch(record.forkContext) : undefined;
@@ -2981,6 +2982,7 @@ export async function stopAgent(
     throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
   }
   const client = record.client;
+  if (record.ownership) touchOwnership(record.ownership.home);
   if (client) {
     const generation = record.launchGeneration;
     if (record.ownership) updateOwnership(record.ownership.home, { lastActivityAt: Date.now(), liveness: { lifecycle: "stopping", running: true, observedAt: Date.now() } });

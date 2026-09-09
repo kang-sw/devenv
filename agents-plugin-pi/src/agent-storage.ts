@@ -50,7 +50,15 @@ export function readOwnership(home: string): OwnershipMetadata | undefined {
 }
 export function validOwnership(value: unknown): value is OwnershipMetadata {
   const o = value as Partial<OwnershipMetadata> | null;
-  return validDescriptor(value) && Number.isFinite(o.createdAt) && Number.isFinite(o.lastActivityAt) && Number.isFinite(o.updatedAt) && !!o.liveness && ["starting","live","stopping","stopped","unknown"].includes(o.liveness.lifecycle as string);
+  const l = o?.liveness;
+  const signature = o?.sessionSignature;
+  return validDescriptor(value) && Number.isFinite(o.createdAt) && Number.isFinite(o.lastActivityAt) && Number.isFinite(o.updatedAt) && !!l && ["starting","live","stopping","stopped","unknown"].includes(l.lifecycle as string) &&
+    (l.running === undefined || typeof l.running === "boolean") && (l.observedAt === undefined || Number.isFinite(l.observedAt)) &&
+    (l.pid === undefined || (Number.isInteger(l.pid) && l.pid > 0)) && (l.instanceNonce === undefined || SAFE_COMPONENT.test(l.instanceNonce)) &&
+    (l.threadBound === undefined || typeof l.threadBound === "boolean") && (l.pendingQuestion === undefined || typeof l.pendingQuestion === "boolean") &&
+    (l.pendingApprovalCommandId === undefined || SAFE_COMPONENT.test(l.pendingApprovalCommandId)) &&
+    (l.recovery === undefined || ["none","sidecar","thread","revived"].includes(l.recovery)) &&
+    (signature === undefined || (Number.isFinite(signature.mtimeMs) && Number.isFinite(signature.size) && signature.size >= 0));
 }
 export function validDescriptor(value: unknown): value is AgentOwnership { const o = value as Partial<AgentOwnership> | null; return !!o && o.version === OWNERSHIP_VERSION && typeof o.ownerSessionId === "string" && SAFE_COMPONENT.test(o.ownerSessionId) && typeof o.agentId === "string" && SAFE_COMPONENT.test(o.agentId) && typeof o.home === "string" && ["worker","execute-worker","fork","explore"].includes(o.role as string) && (o.sessionPath === undefined || typeof o.sessionPath === "string"); }
 export function updateOwnership(home: string, update: Partial<Pick<OwnershipMetadata, "lastActivityAt" | "liveness">>): OwnershipMetadata | undefined {
@@ -67,7 +75,9 @@ export function observeSessionWrite(home: string, sessionPath: string): void {
     const changed = !current.sessionSignature || current.sessionSignature.mtimeMs !== signature.mtimeMs || current.sessionSignature.size !== signature.size;
     const now = Date.now();
     writeOwnership({ ...current, sessionSignature: signature, ...(changed ? { lastActivityAt: Math.max(current.lastActivityAt, now) } : {}), updatedAt: now });
-  } catch {
+  } catch (error) {
     // Unknown observation remains conservative; never infer a write from directory metadata.
+    console.error(`ws-pi-agent: could not observe owned session write: ${String(error)}`);
+    updateOwnership(home, { liveness: { lifecycle: "unknown", observedAt: Date.now() } });
   }
 }

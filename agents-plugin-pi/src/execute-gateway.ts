@@ -121,6 +121,7 @@ import {
   type RpcAgentRecord,
   type RpcAgentRegistry,
 } from "./spawner.ts";
+import { touchOwnership } from "./agent-storage.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers. Unit-tested directly (test/execute-gateway.test.ts) with no
@@ -736,6 +737,7 @@ export function registerExecuteGateway(
       mkdirSync(dirname(decisionPath), { recursive: true });
       writeFileSync(decisionPath, JSON.stringify({ decision: p.decision, reason: p.reason, command: p.command }));
       record.pendingApproval = { ...record.pendingApproval!, decisionWritten: true };
+      if (record.ownership) touchOwnership(record.ownership.home);
       syncOwnershipProtection(record);
 
       return { content: [{ type: "text", text: JSON.stringify({ ok: true }) }] };

@@ -73,6 +73,7 @@ import {
   spawnAgent,
   storageContextFromToolCtx,
   syncOwnershipProtection,
+  startOwnedSessionObserver,
   stopAgent,
   type RpcAgentRecord,
   type RpcAgentRegistry,
@@ -707,7 +708,7 @@ export function captureForkResume(record: RpcAgentRecord): PersistedForkResume {
  */
 export function rehydrateForkRecord(agentId: string, resume: PersistedForkResume): RpcAgentRecord {
   const ownership = resume.ownership && validDescriptor(resume.ownership) && resume.ownership.agentId === agentId && resume.ownership.sessionPath === resume.sessionPath && (() => { const disk = readOwnership(resume.ownership!.home); return !!disk && disk.ownerSessionId === resume.ownership!.ownerSessionId && disk.agentId === agentId && disk.sessionPath === resume.sessionPath; })() ? resume.ownership : undefined;
-  return {
+  const record: RpcAgentRecord = {
     agentId,
     client: undefined,
     sessionPath: resume.sessionPath,
@@ -724,6 +725,8 @@ export function rehydrateForkRecord(agentId: string, resume: PersistedForkResume
     running: false,
     reportLog: [],
   };
+  startOwnedSessionObserver(record);
+  return record;
 }
 
 /**
