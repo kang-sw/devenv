@@ -1,7 +1,7 @@
 /**
  * 260905 (`260905-feat-ws-pi-live-agent-widget`): the live-agent widget — one
  * compact `belowEditor` panel listing every live agent and open owner
- * discussion thread, one row each, plus the footer `setStatus` count segment.
+ * discussion thread, one row each, headed by the uncapped count segment.
  * Phase 1 of that ticket also folds in the standalone `260904` "N pending
  * question(s)" `aboveEditor` widget (`ask.ts`'s deleted `refreshPendingWidget`)
  * — the pending-question surface is now a row in THIS widget instead of its
@@ -24,7 +24,7 @@
  * remaining widget call sites go through the same ref, not through this
  * module directly, for the identical reason.
  *
- * `buildAgentRows`/`buildWidgetLines`/`buildStatusSegment` are pure and unit
+ * `buildAgentRows`/`buildWidgetLines`/`buildHeadingLine` are pure and unit
  * tested directly (`test/agent-widget.test.ts`) with duck-typed fake records
  * and threads, no live `pi` session. `createAgentWidgetController` is the IO
  * glue (`ctx.ui.setWidget`/`setStatus`, the 10-second elapsed timer) and is
@@ -41,7 +41,7 @@ import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
 /** `ctx.ui.setWidget` key for the live-agent panel (`belowEditor`, not a footer/header replacement). */
 export const AGENT_WIDGET_KEY = "ws-agents";
 
-/** `ctx.ui.setStatus` key for the footer's agent-count segment. Distinct from `goal-loop.ts`'s `GOAL_LOOP_YIELD_STATUS_KEY` — this widget must never double up that separate segment. */
+/** Retired `ctx.ui.setStatus` key for the former footer agent-count segment. Distinct from `goal-loop.ts`'s `GOAL_LOOP_YIELD_STATUS_KEY`; clear only this key when moving the count into the panel heading. */
 export const AGENT_STATUS_KEY = "ws-agents-status";
 
 /** Cap on rendered rows before a synthetic `+N more` tail — only `running` rows are ever trimmed; both awaiting states are always shown in full. */
@@ -59,7 +59,7 @@ export type AgentRowRole = "worker" | "execute" | "fork" | "thread" | "explore";
 /** One live-agent row's state, in display precedence order (`awaiting-owner` first). Idle is deliberately not a state here — an idle, non-`threadBound` record is auto-parked (see `spawner.ts`'s `attachEventListener`) before it would ever read this way. */
 export type AgentRowState = "awaiting-owner" | "awaiting-approval" | "running";
 
-/** One rendered row of the live-agent widget. Pure data — no `RpcAgentRecord`/`ThreadRecord` reference — so `buildWidgetLines`/`buildStatusSegment` need no registry access of their own. */
+/** One rendered row of the live-agent widget. Pure data — no `RpcAgentRecord`/`ThreadRecord` reference — so `buildWidgetLines`/`buildHeadingLine` need no registry access of their own. */
 export interface AgentRow {
   /** `alias > title > shortened uuid` (mirrors `ask.ts:351`'s short-uuid convention). */
   name: string;
@@ -168,8 +168,7 @@ function clampElapsed(deltaMs: number): number {
  *
  * Sort: state rank first (awaiting owner, then awaiting approval, then
  * running), elapsed descending within each state. No cap here — `N` for the
- * footer's `setStatus` segment is this deduped, UNCAPPED row count (the
- * ticket's "the setStatus count is the deduped row count"); the display cap
+ * panel heading is this deduped, UNCAPPED row count; the display cap
  * to `AGENT_WIDGET_ROW_CAP` with its `+N more` tail is `buildWidgetLines`'s
  * own rendering concern, not a property of the underlying agent count.
  */
@@ -259,16 +258,28 @@ function truncateToWidth(text: string, width: number): string {
 }
 
 /**
- * Renders `rows` (as produced by `buildAgentRows`, already sorted) into the
- * widget's display lines, applying the ticket's cap: every awaiting-state row
- * is kept, `running` rows are trimmed so the total is `AGENT_WIDGET_ROW_CAP`
- * with a synthetic `+N more` trailing line — only `running` rows are ever
- * folded into that tail. Every line is bounded to `width` display columns via
- * `truncateToWidth`. `undefined` when `rows` is empty — the widget's
- * hide-on-empty behavior — regardless of `width`.
+ * The panel heading: `ws: N agents` (`N = rows.length`, the deduped row count
+ * `buildAgentRows` already produced) plus ` · M question(s)` only while
+ * `pendingCount > 0`. It is shown whenever rows or pending questions exist.
  */
-export function buildWidgetLines(rows: readonly AgentRow[], width: number = DEFAULT_AGENT_WIDGET_WIDTH): string[] | undefined {
-  if (rows.length === 0) return undefined;
+export function buildHeadingLine(rows: readonly AgentRow[], pendingCount: number, width: number = DEFAULT_AGENT_WIDGET_WIDTH): string | undefined {
+  if (rows.length === 0 && pendingCount <= 0) return undefined;
+  const questionPart = pendingCount > 0 ? ` · ${pendingCount} question${pendingCount === 1 ? "" : "s"}` : "";
+  return truncateToWidth(`ws: ${rows.length} agents${questionPart}`, width);
+}
+
+/**
+ * Renders the panel heading followed by `rows` (as produced by
+ * `buildAgentRows`, already sorted). The heading does not consume the
+ * ticket's five-row cap: every awaiting-state row is kept, `running` rows are
+ * trimmed so the body has `AGENT_WIDGET_ROW_CAP` rows with a synthetic `+N
+ * more` trailing line. Every line is bounded to `width` display columns via
+ * `truncateToWidth`. `undefined` only when rows and pending questions are
+ * both absent.
+ */
+export function buildWidgetLines(rows: readonly AgentRow[], pendingCount: number, width: number = DEFAULT_AGENT_WIDGET_WIDTH): string[] | undefined {
+  const heading = buildHeadingLine(rows, pendingCount, width);
+  if (heading === undefined) return undefined;
 
   const awaiting = rows.filter((row) => row.state !== "running");
   const running = rows.filter((row) => row.state === "running");
@@ -283,23 +294,9 @@ export function buildWidgetLines(rows: readonly AgentRow[], width: number = DEFA
     hiddenRunning = running.length - runningSlots;
   }
 
-  const lines = shown.map((row) => truncateToWidth(formatRow(row), width));
+  const lines = [heading, ...shown.map((row) => truncateToWidth(formatRow(row), width))];
   if (hiddenRunning > 0) lines.push(truncateToWidth(`+${hiddenRunning} more`, width));
   return lines;
-}
-
-/**
- * The footer `setStatus` segment: `ws: N agents` (`N = rows.length`, the
- * deduped row count `buildAgentRows` already produced — see that function's
- * doc comment for why this is uncapped) plus ` · M question(s)` only while
- * `pendingCount > 0`. `undefined` when there is nothing to show at all —
- * `rows.length === 0` and `pendingCount <= 0` — which clears the segment
- * (`ctx.ui.setStatus(key, undefined)`).
- */
-export function buildStatusSegment(rows: readonly AgentRow[], pendingCount: number): string | undefined {
-  if (rows.length === 0 && pendingCount <= 0) return undefined;
-  const questionPart = pendingCount > 0 ? ` · ${pendingCount} question${pendingCount === 1 ? "" : "s"}` : "";
-  return `ws: ${rows.length} agents${questionPart}`;
 }
 
 /**
@@ -318,8 +315,8 @@ export function shouldArmAgentWidget(role: SpawnRole | undefined, mode: string |
 }
 
 // ---------------------------------------------------------------------------
-// IO glue: the setWidget/setStatus repaint plus the arm-while-non-empty
-// elapsed timer. Not unit tested here — see this file's header comment.
+// IO glue: the setWidget repaint, retired-status clear, plus the arm-while-visible
+// elapsed timer. Controller-facing coverage is in `test/agent-widget.test.ts`.
 // ---------------------------------------------------------------------------
 
 /**
@@ -354,9 +351,9 @@ export interface AgentWidgetUiCtx {
 }
 
 export interface AgentWidgetController {
-  /** Recomputes rows from the live registries and repaints the widget + status segment. Arms the elapsed timer when rows just became non-empty, disarms it when they just became empty. */
+  /** Recomputes rows from the live registries and repaints the widget. Arms the elapsed timer when the panel becomes visible, disarms it when it becomes empty. */
   refresh(): void;
-  /** Disarms the timer and clears both the widget and the status segment. Call once, from `session_shutdown`. */
+  /** Disarms the timer, clears the widget, and clears the retired status segment. Call once, from `session_shutdown`. */
   stop(): void;
 }
 
@@ -368,7 +365,7 @@ export interface AgentWidgetController {
  * controller for the whole session lifetime.
  *
  * The 10-second timer (`AGENT_WIDGET_TICK_MS`) is armed only while the most
- * recently computed row set is non-empty, mirroring `spawner.ts`'s
+ * recently computed panel is visible, mirroring `spawner.ts`'s
  * `startLivenessProbe` arm/disarm-a-timer-only-while-outstanding pattern —
  * an idle lead that has never spawned anything, or one whose registry has
  * gone fully quiet, pays nothing for elapsed-clock upkeep.
@@ -379,6 +376,8 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
   function paint(): void {
     const threadList = [...threads.values()];
     const rows = buildAgentRows(registry, threadList, Date.now());
+    const pendingCount = countPending(threadList);
+    const visible = rows.length > 0 || pendingCount > 0;
     try {
       // 260905 review relay #1 (Important #3): pass the factory overload, not
       // a pre-rendered line array, so `render(width)` is called by the host
@@ -389,10 +388,10 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
       // width-is-a-render-time-input contract.
       ctx.ui?.setWidget?.(
         AGENT_WIDGET_KEY,
-        rows.length === 0 ? undefined : () => ({ render: (width: number) => buildWidgetLines(rows, width) ?? [] }),
+        visible ? () => ({ render: (width: number) => buildWidgetLines(rows, pendingCount, width) ?? [] }) : undefined,
         { placement: "belowEditor" },
       );
-      ctx.ui?.setStatus?.(AGENT_STATUS_KEY, buildStatusSegment(rows, countPending(threadList)));
+      ctx.ui?.setStatus?.(AGENT_STATUS_KEY, undefined);
     } catch {
       // 260905 review relay #1 (Important #4): this function is also the bare
       // `setInterval` callback (below) and is called bare from `index.ts`'s
@@ -402,10 +401,10 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
       // guards against (`triggerAgentWidgetRefresh`/`refreshAgentWidget`).
     }
 
-    if (rows.length > 0 && !timer) {
+    if (visible && !timer) {
       timer = setInterval(paint, AGENT_WIDGET_TICK_MS);
       timer.unref?.();
-    } else if (rows.length === 0 && timer) {
+    } else if (!visible && timer) {
       clearInterval(timer);
       timer = undefined;
     }

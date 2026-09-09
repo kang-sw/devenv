@@ -1,17 +1,14 @@
 /**
  * Unit tests for agent-widget.ts's pure row/render seam — `buildAgentRows`,
- * `buildWidgetLines`, `buildStatusSegment` — driven with duck-typed fake
+ * `buildWidgetLines`, `buildHeadingLine` — driven with duck-typed fake
  * `RpcAgentRecord`/`ThreadRecord` values, no live `pi` session or RPC client.
- * `createAgentWidgetController` (the `ctx.ui.setWidget`/`setStatus` IO glue
- * and the 10-second elapsed timer) is left untested here, same live-gate
- * split `ask.ts`/`spawner.ts` already use between pure helpers and their
- * `registerX`/`createX` IO functions — see this ticket's plan and
- * agent-widget.ts's own header comment.
+ * Controller tests retain the IO seam: they inspect the real factory-rendered
+ * output, retired-footer clearing, and timer lifecycle without a live session.
  */
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { buildAgentRows, buildWidgetLines, buildStatusSegment, shouldArmAgentWidget, AGENT_WIDGET_ROW_CAP } from "../src/agent-widget.ts";
+import { buildAgentRows, buildWidgetLines, buildHeadingLine, createAgentWidgetController, shouldArmAgentWidget, AGENT_STATUS_KEY, AGENT_WIDGET_KEY, AGENT_WIDGET_ROW_CAP } from "../src/agent-widget.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "../src/spawner.ts";
 import type { ThreadRecord } from "../src/ask.ts";
 
@@ -197,22 +194,23 @@ describe("buildWidgetLines", () => {
   }
 
   test("hide-on-empty: undefined for zero rows regardless of width", () => {
-    assert.equal(buildWidgetLines([], 80), undefined);
-    assert.equal(buildWidgetLines([], 40), undefined);
+    assert.equal(buildWidgetLines([], 0, 80), undefined);
+    assert.equal(buildWidgetLines([], 0, 40), undefined);
   });
 
   test("under the cap: every row renders, no tail line", () => {
     const rows = [runningRow(5_000, "a"), runningRow(10_000, "b")];
-    const lines = buildWidgetLines(rows, 80);
-    assert.equal(lines?.length, 2);
-    assert.ok(lines![0].includes("a "));
-    assert.ok(lines![1].includes("b "));
+    const lines = buildWidgetLines(rows, 0, 80);
+    assert.equal(lines?.length, 3);
+    assert.equal(lines![0], "ws: 2 agents");
+    assert.ok(lines![1].includes("a "));
+    assert.ok(lines![2].includes("b "));
   });
 
   test("exact cap boundary: 5 total rows (0 hidden) renders all 5 with no tail", () => {
     const rows = [awaitingRow("t1"), awaitingRow("t2"), runningRow(4, "r1"), runningRow(3, "r2"), runningRow(2, "r3")];
-    const lines = buildWidgetLines(rows, 80)!;
-    assert.equal(lines.length, AGENT_WIDGET_ROW_CAP, "exactly at the cap: nothing hidden, no +N more tail");
+    const lines = buildWidgetLines(rows, 0, 80)!;
+    assert.equal(lines.length, AGENT_WIDGET_ROW_CAP + 1, "heading does not consume a row-cap slot");
     assert.ok(!lines.some((l) => l.includes("more")));
   });
 
@@ -220,38 +218,38 @@ describe("buildWidgetLines", () => {
     // Fixture order mirrors buildAgentRows's real contract: running rows arrive already
     // sorted elapsed-DESCENDING, so slicing the front keeps the longest-running ones.
     const rows = [awaitingRow("t1"), awaitingRow("t2"), awaitingRow("t3"), runningRow(4, "r4"), runningRow(3, "r3"), runningRow(2, "r2"), runningRow(1, "r1")];
-    const lines = buildWidgetLines(rows, 80)!;
-    assert.equal(lines.length, AGENT_WIDGET_ROW_CAP + 1, "5 shown rows plus one +N more tail line");
-    assert.ok(lines.slice(0, 3).every((l, i) => l.includes(`t${i + 1}`)), "all 3 awaiting rows are kept verbatim");
-    assert.ok(lines[3].includes("r4") && lines[4].includes("r3"), "the two KEPT running rows are the longest-elapsed (r4, r3), not merely the first two in array order");
+    const lines = buildWidgetLines(rows, 0, 80)!;
+    assert.equal(lines.length, AGENT_WIDGET_ROW_CAP + 2, "heading, 5 shown rows, plus one +N more tail line");
+    assert.ok(lines.slice(1, 4).every((l, i) => l.includes(`t${i + 1}`)), "all 3 awaiting rows are kept verbatim");
+    assert.ok(lines[4].includes("r4") && lines[5].includes("r3"), "the two KEPT running rows are the longest-elapsed (r4, r3), not merely the first two in array order");
     assert.equal(lines[lines.length - 1], "+2 more", "4 running rows minus the 2 slots left after 3 awaiting rows = 2 hidden (the shortest-elapsed r2/r1)");
   });
 
   test("awaiting rows alone exceeding the cap are NEVER folded — no tail line is added in that case", () => {
     const rows = [awaitingRow("t1"), awaitingRow("t2"), awaitingRow("t3"), awaitingRow("t4"), awaitingRow("t5"), awaitingRow("t6")];
-    const lines = buildWidgetLines(rows, 80)!;
-    assert.equal(lines.length, 6, "all 6 awaiting rows are shown even though this exceeds AGENT_WIDGET_ROW_CAP");
+    const lines = buildWidgetLines(rows, 0, 80)!;
+    assert.equal(lines.length, 7, "heading plus all 6 awaiting rows are shown even though this exceeds AGENT_WIDGET_ROW_CAP");
     assert.ok(!lines.some((l) => l.includes("more")), "no synthetic tail — only running rows are ever trimmed");
   });
 
   test("a thread row's rendered line carries the /answer hint after an em-dash separator", () => {
-    const lines = buildWidgetLines([awaitingRow("q7")], 80)!;
-    assert.match(lines[0], /— \/answer q7$/);
+    const lines = buildWidgetLines([awaitingRow("q7")], 0, 80)!;
+    assert.match(lines[1], /— \/answer q7$/);
   });
 
   test("every line is bounded to the given width at 40, 80, and 120 columns", () => {
     const longName = "a-very-long-agent-name-that-should-get-truncated-eventually";
     const rows = [runningRow(500_000, longName)];
     for (const width of [40, 80, 120]) {
-      const lines = buildWidgetLines(rows, width)!;
-      assert.ok(lines[0].length <= width, `width=${width}: line must not exceed the bound (got ${lines[0].length})`);
+      const lines = buildWidgetLines(rows, 0, width)!;
+      assert.ok(lines.every((line) => line.length <= width), `width=${width}: every line must not exceed the bound`);
     }
   });
 });
 
-describe("buildStatusSegment", () => {
-  test("undefined when there are no rows and no pending questions — clears the segment", () => {
-    assert.equal(buildStatusSegment([], 0), undefined);
+describe("buildHeadingLine", () => {
+  test("undefined when there are no rows and no pending questions — hides the panel", () => {
+    assert.equal(buildHeadingLine([], 0), undefined);
   });
 
   test("N agents, no question part, when pendingCount is 0", () => {
@@ -259,17 +257,110 @@ describe("buildStatusSegment", () => {
       { name: "a", role: "worker" as const, state: "running" as const, elapsedMs: 0, answerHint: undefined },
       { name: "b", role: "worker" as const, state: "running" as const, elapsedMs: 0, answerHint: undefined },
     ];
-    assert.equal(buildStatusSegment(rows, 0), "ws: 2 agents");
+    assert.equal(buildHeadingLine(rows, 0), "ws: 2 agents");
   });
 
   test("singular \"1 question\" vs plural \"N questions\"", () => {
     const rows = [{ name: "a", role: "worker" as const, state: "running" as const, elapsedMs: 0, answerHint: undefined }];
-    assert.equal(buildStatusSegment(rows, 1), "ws: 1 agents · 1 question");
-    assert.equal(buildStatusSegment(rows, 2), "ws: 1 agents · 2 questions");
+    assert.equal(buildHeadingLine(rows, 1), "ws: 1 agents · 1 question");
+    assert.equal(buildHeadingLine(rows, 2), "ws: 1 agents · 2 questions");
   });
 
   test("still renders when rows is empty but pendingCount is positive", () => {
-    assert.equal(buildStatusSegment([], 1), "ws: 0 agents · 1 question");
+    assert.equal(buildHeadingLine([], 1), "ws: 0 agents · 1 question");
+  });
+});
+
+describe("createAgentWidgetController", () => {
+  test("renders the uncapped heading at real widths, preserves the body cap, clears only its retired footer key, and disarms on empty", (t) => {
+    const records = Array.from({ length: 7 }, (_, i) => record({
+      agentId: `${String(i + 1).padStart(8, "0")}-0000-0000-0000-000000000000`,
+      client: {} as never,
+      runStartedAt: NOW - i,
+    }));
+    const registry = registryOf(...records);
+    const threads = new Map<string, ThreadRecord>();
+    const statuses = new Map<string, string | undefined>([["goal-loop", "Goal loop: settling"]]);
+    let widget: ((tui: unknown, theme: unknown) => { render(width: number): string[] }) | undefined;
+    const timerCallbacks: (() => void)[] = [];
+    const cleared: unknown[] = [];
+    t.mock.method(global, "setInterval", ((callback: () => void) => {
+      timerCallbacks.push(callback);
+      return { unref() {} } as never;
+    }) as typeof setInterval);
+    t.mock.method(global, "clearInterval", ((timer: unknown) => { cleared.push(timer); }) as typeof clearInterval);
+    const controller = createAgentWidgetController({ ui: {
+      setWidget(key, content) {
+        assert.equal(key, AGENT_WIDGET_KEY);
+        widget = typeof content === "function" ? content : undefined;
+      },
+      setStatus(key, text) { statuses.set(key, text); },
+    } }, registry, threads);
+
+    controller.refresh();
+    assert.equal(statuses.get(AGENT_STATUS_KEY), undefined, "the obsolete agent footer is cleared on every refresh");
+    assert.equal(statuses.get("goal-loop"), "Goal loop: settling", "unrelated footer ownership is untouched");
+    assert.equal(timerCallbacks.length, 1, "visible panel arms one elapsed refresh timer");
+    for (const width of [40, 80, 120]) {
+      const lines = widget!({}, {}).render(width);
+      assert.equal(lines[0], "ws: 7 agents", `width=${width}: the uncapped count stays in the first line`);
+      assert.ok(lines.every((line) => line.length <= width), `width=${width}: every rendered line stays bounded`);
+      assert.equal(lines.length, AGENT_WIDGET_ROW_CAP + 2, "the heading does not consume a body row-cap slot");
+      assert.equal(lines.at(-1), "+2 more");
+    }
+
+    registry.clear();
+    controller.refresh();
+    assert.equal(widget, undefined, "empty rows and no pending questions hide the panel");
+    assert.equal(cleared.length, 1, "becoming empty clears the timer");
+    controller.stop();
+    assert.equal(statuses.get(AGENT_STATUS_KEY), undefined, "shutdown keeps the retired agent footer cleared");
+  });
+
+  test("keeps a pending-question-only panel visible without an RPC agent", () => {
+    const threads = new Map([["q1", thread({ status: "pending", title: "need owner" })]]);
+    let widget: ((tui: unknown, theme: unknown) => { render(width: number): string[] }) | undefined;
+    const controller = createAgentWidgetController({ ui: {
+      setWidget(_key, content) { widget = typeof content === "function" ? content : undefined; },
+      setStatus() {},
+    } }, registryOf(), threads);
+    controller.refresh();
+    const lines = widget!({}, {}).render(80);
+    assert.equal(lines[0], "ws: 1 agents · 1 question");
+    assert.ok(lines[1].includes("need owner"));
+    controller.stop();
+  });
+
+  test("renders a mixed matched pending thread with its deduplicated uncapped count before the capped body", () => {
+    const respondent = record({
+      agentId: "aaaaaaaa-0000-0000-0000-000000000000",
+      alias: "waiting respondent",
+      threadBound: true,
+    });
+    const running = Array.from({ length: 6 }, (_, i) => record({
+      agentId: `${String(i + 1).padStart(8, "0")}-0000-0000-0000-000000000000`,
+      client: {} as never,
+      runStartedAt: NOW - i,
+    }));
+    const threads = new Map([["q1", thread({
+      threadId: "q1",
+      status: "pending",
+      respondentAgentId: respondent.agentId,
+      touchedAt: new Date(NOW - 1_000).toISOString(),
+    })]]);
+    let widget: ((tui: unknown, theme: unknown) => { render(width: number): string[] }) | undefined;
+    const controller = createAgentWidgetController({ ui: {
+      setWidget(_key, content) { widget = typeof content === "function" ? content : undefined; },
+      setStatus() {},
+    } }, registryOf(respondent, ...running), threads);
+
+    controller.refresh();
+    const lines = widget!({}, {}).render(80);
+    assert.equal(lines[0], "ws: 7 agents · 1 question", "the matched thread is counted once, while its pending suffix remains visible");
+    assert.ok(lines[1].includes("waiting respondent") && lines[1].includes("/answer q1"), "the protected waiting row remains ahead of capped running rows");
+    assert.equal(lines.length, AGENT_WIDGET_ROW_CAP + 2, "heading plus five body rows and the capped-running summary");
+    assert.equal(lines.at(-1), "+2 more");
+    controller.stop();
   });
 });
 

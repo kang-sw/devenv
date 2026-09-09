@@ -1468,7 +1468,8 @@ channel for an owner question: it registers and carries on.
 ## Live-agent widget {#260905-pi-live-agent-widget}
 
 The owner of a TUI lead sees every live child and every open owner question in
-one compact `belowEditor` widget, one row each, plus a footer count. The widget
+one compact `belowEditor` widget, with the count as its first line above the
+agent and question rows. The widget
 is a projection over the two registries the adapter already keeps — the RPC
 agent registry and the owner-question thread registry — and never owns state
 of its own: every repaint rebuilds the rows from those registries.
@@ -1499,21 +1500,23 @@ of its own: every repaint rebuilds the rows from those registries.
   render; only `running` rows are folded into a trailing `+N more` line, so
   every awaiting row is always visible. Each line is bounded to the terminal
   width the host passes at render time (`visibleWidth(line) <= width`,
-  truncated with an ellipsis), and the widget is hidden when there are no
-  rows.
-- **Footer segment.** A `setStatus` segment reads `ws: N agents` where `N` is
+  truncated with an ellipsis). The heading does not consume the row cap. The
+  widget is hidden only when both rows and pending questions are absent.
+- **Panel heading.** The first line reads `ws: N agents` where `N` is
   the uncapped row count, with ` · M question(s)` appended while any thread
-  is pending; it clears when both are zero. This segment is separate from
-  the goal loop's own yield segment.
+  is pending. Pending questions can therefore retain a heading-only panel.
+  The heading follows the same render-time width bound as the rows. The old
+  agent-count footer key is cleared on refresh and shutdown; unrelated footer
+  keys and the goal loop's own yield segment are preserved.
 - **Refresh.** The widget repaints on every registry transition (spawn,
   spawn failure, prompt, settle and automatic park, stop, exit, gated-exec
   approval request, thread registration, open, and close) and on a 10-second
-  timer that runs only while at least one row exists. A repaint that throws
+  timer that runs only while the panel has rows or pending questions. A repaint that throws
   against a torn-down surface loses that repaint only. The controller is
   armed on `session_start` only for a TUI lead (`shouldArmAgentWidget`:
   lead-or-fork spawn role and `mode === "tui"`), a prior controller is
   stopped before a new one is created on `/reload`, and `session_shutdown`
-  stops the timer and clears both the widget and the segment. Off the TUI
+  stops the timer and clears both the widget and the retired agent footer key. Off the TUI
   there is no widget; the headless baselines in the owner-question section
   above are unchanged.
 
