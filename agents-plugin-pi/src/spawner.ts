@@ -1102,7 +1102,8 @@ export interface RpcAgentRecord {
 }
 
 /** Binds once before the first prompt and only recomputes from durable IDs thereafter. */
-export function refreshAgentTelemetry(record: RpcAgentRecord, state?: { sessionFile?: string; sessionId?: string; model?: { provider?: string; id?: string }; thinkingLevel?: string }): boolean {
+export function refreshAgentTelemetry(record: RpcAgentRecord, state?: { sessionFile?: string; sessionId?: string; model?: { provider?: string; id?: string }; thinkingLevel?: string }, opts?: { fresh?: boolean }): boolean {
+  const before = JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
   const path = state?.sessionFile ?? record.sessionPath;
   const read = readSessionEntries(path);
   const sessionId = state?.sessionId ?? (read && !("transient" in read) ? read.headerId : undefined);
@@ -1110,28 +1111,28 @@ export function refreshAgentTelemetry(record: RpcAgentRecord, state?: { sessionF
   if (model) record.observedModel = model; else if (state) delete record.observedModel;
   if (typeof state?.thinkingLevel === "string" && state.thinkingLevel) record.observedEffort = state.thinkingLevel; else if (state) delete record.observedEffort;
   if (!record.telemetry) {
-    if (!sessionId) return false;
+    if (!sessionId) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
     // A non-fork legacy child has no inherited history and can be recovered
     // completely. A fork without its saved boundary must remain unknown.
-    if (read && !("transient" in read) && read.parentSession) {
+    if (read && !("transient" in read) && read.parentSession && !opts?.fresh) {
       if (!record.telemetryInputFloor) record.telemetryInputFloor = { sessionId, sessionPath: path, ...(read.entries.at(-1)?.id ? { prefixEntryId: read.entries.at(-1)!.id } : { emptyPrefix: true }) };
       const floor = reduceTelemetry(record.telemetryInputFloor, read);
-      if (floor?.latestInput !== undefined) record.observedLatestInput = floor.latestInput;
-      return false;
+      if (floor) record.observedLatestInput = floor.latestInput; else delete record.observedLatestInput;
+      return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
     }
+    if (!read && !opts?.fresh) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
     const origin: TelemetryOrigin = { sessionId, sessionPath: path, emptyPrefix: true };
     record.telemetry = { version: 1, origin };
   }
   const telemetry = record.telemetry;
-  if (telemetry.origin.sessionPath !== path || (sessionId && telemetry.origin.sessionId !== sessionId)) return false;
+  if (telemetry.origin.sessionPath !== path || (sessionId && telemetry.origin.sessionId !== sessionId)) { delete record.telemetry; delete record.telemetryInputFloor; delete record.observedLatestInput; return true; }
   if (model) telemetry.model = model; else if (state) delete telemetry.model;
   if (typeof state?.thinkingLevel === "string" && state.thinkingLevel) telemetry.effort = state.thinkingLevel; else if (state) delete telemetry.effort;
   const reduced = reduceTelemetry(telemetry.origin, read);
   if (!reduced) return false;
-  const before = JSON.stringify(telemetry);
   delete telemetry.latestInput; delete telemetry.estimatedUsd;
   Object.assign(telemetry, reduced);
-  return before !== JSON.stringify(telemetry);
+  return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
 }
 
 /**
@@ -2778,7 +2779,7 @@ export async function spawnAgent(
     }
     // Capture the immutable pre-first-prompt boundary after all selection
     // work, before prompt() can append any attributable child turn.
-    refreshAgentTelemetry(record, await client.getState());
+    try { refreshAgentTelemetry(record, await client.getState(), { fresh: true }); } catch { delete record.observedModel; delete record.observedEffort; }
     if (forkLaunch) await captureForkSelection(client, record);
     attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     attachFirstTaskForkCacheNotice(record, client, ctx.forkCacheNoticeOwner);
@@ -2886,7 +2887,7 @@ export async function sendToAgent(
       } else {
         await applyModelEffort(client, record.modelEffort);
       }
-      refreshAgentTelemetry(record, await client.getState());
+      try { refreshAgentTelemetry(record, await client.getState()); } catch { delete record.observedModel; delete record.observedEffort; }
       if (forkLaunch) await captureForkSelection(client, record);
       attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     } catch (err) {

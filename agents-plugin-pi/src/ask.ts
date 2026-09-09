@@ -828,6 +828,11 @@ export function hydrateThreadRegistry(handle: ThreadRegistryHandle, path: string
   handle.pathRef.current = path;
   handle.threads.clear();
   for (const record of loadThreadRegistryFile(path)) {
+    if (record.respondentAgentId && record.forkResume) {
+      // Thread-only rows render this persisted object directly, so reconcile
+      // and normalize it at hydration rather than waiting for /answer.
+      record.forkResume = captureForkResume(rehydrateForkRecord(record.respondentAgentId, record.forkResume));
+    }
     handle.threads.set(record.threadId, record);
   }
 }

@@ -53,10 +53,12 @@ export function reduceTelemetry(origin: TelemetryOrigin, read: ReturnType<typeof
   let total = 0, observedCost = false, invalidCost = false, latest: number | undefined;
   for (const e of read.entries.slice(start)) {
     const assistant = e.type === "message" && e.message?.role === "assistant";
-    const usage = usageOf(e.message?.usage ?? e.usage);
-    if (!usage) { if (assistant) { invalidCost = true; latest = undefined; } continue; }
+    const summary = e.type === "compaction" || e.type === "branch_summary";
+    const rawUsage = e.message?.usage ?? e.usage;
+    const usage = usageOf(rawUsage);
+    if (!usage) { if (assistant || (rawUsage !== undefined && (summary || e.type === "message"))) invalidCost = true; if (assistant || summary) latest = undefined; continue; }
     if (assistant) latest = usage.input; // later summary entries below clear this.
-    if (e.type === "compaction" || e.type === "branch_summary") latest = undefined;
+    if (summary) latest = undefined;
     if (usage.cost === undefined) invalidCost = true; else { observedCost = true; total += usage.cost; }
   }
   return { ...(latest !== undefined ? { latestInput: latest } : {}), ...(!invalidCost && observedCost ? { estimatedUsd: total } : {}) };

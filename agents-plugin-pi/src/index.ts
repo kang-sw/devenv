@@ -238,7 +238,12 @@ export async function persistShutdownAgentSnapshots(
   if (!sidecar || !agentTools || !orphans) return;
   for (const orphan of orphans) {
     const record = agentTools.rpcRegistry.get(orphan.agentId);
-    if (record?.telemetry) orphan.telemetry = record.telemetry;
+    if (!record) continue;
+    orphan.telemetry = record.telemetry;
+    orphan.telemetryInputFloor = record.telemetryInputFloor;
+    orphan.observedModel = record.observedModel;
+    orphan.observedEffort = record.observedEffort;
+    orphan.observedLatestInput = record.observedLatestInput;
   }
   writeSidecarAt(sidecar, orphans);
   for (const thread of threads.threads.values()) {

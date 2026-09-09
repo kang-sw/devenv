@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { buildAgentRows, buildWidgetLines, buildHeadingLine, createAgentWidgetController, shouldArmAgentWidget, AGENT_STATUS_KEY, AGENT_WIDGET_KEY, AGENT_WIDGET_ROW_CAP } from "../src/agent-widget.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "../src/spawner.ts";
 import type { ThreadRecord } from "../src/ask.ts";
+import { visibleWidth } from "../src/text-width.ts";
 
 const NOW = Date.parse("2026-09-05T10:05:00.000Z");
 
@@ -186,6 +187,13 @@ describe("buildAgentRows", () => {
 });
 
 describe("buildWidgetLines", () => {
+  test("telemetry exposes independent fields at wide widths and never displaces a 40-column answer cue", () => {
+    const telemetry = { name: "模型-worker", role: "worker" as const, state: "running" as const, elapsedMs: 0, model: "provider/模型", effort: "high", latestInput: 0, estimatedUsd: 0 };
+    assert.match(buildWidgetLines([telemetry], 0, 120)![1], /provider\/模型 \(high\).*in 0.*est \$0/);
+    const missing = { ...telemetry, model: undefined, effort: undefined, latestInput: undefined, estimatedUsd: undefined, answerHint: "/answer q1" };
+    assert.match(buildWidgetLines([missing], 0, 40)![1], /\/answer q1$/);
+    assert.ok(visibleWidth(buildWidgetLines([missing], 0, 40)![1]) <= 40);
+  });
   function runningRow(elapsedMs: number, name = "w") {
     return { name, role: "worker" as const, state: "running" as const, elapsedMs, answerHint: undefined };
   }
