@@ -120,6 +120,34 @@ this Phase 1 addition does not touch the `ws-agent-spawn`/`ws-agent-send`/
 `explore`/`ws-execute`/`ws-fork` dispatch rows' own custom summary/mandatory
 resolved-model-line contract (YAML Phase 2, described below).
 
+### Repeated playbook and skill reads in the visible context {#260909-pi-visible-playbook-read-dedupe}
+
+`ws__playbook_read` and `ws-skill` shorten only the second successful read of
+an unchanged body already visible in the current context. The underlying MCP
+call or skill-file read still runs; a changed body is returned immediately.
+Reads from the two tool families never match each other. Playbook reads match
+by name and the complete `context` substitution map, independent of map key
+order; skill reads match by name and `args`. The outer routing `session_key`
+does not participate, but a substitution named `session_key` inside `context`
+does. Failed reads retain their existing failure response.
+
+The adapter scans Pi's public active-context construction during execution,
+excluding the current tool-call ID. It keeps no read-history cache. Compacted
+or abandoned branch history cannot authorize shortening a result; visible fork
+prefix history can. A prior successful full result must be byte-identical to
+the fresh body and associated with a matching visible tool call.
+
+The short result identifies the earlier tool-call ID, its distance in tool
+calls, and the body's level-one through level-three headings in order. It also
+carries provenance that resolves to the original matching full result using
+only the current context. A valid short result counts toward the repeated-read
+limit, so the third and later matching reads return the full body. Missing,
+malformed, stale, or ambiguous pointer provenance falls back to the full body;
+pointer-like prose alone is not accepted as provenance.
+
+Other tools, `playbook.render`, workflow-manual system-prompt content, and tool
+schemas retain their existing behavior.
+
 ## Session key stays optional and caller-controllable {#260903-pi-bridge-session-key-fill-forward}
 
 ws-mcp requires a `session_key` on every root-aware tool. On the Pi side the key

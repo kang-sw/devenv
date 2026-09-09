@@ -15,7 +15,8 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -33,9 +34,11 @@ import {
   shouldMapWorkflowManual,
   dispatchMappedWorkflowManual,
   buildAdvisoryKey,
+  startBridge,
   type AdvisoryKeyHolder,
 } from "../src/bridge.ts";
 import type { McpToolCallResult } from "../src/mcp-stdio-client.ts";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 // Real captured pair, not synthetic: `test/fixtures/workflow-manual-static-body.txt`
 // is a live `playbook.read({name: "lead-workflow-manual"})` render (this
@@ -107,6 +110,28 @@ describe("sanitizeToolName", () => {
     const unique = new Set(sanitized);
     assert.equal(unique.size, sanitized.length, "sanitizeToolName produced a name collision over the live tool set");
   });
+});
+
+test("production bridge registration returns the pointer on a repeat playbook.read", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "ws-pi-dedupe-bridge-"));
+  const launcher = join(directory, "launcher.py");
+  writeFileSync(launcher, `import json,sys\nfor line in sys.stdin:\n q=json.loads(line); m=q['method'];\n if m=='initialize': r={'serverInfo':{'version':'0.45.2'},'capabilities':{}}\n elif m=='tools/list': r={'tools':[{'name':'playbook.read','description':'read','inputSchema':{'type':'object','properties':{'name':{'type':'string'}},'required':['name']}}]}\n elif m=='tools/call': r={'isError':False,'content':[{'type':'text','text':'# Repeat\\n## Detail'}]}\n print(json.dumps({'jsonrpc':'2.0','id':q['id'],'result':r}),flush=True)\n`);
+  const tools = new Map<string, any>();
+  const pi = { registerTool: (definition: any) => tools.set(definition.name, definition), on() {} } as unknown as ExtensionAPI;
+  const oldRole = process.env.WS_PI_SPAWN_ROLE;
+  process.env.WS_PI_SPAWN_ROLE = "worker";
+  try {
+    const handle = await startBridge(pi, { launcherPath: launcher, pluginDir: directory, runtimeJsonPath: join(dirname(fileURLToPath(import.meta.url)), "../runtime.json"), cwd: directory, toolPreviewTuiRef: { current: undefined } });
+    const context = { sessionManager: { buildContextEntries: () => [
+      { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "one", name: "ws__playbook_read", arguments: { name: "repeat" } }] } },
+      { type: "message", message: { role: "toolResult", toolCallId: "one", content: [{ type: "text", text: "# Repeat\n## Detail" }], isError: false } },
+    ] } };
+    const result = await tools.get("ws__playbook_read").execute("two", { name: "repeat" }, undefined, undefined, context);
+    assert.match(result.content[0].text, /unchanged result.*`one`.*1 tool call ago/s);
+    handle.shutdown();
+  } finally {
+    if (oldRole === undefined) delete process.env.WS_PI_SPAWN_ROLE; else process.env.WS_PI_SPAWN_ROLE = oldRole;
+  }
 });
 
 describe("filterOutMercenaryTools", () => {
