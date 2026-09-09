@@ -309,7 +309,7 @@ export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
   };
   // A parked record can gain a flushed final entry between sidecar capture
   // and process exit. Reconcile it before any recovery consumer renders it.
-  if (record.telemetry) refreshAgentTelemetry(record);
+  refreshAgentTelemetry(record);
   return record;
 }
 

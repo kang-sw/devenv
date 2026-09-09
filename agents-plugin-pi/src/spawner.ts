@@ -1114,22 +1114,25 @@ export function refreshAgentTelemetry(record: RpcAgentRecord, state?: { sessionF
     if (!sessionId) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
     // A non-fork legacy child has no inherited history and can be recovered
     // completely. A fork without its saved boundary must remain unknown.
-    if (read && !("transient" in read) && read.parentSession && !opts?.fresh) {
+    if (read && !("transient" in read) && read.parentSession && opts?.fresh) {
+      const anchor = read.entries.at(-1)?.id;
+      if (!anchor) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+      record.telemetry = { version: 1, origin: { sessionId, sessionPath: path, prefixEntryId: anchor } };
+    } else if (read && !("transient" in read) && read.parentSession && !opts?.fresh) {
       if (!record.telemetryInputFloor) record.telemetryInputFloor = { sessionId, sessionPath: path, ...(read.entries.at(-1)?.id ? { prefixEntryId: read.entries.at(-1)!.id } : { emptyPrefix: true }) };
       const floor = reduceTelemetry(record.telemetryInputFloor, read);
       if (floor) record.observedLatestInput = floor.latestInput; else delete record.observedLatestInput;
       return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
     }
-    if (!read && !opts?.fresh) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
-    const origin: TelemetryOrigin = { sessionId, sessionPath: path, emptyPrefix: true };
-    record.telemetry = { version: 1, origin };
+    if (!read || ("transient" in (read ?? {}))) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+    if (!record.telemetry) record.telemetry = { version: 1, origin: { sessionId, sessionPath: path, emptyPrefix: true } };
   }
   const telemetry = record.telemetry;
   if (telemetry.origin.sessionPath !== path || (sessionId && telemetry.origin.sessionId !== sessionId)) { delete record.telemetry; delete record.telemetryInputFloor; delete record.observedLatestInput; return true; }
   if (model) telemetry.model = model; else if (state) delete telemetry.model;
   if (typeof state?.thinkingLevel === "string" && state.thinkingLevel) telemetry.effort = state.thinkingLevel; else if (state) delete telemetry.effort;
   const reduced = reduceTelemetry(telemetry.origin, read);
-  if (!reduced) return false;
+  if (!reduced) { delete record.telemetry; delete record.telemetryInputFloor; delete record.observedLatestInput; return true; }
   delete telemetry.latestInput; delete telemetry.estimatedUsd;
   Object.assign(telemetry, reduced);
   return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
@@ -2366,7 +2369,7 @@ export function attachEventListener(
   record.unsubscribe = client.onEvent((evt) => {
     const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string };
     const outcome = applyRpcEvent(record, e);
-    if (e.type === "agent_start" || e.type === "agent_settled" || e.type === "message_end" || e.type === "message_update" || e.type === "thinking_level_changed") refresh();
+    if (e.type === "agent_start" || e.type === "agent_settled" || e.type === "message_end" || e.type === "message_update" || e.type === "thinking_level_changed" || e.type === "compaction_end") refresh();
     if (outcome.push) {
       pushToLead(pi, registry, record, outcome.push.family, outcome.push.payload, outcome.push.deliverAs);
     }
@@ -2779,7 +2782,7 @@ export async function spawnAgent(
     }
     // Capture the immutable pre-first-prompt boundary after all selection
     // work, before prompt() can append any attributable child turn.
-    try { refreshAgentTelemetry(record, await client.getState(), { fresh: true }); } catch { delete record.observedModel; delete record.observedEffort; }
+    try { refreshAgentTelemetry(record, await client.getState(), { fresh: true }); } catch { delete record.observedModel; delete record.observedEffort; if (record.telemetry) { delete record.telemetry.model; delete record.telemetry.effort; } }
     if (forkLaunch) await captureForkSelection(client, record);
     attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     attachFirstTaskForkCacheNotice(record, client, ctx.forkCacheNoticeOwner);
@@ -2887,7 +2890,7 @@ export async function sendToAgent(
       } else {
         await applyModelEffort(client, record.modelEffort);
       }
-      try { refreshAgentTelemetry(record, await client.getState()); } catch { delete record.observedModel; delete record.observedEffort; }
+      try { refreshAgentTelemetry(record, await client.getState()); } catch { delete record.observedModel; delete record.observedEffort; if (record.telemetry) { delete record.telemetry.model; delete record.telemetry.effort; } }
       if (forkLaunch) await captureForkSelection(client, record);
       attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     } catch (err) {

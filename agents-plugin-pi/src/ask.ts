@@ -744,7 +744,7 @@ export function rehydrateForkRecord(agentId: string, resume: PersistedForkResume
   };
   // Thread-only rows are rendered from forkResume while dormant; reconcile
   // the persisted child file here, never from the widget render path.
-  if (record.telemetry) refreshAgentTelemetry(record);
+  refreshAgentTelemetry(record);
   startOwnedSessionObserver(record);
   return record;
 }
