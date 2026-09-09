@@ -80,6 +80,7 @@ import type { ExtensionAPI, SlashCommandInfo } from "@earendil-works/pi-coding-a
 import { parseFrontmatter, type SkillFrontmatter } from "@earendil-works/pi-coding-agent";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
+import { dedupeRead, wsSkillKey } from "./playbook-read-dedupe.ts";
 
 /** Lead-facing tool name (pi-lead-guide.md), registered below. */
 export const WS_SKILL_TOOL_NAME = "ws-skill";
@@ -253,11 +254,13 @@ export function registerWsSkillTool(pi: ExtensionAPI, toolPreviewTuiRef: ToolPre
       },
       required: ["name"],
     } as never,
-    async execute(_toolCallId, params) {
+    async execute(toolCallId, params, _signal, _onUpdate, toolCtx) {
       const p = params as { name: string; args?: string };
       const entries = resolveSkillEntries(pi.getCommands());
       const text = computeWsSkillResult(p.name, p.args, entries, (path) => loadSkillFile(path));
-      return { content: [{ type: "text", text }] };
+      const visibleEntries = toolCtx?.sessionManager?.buildContextEntries?.() ?? [];
+      const decision = dedupeRead(visibleEntries, toolCallId, "ws-skill", wsSkillKey(p), text);
+      return { content: [{ type: "text", text: decision.text }] };
     },
   }, toolPreviewTuiRef);
 }
