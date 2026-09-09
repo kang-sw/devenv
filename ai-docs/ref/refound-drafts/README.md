@@ -29,10 +29,12 @@ through the mirror generator instead.
 | `ticket-fact-populator.md` | `agents-plugin/rsrc/ticket-fact-populator/ticket-fact-populator.md` | route-resolve-implement-reads-ticket-facts, Phase 2 |
 | `bootstrap-template.md` | `AGENTS.template.md` sections and the new migration item, both packages | bootstrap-refoundation-template-migration, Phase 1 |
 | `workflow-guide-sections.md` | two new `WORKFLOW.md` sections, both packages and this repository's copy | bootstrap-refoundation-template-migration, Phase 1 |
-| `workflow-cost-measurement.md` | `ai-docs/manuals/workflow-cost-measurement.md` | git-history-measurement-manual, Phase 1 |
 
 Placement rules for the worker moving a draft:
 
+- When a draft lands, delete it from this directory and drop its row from the
+  table above; the placed file is the single home and git history holds the
+  mapping.
 - Move the text; do not rewrite it. A change the mechanical work forces (a
   tool name, a variable the renderer does not supply, a heading a parser
   needs) is made in place and named in the commit's `## AI Context`.
