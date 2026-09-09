@@ -484,6 +484,8 @@ to the lead too.
 
 ### Result (924d473e) - 2026-09-09
 
+Landed across `924d473e..a909c29b`; the heading names the placement commit.
+
 **Landed.** `ai-docs/ref/refound-drafts/worker-stop-protocol.md` is now the
 bare-name include `agents-plugin/rsrc/worker-stop-protocol.md`;
 `ticket-worker.md` is now `agents-plugin/rsrc/ticket-worker/ticket-worker.md`
@@ -577,7 +579,8 @@ by reading. **Non-redundant** removed the Resume section's restatement.
 "digest" and "no separate document" lines, each of which stated a posture
 rather than an action.
 
-**Round-1 review** (single allocation, fresh reviewer, `27d32dd2`): two
+**Round-1 review** (single allocation, fresh reviewer, over `924d473e`; fixes
+in `27d32dd2`): two
 Important, five Minor, no Critical. Both Important fixed. The first is the
 important one: the fresh-reader fix that renamed the branches had widened stop
 (a) from "the goal branch you were spawned on" to "the branch you were spawned
