@@ -481,6 +481,9 @@ func readTicketFromBytes(relPath, status, text string) TicketInfo {
 // never disagree about what "present" means.
 const RouteFactsHeading = "## Route Facts"
 
+// ticketsDirPrefix is the board root every ticket path sits under.
+const ticketsDirPrefix = "ai-docs/tickets/"
+
 // TicketAt projects one ticket addressed by its board-relative path
 // (`ai-docs/tickets/<status>/<stem>.md`) through readTicketFromBytes — the
 // same reader every listing, status, and find query uses. It exists because
@@ -488,6 +491,12 @@ const RouteFactsHeading = "## Route Facts"
 // must not grow a second ticket parser of its own.
 func TicketAt(root, relPath string) (TicketInfo, error) {
 	clean := filepath.ToSlash(filepath.Clean(relPath))
+	// The path is caller-supplied, so it is confined to the ticket board
+	// rather than trusted as a repo-relative read: nothing outside the board
+	// is a ticket, and a traversal out of the root is not a ticket either.
+	if !strings.HasPrefix(clean, ticketsDirPrefix) || strings.HasSuffix(clean, "/") {
+		return TicketInfo{}, fmt.Errorf("not a ticket path: %s", relPath)
+	}
 	status := ""
 	if idx := strings.LastIndex(clean, "/"); idx > 0 {
 		parent := clean[:idx]

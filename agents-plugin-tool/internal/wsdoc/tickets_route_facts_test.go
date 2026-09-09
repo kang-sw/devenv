@@ -151,3 +151,16 @@ func TestTicketsMoveReadyTipsMissingRouteFacts(t *testing.T) {
 		t.Fatalf("tip = %q, want the missing-route-facts advisory", res.Tip)
 	}
 }
+
+// TestTicketAtRefusesPathsOutsideTheBoard pins the confinement: the ticket path
+// reaching TicketAt is caller-supplied, and nothing outside the board is a
+// ticket.
+func TestTicketAtRefusesPathsOutsideTheBoard(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, filepath.FromSlash("AGENTS.md"), "secret\n")
+	for _, rel := range []string{"AGENTS.md", "../AGENTS.md", "ai-docs/tickets/../../AGENTS.md", "ai-docs/tickets/ready/"} {
+		if _, err := TicketAt(root, rel); err == nil {
+			t.Fatalf("TicketAt(%q) succeeded; want a not-a-ticket-path refusal", rel)
+		}
+	}
+}

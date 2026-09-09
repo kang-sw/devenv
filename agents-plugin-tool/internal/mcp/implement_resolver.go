@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -312,7 +313,16 @@ func loadImplementRouteFacts(root string, target implementTargetInput) implement
 		return implementRouteFactsSource{Status: "unreadable", Detail: fmt.Sprintf("%s in %s has no fact rows", routeFactsHeading, target.TicketPath)}
 	}
 	grouped := map[string]any{}
-	for key, value := range info.RouteFacts {
+	// Sorted so a table with several unrecognized rows always names the same
+	// one: a verdict that reports a different key per run is not reproducible
+	// evidence for the caller acting on it.
+	keys := make([]string, 0, len(info.RouteFacts))
+	for key := range info.RouteFacts {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		value := info.RouteFacts[key]
 		group, ok := routeFactGroups[key]
 		if !ok {
 			return implementRouteFactsSource{Status: "unreadable", Detail: fmt.Sprintf("unrecognized route fact %q in %s", key, target.TicketPath)}
