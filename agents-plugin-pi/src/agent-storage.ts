@@ -2,6 +2,7 @@
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { mkdirSync, lstatSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, relative, sep } from "node:path";
+import { randomUUID } from "node:crypto";
 
 export const OWNERSHIP_VERSION = 1;
 const SAFE_COMPONENT = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
@@ -36,7 +37,7 @@ export function allocateAgentHome(ctx: AgentStorageContext, agentId: string, rol
   const sessionPath = noSession ? undefined : join(home, "session.jsonl");
   const now = Date.now();
   const ownership: AgentOwnership = { version: OWNERSHIP_VERSION, ownerSessionId: ctx.ownerSessionId, agentId, home, role, ...(exploreMode ? { exploreMode } : {}), ...(sessionPath ? { sessionPath } : {}) };
-  writeOwnership({ ...ownership, createdAt: now, lastActivityAt: now, updatedAt: now, liveness: { lifecycle: "starting", observedAt: now } });
+  writeOwnership({ ...ownership, createdAt: now, lastActivityAt: now, updatedAt: now, liveness: { lifecycle: "starting", observedAt: now, pid: process.pid, instanceNonce: randomUUID(), recovery: "none" } });
   return ownership;
 }
 export function writeOwnership(metadata: OwnershipMetadata): void {
