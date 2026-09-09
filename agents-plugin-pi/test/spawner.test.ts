@@ -3148,6 +3148,35 @@ describe("getAgentTranscriptPath", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV placement)", () => {
+  test("neutralizes stale bootstrap overrides in the effective RPC environment for workers, forks, persistent explores, and dormant resumes", () => {
+    const parent = {
+      WS_MCP_BOOTSTRAP_BINARY: "/stale/ws-mcp",
+      WS_MCP_BOOTSTRAP_URL: "https://example.test/stale-ws-mcp",
+      CHILD_SENTINEL: "preserved",
+    };
+    const cases = [
+      buildRpcClientOptions("/repo", undefined, "/tmp/worker.jsonl", undefined, "read"),
+      buildRpcClientOptions("/repo", undefined, "/tmp/fork.jsonl", undefined, "read", "/lead.jsonl"),
+      buildRpcClientOptions("/repo", undefined, "/tmp/explore.jsonl", undefined, "read", undefined, undefined, "explore"),
+      // Dormant resume calls this same builder with the record's stored role.
+      buildRpcClientOptions("/repo", undefined, "/tmp/resume.jsonl", undefined, "read", undefined, undefined, "worker"),
+    ];
+
+    for (const options of cases) {
+      assert.equal(options.env?.WS_MCP_BOOTSTRAP_BINARY, "");
+      assert.equal(options.env?.WS_MCP_BOOTSTRAP_URL, "");
+      const effective = { ...parent, ...options.env };
+      assert.equal(effective.WS_MCP_BOOTSTRAP_BINARY, "");
+      assert.equal(effective.WS_MCP_BOOTSTRAP_URL, "");
+      assert.equal(effective.CHILD_SENTINEL, "preserved");
+    }
+    assert.deepEqual(parent, {
+      WS_MCP_BOOTSTRAP_BINARY: "/stale/ws-mcp",
+      WS_MCP_BOOTSTRAP_URL: "https://example.test/stale-ws-mcp",
+      CHILD_SENTINEL: "preserved",
+    }, "building RPC options never mutates the parent environment");
+  });
+
   test("built options carry the worker role marker and the approvals dir derived from sessionPath's own directory", () => {
     const options = buildRpcClientOptions("/repo", "provider/model", "/tmp/ws-pi-agent-x/session.jsonl", "/tmp/system.md", "read,bash");
     assert.deepEqual(options.env, {
@@ -3159,12 +3188,14 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
       WS_PI_FORK_READY_NONCE: "",
       WS_PI_FORK_AFFINITY: "",
       [WS_PI_PARENT_SESSION_KEY_ENV]: "",
+      WS_MCP_BOOTSTRAP_BINARY: "",
+      WS_MCP_BOOTSTRAP_URL: "",
     });
   });
 
   test("env overrides an inherited exploration mode while preserving role and approvals markers", () => {
     const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-y/session.jsonl", "/tmp/system.md", "read");
-    assert.deepEqual(new Set(Object.keys(options.env ?? {})), new Set([WS_PI_SPAWN_ROLE_ENV, WS_PI_APPROVAL_DIR_ENV, "WS_PI_EXPLORE_MODE", "WS_PI_FORK_CONTEXT", "WS_PI_FORK_READY_PATH", "WS_PI_FORK_READY_NONCE", "WS_PI_FORK_AFFINITY", WS_PI_PARENT_SESSION_KEY_ENV]));
+    assert.deepEqual(new Set(Object.keys(options.env ?? {})), new Set([WS_PI_SPAWN_ROLE_ENV, WS_PI_APPROVAL_DIR_ENV, "WS_PI_EXPLORE_MODE", "WS_PI_FORK_CONTEXT", "WS_PI_FORK_READY_PATH", "WS_PI_FORK_READY_NONCE", "WS_PI_FORK_AFFINITY", WS_PI_PARENT_SESSION_KEY_ENV, "WS_MCP_BOOTSTRAP_BINARY", "WS_MCP_BOOTSTRAP_URL"]));
     assert.equal(options.env?.WS_PI_EXPLORE_MODE, "");
   });
 
@@ -3236,6 +3267,25 @@ describe("buildChildProcessEnv (WS_PI_SPAWN_ROLE_ENV placement for spawnPiProces
     assert.equal(env.PATH, "/usr/bin");
     assert.equal(env.HOME, "/home/user");
     assert.equal(env[WS_PI_SPAWN_ROLE_ENV], "explore");
+  });
+
+  test("removes stale bootstrap overrides but preserves unrelated inherited values without mutating the parent", () => {
+    const parent = {
+      PATH: "/usr/bin",
+      CHILD_SENTINEL: "preserved",
+      WS_MCP_BOOTSTRAP_BINARY: "/stale/ws-mcp",
+      WS_MCP_BOOTSTRAP_URL: "https://example.test/stale-ws-mcp",
+    };
+    const env = buildChildProcessEnv(parent);
+    assert.equal(env.WS_MCP_BOOTSTRAP_BINARY, undefined);
+    assert.equal(env.WS_MCP_BOOTSTRAP_URL, undefined);
+    assert.equal(env.CHILD_SENTINEL, "preserved");
+    assert.deepEqual(parent, {
+      PATH: "/usr/bin",
+      CHILD_SENTINEL: "preserved",
+      WS_MCP_BOOTSTRAP_BINARY: "/stale/ws-mcp",
+      WS_MCP_BOOTSTRAP_URL: "https://example.test/stale-ws-mcp",
+    });
   });
 
   test("an existing WS_PI_SPAWN_ROLE value in the base env is overwritten to \"explore\"", () => {
