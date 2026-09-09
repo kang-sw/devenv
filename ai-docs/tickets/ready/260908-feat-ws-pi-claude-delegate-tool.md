@@ -226,3 +226,33 @@ The owner confirmed `ticket-reviewer-design` on 2026-09-09. Fresh independent
 design and completeness reviews resolved the authoring block after the bounded
 settlement, canonical edit containment, ticket/Relations inputs and closed-profile
 context adaptation were captured. These verdicts do not clear the live probe gate.
+
+## Pre-build SDK gate evidence and Pi encoding (2026-09-10)
+
+The single authorized throwaway Agent SDK probe passed before feature source or
+repository dependency changes. SDK 0.3.263 invoked installed Claude Code 2.1.265
+with the `claude_code` preset, a small natural task-frame append, empty tools and
+MCP servers, `strictMcpConfig: true`, and `settingSources: []`. Normal stored
+subscription authentication was confirmed through sanitized metadata. The query
+returned the requested text in one turn (3,755 ms), without the known 400
+classification, and its owned child stopped. The disposable harness was removed.
+The exact options, safe evidence, and implementation boundaries are recorded in
+`ai-docs/.plans/2026-09/10-0144-260908-feat-ws-pi-claude-delegate-tool.md`
+(research commit `44da6b64`). This clears only the pre-build gate; it neither
+guarantees billing treatment nor replaces the owner-run post-build real-ticket
+audit/consult and five-read-tool profile checks. No further live call belongs to
+automated implementation verification.
+
+The call example above expresses the logical batch contract. The physical Pi
+tool arguments use `{items: [...]}` because Pi's provider conversion requires an
+object schema. Output remains the index-aligned result array, encoded as JSON
+text and mirrored in `details.items`. This necessary encoding preserves batching
+and per-item error isolation; no single-item overload is introduced. Phase 1
+supports only `audit` and `consult`; rewrite, edit targets, and resume remain
+later-phase work and must be rejected rather than silently ignored.
+
+Implementation policy: a session controller shares three active-child slots
+across overlapping invocations. Each running item has a 120-second deadline
+followed by at most two seconds of cleanup. Cancellation is invocation-local;
+shutdown cancels all owned work. Unconfirmed child termination prevents new
+launches instead of releasing capacity as though cleanup succeeded.
