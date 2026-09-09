@@ -60,7 +60,7 @@ export const DEFAULT_AGENT_WIDGET_WIDTH = 80;
 export type AgentRowRole = "worker" | "execute" | "fork" | "thread" | "explore";
 
 /** One live-agent row's state, in display precedence order (`awaiting-owner` first). Idle is deliberately not a state here — an idle, non-`threadBound` record is auto-parked (see `spawner.ts`'s `attachEventListener`) before it would ever read this way. */
-export type AgentRowState = "awaiting-owner" | "awaiting-approval" | "running";
+export type AgentRowState = "awaiting-owner" | "idle-awaiting-owner" | "awaiting-approval" | "running";
 
 /** One rendered row of the live-agent widget. Pure data — no `RpcAgentRecord`/`ThreadRecord` reference — so `buildWidgetLines`/`buildHeadingLine` need no registry access of their own. */
 export interface AgentRow {
@@ -74,6 +74,8 @@ export interface AgentRow {
   answerHint?: string;
   /** Human-readable question phrase. It is display-only and never a resolution key. */
   answerDisplay?: string;
+  /** A supplied owner-held inspection affordance. Presentation preserves it but never invents one. */
+  inspectionHint?: string;
   model?: string;
   effort?: string;
   latestInput?: number;
@@ -95,12 +97,14 @@ function sanitizeDisplayTitle(title: string | undefined, fallback: string): stri
 
 const STATE_RANK: Record<AgentRowState, number> = {
   "awaiting-owner": 0,
+  "idle-awaiting-owner": 0,
   "awaiting-approval": 1,
   running: 2,
 };
 
 const STATE_LABEL: Record<AgentRowState, string> = {
   "awaiting-owner": "awaiting owner",
+  "idle-awaiting-owner": "idle awaiting owner",
   "awaiting-approval": "awaiting approval",
   running: "running",
 };
@@ -263,16 +267,22 @@ function formatElapsed(elapsedMs: number): string {
 }
 
 /** `name · role · state · elapsed`, plus the `/answer <id>` hint for a `"thread"` row — the ticket's literal row shape. */
+function isAttentionState(state: AgentRowState): boolean {
+  return state === "awaiting-owner" || state === "idle-awaiting-owner" || state === "awaiting-approval";
+}
+
 function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, emphasizeAttention = false): string {
   const primary = row.answerHint ? `/answer ${row.answerDisplay ?? row.name}` : row.name;
-  const base = `${primary} · ${row.role} · ${STATE_LABEL[row.state]} · ${formatElapsed(row.elapsedMs)}`;
+  const stateLabel = STATE_LABEL[row.state];
+  const base = `${primary} · ${row.role} · ${stateLabel} · ${formatElapsed(row.elapsedMs)}`;
   const selection = `${row.model ?? "—"} (${row.effort ?? "—"})`;
   const telemetry = ` · ${selection} · in ${row.latestInput ?? "—"} · est $${row.estimatedUsd ?? "—"}`;
-  const hint = row.answerHint ? ` — ${row.answerHint}` : "";
+  const protectedHint = row.answerHint ?? row.inspectionHint;
+  const hint = protectedHint ? ` — ${protectedHint}` : "";
   // The owner action is the only non-negotiable tail.  Allocate its columns
   // first, then progressively omit telemetry and identity detail.
   let line: string;
-  if (row.answerHint && visibleWidth(hint) <= width) {
+  if (protectedHint && visibleWidth(hint) <= width) {
     const available = width - visibleWidth(hint);
     const withTelemetry = base + telemetry;
     line = visibleWidth(withTelemetry) <= available ? withTelemetry + hint : truncateToWidth(base, available) + hint;
@@ -281,15 +291,21 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, emphasizeA
   }
   // Add ANSI only after width truncation: styling before truncation can leave
   // an incomplete escape sequence in a narrow terminal.
-  if (!emphasizeAttention) return line;
+  if (!emphasizeAttention || !isAttentionState(row.state)) return line;
+  const content = protectedHint ? line.slice(0, -hint.length) : line;
+  const suffix = protectedHint ? hint : "";
   if (row.answerHint) {
-    // A narrow width may truncate before the normal field separator, but the
-    // protected answer tail is still present and must remain unstyled.
-    const separator = line.indexOf(" — ");
-    return separator >= 0 ? bold(line.slice(0, separator), true) + line.slice(separator) : bold(line, true);
+    // The question cue is the first structured field. Its visible prefix is
+    // the only styled part even if width truncation removes later fields.
+    const cueEnd = Math.min(content.length, primary.length);
+    return bold(content.slice(0, cueEnd), true) + content.slice(cueEnd) + suffix;
   }
-  if (row.state === "awaiting-approval") return line.replace(STATE_LABEL[row.state], bold(STATE_LABEL[row.state], true));
-  return line;
+  // State begins after fixed, structured name and role fields. Never search
+  // rendered text: names may contain the state label or separator glyphs.
+  const stateStart = primary.length + 3 + row.role.length + 3;
+  const stateEnd = stateStart + stateLabel.length;
+  if (content.length < stateEnd) return line;
+  return content.slice(0, stateStart) + bold(stateLabel, true) + content.slice(stateEnd) + suffix;
 }
 
 /**
@@ -353,7 +369,7 @@ export function buildWidgetLines(rows: readonly AgentRow[], pendingCount: number
     hiddenRunning = running.length - runningSlots;
   }
 
-  const lines = [heading, ...shown.map((row) => formatRow(row, width, emphasizeAttention && (row.state === "awaiting-owner" || row.state === "awaiting-approval")))];
+  const lines = [heading, ...shown.map((row) => formatRow(row, width, emphasizeAttention && isAttentionState(row.state)))];
   if (hiddenRunning > 0) lines.push(truncateToWidth(`+${hiddenRunning} more`, width));
   return lines;
 }
@@ -453,7 +469,7 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
     const rows = buildAgentRows(registry, threadList, Date.now());
     const pendingCount = countPending(threadList);
     const visible = rows.length > 0 || pendingCount > 0;
-    const qualifying = rows.some((row) => row.state === "awaiting-owner" || row.state === "awaiting-approval");
+    const qualifying = rows.some((row) => isAttentionState(row.state));
     const animationEnabled = options.animationEnabled?.() !== false;
     const animate = options.ownerLead === true && animationEnabled && qualifying;
     const emphasize = qualifying && (!animationEnabled || (animate && attentionPhase));

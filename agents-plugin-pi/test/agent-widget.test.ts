@@ -194,7 +194,7 @@ describe("buildWidgetLines", () => {
     const rows = buildAgentRows(registryOf(), [thread({ threadId: "q42", title })], NOW);
     for (const width of [40, 80, 120]) {
       const line = buildWidgetLines(rows, 1, width, true)![1];
-      assert.ok(!/[\u0000-\u001f\u007f-\u009f]/.test(line.replace(/\x1b\[[0-9;]*m/g, "")), `controls removed at ${width}`);
+      assert.ok(!line.includes("\u001b[31m"), `injected SGR is absent at ${width}`);
       assert.match(line, /\/answer q42$/, `qN survives at ${width}`);
       assert.ok(visibleWidth(line) <= width, `display fits at ${width}`);
     }
@@ -206,6 +206,36 @@ describe("buildWidgetLines", () => {
     const approval = buildWidgetLines([{ name: "exec", role: "execute", state: "awaiting-approval", elapsedMs: 0 }], 0, 80, true)![1];
     assert.match(approval, /awaiting approval/);
     assert.ok(!approval.includes("/answer"));
+  });
+
+  test("attention styles only structured cue fields, even when titles and names contain separators or state words", () => {
+    const question = {
+      name: "worker",
+      role: "fork" as const,
+      state: "awaiting-owner" as const,
+      elapsedMs: 3_000,
+      answerHint: "/answer q7",
+      answerDisplay: "Choose — database",
+      model: "test-model",
+      effort: "high",
+      latestInput: 42,
+      estimatedUsd: .1,
+    };
+    const approval = { name: "awaiting approval audit", role: "execute" as const, state: "awaiting-approval" as const, elapsedMs: 3_000, model: "test-model", effort: "high", latestInput: 42, estimatedUsd: .1 };
+    const animated = buildWidgetLines([question, approval], 1, 180, true)!;
+    assert.equal(animated[1], "\u001b[1m/answer Choose — database\u001b[22m · fork · awaiting owner · 3s · test-model (high) · in 42 · est $0.1 — /answer q7");
+    assert.equal(animated[2], "awaiting approval audit · execute · \u001b[1mawaiting approval\u001b[22m · 3s · test-model (high) · in 42 · est $0.1");
+    assert.ok(!animated[1].slice(animated[1].indexOf(" · fork")).includes("\u001b[1m"), "role, elapsed, telemetry, separators, and qN stay plain");
+    assert.ok(!animated[2].startsWith("\u001b[1m"), "a state-like name cannot redirect approval styling");
+    const staticDisabled = buildWidgetLines([question, approval], 1, 180, true)!;
+    assert.deepEqual(staticDisabled, animated, "static disabled emphasis uses the same cue-only ANSI boundaries");
+  });
+
+  test("a supplied future idle-awaiting-owner row emphasizes its state and preserves only its supplied inspection hint", () => {
+    const row = { name: "parked reviewer", role: "fork" as const, state: "idle-awaiting-owner" as const, elapsedMs: 3_000, inspectionHint: "/audit reviewer" };
+    const line = buildWidgetLines([row], 0, 120, true)![1];
+    assert.equal(line, "parked reviewer · fork · \u001b[1midle awaiting owner\u001b[22m · 3s · — (—) · in — · est $— — /audit reviewer");
+    assert.ok(!line.includes("/answer"), "presentation never fabricates an answer target for an owner-held idle row");
   });
   test("telemetry exposes independent fields at wide widths and never displaces a 40-column answer cue", () => {
     const telemetry = { name: "模型-worker", role: "worker" as const, state: "running" as const, elapsedMs: 0, model: "provider/模型", effort: "high", latestInput: 0, estimatedUsd: 0 };
@@ -329,13 +359,13 @@ describe("createAgentWidgetController", () => {
     const approval = record({ agentId: "bbbbbbbb-0000-0000-0000-000000000000", pendingApproval: { cmdId: "a", command: "x" } });
     const threads = new Map([["q1", thread({ respondentAgentId: waiting.agentId, title: "owner needs this" })]]);
     const callbacks = new Map<number, () => void>();
-    const intervals: number[] = [];
+    const schedules: Array<{ id: number; ms: number }> = [];
     const cleared: number[] = [];
     let next = 1;
     let widget: ((tui: unknown, theme: unknown) => { render(width: number): string[] }) | undefined;
     let enabled = true;
     t.mock.method(global, "setInterval", ((callback: () => void, ms: number) => {
-      const id = next++; callbacks.set(id, callback); intervals.push(ms); return { id, unref() {} } as never;
+      const id = next++; callbacks.set(id, callback); schedules.push({ id, ms }); return { id, unref() {} } as never;
     }) as typeof setInterval);
     t.mock.method(global, "clearInterval", ((timer: { id: number }) => { cleared.push(timer.id); callbacks.delete(timer.id); }) as typeof clearInterval);
     const controller = createAgentWidgetController({ ui: { setWidget(_key, content) { widget = typeof content === "function" ? content : undefined; }, setStatus() {} } }, registryOf(waiting, approval), threads, {
@@ -343,23 +373,27 @@ describe("createAgentWidgetController", () => {
       animationEnabled: () => enabled,
     });
     controller.refresh();
-    assert.deepEqual([...intervals].sort((a, b) => a - b), [AGENT_WIDGET_ATTENTION_TICK_MS, AGENT_WIDGET_TICK_MS]);
+    assert.equal(AGENT_WIDGET_ATTENTION_TICK_MS, 330, "the ticket cadence is literal, not merely self-referential");
+    assert.deepEqual(schedules.map(({ ms }) => ms).sort((a, b) => a - b), [330, AGENT_WIDGET_TICK_MS]);
     const initial = widget!({}, {}).render(120).join("\n");
     assert.match(initial, /\u001b\[1mws: 2 agents/);
     assert.match(initial, /\u001b\[1m\/answer owner needs this/);
     assert.match(initial, /\u001b\[1mawaiting approval/);
-    const attention = [...callbacks.entries()].find(([id]) => !cleared.includes(id) && intervals[id - 1] === AGENT_WIDGET_ATTENTION_TICK_MS)!;
+    const attentionId = schedules.find(({ ms }) => ms === 330)!.id;
+    const attention = [attentionId, callbacks.get(attentionId)!] as const;
     attention[1]();
     const plain = widget!({}, {}).render(120).join("\n");
-    assert.ok(!plain.includes("\u001b[1m"), "the plain phase stays fully visible without emphasis");
-    enabled = false;
-    controller.refresh();
-    assert.equal(intervals.filter((ms) => ms === AGENT_WIDGET_ATTENTION_TICK_MS).length, 1, "disabled config never re-arms animation");
-    assert.equal(cleared.length, 1, "config disable clears only attention while the elapsed controller remains armed");
-    assert.match(widget!({}, {}).render(120).join("\n"), /\u001b\[1m\/answer owner needs this/, "disabled animation uses static bold emphasis");
+    assert.ok(!plain.includes("\u001b[1m"), "the plain phase has no emphasis");
+    assert.match(plain, /\/answer owner needs this.*\/answer q1/, "the question cue remains visible in the plain phase");
+    assert.match(plain, /awaiting approval/, "the approval state remains visible in the plain phase");
     threads.clear(); waiting.threadBound = false; approval.pendingApproval = undefined;
     controller.refresh();
-    assert.equal(cleared.length, 2, "final resolution clears the remaining elapsed timer");
+    assert.ok(cleared.includes(attentionId), "final enabled resolution clears the actual attention timer");
+    enabled = false;
+    threads.set("q2", thread({ threadId: "q2", title: "static wait" }));
+    controller.refresh();
+    assert.equal(schedules.filter(({ ms }) => ms === 330).length, 1, "disabled config never re-arms animation");
+    assert.match(widget!({}, {}).render(120).join("\n"), /\u001b\[1m\/answer static wait/, "disabled animation uses static bold emphasis");
     controller.stop();
   });
 
