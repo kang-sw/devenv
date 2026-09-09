@@ -118,6 +118,22 @@ with negative value — which is why the layers are retired rather than relocate
   *Rejected: strip the key from closed tickets* — a mechanical rewrite of
   history with no consumer.
 
+- **The ticket conventions and the ticket skeleton lose their spec lines; the
+  rest stays.** `ticket-conventions.md` is 73 lines of deterministic
+  invariants (path rule, status directories, frozen Result, Edition
+  append) that pass the authoring standard as written, so it is not
+  rewritten. But five of its Status Flow bullets state the ready spec-address
+  gate this ticket removes (spec addressing on `ready/` entry, the
+  `lead-write-spec` non-invocation, `## Spec Impact`, the linked-spec drop
+  route), and the skeleton carries the optional `## Spec Impact` section and
+  the legacy `plans:` / `skeletons:` keys that no shipped path reads. Leaving
+  them would make the convention contradict the tool that serves it. Phase 2
+  strips exactly those lines and keys; every other convention line and
+  template section is untouched.
+  *Rejected: re-baseline the ticket conventions under the authoring
+  standard* — its lines already carry a citable failure each; a rewrite
+  would change wording without removing a rule.
+
 ## Constraints
 
 - **Shipped-surface rule (AGENTS.md Architecture Rule 4).** No text under
@@ -364,10 +380,16 @@ Scope:
 - Remove the `git.commit` options `mental_model_notes`, `updated_specs`, and
   `updated_mental_models` and their rendered sections.
 - Remove `spec-conventions.md` and `mental-model-conventions.md` from the
-  embedded conventions, along with their canonical names and aliases; leave
-  `ticket-conventions.md` and `convention.read` itself intact.
+  embedded conventions, along with their canonical names and aliases; keep
+  `convention.read` itself. In `ticket-conventions.md`, remove only the
+  Status Flow bullets that state the spec-address gate (spec addressing on
+  `ready/` entry, the epic and workset exemptions from it, the
+  `lead-write-spec` non-invocation, and the linked-spec drop route) and the
+  `idea/` / `todo/` `spec:` allowances; every other line stays (`## Decisions`).
 - Remove `spec:`, `spec-remove:`, and `related-mental-model:` from the ticket
-  skeleton, the `Specs`/`SpecRemoves` ticket fields if nothing else reads them,
+  skeleton, together with the legacy `plans:` / `skeletons:` keys, their
+  explanatory paragraph, and the optional `## Spec Impact` section;
+  the `Specs`/`SpecRemoves` ticket fields if nothing else reads them,
   the spec-anchor half of the ticket graph's `related:` resolution, and the
   spec and mental-model areas from `project_tree` and `doctor`. Resolve
   `legacy_marker.go` and `references.trace` per `## Open Questions` before

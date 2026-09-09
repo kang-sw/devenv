@@ -142,6 +142,29 @@ into playbook text the worker actually reads.
    *Rejected: `ferrule` before spawn plus a render-time mint* — two keys for
    one worker with no rule for which one `session.children` tracks.
 
+9. **The intent review survives as a three-line conversation-fidelity check;
+   the capture checklist is unchanged.** `tickets.checklist(phase: "intent")`
+   answers a question the promotion-time sage gate cannot: whether the lead
+   that held the conversation dropped or flattened something the owner said.
+   The sage reviewer has no conversation, so it checks fit, not fidelity;
+   the two axes are distinct and both stay. What goes is redundancy: item 1
+   repeats the capture checklist's enumeration, item 5 restates the ticket
+   conventions' epic and workset rules, and items 6 and 7 are procedure
+   sentences ("fix in place", "present a summary"). The compressed intent
+   checklist is exactly: the fresh-implementer test (could an implementer
+   reading only the ticket build a materially different caller-visible,
+   workflow, API, or verification result without contradicting it), literal
+   preservation of API/type/event/UI sketches, and no unconfirmed mechanism,
+   future-scope hint, Result Forward note, or focus "Next" line. Unconfirmed
+   gaps still return to the Open Decision Queue; that rule lives in the
+   `ticket` skill, not the checklist. Once the ticket-authoring skill's
+   playbook is retired, the Go constants in `tickets_checklist.go` are the
+   checklist's single source and their "extracted verbatim" comment is
+   updated to say so; the ticket conventions' one reference to the retired
+   skill name is renamed to the `ticket` skill.
+   *Rejected: drop the intent review because the sage gate reviews the
+   ticket* — the sage gate never sees the conversation.
+
 ## Constraints
 
 - **Depends on `260909-refactor-drain-ready-queue-worker-spawner`.** The worker
@@ -406,7 +429,12 @@ spec-authoring, spec-updating, doc-backfill, and forge skills. Deferred to a
 sibling ticket: anything whose only content is the spec or mental-model layer.
 Kept as the lead's `ship` surface: the release skill (epic Cross-Child
 Decision 13); its procedure body may become a manual handed to a subagent,
-but the release decision and stop stay with the lead. Unsettled and listed
+but the release decision and stop stay with the lead. With the ticket
+authoring skill absorbed, compress `tickets.checklist(phase: "intent")` to
+the three items of Decision 9, leave the `content` phase unchanged, and
+rename the ticket conventions' `lead-write-ticket` reference to the `ticket`
+skill (its spec-gate bullets are removed by the sibling that retires the
+spec layer; whichever lands second reconciles the line). Unsettled and listed
 under Open Questions: the worktree scoping skill, the rule-persisting skill,
 and the delegation-posture skill.
 
@@ -442,6 +470,10 @@ and the delegation-posture skill.
   full package, so its removal list is longer.
 - `agents-plugin-tool/internal/wsrsrc/skills_mirror_test.go`,
   `skills_compose_test.go` — curated lists.
+- `agents-plugin-tool/internal/wsdoc/tickets_checklist.go` and its tests —
+  the compressed intent checklist (Decision 9);
+  `agents-plugin-tool/internal/wsdoc/conventions/ticket-conventions.md` — the
+  retired skill name.
 - `agents-plugin/tests/test_skill_dispatch_contracts.py` — the shim/inline
   assertions for retired skills die with them; see the recorded pre-existing
   failure before touching this file.
