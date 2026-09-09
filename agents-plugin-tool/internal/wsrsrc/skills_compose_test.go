@@ -3,7 +3,6 @@ package wsrsrc
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -11,14 +10,11 @@ import (
 // splices. Like substitutionMirroredSkills this is not a blanket mechanism —
 // adding an entry requires updating ai-docs/manuals/wsflow-mirroring.md in the
 // same change.
-var composedSkills = []SkillSplice{
-	{
-		Target:        "lead-drain-ready-queue",
-		Source:        "lead-prefer-subagent",
-		Title:         "Prefer Subagent",
-		AnchorHeading: "## Select",
-	},
-}
+// Currently empty: the sole entry (lead-prefer-subagent spliced into
+// lead-drain-ready-queue) died with that skill. The mechanism is retained
+// because the mapping is expected to gain entries again; ComposeSkillBody's
+// own behavior stays covered by the fixture-driven tests below.
+var composedSkills = []SkillSplice{}
 
 // composeSplice reads the on-disk source body for splice and returns the
 // composed form of the given target text.
@@ -70,33 +66,6 @@ func TestComposeSkillBodyIsIdempotent(t *testing.T) {
 		twice := composeSplice(t, splice, once)
 		if once != twice {
 			t.Fatalf("composing %s twice is not a no-op; region replacement is not idempotent", splice.Target)
-		}
-	}
-}
-
-// TestComposedTargetKeepsTurnEndingLast pins the placement decision: the
-// spliced region is anchored inside the body, never appended at the bottom, so
-// the target's turn-ending contract stays the last thing the reader sees. A
-// bottom-append would put lead-prefer-subagent's own "Require this exact return
-// format" contract after it.
-func TestComposedTargetKeepsTurnEndingLast(t *testing.T) {
-	const turnEndingHeading = "\n## Ending the turn\n"
-	for _, splice := range composedSkills {
-		if splice.Target != "lead-drain-ready-queue" {
-			continue
-		}
-		targetPath := filepath.Join(fullSkillsRoot(), splice.Target, "SKILL.md")
-		raw, err := os.ReadFile(targetPath)
-		if err != nil {
-			t.Fatalf("read splice target %s: %v", targetPath, err)
-		}
-		body := string(raw)
-		headingIdx := strings.LastIndex(body, turnEndingHeading)
-		if headingIdx < 0 {
-			t.Fatalf("%s: no %q section found", splice.Target, strings.TrimSpace(turnEndingHeading))
-		}
-		if next := strings.Index(body[headingIdx+len(turnEndingHeading):], "\n## "); next >= 0 {
-			t.Fatalf("%s: %q is no longer the last section", splice.Target, strings.TrimSpace(turnEndingHeading))
 		}
 	}
 }

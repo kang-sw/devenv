@@ -18,7 +18,6 @@ EXPECTED_SKILLS = {
     "lead-backfill-docs",
     "lead-bootstrap",
     "lead-discuss",
-    "lead-drain-ready-queue",
     "lead-goal-fan-out-step",
     "lead-forge-mental-model",
     "lead-forge-spec",
@@ -26,6 +25,7 @@ EXPECTED_SKILLS = {
     "lead-check-blockers",
     "lead-proceed",
     "lead-review",
+    "lead-run",
     "lead-ship",
     "lead-tune",
     "lead-update-spec",
@@ -44,14 +44,19 @@ EXPECTED_INLINE_SKILLS = {
     "lead-revive",
     "lead-prefer-subagent",
     "lead-verify-discussion",
-    "lead-drain-ready-queue",
     "mcp-server-repair",
 }
-EXPECTED_PARALLEL_INIT_SKILLS = {"lead-backfill-docs", "lead-discuss", "lead-goal-fan-out-step"}
+EXPECTED_PARALLEL_INIT_SKILLS = {
+    "lead-backfill-docs",
+    "lead-discuss",
+    "lead-goal-fan-out-step",
+    "lead-run",
+}
 PARALLEL_INIT_TITLES = {
     "lead-backfill-docs": "Backfill Docs",
     "lead-discuss": "Discuss",
     "lead-goal-fan-out-step": "Goal Fan-Out Step",
+    "lead-run": "Run",
 }
 
 # Single-call shims that carry the mcp-server-repair pointer tail instead of
@@ -208,6 +213,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
             "lead-backfill-docs": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
             "lead-discuss": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
             "lead-goal-fan-out-step": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
+            "lead-run": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
         }
         offenders = []
         for skill in sorted(EXPECTED_PARALLEL_INIT_SKILLS):

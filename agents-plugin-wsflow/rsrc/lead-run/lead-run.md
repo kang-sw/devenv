@@ -1,6 +1,9 @@
 ---
-name: lead-run
-description: Execute work through a spawned worker. Drains `ready/` one ticket per invocation (re-invoked until nothing advanceable remains), or runs an ad-hoc `run <description>`. The lead selects, spawns, waits, handles stops, and merges the goal branch on approval; it never edits source.
+kind: print
+delegates: true
+variables:
+  - ExploreAgent
+  - SpawnIdiom
 ---
 
 # Run
@@ -37,7 +40,8 @@ ticket blocked. Empty and all-blocked end the turn with no spawn; on a
    spliced in. Do not read the file, and do not mint a second key for this
    worker.
 3. Spawn one worker of at least current-mainstream class, in a form that can
-   itself spawn children, with this task block and nothing else:
+   itself spawn children (`{{.SpawnIdiom}}`), with this task block and nothing
+   else:
 
    ```text
    Read <rendered-path> as your system prompt.
@@ -70,7 +74,7 @@ re-summarize them.
   worker with the answer and where you found it. If not, put the one question
   to the user and resume with the answer.
 - **(c) contract broken** — do not go to the user first. Route the worker's
-  `proposed_resolution:` through `{{.SkillNamespace}}:lead-ticket` as an
+  `proposed_resolution:` through `{{.SkillNamespace}}:lead-write-ticket` as an
   `#### Edition` on the executed phase, under the design-review gate at a
   raised tier. A `pass` commits the edition and resumes the worker; a `block`
   goes to the user with the reviewer's verdict.
@@ -115,7 +119,3 @@ it exactly one of:
 
 Write nothing after it, and keep `finished`, `complete`, and `done` out of a
 continuing turn.
-
-[design-review: the `/goal` directive re-invokes a skill by name; the
-continuation line and the directive must name the same skill once the
-collapse renames the drainer.]
