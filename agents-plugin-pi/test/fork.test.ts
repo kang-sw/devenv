@@ -43,7 +43,7 @@
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
 
-import { test, describe } from "node:test";
+import { afterEach, test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   FORK_TOOL_NAME,
@@ -72,7 +72,7 @@ import { WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV } from "../src/pr
 import type { BridgeHandle } from "../src/bridge.ts";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -918,7 +918,7 @@ describe("ws-fork: onModelResolved forwarding (260906 Phase 2)", () => {
     registerFork(pi, bridge, registry, { cwd: "/tmp" });
     const toolCtx = {
       sessionManager: { getSessionFile: () => "/tmp/fake-fork-source.jsonl", getSessionId: () => "test-lead" },
-      agentStorageRoot: mkdtempSync(join(tmpdir(), "ws-pi-storage-test-")),
+      agentStorageRoot: storageRoot(),
       model: { provider: "lead", id: "large" },
       thinkingLevel: "high",
       modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.6-high" }, { provider: "pi", id: "small" }], hasConfiguredAuth: () => true },
@@ -939,6 +939,8 @@ describe("ws-fork: onModelResolved forwarding (260906 Phase 2)", () => {
       assert.deepEqual((updates[0]!.details as { resolved: unknown }).resolved, expected);
       assert.deepEqual((raw.details as { resolved?: unknown } | undefined)?.resolved, expected, "the final return repeats the same shape");
       const record = registry.get(parsed.agent_id)!;
+      assert.equal(record.ownership?.home, join(realpathSync(toolCtx.agentStorageRoot), "ws-agents", "test-lead", parsed.agent_id));
+      assert.equal(record.ownership?.sessionPath, record.sessionPath);
       assert.equal(record.modelTier, "small");
       assert.equal(record.modelSource, "tier");
     } finally { rpc.restore(); }
@@ -964,3 +966,13 @@ describe("ws-fork: onModelResolved forwarding (260906 Phase 2)", () => {
     } finally { rpc.restore(); }
   });
 });
+const storageRoots = new Set<string>();
+afterEach(() => {
+  for (const root of storageRoots) rmSync(root, { recursive: true, force: true });
+  storageRoots.clear();
+});
+function storageRoot(): string {
+  const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+  storageRoots.add(root);
+  return root;
+}

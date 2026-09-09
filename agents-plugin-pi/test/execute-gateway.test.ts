@@ -45,9 +45,9 @@
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
 
-import { test, describe } from "node:test";
+import { afterEach, test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -676,7 +676,7 @@ describe("ws-execute: onModelResolved forwarding (260906 Phase 2)", () => {
     const bridge = { client: { callTool }, wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" } } as unknown as Parameters<typeof registerExecuteGateway>[1];
     const registry: RpcAgentRegistry = new Map();
     registerExecuteGateway(pi, bridge, registry, { cwd: "/tmp", executeWorkerPromptPath: "/tmp/fake-execute-worker-guide.md" });
-    const ctx = { sessionManager: { getSessionId: () => "test-lead" }, agentStorageRoot: mkdtempSync(join(tmpdir(), "ws-pi-storage-test-")), model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.6-high" }, { provider: "pi", id: "small" }], hasConfiguredAuth: () => true } };
+    const ctx = { sessionManager: { getSessionId: () => "test-lead" }, agentStorageRoot: storageRoot(), model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.6-high" }, { provider: "pi", id: "small" }], hasConfiguredAuth: () => true } };
     return { tool: tools.get(EXECUTE_TOOL_NAME)!, registry, ctx };
   }
 
@@ -693,6 +693,8 @@ describe("ws-execute: onModelResolved forwarding (260906 Phase 2)", () => {
       assert.deepEqual((updates[0]!.details as { resolved: unknown }).resolved, expected);
       assert.deepEqual((raw.details as { resolved?: unknown } | undefined)?.resolved, expected, "the final return repeats the same shape");
       const record = registry.get(parsed.agent_id)!;
+      assert.equal(record.ownership?.home, join(realpathSync(ctx.agentStorageRoot), "ws-agents", "test-lead", parsed.agent_id));
+      assert.equal(record.ownership?.sessionPath, record.sessionPath);
       assert.equal(record.modelTier, "small");
       assert.equal(record.modelSource, "tier");
     } finally { rpc.restore(); }
@@ -728,3 +730,13 @@ describe("ws-execute: onModelResolved forwarding (260906 Phase 2)", () => {
     } finally { rpc.restore(); }
   });
 });
+const storageRoots = new Set<string>();
+afterEach(() => {
+  for (const root of storageRoots) rmSync(root, { recursive: true, force: true });
+  storageRoots.clear();
+});
+function storageRoot(): string {
+  const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+  storageRoots.add(root);
+  return root;
+}

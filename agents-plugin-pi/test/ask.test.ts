@@ -105,6 +105,8 @@ import {
   leadIdleRef, registerPushFlush, clearWakeStart,
 } from "../src/spawner.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { allocateAgentHome, createAgentStorageContext } from "../src/agent-storage.ts";
+import { rmSync } from "node:fs";
 
 // 260905 (live-agent widget ticket): every widget-refresh call site in
 // ask.ts now fires through spawner.ts's module-level `agentWidgetRefreshRef`
@@ -663,6 +665,23 @@ describe("captureForkResume / rehydrateForkRecord (the persistence-gap resolutio
     const record = rehydrateForkRecord("agent-1", resume);
     assert.notEqual(record.wsToolNames, resume.wsToolNames);
     assert.deepEqual(record.wsToolNames, resume.wsToolNames);
+  });
+
+  test("owner-bound fork resume restores valid ownership and falls back safely on a mismatched descriptor", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-ask-ownership-test-"));
+    try {
+      const ownership = allocateAgentHome(createAgentStorageContext("lead-1", root), "agent-1", "fork");
+      writeFileSync(ownership.sessionPath!, "fork session\n");
+      const owned = { ...live, sessionPath: ownership.sessionPath, ownership } as unknown as RpcAgentRecord;
+      const resume = captureForkResume(owned);
+      assert.deepEqual(resume.ownership, ownership);
+      assert.deepEqual(rehydrateForkRecord("agent-1", resume).ownership, ownership);
+
+      const bad = { ...resume, ownership: { ...ownership, ownerSessionId: "different" } };
+      const fallback = rehydrateForkRecord("agent-1", bad);
+      assert.equal(fallback.ownership, undefined);
+      assert.equal(fallback.sessionPath, ownership.sessionPath, "invalid ownership cannot erase a usable recorded resume path");
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
   test("a registry emptied by a lead restart accepts the rehydrated record under the same agent_id", () => {

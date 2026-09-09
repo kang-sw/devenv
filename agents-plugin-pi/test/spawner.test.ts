@@ -142,9 +142,20 @@ import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV } from "../src/proce
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { McpStdioClient, McpToolCallResult } from "../src/mcp-stdio-client.ts";
-import { mkdtempSync, readdirSync } from "node:fs";
+import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+const storageRoots = new Set<string>();
+afterEach(() => {
+  for (const root of storageRoots) rmSync(root, { recursive: true, force: true });
+  storageRoots.clear();
+});
+function storageRoot(): string {
+  const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+  storageRoots.add(root);
+  return root;
+}
 
 function freshRunningRecord(): AgentRecord {
   return {
@@ -777,7 +788,7 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
     const pi = { registerTool: (tool: CapturedTool) => tools.set(tool.name, tool), sendMessage() {}, sendUserMessage() {} } as unknown as ExtensionAPI;
     const bridge = { client: { callTool }, wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" } } as never;
     const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" });
-    const ctx = { sessionManager: { getSessionId: () => "test-lead" }, agentStorageRoot: mkdtempSync(join(tmpdir(), "ws-pi-storage-test-")), model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.6-high" }], hasConfiguredAuth: () => true } };
+    const ctx = { sessionManager: { getSessionId: () => "test-lead" }, agentStorageRoot: storageRoot(), model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.6-high" }], hasConfiguredAuth: () => true } };
     return { tool: tools.get("ws-agent-spawn")!, handle, ctx };
   }
 
@@ -815,6 +826,9 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
       assert.equal(called, false);
       assert.ok(parsed.agent_id);
       assert.equal(handle.rpcRegistry.size, 1);
+      const record = handle.rpcRegistry.get(parsed.agent_id)!;
+      assert.equal(record.ownership?.home, join(realpathSync(ctx.agentStorageRoot), "ws-agents", "test-lead", parsed.agent_id));
+      assert.equal(record.ownership?.sessionPath, record.sessionPath);
       await handle.stopAll();
     } finally { rpc.restore(); }
   });
@@ -961,7 +975,7 @@ describe("spawnAgent: onModelResolved (260906 Phase 2 dispatch-row rendering)", 
     const pi = { registerTool: (tool: CapturedTool) => tools.set(tool.name, tool), sendMessage() {}, sendUserMessage() {} } as unknown as ExtensionAPI;
     const bridge = { client: { callTool }, wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" } } as never;
     const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" });
-    const ctx = { sessionManager: { getSessionId: () => "test-lead" }, agentStorageRoot: mkdtempSync(join(tmpdir(), "ws-pi-storage-test-")), model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.6-high" }], hasConfiguredAuth: () => true } };
+    const ctx = { sessionManager: { getSessionId: () => "test-lead" }, agentStorageRoot: storageRoot(), model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.6-high" }], hasConfiguredAuth: () => true } };
     return { tool: tools.get("ws-agent-spawn")!, sendTool: tools.get("ws-agent-send")!, handle, ctx };
   }
 
@@ -1100,7 +1114,7 @@ describe("explore tool: onModelResolved / resolved-line publishing (260906 Phase
       const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" });
       // Matches installRpcHarness's fixed `getState()` model — spawnRole
       // "explore"'s post-start `verifyResearchSelection` compares against it.
-      const ctx = { sessionManager: { getSessionId: () => "test-lead" }, agentStorageRoot: mkdtempSync(join(tmpdir(), "ws-pi-storage-test-")), model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "pi", id: "small" }], hasConfiguredAuth: () => true } };
+      const ctx = { sessionManager: { getSessionId: () => "test-lead" }, agentStorageRoot: storageRoot(), model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "pi", id: "small" }], hasConfiguredAuth: () => true } };
       const tool = tools.get("explore")!;
       const updates: Array<{ content: unknown[]; details?: unknown }> = [];
       const raw = await tool.execute("call", { query: "why does this fail" }, undefined, (partial) => updates.push(partial), ctx);
