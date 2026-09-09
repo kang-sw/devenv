@@ -3236,3 +3236,89 @@ func TestPlaybookPrintGoldenLeadBootstrap(t *testing.T) {
 		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
 	}
 }
+
+// workerPlaybookContent is a worker-role playbook: the render-minted child key
+// must carry the caller's lead scope, not a delegate scope.
+const workerPlaybookContent = `---
+kind: render
+delegates: true
+role: worker
+tier: large
+---
+# Worker Playbook
+
+Execute the ticket.
+`
+
+// TestRenderMintsLeadScopedChildKeyForWorkerPlaybook pins the worker render
+// role: a `role: worker` playbook rendered by a lead caller mints a child key
+// that is lead-scoped and bound to the caller's root, so the worker can call
+// every lead-gated ws tool without minting a key of its own.
+func TestRenderMintsLeadScopedChildKeyForWorkerPlaybook(t *testing.T) {
+	root := buildTestRsrcTree(t, map[string]string{
+		"worker-pb/worker-pb.md": workerPlaybookContent,
+	})
+	s := newTestServerWithHarness(t, "claude")
+	mintRoot := "/work/tree-a"
+	parentKey := "parent-key-fixture"
+
+	body, _, err := renderPlaybookBody(s, root, "worker-pb", nil, wsconfig.Options{}, mintRoot, parentKey, false, "", nil)
+	if err != nil {
+		t.Fatalf("renderPlaybookBody: %v", err)
+	}
+	key := extractSplicedKey(t, body)
+	entry, ok := s.sessions.lookup(key)
+	if !ok {
+		t.Fatalf("minted key %q not found in registry", key)
+	}
+	if entry.scope != roleLead {
+		t.Errorf("minted key scope = %q, want %q (worker → lead)", entry.scope, roleLead)
+	}
+	if entry.root != mintRoot {
+		t.Errorf("minted key root = %q, want caller root %q", entry.root, mintRoot)
+	}
+	if entry.parent != parentKey {
+		t.Errorf("minted key parent = %q, want %q", entry.parent, parentKey)
+	}
+}
+
+// TestPlaybookRenderGoldenTicketWorker resolves the shipped ticket-worker
+// playbook from the real rsrc tree: the worker-stop-protocol include must be
+// spliced in, the harness idiom vars must substitute, and a lead caller must
+// receive a lead-scoped child key. This is the end-to-end counterpart of
+// TestRenderMintsLeadScopedChildKeyForWorkerPlaybook, which uses a fixture.
+func TestPlaybookRenderGoldenTicketWorker(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+	mintRoot := "/work/tree-a"
+
+	body, tier, err := renderPlaybookBody(s, rsrcRoot, "ticket-worker", nil, wsconfig.Options{}, mintRoot, "", false, "", nil)
+	if err != nil {
+		t.Fatalf("renderPlaybookBody: %v", err)
+	}
+	if tier != "large" {
+		t.Errorf("recommended tier = %q, want %q", tier, "large")
+	}
+	// The shared protocol include must arrive with the playbook body.
+	for _, want := range []string{"# Worker Protocol", "## Stop List", "status: [ok] | [escalate-to-lead]"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rendered body missing protocol text %q", want)
+		}
+	}
+	// delegates:true → the harness continuity tip carries the continuation idiom.
+	if !strings.Contains(body, "SendMessage(to: <agentId>)") {
+		t.Errorf("rendered body missing claude continuation idiom")
+	}
+	// No unsubstituted template variables may survive rendering.
+	if strings.Contains(body, "{{.") {
+		t.Errorf("rendered body has unsubstituted variables:\n%s", body)
+	}
+	key := extractSplicedKey(t, body)
+	entry, ok := s.sessions.lookup(key)
+	if !ok {
+		t.Fatalf("minted key %q not found in registry", key)
+	}
+	if entry.scope != roleLead || entry.root != mintRoot {
+		t.Errorf("minted key = (scope %q, root %q), want (%q, %q)", entry.scope, entry.root, roleLead, mintRoot)
+	}
+}

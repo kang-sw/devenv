@@ -62,6 +62,8 @@ func TestChildRoleForPlaybookRole(t *testing.T) {
 		{"Implementer", roleDelegate, true}, // case-insensitive
 		{" reviewer ", roleDelegate, true},  // trimmed
 		{"leaf", roleLeaf, true},
+		{"worker", roleLead, true},
+		{"Worker", roleLead, true}, // case-insensitive
 		{"lead", "", false},
 		{"", "", false},
 		{"bogus", "", false},

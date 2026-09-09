@@ -19,8 +19,6 @@ through the mirror generator instead.
 
 | Draft | Lands as | Owning child |
 |-------|----------|--------------|
-| `worker-stop-protocol.md` | `agents-plugin/rsrc/worker-stop-protocol.md`, a bare-name include; also the prompt body for the epic's hand-dogfood workers (Cross-Child Decision 19) | lead-surface-collapse, Phase 1 |
-| `ticket-worker.md` | `agents-plugin/rsrc/ticket-worker/ticket-worker.md`, `kind: render` | lead-surface-collapse, Phase 1 |
 | `lead-discuss.md` | `discuss` skill body | lead-surface-collapse, Phase 2 |
 | `lead-ticket.md` | `ticket` skill body (name binding is that ticket's open question; the body is name-independent) | lead-surface-collapse, Phase 2 |
 | `lead-run.md` | `run` skill body: the drainer, the spawner, the lead-side stop handling, ad-hoc implement | drain-ready-queue-worker-spawner Phase 1; lead-surface-collapse Phase 1 (escalation) and Phase 2 (ad hoc) |

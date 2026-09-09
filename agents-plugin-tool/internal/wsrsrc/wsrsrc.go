@@ -21,7 +21,7 @@ type PlaybookMeta struct {
 	// Delegates indicates whether this playbook delegates to a sub-agent.
 	Delegates bool
 	// Role is the delegation role of this playbook.
-	// Values: lead | delegate | leaf | implementer | reviewer.
+	// Values: lead | worker | delegate | leaf | implementer | reviewer.
 	// Empty when absent from frontmatter.
 	Role string
 	// Tier is the first-class delegation tier this playbook declares.

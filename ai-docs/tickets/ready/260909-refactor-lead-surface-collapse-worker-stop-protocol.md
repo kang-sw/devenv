@@ -482,6 +482,146 @@ to the lead too.
   `agents-plugin-wsflow/rsrc/`, `agents-plugin-wsflow/rsrc/manifest.json`,
   `agents-plugin/skills/manifest.json`.
 
+### Result (924d473e) - 2026-09-09
+
+Landed across `924d473e..a909c29b`; the heading names the placement commit.
+
+**Landed.** `ai-docs/ref/refound-drafts/worker-stop-protocol.md` is now the
+bare-name include `agents-plugin/rsrc/worker-stop-protocol.md`;
+`ticket-worker.md` is now `agents-plugin/rsrc/ticket-worker/ticket-worker.md`
+with its drafted frontmatter (`kind: render`, `role: worker`, `tier: large`,
+`includes: worker-stop-protocol`) unchanged. Both drafts and their README rows
+are deleted. No `[design-review: ...]` marker was present in either draft. The
+conversion set was empty as Decision 12 predicted, so nothing was converted in
+place and no lead skill inventory changed.
+
+`childRoleForPlaybookRole` gains `worker` → `roleLead` (Decision 8): the render
+path already mints at the caller's root with the caller's key as parent, so the
+one-case addition is the whole capability change. Pinned by two tests — a
+fixture test for the mapping plus root/parent binding
+(`playbook_tools_test.go`), and the table row in the existing mapping test
+(`mercenary_surface_test.go`) — and by a golden test that renders the real
+shipped `ticket-worker`, asserting the include splice, the absence of any
+unsubstituted variable, the `large` tier, the harness continuity idiom, and the
+lead-scoped mint.
+
+**Verification.**
+
+- `go build ./...` clean. `go test ./...` all packages `ok`.
+- `python3 -m unittest discover agents-plugin/tests`: 53 tests, one failure —
+  `test_proceed_keeps_implementation_route_only`, the pre-existing failure
+  recorded in `260909-bug-proceed-contract-test-pins-pre-diet-lead-proceed-strings`.
+  It fails identically on `epic/refound` and this change touches no
+  `lead-proceed` file; it was not absorbed.
+- `python3 -m unittest discover agents-plugin-wsflow/tests`: 10 tests, OK.
+- `test_shipped_surfaces_downstream_neutral.py` green, plus a read of both
+  placed files as a lead in a project that has never heard of this repository:
+  no ticket stem, no `ai-docs/` path bootstrap does not install, no package
+  name, no migration vocabulary.
+- Rsrc manifest regenerated and the wsflow rsrc mirror synced, both with
+  `-count=1`; `diff -r agents-plugin/rsrc agents-plugin-wsflow/rsrc` is empty.
+  The skills-manifest regen was not run and was not required: no file under
+  `agents-plugin/skills/` changed. Compose-then-mirror does not apply for the
+  same reason. Mirror sweep run.
+
+**Fresh-reader audit** (one cycle each, before landing; no fix produced a new
+finding, so no second cycle). `worker-stop-protocol.md`: 24 findings (6 high,
+12 medium, 6 low) — 6 fixed, 6 risk accepted, 10 intentional difference, 2 out
+of scope. `ticket-worker.md`: 21 findings (3 high, 11 medium, 7 low) — 5 fixed,
+4 risk accepted, 11 intentional difference, 1 out of scope.
+
+Fixed in the protocol: the "never wait for sign-off" / "needs user approval"
+contradiction in stop (a); stop (d) gained the Approval Protocol's declared
+home and its absent-case default, so an unsure worker does not stop
+spuriously; stop (e)'s "the fix round" became "round 2", matching the section
+that defines the rounds; `## Branch` now names the shared branch as the one it
+was spawned on rather than "your branch", which was ambiguous once the worker
+also holds a work branch; the Resume section's restatement of the reporting
+rule was dropped; and the report block gained the `status`/`stop` invariant and
+the empty forms for `decisions:` and `proposed_resolution:`. Fixed in
+`ticket-worker`: "task block" is defined at first use; the ticket's
+`## Decisions`/`## Constraints` are named as the ticket's, since this file has
+its own `## Constraints`; "do not accept a digest of the caller's" became the
+positive rule; "no separate document to update" was narrowed to "no separate
+behavior document", which could otherwise read as licence to skip the phase
+Result; and step 1 states how the task block's branch and the route's branch
+action relate.
+
+Risk accepted, with cost: "main-class branch" is left undefined (an unsure
+worker over-stops on a merge, which is the safe direction); the severity scale,
+the review allocation, the route verdict's shape, and the delegate-spawn
+mechanism are left to the tool output and the reviewer playbooks, because
+restating them in prose is exactly the Layer 1/2 duplication the authoring
+manual deletes unconditionally; no build/test-command fallback and no
+warning-baseline step were added, because both would be new rules with no cited
+failure. Intentional difference: everything the appended protocol or the
+prepended credential block defines but the audited file does not, since neither
+file is ever read alone — the audit reads one file by construction. The two
+spawn formulations in step 2 and step 4 are deliberately different: the
+exploration agent has its own spawn form and collapsing them would be wrong.
+Out of scope: the `### Result (<short-hash>)` referent, owned by the ticket
+conventions, and the `### Implementation Conventions` row shape, owned by the
+bootstrap-template child.
+
+**Rule Tests.** Each rule the placement introduces to a shipped surface was
+checked against all seven. The two rules Decision 10 cites — the two-round
+review cap and the shared-branch no-amend rule — pass **failure-cited** on this
+epic's first dogfood run (non-converging fresh-reviewer rounds; a reset that
+dropped a concurrent lead commit), both observed on a current-flagship worker,
+so the fresh-reader audit's "unexercised rule" lens does not strike them.
+**Non-derivable** is what carries the closed stop list: a worker with the code,
+the tests, and the tool schemas cannot infer which decisions cost a lead turn.
+**Scoped** is where the placement changed text: stop (d) gained its
+absent-project default, and `## Declared Conventions` already carried one.
+**Resolvable downstream** is the shipped-surface rule, checked mechanically and
+by reading. **Non-redundant** removed the Resume section's restatement.
+**Falsifiable** and **actionable** drove the audit fixes to stop (a) and to the
+"digest" and "no separate document" lines, each of which stated a posture
+rather than an action.
+
+**Round-1 review** (single allocation, fresh reviewer, over `924d473e`; fixes
+in `27d32dd2`): two
+Important, five Minor, no Critical. Both Important fixed. The first is the
+important one: the fresh-reader fix that renamed the branches had widened stop
+(a) from "the goal branch you were spawned on" to "the branch you were spawned
+on", which would let a worker hand-spawned on a shared non-goal branch
+self-merge into it. Restored, and the audit's naming fix kept only in
+`## Branch`, where the two do not conflict. The second was this Result's
+absence. Three Minors fixed (the stop-(e) vocabulary split across the two
+files, `PlaybookMeta.Role`'s stale value list, and a role comment that implied
+the caller's root confines a worker — it does not; lead scope permits `ferrule`
+at any root, which Decision 8 authorizes). Two Minors accepted: `RoleModel` is
+declared but unreferenced, matching every sibling delegate playbook, and the
+`### Implementation Conventions` hook ships self-guarded but unexercised until
+the bootstrap-template child declares the section.
+
+**Decisions taken.** The resume paragraph names the continuation mechanism in
+prose rather than through the harness idiom variable: the protocol is a shared
+include, and a template variable inside it must be declared by every including
+playbook's frontmatter or rendering fails. The substitution still reaches the
+worker — `delegates: true` appends the harness-specific continuity tip to the
+rendered body, and the golden test asserts the Claude form is present.
+`delegate-orientation.md` is left in place: its report-to-the-lead rule now
+also lives in the protocol, but its auto-injection path is still live for
+mercenary agent registration and its removal belongs to the ticket retiring
+that surface. No Go-emitted instruction string changed, because this phase
+retires no lead skill. The new render-role test lives in `playbook_tools_test.go`
+as the ticket names, while the mapping table row was added to the existing
+table test in `mercenary_surface_test.go` rather than duplicating that table.
+
+**Not done, and why.** Two of the Phase 1 dogfood items are lead-side and are
+left to the lead (epic Cross-Child Decision 19): a real ticket driven end to
+end by a worker spawned against the *rendered placed* file, and the induced
+stop-condition-(c) case demonstrating lead-side resolution without reaching the
+user — the second is by definition a lead action. What this phase does record:
+the placed reader was itself executed verbatim by the hand-spawned worker that
+landed this phase, which routed, edited, verified, reviewed, and reported in
+the fixed shape, and the golden test exercises the rendered mint mechanically.
+
+Phase 2 was not started. `260909-refactor-drain-ready-queue-worker-spawner` is
+still `ready/`, and this ticket's Constraints end the run after Phase 1's
+Result in that case, leaving this ticket in `ready/`.
+
 ### Phase 2: retire the collapsed lead skills
 
 Sequentially dependent on Phase 1: a lead skill is only removable once the
