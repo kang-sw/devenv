@@ -26,11 +26,8 @@ func TestResolveImplementSmallestSafeChangeStillGetsIndependentReview(t *testing
 				TestSurface:     factString{Value: "none", Present: true},
 			},
 			Complexity: implementComplexityFactsInput{
-				ChangePoints:   factString{Value: "clear", Present: true},
 				ReusePoints:    factString{Value: "not-applicable", Present: true},
-				StrategyShape:  factString{Value: "single-obvious", Present: true},
 				SideEffectRisk: factString{Value: "low", Present: true},
-				ColdContext:    factString{Value: "no", Present: true},
 			},
 			Risk: implementRiskFactsInput{
 				Correctness:        factString{Value: "low", Present: true},
@@ -40,7 +37,7 @@ func TestResolveImplementSmallestSafeChangeStillGetsIndependentReview(t *testing
 			},
 		},
 	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "feature/demo", StartCommit: "abc123"})
+	result := resolveImplement(input, factsFromTicket(input), implementBranchObservation{CurrentBranch: "feature/demo", StartCommit: "abc123"})
 	if result.Verdict.Delegation != "delegated" {
 		t.Fatalf("delegation = %q, want delegated", result.Verdict.Delegation)
 	}
@@ -52,11 +49,19 @@ func TestResolveImplementSmallestSafeChangeStillGetsIndependentReview(t *testing
 			t.Fatalf("verdict retained removed stage or fast path %q:\n%s", forbidden, result.Raw)
 		}
 	}
-	for _, gone := range []string{"explicit-delegation-request", "explicit-direct-edit-request"} {
+	for _, gone := range []string{"explicit-delegation-request", "explicit-direct-edit-request", "low-ceremony-if-safe", "change-points", "strategy-shape", "cold-context"} {
 		if containsPrefixed(result.Conditions, gone) {
 			t.Fatalf("conditions retained removed fact %q: %v", gone, result.Conditions)
 		}
 	}
+}
+
+// factsFromTicket is the test stand-in for the ticket read handleEnterImplement
+// performs: it presents a fixture's facts to the resolver exactly as a
+// populated `## Route Facts` section would. Tests about the read itself build
+// their own implementRouteFactsSource.
+func factsFromTicket(input implementInput) implementRouteFactsSource {
+	return implementRouteFactsSource{Facts: input.Facts, Status: "ticket"}
 }
 
 // containsPrefixed reports whether any condition line starts with prefix+"=".
@@ -67,47 +72,6 @@ func containsPrefixed(conditions []string, prefix string) bool {
 		}
 	}
 	return false
-}
-
-func TestResolveImplementRejectedLowCeremonyPreferenceWarnsWithoutChangingVerdicts(t *testing.T) {
-	input := lowCeremonyImplementInput()
-	input.Facts.Scope.Span = factString{Value: "multi-file", Present: true}
-	input.Facts.Scope.Surface = factString{Value: "cross-module", Present: true}
-	input.Facts.Scope.TestSurface = factString{Value: "existing", Present: true}
-	input.Facts.Risk.Correctness = factString{Value: "moderate", Present: true}
-	input.Facts.Risk.Fit = factString{Value: "moderate", Present: true}
-	input.Facts.Risk.Test = factString{Value: "moderate", Present: true}
-
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "feature/demo", StartCommit: "abc123"})
-	if result.Verdict.BranchPlan.Action != "create" || result.Verdict.Delegation != "delegated" || result.Verdict.ReviewAlloc != "partitioned: correctness, fit, test" || result.Verdict.DocMode != "skipped" {
-		t.Fatalf("rejected preference changed independent verdicts: %+v", result.Verdict)
-	}
-	warning := "policy.low_ceremony_if_safe=yes not applicable; continuing with standard branch path"
-	if !containsString(result.Warnings, warning) || !containsString(result.Agenda.Warnings, warning) || !strings.Contains(result.Raw, warning) {
-		t.Fatalf("rejected preference warning missing from result, agenda, or raw output: %+v", result)
-	}
-}
-
-func lowCeremonyImplementInput() implementInput {
-	return implementInput{
-		Target: implementTargetInput{Kind: "inline", Label: "tiny edit", ScopeLabel: "tiny edit", ScopeSlug: "tiny-edit"},
-		Facts: implementFactsInput{
-			Scope: implementScopeFactsInput{
-				Span: factString{Value: "single-file", Present: true}, Surface: factString{Value: "internal", Present: true},
-				NewPublicSymbol: factString{Value: "no", Present: true}, NewTypeContract: factString{Value: "no", Present: true},
-				TestSurface: factString{Value: "none", Present: true},
-			},
-			Risk: implementRiskFactsInput{
-				Correctness: factString{Value: "low", Present: true}, Fit: factString{Value: "low", Present: true},
-				Test: factString{Value: "low", Present: true}, SecurityOrContract: factString{Value: "low", Present: true},
-			},
-		},
-		Policy: implementPolicyInput{
-			LowCeremonyIfSafe: factString{Value: "yes", Present: true},
-			Review:            implementReviewPolicyInput{Override: factString{Value: "auto", Present: true}},
-			Docs:              implementDocsPolicyInput{Mode: factString{Value: "skip-with-reason", Present: true}, Reason: factString{Value: "docs unaffected", Present: true}},
-		},
-	}
 }
 
 func TestDeriveImplementReviewAllocProportionalPartitions(t *testing.T) {
@@ -265,7 +229,7 @@ func TestResolveImplementBranchStopOmitsPlannerInstructions(t *testing.T) {
 			Branch: implementBranchPolicyInput{MergeTarget: factString{Value: "main", Present: true}, AllowRename: factString{Value: "no", Present: true}},
 		},
 	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "implement/old", StartCommit: "abc123"})
+	result := resolveImplement(input, factsFromTicket(input), implementBranchObservation{CurrentBranch: "implement/old", StartCommit: "abc123"})
 	if result.Verdict.BranchPlan.Action != "stop" {
 		t.Fatalf("branch action = %q, want stop", result.Verdict.BranchPlan.Action)
 	}
@@ -289,7 +253,7 @@ func TestResolveImplementBranchRenameDefaultsToAllowedWhenUnset(t *testing.T) {
 			Branch: implementBranchPolicyInput{MergeTarget: factString{Value: "main", Present: true}},
 		},
 	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
+	result := resolveImplement(input, factsFromTicket(input), implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
 	if result.Verdict.BranchPlan.Action != "rename" {
 		t.Fatalf("branch action = %q, want rename (allow_rename absent should default to yes)", result.Verdict.BranchPlan.Action)
 	}
@@ -309,7 +273,7 @@ func TestResolveImplementAheadOfMergeRootBlocksRenameRegardlessOfAllowRename(t *
 		},
 	}
 	obs := implementBranchObservation{CurrentBranch: "impl/root-branch/old", StartCommit: "abc123", AheadOfMergeRoot: 2}
-	result := resolveImplement(input, obs)
+	result := resolveImplement(input, factsFromTicket(input), obs)
 	if result.Verdict.BranchPlan.Action != "stop" {
 		t.Fatalf("branch action = %q, want stop even with allow_rename=yes; plan=%+v", result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)
 	}
@@ -341,7 +305,7 @@ func TestResolveImplementNoAheadOfMergeRootAllowsRename(t *testing.T) {
 		},
 	}
 	obs := implementBranchObservation{CurrentBranch: "impl/root-branch/old", StartCommit: "abc123", AheadOfMergeRoot: 0}
-	result := resolveImplement(input, obs)
+	result := resolveImplement(input, factsFromTicket(input), obs)
 	if result.Verdict.BranchPlan.Action != "rename" {
 		t.Fatalf("branch action = %q, want rename when AheadOfMergeRoot is 0; plan=%+v", result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)
 	}
@@ -361,7 +325,7 @@ func TestResolveImplementSameScopeContinuesRegardlessOfAheadOfMergeRoot(t *testi
 		},
 	}
 	obs := implementBranchObservation{CurrentBranch: "impl/root-branch/old", StartCommit: "abc123", AheadOfMergeRoot: 5}
-	result := resolveImplement(input, obs)
+	result := resolveImplement(input, factsFromTicket(input), obs)
 	if result.Verdict.BranchPlan.Action != "continue" {
 		t.Fatalf("branch action = %q, want continue when target scope matches current, regardless of AheadOfMergeRoot; plan=%+v", result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)
 	}
@@ -378,7 +342,7 @@ func TestResolveImplementAheadOfMergeRootInertOnCreatePath(t *testing.T) {
 		},
 	}
 	obs := implementBranchObservation{CurrentBranch: "goal/some-slug", StartCommit: "abc123", AheadOfMergeRoot: 7}
-	result := resolveImplement(input, obs)
+	result := resolveImplement(input, factsFromTicket(input), obs)
 	if result.Verdict.BranchPlan.Action != "create" {
 		t.Fatalf("branch action = %q, want create on non-impl/-prefixed branch regardless of AheadOfMergeRoot; plan=%+v", result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)
 	}
@@ -397,7 +361,7 @@ func TestResolveImplementMergeConfirmDefaultsToAskWhenUnset(t *testing.T) {
 			Branch: implementBranchPolicyInput{MergeTarget: factString{Value: "main", Present: true}},
 		},
 	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
+	result := resolveImplement(input, factsFromTicket(input), implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
 	if result.Verdict.BranchPlan.MergeConfirm != "ask" {
 		t.Fatalf("merge confirm = %q, want ask (absent should default to ask)", result.Verdict.BranchPlan.MergeConfirm)
 	}
@@ -419,7 +383,7 @@ func TestResolveImplementMergeConfirmSkipHonored(t *testing.T) {
 			},
 		},
 	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
+	result := resolveImplement(input, factsFromTicket(input), implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
 	if result.Verdict.BranchPlan.MergeConfirm != "skip" {
 		t.Fatalf("merge confirm = %q, want skip (explicit skip should be honored)", result.Verdict.BranchPlan.MergeConfirm)
 	}
@@ -441,7 +405,7 @@ func TestResolveImplementMergeConfirmNonSkipStillAsks(t *testing.T) {
 			},
 		},
 	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
+	result := resolveImplement(input, factsFromTicket(input), implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
 	if result.Verdict.BranchPlan.MergeConfirm != "ask" {
 		t.Fatalf("merge confirm = %q, want ask (explicit non-skip value should still ask)", result.Verdict.BranchPlan.MergeConfirm)
 	}
@@ -463,7 +427,7 @@ func TestResolveImplementMergeTargetPolicyIgnoredOutsideImplementBranchWarns(t *
 			Branch: implementBranchPolicyInput{MergeTarget: factString{Value: "master", Present: true}},
 		},
 	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "test/wsflow-smoke", StartCommit: "abc123"})
+	result := resolveImplement(input, factsFromTicket(input), implementBranchObservation{CurrentBranch: "test/wsflow-smoke", StartCommit: "abc123"})
 	if result.Verdict.BranchPlan.Action != "create" {
 		t.Fatalf("branch action = %q, want create", result.Verdict.BranchPlan.Action)
 	}
@@ -495,7 +459,7 @@ func TestResolveImplementMergeTargetPolicyHonoredOnImplementBranchNoWarning(t *t
 			Branch: implementBranchPolicyInput{MergeTarget: factString{Value: "master", Present: true}},
 		},
 	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "impl/tiny-edit", StartCommit: "abc123"})
+	result := resolveImplement(input, factsFromTicket(input), implementBranchObservation{CurrentBranch: "impl/tiny-edit", StartCommit: "abc123"})
 	if result.Verdict.BranchPlan.Action != "continue" {
 		t.Fatalf("branch action = %q, want continue", result.Verdict.BranchPlan.Action)
 	}
@@ -737,7 +701,7 @@ func TestResolveImplementDocSkipAndWarnings(t *testing.T) {
 			},
 		},
 	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
+	result := resolveImplement(input, factsFromTicket(input), implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
 	if result.Verdict.DocMode != "skipped" || result.Agenda.NeedDoc {
 		t.Fatalf("doc mode = %q need_doc=%v, want skipped false", result.Verdict.DocMode, result.Agenda.NeedDoc)
 	}
@@ -752,7 +716,7 @@ func TestResolveImplementDocSkipAndWarnings(t *testing.T) {
 	}
 
 	input.Policy.Docs.Reason = factString{}
-	result = resolveImplement(input, implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
+	result = resolveImplement(input, factsFromTicket(input), implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
 	if !containsString(result.Warnings, "docs skip requested without reason; normalized to standard") {
 		t.Fatalf("warnings missing doc fallback: %v", result.Warnings)
 	}
@@ -789,7 +753,7 @@ func TestResolveImplementSameTicketStemAcrossPhasesContinues(t *testing.T) {
 	const stem = "260900-feat-x"
 
 	phase1 := ticketPhaseInput(stem, "Phase 1")
-	result1 := resolveImplement(phase1, implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
+	result1 := resolveImplement(phase1, factsFromTicket(phase1), implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
 	if result1.Verdict.BranchPlan.Action != "create" {
 		t.Fatalf("phase 1 action = %q, want create; plan=%+v", result1.Verdict.BranchPlan.Action, result1.Verdict.BranchPlan)
 	}
@@ -800,7 +764,7 @@ func TestResolveImplementSameTicketStemAcrossPhasesContinues(t *testing.T) {
 
 	phase2 := ticketPhaseInput(stem, "Phase 2")
 	obs2 := implementBranchObservation{CurrentBranch: targetBranch, StartCommit: "abc123", AheadOfMergeRoot: 3}
-	result2 := resolveImplement(phase2, obs2)
+	result2 := resolveImplement(phase2, factsFromTicket(phase2), obs2)
 	if result2.Verdict.BranchPlan.Action != "continue" {
 		t.Fatalf("phase 2 action = %q, want continue (same ticket_stem must resolve the same target branch %q); plan=%+v",
 			result2.Verdict.BranchPlan.Action, targetBranch, result2.Verdict.BranchPlan)
@@ -813,7 +777,7 @@ func TestResolveImplementSameTicketStemAcrossPhasesContinues(t *testing.T) {
 // share the derivation mechanism.
 func TestResolveImplementDifferentTicketStemStillStops(t *testing.T) {
 	phase1 := ticketPhaseInput("260900-feat-x", "Phase 1")
-	result1 := resolveImplement(phase1, implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
+	result1 := resolveImplement(phase1, factsFromTicket(phase1), implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
 	if result1.Verdict.BranchPlan.Action != "create" {
 		t.Fatalf("setup action = %q, want create; plan=%+v", result1.Verdict.BranchPlan.Action, result1.Verdict.BranchPlan)
 	}
@@ -821,7 +785,7 @@ func TestResolveImplementDifferentTicketStemStillStops(t *testing.T) {
 
 	other := ticketPhaseInput("260900-feat-y", "Phase 1")
 	obs := implementBranchObservation{CurrentBranch: occupiedBranch, StartCommit: "abc123", AheadOfMergeRoot: 2}
-	result := resolveImplement(other, obs)
+	result := resolveImplement(other, factsFromTicket(other), obs)
 	if result.Verdict.BranchPlan.Action != "stop" {
 		t.Fatalf("different ticket_stem action = %q, want stop even with allow_rename=yes; plan=%+v",
 			result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)

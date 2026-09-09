@@ -58,6 +58,15 @@ type TicketInfo struct {
 	Phases             []TicketPhase     `json:"phases,omitempty"`
 	MatchingSnippets   []string          `json:"matching_snippets,omitempty"`
 	MentionsTicketStem bool              `json:"mentions_ticket_stem,omitempty"`
+	// RouteFactsPresent reports whether the body carries a `## Route Facts`
+	// heading at all, which is the presence question the ready gate asks.
+	// RouteFacts holds the rows parsed from that section, keyed by the row's
+	// first column (`scope.span`, `risk.correctness`, …). A present heading
+	// with an empty or malformed table yields RouteFactsPresent=true and an
+	// empty map, so a caller can tell "never populated" from "populated
+	// wrongly" without a second parser.
+	RouteFactsPresent bool              `json:"route_facts_present,omitempty"`
+	RouteFacts        map[string]string `json:"route_facts,omitempty"`
 	// Hidden marks an entry sourced from the git index with no file on disk,
 	// i.e. a ticket this worktree's sparse-checkout scope excludes. It is only
 	// ever set on a resolution-mode call; discovery calls stay filesystem-only.
@@ -233,7 +242,7 @@ func scanTicketsWithBodies(root string, opts ticketScanOptions) ([]TicketInfo, m
 				continue
 			}
 			for _, entry := range sortedEntries(statusDir) {
-				if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {
+				if entry.IsDir() || filepath.Ext(entry.Name()) != ticketFileSuffix {
 					continue
 				}
 				path := filepath.Join(statusDir, entry.Name())
@@ -457,12 +466,120 @@ func readTicketFromBytes(relPath, status, text string) TicketInfo {
 	info.Plans = scalarList(fm["plans"])
 	info.Skeletons = scalarList(fm["skeletons"])
 	info.Completed, _ = fm["completed"].(string)
+	info.RouteFactsPresent, info.RouteFacts = ticketRouteFacts(text)
 	for _, phase := range phases {
 		if !phase.ResultPresent {
 			info.UnresolvedPhases = append(info.UnresolvedPhases, phase.Heading)
 		}
 	}
 	return info
+}
+
+// RouteFactsHeading is the ticket body heading under which the fact populator
+// writes the route-facts table. Both the ready gate and the implementation
+// route resolver address the section by this exact heading, so the two can
+// never disagree about what "present" means.
+const RouteFactsHeading = "## Route Facts"
+
+// ticketsDirPrefix is the board root every ticket path sits under.
+const ticketsDirPrefix = "ai-docs/tickets/"
+
+const ticketFileSuffix = ".md"
+
+// TicketAt projects one ticket addressed by its board-relative path
+// (`ai-docs/tickets/<status>/<stem>.md`) through readTicketFromBytes — the
+// same reader every listing, status, and find query uses. It exists because
+// the implementation route resolver holds a ticket path rather than a stem and
+// must not grow a second ticket parser of its own.
+func TicketAt(root, relPath string) (TicketInfo, error) {
+	// An absolute path under the root names the same ticket as its
+	// board-relative form, and callers relay whatever path their task block
+	// carries. Rebasing it here keeps the confinement below the sole test of
+	// what counts as a ticket, instead of letting the path's spelling decide.
+	if filepath.IsAbs(relPath) {
+		rebased, err := filepath.Rel(root, relPath)
+		if err != nil {
+			return TicketInfo{}, fmt.Errorf("not a ticket path: %s", relPath)
+		}
+		relPath = rebased
+	}
+	clean := filepath.ToSlash(filepath.Clean(relPath))
+	// The path is caller-supplied, so it is confined to the ticket board
+	// rather than trusted as a repo-relative read: nothing outside the board
+	// is a ticket, a traversal out of the root is not a ticket either, and a
+	// status directory is not a ticket even though it lives on the board.
+	if !strings.HasPrefix(clean, ticketsDirPrefix) || !strings.HasSuffix(clean, ticketFileSuffix) {
+		return TicketInfo{}, fmt.Errorf("not a ticket path: %s", relPath)
+	}
+	status := ""
+	if idx := strings.LastIndex(clean, "/"); idx > 0 {
+		parent := clean[:idx]
+		status = normalizeTicketStatus(parent[strings.LastIndex(parent, "/")+1:])
+	}
+	raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(clean)))
+	if err != nil {
+		return TicketInfo{}, err
+	}
+	return readTicketFromBytes(clean, status, string(raw)), nil
+}
+
+// ticketRouteFacts parses the `## Route Facts` markdown table into its
+// fact -> value pairs. The header row and the `---` separator row are skipped
+// by shape (a first cell of "fact" in any case, or a cell made only of "-" and
+// ":"), not by position, so a table written without a separator or with extra
+// leading prose still parses. Only the first two columns are read; the evidence column
+// is the reviewer's, not the resolver's.
+func ticketRouteFacts(text string) (bool, map[string]string) {
+	lines := strings.Split(text, "\n")
+	start := -1
+	for i, line := range lines {
+		if strings.TrimSpace(line) == RouteFactsHeading {
+			start = i + 1
+			break
+		}
+	}
+	if start < 0 {
+		return false, nil
+	}
+	facts := map[string]string{}
+	for _, line := range lines[start:] {
+		trimmed := strings.TrimSpace(line)
+		// Any heading ends the section, not just a sibling `## ` one: a
+		// `### Result` or `#### Edition` landing after the table must not have
+		// its own rows absorbed into the facts.
+		if strings.HasPrefix(trimmed, "#") {
+			break
+		}
+		if !strings.HasPrefix(trimmed, "|") {
+			continue
+		}
+		cells := strings.Split(strings.Trim(trimmed, "|"), "|")
+		if len(cells) < 2 {
+			continue
+		}
+		key := strings.TrimSpace(cells[0])
+		value := strings.TrimSpace(cells[1])
+		if key == "" || strings.EqualFold(key, "fact") || isTableRule(key) {
+			continue
+		}
+		if value == "" {
+			continue
+		}
+		facts[key] = value
+	}
+	if len(facts) == 0 {
+		return true, nil
+	}
+	return true, facts
+}
+
+// isTableRule reports whether a cell is a markdown alignment rule (`---`,
+// `:---:`) rather than content.
+func isTableRule(cell string) bool {
+	if cell == "" {
+		return false
+	}
+	return strings.Trim(cell, "-: ") == ""
 }
 
 // ticketStemFromRelPath takes the basename of a forward-slash board-relative
@@ -472,7 +589,7 @@ func ticketStemFromRelPath(relPath string) string {
 	if idx := strings.LastIndex(relPath, "/"); idx >= 0 {
 		relPath = relPath[idx+1:]
 	}
-	return strings.TrimSuffix(relPath, ".md")
+	return strings.TrimSuffix(relPath, ticketFileSuffix)
 }
 
 func ticketPhases(text string) ([]TicketPhase, bool) {
