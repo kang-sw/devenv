@@ -73,7 +73,7 @@ func shippedImplementerContext() map[string]string {
 
 func shippedImplementerRelayContext() map[string]string {
 	return map[string]string{
-		"PlanPath":           "ai-docs/.plans/plan.md",
+		"TargetPath":         "ai-docs/tickets/ready/260726-bug-demo.md",
 		"ReviewCycle":        "2",
 		"CommitRange":        "abc123..def456",
 		"ReviewPaths":        "ai-docs/.reviews/correctness.md, ai-docs/.reviews/test.md",
@@ -85,7 +85,7 @@ func shippedImplementerRelayContext() map[string]string {
 
 func shippedImplementerElevatedContext() map[string]string {
 	return map[string]string{
-		"PlanPath":           "ai-docs/.plans/plan.md",
+		"TargetPath":         "ai-docs/tickets/ready/260726-bug-demo.md",
 		"ReviewCycle":        "3",
 		"CommitRange":        "abc123..def456",
 		"ReviewPaths":        "ai-docs/.reviews/correctness.md, ai-docs/.reviews/test.md",
@@ -111,6 +111,7 @@ func shippedReviewAdjudicatorContext() map[string]string {
 	}
 }
 
+// initGitRepo creates a git repository in a temp dir and returns its path.
 func initGitRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -1256,7 +1257,7 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 	}
 	body := string(data)
 	for _, want := range []string{
-		"Plan path: `ai-docs/.plans/plan.md`",
+		"Target path: `ai-docs/tickets/ready/260726-bug-demo.md`",
 		"Review cycle: 2",
 		"Current commit range: abc123..def456",
 		"Non-clean review paths: ai-docs/.reviews/correctness.md, ai-docs/.reviews/test.md",
@@ -1264,10 +1265,10 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 		"Verification instructions: go test ./internal/mcp -run TestRenderPlaybookShippedImplementerRelayDeclaredContext",
 		"Result expectations: Report per-finding dispositions, fix commits, updated range, verification, and blockers.",
 		"Rely only on this prompt and named paths; do not depend on prior conversation.",
-		"Read the plan and every non-clean review path directly.",
+		"Read the target and every non-clean review path directly.",
 		"Won't-fix is allowed only for style suggestions conflicting with local patterns, findings that require scope expansion beyond the selected phase, or findings disproven by specific evidence.",
-		"When `## Relevant Ticket Contract` names a ticket path and phase heading, read that ticket file and treat the selected phase text as the task contract.",
-		"escalate for a plan update if a required fix needs a plan deviation.",
+		"Treat the target as the task contract: read it, and when it names phases, treat the selected phase text as the contract and later phases as out of scope.",
+		"escalate for a target update if a required fix needs a deviation from the target.",
 		"Won't-fix is not allowed for correctness, security, contract, regression, or required-test violations.",
 		"records the relevant per-finding dispositions known at that checkpoint",
 		"`[fixed]`",
@@ -1277,7 +1278,7 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 		// Output bullet. A single unanchored Contains would pass with only one site
 		// updated — the exact drift that made the escalation token invisible before.
 		"decide `[fixed]`, `[won't fix: <reason>]`, `[deferred: <reason>]`, or `[escalate: <reason>]`.",
-		"- `[escalate: <reason>]` — needs a plan update, or a change the ticket itself would need; the lead decides the plan-scope question before the next review.",
+		"- `[escalate: <reason>]` — needs a change to the target itself; the lead decides the scope question before the next review.",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("implementer-relay render missing %q:\n%s", want, body)
@@ -1342,7 +1343,7 @@ func TestRenderPlaybookShippedImplementerElevatedDeclaredContext(t *testing.T) {
 	for _, want := range []string{
 		"Your ws session_key",
 		// Every declared input substitutes.
-		"Plan path: `ai-docs/.plans/plan.md`",
+		"Target path: `ai-docs/tickets/ready/260726-bug-demo.md`",
 		"Review cycle: 3",
 		"Current commit range: abc123..def456",
 		"Non-clean review paths: ai-docs/.reviews/correctness.md, ai-docs/.reviews/test.md",
@@ -1352,11 +1353,11 @@ func TestRenderPlaybookShippedImplementerElevatedDeclaredContext(t *testing.T) {
 		"Verification instructions: go test ./internal/mcp -run TestRenderPlaybookShippedImplementerElevatedDeclaredContext",
 		"Result expectations: Report per-finding dispositions, the attempt record, fix commits, updated range, verification, and blockers.",
 		// Axis 1 — inputs: the prior fix commits are read, not merely listed.
-		"Read the plan, every non-clean review path, and the prior fix commits' diffs directly.",
-		// Axis 2 — posture: symptom-vs-cause, a different in-plan approach, escalation.
+		"Read the target, every non-clean review path, and the prior fix commits' diffs directly.",
+		// Axis 2 — posture: symptom-vs-cause, a different in-scope approach, escalation.
 		"Name each relayed finding's root cause before editing; every finding here survived a prior fix or shares a root cause with one.",
-		"Propose and apply a different in-plan approach when the prior attempt treated a symptom rather than the cause.",
-		"Escalate for a plan update when the cause-addressing fix falls outside the plan; do not shrink the fix to fit the plan instead.",
+		"Propose and apply a different in-scope approach when the prior attempt treated a symptom rather than the cause.",
+		"Escalate for a target update when the cause-addressing fix falls outside the target; do not shrink the fix to fit the target instead.",
 		"Decide per finding whether the prior attempt addressed the cause or a symptom, and name the cause this cycle targets.",
 		// Axis 3 — output: the attempt record is written even when this cycle also fails.
 		"Report the approach you attempted and its outcome for every relayed finding, including each finding this cycle failed to resolve.",
@@ -1364,7 +1365,7 @@ func TestRenderPlaybookShippedImplementerElevatedDeclaredContext(t *testing.T) {
 		"when this cycle's attempt also failed — what failed this time and the evidence that showed it",
 		// Lead-side parity: the same four disposition tokens as implementer-relay.
 		"decide `[fixed]`, `[won't fix: <reason>]`, `[deferred: <reason>]`, or `[escalate: <reason>]`.",
-		"- `[escalate: <reason>]` — needs a plan update, or a change the ticket itself would need; the lead decides the plan-scope question before the next review.",
+		"- `[escalate: <reason>]` — needs a change to the target itself; the lead decides the scope question before the next review.",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("implementer-elevated render missing %q:\n%s", want, body)
@@ -1708,7 +1709,6 @@ func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
 			t.Fatalf("code-reviewer render missing %q:\n%s", want, codeReviewerBody)
 		}
 	}
-
 }
 
 func TestRenderPlaybookFullWsStillRejectsUndeclaredContext(t *testing.T) {
