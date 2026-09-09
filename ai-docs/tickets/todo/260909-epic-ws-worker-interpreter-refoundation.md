@@ -71,7 +71,12 @@ removed.
 - `260909-chore-ws-refoundation-git-history-measurement-manual` - qualitative
   before/after measurement manual over downstream git history (commit gaps
   per ticket, relay/revert ratio, escalation counts in Results, judgment
-  items in AI Context). Prerequisite for every removal below.
+  items in AI Context). Prerequisite for every removal below. Landed with
+  the first baseline; its third review round reported seven Critical
+  indicator defects unfixed, carried by the follow-up below.
+- `260909-bug-workflow-cost-measurement-manual-round-three-findings` - triage
+  and fix the manual's reported findings, re-run the baseline at the same
+  measured commit. Prerequisite for the after-run, not for the removals.
 - `260909-refactor-drain-ready-queue-worker-spawner` - drain-ready-queue
   becomes the single drainer and spawner: mints a lead-capability child key
   per ticket and hands the whole ticket to a native worker; retires the
