@@ -26,6 +26,10 @@ no threshold; it produces figures with stated limits.
   proxy; a proxy silently changes what the comparison compares.
 - **Indicators, not a score.** Do not combine them. The sample is small and
   the window is confounded by model changes and topic mix.
+- **Record the commit convention in force.** Who commits (lead, per-phase
+  delegate, one worker per ticket) and at what granularity. Indicators 2 and
+  3 count commits, so a change in convention moves them without any change
+  in abort or re-work; a comparison across conventions reports that first.
 
 ## Window
 
@@ -37,22 +41,32 @@ frontmatter `completed:` date, ties broken by stem. A project with fewer
 than 20 records all of them and says so. Change the size only when both
 halves change together.
 
-Shell setup used by every command below (run from the repository root, at
-the measured commit; `BRANCH` is the branch the history is read on):
+Shell setup used by every command below, run from the repository root at
+the measured commit. `BRANCH` is the branch the history is read on: the
+project's tracked branch (`review-track` in `AGENTS.md` `### Review Policy`,
+or the branch work lands on), set explicitly, never derived from `HEAD`,
+because a run taken from a work branch would otherwise read that branch.
 
 ```sh
-BRANCH=$(git rev-parse --abbrev-ref HEAD)
+BRANCH=develop   # the tracked branch; set it, do not derive it
 completed_date() { awk '/^---$/{c++; next} c==1 && /^completed:/{print $2; exit}' "$1"; }
+epoch() { date -d "$1" +%s 2>/dev/null || date -j -f %Y-%m-%d "$1" +%s 2>/dev/null; }
 window() {
   for f in ai-docs/tickets/.done/*.md; do
     stem=$(basename "$f" .md)
-    case "$stem" in *-epic-*|*-workset-*|*-research-*|*-idea-*|*-design-*) continue;; esac
-    d=$(completed_date "$f"); [ -n "$d" ] && printf '%s %s\n' "$d" "$stem"
+    cat=$(printf '%s' "$stem" | cut -d- -f2)
+    case "$cat" in epic|workset|research|idea|design) continue;; esac
+    d=$(completed_date "$f")
+    if [ -z "$d" ]; then echo "skipped (no completed:): $stem" >&2; continue; fi
+    printf '%s %s\n' "$d" "$stem"
   done | sort | tail -20 | awk '{print $2}'
 }
 ```
 
-`window` prints the stems, oldest first. Record its output with the run.
+`window` prints the stems, oldest first, and names on stderr every closed
+actionable ticket it skipped for lacking `completed:`
+(`window 2>&1 >/dev/null | grep -c skipped` counts them). Record both with
+the run.
 
 ## Indicators
 
@@ -69,9 +83,10 @@ stem and the commit that added the ticket under `.done/`.
 ```sh
 for stem in $(window); do
   f=ai-docs/tickets/.done/$stem.md
-  created=20${stem:0:2}-${stem:2:2}-${stem:4:2}
+  created=$(printf '%s' "$stem" | sed -E 's/^([0-9]{2})([0-9]{2})([0-9]{2}).*/20\1-\2-\3/')
   done_on=$(completed_date "$f")
-  days=$(( ($(date -d "$done_on" +%s) - $(date -d "$created" +%s)) / 86400 ))
+  a=$(epoch "$done_on"); b=$(epoch "$created")
+  days=$([ -n "$a" ] && [ -n "$b" ] && echo $(( (a - b) / 86400 )) || echo unavailable)
   first=$(git log "$BRANCH" --reverse --format=%h --grep="$stem" | head -1)
   close=$(git log "$BRANCH" --format=%h --diff-filter=A -- "$f" | tail -1)
   gap=$([ -n "$first" ] && [ -n "$close" ] && git rev-list --count --first-parent "$first..$close" || echo unavailable)
@@ -192,12 +207,18 @@ implementation commits is the strongest abort signal here and the rarest.
    distribution, or `unavailable` with the reason.
 4. Record every place a command's output did not match the shape described
    here, and every judgment call made in indicator 5.
-5. For the after-run, place the before-run's record beside it and compare
-   per indicator, stating for each whether the window shapes match.
+5. For the after-run, place the before-run's record beside it. Partition
+   the after-window into tickets closed after the before-run's commit and
+   tickets it shares with the before-window, and report indicators 1
+   through 5 for the new partition on its own as well as for the whole
+   window: a window of 20 mostly shared tickets damps every movement, and
+   the shared tickets ran under the old workflow. Compare per indicator,
+   stating whether the window shapes match and whether the commit
+   convention changed between the runs.
 
 ## What This Does Not Measure
 
-Wall-clock time, token cost, the number of lead turns, and the quality of
-the result. A run with fewer corrective commits may have been slower or
+Wall-clock time, token cost, the number of lead turns, the commit
+convention itself, and the quality of the result. A run with fewer corrective commits may have been slower or
 worse; a run with more escalations may have caught more. Read the figures as
 evidence about the shape of the work, not as a verdict on it.

@@ -1,11 +1,14 @@
 ---
 title: "Git-history workflow-cost measurement manual, plus the pre-removal baseline run"
 parent: 260909-epic-ws-worker-interpreter-refoundation
-sage-review-design: required
+sage-review-design: completed
 related:
   260909-research-ws-refoundation-evidence-audit: evidence audit; records that telemetry-before-removal was rejected in favor of this manual
   260909-refactor-drain-ready-queue-worker-spawner: consumer; must not land before this ticket's baseline run exists
   260909-refactor-lead-surface-collapse-worker-stop-protocol: consumer; must not land before this ticket's baseline run exists
+sage-review-completeness: completed
+sage-review-design-reviewed: 5fb4afc0098c7c4a
+sage-review-completeness-reviewed: 5fb4afc0098c7c4a
 ---
 
 # Git-history workflow-cost measurement manual, plus the pre-removal baseline run
@@ -87,6 +90,28 @@ alternatives`.
    forbids inventing a proxy, because a proxy silently changes what the
    before/after comparison compares.
 
+6. **Window: the 20 most recently closed actionable tickets.** Selector: tickets
+   under `.done/` whose stem category is not `epic`, `workset`, `research`,
+   `idea`, or `design`, ordered by the frontmatter `completed:` date, ties by
+   stem; the after-run uses the same size and additionally reports the
+   partition of its window into tickets closed after the baseline commit and
+   tickets shared with the baseline, because most of a 20-ticket after-window
+   is the same tickets run under the old pipeline. Each run also records the
+   commit convention in force (who commits, at what granularity), since
+   indicators 2 and 3 move with that convention independently of re-work. *Rejected: a date range* — the
+   after-run window would hold more or fewer tickets depending on pace, which
+   breaks the fixed-shape rule. *Rejected: everything since a named commit* —
+   unbounded, so the two halves would never share a shape.
+7. **Both halves read `develop`.** Work lands on the review-track branch and
+   the after-run happens once the epic branch has merged into it, so both
+   windows are read on `develop` first-parent history, with the branch set
+   explicitly in the manual's setup rather than derived from `HEAD` (the
+   baseline is taken from the epic branch). *Rejected: the release
+   boundary (`main`)* — release merges collapse per-ticket history, and the
+   after-run would wait on a release.
+8. **The after-run belongs to the epic.** Its Completion Criteria already
+   assign it there; this ticket owns the manual and the baseline only.
+
 ## Constraints
 
 - **Not a shipped surface, still downstream-facing.** `ai-docs/manuals/` is a
@@ -159,6 +184,10 @@ Found by search, not by surveyed coordinates:
 **Goal.** Add one manual under `ai-docs/manuals/` defining the measurement, and
 run it once against this repository's `develop` at a named commit, recording
 the figures in this phase's `### Result`.
+The manual body is drafted at
+`ai-docs/ref/refound-drafts/workflow-cost-measurement.md`; move it to
+`ai-docs/manuals/workflow-cost-measurement.md`, run it, fix what the run
+exposes in the placed copy, and delete the draft so the manual has one home.
 
 **Manual content — the indicator set.** The manual defines at least these,
 each with a stated command, a stated unit, and a stated interpretation limit:
@@ -228,7 +257,7 @@ this ticket's.
 
 - New: one file under `ai-docs/manuals/`; match the frontmatter of the
   existing files found by grepping `ai-docs/manuals/` for `summary:`.
-- This ticket: `ai-docs/tickets/todo/260909-chore-ws-refoundation-git-history-measurement-manual.md`
+- This ticket: `ai-docs/tickets/ready/260909-chore-ws-refoundation-git-history-measurement-manual.md`
   (Phase 1 `### Result`).
 - Read-only during authoring: the bundled ticket conventions via
   `convention.read`; `AGENTS.md` `### Commit Rules`; the drain skill's
@@ -236,22 +265,3 @@ this ticket's.
   by grepping `agents-plugin-tool/` for `manuals`.
 - Expected to change: nothing under `agents-plugin/`,
   `agents-plugin-wsflow/`, or `agents-plugin-tool/`.
-
-## Open Questions
-
-- **Window size and selector for the baseline.** The epic settles that a
-  before/after comparison happens and that both halves must be comparable, but
-  not how large the window is or how tickets are selected into it (last N
-  closed tickets, a date range, or all tickets closed since a named commit).
-  The manual must fix one, and the choice determines whether the after-run has
-  enough closed tickets to compare against. Settle at design review.
-- **Which branch the after-run measures.** This repository lands work on
-  `develop` and ships `develop` -> `main`. If the epic's removals land through
-  goal branches merged into `develop`, the after-run window may straddle merge
-  commits that the baseline window does not contain. The epic does not say
-  whether the comparison is taken on `develop` in both halves or on the
-  release boundary.
-- **Whether the after-run is a separate ticket.** The epic's Completion
-  Criteria assign the after-run to the epic itself rather than to a child.
-  Left as stated; if design review wants the after-run owned by a ticket, that
-  is a new child, not a phase here.
