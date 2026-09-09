@@ -3,10 +3,13 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"strconv"
 	"strings"
 
+	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wskey"
 )
@@ -42,11 +45,8 @@ type implementScopeFactsInput struct {
 }
 
 type implementComplexityFactsInput struct {
-	ChangePoints   factString `json:"change_points,omitempty"`
 	ReusePoints    factString `json:"reuse_points,omitempty"`
-	StrategyShape  factString `json:"strategy_shape,omitempty"`
 	SideEffectRisk factString `json:"side_effect_risk,omitempty"`
-	ColdContext    factString `json:"cold_context,omitempty"`
 }
 
 type implementRiskFactsInput struct {
@@ -57,10 +57,9 @@ type implementRiskFactsInput struct {
 }
 
 type implementPolicyInput struct {
-	LowCeremonyIfSafe factString                 `json:"low_ceremony_if_safe,omitempty"`
-	Branch            implementBranchPolicyInput `json:"branch,omitempty"`
-	Review            implementReviewPolicyInput `json:"review,omitempty"`
-	Docs              implementDocsPolicyInput   `json:"docs,omitempty"`
+	Branch implementBranchPolicyInput `json:"branch,omitempty"`
+	Review implementReviewPolicyInput `json:"review,omitempty"`
+	Docs   implementDocsPolicyInput   `json:"docs,omitempty"`
 }
 
 type implementBranchPolicyInput struct {
@@ -83,6 +82,7 @@ type implementResult struct {
 	NextInstruction string                `json:"next_instruction"`
 	Target          implementResultTarget `json:"target"`
 	Scope           string                `json:"scope"`
+	RouteFacts      string                `json:"route_facts"`
 	Reason          string                `json:"reason"`
 	Conditions      []string              `json:"conditions"`
 	Warnings        []string              `json:"warnings"`
@@ -130,6 +130,7 @@ type implementAgenda struct {
 	NeedDoc     bool                  `json:"need_doc"`
 	Target      implementResultTarget `json:"target"`
 	Scope       string                `json:"scope"`
+	RouteFacts  string                `json:"route_facts"`
 	Conditions  []string              `json:"conditions"`
 	Warnings    []string              `json:"warnings"`
 }
@@ -151,16 +152,12 @@ type normalizedImplementFacts struct {
 	NewPublicSymbol        string
 	NewTypeContract        string
 	TestSurface            string
-	ChangePoints           string
 	ReusePoints            string
-	StrategyShape          string
 	SideEffectRisk         string
-	ColdContext            string
 	CorrectnessRisk        string
 	FitRisk                string
 	TestRisk               string
 	SecurityOrContractRisk string
-	LowCeremonyIfSafe      string
 	ReviewOverride         string
 	DocModePolicy          string
 	DocReason              string
@@ -187,15 +184,18 @@ func parseImplementInput(args map[string]any) (implementInput, error) {
 	if err != nil {
 		return implementInput{}, err
 	}
-	facts, err := parseImplementFacts(args["facts"])
-	if err != nil {
-		return implementInput{}, err
+	// Route facts are the ticket's, not the caller's: they are populated and
+	// design-reviewed once at authoring and read here from the ticket body. A
+	// caller that still sends them is not defaulted or merged — that would
+	// leave two sources for one judgment — it is told where they now live.
+	if _, sent := args["facts"]; sent {
+		return implementInput{}, fmt.Errorf("facts are not a caller argument: route facts are read from the ticket's %q section", routeFactsHeading)
 	}
 	policy, err := parseImplementPolicy(args["policy"])
 	if err != nil {
 		return implementInput{}, err
 	}
-	return implementInput{Target: target, Facts: facts, Policy: policy, Format: format}, nil
+	return implementInput{Target: target, Policy: policy, Format: format}, nil
 }
 
 func parseImplementTarget(m map[string]any) (implementTargetInput, error) {
@@ -243,6 +243,109 @@ func parseImplementTarget(m map[string]any) (implementTargetInput, error) {
 		out.Label = firstNonEmpty(out.TicketPath, out.TicketStem, out.Kind)
 	}
 	return out, nil
+}
+
+// routeFactsHeading is the ticket-body heading the fact populator writes under
+// and this resolver reads from. It mirrors wsdoc.RouteFactsHeading; the
+// constant is restated here only so error text can name it without the mcp
+// package reaching for a wsdoc symbol in a format string.
+const routeFactsHeading = wsdoc.RouteFactsHeading
+
+// implementRouteFactsSource is the resolved provenance of a run's route facts.
+// Status is the named outcome the verdict reports: a missing or unreadable
+// block is stated, never silently replaced by a conservative default verdict,
+// because a capable caller obeys a conservative default without noticing that
+// the facts it was derived from do not exist.
+type implementRouteFactsSource struct {
+	Facts  implementFactsInput
+	Status string // "ticket" | "absent" | "unreadable" | "ad-hoc"
+	Detail string
+}
+
+// routeFactGroups maps each accepted `## Route Facts` row key to the fact group
+// it belongs to. A key outside this set makes the block unreadable rather than
+// being ignored: a populator that drifts from the resolver must be visible at
+// the first run, not silently downgrade the whole ticket to unknown facts.
+var routeFactGroups = map[string]string{
+	"scope.span":                  "scope",
+	"scope.surface":               "scope",
+	"scope.new_public_symbol":     "scope",
+	"scope.new_type_contract":     "scope",
+	"scope.test_surface":          "scope",
+	"complexity.reuse_points":     "complexity",
+	"complexity.side_effect_risk": "complexity",
+	"risk.correctness":            "risk",
+	"risk.fit":                    "risk",
+	"risk.test":                   "risk",
+	"risk.security_or_contract":   "risk",
+}
+
+// loadImplementRouteFacts resolves the run's facts from the target. A ticket
+// target reads them through the wsdoc ticket projection; an ad-hoc target has
+// no ticket to read, and its description in the caller's task block is the
+// contract instead. Every failure resolves to a named status with unknown
+// facts rather than an error, so a fact problem is reported in the verdict the
+// caller reads rather than swallowing the branch plan the caller also needs.
+func loadImplementRouteFacts(root string, target implementTargetInput) implementRouteFactsSource {
+	if target.Kind != "ticket" {
+		return implementRouteFactsSource{Status: "ad-hoc"}
+	}
+	if strings.TrimSpace(target.TicketPath) == "" {
+		return implementRouteFactsSource{Status: "absent", Detail: "ticket target carries no ticket_path to read facts from"}
+	}
+	info, err := wsdoc.TicketAt(root, target.TicketPath)
+	if err != nil {
+		// A ticket file that is not there is the same condition as a ticket
+		// with no facts in it — nothing was populated — and reads better as
+		// such than as a malformed block. Any other read failure is genuinely
+		// unreadable. Neither detail repeats the absolute path the error
+		// carries: the caller was handed the board-relative one.
+		if errors.Is(err, fs.ErrNotExist) {
+			return implementRouteFactsSource{Status: "absent", Detail: fmt.Sprintf("%s does not exist", target.TicketPath)}
+		}
+		return implementRouteFactsSource{Status: "unreadable", Detail: fmt.Sprintf("cannot read %s", target.TicketPath)}
+	}
+	if !info.RouteFactsPresent {
+		return implementRouteFactsSource{Status: "absent", Detail: fmt.Sprintf("%s has no %s section", target.TicketPath, routeFactsHeading)}
+	}
+	if len(info.RouteFacts) == 0 {
+		return implementRouteFactsSource{Status: "unreadable", Detail: fmt.Sprintf("%s in %s has no fact rows", routeFactsHeading, target.TicketPath)}
+	}
+	grouped := map[string]any{}
+	for key, value := range info.RouteFacts {
+		group, ok := routeFactGroups[key]
+		if !ok {
+			return implementRouteFactsSource{Status: "unreadable", Detail: fmt.Sprintf("unrecognized route fact %q in %s", key, target.TicketPath)}
+		}
+		bucket, ok := grouped[group].(map[string]any)
+		if !ok {
+			bucket = map[string]any{}
+			grouped[group] = bucket
+		}
+		bucket[strings.TrimPrefix(key, group+".")] = value
+	}
+	facts, err := parseImplementFacts(grouped)
+	if err != nil {
+		return implementRouteFactsSource{Status: "unreadable", Detail: fmt.Sprintf("%s in %s: %v", routeFactsHeading, target.TicketPath, err)}
+	}
+	return implementRouteFactsSource{Facts: facts, Status: "ticket"}
+}
+
+// routeFactsMissing reports whether the run has no facts to route from. An
+// ad-hoc target is not missing facts; it has none by design.
+func routeFactsMissing(status string) bool {
+	return status == "absent" || status == "unreadable"
+}
+
+func implementRouteFactsLine(source implementRouteFactsSource) string {
+	switch source.Status {
+	case "ticket":
+		return "read from the ticket"
+	case "ad-hoc":
+		return "n/a (ad-hoc target; the description in your task block is the contract)"
+	default:
+		return fmt.Sprintf("missing (%s) - %s", source.Status, source.Detail)
+	}
 }
 
 func parseImplementFacts(raw any) (implementFactsInput, error) {
@@ -314,19 +417,10 @@ func parseImplementScopeFacts(m map[string]any) (implementScopeFactsInput, error
 func parseImplementComplexityFacts(m map[string]any) (implementComplexityFactsInput, error) {
 	var out implementComplexityFactsInput
 	var err error
-	if out.ChangePoints, err = parseEnumFact(m, "change_points", []string{"clear", "partially-known", "unknown"}); err != nil {
-		return out, fmt.Errorf("facts.complexity.%w", err)
-	}
 	if out.ReusePoints, err = parseEnumFact(m, "reuse_points", []string{"confirmed", "unconfirmed", "not-applicable", "unknown"}); err != nil {
 		return out, fmt.Errorf("facts.complexity.%w", err)
 	}
-	if out.StrategyShape, err = parseEnumFact(m, "strategy_shape", []string{"single-obvious", "multiple-viable", "unknown"}); err != nil {
-		return out, fmt.Errorf("facts.complexity.%w", err)
-	}
 	if out.SideEffectRisk, err = parseEnumFact(m, "side_effect_risk", []string{"low", "moderate", "high", "unknown"}); err != nil {
-		return out, fmt.Errorf("facts.complexity.%w", err)
-	}
-	if out.ColdContext, err = parseEnumFact(m, "cold_context", []string{"yes", "no", "unknown"}); err != nil {
 		return out, fmt.Errorf("facts.complexity.%w", err)
 	}
 	return out, nil
@@ -361,9 +455,6 @@ func parseImplementPolicy(raw any) (implementPolicyInput, error) {
 	}
 	var out implementPolicyInput
 	var err error
-	if out.LowCeremonyIfSafe, err = parseEnumFact(m, "low_ceremony_if_safe", []string{"yes", "no", "unknown"}); err != nil {
-		return out, fmt.Errorf("policy.%w", err)
-	}
 	if group, ok := m["branch"]; ok && group != nil {
 		gm, ok := group.(map[string]any)
 		if !ok {
@@ -505,7 +596,8 @@ func observeImplementBranch(root string, targetBranch string) (implementBranchOb
 // keeps its shape, and no emitted todo title repeats it.
 const implementDelegationMode = "delegated"
 
-func resolveImplement(input implementInput, obs implementBranchObservation) implementResult {
+func resolveImplement(input implementInput, source implementRouteFactsSource, obs implementBranchObservation) implementResult {
+	input.Facts = source.Facts
 	n, warnings := normalizeImplementFacts(input)
 	target := implementResultTarget{
 		Kind:       input.Target.Kind,
@@ -519,13 +611,13 @@ func resolveImplement(input implementInput, obs implementBranchObservation) impl
 	docMode := deriveImplementDocMode(n)
 	branchPlan := deriveImplementBranchPlan(n, obs)
 	warnings = append(warnings, branchPlan.Warnings...)
-	if n.LowCeremonyIfSafe == "yes" {
-		warnings = append(warnings, "policy.low_ceremony_if_safe=yes not applicable; continuing with standard branch path")
-	}
 	if branchPlan.Action == "create" && n.MergeTargetPolicy != "" {
 		warnings = append(warnings, fmt.Sprintf("policy.branch.merge_target %q ignored (not on an implementation branch: impl/*, or legacy implement/*); derived from current branch %q", n.MergeTargetPolicy, branchPlan.MergeTarget))
 	}
-	conditions := implementConditions(n)
+	if routeFactsMissing(source.Status) {
+		warnings = append(warnings, "route facts "+implementRouteFactsLine(source)+"; every fact resolved to unknown")
+	}
+	conditions := implementConditions(n, source)
 	reason := implementReason(n, reviewAlloc)
 	verdict := implementVerdict{
 		Delegation:  implementDelegationMode,
@@ -544,14 +636,16 @@ func resolveImplement(input implementInput, obs implementBranchObservation) impl
 		NeedDoc:     docMode == "standard",
 		Target:      target,
 		Scope:       firstNonEmpty(input.Target.ScopeLabel, "unknown"),
+		RouteFacts:  implementRouteFactsLine(source),
 		Conditions:  conditions,
 		Warnings:    warnings,
 	}
 	result := implementResult{
 		Verdict:         verdict,
-		NextInstruction: implementNextInstruction(verdict),
+		NextInstruction: implementNextInstruction(verdict, source),
 		Target:          target,
 		Scope:           agenda.Scope,
+		RouteFacts:      agenda.RouteFacts,
 		Reason:          reason,
 		Conditions:      conditions,
 		Warnings:        warnings,
@@ -574,16 +668,12 @@ func normalizeImplementFacts(input implementInput) (normalizedImplementFacts, []
 		NewPublicSymbol:        factOr(scope.NewPublicSymbol, "unknown"),
 		NewTypeContract:        factOr(scope.NewTypeContract, "unknown"),
 		TestSurface:            factOr(scope.TestSurface, "unknown"),
-		ChangePoints:           factOr(complexity.ChangePoints, "unknown"),
 		ReusePoints:            factOr(complexity.ReusePoints, "unknown"),
-		StrategyShape:          factOr(complexity.StrategyShape, "unknown"),
 		SideEffectRisk:         factOr(complexity.SideEffectRisk, "unknown"),
-		ColdContext:            factOr(complexity.ColdContext, "unknown"),
 		CorrectnessRisk:        factOr(risk.Correctness, "unknown"),
 		FitRisk:                factOr(risk.Fit, "unknown"),
 		TestRisk:               factOr(risk.Test, "unknown"),
 		SecurityOrContractRisk: factOr(risk.SecurityOrContract, "unknown"),
-		LowCeremonyIfSafe:      factOr(policy.LowCeremonyIfSafe, "unknown"),
 		ReviewOverride:         factOr(policy.Review.Override, "auto"),
 		DocModePolicy:          factOr(policy.Docs.Mode, "standard"),
 		DocReason:              strings.TrimSpace(policy.Docs.Reason.Value),
@@ -844,7 +934,27 @@ func finishImplementBranchPlanTail(plan implementBranchPlan, n normalizedImpleme
 	return plan
 }
 
-func implementNextInstruction(verdict implementVerdict) string {
+// implementNextInstruction leads with the route-facts outcome when there is
+// one to report, because it is the sentence that decides whether the run
+// proceeds at all: a worker's stop protocol keys off "missing route facts",
+// and an ad-hoc run needs to be told that its contract is the description it
+// was handed rather than a plan it should go looking for.
+func implementNextInstruction(verdict implementVerdict, source implementRouteFactsSource) string {
+	return implementRouteFactsPreamble(source) + implementBranchNextInstruction(verdict)
+}
+
+func implementRouteFactsPreamble(source implementRouteFactsSource) string {
+	switch {
+	case routeFactsMissing(source.Status):
+		return fmt.Sprintf("Stop and report missing route facts: %s. They are populated once at ticket authoring, so a run that reaches this point was handed over out of order; do not re-derive them here. If you continue anyway, note that every fact below resolved to unknown. ", source.Detail)
+	case source.Status == "ad-hoc":
+		return "Ad-hoc target: the description in your task block is the contract, and no ticket is read. Proceed from it and stop only on your stop protocol's closed list. "
+	default:
+		return ""
+	}
+}
+
+func implementBranchNextInstruction(verdict implementVerdict) string {
 	nextAfterBranch := implementNextAfterBranch(verdict)
 	switch verdict.BranchPlan.Action {
 	case "stop":
@@ -869,26 +979,23 @@ func implementNextAfterBranch(verdict implementVerdict) string {
 	return fmt.Sprintf("execute the installed Prep and Edit todos, %s review, and %s documentation gates in order.", verdict.ReviewAlloc, verdict.DocMode)
 }
 
-func implementConditions(n normalizedImplementFacts) []string {
+func implementConditions(n normalizedImplementFacts, source implementRouteFactsSource) []string {
 	conditions := []string{
 		"span=" + n.Span,
 		"surface=" + n.Surface,
 		"new-public-symbol=" + n.NewPublicSymbol,
 		"new-type-contract=" + n.NewTypeContract,
 		"test-surface=" + n.TestSurface,
-		"change-points=" + n.ChangePoints,
 		"reuse-points=" + n.ReusePoints,
-		"strategy-shape=" + n.StrategyShape,
 		"side-effect-risk=" + n.SideEffectRisk,
 		"correctness-risk=" + n.CorrectnessRisk,
 		"fit-risk=" + n.FitRisk,
 		"test-risk=" + n.TestRisk,
 		"security-or-contract-risk=" + n.SecurityOrContractRisk,
-		"low-ceremony-if-safe=" + n.LowCeremonyIfSafe,
 		"review-override=" + n.ReviewOverride,
 		"doc-mode-policy=" + n.DocModePolicy,
 	}
-	conditions = append(conditions, "merge-confirm="+n.MergeConfirmPolicy)
+	conditions = append(conditions, "route-facts="+source.Status, "merge-confirm="+n.MergeConfirmPolicy)
 	if n.DocModePolicy == "skip-with-reason" {
 		conditions = append(conditions, "doc-reason="+n.DocReason)
 	}
@@ -916,6 +1023,7 @@ func renderImplementRaw(result implementResult) string {
 	fmt.Fprintf(&b, "Next: %s\n\n", result.NextInstruction)
 	fmt.Fprintf(&b, "Target: %s\n", firstNonEmpty(result.Target.Label, result.Target.TicketStem, result.Target.TicketPath, "n/a"))
 	fmt.Fprintf(&b, "Scope: %s\n", result.Scope)
+	fmt.Fprintf(&b, "Route Facts: %s\n", result.RouteFacts)
 	fmt.Fprintf(&b, "Reason: %s\n\n", result.Reason)
 	b.WriteString("Conditions:\n")
 	for _, condition := range result.Conditions {
@@ -938,6 +1046,7 @@ func renderImplementRaw(result implementResult) string {
 	fmt.Fprintf(&b, "- review_alloc: %s\n", result.Agenda.ReviewAlloc)
 	fmt.Fprintf(&b, "- need_review: %t\n", result.Agenda.NeedReview)
 	fmt.Fprintf(&b, "- doc_mode: %s\n", result.Agenda.DocMode)
+	fmt.Fprintf(&b, "- route_facts: %s\n", result.Agenda.RouteFacts)
 	if result.Agenda.DocMode == "skipped" {
 		fmt.Fprintf(&b, "- doc_reason: %s\n", result.Agenda.DocReason)
 	}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -69,7 +70,12 @@ func TestDeriveImplementTodos(t *testing.T) {
 		{true, true, []string{"route", "prep", "edit", "review", "doc-pre-pass", "doc-commit-gate", "doc-closeout", "final-action-gate", "merge"}},
 	}
 	for _, tc := range cases {
-		got := deriveImplementTodos(tc.needReview, tc.needDoc)
+		got := deriveImplementTodosFromVerdict(implementTodoVerdict{
+			Delegation:  implementDelegationMode,
+			ReviewAlloc: "partitioned",
+			NeedReview:  tc.needReview,
+			NeedDoc:     tc.needDoc,
+		})
 		if !eqKeys(keysOf(got), tc.want...) {
 			t.Fatalf("derive(review=%v doc=%v) = %v, want %v", tc.needReview, tc.needDoc, keysOf(got), tc.want)
 		}
@@ -848,7 +854,7 @@ func TestEnterModeReplacesTodos(t *testing.T) {
 	_ = store.mutateTodos(key, func(list []todoItem) ([]todoItem, error) {
 		return todoAppend(list, "stale", "stale", todoPending, nil)
 	})
-	if err := store.enterMode(key, "implement", json.RawMessage(`{"x":1}`), deriveImplementTodos(true, false)); err != nil {
+	if err := store.enterMode(key, "implement", json.RawMessage(`{"x":1}`), deriveImplementTodosFromVerdict(implementTodoVerdict{NeedReview: true})); err != nil {
 		t.Fatal(err)
 	}
 	record, _ := store.readState(key)
@@ -1567,28 +1573,6 @@ func implementReadyArgs(format string) map[string]any {
 			"scope_label": "Phase 1: MCP-owned implement strategy verdict",
 			"scope_slug":  "enter-implement-deterministic-verdict-engine",
 		},
-		"facts": map[string]any{
-			"scope": map[string]any{
-				"span":              "multi-file",
-				"surface":           "public-interface",
-				"new_public_symbol": "no",
-				"new_type_contract": "yes",
-				"test_surface":      "existing",
-			},
-			"complexity": map[string]any{
-				"change_points":    "partially-known",
-				"reuse_points":     "unconfirmed",
-				"strategy_shape":   "single-obvious",
-				"side_effect_risk": "moderate",
-				"cold_context":     "no",
-			},
-			"risk": map[string]any{
-				"correctness":          "high",
-				"fit":                  "moderate",
-				"test":                 "moderate",
-				"security_or_contract": "moderate",
-			},
-		},
 		"policy": map[string]any{
 			"branch": map[string]any{
 				"merge_target": "feature/ferrule",
@@ -1602,6 +1586,8 @@ func implementReadyArgs(format string) map[string]any {
 	return args
 }
 
+// implementSkipDocsArgs is the ad-hoc (inline) target: no ticket, so no route
+// facts, which is the ad-hoc contract rather than a missing-facts condition.
 func implementSkipDocsArgs(format string) map[string]any {
 	args := map[string]any{
 		"target": map[string]any{
@@ -1610,30 +1596,7 @@ func implementSkipDocsArgs(format string) map[string]any {
 			"scope_label": "whole target",
 			"scope_slug":  "tiny-direct-edit",
 		},
-		"facts": map[string]any{
-			"scope": map[string]any{
-				"span":              "single-file",
-				"surface":           "internal",
-				"new_public_symbol": "no",
-				"new_type_contract": "no",
-				"test_surface":      "none",
-			},
-			"complexity": map[string]any{
-				"change_points":    "clear",
-				"reuse_points":     "not-applicable",
-				"strategy_shape":   "single-obvious",
-				"side_effect_risk": "low",
-				"cold_context":     "no",
-			},
-			"risk": map[string]any{
-				"correctness":          "low",
-				"fit":                  "low",
-				"test":                 "low",
-				"security_or_contract": "low",
-			},
-		},
 		"policy": map[string]any{
-			"low_ceremony_if_safe": "yes",
 			"branch": map[string]any{
 				"allow_rename": "no",
 			},
@@ -1646,6 +1609,44 @@ func implementSkipDocsArgs(format string) map[string]any {
 	}
 	args["format"] = format
 	return args
+}
+
+// implementReadyFacts is the fact set implementReadyArgs' ticket target
+// carries. A test that varies one fact copies this map, edits the copy, and
+// passes it to writeImplementReadyTicket.
+func implementReadyFacts() map[string]string {
+	return map[string]string{
+		"scope.span":                  "multi-file",
+		"scope.surface":               "public-interface",
+		"scope.new_public_symbol":     "no",
+		"scope.new_type_contract":     "yes",
+		"scope.test_surface":          "existing",
+		"complexity.reuse_points":     "unconfirmed",
+		"complexity.side_effect_risk": "moderate",
+		"risk.correctness":            "high",
+		"risk.fit":                    "moderate",
+		"risk.test":                   "moderate",
+		"risk.security_or_contract":   "moderate",
+	}
+}
+
+// writeImplementReadyTicket writes the ticket file implementReadyArgs' target
+// points at, with facts rendered as its ## Route Facts table. This is the only
+// way a run gets route facts now: they are the ticket's, not the caller's.
+func writeImplementReadyTicket(t *testing.T, root string, facts map[string]string) {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString("---\ntitle: Demo\n---\n\n# Demo\n\n## Route Facts\n\n| fact | value | evidence |\n|---|---|---|\n")
+	keys := make([]string, 0, len(facts))
+	for key := range facts {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		b.WriteString("| " + key + " | " + facts[key] + " | fixture |\n")
+	}
+	b.WriteString("\n## Phases\n\n### Phase 1: Demo\n")
+	mustWrite(t, root, "ai-docs/tickets/ready/260627-feat-enter-implement-deterministic-verdict-engine.md", b.String())
 }
 
 func proceedArgs(kind, label string, targetExtra, facts map[string]any) map[string]any {
@@ -1763,10 +1764,9 @@ func TestServeStdioSessionStateFlow(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 900100, root, nil))
 
-	enter := callToolWithKey(t, server, 1, key, "route.resolve_implement", map[string]any{
-		"delegation": "delegated", "need_review": true, "need_doc": false,
-	})
-	if !strings.Contains(enter, "entered implement mode") {
+	args := implementSkipDocsArgs("text")
+	enter := callToolWithKey(t, server, 1, key, "route.resolve_implement", args)
+	if !strings.Contains(enter, "Implementation Verdict") {
 		t.Fatalf("route.resolve_implement response unexpected: %s", enter)
 	}
 
@@ -1777,7 +1777,7 @@ func TestServeStdioSessionStateFlow(t *testing.T) {
 		}
 	}
 	if strings.Contains(full, "Doc pre-pass") {
-		t.Fatalf("need_doc=false but Doc steps present: %s", full)
+		t.Fatalf("docs skipped but Doc steps present: %s", full)
 	}
 
 	if got := callToolWithKey(t, server, 3, key, "todo.check", map[string]any{"key": "route", "status": "done"}); !strings.Contains(got, "todo done: route") {
@@ -1792,76 +1792,6 @@ func TestServeStdioSessionStateFlow(t *testing.T) {
 	}
 }
 
-// TestServeStdioEnterImplementVerdictLabels covers the legacy top-level
-// argument path. Both removed axes are now closed at the parser: `delegation`
-// accepts only the single execution mode, and `plan_depth` selects nothing at
-// all, so no combination of legacy arguments can produce a planner label or a
-// caller-reviews-itself allocation.
-func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	initGit(t, root)
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-
-	server := NewServer(root, "test")
-	key, _ := parseLoginResponse(t, callLogin(t, server, 902500, root, nil))
-
-	enter := callToolWithKey(t, server, 1, key, "route.resolve_implement", map[string]any{
-		"delegation":   "delegated",
-		"review_alloc": "single",
-		"need_review":  true,
-	})
-	for _, want := range []string{
-		"- [ ] {prep} Prep",
-		"- [ ] {edit} Edit",
-		"- [ ] {review} Review (single)",
-	} {
-		if !strings.Contains(enter, want) {
-			t.Fatalf("route.resolve_implement output missing %q:\n%s", want, enter)
-		}
-	}
-
-	if got := callToolWithKey(t, server, 2, key, "route.resolve_implement", map[string]any{
-		"delegation":   "direct-edit",
-		"review_alloc": "single",
-		"need_review":  true,
-	}); !strings.Contains(got, `invalid delegation "direct-edit"`) {
-		t.Fatalf("direct-edit delegation should be rejected, got: %s", got)
-	}
-
-	if got := callToolWithKey(t, server, 3, key, "route.resolve_implement", map[string]any{
-		"review_alloc": "lead-only",
-		"need_review":  true,
-	}); !strings.Contains(got, `invalid review_alloc "lead-only"`) {
-		t.Fatalf("lead-only review_alloc should be rejected, got: %s", got)
-	}
-
-	// A legacy plan_depth argument now selects nothing: it is dropped rather
-	// than validated, and no value of it can bring back a planner label.
-	for _, depth := range []string{"none", "survey", "research", "brief"} {
-		got := callToolWithKey(t, server, 4, key, "route.resolve_implement", map[string]any{
-			"plan_depth":   depth,
-			"review_alloc": "single",
-			"need_review":  true,
-		})
-		if !strings.Contains(got, "- [ ] {prep} Prep") || !strings.Contains(got, "- [ ] {edit} Edit") {
-			t.Fatalf("legacy plan_depth=%q did not render the collapsed todos, got: %s", depth, got)
-		}
-		for _, forbidden := range []string{"Prep (survey plan)", "Prep (research plan)", "plan-populator"} {
-			if strings.Contains(got, forbidden) {
-				t.Fatalf("legacy plan_depth=%q exposed a planner path via %q: %s", depth, forbidden, got)
-			}
-		}
-	}
-
-	if got := callToolWithKey(t, server, 7, key, "route.resolve_implement", map[string]any{
-		"review_alloc": "singel",
-		"need_review":  true,
-	}); !strings.Contains(got, `invalid review_alloc "singel"`) {
-		t.Fatalf("invalid review_alloc error expected, got: %s", got)
-	}
-}
-
 func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -1871,6 +1801,7 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+	writeImplementReadyTicket(t, root, implementReadyFacts())
 
 	text := callToolWithKey(t, server, 2, key, "route.resolve_implement", implementReadyArgs("text"))
 	for _, want := range []string{
@@ -1878,6 +1809,7 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 		"Mode: delegated",
 		"Branch Action: create impl/feature/base/jot-pug-mossy",
 		"Review Allocation: partitioned: correctness, fit, test",
+		"Route Facts: read from the ticket",
 		"Next: Create impl/feature/base/jot-pug-mossy",
 		"installed Prep and Edit todos",
 		"partitioned: correctness, fit, test review",
@@ -1951,6 +1883,7 @@ func TestEnterImplementTicketTargetTodosCarryNoPlanningStage(t *testing.T) {
 
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+	writeImplementReadyTicket(t, root, implementReadyFacts())
 	callToolWithKey(t, server, 2, key, "route.resolve_implement", implementReadyArgs("text"))
 
 	record, ok := server.sessions.readState(key)
@@ -1979,18 +1912,16 @@ func TestEnterImplementAllocatesSingleReviewForBoundedPublicExistingTestChange(t
 
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
-	args := implementReadyArgs("json")
-	scope := args["facts"].(map[string]any)["scope"].(map[string]any)
-	scope["new_type_contract"] = "no"
-	complexity := args["facts"].(map[string]any)["complexity"].(map[string]any)
-	complexity["reuse_points"] = "confirmed"
-	risk := args["facts"].(map[string]any)["risk"].(map[string]any)
-	risk["correctness"] = "low"
-	risk["fit"] = "low"
-	risk["test"] = "low"
-	risk["security_or_contract"] = "low"
+	facts := implementReadyFacts()
+	facts["scope.new_type_contract"] = "no"
+	facts["complexity.reuse_points"] = "confirmed"
+	facts["risk.correctness"] = "low"
+	facts["risk.fit"] = "low"
+	facts["risk.test"] = "low"
+	facts["risk.security_or_contract"] = "low"
+	writeImplementReadyTicket(t, root, facts)
 
-	jsonText := callToolWithKey(t, server, 2, key, "route.resolve_implement", args)
+	jsonText := callToolWithKey(t, server, 2, key, "route.resolve_implement", implementReadyArgs("json"))
 	var result implementResult
 	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
 		t.Fatalf("json verdict did not parse: %v\n%s", err, jsonText)
@@ -2135,9 +2066,6 @@ func TestEnterImplementUnbornRepositoryUsesStandardCreatePath(t *testing.T) {
 	if result.Verdict.BranchPlan.Action != "create" || result.Verdict.BranchPlan.StartCommit != "(initial)" {
 		t.Fatalf("unborn repository branch plan = %+v, want standard create with observed marker", result.Verdict.BranchPlan)
 	}
-	if !containsString(result.Warnings, "policy.low_ceremony_if_safe=yes not applicable; continuing with standard branch path") {
-		t.Fatalf("unborn fallback omitted rejected low-ceremony warning: %v", result.Warnings)
-	}
 	record, ok := server.sessions.readState(key)
 	if !ok {
 		t.Fatal("session record not found")
@@ -2149,79 +2077,23 @@ func TestEnterImplementUnbornRepositoryUsesStandardCreatePath(t *testing.T) {
 
 func TestEnterImplementNearMissesPreserveStandardBranchAndMergeTodos(t *testing.T) {
 	cases := []struct {
-		name           string
-		branch         string
-		mutateArgs     func(map[string]any)
-		wantAction     string
-		wantWarning    bool
-		wantDelegation string
-		wantReview     string
+		name       string
+		branch     string
+		wantAction string
 	}{
 		{
-			name: "low ceremony explicitly disabled",
-			mutateArgs: func(args map[string]any) {
-				args["policy"].(map[string]any)["low_ceremony_if_safe"] = "no"
-			},
+			name:       "fresh branch creates",
 			wantAction: "create",
 		},
 		{
-			name: "low ceremony unknown",
-			mutateArgs: func(args map[string]any) {
-				args["policy"].(map[string]any)["low_ceremony_if_safe"] = "unknown"
-			},
-			wantAction: "create",
+			name:       "matching impl branch continues",
+			branch:     implementTargetBranchName("", "tiny-direct-edit"),
+			wantAction: "continue",
 		},
 		{
-			name: "low ceremony missing",
-			mutateArgs: func(args map[string]any) {
-				delete(args["policy"].(map[string]any), "low_ceremony_if_safe")
-			},
-			wantAction: "create",
-		},
-		{
-			name: "normalized unknown test surface",
-			mutateArgs: func(args map[string]any) {
-				args["facts"].(map[string]any)["scope"].(map[string]any)["test_surface"] = "unknown"
-			},
-			wantAction:  "create",
-			wantWarning: true,
-		},
-		{
-			name: "normalized failed risk",
-			mutateArgs: func(args map[string]any) {
-				args["facts"].(map[string]any)["risk"].(map[string]any)["correctness"] = "moderate"
-			},
-			wantAction:  "create",
-			wantWarning: true,
-		},
-		{
-			name: "rejected low ceremony preserves delegated review and docs",
-			mutateArgs: func(args map[string]any) {
-				scope := args["facts"].(map[string]any)["scope"].(map[string]any)
-				scope["span"] = "multi-file"
-				scope["surface"] = "cross-module"
-				scope["test_surface"] = "existing"
-				risk := args["facts"].(map[string]any)["risk"].(map[string]any)
-				risk["correctness"] = "moderate"
-				risk["fit"] = "moderate"
-				risk["test"] = "moderate"
-			},
-			wantAction:     "create",
-			wantWarning:    true,
-			wantDelegation: "delegated",
-			wantReview:     "partitioned: correctness, fit, test",
-		},
-		{
-			name:        "matching impl branch continues",
-			branch:      implementTargetBranchName("", "tiny-direct-edit"),
-			wantAction:  "continue",
-			wantWarning: true,
-		},
-		{
-			name:        "legacy implement branch renames",
-			branch:      "implement/tiny-direct-edit",
-			wantAction:  "rename",
-			wantWarning: true,
+			name:       "legacy implement branch renames",
+			branch:     "implement/tiny-direct-edit",
+			wantAction: "rename",
 		},
 	}
 	for _, tc := range cases {
@@ -2241,9 +2113,6 @@ func TestEnterImplementNearMissesPreserveStandardBranchAndMergeTodos(t *testing.
 				args["policy"].(map[string]any)["branch"].(map[string]any)["merge_target"] = "master"
 				args["policy"].(map[string]any)["branch"].(map[string]any)["allow_rename"] = "yes"
 			}
-			if tc.mutateArgs != nil {
-				tc.mutateArgs(args)
-			}
 			jsonText := callToolWithKey(t, server, 2, key, "route.resolve_implement", args)
 			var result implementResult
 			if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
@@ -2251,13 +2120,6 @@ func TestEnterImplementNearMissesPreserveStandardBranchAndMergeTodos(t *testing.
 			}
 			if result.Verdict.BranchPlan.Action != tc.wantAction {
 				t.Fatalf("branch action = %q, want %q; verdict=%+v", result.Verdict.BranchPlan.Action, tc.wantAction, result.Verdict)
-			}
-			warning := "policy.low_ceremony_if_safe=yes not applicable; continuing with standard branch path"
-			if containsString(result.Warnings, warning) != tc.wantWarning || strings.Contains(result.Raw, warning) != tc.wantWarning || containsString(result.Agenda.Warnings, warning) != tc.wantWarning {
-				t.Fatalf("warning presence mismatch: warnings=%v raw=%q agenda=%v", result.Warnings, result.Raw, result.Agenda.Warnings)
-			}
-			if tc.wantDelegation != "" && (result.Verdict.Delegation != tc.wantDelegation || result.Verdict.ReviewAlloc != tc.wantReview || result.Verdict.DocMode != "skipped") {
-				t.Fatalf("rejected preference changed independent verdicts: %+v", result.Verdict)
 			}
 			record, ok := server.sessions.readState(key)
 			if !ok {
@@ -3809,10 +3671,8 @@ func TestWorkflowManualContinueMode(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 5100, root, nil))
 
 	// Enter implement mode to populate agenda+todos.
-	enter := callToolWithKey(t, server, 5101, key, "route.resolve_implement", map[string]any{
-		"delegation": "delegated", "need_review": true, "need_doc": false,
-	})
-	if !strings.Contains(enter, "entered implement mode") {
+	enter := callToolWithKey(t, server, 5101, key, "route.resolve_implement", implementSkipDocsArgs("text"))
+	if !strings.Contains(enter, "Implementation Verdict") {
 		t.Fatalf("route.resolve_implement unexpected: %s", enter)
 	}
 
@@ -3927,9 +3787,7 @@ func TestWorkflowManualGitCommitReinjection(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 5300, root, nil))
 
 	// Enter implement mode to populate todos.
-	callToolWithKey(t, server, 5301, key, "route.resolve_implement", map[string]any{
-		"delegation": "delegated", "need_review": true, "need_doc": false,
-	})
+	callToolWithKey(t, server, 5301, key, "route.resolve_implement", implementSkipDocsArgs("text"))
 
 	// Stage a file and commit.
 	testFile := filepath.Join(root, "test-p3a.txt")
@@ -4055,10 +3913,8 @@ func TestWorkflowStateReturnsSessionStateOnly(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 5500, root, nil))
 
 	// Enter implement mode to populate agenda+todos.
-	enter := callToolWithKey(t, server, 5501, key, "route.resolve_implement", map[string]any{
-		"delegation": "delegated", "need_review": true, "need_doc": false,
-	})
-	if !strings.Contains(enter, "entered implement mode") {
+	enter := callToolWithKey(t, server, 5501, key, "route.resolve_implement", implementSkipDocsArgs("text"))
+	if !strings.Contains(enter, "Implementation Verdict") {
 		t.Fatalf("route.resolve_implement unexpected: %s", enter)
 	}
 
@@ -4363,46 +4219,6 @@ func TestEnterImplementTypedPathRendersDeclaredBindingAnchor(t *testing.T) {
 			server := NewServer(root, "test")
 			key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
 			callToolWithKey(t, server, 2, key, "route.resolve_implement", implementReadyArgs("text"))
-			assertPrepAnchorClause(t, readPrepInstruction(t, server, 3, key), tc.declared)
-		})
-	}
-}
-
-// TestEnterImplementLegacyPathRendersDeclaredBindingAnchor exercises the legacy
-// top-level route.resolve_implement path in handleEnterImplement, which reads
-// session state itself; this is the path the ticket constraint requires a test
-// to pin.
-func TestEnterImplementLegacyPathRendersDeclaredBindingAnchor(t *testing.T) {
-	legacyArgs := func() map[string]any {
-		return map[string]any{
-			"delegation":   "delegated",
-			"plan_depth":   "survey",
-			"review_alloc": "partitioned",
-			"need_review":  true,
-			"need_doc":     true,
-		}
-	}
-	for _, tc := range []struct {
-		name     string
-		declared bool
-	}{
-		{name: "declared", declared: true},
-		{name: "sectionless", declared: false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			useLeadProfile(t)
-			root := t.TempDir()
-			initGit(t, root)
-			runGit(t, root, "switch", "-c", "implement/demo")
-			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-			if tc.declared {
-				writeBindingAnchorAGENTS(t, root)
-			} else {
-				writeSectionlessAGENTS(t, root)
-			}
-			server := NewServer(root, "test")
-			key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
-			callToolWithKey(t, server, 2, key, "route.resolve_implement", legacyArgs())
 			assertPrepAnchorClause(t, readPrepInstruction(t, server, 3, key), tc.declared)
 		})
 	}

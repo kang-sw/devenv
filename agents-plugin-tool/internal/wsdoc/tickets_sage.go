@@ -42,7 +42,7 @@ type SageGateOptions struct {
 // SageGateResult is the gate decision. Action is the primary control value the
 // caller follows; the remaining fields are populated per action.
 type SageGateResult struct {
-	Action    string   // "skip" | "stop_blocked" | "ask" | "run" | "check_review_required"
+	Action    string   // "skip" | "stop_blocked" | "stop_missing_route_facts" | "ask" | "run" | "check_review_required"
 	AskPrompt string   // populated when Action == "ask"
 	Reviewers []string // populated when Action == "run"; subset of {"design","completeness"}
 	Mode      string   // "standalone" | "combined"; populated when Action == "run"
@@ -177,6 +177,17 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 	}
 
 	// landing == "ready" (including a requested todo/ -> ready/ promotion).
+	//
+	// Route facts gate the promotion ahead of every posture question: the
+	// implementation route resolver reads them off the ticket, so a ticket
+	// that reaches ready/ without them cannot be routed at all, and spending a
+	// completeness reviewer on it first would review a ticket that is
+	// structurally incomplete. Presence only — the reviewer judges the values.
+	// The categories exempt from the spec-address gate are exempt here for the
+	// same reason: they carry no phases and never reach an implementation run.
+	if missingRouteFacts(ticketAbs, stem) {
+		return SageGateResult{Action: "stop_missing_route_facts"}, nil
+	}
 	if !designRequired && !completenessRequired {
 		return SageGateResult{Action: "skip"}, nil
 	}

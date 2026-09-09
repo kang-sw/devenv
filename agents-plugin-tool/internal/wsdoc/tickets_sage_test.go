@@ -75,6 +75,12 @@ func TestRenderBlockedSectionByteIdentical(t *testing.T) {
 
 // writeSageTicket writes a ticket fixture into todo/ with the given sage
 // frontmatter fields and returns its absolute path.
+// sageRouteFactsSection is the minimal `## Route Facts` block every sage-gate
+// fixture carries. The gate refuses a ready/ landing without one, and these
+// tests' subject is posture resolution, not fact population — presence is all
+// they need.
+const sageRouteFactsSection = "## Route Facts\n\n| fact | value |\n|---|---|\n| scope.span | single-file |\n\n"
+
 func writeSageTicket(t *testing.T, root, stem string, fields map[string]string) string {
 	t.Helper()
 	var b strings.Builder
@@ -82,7 +88,7 @@ func writeSageTicket(t *testing.T, root, stem string, fields map[string]string) 
 	for k, v := range fields {
 		b.WriteString(k + ": " + v + "\n")
 	}
-	b.WriteString("---\n\n# Sample\n\nBody text.\n")
+	b.WriteString("---\n\n# Sample\n\n" + sageRouteFactsSection + "Body text.\n")
 	rel := filepath.Join("ai-docs", "tickets", "todo", stem+".md")
 	mustWrite(t, root, rel, b.String())
 	return filepath.Join(root, rel)
@@ -401,7 +407,7 @@ func TestSageGateWarnsWhenCompletedReviewIsStale(t *testing.T) {
 	})
 	initSageFreshnessRepo(t, root)
 	baseline := commitSageFreshnessRepo(t, root, "stamp review")
-	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\n# Sample\n\nBody text changed.\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Body text changed.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	commitSageFreshnessRepo(t, root, "edit after review")
@@ -433,7 +439,7 @@ func TestSageGateStaleAnswerYesRerunsStaleStages(t *testing.T) {
 	})
 	initSageFreshnessRepo(t, root)
 	commitSageFreshnessRepo(t, root, "stamp review")
-	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\n# Sample\n\nBody text changed.\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Body text changed.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	commitSageFreshnessRepo(t, root, "edit after review")
@@ -465,7 +471,7 @@ func TestSageGateStaleAnswerNoWritesNothingAndResolvesRemaining(t *testing.T) {
 	})
 	initSageFreshnessRepo(t, root)
 	commitSageFreshnessRepo(t, root, "design completed")
-	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: required\n---\n\n# Sample\n\nChanged before completeness.\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: required\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Changed before completeness.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -510,7 +516,7 @@ func TestSageGateStaleAnswerYesSingleStageRerunsStandalone(t *testing.T) {
 	})
 	initSageFreshnessRepo(t, root)
 	commitSageFreshnessRepo(t, root, "design completed")
-	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: required\n---\n\n# Sample\n\nChanged before completeness.\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: required\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Changed before completeness.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -547,7 +553,7 @@ func TestSageGateStaleAnswerNoDoesNotSwallowRecommendedStage(t *testing.T) {
 	})
 	initSageFreshnessRepo(t, root)
 	commitSageFreshnessRepo(t, root, "design completed")
-	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: recommended\n---\n\n# Sample\n\nChanged before completeness.\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: recommended\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Changed before completeness.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -566,7 +572,7 @@ func TestSageGateWarnsOnUncommittedPostStampEdit(t *testing.T) {
 	path := writeSageTicket(t, root, stem, map[string]string{"sage-review-design": "completed"})
 	initSageFreshnessRepo(t, root)
 	commitSageFreshnessRepo(t, root, "stamp review")
-	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\nUncommitted change.\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Uncommitted change.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -586,7 +592,7 @@ func TestSageGateWarnsOnStagedOnlyPostStampEdit(t *testing.T) {
 	path := writeSageTicket(t, root, stem, map[string]string{"sage-review-design": "completed"})
 	initSageFreshnessRepo(t, root)
 	commitSageFreshnessRepo(t, root, "stamp review")
-	staged := "---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\nStaged change.\n"
+	staged := "---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\n" + sageRouteFactsSection + "Staged change.\n"
 	if err := os.WriteFile(path, []byte(staged), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -611,7 +617,7 @@ func TestSageGateFreshnessIsStageSpecific(t *testing.T) {
 	})
 	initSageFreshnessRepo(t, root)
 	commitSageFreshnessRepo(t, root, "design completed")
-	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: required\n---\n\n# Sample\n\nChanged before completeness.\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: required\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Changed before completeness.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -631,7 +637,7 @@ func TestSageGateFreshnessIgnoresSageOnlyAndStatusOnlyChanges(t *testing.T) {
 		path := writeSageTicket(t, root, stem, map[string]string{"sage-review-design": "required"})
 		initSageFreshnessRepo(t, root)
 		commitSageFreshnessRepo(t, root, "ticket before review")
-		if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\nBody text.\n"), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Body text.\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		commitSageFreshnessRepo(t, root, "stamp review")
@@ -687,7 +693,7 @@ func TestSageGateFreshnessFollowsStatusMoveThenContentEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 	runGit(t, root, "mv", oldRel, newRel)
-	if err := os.WriteFile(filepath.Join(root, newRel), []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\n# Sample\n\nBody changed in move.\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, newRel), []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Body changed in move.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	commitSageFreshnessRepo(t, root, "move and edit")
@@ -794,20 +800,20 @@ func TestSageGateLegacyFallbackFollowsLatestTransition(t *testing.T) {
 	rel := filepath.Join("ai-docs", "tickets", "todo", stem+".md")
 
 	// c1: initial non-completed state.
-	mustWrite(t, root, rel, "---\ntitle: Sample\nsage-review-design: required\n---\n\n# Sample\n\nBody v1.\n")
+	mustWrite(t, root, rel, "---\ntitle: Sample\nsage-review-design: required\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Body v1.\n")
 	initSageFreshnessRepo(t, root)
 	commitSageFreshnessRepo(t, root, "initial")
 
 	// c2: first completed stamp (transition A), on body v1.
-	mustWrite(t, root, rel, "---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\nBody v1.\n")
+	mustWrite(t, root, rel, "---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Body v1.\n")
 	commitSageFreshnessRepo(t, root, "stamp A")
 
 	// c3: reset to a non-terminal posture with a body change.
-	mustWrite(t, root, rel, "---\ntitle: Sample\nsage-review-design: required\n---\n\n# Sample\n\nBody v2.\n")
+	mustWrite(t, root, rel, "---\ntitle: Sample\nsage-review-design: required\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Body v2.\n")
 	commitSageFreshnessRepo(t, root, "reset")
 
 	// c4: second completed stamp (transition B, latest), on the new body.
-	mustWrite(t, root, rel, "---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\nBody v2.\n")
+	mustWrite(t, root, rel, "---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Body v2.\n")
 	commitSageFreshnessRepo(t, root, "stamp B")
 
 	// Current body (v2) matches transition B, not transition A (v1). Under
@@ -822,7 +828,7 @@ func TestSageGateLegacyFallbackFollowsLatestTransition(t *testing.T) {
 	}
 
 	// A later edit after transition B without a further stamp must go stale.
-	mustWrite(t, root, rel, "---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\nBody v3.\n")
+	mustWrite(t, root, rel, "---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Body v3.\n")
 	commitSageFreshnessRepo(t, root, "edit after B")
 
 	res, err = SageGate(root, SageGateOptions{TicketStem: stem, Landing: "todo"}, "auto")
@@ -1119,7 +1125,7 @@ func TestSageRecordBlockedSectionReplacedOnSecondCycle(t *testing.T) {
 // where a lead recorded two "## " sections after the Blocked section.
 func TestAppendOrReplaceBlockedSectionExcisesOnlyItsOwnSection(t *testing.T) {
 	const section = "## Blocked (2026-07-29)\n\n### Design Reviewer — block\n\n| # | Title | Severity |\n|---|-------|----------|\n| 1 | fresh | high |"
-	const header = "---\ntitle: Sample\n---\n\n# Sample\n\nBody text.\n"
+	const header = "---\ntitle: Sample\n---\n\n# Sample\n\n" + sageRouteFactsSection + "Body text.\n"
 	const prior = "## Blocked (2026-07-27)\n\n### Design Reviewer — block\n\n| # | Title | Severity |\n|---|-------|----------|\n| 1 | stale | high |\n"
 	const later = "## Landing-order inversion (2026-07-28)\n\nLater note one.\n\n## Category C dissolved (2026-07-28)\n\nLater note two.\n"
 

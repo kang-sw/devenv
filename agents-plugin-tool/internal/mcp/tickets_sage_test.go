@@ -305,7 +305,7 @@ func TestServeStdioSageGateDispatch(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", "260101-feat-sg.md"),
-		"---\ntitle: Sage\nsage-review-design: required\n---\n\nBody.\n")
+		"---\ntitle: Sage\nsage-review-design: required\n---\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| scope.span | single-file |\n\nBody.\n")
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
@@ -333,12 +333,12 @@ func TestServeStdioSageGateDetectsStaleCompletedReview(t *testing.T) {
 	root := t.TempDir()
 	ticketRel := filepath.Join("ai-docs", "tickets", "ready", "260101-feat-stale.md")
 	mustWrite(t, root, ticketRel,
-		"---\ntitle: Sage\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\nBody.\n")
+		"---\ntitle: Sage\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| scope.span | single-file |\n\nBody.\n")
 	initGit(t, root)
 	runGit(t, root, "add", ticketRel)
 	runGit(t, root, "commit", "-m", "stamp review")
 	mustWrite(t, root, ticketRel,
-		"---\ntitle: Sage\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\nChanged body.\n")
+		"---\ntitle: Sage\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| scope.span | single-file |\n\nChanged body.\n")
 	runGit(t, root, "add", ticketRel)
 	runGit(t, root, "commit", "-m", "edit after review")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
@@ -376,7 +376,7 @@ func TestServeStdioSageGateDeclineDoesNotAutoCommit(t *testing.T) {
 	root := t.TempDir()
 	ticketRel := filepath.Join("ai-docs", "tickets", "todo", "260101-feat-decline.md")
 	mustWrite(t, root, ticketRel,
-		"---\ntitle: Sage\nsage-review-design: recommended\n---\n\nBody.\n")
+		"---\ntitle: Sage\nsage-review-design: recommended\n---\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| scope.span | single-file |\n\nBody.\n")
 	initGit(t, root)
 	runGit(t, root, "add", ticketRel)
 	runGit(t, root, "commit", "-m", "initial ticket")
@@ -430,7 +430,7 @@ func TestServeStdioSageStampDispatch(t *testing.T) {
 	root := t.TempDir()
 	ticketRel := filepath.Join("ai-docs", "tickets", "todo", "260101-feat-sr.md")
 	mustWrite(t, root, ticketRel,
-		"---\ntitle: Sage\nsage-review-design: required\n---\n\nBody.\n")
+		"---\ntitle: Sage\nsage-review-design: required\n---\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| scope.span | single-file |\n\nBody.\n")
 	initGit(t, root)
 	// Commit the ticket file first so the subsequent posture write can be
 	// distinguished as modified-but-unstaged rather than merely untracked —
@@ -488,7 +488,7 @@ func TestServeStdioSageStampDelegateKeyBlocked(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", "260101-feat-blocked.md"),
-		"---\ntitle: Sage\nsage-review-design: required\n---\n\nBody.\n")
+		"---\ntitle: Sage\nsage-review-design: required\n---\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| scope.span | single-file |\n\nBody.\n")
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))

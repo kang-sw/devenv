@@ -276,6 +276,9 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 		if warning := readyGateWarning(filepath.Join(root, filepath.FromSlash(newPath)), stem); warning != "" {
 			result.Tip = appendTip(result.Tip, warning)
 		}
+		if missingRouteFacts(filepath.Join(root, filepath.FromSlash(newPath)), stem) {
+			result.Tip = appendTip(result.Tip, routeFactsMoveTip)
+		}
 		// Soft warning only: ws/tickets.verify / ws/git.commit's
 		// ready-sage-posture guardrail is the sole HARD enforcement point
 		// (single chokepoint) — this call never blocks the move itself.
@@ -338,6 +341,34 @@ func readyGateWarning(ticketAbsPath, stem string) string {
 
 	return "ready gate is normally enforced by lead-ticket; no spec addressing detected."
 }
+
+// missingRouteFacts reports whether a ticket landing in ready/ owes a
+// `## Route Facts` section and does not have one. It is presence-only by
+// design: the section's values are the completeness reviewer's subject, and a
+// mechanical value check here would duplicate the resolver's own enum
+// validation in a place that cannot report it usefully. Exemption follows the
+// spec-address gate's category set — a ticket with no implementation phases is
+// never routed, so it has no facts to carry.
+func missingRouteFacts(ticketAbsPath, stem string) bool {
+	match := ticketCategoryRE.FindStringSubmatch(stem)
+	if len(match) == 2 && exemptReadyGateCategories[match[1]] {
+		return false
+	}
+	raw, err := os.ReadFile(ticketAbsPath)
+	if err != nil {
+		// Unreadable is not "missing": the callers that reach here already
+		// surface a file-level failure of their own, and refusing a promotion
+		// on an I/O error would misname the problem.
+		return false
+	}
+	present, _ := ticketRouteFacts(string(raw))
+	return !present
+}
+
+// routeFactsMoveTip is the soft counterpart to the SageGate refusal, attached
+// to a ready/ move so a lead calling tickets.move directly still learns the
+// ticket cannot be routed yet.
+const routeFactsMoveTip = "No ## Route Facts section; the implementation route reads its facts from that section, so populate it before dispatching a worker."
 
 // statusRank orders the active status axis idea < todo < ready so a move toward
 // a higher rank counts as upward (promotion).

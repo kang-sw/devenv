@@ -2836,6 +2836,8 @@ func sageGateNextInstruction(result wsdoc.SageGateResult) string {
 		// posture this call wrote" stays true on the branches that wrote
 		// nothing, which is why it can be attached unconditionally.
 		return "next_instruction: A blocked sage review must be addressed before promotion; stop and report the blocker. This gate returns stop_blocked while the posture is blocked and never names a reviewer again, so a later invocation whose edits address the blocker spawns that stage's reviewer via On: Reviewer Spawn and clears the posture with ws/tickets.sage_stamp carrying fresh verdicts; read which stage is blocked from the ticket's sage-review-* frontmatter, which this result does not carry." + sageGatePostureUncommittedNote
+	case "stop_missing_route_facts":
+		return "next_instruction: This ticket has no ## Route Facts section, and the implementation route reads its facts from there, so it cannot be routed as promoted. Render the `ticket-fact-populator` playbook on this ticket, apply what it returns, then call tickets.sage_gate again with the same stem/landing; the section's values are the completeness reviewer's subject, so no review runs until it exists." + sageGatePostureUncommittedNote
 	case "ask":
 		return "next_instruction: Relay ask_prompt to the user, then call tickets.sage_gate again with the same stem/landing plus answer=yes|no." + sageGatePostureUncommittedNote
 	case "run":
@@ -4113,7 +4115,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.sage_gate",
-			"description": "Resolve the sage-review gate for a ticket landing. Owns posture resolution (legacy sage-review: migration, config.list fallback), the category×stage matrix, and standalone/combined mode selection. Returns an action (skip | stop_blocked | ask | run); for run, the reviewer(s) to spawn and the mode. Does not spawn reviewers.",
+			"description": "Resolve the sage-review gate for a ticket landing. Owns posture resolution (legacy sage-review: migration, config.list fallback), the category×stage matrix, and standalone/combined mode selection. Returns an action (skip | stop_blocked | stop_missing_route_facts | ask | run); for run, the reviewer(s) to spawn and the mode. A ready/ landing is refused with stop_missing_route_facts when the ticket carries no ## Route Facts section. Does not spawn reviewers.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

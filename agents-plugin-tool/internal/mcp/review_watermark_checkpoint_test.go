@@ -132,12 +132,12 @@ func TestServeStdioWorkflowManualReviewWatermarkNudgeSurfacesAndQuiets(t *testin
 	}
 }
 
-// TestServeStdioEnterImplementNewSchemaReviewWatermarkNudgeSurfacesAndQuiets
-// covers the third call site's hasNewTarget branch (handleEnterImplement).
+// TestServeStdioEnterImplementReviewWatermarkNudgeSurfacesAndQuiets
+// covers the third call site (handleEnterImplement).
 // The extra commits land on the track branch ("main") before the session's
 // working branch is cut from its tip, mirroring
 // TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda's branch setup.
-func TestServeStdioEnterImplementNewSchemaReviewWatermarkNudgeSurfacesAndQuiets(t *testing.T) {
+func TestServeStdioEnterImplementReviewWatermarkNudgeSurfacesAndQuiets(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	reviewNudgeTestRepo(t, root)
@@ -150,7 +150,7 @@ func TestServeStdioEnterImplementNewSchemaReviewWatermarkNudgeSurfacesAndQuiets(
 
 	staleText := callToolWithKey(t, server, 2, key, "route.resolve_implement", implementReadyArgs("text"))
 	if !strings.Contains(staleText, "review-watermark:") {
-		t.Fatalf("route.resolve_implement (new schema) should carry the review-watermark nudge for a stale range: %s", staleText)
+		t.Fatalf("route.resolve_implement should carry the review-watermark nudge for a stale range: %s", staleText)
 	}
 
 	runGit(t, root, "checkout", "main")
@@ -159,38 +159,7 @@ func TestServeStdioEnterImplementNewSchemaReviewWatermarkNudgeSurfacesAndQuiets(
 
 	freshText := callToolWithKey(t, server, 3, key, "route.resolve_implement", implementReadyArgs("text"))
 	if strings.Contains(freshText, "review-watermark:") {
-		t.Fatalf("route.resolve_implement (new schema) should stay silent right after the ledger was restamped: %s", freshText)
-	}
-}
-
-// TestServeStdioEnterImplementLegacyReviewWatermarkNudgeSurfacesAndQuiets
-// covers the third call site's legacy branch (handleEnter, sole caller is
-// route.resolve_implement without a "target" argument).
-func TestServeStdioEnterImplementLegacyReviewWatermarkNudgeSurfacesAndQuiets(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	reviewNudgeTestRepo(t, root)
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-
-	server := NewServer(root, "test")
-	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
-
-	reviewNudgeSeedStaleMarker(t, root, wsreview.SizeThresholdCommits+2)
-
-	staleResp := callToolWithKey(t, server, 2, key, "route.resolve_implement", map[string]any{
-		"delegation": "delegated", "need_review": true, "need_doc": false,
-	})
-	if !strings.Contains(staleResp, "review-watermark:") {
-		t.Fatalf("legacy route.resolve_implement should carry the review-watermark nudge for a stale range: %s", staleResp)
-	}
-
-	reviewNudgeRestamp(t, root)
-
-	freshResp := callToolWithKey(t, server, 3, key, "route.resolve_implement", map[string]any{
-		"delegation": "delegated", "need_review": true, "need_doc": false,
-	})
-	if strings.Contains(freshResp, "review-watermark:") {
-		t.Fatalf("legacy route.resolve_implement should stay silent right after the ledger was restamped: %s", freshResp)
+		t.Fatalf("route.resolve_implement should stay silent right after the ledger was restamped: %s", freshText)
 	}
 }
 
