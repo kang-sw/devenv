@@ -1,0 +1,42 @@
+---
+summary: Prose drafts for the ws refoundation epic, written against the re-baselined skill-authoring manual before any child ticket runs; each child moves its draft into place
+---
+
+# Refoundation Prose Drafts
+
+These files are the judgment-carrying texts the refoundation epic
+(`260909-epic-ws-worker-interpreter-refoundation`) ships. They are written
+first, by the lead-tier model, against `ai-docs/manuals/skill-authoring.md`,
+so that the child tickets' workers do mechanical placement (frontmatter,
+callers, Go, tests, manifests, wsflow mirror) rather than authoring.
+
+Every draft that lands on a shipped surface is written under AGENTS.md
+Architecture Rule 4: it names nothing a downstream project does not hold.
+Template variables (`{{.McpNamespace}}`, `{{.SkillNamespace}}`,
+`{{.ExploreAgent}}`, `{{.SpawnIdiom}}`) are the render-time substitution
+forms; a draft placed as an inline `SKILL.md` gets the literal namespace
+through the mirror generator instead.
+
+| Draft | Lands as | Owning child |
+|-------|----------|--------------|
+| `worker-stop-protocol.md` | `agents-plugin/rsrc/worker-stop-protocol.md`, a bare-name include; also the prompt body for the epic's hand-dogfood workers (Cross-Child Decision 19) | lead-surface-collapse, Phase 1 |
+| `ticket-worker.md` | `agents-plugin/rsrc/ticket-worker/ticket-worker.md`, `kind: render` | lead-surface-collapse, Phase 1 |
+| `lead-discuss.md` | `discuss` skill body | lead-surface-collapse, Phase 2 |
+| `lead-ticket.md` | `ticket` skill body (name binding is that ticket's open question; the body is name-independent) | lead-surface-collapse, Phase 2 |
+| `lead-run.md` | `run` skill body: the drainer, the spawner, the lead-side stop handling, ad-hoc implement | drain-ready-queue-worker-spawner Phase 1; lead-surface-collapse Phase 1 (escalation) and Phase 2 (ad hoc) |
+| `lead-review.md` | `review` skill body | lead-surface-collapse, Phase 2 |
+| `lead-ship.md` | `ship` skill body | lead-surface-collapse, Phase 2 |
+| `ticket-fact-populator.md` | `agents-plugin/rsrc/ticket-fact-populator/ticket-fact-populator.md` | route-resolve-implement-reads-ticket-facts, Phase 2 |
+| `bootstrap-template.md` | `AGENTS.template.md` sections and the new migration item, both packages | bootstrap-refoundation-template-migration, Phase 1 |
+| `workflow-guide-sections.md` | two new `WORKFLOW.md` sections, both packages and this repository's copy | bootstrap-refoundation-template-migration, Phase 1 |
+| `workflow-cost-measurement.md` | `ai-docs/manuals/workflow-cost-measurement.md` | git-history-measurement-manual, Phase 1 |
+
+Placement rules for the worker moving a draft:
+
+- Move the text; do not rewrite it. A change the mechanical work forces (a
+  tool name, a variable the renderer does not supply, a heading a parser
+  needs) is made in place and named in the commit's `## AI Context`.
+- Run the fresh-reader audit from the manual once per placed file, before it
+  lands. The drafts have not had one.
+- Where a draft leaves a bracketed `[design-review: ...]` marker, the child's
+  design review settles it; the marker must not ship.
