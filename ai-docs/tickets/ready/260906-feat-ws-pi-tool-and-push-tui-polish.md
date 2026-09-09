@@ -269,7 +269,28 @@ uniform native parent background, foreground distinction and separators intact.
 Repeat a long-session responsiveness observation and report it separately from
 the automated test evidence.
 
-Until the owner runs and records this acceptance, the ticket stays in `ready/`
-(NOT moved to `.done/`, no `completed:` frontmatter) and must not be
-re-dispatched for implementation - the code slice is done. Clear this note once
-the owner records the live acceptance.
+Until every owner-live check is confirmed, the ticket stays in `ready/` (NOT
+moved to `.done/`, no `completed:` frontmatter) and must not be re-dispatched for
+implementation - the code slice is done. Clear this note only after the remaining
+live acceptance item passes.
+
+### Owner-live acceptance attempt (2026-09-09)
+
+The owner confirmed the following checks in a real Pi TUI:
+
+- The direct read/run tools showed compact previews and expanded to their full
+  content.
+- Report and settled rows used the subdued treatment and matching
+  `customMessageBg` backgrounds.
+- The question control accepted an owner response, and the error row rendered.
+- Bridged YAML input/output retained the uniform native parent background,
+  distinct foregrounds, and separators under both light and dark themes.
+- No noticeable long-session delay or stutter occurred during this run.
+
+The approval control remains **unverified**: two separate `ws-execute` probes
+could not raise an approval because their workers did not expose
+`ws-worker-exec`. This leaves the owner-live gate blocked.
+
+Owner UX observations for follow-up: report/settled rows need one line of
+background-colored vertical breathing room above and below, and error rows need
+more margin plus a visible border.

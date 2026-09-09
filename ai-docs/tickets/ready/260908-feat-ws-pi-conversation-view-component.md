@@ -383,5 +383,26 @@ human-only and were never agent-cleared:
    result appear as collapsed items and expand.
 
 The Phase 2 code is merged into the goal track (impl→goal per-cycle merge); this
-blocker gates only the ticket's `.done/` transition, not the merge. Clear this
-note and move the ticket to `.done/` once the owner reports the runbook green.
+blocker gates only the ticket's `.done/` transition, not the merge. Keep this
+note and the ticket in `ready/` until every remaining runbook item is green.
+
+### Owner-live acceptance attempt (2026-09-09)
+
+The owner completed a live `/answer` conversation with two turns, `Esc`, reopen,
+a tool call, and `/done`. Observed results:
+
+- The overlay rendered without breakage. No live debug line exposed the exact
+  `instanceof` expression, so this is only the agreed functional identity proxy,
+  not direct instrumentation of item 1.
+- The single header `Esc` hint rendered correctly.
+- The tool call and result appeared collapsed and expanded to their full content,
+  although the owner reported very poor overall visibility.
+- `/done` closed the overlay but did **not** inject a summary into the lead
+  transcript.
+- The `working…` marker existed in the wrong location rather than at the end of
+  the agent dialogue, making it easy to miss, and it was not visible immediately
+  before tool output.
+- The idle-awaiting-owner and settled state rendering remains **unverified**.
+
+Item 1 has only proxy evidence, and items 2 and 3 remain failed or unverified,
+so the owner-live gate is still blocked and the ticket must not move to `.done/`.
