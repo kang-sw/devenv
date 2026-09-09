@@ -139,8 +139,8 @@ instead of full dissolution:
    and duplicated maps to start-here pointers.
 7. Route deeper semantic work through the owning workflow: behavior to
    `ws:lead-forge-spec` or the lead-write-spec procedure, modification knowledge to
-   `ws:lead-forge-mental-model`, ticket readiness/status wording to the
-   lead-ticket procedure, and ambiguous direction
+   `ws:lead-forge-mental-model`, ticket readiness/status wording to
+   `ws:lead-ticket`, and ambiguous direction
    to `ws:lead-discuss`.
 
 ## Commit Traceability

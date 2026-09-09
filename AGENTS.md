@@ -325,7 +325,7 @@ ai-docs/tickets/.dropped/
   Full ceremony:  discuss -> ticket -> run -> review
   Direct:         run <ticket-path or description>
   Queue:          run (no argument) -> next ready/ ticket, one worker per cycle
-  Review:         review [branch|range] -> verdict -> (discuss -> fix | comment | merge)
+  Review:         review [branch|range] -> verdict -> (fix via run | comment | discuss | merge)
   Release:        ship <project> -> release gate -> execute
   ```
   The user decides the next step at each handoff. `run` spawns one worker per

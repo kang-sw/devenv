@@ -13,6 +13,7 @@ related:
 sage-review-completeness: completed
 sage-review-design-reviewed: a805616b0046fb1b
 sage-review-completeness-reviewed: a805616b0046fb1b
+completed: 2026-09-09
 ---
 
 # Collapse the lead skill surface; turn lead procedure playbooks into worker playbooks carrying the stop-and-report protocol
@@ -709,6 +710,150 @@ spec layer; whichever lands second reconciles the line).
 - Manifests: `agents-plugin/skills/manifest.json`,
   `agents-plugin/rsrc/manifest.json`,
   `agents-plugin-wsflow/rsrc/manifest.json`.
+
+### Result (ce5f30ef) - 2026-09-09
+
+Landed across `cf8b6f3a..b9b0627d`; the heading names the collapse commit.
+
+**Landed.** The shipped lead surface is the working five plus housekeeping:
+`lead-discuss`, `lead-ticket`, `lead-run`, `lead-review`, `lead-ship`, then
+`lead-bootstrap`, `lead-tune`, `lead-revive`, `mcp-server-repair`, the three
+undecided skills, and the three that die with the document layer their sibling
+retires. `lead-write-ticket` is renamed to `lead-ticket` in both packages
+(skill dir, rsrc dir, body, and its two `task-list` fragments) by `git mv`.
+Deleted: `lead-proceed` and `lead-verify-discussion` skills, `lead-proceed` and
+`lead-implement` rsrc bodies, and the wsflow skills for all three. The four
+drafts are placed over the existing bodies and deleted from
+`ai-docs/ref/refound-drafts/` with their README rows. Both `[design-review:]`
+markers resolved as they instructed: the review-config and ship-config schema
+blocks are carried byte-verbatim from the old bodies, so no marker ships.
+
+`tickets.checklist(phase: "intent")` is the three items of Decision 9 and is
+category-invariant; `content` is unchanged. `ticket-conventions.md`'s
+`lead-write-ticket` reference is renamed, not removed, per this phase's own
+instruction that the spec-layer sibling deletes those bullets.
+
+**Verification.**
+
+- `go build ./...` clean; `go test ./...` all 14 packages `ok`.
+- `python3 -m unittest discover agents-plugin/tests`: 55 tests, OK.
+  `agents-plugin-wsflow/tests`: 10 tests, OK.
+- Manifests, composed skills, and both wsflow mirrors regenerated with
+  `-count=1`; every drift gate green; `diff -r agents-plugin/rsrc
+  agents-plugin-wsflow/rsrc` empty. Compose ran before mirror.
+- `test_shipped_surfaces_downstream_neutral.py` green, plus a read of the four
+  placed bodies as a lead in a project that has never heard of this repository.
+- Retired names survive in exactly three files, all as negative assertions:
+  `playbook_tools_test.go`, `test_skill_dispatch_contracts.py`,
+  `test_wsflow_skill_bundle.py`. The phase's `grep -r` expectation reads
+  "nothing outside `ai-docs/`, `CHANGELOG.md`, and git history"; a denylist
+  that names what must not reappear is how the removal is enforced, so those
+  three are kept deliberately rather than worked around.
+- Cold-load check: every `{{.SkillNamespace}}:` target in the shipped tree
+  resolves to an existing skill directory. The flow closes — discuss names
+  ticket, run, tune; ticket names run; run names ticket and its own next cycle;
+  review names run and discuss; ship names review — with no retired name
+  anywhere in it.
+- Runtime tool gates: `route.resolve_proceed` lost its only caller and
+  `todo.read` its last prose reference. Both are kept, per this phase's
+  record-don't-drop rule, with every route and description repointed so no
+  emitted string names a skill that does not exist. The other prose-free gated
+  tools were already prose-free before this change.
+
+**Fresh-reader audit** (one cycle per placed body, four separate readers, each
+seeing only its target file; no fix produced a new finding, so no second
+cycle). 98 findings: `lead-ticket` 32 (5 high), `lead-review` 28 (4 high),
+`lead-ship` 23 (2 high), `lead-discuss` 15 (2 high). Applied 18 as `fix`; the
+rest were `risk accepted`, `intentional difference`, or `out of scope`.
+Findings asking prose to restate a tool's enums, response fields, return
+contract, or the spawn mechanism were classified out of scope: the manual's
+layer model deletes Layer 1 and 2 from prose unconditionally. Findings that a
+term another skill owns is undefined here (Open Decision Queue, clearing
+verdict) were intentional differences under the style rule that a skill names
+another skill's entry and never its internal judgments. Unspecified cases the
+manual calls intentional judgment gaps were left empty.
+
+Fixed: `lead-discuss`'s Stops section said "none of your own" while the
+Conversation section told the reader to stop for an unanswered ambiguity.
+`lead-ship`'s pre-merge re-check named the cleared head three ways and assumed
+the gate had run; it now uses one name and states the skipped-gate case, its
+tag push honors the config's `Tag` section instead of pushing unconditionally,
+and the Setup questions ask for the tag format the config format requires.
+`lead-review`'s BLOCKED verdict was produced but never handled, "the built-in
+phases" named nothing in the file, and "the authority the config names"
+pointed at a config section that does not exist — the reviewer contract's
+authority is the ticket or inline contract the change names. `lead-ticket`'s
+Open Decision Queue both permitted proceeding on the lead's own reading and
+forbade it, and its population loop stated a re-run rule and a convergence
+rule that contradicted each other.
+
+**Rule Tests.** The four bodies were written against the manual, so the seven
+tests were applied as a check, not a rewrite. Every rule cites its failure
+except the frontmatter-adjacent lines, which are not rules. Two Scoped
+failures were the audit fixes above (`lead-ship`'s re-check with no gate;
+`lead-review`'s LGTM in the range scenario, which offered to merge a range).
+One Non-redundant failure was `lead-ship`'s duplicated report sentence,
+deleted. Resolvable-downstream holds: the only project-specific inputs are
+read through generic hooks — `AGENTS.md` `### Review Policy` and
+`### Binding Anchor`, and the review and ship config files.
+
+**Mirror sweep.** `ai-docs/manuals/wsflow-mirroring.md` moved with the change:
+the shipped-skills list, the substitution-mirrored list (now three), the
+`lead-prefer-subagent` exception paragraph rewritten to the singular, the
+forbidden-references list gained the four retired names, and the sentence
+claiming a wsflow-only converged spine is replaced by "wsflow ships no
+wsflow-only skills."
+
+**Decisions.**
+
+- Phase 1's branch `impl/epic/refound/evade-grid-clamp` already existed and was
+  already merged. This phase ran on `impl/epic/refound/evade-grid-clamp-p2`,
+  created from the goal branch, rather than force-moving a shared branch.
+- The placed `lead-ticket` body describes a fact populator that edits the
+  ticket file. The populator shipped today returns a correction list and edits
+  nothing; the editing populator is the sibling's draft, still in `ready/`.
+  Step 3 is worded to hold under both contracts — review any edit, apply by
+  hand what was reported but not written — rather than pinning either, so the
+  shipped surface is coherent before and after the sibling lands.
+- The promote path lost the spec-address check with the draft placement. The
+  check is not restored: the document layer it gated is retiring. The ticket
+  conventions and the `tickets.move` advisory still describe it and were only
+  renamed, per this phase's instruction that the sibling deletes those lines.
+  The removal is recorded in `CHANGELOG.md` so no surface claims the promote
+  path is unchanged.
+- `route.resolve_implement`'s emitted review todo named three prompt sections
+  that lived in the deleted `lead-implement` body — "Reviewer prompt frame",
+  "Review relay dispatch", "Re-review prompt". It is on the live worker path,
+  so it pointed a worker at nothing. Repointed to the surviving mechanisms.
+  The relay and review-round budgets are deliberately unchanged: that emitted
+  instruction still allows up to three review rounds while `ticket-worker`
+  step 4 allows two. Deciding which protocol wins is not this phase's, and is
+  recorded here rather than settled.
+- The pre-existing failure recorded in
+  `260909-bug-proceed-contract-test-pins-pre-diet-lead-proceed-strings` is
+  resolved by deletion, not fixed: the three tests that pinned the retired
+  routing skill's strings died with the skill, which is why both suites are
+  now green. It is not a regression this phase caused and not a fix this phase
+  authored. That bug ticket still stands in `idea/` describing a test that no
+  longer exists; dropping it is a ticket-inventory decision for the lead.
+- `lead-review`'s range scenario now points at the fenced config template as
+  its built-in default for Review Phases and the Landing Lens. Risk accepted:
+  a schema block carrying placeholders is load-bearing for a scenario that
+  never runs Setup. The alternative duplicates the phase list outside the
+  block and fails the Non-redundant test.
+- The spec and mental-model corpus is not edited, per this phase's own
+  touchpoints. Both still describe the retired skills throughout; that drift
+  predates this change and belongs to the epic's documentation child.
+
+**Review.** Two rounds, one fresh reviewer each, neither having written the
+change. Round 1: four Important, five Minor, no Critical — the dropped
+spec-address check attributed to two surviving strings, the emitted review todo
+naming deleted sections, the silently absorbed pre-existing failure, and the
+stale canonical-flows block in project memory. All four addressed in
+`b9b0627d`. Round 2, scoped to verifying those fixes: clean, no Critical, no
+Important, two Minor, both applied — the canonical-flows review line routed
+fix through discuss rather than run, and the workflow guide referred to a
+shipped skill by procedure name.
 
 ## Open Questions
 
