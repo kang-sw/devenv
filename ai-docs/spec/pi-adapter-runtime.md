@@ -586,6 +586,48 @@ lost, either: it surfaces again as `ws-agent-list`'s `last_report_at` and feeds
 the registry-cap eviction score (see `ws-agent-spawn` above), both falling back
 to the sidecar's captured time until the record reports again for real.
 
+### Durable child session homes {#260909-pi-durable-child-session-homes}
+
+New child material lives under
+`<configured Pi agent dir>/ws-agents/<dispatching session id>/<agent id>/`,
+outside Pi's ordinary session directory. The namespace uses the immediate
+dispatcher's current Pi session identity, including for nested dispatch and
+sessions without a transcript file. A new session identity has a separate
+namespace; resuming the same identity retains its namespace.
+
+Workers and persistent explores keep their session files in this home. Forks
+receive `--session-dir` pointing to their owned home and retain their copied
+history and parent-session ancestry. A fork's reported session path is accepted
+only after ownership validation; invalid readiness leaves the previous recorded
+path unchanged. Terminal no-session explores receive an owned scratch home
+without requiring a transcript. Approval material remains available through its
+consumer's lifetime, including after fork readiness and while an approval
+decision awaits consumption.
+
+Owned session paths must be strict canonical descendants of the owned home.
+Existing paths must be regular files; directories, traversal to the home or
+outside it, and symlink components are rejected. A not-yet-created session file
+is allowed beneath an existing valid owned parent. Recovery checks the recorded
+ownership descriptor against the home's on-disk identity before treating a
+path as owned. Both orphan-registry and owner-thread recovery preserve this
+information. Legacy recorded session paths remain readable and resumable when
+owned metadata is absent or invalid; that fallback grants no cleanup authority.
+
+Registry capture and recovery apply to every dispatching role. File-backed
+sessions retain the adjacent sidecar described above. Sessions without a file
+use `<configured Pi agent dir>/ws-agents/<session id>/registry.ws-agents.json`;
+only the same Pi session identity discovers that registry.
+
+Owned homes persist ownership, activity, process identity, liveness, and
+question/approval/owner-held protection facts. References, prompts, reports,
+decisions, and observed session-file changes refresh activity; polling and
+directory age alone do not. Before the first session write, an absent file is
+pending, not a failed observation. Actual observation failures and disappearance
+after an observed write retain conservative unknown state and diagnostics.
+Later metadata-write failures are diagnostic and nonfatal to live operations.
+These records prepare safe cleanup; automatic scratch removal, cap-driven disk
+deletion, and age pruning are not implemented by this storage relocation.
+
 ### Turn completion is gated on RPC idle {#260903-pi-spawner-completion-gating}
 
 Because a worker is now a persistent RPC child rather than a one-shot process, a
