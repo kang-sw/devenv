@@ -84,11 +84,14 @@ FORBIDDEN_PATTERNS = {
     "full ws agent dotted tool": re.compile(r"\bagents\."),
     "excluded write-code skill": re.compile(r"\blead-write-code\b"),
     "excluded write-skeleton skill": re.compile(r"\blead-write-skeleton\b"),
-    # lead-sprint and lead-salvage were retired outright rather than merely
-    # excluded from wsflow, so these guard against a reintroduced reference to
-    # a skill that no longer exists in either lineage.
+    # lead-sprint, lead-salvage, lead-drain-ready-queue and
+    # lead-goal-fan-out-step were retired outright rather than merely excluded
+    # from wsflow, so these guard against a reintroduced reference to a skill
+    # that no longer exists in either lineage.
     "retired sprint skill": re.compile(r"\blead-sprint\b"),
     "retired salvage skill": re.compile(r"\blead-salvage\b"),
+    "retired drain skill": re.compile(r"\blead-drain-ready-queue\b"),
+    "retired fan-out skill": re.compile(r"\blead-goal-fan-out-step\b"),
     "excluded authoring skill": re.compile(r"\blead-skill-authoring\b"),
 }
 

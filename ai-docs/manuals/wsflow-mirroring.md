@@ -196,7 +196,7 @@ Current mapping (exhaustive): **empty**. The sole entry spliced
 skill are gone. The mechanism, its generator, and its drift guard stay in
 place for the next entry.
 
-- **Why build time, not serve time.** The serve-time concatenation hooks live
+- **Why build time, not serve time.** The serve-time concatenation hook lives
   in `printPlaybook`, so a serve-time splice would force the target back into
   being a `playbook.read` shim — reintroducing the call-skip failure
   `260703-chore-prefer-subagent-verify-discussion-inline-mirror` removed, on
@@ -344,6 +344,8 @@ Forbidden distributed-skill references include:
 - `lead-sprint`
 - `lead-salvage`
 - `lead-skill-authoring`
+- `lead-drain-ready-queue`
+- `lead-goal-fan-out-step`
 
 Allow exceptions only in repository maintenance documents, tests,
 compatibility comments, or hidden implementation details where the full ws name
