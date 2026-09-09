@@ -17,13 +17,13 @@ the constraint here; the user's attention at each stop is.
 ## Select
 
 Spawn {{.ExploreAgent}} to pick the next ticket; do not list `ready/` or read
-ticket files yourself. It skips candidates carrying a `## Blocked (...)` note,
-then prefers, in order: a ticket already in progress (some phase has a
-`### Result`, at least one does not); one named as a prerequisite by another
-`ready/` ticket's `related:` or `parent:`; otherwise the oldest. It returns
-exactly one advanceable ticket path, or `ready/` empty, or every remaining
-ticket blocked. Empty and all-blocked end the turn with no spawn; on a
-`goal/*` branch each has its own terminal below.
+ticket files yourself. Give it these rules: skip candidates carrying a
+`## Blocked (...)` note, then prefer, in order: a ticket already in progress
+(some phase has a `### Result`, at least one does not); one named as a
+prerequisite by another `ready/` ticket's `related:` or `parent:`; otherwise
+the oldest. Require it to return exactly one advanceable ticket path, or
+`ready/` empty, or every remaining ticket blocked. Empty and all-blocked end
+the turn with no spawn; on a `goal/*` branch each has its own terminal below.
 
 `run <description>` skips selection: the description is the contract.
 
@@ -38,10 +38,11 @@ ticket blocked. Empty and all-blocked end the turn with no spawn; on a
 2. `{{.McpNamespace}}/playbook.render(name: "ticket-worker", session_key:
    <your key>)`. It returns a path with the worker's lead-capability key
    spliced in. Do not read the file, and do not mint a second key for this
-   worker.
+   worker: the render does not hand the key back, so read it off
+   `{{.McpNamespace}}/session.children` as the newest child of your own key.
 3. Spawn one worker of at least current-mainstream class, in a form that can
    itself spawn children (`{{.SpawnIdiom}}`), with this task block and nothing
-   else:
+   else — **Handle the report** names the only lines ever added to it:
 
    ```text
    Read <rendered-path> as your system prompt.
