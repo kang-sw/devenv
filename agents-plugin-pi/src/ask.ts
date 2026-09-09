@@ -707,7 +707,7 @@ export function captureForkResume(record: RpcAgentRecord): PersistedForkResume {
  * puts the record back on the shared registry so `sendToAgent` can find it.
  */
 export function rehydrateForkRecord(agentId: string, resume: PersistedForkResume): RpcAgentRecord {
-  const ownership = resume.ownership && validDescriptor(resume.ownership) && resume.ownership.agentId === agentId && resume.ownership.sessionPath === resume.sessionPath && (() => { const disk = readOwnership(resume.ownership!.home); return !!disk && disk.ownerSessionId === resume.ownership!.ownerSessionId && disk.agentId === agentId && disk.sessionPath === resume.sessionPath; })() ? resume.ownership : undefined;
+  const ownership = resume.ownership && validDescriptor(resume.ownership) && resume.ownership.agentId === agentId && resume.ownership.sessionPath === resume.sessionPath && (() => { const disk = readOwnership(resume.ownership!.home); return !!disk && disk.home === resume.ownership!.home && disk.ownerSessionId === resume.ownership!.ownerSessionId && disk.agentId === agentId && disk.sessionPath === resume.sessionPath && disk.role === resume.ownership!.role && disk.exploreMode === resume.ownership!.exploreMode; })() ? resume.ownership : undefined;
   const record: RpcAgentRecord = {
     agentId,
     client: undefined,
@@ -893,6 +893,7 @@ export function handleForkRaisedQuestion(
     // count it as one of its own outstanding children) even before the owner
     // gets around to `/answer`.
     live.threadBound = true;
+    syncOwnershipProtection(live);
   }
   handle.threads.set(record.threadId, record);
   // Review relay #1 (I2): arm the final-report hook HERE, not only from
@@ -1064,6 +1065,7 @@ export function detachForkRaisedThread(handle: ThreadRegistryHandle, rpcRegistry
       // released too: the fork rejoins the lead's fan-in and its own
       // kind:"final" is pushed to the lead as any other child's would be.
       record.threadBound = false;
+      syncOwnershipProtection(record);
       // Refresh the resume snapshot while the record is still live, so a
       // reopen after a lead restart can rehydrate it.
       thread.forkResume = captureForkResume(record);
@@ -1100,6 +1102,7 @@ export function injectDiscussionSummary(
     if (record) {
       record.overlayAttached = false;
       record.threadBound = false;
+      syncOwnershipProtection(record);
       // Snapshot first: `stopAgent` clears `client`, and a later reopen needs
       // the session/tool fields this copy carries.
       thread.forkResume = captureForkResume(record);

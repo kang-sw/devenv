@@ -22,6 +22,9 @@ function safe(value: string, label: string): string { if (!SAFE_COMPONENT.test(v
 function contained(parent: string, child: string): boolean { const r = relative(parent, child); return r === "" || (!!r && !r.startsWith(`..${sep}`) && r !== ".."); }
 function canonicalRoot(root: string): string { mkdirSync(root, { recursive: true, mode: 0o700 }); return realpathSync(root); }
 function checkedDirectory(path: string, root: string): string { mkdirSync(path, { recursive: true, mode: 0o700 }); const real = realpathSync(path); if (!contained(root, real) || lstatSync(path).isSymbolicLink()) throw new Error("ws-pi-agent: owned path contains a symlink escape"); return real; }
+function canonicalHome(home: string): string { const resolved = resolve(home); if (lstatSync(resolved).isSymbolicLink()) throw new Error("ws-pi-agent: owned home is symlinked"); const real = realpathSync(resolved); if (real !== resolved) throw new Error("ws-pi-agent: owned home escapes through symlink"); return real; }
+function checkedSessionPath(home: string, sessionPath: string): void { const parent = dirname(sessionPath); const realParent = realpathSync(parent); if (realParent !== parent || !contained(home, realParent) || (lstatSync(sessionPath, { throwIfNoEntry: false })?.isSymbolicLink() ?? false)) throw new Error("ws-pi-agent: session path escapes owned home"); }
+export function isOwnedSessionPath(home: string, sessionPath: string): boolean { try { checkedSessionPath(canonicalHome(home), sessionPath); return true; } catch { return false; } }
 
 export function createAgentStorageContext(sessionId: string, agentDir = getAgentDir()): AgentStorageContext {
   return { root: canonicalRoot(agentDir), ownerSessionId: safe(sessionId, "Pi session id") };
@@ -41,12 +44,12 @@ export function allocateAgentHome(ctx: AgentStorageContext, agentId: string, rol
   return ownership;
 }
 export function writeOwnership(metadata: OwnershipMetadata): void {
-  const home = resolve(metadata.home); mkdirSync(home, { recursive: true, mode: 0o700 });
+  const home = canonicalHome(metadata.home); if (metadata.home !== home) throw new Error("ws-pi-agent: ownership home is not canonical"); if (metadata.sessionPath) checkedSessionPath(home, metadata.sessionPath);
   const target = ownershipPath(home), temp = join(home, `.ownership-${process.pid}-${Date.now()}.tmp`);
   writeFileSync(temp, `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o600 }); renameSync(temp, target);
 }
 export function readOwnership(home: string): OwnershipMetadata | undefined {
-  try { const value = JSON.parse(readFileSync(ownershipPath(home), "utf8")) as OwnershipMetadata; return validOwnership(value) ? value : undefined; } catch { return undefined; }
+  try { const canonical = canonicalHome(home); const value = JSON.parse(readFileSync(ownershipPath(canonical), "utf8")) as OwnershipMetadata; return validOwnership(value) && value.home === canonical && (!value.sessionPath || (checkedSessionPath(canonical, value.sessionPath), true)) ? value : undefined; } catch { return undefined; }
 }
 export function validOwnership(value: unknown): value is OwnershipMetadata {
   const o = value as Partial<OwnershipMetadata> | null;

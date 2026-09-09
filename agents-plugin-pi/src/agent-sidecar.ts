@@ -202,7 +202,7 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
     let forkContext: ForkContext | undefined;
     try { forkContext = parseForkContext(o.forkContext); } catch { continue; }
     if (!o.systemPromptPath && !forkContext) continue;
-    const ownership = o.ownership && validDescriptor(o.ownership) && o.ownership.agentId === o.agentId && o.ownership.sessionPath === o.sessionPath && (() => { const disk = readOwnership(o.ownership!.home); return !!disk && disk.ownerSessionId === o.ownership!.ownerSessionId && disk.agentId === o.ownership!.agentId && disk.sessionPath === o.ownership!.sessionPath; })() ? o.ownership : undefined;
+    const ownership = o.ownership && validDescriptor(o.ownership) && o.ownership.agentId === o.agentId && o.ownership.sessionPath === o.sessionPath && (() => { const disk = readOwnership(o.ownership!.home); return !!disk && disk.home === o.ownership!.home && disk.ownerSessionId === o.ownership!.ownerSessionId && disk.agentId === o.ownership!.agentId && disk.sessionPath === o.ownership!.sessionPath && disk.role === o.ownership!.role && disk.exploreMode === o.ownership!.exploreMode; })() ? o.ownership : undefined;
     const toolGroup = o.toolGroup;
     const isKnownToolGroup = toolGroup === undefined || toolGroup === "read-only" || toolGroup === "read-only-explore" || toolGroup === "recon" || toolGroup === "full-worker" || toolGroup === "execute-worker";
     const isKnownRole = o.spawnRole === undefined || o.spawnRole === "worker" || o.spawnRole === "execute-worker" || o.spawnRole === "fork" || o.spawnRole === "explore";

@@ -96,7 +96,7 @@ import { buildAgentSendSummary, buildAgentSpawnSummary, buildExploreSummary, cre
 import { suggestModels, formatExploreTierRefusal, formatTierWarning, modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx, type ModelCatalogEntry, type TierFailure, type TierRejection } from "./model-catalog.ts";
 import { WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readExploreMode, readSpawnRole, type ExploreMode, type SpawnRole } from "./process-role.ts";
 import { captureForkContext, compareForkRegistrations, removeForkTransport, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
-import { allocateAgentHome, createAgentStorageContext, observeSessionWrite, readOwnership, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, isOwnedSessionPath, observeSessionWrite, readOwnership, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers: tool-group resolution, terminal-stopReason classification,
@@ -1975,8 +1975,7 @@ export function validateForkReadiness(launch: ReturnType<typeof prepareForkLaunc
 }
 
 function containedOwnedPath(home: string, candidate: string): boolean {
-  const r = relative(resolve(home), resolve(candidate));
-  return !!r && !r.startsWith(`..${sep}`) && r !== "..";
+  return isOwnedSessionPath(home, candidate);
 }
 
 async function captureForkSelection(client: RpcClient, record: RpcAgentRecord): Promise<void> {
@@ -2169,6 +2168,7 @@ export function applyRpcEvent(
     // it settles, whatever the caller decides to push about it.
     record.running = false;
     record.pendingApproval = undefined;
+    syncOwnershipProtection(record);
     return { settled: true };
   } else if (evt.type === "tool_execution_start" && evt.toolName === REPORT_TO_LEAD_TOOL_NAME) {
     const args = evt.args as { message?: unknown; kind?: unknown } | undefined;
@@ -2998,18 +2998,19 @@ export async function stopAgent(
     // after every settle, not just on an explicit stop) makes this window
     // hot enough to close rather than accept.
     clearLiveState(record);
+    let stopped = true;
     try {
       await client.abort();
     } catch {
-      // best effort
+      stopped = false;
     }
     try {
       await client.stop();
     } catch {
-      // best effort
+      stopped = false;
     }
-    if (record.ownership && record.launchGeneration === generation && !record.client) updateOwnership(record.ownership.home, { liveness: { lifecycle: "stopped", running: false, observedAt: Date.now() } });
-    if (record.ownership) observeSessionWrite(record.ownership.home, record.sessionPath);
+    if (record.ownership && record.launchGeneration === generation && !record.client) updateOwnership(record.ownership.home, { liveness: { lifecycle: stopped ? "stopped" : "unknown", running: false, observedAt: Date.now() } });
+    if (record.ownership && record.launchGeneration === generation && !record.client) observeSessionWrite(record.ownership.home, record.sessionPath);
     // Review relay #1 (I2): a stop is a thread-close path too — the ticket
     // names "lead stop" alongside `/done`/fork final/`ws-resolve`. Releasing
     // the bind here keeps a stopped agent from carrying a latched flag into a
