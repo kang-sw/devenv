@@ -242,7 +242,7 @@ func scanTicketsWithBodies(root string, opts ticketScanOptions) ([]TicketInfo, m
 				continue
 			}
 			for _, entry := range sortedEntries(statusDir) {
-				if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {
+				if entry.IsDir() || filepath.Ext(entry.Name()) != ticketFileSuffix {
 					continue
 				}
 				path := filepath.Join(statusDir, entry.Name())
@@ -589,7 +589,7 @@ func ticketStemFromRelPath(relPath string) string {
 	if idx := strings.LastIndex(relPath, "/"); idx >= 0 {
 		relPath = relPath[idx+1:]
 	}
-	return strings.TrimSuffix(relPath, ".md")
+	return strings.TrimSuffix(relPath, ticketFileSuffix)
 }
 
 func ticketPhases(text string) ([]TicketPhase, bool) {
