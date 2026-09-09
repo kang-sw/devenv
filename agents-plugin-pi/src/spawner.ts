@@ -1021,7 +1021,7 @@ export interface RpcAgentRecord {
    * context (branch/dirty/ahead_behind) would silently describe the wrong
    * directory to the lead.
    */
-  pendingApproval?: { cmdId: string; command: string; rationale?: string; cwd?: string };
+  pendingApproval?: { cmdId: string; command: string; rationale?: string; cwd?: string; decisionWritten?: boolean };
   /**
    * 260904 Phase 2 (side-thread question surface, review relay #1 C1): `true`
    * while an owner overlay chat VIEW is attached to this agent (`ask.ts`'s
@@ -2168,6 +2168,7 @@ export function applyRpcEvent(
     // The run is over: the child stops counting toward the fan-in the instant
     // it settles, whatever the caller decides to push about it.
     record.running = false;
+    record.pendingApproval = undefined;
     return { settled: true };
   } else if (evt.type === "tool_execution_start" && evt.toolName === REPORT_TO_LEAD_TOOL_NAME) {
     const args = evt.args as { message?: unknown; kind?: unknown } | undefined;
