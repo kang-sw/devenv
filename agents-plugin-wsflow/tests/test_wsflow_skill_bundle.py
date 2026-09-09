@@ -18,7 +18,6 @@ EXPECTED_SKILLS = {
     "lead-backfill-docs",
     "lead-bootstrap",
     "lead-discuss",
-    "lead-goal-fan-out-step",
     "lead-forge-mental-model",
     "lead-forge-spec",
     "lead-implement",
@@ -49,13 +48,11 @@ EXPECTED_INLINE_SKILLS = {
 EXPECTED_PARALLEL_INIT_SKILLS = {
     "lead-backfill-docs",
     "lead-discuss",
-    "lead-goal-fan-out-step",
     "lead-run",
 }
 PARALLEL_INIT_TITLES = {
     "lead-backfill-docs": "Backfill Docs",
     "lead-discuss": "Discuss",
-    "lead-goal-fan-out-step": "Goal Fan-Out Step",
     "lead-run": "Run",
 }
 
@@ -212,7 +209,6 @@ class WsflowSkillBundleTest(unittest.TestCase):
         pointer_tail = {
             "lead-backfill-docs": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
             "lead-discuss": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
-            "lead-goal-fan-out-step": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
             "lead-run": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
         }
         offenders = []

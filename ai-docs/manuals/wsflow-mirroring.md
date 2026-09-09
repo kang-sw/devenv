@@ -53,7 +53,6 @@ Included:
 - `lead-tune`
 - `lead-prefer-subagent`
 - `lead-run`
-- `lead-goal-fan-out-step`
 - `lead-scope-worktree`
 - `lead-revive` (inline-body exception; see below)
 - `mcp-server-repair` (inline-body exception; see below)
