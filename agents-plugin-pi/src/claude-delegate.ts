@@ -1,3 +1,4 @@
+import { readSpawnRole } from "./process-role.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 import { ClaudeDelegateError, runClaudeItem, type ClaudeSdkDependencies, type ClaudeUsage } from "./claude-sdk.ts";
@@ -41,8 +42,21 @@ export function createClaudeDelegateController(cwd: () => string, deps: ClaudeDe
   const used = new Set<string>(); let closed = false; let active = 0; let quarantined = false; const queue: { start: () => void; reject: () => void }[] = []; const controllers = new Set<AbortController>(); const running = new Set<Promise<unknown>>();
   const quarantine = () => { quarantined = true; for (const entry of queue.splice(0)) entry.reject(); };
   const acquire = async (signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
-    const start = () => { if (closed || quarantined || signal?.aborted) { reject(new Error("cancelled")); return; } active += 1; resolve(); }; if (closed || quarantined || signal?.aborted) { reject(new Error("cancelled")); return; }
-    if (active < 3) start(); else { const entry = { start, reject: () => reject(new Error("cancelled")) }; const cancel = () => { const index = queue.indexOf(entry); if (index >= 0) queue.splice(index, 1); reject(new Error("cancelled")); }; signal?.addEventListener("abort", cancel, { once: true }); queue.push(entry); }
+    const detach = () => signal?.removeEventListener("abort", cancel);
+    const start = () => {
+      detach();
+      if (closed || quarantined || signal?.aborted) { reject(new Error("cancelled")); return; }
+      active += 1; resolve();
+    };
+    const entry = { start, reject: () => { detach(); reject(new Error("cancelled")); } };
+    const cancel = () => {
+      const index = queue.indexOf(entry);
+      if (index >= 0) queue.splice(index, 1);
+      entry.reject();
+    };
+    if (closed || quarantined || signal?.aborted) { entry.reject(); return; }
+    if (active < 3) start();
+    else { signal?.addEventListener("abort", cancel, { once: true }); queue.push(entry); }
   });
   const release = () => { active -= 1; if (!closed && !quarantined) queue.shift()?.start(); };
   const executeOne = async (value: unknown, id: string, callerSignal?: AbortSignal): Promise<ClaudeDelegateResult> => {
@@ -79,4 +93,26 @@ export function registerClaudeDelegate(pi: ExtensionAPI, controllerRef: { curren
     parameters: { type: "object", additionalProperties: false, properties: { items: { type: "array", minItems: 1, items: { type: "object", additionalProperties: false, properties: { preset: { type: "string", enum: ["audit", "consult"] }, request: { type: "string", minLength: 1 }, paths: { type: "array", items: { type: "string", minLength: 1 } }, model: { type: "string", minLength: 1 } }, required: ["preset", "request"] } }, }, required: ["items"] } as never,
     async execute(_id, params, signal) { const results = await controllerRef.current?.execute((params as { items?: unknown }).items, signal); if (!results) throw new Error("ws-claude is unavailable outside an active lead session"); const text = JSON.stringify(results); return { content: [{ type: "text", text }], details: { items: results } }; },
   } as never, toolPreviewTuiRef);
+}
+
+/** Production registration and session ownership seam; creates no SDK at registration. */
+export function registerClaudeDelegateSession(pi: ExtensionAPI, toolPreviewTuiRef: ToolPreviewTuiRef, deps: ClaudeDelegateDeps = {}) {
+  const ref: { current: ClaudeDelegateController | undefined } = { current: undefined };
+  registerClaudeDelegate(pi, ref, toolPreviewTuiRef);
+  return {
+    async start(cwd: string) {
+      const previous = ref.current;
+      ref.current = undefined;
+      await previous?.shutdown();
+      const role = readSpawnRole(process.env);
+      if (role === undefined || (role === "fork" && pi.getActiveTools().includes(CLAUDE_DELEGATE_TOOL_NAME))) {
+        ref.current = createClaudeDelegateController(() => cwd, deps);
+      }
+    },
+    async shutdown() {
+      const previous = ref.current;
+      ref.current = undefined;
+      await previous?.shutdown();
+    },
+  };
 }
