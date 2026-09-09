@@ -11,6 +11,7 @@ related:
 sage-review-completeness: completed
 sage-review-design-reviewed: 5c3f972c5c00d9bf
 sage-review-completeness-reviewed: 5c3f972c5c00d9bf
+completed: 2026-09-09
 ---
 
 # drain-ready-queue becomes the single drainer and the worker spawner
@@ -475,6 +476,89 @@ and `ferrule` all stay — they now have a consumer in drain.
 - Docs: `ai-docs/manuals/wsflow-mirroring.md` (shipped skills list) and
   `CHANGELOG.md` only. The spec and mental-model corpus is archived whole by
   `260909-refactor-retire-spec-mental-model-layers`; do not edit it here.
+
+### Result (f2294816) - 2026-09-09
+
+`lead-goal-fan-out-step` is gone from both packages — skill shim and rsrc
+overlay — together with the second `printPlaybook` concatenation hook that
+existed only to transclude the drainer (retargeted to `lead-run` in Phase 1)
+into that overlay, its two const names, and its two transclusion tests. The
+inventories that named it are reconciled: the wsflow bundle test's
+`EXPECTED_SKILLS` / `EXPECTED_PARALLEL_INIT_SKILLS` / `PARALLEL_INIT_TITLES` /
+repair-pointer map, the three generated manifests, and the mirroring manual's
+shipped-skill list. Landed across f2294816 and 5d6cc2f3.
+
+**Decisions taken.**
+
+- `CHANGELOG.md` is deliberately untouched, against the phase's doc
+  touchpoint. Its only mention is the historical release entry that introduced
+  the skill, and this repository writes changelog entries at release time (the
+  file's head is the last shipped release, several versions behind the current
+  package version), not per change. Editing release history to erase a skill
+  that existed would be false; adding an unreleased section would break the
+  file's cadence. The phase's own grep expectation already allows the mention
+  to survive there.
+- `skills_mirror_test.go` and `skills_compose_test.go` needed no edit, against
+  the phase's touchpoint list: neither curated list ever named this skill
+  (`substitutionMirroredSkills` covers only the three inline-body skills, and
+  `composedSkills` has been empty since the drainer's retirement in Phase 1).
+- The hook died rather than being retargeted a second time. Its three consts
+  (`goalFanOutStepPlaybookName`, `runPlaybookName`, `runPlaybookTitle`) had no
+  other reader; `WrapForConcatenation` survives because hook 1
+  (`lead-prefer-subagent` into the workflow manual) still uses it. Both
+  transclusion tests were deleted rather than adapted — they asserted the
+  boundary, ordering, and lockstep of a concatenation that no longer happens,
+  and the surviving hook and the wsflow-root render path keep their own
+  coverage elsewhere in the same files.
+- Beyond the phase's list, the two remaining prose references to "the
+  serve-time concatenation hooks" (the mirroring manual's build-time-composition
+  rationale and `skills_compose.go`'s `SkillSplice` doc) were singularized on
+  contact, since they name the same mechanism the reconciled `printPlaybook`
+  comment describes.
+- `lead-drain-ready-queue` and `lead-goal-fan-out-step` were added to the
+  wsflow `FORBIDDEN_PATTERNS` guard and the manual's forbidden-reference list.
+  Both were retired outright rather than excluded from wsflow, which is the
+  documented condition for that guard family (`lead-sprint`, `lead-salvage`);
+  Phase 1 had left the drain half unguarded.
+
+**Verification.**
+
+- `grep -r lead-goal-fan-out-step` over the tracked tree: only `ai-docs/`
+  (a July plan file, the tickets that discuss it) and the historical
+  `CHANGELOG.md:690` release entry.
+- `go build ./...` and `go test ./... -count=1` from `agents-plugin-tool/`:
+  clean, all 14 packages. `gofmt -l` clean on both changed Go files (three
+  files unrelated to this phase carry pre-existing formatting drift).
+- `python3 -m unittest discover agents-plugin-wsflow/tests`: 10 tests, OK.
+- `python3 -m unittest discover agents-plugin/tests`: 53 tests, 1 failure —
+  `test_skill_dispatch_contracts.py::test_proceed_keeps_implementation_route_only`,
+  the pre-existing failure recorded in
+  `260909-bug-proceed-contract-test-pins-pre-diet-lead-proceed-strings`. It
+  pins `lead-proceed` body text this phase does not touch.
+- Regenerated in the mandatory order (compose, wsflow skills mirror, rsrc
+  manifest, wsflow rsrc mirror, skills manifest), each `-count=1`;
+  `TestComposedSkillsUpToDate`, `TestWsflowSkillsMirrorUpToDate`,
+  `TestWsflowRsrcMirrorUpToDate`, `TestSkillsManifestDriftIsVisible` green
+  afterward. The reviewer independently re-verified all three manifests
+  hash-by-hash against disk and confirmed the two rsrc manifests are still
+  byte-identical.
+- Runtime gates read, not cited: `ferrule`, `session.children`, and
+  `session.note` are present at identical ranges in both `runtime.json` files,
+  unchanged by this phase, and all three still have shipped consumers
+  (`session.children` / `session.note` in both copies of `lead-run`, `ferrule`
+  in both copies of `lead-workflow-manual`).
+- Prerequisite satisfied before the removal landed: the workflow-cost baseline
+  is committed at 78573192 and its measurement-manual ticket is in `.done/`.
+- Review: one full-scope reviewer, two rounds. Round 1 returned no Critical and
+  no Important, and four Minor findings; three were fixed in 5d6cc2f3 and the
+  fourth was this Result. Round 2 confirmed all three fixed and raised nothing
+  new.
+
+**Dogfood surprise (not blocking).** The round-1 reviewer ran `git checkout`
+inside the shared worktree to verify the diff and left it on another branch;
+the work branch had to be restored by hand before the fixes could land. A
+read-only review of a named commit range never needs to move `HEAD`. Captured
+for the lead as a delegate-prompt hazard, not fixed here.
 
 ## Open Questions
 
