@@ -214,6 +214,7 @@ import { registerAuditCommands } from "./audit.ts";
 import { registerWsSkillTool } from "./lead-skills.ts";
 import { createToolPreviewTuiRef, loadToolResultTuiModules } from "./tool-result-render.ts";
 import { createAgentStorageContext } from "./agent-storage.ts";
+import { addClaudeDelegateIfLead, createClaudeDelegateController, registerClaudeDelegate, type ClaudeDelegateController } from "./claude-delegate.ts";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const pluginDir = dirname(srcDir); // agents-plugin-pi/
@@ -347,6 +348,9 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   // `session_shutdown`. `undefined` in every non-TUI or non-lead/fork process,
   // which is also what keeps `agentWidgetRefreshRef.current` unset there.
   let agentWidgetHandle: AgentWidgetController | undefined;
+  // The delegate is declared once, but its bounded process controller belongs
+  // to a single lead session and is replaced/disposed at lifecycle boundaries.
+  const claudeDelegateRef: { current: ClaudeDelegateController | undefined } = { current: undefined };
 
   pi.on("resources_discover", () => ({
     skillPaths: [skillsDir],
@@ -385,6 +389,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   });
 
   const goalLoopHandle = registerGoalLoop(pi, { goalLoopConfigPath, rpcRegistryRef }, toolPreviewTuiRef);
+  registerClaudeDelegate(pi, claudeDelegateRef, toolPreviewTuiRef);
   registerLeadBootstrap(pi, wsBlockBaseRef, skillsBlockCacheRef, effectivePromptRef, inheritedForkPromptRef, sessionKeyRef);
   pi.on("input", (event, ctx) => {
     if (readSpawnRole(process.env) !== "fork") return undefined;
@@ -466,6 +471,8 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // `pi-tui.ts`'s `loadHostPiTui()` now (see that file's Addendum doc
     // comment).
     toolPreviewTuiRef.current = await loadToolResultTuiModules();
+    await claudeDelegateRef.current?.shutdown();
+    claudeDelegateRef.current = readSpawnRole(process.env) === undefined ? createClaudeDelegateController(() => ctx.cwd) : undefined;
 
     // 260907 Phase 1: guard the seam so a `startBridge`/`registerAgentTools`
     // failure never falls through into a partial/toolless registration — see
@@ -664,7 +671,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // `_rebuildSystemPrompt` for a role that previously never took that
     // path at all.
     if (isLeadOrFork(bootstrapRole)) {
-      pi.setActiveTools(bootstrap.activeTools);
+      pi.setActiveTools(addClaudeDelegateIfLead(bootstrap.activeTools, bootstrapRole));
     }
 
     if (bootstrapRole === "fork") {
@@ -693,6 +700,8 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async (_event, _ctx) => {
+    await claudeDelegateRef.current?.shutdown();
+    claudeDelegateRef.current = undefined;
     // 260905: snapshot the children BEFORE stopAll() tears down their live
     // clients, so the next start of this session can announce them rather
     // than losing them silently (see agent-sidecar.ts's header). Ordering
