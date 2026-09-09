@@ -114,6 +114,16 @@ func TestEnterImplementMissingRouteFactsIsNamedNotDefaulted(t *testing.T) {
 			wantStatus: "unreadable",
 			wantDetail: `invalid correctness "medium"`,
 		},
+		{
+			// A partial table parses: every row it omits becomes `unknown`,
+			// and an all-unknown risk set allocates the smallest review. So
+			// the table is incomplete rather than conservative, and saying so
+			// is the whole point of naming the outcome.
+			name:       "table missing required facts",
+			body:       "---\ntitle: Demo\n---\n\n# Demo\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| scope.span | multi-file |\n| scope.surface | internal |\n",
+			wantStatus: "unreadable",
+			wantDetail: "is missing complexity.reuse_points, complexity.side_effect_risk, risk.correctness",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			useLeadProfile(t)
@@ -200,6 +210,73 @@ func TestEnterImplementAdHocTargetReadsNoTicket(t *testing.T) {
 				if strings.Contains(full, forbidden) {
 					t.Fatalf("ad-hoc todo list retained planning-stage text %q:\n%s", forbidden, full)
 				}
+			}
+		})
+	}
+}
+
+// TestEnterImplementRefusesABlankFactCell pins the other half of completeness:
+// a row that is present but empty is the same gap as a row that is absent, and
+// both would otherwise route as a deliberate `unknown`.
+func TestEnterImplementRefusesABlankFactCell(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+	facts := implementReadyFacts()
+	facts["risk.correctness"] = ""
+	writeImplementReadyTicket(t, root, facts)
+
+	var result implementResult
+	if err := json.Unmarshal([]byte(callToolWithKey(t, server, 2, key, "route.resolve_implement", implementReadyArgs("json"))), &result); err != nil {
+		t.Fatalf("json verdict did not parse: %v", err)
+	}
+	if !strings.Contains(result.RouteFacts, "is missing risk.correctness") {
+		t.Fatalf("route facts line = %q, want the blank cell named as missing", result.RouteFacts)
+	}
+}
+
+// TestEnterImplementResolvesTargetPathForms pins that the ticket is found by
+// what it is, not by how the caller spelled it: a worker relays whatever path
+// its task block carries, and a target may name only a stem.
+func TestEnterImplementResolvesTargetPathForms(t *testing.T) {
+	const rel = "ai-docs/tickets/ready/260627-feat-enter-implement-deterministic-verdict-engine.md"
+	for _, tc := range []struct {
+		name   string
+		mutate func(target map[string]any, root string)
+	}{
+		{
+			name: "absolute ticket_path under the root",
+			mutate: func(target map[string]any, root string) {
+				target["ticket_path"] = filepath.Join(root, filepath.FromSlash(rel))
+			},
+		},
+		{
+			name: "stem with no ticket_path",
+			mutate: func(target map[string]any, root string) {
+				delete(target, "ticket_path")
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			useLeadProfile(t)
+			root := t.TempDir()
+			initGit(t, root)
+			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+			server := NewServer(root, "test")
+			key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+			writeImplementReadyTicket(t, root, implementReadyFacts())
+
+			args := implementReadyArgs("json")
+			tc.mutate(args["target"].(map[string]any), root)
+			var result implementResult
+			if err := json.Unmarshal([]byte(callToolWithKey(t, server, 2, key, "route.resolve_implement", args)), &result); err != nil {
+				t.Fatalf("json verdict did not parse: %v", err)
+			}
+			if result.RouteFacts != "read from the ticket" {
+				t.Fatalf("route facts = %q, want the ticket source", result.RouteFacts)
 			}
 		})
 	}

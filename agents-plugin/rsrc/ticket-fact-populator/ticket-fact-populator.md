@@ -56,6 +56,11 @@ text — no backticks, emphasis, parentheses, or trailing notes — and the fact
 name is copied character for character. Anything you want to say about a value
 goes in the evidence cell.
 
+Write every row, and leave no value cell empty. A row you omit is not a
+cautious answer: it reads as unknown, and an all-unknown table asks for the
+*smallest* review, so a gap you meant as caution buys less scrutiny rather than
+more. `unknown` is written out, with its reason in the evidence cell.
+
 ```
 | fact | allowed values | evidence |
 |---|---|---|

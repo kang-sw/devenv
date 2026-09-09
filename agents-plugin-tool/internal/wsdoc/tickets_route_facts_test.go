@@ -41,6 +41,24 @@ func TestTicketRouteFactsProjection(t *testing.T) {
 			wantPresent: true,
 			wantFacts:   map[string]string{"risk.fit": "low"},
 		},
+		{
+			// A capitalized header cell is a table the author wrote, not a
+			// fact; reading it as one would fail the whole section on a
+			// difference no reader can see.
+			name:        "header row skipped whatever its case",
+			body:        "# T\n\n## Route Facts\n\n| Fact | Value |\n|---|---|\n| risk.fit | low |\n",
+			wantPresent: true,
+			wantFacts:   map[string]string{"risk.fit": "low"},
+		},
+		{
+			// Any heading closes the section, not only a sibling `## ` one: a
+			// result or edition block landing after the table must not have
+			// its rows absorbed into the facts.
+			name:        "sub-heading ends the section",
+			body:        "# T\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| risk.fit | low |\n\n### Result (abc1234)\n\n| fact | value |\n| risk.fit | high |\n",
+			wantPresent: true,
+			wantFacts:   map[string]string{"risk.fit": "low"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			present, facts := ticketRouteFacts(tc.body)
@@ -152,15 +170,87 @@ func TestTicketsMoveReadyTipsMissingRouteFacts(t *testing.T) {
 	}
 }
 
+// TestTicketsMoveReadyStaysSilentWhenFactsAreNotOwed pins the other side of the
+// advisory: the tip fires on a real gap, not on every `ready/` move. A ticket
+// carrying the section, and a category the ready gate exempts, both move
+// quietly.
+func TestTicketsMoveReadyStaysSilentWhenFactsAreNotOwed(t *testing.T) {
+	cases := []struct {
+		name string
+		stem string
+		body string
+	}{
+		{
+			name: "section present",
+			stem: "260101-feat-sample",
+			body: "---\ntitle: Sample\nspec: 260101-sample\n---\n\n# Sample\n\nBody.\n\n## Route Facts\n\n| fact | value | evidence |\n|---|---|---|\n| scope.span | single-file | a.go |\n",
+		},
+		{
+			name: "exempt category",
+			stem: "260101-research-sample",
+			body: "---\ntitle: Sample\n---\n\n# Sample\n\nBody.\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			rel := filepath.Join("ai-docs", "tickets", "todo", tc.stem+".md")
+			mustWrite(t, root, rel, tc.body)
+			res, err := TicketsMove(root, &mockGitRunner{}, TicketMoveOptions{TicketStem: tc.stem, To: "ready"})
+			if err != nil {
+				t.Fatalf("TicketsMove: %v", err)
+			}
+			if strings.Contains(res.Tip, "No ## Route Facts section") {
+				t.Fatalf("tip = %q, want no missing-route-facts advisory", res.Tip)
+			}
+		})
+	}
+}
+
 // TestTicketAtRefusesPathsOutsideTheBoard pins the confinement: the ticket path
 // reaching TicketAt is caller-supplied, and nothing outside the board is a
-// ticket.
+// ticket. Each case asserts the guard's own refusal rather than any error, so a
+// path that would otherwise read cleanly cannot pass by accident.
 func TestTicketAtRefusesPathsOutsideTheBoard(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root, filepath.FromSlash("AGENTS.md"), "secret\n")
-	for _, rel := range []string{"AGENTS.md", "../AGENTS.md", "ai-docs/tickets/../../AGENTS.md", "ai-docs/tickets/ready/"} {
-		if _, err := TicketAt(root, rel); err == nil {
+	// Both of these are readable files: without the guard they would be
+	// projected as tickets, so they are what the refusal has to catch.
+	mustWrite(t, root, filepath.FromSlash("ai-docs/tickets/ready/notes.txt"), "not a ticket\n")
+	for _, rel := range []string{
+		"AGENTS.md",
+		"../AGENTS.md",
+		"ai-docs/tickets/../../AGENTS.md",
+		"ai-docs/tickets/ready/",
+		"ai-docs/tickets/ready/notes.txt",
+	} {
+		_, err := TicketAt(root, rel)
+		if err == nil {
 			t.Fatalf("TicketAt(%q) succeeded; want a not-a-ticket-path refusal", rel)
 		}
+		if !strings.Contains(err.Error(), "not a ticket path") {
+			t.Fatalf("TicketAt(%q) err = %v, want the confinement refusal", rel, err)
+		}
+	}
+}
+
+// TestTicketAtAcceptsAnAbsolutePathUnderTheRoot pins the other side of the
+// confinement: the board test is about where the ticket is, not how the caller
+// spelled the path, and a caller relaying a path from elsewhere may well hold
+// the absolute one.
+func TestTicketAtAcceptsAnAbsolutePathUnderTheRoot(t *testing.T) {
+	root := t.TempDir()
+	rel := "ai-docs/tickets/ready/260101-feat-sample.md"
+	mustWrite(t, root, filepath.FromSlash(rel), "# Sample\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| risk.fit | low |\n")
+	info, err := TicketAt(root, filepath.Join(root, filepath.FromSlash(rel)))
+	if err != nil {
+		t.Fatalf("TicketAt(absolute): %v", err)
+	}
+	if info.Path != rel || info.Status != "ready" || info.RouteFacts["risk.fit"] != "low" {
+		t.Fatalf("absolute path projected as %+v, want the same ticket as the relative form", info)
+	}
+	// A path outside the root stays refused whichever form it takes.
+	if _, err := TicketAt(root, filepath.Join(t.TempDir(), "ai-docs", "tickets", "ready", "260101-feat-other.md")); err == nil {
+		t.Fatal("an absolute path outside the root was accepted; want a refusal")
 	}
 }

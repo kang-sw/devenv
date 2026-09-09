@@ -190,7 +190,7 @@ func parseImplementInput(args map[string]any) (implementInput, error) {
 	// caller that still sends them is not defaulted or merged — that would
 	// leave two sources for one judgment — it is told where they now live.
 	if _, sent := args["facts"]; sent {
-		return implementInput{}, fmt.Errorf("facts are not a caller argument: route facts are read from the ticket's %q section", routeFactsHeading)
+		return implementInput{}, fmt.Errorf("facts are not a caller argument: route facts are read from the ticket's %q section", wsdoc.RouteFactsHeading)
 	}
 	policy, err := parseImplementPolicy(args["policy"])
 	if err != nil {
@@ -246,12 +246,6 @@ func parseImplementTarget(m map[string]any) (implementTargetInput, error) {
 	return out, nil
 }
 
-// routeFactsHeading is the ticket-body heading the fact populator writes under
-// and this resolver reads from. It mirrors wsdoc.RouteFactsHeading; the
-// constant is restated here only so error text can name it without the mcp
-// package reaching for a wsdoc symbol in a format string.
-const routeFactsHeading = wsdoc.RouteFactsHeading
-
 // implementRouteFactsSource is the resolved provenance of a run's route facts.
 // Status is the named outcome the verdict reports: a missing or unreadable
 // block is stated, never silently replaced by a conservative default verdict,
@@ -291,10 +285,10 @@ func loadImplementRouteFacts(root string, target implementTargetInput) implement
 	if target.Kind != "ticket" {
 		return implementRouteFactsSource{Status: "ad-hoc"}
 	}
-	if strings.TrimSpace(target.TicketPath) == "" {
-		return implementRouteFactsSource{Status: "absent", Detail: "ticket target carries no ticket_path to read facts from"}
+	info, label, err := implementTicketInfo(root, target)
+	if label == "" {
+		return implementRouteFactsSource{Status: "absent", Detail: "ticket target carries no ticket_path or ticket_stem to read facts from"}
 	}
-	info, err := wsdoc.TicketAt(root, target.TicketPath)
 	if err != nil {
 		// A ticket file that is not there is the same condition as a ticket
 		// with no facts in it — nothing was populated — and reads better as
@@ -302,15 +296,15 @@ func loadImplementRouteFacts(root string, target implementTargetInput) implement
 		// unreadable. Neither detail repeats the absolute path the error
 		// carries: the caller was handed the board-relative one.
 		if errors.Is(err, fs.ErrNotExist) {
-			return implementRouteFactsSource{Status: "absent", Detail: fmt.Sprintf("%s does not exist", target.TicketPath)}
+			return implementRouteFactsSource{Status: "absent", Detail: fmt.Sprintf("%s does not exist", label)}
 		}
-		return implementRouteFactsSource{Status: "unreadable", Detail: fmt.Sprintf("cannot read %s", target.TicketPath)}
+		return implementRouteFactsSource{Status: "unreadable", Detail: fmt.Sprintf("cannot read %s", label)}
 	}
 	if !info.RouteFactsPresent {
-		return implementRouteFactsSource{Status: "absent", Detail: fmt.Sprintf("%s has no %s section", target.TicketPath, routeFactsHeading)}
+		return implementRouteFactsSource{Status: "absent", Detail: fmt.Sprintf("%s has no %s section", label, wsdoc.RouteFactsHeading)}
 	}
 	if len(info.RouteFacts) == 0 {
-		return implementRouteFactsSource{Status: "unreadable", Detail: fmt.Sprintf("%s in %s has no fact rows", routeFactsHeading, target.TicketPath)}
+		return implementRouteFactsSource{Status: "unreadable", Detail: fmt.Sprintf("%s in %s has no fact rows", wsdoc.RouteFactsHeading, label)}
 	}
 	grouped := map[string]any{}
 	// Sorted so a table with several unrecognized rows always names the same
@@ -325,7 +319,7 @@ func loadImplementRouteFacts(root string, target implementTargetInput) implement
 		value := info.RouteFacts[key]
 		group, ok := routeFactGroups[key]
 		if !ok {
-			return implementRouteFactsSource{Status: "unreadable", Detail: fmt.Sprintf("unrecognized route fact %q in %s", key, target.TicketPath)}
+			return implementRouteFactsSource{Status: "unreadable", Detail: fmt.Sprintf("unrecognized route fact %q in %s", key, label)}
 		}
 		bucket, ok := grouped[group].(map[string]any)
 		if !ok {
@@ -336,9 +330,51 @@ func loadImplementRouteFacts(root string, target implementTargetInput) implement
 	}
 	facts, err := parseImplementFacts(grouped)
 	if err != nil {
-		return implementRouteFactsSource{Status: "unreadable", Detail: fmt.Sprintf("%s in %s: %v", routeFactsHeading, target.TicketPath, err)}
+		return implementRouteFactsSource{Status: "unreadable", Detail: fmt.Sprintf("%s in %s: %v", wsdoc.RouteFactsHeading, label, err)}
+	}
+	// A value the table did not supply is checked last, so a row that is
+	// present but wrong is named as wrong rather than as absent. Completeness
+	// is checked at all because an omitted row, or one with an empty value
+	// cell, otherwise parses to the same `unknown` an author can write
+	// deliberately — and an all-unknown risk set allocates the *smallest*
+	// review, so the silent direction of that drift is toward less scrutiny.
+	if missing := missingRouteFactKeys(info.RouteFacts); len(missing) > 0 {
+		return implementRouteFactsSource{Status: "unreadable", Detail: fmt.Sprintf("%s in %s is missing %s", wsdoc.RouteFactsHeading, label, strings.Join(missing, ", "))}
 	}
 	return implementRouteFactsSource{Facts: facts, Status: "ticket"}
+}
+
+// implementTicketInfo reads the target's ticket projection and the label the
+// verdict names it by. A path is authoritative when the caller gives one;
+// otherwise the stem is resolved against the board, since the tool accepts a
+// target carrying only a stem and such a target is no less routable.
+func implementTicketInfo(root string, target implementTargetInput) (wsdoc.TicketInfo, string, error) {
+	if path := strings.TrimSpace(target.TicketPath); path != "" {
+		info, err := wsdoc.TicketAt(root, path)
+		return info, path, err
+	}
+	stem := strings.TrimSpace(target.TicketStem)
+	if stem == "" {
+		return wsdoc.TicketInfo{}, "", fs.ErrNotExist
+	}
+	info, err := wsdoc.TicketsStatus(root, wsdoc.TicketStatusOptions{TicketStem: stem, Resolve: true})
+	if err != nil {
+		return wsdoc.TicketInfo{}, stem, fs.ErrNotExist
+	}
+	return *info, info.Path, nil
+}
+
+// missingRouteFactKeys names the accepted facts the table did not supply,
+// sorted so the same table always reports the same list.
+func missingRouteFactKeys(facts map[string]string) []string {
+	missing := []string{}
+	for key := range routeFactGroups {
+		if strings.TrimSpace(facts[key]) == "" {
+			missing = append(missing, key)
+		}
+	}
+	sort.Strings(missing)
+	return missing
 }
 
 // routeFactsMissing reports whether the run has no facts to route from. An
