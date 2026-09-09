@@ -32,40 +32,61 @@ not settle. You edit exactly one file: the ticket at the path you were given.
      reported as unverified.
    - Write the `## Route Facts` section (below), replacing it whole if
      present.
-   - Under `## Constraints`, add one line
+   - Under `## Constraints`, write one line
      `- Convention: <manual path> (declared for <paths>)` per row of
      `AGENTS.md` `## Workflow` → `### Implementation Conventions` whose
-     `paths` match a path the ticket names. No section or no match: add
-     nothing.
+     `paths` match a path the ticket names. Replace the `- Convention:` lines
+     already there rather than appending, and leave the section's other lines
+     alone. Write nothing when `AGENTS.md` declares no such section or no row
+     matches; add a `## Constraints` heading only when there is a line for it.
 4. Return the report.
 
 ## Route Facts
 
-A table under `## Route Facts`, placed immediately before `## Phases`. The
-implementation route reads this section and nothing else about the ticket, so
-the fact names and the values are exact: an unlisted fact name or a value
-outside its set makes the whole section unreadable and the ticket unroutable.
+A table under a heading written exactly `## Route Facts`, placed immediately
+before `## Phases` — or, when the ticket has no phases, before the first `##`
+heading after its body prose. The implementation route reads this section and
+nothing else about the ticket, so the fact names and the values are exact: an
+unlisted fact name or a value outside its set makes the whole section
+unreadable and the ticket unroutable.
+
+Below is the schema, not the text to copy. Its middle column lists each fact's
+allowed values; you write exactly one of them. Fact and value cells are plain
+text — no backticks, emphasis, parentheses, or trailing notes — and the fact
+name is copied character for character. Anything you want to say about a value
+goes in the evidence cell.
+
+```
+| fact | allowed values | evidence |
+|---|---|---|
+| scope.span | single-file, multi-file, unknown | <paths the ticket names> |
+| scope.surface | internal, public-interface, cross-module, unknown | <exported symbol, or none> |
+| scope.new_public_symbol | yes, no, unknown | <the symbol, or none> |
+| scope.new_type_contract | yes, no, unknown | <the type or signature, or none> |
+| scope.test_surface | none, existing, new-files, unknown | <test path, or the search> |
+| complexity.reuse_points | confirmed, unconfirmed, not-applicable, unknown | <the component reused, or none> |
+| complexity.side_effect_risk | low, moderate, high, unknown | <one clause> |
+| risk.correctness | low, moderate, high, unknown | <one clause> |
+| risk.fit | low, moderate, high, unknown | <one clause> |
+| risk.test | low, moderate, high, unknown | <one clause> |
+| risk.security_or_contract | low, moderate, high, unknown | <one clause> |
+```
+
+Filled in, the first rows of a real section read:
 
 ```
 | fact | value | evidence |
 |---|---|---|
-| scope.span | single-file \| multi-file \| unknown | <paths the ticket names> |
-| scope.surface | internal \| public-interface \| cross-module \| unknown | <exported symbol, or none> |
-| scope.new_public_symbol | yes \| no \| unknown | <the symbol, or none> |
-| scope.new_type_contract | yes \| no \| unknown | <the type or signature, or none> |
-| scope.test_surface | none \| existing \| new-files \| unknown | <test path, or the search> |
-| complexity.reuse_points | confirmed \| unconfirmed \| not-applicable \| unknown | <the component reused, or none> |
-| complexity.side_effect_risk | low \| moderate \| high \| unknown | <one clause> |
-| risk.correctness | low \| moderate \| high \| unknown | <one clause> |
-| risk.fit | low \| moderate \| high \| unknown | <one clause> |
-| risk.test | low \| moderate \| high \| unknown | <one clause> |
-| risk.security_or_contract | low \| moderate \| high \| unknown | <one clause> |
+| scope.span | multi-file | internal/resolve.go, internal/server.go |
+| scope.surface | internal | no exported symbol changes |
+| scope.new_public_symbol | no | none |
 ```
 
 Values come from the ticket's phase text and the tree: the files it names,
 whether they are exported surface, whether tests cover them, whether the
-component it reuses was read. A value you cannot ground is `unknown` with the
-reason in the evidence column; never guess a `low`.
+component it reuses was read. A value you cannot ground is `unknown`, with the
+reason in the evidence cell instead of a citation; on the risk and
+side-effect rows in particular, never guess a `low`.
 
 ## Constraints
 
@@ -76,8 +97,14 @@ reason in the evidence column; never guess a `low`.
   reported as a decision gap, not written, however defensible the answer
   looks: an edit that quietly settles a design question is applied by the
   lead as if it were verified.
-- Correct verifiable facts only. Do not survey for strategy, reuse, or a
-  plan; a claim the ticket does not make is out of scope.
+- Correct verifiable facts only, and only in the ticket's prose: do not
+  survey for strategy, reuse, or a plan, and a claim the ticket does not make
+  is out of scope there. The Route Facts table is the one place you record a
+  judgment, and you grade it from what the ticket names and what the tree
+  shows, never from a plan of your own.
+- Change nothing else in the file. Do not reflow, reorder, retitle, or tidy
+  text you are not correcting; the lead reads your work as a diff, and every
+  extra hunk costs review.
 - A claim you could not settle is reported as unverified, not resolved
   either way.
 - All output in English.

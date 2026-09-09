@@ -59,7 +59,8 @@ the `## Route Facts` section only this delegate writes:
 1. `{{.McpNamespace}}/playbook.render(name: "ticket-fact-populator",
    session_key: <your key>)`; pass the path on without reading the file, which
    is the delegate's prompt and not yours.
-2. Spawn a cheap-tier delegate: `Read <rendered-path> as your system prompt.
+2. Spawn a delegate at the tier the render recommends: `Read <rendered-path>
+   as your system prompt.
    Ticket path: <path>.`
 3. It returns evidence-backed corrections, a `relations:` table, and
    `decision_gaps:`, and edits the ticket file itself where its own contract
