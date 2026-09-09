@@ -237,6 +237,20 @@ describe("buildWidgetLines", () => {
     assert.equal(line, "parked reviewer · fork · \u001b[1midle awaiting owner\u001b[22m · 3s · — (—) · in — · est $— — /audit reviewer");
     assert.ok(!line.includes("/answer"), "presentation never fabricates an answer target for an owner-held idle row");
   });
+
+  test("terminal-width formatting never reconstructs absent protected hints during attention styling", () => {
+    const question = { name: "worker", role: "thread" as const, state: "awaiting-owner" as const, elapsedMs: 0, answerHint: "/answer q8", answerDisplay: "a long owner question" };
+    const ownerHeld = { name: "reviewer", role: "fork" as const, state: "idle-awaiting-owner" as const, elapsedMs: 0, inspectionHint: "/audit a-very-long-inspection-target" };
+    for (const emphasize of [false, true]) {
+      for (const row of [question, ownerHeld]) {
+        for (const width of [0, 1, 8]) {
+          const line = buildWidgetLines([row], 0, width, emphasize)![1];
+          assert.ok(visibleWidth(line) <= width, `width=${width}, emphasize=${emphasize}: output stays bounded`);
+          assert.ok(!line.includes("/answer q8") && !line.includes("/audit a-very-long-inspection-target"), `width=${width}, emphasize=${emphasize}: absent long hint is not reconstructed`);
+        }
+      }
+    }
+  });
   test("telemetry exposes independent fields at wide widths and never displaces a 40-column answer cue", () => {
     const telemetry = { name: "模型-worker", role: "worker" as const, state: "running" as const, elapsedMs: 0, model: "provider/模型", effort: "high", latestInput: 0, estimatedUsd: 0 };
     assert.match(buildWidgetLines([telemetry], 0, 120)![1], /provider\/模型 \(high\).*in 0.*est \$0/);

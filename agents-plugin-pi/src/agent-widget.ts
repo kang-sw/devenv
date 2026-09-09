@@ -282,18 +282,24 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, emphasizeA
   // The owner action is the only non-negotiable tail.  Allocate its columns
   // first, then progressively omit telemetry and identity detail.
   let line: string;
+  let appendedHint = false;
   if (protectedHint && visibleWidth(hint) <= width) {
     const available = width - visibleWidth(hint);
     const withTelemetry = base + telemetry;
     line = visibleWidth(withTelemetry) <= available ? withTelemetry + hint : truncateToWidth(base, available) + hint;
+    appendedHint = true;
   } else {
     line = visibleWidth(base + telemetry) <= width ? base + telemetry : truncateToWidth(base, width);
   }
   // Add ANSI only after width truncation: styling before truncation can leave
   // an incomplete escape sequence in a narrow terminal.
   if (!emphasizeAttention || !isAttentionState(row.state)) return line;
-  const content = protectedHint ? line.slice(0, -hint.length) : line;
-  const suffix = protectedHint ? hint : "";
+  // A protected hint that does not fit was never appended. Track that fact
+  // rather than inferring it from row metadata, or narrow styling would
+  // reconstruct an over-width tail after the bounded line was built.
+  const content = appendedHint ? line.slice(0, -hint.length) : line;
+  const suffix = appendedHint ? hint : "";
+  if (content.length === 0) return line;
   if (row.answerHint) {
     // The question cue is the first structured field. Its visible prefix is
     // the only styled part even if width truncation removes later fields.
