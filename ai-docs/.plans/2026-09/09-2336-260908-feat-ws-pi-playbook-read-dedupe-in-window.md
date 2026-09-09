@@ -28,7 +28,7 @@
 
 ## Verification Plan
 - From `agents-plugin-pi/`, run the focused Node test files for the new dedupe module plus `test/bridge.test.ts` and `test/lead-skills.test.ts`; include the focused real-SessionManager timing fixture if it is separate.
-- Run `node --test test/` only after focused tests pass, recording the known baseline separately: 130 existing failures (129 Linux SDK-path fixtures and one stale `ws-ask` exposure expectation). Do not add or re-enable `ws-ask` to change that baseline.
+- Run `node --test test/*.test.ts` only after focused tests pass, recording the known baseline separately: 130 existing failures (129 Linux SDK-path fixtures and one stale `ws-ask` exposure expectation). The installed Node 25 treats `node --test test/` as a module path and rejects it; the explicit glob is the verified suite command. Do not add or re-enable `ws-ask` to change that baseline.
 - Owner dogfood remains the ticket’s manual verification boundary: re-enter `lead-discuss` or `lead-proceed`, confirm the second unchanged read is a usable pointer and no third read is needed.
 
 ## Escalations

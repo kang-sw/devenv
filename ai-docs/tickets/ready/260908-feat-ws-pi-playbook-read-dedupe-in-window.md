@@ -5,6 +5,9 @@ related:
   260904-feat-ws-pi-side-thread-fork-question-surface: forks inherit the lead's history as their prefix, so the dedupe applies to a fork's replayed reads too
 spec:
   - pi-adapter-runtime
+  - 260909-pi-visible-playbook-read-dedupe
+plans:
+  phase-1: ai-docs/.plans/2026-09/09-2336-260908-feat-ws-pi-playbook-read-dedupe-in-window.md
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: ba84d64a2bb52bdc
@@ -129,3 +132,57 @@ Verification:
 - Owner-run dogfood: a lead session that re-enters `lead-discuss` or
   `lead-proceed` receives the pointer and continues the procedure without
   a third read; the adapter test suite passes.
+
+### Result (e7d7140c) - 2026-09-10
+
+Implementation checkpoint through `ee68fa46`; owner-run dogfood remains
+pending. The installed Pi SDK exposes the specified public context API.
+Fixtures use its SessionManager for compaction, rewind, and fork-prefix
+behavior, and the installed agent-core execution loop with a synthetic stream
+to observe the finalized assistant call before tool execution. No model or
+network call is required by these fixtures.
+
+Review dispositions:
+
+- C1 [fixed]: malformed, stale, ambiguous, and entirely missing pointer
+  provenance falls back to the fresh body. The missing-envelope reproduction
+  remained after relay 1 and was resolved by Critical review 3 after relay 2.
+- C2 [fixed]: unknown, unreadable, or invalid skills retain their existing
+  failure response and bypass dedupe; Critical review 2 resolved this finding.
+- I1 [fixed], implementer report: pointers include the original ID, distance
+  in tool calls, and headings.
+- T1 [fixed], implementer report: production bridge and ws-skill registration
+  fixtures exercise successful repeated reads; failure bypass is also covered.
+  The first report overstated ws-skill coverage. The lead required the missing
+  success-path fixture in relay 2 as a bounded exception to the Important
+  one-relay budget, because the implementation plan explicitly required it.
+  No additional Important re-review was performed.
+- T2 [fixed], implementer report: malformed, forged, stale, ambiguous, and
+  missing provenance are distinguished from normal successful repeats.
+- K1 [fixed], separate lead finding: the entire substitution map participates
+  in the key, including a nested `context.session_key`; only the outer routing
+  credential is ignored. Regressions cover both cases.
+- Fit review was clean. Critical review 3 was clean within its scope. Native
+  thread limits rejected fresh Fit/Test reviewer spawns, so separate existing
+  sessions with no implementation ownership performed those partitions;
+  the Test fallback retained its selector model rather than the requested
+  medium binding. No independence from the implementer was lost.
+
+Final verification at `ee68fa46`: 111 focused tests passed. Full adapter suite:
+1,428 tests, 1,298 passed, 130 pre-existing failures, zero skipped. The failures
+remain 129 Linux-specific SDK path fixtures on macOS and one stale `ws-ask`
+exposure expectation; `ws-ask` remains hidden. The original plan command
+`node --test test/` is rejected by Node 25, so the plan now records the verified
+`node --test test/*.test.ts` command. No suite-wide pass or owner acceptance is
+claimed. The implementation stayed within Pi source/tests; shared ws-mcp,
+playbook text, schemas, and workflow-manual behavior were not changed.
+
+## Blocked (2026-09-10)
+
+Awaiting the explicitly required owner-run dogfood: in the actual adapter lead
+session, re-enter `lead-discuss` or `lead-proceed` and confirm that the unchanged
+second read returns a useful pointer and the procedure continues without a
+third read. Automated registration and SDK fixtures prove execution behavior,
+not that human-observed workflow outcome. Record that result before closing
+the ticket; autonomous queue selection should skip this ticket while the
+owner acceptance remains outstanding.
