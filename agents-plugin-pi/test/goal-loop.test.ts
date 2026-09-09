@@ -30,6 +30,7 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   readGoalLoopConfig,
+  resolveAgentWaitAnimation,
   resolveRunawayThreshold,
   resolveCompactionAdvisoryPercent,
   resolveContextWindowOverride,
@@ -87,6 +88,23 @@ describe("readGoalLoopConfig", () => {
     const path = writeConfig("malformed.json", "{not valid json");
     assert.doesNotThrow(() => readGoalLoopConfig(path));
     assert.equal(readGoalLoopConfig(path), undefined);
+  });
+});
+
+describe("resolveAgentWaitAnimation", () => {
+  test("defaults to enabled and only literal false disables the owner-wait cue", () => {
+    assert.equal(resolveAgentWaitAnimation(undefined), true);
+    assert.equal(resolveAgentWaitAnimation({}), true);
+    assert.equal(resolveAgentWaitAnimation({ agent_wait_animation: true }), true);
+    assert.equal(resolveAgentWaitAnimation({ agent_wait_animation: false }), false);
+    assert.equal(resolveAgentWaitAnimation({ agent_wait_animation: "false" as unknown as boolean }), true);
+  });
+
+  test("reads a changed config fresh rather than caching the prior value", () => {
+    const path = writeConfig("agent-wait-animation.json", '{"agent_wait_animation":false}');
+    assert.equal(resolveAgentWaitAnimation(readGoalLoopConfig(path)), false);
+    writeFileSync(path, '{"agent_wait_animation":true}', "utf8");
+    assert.equal(resolveAgentWaitAnimation(readGoalLoopConfig(path)), true);
   });
 });
 
