@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
-import { allocateAgentHome, createAgentStorageContext, readOwnership, touchOwnership } from "../src/agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, observeSessionWrite, readOwnership, touchOwnership } from "../src/agent-storage.ts";
 
 describe("agent storage", () => {
   test("allocates a persistent child beneath the configured Pi root and persists ownership", () => {
@@ -15,6 +15,9 @@ describe("agent storage", () => {
       const before = readOwnership(owned.home)!;
       touchOwnership(owned.home);
       assert.ok(readOwnership(owned.home)!.lastActivityAt >= before.lastActivityAt);
+      writeFileSync(owned.sessionPath!, "session write\n");
+      observeSessionWrite(owned.home, owned.sessionPath!);
+      assert.equal(readOwnership(owned.home)!.sessionSignature?.size, 14);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 

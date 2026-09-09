@@ -37,11 +37,12 @@
  * best-effort by design (see `readAndClearSidecar`).
  */
 
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { RpcAgentRecord, RpcAgentRegistry, SpawnAgentRole, ToolGroup } from "./spawner.ts";
 import { parseForkContext, type ForkContext } from "./fork-context.ts";
 import type { ExploreMode } from "./process-role.ts";
-import { validOwnership, type AgentOwnership } from "./agent-storage.ts";
+import { updateOwnership, validOwnership, type AgentOwnership } from "./agent-storage.ts";
 
 /** Sidecar file version. Bumped only on a breaking shape change; a mismatch is treated as "no sidecar". */
 export const SIDECAR_VERSION = 1;
@@ -99,6 +100,11 @@ export interface SidecarFile {
 /** `<leadSessionFile>.ws-agents.json` — sibling of the session file, same convention as ask.ts's thread registry. */
 export function sidecarPath(leadSessionFile: string): string {
   return `${leadSessionFile}.ws-agents.json`;
+}
+
+/** Durable no-session locator. A fresh Pi identity never discovers another identity's registry. */
+export function noSessionSidecarPath(agentDir: string, sessionId: string): string {
+  return join(agentDir, "ws-agents", sessionId, "registry.ws-agents.json");
 }
 
 /**
@@ -316,6 +322,7 @@ export function reviveOrphans(registry: RpcAgentRegistry, orphans: PersistedOrph
   for (const orphan of orphans) {
     if (registry.has(orphan.agentId)) continue;
     const record = rehydrateOrphanRecord(orphan);
+    if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "unknown", running: false, observedAt: Date.now(), recovery: "sidecar", threadBound: record.threadBound, pendingApprovalCommandId: record.pendingApproval?.cmdId } });
     registry.set(orphan.agentId, record);
     const arm = orphan.spawnRole === "fork" ? wiring.fork : orphan.spawnRole === "execute-worker" ? wiring.executeWorker : orphan.spawnRole === "explore" ? undefined : wiring.worker;
     try {
@@ -420,9 +427,14 @@ export function buildOrphanPush(orphans: PersistedOrphan[]): Record<string, unkn
 
 /** Best-effort sidecar write; a failure here must never break session shutdown. */
 export function writeSidecar(leadSessionFile: string, orphans: PersistedOrphan[]): void {
+  writeSidecarAt(sidecarPath(leadSessionFile), orphans);
+}
+
+export function writeSidecarAt(path: string, orphans: PersistedOrphan[]): void {
   try {
     if (orphans.length === 0) return;
-    writeFileSync(sidecarPath(leadSessionFile), serializeOrphans(orphans), "utf8");
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    writeFileSync(path, serializeOrphans(orphans), { mode: 0o600 });
   } catch {
     // Nothing to fall back to — the orphans are simply not announced next run.
   }
@@ -435,7 +447,10 @@ export function writeSidecar(leadSessionFile: string, orphans: PersistedOrphan[]
  * agents on every subsequent start.
  */
 export function readAndClearSidecar(leadSessionFile: string): PersistedOrphan[] {
-  const path = sidecarPath(leadSessionFile);
+  return readAndClearSidecarAt(sidecarPath(leadSessionFile));
+}
+
+export function readAndClearSidecarAt(path: string): PersistedOrphan[] {
   let raw: string | undefined;
   try {
     if (!existsSync(path)) return [];

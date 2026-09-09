@@ -116,6 +116,7 @@ import {
   resolveAgentId,
   spawnAgent,
   storageContextFromToolCtx,
+  syncOwnershipProtection,
   type ResolvedModelInfo,
   type RpcAgentRecord,
   type RpcAgentRegistry,
@@ -733,6 +734,7 @@ export function registerExecuteGateway(
       mkdirSync(dirname(decisionPath), { recursive: true });
       writeFileSync(decisionPath, JSON.stringify({ decision: p.decision, reason: p.reason, command: p.command }));
       record.pendingApproval = undefined;
+      syncOwnershipProtection(record);
 
       return { content: [{ type: "text", text: JSON.stringify({ ok: true }) }] };
     },

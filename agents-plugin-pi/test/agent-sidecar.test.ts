@@ -27,6 +27,7 @@ import { join } from "node:path";
 import {
   SIDECAR_VERSION,
   MID_TURN_ORPHAN_CAVEAT,
+  noSessionSidecarPath,
   buildOrphanPush,
   buildOrphanSummary,
   captureOrphans,
@@ -70,6 +71,10 @@ function withTempDir<T>(fn: (dir: string) => T): T {
 describe("sidecarPath", () => {
   test("is a sibling of the lead's own session file, matching ask.ts's thread-registry convention", () => {
     assert.equal(sidecarPath("/home/u/.pi/sessions/s1.jsonl"), "/home/u/.pi/sessions/s1.jsonl.ws-agents.json");
+  });
+  test("namespaces no-session registries by the current Pi identity", () => {
+    assert.equal(noSessionSidecarPath("/tmp/pi-agent", "same-id"), "/tmp/pi-agent/ws-agents/same-id/registry.ws-agents.json");
+    assert.notEqual(noSessionSidecarPath("/tmp/pi-agent", "same-id"), noSessionSidecarPath("/tmp/pi-agent", "new-id"));
   });
 });
 

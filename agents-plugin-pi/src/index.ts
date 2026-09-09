@@ -189,7 +189,7 @@ import {
 } from "./spawner.ts";
 import { createAgentWidgetController, shouldArmAgentWidget, type AgentWidgetController } from "./agent-widget.ts";
 import { registerPushMessageRenderers } from "./push-render.ts";
-import { buildOrphanPush, captureOrphans, readAndClearSidecar, reviveOrphans, writeSidecar } from "./agent-sidecar.ts";
+import { buildOrphanPush, captureOrphans, noSessionSidecarPath, readAndClearSidecarAt, reviveOrphans, sidecarPath, writeSidecarAt } from "./agent-sidecar.ts";
 import { buildDiscussKickoff } from "./discuss.ts";
 import { registerGoalLoop, readGoalLoopConfig, resolveSettleDelayMs } from "./goal-loop.ts";
 import { resolveSkillsDir } from "./skills-dir.ts";
@@ -304,6 +304,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   // handler (which gets a ctx of its own, but only after teardown has begun)
   // knows where to write the orphan sidecar.
   let leadSessionFile: string | undefined;
+  let leadSidecarPath: string | undefined;
   // 260904 Phase 2 (side-thread question surface): one thread registry per
   // extension instance. Its in-memory map is hydrated from (and written back
   // to) a sibling file of the lead's own session file on every session_start
@@ -509,6 +510,8 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     if (isLeadOrFork(readSpawnRole(process.env))) {
       const sessionFile = ctx.sessionManager.getSessionFile();
       leadSessionFile = sessionFile ?? undefined;
+      const storage = createAgentStorageContext(ctx.sessionManager.getSessionId());
+      leadSidecarPath = sessionFile ? sidecarPath(sessionFile) : noSessionSidecarPath(storage.root, storage.ownerSessionId);
       if (sessionFile) {
         hydrateThreadRegistry(threadHandle, threadRegistryPath(sessionFile));
         // 260905 orphan revival: a previous run of THIS lead session died (or
@@ -518,7 +521,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
         // when any of them was cut off mid-turn — tell the lead once. Runs
         // before `registerAsk`/`registerThreadCommands` only incidentally —
         // nothing below depends on it.
-        const orphans = readAndClearSidecar(sessionFile);
+        const orphans = readAndClearSidecarAt(leadSidecarPath);
         if (orphans.length > 0) {
           // Role-keyed wiring re-arm (review relay #1, I1): `spawnRole` is
           // persisted precisely so a revived FORK comes back with its question
@@ -545,6 +548,13 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
             } else pushToLead(pi, agentTools.rpcRegistry, undefined, "ws-agent-orphaned", orphanPush, "followUp");
           }
         }
+      }
+      if (!sessionFile) {
+        const orphans = readAndClearSidecarAt(leadSidecarPath);
+        if (orphans.length > 0) reviveOrphans(agentTools.rpcRegistry, orphans, {
+          fork: (record) => armForkRoleWiring(pi, agentTools!.rpcRegistry, record, onForkQuestion),
+          executeWorker: (record) => { record.onApprovalPending = onApprovalPending; },
+        });
       }
       // 260905 (live-agent widget ticket): TUI-lead-only, via
       // `shouldArmAgentWidget` (review relay #1 Important #5: extracted into
@@ -656,8 +666,8 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // captures already-dormant (parked) records, but only a live-at-shutdown
     // snapshot correctly reports which ones were still `running` at that
     // instant; after stopAll() every record reads as dormant/idle.
-    if (leadSessionFile && agentTools) {
-      writeSidecar(leadSessionFile, captureOrphans(agentTools.rpcRegistry));
+    if (leadSidecarPath && agentTools) {
+      writeSidecarAt(leadSidecarPath, captureOrphans(agentTools.rpcRegistry));
     }
     // Await graceful RPC teardown of any still-live spawned `pi` children
     // before tearing down the bridge connection they were dispatching ws__*
@@ -668,6 +678,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     agentTools = undefined;
     rpcRegistryRef.current = undefined;
     leadSessionFile = undefined;
+    leadSidecarPath = undefined;
     // Held pushes die with the session, exactly like the Pi followUp queue
     // they stand in for: their registry is about to be discarded, so a status
     // line computed after this point would describe nothing. The sidecar

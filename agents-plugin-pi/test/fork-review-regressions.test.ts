@@ -105,7 +105,7 @@ test("C6/I1/I2: source adapter argv and canonical markers isolate every descenda
     const options = buildRpcClientOptions("/repo", undefined, "/child", "/worker-prompt", "read", undefined, undefined, spawnRole, mode);
     const merged = { ...poison, ...options.env };
     for (const key of markers) assert.equal(merged[key], "");
-    assert.deepEqual(options.args, ["--session", "/child", "--append-system-prompt", "/worker-prompt", "--tools", "read"]);
+    assert.deepEqual(options.args, ["--session", "/child", "--session-dir", "/", "--append-system-prompt", "/worker-prompt", "--tools", "read"]);
   }
   for (const source of [undefined, "/lead"]) {
     const options = buildRpcClientOptions("/repo", undefined, "/child", "/old-directive", "read", source, "original-parent", "fork");

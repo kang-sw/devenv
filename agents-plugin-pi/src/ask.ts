@@ -72,6 +72,7 @@ import {
   sendToAgent,
   spawnAgent,
   storageContextFromToolCtx,
+  syncOwnershipProtection,
   stopAgent,
   type RpcAgentRecord,
   type RpcAgentRegistry,
@@ -90,6 +91,7 @@ import {
 import { loadHostPiTui, type MarkdownTheme } from "./pi-tui.ts";
 import { captureForkContext, captureRegisteredTools, captureUnflushedForkSource, effectiveForkDescriptor, type ForkContext } from "./fork-context.ts";
 import type { LeadPromptRef } from "./lead-bootstrap.ts";
+import { readOwnership, validOwnership } from "./agent-storage.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers. Unit-tested directly (test/ask.test.ts) with no
@@ -704,11 +706,12 @@ export function captureForkResume(record: RpcAgentRecord): PersistedForkResume {
  * puts the record back on the shared registry so `sendToAgent` can find it.
  */
 export function rehydrateForkRecord(agentId: string, resume: PersistedForkResume): RpcAgentRecord {
+  const ownership = resume.ownership && validOwnership(resume.ownership) && resume.ownership.agentId === agentId && resume.ownership.sessionPath === resume.sessionPath && readOwnership(resume.ownership.home)?.ownerSessionId === resume.ownership.ownerSessionId ? resume.ownership : undefined;
   return {
     agentId,
     client: undefined,
     sessionPath: resume.sessionPath,
-    ...(resume.ownership ? { ownership: resume.ownership } : {}),
+    ...(ownership ? { ownership } : {}),
     systemPromptPath: resume.systemPromptPath,
     ...(resume.forkContext ? { forkContext: resume.forkContext } : {}),
     modelBase: resume.modelBase,
@@ -1390,7 +1393,7 @@ export async function ensureRespondent(
  */
 function bindThread(rpcRegistry: RpcAgentRegistry, agentId: string, bound: boolean): void {
   const record = rpcRegistry.get(agentId);
-  if (record) record.threadBound = bound;
+  if (record) { record.threadBound = bound; syncOwnershipProtection(record); }
 }
 
 /**

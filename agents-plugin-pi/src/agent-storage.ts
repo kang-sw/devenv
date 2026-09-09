@@ -1,6 +1,6 @@
 /** Durable, Pi-local storage for delegated-agent material. */
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { mkdirSync, lstatSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, lstatSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, relative, sep } from "node:path";
 
 export const OWNERSHIP_VERSION = 1;
@@ -14,6 +14,7 @@ export interface AgentOwnership {
 export interface OwnershipMetadata extends AgentOwnership {
   createdAt: number; lastActivityAt: number; updatedAt: number;
   liveness: { lifecycle: "starting" | "live" | "stopping" | "stopped" | "unknown"; running?: boolean; observedAt?: number; pid?: number; instanceNonce?: string; threadBound?: boolean; pendingQuestion?: boolean; pendingApprovalCommandId?: string; recovery?: "none" | "sidecar" | "thread" | "revived" };
+  sessionSignature?: { mtimeMs: number; size: number };
 }
 
 function safe(value: string, label: string): string { if (!SAFE_COMPONENT.test(value)) throw new Error(`ws-pi-agent: unsafe ${label}`); return value; }
@@ -55,3 +56,15 @@ export function updateOwnership(home: string, update: Partial<Pick<OwnershipMeta
   writeOwnership(next); return next;
 }
 export function touchOwnership(home: string): void { updateOwnership(home, { lastActivityAt: Date.now() }); }
+/** Samples the actual session file. A stat failure records no invented write/activity. */
+export function observeSessionWrite(home: string, sessionPath: string): void {
+  const current = readOwnership(home); if (!current) return;
+  try {
+    const stat = statSync(sessionPath); const signature = { mtimeMs: stat.mtimeMs, size: stat.size };
+    const changed = !current.sessionSignature || current.sessionSignature.mtimeMs !== signature.mtimeMs || current.sessionSignature.size !== signature.size;
+    const now = Date.now();
+    writeOwnership({ ...current, sessionSignature: signature, ...(changed ? { lastActivityAt: Math.max(current.lastActivityAt, now) } : {}), updatedAt: now });
+  } catch {
+    // Unknown observation remains conservative; never infer a write from directory metadata.
+  }
+}

@@ -96,7 +96,7 @@ import { buildAgentSendSummary, buildAgentSpawnSummary, buildExploreSummary, cre
 import { suggestModels, formatExploreTierRefusal, formatTierWarning, modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx, type ModelCatalogEntry, type TierFailure, type TierRejection } from "./model-catalog.ts";
 import { WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readExploreMode, readSpawnRole, type ExploreMode, type SpawnRole } from "./process-role.ts";
 import { captureForkContext, compareForkRegistrations, removeForkTransport, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
-import { allocateAgentHome, createAgentStorageContext, touchOwnership, updateOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, observeSessionWrite, touchOwnership, updateOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers: tool-group resolution, terminal-stopReason classification,
@@ -1641,6 +1641,7 @@ export async function promptAgent(
   // not to the one starting now.
   record.pendingFinal = undefined;
   record.runStartedAt = Date.now();
+  if (record.ownership) observeSessionWrite(record.ownership.home, record.sessionPath);
   if (record.ownership) updateOwnership(record.ownership.home, { lastActivityAt: Date.now(), liveness: { lifecycle: "live", running: true, observedAt: Date.now() } });
   if (opts?.isLeadPrompt !== false) {
     record.lastLeadPromptAt = Date.now();
@@ -2040,6 +2041,22 @@ export function recordReport(record: RpcAgentRecord, kind: "question" | "final" 
   if (record.ownership) touchOwnership(record.ownership.home);
 }
 
+/** Writes durable owner/approval protection without treating a poll as activity. */
+export function syncOwnershipProtection(record: RpcAgentRecord): void {
+  if (!record.ownership) return;
+  updateOwnership(record.ownership.home, {
+    liveness: {
+      lifecycle: record.client ? (record.running ? "live" : "stopping") : "unknown",
+      running: record.running,
+      observedAt: Date.now(),
+      threadBound: record.threadBound,
+      pendingQuestion: record.threadBound,
+      pendingApprovalCommandId: record.pendingApproval?.cmdId,
+      recovery: record.client ? "none" : "revived",
+    },
+  });
+}
+
 /**
  * The report kinds `record` has filed since its last LEAD prompt — the input
  * `fork.ts`'s `isIdleWithoutFinal` judges a turn against. Filtering by
@@ -2203,6 +2220,7 @@ export function applyRpcEvent(
         rationale: typeof args?.rationale === "string" ? args.rationale : undefined,
         cwd: typeof args?.cwd === "string" ? args.cwd : undefined,
       };
+      syncOwnershipProtection(record);
       // The approval PUSH itself is `createApprovalRelay`'s job
       // (execute-gateway.ts owns the §7 payload and the working-context
       // scrape); this branch only records what is pending. Fired from
@@ -2972,6 +2990,7 @@ export async function stopAgent(
       // best effort
     }
     if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "stopped", running: false, observedAt: Date.now() } });
+    if (record.ownership) observeSessionWrite(record.ownership.home, record.sessionPath);
     // Review relay #1 (I2): a stop is a thread-close path too — the ticket
     // names "lead stop" alongside `/done`/fork final/`ws-resolve`. Releasing
     // the bind here keeps a stopped agent from carrying a latched flag into a
@@ -3010,6 +3029,7 @@ export function getAgentTranscriptPath(registry: RpcAgentRegistry, agentId: stri
     throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
   }
   if (record.ownership) touchOwnership(record.ownership.home);
+  if (record.ownership) observeSessionWrite(record.ownership.home, record.sessionPath);
   return { transcript_path: record.sessionPath };
 }
 
