@@ -45,3 +45,11 @@ test("actual registration exposes the object envelope and starts no child before
   const result = await definition.execute("id", { items: [{ preset: "consult", request: "x" }] }, new AbortController().signal);
   assert.equal(queries, 1); assert.deepEqual(JSON.parse(result.content[0].text), result.details.items);
 });
+
+test("queued invocation cancellation settles queued work without launching it", async () => {
+  let starts = 0; const gate: (() => void)[] = []; const controller = createClaudeDelegateController(() => process.cwd(), { executable: "/usr/bin/true", loadSdk: async () => ({ query: () => ({ close() {}, async *[Symbol.asyncIterator]() { starts += 1; await new Promise<void>((resolve) => gate.push(resolve)); yield { type: "result", subtype: "success", is_error: false, result: "ok", usage: {}, modelUsage: {}, total_cost_usd: 0 }; } }) }) });
+  const first = controller.execute(Array.from({ length: 3 }, () => ({ preset: "audit", request: "x" }))); await new Promise((resolve) => setTimeout(resolve, 5));
+  const cancellation = new AbortController(); const queued = controller.execute([{ preset: "consult", request: "x" }], cancellation.signal); cancellation.abort();
+  assert.equal((await queued)[0]?.error?.code, "cancelled"); assert.equal(starts, 3);
+  for (const release of gate.splice(0)) release(); await first;
+});
