@@ -1,6 +1,6 @@
 /** Read-only, durable child-session telemetry.  This deliberately does not
  * use SessionManager: opening a production history can migrate/write it. */
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 
 export interface TelemetryOrigin { sessionId: string; sessionPath: string; prefixEntryId?: string; emptyPrefix?: true }
@@ -27,8 +27,8 @@ export function parseTelemetry(value: unknown): AgentTelemetry | undefined {
   return out;
 }
 export function readSessionEntries(path: string): { headerId: string; parentSession?: string; entries: Entry[] } | { transient: true } | undefined {
-  if (!existsSync(path)) return undefined;
-  let raw: string; try { raw = readFileSync(path, "utf8"); } catch { return undefined; }
+  // Missing or unreachable files do not contradict an already validated origin.
+  let raw: string; try { raw = readFileSync(path, "utf8"); } catch { return { transient: true }; }
   const lines = raw.split("\n"); if (lines.at(-1) === "") lines.pop();
   const parsed: unknown[] = [];
   for (let i = 0; i < lines.length; i++) { try { parsed.push(JSON.parse(lines[i])); } catch { return i === lines.length - 1 ? { transient: true } : undefined; } }
@@ -44,7 +44,7 @@ export function readSessionEntries(path: string): { headerId: string; parentSess
   }
   return { headerId: h.id, ...(typeof h.parentSession === "string" && h.parentSession ? { parentSession: h.parentSession } : {}), entries };
 }
-/** Recomputes, never adds. Invalid complete input returns undefined so callers retain a stale valid snapshot. */
+/** Recomputes, never adds. Unavailable or invalid input returns undefined; callers classify the read before choosing fallback. */
 export function reduceTelemetry(origin: TelemetryOrigin, read: ReturnType<typeof readSessionEntries>): Pick<AgentTelemetry, "latestInput" | "estimatedUsd"> | undefined {
   if (!read || "transient" in read || read.headerId !== origin.sessionId) return undefined;
   let start = 0;

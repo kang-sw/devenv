@@ -3,11 +3,11 @@
  * process, owner history, or model request is involved. */
 import assert from "node:assert/strict";
 import { afterEach, describe, test } from "node:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RpcClient, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { attachEventListener, refreshAgentTelemetry, registerAgentTools, sendToAgent, stopAgent, type RpcAgentRecord } from "../src/spawner.ts";
+import { agentWidgetRefreshRef, attachEventListener, refreshAgentTelemetry, registerAgentTools, sendToAgent, stopAgent, type RpcAgentRecord } from "../src/spawner.ts";
 import { captureOrphans, parseOrphans, rehydrateOrphanRecord, serializeOrphans } from "../src/agent-sidecar.ts";
 import { captureForkResume, createThreadRegistryHandle, hydrateThreadRegistry, rehydrateForkRecord, saveThreadRegistryFile } from "../src/ask.ts";
 import { persistShutdownAgentSnapshots } from "../src/index.ts";
@@ -21,6 +21,78 @@ function write(path: string, lines: unknown[]) { writeFileSync(path, `${lines.ma
 async function ticks() { await new Promise(resolve => setImmediate(resolve)); await new Promise(resolve => setImmediate(resolve)); }
 
 describe("agent telemetry lifecycle at production boundaries", () => {
+  for (const interruption of ["partial", "missing", "read-error"] as const) test(`fork origin and usage survive ${interruption} and resume complete accounting`, () => {
+    const session = join(root(), "child.jsonl");
+    const state = { sessionId: "s", sessionFile: session, model: { provider: "p", id: "m" }, thinkingLevel: "low" };
+    const record = { agentId: "a", sessionPath: session } as RpcAgentRecord;
+    const inherited = [header("s", "/parent"), assistant("parent", 900, 9)];
+    write(session, inherited); refreshAgentTelemetry(record, state, { fresh: true });
+    const complete = [...inherited, assistant("child", 20, .2)];
+    write(session, complete); refreshAgentTelemetry(record, state);
+    const origin = { ...record.telemetry!.origin };
+    if (interruption === "partial") writeFileSync(session, '{"type":');
+    else { rmSync(session); if (interruption === "read-error") mkdirSync(session); }
+    assert.equal(refreshAgentTelemetry(record, { ...state, thinkingLevel: "high" }), true, "selection changes notify even with stale usage");
+    assert.deepEqual(record.telemetry, { version: 1, origin, model: "p/m", effort: "high", latestInput: 20, estimatedUsd: .2 });
+    assert.equal(record.telemetryInputFloor, undefined);
+    if (interruption === "read-error") rmSync(session, { recursive: true });
+    write(session, [...complete, assistant("next", 25, .3)]);
+    refreshAgentTelemetry(record, state); refreshAgentTelemetry(record, state);
+    assert.deepEqual(record.telemetry?.origin, origin);
+    assert.equal(record.telemetry?.latestInput, 25); assert.equal(record.telemetry?.estimatedUsd, .5);
+  });
+
+  for (const contradiction of ["header", "path", "anchor", "duplicate", "interior", "entry-id"] as const) test(`readable ${contradiction} contradiction invalidates saved attribution`, () => {
+    const session = join(root(), "child.jsonl");
+    const state = { sessionId: "s", sessionFile: session };
+    const record = { agentId: "a", sessionPath: session } as RpcAgentRecord;
+    const entries = [header("s", "/parent"), assistant("parent", 900, 9), assistant("child", 20, .2)];
+    write(session, entries.slice(0, 2)); refreshAgentTelemetry(record, state, { fresh: true });
+    write(session, entries); refreshAgentTelemetry(record, state);
+    if (contradiction === "header") write(session, [header("other", "/parent"), ...entries.slice(1)]);
+    if (contradiction === "anchor") write(session, [entries[0], entries[2]]);
+    if (contradiction === "duplicate") write(session, [...entries, assistant("child", 99, 9)]);
+    if (contradiction === "entry-id") write(session, [...entries, { type: "message", message: { role: "assistant" } }]);
+    if (contradiction === "interior") writeFileSync(session, JSON.stringify(entries[0]) + '\n{broken\n' + JSON.stringify(entries[2]) + '\n');
+    refreshAgentTelemetry(record, contradiction === "path" ? { ...state, sessionFile: session + ".other" } : state);
+    assert.equal(record.telemetry, undefined); assert.equal(record.telemetryInputFloor, undefined); assert.equal(record.observedLatestInput, undefined);
+  });
+
+  test("collector rejection clears current selection and notifies once while preserving usage", async () => {
+    const session = join(root(), "child.jsonl"); write(session, [header("s"), assistant("child", 20, .2)]);
+    let listener!: (event: unknown) => void, notifications = 0;
+    const client = { onEvent: (fn: typeof listener) => (listener = fn, () => {}), getState: async () => { throw new Error("state unavailable"); } } as unknown as RpcClient;
+    const record = { agentId: "a", client, launchGeneration: 1, sessionPath: session, wsToolNames: [], reportLog: [] } as unknown as RpcAgentRecord;
+    refreshAgentTelemetry(record, { sessionId: "s", model: { provider: "p", id: "m" }, thinkingLevel: "low" });
+    const origin = { ...record.telemetry!.origin }, previous = agentWidgetRefreshRef.current;
+    agentWidgetRefreshRef.current = () => { notifications++; };
+    try {
+      attachEventListener(undefined, undefined, record, client);
+      listener({ type: "thinking_level_changed", thinkingLevel: "high" }); await ticks();
+      assert.equal(record.observedModel, undefined); assert.equal(record.observedEffort, undefined);
+      assert.deepEqual(record.telemetry, { version: 1, origin, latestInput: 20, estimatedUsd: .2 });
+      assert.equal(notifications, 1);
+      listener({ type: "thinking_level_changed" }); await ticks(); assert.equal(notifications, 1, "unchanged unknown selection does not notify again");
+    } finally { agentWidgetRefreshRef.current = previous; }
+  });
+
+  for (const replacement of ["client", "generation"] as const) test(`old collector rejection cannot clear selection after ${replacement} replacement`, async () => {
+    let listener!: (event: unknown) => void, reject!: (error: Error) => void, notifications = 0;
+    const pending = new Promise<never>((_, fail) => { reject = fail; });
+    const client = { onEvent: (fn: typeof listener) => (listener = fn, () => {}), getState: () => pending } as unknown as RpcClient;
+    const record = { agentId: "a", client, launchGeneration: 1, sessionPath: "/unused", wsToolNames: [], reportLog: [] } as unknown as RpcAgentRecord;
+    const previous = agentWidgetRefreshRef.current; agentWidgetRefreshRef.current = () => { notifications++; };
+    try {
+      attachEventListener(undefined, undefined, record, client); listener({ type: "thinking_level_changed" });
+      if (replacement === "client") record.client = {} as RpcClient; else record.launchGeneration++;
+      record.observedModel = "new/model"; record.observedEffort = "high";
+      record.telemetry = { version: 1, origin: { sessionId: "new", sessionPath: "/unused", emptyPrefix: true }, model: "new/model", effort: "high", latestInput: 12, estimatedUsd: .4 };
+      const expected = structuredClone(record.telemetry);
+      reject(new Error("old state unavailable")); await ticks();
+      assert.equal(record.observedModel, "new/model"); assert.equal(record.observedEffort, "high"); assert.deepEqual(record.telemetry, expected); assert.equal(notifications, 0);
+    } finally { agentWidgetRefreshRef.current = previous; }
+  });
+
   test("fresh task and discussion forks preserve the inherited prefix as their immutable origin", () => {
     const dir = root();
     for (const role of ["task", "discussion"]) {

@@ -1131,6 +1131,7 @@ export function refreshAgentTelemetry(record: RpcAgentRecord, state?: { sessionF
   if (telemetry.origin.sessionPath !== path || (sessionId && telemetry.origin.sessionId !== sessionId)) { delete record.telemetry; delete record.telemetryInputFloor; delete record.observedLatestInput; return true; }
   if (model) telemetry.model = model; else if (state) delete telemetry.model;
   if (typeof state?.thinkingLevel === "string" && state.thinkingLevel) telemetry.effort = state.thinkingLevel; else if (state) delete telemetry.effort;
+  if (read && "transient" in read) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
   const reduced = reduceTelemetry(telemetry.origin, read);
   if (!reduced) { delete record.telemetry; delete record.telemetryInputFloor; delete record.observedLatestInput; return true; }
   delete telemetry.latestInput; delete telemetry.estimatedUsd;
@@ -2361,7 +2362,14 @@ export function attachEventListener(
         try {
           const state = await client.getState();
           if (record.client === client && record.launchGeneration === generation && refreshAgentTelemetry(record, state)) triggerAgentWidgetRefresh();
-        } catch { /* retain the previous complete snapshot */ }
+        } catch {
+          if (record.client === client && record.launchGeneration === generation) {
+            const changed = record.observedModel !== undefined || record.observedEffort !== undefined || record.telemetry?.model !== undefined || record.telemetry?.effort !== undefined;
+            delete record.observedModel; delete record.observedEffort;
+            if (record.telemetry) { delete record.telemetry.model; delete record.telemetry.effort; }
+            if (changed) triggerAgentWidgetRefresh();
+          }
+        }
       } while (dirty && record.client === client && record.launchGeneration === generation);
       refreshing = false;
     })();
