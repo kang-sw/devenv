@@ -333,6 +333,11 @@ func withRecommendedRenderBinding(payload, harness, tier string, configOpts wsco
 // Mapping:
 //   - "implementer", "reviewer", "delegate" → roleDelegate
 //   - "leaf" → roleLeaf
+//   - "worker" → roleLead: a worker executes a whole unit of work end to end
+//     (route, edit, verify, review, commit, close), so it needs the same
+//     unrestricted scope a lead holds. The key is still a child of the caller
+//     and bound to the caller's root, so it is lead-capability without being
+//     the caller's own key.
 //   - "lead", "", unknown → ("", false): lead playbooks never mint child keys.
 func childRoleForPlaybookRole(role string) (toolRole, bool) {
 	switch strings.ToLower(strings.TrimSpace(role)) {
@@ -340,6 +345,8 @@ func childRoleForPlaybookRole(role string) (toolRole, bool) {
 		return roleDelegate, true
 	case "leaf":
 		return roleLeaf, true
+	case "worker":
+		return roleLead, true
 	default:
 		return "", false
 	}
@@ -453,9 +460,9 @@ const (
 	preferSubagentPlaybookTitle = "Prefer Subagent"
 	preferSubagentEnabledValue  = "on"
 
-	goalFanOutStepPlaybookName = "lead-goal-fan-out-step"
-	drainReadyQueuePlaybookName       = "lead-drain-ready-queue"
-	drainReadyQueuePlaybookTitle      = "Drain Ready Queue"
+	goalFanOutStepPlaybookName   = "lead-goal-fan-out-step"
+	drainReadyQueuePlaybookName  = "lead-drain-ready-queue"
+	drainReadyQueuePlaybookTitle = "Drain Ready Queue"
 )
 
 // builtinPromptOverrideDefaults returns code-owned default override values for

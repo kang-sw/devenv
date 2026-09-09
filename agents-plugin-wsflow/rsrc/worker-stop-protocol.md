@@ -14,19 +14,20 @@ Stop and report only when one of these holds. Everything else is yours to
 decide.
 
 - **(a) Merge into a parent branch.** A `goal/<parent>/<stem>` branch merging
-  into `<parent>`, and any merge into a `main`-class branch, needs user
-  approval: that merge is the veto point for every decision you took alone.
-  Merging your own implementation branch into the goal branch you were spawned
-  on is yours.
+  into `<parent>`, and any merge into a `main`-class branch, is not yours to
+  perform: stop and report it so the lead can carry the approval, because that
+  merge is the veto point for every decision you took alone. Merging your own
+  implementation branch into the branch you were spawned on is yours.
 - **(b) An unresolved decision.** An `[escalate-to-lead]` result from a
   delegate you spawned that the ticket does not settle, or an Open Decision
   Queue item the ticket left open.
 - **(c) A ticket decision contradicted by code reality** so it cannot be
   executed as written. Include your proposed resolution in the report.
-- **(d) An irreversible action** in the project's Approval Protocol always-ask
-  category.
-- **(e) A Critical review finding still open after the fix round** (see
-  Review Rounds below).
+- **(d) An irreversible action** in the always-ask category of the Approval
+  Protocol `AGENTS.md` declares. A project that declares none has no always-ask
+  category and no stop here.
+- **(e) A Critical review finding still open after round 2** (see Review
+  Rounds below).
 
 A decision not on this list is recorded, not escalated: one line in the
 commit's `## AI Context`, and in the ticket's `### Result` when it changes what
@@ -44,9 +45,9 @@ and never converges; the cap is the convergence.
 
 ## Branch
 
-Your branch is shared: the lead commits on it while you run. Never amend,
-reset, rebase, or force-move it; a correction, including a fixed commit
-message, is a new commit. While a delegate you spawned runs, wait for the
+The branch you were spawned on is shared: the lead commits on it while you run.
+Never amend, reset, rebase, or force-move it; a correction, including a fixed
+commit message, is a new commit. While a delegate you spawned runs, wait for the
 host's completion signal; do not poll with sleep loops or fill the wait with
 repeated verification runs.
 
@@ -72,7 +73,7 @@ stop. A project that declares no such section has nothing to read here.
 
 ## Resume
 
-When you stop, end your turn with the report. The lead resumes you through the
+A stop ends your turn. The lead resumes you through the
 host's continuation mechanism, or re-spawns you with a recap when the host has
 none. Both are safe only because everything you need is in the ticket, the
 branch, and git; keep it there, not in your conversation.
@@ -80,7 +81,9 @@ branch, and git; keep it there, not in your conversation.
 ## Report
 
 Write all output in English. End every run, stopped or complete, with this
-block as the last thing you emit:
+block as the last thing you emit. `stop:` is `none` exactly when `status:` is
+`[ok]`; `decisions:` and `proposed_resolution:` take `none` and `n/a` when they
+do not apply.
 
 ```
 status: [ok] | [escalate-to-lead]
