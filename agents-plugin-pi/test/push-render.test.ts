@@ -23,6 +23,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { buildPushComponent, buildPushRenderLines, registerPushMessageRenderers, type PushTuiModules } from "../src/push-render.ts";
 import { buildPushContent, PUSH_FAMILIES } from "../src/spawner.ts";
+import { approximateCodePointWidth } from "../src/tool-result-render.ts";
 
 describe("buildPushRenderLines", () => {
   test("splits a real pushed message into head, payload and status", () => {
@@ -198,6 +199,10 @@ function fakeTheme() {
 
 function plainLine(text: string): string {
   return text.replace(/<[^>]+>/g, "");
+}
+
+function displayWidth(text: string): number {
+  return [...plainLine(text)].reduce((width, codePoint) => width + approximateCodePointWidth(codePoint), 0);
 }
 
 describe("buildPushComponent", () => {
@@ -409,21 +414,29 @@ describe("registerPushMessageRenderers", () => {
     }
   });
 
-  test("registered reports retain collapsed and expanded logical-line behavior at 40, 80, and 120 columns", async () => {
+  test("registered reports fit long ANSI and multibyte payload rows at 40, 80, and 120 columns", async () => {
     const registered = new Map<string, (message: unknown, options: unknown, theme: unknown) => unknown>();
     const pi = { registerMessageRenderer: (family: string, renderer: (message: unknown, options: unknown, theme: unknown) => unknown) => registered.set(family, renderer) };
     const tui = fakeTui();
     await registerPushMessageRenderers(pi as never, tui.modules);
-    const entries = Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`k${index}`, `v${index}`]));
+    const entries = Object.fromEntries(Array.from({ length: 12 }, (_, index) => [
+      `k${index}`,
+      index === 0 ? `\x1b[35m${"界".repeat(48)}\x1b[0m` : `v${index}`,
+    ]));
     const message = { content: buildPushContent("ws-agent-report", "a1", entries, undefined) };
 
     for (const width of [40, 80, 120]) {
       const collapsed = registered.get("ws-agent-report")!(message, { expanded: false }, fakeTheme()) as FakeComponent;
       const collapsedLines = collapsed.render(width);
-      assert.equal(collapsedLines.length, 12, `collapsed report fits the logical-line cap at ${width}`);
       assert.equal(collapsedLines.at(-1)?.replace(/<[^>]+>/g, "").trim(), "...");
+      assert.doesNotMatch(collapsedLines.join("\n"), /k11: v11/, `collapsed report retains the logical-line cap at ${width}`);
+      assert.ok(collapsedLines.every((line) => displayWidth(line) <= width), `collapsed report rows fit ${width} columns`);
+      assert.doesNotMatch(collapsedLines.join("\n"), /\x1b\[/, `collapsed report sanitizes ANSI at ${width}`);
       const expanded = registered.get("ws-agent-report")!(message, { expanded: true }, fakeTheme()) as FakeComponent;
-      assert.equal(expanded.render(width).length, 13, `expanded report recovers all logical lines at ${width}`);
+      const expandedLines = expanded.render(width);
+      assert.match(expandedLines.join("\n"), /k11: v11/, `expanded report recovers all logical lines at ${width}`);
+      assert.ok(expandedLines.every((line) => displayWidth(line) <= width), `expanded report rows fit ${width} columns`);
+      assert.doesNotMatch(expandedLines.join("\n"), /\x1b\[/, `expanded report sanitizes ANSI at ${width}`);
     }
   });
 
