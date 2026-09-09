@@ -259,13 +259,17 @@ re-work.
 The anchor carries the same weakness in a quieter form. When a ticket's real
 first implementation commit does not name the stem, the selector does not
 always fall through to `unavailable`: it anchors on whatever *later*
-product-typed commit does name it — often a `fix` that is itself the repair,
-which then becomes the anchor and is excluded from its own corrective count,
-while the denominator shrinks to the tail of the ticket. Both readings
-understate the ticket, and only the printed `anchor=` line makes the difference
-visible, which is why reading it is required. The `unavailable` count is the
-window's visible proxy for how often the convention hides implementation
-commits; the wrong-anchor rows are the invisible remainder of the same gap.
+product-typed commit does name it. On a multi-phase ticket that is typically a
+second or third phase's implementation, so the anchor sits well after the work
+began and the denominator shrinks to the tail of the ticket; when the later
+commit is itself a repair, the anchor is a repair excluded from its own
+corrective count. Both readings understate the ticket, and only the printed
+`anchor=` line makes the difference visible, which is why reading it is
+required. Judge each anchor against the ticket's phase count: an anchor whose
+subject describes a late phase on a ticket with earlier phases is a
+`unavailable` row in disguise. The `unavailable` count is the window's visible
+proxy for how often the convention hides implementation commits; the
+wrong-anchor rows are the invisible remainder of the same gap.
 
 ### 4. Escalations recorded in `### Result`
 
@@ -386,10 +390,12 @@ stem merely listed under another ticket's `## Ticket Updates` and counts an
 administrative `chore(tickets): drop ...` sweep once per ticket it closes. That
 removes the sweeps but not the rest: a `fix`/`feat`/`refactor` commit that
 implements something else while naming this stem as a follow-up, a
-forward-dependency, or the reason the ticket is being dropped still selects.
-Expect roughly a third of the rows to be that; the loop therefore prints each
-stem with its selected subject, and the reported number is the count *after*
-reading them. A dropped ticket with real implementation commits is the
+forward-dependency, or the reason the ticket is being dropped still selects,
+and so does a `feat(ticket): <stem> — ...` commit that only creates the ticket.
+Expect more than half the rows to be one of those; the loop therefore prints
+each stem with its selected subject, and the reported number is the count
+*after* reading them. Report both numbers — rows printed and rows judged real —
+because the gap between them is a property of the commit convention, not noise. A dropped ticket with real implementation commits is the
 strongest abort signal available here, which is exactly why it must not be
 reported unread.
 

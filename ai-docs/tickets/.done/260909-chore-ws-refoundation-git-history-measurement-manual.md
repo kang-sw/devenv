@@ -441,3 +441,176 @@ this work; it belongs to whichever child edits that surface.
 Criteria own it, and its Cross-Child Decision 19 names the hand-dogfood run of
 the removal children as the first after-sample — which includes this ticket's
 own execution.
+
+#### Edition (6a5947ab) - 2026-09-09
+
+Independent review of the placed manual and of the Result above (round 2, three
+reviewers, none of them the author) found the manual asserting numbers its
+commands could not justify, and this Result carrying six errors of its own. The
+manual fixes are in `6a5947ab`; the Result above is frozen, so the corrections
+are here. **Where this Edition and the Result disagree, this Edition is the
+baseline.** The baseline is pinned to the manual as of `6a5947ab`
+(placed at `c96b4db2`); an after-run must use that version or later, because the
+figures below are not comparable against the `c96b4db2` indicator 3 rule.
+
+**Manual corrections and their effect on the figures.**
+
+- *Indicator 3's free-text corrective vocabulary is gone.* The stem-word
+  stripping recorded above as the fix was itself broken: `gsub` is a substring
+  operation, so any `*-review-*` stem also destroys `re-review` and
+  `review round` in unrelated subjects — the false positives became silent
+  false negatives. The automatic rule is now typed `fix`/`revert` only, plus a
+  required hand read of the printed post-implementation subjects. Re-run figure
+  is unchanged at **1 corrective of 52 post-implementation commits across 12
+  measurable tickets**; the hand read of all 52 subjects adds none. What
+  changed is that the number is now defensible.
+- *Indicator 3 prints its anchor, and two anchors in this window are wrong.*
+  `260824-feat-review-release-gate-policy` anchors on `f3ac6a20`
+  (`fix(lead-ship): stop for explicit decision on an empty/no-marker ledger`)
+  and `260908-feat-survey-plan-is-route-not-contract` on `10d38f80`
+  (`feat(agents-plugin): stop dispatching plan artifact to reviewers`). Neither
+  is a first implementation commit: both are a *later phase's* implementation,
+  because the earlier phase's commits never name the stem on `develop`. Their
+  denominators (2 and 4) cover the tail of the ticket only. So the honest
+  reading of indicator 3 in this window is **1 of 52 across 10 soundly anchored
+  tickets, 2 anchored late, 7 unavailable, 1 with no post-implementation
+  commits** — 10 of 20 tickets (50%), not 8 of 20 (40%), carry a measurement
+  defect traceable to the same cause.
+- *Indicator 4 prints its matched lines and asks for two numbers.* Re-run:
+  **10 lines read, 0 judged to record an actual stop.** The Result above says
+  the same thing; the manual now requires both numbers rather than leaving the
+  second to the measurer's discretion. Of the 10, nine are plainly abstract
+  design vocabulary; the tenth
+  (`260908-feat-survey-plan-is-route-not-contract`, "ruling — only strings that
+  already named `[escalate-to-research]` …") records a lead ruling the ticket
+  received, which is adjacent to a stop but is not one. Zero stands.
+- *Indicator 6's dropped-ticket rows are printed and were read.* Re-run prints
+  9 rows; **4 are genuine** (`260405-research-marathon-delegation-hardening`,
+  `260425-chore-mental-model-index-migration` — a `revert:` of shipped work,
+  the strongest abort in the tree —, and both
+  `260626-bug-prefer-subagent-*` tickets) and **5 are false positives**: two
+  `feat(ticket): <stem>` commits that only create the ticket
+  (`260421-feat-rebuild-spec-skill`, `260429-feat-api-deps`), one follow-up
+  note under another ticket's `## Ticket Updates`
+  (`260505-bug-plugin-managed-default-root-discovery`), one forward dependency
+  (`260513-feat-async-exec-output-reader`), and one commit that *is* the drop
+  (`260524-bug-wsstore-ci-sqlite-busy`). The Result above's "two of those nine
+  are still package-scoped commits" understates the residual by more than half.
+  Baseline: **dropped with implementation commits: 9 printed, 4 real.**
+
+**Corrections to this Result's own claims.**
+
+- *"48 closed actionable tickets were skipped … every one predates the
+  convention"* is false. The 48 span `completed:`-less closures from
+  2026-04-29 to 2026-08-27 and are convention gaps, not a pre-convention era.
+  The conclusion still holds for a different reason: the newest of the 48
+  closed on 2026-08-27, below the window floor of 2026-08-30, so none of them
+  would have entered the window. The after-run must still compare the count.
+- *"137 stem-referencing commits"* is a sum of per-row counts; commits that
+  name two stems are counted twice. **Distinct commits: 115.** The type
+  breakdown is likewise per-row. Both windows must be counted the same way for
+  the comparison to hold.
+- *"product commits reach `develop` inside merges that do not name the stem"*
+  is backwards. The merge commits do name the stem — that is why they appear in
+  the `merge 17` row. It is the product commits *inside* those merges that do
+  not. The consequence is the same and the sentence was wrong.
+- *"alongside the five existing manuals"* — there are **six**.
+- *Indicator 5's "53%"* is the judgment share (172 of 326), not a narration or
+  error rate; the Result reads ambiguously.
+- The four-blind-reader classification protocol used for indicator 5 is
+  **not encoded in the manual**. The manual states the measurer-dependence and
+  says to keep the classifier fixed; it does not prescribe four partitions and
+  four independent readers. An after-run that wants comparability must copy the
+  protocol from this Edition, not from the manual.
+
+**Per-ticket rows the Result summarized instead of listing.**
+
+Indicator 1, `<stem> <days> / <first-parent commit gap>`, window order:
+
+```text
+260824-feat-lead-review-range-scenario 6/34
+260824-feat-review-release-gate-policy 6/57
+260824-feat-review-watermark-ledger 6/41
+260828-refactor-per-slice-review-relay 2/24
+260830-bug-review-nudge-trackless-bootstrap-gap 0/0
+260830-feat-sage-freshness-content-baseline 0/9
+260831-bug-survey-plan-unilateral-scope-reduction 0/2
+260831-refactor-severity-graded-per-slice-review-relay 0/7
+260901-feat-note-oversize-layer-aware-clone-path 0/6
+260903-refactor-mcp-read-surface-collapse 1/14
+260903-refactor-mcp-todo-signature-merge 1/14
+260903-refactor-mcp-verb-vocabulary-unification 1/14
+260904-bug-windows-parent-watch-pid-reuse-flake 0/1
+260904-refactor-enter-affordance-rename-route-opaque 0/15
+260906-bug-route-opaque-params-handler-mismatch 0/5
+260907-feat-ws-project-tree-parent-nested-ticket-render 0/6
+260908-feat-survey-plan-is-route-not-contract 0/17
+260908-bug-sage-gate-stale-completed-has-no-rerun-path 1/15
+260908-bug-shipped-surfaces-carry-devenv-only-content 1/12
+260908-feat-implement-skip-survey-for-localized-ticket-target 1/16
+```
+
+Indicator 2, per-stem type counts (per-row; a commit naming two stems
+appears in both rows):
+
+```text
+260824-feat-lead-review-range-scenario chore=3 docs=2 feat=2
+260824-feat-review-release-gate-policy chore=4 docs=4 fix=1
+260824-feat-review-watermark-ledger chore=3 docs=8 feat=2 fix=1
+260828-refactor-per-slice-review-relay chore=1 docs=2
+260830-bug-review-nudge-trackless-bootstrap-gap fix=1
+260830-feat-sage-freshness-content-baseline chore=2 docs=2 feat=1
+260831-bug-survey-plan-unilateral-scope-reduction chore=1 docs=3 feat=1 merge=1
+260831-refactor-severity-graded-per-slice-review-relay chore=2 docs=1 merge=1 plan=1
+260901-feat-note-oversize-layer-aware-clone-path chore=1 docs=3 feat=2
+260903-refactor-mcp-read-surface-collapse docs=6 merge=1 refactor=1
+260903-refactor-mcp-todo-signature-merge docs=7
+260903-refactor-mcp-verb-vocabulary-unification docs=6 merge=1 refactor=1
+260904-bug-windows-parent-watch-pid-reuse-flake docs=1 fix=1
+260904-refactor-enter-affordance-rename-route-opaque docs=7 merge=2 refactor=2
+260906-bug-route-opaque-params-handler-mismatch docs=2
+260907-feat-ws-project-tree-parent-nested-ticket-render docs=4 merge=1
+260908-feat-survey-plan-is-route-not-contract docs=9 feat=1 merge=2
+260908-bug-sage-gate-stale-completed-has-no-rerun-path docs=5 merge=2
+260908-bug-shipped-surfaces-carry-devenv-only-content docs=5 feat=1 merge=4 test=3
+260908-feat-implement-skip-survey-for-localized-ticket-target docs=4 merge=2
+```
+
+The seven tickets with no product-typed commit naming them on `develop`
+(indicator 2's zero rows and indicator 3's `unavailable` rows, the same set):
+`260828-refactor-per-slice-review-relay`,
+`260831-refactor-severity-graded-per-slice-review-relay`,
+`260903-refactor-mcp-todo-signature-merge`,
+`260906-bug-route-opaque-params-handler-mismatch`,
+`260907-feat-ws-project-tree-parent-nested-ticket-render`,
+`260908-bug-sage-gate-stale-completed-has-no-rerun-path`,
+`260908-feat-implement-skip-survey-for-localized-ticket-target`.
+
+Indicator 3 per-ticket, `corrective of post-implementation`, anchored tickets
+only: `260824-feat-lead-review-range-scenario` 0/3;
+`260824-feat-review-release-gate-policy` 0/2 (late anchor);
+`260824-feat-review-watermark-ledger` 1/8;
+`260830-bug-review-nudge-trackless-bootstrap-gap` n/a;
+`260830-feat-sage-freshness-content-baseline` 0/3;
+`260831-bug-survey-plan-unilateral-scope-reduction` 0/4;
+`260901-feat-note-oversize-layer-aware-clone-path` 0/4;
+`260903-refactor-mcp-read-surface-collapse` 0/3;
+`260903-refactor-mcp-verb-vocabulary-unification` 0/3;
+`260904-bug-windows-parent-watch-pid-reuse-flake` 0/1;
+`260904-refactor-enter-affordance-rename-route-opaque` 0/7;
+`260908-feat-survey-plan-is-route-not-contract` 0/4 (late anchor);
+`260908-bug-shipped-surfaces-carry-devenv-only-content` 0/10.
+
+**Attribution gap in this ticket's commits.** `c96b4db2` and `78573192` carry
+no `Co-Authored-By`/`Claude-Session` trailers. Recreating them to add the
+trailers collided with a concurrent session that landed `3fcaa003` on this
+branch mid-operation; the recovery was `git reset --hard 3fcaa003`, restoring
+the exact original history. The trailers are not worth rewriting shared history
+under a live concurrent writer, so the gap stands. `6a5947ab` and later carry
+them.
+
+**Verification of this Edition.** Indicators 3, 4 and 6 re-run verbatim from
+the `6a5947ab` manual against `develop` at `84b1f825` (unmoved since the
+original run), from a read-only `git archive develop` ticket tree; the `sh`
+blocks are byte-identical to those verified across `sh`/`bash`/`dash` in
+`c96b4db2`.
