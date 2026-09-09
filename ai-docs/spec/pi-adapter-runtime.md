@@ -1476,7 +1476,8 @@ of its own: every repaint rebuilds the rows from those registries.
 
 - **Rows.** Each row starts with `name · role · state · elapsed`, followed by
   model and usage telemetry when space permits, with the `/answer <id>` hint
-  retained when the row awaits the owner. `name` is the
+  retained when the row awaits the owner. Question rows replace the name field
+  with the display phrase `/answer <title>` described below. Otherwise, `name` is the
   agent's alias, else its title, else the first eight characters of its id; a
   thread with no live respondent is named by the thread title. `role` is
   `worker`, `execute`, `fork`, `explore`, or `thread` (an owner discussion
@@ -1519,7 +1520,8 @@ of its own: every repaint rebuilds the rows from those registries.
   stopped before a new one is created on `/reload`, and `session_shutdown`
   stops the timer and clears both the widget and the retired agent footer key. Off the TUI
   there is no widget; the headless baselines in the owner-question section
-  above are unchanged.
+  above are unchanged. Qualifying owner waits add the separately managed
+  attention cadence described below.
 
 > [!note] Live verification · 2026-09-05
 > Offline coverage: row shape and states, name precedence, ordering and the
@@ -1530,6 +1532,41 @@ of its own: every repaint rebuilds the rows from those registries.
 > exercised live: the real-width render through the host's widget factory,
 > the 10-second clock under a running child, and `/reload` re-arming — these
 > are owner-run checks recorded in the ticket's Phase 1 Result.
+
+### Owner-wait attention {#260910-pi-owner-wait-attention}
+
+The owner's lead TUI makes open questions and pending approvals conspicuous:
+the actionable text alternates between bold and ordinary every **330ms**, with
+the single count heading on the same phase. Text remains visible in both
+phases, and emphasis continues for as long as qualifying waits remain.
+Spawned child processes do not animate, and ordinary lead idle does not qualify.
+
+- **Question phrase.** The primary row field displays `/answer <title>`.
+  Control characters are sanitized; an unavailable or unusable title falls
+  back to the question ID. This is display text only: the separately retained
+  `/answer qN` hint remains the valid command. Titles never become lookup keys.
+- **Styling boundaries.** Only the visible question phrase or the actual
+  `awaiting approval` state label changes weight, alongside the count heading.
+  Role, elapsed time, telemetry, separators, and command hints stay ordinary.
+  An approval has no fabricated answer target. Existing tool/body muting is
+  preserved. There is no sound, notification, or color cycle.
+- **Supplied owner-held rows.** The presentation layer also accepts
+  `idle-awaiting-owner` without a question, emphasizes its existing state
+  label, and preserves an explicitly supplied inspection hint. This support
+  does not create ownership transitions or steering commands.
+- **Configuration.** `agent_wait_animation` in
+  `agents-plugin-pi/goal-loop-config.json` defaults to enabled. Literal `false`
+  disables animation and uses static bold emphasis. Missing, malformed, or
+  non-boolean values fall back to enabled. The setting is read on widget
+  refresh, so a file change takes effect on the next refresh; rendering the
+  captured widget itself performs no configuration I/O.
+- **Lifetime and width.** Each eligible widget owns at most one attention
+  timer, shared by all qualifying rows and separate from elapsed-time updates.
+  Final wait resolution, disable, replacement/session switch, and teardown
+  stop attention work. Ticks make no model calls or RPC polls. The existing
+  count destination, ordering, protected-row cap, and width bounds remain in
+  force. A valid action hint takes priority when it fits; an omitted hint is
+  not reinserted by styling at widths too small to contain it.
 
 ### Agent row model and usage {#260910-pi-agent-row-telemetry}
 
