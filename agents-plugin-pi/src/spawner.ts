@@ -559,6 +559,7 @@ export interface AgentRecord {
   selfReap: boolean;
   waiters: Array<() => void>;
   ownership?: AgentOwnership;
+  ownershipObserverStop?: () => void;
 }
 
 export type AgentRegistry = Map<string, AgentRecord>;
@@ -2057,6 +2058,16 @@ export function syncOwnershipProtection(record: RpcAgentRecord): void {
   });
 }
 
+/** Unreferenced persistent-record observer; unchanged polling never renews activity. */
+export function startOwnedSessionObserver(record: RpcAgentRecord, intervalMs = 5_000): void {
+  if (!record.ownership || record.ownershipObserverStop) return;
+  const sample = () => observeSessionWrite(record.ownership!.home, record.sessionPath);
+  sample();
+  const timer = setInterval(sample, intervalMs);
+  timer.unref();
+  record.ownershipObserverStop = () => { clearInterval(timer); record.ownershipObserverStop = undefined; };
+}
+
 /**
  * The report kinds `record` has filed since its last LEAD prompt — the input
  * `fork.ts`'s `isIdleWithoutFinal` judges a turn against. Filtering by
@@ -2654,6 +2665,7 @@ export async function spawnAgent(
     prompt: truncatePromptForStorage(params.prompt),
   };
   registry.set(agentId, record);
+  startOwnedSessionObserver(record);
 
   const client = new RpcClient(
     buildRpcClientOptions(
@@ -3448,6 +3460,7 @@ export function registerAgentTools(
     rpcRegistry,
     async stopAll(): Promise<void> {
       stopLivenessProbe();
+      for (const record of rpcRegistry.values()) record.ownershipObserverStop?.();
       // Silent by construction: the session itself is going away, so a
       // per-agent "stopped" push would have nowhere to land. Routed through
       // stopAgent so shutdown leaves records in the same resting shape every
