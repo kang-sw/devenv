@@ -495,7 +495,7 @@ export function parseThreadRegistry(raw: string): ThreadRecord[] {
     });
 }
 
-/** §5 widget wording counts PENDING threads only — an already-open thread is not something the owner still owes an answer to. Also feeds `agent-widget.ts`'s `buildStatusSegment` question count. */
+/** §5 widget wording counts PENDING threads only — an already-open thread is not something the owner still owes an answer to. Also feeds `agent-widget.ts`'s panel-heading question count. */
 export function countPending(records: readonly ThreadRecord[]): number {
   return records.filter((record) => record.status === "pending").length;
 }

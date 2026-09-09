@@ -330,6 +330,38 @@ describe("createAgentWidgetController", () => {
     assert.ok(lines[1].includes("need owner"));
     controller.stop();
   });
+
+  test("renders a mixed matched pending thread with its deduplicated uncapped count before the capped body", () => {
+    const respondent = record({
+      agentId: "aaaaaaaa-0000-0000-0000-000000000000",
+      alias: "waiting respondent",
+      threadBound: true,
+    });
+    const running = Array.from({ length: 6 }, (_, i) => record({
+      agentId: `${String(i + 1).padStart(8, "0")}-0000-0000-0000-000000000000`,
+      client: {} as never,
+      runStartedAt: NOW - i,
+    }));
+    const threads = new Map([["q1", thread({
+      threadId: "q1",
+      status: "pending",
+      respondentAgentId: respondent.agentId,
+      touchedAt: new Date(NOW - 1_000).toISOString(),
+    })]]);
+    let widget: ((tui: unknown, theme: unknown) => { render(width: number): string[] }) | undefined;
+    const controller = createAgentWidgetController({ ui: {
+      setWidget(_key, content) { widget = typeof content === "function" ? content : undefined; },
+      setStatus() {},
+    } }, registryOf(respondent, ...running), threads);
+
+    controller.refresh();
+    const lines = widget!({}, {}).render(80);
+    assert.equal(lines[0], "ws: 7 agents · 1 question", "the matched thread is counted once, while its pending suffix remains visible");
+    assert.ok(lines[1].includes("waiting respondent") && lines[1].includes("/answer q1"), "the protected waiting row remains ahead of capped running rows");
+    assert.equal(lines.length, AGENT_WIDGET_ROW_CAP + 2, "heading plus five body rows and the capped-running summary");
+    assert.equal(lines.at(-1), "+2 more");
+    controller.stop();
+  });
 });
 
 describe("shouldArmAgentWidget (review relay #1 Important #5: the wiring gate index.ts uses, now directly testable)", () => {
