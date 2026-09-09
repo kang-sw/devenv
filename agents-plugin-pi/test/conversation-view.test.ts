@@ -937,3 +937,163 @@ describe("ConversationViewComponent — onItemsChange option", () => {
     assert.deepEqual(view.getItems(), [{ kind: "assistant", text: "x" }]);
   });
 });
+
+describe("ConversationViewComponent — overlay border chrome (V1/V2)", () => {
+  test("border:true wraps the whole view in a box border with a one-column horizontal margin, at 40/80/120", () => {
+    for (const width of WIDTHS) {
+      const { channel } = fakeChannel();
+      const view = new ConversationViewComponent(fakeTui(), { channel, initialItems: ALL_ITEM_KINDS, border: true });
+      const lines = view.render(width);
+      assertWidthBounded(lines, width, `width ${width} (bordered)`);
+      const top = lines[0];
+      const bottom = lines[lines.length - 1];
+      // V1: a border is present, top and bottom, spanning the full width.
+      assert.ok(top.startsWith("┌") && top.endsWith("┐"), `V1: no top border at width ${width}: ${JSON.stringify(top)}`);
+      assert.ok(bottom.startsWith("└") && bottom.endsWith("┘"), `V1: no bottom border at width ${width}`);
+      assert.equal(visibleWidth(top), width, "the top border spans the full width");
+      assert.equal(visibleWidth(bottom), width, "the bottom border spans the full width");
+      // V2: every interior line carries the side borders AND a one-column
+      // horizontal margin inside them (`│ … │`).
+      for (const line of lines.slice(1, -1)) {
+        assert.ok(line.startsWith("│ ") && line.endsWith(" │"), `V2: interior line lacks the bordered ~1-char margin at width ${width}: ${JSON.stringify(line)}`);
+      }
+      // Density polish: one blank interior row just below the top border and
+      // just above the bottom border, so content never touches the box.
+      assert.equal(lines[1].slice(1, -1).trim(), "", `no blank padding row below the top border at width ${width}: ${JSON.stringify(lines[1])}`);
+      assert.equal(lines[lines.length - 2].slice(1, -1).trim(), "", `no blank padding row above the bottom border at width ${width}`);
+    }
+  });
+
+  test("border defaults off — the view renders with no box-drawing chrome (audit-window/read-only embeds stay bare)", () => {
+    const { channel } = fakeChannel();
+    const view = new ConversationViewComponent(fakeTui(), { channel, initialItems: ALL_ITEM_KINDS });
+    assert.ok(!view.render(80).some((l) => /[┌┐└┘│]/.test(l)), "no border chrome unless border:true");
+  });
+});
+
+describe("ConversationViewComponent — model-turn gutter (V3)", () => {
+  const GUTTER = "▌ ";
+
+  test("every rendered line of an assistant (model) turn carries the gutter, and stays width-bounded", () => {
+    for (const width of WIDTHS) {
+      const { channel } = fakeChannel();
+      // headerHint "" collapses the header to a single blank line, so after
+      // filtering blanks the only non-empty lines are the model turn's.
+      const view = new ConversationViewComponent(fakeTui(), {
+        channel,
+        headerHint: "",
+        initialItems: [{ kind: "assistant", text: "alpha beta gamma delta epsilon zeta eta theta ".repeat(4).trim() }],
+      });
+      const rendered = view.render(width);
+      assertWidthBounded(rendered, width, `width ${width}`);
+      const contentLines = rendered.filter((l) => l.trim().length > 0);
+      assert.ok(contentLines.length > 1, `the long model turn must wrap onto multiple lines at width ${width}`);
+      for (const line of contentLines) {
+        assert.ok(line.startsWith(GUTTER), `V3: a model-turn line is missing the gutter at width ${width}: ${JSON.stringify(line)}`);
+      }
+    }
+  });
+
+  test("the gutter sets the model turn apart from lead-message (keeps its 'lead:' label), user, and note rows", () => {
+    const { channel } = fakeChannel();
+    const view = new ConversationViewComponent(fakeTui(), {
+      channel,
+      initialItems: [
+        { kind: "assistant", text: "model says hi" },
+        { kind: "lead-message", text: "lead says hi" },
+        { kind: "user", text: "owner says hi" },
+        { kind: "note", text: "a note" },
+      ],
+    });
+    const lines = view.render(80);
+    assert.ok(lines.some((l) => l.startsWith(GUTTER) && l.includes("model says hi")), "the model turn carries the gutter");
+    assert.ok(lines.some((l) => l.trim() === "lead:"), "the lead message keeps its own label");
+    assert.ok(!lines.some((l) => l.startsWith(GUTTER) && l.includes("lead says hi")), "the lead message is not given the model gutter");
+    assert.ok(!lines.some((l) => l.startsWith(GUTTER) && l.includes("owner says hi")), "a user turn is not given the model gutter");
+    assert.ok(!lines.some((l) => l.startsWith(GUTTER) && l.includes("a note")), "a note is not given the model gutter");
+  });
+
+  test("a streaming (not-yet-settled) model tail also carries the gutter", () => {
+    const { channel, fire } = fakeChannel();
+    const view = new ConversationViewComponent(fakeTui(), { channel });
+    fire({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "partial thought" } });
+    assert.ok(view.render(80).some((l) => l.startsWith(GUTTER) && l.includes("partial thought")));
+  });
+});
+
+describe("ConversationViewComponent — density / vertical rhythm (260909 polish)", () => {
+  test("a note renders with no leading '·' bullet (noise removed)", () => {
+    const { channel } = fakeChannel();
+    const view = new ConversationViewComponent(fakeTui(), { channel, initialItems: [{ kind: "note", text: "Question: pick one" }] });
+    const lines = view.render(80);
+    assert.ok(lines.some((l) => l.includes("Question: pick one")));
+    assert.ok(!lines.some((l) => l.trimStart().startsWith("· ")), "the noise bullet must be gone");
+  });
+
+  test("the header block is separated from the conversation body by a blank line", () => {
+    const { channel } = fakeChannel();
+    const view = new ConversationViewComponent(fakeTui(), {
+      channel,
+      headerHint: "HEADER-ONLY-LINE",
+      initialItems: [{ kind: "assistant", text: "body line" }],
+    });
+    const lines = view.render(80);
+    const hIdx = lines.findIndex((l) => l.includes("HEADER-ONLY-LINE"));
+    const bIdx = lines.findIndex((l) => l.includes("body line"));
+    assert.ok(hIdx >= 0 && bIdx > hIdx, "header and body both render, body after header");
+    assert.ok(lines.slice(hIdx + 1, bIdx).some((l) => l.trim() === ""), "a blank line separates the header block from the body");
+  });
+
+  test("conversation turns are separated by a blank line (question vs. answer)", () => {
+    const { channel } = fakeChannel();
+    const view = new ConversationViewComponent(fakeTui(), {
+      channel,
+      headerHint: "HDR",
+      initialItems: [{ kind: "note", text: "Question: pick one" }, { kind: "assistant", text: "answer here" }],
+    });
+    const lines = view.render(80);
+    const qIdx = lines.findIndex((l) => l.includes("Question: pick one"));
+    const aIdx = lines.findIndex((l) => l.includes("answer here"));
+    assert.ok(qIdx >= 0 && aIdx > qIdx, "question and answer both render, answer after question");
+    assert.ok(lines.slice(qIdx + 1, aIdx).some((l) => l.trim() === ""), "a blank line separates the two turns");
+  });
+});
+
+describe("ConversationViewComponent — working marker location (F2)", () => {
+  test("'working…' renders at the END of the agent dialogue (the streaming slot at the foot), never in the header", () => {
+    const { channel } = fakeChannel("running");
+    const view = new ConversationViewComponent(fakeTui(), {
+      channel,
+      headerHint: "HEADER-HINT",
+      initialItems: [{ kind: "assistant", text: "the model dialogue" }],
+    });
+    const lines = view.render(80);
+    const hintIdx = lines.findIndex((l) => l.includes("HEADER-HINT"));
+    const dialogueIdx = lines.findIndex((l) => l.includes("the model dialogue"));
+    const workingIdx = lines.findIndex((l) => l.includes("working…"));
+    assert.ok(hintIdx >= 0 && dialogueIdx >= 0 && workingIdx >= 0, "hint, dialogue, and marker all render");
+    assert.ok(workingIdx > dialogueIdx, "the marker sits at the END of the agent dialogue, after the last dialogue line — not the header");
+    assert.equal(workingIdx, lines.length - 1, "the marker is the final line: the streaming slot at the transcript foot");
+  });
+
+  test("the marker is shown while running and BEFORE a turn's tool output/text — then the first delta replaces it", () => {
+    const { channel, fire } = fakeChannel("running");
+    const view = new ConversationViewComponent(fakeTui(), { channel });
+    // Running, nothing streamed yet (the agent_start moment): the marker is
+    // present at the foot before any tool output or text of the turn.
+    assert.ok(view.render(80).some((l) => l.includes("working…")), "the marker is shown as soon as the child is working");
+    // A tool executes; its output appends. The marker stays pinned to the foot,
+    // never jumping to the header.
+    fire({ type: "tool_execution_start", toolCallId: "c1", toolName: "ws-read", args: { path: "a.txt" } });
+    const withTool = view.render(80);
+    const workingIdx = withTool.findIndex((l) => l.includes("working…"));
+    const toolIdx = withTool.findIndex((l) => l.includes("ws-read"));
+    assert.ok(toolIdx >= 0 && workingIdx >= 0);
+    assert.equal(workingIdx, withTool.length - 1, "the marker stays at the transcript foot alongside tool output, not the header");
+    // The first streamed delta of the turn replaces the marker with the tail.
+    fire({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "answering now" } });
+    const streaming = view.render(80);
+    assert.ok(!streaming.some((l) => l.includes("working…")), "the first delta replaces the marker");
+    assert.ok(streaming.some((l) => l.includes("answering now")));
+  });
+});

@@ -359,10 +359,16 @@ export function normalizeTranscript(value: unknown): ConversationItem[] | undefi
  * already carries it as its first entry), else empty. Exported for direct
  * testing (pure — no component/channel needed).
  */
-export function buildInitialConversationItems(thread: Pick<ThreadRecord, "transcript" | "question">): ConversationItem[] {
+export function buildInitialConversationItems(thread: Pick<ThreadRecord, "transcript" | "question" | "title">): ConversationItem[] {
   if (thread.transcript && thread.transcript.length > 0) return thread.transcript;
-  if (thread.question) return [{ kind: "note", text: thread.question }];
-  return [];
+  const question = thread.question?.trim();
+  if (!question) return [];
+  // 260909 V4 (+ density polish): the header block already shows the title, so
+  // a seeded question that merely restates it verbatim is dropped rather than
+  // repeated. Otherwise it is framed as the question under discussion (the
+  // note renders with no bullet — see `renderItem`).
+  if (question === thread.title?.trim()) return [];
+  return [{ kind: "note", text: `Question: ${question}` }];
 }
 
 /**
@@ -1455,6 +1461,34 @@ export function summarizeThenClose(component: ConversationViewComponent, channel
 }
 
 /**
+ * `openThread`'s `/done` dispatch, extracted from its inline `onDone` closure
+ * (mirroring `resolveDoneAction`/`summarizeThenClose`) so the
+ * origin-to-route mapping is unit-lockable end to end rather than live-gate
+ * only — the seam 260909 F1 regressed on.
+ *
+ * - `"summarize"` — a `lead-ask` thread this surface owns: ask the discussion
+ *   fork for a summary turn, whose settle drives `overlay.closeWithSummary`,
+ *   which routes through `closeThreadOnDone` to the §6 `ws-thread-summary`
+ *   injection into the lead. Returns the pending `summarizeThenClose`
+ *   unsubscribe so an early Esc can tear the listener down.
+ * - `"close-empty"` — a `fork-raised` thread: close the view with an empty
+ *   summary, which `closeThreadOnDone` routes to a detach with NO injection
+ *   and NO stop (the scope guard). Returns `undefined` — nothing is pending.
+ */
+export function runDoneAction(
+  action: DoneAction,
+  component: ConversationViewComponent,
+  channel: ConversationChannel,
+  overlay: OverlayHandle,
+): (() => void) | undefined {
+  if (action === "close-empty") {
+    overlay.closeWithSummary("");
+    return undefined;
+  }
+  return summarizeThenClose(component, channel, overlay);
+}
+
+/**
  * Wraps a live `ConversationViewComponent` + the `ctx.ui.custom` `done`
  * callback as an `OverlayHandle` — the external contract
  * `handleRespondentFinalReport`'s `overlay.closeWithSummary` path, a pending
@@ -1560,9 +1594,12 @@ async function openThread(
   // conversation so far.
   const initialItems = buildInitialConversationItems(thread);
   const opened = formatSpawnTime(thread.createdAt);
+  // Tidy header block: title, opened (flush, not oddly indented), key hint.
+  // The component separates this block from the conversation body with a blank
+  // line, so no rule is needed here.
   const headerHint = [
     `ws thread ${thread.threadId} · ${thread.title}`,
-    ...(opened ? [`  opened ${opened}`] : []),
+    ...(opened ? [`opened ${opened}`] : []),
     `Esc: close view (thread stays open) · ${DONE_COMMAND}: end thread`,
   ].join("\n");
   // Review relay #2 C2: only a discussion fork this surface owns is asked
@@ -1597,6 +1634,9 @@ async function openThread(
           initialItems,
           headerHint,
           markdownTheme,
+          // 260909 V1/V2: the overlay draws its own border + horizontal margin
+          // so it separates from the lead's background behind it.
+          border: true,
           userLineBg: (text) => theme?.bg?.("userMessageBg", text) ?? text,
           primitives: { ScrollView: hostPiTui.ScrollView, Markdown: hostPiTui.Markdown, Text: hostPiTui.Text, Editor: hostPiTui.Editor },
           // Routed through `overlayHandle.close()` (rather than the raw
@@ -1606,11 +1646,7 @@ async function openThread(
           // settle still injected a summary into the lead behind it.
           onEscape: () => overlayHandle?.close(),
           onDone: () => {
-            if (resolveDoneAction(summarizeOnDone) === "close-empty") {
-              overlayHandle?.closeWithSummary("");
-              return;
-            }
-            pendingSummarizeUnsubscribe = summarizeThenClose(component, channel, overlayHandle!);
+            pendingSummarizeUnsubscribe = runDoneAction(resolveDoneAction(summarizeOnDone), component, channel, overlayHandle!);
           },
           onItemsChange: (items) => {
             thread.transcript = items.length > THREAD_TRANSCRIPT_CAP ? items.slice(-THREAD_TRANSCRIPT_CAP) : [...items];

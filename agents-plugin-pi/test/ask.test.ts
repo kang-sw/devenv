@@ -81,6 +81,7 @@ import {
   summarizeThenClose,
   buildOverlayHandle,
   resolveDoneAction,
+  runDoneAction,
   type ThreadRecord,
   type OverlayHandle,
   type DoneAction,
@@ -303,12 +304,12 @@ describe("threadRegistryPath / serialize / parse", () => {
       assert.deepEqual(buildInitialConversationItems({ transcript: items, question: "ignored" }), items);
     });
 
-    test("an empty transcript falls back to seeding a single note from the question", () => {
+    test("an empty transcript falls back to seeding a single note framing the question (V4)", () => {
       assert.deepEqual(buildInitialConversationItems({ transcript: [], question: "Rebase or merge?" }), [
-        { kind: "note", text: "Rebase or merge?" },
+        { kind: "note", text: "Question: Rebase or merge?" },
       ]);
-      assert.deepEqual(buildInitialConversationItems({ transcript: undefined, question: "Rebase or merge?" }), [
-        { kind: "note", text: "Rebase or merge?" },
+      assert.deepEqual(buildInitialConversationItems({ transcript: undefined, question: "  Rebase or merge?  " }), [
+        { kind: "note", text: "Question: Rebase or merge?" },
       ]);
     });
 
@@ -1678,6 +1679,157 @@ describe("resolveDoneAction (review relay #2 I3: the summarizeOnDone branch, ext
     assert.equal(summarize, "summarize");
     const closeEmpty: DoneAction = resolveDoneAction(false);
     assert.equal(closeEmpty, "close-empty");
+  });
+});
+
+/**
+ * 260909 F1: `openThread`'s inline `onDone` dispatch — the seam that regressed
+ * live (a `lead-ask` `/done` closed the overlay but injected no summary) — is
+ * now the exported `runDoneAction`, so the whole (origin -> route -> lead
+ * injection) chain is unit-lockable through the REAL `ConversationViewComponent`
+ * + `buildOverlayHandle` wiring `openThread` uses, not a live TUI. The two
+ * routes are asserted together so the scope guard (fork-raised injects
+ * nothing) can never drift back onto the lead-ask route or vice versa.
+ */
+describe("runDoneAction (openThread's /done dispatch — F1 regression guard + scope guard)", () => {
+  function sharedChannel(): { channel: ConversationChannel; fire: (evt: unknown) => void; sent: string[] } {
+    const listeners = new Set<(evt: unknown) => void>();
+    const sent: string[] = [];
+    const channel: ConversationChannel = {
+      onEvent: (l) => {
+        listeners.add(l);
+        return () => listeners.delete(l);
+      },
+      liveness: () => "running",
+      send: async (text) => {
+        sent.push(text);
+      },
+    };
+    return { channel, fire: (evt) => { for (const l of [...listeners]) l(evt); }, sent };
+  }
+
+  function setup(origin: "lead-ask" | "fork-raised") {
+    const sent: Array<{ message: unknown; options: unknown }> = [];
+    leadIdleRef.current = () => true;
+    const handlers = new Map<string, () => void>();
+    const pi = {
+      on: (event: string, fn: () => void) => handlers.set(event, fn),
+      sendUserMessage: () => handlers.get("agent_start")?.(),
+      sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }),
+    } as unknown as ExtensionAPI;
+    registerPushFlush(pi, { delayMs: () => 10 });
+    const handle = createThreadRegistryHandle();
+    const record = thread({ threadId: "q1", question: "Which anchor?", context: "background", origin, status: "open" });
+    handle.threads.set(record.threadId, record);
+    return { pi, sent, handle, record };
+  }
+
+  test("F1: a lead-ask /done drives the fork's summary settle into a ws-thread-summary injection to the lead", () => {
+    const { pi, sent, handle, record } = setup("lead-ask");
+    const ch = sharedChannel();
+    const component = new ConversationViewComponent({ requestRender: () => {} }, { channel: ch.channel });
+    const overlay = buildOverlayHandle(pi, handle, new Map(), record, component, () => {});
+
+    // Exactly openThread's own onDone: resolveDoneAction(thread.origin === "lead-ask").
+    const pending = runDoneAction(resolveDoneAction(record.origin === "lead-ask"), component, ch.channel, overlay);
+    assert.equal(typeof pending, "function", "the summarize route returns the pending listener's unsubscribe");
+    assert.deepEqual(ch.sent, [buildDoneSummaryPrompt()], "the discussion fork is asked for a summary turn");
+    assert.equal(sent.length, 0, "nothing is injected until the fork settles that summary");
+
+    ch.fire({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "We take the second anchor." } });
+    ch.fire({ type: "agent_settled" });
+
+    assert.equal(sent.length, 1, "F1: the lead-ask /done route injects the summary into the lead (the regression)");
+    const msg = sent[0].message as { customType: string; content: string };
+    assert.equal(msg.customType, "ws-thread-summary");
+    assert.ok(msg.content.includes("We take the second anchor."));
+    assert.equal(record.status, "dormant");
+  });
+
+  test("scope guard: a fork-raised /done detaches with NO injection and no pending summarize listener", () => {
+    const { pi, sent, handle, record } = setup("fork-raised");
+    const ch = sharedChannel();
+    const component = new ConversationViewComponent({ requestRender: () => {} }, { channel: ch.channel });
+    const overlay = buildOverlayHandle(pi, handle, new Map(), record, component, () => {});
+
+    const pending = runDoneAction(resolveDoneAction(record.origin === "lead-ask"), component, ch.channel, overlay);
+
+    assert.equal(pending, undefined, "close-empty has no pending summarize listener");
+    assert.deepEqual(ch.sent, [], "a fork-raised thread's fork is never asked to summarize");
+    assert.deepEqual(sent, [], "the scope guard: a fork-raised /done injects nothing into the lead");
+    assert.equal(record.status, "dormant", "the thread detaches (dormant, reopenable) — the task fork keeps running");
+  });
+
+  /**
+   * 260909 F1, live-path reproduction. The two tests above feed `runDoneAction`
+   * a record whose `origin` was set by hand. These two instead build the record
+   * through its ACTUAL construction site and then round-trip it through
+   * `serializeThreadRegistry` -> `parseThreadRegistry` — exactly the on-disk
+   * `<sessionFile>.ws-threads.json` persist + `/reload` re-hydration the owner's
+   * live thread went through — before reading `thread.origin` at `/done` time.
+   * This closes the gap the owner's live evidence exposed: a `/done` on the real
+   * "테스트 질문" thread closed with no summary because that thread had
+   * `origin: "fork-raised"` on disk (a fork raised it via
+   * `ws-report-to-lead(kind:"question")`, NOT the lead via `ws-ask`), so
+   * close-empty was correct. These lock which construction site yields which
+   * origin, and that the origin the `/done` predicate reads survives a reload
+   * unchanged in BOTH directions.
+   */
+  function reload(record: ReturnType<typeof thread>): ReturnType<typeof thread> {
+    const [reloaded] = parseThreadRegistry(serializeThreadRegistry([record]));
+    return reloaded as ReturnType<typeof thread>;
+  }
+
+  test("F1 live path: a lead-ask thread built by the real ws-ask tool still routes /done to summarize+inject after a persist/reload", async () => {
+    // Construct via the REAL ws-ask tool execute — the only lead-ask origin site.
+    const tools = new Map<string, { execute: (...a: unknown[]) => Promise<{ content: Array<{ text: string }> }> }>();
+    const askPi = { registerTool: (t: { name: string }) => tools.set(t.name, t as never) } as unknown as ExtensionAPI;
+    const askHandle = createThreadRegistryHandle();
+    registerAsk(askPi, askHandle, new Map());
+    await tools.get(ASK_TOOL_NAME)!.execute("call-1", { title: "Which anchor?", question: "Which anchor?" }, undefined, undefined, { mode: "tui", ui: { notify: () => {} } });
+    const created = askHandle.threads.get("q1")!;
+    assert.equal(created.origin, "lead-ask", "sanity: ws-ask is the lead-ask origin site");
+
+    // The /reload round-trip openThread's record actually survives, then opened.
+    const record = reload(created);
+    record.status = "open";
+    assert.equal(record.origin, "lead-ask", "origin survives the persist/reload the live thread goes through");
+
+    const { pi, sent, handle } = setup("lead-ask");
+    handle.threads.set(record.threadId, record);
+    const ch = sharedChannel();
+    const component = new ConversationViewComponent({ requestRender: () => {} }, { channel: ch.channel });
+    const overlay = buildOverlayHandle(pi, handle, new Map(), record, component, () => {});
+
+    runDoneAction(resolveDoneAction(record.origin === "lead-ask"), component, ch.channel, overlay);
+    assert.deepEqual(ch.sent, [buildDoneSummaryPrompt()], "the reloaded lead-ask thread is still asked for a summary turn");
+    ch.fire({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Second anchor." } });
+    ch.fire({ type: "agent_settled" });
+    assert.equal(sent.length, 1, "the reloaded lead-ask /done still injects the summary into the lead");
+    assert.equal((sent[0].message as { customType: string }).customType, "ws-thread-summary");
+  });
+
+  test("F1 live path: the owner's real symptom — a fork-raised thread (ws-report-to-lead question) closes with NO summary after a reload, which is correct", () => {
+    // Construct via the REAL fork-raised site — a fork's ws-report-to-lead(kind:"question").
+    const frHandle = createThreadRegistryHandle();
+    const created = handleForkRaisedQuestion(frHandle, new Map(), "agent-7", "테스트 질문입니다. 모달이 정상적으로 보이나요?");
+    assert.equal(created.origin, "fork-raised", "sanity: a fork-raised question is the fork-raised origin site");
+    assert.equal(created.entryId, undefined, "a fork-raised thread has no lead entry — the on-disk field profile the owner's q1 matched");
+
+    const record = reload(created);
+    record.status = "open";
+    assert.equal(record.origin, "fork-raised", "origin survives the reload — the /done predicate reads fork-raised, exactly the live thread's shape");
+
+    const { pi, sent, handle } = setup("fork-raised");
+    handle.threads.set(record.threadId, record);
+    const ch = sharedChannel();
+    const component = new ConversationViewComponent({ requestRender: () => {} }, { channel: ch.channel });
+    const overlay = buildOverlayHandle(pi, handle, new Map(), record, component, () => {});
+
+    const pending = runDoneAction(resolveDoneAction(record.origin === "lead-ask"), component, ch.channel, overlay);
+    assert.equal(pending, undefined, "close-empty: no summarize listener — matches the owner's 'overlay just closed' report");
+    assert.deepEqual(ch.sent, [], "no summary turn is ever requested (the owner saw none) — the scope guard, not a bug");
+    assert.deepEqual(sent, [], "nothing is injected into the lead for a fork-raised /done");
   });
 });
 

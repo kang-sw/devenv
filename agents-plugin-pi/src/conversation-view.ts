@@ -131,6 +131,55 @@ const CTRL_O = "\x0f";
 /** Shift+Tab (CSI `Z`), as reported by every terminal Pi runs under. */
 const SHIFT_TAB = "\x1b[Z";
 
+/**
+ * 260909 F2 (regression of 260905): the activity marker lives in the STREAMING
+ * SLOT at the foot of the transcript — "where the tail would appear" — not in
+ * the header. It is drawn only while the child is running and no streamed tail
+ * has arrived yet; the first text delta replaces it.
+ */
+const WORKING_MARKER = "working…";
+
+/** 260909 F2: the loud idle banner, rendered at BOTH the header and the transcript foot so it is hard to miss. */
+const AWAITING_OWNER_BANNER = "── AWAITING OWNER ──";
+
+/**
+ * 260909 V3: a left gutter that visually sets a model (`"assistant"`) turn —
+ * and its streaming tail — apart from owner/lead/note/tool rows, WITHOUT
+ * reintroducing a misleading label (the header rationale keeps `"assistant"`
+ * label-free precisely so it is not mistaken for a lead message). A thin block
+ * gutter reads as "the model spoke here" on its own.
+ */
+const ASSISTANT_GUTTER = "▌ ";
+
+/**
+ * 260909 V1/V2: columns the overlay border chrome consumes on each rendered
+ * line — one border glyph plus one column of horizontal margin on each side
+ * (`│ … │`). Inner content is rendered at `width - BORDER_OVERHEAD` and then
+ * wrapped, so the finished line's visible width is exactly `width`.
+ */
+const BORDER_OVERHEAD = 4;
+
+/**
+ * 260909 V1/V2 (+ density polish): wraps already-rendered, `innerWidth`-clamped
+ * inner lines in a single-line box border with a one-column horizontal margin,
+ * plus one blank interior row just below the top border and just above the
+ * bottom border so content never touches the box. Pure and exported so
+ * `render()`'s chrome is unit-lockable on its own. Every returned line's
+ * visible width is exactly `width`.
+ */
+export function wrapInBorder(innerLines: readonly string[], width: number, innerWidth: number): string[] {
+  const horizontal = "─".repeat(Math.max(0, width - 2));
+  const top = `┌${horizontal}┐`;
+  const bottom = `└${horizontal}┘`;
+  // A leading and trailing blank row give the content vertical breathing room
+  // inside the border.
+  const body = ["", ...innerLines, ""].map((line) => {
+    const pad = " ".repeat(Math.max(0, innerWidth - visibleWidth(line)));
+    return `│ ${line}${pad} │`;
+  });
+  return [top, ...body, bottom];
+}
+
 /** `mode` values `ConversationViewComponent` can be in. See `setMode`'s raise-only contract. */
 export type ConversationViewMode = "view" | "interactive";
 
@@ -254,6 +303,13 @@ export interface ConversationViewOptions {
   userLineBg?: (text: string) => string;
   /** Fired with a full copy of the transcript after every append — never for the streaming tail. Lets a host persist the transcript as it grows. */
   onItemsChange?: (items: readonly ConversationItem[]) => void;
+  /**
+   * 260909 V1/V2: draw a single-line box border (with a one-column horizontal
+   * margin) around the whole view so it separates from the lead's background.
+   * Opt-in — the `/answer` overlay sets it; a `"view"`-only embed (e.g. the
+   * audit window) that supplies its own chrome leaves it off (the default).
+   */
+  border?: boolean;
 }
 
 /**
@@ -561,17 +617,41 @@ export class ConversationViewComponent implements Component {
 
   render(width: number): string[] {
     const w = Math.max(1, width);
+    // V1/V2: with the border on, inner content is rendered narrower and then
+    // wrapped, so the finished lines stay exactly `w` wide.
+    const border = this.options.border === true;
+    const innerW = border ? Math.max(1, w - BORDER_OVERHEAD) : w;
+    const inner = this.renderInner(innerW).map((line) => (visibleWidth(line) > innerW ? truncateToWidth(line, innerW) : line));
+    return border ? wrapInBorder(inner, w, innerW) : inner;
+  }
+
+  private renderInner(w: number): string[] {
     const liveness = this.options.channel.liveness();
-    const banner = this.bannerFor(liveness);
     const lines: string[] = [];
+    // Header block: the hint (title / opened / key hint), and the loud idle
+    // banner when awaiting the owner. "idle-awaiting-owner" must be visibly
+    // louder than the other two states — render its banner at BOTH the header
+    // and the transcript foot. The "working…" activity marker is NOT a header
+    // banner; it lives in the streaming slot at the foot (see `renderItems`).
     lines.push(...this.textLines(this.hintText(), w));
-    if (banner) lines.push(...this.textLines(banner, w));
-    lines.push(...this.scrollView.render(w));
-    // "idle-awaiting-owner" must be visibly louder than the other two states:
-    // render it at the transcript foot too, not just the header.
-    if (liveness === "idle-awaiting-owner" && banner) lines.push(...this.textLines(banner, w));
-    if (this.mode === "interactive" && this.editor) lines.push(...this.editor.render(w));
-    return lines.map((line) => (visibleWidth(line) > w ? truncateToWidth(line, w) : line));
+    const idleBanner = liveness === "idle-awaiting-owner" ? AWAITING_OWNER_BANNER : undefined;
+    if (idleBanner) lines.push(...this.textLines(idleBanner, w));
+    // One blank line separates the header block from the conversation body
+    // (density polish: a blank line, not a full-width rule).
+    const body = this.scrollView.render(w);
+    if (body.length > 0) {
+      lines.push("");
+      lines.push(...body);
+    }
+    if (idleBanner) {
+      lines.push("");
+      lines.push(...this.textLines(idleBanner, w));
+    }
+    if (this.mode === "interactive" && this.editor) {
+      lines.push("");
+      lines.push(...this.editor.render(w));
+    }
+    return lines;
   }
 
   private hintText(): string {
@@ -581,23 +661,31 @@ export class ConversationViewComponent implements Component {
       : `Tab/Shift+Tab: focus item · Space: expand/collapse · Ctrl+O: expand all · Esc: close · Enter: interact`;
   }
 
-  private bannerFor(liveness: ChildLiveness): string | undefined {
-    // "working…" is replaced by the first streamed delta — once there is a
-    // non-empty streaming tail, the tail itself is the "child is working"
-    // signal, so the marker must not linger alongside it.
-    if (liveness === "running" && this.streaming.trim() === "") return "working…";
-    if (liveness === "idle-awaiting-owner") return "── AWAITING OWNER ──";
-    return undefined;
-  }
-
   private renderItems(width: number): string[] {
-    const lines: string[] = [];
+    // Each turn is its own block; blocks are separated by one blank line for
+    // vertical rhythm (question vs. answer, and between turns).
+    const blocks: string[][] = [];
     for (let i = 0; i < this.items.length; i += 1) {
-      lines.push(...this.renderItem(this.items[i], i, width));
+      blocks.push(this.renderItem(this.items[i], i, width));
     }
-    if (this.streaming.trim().length > 0) {
-      // Partial "assistant" text: Markdown, no label — same as the settled kind.
-      lines.push(...this.markdownLines(this.streaming.trim(), width));
+    const tail = this.streaming.trim();
+    if (tail.length > 0) {
+      // Partial "assistant" text: same gutter treatment as the settled kind,
+      // no label — the streamed tail is itself the "child is working" signal.
+      blocks.push(this.assistantLines(tail, width));
+    } else if (this.options.channel.liveness() === "running") {
+      // F2 (260905): the activity marker sits at the END of the dialogue — the
+      // streaming slot where the tail would appear — so it is not missed, and
+      // is shown while the child works and before any streamed text/tool
+      // output of the turn arrives. Replaced by the first delta (the branch
+      // above), so it never lingers alongside a non-empty tail.
+      blocks.push(this.textLines(WORKING_MARKER, width));
+    }
+    const lines: string[] = [];
+    for (const block of blocks) {
+      if (block.length === 0) continue;
+      if (lines.length > 0) lines.push("");
+      lines.push(...block);
     }
     return lines;
   }
@@ -608,10 +696,14 @@ export class ConversationViewComponent implements Component {
       case "user":
         return this.textLines(`you: ${item.text}`, width, this.options.userLineBg);
       case "note":
-        return this.textLines(`· ${item.text}`, width);
+        // Density polish: no leading `·` bullet — it read as noise and the
+        // note's own phrasing already sets it apart from owner/model turns.
+        return this.textLines(item.text, width);
       case "assistant":
-        // The child's own finalized text — Markdown, no "lead:" label (see this file's header).
-        return this.markdownLines(item.text, width);
+        // The child's own finalized text — Markdown, no "lead:" label (see this
+        // file's header). V3: carries the model gutter so it reads apart from
+        // owner/lead/note/tool rows without a misleading label.
+        return this.assistantLines(item.text, width);
       case "lead-message": {
         const lines = this.textLines("lead:", width);
         return [...lines, ...this.markdownLines(item.text, width)];
@@ -639,5 +731,17 @@ export class ConversationViewComponent implements Component {
 
   private markdownLines(text: string, width: number): string[] {
     return new this.primitives.Markdown(text, 0, 0, this.options.markdownTheme ?? IDENTITY_MARKDOWN_THEME).render(width);
+  }
+
+  /**
+   * V3: a model turn (`"assistant"`, and its streaming tail) rendered as
+   * Markdown behind the `ASSISTANT_GUTTER`. Markdown is rendered narrower by
+   * exactly the gutter's width and then prefixed, so each line's visible width
+   * still lands at `width`.
+   */
+  private assistantLines(text: string, width: number): string[] {
+    const gutterWidth = visibleWidth(ASSISTANT_GUTTER);
+    const body = this.markdownLines(text, Math.max(1, width - gutterWidth));
+    return body.map((line) => `${ASSISTANT_GUTTER}${line}`);
   }
 }
