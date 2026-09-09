@@ -5,6 +5,10 @@ related:
   260904-feat-ws-pi-side-thread-fork-question-surface: forks inherit the lead's history as their prefix, so the dedupe applies to a fork's replayed reads too
 spec:
   - pi-adapter-runtime
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-completeness-reviewed: ba84d64a2bb52bdc
+sage-review-design-reviewed: ba84d64a2bb52bdc
 ---
 
 # Stateless in-window dedupe for `playbook.read` and `ws-skill`: a repeat read of an unchanged body returns a short pointer instead of the body
@@ -36,12 +40,13 @@ compaction, rewind, and tree branching by construction.
 
 - **Stateless detection from the session tree.** At `execute()` time for
   `ws__playbook_read` (and `ws-skill`), read
-  `ctx.sessionManager.getBranch()` and reduce it with
-  `buildContextEntries` (Pi's own cut at the latest compaction's
-  `firstKeptEntryId`, honoring branch summaries). Scan the remaining
+  `ctx.sessionManager.buildContextEntries()` (Pi's public construction of
+  the active branch and compaction cut, honoring branch summaries). Scan the remaining
   entries for an earlier successful `toolResult` of the same tool whose
-  call had the same `name` and the same `context` substitution map
-  (`session_key` is session-constant and ignored). The current call's own
+  call had the same tool-specific key: `name` plus the `context` substitution
+  map for `playbook.read`, and `name` plus `args` for `ws-skill`. Compare maps
+  semantically, independent of key ordering; `session_key` is ignored. Do not
+  match across the two tool families. The current call's own
   `toolCallId` is excluded. No adapter-side flags, counters, or caches:
   the session tree is the only state, and it already reflects
   compaction (summarized reads are gone), rewind (the abandoned branch is
@@ -58,10 +63,17 @@ compaction, rewind, and tree branching by construction.
   model can re-anchor without the full text. It is a normal text result,
   not an error; the `tool_call` hook's `block` path was rejected because
   its `reason` lands as an error-flavored result.
-- **Third call passes through.** If the window already holds two identical
-  results for the same key, the full body is returned again. This is the
-  safety valve for a model that has genuinely lost the thread; it is also
-  computed from the window, so it needs no state.
+- **Third call passes through.** Count successful same-content occurrences,
+  including the second call's short pointer, rather than requiring two full
+  identical text results. First call returns the full body, second returns the
+  pointer, and third and later matching calls in the same visible window return
+  the full body. This is the safety valve for a model that lost the thread.
+  Pointer results must carry enough verifiable provenance to resolve their
+  original full-body toolCallId and key from the current context alone. Only
+  count a pointer when that referenced successful full result is still visible
+  and byte-identical to the fresh response. Never trust a coincidentally similar
+  ordinary result or a reference outside the active context. If provenance is
+  missing or ambiguous, return the full body. No adapter-side history cache.
 - **Scope.** `ws__playbook_read` and `ws-skill` only. `playbook.render` and
   the workflow-manual snapshot (`lead-bootstrap.ts`, already served from
   the system prompt) are untouched. ws-mcp is untouched (adapter-only,
@@ -109,7 +121,9 @@ Verification:
   maps do not dedupe; a compaction entry between the reads returns the
   body; a rewind (leaf moved to an earlier entry, the earlier read on the
   abandoned branch) returns the body; a fork-style prefix containing the
-  read dedupes; the third identical call returns the body; the current
+  read dedupes; the third and fourth identical calls return the body even though the
+  second returned a pointer; missing/forged/stale pointer provenance falls back
+  to the body; different ws-skill args do not dedupe; the current
   call's own entry never counts.
 - `ws-skill` covered by the same fixtures.
 - Owner-run dogfood: a lead session that re-enters `lead-discuss` or
