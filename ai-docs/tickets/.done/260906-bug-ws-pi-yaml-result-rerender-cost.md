@@ -2,6 +2,7 @@
 title: Investigate severe Pi TUI slowdown and repeated YAML result rendering cost
 related:
   260906-feat-ws-pi-tool-result-yaml-tui-rendering: Phase 1 introduced the renderer under investigation
+completed: 2026-09-09
 ---
 
 # Investigate severe Pi TUI slowdown and repeated YAML result rendering cost
@@ -68,3 +69,19 @@ Reproduce on a long session with large collapsed tool outputs and measure redraw
 Preserve model payloads, safe per-row output, terminal-control sanitization, YAML conversion, and the owner-approved logical-line ASCII fallback. Exact ten-visual-row budgeting is best-effort; do not repeat the previous scope expansion into a second Unicode implementation. No unrelated TUI redesign in this slice.
 
 Verification should include repeated unchanged renders, width/expansion/content changes, and a long-session latency comparison, not just correctness tests. Document residual upstream cost separately. Owner-live observation remains required before claiming responsiveness restored.
+
+
+### Result (bbf9a29a) - 2026-09-09
+
+Implemented the replacement renderer in `bbf9a29a`, hardened by `2c8c50a`.
+The controlled rollback comparison and subsequent same-session replacement
+acceptance are recorded above: the owner confirmed responsiveness recovered
+and previews worked. The recorded final automated suite passed 945 tests.
+This resolves the phase through controlled comparison rather than a precisely
+attributed JavaScript CPU profile; neither a measured asymptotic bound nor
+numeric latency benchmark is claimed. The old fallback direction in the phase
+plan was superseded by the owner-approved native-renderer replacement.
+
+## Resolution (2026-09-09)
+
+Owner approved closure on backlog review. Replacement bbf9a29a/2c8c50a caches preparation/layout and budgets logical lines before wrapping; the ticket records same-session owner confirmation that lag disappeared and previews worked. Exact JavaScript call-site attribution remains unproven and is not claimed. Subsequent styling has separate ownership.

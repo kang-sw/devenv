@@ -4,6 +4,7 @@ related:
   260907-feat-ws-pi-lead-tool-profile-and-orchestrator-role: the thin lead surface this provider would carry; orchestrator/worker stay on Pi-native providers, only the lead's model changes
   260907-bug-ws-pi-fork-first-call-prompt-cache-miss: a Claude-backed lead re-pays every fork as a full replay on the Claude side (subscription limits, not dollars); the deferred-tool channel there does not apply to this provider
   260802-research-ws-pi-native-framework: Pi as the framework host; this ticket keeps that and only swaps the lead's model backend
+completed: 2026-09-09
 ---
 
 # Claude Code as a Pi lead model: a custom Pi provider backed by the Agent SDK (`claude -p` stream-json)
@@ -190,3 +191,8 @@ Verdict: the A′ design is viable; promote to a feature ticket once the
 lead-profile ticket lands, since the provider only needs to reflect the
 thin lead surface. Spike artifacts live in the session scratchpad
 (`spike-claude-provider/ext.ts`), not in the repo.
+
+
+## Resolution (2026-09-09)
+
+Owner approved closing the concluded provider investigation. The positive isolated spike was superseded by the recorded real-Pi subscription-path failure and implementation revert. The distinct 260908-feat-ws-pi-claude-delegate-tool owns the Claude Code subprocess-as-subagent direction; the original provider implementation remains parked in todo, not silently promoted or deleted. Preserve this research as evidence, not as a claim about current service billing behavior.
