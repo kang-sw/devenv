@@ -10,6 +10,7 @@ import { RpcClient, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { attachEventListener, registerAgentTools, sendToAgent, stopAgent, type RpcAgentRecord } from "../src/spawner.ts";
 import { captureOrphans, parseOrphans, rehydrateOrphanRecord, serializeOrphans } from "../src/agent-sidecar.ts";
 import { captureForkResume, createThreadRegistryHandle, hydrateThreadRegistry, rehydrateForkRecord, saveThreadRegistryFile } from "../src/ask.ts";
+import { persistShutdownAgentSnapshots } from "../src/index.ts";
 
 const roots = new Set<string>();
 afterEach(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); roots.clear(); });
@@ -66,6 +67,27 @@ describe("agent telemetry lifecycle at production boundaries", () => {
     record = { agentId: "a", client, launchGeneration: 1, sessionPath: session, telemetry: { version: 1, origin: { sessionId: "stop", sessionPath: session, emptyPrefix: true } }, wsToolNames: [], toolGroup: "full-worker", reportLog: [], streaming: true, running: true } as RpcAgentRecord;
     await stopAgent(new Map([["a", record]]), "a", undefined, { silent: true });
     assert.equal(record.client, undefined); assert.equal(record.telemetry?.latestInput, 23); assert.equal(record.telemetry?.estimatedUsd, .8);
+  });
+
+  test("production shutdown preserves the pre-stop roll-call while persisting final telemetry to sidecar and thread resume", async () => {
+    const dir = root(), workerPath = join(dir, "worker.jsonl"), forkPath = join(dir, "fork.jsonl"), sidecar = join(dir, "orphans.json"), threadPath = join(dir, "threads.json");
+    write(workerPath, [header("worker")]); write(forkPath, [header("fork")]);
+    const makeLive = (agentId: string, sessionPath: string, input: number, cost: number, threadBound = false) => {
+      let record!: RpcAgentRecord;
+      const client = { abort: async () => { assert.equal(record.client, undefined, "shutdown must clear live client before child teardown"); write(sessionPath, [header(agentId), assistant(`${agentId}-final`, input, cost)]); }, stop: async () => {} } as unknown as RpcClient;
+      record = { agentId, client, launchGeneration: 1, sessionPath, systemPromptPath: join(dir, `${agentId}.md`), telemetry: { version: 1, origin: { sessionId: agentId, sessionPath, emptyPrefix: true } }, wsToolNames: [], toolGroup: "full-worker", reportLog: [], spawnRole: threadBound ? "fork" : "worker", threadBound, streaming: true, running: true } as RpcAgentRecord;
+      return record;
+    };
+    const worker = makeLive("worker", workerPath, 31, .7), fork = makeLive("fork", forkPath, 37, .9, true);
+    const registry = new Map([[worker.agentId, worker], [fork.agentId, fork]]);
+    const threads = createThreadRegistryHandle(); threads.pathRef.current = threadPath;
+    threads.threads.set("q1", { threadId: "q1", title: "question", status: "dormant", origin: "fork-raised", createdAt: "2026-09-10T00:00:00.000Z", touchedAt: "2026-09-10T00:00:00.000Z", respondentAgentId: "fork", forkResume: captureForkResume(fork) });
+    await persistShutdownAgentSnapshots({ rpcRegistry: registry, stopAll: async () => { await stopAgent(registry, "worker", undefined, { silent: true }); await stopAgent(registry, "fork", undefined, { silent: true }); } }, sidecar, threads);
+    const [saved] = parseOrphans(readFileSync(sidecar, "utf8"));
+    assert.equal(saved.state, "running", "roll-call is captured before orderly stop clears live state"); assert.equal(saved.telemetry?.latestInput, 31); assert.equal(saved.telemetry?.estimatedUsd, .7);
+    const persistedThread = JSON.parse(readFileSync(threadPath, "utf8")).threads[0];
+    assert.equal(persistedThread.forkResume.telemetry.latestInput, 37); assert.equal(persistedThread.forkResume.telemetry.estimatedUsd, .9);
+    assert.equal(worker.client, undefined); assert.equal(fork.client, undefined);
   });
 
   test("both recovery formats retain stale snapshots while replaying new durable calls, including a thread-only row", () => {
