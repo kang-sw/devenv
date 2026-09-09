@@ -78,7 +78,7 @@ removed.
   fan-out entry point while keeping its mint/track mechanism; serial first,
   parallelism opened inside later.
 - `260909-refactor-lead-surface-collapse-worker-stop-protocol` - lead skills
-  collapse to discuss, ticket, run, review plus housekeeping; `kind: print`
+  collapse to discuss, ticket, run, review, ship plus housekeeping; `kind: print`
   procedure playbooks move to worker-facing `kind: render` playbooks whose
   core is the stop-and-report protocol; delegate prompts carry source
   pointers, never summaries.
@@ -159,6 +159,19 @@ removed.
 11. **Shipped-surface rule holds.** No child ships text naming this
     repository's tickets, layout, or migration vocabulary; downstream input
     goes through generic hooks.
+12. **Key minting.** `ferrule` is the base primitive. A subagent whose prompt
+    is a rendered playbook gets its child key from `playbook.render`, which
+    mints as part of rendering; the spawner does not mint a second key for
+    the same worker. The `workflow_manual` mint was a convenience, not a
+    contract.
+13. **Ship stays on the lead surface.** The working skills are discuss,
+    ticket, run, review, ship. A release is a low-reversibility user-facing
+    action, so its decision and stop belong to the lead and user; the
+    procedure itself may be handed to a subagent with the manual.
+14. **Closed inventory is immutable.** No child edits or moves anything under
+    `.done/` or `.dropped/`. Historical keys and citations in closed tickets
+    (`related-mental-model:`, spec anchors) remain as residue, and any
+    reader that resolves them must tolerate an unresolved target.
 
 ## Completion Criteria
 

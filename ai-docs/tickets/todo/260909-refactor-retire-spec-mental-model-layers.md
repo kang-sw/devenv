@@ -109,6 +109,15 @@ with negative value — which is why the layers are retired rather than relocate
   The commit-message surface that does exist in Go is the `git.commit` option
   set and its rendered sections, which are removed with the layer.
 
+- **Closed inventory is untouched.** Per epic Cross-Child Decision 14, nothing
+  under `.done/` or `.dropped/` is edited or moved: the roughly 218 closed
+  tickets carrying `related-mental-model:` keep it, and the spec anchors that
+  closed tickets cite stay as citations. Any reader that resolves those
+  references (`references.trace`, the ticket graph) must tolerate an
+  unresolved target once the corpus lives under `ai-docs/.old/`.
+  *Rejected: strip the key from closed tickets* — a mechanical rewrite of
+  history with no consumer.
+
 ## Constraints
 
 - **Shipped-surface rule (AGENTS.md Architecture Rule 4).** No text under
@@ -272,11 +281,6 @@ Not settled by the epic; resolve at design review or defer.
   with no exported symbols and its own advisory surface. Whether it dies with
   the layer or has a residual non-spec purpose was not determined; read it
   before Phase 2.
-- **`related-mental-model:` in closed tickets.** No Go code reads the key and
-  it has zero test coverage, so removing it from the skeleton and the reviewer
-  playbook is mechanical. Whether the key is also stripped from the roughly 218
-  `.done/` tickets that carry it, or left as historical residue, is undecided;
-  leaving it is the cheaper default.
 - **This repository's `AGENTS.md`.** Its `## Documentation System`,
   `## Code Standards` (item 5), and commit-template `## Spec` trailer describe
   the retiring layers. Updating it is required for coherence but is a

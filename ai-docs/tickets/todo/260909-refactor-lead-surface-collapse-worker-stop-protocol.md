@@ -54,10 +54,10 @@ into playbook text the worker actually reads.
 
 ## Decisions
 
-1. **The lead surface collapses to four working skills plus housekeeping.**
+1. **The lead surface collapses to five working skills plus housekeeping.**
    Working: `discuss`; `ticket` (write, batch promotion, drop, all through the
    Open Decision Queue); `run` (drain the queue plus ad-hoc implement);
-   `review`. Housekeeping: `bootstrap`, `tune`, `revive`, `mcp-server-repair`.
+   `review`; `ship` (Decision 8). Housekeeping: `bootstrap`, `tune`, `revive`, `mcp-server-repair`.
    Every other `lead-*` skill retires or becomes a worker playbook.
    *Rejected: keeping the routing entry skill as a thin front door.* Routing is
    the worker's first act, not the lead's; a lead-facing routing skill re-adds
@@ -127,6 +127,16 @@ into playbook text the worker actually reads.
    *Rejected: absorbing those retirements here* to finish the collapse in one
    ticket: it would put two independent removals behind one review and make the
    measurement comparison unattributable.
+
+8. **Ship stays a lead skill; the worker's key comes from `playbook.render`.**
+   Per epic Cross-Child Decisions 12 and 13: the release skill is the fifth
+   working skill, not housekeeping and not a worker playbook, because a
+   release is a low-reversibility action whose stop belongs to the lead and
+   user. The worker's lead-capability key is minted by `playbook.render` when
+   the spawner renders the worker playbook; this ticket's stop protocol and
+   worker playbooks assume that key and never mint another.
+   *Rejected: `ferrule` before spawn plus a render-time mint* — two keys for
+   one worker with no rule for which one `session.children` tracks.
 
 ## Constraints
 
@@ -368,8 +378,8 @@ Sequentially dependent on Phase 1: a lead skill is only removable once the
 worker-facing replacement it fronts is landed and dogfooded. Removing entry
 points first would leave the queue with no path.
 
-**Goal.** Reduce the shipped lead skill inventory to the working four —
-`discuss`, `ticket`, `run`, `review` — plus housekeeping (`bootstrap`, `tune`,
+**Goal.** Reduce the shipped lead skill inventory to the working five —
+`discuss`, `ticket`, `run`, `review`, `ship` — plus housekeeping (`bootstrap`, `tune`,
 `revive`, `mcp-server-repair`), across both packages and every inventory that
 names them. Skills fronting a document layer another child retires are
 coordinated with that child, not deleted here.
@@ -382,8 +392,11 @@ intact. Absorbed into `discuss`: the discussion verification checkpoint.
 Becoming worker playbooks or dying with their layer: the implementation,
 spec-authoring, spec-updating, doc-backfill, and forge skills. Deferred to a
 sibling ticket: anything whose only content is the spec or mental-model layer.
-Unsettled and listed under Open Questions: the release skill, the worktree
-scoping skill, the rule-persisting skill, and the delegation-posture skill.
+Kept as the lead's `ship` surface: the release skill (epic Cross-Child
+Decision 13); its procedure body may become a manual handed to a subagent,
+but the release decision and stop stay with the lead. Unsettled and listed
+under Open Questions: the worktree scoping skill, the rule-persisting skill,
+and the delegation-posture skill.
 
 **Verification expectations.**
 
@@ -434,11 +447,6 @@ scoping skill, the rule-persisting skill, and the delegation-posture skill.
 
 ## Open Questions
 
-- **Disposition of the release skill.** This repository's own `### Review
-  Policy` declares a real `develop` -> `main` release boundary gated by that
-  skill, and a release is a low-reversibility user-facing action. The epic's
-  target surface lists neither it nor a home for it. Retiring it, folding it
-  into housekeeping, or making it a fifth working skill is unsettled.
 - **Disposition of the worktree-scoping, rule-persisting, and
   delegation-posture skills.** None is a procedure playbook and none is
   housekeeping as the epic names it. The delegation-posture body is currently
@@ -457,12 +465,6 @@ scoping skill, the rule-persisting skill, and the delegation-posture skill.
   set of playbooks worth converting in Phase 1 depends on their landing order,
   and converting a playbook that a sibling then deletes is wasted review. Fix
   the ordering at design review.
-- **Whether the worker's key comes from `ferrule` or from `playbook.render`.**
-  Both mint a child session key for a lead caller. The spawner ticket mints
-  with `ferrule` before spawning; a rendered worker playbook would mint again.
-  Which mint is authoritative — and whether a double mint is harmless or a bug
-  — is not settled by the epic and is a contract question between the two
-  tickets.
 - **Where the host agent id is recorded.** Resuming a stopped worker needs the
   host's agent id, the runtime keeps no registry, and the continuity tip pushes
   the burden onto the lead's workflow state. Whether the stop protocol requires

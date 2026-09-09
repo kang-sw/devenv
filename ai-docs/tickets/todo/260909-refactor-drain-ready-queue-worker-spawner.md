@@ -57,9 +57,11 @@ Parallelism is the epic's explicit Deferred item and is not opened here.
 
 1. **One entry point: `drain-ready-queue` selects and spawns.** Per drain
    invocation: select one advanceable `ready/` ticket (the existing selection
-   rule is unchanged), mint a lead-capability child key against the worker's
-   root with `ferrule(capability: "lead", parent_session_key: <lead key>)`, and
-   hand the worker the whole ticket. The lead does not read `lead-proceed`,
+   rule is unchanged), render the worker playbook with `playbook.render`,
+   which mints a lead-capability child key for the worker's root as part of
+   rendering (`ferrule` is the base primitive underneath and is not called a
+   second time for the same worker; epic Cross-Child Decision 12), and hand
+   the worker the whole ticket. The lead does not read `lead-proceed`,
    does not route, and does not edit source.
    *Rejected: keep fan-out as a second, parallel entry point.* The epic forbids
    a second entry point (Decision 9) and `260730` documents why the existing
@@ -85,8 +87,8 @@ Parallelism is the epic's explicit Deferred item and is not opened here.
 
 4. **Keep the mint/track mechanism; retire only the entry point.**
    `ferrule(capability: "lead", parent_session_key: ...)`, `session.children`,
-   and `session.note` all survive and move under drain: `ferrule` mints,
-   `session.note` records the worker's state against the lead's key so a
+   and `session.note` all survive and move under drain: the render step
+   mints on top of `ferrule`, `session.note` records the worker's state against the lead's key so a
    compacted lead can rebuild the board, `session.children` re-discovers the
    worker. *This overturns `260730` Phase 2*, whose entire justification was
    that `session.note` had zero shipped consumers. Re-scoping or dropping
@@ -205,8 +207,9 @@ Located by search term, not by line number:
 ### Phase 1: drain spawns a lead-capability worker per ticket, serially
 
 **Goal.** `lead-drain-ready-queue`'s dispatch step stops handing the ticket to
-`lead-proceed` in the lead's own session and instead: mints a lead-capability
-child key for the worker's root, spawns one native-harness subagent of at least
+`lead-proceed` in the lead's own session and instead: renders the worker
+playbook (which mints a lead-capability child key for the worker's root),
+spawns one native-harness subagent of at least
 current-mainstream class, hands it the ticket as a source pointer (path and
 stem — never a lead summary of the ticket, per epic Cross-Child Decision 7),
 records the worker against the lead's key, waits for the worker's terminal
