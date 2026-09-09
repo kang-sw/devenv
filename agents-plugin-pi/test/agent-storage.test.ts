@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
-import { allocateAgentHome, createAgentStorageContext, observeSessionWrite, readOwnership, touchOwnership } from "../src/agent-storage.ts";
-import { exploreLeaf } from "../src/spawner.ts";
+import { allocateAgentHome, createAgentStorageContext, isOwnedSessionPath, observeSessionWrite, readOwnership, touchOwnership, writeOwnership, updateOwnership } from "../src/agent-storage.ts";
+import { writePrivateJson } from "../src/fork-context.ts";
+import { exploreLeaf, prepareForkLaunch, validateForkReadiness } from "../src/spawner.ts";
 
 describe("agent storage", () => {
   test("allocates a persistent child beneath the configured Pi root and persists ownership", () => {
@@ -47,6 +48,100 @@ describe("agent storage", () => {
       const metadata = readOwnership(owned.home)!;
       writeFileSync(join(owned.home, "ownership.json"), JSON.stringify({ ...metadata, home: join(root, "elsewhere") }));
       assert.equal(readOwnership(owned.home), undefined, "metadata can never redirect a locator's future writes");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("validates the complete session candidate and regular-file type at every ownership boundary", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+    try {
+      const owned = allocateAgentHome(createAgentStorageContext("lead-1", root), "agent-5", "worker");
+      const metadata = readOwnership(owned.home)!;
+      const nested = join(owned.home, "nested");
+      mkdirSync(nested);
+      const sibling = `${owned.home}-sibling`;
+      mkdirSync(sibling);
+      writeFileSync(join(sibling, "session.jsonl"), "outside");
+      symlinkSync(sibling, join(nested, "outside"));
+      symlinkSync(nested, join(owned.home, "alias"));
+      writeFileSync(owned.sessionPath!, "session");
+      symlinkSync(owned.sessionPath!, join(nested, "linked.jsonl"));
+      const invalid = [owned.home, `${owned.home}/.`, `${owned.home}/..`, sibling,
+        join(sibling, "session.jsonl"), nested, join(nested, "linked.jsonl"),
+        join(nested, "outside", "session.jsonl"), join(nested, "outside", "missing.jsonl"),
+        join(owned.home, "alias", "missing.jsonl"), join(nested, "absent", "session.jsonl")];
+      for (const candidate of invalid) {
+        assert.equal(isOwnedSessionPath(owned.home, candidate), false, candidate);
+        assert.throws(() => writeOwnership({ ...metadata, sessionPath: candidate }), undefined, candidate);
+        writeFileSync(join(owned.home, "ownership.json"), JSON.stringify({ ...metadata, sessionPath: candidate }));
+        assert.equal(readOwnership(owned.home), undefined, candidate);
+      }
+      for (const candidate of [owned.sessionPath!, join(nested, "new.jsonl")]) {
+        assert.equal(isOwnedSessionPath(owned.home, candidate), true, candidate);
+        writeOwnership({ ...metadata, sessionPath: candidate });
+        assert.equal(readOwnership(owned.home)?.sessionPath, candidate);
+      }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("fork readiness rejects a terminal traversal before changing memory or disk", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+    const launch = prepareForkLaunch(undefined);
+    try {
+      const ownership = allocateAgentHome(createAgentStorageContext("lead-1", root), "agent-7", "fork");
+      const record = { ownership, sessionPath: ownership.sessionPath } as never;
+      const before = readOwnership(ownership.home);
+      const candidate = `${ownership.home}/..`;
+      writePrivateJson(launch.readinessPath, { nonce: launch.nonce, ownSessionKey: "child-key", sessionId: "child-id", sessionPath: candidate, activeTools: [], registeredTools: [] });
+      assert.throws(() => validateForkReadiness(launch, record, { sessionId: "child-id", sessionFile: candidate }), /escaped owned home/);
+      assert.equal(record.sessionPath, ownership.sessionPath);
+      assert.deepEqual(readOwnership(ownership.home), before);
+    } finally {
+      rmSync(dirname(launch.contextPath), { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("missing first write is pending; disappearing observed history remains diagnostic and conservative", (t) => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+    const diagnostics = t.mock.method(console, "error", () => {});
+    try {
+      const owned = allocateAgentHome(createAgentStorageContext("lead-1", root), "agent-6", "worker");
+      const before = readOwnership(owned.home)!;
+      observeSessionWrite(owned.home, owned.sessionPath!);
+      assert.deepEqual(readOwnership(owned.home), before);
+      assert.equal(diagnostics.mock.callCount(), 0);
+      writeFileSync(owned.sessionPath!, "first write");
+      observeSessionWrite(owned.home, owned.sessionPath!);
+      updateOwnership(owned.home, { liveness: { lifecycle: "live", running: true } });
+      const observed = readOwnership(owned.home)!;
+      assert.equal(observed.sessionSignature?.size, 11);
+      rmSync(owned.sessionPath!);
+      observeSessionWrite(owned.home, owned.sessionPath!);
+      const missing = readOwnership(owned.home)!;
+      assert.equal(diagnostics.mock.callCount(), 1);
+      assert.match(String(diagnostics.mock.calls[0].arguments[0]), /ENOENT/);
+      assert.equal(missing.liveness.lifecycle, "unknown");
+      assert.equal(missing.liveness.running, true, "missing history is not proof of process death");
+      assert.equal(missing.lastActivityAt, observed.lastActivityAt);
+      assert.deepEqual(missing.sessionSignature, observed.sessionSignature);
+      observeSessionWrite(owned.home, join(owned.home, "invalid-parent", "session.jsonl"));
+      assert.equal(diagnostics.mock.callCount(), 2, "other observation IO failures remain diagnostic");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("a real stat failure before the first write is still diagnostic", (t) => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+    const diagnostics = t.mock.method(console, "error", () => {});
+    try {
+      const owned = allocateAgentHome(createAgentStorageContext("lead-1", root), "agent-8", "worker");
+      const before = readOwnership(owned.home)!;
+      observeSessionWrite(owned.home, join(owned.home, "ownership.json", "invalid"));
+      assert.equal(diagnostics.mock.callCount(), 1);
+      assert.match(String(diagnostics.mock.calls[0].arguments[0]), /ENOTDIR/);
+      const after = readOwnership(owned.home)!;
+      assert.equal(after.liveness.lifecycle, "unknown");
+      assert.equal(after.lastActivityAt, before.lastActivityAt);
+      assert.equal(after.sessionSignature, undefined);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 

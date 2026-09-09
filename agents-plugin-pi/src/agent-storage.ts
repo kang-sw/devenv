@@ -23,7 +23,14 @@ function contained(parent: string, child: string): boolean { const r = relative(
 function canonicalRoot(root: string): string { mkdirSync(root, { recursive: true, mode: 0o700 }); return realpathSync(root); }
 function checkedDirectory(path: string, root: string): string { mkdirSync(path, { recursive: true, mode: 0o700 }); const real = realpathSync(path); if (!contained(root, real) || lstatSync(path).isSymbolicLink()) throw new Error("ws-pi-agent: owned path contains a symlink escape"); return real; }
 function canonicalHome(home: string): string { const resolved = resolve(home); if (lstatSync(resolved).isSymbolicLink()) throw new Error("ws-pi-agent: owned home is symlinked"); const real = realpathSync(resolved); if (real !== resolved) throw new Error("ws-pi-agent: owned home escapes through symlink"); return real; }
-function checkedSessionPath(home: string, sessionPath: string): void { const parent = dirname(sessionPath); const realParent = realpathSync(parent); if (realParent !== parent || !contained(home, realParent) || (lstatSync(sessionPath, { throwIfNoEntry: false })?.isSymbolicLink() ?? false)) throw new Error("ws-pi-agent: session path escapes owned home"); }
+function checkedSessionPath(home: string, sessionPath: string): void {
+  const candidate = resolve(sessionPath);
+  if (candidate !== sessionPath || candidate === home || !contained(home, candidate)) throw new Error("ws-pi-agent: session path escapes owned home");
+  const parent = dirname(candidate);
+  if (realpathSync(parent) !== parent) throw new Error("ws-pi-agent: session path escapes owned home through a symlink");
+  const entry = lstatSync(candidate, { throwIfNoEntry: false });
+  if (entry && (!entry.isFile() || realpathSync(candidate) !== candidate)) throw new Error("ws-pi-agent: owned session path must be a regular file without symlinks");
+}
 export function isOwnedSessionPath(home: string, sessionPath: string): boolean { try { checkedSessionPath(canonicalHome(home), sessionPath); return true; } catch { return false; } }
 
 export function createAgentStorageContext(sessionId: string, agentDir = getAgentDir()): AgentStorageContext {
@@ -74,7 +81,14 @@ export function touchOwnership(home: string): void { updateOwnership(home, { las
 export function observeSessionWrite(home: string, sessionPath: string): void {
   const current = readOwnership(home); if (!current) return;
   try {
-    const stat = statSync(sessionPath); const signature = { mtimeMs: stat.mtimeMs, size: stat.size };
+    let stat;
+    try { stat = statSync(sessionPath); } catch (error) {
+      // Pi writes a new session lazily. Absence before the first observed write
+      // is pending observation, while disappearance of known history is not.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT" && !current.sessionSignature && sessionPath === current.sessionPath) return;
+      throw error;
+    }
+    const signature = { mtimeMs: stat.mtimeMs, size: stat.size };
     const changed = !current.sessionSignature || current.sessionSignature.mtimeMs !== signature.mtimeMs || current.sessionSignature.size !== signature.size;
     const now = Date.now();
     writeOwnership({ ...current, sessionSignature: signature, ...(changed ? { lastActivityAt: Math.max(current.lastActivityAt, now) } : {}), updatedAt: now });

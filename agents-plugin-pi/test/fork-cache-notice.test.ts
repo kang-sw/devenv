@@ -1,3 +1,7 @@
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createAgentStorageContext, readOwnership } from "../src/agent-storage.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
@@ -91,7 +95,11 @@ test("task spawn context carries only an ephemeral parent UI reference", () => {
   assert.equal(built.forkCacheNoticeOwner, owner);
 });
 
-test("production initial spawn attaches before prompt; live/dormant sends never re-arm or wake lead", async () => {
+test("production initial spawn attaches before prompt; live/dormant sends never re-arm or wake lead", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "ws-pi-cache-notice-test-"));
+  const storage = createAgentStorageContext("notice-owner", root);
+  const registry = new Map();
+  const diagnostics = t.mock.method(console, "error", () => {});
   const notices: string[] = [];
   const owner = { mode: "tui", hasUI: true, ui: { notify: (s: string) => notices.push(s) } } as any;
   const pi = { sendMessage: () => assert.fail("cosmetic message push"), sendUserMessage: () => assert.fail("cosmetic lead wake") } as any;
@@ -102,16 +110,24 @@ test("production initial spawn attaches before prompt; live/dormant sends never 
     async start() {
       this.listeners = [];
       const envelope = readForkLaunchContext(this.options.env)!;
-      writePrivateJson(envelope.readinessPath, { nonce: envelope.nonce, sessionId: "child-id", sessionPath: "/tmp/notice-child.jsonl", ownSessionKey: "notice-child-key", activeTools: [], registeredTools: [] });
+      const home = this.options.args[this.options.args.indexOf("--session-dir") + 1];
+      this.sessionFile = join(home, "notice-child.jsonl");
+      const metadata = readOwnership(home)!;
+      if (!existsSync(this.sessionFile)) {
+        assert.equal(metadata.liveness.lifecycle, "starting", "pre-start observer must not downgrade a new spawn");
+        assert.equal(metadata.sessionSignature, undefined);
+      }
+      assert.equal(diagnostics.mock.callCount(), 0, "pre-start observer must not report an expected missing file");
+      writeFileSync(this.sessionFile, "offline fork session\n");
+      writePrivateJson(envelope.readinessPath, { nonce: envelope.nonce, sessionId: "child-id", sessionPath: this.sessionFile, ownSessionKey: "notice-child-key", activeTools: [], registeredTools: [] });
     },
     async stop() {}, async setThinkingLevel() {},
     onEvent(fn: (e: unknown) => void) { this.listeners.push(fn); return () => {}; },
-    async getState() { return { sessionId: "child-id", sessionFile: "/tmp/notice-child.jsonl", model: { provider: "offline", id: "test" }, thinkingLevel: "off" }; },
+    async getState() { return { sessionId: "child-id", sessionFile: this.sessionFile, model: { provider: "offline", id: "test" }, thinkingLevel: "off" }; },
     async prompt() { for (const fn of this.listeners) fn(event()); },
   });
   try {
-    const registry = new Map();
-    const result = await spawnAgent(registry, { pi, cwd: "/tmp", inheritModel: "offline/test", catalog: [], wsToolNames: [], client: {} as any, forkFrom: "/tmp/notice-parent.jsonl", spawnRole: "fork", forkContext: context as any, forkCacheNoticeOwner: owner }, { prompt: "task", alias: "cache-task" });
+    const result = await spawnAgent(registry, { storage, pi, cwd: root, inheritModel: "offline/test", catalog: [], wsToolNames: [], client: {} as any, forkFrom: "/tmp/notice-parent.jsonl", spawnRole: "fork", forkContext: context as any, forkCacheNoticeOwner: owner }, { prompt: "task", alias: "cache-task" });
     assert.equal(notices.length, 1, "the very first prompt response is observed");
     await sendToAgent(registry, { cwd: "/tmp", pi }, result.agent_id, "followup");
     assert.equal(notices.length, 1);
@@ -120,5 +136,10 @@ test("production initial spawn attaches before prompt; live/dormant sends never 
     record.client = undefined;
     await sendToAgent(registry, { cwd: "/tmp", pi }, result.agent_id, "resume");
     assert.equal(notices.length, 1, "new resume client has no cosmetic listener");
-  } finally { Object.assign(proto, saved); }
+    assert.equal(diagnostics.mock.callCount(), 0);
+  } finally {
+    for (const record of registry.values()) record.ownershipObserverStop?.();
+    Object.assign(proto, saved);
+    rmSync(root, { recursive: true, force: true });
+  }
 });
