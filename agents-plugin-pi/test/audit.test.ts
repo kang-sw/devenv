@@ -71,7 +71,7 @@ function fakePi() {
  * makes. `close()` resolves it from the outside, standing in for an owner
  * Esc that never happens in a given test.
  */
-function fakeViewerCtx() {
+function fakeViewerCtx(theme?: { bg?(color: string, text: string): string; fg?(color: string, text: string): string }) {
   let resolveComponent!: (c: ConversationViewComponent) => void;
   const componentReady = new Promise<ConversationViewComponent>((res) => {
     resolveComponent = res;
@@ -84,7 +84,7 @@ function fakeViewerCtx() {
       custom: (factory: (...args: unknown[]) => unknown) =>
         new Promise((resolve) => {
           doneFn = resolve;
-          const built = factory({ requestRender: () => {} }, undefined, undefined, (v: unknown) => resolve(v));
+          const built = factory({ requestRender: () => {} }, theme, undefined, (v: unknown) => resolve(v));
           Promise.resolve(built).then((component) => resolveComponent(component as ConversationViewComponent));
         }),
     },
@@ -292,6 +292,32 @@ describe("registerAuditCommands", () => {
 });
 
 describe("openViewer (the read-only overlay: Esc/Enter contract and the one-overlay-at-a-time singleton)", () => {
+  test("wires host semantic muted/dim foregrounds into tool rows and the working marker", async () => {
+    const path = join(mkdtempSync(join(tmpdir(), "ws-pi-audit-theme-")), "session.jsonl");
+    writeFileSync(path, [
+      `{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"bash","arguments":{"cmd":"pwd"}}]}}`,
+      `{"type":"message","message":{"role":"toolResult","toolCallId":"c1","toolName":"bash","content":[{"type":"text","text":"/tmp"}]}}`,
+    ].join("\n"));
+    const calls: Array<{ color: string; text: string }> = [];
+    const theme = {
+      fg: (color: string, text: string) => {
+        calls.push({ color, text });
+        return `\x1b[2m${text}\x1b[0m`;
+      },
+    };
+    const registry = registryOf(record({ agentId: "a1", sessionPath: path, streaming: true }));
+    const opened = fakeViewerCtx(theme);
+    const promise = openViewer(opened.ctx as never, registry, "a1");
+    const component = await opened.componentReady;
+
+    component.render(120);
+    assert.ok(calls.some((call) => call.color === "muted" && call.text.includes("bash")), "tool use is painted with the host's muted semantic");
+    assert.ok(calls.some((call) => call.color === "dim" && call.text === "working…"), "the activity marker is painted with the host's dim semantic");
+
+    opened.close();
+    await promise;
+  });
+
   test("Esc closes the viewer directly, with no confirmation modal in the way", async () => {
     const registry = registryOf(record({ agentId: "a1" }));
     const opened = fakeViewerCtx();

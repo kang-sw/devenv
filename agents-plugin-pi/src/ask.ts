@@ -1377,7 +1377,7 @@ function bindThread(rpcRegistry: RpcAgentRegistry, agentId: string, bound: boole
  * (`ExtensionUIContext.custom`) — kept minimal like every other `ctx` seam in
  * this module, and narrowed to what `openThread` needs: a `tui` structurally
  * compatible with `ConversationViewTui` (the real host `TUI` is a superset),
- * a `theme` exposing `bg`, and a factory that may return its component
+ * a `theme` exposing semantic foreground/background painters, and a factory that may return its component
  * asynchronously (the real signature allows `Component | Promise<Component>`
  * — needed here because building the live component awaits
  * `loadHostPiTui()`).
@@ -1387,7 +1387,7 @@ interface AskCustomUiCtx {
     custom<T>(
       factory: (
         tui: ConversationViewTui,
-        theme: { bg?(color: string, text: string): string } | undefined,
+        theme: { bg?(color: string, text: string): string; fg?(color: string, text: string): string } | undefined,
         keybindings: unknown,
         done: (result: T) => void,
       ) => ConversationViewComponent | Promise<ConversationViewComponent>,
@@ -1638,6 +1638,8 @@ async function openThread(
           // so it separates from the lead's background behind it.
           border: true,
           userLineBg: (text) => theme?.bg?.("userMessageBg", text) ?? text,
+          toolTextFg: (text) => theme?.fg?.("muted", text) ?? text,
+          workingTextFg: (text) => theme?.fg?.("dim", text) ?? text,
           primitives: { ScrollView: hostPiTui.ScrollView, Markdown: hostPiTui.Markdown, Text: hostPiTui.Text, Editor: hostPiTui.Editor },
           // Routed through `overlayHandle.close()` (rather than the raw
           // `done` callback) so an Esc during a pending summary wait

@@ -804,7 +804,7 @@ describe("ConversationViewComponent — userLineBg option", () => {
   const ANSI_CLOSE = "\x1b[0m";
   const paint = (text: string) => `${ANSI_OPEN}${text}${ANSI_CLOSE}`;
 
-  test("a supplied bg painter wraps the full-width 'you: ' line, at 40/80/120 columns", () => {
+  test("a supplied bg painter wraps the full-width 'you: ' line and one blank row above/below it, at 40/80/120 columns", () => {
     for (const width of WIDTHS) {
       const { channel } = fakeChannel();
       const view = new ConversationViewComponent(fakeTui(), {
@@ -817,6 +817,13 @@ describe("ConversationViewComponent — userLineBg option", () => {
         lines.some((l) => l.startsWith(ANSI_OPEN) && l.endsWith(ANSI_CLOSE) && l.includes("you: hello")),
         `width ${width}: no line shows the bg wrapper: ${JSON.stringify(lines)}`,
       );
+      const userIndex = lines.findIndex((l) => l.includes("you: hello"));
+      assert.ok(userIndex > 0 && userIndex < lines.length - 1, `width ${width}: user content must have padding on both sides`);
+      for (const paddingLine of [lines[userIndex - 1], lines[userIndex + 1]]) {
+        assert.ok(paddingLine.startsWith(ANSI_OPEN) && paddingLine.endsWith(ANSI_CLOSE), `width ${width}: padding row is outside the user background`);
+        assert.equal(visibleWidth(paddingLine), width, `width ${width}: painted padding row must span the full content width`);
+        assert.equal(paddingLine.replace(ANSI_OPEN, "").replace(ANSI_CLOSE, "").trim(), "", `width ${width}: user padding row must be blank`);
+      }
     }
   });
 
@@ -849,6 +856,38 @@ describe("ConversationViewComponent — userLineBg option", () => {
     for (const width of WIDTHS) {
       assertWidthBounded(view.render(width), width, `width ${width}`);
     }
+  });
+});
+
+describe("ConversationViewComponent — semantic muted text painters", () => {
+  const MUTED_OPEN = "\x1b[2m";
+  const ANSI_CLOSE = "\x1b[0m";
+  const muted = (text: string) => `${MUTED_OPEN}${text}${ANSI_CLOSE}`;
+
+  test("tool-call/tool-result heads and expanded bodies use the supplied muted foreground while staying width-bounded", () => {
+    const { channel } = fakeChannel();
+    const view = new ConversationViewComponent(fakeTui(), {
+      channel,
+      headerHint: "HDR",
+      initialItems: [
+        { kind: "tool-call", id: "c1", name: "ws-read", args: { path: "a.txt" } },
+        { kind: "tool-result", id: "c1", name: "ws-read", content: '{"ok":true}' },
+      ],
+      toolTextFg: muted,
+    });
+    view.handleInput("\x0f"); // expand both structured tool rows
+    const lines = view.render(40);
+    assertWidthBounded(lines, 40, "muted tool rows");
+    const toolLines = lines.filter((line) => /ws-read|path:|ok:/.test(line));
+    assert.ok(toolLines.length >= 4, `expected muted heads and bodies: ${JSON.stringify(lines)}`);
+    for (const line of toolLines) assert.ok(line.includes(MUTED_OPEN) && line.includes(ANSI_CLOSE), `tool text is not muted: ${JSON.stringify(line)}`);
+  });
+
+  test("the working marker uses its supplied dim foreground painter", () => {
+    const { channel } = fakeChannel("running");
+    const view = new ConversationViewComponent(fakeTui(), { channel, workingTextFg: muted });
+    const marker = view.render(80).find((line) => line.includes("working…"));
+    assert.ok(marker?.includes(MUTED_OPEN) && marker.includes(ANSI_CLOSE), `working marker is not dimmed: ${JSON.stringify(marker)}`);
   });
 });
 

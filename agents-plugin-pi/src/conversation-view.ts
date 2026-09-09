@@ -301,6 +301,10 @@ export interface ConversationViewOptions {
   markdownTheme?: MarkdownTheme;
   /** Background painter for `"user"` items — e.g. `(text) => theme.bg("userMessageBg", text)`. Left unpainted when omitted. */
   userLineBg?: (text: string) => string;
+  /** Muted foreground painter for tool-call/tool-result heads and expanded bodies. Left unpainted when omitted. */
+  toolTextFg?: (text: string) => string;
+  /** Dim foreground painter for the transient `working…` marker. Left unpainted when omitted. */
+  workingTextFg?: (text: string) => string;
   /** Fired with a full copy of the transcript after every append — never for the streaming tail. Lets a host persist the transcript as it grows. */
   onItemsChange?: (items: readonly ConversationItem[]) => void;
   /**
@@ -679,7 +683,7 @@ export class ConversationViewComponent implements Component {
       // is shown while the child works and before any streamed text/tool
       // output of the turn arrives. Replaced by the first delta (the branch
       // above), so it never lingers alongside a non-empty tail.
-      blocks.push(this.textLines(WORKING_MARKER, width));
+      blocks.push(this.textLines(WORKING_MARKER, width, undefined, this.options.workingTextFg));
     }
     const lines: string[] = [];
     for (const block of blocks) {
@@ -694,7 +698,9 @@ export class ConversationViewComponent implements Component {
     const focusMarker = this.focusIndex === index ? "> " : "";
     switch (item.kind) {
       case "user":
-        return this.textLines(`you: ${item.text}`, width, this.options.userLineBg);
+        // Keep one blank row above and below the owner turn inside the same
+        // full-width background as its content (`Text` paddingY=1).
+        return new this.primitives.Text(`you: ${item.text}`, 0, 1, this.options.userLineBg).render(width);
       case "note":
         // Density polish: no leading `·` bullet — it read as noise and the
         // note's own phrasing already sets it apart from owner/model turns.
@@ -709,24 +715,24 @@ export class ConversationViewComponent implements Component {
         return [...lines, ...this.markdownLines(item.text, width)];
       }
       case "tool-call": {
-        const lines = this.textLines(`${focusMarker}${toolCallHead(item)}`, width);
+        const lines = this.textLines(`${focusMarker}${toolCallHead(item)}`, width, undefined, this.options.toolTextFg);
         if (this.expanded.has(index)) {
-          for (const bodyLine of toolCallBody(item)) lines.push(...this.textLines(`  ${bodyLine}`, width));
+          for (const bodyLine of toolCallBody(item)) lines.push(...this.textLines(`  ${bodyLine}`, width, undefined, this.options.toolTextFg));
         }
         return lines;
       }
       case "tool-result": {
-        const lines = this.textLines(`${focusMarker}${toolResultHead(item)}`, width);
+        const lines = this.textLines(`${focusMarker}${toolResultHead(item)}`, width, undefined, this.options.toolTextFg);
         if (this.expanded.has(index)) {
-          for (const bodyLine of toolResultBody(item)) lines.push(...this.textLines(`  ${bodyLine}`, width));
+          for (const bodyLine of toolResultBody(item)) lines.push(...this.textLines(`  ${bodyLine}`, width, undefined, this.options.toolTextFg));
         }
         return lines;
       }
     }
   }
 
-  private textLines(text: string, width: number, bg?: (text: string) => string): string[] {
-    return new this.primitives.Text(text, 0, 0, bg).render(width);
+  private textLines(text: string, width: number, bg?: (text: string) => string, fg?: (text: string) => string): string[] {
+    return new this.primitives.Text(fg?.(text) ?? text, 0, 0, bg).render(width);
   }
 
   private markdownLines(text: string, width: number): string[] {

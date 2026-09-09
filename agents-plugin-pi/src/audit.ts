@@ -298,7 +298,7 @@ interface AuditCustomUiCtx {
     custom<T>(
       factory: (
         tui: ConversationViewTui,
-        theme: { bg?(color: string, text: string): string } | undefined,
+        theme: { bg?(color: string, text: string): string; fg?(color: string, text: string): string } | undefined,
         keybindings: unknown,
         done: (result: T) => void,
       ) => Component | Promise<Component>,
@@ -421,6 +421,8 @@ export async function openViewer(ctx: AuditUiCtx & { ui?: { custom?: unknown } }
         headerHint,
         markdownTheme,
         userLineBg: (text) => theme?.bg?.("userMessageBg", text) ?? text,
+        toolTextFg: (text) => theme?.fg?.("muted", text) ?? text,
+        workingTextFg: (text) => theme?.fg?.("dim", text) ?? text,
         primitives: { ScrollView: hostPiTui.ScrollView, Markdown: hostPiTui.Markdown, Text: hostPiTui.Text, Editor: hostPiTui.Editor },
         // No modal — Phase 1's "Esc closes the viewer directly" (contrast
         // `ask.ts`'s `openThread`, which routes Esc through `overlayHandle`

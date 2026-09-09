@@ -1464,6 +1464,11 @@ transcript renderer of its own.
   `Shift+Tab` move a selection highlight across the collapsible items
   newest-first, `Space` toggles the selected item, and `Ctrl+O` toggles all of
   them at once.
+- **Conversation styling.** Tool-call and tool-result heads and expanded
+  bodies use the host theme's muted foreground; the transient `working…`
+  marker uses its dim foreground. User messages include one blank row above
+  and below their content, filled with the same user-message background.
+  Both the owner-question overlay and audit viewer apply these styles.
 - **Two modes.** `view` has no input line and never sends; `interactive` shows
   an editor and delivers the owner's typed lines through the channel. Mode is
   set at construction and may be raised from `view` to `interactive` on the
