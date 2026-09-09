@@ -3061,6 +3061,10 @@ export async function stopAgent(
     } catch {
       stopped = false;
     }
+    // `message_end` can be persisted while abort/stop is in flight.  The
+    // record is already synchronously dormant, so this final disk-only read
+    // cannot revive a stale client or delay the stop race protection.
+    refreshAgentTelemetry(record);
     if (record.ownership && record.launchGeneration === generation && !record.client) updateOwnership(record.ownership.home, { liveness: { lifecycle: stopped ? "stopped" : "unknown", running: false, observedAt: Date.now() } });
     if (record.ownership && record.launchGeneration === generation && !record.client) observeSessionWrite(record.ownership.home, record.sessionPath);
     // Review relay #1 (I2): a stop is a thread-close path too — the ticket

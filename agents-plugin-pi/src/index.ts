@@ -202,10 +202,12 @@ import {
   buildForkQuestionLeadNotice,
   createThreadRegistryHandle,
   handleForkRaisedQuestion,
+  captureForkResume,
   hydrateThreadRegistry,
   registerAsk,
   registerThreadCommands,
   threadRegistryPath,
+  saveThreadRegistryFile,
 } from "./ask.ts";
 import { registerAuditCommands } from "./audit.ts";
 import { registerWsSkillTool } from "./lead-skills.ts";
@@ -665,15 +667,29 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // captures already-dormant (parked) records, but only a live-at-shutdown
     // snapshot correctly reports which ones were still `running` at that
     // instant; after stopAll() every record reads as dormant/idle.
-    if (leadSidecarPath && agentTools) {
-      writeSidecarAt(leadSidecarPath, captureOrphans(agentTools.rpcRegistry));
-    }
+    const shutdownOrphans = agentTools ? captureOrphans(agentTools.rpcRegistry) : undefined;
     // Await graceful RPC teardown of any still-live spawned `pi` children
     // before tearing down the bridge connection they were dispatching ws__*
     // tool calls through (agentTools.stopAll() is itself async now that
     // teardown is a graceful RpcClient.stop() rather than a fire-and-forget
     // SIGTERM — see spawner.ts's AgentToolsHandle doc comment).
     await agentTools?.stopAll();
+    // Preserve the pre-stop running roll-call, but overwrite its telemetry
+    // with the final post-stop disk reconciliation from each same record.
+    if (leadSidecarPath && agentTools && shutdownOrphans) {
+      for (const orphan of shutdownOrphans) {
+        const record = agentTools.rpcRegistry.get(orphan.agentId);
+        if (record?.telemetry) orphan.telemetry = record.telemetry;
+      }
+      writeSidecarAt(leadSidecarPath, shutdownOrphans);
+      for (const thread of threadHandle.threads.values()) {
+        if (!thread.respondentAgentId) continue;
+        const record = agentTools.rpcRegistry.get(thread.respondentAgentId);
+        if (record) thread.forkResume = captureForkResume(record);
+      }
+      const threadPath = threadHandle.pathRef.current;
+      if (threadPath) saveThreadRegistryFile(threadPath, [...threadHandle.threads.values()]);
+    }
     agentTools = undefined;
     rpcRegistryRef.current = undefined;
     leadSessionFile = undefined;
