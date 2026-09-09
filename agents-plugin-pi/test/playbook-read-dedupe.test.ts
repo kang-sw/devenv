@@ -26,6 +26,11 @@ test("playbook repeat is full, pointer, then full and ignores session_key/map or
   assert.deepEqual(fourth, { text: body, deduped: false });
 });
 
+test("only outer session_key is ignored; context.session_key remains semantic substitution data", () => {
+  assert.equal(playbookReadKey({ name: "lead", context: { session_key: "context-a" }, session_key: "outer-a" }), playbookReadKey({ name: "lead", context: { session_key: "context-a" }, session_key: "outer-b" }));
+  assert.notEqual(playbookReadKey({ name: "lead", context: { session_key: "context-a" } }), playbookReadKey({ name: "lead", context: { session_key: "context-b" } }));
+});
+
 test("only an authentic successful visible full result validates a pointer", () => {
   const key = playbookReadKey({ name: "lead" });
   const first = [call("one", "ws__playbook_read", { name: "lead" }), result("one", body)];
@@ -44,6 +49,8 @@ test("malformed, stale, and ambiguous pointer provenance fail closed to the fres
     assert.deepEqual(dedupeRead([...first, call("two", "ws__playbook_read", { name: "lead" }), result("two", pointer)], "three", "playbook.read", key, body), { text: body, deduped: false });
   }
   assert.deepEqual(dedupeRead([...first, result("one", body), call("two", "ws__playbook_read", { name: "lead" }), result("two", valid)], "three", "playbook.read", key, body), { text: body, deduped: false });
+  const missingEnvelope = valid.split("\n")[0]!;
+  assert.deepEqual(dedupeRead([...first, call("two", "ws__playbook_read", { name: "lead" }), result("two", missingEnvelope)], "three", "playbook.read", key, body), { text: body, deduped: false });
 });
 
 test("ws-skill is isolated from playbook reads and includes args in its key", () => {

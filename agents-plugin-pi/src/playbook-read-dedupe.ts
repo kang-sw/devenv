@@ -17,14 +17,11 @@ function stable(value: unknown): string {
   return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stable(record[key])}`).join(",")}}`;
 }
 
-function withoutSessionKey(value: unknown): unknown {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-  const { session_key: _ignored, ...rest } = value as Record<string, unknown>;
-  return rest;
-}
-
 export function playbookReadKey(params: Record<string, unknown>): string {
-  return stable({ name: params.name, context: withoutSessionKey(params.context) });
+  // Routing's outer session_key does not participate because this key only
+  // projects name/context. A context.session_key is playbook substitution
+  // data, so it remains part of the semantic context map.
+  return stable({ name: params.name, context: params.context });
 }
 
 export function wsSkillKey(params: Record<string, unknown>): string {
@@ -106,7 +103,10 @@ export function dedupeRead(entries: readonly unknown[], currentToolCallId: strin
   let count = fullIds.size;
   for (const texts of matching.values()) for (const text of texts) {
     const marker = parsePointer(text);
-    const candidate = text.includes(PROVENANCE_PREFIX);
+    // A prior pointer's human paragraph may survive a transcript transform
+    // while its provenance line is removed. It is still a pointer candidate,
+    // never evidence for emitting another pointer.
+    const candidate = text.startsWith("The unchanged result is available from successful tool call `") || text.includes(PROVENANCE_PREFIX);
     if (!candidate) continue;
     if (!marker || marker.family !== family || marker.key !== key || !fullIds.has(marker.originalToolCallId)) return { text: freshBody, deduped: false };
     count += 1;
