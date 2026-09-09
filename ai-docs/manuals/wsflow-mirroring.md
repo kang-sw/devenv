@@ -118,14 +118,13 @@ only undeclared caller `context` extras as a free-text Render Context block;
 declared context keys are templated normally. Other playbooks still treat
 `context` as declared template variables only.
 
-- Render-eligible prompt stems: `reference-discovery`, `plan-populator-survey`,
-  `plan-populator-research`, `code-reviewer`, `mental-model-updater`. These bare
-  stems are not full-ws references and may appear in distributed wsflow skill
-  text.
-- File-writing prompts (`plan-populator-*`, `mental-model-updater`) receive a
-  caller-created output path in `context`; free-response prompts
-  (`reference-discovery`, `code-reviewer`) return text. `playbook.render` does
-  not mint an `expected_output_path`.
+- Render-eligible prompt stems: `reference-discovery`, `code-reviewer`,
+  `mental-model-updater`. These bare stems are not full-ws references and may
+  appear in distributed wsflow skill text.
+- File-writing prompts (`mental-model-updater`) receive a caller-created output
+  path in `context`; free-response prompts (`reference-discovery`,
+  `code-reviewer`) return text. `playbook.render` does not mint an
+  `expected_output_path`.
 - The `implementer` prompt is not render-eligible in wsflow.
 
 The retired `prompt.render` tool is no longer advertised or callable in wsflow
