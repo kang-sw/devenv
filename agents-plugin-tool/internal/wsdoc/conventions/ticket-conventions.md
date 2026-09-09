@@ -26,7 +26,7 @@ rules and hard invariants only.
 - Epic tickets are lightweight milestone boards and remain exempt from the ready spec-address gate.
 - Workset tickets are non-hierarchical operating-context boards, remain exempt from the ready spec-address gate, and normally stay in `idea/` or `todo/` rather than `ready/`.
 - Promoting `idea/` → `todo/` is triage and does not require spec creation.
-- Promoting or creating a non-`epic`, non-`research`, non-`workset` ticket in `ready/`: `lead-write-ticket` verifies spec addressing before the move or commit and never invokes `lead-write-spec`; spec addressing runs through `spec:`, `spec-remove:`, or `## Spec Impact`.
+- Promoting or creating a non-`epic`, non-`research`, non-`workset` ticket in `ready/`: `lead-ticket` verifies spec addressing before the move or commit and never invokes `lead-write-spec`; spec addressing runs through `spec:`, `spec-remove:`, or `## Spec Impact`.
 - Dropping a ticket with linked spec entries: route through `lead-discuss` before moving the ticket. The ticket's unimplemented spec text is ticket-local (`## Spec Impact`), so the drop orphans nothing in the spec corpus; only spec text the ticket already landed needs review.
 
 ## Epic Tickets

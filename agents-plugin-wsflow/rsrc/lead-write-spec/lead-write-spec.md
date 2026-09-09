@@ -17,8 +17,8 @@ Target: user request
 
 1. **judge: spec-impact** - does this work introduce or modify caller-observable behavior?
    - no  -> output "No public behavior affected."
-       - While `{{.SkillNamespace}}:lead-proceed` -> continue with appropriate next step.
-       - Otherwise -> suggest using the lead-write-ticket procedure. Exit.
+       - While `{{.SkillNamespace}}:lead-run` -> continue with appropriate next step.
+       - Otherwise -> suggest using the lead-ticket procedure. Exit.
    - yes -> proceed with steps below.
 2. Identify the target from `user request` - area name, file path, or description.
 3. If creating a new spec:

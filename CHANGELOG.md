@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **The lead skill surface collapses to five working skills plus
+  housekeeping.** Working: `lead-discuss`, `lead-ticket`, `lead-run`,
+  `lead-review`, `lead-ship`. Housekeeping and undecided skills survive
+  unchanged. `lead-write-ticket` is renamed to `lead-ticket` with its write,
+  promote, drop paths and the Open Decision Queue intact. `lead-proceed`
+  retires into `lead-run`; `lead-verify-discussion` retires into
+  `lead-discuss`, whose body now carries the premise/over-alignment check;
+  `lead-implement` retires, superseded for the worker by the `ticket-worker`
+  playbook. The `lead-discuss`, `lead-ticket`, `lead-review`, and `lead-ship`
+  bodies are rewritten for the collapsed surface; the review and ship config
+  schemas are carried over unchanged. Both the `ws` and `wsflow` skill
+  inventories, the shared rsrc tree, the plugin manifests, and the mirroring
+  manual move together. The spec- and mental-model-fronting skills are
+  untouched here; they retire with their document layer.
+- **`tickets.checklist(phase: "intent")` compresses to three items.** It is
+  now only the conversation-fidelity check the promotion-time sage review
+  cannot perform: the fresh-implementer test, literal preservation of
+  API/type/event/UI sketches, and the no-unconfirmed-material check. The
+  capture enumeration, the epic/workset shape items, and the
+  fix-then-summarize procedure items are dropped as redundant with the
+  content checklist, the ticket conventions, and the skill respectively; the
+  checklist is now category-invariant. `phase: "content"` is unchanged.
+- **`route.resolve_proceed` has no shipped caller.** Its only entry point was
+  the retired routing skill. The tool, its verdict set, and its tests are
+  retained; its routes now name `lead-run` and `lead-ticket` instead of the
+  retired skills.
+
 ## v0.42.0 - 2026-08-23
 
 ### Changed

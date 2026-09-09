@@ -1,6 +1,7 @@
 ---
-name: lead-ticket
-description: Create, edit, promote, drop, or close a workflow ticket. Owns the Open Decision Queue, cheap-tier fact population, and the design-review gate into `ready/`.
+kind: print
+includes:
+  - task-list
 ---
 
 # Ticket

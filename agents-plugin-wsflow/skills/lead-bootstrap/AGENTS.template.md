@@ -185,7 +185,7 @@ Adapt structure to the project; this is a starting point, not a schema.
   AGENTS/WORKFLOW wording to refer to `Ticket Focus`. Preserve entry text
   during migration; do not add omitted tickets, infer readiness, normalize
   wording, reorder, or promote ticket status. If any migrated entry still lacks
-  clear status or readiness wording, report that a follow-up `lead-write-ticket`
+  clear status or readiness wording, report that a follow-up `lead-ticket`
   focus cleanup is needed.
 - v0042: Replace step 4 in `## Project Memory` from `git log -10` to `git log --oneline -20` with description "recent commit stems".
 - v0043: Remove step 4 (`git log --oneline -20`) from `## Project Memory`; it is a redundant subset of step 3 (`git log --oneline --graph -50`). Renumber former step 5 to step 4 when present.

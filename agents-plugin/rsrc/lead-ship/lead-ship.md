@@ -4,74 +4,64 @@ kind: print
 
 # Ship
 
-Target: user request
+You are the lead releasing a project. A release is low-reversibility, so its
+decisions stop with you and the user; the mechanical steps run in a delegate
+with the config as its input.
 
-## Invariants
+## Config
 
-- Never infer a version number without an explicit strategy in the ship config - ask if ambiguous.
-- Never publish or push tags without user confirmation at the final gate.
-- The ship config is the single source of truth; do not improvise steps not listed there — except the **Release gate** below, which is un-omittable regardless of what the loaded config does or does not mention (it is still user-overridable at the gate itself, per its own stop-for-decision step).
-- All written artifacts (ship config, version files) must be in English regardless of conversation language.
+`ai-docs/ship/<proj>.md` is committed, for public targets;
+`ai-docs/ship/<proj>.local.md` is gitignored, for private targets, and wins
+when both exist. A named project loads that pair or stops with an error; no
+argument loads the single config, asks which of several, or goes to **No
+config**. The config is the only source of steps: never infer a version
+without an explicit strategy in it, and never add a step it does not list.
+The release gate below is the one exception and cannot be omitted by a
+config.
 
-## On: invoke
+## Release gate
 
-### 1. Resolve config
+Applies when the project's `AGENTS.md` `### Review Policy` declares
+`release-boundary: present`; otherwise skip to **Execute**.
 
-Config naming:
-- `ai-docs/ship/<proj>.md` - committed; for public publish targets.
-- `ai-docs/ship/<proj>.local.md` - gitignored; for private or sensitive deploy targets (internal registries, SSH deploys, credentials). Takes precedence over the `.md` variant when both exist for the same `<proj>`.
+1. `{{.McpNamespace}}/review.marker(format: json)`. Read its `found` field
+   first; never infer emptiness from a rev-list count, because an empty head
+   in `git rev-list --count <head>..HEAD` resolves to `HEAD` and reports `0`.
+2. `found: false`: all prior history is unreviewed. Stop for the user's
+   choice: **bootstrap** (`review.marker(bootstrap: true)` accepts history as
+   unreviewed and proceeds), or **review** (ask for an explicit base, then
+   `{{.SkillNamespace}}:lead-review` over `range: <base>..HEAD`). Declining
+   both stops here.
+3. `found: true`: `git rev-list --count <frontier-head>..HEAD`. `0` proceeds.
+   Otherwise `{{.SkillNamespace}}:lead-review` over `range:
+   <frontier-head>..HEAD`; a clearing verdict proceeds, anything else stops
+   for the user's explicit override with a recommendation against it.
+4. This gate never calls `review.stamp`; the marker moves only through the
+   review skill. An override leaves it where it was.
 
-1. List `ai-docs/ship/` for `*.md` and `*.local.md` files.
-2. If `user request` names a project, look for `<proj>.local.md` first, then `<proj>.md`. Stop with an error if neither is found.
-3. If no argument:
-   - One config found (either variant) -> load it.
-   - Multiple configs found -> list them (noting which are local) and ask the user which project to ship.
-   - No configs found -> go to **On: no config**.
+## Execute
 
-### 2. Release gate
+1. Delegate pre-flight, version derivation, tag creation (not pushed), and
+   build/package to a subagent with the config path; it returns version,
+   tag, and the full output of each command.
+2. Confirm with the user: version, tag, publish targets. Wait for explicit
+   approval.
+3. Publish per the config. When a publish step promotes one branch into
+   another, pin the gate's reviewed through-SHA and re-assert it immediately
+   before the merge; if the branch moved, abort and re-run the gate over the
+   delta.
+4. Push the tag; run post-ship steps.
 
-Un-omittable, user-overridable. Applies only when the loaded project's `AGENTS.md` `### Review Policy` section declares `release-boundary: present`, read as plain prose the same way this skill and `ws.md`-style configs already read project config text — no MCP tool resolves this field. `release-boundary: absent` (or the field unset) skips this section entirely; that project's ship path is unchanged. Run this before **3. Execute** step 1 (Pre-flight), not as one of its bullets — a Pre-flight bullet is defeatable by a config that simply omits it, which is exactly what this gate must not be.
+Report version, tag, targets, and any deviation.
 
-1. Call `{{.McpNamespace}}/review.marker(format: json)` to resolve the review-watermark frontier — read its structured `found` field first, never infer emptiness from the rev-list count below (an empty `head` substituted into `git rev-list --count <frontier-head>..HEAD` resolves the empty side to `HEAD` and silently reports `0`, which would wrongly read as clear).
-2. `found: false` (no ledger entry at all — the common first-ship state on a project that was never bootstrapped) — treat all prior history as review-skipped: **not clear**. **Stop for an explicit user decision** offering exactly these two choices, which do not compose:
-   - **(i) Bootstrap** — call `review.marker(bootstrap: true)` to seed `<HEAD>..<HEAD>` as an explicit accept of all prior history as unreviewed (equivalent to an override, not a review; nothing gets reviewed). This is itself the explicit accept, so it proceeds straight to **3. Execute**.
-   - **(ii) Review** — ask for an explicit base (repo root or a named commit; the empty ledger supplies none), then trigger `{{.SkillNamespace}}:lead-review` over `range: <chosen-base>..HEAD`, which stamps and advances the marker. This is a real review, not an accept-as-is, so its outcome is not automatically clear: apply the same clears/not-clear handling as step 5 below — clears -> proceed to **3. Execute**; still not clear -> surface a strong recommendation and **stop for an explicit user decision** (step 6's override applies here too).
-   Declining either choice stops here without shipping.
-3. `found: true` — run `git rev-list --count <frontier-head>..HEAD`.
-4. Empty (`0`) — proceed to **3. Execute**.
-5. Non-empty — trigger `{{.SkillNamespace}}:lead-review` over `range: <frontier-head>..HEAD`.
-   - Clears (the range now reviews clean) — proceed to **3. Execute**.
-   - Still not clear — surface a strong recommendation against proceeding and **stop for an explicit user decision**.
-6. On an explicit user override (from step 2(ii)'s or step 5's stop): proceed to **3. Execute** anyway. This gate never calls `review.stamp` itself — the marker only ever advances through `{{.SkillNamespace}}:lead-review`'s own step 7 (single-writer invariant), whether that happens via step 2(ii)'s explicit review or step 5's triggered review; an override leaves the marker exactly where the gate found it. No audit record of the override is required or written by this mechanism.
+## No config
 
-### 3. Execute
+Ask for the sub-project, public or private target, version strategy (manual
+semver, auto-increment patch, date-based, `git describe`, or another explicit
+rule), build and publish commands, and post-ship steps; write the config to
+the matching path and confirm it before executing.
 
-Follow the loaded config exactly, section by section:
-
-1. **Pre-flight** - run any listed checks (tests, lint, build).
-2. **Version** - derive or bump the version per the config's version strategy.
-3. **Tag** - create the git tag per the config. Do not push yet.
-4. **Build / package** - run listed build or package commands.
-5. **Confirm** - show the user: version string, tag, and publish targets. **Wait for explicit approval before proceeding.**
-6. **Publish** - run listed publish commands (e.g. `cargo publish`, `npm publish`, `docker push`). When a publish step promotes one branch into another (e.g. `develop` -> `main`), pin the release-gate's reviewed through-SHA and re-assert it immediately before the merge, aborting and re-running the gate over the delta if the branch moved since — the project's own config supplies the concrete git incantation.
-7. **Push tag** - `git push origin <tag>`.
-8. **Post-ship** - run any listed post-ship steps.
-
-Report what was done: version, tag, publish targets, any deviations.
-
-## On: no config
-
-The project has no ship config. Ask for:
-- Sub-project/component, which determines `<proj>`.
-- Public vs private/sensitive target; private targets use `<proj>.local.md`.
-- Version strategy: manual semver, auto-increment patch, date-based (`YYYY.MM.DD`), `git describe`, or another explicit strategy.
-- Build/package steps, publish/deploy commands, and post-ship steps.
-
-Then:
-1. Write the config to `ai-docs/ship/<proj>.md` or `ai-docs/ship/<proj>.local.md` depending on the answer above.
-2. Confirm the written config with the user before proceeding to **Execute**.
-
-## Ship Config Format
+### Ship Config Format
 
 ```markdown
 # Ship: <proj>
@@ -98,8 +88,12 @@ Push: yes
 
 Omit sections that do not apply.
 
-## Doctrine
+## Stops
 
-Ship optimizes for **zero-surprise releases**: every step is config-prescribed
-or user-confirmed before execution. The first invocation captures judgment so
-future invocations need less human input. When ambiguous, reduce future judgment.
+The release-gate decision; the publish confirmation; any push of a tag or
+branch.
+
+## Output
+
+What shipped: version, tag, targets, deviations. Config and version files in
+English.

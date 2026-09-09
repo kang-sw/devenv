@@ -1,6 +1,6 @@
 ---
 name: lead-review
-description: Use when the user wants to review a pull request or merge request branch; loads or creates a review config, runs structured review phases, and routes to fix, comment, or merge.
+description: Independent review of a contributor branch or a commit range. The lead resolves target and config, spawns reviewers that read the diff from git, decides the verdict, stamps the review ledger for ranges, and carries merge approval to the user.
 ---
 
 # Review

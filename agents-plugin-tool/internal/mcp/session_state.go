@@ -395,7 +395,7 @@ type implementTodoVerdict struct {
 	BindingAnchorClause string
 }
 
-// deriveImplementTodos builds the standard lead-implement checklist. The
+// deriveImplementTodos builds the standard implementation checklist. The
 // verdict-aware path replaces final-action and merge with completion only for
 // the exact current-branch outcome.
 func deriveImplementTodos(needReview, needDoc bool) []todoItem {
@@ -732,7 +732,7 @@ func joinHumanList(items []string) string {
 	}
 }
 
-// deriveProceedTodos mirrors lead-proceed "On: invoke": build route context,
+// deriveProceedTodos mirrors the proceed route sequence: build route context,
 // then resolve the MCP verdict with an executable Next instruction.
 func deriveProceedTodos() []todoItem {
 	return withPendingStatus([]todoItem{

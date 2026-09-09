@@ -131,8 +131,8 @@ topics: plugin architecture, host-neutral migration, spawn-removal, adapter boun
 ```
 
 `anchor` names the ticket a lead must read before answering or editing when a
-target touches one of the `topics`. `lead-discuss`, `lead-proceed`, and
-`lead-implement` read this declaration through the generic binding-anchor hook
+target touches one of the `topics`. `lead-discuss` reads it directly, and the
+routed run path injects it through the generic binding-anchor hook
 (`ai-docs/spec/workflow-skills.md`
 `{#260908-project-binding-anchor-declaration}`) rather than naming this
 repository's anchor in shipped text. Both keys are required: a project that
@@ -293,7 +293,7 @@ ai-docs/tickets/.dropped/
     installs when Claude Code is available; it intentionally does not install
     wsflow into Claude.
   - `agents-plugin/` is registered through `.agents/plugins/marketplace.json`;
-    Codex UI install has verified `ws:lead-write-ticket` and `ws:lead-discuss`.
+    Codex UI install has verified `ws:lead-ticket` and `ws:lead-discuss`.
   - `agents-plugin-wsflow/` is an agentless derivative package with
     Codex/Claude manifests, package-local no-agent MCP env, shared launcher
     copies, a reduced `runtime.json`, thin wsflow skill shims over shared

@@ -299,11 +299,11 @@ func appendTip(existing, addition string) string {
 }
 
 // ticketCategoryRE extracts the category token from a ticket stem
-// (YYMMDD-<category>-<slug>), mirroring the lead-write-ticket convention.
+// (YYMMDD-<category>-<slug>), mirroring the ticket-authoring convention.
 var ticketCategoryRE = regexp.MustCompile(`^\d{6}-([a-z]+)-`)
 
 // exemptReadyGateCategories are ticket categories exempt from the spec-address
-// gate enforced by the lead-write-ticket playbook when promoting to ready/.
+// gate enforced by the lead-ticket playbook when promoting to ready/.
 var exemptReadyGateCategories = map[string]bool{
 	"epic":     true,
 	"research": true,
@@ -314,7 +314,7 @@ var exemptReadyGateCategories = map[string]bool{
 // ticket is moved to ready/ without detected spec addressing (a confirmed
 // spec:/spec-remove: frontmatter entry or a ## Spec Impact section). The
 // spec-address gate itself is documented and enforced only at the
-// lead-write-ticket playbook layer; this primitive-layer warning exists so a
+// lead-ticket playbook layer; this primitive-layer warning exists so a
 // lead calling tickets_move directly still gets a signal.
 func readyGateWarning(ticketAbsPath, stem string) string {
 	match := ticketCategoryRE.FindStringSubmatch(stem)
@@ -336,7 +336,7 @@ func readyGateWarning(ticketAbsPath, stem string) string {
 		}
 	}
 
-	return "ready gate is normally enforced by lead-write-ticket; no spec addressing detected."
+	return "ready gate is normally enforced by lead-ticket; no spec addressing detected."
 }
 
 // statusRank orders the active status axis idea < todo < ready so a move toward
@@ -378,7 +378,7 @@ func ResolvedSageReviewPosture(sageReview string) string {
 // ticketCategoryRE category-detection mechanism as exemptReadyGateCategories
 // rather than inventing a new one: `research`/`workset` are exempt from both
 // stages (mirroring their blanket spec-address-gate exemption), `epic` needs
-// only design (epics never reach lead-implement so completeness never
+// only design (epics never reach implementation so completeness never
 // applies), and every other category (the default/actionable categories)
 // needs both.
 func sageReviewStageRequirement(stem string) (design, completeness bool) {

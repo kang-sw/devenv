@@ -844,7 +844,7 @@ func TestTicketsMoveToReadyWarnsWhenNoSpecAddressing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TicketsMove: %v", err)
 	}
-	if !strings.Contains(result.Tip, "ready gate is normally enforced by lead-write-ticket") {
+	if !strings.Contains(result.Tip, "ready gate is normally enforced by lead-ticket") {
 		t.Fatalf("Tip = %q, want ready-gate warning", result.Tip)
 	}
 }
@@ -973,7 +973,7 @@ func TestTicketsMoveToReadyCombinesSageTipAndReadyGateWarning(t *testing.T) {
 	if !strings.Contains(result.Tip, "design skipped") || !strings.Contains(result.Tip, "completeness skipped") {
 		t.Fatalf("Tip = %q, want sage review posture tip for both stages", result.Tip)
 	}
-	if !strings.Contains(result.Tip, "ready gate is normally enforced by lead-write-ticket") {
+	if !strings.Contains(result.Tip, "ready gate is normally enforced by lead-ticket") {
 		t.Fatalf("Tip = %q, want ready-gate warning", result.Tip)
 	}
 }

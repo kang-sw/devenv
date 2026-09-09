@@ -10,7 +10,7 @@ import (
 )
 
 // Literal Blocked Section Templates captured verbatim from
-// agents-plugin/rsrc/lead-write-ticket/lead-write-ticket.md (the three "Blocked
+// agents-plugin/rsrc/lead-ticket/lead-ticket.md (the three "Blocked
 // Section Template" fences) BEFORE they were deleted from the playbook. These
 // are the byte-identical regression fixtures for renderBlockedSection: the tool
 // must reproduce them exactly when rendered with the templates' placeholder

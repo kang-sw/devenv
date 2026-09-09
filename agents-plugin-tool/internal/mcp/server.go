@@ -2821,7 +2821,7 @@ func sageGateNextInstruction(result wsdoc.SageGateResult) string {
 		return "next_instruction: Sage review gate resolved with no further review required; proceed to handoff." + sageGatePostureUncommittedNote
 	case "stop_blocked":
 		// The recovery sentence exists because the bare "stop" read as a dead
-		// end while lead-write-ticket's On: Reviewer Spawn covers "each stage
+		// end while the ticket skill's reviewer-spawn step covers "each stage
 		// the gate reports blocked whose blocker this invocation's edits
 		// address" — a clause that looks unreachable if the gate is the only
 		// path to a reviewer. It is not: resolveStage returns stop_blocked
@@ -3534,14 +3534,14 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "route.resolve_implement",
-			"description": "Inner step of ws:lead-implement; not a direct entry point — params are constructed by that skill. Resolves normalized implementation facts and observed Git branch state into one deterministic implementation verdict, stores the 'implement' agenda blob, and replaces the todo list with the derived implement checklist.",
+			"description": "Inner step of the ticket-worker playbook; not a direct entry point — params are constructed by that playbook. Resolves normalized implementation facts and observed Git branch state into one deterministic implementation verdict, stores the 'implement' agenda blob, and replaces the todo list with the derived implement checklist.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
 					"params": map[string]any{
 						"type":        "object",
-						"description": "Opaque implementation-routing input, constructed by ws:lead-implement. Inner step of that skill; not a direct entry point — see ws:lead-implement's Fact Contract for the full field set.",
+						"description": "Opaque implementation-routing input, constructed by the ticket-worker playbook. Inner step of that playbook; not a direct entry point — see its route step for the full field set.",
 					},
 				},
 				"required": []string{"session_key"},
@@ -3549,14 +3549,14 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "route.resolve_proceed",
-			"description": "Inner step of ws:lead-proceed; not a direct entry point — params are constructed by that skill. Resolves deterministic proceed facts into one route verdict, stores the 'proceed' agenda blob, and replaces the todo list with the lead-proceed checklist.",
+			"description": "Inner routing step; not a direct entry point — params are constructed by the calling skill. Resolves deterministic proceed facts into one route verdict, stores the 'proceed' agenda blob, and replaces the todo list with the derived proceed checklist.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
 					"params": map[string]any{
 						"type":        "object",
-						"description": "Opaque routing input, constructed by ws:lead-proceed. Inner step of that skill; not a direct entry point — see ws:lead-proceed's Fact Contract for the full field set.",
+						"description": "Opaque routing input, constructed by the calling skill. Inner step of that skill; not a direct entry point — see its Fact Contract for the full field set.",
 					},
 				},
 				"required": []string{"session_key"},

@@ -14,7 +14,6 @@ import (
 // auto-mirror mechanism — see ai-docs/manuals/wsflow-mirroring.md.
 var substitutionMirroredSkills = []string{
 	"lead-prefer-subagent",
-	"lead-verify-discussion",
 	"mcp-server-repair",
 }
 

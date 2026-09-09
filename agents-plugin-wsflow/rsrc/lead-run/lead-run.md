@@ -79,7 +79,7 @@ re-summarize them.
   worker with the answer and where you found it. If not, put the one question
   to the user and resume with the answer.
 - **(c) contract broken** — do not go to the user first. Route the worker's
-  `proposed_resolution:` through `{{.SkillNamespace}}:lead-write-ticket` as an
+  `proposed_resolution:` through `{{.SkillNamespace}}:lead-ticket` as an
   `#### Edition` on the executed phase, under the design-review gate at a
   raised tier. A `pass` commits the edition and resumes the worker; a `block`
   goes to the user with the reviewer's verdict.
