@@ -379,10 +379,8 @@ func todoInstructionPreview(instruction string) string {
 // --- enter-mode todo derivation ----------------------------------------------
 
 type implementTodoVerdict struct {
-	TargetKind  string
 	Delegation  string
 	BranchPlan  implementBranchPlan
-	PlanDepth   string
 	ReviewAlloc string
 	NeedReview  bool
 	DocMode     string
@@ -395,13 +393,10 @@ type implementTodoVerdict struct {
 	BindingAnchorClause string
 }
 
-// deriveImplementTodos builds the standard implementation checklist. The
-// verdict-aware path replaces final-action and merge with completion only for
-// the exact current-branch outcome.
+// deriveImplementTodos builds the standard implementation checklist.
 func deriveImplementTodos(needReview, needDoc bool) []todoItem {
 	return deriveImplementTodosFromVerdict(implementTodoVerdict{
-		Delegation:  "delegated",
-		PlanDepth:   "survey",
+		Delegation:  implementDelegationMode,
 		ReviewAlloc: "partitioned",
 		NeedReview:  needReview,
 		NeedDoc:     needDoc,
@@ -411,10 +406,10 @@ func deriveImplementTodos(needReview, needDoc bool) []todoItem {
 func deriveImplementTodosFromVerdict(verdict implementTodoVerdict) []todoItem {
 	items := []todoItem{
 		{Key: "route", Title: "Route", Instruction: implementInstructionPtr(implementRouteInstruction(verdict))},
-		{Key: "prep", Title: implementPrepTitle(verdict.PlanDepth), Instruction: implementInstructionPtr(implementPrepInstruction(verdict))},
+		{Key: "prep", Title: "Prep", Instruction: implementInstructionPtr(implementPrepInstruction(verdict))},
 		{Key: "edit", Title: implementEditTitle(verdict.Delegation), Instruction: implementInstructionPtr(implementEditInstruction(verdict))},
 	}
-	if verdict.NeedReview || isLeadOnlyReview(verdict.ReviewAlloc) {
+	if verdict.NeedReview {
 		items = append(items, todoItem{Key: "review", Title: implementReviewTitle(verdict.ReviewAlloc), Instruction: implementInstructionPtr(implementReviewInstruction(verdict))})
 	}
 	if verdict.NeedDoc {
@@ -424,14 +419,10 @@ func deriveImplementTodosFromVerdict(verdict implementTodoVerdict) []todoItem {
 			todoItem{Key: "doc-closeout", Title: "Doc closeout", Instruction: implementInstructionPtr(implementDocCloseoutInstruction(verdict))},
 		)
 	}
-	if isCurrentBranchCompletion(verdict) {
-		items = append(items, todoItem{Key: "complete", Title: "Complete", Instruction: implementInstructionPtr(implementCompletionInstruction(verdict))})
-	} else {
-		items = append(items,
-			todoItem{Key: "final-action-gate", Title: "Final action gate", Instruction: implementInstructionPtr(implementFinalActionInstruction(verdict))},
-			todoItem{Key: "merge", Title: "Merge", Instruction: implementInstructionPtr(implementMergeInstruction(verdict))},
-		)
-	}
+	items = append(items,
+		todoItem{Key: "final-action-gate", Title: "Final action gate", Instruction: implementInstructionPtr(implementFinalActionInstruction(verdict))},
+		todoItem{Key: "merge", Title: "Merge", Instruction: implementInstructionPtr(implementMergeInstruction(verdict))},
+	)
 	return withPendingStatus(items)
 }
 
@@ -441,12 +432,10 @@ func implementInstructionPtr(instruction string) *string {
 
 func parseImplementDelegation(raw string) (string, error) {
 	switch strings.ToLower(raw) {
-	case "", "delegated":
-		return "delegated", nil
-	case "direct-edit":
-		return "direct-edit", nil
+	case "", implementDelegationMode:
+		return implementDelegationMode, nil
 	default:
-		return "", fmt.Errorf("invalid delegation %q: want one of delegated, direct-edit", raw)
+		return "", fmt.Errorf("invalid delegation %q: want %s", raw, implementDelegationMode)
 	}
 }
 
@@ -454,38 +443,21 @@ func parseImplementReviewAlloc(raw string) (string, error) {
 	switch strings.ToLower(raw) {
 	case "":
 		return "partitioned", nil
-	case "lead-only", "single", "partitioned":
+	case "single", "partitioned":
 		return strings.ToLower(raw), nil
 	case "partitioned: correctness", "partitioned: fit", "partitioned: test",
 		"partitioned: correctness, fit", "partitioned: correctness, test", "partitioned: fit, test",
 		"partitioned: correctness, fit, test":
 		return "partitioned", nil
 	default:
-		return "", fmt.Errorf("invalid review_alloc %q: want one of lead-only, single, partitioned", raw)
-	}
-}
-
-func implementPrepTitle(planDepth string) string {
-	switch strings.ToLower(strings.TrimSpace(planDepth)) {
-	case "none", "":
-		return "Prep"
-	case "survey":
-		return "Prep (survey plan)"
-	case "research":
-		return "Prep (research plan)"
-	default:
-		return "Prep"
+		return "", fmt.Errorf("invalid review_alloc %q: want one of single, partitioned", raw)
 	}
 }
 
 func implementEditTitle(delegation string) string {
 	switch strings.ToLower(strings.TrimSpace(delegation)) {
-	case "delegated":
+	case implementDelegationMode:
 		return "Edit (delegated)"
-	case "direct", "direct-edit", "inline", "lead-owned":
-		return "Edit (direct)"
-	case "":
-		return "Edit"
 	default:
 		return "Edit"
 	}
@@ -497,8 +469,6 @@ func implementReviewTitle(reviewAlloc string) string {
 		return "Review (single)"
 	case "partitioned", "partitioned: correctness, fit, test", "partitioned: correctness,fit,test":
 		return "Review (partitioned)"
-	case "lead-only", "lead only":
-		return "Review (lead-only)"
 	case "":
 		return "Review"
 	default:
@@ -520,60 +490,42 @@ func implementRouteInstruction(verdict implementTodoVerdict) string {
 		return fmt.Sprintf("Rename the current implementation branch to %s before source edits, preserving %s as the merge target. Mark route complete only after the branch action succeeds; do not call route.resolve_implement again.", firstNonEmpty(plan.TargetBranch, "the target implementation branch"), firstNonEmpty(plan.MergeTarget, "the selected base branch"))
 	case "continue":
 		return fmt.Sprintf("Continue on %s for this implementation path before starting prep or edits. Keep the existing implementation branch context and do not call route.resolve_implement again.", firstNonEmpty(plan.CurrentBranch, plan.TargetBranch, "the current implementation branch"))
-	case "current":
-		return fmt.Sprintf("Keep the current branch %s for this explicit low-ceremony path. Omit implementation-branch creation and merge work, and do not call route.resolve_implement again.", firstNonEmpty(plan.CurrentBranch, "the observed branch"))
 	default:
 		return "Confirm the implementation branch setup before source edits, then follow the selected implementation path."
 	}
+}
+
+// implementPrepGuardrails renders the Prep preamble. It carries only what the
+// executing caller cannot derive from the target itself: any project-declared
+// binding anchor (read through the generic AGENTS.md hook, empty when the
+// project declares none) and the implementation playbook, whose verification,
+// test-strategy and mechanical-edit rules the later gates cite by name. The
+// preamble schedules no planning pass: the target is the plan.
+func implementPrepGuardrails(anchorClause string) string {
+	const playbookClause = `read infra.read("impl-playbook"). `
+	if strings.TrimSpace(anchorClause) == "" {
+		return "Before edits or dispatch, " + playbookClause
+	}
+	return "Before edits or dispatch, " + anchorClause + "and " + playbookClause
 }
 
 func implementPrepInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not prepare further implementation work until the branch blocker is resolved: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
-	guardrails := `Before edits or dispatch, run mental-model lookup, read returned docs ancestors first, ` + verdict.BindingAnchorClause + `and read infra.read("impl-playbook"). `
-	switch strings.ToLower(strings.TrimSpace(verdict.PlanDepth)) {
-	case "none", "":
-		if strings.ToLower(strings.TrimSpace(verdict.Delegation)) == "delegated" {
-			return guardrails + "No survey or research plan is needed: this delegated ticket target localizes the change. " +
-				"Call path.generate(kind: \"plan\", stems: [target stem or scope]) to create the plan path, then write the plan stub yourself with all six sections and dispatch no planner. " +
-				"Fill \"## Relevant Ticket Contract\" with the ticket path and selected phase heading only. " +
-				"In \"## Out of Scope\", \"## Implementation Plan\", and \"## Verification Plan\", write the line \"Skipped: the ticket localizes the change (facts: change_points=clear, reuse_points=<value>, strategy_shape=single-obvious, side_effect_risk=low)\", filling <value> from the reuse-points condition in this verdict's Conditions. " +
-				"In \"## Codebase Findings\", record one line per binding constraint the Prep reads surfaced — from the mental-model lookup documents, infra.read(\"impl-playbook\"), and any declared AGENTS.md anchor document — or \"Skipped: no binding constraint from Prep reads\" when none applies. " +
-				"Write \"None.\" in \"## Escalations\". Then render implementer with the stub plan path; do not dispatch a planner."
-		}
-		return guardrails + "Confirm the direct-edit facts are still accurate, identify the focused verification command, and proceed without a separate brief, survey, or research plan."
-	case "survey":
-		return guardrails + "Call path.generate(kind: \"plan\", stems: [target stem or scope]) to create the plan path, render plan-populator-survey with " + plannerAuthorityInputs(verdict.TargetKind) + ", and dispatch it to write the light implementation plan. If survey returns [escalate-to-research] for low confidence or strategic uncertainty, render plan-populator-research with the same authority and plan path before implementer dispatch. If survey returns [escalate-to-lead], adjudicate the escalation in place before implementer dispatch. Do not create a separate brief."
-	case "research":
-		return guardrails + "Render plan-populator-research with " + plannerAuthorityInputs(verdict.TargetKind) + ", then dispatch it to refine or replace the same implementation plan before implementer dispatch. Do not create a separate brief."
-	default:
-		return guardrails + "Prepare the implementation context required by the selected verdict before edits."
-	}
+	return implementPrepGuardrails(verdict.BindingAnchorClause) +
+		"Then start from the target's own contract: no survey, research, or planning stage runs before the edits. " +
+		"Survey only what the target leaves open, and resolve a target decision that source contradicts before editing rather than working around it."
 }
 
 func implementEditInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not start source edits while branch action is stop: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
-	switch strings.ToLower(strings.TrimSpace(verdict.Delegation)) {
-	case "direct-edit":
-		if isCurrentBranchCompletion(verdict) {
-			return "Apply the source edits directly in this lead context, run focused verification, create exactly one logical explicit-path commit with ## AI Context, and capture the resulting commit range. Do not push."
-		}
-		return "Apply the source edits directly in this lead context, run focused verification, commit the logical checkpoint, and capture the resulting commit range."
-	case "delegated":
-		switch strings.ToLower(strings.TrimSpace(verdict.PlanDepth)) {
-		case "survey":
-			return "After the survey plan is ready and any [escalate-to-research] signal is resolved on the same plan path, render implementer with PlanPath and dispatch the delegated implementer; capture the implemented commit range for review and relays."
-		case "research":
-			return "After the research plan is ready on the same plan path, render implementer with PlanPath and dispatch the delegated implementer; capture the implemented commit range for review and relays."
-		default:
-			return "Render implementer with PlanPath and dispatch the delegated implementer; capture the implemented commit range for review and relays."
-		}
-	default:
-		return "Execute the selected implementation path and verify the changed behavior before review or documentation closeout."
+	if strings.EqualFold(strings.TrimSpace(verdict.Delegation), implementDelegationMode) {
+		return "Apply the source edits, verify them against the project's build and test commands, commit each logical checkpoint with ## AI Context, and capture the resulting commit range for review and relays."
 	}
+	return "Execute the selected implementation path and verify the changed behavior before review or documentation closeout."
 }
 
 // implementReviewDispositionClause states the disposition-marker requirement for
@@ -608,9 +560,6 @@ func implementReviewInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not start review before implementation can run; resolve the branch blocker first: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
-	if isLeadOnlyReview(verdict.ReviewAlloc) {
-		return "Perform lead-owned review only; record why external reviewers are unnecessary for this verdict, then preserve the rationale for the final report."
-	}
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(verdict.ReviewAlloc)), "partitioned:") {
 		return fmt.Sprintf("Dispatch %s reviewers with the rendered reviewer playbook and generated review paths. %s %s %s", formatReviewPartitions(verdict.ReviewAlloc), implementReviewDispositionClause, implementReviewRelayClause, implementReviewCriticalBranchClause)
 	}
@@ -642,8 +591,7 @@ func implementDocCloseoutInstruction(verdict implementTodoVerdict) string {
 }
 
 // implementFinalActionInstruction's default outcome is continue-on-branch
-// without merging (modeled on implementCompletionInstruction's no-merge
-// phrasing), for every phase — this package carries no phase-index/position
+// without merging, for every phase — this package carries no phase-index/position
 // field, so the same wording applies regardless of where in a multi-phase
 // run this gate falls. An explicit merge stays available as a caller-chosen
 // option; verdict.BranchPlan.MergeConfirm governs approval for that chosen
@@ -684,21 +632,10 @@ func implementMergeInstruction(verdict implementTodoVerdict) string {
 	return "This step runs only when a merge was explicitly chosen at the final action gate or later at tickets.close review; when chosen, perform it against the verdict merge target after user approval and preserve the workflow-owned merge record. Otherwise skip this step: continuing on the branch without merging is the default outcome."
 }
 
-func implementCompletionInstruction(verdict implementTodoVerdict) string {
-	return fmt.Sprintf("Confirm focused verification passed, complete lead-owned review with the rationale for no external reviewers, and report the retained branch, commit range, skipped documentation reason, and no-merge completion. Do not push. Documentation skipped because: %s.", firstNonEmpty(verdict.DocReason, "no documentation reason was provided"))
-}
-
-func isCurrentBranchCompletion(verdict implementTodoVerdict) bool {
-	return strings.EqualFold(strings.TrimSpace(verdict.BranchPlan.Action), "current")
-}
-
 func isBranchStop(verdict implementTodoVerdict) bool {
 	return strings.EqualFold(strings.TrimSpace(verdict.BranchPlan.Action), "stop")
 }
 
-func isLeadOnlyReview(reviewAlloc string) bool {
-	return strings.EqualFold(strings.TrimSpace(reviewAlloc), "lead-only") || strings.EqualFold(strings.TrimSpace(reviewAlloc), "lead only")
-}
 
 func formatReviewPartitions(reviewAlloc string) string {
 	raw := strings.TrimSpace(reviewAlloc)
@@ -1097,10 +1034,8 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 			return toolTextResponse(id, "", fmt.Errorf("%s: agenda is not JSON-encodable: %w", tool, err))
 		}
 		todos := deriveImplementTodosFromVerdict(implementTodoVerdict{
-			TargetKind:          result.Target.Kind,
 			Delegation:          result.Verdict.Delegation,
 			BranchPlan:          result.Verdict.BranchPlan,
-			PlanDepth:           result.Verdict.PlanDepth,
 			ReviewAlloc:         result.Verdict.ReviewAlloc,
 			NeedReview:          result.Verdict.NeedReview,
 			DocMode:             result.Verdict.DocMode,
@@ -1128,16 +1063,15 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("route.resolve_implement: %w", err))
 	}
-	planDepth, err := parseLegacyImplementPlanDepth(delegation, stringValue(args["plan_depth"]))
-	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("route.resolve_implement: %w", err))
-	}
 	reviewAlloc, err := parseImplementReviewAlloc(stringValue(args["review_alloc"]))
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("route.resolve_implement: %w", err))
 	}
 	args["delegation"] = delegation
-	args["plan_depth"] = planDepth
+	// plan_depth selected a planning stage that no longer exists. Drop it
+	// rather than validate it, so a legacy caller that still sends one neither
+	// errors nor leaves a stage name behind in the stored agenda.
+	delete(args, "plan_depth")
 	args["review_alloc"] = reviewAlloc
 	// The legacy top-level path has no record in scope; read the session state
 	// (fail-open to an empty root, which renders no clause) so the Prep
@@ -1146,41 +1080,12 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 	record, _ := s.sessions.readState(sessionKey)
 	todos := deriveImplementTodosFromVerdict(implementTodoVerdict{
 		Delegation:          delegation,
-		PlanDepth:           planDepth,
 		ReviewAlloc:         reviewAlloc,
 		NeedReview:          needReview,
 		NeedDoc:             needDoc,
 		BindingAnchorClause: wsreview.ReadAgentsBindingAnchor(record.Root).PrepClause(),
 	})
 	return s.handleEnter(id, "route.resolve_implement", "implement", args, todos)
-}
-
-func parseLegacyImplementPlanDepth(delegation string, raw string) (string, error) {
-	normalized := strings.ToLower(strings.TrimSpace(raw))
-	switch delegation {
-	case "direct-edit":
-		switch normalized {
-		case "", "none":
-			return "none", nil
-		case "survey", "research":
-			return "", fmt.Errorf("invalid plan_depth %q for direct-edit: want none", raw)
-		default:
-			return "", fmt.Errorf("invalid plan_depth %q: want one of none, survey", raw)
-		}
-	case "delegated":
-		switch normalized {
-		case "", "survey":
-			return "survey", nil
-		case "none":
-			return "none", nil
-		case "research":
-			return "", fmt.Errorf("invalid plan_depth %q for delegated legacy enter: start with survey and escalate to research only after survey returns [escalate-to-research]", raw)
-		default:
-			return "", fmt.Errorf("invalid plan_depth %q: want one of none, survey", raw)
-		}
-	default:
-		return "", fmt.Errorf("invalid delegation %q: want one of delegated, direct-edit", delegation)
-	}
 }
 
 func stringValue(v any) string {
