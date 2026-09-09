@@ -560,6 +560,7 @@ export interface AgentRecord {
   waiters: Array<() => void>;
   ownership?: AgentOwnership;
   ownershipObserverStop?: () => void;
+  launchGeneration?: number;
 }
 
 export type AgentRegistry = Map<string, AgentRecord>;
@@ -1967,7 +1968,7 @@ export function validateForkReadiness(launch: ReturnType<typeof prepareForkLaunc
   }
   if (record.ownership && !containedOwnedPath(record.ownership.home, state.sessionFile)) throw new Error("ws-pi-agent: fork readiness rejected (session escaped owned home)");
   record.sessionPath = state.sessionFile;
-  if (record.ownership) { record.ownership = { ...record.ownership, sessionPath: state.sessionFile }; const metadata = readOwnership(record.ownership.home); if (metadata) writeOwnership({ ...metadata, sessionPath: state.sessionFile, updatedAt: Date.now(), liveness: { ...metadata.liveness, lifecycle: "live", running: true, observedAt: Date.now() } }); }
+  if (record.ownership) { record.ownership = { ...record.ownership, sessionPath: state.sessionFile }; const metadata = readOwnership(record.ownership.home); try { if (metadata) writeOwnership({ ...metadata, sessionPath: state.sessionFile, updatedAt: Date.now(), liveness: { ...metadata.liveness, lifecycle: "live", running: true, observedAt: Date.now() } }); } catch { /* durable facts remain conservative; readiness stays usable */ } }
   removeForkTransport(launch.contextPath);
   removeForkTransport(launch.readinessPath);
   rmSync(dirname(launch.contextPath), { recursive: true, force: true });
@@ -2489,6 +2490,7 @@ export function evictForCapacity(registry: RpcAgentRegistry, cap: number): { ok:
         error: `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) reached and every remaining record is running/threadBound — nothing can be evicted to fit`,
       };
     }
+    candidate.ownershipObserverStop?.();
     registry.delete(candidate.agentId);
     evictedLabels.push(candidate.alias ?? candidate.agentId);
   }
@@ -2682,6 +2684,7 @@ export async function spawnAgent(
     ),
   );
   record.client = client;
+  record.launchGeneration = (record.launchGeneration ?? 0) + 1;
 
   // 260905: the record is registered BEFORE `start()`, so a failure anywhere
   // in the launch sequence would otherwise leave a half-registered zombie the
@@ -2809,6 +2812,7 @@ export async function sendToAgent(
       ),
     );
     record.client = client;
+    record.launchGeneration = (record.launchGeneration ?? 0) + 1;
     try {
       await client.start();
       if (forkLaunch) validateForkReadiness(forkLaunch, record, await client.getState());
@@ -2977,6 +2981,7 @@ export async function stopAgent(
   }
   const client = record.client;
   if (client) {
+    const generation = record.launchGeneration;
     if (record.ownership) updateOwnership(record.ownership.home, { lastActivityAt: Date.now(), liveness: { lifecycle: "stopping", running: true, observedAt: Date.now() } });
     // Review relay #1 (Important, alias/park/cap): clear live state
     // SYNCHRONOUSLY, before either await below, not after both resolve. A
@@ -3000,7 +3005,7 @@ export async function stopAgent(
     } catch {
       // best effort
     }
-    if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "stopped", running: false, observedAt: Date.now() } });
+    if (record.ownership && record.launchGeneration === generation && !record.client) updateOwnership(record.ownership.home, { liveness: { lifecycle: "stopped", running: false, observedAt: Date.now() } });
     if (record.ownership) observeSessionWrite(record.ownership.home, record.sessionPath);
     // Review relay #1 (I2): a stop is a thread-close path too — the ticket
     // names "lead stop" alongside `/done`/fork final/`ws-resolve`. Releasing

@@ -507,11 +507,17 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // lead/fork session owns a thread registry — a worker/explore child has
     // none.
     threadHandle.ctxRef.current = ctx;
+    const dispatchSessionFile = ctx.sessionManager.getSessionFile();
+    leadSessionFile = dispatchSessionFile ?? undefined;
+    const dispatchStorage = createAgentStorageContext(ctx.sessionManager.getSessionId());
+    leadSidecarPath = dispatchSessionFile ? sidecarPath(dispatchSessionFile) : noSessionSidecarPath(dispatchStorage.root, dispatchStorage.ownerSessionId);
+    const recoveredRegistry = readAndClearSidecarAt(leadSidecarPath);
+    if (recoveredRegistry.length > 0) reviveOrphans(agentTools.rpcRegistry, recoveredRegistry, {
+      fork: (record) => armForkRoleWiring(pi, agentTools!.rpcRegistry, record, onForkQuestion),
+      executeWorker: (record) => { record.onApprovalPending = onApprovalPending; },
+    });
     if (isLeadOrFork(readSpawnRole(process.env))) {
-      const sessionFile = ctx.sessionManager.getSessionFile();
-      leadSessionFile = sessionFile ?? undefined;
-      const storage = createAgentStorageContext(ctx.sessionManager.getSessionId());
-      leadSidecarPath = sessionFile ? sidecarPath(sessionFile) : noSessionSidecarPath(storage.root, storage.ownerSessionId);
+      const sessionFile = dispatchSessionFile;
       if (sessionFile) {
         hydrateThreadRegistry(threadHandle, threadRegistryPath(sessionFile));
         // 260905 orphan revival: a previous run of THIS lead session died (or
@@ -521,7 +527,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
         // when any of them was cut off mid-turn — tell the lead once. Runs
         // before `registerAsk`/`registerThreadCommands` only incidentally —
         // nothing below depends on it.
-        const orphans = readAndClearSidecarAt(leadSidecarPath);
+        const orphans = recoveredRegistry;
         if (orphans.length > 0) {
           // Role-keyed wiring re-arm (review relay #1, I1): `spawnRole` is
           // persisted precisely so a revived FORK comes back with its question
@@ -548,13 +554,6 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
             } else pushToLead(pi, agentTools.rpcRegistry, undefined, "ws-agent-orphaned", orphanPush, "followUp");
           }
         }
-      }
-      if (!sessionFile) {
-        const orphans = readAndClearSidecarAt(leadSidecarPath);
-        if (orphans.length > 0) reviveOrphans(agentTools.rpcRegistry, orphans, {
-          fork: (record) => armForkRoleWiring(pi, agentTools!.rpcRegistry, record, onForkQuestion),
-          executeWorker: (record) => { record.onApprovalPending = onApprovalPending; },
-        });
       }
       // 260905 (live-agent widget ticket): TUI-lead-only, via
       // `shouldArmAgentWidget` (review relay #1 Important #5: extracted into
