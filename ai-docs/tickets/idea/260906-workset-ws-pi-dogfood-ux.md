@@ -24,19 +24,20 @@ the earlier instruction to implement report styling immediately.
 - `260909-feat-ws-pi-report-header-distinction` — ready;
   owns the residual report-only header distinction, preserving the existing
   compact body and shared background.
-- `260908-feat-ws-pi-attention-alert-when-agents-wait-on-owner` — ready
-  preparation; owns the separately confirmed 330ms bold/plain attention cue.
+- `260908-feat-ws-pi-attention-alert-when-agents-wait-on-owner` — ready;
+  owns the confirmed 330ms bold/plain attention cue, question title plus valid
+  command hint, and approval-wait label.
+- `260909-feat-ws-pi-goal-stop-controls` — ready;
+  owns stop/clear/reset aliases that disarm goal continuation while preserving
+  the current response, children and history.
 
 These are inclusions, not parent/child relationships. The workset itself stays
 in `idea/`; implementation-ready status applies to each actionable ticket.
 
 ## Planned References
 
-- **Goal stop/reset control** — Owner authorized ready preparation on
-  2026-09-09. The remaining decision is whether stopping disarms only the goal
-  reminder/rearm loop or also interrupts the current response and children.
-  Create and promote the actionable ticket after that stop scope is confirmed.
-  Do not interpret `/goal clear` as a new replacement goal in the intended UI.
+- None. The owner confirmed the remaining stop scope on 2026-09-09 and the
+  actionable goal-control ticket now owns it.
 
 ## Focus
 
@@ -54,5 +55,4 @@ use the current owner conversation for unresolved decisions. The separate
 
 - Done: the owner ends collection and the recorded requests have explicit
   dispositions.
-- Deferred: ws-ask disposition and any newly collected, unapproved requests;
-  unresolved stop-scope decisions remain explicit during ready preparation.
+- Deferred: ws-ask disposition and any newly collected, unapproved requests.
