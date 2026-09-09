@@ -39,7 +39,10 @@ description is the contract.
    <your key>)`. It returns a path with the worker's lead-capability key
    spliced in. Do not read the file, and do not mint a second key for this
    worker: the render does not hand the key back, so read it off
-   `{{.McpNamespace}}/session.children` as the newest child of your own key.
+   `{{.McpNamespace}}/session.children` as the one child of your key carrying
+   no note. That listing is ordered by key, not by age, so recency cannot
+   identify it; step 4 notes every worker you dispatch, which is what leaves
+   exactly one un-noted.
 3. Spawn one worker of at least current-mainstream or previous-generation
    flagship class, in a form that can itself spawn children
    (`{{.SpawnIdiom}}`), with this task block and nothing else — **Handle the
