@@ -85,6 +85,8 @@ import { clearWakeStart, reserveWakeStart, heldPushQueue, flushHeldPushes, hasRu
 // ---------------------------------------------------------------------------
 
 export interface GoalLoopConfig {
+  /** Whether an owner lead animates actionable child waits in the live-agent widget. Only literal false disables the 330ms cue. */
+  agent_wait_animation?: boolean;
   runaway_threshold?: number;
   /** Advisory context-usage percent (0, 100] surfaced in the reinject reminder as a nudge point — not a gate. */
   compaction_advisory_percent?: number;
@@ -98,6 +100,11 @@ export interface GoalLoopConfig {
    * arm, mirroring `runaway_threshold`'s never-hard-fail shape.
    */
   settle_delay_ms?: number;
+}
+
+/** Literal `false` opts out of animation. Malformed, missing, and every other value retain the enabled default. */
+export function resolveAgentWaitAnimation(config: GoalLoopConfig | undefined): boolean {
+  return config?.agent_wait_animation !== false;
 }
 
 /** Default number of consecutive no-tool-call re-fires before the loop force-stops, absent (or overridden by) a config file. */

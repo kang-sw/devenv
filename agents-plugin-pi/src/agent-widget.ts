@@ -50,6 +50,9 @@ export const AGENT_WIDGET_ROW_CAP = 5;
 /** How often the widget repaints its elapsed clocks while it has at least one row. Mirrors `spawner.ts`'s `startLivenessProbe` arm/disarm-a-timer pattern. */
 export const AGENT_WIDGET_TICK_MS = 10_000;
 
+/** Owner-wait emphasis cadence. It is deliberately independent of the elapsed-clock timer. */
+export const AGENT_WIDGET_ATTENTION_TICK_MS = 330;
+
 /** `buildWidgetLines`'s width bound when the caller supplies none — Pi's extension surface exposes no live terminal-column read, so this is a conservative fixed default rather than a probed value. */
 export const DEFAULT_AGENT_WIDGET_WIDTH = 80;
 
@@ -69,10 +72,25 @@ export interface AgentRow {
   elapsedMs: number;
   /** The `/answer <id>` hint text, set only for a `"thread"` row (the ticket's merged-in owner-question cue). */
   answerHint?: string;
+  /** Human-readable question phrase. It is display-only and never a resolution key. */
+  answerDisplay?: string;
   model?: string;
   effort?: string;
   latestInput?: number;
   estimatedUsd?: number;
+}
+
+const BOLD = "\u001b[1m";
+const RESET = "\u001b[22m";
+
+function bold(text: string, enabled: boolean): string {
+  return enabled ? `${BOLD}${text}${RESET}` : text;
+}
+
+/** Removes terminal/control input before it reaches a TUI row. */
+function sanitizeDisplayTitle(title: string | undefined, fallback: string): string {
+  const cleaned = title?.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim();
+  return cleaned || fallback;
 }
 
 const STATE_RANK: Record<AgentRowState, number> = {
@@ -198,7 +216,10 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
       role: isAwaitingOwnerWithThread && boundThread!.origin === "lead-ask" ? "thread" : roleFromSpawnRole(record.spawnRole),
       state,
       elapsedMs,
-      answerHint: isAwaitingOwnerWithThread ? `/answer ${boundThread!.threadId}` : undefined,
+      ...(isAwaitingOwnerWithThread ? {
+        answerHint: `/answer ${boundThread!.threadId}`,
+        answerDisplay: sanitizeDisplayTitle(boundThread!.title, boundThread!.threadId),
+      } : {}),
       ...(record.telemetry?.model ?? record.observedModel ? { model: record.telemetry?.model ?? record.observedModel } : {}),
       ...(record.telemetry?.effort ?? record.observedEffort ? { effort: record.telemetry?.effort ?? record.observedEffort } : {}),
       ...((record.telemetry?.latestInput ?? record.observedLatestInput) !== undefined ? { latestInput: record.telemetry?.latestInput ?? record.observedLatestInput } : {}),
@@ -214,6 +235,7 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
       state: "awaiting-owner",
       elapsedMs: clampElapsed(now - Date.parse(thread.touchedAt)),
       answerHint: `/answer ${thread.threadId}`,
+      answerDisplay: sanitizeDisplayTitle(thread.title, thread.threadId),
       ...(thread.forkResume?.telemetry?.model ?? thread.forkResume?.observedModel ? { model: thread.forkResume?.telemetry?.model ?? thread.forkResume?.observedModel } : {}),
       ...(thread.forkResume?.telemetry?.effort ?? thread.forkResume?.observedEffort ? { effort: thread.forkResume?.telemetry?.effort ?? thread.forkResume?.observedEffort } : {}),
       ...((thread.forkResume?.telemetry?.latestInput ?? thread.forkResume?.observedLatestInput) !== undefined ? { latestInput: thread.forkResume?.telemetry?.latestInput ?? thread.forkResume?.observedLatestInput } : {}),
@@ -241,19 +263,33 @@ function formatElapsed(elapsedMs: number): string {
 }
 
 /** `name · role · state · elapsed`, plus the `/answer <id>` hint for a `"thread"` row — the ticket's literal row shape. */
-function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH): string {
-  const base = `${row.name} · ${row.role} · ${STATE_LABEL[row.state]} · ${formatElapsed(row.elapsedMs)}`;
+function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, emphasizeAttention = false): string {
+  const primary = row.answerHint ? `/answer ${row.answerDisplay ?? row.name}` : row.name;
+  const base = `${primary} · ${row.role} · ${STATE_LABEL[row.state]} · ${formatElapsed(row.elapsedMs)}`;
   const selection = `${row.model ?? "—"} (${row.effort ?? "—"})`;
   const telemetry = ` · ${selection} · in ${row.latestInput ?? "—"} · est $${row.estimatedUsd ?? "—"}`;
   const hint = row.answerHint ? ` — ${row.answerHint}` : "";
   // The owner action is the only non-negotiable tail.  Allocate its columns
   // first, then progressively omit telemetry and identity detail.
+  let line: string;
   if (row.answerHint && visibleWidth(hint) <= width) {
     const available = width - visibleWidth(hint);
     const withTelemetry = base + telemetry;
-    return visibleWidth(withTelemetry) <= available ? withTelemetry + hint : truncateToWidth(base, available) + hint;
+    line = visibleWidth(withTelemetry) <= available ? withTelemetry + hint : truncateToWidth(base, available) + hint;
+  } else {
+    line = visibleWidth(base + telemetry) <= width ? base + telemetry : truncateToWidth(base, width);
   }
-  return visibleWidth(base + telemetry) <= width ? base + telemetry : truncateToWidth(base, width);
+  // Add ANSI only after width truncation: styling before truncation can leave
+  // an incomplete escape sequence in a narrow terminal.
+  if (!emphasizeAttention) return line;
+  if (row.answerHint) {
+    // A narrow width may truncate before the normal field separator, but the
+    // protected answer tail is still present and must remain unstyled.
+    const separator = line.indexOf(" — ");
+    return separator >= 0 ? bold(line.slice(0, separator), true) + line.slice(separator) : bold(line, true);
+  }
+  if (row.state === "awaiting-approval") return line.replace(STATE_LABEL[row.state], bold(STATE_LABEL[row.state], true));
+  return line;
 }
 
 /**
@@ -284,10 +320,11 @@ function truncateToWidth(text: string, width: number): string {
  * `buildAgentRows` already produced) plus ` · M question(s)` only while
  * `pendingCount > 0`. It is shown whenever rows or pending questions exist.
  */
-export function buildHeadingLine(rows: readonly AgentRow[], pendingCount: number, width: number = DEFAULT_AGENT_WIDGET_WIDTH): string | undefined {
+export function buildHeadingLine(rows: readonly AgentRow[], pendingCount: number, width: number = DEFAULT_AGENT_WIDGET_WIDTH, emphasizeAttention = false): string | undefined {
   if (rows.length === 0 && pendingCount <= 0) return undefined;
   const questionPart = pendingCount > 0 ? ` · ${pendingCount} question${pendingCount === 1 ? "" : "s"}` : "";
-  return truncateToWidth(`ws: ${rows.length} agents${questionPart}`, width);
+  const heading = `ws: ${rows.length} agents${questionPart}`;
+  return bold(truncateToWidth(heading, width), emphasizeAttention);
 }
 
 /**
@@ -299,8 +336,8 @@ export function buildHeadingLine(rows: readonly AgentRow[], pendingCount: number
  * `truncateToWidth`. `undefined` only when rows and pending questions are
  * both absent.
  */
-export function buildWidgetLines(rows: readonly AgentRow[], pendingCount: number, width: number = DEFAULT_AGENT_WIDGET_WIDTH): string[] | undefined {
-  const heading = buildHeadingLine(rows, pendingCount, width);
+export function buildWidgetLines(rows: readonly AgentRow[], pendingCount: number, width: number = DEFAULT_AGENT_WIDGET_WIDTH, emphasizeAttention = false): string[] | undefined {
+  const heading = buildHeadingLine(rows, pendingCount, width, emphasizeAttention);
   if (heading === undefined) return undefined;
 
   const awaiting = rows.filter((row) => row.state !== "running");
@@ -316,7 +353,7 @@ export function buildWidgetLines(rows: readonly AgentRow[], pendingCount: number
     hiddenRunning = running.length - runningSlots;
   }
 
-  const lines = [heading, ...shown.map((row) => formatRow(row, width))];
+  const lines = [heading, ...shown.map((row) => formatRow(row, width, emphasizeAttention && (row.state === "awaiting-owner" || row.state === "awaiting-approval")))];
   if (hiddenRunning > 0) lines.push(truncateToWidth(`+${hiddenRunning} more`, width));
   return lines;
 }
@@ -379,6 +416,13 @@ export interface AgentWidgetController {
   stop(): void;
 }
 
+export interface AgentWidgetControllerOptions {
+  /** Only the host lead owns the attention timer; forks retain the ordinary panel. */
+  ownerLead?: boolean;
+  /** Read the adapter-local config afresh at each refresh. */
+  animationEnabled?: () => boolean;
+}
+
 /**
  * Builds the IO controller `index.ts` wires into `spawner.ts`'s
  * `agentWidgetRefreshRef` (and calls directly from its own `session_start`/
@@ -392,14 +436,27 @@ export interface AgentWidgetController {
  * an idle lead that has never spawned anything, or one whose registry has
  * gone fully quiet, pays nothing for elapsed-clock upkeep.
  */
-export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: RpcAgentRegistry, threads: Map<string, ThreadRecord>): AgentWidgetController {
+export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: RpcAgentRegistry, threads: Map<string, ThreadRecord>, options: AgentWidgetControllerOptions = {}): AgentWidgetController {
   let timer: ReturnType<typeof setInterval> | undefined;
+  let attentionTimer: ReturnType<typeof setInterval> | undefined;
+  let attentionPhase = true;
+
+  function clearAttentionTimer(): void {
+    if (attentionTimer) {
+      clearInterval(attentionTimer);
+      attentionTimer = undefined;
+    }
+  }
 
   function paint(): void {
     const threadList = [...threads.values()];
     const rows = buildAgentRows(registry, threadList, Date.now());
     const pendingCount = countPending(threadList);
     const visible = rows.length > 0 || pendingCount > 0;
+    const qualifying = rows.some((row) => row.state === "awaiting-owner" || row.state === "awaiting-approval");
+    const animationEnabled = options.animationEnabled?.() !== false;
+    const animate = options.ownerLead === true && animationEnabled && qualifying;
+    const emphasize = qualifying && (!animationEnabled || (animate && attentionPhase));
     try {
       // 260905 review relay #1 (Important #3): pass the factory overload, not
       // a pre-rendered line array, so `render(width)` is called by the host
@@ -410,7 +467,7 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
       // width-is-a-render-time-input contract.
       ctx.ui?.setWidget?.(
         AGENT_WIDGET_KEY,
-        visible ? () => ({ render: (width: number) => buildWidgetLines(rows, pendingCount, width) ?? [] }) : undefined,
+        visible ? () => ({ render: (width: number) => buildWidgetLines(rows, pendingCount, width, emphasize) ?? [] }) : undefined,
         { placement: "belowEditor" },
       );
       ctx.ui?.setStatus?.(AGENT_STATUS_KEY, undefined);
@@ -430,6 +487,16 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
       clearInterval(timer);
       timer = undefined;
     }
+    if (animate && !attentionTimer) {
+      attentionTimer = setInterval(() => {
+        attentionPhase = !attentionPhase;
+        paint();
+      }, AGENT_WIDGET_ATTENTION_TICK_MS);
+      attentionTimer.unref?.();
+    } else if (!animate) {
+      attentionPhase = true;
+      clearAttentionTimer();
+    }
   }
 
   return {
@@ -439,6 +506,7 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
         clearInterval(timer);
         timer = undefined;
       }
+      clearAttentionTimer();
       ctx.ui?.setWidget?.(AGENT_WIDGET_KEY, undefined, { placement: "belowEditor" });
       ctx.ui?.setStatus?.(AGENT_STATUS_KEY, undefined);
     },

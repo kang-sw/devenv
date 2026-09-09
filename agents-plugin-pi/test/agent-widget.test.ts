@@ -10,7 +10,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
-import { buildAgentRows, buildWidgetLines, buildHeadingLine, createAgentWidgetController, shouldArmAgentWidget, AGENT_STATUS_KEY, AGENT_WIDGET_KEY, AGENT_WIDGET_ROW_CAP } from "../src/agent-widget.ts";
+import { buildAgentRows, buildWidgetLines, buildHeadingLine, createAgentWidgetController, shouldArmAgentWidget, AGENT_STATUS_KEY, AGENT_WIDGET_KEY, AGENT_WIDGET_ROW_CAP, AGENT_WIDGET_ATTENTION_TICK_MS, AGENT_WIDGET_TICK_MS } from "../src/agent-widget.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "../src/spawner.ts";
 import type { ThreadRecord } from "../src/ask.ts";
 import { visibleWidth } from "../src/text-width.ts";
@@ -53,7 +53,7 @@ describe("buildAgentRows", () => {
   test("a plain live (client-holding) non-threadBound record is a running row with no answer hint", () => {
     const r = record({ client: {} as never, runStartedAt: NOW - 5_000 });
     const rows = buildAgentRows(registryOf(r), [], NOW);
-    assert.deepEqual(rows, [{ name: "11111111", role: "worker", state: "running", elapsedMs: 5_000, answerHint: undefined }]);
+    assert.deepEqual(rows, [{ name: "11111111", role: "worker", state: "running", elapsedMs: 5_000 }]);
   });
 
   test("name precedence: alias > title > shortened uuid", () => {
@@ -124,7 +124,7 @@ describe("buildAgentRows", () => {
   test("review relay #1 Critical: a pending ws-ask thread with NO respondent yet (empty registry) still renders one row, named by the thread's own title, carrying the /answer hint", () => {
     const t = thread({ threadId: "q9", title: "why is the build red", status: "pending", origin: "lead-ask", respondentAgentId: undefined, touchedAt: new Date(NOW - 5_000).toISOString() });
     const rows = buildAgentRows(registryOf(), [t], NOW);
-    assert.deepEqual(rows, [{ name: "why is the build red", role: "thread", state: "awaiting-owner", elapsedMs: 5_000, answerHint: "/answer q9" }]);
+    assert.deepEqual(rows, [{ name: "why is the build red", role: "thread", state: "awaiting-owner", elapsedMs: 5_000, answerHint: "/answer q9", answerDisplay: "why is the build red" }]);
   });
 
   test("review relay #1 Critical: the lead-restart scenario — a thread with a respondentAgentId but no matching registry record (reviveOrphans never re-sets threadBound) — still renders one row", () => {
@@ -132,7 +132,7 @@ describe("buildAgentRows", () => {
     // The orphan record IS in the registry (reviveOrphans always re-registers it), just not threadBound.
     const orphan = record({ agentId: "ffffffff-0000-0000-0000-000000000000" });
     const rows = buildAgentRows(registryOf(orphan), [t], NOW);
-    assert.deepEqual(rows, [{ name: "post-restart question", role: "thread", state: "awaiting-owner", elapsedMs: 9_000, answerHint: "/answer q10" }]);
+    assert.deepEqual(rows, [{ name: "post-restart question", role: "thread", state: "awaiting-owner", elapsedMs: 9_000, answerHint: "/answer q10", answerDisplay: "post-restart question" }]);
   });
 
   test("review relay #1 Critical: dedupe — once a live threadBound record covers the thread, no second synthetic row is added for the same thread", () => {
@@ -189,6 +189,24 @@ describe("buildAgentRows", () => {
 });
 
 describe("buildWidgetLines", () => {
+  test("owner-question display titles are sanitized and width-bound while qN remains the only command hint", () => {
+    const title = "very long\u001b[31m owner\nquestion title that must truncate";
+    const rows = buildAgentRows(registryOf(), [thread({ threadId: "q42", title })], NOW);
+    for (const width of [40, 80, 120]) {
+      const line = buildWidgetLines(rows, 1, width, true)![1];
+      assert.ok(!/[\u0000-\u001f\u007f-\u009f]/.test(line.replace(/\x1b\[[0-9;]*m/g, "")), `controls removed at ${width}`);
+      assert.match(line, /\/answer q42$/, `qN survives at ${width}`);
+      assert.ok(visibleWidth(line) <= width, `display fits at ${width}`);
+    }
+  });
+
+  test("an unusable owner-question title falls back to its id, while approval has no fabricated answer target", () => {
+    const question = buildAgentRows(registryOf(), [thread({ threadId: "q43", title: "\n\t" })], NOW);
+    assert.match(buildWidgetLines(question, 1, 80, true)![1], /\/answer q43.*— \/answer q43$/);
+    const approval = buildWidgetLines([{ name: "exec", role: "execute", state: "awaiting-approval", elapsedMs: 0 }], 0, 80, true)![1];
+    assert.match(approval, /awaiting approval/);
+    assert.ok(!approval.includes("/answer"));
+  });
   test("telemetry exposes independent fields at wide widths and never displaces a 40-column answer cue", () => {
     const telemetry = { name: "模型-worker", role: "worker" as const, state: "running" as const, elapsedMs: 0, model: "provider/模型", effort: "high", latestInput: 0, estimatedUsd: 0 };
     assert.match(buildWidgetLines([telemetry], 0, 120)![1], /provider\/模型 \(high\).*in 0.*est \$0/);
@@ -306,6 +324,62 @@ describe("buildHeadingLine", () => {
 });
 
 describe("createAgentWidgetController", () => {
+  test("owner waits toggle bold/plain exactly every 330ms, share one timer, and disarm on resolution or config disable", (t) => {
+    const waiting = record({ agentId: "aaaaaaaa-0000-0000-0000-000000000000", threadBound: true });
+    const approval = record({ agentId: "bbbbbbbb-0000-0000-0000-000000000000", pendingApproval: { cmdId: "a", command: "x" } });
+    const threads = new Map([["q1", thread({ respondentAgentId: waiting.agentId, title: "owner needs this" })]]);
+    const callbacks = new Map<number, () => void>();
+    const intervals: number[] = [];
+    const cleared: number[] = [];
+    let next = 1;
+    let widget: ((tui: unknown, theme: unknown) => { render(width: number): string[] }) | undefined;
+    let enabled = true;
+    t.mock.method(global, "setInterval", ((callback: () => void, ms: number) => {
+      const id = next++; callbacks.set(id, callback); intervals.push(ms); return { id, unref() {} } as never;
+    }) as typeof setInterval);
+    t.mock.method(global, "clearInterval", ((timer: { id: number }) => { cleared.push(timer.id); callbacks.delete(timer.id); }) as typeof clearInterval);
+    const controller = createAgentWidgetController({ ui: { setWidget(_key, content) { widget = typeof content === "function" ? content : undefined; }, setStatus() {} } }, registryOf(waiting, approval), threads, {
+      ownerLead: true,
+      animationEnabled: () => enabled,
+    });
+    controller.refresh();
+    assert.deepEqual([...intervals].sort((a, b) => a - b), [AGENT_WIDGET_ATTENTION_TICK_MS, AGENT_WIDGET_TICK_MS]);
+    const initial = widget!({}, {}).render(120).join("\n");
+    assert.match(initial, /\u001b\[1mws: 2 agents/);
+    assert.match(initial, /\u001b\[1m\/answer owner needs this/);
+    assert.match(initial, /\u001b\[1mawaiting approval/);
+    const attention = [...callbacks.entries()].find(([id]) => !cleared.includes(id) && intervals[id - 1] === AGENT_WIDGET_ATTENTION_TICK_MS)!;
+    attention[1]();
+    const plain = widget!({}, {}).render(120).join("\n");
+    assert.ok(!plain.includes("\u001b[1m"), "the plain phase stays fully visible without emphasis");
+    enabled = false;
+    controller.refresh();
+    assert.equal(intervals.filter((ms) => ms === AGENT_WIDGET_ATTENTION_TICK_MS).length, 1, "disabled config never re-arms animation");
+    assert.equal(cleared.length, 1, "config disable clears only attention while the elapsed controller remains armed");
+    assert.match(widget!({}, {}).render(120).join("\n"), /\u001b\[1m\/answer owner needs this/, "disabled animation uses static bold emphasis");
+    threads.clear(); waiting.threadBound = false; approval.pendingApproval = undefined;
+    controller.refresh();
+    assert.equal(cleared.length, 2, "final resolution clears the remaining elapsed timer");
+    controller.stop();
+  });
+
+  test("fork and headless-equivalent controllers never own an attention timer, and replacement stop clears it once", (t) => {
+    const threads = new Map([["q1", thread({ title: "wait" })]]);
+    const intervals: number[] = [];
+    const cleared: unknown[] = [];
+    t.mock.method(global, "setInterval", ((callback: () => void, ms: number) => { intervals.push(ms); return { unref() {}, callback } as never; }) as typeof setInterval);
+    t.mock.method(global, "clearInterval", ((timer: unknown) => { cleared.push(timer); }) as typeof clearInterval);
+    const ui = { setWidget() {}, setStatus() {} };
+    const fork = createAgentWidgetController({ ui }, registryOf(), threads, { ownerLead: false });
+    fork.refresh();
+    assert.ok(!intervals.includes(AGENT_WIDGET_ATTENTION_TICK_MS));
+    const lead = createAgentWidgetController({ ui }, registryOf(), threads, { ownerLead: true });
+    lead.refresh();
+    assert.equal(intervals.filter((ms) => ms === AGENT_WIDGET_ATTENTION_TICK_MS).length, 1);
+    lead.stop(); lead.stop();
+    assert.equal(cleared.length, 2, "stop clears its elapsed and actual attention interval once each");
+    fork.stop();
+  });
   test("renders the uncapped heading at real widths, preserves the body cap, clears only its retired footer key, and disarms on empty", (t) => {
     const records = Array.from({ length: 7 }, (_, i) => record({
       agentId: `${String(i + 1).padStart(8, "0")}-0000-0000-0000-000000000000`,
@@ -391,7 +465,7 @@ describe("createAgentWidgetController", () => {
     controller.refresh();
     const lines = widget!({}, {}).render(80);
     assert.equal(lines[0], "ws: 7 agents · 1 question", "the matched thread is counted once, while its pending suffix remains visible");
-    assert.ok(lines[1].includes("waiting respondent") && lines[1].includes("/answer q1"), "the protected waiting row remains ahead of capped running rows");
+    assert.ok(lines[1].includes("/answer a question") && lines[1].includes("/answer q1"), "the protected waiting row uses its display title and remains ahead of capped running rows");
     assert.equal(lines.length, AGENT_WIDGET_ROW_CAP + 2, "heading plus five body rows and the capped-running summary");
     assert.equal(lines.at(-1), "+2 more");
     controller.stop();

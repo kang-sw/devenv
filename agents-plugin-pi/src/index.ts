@@ -191,7 +191,7 @@ import { createAgentWidgetController, shouldArmAgentWidget, type AgentWidgetCont
 import { registerPushMessageRenderers } from "./push-render.ts";
 import { buildOrphanPush, captureOrphans, noSessionSidecarPath, readAndClearSidecarAt, reviveOrphans, sidecarPath, writeSidecarAt } from "./agent-sidecar.ts";
 import { buildDiscussKickoff } from "./discuss.ts";
-import { registerGoalLoop, readGoalLoopConfig, resolveSettleDelayMs } from "./goal-loop.ts";
+import { registerGoalLoop, readGoalLoopConfig, resolveAgentWaitAnimation, resolveSettleDelayMs } from "./goal-loop.ts";
 import { resolveSkillsDir } from "./skills-dir.ts";
 import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
 import { applyForkAffinity, captureRegisteredTools, compareForkRegistrations, effectiveForkDescriptor, frameForkInput, readForkLaunchContext, removeForkTransport, restoreForkContext, restoreForkKeys, writePrivateJson, type ForkContext } from "./fork-context.ts";
@@ -595,9 +595,13 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       // (hydration/orphan revival apply there too), but the widget itself
       // must not. A prior controller (a `/reload`) is stopped first so its
       // timer never outlives the registry/threads it closed over.
-      if (shouldArmAgentWidget(readSpawnRole(process.env), ctx.mode)) {
+      const spawnRole = readSpawnRole(process.env);
+      if (shouldArmAgentWidget(spawnRole, ctx.mode)) {
         agentWidgetHandle?.stop();
-        agentWidgetHandle = createAgentWidgetController(ctx, agentTools.rpcRegistry, threadHandle.threads);
+        agentWidgetHandle = createAgentWidgetController(ctx, agentTools.rpcRegistry, threadHandle.threads, {
+          ownerLead: spawnRole === undefined,
+          animationEnabled: () => resolveAgentWaitAnimation(readGoalLoopConfig(goalLoopConfigPath)),
+        });
         agentWidgetRefreshRef.current = () => agentWidgetHandle?.refresh();
         agentWidgetHandle.refresh();
       }
