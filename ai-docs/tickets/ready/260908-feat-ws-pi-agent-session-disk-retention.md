@@ -2,6 +2,9 @@
 title: "Pi adapter: bound subagent session files on disk (evict to disk, prune by age, drop empty spawn dirs)"
 spec:
   - pi-adapter-runtime
+  - 260909-pi-durable-child-session-homes
+plans:
+  phase-1: ai-docs/.plans/2026-09/09-2237-260908-feat-ws-pi-agent-session-disk-retention-phase1.md
 parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260905-feat-ws-pi-agent-alias-park-and-registry-cap: owns the in-memory registry cap and `evictForCapacity`
@@ -133,6 +136,56 @@ configured agent-dir override, fork copy and ancestry, approval lifetime,
 reopen/resume and sidecar recovery. Owner live check: new children do not enter
 Pi's ordinary resume list or create legacy `ws-pi-agent-*` temp homes.
 
+### Result (5b525cfe) - 2026-09-09
+
+Phase 1 implementation checkpoint, through `15c2fa89`; owner live acceptance
+remains pending. The researched plan resolved storage identity to the immediate
+dispatching Pi session's SDK identity, including no-session dispatchers, and
+included the separate terminal collector and owner-thread recovery paths.
+No disk deletion, TTL configuration, cross-session scan, or audit steering was
+introduced. Phases 2 and 3 remain unimplemented.
+
+Review dispositions:
+
+- Correctness C1 [fixed]: complete canonical session-path validation, including
+  terminal traversal, directories, symlinks, and invalid readiness without
+  state mutation. Review 3 retained C1; the required elevated implementer fixed
+  it in `15c2fa89` with targeted regressions. No fourth review was scheduled.
+- Correctness C2 [fixed]: recovery binds descriptors to complete on-disk
+  ownership identity; Critical re-review resolved it.
+- Correctness C3 [fixed]: commit fork readiness paths only after validation;
+  Critical re-review resolved it.
+- Correctness C4 [fixed]: preserve question and approval protection across
+  transitions and decision consumption; Critical re-review resolved it.
+- Correctness C5 [fixed]: failed stops and stale launch generations cannot
+  fabricate stopped state; Critical re-review resolved it.
+- Correctness C6 [fixed]: later metadata failures are nonfatal and diagnostic.
+  Re-review resolved the runtime-breaking concern and downgraded its remaining
+  diagnostic concern to Important; final implementation verification covers
+  pending first writes versus actual observation failures.
+- Correctness I1/I2/I3 [fixed], implementer self-reports: all dispatching roles
+  recover registries; durable process/protection facts are validated; activity
+  boundaries and observer lifecycle are retained. These Important dispositions
+  are not independent re-review verdicts.
+- Test T1/T2/T3 [fixed]: configured-root dispatch integration, valid/invalid
+  recovery and resume through both registries, and temporary fixture cleanup.
+  The terminal collector test exercises real process launch/harvest with a
+  disposable fake Pi executable and no model call. Fit review was clean.
+
+Verification at `15c2fa89`: 559 focused tests passed. Full suite: 1,417 tests,
+1,287 passed and 130 existing baseline failures (129 Linux-specific SDK fixture
+failures on macOS and one stale `ws-ask` surface expectation). No unexpected
+observer diagnostic lines; `git diff --check` passed. `ws-ask` remains hidden.
+
+An isolated installed Pi 0.85.1 RPC probe verified worker session targeting and
+fork `--session-dir`, physical fork history and parent ancestry outside the
+ordinary session directory. It used `--no-extensions` and no model prompt:
+this verifies SDK/CLI compatibility, not the adapter's live owner acceptance.
+The worker did not flush a physical transcript before its first assistant turn.
+Probe roots and processes were removed. An initial SDK signature probe created
+one synthetic file in the owner's default session directory; that exact new
+file was immediately removed, without changing pre-existing history.
+
 ### Phase 2: Clean up scratch homes and cap-evicted sessions
 
 Build on Phase 1 metadata to remove unused scratch homes and safely remove
@@ -154,3 +207,13 @@ protected children in another live lead, mixed-age subtrees, unknown legacy home
 missing lead files, missing audit history, and permission failures. Owner live
 check uses disposable owned fixtures with a short TTL; production history is not
 needed to verify deletion.
+
+## Blocked (2026-09-09)
+
+Awaiting the Phase 1 owner live adapter check: launch fresh worker, fork, and
+explore children through the actual extension, confirm their configured owned
+homes and fork ancestry, and confirm they neither enter Pi's ordinary resume
+list nor allocate legacy `ws-pi-agent-*` homes. The extension-disabled CLI probe
+does not satisfy this gate. Record acceptance before advancing to Phase 2;
+the ticket stays open in `ready/` and autonomous selection should skip it while
+this condition remains outstanding. No production-history deletion is needed.

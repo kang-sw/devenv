@@ -189,7 +189,7 @@ import {
 } from "./spawner.ts";
 import { createAgentWidgetController, shouldArmAgentWidget, type AgentWidgetController } from "./agent-widget.ts";
 import { registerPushMessageRenderers } from "./push-render.ts";
-import { buildOrphanPush, captureOrphans, readAndClearSidecar, reviveOrphans, writeSidecar } from "./agent-sidecar.ts";
+import { buildOrphanPush, captureOrphans, noSessionSidecarPath, readAndClearSidecarAt, reviveOrphans, sidecarPath, writeSidecarAt } from "./agent-sidecar.ts";
 import { buildDiscussKickoff } from "./discuss.ts";
 import { registerGoalLoop, readGoalLoopConfig, resolveSettleDelayMs } from "./goal-loop.ts";
 import { resolveSkillsDir } from "./skills-dir.ts";
@@ -210,6 +210,7 @@ import {
 import { registerAuditCommands } from "./audit.ts";
 import { registerWsSkillTool } from "./lead-skills.ts";
 import { createToolPreviewTuiRef, loadToolResultTuiModules } from "./tool-result-render.ts";
+import { createAgentStorageContext } from "./agent-storage.ts";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const pluginDir = dirname(srcDir); // agents-plugin-pi/
@@ -303,6 +304,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   // handler (which gets a ctx of its own, but only after teardown has begun)
   // knows where to write the orphan sidecar.
   let leadSessionFile: string | undefined;
+  let leadSidecarPath: string | undefined;
   // 260904 Phase 2 (side-thread question surface): one thread registry per
   // extension instance. Its in-memory map is hydrated from (and written back
   // to) a sibling file of the lead's own session file on every session_start
@@ -454,7 +456,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
         previousOwnKeys,
       });
       const approval = createApprovalRelay(pi, { cwd: ctx.cwd }, rpcRegistryRef);
-      const tools = registerAgentTools(pi, h, { cwd: ctx.cwd }, approval, undefined, exploreGuidePath, toolPreviewTuiRef);
+      const tools = registerAgentTools(pi, h, { cwd: ctx.cwd, storage: createAgentStorageContext(ctx.sessionManager.getSessionId()) }, approval, undefined, exploreGuidePath, toolPreviewTuiRef);
       return { handle: h, agentTools: tools, onApprovalPending: approval };
     });
     if (!sessionBootstrap) return; // notified (and, for a spawned child, already exited) inside bootstrapOrFailLoud — never fall through to a partial/toolless registration.
@@ -505,9 +507,17 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // lead/fork session owns a thread registry — a worker/explore child has
     // none.
     threadHandle.ctxRef.current = ctx;
+    const dispatchSessionFile = ctx.sessionManager.getSessionFile();
+    leadSessionFile = dispatchSessionFile ?? undefined;
+    const dispatchStorage = createAgentStorageContext(ctx.sessionManager.getSessionId());
+    leadSidecarPath = dispatchSessionFile ? sidecarPath(dispatchSessionFile) : noSessionSidecarPath(dispatchStorage.root, dispatchStorage.ownerSessionId);
+    const recoveredRegistry = readAndClearSidecarAt(leadSidecarPath);
+    if (recoveredRegistry.length > 0) reviveOrphans(agentTools.rpcRegistry, recoveredRegistry, {
+      fork: (record) => armForkRoleWiring(pi, agentTools!.rpcRegistry, record, onForkQuestion),
+      executeWorker: (record) => { record.onApprovalPending = onApprovalPending; },
+    });
     if (isLeadOrFork(readSpawnRole(process.env))) {
-      const sessionFile = ctx.sessionManager.getSessionFile();
-      leadSessionFile = sessionFile ?? undefined;
+      const sessionFile = dispatchSessionFile;
       if (sessionFile) {
         hydrateThreadRegistry(threadHandle, threadRegistryPath(sessionFile));
         // 260905 orphan revival: a previous run of THIS lead session died (or
@@ -517,7 +527,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
         // when any of them was cut off mid-turn — tell the lead once. Runs
         // before `registerAsk`/`registerThreadCommands` only incidentally —
         // nothing below depends on it.
-        const orphans = readAndClearSidecar(sessionFile);
+        const orphans = recoveredRegistry;
         if (orphans.length > 0) {
           // Role-keyed wiring re-arm (review relay #1, I1): `spawnRole` is
           // persisted precisely so a revived FORK comes back with its question
@@ -655,8 +665,8 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // captures already-dormant (parked) records, but only a live-at-shutdown
     // snapshot correctly reports which ones were still `running` at that
     // instant; after stopAll() every record reads as dormant/idle.
-    if (leadSessionFile && agentTools) {
-      writeSidecar(leadSessionFile, captureOrphans(agentTools.rpcRegistry));
+    if (leadSidecarPath && agentTools) {
+      writeSidecarAt(leadSidecarPath, captureOrphans(agentTools.rpcRegistry));
     }
     // Await graceful RPC teardown of any still-live spawned `pi` children
     // before tearing down the bridge connection they were dispatching ws__*
@@ -667,6 +677,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     agentTools = undefined;
     rpcRegistryRef.current = undefined;
     leadSessionFile = undefined;
+    leadSidecarPath = undefined;
     // Held pushes die with the session, exactly like the Pi followUp queue
     // they stand in for: their registry is about to be discarded, so a status
     // line computed after this point would describe nothing. The sidecar

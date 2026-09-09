@@ -142,8 +142,20 @@ import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV } from "../src/proce
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { McpStdioClient, McpToolCallResult } from "../src/mcp-stdio-client.ts";
-import { readdirSync } from "node:fs";
+import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const storageRoots = new Set<string>();
+afterEach(() => {
+  for (const root of storageRoots) rmSync(root, { recursive: true, force: true });
+  storageRoots.clear();
+});
+function storageRoot(): string {
+  const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+  storageRoots.add(root);
+  return root;
+}
 
 function freshRunningRecord(): AgentRecord {
   return {
@@ -776,14 +788,13 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
     const pi = { registerTool: (tool: CapturedTool) => tools.set(tool.name, tool), sendMessage() {}, sendUserMessage() {} } as unknown as ExtensionAPI;
     const bridge = { client: { callTool }, wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" } } as never;
     const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" });
-    const ctx = { model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.6-high" }], hasConfiguredAuth: () => true } };
+    const ctx = { sessionManager: { getSessionId: () => "test-lead" }, agentStorageRoot: storageRoot(), model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.6-high" }], hasConfiguredAuth: () => true } };
     return { tool: tools.get("ws-agent-spawn")!, handle, ctx };
   }
 
   test("a named tier resolved 'unset' (resolved_from !== pi) refuses BEFORE any side effect: throws, no registry record, no session directory, no alias hold", async () => {
     const rpc = installRpcHarness();
     try {
-      const before = readdirSync(tmpdir()).filter(name => name.startsWith("ws-pi-agent-")).length;
       const { tool, handle, ctx } = harness(async (name) => { assert.equal(name, "config.resolve_agent"); return jsonResult({ resolved_from: "default", model: "gpt-5.6-terra" }); });
       await assert.rejects(
         () => tool.execute("call", { system_prompt_path: "/tmp/p.md", prompt: "hi", model_name: "small", alias: "wanted-alias" }, undefined, undefined, ctx),
@@ -791,7 +802,6 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
       );
       assert.equal(handle.rpcRegistry.size, 0, "a rejected spawn creates no registry entry");
       assert.equal([...handle.rpcRegistry.values()].some(r => r.alias === "wanted-alias"), false, "no alias hold either");
-      assert.equal(readdirSync(tmpdir()).filter(name => name.startsWith("ws-pi-agent-")).length, before, "a rejected spawn allocates no session directory");
     } finally { rpc.restore(); }
   });
 
@@ -816,6 +826,9 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
       assert.equal(called, false);
       assert.ok(parsed.agent_id);
       assert.equal(handle.rpcRegistry.size, 1);
+      const record = handle.rpcRegistry.get(parsed.agent_id)!;
+      assert.equal(record.ownership?.home, join(realpathSync(ctx.agentStorageRoot), "ws-agents", "test-lead", parsed.agent_id));
+      assert.equal(record.ownership?.sessionPath, record.sessionPath);
       await handle.stopAll();
     } finally { rpc.restore(); }
   });
@@ -962,7 +975,7 @@ describe("spawnAgent: onModelResolved (260906 Phase 2 dispatch-row rendering)", 
     const pi = { registerTool: (tool: CapturedTool) => tools.set(tool.name, tool), sendMessage() {}, sendUserMessage() {} } as unknown as ExtensionAPI;
     const bridge = { client: { callTool }, wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" } } as never;
     const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" });
-    const ctx = { model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.6-high" }], hasConfiguredAuth: () => true } };
+    const ctx = { sessionManager: { getSessionId: () => "test-lead" }, agentStorageRoot: storageRoot(), model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.6-high" }], hasConfiguredAuth: () => true } };
     return { tool: tools.get("ws-agent-spawn")!, sendTool: tools.get("ws-agent-send")!, handle, ctx };
   }
 
@@ -1101,7 +1114,7 @@ describe("explore tool: onModelResolved / resolved-line publishing (260906 Phase
       const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" });
       // Matches installRpcHarness's fixed `getState()` model — spawnRole
       // "explore"'s post-start `verifyResearchSelection` compares against it.
-      const ctx = { model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "pi", id: "small" }], hasConfiguredAuth: () => true } };
+      const ctx = { sessionManager: { getSessionId: () => "test-lead" }, agentStorageRoot: storageRoot(), model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "pi", id: "small" }], hasConfiguredAuth: () => true } };
       const tool = tools.get("explore")!;
       const updates: Array<{ content: unknown[]; details?: unknown }> = [];
       const raw = await tool.execute("call", { query: "why does this fail" }, undefined, (partial) => updates.push(partial), ctx);
@@ -3204,7 +3217,7 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
     assert.equal(options.env?.[WS_PI_APPROVAL_DIR_ENV], "/tmp/ws-pi-agent-z/approvals");
   });
 
-  test('260904 Phase 1 (side-thread fork): forkFrom set emits ["--fork", forkFrom, ...] instead of ["--session", sessionPath, ...], and sets the role marker to "fork"', () => {
+  test('forks keep their copied session under the owned --session-dir', () => {
     const options = buildRpcClientOptions(
       "/repo",
       undefined,
@@ -3213,7 +3226,7 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
       "read,bash",
       "/lead/session.jsonl",
     );
-    assert.deepEqual(options.args, ["--fork", "/lead/session.jsonl", "--extension", new URL("../src/index.ts", import.meta.url).pathname, "--tools", "read,bash"]);
+    assert.deepEqual(options.args, ["--fork", "/lead/session.jsonl", "--session-dir", "/tmp/ws-pi-agent-w", "--extension", new URL("../src/index.ts", import.meta.url).pathname, "--tools", "read,bash"]);
     assert.equal(options.env?.[WS_PI_SPAWN_ROLE_ENV], "fork");
   });
 
@@ -3235,9 +3248,9 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
     assert.equal(options.env?.[WS_PI_PARENT_SESSION_KEY_ENV], "");
   });
 
-  test("no forkFrom (the existing worker/execute-worker path): --session branch and role=worker are unchanged", () => {
+  test("workers provide their owned session directory", () => {
     const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-w4/session.jsonl", "/tmp/system.md", "read");
-    assert.deepEqual(options.args, ["--session", "/tmp/ws-pi-agent-w4/session.jsonl", "--append-system-prompt", "/tmp/system.md", "--tools", "read"]);
+    assert.deepEqual(options.args, ["--session", "/tmp/ws-pi-agent-w4/session.jsonl", "--session-dir", "/tmp/ws-pi-agent-w4", "--append-system-prompt", "/tmp/system.md", "--tools", "read"]);
     assert.equal(options.env?.[WS_PI_SPAWN_ROLE_ENV], "worker");
     assert.equal(options.env?.[WS_PI_PARENT_SESSION_KEY_ENV], "");
   });
@@ -3245,7 +3258,7 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
   test("260906 (lead explore as an async RPC child): spawnRoleOverride:\"explore\" wins outright over the forkFrom?fork:worker default", () => {
     const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-w5/session.jsonl", "/tmp/system.md", "read,grep,find,ls,bash", undefined, undefined, "explore");
     assert.equal(options.env?.[WS_PI_SPAWN_ROLE_ENV], "explore");
-    assert.deepEqual(options.args, ["--session", "/tmp/ws-pi-agent-w5/session.jsonl", "--append-system-prompt", "/tmp/system.md", "--tools", "read,grep,find,ls,bash"]);
+    assert.deepEqual(options.args, ["--session", "/tmp/ws-pi-agent-w5/session.jsonl", "--session-dir", "/tmp/ws-pi-agent-w5", "--append-system-prompt", "/tmp/system.md", "--tools", "read,grep,find,ls,bash"]);
   });
 
   test("260906: omitting spawnRoleOverride preserves today's forkFrom?fork:worker behavior unchanged", () => {

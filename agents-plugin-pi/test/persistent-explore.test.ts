@@ -1,7 +1,9 @@
-import { describe, test } from "node:test";
+import { afterEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync } from "node:fs";
+import { mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createAgentStorageContext } from "../src/agent-storage.ts";
 import { RpcClient, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   registerAgentTools,
@@ -13,6 +15,12 @@ import {
 import { WS_PI_EXPLORE_MODE_ENV, WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 import { captureOrphans, parseOrphans, reviveOrphans, serializeOrphans } from "../src/agent-sidecar.ts";
 import type { McpToolCallResult } from "../src/mcp-stdio-client.ts";
+
+const storageRoots = new Set<string>();
+afterEach(() => {
+  for (const root of storageRoots) rmSync(root, { recursive: true, force: true });
+  storageRoots.clear();
+});
 
 interface CapturedTool {
   name: string;
@@ -48,7 +56,16 @@ function installRpcHarness(state: { model: string; thinking: string; clamp?: str
   const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
   const calls: string[] = [];
   Object.assign(RpcClient.prototype, {
-    start: async () => { calls.push("start"); }, stop: async () => { calls.push("stop"); }, abort: async () => { calls.push("abort"); },
+    start: async function(this: { options?: { args?: string[] } }) {
+      calls.push("start");
+      const args = this.options?.args ?? [];
+      const sessionIndex = args.indexOf("--session");
+      const sessionDirIndex = args.indexOf("--session-dir");
+      const session = sessionIndex >= 0 ? args[sessionIndex + 1] : undefined;
+      const sessionDir = sessionDirIndex >= 0 ? args[sessionDirIndex + 1] : undefined;
+      if (session) writeFileSync(session, "mock session\n");
+      else if (sessionDir) writeFileSync(join(sessionDir, "session.jsonl"), "mock session\n");
+    }, stop: async () => { calls.push("stop"); }, abort: async () => { calls.push("abort"); },
     onEvent: () => () => {}, prompt: async (message: string) => { calls.push(`prompt:${message}`); },
     setThinkingLevel: async (level: string) => { calls.push(`thinking:${level}`); state.thinking = state.clamp ?? level; },
     getState: async () => {
@@ -78,11 +95,13 @@ function registerHarness(options: {
     wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" },
   } as never;
   const leafCalls: Array<{ ctx: unknown; opts: unknown }> = [];
-  const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" }, undefined, async (_client, _registry, ctx, _params, opts) => {
+  const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+  storageRoots.add(root);
+  const handle = registerAgentTools(pi, bridge, { cwd: "/tmp", storage: createAgentStorageContext("test-lead", root) }, undefined, async (_client, _registry, ctx, _params, opts) => {
     leafCalls.push({ ctx, opts });
     return options.leaf?.(ctx, opts) ?? { agentId: "leaf", state: "done", output: "evidence" };
   });
-  return { tools, handle, lookups: () => lookups, leafCalls };
+  return { tools, handle, root, lookups: () => lookups, leafCalls };
 }
 
 function activeDynamicTools(tools: Map<string, CapturedTool>, allowlist: string): string[] {
@@ -137,6 +156,8 @@ describe("persistent explore registration, dispatch, and frozen selection", () =
         const result = JSON.parse((await tool.execute("call", { query: "find the contract" }, undefined, undefined, toolCtx)).content[0]!.text);
         assert.deepEqual(Object.keys(result).sort(), ["agent_id", "alias"]);
         const researcher = h.handle.rpcRegistry.get(result.agent_id)!;
+        assert.equal(researcher.ownership?.home, join(realpathSync(h.root), "ws-agents", "test-lead", result.agent_id));
+        assert.equal(researcher.ownership?.sessionPath, researcher.sessionPath);
         assert.equal(researcher.toolGroup, "read-only");
         assert.equal(researcher.modelBase, "pi/small");
         assert.equal(researcher.modelEffort, "high", "Pi's actual clamp replaces requested xhigh before persistence");

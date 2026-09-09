@@ -43,7 +43,7 @@
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
 
-import { test, describe } from "node:test";
+import { afterEach, test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   FORK_TOOL_NAME,
@@ -72,7 +72,9 @@ import { WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV } from "../src/pr
 import type { BridgeHandle } from "../src/bridge.ts";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // Phase 2: these payload-focused fixtures model a user wake followed by
 // confirmed streaming start, rather than the retired undefined-idle fallback.
@@ -881,22 +883,23 @@ describe("ws-fork: onModelResolved forwarding (260906 Phase 2)", () => {
   function installRpcHarness() {
     const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
     Object.assign(RpcClient.prototype, {
-      async start(this: { options?: { env?: Record<string, string> } }) {
+      async start(this: { options?: { env?: Record<string, string>; args?: string[] } }) {
         const env = this.options?.env;
+        const sessionDir = this.options?.args?.[this.options.args.indexOf("--session-dir") + 1];
         const readinessPath = env?.[WS_PI_FORK_READY_PATH_ENV];
         const nonce = env?.[WS_PI_FORK_READY_NONCE_ENV];
         if (readinessPath && nonce) {
           writeFileSync(readinessPath, JSON.stringify({
             nonce,
             ownSessionKey: "fork-child-key",
-            sessionPath: "/tmp/ws-pi-agent-test/session.jsonl",
+            sessionPath: `${sessionDir}/session.jsonl`,
             sessionId: "fork-child-session-id",
           }));
         }
       },
       stop: async () => {}, abort: async () => {},
       onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {},
-      getState: async () => ({ model: { provider: "pi", id: "small" }, thinkingLevel: "medium", sessionFile: "/tmp/ws-pi-agent-test/session.jsonl" }),
+      getState: async function(this: { options?: { args?: string[] } }) { const dir = this.options?.args?.[this.options.args.indexOf("--session-dir") + 1]; return { model: { provider: "pi", id: "small" }, thinkingLevel: "medium", sessionFile: `${dir}/session.jsonl`, sessionId: "fork-child-session-id" }; },
     });
     return { restore: () => Object.assign(RpcClient.prototype, original) };
   }
@@ -914,7 +917,8 @@ describe("ws-fork: onModelResolved forwarding (260906 Phase 2)", () => {
     const registry: RpcAgentRegistry = new Map();
     registerFork(pi, bridge, registry, { cwd: "/tmp" });
     const toolCtx = {
-      sessionManager: { getSessionFile: () => "/tmp/fake-fork-source.jsonl" },
+      sessionManager: { getSessionFile: () => "/tmp/fake-fork-source.jsonl", getSessionId: () => "test-lead" },
+      agentStorageRoot: storageRoot(),
       model: { provider: "lead", id: "large" },
       thinkingLevel: "high",
       modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.6-high" }, { provider: "pi", id: "small" }], hasConfiguredAuth: () => true },
@@ -935,6 +939,8 @@ describe("ws-fork: onModelResolved forwarding (260906 Phase 2)", () => {
       assert.deepEqual((updates[0]!.details as { resolved: unknown }).resolved, expected);
       assert.deepEqual((raw.details as { resolved?: unknown } | undefined)?.resolved, expected, "the final return repeats the same shape");
       const record = registry.get(parsed.agent_id)!;
+      assert.equal(record.ownership?.home, join(realpathSync(toolCtx.agentStorageRoot), "ws-agents", "test-lead", parsed.agent_id));
+      assert.equal(record.ownership?.sessionPath, record.sessionPath);
       assert.equal(record.modelTier, "small");
       assert.equal(record.modelSource, "tier");
     } finally { rpc.restore(); }
@@ -960,3 +966,13 @@ describe("ws-fork: onModelResolved forwarding (260906 Phase 2)", () => {
     } finally { rpc.restore(); }
   });
 });
+const storageRoots = new Set<string>();
+afterEach(() => {
+  for (const root of storageRoots) rmSync(root, { recursive: true, force: true });
+  storageRoots.clear();
+});
+function storageRoot(): string {
+  const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+  storageRoots.add(root);
+  return root;
+}
