@@ -108,3 +108,20 @@ omits the `effort=` token; the response never contains another harness's
 bucket; the text form matches the scalar-knob line family; the persisted
 config still carries every harness unchanged (read back through
 `config.list`).
+
+## Blocked (2026-09-09)
+
+Blocked for the Pi-track ready-queue run by the existing develop-only authoring
+rule, not by an unresolved product decision. This ticket changes shared ws-mcp
+Go code; its Proposed direction and Constraints, and AGENTS.md's Pi-track
+clause (1), require authoring on `develop` and bringing the upstream change to
+the Pi track by cherry-pick. Do not implement the Go change on a Pi goal or
+implementation branch.
+
+Read-only verification at `develop` commit `84b1f825` found that the
+`config.tune` / `agents.tier` branch still returns
+`toolJSONResponse(req.ID, cfg, err)`, and ticket-linked history contains no
+implementation to import. Continue this ticket through the develop workflow;
+after its source, tests, and response-contract spec land there, re-evaluate the
+upstream commit and the released runtime before clearing this track-local
+blocker. No source change, release, or completion is claimed by this note.
