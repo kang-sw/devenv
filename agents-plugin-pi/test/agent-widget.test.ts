@@ -193,6 +193,9 @@ describe("buildWidgetLines", () => {
     const missing = { ...telemetry, model: undefined, effort: undefined, latestInput: undefined, estimatedUsd: undefined, answerHint: "/answer q1" };
     assert.match(buildWidgetLines([missing], 0, 40)![1], /\/answer q1$/);
     assert.ok(visibleWidth(buildWidgetLines([missing], 0, 40)![1]) <= 40);
+    const compact = { ...telemetry, name: "a", model: "p", effort: "l", latestInput: 7, estimatedUsd: .1 };
+    assert.match(buildWidgetLines([compact], 0, 80)![1], /p \(l\).*in 7.*est \$0.1/);
+    assert.match(buildWidgetLines([compact], 0, 120)![1], /p \(l\).*in 7.*est \$0.1/);
   });
   function runningRow(elapsedMs: number, name = "w") {
     return { name, role: "worker" as const, state: "running" as const, elapsedMs, answerHint: undefined };
