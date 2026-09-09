@@ -30,6 +30,34 @@ shared component — i.e. migration regressions, not new features.
 
 ## Decisions
 
+### Owner handoff correction and follow-up (2026-09-09)
+
+This update supersedes the original F1 diagnosis and missing functional
+acceptance entries below; they remain the historical report that motivated
+the WIP commit `2ff2f75b`.
+
+- The owner reports successful fork creation, fork owner-question creation and
+  `/answer` attachment, and model override from tier `small` to
+  `openai-codex/gpt-5.6-luna/high`.
+- The owner also confirms that `/done`, `Esc` followed by reopening, and tool
+  result collapse/expand passed in another session; the previous handoff
+  omitted those results. These are owner-reported live checks, not checks
+  rerun by this implementation session.
+- The exercised path is fork-raised. Its `/done` closes without summary
+  injection by design. The WIP investigation found no F1 source defect.
+  `ws-ask` and `ws-resolve` are deprecation candidates and currently excluded
+  from the active tool surface. Do not reactivate them to test this hotfix;
+  the unused lead-ask summary path is separate from this fork UX acceptance.
+- The owner requests a bounded follow-up hotfix: gray out tool-use text and
+  `working…`, and add one blank row above and below each user chat message
+  **inside its background**. The new presentation changes still need their
+  own live visual check after implementation; previously confirmed functional
+  checks are not missing evidence.
+- The owner requests one `gpt-5.6-sol` agent at `high` effort for this hotfix,
+  continuing the tight fix/verify loop used for the WIP.
+
+### Original observations
+
 Confirmed defects the owner observed live:
 
 Legibility / overlay chrome:

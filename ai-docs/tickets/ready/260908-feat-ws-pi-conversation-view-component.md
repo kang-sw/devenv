@@ -368,6 +368,13 @@ failing-test-name set to baseline), zero regressions introduced.
 
 ## Blocked (2026-09-09)
 
+Current acceptance correction: the owner subsequently confirmed the fork
+question flow, `/done`, `Esc`/reopen, and tool collapse/expand as passed in
+other live sessions (see the follow-up below). The original checklist and
+attempt remain historical evidence, not a request to repeat those checks.
+The remaining presentation follow-up is tracked by
+`260909-bug-ws-pi-conversation-view-overlay-legibility-and-done-marker-regressions`.
+
 Both phases are implemented and review-clean, but this ticket cannot close to
 `.done/` until the **owner-run acceptance runbook** passes — these checks are
 human-only and were never agent-cleared:
@@ -406,3 +413,26 @@ a tool call, and `/done`. Observed results:
 
 Item 1 has only proxy evidence, and items 2 and 3 remain failed or unverified,
 so the owner-live gate is still blocked and the ticket must not move to `.done/`.
+
+### Owner-live handoff correction (2026-09-09)
+
+The owner reports successful fork creation, fork owner-question creation and
+`/answer` attachment, with the `small` tier resolving to
+`openai-codex/gpt-5.6-luna/high`. The owner also confirms that `/done`, `Esc`
+followed by reopening, and tool result collapse/expand passed in another
+session; their absence from the prior handoff did not mean they were untested.
+This is owner-reported live evidence, not an agent rerun.
+
+The live path is fork-raised, where `/done` correctly closes without injecting
+a summary. As the WIP `2ff2f75b` investigation established, that observation
+does not demonstrate a lead-ask summary defect. The owner clarified that
+`ws-ask` and `ws-resolve` are deprecation candidates and intentionally absent
+from the active tool surface; re-enabling them is outside this acceptance run.
+The historical lead-ask runbook is not the current fork test procedure.
+
+The owner requests three presentation refinements under `260909`: gray tool-use
+text, gray `working…`, and one background-filled blank row above and below
+user chat content. Keep that new visual check separate from the confirmed
+functional results. This update does not claim direct host-instance
+instrumentation or an `idle-awaiting-owner` check; the `/answer` binding still
+exposes only `running` and `settled` through `forkChannelLiveness`.
