@@ -97,6 +97,7 @@ import { suggestModels, formatExploreTierRefusal, formatTierWarning, modelCatalo
 import { WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readExploreMode, readSpawnRole, type ExploreMode, type SpawnRole } from "./process-role.ts";
 import { captureForkContext, compareForkRegistrations, removeForkTransport, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
 import { allocateAgentHome, createAgentStorageContext, isOwnedSessionPath, observeSessionWrite, readOwnership, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
+import { readSessionEntries, reduceTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers: tool-group resolution, terminal-stopReason classification,
@@ -857,6 +858,8 @@ export interface RpcAgentRecord {
   modelBase?: string;
   /** Caller-supplied thinking level, applied via `setThinkingLevel()` after every (re)start. */
   modelEffort?: string;
+  /** Observed child selection and recomputed durable usage; launch intent stays above. */
+  telemetry?: AgentTelemetry;
   /**
    * 260906 Phase 2 (YAML/TUI dispatch-row rendering): the raw tier name
    * (`params.modelName`) requested at spawn, or `undefined` for an inherit
@@ -1091,6 +1094,32 @@ export interface RpcAgentRecord {
    * `onApprovalPending` of its own, gets it for free.
    */
   onApprovalPending?: (record: RpcAgentRecord) => void;
+}
+
+/** Binds once before the first prompt and only recomputes from durable IDs thereafter. */
+export function refreshAgentTelemetry(record: RpcAgentRecord, state?: { sessionFile?: string; sessionId?: string; model?: { provider?: string; id?: string }; thinkingLevel?: string }): boolean {
+  const path = state?.sessionFile ?? record.sessionPath;
+  const read = readSessionEntries(path);
+  const sessionId = state?.sessionId ?? (read && !("transient" in read) ? read.headerId : undefined);
+  if (!record.telemetry) {
+    if (!sessionId) return false;
+    // A non-fork legacy child has no inherited history and can be recovered
+    // completely. A fork without its saved boundary must remain unknown.
+    if (read && !("transient" in read) && read.parentSession) return false;
+    const origin: TelemetryOrigin = { sessionId, sessionPath: path, emptyPrefix: true };
+    record.telemetry = { version: 1, origin };
+  }
+  const telemetry = record.telemetry;
+  if (telemetry.origin.sessionPath !== path || (sessionId && telemetry.origin.sessionId !== sessionId)) return false;
+  const model = state?.model?.provider && state.model.id ? `${state.model.provider}/${state.model.id}` : undefined;
+  if (model) telemetry.model = model; else if (state) delete telemetry.model;
+  if (typeof state?.thinkingLevel === "string" && state.thinkingLevel) telemetry.effort = state.thinkingLevel; else if (state) delete telemetry.effort;
+  const reduced = reduceTelemetry(telemetry.origin, read);
+  if (!reduced) return false;
+  const before = JSON.stringify(telemetry);
+  delete telemetry.latestInput; delete telemetry.estimatedUsd;
+  Object.assign(telemetry, reduced);
+  return before !== JSON.stringify(telemetry);
 }
 
 /**
@@ -2303,9 +2332,28 @@ export function attachEventListener(
   client: RpcClient,
   onApprovalPending?: (record: RpcAgentRecord) => void,
 ): void {
+  let refreshing = false;
+  let dirty = false;
+  const generation = record.launchGeneration;
+  const refresh = () => {
+    dirty = true;
+    if (refreshing) return;
+    refreshing = true;
+    void (async () => {
+      do {
+        dirty = false;
+        try {
+          const state = await client.getState();
+          if (record.client === client && record.launchGeneration === generation && refreshAgentTelemetry(record, state)) triggerAgentWidgetRefresh();
+        } catch { /* retain the previous complete snapshot */ }
+      } while (dirty && record.client === client && record.launchGeneration === generation);
+      refreshing = false;
+    })();
+  };
   record.unsubscribe = client.onEvent((evt) => {
     const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string };
     const outcome = applyRpcEvent(record, e);
+    if (e.type === "agent_start" || e.type === "agent_settled" || e.type === "message_end" || e.type === "message_update" || e.type === "thinking_level_changed") refresh();
     if (outcome.push) {
       pushToLead(pi, registry, record, outcome.push.family, outcome.push.payload, outcome.push.deliverAs);
     }
@@ -2716,6 +2764,9 @@ export async function spawnAgent(
     } else {
       await applyModelEffort(client, record.modelEffort);
     }
+    // Capture the immutable pre-first-prompt boundary after all selection
+    // work, before prompt() can append any attributable child turn.
+    refreshAgentTelemetry(record, await client.getState());
     if (forkLaunch) await captureForkSelection(client, record);
     attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     attachFirstTaskForkCacheNotice(record, client, ctx.forkCacheNoticeOwner);
@@ -2823,6 +2874,7 @@ export async function sendToAgent(
       } else {
         await applyModelEffort(client, record.modelEffort);
       }
+      refreshAgentTelemetry(record, await client.getState());
       if (forkLaunch) await captureForkSelection(client, record);
       attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     } catch (err) {

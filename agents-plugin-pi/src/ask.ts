@@ -93,6 +93,7 @@ import { loadHostPiTui, type MarkdownTheme } from "./pi-tui.ts";
 import { captureForkContext, captureRegisteredTools, captureUnflushedForkSource, effectiveForkDescriptor, type ForkContext } from "./fork-context.ts";
 import type { LeadPromptRef } from "./lead-bootstrap.ts";
 import { readOwnership, validDescriptor } from "./agent-storage.ts";
+import { parseTelemetry, type AgentTelemetry } from "./agent-telemetry.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers. Unit-tested directly (test/ask.test.ts) with no
@@ -407,6 +408,7 @@ export interface PersistedForkResume {
   toolGroup: ToolGroup;
   modelBase?: string;
   modelEffort?: string;
+  telemetry?: AgentTelemetry;
   ownership?: import("./agent-storage.ts").AgentOwnership;
 }
 
@@ -694,6 +696,7 @@ export function captureForkResume(record: RpcAgentRecord): PersistedForkResume {
     toolGroup: record.toolGroup,
     modelBase: record.modelBase,
     modelEffort: record.modelEffort,
+    ...(record.telemetry ? { telemetry: record.telemetry } : {}),
     ...(record.ownership ? { ownership: record.ownership } : {}),
   };
 }
@@ -717,6 +720,7 @@ export function rehydrateForkRecord(agentId: string, resume: PersistedForkResume
     ...(resume.forkContext ? { forkContext: resume.forkContext } : {}),
     modelBase: resume.modelBase,
     modelEffort: resume.modelEffort,
+    ...(parseTelemetry(resume.telemetry) ? { telemetry: parseTelemetry(resume.telemetry) } : {}),
     wsToolNames: [...resume.wsToolNames],
     toolGroup: resume.toolGroup,
     explicitTools: resume.explicitTools,

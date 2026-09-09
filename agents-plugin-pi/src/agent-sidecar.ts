@@ -43,6 +43,7 @@ import { startOwnedSessionObserver, type RpcAgentRecord, type RpcAgentRegistry, 
 import { parseForkContext, type ForkContext } from "./fork-context.ts";
 import type { ExploreMode } from "./process-role.ts";
 import { readOwnership, updateOwnership, validDescriptor, type AgentOwnership } from "./agent-storage.ts";
+import { parseTelemetry, type AgentTelemetry } from "./agent-telemetry.ts";
 
 /** Sidecar file version. Bumped only on a breaking shape change; a mismatch is treated as "no sidecar". */
 export const SIDECAR_VERSION = 1;
@@ -64,6 +65,7 @@ export interface PersistedOrphan {
   forkContext?: ForkContext;
   modelBase?: string;
   modelEffort?: string;
+  telemetry?: AgentTelemetry;
   wsToolNames: string[];
   toolGroup: ToolGroup;
   explicitTools?: string;
@@ -138,6 +140,7 @@ export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
       ...(record.forkContext ? { forkContext: record.forkContext } : {}),
       modelBase: record.modelBase,
       modelEffort: record.modelEffort,
+      ...(record.telemetry ? { telemetry: record.telemetry } : {}),
       wsToolNames: [...record.wsToolNames],
       toolGroup: record.toolGroup,
       explicitTools: record.explicitTools,
@@ -227,6 +230,7 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
       ...(forkContext ? { forkContext } : {}),
       modelBase: typeof o.modelBase === "string" ? o.modelBase : undefined,
       modelEffort: typeof o.modelEffort === "string" ? o.modelEffort : undefined,
+      ...(parseTelemetry(o.telemetry) ? { telemetry: parseTelemetry(o.telemetry) } : {}),
       wsToolNames: Array.isArray(o.wsToolNames) ? o.wsToolNames.filter((n): n is string => typeof n === "string") : [],
       toolGroup: (o.toolGroup ?? "full-worker") as ToolGroup,
       explicitTools: typeof o.explicitTools === "string" ? o.explicitTools : undefined,
@@ -276,6 +280,7 @@ export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
     ...(orphan.forkContext ? { forkContext: orphan.forkContext } : {}),
     modelBase: orphan.modelBase,
     modelEffort: orphan.modelEffort,
+    ...(orphan.telemetry ? { telemetry: orphan.telemetry } : {}),
     wsToolNames: [...orphan.wsToolNames],
     toolGroup: orphan.toolGroup,
     explicitTools: orphan.explicitTools,
