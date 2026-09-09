@@ -1,6 +1,7 @@
 /** Read-only, durable child-session telemetry.  This deliberately does not
  * use SessionManager: opening a production history can migrate/write it. */
 import { existsSync, readFileSync } from "node:fs";
+import { isDeepStrictEqual } from "node:util";
 
 export interface TelemetryOrigin { sessionId: string; sessionPath: string; prefixEntryId?: string; emptyPrefix?: true }
 export interface AgentTelemetry { version: 1; origin: TelemetryOrigin; model?: string; effort?: string; latestInput?: number; estimatedUsd?: number }
@@ -34,8 +35,13 @@ export function readSessionEntries(path: string): { headerId: string; parentSess
   const h = parsed.shift() as { type?: unknown; version?: unknown; id?: unknown; parentSession?: unknown } | undefined;
   if (!h || h.type !== "session" || h.version !== 3 || typeof h.id !== "string" || !h.id) return undefined;
   const entries: Entry[] = [];
-  const ids = new Set<string>();
-  for (const e of parsed) { if (!e || typeof e !== "object" || typeof (e as Entry).id !== "string" || !(e as Entry).id || ids.has((e as Entry).id)) return undefined; ids.add((e as Entry).id); entries.push(e as Entry); }
+  const byId = new Map<string, Entry>();
+  for (const raw of parsed) {
+    if (!raw || typeof raw !== "object" || typeof (raw as Entry).id !== "string" || !(raw as Entry).id) return undefined;
+    const e = raw as Entry, prior = byId.get(e.id);
+    if (prior) { if (!isDeepStrictEqual(prior, e)) return undefined; continue; }
+    byId.set(e.id, e); entries.push(e);
+  }
   return { headerId: h.id, ...(typeof h.parentSession === "string" && h.parentSession ? { parentSession: h.parentSession } : {}), entries };
 }
 /** Recomputes, never adds. Invalid complete input returns undefined so callers retain a stale valid snapshot. */
@@ -47,8 +53,8 @@ export function reduceTelemetry(origin: TelemetryOrigin, read: ReturnType<typeof
   let total = 0, observedCost = false, invalidCost = false, latest: number | undefined;
   for (const e of read.entries.slice(start)) {
     const assistant = e.type === "message" && e.message?.role === "assistant";
-    const usage = usageOf(assistant ? e.message?.usage : e.usage);
-    if (!usage) continue;
+    const usage = usageOf(e.message?.usage ?? e.usage);
+    if (!usage) { if (assistant) invalidCost = true; continue; }
     if (assistant) latest = usage.input; // later summary entries below clear this.
     if (e.type === "compaction" || e.type === "branch_summary") latest = undefined;
     if (usage.cost === undefined) invalidCost = true; else { observedCost = true; total += usage.cost; }
@@ -57,5 +63,8 @@ export function reduceTelemetry(origin: TelemetryOrigin, read: ReturnType<typeof
 }
 export function refreshTelemetry(snapshot: AgentTelemetry): AgentTelemetry | undefined {
   const reduced = reduceTelemetry(snapshot.origin, readSessionEntries(snapshot.origin.sessionPath));
-  return reduced === undefined ? undefined : { ...snapshot, ...reduced };
+  if (reduced === undefined) return undefined;
+  const next = { ...snapshot };
+  delete next.latestInput; delete next.estimatedUsd;
+  return { ...next, ...reduced };
 }
