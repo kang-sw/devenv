@@ -1,146 +1,145 @@
 ---
-summary: On auditing skill/agent/prompt/convention content — authoring rules and invariant checklist
+summary: Authoring standard for skills, playbooks, agent prompts, and conventions written for current-generation models — reader model, rule lifecycle, rule tests, layouts, audits
 ---
 
 # Skill Authoring
 
-Canonical reference for skill and agent authoring.
-Apply rules directly; add local procedure only when the target needs it.
+Standard for every skill, playbook, agent prompt, and convention this
+repository ships. Read it before editing any of them. It optimizes one thing:
+**fewest lead turns and fewest stops per ticket at unchanged review quality.**
+The finite resources are the user's attention at each stop, wall-clock latency,
+and the worker's context window; the lead's context is not the constraint.
+
+## Reader Model
+
+- The reader reads the whole file and treats every imperative as binding. Its
+  failure mode is over-compliance: applying a rule outside the scope its author
+  had in mind, and taking the heavier path whenever a rule leaves it unsure. It
+  does not skip, and it does not need repetition.
+- Therefore every rule says when it applies and what the default is when it
+  does not. A one-clause rationale is content, not overhead: the reader uses it
+  to decide non-application.
+- Reader tiers differ. A **worker** (current-mainstream or previous-generation
+  flagship class, holding a whole ticket) gets outcome, constraints, and a
+  closed stop list. A **cheap-tier delegate** (fact population, survey, review
+  scouting) gets a bounded task, pointer inputs, and a fixed output shape.
+  Text written for one tier is wrong for the other.
 
 ## Layer Model
 
-Every piece of skill content belongs to exactly one layer. Layers 1 and 2 are
-owned by the MCP tool — delete their content from the playbook unconditionally.
+Every sentence of skill content belongs to exactly one layer. Layers 1 and 2
+are owned by the MCP tool; delete their content from prose unconditionally.
 
-| Layer | Owns | Model-accessible? | Delete from playbook? |
+| Layer | Owns | Model-accessible? | In prose? |
 |-------|------|------|------|
-| 1 — MCP schema | Input field names, types, enums, call format; response schema (Next: labels, state update field names) | Yes — via ToolSearch before call, tool response after | Yes — restatement drifts |
-| 2 — MCP internal | Routing computation, verdict selection logic, and all post-call output text (e.g. `NextInstruction`, a todo's `Instruction` field) | No — black box; post-call instructions arrive via tool response | Yes — always invisible; playbook lines that say what to do with a tool's post-call output (e.g. `Next:`, a todo `Instruction`) are Layer 2 restatement |
-| 3 — Playbook | Pre-call only: observation targets, soft judgments, non-obvious edge cases, step choreography, doctrine | Yes — this file | N/A — keep only what passes the destructive-first test |
+| 1 — MCP schema | Field names, types, enums, call format, response fields | Yes, via tool discovery and the response | No — restatement drifts |
+| 2 — MCP internal | Deterministic computation and all post-call output text (`Next:`, todo instructions) | No; it arrives in the response | No — prose that says what to do with post-call output is restatement |
+| 3 — Prose | Pre-call only: what to observe, the judgment the tool cannot compute, non-obvious edge cases, the stop list | Yes | Only what passes the test below |
 
-Layer 3 is **pre-call only**. After the MCP call, the model follows the tool's returned output exactly (e.g. `Next:`, a todo `Instruction`); post-call branch handling belongs in that output, not in playbook prose. These are examples of a post-call output channel, not an exhaustive list — a new MCP output shape is still Layer 2.
+Test every section, burden of proof on keeping it:
+- Would a reader with only Layer 3 plus the tool schemas reach the same outcome?
+  Yes → delete.
+- Does it say what to do with something a tool returns post-call? Yes → delete,
+  after confirming against the tool's actual output text.
+- Uncertain → delete. A missing Layer 3 line costs one wrong execution; a stale
+  Layer 1/2 copy drifts silently.
 
-### Gate: which layers apply?
+Exempt: text rendered verbatim into a delegate prompt (`playbook.render`
+payloads, template blocks). Its reader has no session context; apply the
+layouts below to it, not this test.
 
-- **Layer 1** applies when the skill calls a typed MCP tool (e.g. `enter.*`, `git.commit`).
-- **Layer 2** applies when conditional routing/verdict logic has been moved into an MCP tool. If the logic still lives in playbook prose with no MCP tool computing it — file a Lever B migration ticket; do not audit as if Layer 2 is present.
-- **Layer 3** always applies.
+Move logic into a tool only when it is deterministic (a git range, a directory
+move, a stamp). Judgment never moves into a tool input the model must
+pre-populate: that converts one judgment into a fact-gathering turn plus a
+judgment, and is how routing surfaces grow.
 
-### Destructive-first stance
+## Rule Lifecycle
 
-Burden of proof is on keeping content, not on deleting it.
+- A rule exists to prevent a named failure, and cites it in one clause. A
+  rule with no citable failure is deleted.
+- Add a rule only for a failure observed on the current worker tier. When the
+  tier changes, reproduce each rule's failure or delete the rule; rules are not
+  kept as insurance.
+- Repeated friction is not a reason to add a gate. A gate whose default is the
+  heavier path is a defect: state the cheap default and the condition that
+  escalates.
+- Unspecified cases are intentional judgment gaps. Leave them empty.
+- Compress before adding: delete filler and duplicates, keep exact technical
+  nouns, and keep full grammar where compression could change order, ownership,
+  or safety.
 
-Test for every section or rule:
-- *"Would a model following only Layer 3 + MCP tool schemas reach the same execution outcome?"* — Yes → delete.
-- *"Does this say what to do with content an MCP tool returns post-call (e.g. `Next:`, a todo `Instruction`)?"* — Yes → Layer 2 output restatement → delete. Confirm against the tool's actual generated text, not the schema alone.
-- **No to both** → Layer 3; apply the invariant checklist before keeping.
-- **Uncertain** → delete. A missing Layer 3 rule causes one wrong execution; a stale Layer 1/2 copy causes compounding drift.
+## Rule Tests
 
-Doctrine is Layer 3 only when at least one invariant re-derives from it; otherwise delete.
+Every rule passes all seven: **Falsifiable** (a concrete violation can be
+described) · **Actionable** (says what to do) · **Scoped** (says when it does
+not apply, or names its cheap default) · **Non-derivable** (a reader with the
+code, the tests, and the tool schemas could not infer it) · **Failure-cited**
+(names the failure it prevents, reproducible on the current tier) ·
+**Non-redundant** (no other line covers it) · **Resolvable downstream**
+(resolves in a project holding only what bootstrap installs; see `AGENTS.md`
+Architecture Rule 4 for what shipped text may not name).
 
-Exempt: text rendered verbatim into a subagent/delegate prompt (`Templates` blocks, `playbook.render` payloads). Its reader has no session context or access to this skill's Invariants — apply Agent Layout self-containment to it, not this test.
+Grouped rules are allowed: `Group Name` / `- <rule>`. Group names classify;
+they are not rules.
 
-## Authoring Rules
+## Style
 
-### Reader model
+- State the outcome, the constraints, and the stop conditions. Write steps only
+  where order is a safety property.
+- Write prohibitions as prohibitions and preferences as preferences with their
+  default. Do not soften a prohibition into a preferred alternative.
+- At most one example, and only of an output shape.
+- No doctrine sections. The optimization target is the file's first sentence;
+  rationale sits on the rule it justifies. A separate doctrine paragraph was a
+  device for readers that needed to re-derive dropped rules; this reader keeps
+  them.
+- Pointers, not summaries. Inputs are paths, stems, and ranges; another agent's
+  summary is never a reader's sole input; any structured output carries an
+  explicit omitted/deferred field.
+- Skills reference other skills only as invocation targets
+  (`{{.SkillNamespace}}:<skill>`); handoffs share the conversation and need no
+  carry block; name the target and its entry, never its internal judgments.
+- User-approval gates apply on direct user invocation only. Chained invocations
+  re-ask only for the Approval Protocol's always-ask category.
 
-- Audience is a model re-reading under attention pressure, not a leisurely human reader.
-- One-liners survive pressure; paragraphs are skipped. Every rule fits one line.
-- Preserve full grammar when compression could change order, ownership, or safety.
+## Layouts
 
-### Content
+Directives at the top, no doctrine at the bottom.
 
-- Skills stand alone; reference other skills only as explicit invocation targets (`{{.SkillNamespace}}:<skill>`).
-- Agents stand alone; do not reference session state or conversation history.
-- Use examples only when they prevent repeated wrong execution.
-- Prefer `Do X through Y` over `Do not do X` when a positive action exists.
-- Skill-to-skill handoffs share the active conversation; write `Continue through <skill>` without a carry block.
-- Skill-level user-approval gates apply only on direct user invocation; chained invocations re-ask only for safety, deletion, or explicit consent rules.
-- When invoking another skill, name only the target skill and entry route; do not pre-decide its internal judgments.
+**Lead skill** (thin): Identity → what the lead does here (converse, manage the
+ticket inventory, spawn, handle first-line escalation) → the stops it surfaces
+to the user → Output. It carries no procedure a worker executes.
 
-### Iteration
+**Worker playbook** (`kind: render`): Identity and addressee (a worker holding
+a lead-capability key, reporting to the lead, never waiting for a human) →
+Inputs as pointers (ticket path and stem, the project's declared conventions
+hook, the manuals the ticket cites) → Constraints → the closed stop list →
+Report shape. Self-contained through pointers; communication rules are injected
+by the caller, not written into the playbook.
 
-- Repeatedly violated rule → mechanize with structure rather than restate it.
-- Compress before adding: delete filler, merge duplicates, keep exact technical nouns.
-- Add rules only for observed wrong executions or non-obvious constraints. Unspecified cases are intentional judgment gaps — leave them empty. If gap intentionality is unclear during authoring or audit, surface it to the human author before encoding.
-- After each pass: re-read additions, cut, then apply the Layer test to every section.
-- After edits: run **On: Fresh-Reader Audit**. After doctrine/routing/layout edits: also run **On: Downstream Consistency Sweep**.
+**Cheap-tier delegate**: Identity → one bounded task → pointer inputs → fixed
+output shape with an omitted/deferred field. No judgment beyond the task.
 
-### Invariant checklist
+## Audits
 
-Every invariant must pass all seven: **Falsifiable** (concrete violation describable?) · **Actionable** (says what to do, not just avoid?) · **One line** (fits without a paragraph?) · **Context-free** (understandable without surrounding file?) · **Non-redundant** (says something no other line covers?) · **Doctrine-aligned** (re-derives from the file's doctrine?) · **Resolvable downstream** (resolves in a project holding only what bootstrap installs?).
+**Fresh-reader audit** — once per skill or playbook before it lands, not after
+every edit.
+1. A separate reviewer reads only the target file: no conversation, project
+   docs, or metadata. Bar: a good-faith reader who applies the stated purpose
+   without hunting for loopholes.
+2. It flags: awkward, surprising, context-dependent, underspecified,
+   contradictory, duplicated, orphaned, missing end-state wording, Layer 1/2
+   restatement, **a rule that sends a careful reader down the heavier path when
+   unsure**, and **a rule that prevents a failure the current tier does not
+   commit**.
+3. Per finding: quote, issue, severity, suggested rewrite or deletion.
+4. Classify `fix` · `risk accepted` (record cost) · `intentional difference` ·
+   `out of scope`. Edit `fix` only. One cycle; a second only if a fix produced a
+   new finding.
 
-Grouped invariant lists are allowed: `Group Name` / `- <invariant>`. Group names classify only; they are not rules.
+**Mirror sweep** — when a change touches a surface mirrored into
+`agents-plugin-wsflow`, read `ai-docs/manuals/wsflow-mirroring.md` first and
+regenerate with its documented command; never hand-edit the mirror.
 
-### Doctrine format
-
-Name the finite resource; state the guiding principle. Use measurable nouns ("context window", not "quality"). Keep only when at least one invariant re-derives from it.
-
-## Skill Layout
-
-**Routing skill** (Layer 2 applies — skill delegates decisions to `enter.*`):
-
-Shape: `Invariants` → `On: invoke` (observe → judge → dispatch, thin) → `Judgments` → `Doctrine`
-
-- Handlers are thin: gather facts, call `enter.*`, follow `Next:`. Routing logic belongs in the MCP tool.
-- Keep `judge:` tables only for soft decisions the MCP tool cannot compute (ambiguous inputs requiring model assessment).
-- H3 sub-blocks not needed for thin dispatch handlers.
-
-**Choreography skill** (Layer 2 does not apply — sequential steps, no routing MCP tool):
-
-Shape: `Invariants` → `On: X` handlers → `Judgments` → `Templates` → `Doctrine`
-
-- Handlers may be multi-step; use H3 sub-blocks when a handler exceeds four steps with mixed responsibility.
-- Name each sub-block by its responsibility; do not split single-purpose checklists.
-- State each rule once: if an Invariant already captures a constraint, remove it from handler steps.
-- Judge lives where its gated procedure lives; if the procedure is delegated to another skill, move the judge with it.
-
-Both: directives at top, doctrine at bottom, never interleaved. Soft judgments extracted from handlers, named `judge: <name>`, referenced by name.
-
-## Agent Layout
-
-1. **Identity** — one sentence: what you are and what you do.
-2. **Constraints** — scope boundaries, hard rules. Same checklist as skill invariants.
-3. **Process** — step-by-step; typically a single linear flow.
-4. **Heuristics** — decision tables, escalation criteria. Omit if decisions are purely mechanical.
-5. **Output** — structured return format. Required.
-6. **Doctrine** — one paragraph.
-
-Agents start with no session context; keep self-contained. Inject communication rules from the calling skill, not the agent definition.
-
-## On: Fresh-Reader Audit
-
-Targets: `agents-plugin/rsrc/lead-*/lead-*.md` and `agents-plugin/skills/*/SKILL.md`.
-Bar: a good-faith reader who applies the stated purpose without hunting for loopholes.
-
-1. Run a separate fresh reviewer with only the target file; no prior conversation, project docs, or metadata.
-2. Ask reviewer to flag: awkward, surprising, context-dependent, underspecified, contradictory, duplicated, orphaned, missing end-state wording, **and any section that restates an MCP tool schema (Layer 1/2 content in playbook)**.
-3. Require per finding: quote, issue, severity (low/medium/high), suggested rewrite or deletion.
-4. Classify: `fix` · `risk accepted` (record cost and risk) · `intentional difference` · `out of scope`.
-5. Edit only `fix` findings. Max three cycles; stop when no `fix` remains or report unresolved.
-
-## On: Routing Coverage Audit
-
-Applies when Layer 2 is present (skill calls `enter.*` or equivalent).
-
-1. Enumerate all `Next:` values the MCP tool can emit; use tool source or static-analysis subagent.
-2. For each value: verify Layer 3 has adequate fact-gathering guidance for the model to reach it correctly.
-3. For each underspecified `Next:` (post-call model judgment required): verify Layer 3 has supplemental guidance.
-4. Flag branches with no Layer 3 coverage and branches where `Next:` is ambiguous without playbook support.
-
-## On: Downstream Consistency Sweep
-
-After doctrine, terminology, routing, layout, or audit-gate edits:
-
-1. Select affected rsrc playbooks, entry skills, agent prompts, specs, and mirrored surfaces.
-2. When a mirrored surface includes `agents-plugin-wsflow`, read `ai-docs/manuals/wsflow-mirroring.md` first and follow its required checks — its `rsrc/` tree is a generated byte-identical mirror; regenerate it with the documented test command, never hand-edit it.
-3. Conservative finding-only first pass; classify each finding as `fix` / `risk accepted` / `intentional difference` / `out of scope`.
-4. Edit only `fix` findings; record intentional differences when drift would otherwise look stale.
-
-## Doctrine
-
-Skill and agent files are reread under attention pressure. Every choice optimizes for
-**executability under pressure**: Layer-owned content deleted, skimmable imperatives
-first, mechanical structure where judgment fails, preserved judgment where mechanism
-would lose signal, rationale collapsed into doctrine. When ambiguous, choose what
-the pressured model executes reliably.
+The former routing-coverage audit is retired with the routing surface it
+audited; a resolver's verdict set is covered by that tool's tests.

@@ -3065,16 +3065,21 @@ func TestSkillAuthoringRelocatedOutOfRsrc(t *testing.T) {
 		t.Fatalf("relocated authoring manual missing: %v", err)
 	}
 	body := string(raw)
-	if !strings.Contains(body, "executability under pressure") {
-		t.Error("relocated manual lost the doctrine text 'executability under pressure'")
-	}
 	// The manual carries manuals-tier `summary:` frontmatter, not the
 	// rsrc playbook-serving frontmatter (`kind:`, `delegates:`, etc.) which
 	// has no meaning outside rsrc and must not have come along with the move.
-	if !strings.Contains(body, "summary:") {
+	// Only the frontmatter block is inspected: the body may legitimately
+	// mention `kind: render` when describing playbook layouts.
+	frontmatter := body
+	if strings.HasPrefix(body, "---\n") {
+		if end := strings.Index(body[4:], "\n---"); end >= 0 {
+			frontmatter = body[:4+end]
+		}
+	}
+	if !strings.Contains(frontmatter, "summary:") {
 		t.Error("relocated manual is missing manuals-tier `summary:` frontmatter")
 	}
-	if strings.Contains(body, "kind:") {
+	if strings.Contains(frontmatter, "kind:") {
 		t.Error("relocated manual still carries rsrc playbook-serving frontmatter")
 	}
 }
