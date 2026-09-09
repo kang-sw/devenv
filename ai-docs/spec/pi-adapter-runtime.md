@@ -1088,10 +1088,18 @@ and carry no cap.
 
 The whole message — head, body, and status — paints on a theme-aware shared
 background (the `customMessageBg` token, the same one Pi's own default
-custom-message box uses) with a subdued/gray foreground (`muted`/`dim`
-tokens), replacing the prior `customMessageLabel`/`customMessageText`
-coloring. Family/agent identity, status meaning, and every existing
-interaction control are retained.
+custom-message box uses). Bodies and truncation markers use the subdued
+`muted` foreground, and status lines remain `dim`. Family/agent identity,
+status meaning, and every existing interaction control are retained.
+
+Report headers have a distinct theme-aware foreground.
+{#260910-pi-report-header-distinction} Only the registered `ws-agent-report`
+family uses `customMessageLabel` for its header; all other push headers remain
+`muted`. The distinction applies to collapsed and expanded reports and follows
+live theme changes through the existing native rendering lifecycle. It changes
+neither body/background styling nor message payloads, delivery, or wake behavior.
+Existing terminal sanitization, width fitting, and cached preparation/layout
+remain in use; repeated unchanged rendering does not prepare hidden bodies again.
 
 ### Transcript path accessor {#260904-pi-agent-transcript-path}
 
