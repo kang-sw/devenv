@@ -335,9 +335,10 @@ func withRecommendedRenderBinding(payload, harness, tier string, configOpts wsco
 //   - "leaf" → roleLeaf
 //   - "worker" → roleLead: a worker executes a whole unit of work end to end
 //     (route, edit, verify, review, commit, close), so it needs the same
-//     unrestricted scope a lead holds. The key is still a child of the caller
-//     and bound to the caller's root, so it is lead-capability without being
-//     the caller's own key.
+//     unrestricted scope a lead holds. The key is a distinct child of the
+//     caller (parent = caller key) minted at the caller's root. That root is
+//     the key's default binding, not a confinement: lead scope permits every
+//     tool, ferrule included, so a worker is trusted at lead level by design.
 //   - "lead", "", unknown → ("", false): lead playbooks never mint child keys.
 func childRoleForPlaybookRole(role string) (toolRole, bool) {
 	switch strings.ToLower(strings.TrimSpace(role)) {

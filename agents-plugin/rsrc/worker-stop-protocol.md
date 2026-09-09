@@ -17,7 +17,7 @@ decide.
   into `<parent>`, and any merge into a `main`-class branch, is not yours to
   perform: stop and report it so the lead can carry the approval, because that
   merge is the veto point for every decision you took alone. Merging your own
-  implementation branch into the branch you were spawned on is yours.
+  implementation branch into the goal branch you were spawned on is yours.
 - **(b) An unresolved decision.** An `[escalate-to-lead]` result from a
   delegate you spawned that the ticket does not settle, or an Open Decision
   Queue item the ticket left open.

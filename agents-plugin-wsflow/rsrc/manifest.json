@@ -50,7 +50,7 @@
     "ticket-fact-populator/ticket-fact-populator.md": "57e2afa07186cd24125040c7ad617ff8e42eebd1fa240c8780fb2b4d4d566ac8",
     "ticket-reviewer-completeness/ticket-reviewer-completeness.md": "4e2400ad0a1e8b7eae219506bd591d5ae4a1dba79773ce1193dd44281597d3e7",
     "ticket-reviewer-design/ticket-reviewer-design.md": "841e1796de91d7c1f7ab744d0c5b7e44f1f634288396c09263b0256664c12e3d",
-    "ticket-worker/ticket-worker.md": "4e21ee834c827c5ba6376e14697d2ba5db103c2553b0334c8f3e797dc64c1428",
-    "worker-stop-protocol.md": "31f3707f3d2f64479cbd97634a423852d7bbc755c58b75ecd7a2d531dc6d9554"
+    "ticket-worker/ticket-worker.md": "b0e72b9614abb945d9abd3ab95f304ff247360bd616888e5ee41412af3b3f20f",
+    "worker-stop-protocol.md": "321b3e81f53199f338286c0973e54e752e74b6383067a80eb92987e49807c8bc"
   }
 }

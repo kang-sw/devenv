@@ -74,8 +74,8 @@ this file. The Worker Protocol appended below governs; read it first.
    key>)` and spawn each reviewer by {{.SpawnIdiom}} with the rendered path,
    the ticket path, and the branch name; each reviewer reads the diff from
    git. Fix findings by severity. Two rounds: the second verifies the fixes
-   of the first and raises nothing new; there is no third. A Critical
-   finding still open after the fix round is stop (e).
+   of the first and raises nothing new; there is no third. A Critical finding
+   still open after round 2 is stop (e).
 5. Record: append `### Result (<short-hash>)` to the executed phase with what
    landed, the verification evidence, and the decisions you took. When every
    phase has a Result, `{{.McpNamespace}}/tickets.close(stem: <stem>,
