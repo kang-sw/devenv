@@ -47,3 +47,33 @@ keeps the Down-arrow idea alive.
    in any other editor state.
 3. If none exists: record the gap and the Pi-side change that would enable
    it, and leave this ticket in `idea/` until Pi grows the hook.
+
+## Ready-promotion review (2026-09-09)
+
+The owner requested all remaining conversation-view children become ready.
+A read-only survey of the locally installed Pi 0.84.4 public API found a
+specific blocker for this ticket's exact no-interference contract. The public
+`setEditorComponent`/`CustomEditor` extension path can intercept keys and expose
+text/logical lines/cursor, but editor autocomplete state, history position,
+visual-line boundary and layout width remain private. `onTerminalInput` runs
+before editor handling, not as an unhandled-key callback.
+
+A post-super.handleInput comparison of unchanged text/cursor is not sufficient:
+Down can move an autocomplete selection without changing either. Replacing the
+editor also consumes the one custom-editor factory and needs a composition
+policy for another extension's editor. Neither a private-field heuristic nor
+stealing Down was approved by the promotion request.
+
+Promotion is therefore deferred until a supported editor-disposition or
+post-processing boundary hook can signal that Down had no valid action after
+autocomplete/history/wrapped-line navigation. This corrects the earlier blanket
+"not reachable as an extension" statement with the exact missing condition.
+Current `/audit` and `Ctrl+Shift+U` entry points remain available. No code or
+upstream API change is included in this ticket-authoring pass.
+
+Evidence: installed pi-coding-agent `dist/core/extensions/types.d.ts`
+(onTerminalInput/setEditorComponent), host pi-tui `dist/components/editor.d.ts`
+(private history/autocomplete/visual-line members) and `editor.js`
+(autocomplete Down consumes input without changing text/cursor). Recheck the
+supported API when the pinned host is upgraded; do not assume all later Pi
+versions have the same gap.

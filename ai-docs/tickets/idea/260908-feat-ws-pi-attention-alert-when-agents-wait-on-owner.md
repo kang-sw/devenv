@@ -1,10 +1,13 @@
 ---
 title: "Visually loud widget rows when a child or the lead is waiting on the owner"
+spec:
+  - pi-adapter-runtime
 related:
   260908-epic-ws-pi-subagent-conversation-view: specifies prominent rendering for `idle-awaiting-owner` (owner-held children) only, styling left open; this ticket covers the other waits and pins the styling
   260908-feat-ws-pi-subagent-audit-window-and-owner-steering: introduces `lastWriter`/owner-held liveness; its `idle-awaiting-owner` rows should get the same treatment
   260905-feat-ws-pi-live-agent-widget: the widget whose `awaiting owner` / `awaiting approval` rows are the surface being changed
   260906-workset-ws-pi-dogfood-ux: polishing board
+  260909-feat-ws-pi-agent-count-panel-header: coordinate the single count destination; independent implementation
 ---
 
 # Visually loud widget rows when a child or the lead is waiting on the owner
@@ -14,7 +17,7 @@ related:
 Owner request (2026-09-08): when an agent is waiting on the owner — a
 `ws-ask` question, a `ws-approve` approval, an owner-held child that
 went `idle-awaiting-owner` — the below-editor widget should look loud
-enough that the owner cannot miss it: a rainbow or pulsing highlight,
+enough that the owner cannot miss it: a visibly animated attention cue,
 not a plain row. This is about visual salience inside the TUI; no sound
 or OS notification is asked for.
 
@@ -35,14 +38,15 @@ unpinned for the third.
 - Treat all three waits the same: `awaiting-owner` (ask question),
   `awaiting-approval` (ws-approve), and `idle-awaiting-owner` (owner-held
   child, once the audit-window ticket lands) share one "needs the owner"
-  style. The footer `ws: N agents` status segment gets the same
-  emphasis while any such row exists.
-- Style: an animated highlight on the row (cycling hue across the row
-  text, or a two-phase pulse between the theme's accent and warning
-  colors), with the elapsed clock kept. The widget already uses the
-  `(tui, theme) => Component` factory overload, so the component owns a
-  timer (a few hundred ms, only while a waiting row exists) and calls
-  the TUI's re-render request; the 10 s elapsed tick stays as is.
+  style. The agent-count segment gets the same
+  emphasis while any such row exists; `260909-feat-ws-pi-agent-count-panel-header`
+  moves that segment above the list, so do not resurrect its old footer copy.
+- **Owner-confirmed animation (2026-09-09).** Toggle the
+  `/answer <title>` attention text between bold and ordinary weight every
+  **0.33 seconds (330ms)**. The owner explicitly wants a noisy, conspicuous
+  cue. This supersedes hue cycling and accent/warning color pulses; the text
+  remains visible in both states. Preserve the elapsed clock. Stop the timer
+  when no qualifying wait remains or the widget/session is torn down.
 - Off switch: a single adapter config flag (harness config layer,
   `260905-feat-ws-pi-harness-config-layer`) that falls back to a static
   bold/colored row for owners who find animation distracting or run in a
@@ -50,14 +54,22 @@ unpinned for the third.
 - Children of the lead (forks, workers) do not animate; only the owner's
   own Pi does.
 
-## Open questions
+## Ready-preparation decisions still open
 
-- Color source: the factory's `theme` exposes `fg(ThemeColor, text)` and
-  `bold` over the named palette (`accent`, `warning`, `error`, `success`,
-  ...), and `render(width)` returns raw strings, so a hue cycle can use
-  either the palette (theme-safe, few steps) or direct truecolor escapes
-  (smooth, but ignores the theme). Decide which at implementation time.
-- Whether the animation should stop after some minutes and settle into
-  the static style, to avoid a permanently flashing row on a long wait.
-- Whether the lead's own turn end (Pi idle, waiting for the owner's next
-  message) deserves the same treatment; Pi itself gives no cue.
+- The requested `/answer <title>` is a display phrase; the existing command
+  resolves a question ID (`qN`). Confirm how the visible title and valid
+  command hint coexist before committing the final interaction contract.
+- Approval rows have no question target, and future owner-held idle rows may
+  likewise have no `/answer` thread. Confirm the equivalent emphasis text for
+  those waits, or explicitly limit this slice to question waits.
+- The original timeout-to-static and ordinary lead-idle expansion questions
+  are not settled by the 330ms animation choice. Keep ordinary lead-idle
+  notifications outside implementation until their scope is confirmed.
+
+## Spec Impact
+
+Add the confirmed bold/plain attention effect and its final trigger/label
+rules to the live-agent-widget section of `pi-adapter-runtime` when implemented.
+Do not expose ws-ask/ws-resolve again; fork-raised owner questions remain an
+existing source of real question rows. Ready promotion awaits the label/trigger
+clarification above and the ordinary independent review.

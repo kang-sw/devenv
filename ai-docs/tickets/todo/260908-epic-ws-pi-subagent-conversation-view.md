@@ -77,24 +77,22 @@ Included:
 
 ## Child Tickets
 
-- Planned: **A — shared conversation-view component on pi-tui.** Phase 1:
-  add `@earendil-works/pi-tui` as a direct dependency, build the component
-  (message model, view/interactive modes, 3-state liveness input, pi-tui
-  primitives) with pure `render(width)` tests. Phase 2: migrate the ask
-  overlay (`overlay-chat.ts` / `ask.ts` binding) onto it, delete the
-  superseded local helpers, keep the ask verification of
-  `260904` / `260905-…-activity-indicator` green.
-- Planned: **B — owner audit window and owner steering.** Phase 1: `/audit`
-  command, child picker (live + recent), viewer in `view` mode with live
-  follow; the source is the child's own session transcript plus the live RPC
-  event stream, never the lead's context. Phase 2: `interactive` mode on any
-  child, `lastWriter` ownership, the Esc modal, Ctrl+C swallow, the
-  owner-held toast and flags, and the prominent idle-awaiting-owner
-  rendering.
+- `260908-feat-ws-pi-conversation-view-component` — done. Shared component
+  and `/answer` migration, including the accepted 260909 overlay follow-ups.
+- `260908-feat-ws-pi-subagent-audit-window-and-owner-steering` — ready.
+  Phase 1 read-only audit is implemented; its distinct owner-live gate and
+  Phase 2 owner steering/ownership/modal remain. The component prerequisite
+  is now complete.
+- `260908-feat-ws-pi-down-arrow-into-agent-picker` — idea. Owner requested
+  ready promotion on 2026-09-09, but the local Pi public API does not expose
+  the precise post-editor no-action condition needed to preserve native
+  autocomplete/history/visual-line Down behavior. Keep blocked on that
+  supported hook; `/audit` and `Ctrl+Shift+U` are already available.
 
-A depends on nothing; B Phase 1 depends on A Phase 1; B Phase 2 depends on A
-Phase 2 (the ask overlay and the audit window must share one binding so the
-ownership rule has one implementation).
+The owner requested the remaining children advance, not that their unresolved
+live gates or host API constraints be considered passed. Audit Phase 2 depends
+on its Phase 1 acceptance; Down-arrow requires the supported input hook before
+its exact behavior is implementation-ready.
 
 ## Cross-Child Decisions
 
