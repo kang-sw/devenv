@@ -860,6 +860,11 @@ export interface RpcAgentRecord {
   modelEffort?: string;
   /** Observed child selection and recomputed durable usage; launch intent stays above. */
   telemetry?: AgentTelemetry;
+  /** Legacy-fork floor: permits post-launch latest input, never lifetime cost. */
+  telemetryInputFloor?: TelemetryOrigin;
+  observedModel?: string;
+  observedEffort?: string;
+  observedLatestInput?: number;
   /**
    * 260906 Phase 2 (YAML/TUI dispatch-row rendering): the raw tier name
    * (`params.modelName`) requested at spawn, or `undefined` for an inherit
@@ -1101,17 +1106,24 @@ export function refreshAgentTelemetry(record: RpcAgentRecord, state?: { sessionF
   const path = state?.sessionFile ?? record.sessionPath;
   const read = readSessionEntries(path);
   const sessionId = state?.sessionId ?? (read && !("transient" in read) ? read.headerId : undefined);
+  const model = state?.model?.provider && state.model.id ? `${state.model.provider}/${state.model.id}` : undefined;
+  if (model) record.observedModel = model; else if (state) delete record.observedModel;
+  if (typeof state?.thinkingLevel === "string" && state.thinkingLevel) record.observedEffort = state.thinkingLevel; else if (state) delete record.observedEffort;
   if (!record.telemetry) {
     if (!sessionId) return false;
     // A non-fork legacy child has no inherited history and can be recovered
     // completely. A fork without its saved boundary must remain unknown.
-    if (read && !("transient" in read) && read.parentSession) return false;
+    if (read && !("transient" in read) && read.parentSession) {
+      if (!record.telemetryInputFloor) record.telemetryInputFloor = { sessionId, sessionPath: path, ...(read.entries.at(-1)?.id ? { prefixEntryId: read.entries.at(-1)!.id } : { emptyPrefix: true }) };
+      const floor = reduceTelemetry(record.telemetryInputFloor, read);
+      if (floor?.latestInput !== undefined) record.observedLatestInput = floor.latestInput;
+      return false;
+    }
     const origin: TelemetryOrigin = { sessionId, sessionPath: path, emptyPrefix: true };
     record.telemetry = { version: 1, origin };
   }
   const telemetry = record.telemetry;
   if (telemetry.origin.sessionPath !== path || (sessionId && telemetry.origin.sessionId !== sessionId)) return false;
-  const model = state?.model?.provider && state.model.id ? `${state.model.provider}/${state.model.id}` : undefined;
   if (model) telemetry.model = model; else if (state) delete telemetry.model;
   if (typeof state?.thinkingLevel === "string" && state.thinkingLevel) telemetry.effort = state.thinkingLevel; else if (state) delete telemetry.effort;
   const reduced = reduceTelemetry(telemetry.origin, read);
