@@ -4651,11 +4651,9 @@ func noAgentHiddenTool(name string) bool {
 // eligible for the wsflow playbook.render legacy context bridge.
 // Add entries here as the spec expands the set.
 var wsflowRenderEligibleStems = map[string]bool{
-	"reference-discovery":     true,
-	"plan-populator-survey":   true,
-	"plan-populator-research": true,
-	"code-reviewer":           true,
-	"mental-model-updater":    true,
+	"reference-discovery":  true,
+	"code-reviewer":        true,
+	"mental-model-updater": true,
 }
 
 func appendRenderContext(body string, context map[string]string) string {

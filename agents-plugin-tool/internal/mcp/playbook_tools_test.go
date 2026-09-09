@@ -73,7 +73,7 @@ func shippedImplementerContext() map[string]string {
 
 func shippedImplementerRelayContext() map[string]string {
 	return map[string]string{
-		"PlanPath":           "ai-docs/.plans/plan.md",
+		"TargetPath":         "ai-docs/tickets/ready/260726-bug-demo.md",
 		"ReviewCycle":        "2",
 		"CommitRange":        "abc123..def456",
 		"ReviewPaths":        "ai-docs/.reviews/correctness.md, ai-docs/.reviews/test.md",
@@ -85,7 +85,7 @@ func shippedImplementerRelayContext() map[string]string {
 
 func shippedImplementerElevatedContext() map[string]string {
 	return map[string]string{
-		"PlanPath":           "ai-docs/.plans/plan.md",
+		"TargetPath":         "ai-docs/tickets/ready/260726-bug-demo.md",
 		"ReviewCycle":        "3",
 		"CommitRange":        "abc123..def456",
 		"ReviewPaths":        "ai-docs/.reviews/correctness.md, ai-docs/.reviews/test.md",
@@ -111,28 +111,7 @@ func shippedReviewAdjudicatorContext() map[string]string {
 	}
 }
 
-func shippedPlanPopulatorContext() map[string]string {
-	return map[string]string{
-		"target_kind":     "ticket",
-		"ticket_path":     "ai-docs/tickets/ready/260628-feat-demo.md",
-		"selected_phase":  "Phase 2: Rework planner playbooks around ticket-to-plan",
-		"inline_contract": "",
-		"plan_path":       "ai-docs/.plans/2026-06/28-1200-demo.md",
-	}
-}
-
-func shippedInlinePlanPopulatorContext() map[string]string {
-	return map[string]string{
-		"target_kind":     "inline",
-		"ticket_path":     "",
-		"selected_phase":  "",
-		"inline_contract": "Change the bounded renderer path; preserve public behavior; verify focused planner and review tests.",
-		"plan_path":       "ai-docs/.plans/2026-06/28-1200-inline.md",
-	}
-}
-
 // initGitRepo creates a git repository in a temp dir and returns its path.
-// Required for renderPlaybook tests since GeneratePaths calls gitIdentity.
 func initGitRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -1278,7 +1257,7 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 	}
 	body := string(data)
 	for _, want := range []string{
-		"Plan path: `ai-docs/.plans/plan.md`",
+		"Target path: `ai-docs/tickets/ready/260726-bug-demo.md`",
 		"Review cycle: 2",
 		"Current commit range: abc123..def456",
 		"Non-clean review paths: ai-docs/.reviews/correctness.md, ai-docs/.reviews/test.md",
@@ -1286,10 +1265,10 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 		"Verification instructions: go test ./internal/mcp -run TestRenderPlaybookShippedImplementerRelayDeclaredContext",
 		"Result expectations: Report per-finding dispositions, fix commits, updated range, verification, and blockers.",
 		"Rely only on this prompt and named paths; do not depend on prior conversation.",
-		"Read the plan and every non-clean review path directly.",
+		"Read the target and every non-clean review path directly.",
 		"Won't-fix is allowed only for style suggestions conflicting with local patterns, findings that require scope expansion beyond the selected phase, or findings disproven by specific evidence.",
-		"When `## Relevant Ticket Contract` names a ticket path and phase heading, read that ticket file and treat the selected phase text as the task contract.",
-		"escalate for a plan update if a required fix needs a plan deviation.",
+		"Treat the target as the task contract: read it, and when it names phases, treat the selected phase text as the contract and later phases as out of scope.",
+		"escalate for a target update if a required fix needs a deviation from the target.",
 		"Won't-fix is not allowed for correctness, security, contract, regression, or required-test violations.",
 		"records the relevant per-finding dispositions known at that checkpoint",
 		"`[fixed]`",
@@ -1299,7 +1278,7 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 		// Output bullet. A single unanchored Contains would pass with only one site
 		// updated — the exact drift that made the escalation token invisible before.
 		"decide `[fixed]`, `[won't fix: <reason>]`, `[deferred: <reason>]`, or `[escalate: <reason>]`.",
-		"- `[escalate: <reason>]` — needs a plan update, or a change the ticket itself would need; the lead decides the plan-scope question before the next review.",
+		"- `[escalate: <reason>]` — needs a change to the target itself; the lead decides the scope question before the next review.",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("implementer-relay render missing %q:\n%s", want, body)
@@ -1364,7 +1343,7 @@ func TestRenderPlaybookShippedImplementerElevatedDeclaredContext(t *testing.T) {
 	for _, want := range []string{
 		"Your ws session_key",
 		// Every declared input substitutes.
-		"Plan path: `ai-docs/.plans/plan.md`",
+		"Target path: `ai-docs/tickets/ready/260726-bug-demo.md`",
 		"Review cycle: 3",
 		"Current commit range: abc123..def456",
 		"Non-clean review paths: ai-docs/.reviews/correctness.md, ai-docs/.reviews/test.md",
@@ -1374,11 +1353,11 @@ func TestRenderPlaybookShippedImplementerElevatedDeclaredContext(t *testing.T) {
 		"Verification instructions: go test ./internal/mcp -run TestRenderPlaybookShippedImplementerElevatedDeclaredContext",
 		"Result expectations: Report per-finding dispositions, the attempt record, fix commits, updated range, verification, and blockers.",
 		// Axis 1 — inputs: the prior fix commits are read, not merely listed.
-		"Read the plan, every non-clean review path, and the prior fix commits' diffs directly.",
-		// Axis 2 — posture: symptom-vs-cause, a different in-plan approach, escalation.
+		"Read the target, every non-clean review path, and the prior fix commits' diffs directly.",
+		// Axis 2 — posture: symptom-vs-cause, a different in-scope approach, escalation.
 		"Name each relayed finding's root cause before editing; every finding here survived a prior fix or shares a root cause with one.",
-		"Propose and apply a different in-plan approach when the prior attempt treated a symptom rather than the cause.",
-		"Escalate for a plan update when the cause-addressing fix falls outside the plan; do not shrink the fix to fit the plan instead.",
+		"Propose and apply a different in-scope approach when the prior attempt treated a symptom rather than the cause.",
+		"Escalate for a target update when the cause-addressing fix falls outside the target; do not shrink the fix to fit the target instead.",
 		"Decide per finding whether the prior attempt addressed the cause or a symptom, and name the cause this cycle targets.",
 		// Axis 3 — output: the attempt record is written even when this cycle also fails.
 		"Report the approach you attempted and its outcome for every relayed finding, including each finding this cycle failed to resolve.",
@@ -1386,7 +1365,7 @@ func TestRenderPlaybookShippedImplementerElevatedDeclaredContext(t *testing.T) {
 		"when this cycle's attempt also failed — what failed this time and the evidence that showed it",
 		// Lead-side parity: the same four disposition tokens as implementer-relay.
 		"decide `[fixed]`, `[won't fix: <reason>]`, `[deferred: <reason>]`, or `[escalate: <reason>]`.",
-		"- `[escalate: <reason>]` — needs a plan update, or a change the ticket itself would need; the lead decides the plan-scope question before the next review.",
+		"- `[escalate: <reason>]` — needs a change to the target itself; the lead decides the scope question before the next review.",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("implementer-elevated render missing %q:\n%s", want, body)
@@ -1728,205 +1707,6 @@ func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
 	for _, want := range []string{"wsflow/", "## Render Context", "- note: see ws/specs.query for details"} {
 		if !strings.Contains(codeReviewerBody, want) {
 			t.Fatalf("code-reviewer render missing %q:\n%s", want, codeReviewerBody)
-		}
-	}
-
-	planContext := shippedPlanPopulatorContext()
-	planContext["note"] = "legacy extra context"
-	planPath, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "plan-populator-survey", planContext, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
-	if err != nil {
-		t.Fatalf("renderPlaybook plan-populator-survey with legacy context: %v", err)
-	}
-	if tier != "medium" {
-		t.Fatalf("plan-populator-survey tier = %q, want medium", tier)
-	}
-	planData, err := os.ReadFile(planPath)
-	if err != nil {
-		t.Fatalf("read plan-populator-survey render: %v", err)
-	}
-	planBody := string(planData)
-	for _, want := range []string{
-		"## Render Context",
-		"- note: legacy extra context",
-		"- Target kind: `ticket`",
-		"- Ticket path: `ai-docs/tickets/ready/260628-feat-demo.md`",
-		"- Selected phase: `Phase 2: Rework planner playbooks around ticket-to-plan`",
-		"- Plan path: `ai-docs/.plans/2026-06/28-1200-demo.md`",
-		"## Relevant Ticket Contract",
-		"## Out of Scope",
-		"## Codebase Findings",
-		"## Implementation Plan",
-		"## Verification Plan",
-		"## Escalations",
-		"[escalate-to-research]",
-		"Confidence: `<high|medium|low>`",
-	} {
-		if !strings.Contains(planBody, want) {
-			t.Fatalf("plan-populator-survey render missing %q:\n%s", want, planBody)
-		}
-	}
-	for _, forbidden := range []string{"- brief_path:", "brief path", "Brief path", "Mercenary path", "ws.mercenary.", "exec."} {
-		if strings.Contains(planBody, forbidden) {
-			t.Fatalf("plan-populator-survey wsflow render contains forbidden %q:\n%s", forbidden, planBody)
-		}
-	}
-
-	researchContext := shippedPlanPopulatorContext()
-	researchContext["note"] = "legacy extra context"
-	researchPath, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "plan-populator-research", researchContext, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
-	if err != nil {
-		t.Fatalf("renderPlaybook plan-populator-research with legacy context: %v", err)
-	}
-	if tier != "large" {
-		t.Fatalf("plan-populator-research tier = %q, want large", tier)
-	}
-	researchData, err := os.ReadFile(researchPath)
-	if err != nil {
-		t.Fatalf("read plan-populator-research render: %v", err)
-	}
-	researchBody := string(researchData)
-	for _, want := range []string{
-		"## Render Context",
-		"- note: legacy extra context",
-		"- Target kind: `ticket`",
-		"- Ticket path: `ai-docs/tickets/ready/260628-feat-demo.md`",
-		"- Selected phase: `Phase 2: Rework planner playbooks around ticket-to-plan`",
-		"- Plan path: `ai-docs/.plans/2026-06/28-1200-demo.md`",
-		"If `ai-docs/.plans/2026-06/28-1200-demo.md` already contains survey output, read it before replacing or",
-		"## Relevant Ticket Contract",
-		"## Out of Scope",
-		"## Codebase Findings",
-		"## Implementation Plan",
-		"## Verification Plan",
-		"## Escalations",
-	} {
-		if !strings.Contains(researchBody, want) {
-			t.Fatalf("plan-populator-research render missing %q:\n%s", want, researchBody)
-		}
-	}
-	for _, forbidden := range []string{"- brief_path:", "brief path", "Brief path"} {
-		if strings.Contains(researchBody, forbidden) {
-			t.Fatalf("plan-populator-research wsflow render contains forbidden %q:\n%s", forbidden, researchBody)
-		}
-	}
-}
-
-func TestRenderPlaybookFullWsPlannerContext(t *testing.T) {
-	t.Setenv(envNoAgent, "")
-	t.Setenv(envNamespace, "")
-	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	worktreeRoot := initGitRepo(t)
-	cacheHome := filepath.Join(t.TempDir(), "cache")
-	t.Setenv("WS_CACHE_HOME", cacheHome)
-	s := newTestServerWithHarness(t, "codex")
-
-	assertPlanner := func(name, wantTier string, wants []string) {
-		t.Helper()
-		path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, shippedPlanPopulatorContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
-		if err != nil {
-			t.Fatalf("renderPlaybook %s with declared planner context: %v", name, err)
-		}
-		if tier != wantTier {
-			t.Fatalf("%s tier = %q, want %s", name, tier, wantTier)
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s render: %v", name, err)
-		}
-		body := string(data)
-		commonWants := []string{
-			"- Ticket path: `ai-docs/tickets/ready/260628-feat-demo.md`",
-			"- Selected phase: `Phase 2: Rework planner playbooks around ticket-to-plan`",
-			"- Plan path: `ai-docs/.plans/2026-06/28-1200-demo.md`",
-			"## Relevant Ticket Contract",
-			"## Out of Scope",
-			"## Codebase Findings",
-			"## Implementation Plan",
-			"## Verification Plan",
-			"## Escalations",
-		}
-		for _, want := range append(commonWants, wants...) {
-			if !strings.Contains(body, want) {
-				t.Fatalf("%s full ws render missing %q:\n%s", name, want, body)
-			}
-		}
-		for _, forbidden := range []string{
-			"brief_path", "BriefPath", "brief path", "Brief path",
-			// Decision 2's core fix: the plan must never restate ticket contract
-			// text. This is the exact regression string the ticket is named for.
-			"<clipped authority requirement",
-		} {
-			if strings.Contains(body, forbidden) {
-				t.Fatalf("%s full ws render retained brief dependency %q:\n%s", name, forbidden, body)
-			}
-		}
-	}
-
-	// Decision 2's contract-free `## Relevant Ticket Contract` body: for a
-	// ticket target it names only the ticket path and selected phase heading,
-	// never restated ticket text. Pinned separately per delegate because
-	// survey and research phrase the same rule in different template shapes
-	// (bulleted vs. prose).
-	const surveyTicketContractBody = "    - For a `ticket` target: `<ticket path>` — `<selected phase heading>`. No\n      restated, summarized, or reworded ticket text.\n    - For an `inline` target: `<inline contract, pasted verbatim>`."
-	const researchTicketContractBody = "    For a `ticket` target: the ticket path and selected phase heading only — no\n    restated, summarized, or reworded ticket text. For an `inline` target: the\n    inline contract, pasted verbatim."
-
-	assertPlanner("plan-populator-survey", "medium", []string{
-		"[ok]`, `[escalate-to-research]`, or `[escalate-to-lead]`",
-		"Confidence: `<high|medium|low>`",
-		"Escalation rationale when returning `[escalate-to-research]`",
-		"Escalation rationale when returning `[escalate-to-lead]`",
-		"Carry a fully-specified, multi-part requirement into the plan whole; do not\n  silently implement a subset.",
-		"A \"first cut\" or phased subset is legitimate only when the ticket\n  or lead already authorized the phasing — never when the survey invents it.",
-		"an implementation\n  fallback (a scope shortcut or temporary path substituted for the real\n  target)",
-		"A ticket's required\n  runtime fallback — a specified execution branch such as graceful\n  degradation — is not a shortcut signal and must be planned in full.",
-		"Exit to research when confidence is low, strategy is unclear, contract facts\n  conflict, or reuse judgment needs a deeper planner.",
-		surveyTicketContractBody,
-	})
-	assertPlanner("plan-populator-research", "large", []string{
-		"[ok]` or `[escalate-to-lead]`",
-		"Include `None` when no blocker remains and reporting `[ok]`;",
-		"Do not encode a temporary, implementation-fallback (scope shortcut), mock-data,\n  or duplicated-glue path as the implementation.",
-		"A ticket's required runtime\n  fallback — a specified execution branch such as graceful degradation — is not\n  a shortcut and must be planned in full.",
-		"or when a fully-specified, multi-part requirement\n  cannot be carried whole into the plan and only a confident subset can be\n  planned; a \"first cut\" is legitimate only when the ticket or lead already\n  authorized the phasing.",
-		researchTicketContractBody,
-	})
-
-	for _, name := range []string{"plan-populator-survey", "plan-populator-research"} {
-		path, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, shippedInlinePlanPopulatorContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
-		if err != nil {
-			t.Fatalf("renderPlaybook %s with inline authority: %v", name, err)
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s inline render: %v", name, err)
-		}
-		body := string(data)
-		for _, want := range []string{
-			"- Target kind: `inline`",
-			"- Inline contract: `Change the bounded renderer path; preserve public behavior; verify focused planner and review tests.`",
-			"for `inline`, use `Change the bounded renderer path; preserve public behavior; verify focused planner and review tests.` and do not read a ticket",
-		} {
-			if !strings.Contains(body, want) {
-				t.Fatalf("%s inline render missing %q:\n%s", name, want, body)
-			}
-		}
-		for _, forbidden := range []string{"Read the ticket at ``"} {
-			if strings.Contains(body, forbidden) {
-				t.Fatalf("%s inline render requires fake ticket authority %q:\n%s", name, forbidden, body)
-			}
-		}
-	}
-
-	ctx := shippedPlanPopulatorContext()
-	ctx["brief_path"] = "ai-docs/.plans/legacy-brief.md"
-	for _, name := range []string{"plan-populator-survey", "plan-populator-research"} {
-		if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, ctx, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
-			t.Fatalf("full ws renderPlaybook accepted brief_path for %s", name)
-		} else {
-			var undeclared wsrsrc.ErrUndeclaredVar
-			if !errors.As(err, &undeclared) || undeclared.Name != "brief_path" {
-				t.Fatalf("%s brief_path error = %T %v, want ErrUndeclaredVar brief_path", name, err, err)
-			}
 		}
 	}
 }

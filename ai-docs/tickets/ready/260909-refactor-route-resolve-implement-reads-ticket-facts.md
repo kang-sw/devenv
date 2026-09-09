@@ -403,6 +403,102 @@ shape), `internal/mcp/{implement_resolver,session_state,playbook_tools}_test.go`
 `agents-plugin/rsrc/plan-populator-research/`, both `manifest.json` pairs,
 `ai-docs/manuals/wsflow-mirroring.md`.
 
+### Result (407b12a8) - 2026-09-09
+
+Landed as `a894d3db..407b12a8` on `impl/epic/refound/setup-sweep-crave`.
+
+**What landed.** `a894d3db` collapsed the resolver: deleted
+`deriveImplementPlanDepth` and the `plan_depth` output field,
+`plannerAuthorityInputs`, `deriveImplementDelegation`,
+`automaticDirectEditEligible`, `automaticLeadOnlyReviewEligible`,
+`currentBranchImplementEligible` with the `Branch Action: current` path and its
+`validObservedStartCommit` / `deriveResolvedImplementBranchPlan` helpers, the
+`explicit_delegation_request` / `explicit_direct_edit_request` facts, the
+`lead-only` review arm, `implementPrepTitle`, `implementCompletionInstruction`,
+`isCurrentBranchCompletion`, `isLeadOnlyReview`, and
+`parseLegacyImplementPlanDepth`. `implementReviewPartitions` and
+`partitionedReviewAlloc` are kept. Delegation is now the constant
+`implementDelegationMode = "delegated"`; `NeedReview` is unconditionally true.
+`6ea093ed` deleted the two `plan-populator-*` playbooks with their wsflow
+mirrors, dropped them from `wsflowRenderEligibleStems`, rewrote the
+`reference-discovery` line that named `plan-populator-survey`, and updated the
+render-dispatch section of `ai-docs/manuals/wsflow-mirroring.md`. `2f96d79b`
+and `407b12a8` are the review round-1 fix commits (below).
+
+**Verification** (all output read in full, all green):
+`go build ./...`; `go vet ./...`; `go test ./...` (14 packages ok);
+`python3 -m unittest discover agents-plugin/tests` (55 tests, OK);
+`python3 -m unittest discover agents-plugin-wsflow/tests` (10 tests, OK);
+`go test ./internal/wsrsrc/... -count=1`; the five env-gated regen entrypoints
+re-run with `-count=1` produced no drift; `diff -r agents-plugin/rsrc
+agents-plugin-wsflow/rsrc` is empty.
+
+**Review.** Round 1 (one full-scope reviewer, the allocation the route set):
+3 Important, 8 Minor, no Critical. Round 2 (verification-only): clean — all
+three Important and all eight in-scope Minor [fixed], no regressions.
+Dispositions:
+
+- Three files left not gofmt-clean by the collapse — [fixed] (`2f96d79b`).
+- `implementer-relay` / `implementer-elevated` still declared `PlanPath` and
+  told the agent to read a plan whose only producer this phase deleted, so the
+  render substituted the empty string (`wsrsrc` rejects only *undeclared*
+  keys, so nothing surfaced it) — [fixed] (`407b12a8`): variable renamed to
+  `TargetPath`, plan-referring prose repointed at the target, and the
+  `## Relevant Ticket Contract` clause — a section of the deleted plan file —
+  replaced by a target-as-contract clause. Mirror and both manifests
+  regenerated.
+- The retained `delegated` label contradicted its own instruction (the same
+  todo now tells that caller to edit the source itself) and no shipped
+  playbook read it — [fixed] (`2f96d79b`): the Edit todo is titled `Edit`,
+  `implementEditTitle` is gone, and `implementDelegationMode` documents that
+  the value names how the caller was reached, not what it does.
+- Eight Minor (Prep wording collision, undocumented legacy-axis asymmetry, an
+  over-broad test comment, a lost helper doc comment, blank-line drift, a
+  stale line-number citation, a re-wrap, docs drift) — seven [fixed]
+  (`2f96d79b`, `407b12a8`); the spec/mental-model drift is
+  [deferred: the ticket's Constraints assign those anchors to
+  `260909-refactor-retire-spec-mental-model-layers`].
+
+**Decisions taken.**
+
+- The second Open Question (final prep-guardrail wording) is resolved here,
+  since the sibling lead-surface ticket never settled it: the Prep preamble
+  keeps only what the executing caller cannot derive from the target — the
+  project-declared binding anchor, read through the generic
+  `ReadAgentsBindingAnchor` hook so a project that declares none renders
+  nothing, plus `infra.read("impl-playbook")`, whose test-strategy table,
+  mechanical-edit criteria and unchanged-input verification rule the later
+  gates cite by name and which the worker playbook does not carry. The
+  mental-model lookup clause is dropped with the layer that backed it.
+- The `## Fact Contract` tables this phase asks to update do not exist:
+  `lead-implement` was deleted by the already-landed
+  `260909-refactor-lead-surface-collapse-worker-stop-protocol`, and the
+  `ticket-worker` playbook carries no such section. Recorded as a cosmetic
+  adaptation rather than a stop.
+- `lead-only` was still reachable through the `policy.review.override` enum
+  and `parseImplementReviewAlloc`; the phase text names neither, but leaving
+  either would have kept the deleted allocation reachable, so both were
+  closed.
+- The Edit todo instruction was rewritten because `PlanPath` no longer exists
+  to hand off; the new text converges on what the shipped `ticket-worker`
+  playbook already says in its own edit step.
+- The three retired legacy top-level axes are handled asymmetrically on
+  purpose: `delegation` and `review_alloc` still select behavior, so a retired
+  value errors rather than silently downgrading what the caller asked for,
+  while `plan_depth` selected a stage that no longer exists at all and is
+  dropped. Documented in one comment on each site.
+- No spec or mental-model edit, per this ticket's Constraints.
+- Scope for the relay repoint was held to the two playbooks the route
+  dispatches. `implementer` and `review-adjudicator` also still declare
+  `PlanPath` but no shipped text dispatches either; forward note recorded on
+  `407b12a8`.
+- Commit-hygiene slip: the `git rm -r` of the two `plan-populator-*` trees was
+  already staged when `a894d3db` was written, so those four file deletions
+  landed in the resolver commit even though `6ea093ed`'s message describes
+  them. Not amended — the branch is shared, and a correction is a new commit,
+  not a rewrite.
+
+
 ### Phase 2: Read the surviving facts from the sage-stamped ticket
 
 Goal: for a ticket target the resolver derives its route facts from the

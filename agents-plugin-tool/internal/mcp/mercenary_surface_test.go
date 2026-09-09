@@ -599,17 +599,12 @@ func TestRenderGoldenShippedPhase4Delegates(t *testing.T) {
 	names := []string{
 		"code-review-correctness", "code-review-fit", "code-review-test",
 		"reference-discovery", "mental-model-updater",
-		"plan-populator-survey", "plan-populator-research",
 		"ticket-reviewer-design", "ticket-reviewer-completeness",
 	}
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			s := newTestServerWithHarness(t, "claude")
-			var context map[string]string
-			if name == "plan-populator-survey" || name == "plan-populator-research" {
-				context = shippedPlanPopulatorContext()
-			}
-			body, _, err := renderPlaybookBody(s, rsrcRoot, name, context, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", false, "", nil)
+			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", false, "", nil)
 			if err != nil {
 				t.Fatalf("renderPlaybookBody(%s): %v", name, err)
 			}
