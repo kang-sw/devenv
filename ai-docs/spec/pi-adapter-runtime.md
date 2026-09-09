@@ -1478,6 +1478,10 @@ transcript renderer of its own.
   marker uses its dim foreground. User messages include one blank row above
   and below their content, filled with the same user-message background.
   Both the owner-question overlay and audit viewer apply these styles.
+  The owner-question overlay has a border, horizontal interior margins, and
+  blank interior rows above and below its content. Blank lines separate its
+  header and dialogue turns; assistant turns and streaming text carry a left
+  gutter to distinguish them from owner messages.
 - **Two modes.** `view` has no input line and never sends; `interactive` shows
   an editor and delivers the owner's typed lines through the channel. Mode is
   set at construction and may be raised from `view` to `interactive` on the

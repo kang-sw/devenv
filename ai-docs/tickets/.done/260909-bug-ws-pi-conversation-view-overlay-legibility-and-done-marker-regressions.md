@@ -8,6 +8,7 @@ spec:
   - pi-adapter-runtime
 sage-review-design: completed
 sage-review-design-reviewed: 94835e2f47c51a37
+completed: 2026-09-09
 ---
 
 # Pi adapter: conversation-view / `/answer` overlay legibility defects plus `/done` summary-injection and `working…` marker regressions surfaced by owner-live acceptance
@@ -162,3 +163,41 @@ Exit: once the structural tests are green and the owner confirms the live feel,
 re-run `260908`'s owner-live runbook items (its item 2 `/done` summary
 injection, item 3 activity-indicator states, plus items 1 and 4) to clear that
 ticket's `.done/` gate.
+
+### Result (2ff2f75b) - 2026-09-09
+
+Implemented overlay border and margins, assistant-turn distinction, initial
+question presentation, density improvements, and working-marker relocation.
+Investigation corrected F1: the observed thread was fork-raised, whose `/done`
+correctly closes without summary injection. Real construction and registry
+reload tests cover both origins; no summary-injection source fix was needed.
+The WIP recorded 68 conversation-view and 119 ask tests passing; its full-suite
+run reported seven pre-existing unrelated failures.
+
+#### Edition (19c2dbdb) - 2026-09-09
+
+Applied muted tool text and a dim working marker to both conversation-view
+consumers, with one background-filled padding row above and below user turns.
+Focused conversation-view, ask, and audit verification passed 218 tests.
+The owner confirmed the presentation looked much better in the live overlay.
+
+#### Edition (031feaea) - 2026-09-09
+
+Moved the original question into the first assistant-styled dialogue turn,
+compacted header metadata, and repaired older question seeds without
+duplicating them on reopen. Focused verification passed 221 tests; diff and
+spec-index checks passed. The owner subsequently described the live result as
+perfect and asked about closing the tickets, clearing this visual follow-up.
+
+Accepted functional evidence is the owner's fork creation, question-to-overlay
+connection, tier override, `/done`, Esc/reopen, and tool collapse/expand checks
+recorded above. The dormant lead-ask route is not re-enabled for acceptance.
+The real `idle-awaiting-owner` producer belongs to the existing audit/owner
+steering Phase 2, not this two-state `/answer` binding; this closeout does not
+claim that future live behavior was tested. The original runbook wording is
+superseded by this scoped acceptance record.
+
+
+## Resolution (2026-09-09)
+
+Owner accepted the final live question placement after 031feaea, following acceptance of the muted text/padded user backgrounds and confirmation of fork-question functional checks. Result and Editions above record implementation, automated evidence, the F1 scope correction, and the boundary with future audit ownership behavior. No remaining work in this hotfix slice.

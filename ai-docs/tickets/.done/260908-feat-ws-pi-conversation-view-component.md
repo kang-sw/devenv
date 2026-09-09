@@ -14,6 +14,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: db5e498da6ef333a
 sage-review-completeness-reviewed: db5e498da6ef333a
+completed: 2026-09-09
 ---
 
 # Pi adapter: shared conversation-view component on pi-tui, with the ask overlay migrated onto it
@@ -366,7 +367,7 @@ test/conversation-view.test.ts` 173/173; full `npm test` 1209/1339 with the
 same ~130 pre-existing WS_PI_SPAWN_ROLE/fork-prefix env failures (byte-identical
 failing-test-name set to baseline), zero regressions introduced.
 
-## Blocked (2026-09-09)
+## Historical acceptance blocker (2026-09-09; resolved below)
 
 Current acceptance correction: the owner subsequently confirmed the fork
 question flow, `/done`, `Esc`/reopen, and tool collapse/expand as passed in
@@ -436,3 +437,8 @@ user chat content. Keep that new visual check separate from the confirmed
 functional results. This update does not claim direct host-instance
 instrumentation or an `idle-awaiting-owner` check; the `/answer` binding still
 exposes only `running` and `settled` through `forkChannelLiveness`.
+
+
+## Resolution (2026-09-09)
+
+Both implementation phases and the linked 260909 presentation fixes are complete. On 2026-09-09 the owner accepted the latest live overlay as perfect and confirmed that the functional fork-question checks had already passed in other sessions. The historical acceptance blocker is resolved for the current exposed fork path: original question/assistant presentation, working marker, tool collapse/expand, Esc/reopen, and fork-raised /done. The successful real host overlay is functional instance-compatibility evidence, not a claim of direct instanceof instrumentation. Hidden ws-ask/ws-resolve remain deprecation candidates; no lead-ask live summary trial is claimed or required by this scoped owner acceptance. The component's idle-awaiting-owner rendering has automated coverage; producing that state through real owner ownership remains part of 260908-feat-ws-pi-subagent-audit-window-and-owner-steering Phase 2. That ticket and the parent epic remain open. Latest focused conversation-view/ask/audit verification: 221 passed, zero failed.

@@ -323,7 +323,8 @@ sign-off is owner-only.
 The ticket also stays out of `.done/` because **Phase 2 (owner steering,
 ownership, modal) is not yet implemented** — and Phase 2 additionally depends on
 `260908-feat-ws-pi-conversation-view-component` Phase 2, whose own owner
-acceptance is likewise pending. This ticket therefore remains in `ready/` with
+acceptance was subsequently completed on 2026-09-09 and that prerequisite is
+now closed. This ticket therefore remains in `ready/` with
 Phase 1 code landed; a drain selector should skip it (blocked note present)
 until the owner clears the Phase 1 live check and Phase 2's prerequisites are
 met.
