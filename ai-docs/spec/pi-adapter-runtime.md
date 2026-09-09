@@ -478,6 +478,59 @@ UTF-8 characters split across read-buffer boundaries are reconstructed intact.
 Concurrent in-flight requests are correlated back to their callers by JSON-RPC
 id, independent of the order responses arrive.
 
+## Claude read-only delegation {#260910-pi-claude-read-only-delegation}
+
+`ws-claude` runs bounded Claude Code subtasks through the Agent SDK. It is a
+separate leaf tool from Pi-native spawning. A lead gains the tool; a fork can
+use it only when its captured active-tool list already contains it. Worker and
+explore roles do not gain it. Registration starts no Claude process. Session
+replacement and shutdown stop admission and await owned work cleanup.
+
+The physical Pi arguments are an object containing a non-empty `items` array:
+
+```text
+ws-claude({items: [{preset: "audit" | "consult", request, paths?, model?}, ...]})
+```
+
+`audit` returns artifact findings; `consult` answers a posed question. Requests
+must be nonblank; optional paths identify read targets relative to the session
+working directory, and an optional model selects a Claude model. Unsupported
+presets and fields, including edit targets and resume, are rejected. Malformed
+batch input starts no work; invalid items return errors alongside valid siblings.
+The output is an input-index-aligned JSON array in tool text, mirrored in
+`details.items`. Each entry has `id`, `status` (`success` or `error`), `output`,
+and `usage`; errors also have a bounded categorical `{code, message}`. A
+three-word public handle remains stable for that result and is not reused within
+the session controller. Handle exhaustion rejects the batch before launching
+any part of it. Handles do not yet support continuation.
+
+Overlapping invocations share three execution slots with FIFO overflow. Each
+running item has a 120-second deadline from admission, including SDK setup, and
+at most two additional seconds for cleanup. Cancellation removes that invocation's
+queued work and stops its active children while retaining settled sibling results.
+SDK failure and timeout are isolated per item. Cleanup proceeds even if SDK close
+throws: the adapter observes its owned child's termination, escalates termination
+when needed, and closes owned streams/listeners. Unconfirmed process or stream
+cleanup yields `cleanup_failed`, cancels queued work, and stops further launches
+for that controller. Capacity is not reused as though cleanup had succeeded.
+
+Each item uses Claude Code's `claude_code` system preset with a small embedded
+task frame; the task request stays in the user message. The adapter supplies no
+Pi system prompt, parent transcript, or ws credential context. Child environment
+inheritance is restricted to ordinary local execution/authentication prerequisites.
+The tool uses the locally installed Claude executable and its stored authentication.
+The available tool inventory is limited to `Read`, `Grep`, `Glob`, `WebSearch`,
+and `WebFetch`, with strict empty MCP configuration and filesystem settings
+disabled. Writes, Bash/exec, other agents, and account connector tools are not
+enabled. Unexpected tool or MCP inventory in SDK initialization fails the item.
+This profile is not a general filesystem sandbox.
+
+Only a valid successful terminal result becomes successful output. Usage is a
+terminal SDK usage/model-usage projection with `cost_estimate_usd`, or `null`
+when unavailable; an estimate is not a bill. Raw Claude session IDs and arbitrary
+SDK exception text are not returned as diagnostics. Neither this interface nor
+its prompt shape guarantees subscription billing treatment.
+
 ## Delegation spawner {#260903-pi-delegation-spawner-tools}
 
 The adapter exposes a Pi-side delegation layer built on the same self-owned
