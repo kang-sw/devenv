@@ -25,12 +25,30 @@ decide.
   executed as written. Include your proposed resolution in the report.
 - **(d) An irreversible action** in the project's Approval Protocol always-ask
   category.
-- **(e) A Critical review finding that survives three review rounds.**
+- **(e) A Critical review finding still open after the fix round** (see
+  Review Rounds below).
 
 A decision not on this list is recorded, not escalated: one line in the
 commit's `## AI Context`, and in the ticket's `### Result` when it changes what
 the phase delivers. Your terminal report lists these for veto; nothing is
 dropped silently and nothing costs a stop.
+
+## Review Rounds
+
+Review is two rounds, never more. Round 1: fresh reviewers sweep the change at
+the allocation the route set. Round 2: a reviewer checks only whether the
+round-1 findings were fixed; it raises nothing new, and anything new it
+notices goes into `unresolved:` as an observation. A Critical still open after
+round 2 is stop (e). A fresh sweep each round finds a fresh set of findings
+and never converges; the cap is the convergence.
+
+## Branch
+
+Your branch is shared: the lead commits on it while you run. Never amend,
+reset, rebase, or force-move it; a correction, including a fixed commit
+message, is a new commit. While a delegate you spawned runs, wait for the
+host's completion signal; do not poll with sleep loops or fill the wait with
+repeated verification runs.
 
 ## Inputs Are Pointers
 

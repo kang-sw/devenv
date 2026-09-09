@@ -165,6 +165,15 @@ into playbook text the worker actually reads.
    *Rejected: drop the intent review because the sage gate reviews the
    ticket* — the sage gate never sees the conversation.
 
+10. **The first dogfood run is the failure citation for the review-round and
+    branch rules.** Epic Cross-Child Decision 20 records what happened; this
+    ticket carries the rules into the protocol. Under the authoring standard
+    a rule needs a failure observed on the current tier, and these two were
+    observed on a current-flagship worker holding a documentation ticket:
+    non-converging fresh-reviewer rounds, and a reset that dropped a
+    concurrent lead commit. The fresh-reader audit of the protocol must not
+    strike them as unexercised.
+
 ## Constraints
 
 - **Depends on `260909-refactor-drain-ready-queue-worker-spawner`.** The worker
@@ -323,9 +332,18 @@ restated in each. It states:
   (a) a low-reversibility merge; (b) an `[escalate-to-lead]` entry or an Open
   Decision Queue during promotion; (c) a ticket decision contradicted by code
   reality so it cannot be executed as written; (d) an irreversible action in
-  the Approval Protocol's always-ask category; (e) a Critical finding surviving
-  three review rounds. Stated as a closed list, with the explicit statement
-  that everything else is decided by the worker.
+  the Approval Protocol's always-ask category; (e) a Critical finding still
+  open after the fix round. Stated as a closed list, with the explicit
+  statement that everything else is decided by the worker.
+- **Two review rounds, fixed** (epic Cross-Child Decision 20): round 1 is the
+  full review at the route's allocation; round 2 checks only that round-1
+  findings were fixed and raises nothing new; no round 3. The playbook
+  states this as the round structure, not as a count the worker may exceed.
+- **Shared-branch discipline** (epic Cross-Child Decision 20): the goal
+  branch carries concurrent lead commits; the worker never amends, resets,
+  or rebases it, and corrects with a new commit. While a spawned delegate
+  runs, the worker waits for the host's completion signal; no polling loops,
+  no filler verification runs.
 - **What happens to everything else.** Recorded in the commit `## AI Context`
   and in the ticket's phase `### Result`, then batched into the merge-stop
   report so the lead can veto. Nothing is dropped silently and nothing costs an

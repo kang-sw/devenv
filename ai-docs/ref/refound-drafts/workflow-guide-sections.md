@@ -48,7 +48,7 @@ The worker stops only for: a merge into a parent branch (user approval; the
 veto point for everything the worker decided alone); an unresolved decision
 the ticket does not settle; a ticket decision contradicted by code reality;
 an irreversible action in the Approval Protocol's always-ask category; a
-Critical review finding surviving three review rounds. Every other decision
+Critical review finding still open after the single fix round. Every other decision
 is recorded in the commit's `## AI Context` and the ticket's `### Result`
 and listed in the worker's terminal report for veto. The lead resolves a
 contradicted decision itself when it can (design review over the worker's

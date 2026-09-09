@@ -76,7 +76,7 @@ re-summarize them.
   goes to the user with the reviewer's verdict.
 - **(d) irreversible action** — put the report's lines to the user; resume
   with the answer.
-- **(e) Critical finding after three rounds** — re-spawn the ticket on a
+- **(e) Critical still open after the fix round** — re-spawn the ticket on a
   higher-tier worker, same branch, with the finding's location (commit and
   file) in the task block. A second (e) from the elevated worker goes to the
   user.

@@ -149,7 +149,7 @@ removed.
    entry or an Open Decision Queue during promotion; (c) a ticket decision
    contradicted by code reality so it cannot be executed as written; (d) an
    irreversible action per the Approval Protocol's always-ask category; (e)
-   a Critical finding surviving three review rounds. Everything else the
+   a Critical finding still open after the fix round (Decision 20). Everything else the
    worker decides, records in `## AI Context` and the ticket `### Result`,
    and proceeds; the merge-stop report lists those decisions for veto.
 6. **Lead as first-line escalation handler.** On (c) the lead first attempts
@@ -234,6 +234,23 @@ removed.
     terminal report through the host notification and applies the
     goal-to-parent merge stop. This run is the measurement manual's first
     after-sample. Branch: `epic/refound`.
+20. **Review is two rounds, and the branch is never rewritten.** Observed on
+    the first hand-dogfood run (the measurement-manual ticket): a fresh
+    reviewer each round found a fresh set of Criticals, so three rounds did
+    not converge and a fourth was about to open; and the worker reset the
+    shared branch to re-author its commits, dropping a lead commit made
+    concurrently. Therefore: round 1 is a full review by fresh reviewers at
+    the route's allocation; round 2 verifies only that round-1 findings were
+    fixed and raises nothing new (an observation goes into `unresolved:`);
+    there is no round 3, and a Critical still open after round 2 is stop (e).
+    The goal branch is shared with the lead, who commits on it during the
+    run: the worker never amends, resets, or rebases it; a correction is a new
+    commit. While a spawned delegate runs, the worker waits for the host's
+    completion signal and does not poll or fill the wait with repeated
+    verification runs.
+    *Rejected: keep three rounds with a same-root-cause stop* — the rounds
+    failed by finding different Criticals each time, which that stop does
+    not catch.
 
 ## Completion Criteria
 
