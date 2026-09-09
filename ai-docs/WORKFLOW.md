@@ -140,7 +140,7 @@ instead of full dissolution:
 7. Route deeper semantic work through the owning workflow: behavior to
    `ws:lead-forge-spec` or the lead-write-spec procedure, modification knowledge to
    `ws:lead-forge-mental-model`, ticket readiness/status wording to the
-   lead-write-ticket procedure, and ambiguous direction
+   lead-ticket procedure, and ambiguous direction
    to `ws:lead-discuss`.
 
 ## Commit Traceability

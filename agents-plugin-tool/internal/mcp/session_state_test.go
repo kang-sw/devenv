@@ -367,7 +367,7 @@ func TestDeriveImplementTodoInstructionsPartitionedReview(t *testing.T) {
 	if !strings.Contains(review, "Dispatch correctness and test reviewers") {
 		t.Fatalf("review instruction missing selected partitions: %q", review)
 	}
-	if !strings.Contains(review, "Reviewer prompt frame") || !strings.Contains(review, "Review relay dispatch") || !strings.Contains(review, "Re-review prompt") {
+	if !strings.Contains(review, "rendered reviewer playbook") || !strings.Contains(review, "`implementer-relay` playbook") || !strings.Contains(review, "fresh reviewer render") {
 		t.Fatalf("review instruction missing named template guidance: %q", review)
 	}
 	if strings.Contains(review, "fit") {
@@ -404,11 +404,11 @@ func implementOrdinaryRelayWants() []string {
 		"carry each disposition into the final report",
 		"An Important finding still non-clean after its own relay instead carries the implementer's self-reported [not fixed: <reason>]",
 		"since Important is never re-reviewed",
-		"Relay #1 dispositions every non-clean Critical/Important finding from review #1 at once with the Review relay dispatch",
+		"Relay #1 dispositions every non-clean Critical/Important finding from review #1 at once with the `implementer-relay` playbook",
 		"Important is best-effort: its one-relay budget is spent in relay #1",
 		"Minor drives no relay at any point; record Minor findings in the review summary only",
-		"Critical exception: if review #1 reports any Critical finding, follow relay #1 with one Critical-scoped review #2 using the Re-review prompt, limited to the Critical findings",
-		"If review #2 still reports that Critical non-clean, follow it with a second Critical-scoped relay (relay #2) via the Review relay dispatch, then a Critical-scoped review #3 using the Re-review prompt",
+		"Critical exception: if review #1 reports any Critical finding, follow relay #1 with one Critical-scoped review #2 using a fresh reviewer render, limited to the Critical findings",
+		"If review #2 still reports that Critical non-clean, follow it with a second Critical-scoped relay (relay #2) via the `implementer-relay` playbook, then a Critical-scoped review #3 using a fresh reviewer render",
 		"if review #3 still reports the Critical finding non-clean, unconditionally elevate that finding to `implementer-elevated`",
 		"never a hard stop",
 		"continue to the remaining todos with the elevation recorded in the final report",
@@ -2213,7 +2213,7 @@ func TestEnterImplementAllocatesSingleReviewForBoundedPublicExistingTestChange(t
 	}
 	review := readTodoInstruction(t, server, 3, key, "review")
 	for _, want := range []string{
-		"Render `reviewer`", "one full-scope review", "Reviewer prompt frame", "generated findings path",
+		"Render `reviewer`", "one full-scope review", "rendered path", "generated findings path",
 	} {
 		if !strings.Contains(review, want) {
 			t.Fatalf("single-review todo instruction missing %q: %q", want, review)
@@ -2257,8 +2257,8 @@ func TestDeriveImplementTodoInstructionsCriticalReviewBranch(t *testing.T) {
 	})
 	review := requireInstruction(t, todoByKey(t, got, "review"))
 	for _, want := range []string{
-		"Critical exception: if review #1 reports any Critical finding, follow relay #1 with one Critical-scoped review #2 using the Re-review prompt, limited to the Critical findings",
-		"If review #2 still reports that Critical non-clean, follow it with a second Critical-scoped relay (relay #2) via the Review relay dispatch, then a Critical-scoped review #3 using the Re-review prompt",
+		"Critical exception: if review #1 reports any Critical finding, follow relay #1 with one Critical-scoped review #2 using a fresh reviewer render, limited to the Critical findings",
+		"If review #2 still reports that Critical non-clean, follow it with a second Critical-scoped relay (relay #2) via the `implementer-relay` playbook, then a Critical-scoped review #3 using a fresh reviewer render",
 		"if review #3 still reports the Critical finding non-clean, unconditionally elevate that finding to `implementer-elevated`",
 		"never a hard stop",
 		"continue to the remaining todos with the elevation recorded in the final report",
@@ -2308,7 +2308,7 @@ func TestEnterImplementFocusedTodosDirectLeadOnlySkippedDocs(t *testing.T) {
 		t.Fatalf("direct-edit todo instruction not focused: %q", edit)
 	}
 	review := readTodoInstruction(t, server, 4, key, "review")
-	if !strings.Contains(review, "Perform lead-owned review only") || strings.Contains(review, "Reviewer prompt frame") {
+	if !strings.Contains(review, "Perform lead-owned review only") || strings.Contains(review, "rendered reviewer playbook") {
 		t.Fatalf("lead-only review todo instruction not focused: %q", review)
 	}
 	for _, forbidden := range []string{"review cycles for this implementation slice", "the budget ends relaying, not the run"} {
