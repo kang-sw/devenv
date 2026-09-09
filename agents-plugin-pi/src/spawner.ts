@@ -97,6 +97,7 @@ import { suggestModels, formatExploreTierRefusal, formatTierWarning, modelCatalo
 import { WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readExploreMode, readSpawnRole, type ExploreMode, type SpawnRole } from "./process-role.ts";
 import { captureForkContext, compareForkRegistrations, removeForkTransport, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
 import { allocateAgentHome, createAgentStorageContext, isOwnedSessionPath, observeSessionWrite, readOwnership, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
+import { readSessionEntries, reduceTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers: tool-group resolution, terminal-stopReason classification,
@@ -857,6 +858,13 @@ export interface RpcAgentRecord {
   modelBase?: string;
   /** Caller-supplied thinking level, applied via `setThinkingLevel()` after every (re)start. */
   modelEffort?: string;
+  /** Observed child selection and recomputed durable usage; launch intent stays above. */
+  telemetry?: AgentTelemetry;
+  /** Legacy-fork floor: permits post-launch latest input, never lifetime cost. */
+  telemetryInputFloor?: TelemetryOrigin;
+  observedModel?: string;
+  observedEffort?: string;
+  observedLatestInput?: number;
   /**
    * 260906 Phase 2 (YAML/TUI dispatch-row rendering): the raw tier name
    * (`params.modelName`) requested at spawn, or `undefined` for an inherit
@@ -1091,6 +1099,44 @@ export interface RpcAgentRecord {
    * `onApprovalPending` of its own, gets it for free.
    */
   onApprovalPending?: (record: RpcAgentRecord) => void;
+}
+
+/** Binds once before the first prompt and only recomputes from durable IDs thereafter. */
+export function refreshAgentTelemetry(record: RpcAgentRecord, state?: { sessionFile?: string; sessionId?: string; model?: { provider?: string; id?: string }; thinkingLevel?: string }, opts?: { fresh?: boolean }): boolean {
+  const before = JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+  const path = state?.sessionFile ?? record.sessionPath;
+  const read = readSessionEntries(path);
+  const sessionId = state?.sessionId ?? (read && !("transient" in read) ? read.headerId : undefined);
+  const model = state?.model?.provider && state.model.id ? `${state.model.provider}/${state.model.id}` : undefined;
+  if (model) record.observedModel = model; else if (state) delete record.observedModel;
+  if (typeof state?.thinkingLevel === "string" && state.thinkingLevel) record.observedEffort = state.thinkingLevel; else if (state) delete record.observedEffort;
+  if (!record.telemetry) {
+    if (!sessionId) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+    // A non-fork legacy child has no inherited history and can be recovered
+    // completely. A fork without its saved boundary must remain unknown.
+    if (read && !("transient" in read) && read.parentSession && opts?.fresh) {
+      const anchor = read.entries.at(-1)?.id;
+      if (!anchor) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+      record.telemetry = { version: 1, origin: { sessionId, sessionPath: path, prefixEntryId: anchor } };
+    } else if (read && !("transient" in read) && read.parentSession && !opts?.fresh) {
+      if (!record.telemetryInputFloor) record.telemetryInputFloor = { sessionId, sessionPath: path, ...(read.entries.at(-1)?.id ? { prefixEntryId: read.entries.at(-1)!.id } : { emptyPrefix: true }) };
+      const floor = reduceTelemetry(record.telemetryInputFloor, read);
+      if (floor) record.observedLatestInput = floor.latestInput; else delete record.observedLatestInput;
+      return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+    }
+    if (!read || ("transient" in (read ?? {}))) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+    if (!record.telemetry) record.telemetry = { version: 1, origin: { sessionId, sessionPath: path, emptyPrefix: true } };
+  }
+  const telemetry = record.telemetry;
+  if (telemetry.origin.sessionPath !== path || (sessionId && telemetry.origin.sessionId !== sessionId)) { delete record.telemetry; delete record.telemetryInputFloor; delete record.observedLatestInput; return true; }
+  if (model) telemetry.model = model; else if (state) delete telemetry.model;
+  if (typeof state?.thinkingLevel === "string" && state.thinkingLevel) telemetry.effort = state.thinkingLevel; else if (state) delete telemetry.effort;
+  if (read && "transient" in read) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+  const reduced = reduceTelemetry(telemetry.origin, read);
+  if (!reduced) { delete record.telemetry; delete record.telemetryInputFloor; delete record.observedLatestInput; return true; }
+  delete telemetry.latestInput; delete telemetry.estimatedUsd;
+  Object.assign(telemetry, reduced);
+  return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
 }
 
 /**
@@ -2303,9 +2349,35 @@ export function attachEventListener(
   client: RpcClient,
   onApprovalPending?: (record: RpcAgentRecord) => void,
 ): void {
+  let refreshing = false;
+  let dirty = false;
+  const generation = record.launchGeneration;
+  const refresh = () => {
+    dirty = true;
+    if (refreshing) return;
+    refreshing = true;
+    void (async () => {
+      do {
+        dirty = false;
+        try {
+          const state = await client.getState();
+          if (record.client === client && record.launchGeneration === generation && refreshAgentTelemetry(record, state)) triggerAgentWidgetRefresh();
+        } catch {
+          if (record.client === client && record.launchGeneration === generation) {
+            const changed = record.observedModel !== undefined || record.observedEffort !== undefined || record.telemetry?.model !== undefined || record.telemetry?.effort !== undefined;
+            delete record.observedModel; delete record.observedEffort;
+            if (record.telemetry) { delete record.telemetry.model; delete record.telemetry.effort; }
+            if (changed) triggerAgentWidgetRefresh();
+          }
+        }
+      } while (dirty && record.client === client && record.launchGeneration === generation);
+      refreshing = false;
+    })();
+  };
   record.unsubscribe = client.onEvent((evt) => {
     const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string };
     const outcome = applyRpcEvent(record, e);
+    if (e.type === "agent_start" || e.type === "agent_settled" || e.type === "message_end" || e.type === "message_update" || e.type === "thinking_level_changed" || e.type === "compaction_end") refresh();
     if (outcome.push) {
       pushToLead(pi, registry, record, outcome.push.family, outcome.push.payload, outcome.push.deliverAs);
     }
@@ -2716,6 +2788,9 @@ export async function spawnAgent(
     } else {
       await applyModelEffort(client, record.modelEffort);
     }
+    // Capture the immutable pre-first-prompt boundary after all selection
+    // work, before prompt() can append any attributable child turn.
+    try { refreshAgentTelemetry(record, await client.getState(), { fresh: true }); } catch { delete record.observedModel; delete record.observedEffort; if (record.telemetry) { delete record.telemetry.model; delete record.telemetry.effort; } }
     if (forkLaunch) await captureForkSelection(client, record);
     attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     attachFirstTaskForkCacheNotice(record, client, ctx.forkCacheNoticeOwner);
@@ -2823,6 +2898,7 @@ export async function sendToAgent(
       } else {
         await applyModelEffort(client, record.modelEffort);
       }
+      try { refreshAgentTelemetry(record, await client.getState()); } catch { delete record.observedModel; delete record.observedEffort; if (record.telemetry) { delete record.telemetry.model; delete record.telemetry.effort; } }
       if (forkLaunch) await captureForkSelection(client, record);
       attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     } catch (err) {
@@ -3009,6 +3085,10 @@ export async function stopAgent(
     } catch {
       stopped = false;
     }
+    // `message_end` can be persisted while abort/stop is in flight.  The
+    // record is already synchronously dormant, so this final disk-only read
+    // cannot revive a stale client or delay the stop race protection.
+    refreshAgentTelemetry(record);
     if (record.ownership && record.launchGeneration === generation && !record.client) updateOwnership(record.ownership.home, { liveness: { lifecycle: stopped ? "stopped" : "unknown", running: false, observedAt: Date.now() } });
     if (record.ownership && record.launchGeneration === generation && !record.client) observeSessionWrite(record.ownership.home, record.sessionPath);
     // Review relay #1 (I2): a stop is a thread-close path too — the ticket

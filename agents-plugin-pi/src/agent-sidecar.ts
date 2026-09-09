@@ -39,10 +39,11 @@
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { startOwnedSessionObserver, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole, type ToolGroup } from "./spawner.ts";
+import { refreshAgentTelemetry, startOwnedSessionObserver, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole, type ToolGroup } from "./spawner.ts";
 import { parseForkContext, type ForkContext } from "./fork-context.ts";
 import type { ExploreMode } from "./process-role.ts";
 import { readOwnership, updateOwnership, validDescriptor, type AgentOwnership } from "./agent-storage.ts";
+import { parseTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
 
 /** Sidecar file version. Bumped only on a breaking shape change; a mismatch is treated as "no sidecar". */
 export const SIDECAR_VERSION = 1;
@@ -64,6 +65,11 @@ export interface PersistedOrphan {
   forkContext?: ForkContext;
   modelBase?: string;
   modelEffort?: string;
+  telemetry?: AgentTelemetry;
+  telemetryInputFloor?: TelemetryOrigin;
+  observedModel?: string;
+  observedEffort?: string;
+  observedLatestInput?: number;
   wsToolNames: string[];
   toolGroup: ToolGroup;
   explicitTools?: string;
@@ -138,6 +144,11 @@ export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
       ...(record.forkContext ? { forkContext: record.forkContext } : {}),
       modelBase: record.modelBase,
       modelEffort: record.modelEffort,
+      ...(record.telemetry ? { telemetry: record.telemetry } : {}),
+      ...(record.telemetryInputFloor ? { telemetryInputFloor: record.telemetryInputFloor } : {}),
+      ...(record.observedModel ? { observedModel: record.observedModel } : {}),
+      ...(record.observedEffort ? { observedEffort: record.observedEffort } : {}),
+      ...(record.observedLatestInput !== undefined ? { observedLatestInput: record.observedLatestInput } : {}),
       wsToolNames: [...record.wsToolNames],
       toolGroup: record.toolGroup,
       explicitTools: record.explicitTools,
@@ -227,6 +238,11 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
       ...(forkContext ? { forkContext } : {}),
       modelBase: typeof o.modelBase === "string" ? o.modelBase : undefined,
       modelEffort: typeof o.modelEffort === "string" ? o.modelEffort : undefined,
+      ...(parseTelemetry(o.telemetry) ? { telemetry: parseTelemetry(o.telemetry) } : {}),
+      ...(parseTelemetry({ version: 1, origin: o.telemetryInputFloor })?.origin ? { telemetryInputFloor: parseTelemetry({ version: 1, origin: o.telemetryInputFloor })!.origin } : {}),
+      ...(typeof o.observedModel === "string" && o.observedModel ? { observedModel: o.observedModel } : {}),
+      ...(typeof o.observedEffort === "string" && o.observedEffort ? { observedEffort: o.observedEffort } : {}),
+      ...(typeof o.observedLatestInput === "number" && Number.isFinite(o.observedLatestInput) && o.observedLatestInput >= 0 ? { observedLatestInput: o.observedLatestInput } : {}),
       wsToolNames: Array.isArray(o.wsToolNames) ? o.wsToolNames.filter((n): n is string => typeof n === "string") : [],
       toolGroup: (o.toolGroup ?? "full-worker") as ToolGroup,
       explicitTools: typeof o.explicitTools === "string" ? o.explicitTools : undefined,
@@ -264,7 +280,7 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
  * reports again for real.
  */
 export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
-  return {
+  const record: RpcAgentRecord = {
     agentId: orphan.agentId,
     alias: orphan.alias,
     title: orphan.title,
@@ -276,6 +292,11 @@ export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
     ...(orphan.forkContext ? { forkContext: orphan.forkContext } : {}),
     modelBase: orphan.modelBase,
     modelEffort: orphan.modelEffort,
+    ...(orphan.telemetry ? { telemetry: orphan.telemetry } : {}),
+    ...(orphan.telemetryInputFloor ? { telemetryInputFloor: orphan.telemetryInputFloor } : {}),
+    ...(orphan.observedModel ? { observedModel: orphan.observedModel } : {}),
+    ...(orphan.observedEffort ? { observedEffort: orphan.observedEffort } : {}),
+    ...(orphan.observedLatestInput !== undefined ? { observedLatestInput: orphan.observedLatestInput } : {}),
     wsToolNames: [...orphan.wsToolNames],
     toolGroup: orphan.toolGroup,
     explicitTools: orphan.explicitTools,
@@ -286,6 +307,10 @@ export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
     reportLog: [],
     lastReportAtOverride: orphan.lastReportAt,
   };
+  // A parked record can gain a flushed final entry between sidecar capture
+  // and process exit. Reconcile it before any recovery consumer renders it.
+  refreshAgentTelemetry(record);
+  return record;
 }
 
 /**

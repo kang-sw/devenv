@@ -1474,11 +1474,12 @@ is a projection over the two registries the adapter already keeps — the RPC
 agent registry and the owner-question thread registry — and never owns state
 of its own: every repaint rebuilds the rows from those registries.
 
-- **Rows.** Each row reads `name · role · state · elapsed`, with the
-  `/answer <id>` hint appended when the row awaits the owner. `name` is the
+- **Rows.** Each row starts with `name · role · state · elapsed`, followed by
+  model and usage telemetry when space permits, with the `/answer <id>` hint
+  retained when the row awaits the owner. `name` is the
   agent's alias, else its title, else the first eight characters of its id; a
   thread with no live respondent is named by the thread title. `role` is
-  `worker`, `execute`, `fork`, `explore`, or `thread` (a lead-ask discussion
+  `worker`, `execute`, `fork`, `explore`, or `thread` (an owner discussion
   respondent, or a thread with no live respondent yet). A persistent
   researcher is an `explore` row while it has a live client; after settle it
   parks and disappears from the live widget but stays in the registry for
@@ -1492,8 +1493,8 @@ of its own: every repaint rebuilds the rows from those registries.
   a row while parked between messages — it is the owner's action cue). A
   thread is a row while it is `pending` or `open`; it collapses onto its
   respondent's row when that respondent is a thread-bound record, and
-  otherwise stands alone (a `ws-ask` question before `/answer` spawns its
-  fork, or a fork-raised question whose respondent was revived dormant after
+  otherwise stands alone (an owner question without a live respondent,
+  or a fork-raised question whose respondent was revived dormant after
   a lead restart). `dormant` and `closed` threads produce no row.
 - **Order and cap.** Rows sort `awaiting owner`, then `awaiting approval`,
   then `running`, longest elapsed first within a state. At most five rows
@@ -1529,6 +1530,45 @@ of its own: every repaint rebuilds the rows from those registries.
 > exercised live: the real-width render through the host's widget factory,
 > the 10-second clock under a running child, and `/reload` re-arming — these
 > are owner-run checks recorded in the ticket's Phase 1 Result.
+
+### Agent row model and usage {#260910-pi-agent-row-telemetry}
+
+When the row fits, telemetry reads `<provider/model> (<effort>) · in <input> ·
+est $<USD>`. Model, effort, latest input, and estimated cost independently use
+`—` when unavailable. A reported zero remains zero. Model and effort reflect
+observed child state rather than the requested launch configuration; a failed
+current-state observation clears those labels independently of retained usage.
+
+- **Latest input.** Input is the most recent attributable model call's reported
+  input-token field, without adding cache tokens or substituting a session
+  total. A newer call with missing input clears the previous value. Summary
+  usage may aggregate several calls, so it clears latest input rather than
+  presenting aggregate tokens as one call.
+- **Estimated cost.** The USD amount is cumulative reported estimated cost
+  attributable to this child, including usage-bearing summaries and tool
+  results. It is not subscription billing. Durable call identities prevent
+  repeated events and continuation or resume from adding a call twice. Fork
+  accounting excludes the complete inherited prefix captured before the
+  child's first prompt. Missing or invalid cost on a known contributing call
+  makes the complete estimate unknown; empty history does not invent zero.
+- **Recovery.** Ordinary-agent sidecars and owner-thread resume snapshots
+  preserve validated observations and attribution. Readable child history is
+  reconciled during recovery, including a thread whose respondent has not
+  relaunched. A legacy ordinary session with no parent history can recover
+  its total. A legacy fork without its original boundary keeps lifetime cost
+  unknown; a separate observation boundary can establish later child input
+  without claiming a complete lifetime total. Temporarily missing, unreadable,
+  or partially written history preserves a validated lifetime origin and
+  usage snapshot. Readable identity or boundary contradictions invalidate
+  incompatible attribution instead of carrying its old total forward.
+- **Collection and display.** Usage is collected at child event and lifecycle
+  boundaries, including compaction and final stop, outside rendering. Optional
+  telemetry queries cannot prevent otherwise valid delegation. Shutdown keeps
+  the pre-stop orphan activity state while persisting final usage to both
+  recovery formats. Rendering performs no RPC or disk reads and adds no
+  per-frame polling. Width limits, row order, caps, and waiting-row visibility
+  remain unchanged. The full `/answer <id>` cue takes priority whenever it
+  fits; telemetry is omitted before that cue when the row is too narrow.
 
 ## Shared conversation-view component {#260909-pi-conversation-view-component}
 

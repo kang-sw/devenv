@@ -69,6 +69,10 @@ export interface AgentRow {
   elapsedMs: number;
   /** The `/answer <id>` hint text, set only for a `"thread"` row (the ticket's merged-in owner-question cue). */
   answerHint?: string;
+  model?: string;
+  effort?: string;
+  latestInput?: number;
+  estimatedUsd?: number;
 }
 
 const STATE_RANK: Record<AgentRowState, number> = {
@@ -195,6 +199,10 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
       state,
       elapsedMs,
       answerHint: isAwaitingOwnerWithThread ? `/answer ${boundThread!.threadId}` : undefined,
+      ...(record.telemetry?.model ?? record.observedModel ? { model: record.telemetry?.model ?? record.observedModel } : {}),
+      ...(record.telemetry?.effort ?? record.observedEffort ? { effort: record.telemetry?.effort ?? record.observedEffort } : {}),
+      ...((record.telemetry?.latestInput ?? record.observedLatestInput) !== undefined ? { latestInput: record.telemetry?.latestInput ?? record.observedLatestInput } : {}),
+      ...(record.telemetry?.estimatedUsd !== undefined ? { estimatedUsd: record.telemetry.estimatedUsd } : {}),
     });
   }
 
@@ -206,6 +214,10 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
       state: "awaiting-owner",
       elapsedMs: clampElapsed(now - Date.parse(thread.touchedAt)),
       answerHint: `/answer ${thread.threadId}`,
+      ...(thread.forkResume?.telemetry?.model ?? thread.forkResume?.observedModel ? { model: thread.forkResume?.telemetry?.model ?? thread.forkResume?.observedModel } : {}),
+      ...(thread.forkResume?.telemetry?.effort ?? thread.forkResume?.observedEffort ? { effort: thread.forkResume?.telemetry?.effort ?? thread.forkResume?.observedEffort } : {}),
+      ...((thread.forkResume?.telemetry?.latestInput ?? thread.forkResume?.observedLatestInput) !== undefined ? { latestInput: thread.forkResume?.telemetry?.latestInput ?? thread.forkResume?.observedLatestInput } : {}),
+      ...(thread.forkResume?.telemetry?.estimatedUsd !== undefined ? { estimatedUsd: thread.forkResume.telemetry.estimatedUsd } : {}),
     });
   }
 
@@ -229,9 +241,19 @@ function formatElapsed(elapsedMs: number): string {
 }
 
 /** `name · role · state · elapsed`, plus the `/answer <id>` hint for a `"thread"` row — the ticket's literal row shape. */
-function formatRow(row: AgentRow): string {
+function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH): string {
   const base = `${row.name} · ${row.role} · ${STATE_LABEL[row.state]} · ${formatElapsed(row.elapsedMs)}`;
-  return row.answerHint ? `${base} — ${row.answerHint}` : base;
+  const selection = `${row.model ?? "—"} (${row.effort ?? "—"})`;
+  const telemetry = ` · ${selection} · in ${row.latestInput ?? "—"} · est $${row.estimatedUsd ?? "—"}`;
+  const hint = row.answerHint ? ` — ${row.answerHint}` : "";
+  // The owner action is the only non-negotiable tail.  Allocate its columns
+  // first, then progressively omit telemetry and identity detail.
+  if (row.answerHint && visibleWidth(hint) <= width) {
+    const available = width - visibleWidth(hint);
+    const withTelemetry = base + telemetry;
+    return visibleWidth(withTelemetry) <= available ? withTelemetry + hint : truncateToWidth(base, available) + hint;
+  }
+  return visibleWidth(base + telemetry) <= width ? base + telemetry : truncateToWidth(base, width);
 }
 
 /**
@@ -294,7 +316,7 @@ export function buildWidgetLines(rows: readonly AgentRow[], pendingCount: number
     hiddenRunning = running.length - runningSlots;
   }
 
-  const lines = [heading, ...shown.map((row) => truncateToWidth(formatRow(row), width))];
+  const lines = [heading, ...shown.map((row) => formatRow(row, width))];
   if (hiddenRunning > 0) lines.push(truncateToWidth(`+${hiddenRunning} more`, width));
   return lines;
 }

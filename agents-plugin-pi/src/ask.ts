@@ -70,6 +70,7 @@ import {
   sendToLead,
   inheritModelFromToolCtx,
   sendToAgent,
+  refreshAgentTelemetry,
   spawnAgent,
   storageContextFromToolCtx,
   syncOwnershipProtection,
@@ -93,6 +94,7 @@ import { loadHostPiTui, type MarkdownTheme } from "./pi-tui.ts";
 import { captureForkContext, captureRegisteredTools, captureUnflushedForkSource, effectiveForkDescriptor, type ForkContext } from "./fork-context.ts";
 import type { LeadPromptRef } from "./lead-bootstrap.ts";
 import { readOwnership, validDescriptor } from "./agent-storage.ts";
+import { parseTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers. Unit-tested directly (test/ask.test.ts) with no
@@ -407,6 +409,11 @@ export interface PersistedForkResume {
   toolGroup: ToolGroup;
   modelBase?: string;
   modelEffort?: string;
+  telemetry?: AgentTelemetry;
+  telemetryInputFloor?: TelemetryOrigin;
+  observedModel?: string;
+  observedEffort?: string;
+  observedLatestInput?: number;
   ownership?: import("./agent-storage.ts").AgentOwnership;
 }
 
@@ -694,6 +701,11 @@ export function captureForkResume(record: RpcAgentRecord): PersistedForkResume {
     toolGroup: record.toolGroup,
     modelBase: record.modelBase,
     modelEffort: record.modelEffort,
+    ...(record.telemetry ? { telemetry: record.telemetry } : {}),
+    ...(record.telemetryInputFloor ? { telemetryInputFloor: record.telemetryInputFloor } : {}),
+    ...(record.observedModel ? { observedModel: record.observedModel } : {}),
+    ...(record.observedEffort ? { observedEffort: record.observedEffort } : {}),
+    ...(record.observedLatestInput !== undefined ? { observedLatestInput: record.observedLatestInput } : {}),
     ...(record.ownership ? { ownership: record.ownership } : {}),
   };
 }
@@ -717,6 +729,11 @@ export function rehydrateForkRecord(agentId: string, resume: PersistedForkResume
     ...(resume.forkContext ? { forkContext: resume.forkContext } : {}),
     modelBase: resume.modelBase,
     modelEffort: resume.modelEffort,
+    ...(parseTelemetry(resume.telemetry) ? { telemetry: parseTelemetry(resume.telemetry) } : {}),
+    ...(parseTelemetry({ version: 1, origin: resume.telemetryInputFloor })?.origin ? { telemetryInputFloor: parseTelemetry({ version: 1, origin: resume.telemetryInputFloor })!.origin } : {}),
+    ...(typeof resume.observedModel === "string" && resume.observedModel ? { observedModel: resume.observedModel } : {}),
+    ...(typeof resume.observedEffort === "string" && resume.observedEffort ? { observedEffort: resume.observedEffort } : {}),
+    ...(typeof resume.observedLatestInput === "number" && Number.isFinite(resume.observedLatestInput) && resume.observedLatestInput >= 0 ? { observedLatestInput: resume.observedLatestInput } : {}),
     wsToolNames: [...resume.wsToolNames],
     toolGroup: resume.toolGroup,
     explicitTools: resume.explicitTools,
@@ -725,6 +742,9 @@ export function rehydrateForkRecord(agentId: string, resume: PersistedForkResume
     running: false,
     reportLog: [],
   };
+  // Thread-only rows are rendered from forkResume while dormant; reconcile
+  // the persisted child file here, never from the widget render path.
+  refreshAgentTelemetry(record);
   startOwnedSessionObserver(record);
   return record;
 }
@@ -808,6 +828,11 @@ export function hydrateThreadRegistry(handle: ThreadRegistryHandle, path: string
   handle.pathRef.current = path;
   handle.threads.clear();
   for (const record of loadThreadRegistryFile(path)) {
+    if (record.respondentAgentId && record.forkResume) {
+      // Thread-only rows render this persisted object directly, so reconcile
+      // and normalize it at hydration rather than waiting for /answer.
+      record.forkResume = captureForkResume(rehydrateForkRecord(record.respondentAgentId, record.forkResume));
+    }
     handle.threads.set(record.threadId, record);
   }
 }

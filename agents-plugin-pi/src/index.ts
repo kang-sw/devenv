@@ -201,11 +201,14 @@ import { armForkRoleWiring, registerFork } from "./fork.ts";
 import {
   buildForkQuestionLeadNotice,
   createThreadRegistryHandle,
+  type ThreadRegistryHandle,
   handleForkRaisedQuestion,
+  captureForkResume,
   hydrateThreadRegistry,
   registerAsk,
   registerThreadCommands,
   threadRegistryPath,
+  saveThreadRegistryFile,
 } from "./ask.ts";
 import { registerAuditCommands } from "./audit.ts";
 import { registerWsSkillTool } from "./lead-skills.ts";
@@ -222,6 +225,34 @@ const goalLoopConfigPath = join(pluginDir, "goal-loop-config.json");
 const piLeadGuidePath = join(pluginDir, "pi-lead-guide.md");
 const executeWorkerGuidePath = join(pluginDir, "execute-worker-guide.md");
 const exploreGuidePath = join(pluginDir, "explore-guide.md");
+
+/** Shutdown's durable boundary: preserve pre-stop status, then persist the
+ * same snapshots enriched from final child disk reconciliation. */
+export async function persistShutdownAgentSnapshots(
+  agentTools: AgentToolsHandle | undefined,
+  sidecar: string | undefined,
+  threads: ThreadRegistryHandle,
+): Promise<void> {
+  const orphans = agentTools ? captureOrphans(agentTools.rpcRegistry) : undefined;
+  await agentTools?.stopAll();
+  if (!sidecar || !agentTools || !orphans) return;
+  for (const orphan of orphans) {
+    const record = agentTools.rpcRegistry.get(orphan.agentId);
+    if (!record) continue;
+    orphan.telemetry = record.telemetry;
+    orphan.telemetryInputFloor = record.telemetryInputFloor;
+    orphan.observedModel = record.observedModel;
+    orphan.observedEffort = record.observedEffort;
+    orphan.observedLatestInput = record.observedLatestInput;
+  }
+  writeSidecarAt(sidecar, orphans);
+  for (const thread of threads.threads.values()) {
+    if (!thread.respondentAgentId) continue;
+    const record = agentTools.rpcRegistry.get(thread.respondentAgentId);
+    if (record) thread.forkResume = captureForkResume(record);
+  }
+  if (threads.pathRef.current) saveThreadRegistryFile(threads.pathRef.current, [...threads.threads.values()]);
+}
 
 /**
  * `260907-bug-ws-pi-deep-explore-missing-collection-tool` Phase 1: guards the
@@ -665,15 +696,12 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // captures already-dormant (parked) records, but only a live-at-shutdown
     // snapshot correctly reports which ones were still `running` at that
     // instant; after stopAll() every record reads as dormant/idle.
-    if (leadSidecarPath && agentTools) {
-      writeSidecarAt(leadSidecarPath, captureOrphans(agentTools.rpcRegistry));
-    }
     // Await graceful RPC teardown of any still-live spawned `pi` children
     // before tearing down the bridge connection they were dispatching ws__*
     // tool calls through (agentTools.stopAll() is itself async now that
     // teardown is a graceful RpcClient.stop() rather than a fire-and-forget
     // SIGTERM — see spawner.ts's AgentToolsHandle doc comment).
-    await agentTools?.stopAll();
+    await persistShutdownAgentSnapshots(agentTools, leadSidecarPath, threadHandle);
     agentTools = undefined;
     rpcRegistryRef.current = undefined;
     leadSessionFile = undefined;
