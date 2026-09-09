@@ -33,6 +33,7 @@ import { readFileSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme, getSelectListTheme } from "@earendil-works/pi-coding-agent";
 import { lastActivityAt, resolveAgentId, type RpcAgentRegistry } from "./spawner.ts";
+import { touchOwnership } from "./agent-storage.ts";
 import { classifyRegistryRowState, rowName, type AgentRowState } from "./agent-widget.ts";
 import { resolveChildLiveness } from "./ask.ts";
 import {
@@ -396,6 +397,7 @@ export async function openViewer(ctx: AuditUiCtx & { ui?: { custom?: unknown } }
     notify(ctx, `ws: no agent "${agentId}" to audit.`, "warning");
     return;
   }
+  if (record.ownership) touchOwnership(record.ownership.home);
 
   activeAuditOverlay?.close();
   activeAuditOverlay = undefined;

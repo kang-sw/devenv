@@ -2,6 +2,9 @@
 title: "Visually loud widget rows when a child or the lead is waiting on the owner"
 spec:
   - pi-adapter-runtime
+  - 260910-pi-owner-wait-attention
+plans:
+  phase-1: ai-docs/.plans/2026-09/10-0120-260908-feat-ws-pi-attention-alert-when-agents-wait-on-owner.md
 related:
   260908-epic-ws-pi-subagent-conversation-view: specifies prominent rendering for `idle-awaiting-owner` (owner-held children) only, styling left open; this ticket covers the other waits and pins the styling
   260908-feat-ws-pi-subagent-audit-window-and-owner-steering: introduces `lastWriter`/owner-held liveness; its `idle-awaiting-owner` rows should get the same treatment
@@ -71,3 +74,73 @@ fallback, child-context exclusion, teardown/session switch, long/control-charact
 titles and valid qN hints, approval rows without answer targets, and count-header
 integration. Owner live acceptance checks readability in a real terminal with
 fork questions and approval waits; no ws-ask/ws-resolve test is required.
+
+### Result (719a18b3) - 2026-09-10
+
+Implemented 330ms bold/plain question and approval attention in the existing
+owner-lead widget, synchronized with its single count heading. Display titles
+remain separate from valid qN command hints. The existing packaged adapter
+configuration now accepts `agent_wait_animation`; literal false selects static
+bold emphasis, and the next widget refresh observes changes. One attention
+timer is shared by qualifying waits and remains separate from elapsed updates.
+The formatter accepts supplied owner-held idle rows and inspection hints without
+implementing ownership transitions or steering.
+
+Final source checkpoint: `38657d6646948633ad60111120e8cc5fbb04b8c9`.
+Source review range starts at plan commit `8b11343d`.
+
+Verification:
+
+- `cd agents-plugin-pi && node --test test/agent-widget.test.ts test/goal-loop.test.ts`:
+  164 pass, zero failures at the final source checkpoint.
+- `cd agents-plugin-pi && npm test`: 1478 total, 1348 pass, 130 fail. The
+  failures retain the known baseline categories: 129 hardcoded Linux SDK-path
+  fixtures and one stale `ws-ask` exposure assertion. The full suite is not
+  clean; no unrelated fixture changes were made.
+- Fake-clock assertions cover literal 330ms cadence, visible text in both
+  phases, shared timer ownership, enabled final-wait cleanup, disabled static
+  fallback, child exclusion, and controller teardown. Formatting regressions
+  cover injected escape controls, delimiter/state-like names, exact ANSI span
+  boundaries, supplied owner-held rows, and protected action hints. Widths
+  0/1/8 additionally guard styling from reintroducing an omitted suffix.
+- Controller tests and source-inspected host replacement/shutdown wiring are
+  offline evidence; they do not claim a full live Pi session or real-terminal
+  readability check.
+
+Review dispositions:
+
+- ATTN-COR-001 and ATTN-TST-003 [fixed]: relay commit `68313f71` uses structured
+  cue/state boundaries and exact styling regressions; elapsed, telemetry,
+  separators, and qN hints remain ordinary.
+- ATTN-COR-002 and ATTN-TST-004 [fixed]: the same relay adds supplied
+  `idle-awaiting-owner` presentation and preserves an explicit inspection hint.
+- ATTN-TST-001 [fixed]: asserts literal timing, both visible phases, and final
+  resolution while animation remains enabled.
+- ATTN-TST-002 [fixed]: checks that the injected control sequence is absent
+  without stripping it out of the inspected output first.
+- ATTN-FIT-DOC-001 [fixed]: initially deferred to the root-owned documentation
+  pass; spec commit `1c49d551` extends the existing widget contract with its
+  subordinate attention entry. No parallel widget/count surface was added.
+- ATTN-LEAD-001 [fixed]: final documentation/source checking exposed a new
+  narrow-width regression introduced by the relay. Commit `38657d66` tracks
+  the suffix actually appended and adds width 0/1/8 regressions. This required
+  width-verification follow-up is not another independent Important review.
+- All first-round findings were Important and relayed together once; there
+  were no Critical or Minor findings and no independent re-review. Source/test
+  fixes above are implementer self-reports with verification evidence.
+
+Closeout: the runtime spec captures configuration and timer invariants, so no
+duplicate mental-model or project-orientation change is needed. Preserve the
+separate spec/ticket commits and corrective history; documentation-tip
+compaction is skipped. Source inputs are unchanged after final suite evidence;
+documentation checks cover the subsequent closeout. The unrelated untracked
+`06-1203` plan remains untouched.
+
+## Blocked (2026-09-10)
+
+Owner-live acceptance remains outstanding: in a real lead TUI, observe a fork
+question and an approval wait, confirm readable 330ms bold/plain emphasis and
+valid qN hints, resolve waits, then disable/reload and confirm static emphasis
+without duplicate animation. Keep this ticket in `ready/` and skip it during
+unattended queue selection until that evidence arrives. No deprecated
+ws-ask/ws-resolve flow is needed for this check.

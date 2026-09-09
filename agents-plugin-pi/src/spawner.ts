@@ -83,7 +83,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -96,6 +96,8 @@ import { buildAgentSendSummary, buildAgentSpawnSummary, buildExploreSummary, cre
 import { suggestModels, formatExploreTierRefusal, formatTierWarning, modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx, type ModelCatalogEntry, type TierFailure, type TierRejection } from "./model-catalog.ts";
 import { WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readExploreMode, readSpawnRole, type ExploreMode, type SpawnRole } from "./process-role.ts";
 import { captureForkContext, compareForkRegistrations, removeForkTransport, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
+import { allocateAgentHome, createAgentStorageContext, isOwnedSessionPath, observeSessionWrite, readOwnership, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
+import { readSessionEntries, reduceTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers: tool-group resolution, terminal-stopReason classification,
@@ -133,6 +135,10 @@ export const GATED_EXEC_TOOL_NAME = "ws-worker-exec";
  */
 export const WS_PI_APPROVAL_DIR_ENV = "WS_PI_APPROVAL_DIR";
 
+/** Parent-shell bootstrap overrides select a forced ws-mcp install. They are
+ * lead-launch policy, never child-launch policy. */
+const CHILD_BOOTSTRAP_OVERRIDE_ENVS = ["WS_MCP_BOOTSTRAP_BINARY", "WS_MCP_BOOTSTRAP_URL"] as const;
+
 /**
  * Pure env-builder for the one-shot `explore` path's `spawn(...)` call
  * (`spawnPiProcess` below): merges the `explore` process-role marker
@@ -152,6 +158,7 @@ export function buildChildProcessEnv(baseEnv: NodeJS.ProcessEnv): NodeJS.Process
   // A collection leaf remains explore-role but is terminal: never inherit a
   // deep marker that would re-enable recursive collection.
   const env = { ...baseEnv, [WS_PI_SPAWN_ROLE_ENV]: "explore" };
+  for (const override of CHILD_BOOTSTRAP_OVERRIDE_ENVS) delete env[override];
   delete env[WS_PI_EXPLORE_MODE_ENV];
   for (const marker of [WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_AFFINITY_ENV]) delete env[marker];
   return env;
@@ -552,6 +559,9 @@ export interface AgentRecord {
   /** Explore leaves self-reap from the registry once harvested by wait/exploreLeaf; workers never do. */
   selfReap: boolean;
   waiters: Array<() => void>;
+  ownership?: AgentOwnership;
+  ownershipObserverStop?: () => void;
+  launchGeneration?: number;
 }
 
 export type AgentRegistry = Map<string, AgentRecord>;
@@ -654,7 +664,7 @@ function spawnPiProcess(record: AgentRecord, args: string[], cwd: string): void 
   const invocation = getPiInvocation(args);
   const proc = spawn(invocation.command, invocation.args, {
     cwd,
-    env: buildChildProcessEnv(process.env),
+    env: { ...buildChildProcessEnv(process.env), ...(record.ownership ? { [WS_PI_APPROVAL_DIR_ENV]: join(record.ownership.home, "approvals") } : {}) },
     stdio: ["ignore", "pipe", "pipe"],
   });
   record.proc = proc;
@@ -681,6 +691,7 @@ function spawnPiProcess(record: AgentRecord, args: string[], cwd: string): void 
     record.errorMessage = `pi process failed to start: ${err.message}`;
     record.state = "done";
     settleWaiters(record);
+    if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "unknown", observedAt: Date.now() } });
   });
 
   proc.on("close", (code, signal) => {
@@ -689,6 +700,7 @@ function spawnPiProcess(record: AgentRecord, args: string[], cwd: string): void 
     record.exitSignal = signal;
     record.state = "done";
     settleWaiters(record);
+    if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "stopped", running: false, observedAt: Date.now() } });
   });
 }
 
@@ -700,6 +712,15 @@ export interface AgentCallCtx {
   model?: string;
   /** Bridge's sanitized `ws__*` registered tool names, for the `full-worker` group. */
   wsToolNames: readonly string[];
+  storage?: AgentStorageContext;
+}
+
+/** Extracts the immediate dispatcher's stable Pi identity from a live tool call. */
+export function storageContextFromToolCtx(toolCtx: unknown): AgentStorageContext {
+  const value = toolCtx as { sessionManager?: { getSessionId?: () => string }; agentStorageRoot?: string } | undefined;
+  const id = value?.sessionManager?.getSessionId?.();
+  if (!id) throw new Error("ws-pi-agent: current Pi session identity is unavailable");
+  return createAgentStorageContext(id, value?.agentStorageRoot);
 }
 
 export interface ExploreParams {
@@ -753,6 +774,7 @@ export async function exploreLeaf(
   }
 
   const agentId = randomUUID();
+  const ownership = ctx.storage ? allocateAgentHome(ctx.storage, agentId, "explore", undefined, true) : undefined;
   const record: AgentRecord = {
     agentId,
     playbook: "explore",
@@ -764,6 +786,7 @@ export async function exploreLeaf(
     exitSignal: null,
     selfReap: true,
     waiters: [],
+    ownership,
   };
   registry.set(agentId, record);
 
@@ -827,12 +850,21 @@ export interface RpcAgentRecord {
   client?: RpcClient;
   /** Absolute path to the ws-owned `--session` file, reused unchanged across every (re)start. */
   sessionPath: string;
+  /** Durable-home ownership. Absent only for pre-retention legacy records. */
+  ownership?: AgentOwnership;
   /** Lead-rendered playbook prompt path, passed via `--append-system-prompt`; reused unchanged across resumes (no re-render). */
   systemPromptPath?: string;
   /** Resolved `provider/id`, or undefined to inherit pi's own default resolution. Cached so a dormant resume reuses the same model. */
   modelBase?: string;
   /** Caller-supplied thinking level, applied via `setThinkingLevel()` after every (re)start. */
   modelEffort?: string;
+  /** Observed child selection and recomputed durable usage; launch intent stays above. */
+  telemetry?: AgentTelemetry;
+  /** Legacy-fork floor: permits post-launch latest input, never lifetime cost. */
+  telemetryInputFloor?: TelemetryOrigin;
+  observedModel?: string;
+  observedEffort?: string;
+  observedLatestInput?: number;
   /**
    * 260906 Phase 2 (YAML/TUI dispatch-row rendering): the raw tier name
    * (`params.modelName`) requested at spawn, or `undefined` for an inherit
@@ -997,7 +1029,7 @@ export interface RpcAgentRecord {
    * context (branch/dirty/ahead_behind) would silently describe the wrong
    * directory to the lead.
    */
-  pendingApproval?: { cmdId: string; command: string; rationale?: string; cwd?: string };
+  pendingApproval?: { cmdId: string; command: string; rationale?: string; cwd?: string; decisionWritten?: boolean };
   /**
    * 260904 Phase 2 (side-thread question surface, review relay #1 C1): `true`
    * while an owner overlay chat VIEW is attached to this agent (`ask.ts`'s
@@ -1067,6 +1099,44 @@ export interface RpcAgentRecord {
    * `onApprovalPending` of its own, gets it for free.
    */
   onApprovalPending?: (record: RpcAgentRecord) => void;
+}
+
+/** Binds once before the first prompt and only recomputes from durable IDs thereafter. */
+export function refreshAgentTelemetry(record: RpcAgentRecord, state?: { sessionFile?: string; sessionId?: string; model?: { provider?: string; id?: string }; thinkingLevel?: string }, opts?: { fresh?: boolean }): boolean {
+  const before = JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+  const path = state?.sessionFile ?? record.sessionPath;
+  const read = readSessionEntries(path);
+  const sessionId = state?.sessionId ?? (read && !("transient" in read) ? read.headerId : undefined);
+  const model = state?.model?.provider && state.model.id ? `${state.model.provider}/${state.model.id}` : undefined;
+  if (model) record.observedModel = model; else if (state) delete record.observedModel;
+  if (typeof state?.thinkingLevel === "string" && state.thinkingLevel) record.observedEffort = state.thinkingLevel; else if (state) delete record.observedEffort;
+  if (!record.telemetry) {
+    if (!sessionId) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+    // A non-fork legacy child has no inherited history and can be recovered
+    // completely. A fork without its saved boundary must remain unknown.
+    if (read && !("transient" in read) && read.parentSession && opts?.fresh) {
+      const anchor = read.entries.at(-1)?.id;
+      if (!anchor) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+      record.telemetry = { version: 1, origin: { sessionId, sessionPath: path, prefixEntryId: anchor } };
+    } else if (read && !("transient" in read) && read.parentSession && !opts?.fresh) {
+      if (!record.telemetryInputFloor) record.telemetryInputFloor = { sessionId, sessionPath: path, ...(read.entries.at(-1)?.id ? { prefixEntryId: read.entries.at(-1)!.id } : { emptyPrefix: true }) };
+      const floor = reduceTelemetry(record.telemetryInputFloor, read);
+      if (floor) record.observedLatestInput = floor.latestInput; else delete record.observedLatestInput;
+      return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+    }
+    if (!read || ("transient" in (read ?? {}))) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+    if (!record.telemetry) record.telemetry = { version: 1, origin: { sessionId, sessionPath: path, emptyPrefix: true } };
+  }
+  const telemetry = record.telemetry;
+  if (telemetry.origin.sessionPath !== path || (sessionId && telemetry.origin.sessionId !== sessionId)) { delete record.telemetry; delete record.telemetryInputFloor; delete record.observedLatestInput; return true; }
+  if (model) telemetry.model = model; else if (state) delete telemetry.model;
+  if (typeof state?.thinkingLevel === "string" && state.thinkingLevel) telemetry.effort = state.thinkingLevel; else if (state) delete telemetry.effort;
+  if (read && "transient" in read) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+  const reduced = reduceTelemetry(telemetry.origin, read);
+  if (!reduced) { delete record.telemetry; delete record.telemetryInputFloor; delete record.observedLatestInput; return true; }
+  delete telemetry.latestInput; delete telemetry.estimatedUsd;
+  Object.assign(telemetry, reduced);
+  return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
 }
 
 /**
@@ -1619,6 +1689,8 @@ export async function promptAgent(
   // not to the one starting now.
   record.pendingFinal = undefined;
   record.runStartedAt = Date.now();
+  if (record.ownership) observeSessionWrite(record.ownership.home, record.sessionPath);
+  if (record.ownership) updateOwnership(record.ownership.home, { lastActivityAt: Date.now(), liveness: { lifecycle: "live", running: true, observedAt: Date.now() } });
   if (opts?.isLeadPrompt !== false) {
     record.lastLeadPromptAt = Date.now();
   }
@@ -1679,6 +1751,7 @@ export function markAgentExited(
 ): void {
   if (!record.client) return;
   clearLiveState(record);
+  if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "unknown", running: false, observedAt: Date.now() } });
   triggerAgentWidgetRefresh();
   // A child that filed a final and then died before settling still answered;
   // `settled_reason: "exited"` is what tells the lead the death, not silence.
@@ -1765,6 +1838,8 @@ export interface RpcSpawnCtx {
    */
   pi: ExtensionAPI;
   cwd: string;
+  /** Immediate dispatcher's configured Pi home and stable current session identity. */
+  storage?: AgentStorageContext;
   /** `provider/id`, forwarded from the calling tool-execute ctx.model, or undefined to inherit pi's own default. */
   inheritModel?: string;
   /** Current execute/command context's live getAll + configured-auth catalog. */
@@ -1937,10 +2012,16 @@ export function validateForkReadiness(launch: ReturnType<typeof prepareForkLaunc
       ? "missing or reordered callable tools" : compareForkRegistrations(record.forkContext.registeredTools, ready.registeredTools);
     if (mismatch) throw new Error(`ws-pi-agent: fork readiness rejected (${mismatch})`);
   }
+  if (record.ownership && !containedOwnedPath(record.ownership.home, state.sessionFile)) throw new Error("ws-pi-agent: fork readiness rejected (session escaped owned home)");
   record.sessionPath = state.sessionFile;
+  if (record.ownership) { record.ownership = { ...record.ownership, sessionPath: state.sessionFile }; const metadata = readOwnership(record.ownership.home); try { if (metadata) writeOwnership({ ...metadata, sessionPath: state.sessionFile, updatedAt: Date.now(), liveness: { ...metadata.liveness, lifecycle: "live", running: true, observedAt: Date.now() } }); } catch { /* durable facts remain conservative; readiness stays usable */ } }
   removeForkTransport(launch.contextPath);
   removeForkTransport(launch.readinessPath);
   rmSync(dirname(launch.contextPath), { recursive: true, force: true });
+}
+
+function containedOwnedPath(home: string, candidate: string): boolean {
+  return isOwnedSessionPath(home, candidate);
 }
 
 async function captureForkSelection(client: RpcClient, record: RpcAgentRecord): Promise<void> {
@@ -1976,7 +2057,11 @@ export function buildRpcClientOptions(
   env[WS_PI_FORK_READY_NONCE_ENV] = forkLaunch?.nonce ?? "";
   env[WS_PI_FORK_AFFINITY_ENV] = forkLaunch?.affinityId ?? "";
   env[WS_PI_PARENT_SESSION_KEY_ENV] = role === "fork" ? parentSessionKey ?? "" : "";
+  // RpcClient overlays env onto process.env, so deletion here would preserve a
+  // stale parent value. Empty values neutralize forced bootstrap selection.
+  for (const override of CHILD_BOOTSTRAP_OVERRIDE_ENVS) env[override] = "";
   const args = forkFrom ? ["--fork", forkFrom] : ["--session", sessionPath];
+  args.push("--session-dir", dirname(sessionPath));
   if (role === "fork") args.push("--extension", fileURLToPath(new URL("./index.ts", import.meta.url)));
   else if (systemPromptPath) args.push("--append-system-prompt", systemPromptPath);
   args.push("--tools", tools);
@@ -2000,6 +2085,33 @@ export function recordReport(record: RpcAgentRecord, kind: "question" | "final" 
   if (record.reportLog.length > REPORT_LOG_CAP) {
     record.reportLog.shift();
   }
+  if (record.ownership) touchOwnership(record.ownership.home);
+}
+
+/** Writes durable owner/approval protection without treating a poll as activity. */
+export function syncOwnershipProtection(record: RpcAgentRecord): void {
+  if (!record.ownership) return;
+  updateOwnership(record.ownership.home, {
+    liveness: {
+      lifecycle: record.client ? (record.running ? "live" : "stopping") : "unknown",
+      running: record.running,
+      observedAt: Date.now(),
+      threadBound: record.threadBound,
+      pendingQuestion: record.threadBound,
+      pendingApprovalCommandId: record.pendingApproval?.cmdId,
+      recovery: record.client ? "none" : "revived",
+    },
+  });
+}
+
+/** Unreferenced persistent-record observer; unchanged polling never renews activity. */
+export function startOwnedSessionObserver(record: RpcAgentRecord, intervalMs = 5_000): void {
+  if (!record.ownership || record.ownershipObserverStop) return;
+  const sample = () => observeSessionWrite(record.ownership!.home, record.sessionPath);
+  sample();
+  const timer = setInterval(sample, intervalMs);
+  timer.unref();
+  record.ownershipObserverStop = () => { clearInterval(timer); record.ownershipObserverStop = undefined; };
 }
 
 /**
@@ -2101,6 +2213,8 @@ export function applyRpcEvent(
     // The run is over: the child stops counting toward the fan-in the instant
     // it settles, whatever the caller decides to push about it.
     record.running = false;
+    record.pendingApproval = undefined;
+    syncOwnershipProtection(record);
     return { settled: true };
   } else if (evt.type === "tool_execution_start" && evt.toolName === REPORT_TO_LEAD_TOOL_NAME) {
     const args = evt.args as { message?: unknown; kind?: unknown } | undefined;
@@ -2165,6 +2279,7 @@ export function applyRpcEvent(
         rationale: typeof args?.rationale === "string" ? args.rationale : undefined,
         cwd: typeof args?.cwd === "string" ? args.cwd : undefined,
       };
+      syncOwnershipProtection(record);
       // The approval PUSH itself is `createApprovalRelay`'s job
       // (execute-gateway.ts owns the §7 payload and the working-context
       // scrape); this branch only records what is pending. Fired from
@@ -2234,9 +2349,35 @@ export function attachEventListener(
   client: RpcClient,
   onApprovalPending?: (record: RpcAgentRecord) => void,
 ): void {
+  let refreshing = false;
+  let dirty = false;
+  const generation = record.launchGeneration;
+  const refresh = () => {
+    dirty = true;
+    if (refreshing) return;
+    refreshing = true;
+    void (async () => {
+      do {
+        dirty = false;
+        try {
+          const state = await client.getState();
+          if (record.client === client && record.launchGeneration === generation && refreshAgentTelemetry(record, state)) triggerAgentWidgetRefresh();
+        } catch {
+          if (record.client === client && record.launchGeneration === generation) {
+            const changed = record.observedModel !== undefined || record.observedEffort !== undefined || record.telemetry?.model !== undefined || record.telemetry?.effort !== undefined;
+            delete record.observedModel; delete record.observedEffort;
+            if (record.telemetry) { delete record.telemetry.model; delete record.telemetry.effort; }
+            if (changed) triggerAgentWidgetRefresh();
+          }
+        }
+      } while (dirty && record.client === client && record.launchGeneration === generation);
+      refreshing = false;
+    })();
+  };
   record.unsubscribe = client.onEvent((evt) => {
     const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string };
     const outcome = applyRpcEvent(record, e);
+    if (e.type === "agent_start" || e.type === "agent_settled" || e.type === "message_end" || e.type === "message_update" || e.type === "thinking_level_changed" || e.type === "compaction_end") refresh();
     if (outcome.push) {
       pushToLead(pi, registry, record, outcome.push.family, outcome.push.payload, outcome.push.deliverAs);
     }
@@ -2422,6 +2563,7 @@ export function evictForCapacity(registry: RpcAgentRegistry, cap: number): { ok:
         error: `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) reached and every remaining record is running/threadBound — nothing can be evicted to fit`,
       };
     }
+    candidate.ownershipObserverStop?.();
     registry.delete(candidate.agentId);
     evictedLabels.push(candidate.alias ?? candidate.agentId);
   }
@@ -2555,8 +2697,10 @@ export async function spawnAgent(
     throw new Error("ws-pi-agent: systemPromptPath is required for a non-fork spawn");
   }
   const agentId = randomUUID();
-  const sessionDir = mkdtempSync(join(tmpdir(), "ws-pi-agent-"));
-  const sessionPath = join(sessionDir, "session.jsonl");
+  const role = ctx.spawnRole ?? (ctx.forkFrom ? "fork" : resolveSpawnToolGroup(ctx.toolGroup) === "execute-worker" ? "execute-worker" : "worker");
+  if (!ctx.storage) throw new Error("ws-pi-agent: missing Pi storage context for durable child allocation");
+  const ownership = allocateAgentHome(ctx.storage, agentId, role, ctx.exploreMode);
+  const sessionPath = ownership.sessionPath!;
   const forkLaunch = ctx.forkFrom || ctx.spawnRole === "fork" ? prepareForkLaunch(ctx.forkContext) : undefined;
   let forkSourcePath = ctx.forkFrom;
   if (forkLaunch && ctx.forkSourceEntries) {
@@ -2571,6 +2715,7 @@ export async function spawnAgent(
     alias,
     title: params.title,
     sessionPath,
+    ownership,
     systemPromptPath: params.systemPromptPath,
     modelBase,
     // Explicit caller effort always wins over the config-resolved one
@@ -2586,7 +2731,7 @@ export async function spawnAgent(
     wsToolNames: ctx.wsToolNames,
     toolGroup,
     explicitTools: ctx.explicitTools,
-    spawnRole: ctx.spawnRole ?? (ctx.forkFrom ? "fork" : toolGroup === "execute-worker" ? "execute-worker" : "worker"),
+    spawnRole: role,
     exploreMode: ctx.exploreMode,
     forkContext: ctx.forkContext,
     streaming: false,
@@ -2595,6 +2740,7 @@ export async function spawnAgent(
     prompt: truncatePromptForStorage(params.prompt),
   };
   registry.set(agentId, record);
+  startOwnedSessionObserver(record);
 
   const client = new RpcClient(
     buildRpcClientOptions(
@@ -2611,6 +2757,7 @@ export async function spawnAgent(
     ),
   );
   record.client = client;
+  record.launchGeneration = (record.launchGeneration ?? 0) + 1;
 
   // 260905: the record is registered BEFORE `start()`, so a failure anywhere
   // in the launch sequence would otherwise leave a half-registered zombie the
@@ -2628,7 +2775,6 @@ export async function spawnAgent(
           "ws-pi-agent: fork spawn: RpcClient.getState() returned no sessionFile — cannot determine the forked session's actual path",
         );
       }
-      record.sessionPath = forkedSessionFile;
       if (forkLaunch) validateForkReadiness(forkLaunch, record, state);
     }
 
@@ -2642,6 +2788,9 @@ export async function spawnAgent(
     } else {
       await applyModelEffort(client, record.modelEffort);
     }
+    // Capture the immutable pre-first-prompt boundary after all selection
+    // work, before prompt() can append any attributable child turn.
+    try { refreshAgentTelemetry(record, await client.getState(), { fresh: true }); } catch { delete record.observedModel; delete record.observedEffort; if (record.telemetry) { delete record.telemetry.model; delete record.telemetry.effort; } }
     if (forkLaunch) await captureForkSelection(client, record);
     attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     attachFirstTaskForkCacheNotice(record, client, ctx.forkCacheNoticeOwner);
@@ -2714,6 +2863,7 @@ export async function sendToAgent(
   // thread bind the owner surface will never close (the headless
   // fork-raised-question path).
   if (ctx.leadSend && record.threadBound) record.threadBound = false;
+  if (record.ownership) touchOwnership(record.ownership.home);
 
   if (!record.client) {
     const forkLaunch = record.spawnRole === "fork" ? prepareForkLaunch(record.forkContext) : undefined;
@@ -2739,6 +2889,7 @@ export async function sendToAgent(
       ),
     );
     record.client = client;
+    record.launchGeneration = (record.launchGeneration ?? 0) + 1;
     try {
       await client.start();
       if (forkLaunch) validateForkReadiness(forkLaunch, record, await client.getState());
@@ -2747,6 +2898,7 @@ export async function sendToAgent(
       } else {
         await applyModelEffort(client, record.modelEffort);
       }
+      try { refreshAgentTelemetry(record, await client.getState()); } catch { delete record.observedModel; delete record.observedEffort; if (record.telemetry) { delete record.telemetry.model; delete record.telemetry.effort; } }
       if (forkLaunch) await captureForkSelection(client, record);
       attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     } catch (err) {
@@ -2906,7 +3058,10 @@ export async function stopAgent(
     throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
   }
   const client = record.client;
+  if (record.ownership) touchOwnership(record.ownership.home);
   if (client) {
+    const generation = record.launchGeneration;
+    if (record.ownership) updateOwnership(record.ownership.home, { lastActivityAt: Date.now(), liveness: { lifecycle: "stopping", running: true, observedAt: Date.now() } });
     // Review relay #1 (Important, alias/park/cap): clear live state
     // SYNCHRONOUSLY, before either await below, not after both resolve. A
     // record that still reads `client`-live during `abort()`/`stop()` is a
@@ -2919,16 +3074,23 @@ export async function stopAgent(
     // after every settle, not just on an explicit stop) makes this window
     // hot enough to close rather than accept.
     clearLiveState(record);
+    let stopped = true;
     try {
       await client.abort();
     } catch {
-      // best effort
+      stopped = false;
     }
     try {
       await client.stop();
     } catch {
-      // best effort
+      stopped = false;
     }
+    // `message_end` can be persisted while abort/stop is in flight.  The
+    // record is already synchronously dormant, so this final disk-only read
+    // cannot revive a stale client or delay the stop race protection.
+    refreshAgentTelemetry(record);
+    if (record.ownership && record.launchGeneration === generation && !record.client) updateOwnership(record.ownership.home, { liveness: { lifecycle: stopped ? "stopped" : "unknown", running: false, observedAt: Date.now() } });
+    if (record.ownership && record.launchGeneration === generation && !record.client) observeSessionWrite(record.ownership.home, record.sessionPath);
     // Review relay #1 (I2): a stop is a thread-close path too — the ticket
     // names "lead stop" alongside `/done`/fork final/`ws-resolve`. Releasing
     // the bind here keeps a stopped agent from carrying a latched flag into a
@@ -2966,6 +3128,8 @@ export function getAgentTranscriptPath(registry: RpcAgentRegistry, agentId: stri
   if (!record) {
     throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
   }
+  if (record.ownership) touchOwnership(record.ownership.home);
+  if (record.ownership) observeSessionWrite(record.ownership.home, record.sessionPath);
   return { transcript_path: record.sessionPath };
 }
 
@@ -3029,7 +3193,7 @@ export interface AgentToolsHandle {
 export function registerAgentTools(
   pi: ExtensionAPI,
   bridge: BridgeHandle,
-  sessionCtx: { cwd: string },
+  sessionCtx: { cwd: string; storage?: AgentStorageContext },
   /**
    * 260904 Phase 1: see `RpcSpawnCtx.onApprovalPending`'s doc comment.
    * Threaded into both `ws-agent-spawn`'s `spawnAgent` call and
@@ -3148,6 +3312,7 @@ export function registerAgentTools(
         {
           pi,
           cwd: sessionCtx.cwd,
+          storage: sessionCtx.storage ?? storageContextFromToolCtx(toolCtx),
           inheritModel: inheritModelFromToolCtx(toolCtx),
           catalog: modelCatalogFromToolCtx(toolCtx),
           notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx),
@@ -3338,7 +3503,7 @@ export function registerAgentTools(
           const result = await spawnAgent(
             rpcRegistry,
             {
-              pi, cwd: sessionCtx.cwd, inheritModel: mode === "deep" ? inherited : inheritModelFromToolCtx(toolCtx),
+              pi, cwd: sessionCtx.cwd, storage: sessionCtx.storage ?? storageContextFromToolCtx(toolCtx), inheritModel: mode === "deep" ? inherited : inheritModelFromToolCtx(toolCtx),
               catalog: mode === "simple" ? modelCatalogFromToolCtx(toolCtx) : [],
               notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx), wsToolNames: bridge.wsToolNames, client: bridge.client,
               toolGroup: mode === "deep" ? "read-only-explore" : "read-only", spawnRole: "explore", exploreMode: mode,
@@ -3383,6 +3548,7 @@ export function registerAgentTools(
     rpcRegistry,
     async stopAll(): Promise<void> {
       stopLivenessProbe();
+      for (const record of rpcRegistry.values()) record.ownershipObserverStop?.();
       // Silent by construction: the session itself is going away, so a
       // per-agent "stopped" push would have nowhere to land. Routed through
       // stopAgent so shutdown leaves records in the same resting shape every

@@ -70,7 +70,11 @@ import {
   sendToLead,
   inheritModelFromToolCtx,
   sendToAgent,
+  refreshAgentTelemetry,
   spawnAgent,
+  storageContextFromToolCtx,
+  syncOwnershipProtection,
+  startOwnedSessionObserver,
   stopAgent,
   type RpcAgentRecord,
   type RpcAgentRegistry,
@@ -89,6 +93,8 @@ import {
 import { loadHostPiTui, type MarkdownTheme } from "./pi-tui.ts";
 import { captureForkContext, captureRegisteredTools, captureUnflushedForkSource, effectiveForkDescriptor, type ForkContext } from "./fork-context.ts";
 import type { LeadPromptRef } from "./lead-bootstrap.ts";
+import { readOwnership, validDescriptor } from "./agent-storage.ts";
+import { parseTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers. Unit-tested directly (test/ask.test.ts) with no
@@ -403,6 +409,12 @@ export interface PersistedForkResume {
   toolGroup: ToolGroup;
   modelBase?: string;
   modelEffort?: string;
+  telemetry?: AgentTelemetry;
+  telemetryInputFloor?: TelemetryOrigin;
+  observedModel?: string;
+  observedEffort?: string;
+  observedLatestInput?: number;
+  ownership?: import("./agent-storage.ts").AgentOwnership;
 }
 
 /**
@@ -490,7 +502,7 @@ export function parseThreadRegistry(raw: string): ThreadRecord[] {
     });
 }
 
-/** §5 widget wording counts PENDING threads only — an already-open thread is not something the owner still owes an answer to. Also feeds `agent-widget.ts`'s `buildStatusSegment` question count. */
+/** §5 widget wording counts PENDING threads only — an already-open thread is not something the owner still owes an answer to. Also feeds `agent-widget.ts`'s panel-heading question count. */
 export function countPending(records: readonly ThreadRecord[]): number {
   return records.filter((record) => record.status === "pending").length;
 }
@@ -689,6 +701,12 @@ export function captureForkResume(record: RpcAgentRecord): PersistedForkResume {
     toolGroup: record.toolGroup,
     modelBase: record.modelBase,
     modelEffort: record.modelEffort,
+    ...(record.telemetry ? { telemetry: record.telemetry } : {}),
+    ...(record.telemetryInputFloor ? { telemetryInputFloor: record.telemetryInputFloor } : {}),
+    ...(record.observedModel ? { observedModel: record.observedModel } : {}),
+    ...(record.observedEffort ? { observedEffort: record.observedEffort } : {}),
+    ...(record.observedLatestInput !== undefined ? { observedLatestInput: record.observedLatestInput } : {}),
+    ...(record.ownership ? { ownership: record.ownership } : {}),
   };
 }
 
@@ -701,14 +719,21 @@ export function captureForkResume(record: RpcAgentRecord): PersistedForkResume {
  * puts the record back on the shared registry so `sendToAgent` can find it.
  */
 export function rehydrateForkRecord(agentId: string, resume: PersistedForkResume): RpcAgentRecord {
-  return {
+  const ownership = resume.ownership && validDescriptor(resume.ownership) && resume.ownership.agentId === agentId && resume.ownership.sessionPath === resume.sessionPath && (() => { const disk = readOwnership(resume.ownership!.home); return !!disk && disk.home === resume.ownership!.home && disk.ownerSessionId === resume.ownership!.ownerSessionId && disk.agentId === agentId && disk.sessionPath === resume.sessionPath && disk.role === resume.ownership!.role && disk.exploreMode === resume.ownership!.exploreMode; })() ? resume.ownership : undefined;
+  const record: RpcAgentRecord = {
     agentId,
     client: undefined,
     sessionPath: resume.sessionPath,
+    ...(ownership ? { ownership } : {}),
     systemPromptPath: resume.systemPromptPath,
     ...(resume.forkContext ? { forkContext: resume.forkContext } : {}),
     modelBase: resume.modelBase,
     modelEffort: resume.modelEffort,
+    ...(parseTelemetry(resume.telemetry) ? { telemetry: parseTelemetry(resume.telemetry) } : {}),
+    ...(parseTelemetry({ version: 1, origin: resume.telemetryInputFloor })?.origin ? { telemetryInputFloor: parseTelemetry({ version: 1, origin: resume.telemetryInputFloor })!.origin } : {}),
+    ...(typeof resume.observedModel === "string" && resume.observedModel ? { observedModel: resume.observedModel } : {}),
+    ...(typeof resume.observedEffort === "string" && resume.observedEffort ? { observedEffort: resume.observedEffort } : {}),
+    ...(typeof resume.observedLatestInput === "number" && Number.isFinite(resume.observedLatestInput) && resume.observedLatestInput >= 0 ? { observedLatestInput: resume.observedLatestInput } : {}),
     wsToolNames: [...resume.wsToolNames],
     toolGroup: resume.toolGroup,
     explicitTools: resume.explicitTools,
@@ -717,6 +742,11 @@ export function rehydrateForkRecord(agentId: string, resume: PersistedForkResume
     running: false,
     reportLog: [],
   };
+  // Thread-only rows are rendered from forkResume while dormant; reconcile
+  // the persisted child file here, never from the widget render path.
+  refreshAgentTelemetry(record);
+  startOwnedSessionObserver(record);
+  return record;
 }
 
 /**
@@ -798,6 +828,11 @@ export function hydrateThreadRegistry(handle: ThreadRegistryHandle, path: string
   handle.pathRef.current = path;
   handle.threads.clear();
   for (const record of loadThreadRegistryFile(path)) {
+    if (record.respondentAgentId && record.forkResume) {
+      // Thread-only rows render this persisted object directly, so reconcile
+      // and normalize it at hydration rather than waiting for /answer.
+      record.forkResume = captureForkResume(rehydrateForkRecord(record.respondentAgentId, record.forkResume));
+    }
     handle.threads.set(record.threadId, record);
   }
 }
@@ -883,6 +918,7 @@ export function handleForkRaisedQuestion(
     // count it as one of its own outstanding children) even before the owner
     // gets around to `/answer`.
     live.threadBound = true;
+    syncOwnershipProtection(live);
   }
   handle.threads.set(record.threadId, record);
   // Review relay #1 (I2): arm the final-report hook HERE, not only from
@@ -1054,6 +1090,7 @@ export function detachForkRaisedThread(handle: ThreadRegistryHandle, rpcRegistry
       // released too: the fork rejoins the lead's fan-in and its own
       // kind:"final" is pushed to the lead as any other child's would be.
       record.threadBound = false;
+      syncOwnershipProtection(record);
       // Refresh the resume snapshot while the record is still live, so a
       // reopen after a lead restart can rehydrate it.
       thread.forkResume = captureForkResume(record);
@@ -1090,6 +1127,7 @@ export function injectDiscussionSummary(
     if (record) {
       record.overlayAttached = false;
       record.threadBound = false;
+      syncOwnershipProtection(record);
       // Snapshot first: `stopAgent` clears `client`, and a later reopen needs
       // the session/tool fields this copy carries.
       thread.forkResume = captureForkResume(record);
@@ -1345,6 +1383,7 @@ export async function ensureRespondent(
     {
       pi,
       cwd: sessionCtx.cwd,
+      storage: storageContextFromToolCtx(ctx),
       inheritModel: inheritModelFromToolCtx(ctx),
       catalog: modelCatalogFromToolCtx(ctx),
       notifyTierWarning: tierWarningNotifierFromToolCtx(ctx),
@@ -1385,7 +1424,7 @@ export async function ensureRespondent(
  */
 function bindThread(rpcRegistry: RpcAgentRegistry, agentId: string, bound: boolean): void {
   const record = rpcRegistry.get(agentId);
-  if (record) record.threadBound = bound;
+  if (record) { record.threadBound = bound; syncOwnershipProtection(record); }
 }
 
 /**

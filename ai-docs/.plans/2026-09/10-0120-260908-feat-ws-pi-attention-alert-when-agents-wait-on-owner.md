@@ -1,0 +1,35 @@
+# Plan: Emphasize child waits that need the owner — Phase 1: Animate actionable owner waits
+
+## Relevant Ticket Contract
+- Only the owner’s lead Pi animates. Open owner questions, pending approvals, and future `idle-awaiting-owner` rows qualify; ordinary lead idle does not. The toggle is 330ms, bold/plain only, remains visible in both phases, has no timeout, and never polls or calls RPC.
+- A question shows the sanitized, width-truncated display phrase `/answer <title>` while retaining a valid `/answer qN` command hint; the title must never become a lookup key. Approval has no fabricated answer target. The existing count heading emphasizes on the same cadence without restoring a footer count.
+- Add one adapter-local disable flag with static emphasis as the fallback. Stop all animation work on final resolution, disable, session switch, or teardown; never stack timers.
+- Update `{#260905-pi-live-agent-widget}` and cover the ticket’s fake-clock and owner-terminal verification boundary.
+
+## Out of Scope
+- `lastWriter`, owner steering, audit-window ownership, and production creation of `idle-awaiting-owner` are owned by `260908-feat-ws-pi-subagent-audit-window-and-owner-steering`; consume that row state when it arrives without fabricating it here.
+- Changes to sorting, protected-row visibility, question/approval actions, telemetry projection, agent-count placement, ws-ask/ws-resolve surfaces, sound, notifications, and color cycling.
+
+## Codebase Findings
+- `agents-plugin-pi/src/agent-widget.ts#L179-L229` — the pure row projection already supplies a thread title separately from its `/answer qN` hint and preserves model/usage telemetry; presentation can add an attention display field without changing lookup identity or telemetry/count derivation.
+- `agents-plugin-pi/src/agent-widget.ts#L243-L320` — row formatting reserves the command hint before width truncation and the heading is the single uncapped count destination; reuse that width path while styling only the qualifying phrase/label and heading.
+- `agents-plugin-pi/src/agent-widget.ts#L395-L445` — one controller owns the 10-second repaint interval, reads the registries afresh, and already disarms when empty or stopped. Its injected clock seam should be extended so one owner-lead controller independently arms/disarms the 330ms attention timer.
+- `agents-plugin-pi/src/index.ts#L224-L224` and `agents-plugin-pi/src/goal-loop.ts#L82-L129` — `goal-loop-config.json` is the adapter-local, packaged JSON configuration surface; its typed reader is non-throwing and read fresh. Add `agent_wait_animation?: boolean`, defaulting to enabled, and resolve it freshly on each widget refresh so a changed file is honored on the next refresh and a `/reload` creates no stale configuration/timer state.
+- `agents-plugin-pi/src/index.ts#L590-L603` and `agents-plugin-pi/src/index.ts#L720-L728` — only TUI lead/fork sessions create the controller, a replacement session stops the old controller first, and shutdown clears its refresh ref. Preserve this lifecycle so spawned children and headless sessions never own animation timers.
+- `agents-plugin-pi/test/agent-widget.test.ts#L312-L398` — the controller suite already captures `setInterval`/`clearInterval`, real-width widget factories, count heading, empty-state disarm, and preserved unrelated status; extend this fake-clock harness with exact 330ms scheduling and production lifecycle assertions instead of relying on broad suite totals.
+- `ai-docs/spec/pi-adapter-runtime.md#L1477-L1522` — the live widget contract already fixes row ordering, action-hint retention, telemetry, count-heading ownership, and reload/shutdown lifecycle; amend this anchor rather than adding a second widget contract.
+
+## Implementation Plan
+1. `agents-plugin-pi/src/goal-loop.ts`, `agents-plugin-pi/goal-loop-config.json`, and `agents-plugin-pi/src/index.ts` — extend the existing adapter JSON schema with `agent_wait_animation?: boolean` (default `true`), retain malformed/missing-file fallback, and pass the existing plugin-local config path into the widget as a read-fresh resolver. `false` means static bold emphasis; any other value falls back to enabled. Do not create a new config file or ws-mcp setting.
+2. `agents-plugin-pi/src/agent-widget.ts` — add pure attention-aware row/heading formatting that identifies open question rows, pending approval rows, and a supplied future owner-held idle state. Toggle only the target text weight at `330ms`; keep it visible and preserve existing state labels, elapsed clock, protected `/answer qN` tail, sorting, telemetry, and the one count heading. For questions, sanitize control characters and width-truncate the title display while reserving the qN hint; use the ID only when no usable title remains. Never route title text through question resolution.
+3. `agents-plugin-pi/src/agent-widget.ts` and `agents-plugin-pi/src/index.ts` — evolve the controller’s explicit timer dependencies to own at most one attention interval alongside its elapsed interval. Keep the existing lead/fork panel gate, but pass a distinct host-lead eligibility value so fork children retain their ordinary panel without owning an attention timer. Arm animation only for an enabled, qualifying owner-lead widget; refresh on each phase; clear it when the last qualifying row resolves, configuration disables it, the controller is replaced on session start, or shutdown runs. Retain the headless exclusion and best-effort render failure handling.
+4. `ai-docs/spec/pi-adapter-runtime.md` — amend `{#260905-pi-live-agent-widget}` with the qualifying-state rules, 330ms bold/plain cadence, display-title/qN distinction, static-disabled behavior, count-heading synchronization, and single-timer lifecycle.
+5. `agents-plugin-pi/test/agent-widget.test.ts` (and a focused config-reader test beside `agents-plugin-pi/test/goal-loop.test.ts`) — assert the exact initial and 330ms bold/plain render states, no blank phase, shared single timer for multiple qualifying rows, no timer for ordinary running/child/headless cases, final-resolution and disable disarm, title control-character removal plus width truncation with intact `/answer qN`, fallback-to-ID, approval without an answer target, static-disabled bold output, unchanged telemetry/count heading, and stop/reload/shutdown clearing the timer exactly once without duplicates.
+
+## Verification Plan
+- Run `cd agents-plugin-pi && node --test test/agent-widget.test.ts test/goal-loop.test.ts` to exercise the fake clock, formatting, config fallback/reload, and controller lifecycle assertions.
+- Run `cd agents-plugin-pi && npm test` after the focused tests pass; do not treat the known baseline’s unrelated Linux SDK fixture paths or stale ws-ask issue as work for this phase.
+- Owner live check in a real lead TUI: create a fork question and an approval wait, confirm a readable 330ms bold/plain cue with the display title plus valid qN hint, resolve each and observe timer stop; change the flag/reload and confirm static emphasis/no duplicate timer. Record this gate in the ticket result.
+
+## Escalations
+- None.

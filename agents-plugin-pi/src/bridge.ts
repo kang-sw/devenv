@@ -37,6 +37,7 @@ import { WS_PI_PARENT_SESSION_KEY_ENV, isLeadOrFork, readSpawnRole, type SpawnRo
 import { resolveModelForAliasViaWsMcp, inheritModelFromToolCtx } from "./spawner.ts";
 import { modelCatalogFromToolCtx, formatTierWarning, type ModelCatalogEntry, type TierRejection } from "./model-catalog.ts";
 import { registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
+import { dedupeRead, playbookReadKey } from "./playbook-read-dedupe.ts";
 
 import type { ForkContext } from "./fork-context.ts";
 
@@ -764,7 +765,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
         // symbols at runtime. ws-mcp's inputSchema is already a plain
         // {type, properties, required} object, so no typebox shim is needed.
         parameters: withOptionalSessionKey(tool.inputSchema) as never,
-        async execute(_toolCallId, params, _signal, _onUpdate, toolCtx) {
+        async execute(toolCallId, params, _signal, _onUpdate, toolCtx) {
           // Dispatch always uses the RAW dotted name — sanitization is
           // registration-only, never part of the ws-mcp wire call.
           // Refuse inherited/stale fork keys before sentinel normalization and
@@ -836,6 +837,17 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
           // computeRawDispatchPiAliasTableReport's doc comment.
           const piAliasTableReport = await computeRawDispatchPiAliasTableReport(rawName, (name, callArgs) => client.callTool(name, callArgs), catalog);
           const content = maybeAppendModelCatalogAdvisory(rawName, result.content, piAliasTableReport, inheritModel, catalog.length === 0, advisoryKeyHolder);
+          if (rawName === "playbook.read") {
+            const body = firstText({ ...result, content });
+            if (body !== undefined) {
+              const visibleEntries = toolCtx?.sessionManager?.buildContextEntries?.() ?? [];
+              const decision = dedupeRead(visibleEntries, toolCallId, "playbook.read", playbookReadKey(args), body);
+              if (decision.deduped) {
+                const index = content.findIndex((item) => item.type === "text");
+                content[index] = { ...content[index]!, text: decision.text };
+              }
+            }
+          }
           return { content, details: result };
         },
       }, opts.toolPreviewTuiRef);

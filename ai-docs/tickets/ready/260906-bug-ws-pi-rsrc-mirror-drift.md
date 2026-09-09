@@ -137,3 +137,20 @@ loaded package/runtime identity, and reproduction context have not yet been
 provided, so this report does not establish that stale mirrored files are the
 current root cause. Diagnosis and live acceptance remain outstanding; this
 inventory update makes no source changes and claims no new verification.
+
+## Blocked (2026-09-10)
+
+The only implementation phase already has a Result; there is no unfinished
+phase to dispatch. The owner's unresolved error report still requires the exact
+error text, loaded Pi package/ws-mcp runtime identity, and reproduction context
+before a follow-up fix can be scoped. Do not infer a stale mirror as its root
+cause or treat local repository identity checks as owner-live acceptance.
+
+Current workspace revalidation at `bb9e6025`: `diff -rq agents-plugin/rsrc
+agents-plugin-pi/rsrc` found no differences; launcher copies are byte-identical;
+`node --test test/version-check.test.ts` from `agents-plugin-pi/` passed 7/7,
+including runtime identity and recursive mirror checks. No actionable local
+mirror drift reproduced, and no source changed. These checks establish the
+workspace copies only, not which package or runtime the owner's Pi session
+loaded. Keep the ticket open until that evidence and the existing live
+`lead-review` acceptance check are supplied.

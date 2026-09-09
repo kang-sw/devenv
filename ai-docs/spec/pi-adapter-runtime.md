@@ -120,6 +120,34 @@ this Phase 1 addition does not touch the `ws-agent-spawn`/`ws-agent-send`/
 `explore`/`ws-execute`/`ws-fork` dispatch rows' own custom summary/mandatory
 resolved-model-line contract (YAML Phase 2, described below).
 
+### Repeated playbook and skill reads in the visible context {#260909-pi-visible-playbook-read-dedupe}
+
+`ws__playbook_read` and `ws-skill` shorten only the second successful read of
+an unchanged body already visible in the current context. The underlying MCP
+call or skill-file read still runs; a changed body is returned immediately.
+Reads from the two tool families never match each other. Playbook reads match
+by name and the complete `context` substitution map, independent of map key
+order; skill reads match by name and `args`. The outer routing `session_key`
+does not participate, but a substitution named `session_key` inside `context`
+does. Failed reads retain their existing failure response.
+
+The adapter scans Pi's public active-context construction during execution,
+excluding the current tool-call ID. It keeps no read-history cache. Compacted
+or abandoned branch history cannot authorize shortening a result; visible fork
+prefix history can. A prior successful full result must be byte-identical to
+the fresh body and associated with a matching visible tool call.
+
+The short result identifies the earlier tool-call ID, its distance in tool
+calls, and the body's level-one through level-three headings in order. It also
+carries provenance that resolves to the original matching full result using
+only the current context. A valid short result counts toward the repeated-read
+limit, so the third and later matching reads return the full body. Missing,
+malformed, stale, or ambiguous pointer provenance falls back to the full body;
+pointer-like prose alone is not accepted as provenance.
+
+Other tools, `playbook.render`, workflow-manual system-prompt content, and tool
+schemas retain their existing behavior.
+
 ## Session key stays optional and caller-controllable {#260903-pi-bridge-session-key-fill-forward}
 
 ws-mcp requires a `session_key` on every root-aware tool. On the Pi side the key
@@ -350,6 +378,15 @@ Observable behavior:
   lead/fork session start rebuilds, relying on Go's build cache.
 - **Marker present, worker or explore role**: the marker is not consulted; the
   child's launcher reuses the binary the lead's launch installed.
+- **Inherited bootstrap overrides at child launch**: direct exploration and RPC
+  worker, fork, persistent-explore and dormant-resume launches neutralize the
+  parent shell's `WS_MCP_BOOTSTRAP_BINARY` and `WS_MCP_BOOTSTRAP_URL`. Direct
+  child environments omit these keys; RPC overrides use empty values so the
+  parent-environment merge cannot restore them. A stale shell selection cannot
+  force a child to replace the selected compatible runtime. Unrelated environment
+  values and the parent process remain unchanged. A fork's own valid marker can
+  still build and select its runtime for its launcher; normal compatibility
+  checks, cache reuse and release selection remain in force.
 - **Invalid marker** (bad JSON, wrong `schema_version`, a missing or relative
   path field, `tool_dir` without `cmd/ws-mcp`, or a `go` that is not an
   executable file) or a **failed build**: session start fails loudly with the
@@ -440,6 +477,59 @@ message per line, no Content-Length framing) and decodes it so that multibyte
 UTF-8 characters split across read-buffer boundaries are reconstructed intact.
 Concurrent in-flight requests are correlated back to their callers by JSON-RPC
 id, independent of the order responses arrive.
+
+## Claude read-only delegation {#260910-pi-claude-read-only-delegation}
+
+`ws-claude` runs bounded Claude Code subtasks through the Agent SDK. It is a
+separate leaf tool from Pi-native spawning. A lead gains the tool; a fork can
+use it only when its captured active-tool list already contains it. Worker and
+explore roles do not gain it. Registration starts no Claude process. Session
+replacement and shutdown stop admission and await owned work cleanup.
+
+The physical Pi arguments are an object containing a non-empty `items` array:
+
+```text
+ws-claude({items: [{preset: "audit" | "consult", request, paths?, model?}, ...]})
+```
+
+`audit` returns artifact findings; `consult` answers a posed question. Requests
+must be nonblank; optional paths identify read targets relative to the session
+working directory, and an optional model selects a Claude model. Unsupported
+presets and fields, including edit targets and resume, are rejected. Malformed
+batch input starts no work; invalid items return errors alongside valid siblings.
+The output is an input-index-aligned JSON array in tool text, mirrored in
+`details.items`. Each entry has `id`, `status` (`success` or `error`), `output`,
+and `usage`; errors also have a bounded categorical `{code, message}`. A
+three-word public handle remains stable for that result and is not reused within
+the session controller. Handle exhaustion rejects the batch before launching
+any part of it. Handles do not yet support continuation.
+
+Overlapping invocations share three execution slots with FIFO overflow. Each
+running item has a 120-second deadline from admission, including SDK setup, and
+at most two additional seconds for cleanup. Cancellation removes that invocation's
+queued work and stops its active children while retaining settled sibling results.
+SDK failure and timeout are isolated per item. Cleanup proceeds even if SDK close
+throws: the adapter observes its owned child's termination, escalates termination
+when needed, and closes owned streams/listeners. Unconfirmed process or stream
+cleanup yields `cleanup_failed`, cancels queued work, and stops further launches
+for that controller. Capacity is not reused as though cleanup had succeeded.
+
+Each item uses Claude Code's `claude_code` system preset with a small embedded
+task frame; the task request stays in the user message. The adapter supplies no
+Pi system prompt, parent transcript, or ws credential context. Child environment
+inheritance is restricted to ordinary local execution/authentication prerequisites.
+The tool uses the locally installed Claude executable and its stored authentication.
+The available tool inventory is limited to `Read`, `Grep`, `Glob`, `WebSearch`,
+and `WebFetch`, with strict empty MCP configuration and filesystem settings
+disabled. Writes, Bash/exec, other agents, and account connector tools are not
+enabled. Unexpected tool or MCP inventory in SDK initialization fails the item.
+This profile is not a general filesystem sandbox.
+
+Only a valid successful terminal result becomes successful output. Usage is a
+terminal SDK usage/model-usage projection with `cost_estimate_usd`, or `null`
+when unavailable; an estimate is not a bill. Raw Claude session IDs and arbitrary
+SDK exception text are not returned as diagnostics. Neither this interface nor
+its prompt shape guarantees subscription billing treatment.
 
 ## Delegation spawner {#260903-pi-delegation-spawner-tools}
 
@@ -576,6 +666,48 @@ to a process that no longer exists. A revived record's last-report time is not
 lost, either: it surfaces again as `ws-agent-list`'s `last_report_at` and feeds
 the registry-cap eviction score (see `ws-agent-spawn` above), both falling back
 to the sidecar's captured time until the record reports again for real.
+
+### Durable child session homes {#260909-pi-durable-child-session-homes}
+
+New child material lives under
+`<configured Pi agent dir>/ws-agents/<dispatching session id>/<agent id>/`,
+outside Pi's ordinary session directory. The namespace uses the immediate
+dispatcher's current Pi session identity, including for nested dispatch and
+sessions without a transcript file. A new session identity has a separate
+namespace; resuming the same identity retains its namespace.
+
+Workers and persistent explores keep their session files in this home. Forks
+receive `--session-dir` pointing to their owned home and retain their copied
+history and parent-session ancestry. A fork's reported session path is accepted
+only after ownership validation; invalid readiness leaves the previous recorded
+path unchanged. Terminal no-session explores receive an owned scratch home
+without requiring a transcript. Approval material remains available through its
+consumer's lifetime, including after fork readiness and while an approval
+decision awaits consumption.
+
+Owned session paths must be strict canonical descendants of the owned home.
+Existing paths must be regular files; directories, traversal to the home or
+outside it, and symlink components are rejected. A not-yet-created session file
+is allowed beneath an existing valid owned parent. Recovery checks the recorded
+ownership descriptor against the home's on-disk identity before treating a
+path as owned. Both orphan-registry and owner-thread recovery preserve this
+information. Legacy recorded session paths remain readable and resumable when
+owned metadata is absent or invalid; that fallback grants no cleanup authority.
+
+Registry capture and recovery apply to every dispatching role. File-backed
+sessions retain the adjacent sidecar described above. Sessions without a file
+use `<configured Pi agent dir>/ws-agents/<session id>/registry.ws-agents.json`;
+only the same Pi session identity discovers that registry.
+
+Owned homes persist ownership, activity, process identity, liveness, and
+question/approval/owner-held protection facts. References, prompts, reports,
+decisions, and observed session-file changes refresh activity; polling and
+directory age alone do not. Before the first session write, an absent file is
+pending, not a failed observation. Actual observation failures and disappearance
+after an observed write retain conservative unknown state and diagnostics.
+Later metadata-write failures are diagnostic and nonfatal to live operations.
+These records prepare safe cleanup; automatic scratch removal, cap-driven disk
+deletion, and age pruning are not implemented by this storage relocation.
 
 ### Turn completion is gated on RPC idle {#260903-pi-spawner-completion-gating}
 
@@ -956,10 +1088,18 @@ and carry no cap.
 
 The whole message — head, body, and status — paints on a theme-aware shared
 background (the `customMessageBg` token, the same one Pi's own default
-custom-message box uses) with a subdued/gray foreground (`muted`/`dim`
-tokens), replacing the prior `customMessageLabel`/`customMessageText`
-coloring. Family/agent identity, status meaning, and every existing
-interaction control are retained.
+custom-message box uses). Bodies and truncation markers use the subdued
+`muted` foreground, and status lines remain `dim`. Family/agent identity,
+status meaning, and every existing interaction control are retained.
+
+Report headers have a distinct theme-aware foreground.
+{#260910-pi-report-header-distinction} Only the registered `ws-agent-report`
+family uses `customMessageLabel` for its header; all other push headers remain
+`muted`. The distinction applies to collapsed and expanded reports and follows
+live theme changes through the existing native rendering lifecycle. It changes
+neither body/background styling nor message payloads, delivery, or wake behavior.
+Existing terminal sanitization, width fitting, and cached preparation/layout
+remain in use; repeated unchanged rendering does not prepare hidden bodies again.
 
 ### Transcript path accessor {#260904-pi-agent-transcript-path}
 
@@ -1389,16 +1529,19 @@ channel for an owner question: it registers and carries on.
 ## Live-agent widget {#260905-pi-live-agent-widget}
 
 The owner of a TUI lead sees every live child and every open owner question in
-one compact `belowEditor` widget, one row each, plus a footer count. The widget
+one compact `belowEditor` widget, with the count as its first line above the
+agent and question rows. The widget
 is a projection over the two registries the adapter already keeps — the RPC
 agent registry and the owner-question thread registry — and never owns state
 of its own: every repaint rebuilds the rows from those registries.
 
-- **Rows.** Each row reads `name · role · state · elapsed`, with the
-  `/answer <id>` hint appended when the row awaits the owner. `name` is the
+- **Rows.** Each row starts with `name · role · state · elapsed`, followed by
+  model and usage telemetry when space permits, with the `/answer <id>` hint
+  retained when the row awaits the owner. Question rows replace the name field
+  with the display phrase `/answer <title>` described below. Otherwise, `name` is the
   agent's alias, else its title, else the first eight characters of its id; a
   thread with no live respondent is named by the thread title. `role` is
-  `worker`, `execute`, `fork`, `explore`, or `thread` (a lead-ask discussion
+  `worker`, `execute`, `fork`, `explore`, or `thread` (an owner discussion
   respondent, or a thread with no live respondent yet). A persistent
   researcher is an `explore` row while it has a live client; after settle it
   parks and disappears from the live widget but stays in the registry for
@@ -1412,31 +1555,34 @@ of its own: every repaint rebuilds the rows from those registries.
   a row while parked between messages — it is the owner's action cue). A
   thread is a row while it is `pending` or `open`; it collapses onto its
   respondent's row when that respondent is a thread-bound record, and
-  otherwise stands alone (a `ws-ask` question before `/answer` spawns its
-  fork, or a fork-raised question whose respondent was revived dormant after
+  otherwise stands alone (an owner question without a live respondent,
+  or a fork-raised question whose respondent was revived dormant after
   a lead restart). `dormant` and `closed` threads produce no row.
 - **Order and cap.** Rows sort `awaiting owner`, then `awaiting approval`,
   then `running`, longest elapsed first within a state. At most five rows
   render; only `running` rows are folded into a trailing `+N more` line, so
   every awaiting row is always visible. Each line is bounded to the terminal
   width the host passes at render time (`visibleWidth(line) <= width`,
-  truncated with an ellipsis), and the widget is hidden when there are no
-  rows.
-- **Footer segment.** A `setStatus` segment reads `ws: N agents` where `N` is
+  truncated with an ellipsis). The heading does not consume the row cap. The
+  widget is hidden only when both rows and pending questions are absent.
+- **Panel heading.** The first line reads `ws: N agents` where `N` is
   the uncapped row count, with ` · M question(s)` appended while any thread
-  is pending; it clears when both are zero. This segment is separate from
-  the goal loop's own yield segment.
+  is pending. Pending questions can therefore retain a heading-only panel.
+  The heading follows the same render-time width bound as the rows. The old
+  agent-count footer key is cleared on refresh and shutdown; unrelated footer
+  keys and the goal loop's own yield segment are preserved.
 - **Refresh.** The widget repaints on every registry transition (spawn,
   spawn failure, prompt, settle and automatic park, stop, exit, gated-exec
   approval request, thread registration, open, and close) and on a 10-second
-  timer that runs only while at least one row exists. A repaint that throws
+  timer that runs only while the panel has rows or pending questions. A repaint that throws
   against a torn-down surface loses that repaint only. The controller is
   armed on `session_start` only for a TUI lead (`shouldArmAgentWidget`:
   lead-or-fork spawn role and `mode === "tui"`), a prior controller is
   stopped before a new one is created on `/reload`, and `session_shutdown`
-  stops the timer and clears both the widget and the segment. Off the TUI
+  stops the timer and clears both the widget and the retired agent footer key. Off the TUI
   there is no widget; the headless baselines in the owner-question section
-  above are unchanged.
+  above are unchanged. Qualifying owner waits add the separately managed
+  attention cadence described below.
 
 > [!note] Live verification · 2026-09-05
 > Offline coverage: row shape and states, name precedence, ordering and the
@@ -1447,6 +1593,80 @@ of its own: every repaint rebuilds the rows from those registries.
 > exercised live: the real-width render through the host's widget factory,
 > the 10-second clock under a running child, and `/reload` re-arming — these
 > are owner-run checks recorded in the ticket's Phase 1 Result.
+
+### Owner-wait attention {#260910-pi-owner-wait-attention}
+
+The owner's lead TUI makes open questions and pending approvals conspicuous:
+the actionable text alternates between bold and ordinary every **330ms**, with
+the single count heading on the same phase. Text remains visible in both
+phases, and emphasis continues for as long as qualifying waits remain.
+Spawned child processes do not animate, and ordinary lead idle does not qualify.
+
+- **Question phrase.** The primary row field displays `/answer <title>`.
+  Control characters are sanitized; an unavailable or unusable title falls
+  back to the question ID. This is display text only: the separately retained
+  `/answer qN` hint remains the valid command. Titles never become lookup keys.
+- **Styling boundaries.** Only the visible question phrase or the actual
+  `awaiting approval` state label changes weight, alongside the count heading.
+  Role, elapsed time, telemetry, separators, and command hints stay ordinary.
+  An approval has no fabricated answer target. Existing tool/body muting is
+  preserved. There is no sound, notification, or color cycle.
+- **Supplied owner-held rows.** The presentation layer also accepts
+  `idle-awaiting-owner` without a question, emphasizes its existing state
+  label, and preserves an explicitly supplied inspection hint. This support
+  does not create ownership transitions or steering commands.
+- **Configuration.** `agent_wait_animation` in
+  `agents-plugin-pi/goal-loop-config.json` defaults to enabled. Literal `false`
+  disables animation and uses static bold emphasis. Missing, malformed, or
+  non-boolean values fall back to enabled. The setting is read on widget
+  refresh, so a file change takes effect on the next refresh; rendering the
+  captured widget itself performs no configuration I/O.
+- **Lifetime and width.** Each eligible widget owns at most one attention
+  timer, shared by all qualifying rows and separate from elapsed-time updates.
+  Final wait resolution, disable, replacement/session switch, and teardown
+  stop attention work. Ticks make no model calls or RPC polls. The existing
+  count destination, ordering, protected-row cap, and width bounds remain in
+  force. A valid action hint takes priority when it fits; an omitted hint is
+  not reinserted by styling at widths too small to contain it.
+
+### Agent row model and usage {#260910-pi-agent-row-telemetry}
+
+When the row fits, telemetry reads `<provider/model> (<effort>) · in <input> ·
+est $<USD>`. Model, effort, latest input, and estimated cost independently use
+`—` when unavailable. A reported zero remains zero. Model and effort reflect
+observed child state rather than the requested launch configuration; a failed
+current-state observation clears those labels independently of retained usage.
+
+- **Latest input.** Input is the most recent attributable model call's reported
+  input-token field, without adding cache tokens or substituting a session
+  total. A newer call with missing input clears the previous value. Summary
+  usage may aggregate several calls, so it clears latest input rather than
+  presenting aggregate tokens as one call.
+- **Estimated cost.** The USD amount is cumulative reported estimated cost
+  attributable to this child, including usage-bearing summaries and tool
+  results. It is not subscription billing. Durable call identities prevent
+  repeated events and continuation or resume from adding a call twice. Fork
+  accounting excludes the complete inherited prefix captured before the
+  child's first prompt. Missing or invalid cost on a known contributing call
+  makes the complete estimate unknown; empty history does not invent zero.
+- **Recovery.** Ordinary-agent sidecars and owner-thread resume snapshots
+  preserve validated observations and attribution. Readable child history is
+  reconciled during recovery, including a thread whose respondent has not
+  relaunched. A legacy ordinary session with no parent history can recover
+  its total. A legacy fork without its original boundary keeps lifetime cost
+  unknown; a separate observation boundary can establish later child input
+  without claiming a complete lifetime total. Temporarily missing, unreadable,
+  or partially written history preserves a validated lifetime origin and
+  usage snapshot. Readable identity or boundary contradictions invalidate
+  incompatible attribution instead of carrying its old total forward.
+- **Collection and display.** Usage is collected at child event and lifecycle
+  boundaries, including compaction and final stop, outside rendering. Optional
+  telemetry queries cannot prevent otherwise valid delegation. Shutdown keeps
+  the pre-stop orphan activity state while persisting final usage to both
+  recovery formats. Rendering performs no RPC or disk reads and adds no
+  per-frame polling. Width limits, row order, caps, and waiting-row visibility
+  remain unchanged. The full `/answer <id>` cue takes priority whenever it
+  fits; telemetry is omitted before that cue when the row is too narrow.
 
 ## Shared conversation-view component {#260909-pi-conversation-view-component}
 

@@ -27,6 +27,7 @@ import { join } from "node:path";
 import {
   SIDECAR_VERSION,
   MID_TURN_ORPHAN_CAVEAT,
+  noSessionSidecarPath,
   buildOrphanPush,
   buildOrphanSummary,
   captureOrphans,
@@ -43,6 +44,7 @@ import {
 import { armForkRoleWiring } from "../src/fork.ts";
 import { applyRpcEvent, listAgents, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import type { ExtensionAPI, RpcClient } from "@earendil-works/pi-coding-agent";
+import { allocateAgentHome, createAgentStorageContext, readOwnership } from "../src/agent-storage.ts";
 
 function record(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
   return {
@@ -70,6 +72,10 @@ function withTempDir<T>(fn: (dir: string) => T): T {
 describe("sidecarPath", () => {
   test("is a sibling of the lead's own session file, matching ask.ts's thread-registry convention", () => {
     assert.equal(sidecarPath("/home/u/.pi/sessions/s1.jsonl"), "/home/u/.pi/sessions/s1.jsonl.ws-agents.json");
+  });
+  test("namespaces no-session registries by the current Pi identity", () => {
+    assert.equal(noSessionSidecarPath("/tmp/pi-agent", "same-id"), "/tmp/pi-agent/ws-agents/same-id/registry.ws-agents.json");
+    assert.notEqual(noSessionSidecarPath("/tmp/pi-agent", "same-id"), noSessionSidecarPath("/tmp/pi-agent", "new-id"));
   });
 });
 
@@ -222,6 +228,26 @@ describe("serializeOrphans / parseOrphans", () => {
   test("round-trips a full orphan set unchanged, state, last-report time and alias/title/prompt included", () => {
     assert.deepEqual(parseOrphans(serializeOrphans(orphans)), orphans);
   });
+
+  test("preserves valid owned sidecars through revival and strips mismatched ownership without losing legacy resume", () => withTempDir((root) => {
+    const ownership = allocateAgentHome(createAgentStorageContext("lead-1", root), "owned-1", "worker");
+    writeFileSync(ownership.sessionPath!, "session\n");
+    const saved: PersistedOrphan = {
+      agentId: ownership.agentId, sessionPath: ownership.sessionPath!, systemPromptPath: "/tmp/p.md",
+      wsToolNames: [], toolGroup: "full-worker", ownership,
+    };
+    const [parsed] = parseOrphans(serializeOrphans([saved]));
+    assert.deepEqual(parsed.ownership, ownership);
+    const revived = rehydrateOrphanRecord(parsed);
+    assert.deepEqual(revived.ownership, ownership);
+    assert.equal(revived.sessionPath, ownership.sessionPath);
+    assert.equal(readOwnership(ownership.home)?.agentId, ownership.agentId);
+
+    const bad = { ...saved, ownership: { ...ownership, ownerSessionId: "other-lead" } };
+    const [fallback] = parseOrphans(serializeOrphans([bad]));
+    assert.equal(fallback.ownership, undefined, "mismatched ownership is never authorized");
+    assert.equal(fallback.sessionPath, ownership.sessionPath, "legacy resume remains available");
+  }));
 
   test("260905 (alias/park/cap): an old-shape orphan with no alias/title/prompt still round-trips (they parse as undefined, not invented)", () => {
     const oldShape: PersistedOrphan[] = [

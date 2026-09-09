@@ -115,10 +115,13 @@ import {
   pushToLead,
   resolveAgentId,
   spawnAgent,
+  storageContextFromToolCtx,
+  syncOwnershipProtection,
   type ResolvedModelInfo,
   type RpcAgentRecord,
   type RpcAgentRegistry,
 } from "./spawner.ts";
+import { touchOwnership } from "./agent-storage.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers. Unit-tested directly (test/execute-gateway.test.ts) with no
@@ -267,6 +270,7 @@ export interface PendingApproval {
   rationale?: string;
   /** Worker-supplied per-call cwd override (mirrors `ws-worker-exec`'s own `cwd?` param) — see `resolveApprovalContextCwd`. */
   cwd?: string;
+  decisionWritten?: boolean;
 }
 
 export type ValidatePendingApprovalResult = { ok: true } | { ok: false; reason: string };
@@ -285,6 +289,7 @@ export function validatePendingApproval(pending: PendingApproval | undefined, cm
   if (pending.cmdId !== cmdId) {
     return { ok: false, reason: `cmd_id mismatch: pending cmd_id is "${pending.cmdId}", got "${cmdId}"` };
   }
+  if (pending.decisionWritten) return { ok: false, reason: "approval decision is already written and awaiting worker consumption" };
   return { ok: true };
 }
 
@@ -670,6 +675,7 @@ export function registerExecuteGateway(
         {
           pi,
           cwd: sessionCtx.cwd,
+          storage: storageContextFromToolCtx(toolCtx),
           inheritModel: inheritModelFromToolCtx(toolCtx),
           catalog: modelCatalogFromToolCtx(toolCtx),
           notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx),
@@ -726,11 +732,13 @@ export function registerExecuteGateway(
         throw new Error(`ws-pi-agent: ${APPROVE_TOOL_NAME} rejected: ${inputValidation.reason}`);
       }
 
-      const sessionDir = dirname(record.sessionPath);
+      const sessionDir = record.ownership?.home ?? dirname(record.sessionPath);
       const decisionPath = approvalDecisionPath(sessionDir, p.cmd_id);
       mkdirSync(dirname(decisionPath), { recursive: true });
       writeFileSync(decisionPath, JSON.stringify({ decision: p.decision, reason: p.reason, command: p.command }));
-      record.pendingApproval = undefined;
+      record.pendingApproval = { ...record.pendingApproval!, decisionWritten: true };
+      if (record.ownership) touchOwnership(record.ownership.home);
+      syncOwnershipProtection(record);
 
       return { content: [{ type: "text", text: JSON.stringify({ ok: true }) }] };
     },

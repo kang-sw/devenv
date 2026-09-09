@@ -37,10 +37,13 @@
  * best-effort by design (see `readAndClearSidecar`).
  */
 
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import type { RpcAgentRecord, RpcAgentRegistry, SpawnAgentRole, ToolGroup } from "./spawner.ts";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { refreshAgentTelemetry, startOwnedSessionObserver, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole, type ToolGroup } from "./spawner.ts";
 import { parseForkContext, type ForkContext } from "./fork-context.ts";
 import type { ExploreMode } from "./process-role.ts";
+import { readOwnership, updateOwnership, validDescriptor, type AgentOwnership } from "./agent-storage.ts";
+import { parseTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
 
 /** Sidecar file version. Bumped only on a breaking shape change; a mismatch is treated as "no sidecar". */
 export const SIDECAR_VERSION = 1;
@@ -62,6 +65,11 @@ export interface PersistedOrphan {
   forkContext?: ForkContext;
   modelBase?: string;
   modelEffort?: string;
+  telemetry?: AgentTelemetry;
+  telemetryInputFloor?: TelemetryOrigin;
+  observedModel?: string;
+  observedEffort?: string;
+  observedLatestInput?: number;
   wsToolNames: string[];
   toolGroup: ToolGroup;
   explicitTools?: string;
@@ -82,6 +90,8 @@ export interface PersistedOrphan {
   state?: OrphanState;
   /** ISO time of the newest `reportLog` entry at shutdown; omitted when the child never reported. */
   lastReportAt?: string;
+  /** Additive durable ownership; absence keeps a legacy record resumable. */
+  ownership?: AgentOwnership;
 }
 
 /** See `PersistedOrphan.state`. */
@@ -96,6 +106,11 @@ export interface SidecarFile {
 /** `<leadSessionFile>.ws-agents.json` — sibling of the session file, same convention as ask.ts's thread registry. */
 export function sidecarPath(leadSessionFile: string): string {
   return `${leadSessionFile}.ws-agents.json`;
+}
+
+/** Durable no-session locator. A fresh Pi identity never discovers another identity's registry. */
+export function noSessionSidecarPath(agentDir: string, sessionId: string): string {
+  return join(agentDir, "ws-agents", sessionId, "registry.ws-agents.json");
 }
 
 /**
@@ -129,6 +144,11 @@ export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
       ...(record.forkContext ? { forkContext: record.forkContext } : {}),
       modelBase: record.modelBase,
       modelEffort: record.modelEffort,
+      ...(record.telemetry ? { telemetry: record.telemetry } : {}),
+      ...(record.telemetryInputFloor ? { telemetryInputFloor: record.telemetryInputFloor } : {}),
+      ...(record.observedModel ? { observedModel: record.observedModel } : {}),
+      ...(record.observedEffort ? { observedEffort: record.observedEffort } : {}),
+      ...(record.observedLatestInput !== undefined ? { observedLatestInput: record.observedLatestInput } : {}),
       wsToolNames: [...record.wsToolNames],
       toolGroup: record.toolGroup,
       explicitTools: record.explicitTools,
@@ -139,6 +159,7 @@ export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
       // other optional field above — `JSON.stringify` drops it on the way out
       // and `parseOrphans` reads it back the same way.
       lastReportAt: lastReportAt(record),
+      ...(record.ownership ? { ownership: record.ownership } : {}),
     });
   }
   return orphans;
@@ -192,6 +213,7 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
     let forkContext: ForkContext | undefined;
     try { forkContext = parseForkContext(o.forkContext); } catch { continue; }
     if (!o.systemPromptPath && !forkContext) continue;
+    const ownership = o.ownership && validDescriptor(o.ownership) && o.ownership.agentId === o.agentId && o.ownership.sessionPath === o.sessionPath && (() => { const disk = readOwnership(o.ownership!.home); return !!disk && disk.home === o.ownership!.home && disk.ownerSessionId === o.ownership!.ownerSessionId && disk.agentId === o.ownership!.agentId && disk.sessionPath === o.ownership!.sessionPath && disk.role === o.ownership!.role && disk.exploreMode === o.ownership!.exploreMode; })() ? o.ownership : undefined;
     const toolGroup = o.toolGroup;
     const isKnownToolGroup = toolGroup === undefined || toolGroup === "read-only" || toolGroup === "read-only-explore" || toolGroup === "recon" || toolGroup === "full-worker" || toolGroup === "execute-worker";
     const isKnownRole = o.spawnRole === undefined || o.spawnRole === "worker" || o.spawnRole === "execute-worker" || o.spawnRole === "fork" || o.spawnRole === "explore";
@@ -216,6 +238,11 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
       ...(forkContext ? { forkContext } : {}),
       modelBase: typeof o.modelBase === "string" ? o.modelBase : undefined,
       modelEffort: typeof o.modelEffort === "string" ? o.modelEffort : undefined,
+      ...(parseTelemetry(o.telemetry) ? { telemetry: parseTelemetry(o.telemetry) } : {}),
+      ...(parseTelemetry({ version: 1, origin: o.telemetryInputFloor })?.origin ? { telemetryInputFloor: parseTelemetry({ version: 1, origin: o.telemetryInputFloor })!.origin } : {}),
+      ...(typeof o.observedModel === "string" && o.observedModel ? { observedModel: o.observedModel } : {}),
+      ...(typeof o.observedEffort === "string" && o.observedEffort ? { observedEffort: o.observedEffort } : {}),
+      ...(typeof o.observedLatestInput === "number" && Number.isFinite(o.observedLatestInput) && o.observedLatestInput >= 0 ? { observedLatestInput: o.observedLatestInput } : {}),
       wsToolNames: Array.isArray(o.wsToolNames) ? o.wsToolNames.filter((n): n is string => typeof n === "string") : [],
       toolGroup: (o.toolGroup ?? "full-worker") as ToolGroup,
       explicitTools: typeof o.explicitTools === "string" ? o.explicitTools : undefined,
@@ -232,6 +259,7 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
       // and spec both declare ISO. `Number.isFinite(Date.parse(...))` rejects
       // anything that does not parse as a date.
       lastReportAt: typeof o.lastReportAt === "string" && Number.isFinite(Date.parse(o.lastReportAt)) ? o.lastReportAt : undefined,
+      ...(ownership ? { ownership } : {}),
     });
   }
   return out;
@@ -252,17 +280,23 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
  * reports again for real.
  */
 export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
-  return {
+  const record: RpcAgentRecord = {
     agentId: orphan.agentId,
     alias: orphan.alias,
     title: orphan.title,
     prompt: orphan.prompt,
     client: undefined,
     sessionPath: orphan.sessionPath,
+    ...(orphan.ownership ? { ownership: orphan.ownership } : {}),
     systemPromptPath: orphan.systemPromptPath,
     ...(orphan.forkContext ? { forkContext: orphan.forkContext } : {}),
     modelBase: orphan.modelBase,
     modelEffort: orphan.modelEffort,
+    ...(orphan.telemetry ? { telemetry: orphan.telemetry } : {}),
+    ...(orphan.telemetryInputFloor ? { telemetryInputFloor: orphan.telemetryInputFloor } : {}),
+    ...(orphan.observedModel ? { observedModel: orphan.observedModel } : {}),
+    ...(orphan.observedEffort ? { observedEffort: orphan.observedEffort } : {}),
+    ...(orphan.observedLatestInput !== undefined ? { observedLatestInput: orphan.observedLatestInput } : {}),
     wsToolNames: [...orphan.wsToolNames],
     toolGroup: orphan.toolGroup,
     explicitTools: orphan.explicitTools,
@@ -273,6 +307,10 @@ export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
     reportLog: [],
     lastReportAtOverride: orphan.lastReportAt,
   };
+  // A parked record can gain a flushed final entry between sidecar capture
+  // and process exit. Reconcile it before any recovery consumer renders it.
+  refreshAgentTelemetry(record);
+  return record;
 }
 
 /**
@@ -309,6 +347,8 @@ export function reviveOrphans(registry: RpcAgentRegistry, orphans: PersistedOrph
   for (const orphan of orphans) {
     if (registry.has(orphan.agentId)) continue;
     const record = rehydrateOrphanRecord(orphan);
+    startOwnedSessionObserver(record);
+    if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "unknown", running: false, observedAt: Date.now(), recovery: "sidecar", threadBound: record.threadBound, pendingApprovalCommandId: record.pendingApproval?.cmdId } });
     registry.set(orphan.agentId, record);
     const arm = orphan.spawnRole === "fork" ? wiring.fork : orphan.spawnRole === "execute-worker" ? wiring.executeWorker : orphan.spawnRole === "explore" ? undefined : wiring.worker;
     try {
@@ -413,9 +453,14 @@ export function buildOrphanPush(orphans: PersistedOrphan[]): Record<string, unkn
 
 /** Best-effort sidecar write; a failure here must never break session shutdown. */
 export function writeSidecar(leadSessionFile: string, orphans: PersistedOrphan[]): void {
+  writeSidecarAt(sidecarPath(leadSessionFile), orphans);
+}
+
+export function writeSidecarAt(path: string, orphans: PersistedOrphan[]): void {
   try {
     if (orphans.length === 0) return;
-    writeFileSync(sidecarPath(leadSessionFile), serializeOrphans(orphans), "utf8");
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    writeFileSync(path, serializeOrphans(orphans), { mode: 0o600 });
   } catch {
     // Nothing to fall back to — the orphans are simply not announced next run.
   }
@@ -428,7 +473,10 @@ export function writeSidecar(leadSessionFile: string, orphans: PersistedOrphan[]
  * agents on every subsequent start.
  */
 export function readAndClearSidecar(leadSessionFile: string): PersistedOrphan[] {
-  const path = sidecarPath(leadSessionFile);
+  return readAndClearSidecarAt(sidecarPath(leadSessionFile));
+}
+
+export function readAndClearSidecarAt(path: string): PersistedOrphan[] {
   let raw: string | undefined;
   try {
     if (!existsSync(path)) return [];

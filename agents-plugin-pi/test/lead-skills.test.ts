@@ -12,6 +12,9 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI, SlashCommandInfo, SourceInfo } from "@earendil-works/pi-coding-agent";
 import {
   WS_SKILL_TOOL_NAME,
@@ -252,7 +255,7 @@ describe("addSkillToolIfLeadOrFork", () => {
 describe("registerWsSkillTool (fake pi)", () => {
   interface FakeTool {
     name: string;
-    execute(id: string, params: unknown): Promise<{ content: Array<{ type: string; text: string }> }>;
+    execute(id: string, params: unknown, signal?: unknown, update?: unknown, ctx?: unknown): Promise<{ content: Array<{ type: string; text: string }> }>;
   }
 
   function fakePi(tools: Map<string, FakeTool>, getCommands: () => SlashCommandInfo[]): ExtensionAPI {
@@ -295,5 +298,37 @@ describe("registerWsSkillTool (fake pi)", () => {
 
     const unknownResult = await tool.execute("call-2", { name: "does-not-exist" });
     assert.match(unknownResult.content[0].text, /lead-drain-ready-queue/, "the unknown-name listing must include the live-merged skill too");
+  });
+
+  test("production registration never dedupes unknown-skill errors", async () => {
+    const tools = new Map<string, FakeTool>();
+    const pi = fakePi(tools, () => []);
+    registerWsSkillTool(pi);
+    const context = { sessionManager: { buildContextEntries: () => [{ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "one", name: "ws-skill", arguments: { name: "missing" } }] } }, { type: "message", message: { role: "toolResult", toolCallId: "one", content: [{ type: "text", text: 'Unknown skill "missing". Available skills: (none)' }], isError: false } }] } };
+    const result = await tools.get(WS_SKILL_TOOL_NAME)!.execute("two", { name: "missing" }, undefined, undefined, context);
+    assert.match(result.content[0].text, /^Unknown skill "missing"/);
+    assert.doesNotMatch(result.content[0].text, /unchanged result/);
+  });
+
+  test("production registration returns full, pointer, then full for a successful ws-skill read", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "ws-pi-dedupe-skill-"));
+    const path = join(directory, "SKILL.md");
+    writeFileSync(path, "---\nname: repeat\n---\n# Repeat\n## Detail\n");
+    const tools = new Map<string, FakeTool>();
+    const pi = fakePi(tools, () => [skillCommand("repeat", "fixture", path)]);
+    registerWsSkillTool(pi);
+    const tool = tools.get(WS_SKILL_TOOL_NAME)!;
+    const first = await tool.execute("one", { name: "repeat" }, undefined, undefined, { sessionManager: { buildContextEntries: () => [] } });
+    assert.match(first.content[0].text, /^# Repeat/);
+    const secondContext = { sessionManager: { buildContextEntries: () => [
+      { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "one", name: "ws-skill", arguments: { name: "repeat" } }] } },
+      { type: "message", message: { role: "toolResult", toolCallId: "one", content: first.content, isError: false } },
+      { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "two", name: "ws-skill", arguments: { name: "repeat" } }] } },
+    ] } };
+    const second = await tool.execute("two", { name: "repeat" }, undefined, undefined, secondContext);
+    assert.match(second.content[0].text, /unchanged result.*`one`/s);
+    const thirdContext = { sessionManager: { buildContextEntries: () => [...secondContext.sessionManager.buildContextEntries(), { type: "message", message: { role: "toolResult", toolCallId: "two", content: second.content, isError: false } }, { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "three", name: "ws-skill", arguments: { name: "repeat" } }] } }] } };
+    const third = await tool.execute("three", { name: "repeat" }, undefined, undefined, thirdContext);
+    assert.equal(third.content[0].text, first.content[0].text);
   });
 });

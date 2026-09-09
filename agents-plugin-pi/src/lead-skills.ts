@@ -80,6 +80,7 @@ import type { ExtensionAPI, SlashCommandInfo } from "@earendil-works/pi-coding-a
 import { parseFrontmatter, type SkillFrontmatter } from "@earendil-works/pi-coding-agent";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
+import { dedupeRead, wsSkillKey } from "./playbook-read-dedupe.ts";
 
 /** Lead-facing tool name (pi-lead-guide.md), registered below. */
 export const WS_SKILL_TOOL_NAME = "ws-skill";
@@ -92,6 +93,7 @@ export interface SkillEntry {
 }
 
 export type LoadedSkill = { ok: true; body: string; disableModelInvocation: boolean } | { ok: false; error: string };
+export type WsSkillReadResult = { text: string; success: boolean };
 
 /**
  * `pi.getCommands()` -> `SkillEntry[]`: filters to `source: "skill"` and
@@ -202,16 +204,21 @@ export function buildSkillsBlock(entries: readonly SkillEntry[], loadFile: (path
  * `User: <args>` line.
  */
 export function computeWsSkillResult(name: string, args: string | undefined, entries: readonly SkillEntry[], loadFile: (path: string) => LoadedSkill): string {
+  return computeWsSkillReadResult(name, args, entries, loadFile).text;
+}
+
+/** Same public text contract as computeWsSkillResult, with a success bit for read-only optimizations. */
+export function computeWsSkillReadResult(name: string, args: string | undefined, entries: readonly SkillEntry[], loadFile: (path: string) => LoadedSkill): WsSkillReadResult {
   const entry = entries.find((e) => e.name === name);
   if (!entry) {
     const names = entries.map((e) => e.name).sort();
-    return `Unknown skill "${name}". Available skills: ${names.length > 0 ? names.join(", ") : "(none)"}`;
+    return { text: `Unknown skill "${name}". Available skills: ${names.length > 0 ? names.join(", ") : "(none)"}`, success: false };
   }
   const loaded = loadFile(entry.path);
   if (!loaded.ok) {
-    return `Error loading skill "${name}": ${loaded.error}`;
+    return { text: `Error loading skill "${name}": ${loaded.error}`, success: false };
   }
-  return args ? `${loaded.body}\n\nUser: ${args}` : loaded.body;
+  return { text: args ? `${loaded.body}\n\nUser: ${args}` : loaded.body, success: true };
 }
 
 /**
@@ -253,11 +260,14 @@ export function registerWsSkillTool(pi: ExtensionAPI, toolPreviewTuiRef: ToolPre
       },
       required: ["name"],
     } as never,
-    async execute(_toolCallId, params) {
+    async execute(toolCallId, params, _signal, _onUpdate, toolCtx) {
       const p = params as { name: string; args?: string };
       const entries = resolveSkillEntries(pi.getCommands());
-      const text = computeWsSkillResult(p.name, p.args, entries, (path) => loadSkillFile(path));
-      return { content: [{ type: "text", text }] };
+      const read = computeWsSkillReadResult(p.name, p.args, entries, (path) => loadSkillFile(path));
+      if (!read.success) return { content: [{ type: "text", text: read.text }] };
+      const visibleEntries = toolCtx?.sessionManager?.buildContextEntries?.() ?? [];
+      const decision = dedupeRead(visibleEntries, toolCallId, "ws-skill", wsSkillKey(p), read.text);
+      return { content: [{ type: "text", text: decision.text }] };
     },
   }, toolPreviewTuiRef);
 }

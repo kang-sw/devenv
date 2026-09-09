@@ -23,6 +23,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { buildPushComponent, buildPushRenderLines, registerPushMessageRenderers, type PushTuiModules } from "../src/push-render.ts";
 import { buildPushContent, PUSH_FAMILIES } from "../src/spawner.ts";
+import { approximateCodePointWidth } from "../src/tool-result-render.ts";
 
 describe("buildPushRenderLines", () => {
   test("splits a real pushed message into head, payload and status", () => {
@@ -103,8 +104,13 @@ type FakeComponent = { render(width: number): string[]; invalidate(): void };
  * `buildPushComponent`'s body now goes through `createBoundedText`/
  * `updateText` from `tool-result-render.ts`, which requires that shape.
  */
-function fakeTui(): { modules: PushTuiModules; boxes: FakeBox[] } {
+function fakeTui(): { modules: PushTuiModules; boxes: FakeBox[]; strips: number; truncations: number; layouts: number; joins: number; styles: number } {
   const boxes: FakeBox[] = [];
+  let strips = 0;
+  let truncations = 0;
+  let layouts = 0;
+  let joins = 0;
+  let styles = 0;
 
   class FakeText implements FakeComponent {
     private text: string;
@@ -148,10 +154,24 @@ function fakeTui(): { modules: PushTuiModules; boxes: FakeBox[] } {
     modules: {
       Box: FakeBoxImpl,
       Text: FakeText,
-      stripTerminalSequences: (text: string) => text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, ""),
-      truncateToWidth: (text: string) => text,
+      stripTerminalSequences: (text: string) => {
+        strips += 1;
+        return text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+      },
+      truncateToWidth: (text: string) => {
+        truncations += 1;
+        return text;
+      },
+      onPreviewLayout: () => { layouts += 1; },
+      onPreviewJoin: () => { joins += 1; },
+      onPreviewStyle: () => { styles += 1; },
     } as unknown as PushTuiModules,
     boxes,
+    get strips() { return strips; },
+    get truncations() { return truncations; },
+    get layouts() { return layouts; },
+    get joins() { return joins; },
+    get styles() { return styles; },
   };
 }
 
@@ -159,10 +179,11 @@ function fakeTui(): { modules: PushTuiModules; boxes: FakeBox[] } {
 function fakeTheme() {
   const fgCalls: Array<{ color: string; text: string }> = [];
   const bgCalls: Array<{ color: string; text: string }> = [];
+  let variant = "initial";
   return {
     fg(color: string, text: string): string {
       fgCalls.push({ color, text });
-      return `<fg:${color}>${text}</fg>`;
+      return `<fg:${color}:${variant}>${text}</fg>`;
     },
     bg(color: string, text: string): string {
       bgCalls.push({ color, text });
@@ -170,11 +191,18 @@ function fakeTheme() {
     },
     fgCalls,
     bgCalls,
+    setVariant(next: string): void {
+      variant = next;
+    },
   };
 }
 
 function plainLine(text: string): string {
   return text.replace(/<[^>]+>/g, "");
+}
+
+function displayWidth(text: string): number {
+  return [...plainLine(text)].reduce((width, codePoint) => width + approximateCodePointWidth(codePoint), 0);
 }
 
 describe("buildPushComponent", () => {
@@ -187,7 +215,7 @@ describe("buildPushComponent", () => {
   test("draws the family head ONCE — Pi's default printed it above an identical content line", () => {
     const tui = fakeTui();
     const theme = fakeTheme();
-    const component = buildPushComponent(tui.modules, message, theme) as FakeComponent;
+    const component = buildPushComponent(tui.modules, message, theme, false, "ws-agent-report") as FakeComponent;
 
     const rendered = component.render(80);
     assert.deepEqual(rendered.map(plainLine), [
@@ -201,8 +229,8 @@ describe("buildPushComponent", () => {
     assert.ok(theme.bgCalls.every((call) => call.color === "customMessageBg"), "every background paint uses the shared token");
     assert.ok(theme.bgCalls.length > 0, "the box paints a background");
     assert.ok(
-      theme.fgCalls.some((call) => call.color === "muted" && call.text.includes("[ws-agent-report] agent w1")),
-      "head is muted",
+      theme.fgCalls.some((call) => call.color === "customMessageLabel" && call.text.includes("[ws-agent-report] agent w1")),
+      "report head uses the theme's existing label role",
     );
     assert.ok(
       theme.fgCalls.some((call) => call.color === "muted" && call.text.includes("kind: final")),
@@ -213,14 +241,14 @@ describe("buildPushComponent", () => {
       "status stays dim",
     );
     assert.ok(
-      !theme.fgCalls.some((call) => call.color === "customMessageLabel" || call.color === "customMessageText"),
-      "no longer paints with Pi's default custom-message colors",
+      !theme.fgCalls.some((call) => call.color === "customMessageText"),
+      "does not paint with Pi's default body color",
     );
   });
 
   test("no theme (and a throwing theme) degrade to unpainted text rather than to no component", () => {
     const plain = fakeTui();
-    const plainComponent = buildPushComponent(plain.modules, message, undefined) as FakeComponent;
+    const plainComponent = buildPushComponent(plain.modules, message, undefined, false, "ws-agent-report") as FakeComponent;
     assert.ok(plainComponent);
     assert.equal(plainComponent.render(80)[0], "[ws-agent-report] agent w1");
 
@@ -232,7 +260,7 @@ describe("buildPushComponent", () => {
       bg: () => {
         throw new Error("theme is gone");
       },
-    }) as FakeComponent;
+    }, false, "ws-agent-report") as FakeComponent;
     assert.ok(brokenComponent);
     assert.equal(brokenComponent.render(80)[0], "[ws-agent-report] agent w1");
   });
@@ -284,6 +312,31 @@ describe("buildPushComponent", () => {
     assert.equal(expandedLines.length, 13, "head + all 12 body logical lines, no marker");
   });
 
+  test("reuses the bounded body preparation and layout at one width while a mutated theme restyles it", () => {
+    const tui = fakeTui();
+    const theme = fakeTheme();
+    const entries = Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`k${index}`, `v${index}`]));
+    const component = buildPushComponent(
+      tui.modules,
+      { content: buildPushContent("ws-agent-report", "w1", entries, undefined) },
+      theme,
+      false,
+      "ws-agent-report",
+    ) as FakeComponent;
+
+    component.render(80);
+    const prepared = { strips: tui.strips, layouts: tui.layouts, joins: tui.joins };
+    theme.fgCalls.length = 0;
+    theme.setVariant("mutated");
+    component.invalidate();
+    const rerendered = component.render(80);
+
+    assert.deepEqual({ strips: tui.strips, layouts: tui.layouts, joins: tui.joins }, prepared, "theme restyling does not reprepare or relayout the hidden body");
+    assert.ok(tui.styles >= 2, "the same theme object is restyled after mutation/invalidation");
+    assert.ok(theme.fgCalls.some((call) => call.color === "muted" && call.text.includes("k0: v0")), "body is restyled after same-object theme mutation");
+    assert.match(rerendered.join("\n"), /<fg:muted:mutated>/, "the mutated theme output reaches the unchanged body");
+  });
+
   test("260906 Phase 1: a head-only message with no body draws no empty body row", () => {
     const tui = fakeTui();
     const component = buildPushComponent(tui.modules, { content: "[ws-agent-orphaned]" }, undefined) as FakeComponent;
@@ -332,6 +385,58 @@ describe("registerPushMessageRenderers", () => {
       ) as FakeComponent;
       rendered.render(80);
       assert.ok(theme.bgCalls.some((call) => call.color === "customMessageBg"), `${family} paints the shared background`);
+    }
+  });
+
+  test("uses customMessageLabel only for registered report heads and preserves all comparison bands", async () => {
+    const registered = new Map<string, (message: unknown, options: unknown, theme: unknown) => unknown>();
+    const pi = {
+      registerMessageRenderer: (customType: string, renderer: (message: unknown, options: unknown, theme: unknown) => unknown) => {
+        registered.set(customType, renderer);
+      },
+    };
+    const tui = fakeTui();
+    await registerPushMessageRenderers(pi as never, tui.modules);
+
+    for (const family of PUSH_FAMILIES) {
+      const theme = fakeTheme();
+      const status = family === "ws-agent-report" ? "1 delegated agent still running" : undefined;
+      const component = registered.get(family)!(
+        { content: buildPushContent(family, "a1", { note: "body" }, status), details: status ? { status } : undefined },
+        { expanded: false },
+        theme,
+      ) as FakeComponent;
+      component.render(80);
+      const headColor = family === "ws-agent-report" ? "customMessageLabel" : "muted";
+      assert.ok(theme.fgCalls.some((call) => call.color === headColor && call.text.includes(`[${family}]`)), `${family} head uses ${headColor}`);
+      assert.ok(theme.fgCalls.some((call) => call.color === "muted" && call.text.includes("note: body")), `${family} body stays muted`);
+      if (status) assert.ok(theme.fgCalls.some((call) => call.color === "dim" && call.text === status), "report status stays dim");
+    }
+  });
+
+  test("registered reports fit long ANSI and multibyte payload rows at 40, 80, and 120 columns", async () => {
+    const registered = new Map<string, (message: unknown, options: unknown, theme: unknown) => unknown>();
+    const pi = { registerMessageRenderer: (family: string, renderer: (message: unknown, options: unknown, theme: unknown) => unknown) => registered.set(family, renderer) };
+    const tui = fakeTui();
+    await registerPushMessageRenderers(pi as never, tui.modules);
+    const entries = Object.fromEntries(Array.from({ length: 12 }, (_, index) => [
+      `k${index}`,
+      index === 0 ? `\x1b[35m${"界".repeat(48)}\x1b[0m` : `v${index}`,
+    ]));
+    const message = { content: buildPushContent("ws-agent-report", "a1", entries, undefined) };
+
+    for (const width of [40, 80, 120]) {
+      const collapsed = registered.get("ws-agent-report")!(message, { expanded: false }, fakeTheme()) as FakeComponent;
+      const collapsedLines = collapsed.render(width);
+      assert.equal(collapsedLines.at(-1)?.replace(/<[^>]+>/g, "").trim(), "...");
+      assert.doesNotMatch(collapsedLines.join("\n"), /k11: v11/, `collapsed report retains the logical-line cap at ${width}`);
+      assert.ok(collapsedLines.every((line) => displayWidth(line) <= width), `collapsed report rows fit ${width} columns`);
+      assert.doesNotMatch(collapsedLines.join("\n"), /\x1b\[/, `collapsed report sanitizes ANSI at ${width}`);
+      const expanded = registered.get("ws-agent-report")!(message, { expanded: true }, fakeTheme()) as FakeComponent;
+      const expandedLines = expanded.render(width);
+      assert.match(expandedLines.join("\n"), /k11: v11/, `expanded report recovers all logical lines at ${width}`);
+      assert.ok(expandedLines.every((line) => displayWidth(line) <= width), `expanded report rows fit ${width} columns`);
+      assert.doesNotMatch(expandedLines.join("\n"), /\x1b\[/, `expanded report sanitizes ANSI at ${width}`);
     }
   });
 

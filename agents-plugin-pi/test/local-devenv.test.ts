@@ -18,6 +18,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,6 +26,7 @@ import { readLocalDevenvMarker, buildLocalDevenvBootstrap, type LocalDevenvBuild
 import { wrapLaunchErrorWithLocalDevenvContext } from "../src/bridge.ts";
 import { buildStdioSpawnOptions, spawnWsMcpClient } from "../src/mcp-stdio-client.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
+import { buildChildProcessEnv } from "../src/spawner.ts";
 
 function tempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -369,6 +371,67 @@ describe("buildStdioSpawnOptions / spawnWsMcpClient env forwarding", () => {
       assert.equal(collected.join(""), "/tmp/injected-ws-mcp");
     } finally {
       rmSync(scriptDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("child bootstrap overrides: real launcher fixture", () => {
+  test("a child-style sanitized environment reuses a compatible runtime instead of honoring stale binary and URL overrides", () => {
+    const dir = tempDir("ws-pi-child-bootstrap-launcher-");
+    try {
+      const pluginDir = join(dir, "plugin");
+      const binDir = join(pluginDir, "bin");
+      const runtimeDir = join(dir, "runtime");
+      mkdirSync(join(pluginDir, "rsrc"), { recursive: true });
+      mkdirSync(binDir, { recursive: true });
+      writeFileSync(join(pluginDir, "rsrc", "manifest.json"), "{}");
+
+      const sourcePluginDir = process.cwd();
+      const launcherPath = join(binDir, "ws-mcp-launcher.py");
+      const contractPath = join(pluginDir, "runtime.json");
+      const contractText = readFileSync(join(sourcePluginDir, "runtime.json"), "utf8");
+      writeFileSync(launcherPath, readFileSync(join(sourcePluginDir, "bin", "ws-mcp-launcher.py"), "utf8"));
+      writeFileSync(contractPath, contractText);
+
+      const contract = JSON.parse(contractText) as { plugin_version: string; mcp_protocol: string; tools: Record<string, unknown>; commands: Record<string, unknown> };
+      const runtimeName = `ws-mcp-${contract.plugin_version}-${createHash("sha256").update(contractText).digest("hex").slice(0, 12)}`;
+      const runtimePath = join(runtimeDir, runtimeName);
+      mkdirSync(runtimeDir, { recursive: true });
+      writeFileSync(
+        runtimePath,
+        `#!/usr/bin/env python3\nimport json, sys\ncontract = json.load(open(${JSON.stringify(contractPath)}))\nif sys.argv[1:] == ['runtime', 'capabilities']:\n print(json.dumps({'version': contract['plugin_version'], 'mcp_protocol': contract['mcp_protocol'], 'tools': sorted(contract['tools']), 'commands': sorted(contract['commands'])}))\nelse:\n print('reused-compatible-runtime')\n`,
+        { mode: 0o755 },
+      );
+
+      const parent = {
+        PATH: process.env.PATH ?? "",
+        WS_MCP_RUNTIME_DIR: runtimeDir,
+        WS_MCP_BOOTSTRAP_BINARY: join(dir, "stale-ws-mcp"),
+        WS_MCP_BOOTSTRAP_URL: "https://example.test/stale-ws-mcp",
+        CHILD_SENTINEL: "preserved",
+      };
+      assert.throws(
+        () => execFileSync("python3", [launcherPath, "serve", "--stdio"], { env: parent, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
+        /bootstrap binary not found/,
+        "the stale parent override would force replacement instead of reusing the compatible runtime",
+      );
+      const childEnv = buildChildProcessEnv(parent);
+      assert.equal(childEnv.WS_MCP_BOOTSTRAP_BINARY, undefined);
+      assert.equal(childEnv.WS_MCP_BOOTSTRAP_URL, undefined);
+      assert.equal(childEnv.CHILD_SENTINEL, "preserved");
+
+      const output = execFileSync("python3", [launcherPath, "serve", "--stdio"], { env: childEnv, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      assert.equal(output, "reused-compatible-runtime\n");
+      assert.match(readFileSync(runtimePath, "utf8"), /reused-compatible-runtime/, "the selected compatible runtime was not replaced");
+      assert.deepEqual(parent, {
+        PATH: process.env.PATH ?? "",
+        WS_MCP_RUNTIME_DIR: runtimeDir,
+        WS_MCP_BOOTSTRAP_BINARY: join(dir, "stale-ws-mcp"),
+        WS_MCP_BOOTSTRAP_URL: "https://example.test/stale-ws-mcp",
+        CHILD_SENTINEL: "preserved",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });
