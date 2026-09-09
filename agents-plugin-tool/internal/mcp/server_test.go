@@ -358,7 +358,7 @@ func TestNamespaceTermsSubstitution(t *testing.T) {
 		want  string
 	}{
 		{"use ws/specs.query here", "use wsflow/specs.query here"},
-		{"call ws:lead-implement skill", "call wsflow:lead-implement skill"},
+		{"call ws:lead-run skill", "call wsflow:lead-run skill"},
 		{"rows: many items", "rows: many items"},
 		{"news/feed here", "news/feed here"},
 		{"workflows/steps", "workflows/steps"},

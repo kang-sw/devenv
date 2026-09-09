@@ -108,7 +108,7 @@ not have one. This flow only runs when a project still has one (gated by
 | Static reference material | Compact to `ai-docs/ref/` or API-doc pointers |
 | Procedure or how-to content (has a one-line applicability description) | Move to `ai-docs/manuals/` with a `summary:` frontmatter line equal to that description |
 | Project reading map | `{{.SkillNamespace}}:lead-forge-mental-model` or `{{.SkillNamespace}}:lead-discuss` when mixed with status claims |
-| Focus or ticket ordering | the lead-write-ticket procedure |
+| Focus or ticket ordering | the lead-ticket procedure |
 | Work history | Compact to Git history, ticket archives, or roadmap pointers |
 | Duplicated doc map | Compact to start-here pointers |
 | Ambiguous project direction | `{{.SkillNamespace}}:lead-discuss` |

@@ -2406,30 +2406,6 @@ func TestPlaybookPrintGoldenLeadCheckBlockers(t *testing.T) {
 	}
 }
 
-// TestSkillBodyGoldenLeadVerifyDiscussion verifies lead-verify-discussion
-// resolves from the real skills tree as a static inlined SKILL.md body.
-// lead-verify-discussion is no longer a playbook.read-backed rsrc playbook
-// (its procedure body was inlined directly into SKILL.md), so this reads
-// through wsrsrc.LoadSkillBody rather than printPlaybook. The former
-// delegates:true continuity-tip and mercenary-path paragraphs were removed
-// (see 864902a3): they were a poor fit for this checkpoint's conditional
-// delegation, and their removal makes the source eligible for
-// substitution-mirrored wsflow generation (no product-specific content).
-func TestSkillBodyGoldenLeadVerifyDiscussion(t *testing.T) {
-	skillsRoot := filepath.Join("..", "..", "..", "agents-plugin", "skills")
-
-	body, err := wsrsrc.LoadSkillBody(skillsRoot, "lead-verify-discussion")
-	if err != nil {
-		t.Fatalf("LoadSkillBody: %v", err)
-	}
-	if !strings.Contains(body, "Re-objectify the discussion") {
-		t.Errorf("body %q: expected procedure text 'Re-objectify the discussion'", body)
-	}
-	if strings.Contains(body, "mercenary") {
-		t.Errorf("body %q: must not contain mercenary-path content (removed in 864902a3)", body)
-	}
-}
-
 // TestPlaybookPrintGoldenLeadBackfillDocs verifies lead-backfill-docs resolves
 // and keeps the two boundaries that make it correct: spec authoring stays with
 // the lead, and the mental-model range is extended through the spec commit.
@@ -2536,250 +2512,48 @@ func TestPlaybookPrintGoldenLeadWriteSpec(t *testing.T) {
 	}
 }
 
-// TestPlaybookPrintGoldenLeadWriteTicket verifies lead-write-ticket resolves
-// and delegates:false (no tip).
-func TestPlaybookPrintGoldenLeadWriteTicket(t *testing.T) {
+// TestPlaybookPrintGoldenLeadTicket verifies lead-ticket resolves from the
+// real rsrc tree, splices its task-list include, and keeps the two boundaries
+// the collapse must not lose: the Open Decision Queue gates what gets
+// written, and the ready-promotion path runs dependency closure and the sage
+// gate before its single commit. delegates:false — no tip.
+func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-write-ticket", nil, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-ticket", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	if !strings.Contains(body, "recoverability of intent") {
-		t.Errorf("body %q: expected doctrine text 'recoverability of intent'", body)
-	}
-	if !strings.Contains(body, `tickets.create_empty(session_key: <lead key>, stem: "<category>-<name>", initial_state: "<initial-status>")`) {
-		t.Errorf("body missing tickets.create_empty public schema call:\n%s", body)
-	}
-	// 260701 Phase 2: the sage-review state-machine prose was relocated into the
-	// tickets.sage_gate / tickets.sage_record MCP tools; the playbook now carries
-	// only the two-step call site and the parameterized Reviewer Spawn block.
-	// 260723 Phase 2: tickets.sage_record was renamed to the lead-only
-	// tickets.sage_stamp, and the two-step call site was further trimmed down
-	// to "follow its returned next_instruction" (action-time obligation prose)
-	// instead of restating the four sage_gate action branches or sage_stamp's
-	// aggregate/write/render/commit behavior up front.
 	for _, want := range []string{
-		"tickets.sage_gate(stem, landing)",
-		"tickets.sage_stamp(stem, stage, verdicts)",
-		"follow its returned next_instruction",
-		"## On: Reviewer Spawn",
-		"For each reviewer named by `tickets.sage_gate`",
+		"You are the lead managing the ticket inventory",
+		"## Open Decision Queue",
+		"Included Guidance: Open Decision Queue Task List",
+		"tickets.create_empty",
+		"tickets.sage_gate(stem, landing: \"ready\")",
+		"tickets.sage_stamp",
+		"Dependency closure over the whole batch first",
+		"Stamps leave files uncommitted",
+		"ticket-fact-populator",
 	} {
 		if !strings.Contains(body, want) {
-			t.Errorf("body missing sage review gate call-site language %q:\n%s", want, body)
+			t.Errorf("body missing lead-ticket text %q:\n%s", want, body)
 		}
 	}
-	// The relocated state-machine prose, Blocked templates, and the retired
-	// tool name must all be gone.
+	// The retired entry points must not be named by the surviving skill.
 	for _, forbidden := range []string{
-		"If posture is `recommended`, ask the user",
-		"If posture is `required`, run design review without asking",
-		"add or update `sage-review-design: completed`",
-		"Blocked Section Template",
-		"## On: Design Review Stage",
-		"## On: Ready-promotion Aggregation",
-		"tickets.sage_record(stem, stage, verdicts)",
-		"tickets.create(session_key:",
+		"lead-write-ticket",
+		"lead-proceed",
+		"lead-implement",
+		"[design-review:",
 	} {
 		if strings.Contains(body, forbidden) {
-			t.Errorf("body still contains relocated sage prose %q:\n%s", forbidden, body)
+			t.Errorf("body still names retired surface %q:\n%s", forbidden, body)
 		}
 	}
 	// delegates:false — no tip.
 	if strings.Contains(body, "Continuity tip") {
 		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
-	}
-}
-
-// TestPlaybookPrintGoldenLeadImplement verifies lead-implement resolves
-// and is delegates:true (tip must appear).
-func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
-	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	s := newTestServerWithHarness(t, "claude")
-
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-implement", nil, wsconfig.Options{}, "", nil)
-	if err != nil {
-		t.Fatalf("printPlaybook: %v", err)
-	}
-	if !strings.Contains(body, "execution attention") {
-		t.Errorf("body %q: expected doctrine text 'execution attention'", body)
-	}
-	for _, want := range []string{
-		"Gather `target`, `facts`, and explicit caller `policy` for `ws/route.resolve_implement`",
-		"Call `ws/route.resolve_implement` with outer `session_key` and `params: {target, facts, policy, format: \"json\"}`.",
-		"For tickets, use the ticket description only; for inline targets, use the accepted caller contract, loaded context, focused source inspection, and command output.",
-		"Treat the installed todo list as the ordered runbook",
-		"Stop for unresolved binding decisions before source edits.",
-		"If a plan artifact was created, commit it before Edit.",
-		// Decision 6 lead-adjudication window (260908 Phase 1): rules on each
-		// settled-vs-open escalation before implementer dispatch instead of
-		// deferring it or treating it as a settled finding.
-		"Before implementer dispatch, adjudicate each settled-vs-open\n  `## Escalations` entry (an `[escalate-to-lead]` entry that narrows,\n  inverts, or reframes something the ticket already settled): rule on the\n  entry, write the ruling directly under it in the plan's `## Escalations`\n  section, and continue. Stop for the user only when resolving the entry\n  would itself change the ticket.",
-		// Decision 2 (260908 Phase 1): the Plan contract section states the
-		// contract-free-for-ticket / verbatim-for-inline split explicitly.
-		"For a ticket target, `Relevant Ticket Contract` names only the ticket path and\nselected phase heading — never restated, summarized, or reworded ticket text;\nthe plan is a route to the ticket, not a contract substitute for it. For an\ninline target, `Relevant Ticket Contract` contains the accepted inline\ncontract character-for-character.",
-		"Delegate dispatch",
-		"Implementer spawn prompt",
-		"Rendered implementer prompt: <prompt-path>",
-		"contains the plan path, verification",
-		"implementer-relay` gets **Review relay dispatch**",
-		"choose the worker tier from dispatch metadata, but do not include `recommended-tier` in worker-facing task text",
-		"Collect the normal completion report",
-		"| `ticket` | `ticket_path`, `selected_phase`, empty `inline_contract`, `plan_path` |",
-		"| `inline` | empty `ticket_path`/`selected_phase`, self-contained `inline_contract`, `plan_path` |",
-		"Full scope | `reviewer` | `reviewer` (includes `code-reviewer`)",
-		"Authority: Ticket path <ticket-path>",
-		"Authority: Inline contract <accepted scope, constraints, non-goals, verification boundary>",
-		"Selected phase: <phase heading>",
-		"Each specified authority requirement is implemented, or carries an explicit, authorized deferral.",
-		"An authorized deferral or scope reduction not named in Review focus is a finding.",
-		"Reviewer prompt frame",
-		"Review relay dispatch",
-		"Render `implementer-relay` with declared inputs",
-		"implementer-elevated` gets **Review relay dispatch** when the Critical ceiling fires (review #3 still reports the Critical finding non-clean)",
-		"When the Critical ceiling fires (review #3 still reports the Critical finding\nnon-clean), render `implementer-elevated` in place of `implementer-relay`",
-		"Rendered review relay prompt: <prompt-path>",
-		// The symmetric re-review ask. Without it a [fixed] item that did not land
-		// carries no token, so the capacity condition would have to be inferred from
-		// prose — and an inferred routing condition does not fire.
-		"For each [fixed], respond [resolved] or [unresolved: <short reason>].",
-		"Mercenary path:",
-		`ws/mercenary.result(name: "<name>", timeout_seconds: 600)`,
-		"Set `policy.branch.merge_target` only when already on an implementation branch (`impl/*`, or legacy `implement/*`) or the user names it.",
-		"Map a clear request to streamline implementation to `policy.low_ceremony_if_safe=yes`; labels such as `hotfix`, `tweak`, or `small fix` alone do not count.",
-		"Low-ceremony preference affects branch selection only; it waives no other policy or gate.",
-		"If no skip condition holds and the branch name matches `impl/*`, delete without asking",
-		"the branch does not match `impl/*`, including legacy `implement/*`",
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("lead-implement full ws render missing %q:\n%s", want, body)
-		}
-	}
-	if strings.Contains(body, "with `session_key`, `target`, `facts`, `policy`, and `format: \"json\"`") {
-		t.Fatalf("lead-implement full ws render retained obsolete top-level route call:\n%s", body)
-	}
-	if strings.Contains(body, "Recommended tier: <recommended-tier>") {
-		t.Fatalf("lead-implement full ws render still exposes recommended tier in worker-facing task text:\n%s", body)
-	}
-	// Per-slice review relay (260831 severity-graded budget): `implementer-elevated`
-	// is reachable again, but only at the Critical ceiling (asserted in the wanted
-	// list above, reworded from the old capacity/root-cause trigger); the wanted
-	// assertions above pin that reworded routing text directly. `review-adjudicator`
-	// stays unreachable and unreferenced — nothing in the graded budget reproduces
-	// its contested-finding arbitration trigger.
-	for _, forbidden := range []string{
-		"When the review Instruction's capacity or root-cause condition fired",
-		"review-adjudicator` gets the plan path, review paths, implementer disposition record",
-		"review-adjudicator` returns one verdict line per dispute",
-	} {
-		if strings.Contains(body, forbidden) {
-			t.Fatalf("lead-implement full ws render retained unreachable adjudicator routing prose, or the superseded capacity/root-cause trigger wording, %q:\n%s", forbidden, body)
-		}
-	}
-	// 260908 Phase 2 (Decision 4): reviewers no longer receive a plan artifact —
-	// the reviewer prompt frame is unified (no plan path, no generated/direct-edit
-	// split) and the required-check rows drop the plan reference.
-	for _, forbidden := range []string{
-		"Plan path:",
-		"Plan guardrails were not bypassed.",
-		"Generated plan:",
-		"Direct edit with no generated plan:",
-		"Review the supplied authority, plan contract, and diff together.",
-	} {
-		if strings.Contains(body, forbidden) {
-			t.Fatalf("lead-implement full ws render retained superseded reviewer-plan prose %q:\n%s", forbidden, body)
-		}
-	}
-	// 260831: the reviewer-frame coverage line was operationalized against
-	// "authority" (not "ticket"); the old vague phrasing must not survive.
-	if strings.Contains(body, "Binding authority decisions were not omitted or violated.") {
-		t.Fatalf("lead-implement full ws render retained superseded reviewer-frame coverage line:\n%s", body)
-	}
-	for _, forbidden := range []string{
-		"Brief template",
-		"BriefPath",
-		"Brief path:",
-		"implementation brief",
-		"lead-authored brief",
-		"contains the brief path",
-		"using the brief",
-		"dispatch `mental-model-updater` only when workflow behavior",
-	} {
-		if strings.Contains(body, forbidden) {
-			t.Fatalf("lead-implement full ws render retained old brief contract %q:\n%s", forbidden, body)
-		}
-	}
-	for _, forbidden := range []string{
-		"Review cycle <N>. Rely only on this prompt and named paths.",
-		"Non-clean review paths: <paths>. Read each file directly.",
-		"Commit fixes, run verification, and report commit hashes plus test results.",
-		"Won't-fix allowed: style conflicts with codebase patterns; scope expansion beyond brief.",
-	} {
-		if strings.Contains(body, forbidden) {
-			t.Fatalf("lead-implement full ws render still embeds old review relay prompt body %q:\n%s", forbidden, body)
-		}
-	}
-	for _, forbidden := range []string{
-		"If `Branch Action: create`",
-		"If `Branch Action: rename`",
-		"If `Branch Action: continue`",
-		"If direct-edit:",
-		"If delegated:",
-		"If lead-only:",
-		"If single:",
-		"If partitioned:",
-		"If `doc_mode` is `skipped`",
-		"Acceptance:",
-		"Implement or escalate Brief `## Contract Instructions`",
-		"Satisfy Brief `## Integration Test Instructions`",
-		"Test files: <paths, or None with reason>",
-	} {
-		if strings.Contains(body, forbidden) {
-			t.Fatalf("lead-implement full ws render still contains unreachable-path prose %q:\n%s", forbidden, body)
-		}
-	}
-	// delegates:true (spawns implementer/reviewer agents) — tip must appear.
-	if !strings.Contains(body, "Continuity tip") {
-		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
-	}
-}
-
-func TestPlaybookPrintWsflowLeadImplementOmitsMercenaryCommands(t *testing.T) {
-	t.Setenv(envNoAgent, "1")
-	t.Setenv(envNamespace, "wsflow")
-	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	s := newTestServerWithHarness(t, "claude")
-
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-implement", nil, wsconfig.Options{}, "", nil)
-	if err != nil {
-		t.Fatalf("printPlaybook: %v", err)
-	}
-	for _, forbidden := range []string{
-		"ws/mercenary.",
-		"ws.mercenary.",
-		`"workflow.prefer_mercenary"`,
-		"Mercenary (when selected):",
-		fullOnlyStart,
-		fullOnlyEnd,
-		mercenaryOnlyStart,
-		mercenaryOnlyEnd,
-	} {
-		if strings.Contains(body, forbidden) {
-			t.Fatalf("wsflow lead-implement render contains forbidden %q:\n%s", forbidden, body)
-		}
-	}
-	for _, want := range []string{
-		"Set `policy.branch.merge_target` only when already on an implementation branch (`impl/*`, or legacy `implement/*`) or the user names it.",
-		"Map a clear request to streamline implementation to `policy.low_ceremony_if_safe=yes`; labels such as `hotfix`, `tweak`, or `small fix` alone do not count.",
-		"Low-ceremony preference affects branch selection only; it waives no other policy or gate.",
-		"If no skip condition holds and the branch name matches `impl/*`, delete without asking",
-		"the branch does not match `impl/*`, including legacy `implement/*`",
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("wsflow lead-implement render missing %q:\n%s", want, body)
-		}
 	}
 }
 
@@ -2804,65 +2578,31 @@ func TestShippedExecutorWrapupResultIncludesBehavioralDelta(t *testing.T) {
 // Golden print: Phase 3 entry-skill playbooks (real rsrc tree)
 // ---------------------------------------------------------------------------
 
-// TestPlaybookPrintGoldenLeadProceed verifies lead-proceed resolves from the
-// real rsrc tree and contains procedure body text. delegates:false — no tip.
-func TestPlaybookPrintGoldenLeadProceed(t *testing.T) {
+// TestRetiredLeadPlaybooksNoLongerResolve pins the collapse: the routing
+// entry playbook retired into lead-run and the implementation procedure was
+// superseded by the ticket-worker playbook, so neither may resolve again. A
+// reintroduction is a silent re-expansion of the lead surface, which is
+// exactly what this change removes; the replacements are asserted here too so
+// the retirement cannot pass while leaving no path.
+func TestRetiredLeadPlaybooksNoLongerResolve(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-proceed", nil, wsconfig.Options{}, "", nil)
-	if err != nil {
-		t.Fatalf("printPlaybook: %v", err)
-	}
-	if !strings.Contains(body, "workflow attention") {
-		t.Errorf("body %q: expected doctrine text 'workflow attention'", body)
-	}
-	for _, want := range []string{
-		`route.resolve_proceed`,
-		"Call `ws/route.resolve_proceed(session_key: <key>, params: {target: ..., facts: ...})`.",
-		"Follow `Next:` exactly",
-		"Treat an `route.resolve_proceed` verdict as authoritative",
-		"judge: free-form",
-		"Every touched path is a manual, note, or similar working document that no spec, mental model, or distributed artifact governs, regardless of file count, and no No row matches.",
-		"Otherwise, local scope and verification are clear",
-		"A ticket phase or ticket edit, unresolved choice, contract or canonical-flow impact, or requested review is present.",
-		"- On `Yes`",
-		"return without calling `route.resolve_proceed`",
-		"scope_blocked=no-unfinished-phase",
-		"scope_blocked=container-ticket",
-		"scope_blocked=multiple-explicit-phases",
-		"Accepted work spans multiple independently reviewable phases or needs pre-implementation contract/verification traceability beyond its eventual implementation commit and any relevant existing spec",
-		"Accepted work is one bounded reviewable slice recoverable from its eventual implementation commit plus any relevant existing spec, regardless of file count or public surface",
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("body %q: expected lead-proceed handoff/verdict text %q", body, want)
+	for _, retired := range []string{"lead-proceed", "lead-implement", "lead-write-ticket", "lead-verify-discussion"} {
+		if _, _, err := printPlaybook(s, rsrcRoot, retired, nil, wsconfig.Options{}, "", nil); err == nil {
+			t.Errorf("%s must no longer resolve as an rsrc playbook", retired)
 		}
 	}
-	if strings.Contains(body, "route.resolve_proceed(session_key: <key>, target: ..., facts: ...)") {
-		t.Fatalf("lead-proceed full ws render retained obsolete top-level route call:\n%s", body)
-	}
-	for _, old := range []string{
-		"Use the first matching route block",
-		"#### Implementation Dispatch",
-		"| `has-ticket=yes`, `status=ready`, `freshness=current`, `scope-blocked=none` | `lead-implement` |",
-		"### 3. Report Routing Verdict",
-		"## Routing Verdict",
-		"If `NEXT: lead-discuss`, continue through `ws:lead-discuss`.",
-		"judge: direct-execution",
-		"broad scope",
-	} {
-		if strings.Contains(body, old) {
-			t.Errorf("body %q: old deterministic route matrix text still present: %q", body, old)
+	for _, replacement := range []string{"lead-run", "lead-ticket", "ticket-worker"} {
+		if _, _, err := printPlaybook(s, rsrcRoot, replacement, nil, wsconfig.Options{}, "", nil); err != nil {
+			t.Errorf("replacement playbook %s must resolve: %v", replacement, err)
 		}
-	}
-	// delegates:false — continuity tip must NOT appear.
-	if strings.Contains(body, "Continuity tip") {
-		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
 	}
 }
 
 // TestPlaybookPrintGoldenLeadShip verifies lead-ship resolves from the real
-// rsrc tree and contains procedure body text. delegates:false — no tip.
+// rsrc tree, keeps the un-omittable release gate, and still carries the ship
+// config schema no tool owns. delegates:false — no tip.
 func TestPlaybookPrintGoldenLeadShip(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
@@ -2871,8 +2611,21 @@ func TestPlaybookPrintGoldenLeadShip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	if !strings.Contains(body, "zero-surprise releases") {
-		t.Errorf("body %q: expected doctrine text 'zero-surprise releases'", body)
+	for _, want := range []string{
+		"A release is low-reversibility",
+		"## Release gate",
+		"release-boundary: present",
+		"review.marker(format: json)",
+		"This gate never calls `review.stamp`",
+		"### Ship Config Format",
+		"## Version Strategy",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing lead-ship text %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "[design-review:") {
+		t.Errorf("body %q: unresolved design-review marker shipped", body)
 	}
 	// delegates:false — continuity tip must NOT appear.
 	if strings.Contains(body, "Continuity tip") {
@@ -2900,7 +2653,9 @@ func TestPlaybookPrintGoldenLeadAddRule(t *testing.T) {
 }
 
 // TestPlaybookPrintGoldenLeadDiscuss verifies lead-discuss resolves from the
-// real rsrc tree and is delegates:true (reference-discovery spawn — tip must appear).
+// real rsrc tree, keeps its conversation-only boundary, and routes capture and
+// execution at the collapsed names. delegates:true (exploration spawn) — tip
+// must appear, and the ExploreAgent variable must be substituted.
 func TestPlaybookPrintGoldenLeadDiscuss(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
@@ -2909,17 +2664,28 @@ func TestPlaybookPrintGoldenLeadDiscuss(t *testing.T) {
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	if !strings.Contains(body, "decision quality per conversation turn") {
-		t.Errorf("body %q: expected doctrine text 'decision quality per conversation turn'", body)
+	for _, want := range []string{
+		"you edit no source and write no document here",
+		"ws:lead-ticket",
+		"ws:lead-run",
+		"### Binding Anchor",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing lead-discuss text %q:\n%s", want, body)
+		}
 	}
-	// delegates:true (reference-discovery spawn in judge: needs-survey) — tip must appear.
+	if strings.Contains(body, "{{.ExploreAgent}}") {
+		t.Errorf("body %q: ExploreAgent left unsubstituted", body)
+	}
+	// delegates:true (exploration spawn) — tip must appear.
 	if !strings.Contains(body, "Continuity tip") {
 		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
 	}
 }
 
 // TestPlaybookPrintGoldenLeadReview verifies lead-review resolves from the
-// real rsrc tree and contains procedure body text. delegates:false — no tip.
+// real rsrc tree, keeps the single-writer ledger stamp rule, and still
+// carries the review config schema no tool owns. delegates:false — no tip.
 func TestPlaybookPrintGoldenLeadReview(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
@@ -2928,8 +2694,20 @@ func TestPlaybookPrintGoldenLeadReview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	if !strings.Contains(body, "maintainer decision quality with minimum friction") {
-		t.Errorf("body %q: expected doctrine text 'maintainer decision quality with minimum friction'", body)
+	for _, want := range []string{
+		"reviewing work you did not write",
+		"This step\n   is the ledger's only writer.",
+		"Never\n   pass the marker entry's base",
+		"### Review Config Template",
+		"## Landing Lens",
+		"ws:lead-run",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing lead-review text %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "[design-review:") {
+		t.Errorf("body %q: unresolved design-review marker shipped", body)
 	}
 	// delegates:false — continuity tip must NOT appear.
 	if strings.Contains(body, "Continuity tip") {
@@ -3015,81 +2793,89 @@ func TestPlaybookPrintGoldenLeadForgeMentalModel(t *testing.T) {
 	}
 }
 
-// TestSkillsCallEnterTools verifies that the four skills modified in Phase 2
-// contain the expected enter.* and agenda.set call tokens after rendering.
-// Tokens are chosen to be non-incidental: enter.<mode> appears only from the
-// inserted calls, and target/facts/policy or agenda.set are argument-level
-// signals that cannot appear from surrounding prose alone.
+// TestSkillsCallEnterTools verifies the routing call site survives the lead
+// surface collapse: it moved off the retired lead-facing playbooks onto the
+// worker playbook, which is now the only reader that routes an implementation.
+// Tokens are chosen to be non-incidental: route.<mode> appears only from the
+// inserted call, and target/policy are argument-level signals that cannot
+// appear from surrounding prose alone.
 func TestSkillsCallEnterTools(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
 	cases := []struct {
-		skill    string
+		playbook string
 		wantAll  []string
 		wantNone []string
 	}{
 		{
-			skill:   "lead-implement",
-			wantAll: []string{"route.resolve_implement", "`target`", "`facts`", "`policy`"},
-		},
-		{
-			skill:    "lead-proceed",
-			wantAll:  []string{"route.resolve_proceed", "Treat an `route.resolve_proceed` verdict as authoritative", "Follow `Next:` exactly"},
-			wantNone: []string{"### 3. Report Routing Verdict", "## Routing Verdict"},
+			playbook: "ticket-worker",
+			wantAll:  []string{"route.resolve_implement", "target:", "policy:"},
+			wantNone: []string{"## Routing Verdict"},
 		},
 	}
 
 	for _, tc := range cases {
-		t.Run(tc.skill, func(t *testing.T) {
-			body, _, err := printPlaybook(s, rsrcRoot, tc.skill, nil, wsconfig.Options{}, "", nil)
+		t.Run(tc.playbook, func(t *testing.T) {
+			body, _, err := renderPlaybookBody(s, rsrcRoot, tc.playbook, nil, wsconfig.Options{}, "", "", false, "", nil)
 			if err != nil {
-				t.Fatalf("printPlaybook(%q): %v", tc.skill, err)
+				t.Fatalf("renderPlaybookBody(%q): %v", tc.playbook, err)
 			}
 			for _, token := range tc.wantAll {
 				if !strings.Contains(body, token) {
-					t.Errorf("printPlaybook(%q): rendered body does not contain %q", tc.skill, token)
+					t.Errorf("renderPlaybookBody(%q): rendered body does not contain %q", tc.playbook, token)
 				}
 			}
 			for _, token := range tc.wantNone {
 				if strings.Contains(body, token) {
-					t.Errorf("printPlaybook(%q): rendered body should not contain %q", tc.skill, token)
+					t.Errorf("renderPlaybookBody(%q): rendered body should not contain %q", tc.playbook, token)
 				}
 			}
 		})
 	}
 }
 
-// TestPhase3bSkillRepoint verifies that the four repointed lead skills call
-// ws.workflow_manual and reference lead-revive instead of the removed
-// playbook.read(name: "lead-workflow-manual") self-load pattern, and that the
-// lead-revive skill exists while lead-load-workflow-manual does not.
+// TestPhase3bSkillRepoint verifies the workflow-manual bootstrap stayed on the
+// skill shims rather than reappearing as a playbook self-load. The original
+// four repointed skills are gone or collapsed; the invariant now lives on the
+// parallel-init shims, which call workflow_manual alongside playbook.read.
+// A playbook body that self-loads the manual re-adds the recursion this
+// repoint removed, so no rsrc body may carry that call.
 func TestPhase3bSkillRepoint(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	skillsRoot := filepath.Join("..", "..", "..", "agents-plugin", "skills")
 	wsflowSkillsRoot := filepath.Join("..", "..", "..", "agents-plugin-wsflow", "skills")
-	s := newTestServerWithHarness(t, "claude")
 
-	// Verify the surviving repointed skills call workflow_manual and lead-revive,
-	// and no longer contain the removed playbook.read self-load call. The
-	// original four included lead-sprint and lead-salvage, both since retired.
-	repointed := []string{"lead-proceed", "lead-discuss"}
-	for _, skill := range repointed {
+	for _, skill := range []string{"lead-discuss", "lead-run", "lead-ticket"} {
 		t.Run(skill, func(t *testing.T) {
-			body, _, err := printPlaybook(s, rsrcRoot, skill, nil, wsconfig.Options{}, "", nil)
+			raw, err := os.ReadFile(filepath.Join(skillsRoot, skill, "SKILL.md"))
 			if err != nil {
-				t.Fatalf("printPlaybook(%q): %v", skill, err)
+				t.Fatalf("read %s SKILL.md: %v", skill, err)
 			}
-			if !strings.Contains(body, "workflow_manual") {
-				t.Errorf("%s: rendered body must contain 'workflow_manual'", skill)
-			}
-			if !strings.Contains(body, "lead-revive") {
-				t.Errorf("%s: rendered body must contain 'lead-revive'", skill)
-			}
-			if strings.Contains(body, `playbook.read(name: "lead-workflow-manual")`) {
-				t.Errorf("%s: rendered body must not contain removed playbook.read self-load call", skill)
+			if !strings.Contains(string(raw), "workflow_manual") {
+				t.Errorf("%s: SKILL.md must bootstrap through workflow_manual", skill)
 			}
 		})
+	}
+
+	// No shipped playbook body may self-load the workflow manual.
+	entries, err := os.ReadDir(rsrcRoot)
+	if err != nil {
+		t.Fatalf("read rsrc root: %v", err)
+	}
+	for _, entry := range entries {
+		// lead-workflow-manual is the manual itself: it states its own reload
+		// invariant, so the call it names is documentation, not a self-load.
+		if !entry.IsDir() || entry.Name() == "lead-workflow-manual" {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(rsrcRoot, entry.Name(), entry.Name()+".md"))
+		if err != nil {
+			continue
+		}
+		if strings.Contains(string(body), `playbook.read(name: "lead-workflow-manual")`) {
+			t.Errorf("%s: playbook body must not contain the removed playbook.read self-load call", entry.Name())
+		}
 	}
 
 	// lead-revive SKILL.md must exist in agents-plugin/skills/.

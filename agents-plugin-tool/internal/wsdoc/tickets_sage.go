@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// tickets_sage.go relocates the lead-write-ticket "On: Sage Review Gate" /
+// tickets_sage.go relocates the ticket skill's "On: Sage Review Gate" /
 // "Design Review Stage" / "Completeness Review Stage" / "Ready-promotion
 // Aggregation" prose state-machine and its three Blocked Section Templates into
 // two Go tools: SageGate (posture resolution + gate decision) and SageRecord
@@ -120,7 +120,7 @@ type stageOutcome struct {
 }
 
 // SageGate resolves the sage-review gate for a landing, porting the
-// lead-write-ticket gate + per-stage posture prose. resolvedSageReviewConfig is
+// ticket-skill gate + per-stage posture prose. resolvedSageReviewConfig is
 // the config.list sage_review value resolved by the caller (used only for the
 // missing/pending config-fallback branch).
 func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string) (SageGateResult, error) {

@@ -1,3 +1,4 @@
+import re
 import unittest
 from pathlib import Path
 
@@ -5,46 +6,82 @@ from pathlib import Path
 SKILLS_DIR = Path(__file__).resolve().parents[1] / "skills"
 RSRC_DIR = Path(__file__).resolve().parents[1] / "rsrc"
 
+# The lead surface is a working set plus housekeeping; everything else is a
+# worker playbook or retired. A skill added or removed without updating this
+# set is inventory drift, not a passing change.
+EXPECTED_LEAD_SKILLS = {
+    # working
+    "lead-discuss",
+    "lead-ticket",
+    "lead-run",
+    "lead-review",
+    "lead-ship",
+    # housekeeping
+    "lead-bootstrap",
+    "lead-tune",
+    "lead-revive",
+    "mcp-server-repair",
+    # undecided disposition; survive unchanged
+    "lead-scope-worktree",
+    "lead-add-rule",
+    "lead-prefer-subagent",
+    # dying with the document layer they front, in a separate change
+    "lead-backfill-docs",
+    "lead-forge-spec",
+    "lead-forge-mental-model",
+}
+
+# Names that must not reappear anywhere on the shipped skill or playbook
+# surface: each was retired into a surviving skill, or renamed.
+RETIRED_SKILL_NAMES = (
+    "lead-proceed",
+    "lead-implement",
+    "lead-verify-discussion",
+    "lead-write-ticket",
+)
+
 
 class SkillDispatchContractsTest(unittest.TestCase):
-    def test_proceed_keeps_implementation_route_only(self):
-        shim = (SKILLS_DIR / "lead-proceed" / "SKILL.md").read_text(encoding="utf-8")
-        text = (RSRC_DIR / "lead-proceed" / "lead-proceed.md").read_text(encoding="utf-8")
+    def test_lead_skill_surface_is_collapsed(self):
+        actual = {path.name for path in SKILLS_DIR.iterdir() if path.is_dir()}
+        self.assertEqual(actual, EXPECTED_LEAD_SKILLS)
 
-        self.assertIn('ws/playbook.read(name: "lead-proceed")', shim)
-        self.assertIn("Route only; do not implement or plan here.", text)
-        self.assertIn("Always route code-editing work through `lead-implement`", text)
-        self.assertIn("{{.McpNamespace}}/route.resolve_proceed(session_key:", text)
-        self.assertIn("Follow `Next:` from `route.resolve_proceed` exactly", text)
-        self.assertIn("scope_blocked=no-unfinished-phase", text)
-        self.assertIn("scope_blocked=container-ticket", text)
-        self.assertIn("scope_blocked=multiple-explicit-phases", text)
-        self.assertNotIn("## Routing Verdict", text)
-        self.assertNotIn("**Implementation Route**", text)
-        self.assertNotIn("**Implementation Verdict**", text)
-        self.assertNotIn("**Verdict Basis**", text)
-        self.assertNotIn("### judge: implementation-dispatch", text)
+    def test_retired_skill_names_are_gone_from_shipped_surfaces(self):
+        offenders = []
+        for root in (SKILLS_DIR, RSRC_DIR):
+            for path in sorted(root.rglob("*")):
+                if not path.is_file() or path.suffix not in {".md", ".json"}:
+                    continue
+                text = path.read_text(encoding="utf-8")
+                for name in RETIRED_SKILL_NAMES:
+                    if re.search(rf"\b{re.escape(name)}\b", text):
+                        offenders.append(f"{path.relative_to(SKILLS_DIR.parent)}: {name}")
+        self.assertEqual(offenders, [])
 
-    def test_implement_keeps_execution_owner(self):
-        text = (RSRC_DIR / "lead-implement" / "lead-implement.md").read_text(encoding="utf-8")
+    def test_ticket_skill_dispatches_to_renamed_playbook(self):
+        shim = (SKILLS_DIR / "lead-ticket" / "SKILL.md").read_text(encoding="utf-8")
+        text = (RSRC_DIR / "lead-ticket" / "lead-ticket.md").read_text(encoding="utf-8")
 
-        self.assertIn("{{.McpNamespace}}/route.resolve_implement", text)
-        self.assertIn("Gather `target`, `facts`, and explicit caller `policy`", text)
-        self.assertIn("Follow the returned `raw` verdict and `next_instruction`; do not re-derive deterministic labels.", text)
-        self.assertIn(
-            "No Edit or Write tool call is permitted until `route.resolve_implement` returns a `direct-edit` verdict.",
-            text,
-        )
-        self.assertIn(
-            "Wait for user approval before merge or another implementation slice, unless the resolved verdict's merge confirm is `skip`, in which case proceed with that merge without asking.",
-            text,
-        )
-        self.assertIn("### Implementer spawn prompt", text)
-        self.assertIn("### Reviewer table", text)
-        self.assertNotIn("## Implementation Verdict", text)
-        self.assertNotIn("### judge: needs-delegation", text)
-        self.assertNotIn("### judge: branch-mode", text)
-        self.assertNotIn("\nNEXT:", text)
+        self.assertIn('ws/playbook.read(name: "lead-ticket", session_key:', shim)
+        self.assertIn("## Open Decision Queue", text)
+        self.assertIn('{{.McpNamespace}}/playbook.render(name: "ticket-fact-populator"', text)
+        self.assertIn("{{.McpNamespace}}/tickets.sage_gate(stem, landing: \"ready\")", text)
+        self.assertIn("{{.SkillNamespace}}:lead-run", text)
+
+    def test_placed_lead_bodies_carry_no_unresolved_review_marker(self):
+        for skill in ("lead-discuss", "lead-ticket", "lead-review", "lead-ship"):
+            text = (RSRC_DIR / skill / f"{skill}.md").read_text(encoding="utf-8")
+            self.assertNotIn("[design-review:", text, msg=skill)
+
+    def test_review_and_ship_retain_their_config_schemas(self):
+        review = (RSRC_DIR / "lead-review" / "lead-review.md").read_text(encoding="utf-8")
+        ship = (RSRC_DIR / "lead-ship" / "lead-ship.md").read_text(encoding="utf-8")
+
+        self.assertIn("### Review Config Template", review)
+        self.assertIn("## Landing Lens", review)
+        self.assertIn("## Deep Review", review)
+        self.assertIn("### Ship Config Format", ship)
+        self.assertIn("## Version Strategy", ship)
 
     def test_workflow_manual_requires_english_agent_prompts(self):
         text = (RSRC_DIR / "lead-workflow-manual" / "lead-workflow-manual.md").read_text(encoding="utf-8")
@@ -53,16 +90,6 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn("<!-- ws:full-only:start -->", text)
         self.assertIn("Write prompts sent to `mercenary.call` in English.", text)
         self.assertIn("<!-- ws:full-only:end -->", text)
-
-    def test_verify_discussion_is_inlined_static_body(self):
-        # lead-verify-discussion's body is inlined directly in SKILL.md (no
-        # rsrc playbook, no playbook.read indirection) since the
-        # substitution-mirrored inline-mirror work landed.
-        text = (SKILLS_DIR / "lead-verify-discussion" / "SKILL.md").read_text(encoding="utf-8")
-
-        self.assertNotIn('ws/playbook.read(name: "lead-verify-discussion")', text)
-        self.assertIn("Treat user preference as input, not evidence.", text)
-        self.assertIn("Build the strongest concise countercase", text)
 
     def test_run_dispatches_through_playbook_read(self):
         # lead-run is a playbook.read shim over an rsrc body, not an inline

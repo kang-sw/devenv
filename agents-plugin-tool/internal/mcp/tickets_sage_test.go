@@ -176,7 +176,7 @@ func TestFormatSageRecordRoundTrip(t *testing.T) {
 // TestFormatSageGateBlockedRecovery pins that the gate's stop_blocked branch
 // names its recovery route rather than reading as a dead end. Without it, a
 // re-entry whose edits address the blocker got a bare "stop" from the gate while
-// lead-write-ticket's On: Reviewer Spawn told it to review the blocked stage —
+// the ticket skill's reviewer-spawn step told it to review the blocked stage —
 // one condition described two ways, which is what forced a judgement call
 // mid-procedure during dogfooding.
 func TestFormatSageGateBlockedRecovery(t *testing.T) {

@@ -20,18 +20,15 @@ EXPECTED_SKILLS = {
     "lead-discuss",
     "lead-forge-mental-model",
     "lead-forge-spec",
-    "lead-implement",
     "lead-check-blockers",
-    "lead-proceed",
     "lead-review",
     "lead-run",
     "lead-ship",
     "lead-tune",
     "lead-update-spec",
-    "lead-verify-discussion",
     "lead-workflow-manual",
     "lead-write-spec",
-    "lead-write-ticket",
+    "lead-ticket",
     "lead-prefer-subagent",
     "lead-revive",
     "lead-scope-worktree",
@@ -42,7 +39,6 @@ EXPECTED_WSFLOW_ONLY_SKILLS: set = set()
 EXPECTED_INLINE_SKILLS = {
     "lead-revive",
     "lead-prefer-subagent",
-    "lead-verify-discussion",
     "mcp-server-repair",
 }
 EXPECTED_PARALLEL_INIT_SKILLS = {
@@ -59,8 +55,7 @@ PARALLEL_INIT_TITLES = {
 # Single-call shims that carry the mcp-server-repair pointer tail instead of
 # the generic "stop and report that blocker" un-pointed form.
 POINTER_TAIL_TITLES = {
-    "lead-proceed": "Proceed",
-    "lead-write-ticket": "Write Ticket",
+    "lead-ticket": "Ticket",
     "lead-write-spec": "Write Spec",
     "lead-add-rule": "Add Rule",
     "lead-bootstrap": "Bootstrap",
@@ -69,7 +64,6 @@ POINTER_TAIL_TITLES = {
     "lead-review": "Review",
     "lead-ship": "Ship",
     "lead-tune": "Workflow Tuning",
-    "lead-implement": "Implement",
     "lead-check-blockers": "Check Blockers",
     "lead-update-spec": "Update Spec",
     "lead-workflow-manual": "Workflow Manual",
@@ -84,14 +78,19 @@ FORBIDDEN_PATTERNS = {
     "full ws agent dotted tool": re.compile(r"\bagents\."),
     "excluded write-code skill": re.compile(r"\blead-write-code\b"),
     "excluded write-skeleton skill": re.compile(r"\blead-write-skeleton\b"),
-    # lead-sprint, lead-salvage, lead-drain-ready-queue and
-    # lead-goal-fan-out-step were retired outright rather than merely excluded
-    # from wsflow, so these guard against a reintroduced reference to a skill
-    # that no longer exists in either lineage.
+    # lead-sprint, lead-salvage, lead-drain-ready-queue, lead-goal-fan-out-step,
+    # lead-proceed, lead-implement and lead-verify-discussion were retired
+    # outright rather than merely excluded from wsflow, and lead-write-ticket
+    # was renamed to lead-ticket, so these guard against a reintroduced
+    # reference to a skill that no longer exists in either lineage.
     "retired sprint skill": re.compile(r"\blead-sprint\b"),
     "retired salvage skill": re.compile(r"\blead-salvage\b"),
     "retired drain skill": re.compile(r"\blead-drain-ready-queue\b"),
     "retired fan-out skill": re.compile(r"\blead-goal-fan-out-step\b"),
+    "retired proceed skill": re.compile(r"\blead-proceed\b"),
+    "retired implement skill": re.compile(r"\blead-implement\b"),
+    "retired verify-discussion skill": re.compile(r"\blead-verify-discussion\b"),
+    "retired write-ticket skill": re.compile(r"\blead-write-ticket\b"),
     "excluded authoring skill": re.compile(r"\blead-skill-authoring\b"),
 }
 
@@ -147,10 +146,10 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_skill_files_are_thin_playbook_shims(self):
-        # lead-proceed, lead-write-ticket, lead-write-spec, lead-add-rule,
-        # lead-bootstrap, lead-forge-mental-model, lead-forge-spec,
-        # lead-review, lead-ship, lead-tune, lead-implement,
-        # lead-check-blockers, lead-update-spec, and lead-workflow-manual all
+        # lead-ticket, lead-write-spec, lead-add-rule, lead-bootstrap,
+        # lead-forge-mental-model, lead-forge-spec, lead-review, lead-ship,
+        # lead-tune, lead-check-blockers, lead-update-spec, and
+        # lead-workflow-manual all
         # carry the mcp-server-repair pointer in place of the generic "stop
         # and report that blocker" tail, so they are checked separately below
         # (see POINTER_TAIL_TITLES) with their own exact tail. That accounts

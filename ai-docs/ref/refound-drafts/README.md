@@ -19,10 +19,6 @@ through the mirror generator instead.
 
 | Draft | Lands as | Owning child |
 |-------|----------|--------------|
-| `lead-discuss.md` | `discuss` skill body | lead-surface-collapse, Phase 2 |
-| `lead-ticket.md` | `ticket` skill body (name binding is that ticket's open question; the body is name-independent) | lead-surface-collapse, Phase 2 |
-| `lead-review.md` | `review` skill body | lead-surface-collapse, Phase 2 |
-| `lead-ship.md` | `ship` skill body | lead-surface-collapse, Phase 2 |
 | `ticket-fact-populator.md` | `agents-plugin/rsrc/ticket-fact-populator/ticket-fact-populator.md` | route-resolve-implement-reads-ticket-facts, Phase 2 |
 | `bootstrap-template.md` | `AGENTS.template.md` sections and the new migration item, both packages | bootstrap-refoundation-template-migration, Phase 1 |
 | `workflow-guide-sections.md` | two new `WORKFLOW.md` sections, both packages and this repository's copy | bootstrap-refoundation-template-migration, Phase 1 |

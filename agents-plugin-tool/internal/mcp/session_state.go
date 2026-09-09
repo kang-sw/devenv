@@ -395,7 +395,7 @@ type implementTodoVerdict struct {
 	BindingAnchorClause string
 }
 
-// deriveImplementTodos builds the standard lead-implement checklist. The
+// deriveImplementTodos builds the standard implementation checklist. The
 // verdict-aware path replaces final-action and merge with completion only for
 // the exact current-branch outcome.
 func deriveImplementTodos(needReview, needDoc bool) []todoItem {
@@ -591,7 +591,7 @@ const implementReviewDispositionClause = "Record exactly one disposition marker 
 // [not fixed: <reason>] from implementReviewDispositionClause. Minor drives no
 // relay at any point. Critical's own further budget lives in
 // implementReviewCriticalBranchClause, not here.
-const implementReviewRelayClause = "Relay #1 dispositions every non-clean Critical/Important finding from review #1 at once with the Review relay dispatch. Important is best-effort: its one-relay budget is spent in relay #1, is never re-reviewed, and a still-non-clean Important after relay #1 stands on that self-reported [not fixed: <reason>] rather than another relay. Minor drives no relay at any point; record Minor findings in the review summary only."
+const implementReviewRelayClause = "Relay #1 dispositions every non-clean Critical/Important finding from review #1 at once with the `implementer-relay` playbook. Important is best-effort: its one-relay budget is spent in relay #1, is never re-reviewed, and a still-non-clean Important after relay #1 stands on that self-reported [not fixed: <reason>] rather than another relay. Minor drives no relay at any point; record Minor findings in the review summary only."
 
 // implementReviewCriticalBranchClause states the Critical exception: bounded 3
 // review rounds (review #1 plus up to 2 Critical-scoped re-reviews), affording
@@ -602,7 +602,7 @@ const implementReviewRelayClause = "Relay #1 dispositions every non-clean Critic
 // elevation shape from before 260828 without reviving the mid-budget
 // capacity/root-cause trigger or review-adjudicator arbitration that shape also
 // carried.
-const implementReviewCriticalBranchClause = "Critical exception: if review #1 reports any Critical finding, follow relay #1 with one Critical-scoped review #2 using the Re-review prompt, limited to the Critical findings. If review #2 still reports that Critical non-clean, follow it with a second Critical-scoped relay (relay #2) via the Review relay dispatch, then a Critical-scoped review #3 using the Re-review prompt. Ceiling: if review #3 still reports the Critical finding non-clean, unconditionally elevate that finding to `implementer-elevated` — never a hard stop — and continue to the remaining todos with the elevation recorded in the final report; do not schedule a review #4 or a third relay."
+const implementReviewCriticalBranchClause = "Critical exception: if review #1 reports any Critical finding, follow relay #1 with one Critical-scoped review #2 using a fresh reviewer render, limited to the Critical findings. If review #2 still reports that Critical non-clean, follow it with a second Critical-scoped relay (relay #2) via the `implementer-relay` playbook, then a Critical-scoped review #3 using a fresh reviewer render. Ceiling: if review #3 still reports the Critical finding non-clean, unconditionally elevate that finding to `implementer-elevated` — never a hard stop — and continue to the remaining todos with the elevation recorded in the final report; do not schedule a review #4 or a third relay."
 
 func implementReviewInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
@@ -612,12 +612,12 @@ func implementReviewInstruction(verdict implementTodoVerdict) string {
 		return "Perform lead-owned review only; record why external reviewers are unnecessary for this verdict, then preserve the rationale for the final report."
 	}
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(verdict.ReviewAlloc)), "partitioned:") {
-		return fmt.Sprintf("Dispatch %s reviewers with the Reviewer prompt frame and generated review paths. %s %s %s", formatReviewPartitions(verdict.ReviewAlloc), implementReviewDispositionClause, implementReviewRelayClause, implementReviewCriticalBranchClause)
+		return fmt.Sprintf("Dispatch %s reviewers with the rendered reviewer playbook and generated review paths. %s %s %s", formatReviewPartitions(verdict.ReviewAlloc), implementReviewDispositionClause, implementReviewRelayClause, implementReviewCriticalBranchClause)
 	}
 	if strings.EqualFold(strings.TrimSpace(verdict.ReviewAlloc), "single") {
-		return fmt.Sprintf("Render `reviewer` and dispatch one full-scope review with the Reviewer prompt frame and a generated findings path. %s %s %s", implementReviewDispositionClause, implementReviewRelayClause, implementReviewCriticalBranchClause)
+		return fmt.Sprintf("Render `reviewer` and dispatch one full-scope review with the rendered path and a generated findings path. %s %s %s", implementReviewDispositionClause, implementReviewRelayClause, implementReviewCriticalBranchClause)
 	}
-	return fmt.Sprintf("Dispatch the selected reviewers with the Reviewer prompt frame and generated review paths. %s %s %s", implementReviewDispositionClause, implementReviewRelayClause, implementReviewCriticalBranchClause)
+	return fmt.Sprintf("Dispatch the selected reviewers with the rendered reviewer playbook and generated review paths. %s %s %s", implementReviewDispositionClause, implementReviewRelayClause, implementReviewCriticalBranchClause)
 }
 
 func implementDocPrePassInstruction(verdict implementTodoVerdict) string {
@@ -732,7 +732,7 @@ func joinHumanList(items []string) string {
 	}
 }
 
-// deriveProceedTodos mirrors lead-proceed "On: invoke": build route context,
+// deriveProceedTodos mirrors the proceed route sequence: build route context,
 // then resolve the MCP verdict with an executable Next instruction.
 func deriveProceedTodos() []todoItem {
 	return withPendingStatus([]todoItem{

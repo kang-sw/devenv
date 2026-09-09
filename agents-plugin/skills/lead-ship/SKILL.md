@@ -1,6 +1,6 @@
 ---
 name: lead-ship
-description: Use when the user asks to ship, release, publish, tag, or deploy a configured project; follows the ai-docs/ship configuration.
+description: Ship, release, publish, tag, or deploy a configured project from its `ai-docs/ship` config. The release gate and the publish confirmation stay with the lead and the user; the mechanical steps go to a delegate.
 ---
 
 # Ship

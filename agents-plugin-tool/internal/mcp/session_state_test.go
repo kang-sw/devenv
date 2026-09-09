@@ -367,7 +367,7 @@ func TestDeriveImplementTodoInstructionsPartitionedReview(t *testing.T) {
 	if !strings.Contains(review, "Dispatch correctness and test reviewers") {
 		t.Fatalf("review instruction missing selected partitions: %q", review)
 	}
-	if !strings.Contains(review, "Reviewer prompt frame") || !strings.Contains(review, "Review relay dispatch") || !strings.Contains(review, "Re-review prompt") {
+	if !strings.Contains(review, "rendered reviewer playbook") || !strings.Contains(review, "`implementer-relay` playbook") || !strings.Contains(review, "fresh reviewer render") {
 		t.Fatalf("review instruction missing named template guidance: %q", review)
 	}
 	if strings.Contains(review, "fit") {
@@ -404,11 +404,11 @@ func implementOrdinaryRelayWants() []string {
 		"carry each disposition into the final report",
 		"An Important finding still non-clean after its own relay instead carries the implementer's self-reported [not fixed: <reason>]",
 		"since Important is never re-reviewed",
-		"Relay #1 dispositions every non-clean Critical/Important finding from review #1 at once with the Review relay dispatch",
+		"Relay #1 dispositions every non-clean Critical/Important finding from review #1 at once with the `implementer-relay` playbook",
 		"Important is best-effort: its one-relay budget is spent in relay #1",
 		"Minor drives no relay at any point; record Minor findings in the review summary only",
-		"Critical exception: if review #1 reports any Critical finding, follow relay #1 with one Critical-scoped review #2 using the Re-review prompt, limited to the Critical findings",
-		"If review #2 still reports that Critical non-clean, follow it with a second Critical-scoped relay (relay #2) via the Review relay dispatch, then a Critical-scoped review #3 using the Re-review prompt",
+		"Critical exception: if review #1 reports any Critical finding, follow relay #1 with one Critical-scoped review #2 using a fresh reviewer render, limited to the Critical findings",
+		"If review #2 still reports that Critical non-clean, follow it with a second Critical-scoped relay (relay #2) via the `implementer-relay` playbook, then a Critical-scoped review #3 using a fresh reviewer render",
 		"if review #3 still reports the Critical finding non-clean, unconditionally elevate that finding to `implementer-elevated`",
 		"never a hard stop",
 		"continue to the remaining todos with the elevation recorded in the final report",
@@ -1092,7 +1092,7 @@ func TestResolveProceedRoutes(t *testing.T) {
 			name:       "ready ticket routes to implement",
 			args:       proceedReadyArgs("text"),
 			wantRoute:  "implementation-dispatch.ready-actionable",
-			wantNext:   "lead-implement",
+			wantNext:   "lead-run",
 			wantReason: "status=ready",
 			wantCond:   "scope-blocked=none",
 		},
@@ -1104,7 +1104,7 @@ func TestResolveProceedRoutes(t *testing.T) {
 				"work":   map[string]any{"slice": "whole target"},
 			}),
 			wantRoute:  "implementation-dispatch.inline-direct",
-			wantNext:   "lead-implement",
+			wantNext:   "lead-run",
 			wantReason: "needs-ticket=no",
 			wantCond:   "status=n/a",
 		},
@@ -1116,7 +1116,7 @@ func TestResolveProceedRoutes(t *testing.T) {
 				"work":   map[string]any{"slice": "Phase 1: Demo"},
 			}),
 			wantRoute:  "ticket-readiness.status-refresh",
-			wantNext:   "lead-write-ticket",
+			wantNext:   "lead-ticket",
 			wantReason: "status=idea",
 			wantCond:   "status=idea",
 		},
@@ -1128,7 +1128,7 @@ func TestResolveProceedRoutes(t *testing.T) {
 				"work":   map[string]any{"slice": "Phase 1: Demo"},
 			}),
 			wantRoute:  "ticket-readiness.status-refresh",
-			wantNext:   "lead-write-ticket",
+			wantNext:   "lead-ticket",
 			wantReason: "status=todo",
 			wantCond:   "status=todo",
 		},
@@ -1242,7 +1242,7 @@ func TestResolveProceedRoutes(t *testing.T) {
 				"work":   map[string]any{"slice": "Phase 1: Demo"},
 			}),
 			wantRoute:  "implementation-dispatch.ready-actionable",
-			wantNext:   "lead-implement",
+			wantNext:   "lead-run",
 			wantReason: "status=ready",
 			wantCond:   "binding-anchor=n/a",
 		},
@@ -1266,7 +1266,7 @@ func TestResolveProceedRoutes(t *testing.T) {
 				"work":   map[string]any{"slice": "Phase 1: Demo"},
 			}),
 			wantRoute:  "ticket-readiness.freshness-refresh",
-			wantNext:   "lead-write-ticket",
+			wantNext:   "lead-ticket",
 			wantReason: "freshness=missing-settled-decisions",
 			wantCond:   "freshness=missing-settled-decisions",
 		},
@@ -1278,7 +1278,7 @@ func TestResolveProceedRoutes(t *testing.T) {
 				"work":   map[string]any{"slice": "whole target"},
 			}),
 			wantRoute:  "ticket-readiness.inline-needs-ticket",
-			wantNext:   "lead-write-ticket",
+			wantNext:   "lead-ticket",
 			wantReason: "needs-ticket=yes",
 			wantCond:   "needs-ticket=yes",
 		},
@@ -1381,8 +1381,8 @@ func TestProceedNextInstructions(t *testing.T) {
 		{
 			name:     "implement instruction names playbook and pre-source boundary",
 			args:     proceedReadyArgs("text"),
-			wantNext: "lead-implement",
-			wantText: `Routing to next action: lead-implement. Call wsflow/playbook.read(name: "lead-implement"), then execute the returned playbook inline for this target and phase before inspecting source`,
+			wantNext: "lead-run",
+			wantText: `Routing to next action: lead-run. Call wsflow/playbook.read(name: "lead-run"), then execute the returned playbook inline for this target and phase before inspecting source`,
 		},
 		{
 			name: "write ticket instruction names playbook and reroute",
@@ -1391,8 +1391,8 @@ func TestProceedNextInstructions(t *testing.T) {
 				"gates":  map[string]any{"scope_blocked": "none", "discussion_needed": "no"},
 				"work":   map[string]any{"slice": "Phase 1: Demo"},
 			}),
-			wantNext: "lead-write-ticket",
-			wantText: `Routing to next action: lead-write-ticket. Call wsflow/playbook.read(name: "lead-write-ticket"), then execute the returned playbook inline. After it returns, capture the Ticket path; if it is under ai-docs/tickets/ready/, rebuild route context and rerun wsflow/route.resolve_proceed`,
+			wantNext: "lead-ticket",
+			wantText: `Routing to next action: lead-ticket. Call wsflow/playbook.read(name: "lead-ticket"), then execute the returned playbook inline. After it returns, capture the Ticket path; if it is under ai-docs/tickets/ready/, rebuild route context and rerun wsflow/route.resolve_proceed`,
 		},
 		{
 			name: "discussion instruction names skill namespace",
@@ -1521,13 +1521,13 @@ func assertRouteResolveSchemaIsOpaque(t *testing.T, listLine, toolName, skillPoi
 func TestRouteResolveProceedSchemaIsOpaque(t *testing.T) {
 	useLeadProfile(t)
 	server := NewServer(t.TempDir(), "test")
-	assertRouteResolveSchemaIsOpaque(t, callToolsList(t, server), "route.resolve_proceed", "ws:lead-proceed")
+	assertRouteResolveSchemaIsOpaque(t, callToolsList(t, server), "route.resolve_proceed", "constructed by the calling skill")
 }
 
 func TestRouteResolveImplementSchemaIsOpaque(t *testing.T) {
 	useLeadProfile(t)
 	server := NewServer(t.TempDir(), "test")
-	assertRouteResolveSchemaIsOpaque(t, callToolsList(t, server), "route.resolve_implement", "ws:lead-implement")
+	assertRouteResolveSchemaIsOpaque(t, callToolsList(t, server), "route.resolve_implement", "ticket-worker")
 }
 
 func routeStateSnapshot(t *testing.T, server *Server, key string) string {
@@ -1660,10 +1660,10 @@ func TestEnterProceedStoresVerdictAgendaAndTodos(t *testing.T) {
 	if len(nonEmpty) < 3 {
 		t.Fatalf("raw verdict too short:\n%s", text)
 	}
-	if nonEmpty[0] != "Proceed Verdict" || nonEmpty[1] != "Route: implementation-dispatch.ready-actionable" || nonEmpty[2] != "NEXT: lead-implement" {
+	if nonEmpty[0] != "Proceed Verdict" || nonEmpty[1] != "Route: implementation-dispatch.ready-actionable" || nonEmpty[2] != "NEXT: lead-run" {
 		t.Fatalf("unexpected first verdict lines: %v\nfull:\n%s", nonEmpty[:3], text)
 	}
-	if !strings.Contains(text, "Agenda:") || !strings.Contains(text, "- next_skill: lead-implement") {
+	if !strings.Contains(text, "Agenda:") || !strings.Contains(text, "- next_skill: lead-run") {
 		t.Fatalf("raw verdict missing clear agenda/next direction:\n%s", text)
 	}
 
@@ -1678,7 +1678,7 @@ func TestEnterProceedStoresVerdictAgendaAndTodos(t *testing.T) {
 	if err := json.Unmarshal(record.Agenda["proceed"], &agenda); err != nil {
 		t.Fatalf("agenda did not store proceed verdict subset: %v", err)
 	}
-	if agenda.NextSkill != "lead-implement" || agenda.Route != "implementation-dispatch.ready-actionable" || !containsString(agenda.Conditions, "freshness=current") {
+	if agenda.NextSkill != "lead-run" || agenda.Route != "implementation-dispatch.ready-actionable" || !containsString(agenda.Conditions, "freshness=current") {
 		t.Fatalf("unexpected agenda: %+v", agenda)
 	}
 }
@@ -1720,7 +1720,7 @@ func TestEnterProceedWarningsAndErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := resolveProceed(input)
-	if result.Next != "lead-implement" {
+	if result.Next != "lead-run" {
 		t.Fatalf("contradictory inline facts should still route conservatively, got %s", result.Next)
 	}
 	if len(result.Warnings) == 0 || !strings.Contains(strings.Join(result.Warnings, "\n"), "ignored for inline target") {
@@ -2213,7 +2213,7 @@ func TestEnterImplementAllocatesSingleReviewForBoundedPublicExistingTestChange(t
 	}
 	review := readTodoInstruction(t, server, 3, key, "review")
 	for _, want := range []string{
-		"Render `reviewer`", "one full-scope review", "Reviewer prompt frame", "generated findings path",
+		"Render `reviewer`", "one full-scope review", "rendered path", "generated findings path",
 	} {
 		if !strings.Contains(review, want) {
 			t.Fatalf("single-review todo instruction missing %q: %q", want, review)
@@ -2257,8 +2257,8 @@ func TestDeriveImplementTodoInstructionsCriticalReviewBranch(t *testing.T) {
 	})
 	review := requireInstruction(t, todoByKey(t, got, "review"))
 	for _, want := range []string{
-		"Critical exception: if review #1 reports any Critical finding, follow relay #1 with one Critical-scoped review #2 using the Re-review prompt, limited to the Critical findings",
-		"If review #2 still reports that Critical non-clean, follow it with a second Critical-scoped relay (relay #2) via the Review relay dispatch, then a Critical-scoped review #3 using the Re-review prompt",
+		"Critical exception: if review #1 reports any Critical finding, follow relay #1 with one Critical-scoped review #2 using a fresh reviewer render, limited to the Critical findings",
+		"If review #2 still reports that Critical non-clean, follow it with a second Critical-scoped relay (relay #2) via the `implementer-relay` playbook, then a Critical-scoped review #3 using a fresh reviewer render",
 		"if review #3 still reports the Critical finding non-clean, unconditionally elevate that finding to `implementer-elevated`",
 		"never a hard stop",
 		"continue to the remaining todos with the elevation recorded in the final report",
@@ -2308,7 +2308,7 @@ func TestEnterImplementFocusedTodosDirectLeadOnlySkippedDocs(t *testing.T) {
 		t.Fatalf("direct-edit todo instruction not focused: %q", edit)
 	}
 	review := readTodoInstruction(t, server, 4, key, "review")
-	if !strings.Contains(review, "Perform lead-owned review only") || strings.Contains(review, "Reviewer prompt frame") {
+	if !strings.Contains(review, "Perform lead-owned review only") || strings.Contains(review, "rendered reviewer playbook") {
 		t.Fatalf("lead-only review todo instruction not focused: %q", review)
 	}
 	for _, forbidden := range []string{"review cycles for this implementation slice", "the budget ends relaying, not the run"} {

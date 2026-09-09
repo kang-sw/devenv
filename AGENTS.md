@@ -131,8 +131,8 @@ topics: plugin architecture, host-neutral migration, spawn-removal, adapter boun
 ```
 
 `anchor` names the ticket a lead must read before answering or editing when a
-target touches one of the `topics`. `lead-discuss`, `lead-proceed`, and
-`lead-implement` read this declaration through the generic binding-anchor hook
+target touches one of the `topics`. `lead-discuss` reads it directly, and the
+routed run path injects it through the generic binding-anchor hook
 (`ai-docs/spec/workflow-skills.md`
 `{#260908-project-binding-anchor-declaration}`) rather than naming this
 repository's anchor in shipped text. Both keys are required: a project that
@@ -293,7 +293,8 @@ ai-docs/tickets/.dropped/
     installs when Claude Code is available; it intentionally does not install
     wsflow into Claude.
   - `agents-plugin/` is registered through `.agents/plugins/marketplace.json`;
-    Codex UI install has verified `ws:lead-write-ticket` and `ws:lead-discuss`.
+    Codex UI install has verified the ticket-authoring and discussion skills
+    (`ws:lead-ticket` since its rename from `ws:lead-write-ticket`).
   - `agents-plugin-wsflow/` is an agentless derivative package with
     Codex/Claude manifests, package-local no-agent MCP env, shared launcher
     copies, a reduced `runtime.json`, thin wsflow skill shims over shared
@@ -321,15 +322,14 @@ ai-docs/tickets/.dropped/
     tree and plugin manifest/tests; not duplicated here.
 - **Canonical flows.**
   ```text
-  Full ceremony:  discuss -> proceed -> implement -> review/docs/final gate
-  Direct:         implement <description>
-  Auto-route:     proceed <ticket-path>
-  Sprint:         sprint -> discuss/explore -> sprint-edit episode? -> episode closure or normal handoff
-  Review:         review [branch] -> verdict -> (discuss -> fix | comment | merge)
-  Recovery:       salvage -> research report -> recovery epic? -> child tickets
+  Full ceremony:  discuss -> ticket -> run -> review
+  Direct:         run <ticket-path or description>
+  Queue:          run (no argument) -> next ready/ ticket, one worker per cycle
+  Review:         review [branch|range] -> verdict -> (fix via run | comment | discuss | merge)
+  Release:        ship <project> -> release gate -> execute
   ```
-  User decides next step at each handoff. `proceed` is the explicit opt-in for
-  auto-chaining through the pipeline.
+  The user decides the next step at each handoff. `run` spawns one worker per
+  invocation; the worker, not the lead, executes the ticket.
 
 ## Project Knowledge
 
