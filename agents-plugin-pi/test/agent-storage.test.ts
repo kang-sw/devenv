@@ -9,8 +9,9 @@ describe("agent storage", () => {
   test("allocates a persistent child beneath the configured Pi root and persists ownership", () => {
     const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
     try {
-      const owned = allocateAgentHome(createAgentStorageContext("lead_1", root), "agent-1", "worker");
-      assert.equal(owned.home, join(root, "ws-agents", "lead_1", "agent-1"));
+      const context = createAgentStorageContext("lead_1", root);
+      const owned = allocateAgentHome(context, "agent-1", "worker");
+      assert.equal(owned.home, join(context.root, "ws-agents", "lead_1", "agent-1"));
       assert.equal(owned.sessionPath, join(owned.home, "session.jsonl"));
       const before = readOwnership(owned.home)!;
       touchOwnership(owned.home);

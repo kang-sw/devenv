@@ -91,7 +91,7 @@ import {
 import { loadHostPiTui, type MarkdownTheme } from "./pi-tui.ts";
 import { captureForkContext, captureRegisteredTools, captureUnflushedForkSource, effectiveForkDescriptor, type ForkContext } from "./fork-context.ts";
 import type { LeadPromptRef } from "./lead-bootstrap.ts";
-import { readOwnership, validOwnership } from "./agent-storage.ts";
+import { readOwnership, validDescriptor } from "./agent-storage.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers. Unit-tested directly (test/ask.test.ts) with no
@@ -706,7 +706,7 @@ export function captureForkResume(record: RpcAgentRecord): PersistedForkResume {
  * puts the record back on the shared registry so `sendToAgent` can find it.
  */
 export function rehydrateForkRecord(agentId: string, resume: PersistedForkResume): RpcAgentRecord {
-  const ownership = resume.ownership && validOwnership(resume.ownership) && resume.ownership.agentId === agentId && resume.ownership.sessionPath === resume.sessionPath && readOwnership(resume.ownership.home)?.ownerSessionId === resume.ownership.ownerSessionId ? resume.ownership : undefined;
+  const ownership = resume.ownership && validDescriptor(resume.ownership) && resume.ownership.agentId === agentId && resume.ownership.sessionPath === resume.sessionPath && (() => { const disk = readOwnership(resume.ownership!.home); return !!disk && disk.ownerSessionId === resume.ownership!.ownerSessionId && disk.agentId === agentId && disk.sessionPath === resume.sessionPath; })() ? resume.ownership : undefined;
   return {
     agentId,
     client: undefined,

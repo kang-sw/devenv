@@ -1,6 +1,6 @@
 /** Durable, Pi-local storage for delegated-agent material. */
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { mkdirSync, lstatSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, lstatSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, relative, sep } from "node:path";
 
 export const OWNERSHIP_VERSION = 1;
@@ -19,7 +19,8 @@ export interface OwnershipMetadata extends AgentOwnership {
 
 function safe(value: string, label: string): string { if (!SAFE_COMPONENT.test(value)) throw new Error(`ws-pi-agent: unsafe ${label}`); return value; }
 function contained(parent: string, child: string): boolean { const r = relative(parent, child); return r === "" || (!!r && !r.startsWith(`..${sep}`) && r !== ".."); }
-function canonicalRoot(root: string): string { mkdirSync(root, { recursive: true, mode: 0o700 }); return resolve(root); }
+function canonicalRoot(root: string): string { mkdirSync(root, { recursive: true, mode: 0o700 }); return realpathSync(root); }
+function checkedDirectory(path: string, root: string): string { mkdirSync(path, { recursive: true, mode: 0o700 }); const real = realpathSync(path); if (!contained(root, real) || lstatSync(path).isSymbolicLink()) throw new Error("ws-pi-agent: owned path contains a symlink escape"); return real; }
 
 export function createAgentStorageContext(sessionId: string, agentDir = getAgentDir()): AgentStorageContext {
   return { root: canonicalRoot(agentDir), ownerSessionId: safe(sessionId, "Pi session id") };
@@ -27,11 +28,11 @@ export function createAgentStorageContext(sessionId: string, agentDir = getAgent
 export function ownershipPath(home: string): string { return join(home, "ownership.json"); }
 export function allocateAgentHome(ctx: AgentStorageContext, agentId: string, role: AgentOwnership["role"], exploreMode?: "simple" | "deep", noSession = false): AgentOwnership {
   safe(agentId, "agent id");
-  const ownerRoot = join(ctx.root, "ws-agents", safe(ctx.ownerSessionId, "Pi session id"));
+  const namespace = checkedDirectory(join(ctx.root, "ws-agents"), ctx.root);
+  const ownerRoot = checkedDirectory(join(namespace, safe(ctx.ownerSessionId, "Pi session id")), ctx.root);
   const home = resolve(ownerRoot, agentId);
   if (!contained(ownerRoot, home)) throw new Error("ws-pi-agent: agent home escapes configured Pi directory");
-  mkdirSync(home, { recursive: true, mode: 0o700 });
-  if (lstatSync(home).isSymbolicLink()) throw new Error("ws-pi-agent: agent home must not be a symlink");
+  checkedDirectory(home, ownerRoot);
   const sessionPath = noSession ? undefined : join(home, "session.jsonl");
   const now = Date.now();
   const ownership: AgentOwnership = { version: OWNERSHIP_VERSION, ownerSessionId: ctx.ownerSessionId, agentId, home, role, ...(exploreMode ? { exploreMode } : {}), ...(sessionPath ? { sessionPath } : {}) };
@@ -48,12 +49,13 @@ export function readOwnership(home: string): OwnershipMetadata | undefined {
 }
 export function validOwnership(value: unknown): value is OwnershipMetadata {
   const o = value as Partial<OwnershipMetadata> | null;
-  return !!o && o.version === OWNERSHIP_VERSION && typeof o.ownerSessionId === "string" && SAFE_COMPONENT.test(o.ownerSessionId) && typeof o.agentId === "string" && SAFE_COMPONENT.test(o.agentId) && typeof o.home === "string" && typeof o.role === "string" && Number.isFinite(o.createdAt) && Number.isFinite(o.lastActivityAt) && Number.isFinite(o.updatedAt) && !!o.liveness && typeof o.liveness.lifecycle === "string";
+  return validDescriptor(value) && Number.isFinite(o.createdAt) && Number.isFinite(o.lastActivityAt) && Number.isFinite(o.updatedAt) && !!o.liveness && ["starting","live","stopping","stopped","unknown"].includes(o.liveness.lifecycle as string);
 }
+export function validDescriptor(value: unknown): value is AgentOwnership { const o = value as Partial<AgentOwnership> | null; return !!o && o.version === OWNERSHIP_VERSION && typeof o.ownerSessionId === "string" && SAFE_COMPONENT.test(o.ownerSessionId) && typeof o.agentId === "string" && SAFE_COMPONENT.test(o.agentId) && typeof o.home === "string" && ["worker","execute-worker","fork","explore"].includes(o.role as string) && (o.sessionPath === undefined || typeof o.sessionPath === "string"); }
 export function updateOwnership(home: string, update: Partial<Pick<OwnershipMetadata, "lastActivityAt" | "liveness">>): OwnershipMetadata | undefined {
   const current = readOwnership(home); if (!current) return undefined;
-  const now = Date.now(); const next = { ...current, ...update, lastActivityAt: Math.max(current.lastActivityAt, update.lastActivityAt ?? current.lastActivityAt), updatedAt: now };
-  writeOwnership(next); return next;
+  const now = Date.now(); const next = { ...current, ...update, liveness: { ...current.liveness, ...update.liveness }, lastActivityAt: Math.max(current.lastActivityAt, update.lastActivityAt ?? current.lastActivityAt), updatedAt: now };
+  try { writeOwnership(next); return next; } catch { return undefined; }
 }
 export function touchOwnership(home: string): void { updateOwnership(home, { lastActivityAt: Date.now() }); }
 /** Samples the actual session file. A stat failure records no invented write/activity. */
