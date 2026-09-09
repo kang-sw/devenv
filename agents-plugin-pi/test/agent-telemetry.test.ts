@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import test from "node:test";
 import { readSessionEntries, reduceTelemetry } from "../src/agent-telemetry.ts";
 import { refreshAgentTelemetry, stopAgent, type RpcAgentRecord } from "../src/spawner.ts";
+import { buildAgentRows } from "../src/agent-widget.ts";
 
 async function withSession(lines: unknown[], fn: (path: string) => void | Promise<void>): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "ws-pi-telemetry-"));
@@ -26,6 +27,13 @@ test("stop performs a final disk reconciliation after synchronous live-state cle
   assert.equal(record.telemetry?.latestInput, 11);
   assert.equal(record.telemetry?.estimatedUsd, .6);
 }));
+
+test("row projection preserves reported zero latest input for live and thread-only recovery", () => {
+  const live = { agentId: "a", client: {}, sessionPath: "/tmp/a", wsToolNames: [], toolGroup: "full-worker", reportLog: [], streaming: true, running: true, telemetry: { version: 1, origin: { sessionId: "a", sessionPath: "/tmp/a", emptyPrefix: true }, latestInput: 0 } } as unknown as RpcAgentRecord;
+  assert.equal(buildAgentRows(new Map([["a", live]]), [], Date.now())[0].latestInput, 0);
+  const thread = { threadId: "q1", title: "q", status: "pending", origin: "fork-raised", createdAt: "2026-01-01T00:00:00.000Z", touchedAt: "2026-01-01T00:00:00.000Z", forkResume: { sessionPath: "/tmp/f", wsToolNames: [], toolGroup: "full-worker", telemetry: { version: 1, origin: { sessionId: "f", sessionPath: "/tmp/f", emptyPrefix: true }, latestInput: 0 } } } as never;
+  assert.equal(buildAgentRows(new Map(), [thread], Date.now())[0].latestInput, 0);
+});
 
 test("telemetry retains reported zero and refuses malformed/missing anchors", () => withSession([header, assistant("a", 0, 0)], path => {
   const read = readSessionEntries(path);

@@ -201,7 +201,7 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
       answerHint: isAwaitingOwnerWithThread ? `/answer ${boundThread!.threadId}` : undefined,
       ...(record.telemetry?.model ?? record.observedModel ? { model: record.telemetry?.model ?? record.observedModel } : {}),
       ...(record.telemetry?.effort ?? record.observedEffort ? { effort: record.telemetry?.effort ?? record.observedEffort } : {}),
-      ...(record.telemetry?.latestInput ?? record.observedLatestInput !== undefined ? { latestInput: record.telemetry?.latestInput ?? record.observedLatestInput } : {}),
+      ...((record.telemetry?.latestInput ?? record.observedLatestInput) !== undefined ? { latestInput: record.telemetry?.latestInput ?? record.observedLatestInput } : {}),
       ...(record.telemetry?.estimatedUsd !== undefined ? { estimatedUsd: record.telemetry.estimatedUsd } : {}),
     });
   }
@@ -216,7 +216,7 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
       answerHint: `/answer ${thread.threadId}`,
       ...(thread.forkResume?.telemetry?.model ?? thread.forkResume?.observedModel ? { model: thread.forkResume?.telemetry?.model ?? thread.forkResume?.observedModel } : {}),
       ...(thread.forkResume?.telemetry?.effort ?? thread.forkResume?.observedEffort ? { effort: thread.forkResume?.telemetry?.effort ?? thread.forkResume?.observedEffort } : {}),
-      ...(thread.forkResume?.telemetry?.latestInput ?? thread.forkResume?.observedLatestInput !== undefined ? { latestInput: thread.forkResume?.telemetry?.latestInput ?? thread.forkResume?.observedLatestInput } : {}),
+      ...((thread.forkResume?.telemetry?.latestInput ?? thread.forkResume?.observedLatestInput) !== undefined ? { latestInput: thread.forkResume?.telemetry?.latestInput ?? thread.forkResume?.observedLatestInput } : {}),
       ...(thread.forkResume?.telemetry?.estimatedUsd !== undefined ? { estimatedUsd: thread.forkResume.telemetry.estimatedUsd } : {}),
     });
   }

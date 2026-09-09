@@ -201,6 +201,7 @@ import { armForkRoleWiring, registerFork } from "./fork.ts";
 import {
   buildForkQuestionLeadNotice,
   createThreadRegistryHandle,
+  type ThreadRegistryHandle,
   handleForkRaisedQuestion,
   captureForkResume,
   hydrateThreadRegistry,
@@ -230,7 +231,7 @@ const exploreGuidePath = join(pluginDir, "explore-guide.md");
 export async function persistShutdownAgentSnapshots(
   agentTools: AgentToolsHandle | undefined,
   sidecar: string | undefined,
-  threads: { values(): IterableIterator<import("./ask.ts").ThreadRecord>; pathRef: { current?: string } },
+  threads: ThreadRegistryHandle,
 ): Promise<void> {
   const orphans = agentTools ? captureOrphans(agentTools.rpcRegistry) : undefined;
   await agentTools?.stopAll();
@@ -240,12 +241,12 @@ export async function persistShutdownAgentSnapshots(
     if (record?.telemetry) orphan.telemetry = record.telemetry;
   }
   writeSidecarAt(sidecar, orphans);
-  for (const thread of threads.values()) {
+  for (const thread of threads.threads.values()) {
     if (!thread.respondentAgentId) continue;
     const record = agentTools.rpcRegistry.get(thread.respondentAgentId);
     if (record) thread.forkResume = captureForkResume(record);
   }
-  if (threads.pathRef.current) saveThreadRegistryFile(threads.pathRef.current, [...threads.values()]);
+  if (threads.pathRef.current) saveThreadRegistryFile(threads.pathRef.current, [...threads.threads.values()]);
 }
 
 /**

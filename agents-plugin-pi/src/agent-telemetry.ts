@@ -54,7 +54,7 @@ export function reduceTelemetry(origin: TelemetryOrigin, read: ReturnType<typeof
   for (const e of read.entries.slice(start)) {
     const assistant = e.type === "message" && e.message?.role === "assistant";
     const usage = usageOf(e.message?.usage ?? e.usage);
-    if (!usage) { if (assistant) invalidCost = true; continue; }
+    if (!usage) { if (assistant) { invalidCost = true; latest = undefined; } continue; }
     if (assistant) latest = usage.input; // later summary entries below clear this.
     if (e.type === "compaction" || e.type === "branch_summary") latest = undefined;
     if (usage.cost === undefined) invalidCost = true; else { observedCost = true; total += usage.cost; }
