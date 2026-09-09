@@ -36,8 +36,9 @@ Applies when the project's `AGENTS.md` `### Review Policy` declares
    Otherwise `{{.SkillNamespace}}:lead-review` over `range:
    <frontier-head>..HEAD`; a clearing verdict proceeds, anything else stops
    for the user's explicit override with a recommendation against it.
-4. This gate never calls `review.stamp`; the marker moves only through the
-   review skill. An override leaves it where it was.
+4. This gate never calls `review.stamp`; apart from the step-2 bootstrap the
+   marker advances only through the review skill. An override leaves it where
+   it was.
 
 ## Execute
 
@@ -47,19 +48,19 @@ Applies when the project's `AGENTS.md` `### Review Policy` declares
 2. Confirm with the user: version, tag, publish targets. Wait for explicit
    approval.
 3. Publish per the config. When a publish step promotes one branch into
-   another, pin the gate's reviewed through-SHA and re-assert it immediately
-   before the merge; if the branch moved, abort and re-run the gate over the
-   delta.
-4. Push the tag; run post-ship steps.
-
-Report version, tag, targets, and any deviation.
+   another, pin the head the gate cleared and re-check the source branch tip
+   immediately before the merge; if it moved, abort and re-run the gate over
+   the delta. A gate that did not apply leaves nothing to re-check.
+4. Push the tag when the config's `Tag` section asks for it; the step-2
+   confirmation covers that push. Run post-ship steps.
 
 ## No config
 
 Ask for the sub-project, public or private target, version strategy (manual
 semver, auto-increment patch, date-based, `git describe`, or another explicit
-rule), build and publish commands, and post-ship steps; write the config to
-the matching path and confirm it before executing.
+rule), build and publish commands, tag format and whether the tag is pushed,
+and post-ship steps; write the config to the matching path and confirm it
+before executing.
 
 ### Ship Config Format
 

@@ -42,11 +42,12 @@ asking, so judgment is spent here and not at run time.
 
 List every unconfirmed item that could change ticket text, as a visible task
 list (the included task-list guidance applies). Ask the whole queue in one
-response, each item restated in full with your recommendation as a proposal.
-Reconcile item by item; re-ask what the answer did not reach as one batch;
-where an answer's reach is unclear, state your reading on its own line and
-continue. Proceed only when every item is confirmed, rejected, or explicitly
-deferred, and write confirmed items only.
+response, each item restated in full, your recommendation for it in the
+response body rather than in the item text. Reconcile item by item; re-ask
+what the answer did not reach as one batch; where an answer's reach is
+unclear, state your reading on its own line and leave the item open until
+the user confirms it. Proceed only when every item is confirmed, rejected, or
+explicitly deferred, and write confirmed items only.
 
 ## Ground: fact population
 
@@ -54,16 +55,20 @@ When the body asserts anything the tree can check (a path, symbol, count,
 present behavior, command, quotation) and the landing is `todo/` or `ready/`:
 
 1. `{{.McpNamespace}}/playbook.render(name: "ticket-fact-populator",
-   session_key: <your key>)`; do not read the rendered file.
+   session_key: <your key>)`; pass the path on without reading the file, which
+   is the delegate's prompt and not yours.
 2. Spawn a cheap-tier delegate: `Read <rendered-path> as your system prompt.
    Ticket path: <path>.`
-3. The populator edits the ticket file directly. Review its edits as `git
-   diff -- <ticket path>`; revert any hunk you reject. Send each returned
-   `decision_gaps:` item to the Open Decision Queue; never resolve one from
-   the populator's evidence alone.
-4. Run it again only when an applied correction proved wrong or an
-   unverified claim became checkable. A round returning no fewer corrections
-   than the round before ends population; its remainder goes to the queue.
+3. It returns evidence-backed corrections, a `relations:` table, and
+   `decision_gaps:`, and edits the ticket file itself where its own contract
+   says it does. Review any edit as `git diff -- <ticket path>` and revert any
+   hunk you reject; apply by hand a correction it reported but did not write.
+   Send each `decision_gaps:` item to the Open Decision Queue; never resolve
+   one from the populator's evidence alone.
+4. Run it again only when an applied correction proved wrong or an unverified
+   claim became checkable, and stop as soon as a round returns no fewer
+   corrections than the round before; whatever is still unverified goes to the
+   queue.
 
 Not for an `idea/` landing or a pure status move.
 
@@ -80,16 +85,17 @@ promotion is a batch of one.
 2. Per ticket in order: `{{.McpNamespace}}/tickets.move(stem, to: "ready")`,
    then `{{.McpNamespace}}/tickets.sage_gate(stem, landing: "ready")` and its
    returned action. For `run`: `playbook.render` the named reviewer, spawn it
-   with the ticket path and the populator's `relations:` table, and pass each
-   `verdict:` to `{{.McpNamespace}}/tickets.sage_stamp`. A `block` moves that
+   with the ticket path and the populator's `relations:` table when
+   population ran, and pass each `verdict:` to
+   `{{.McpNamespace}}/tickets.sage_stamp`. A `block` moves that
    ticket back and ends the batch there; report the promoted prefix and the
    blocker.
 3. Stamps leave files uncommitted. One `{{.McpNamespace}}/git.commit` carries
    the batch, its `## AI Context` naming the order.
 
-The stamp digests the body, so the populator's `## Route Facts` are covered:
-a fact edited after the stamp invalidates it, and re-running the gate is the
-only repair.
+The stamp digests the body, so any `## Route Facts` the populator wrote are
+covered: a fact edited after the stamp invalidates it, and re-running the gate
+is the only repair.
 
 ## Drop and close
 
@@ -109,5 +115,5 @@ Drop: `{{.McpNamespace}}/tickets.close(stem, status: "dropped")`. Closing to
 Commit edited paths with `{{.McpNamespace}}/git.commit(paths, title,
 ai_context)`, one logical unit. Suggest the next action: a child ticket for an
 epic or workset; `{{.SkillNamespace}}:lead-run` for an actionable ticket now
-in `ready/`. End with `Ticket: ai-docs/tickets/<status>/<stem>.md` on its own
-final line.
+in `ready/`. End with `Ticket: ai-docs/tickets/<status>/<stem>.md` per ticket
+written, the last of them on its own final line.

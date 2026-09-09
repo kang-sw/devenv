@@ -11,7 +11,8 @@ you resolve the target, adjudicate their findings, and carry the decisions.
 ## Target
 
 - `range: <base>..<head>` is the range scenario: no checkout, config
-  optional; without `ai-docs/_review.local.md` use the built-in phases.
+  optional; without `ai-docs/_review.local.md` use the config template's
+  Review Phases below as the built-in default.
 - `branch` or no argument is the branch scenario: load
   `ai-docs/_review.local.md` (go to **Setup** if absent), record the current
   branch, fetch and check out the target per the config's Remote section, and
@@ -29,10 +30,12 @@ you resolve the target, adjudicate their findings, and carry the decisions.
    `code-review-fit`, and `code-review-test` partitions, each with
    `{{.McpNamespace}}/playbook.render(name, session_key: <your key>)`; spawn
    each with the rendered path, the range (`<merge-base>..<head>` for a
-   branch), the config path, and the authority the config names. Each returns
-   severity-graded findings and an `omitted:` field.
-3. Range scenario adds the landing phase: convention adherence, and a test
-   change alongside every behavior change.
+   branch), the config path, and the review authority — the ticket or inline
+   contract the change names, when there is one. Each returns severity-graded
+   findings and an `omitted:` field.
+3. Range scenario adds the Landing Lens phase — the config's section, or the
+   built-in default in the template below — plus a test change alongside every
+   behavior change.
 4. Config checklist items go to the user in one response.
 5. Verdict from the aggregate: BLOCKED, LGTM, NEEDS FIX, or OPEN.
 6. Range scenario only: `{{.McpNamespace}}/review.marker(bootstrap: true)`
@@ -45,8 +48,11 @@ you resolve the target, adjudicate their findings, and carry the decisions.
 
 ## Verdict
 
-- **LGTM**: merge per the config's Merge Approval Method, else ask "Merge?"
-  and merge on confirmation; notify per the config's Notification Method.
+- **BLOCKED**: the blocked-path stop in **Target** already ran; nothing is
+  reviewed and nothing is stamped.
+- **LGTM**: branch scenario merges per the config's Merge Approval Method,
+  else asks "Merge?" and merges on confirmation, then notifies per the
+  config's Notification Method; a range scenario ends at the step-6 stamp.
 - **NEEDS FIX**: write the findings to
   `{{.McpNamespace}}/path.generate(kind: "review")` and ask: fix locally, or
   post to the contributor. Locally →
@@ -113,9 +119,9 @@ threshold: 20 files / 500 lines
 
 ## Stops
 
-Merging; pushing or modifying a remote branch; each checklist item.
+Merging; pushing or modifying a remote branch; the checklist response.
 
 ## Output
 
-The verdict, the findings path, the merge decision, and the restored branch.
-All written artifacts in English.
+The verdict, the findings path, the merge decision, and the branch restored
+or the user's decision not to. All written artifacts in English.

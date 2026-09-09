@@ -38,10 +38,11 @@ user wants executed goes to `{{.SkillNamespace}}:lead-run`.
 
 ## Stops
 
-None of your own; this skill ends when the user moves to capture or
-execution.
+An ambiguity you surfaced and the user has not answered. Nothing else stops
+here; the skill ends when the user moves to capture or execution.
 
 ## Output
 
-Conversation. When a ticket was read or created in this conversation, end
-with `Ticket: <path>` on its own line.
+Conversation. When a ticket was read in this conversation, or written through
+`{{.SkillNamespace}}:lead-ticket` during it, end with `Ticket: <path>` on its
+own line.
