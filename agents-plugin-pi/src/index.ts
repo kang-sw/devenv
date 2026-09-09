@@ -214,7 +214,7 @@ import { registerAuditCommands } from "./audit.ts";
 import { registerWsSkillTool } from "./lead-skills.ts";
 import { createToolPreviewTuiRef, loadToolResultTuiModules } from "./tool-result-render.ts";
 import { createAgentStorageContext } from "./agent-storage.ts";
-import { addClaudeDelegateIfLead, createClaudeDelegateController, registerClaudeDelegate, type ClaudeDelegateController } from "./claude-delegate.ts";
+import { addClaudeDelegateIfLead, CLAUDE_DELEGATE_TOOL_NAME, createClaudeDelegateController, registerClaudeDelegate, type ClaudeDelegateController } from "./claude-delegate.ts";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const pluginDir = dirname(srcDir); // agents-plugin-pi/
@@ -472,7 +472,13 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // comment).
     toolPreviewTuiRef.current = await loadToolResultTuiModules();
     await claudeDelegateRef.current?.shutdown();
-    claudeDelegateRef.current = readSpawnRole(process.env) === undefined ? createClaudeDelegateController(() => ctx.cwd) : undefined;
+    const delegateRole = readSpawnRole(process.env);
+    // A fork keeps its captured surface verbatim. If that surface already
+    // includes ws-claude it needs its own isolated controller; no other child
+    // role acquires the tool or a controller.
+    claudeDelegateRef.current = delegateRole === undefined || (delegateRole === "fork" && pi.getActiveTools().includes(CLAUDE_DELEGATE_TOOL_NAME))
+      ? createClaudeDelegateController(() => ctx.cwd)
+      : undefined;
 
     // 260907 Phase 1: guard the seam so a `startBridge`/`registerAgentTools`
     // failure never falls through into a partial/toolless registration — see

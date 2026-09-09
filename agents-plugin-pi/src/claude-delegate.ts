@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
-import { runClaudeItem, type ClaudeSdkDependencies, type ClaudeUsage } from "./claude-sdk.ts";
+import { ClaudeDelegateError, runClaudeItem, type ClaudeSdkDependencies, type ClaudeUsage } from "./claude-sdk.ts";
 import type { ClaudeDelegatePreset } from "./claude-delegate-prompts.ts";
 
 export const CLAUDE_DELEGATE_TOOL_NAME = "ws-claude";
@@ -14,11 +14,13 @@ function errorResult(id: string, code: string, message: string): ClaudeDelegateR
 function validItem(value: unknown): value is ClaudeDelegateItem {
   if (!value || typeof value !== "object") return false;
   const item = value as ClaudeDelegateItem;
+  if (Object.keys(item).some((key) => !["preset", "request", "paths", "model"].includes(key))) return false;
   return (item.preset === "audit" || item.preset === "consult") && typeof item.request === "string" && item.request.trim().length > 0 &&
     (item.paths === undefined || (Array.isArray(item.paths) && item.paths.every((path) => typeof path === "string" && path.trim().length > 0))) &&
     (item.model === undefined || (typeof item.model === "string" && item.model.trim().length > 0)) && item.editTargets === undefined && item.resume === undefined;
 }
-function errorCode(error: unknown, signal?: AbortSignal): "timeout" | "cancelled" | "sdk_error" | "missing_result" | "profile_violation" {
+function errorCode(error: unknown, signal?: AbortSignal): "timeout" | "cancelled" | "sdk_error" | "missing_result" | "profile_violation" | "cleanup_failed" {
+  if (error instanceof ClaudeDelegateError) return error.code;
   const text = error instanceof Error ? error.message : String(error);
   if (signal?.aborted) return "cancelled";
   if (text.includes("timeout")) return "timeout";
@@ -36,31 +38,32 @@ export function allocateClaudeHandle(used: Set<string>): string {
 }
 
 export function createClaudeDelegateController(cwd: () => string, deps: ClaudeDelegateDeps = {}): ClaudeDelegateController {
-  const used = new Set<string>(); let closed = false; let active = 0; const queue: (() => void)[] = []; const controllers = new Set<AbortController>();
+  const used = new Set<string>(); let closed = false; let active = 0; let quarantined = false; const queue: { start: () => void; reject: () => void }[] = []; const controllers = new Set<AbortController>(); const running = new Set<Promise<unknown>>();
   const acquire = async (signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
-    const start = () => { active += 1; resolve(); }; if (closed || signal?.aborted) { reject(new Error("cancelled")); return; }
-    if (active < 3) start(); else { const cancel = () => { const index = queue.indexOf(start); if (index >= 0) queue.splice(index, 1); reject(new Error("cancelled")); }; signal?.addEventListener("abort", cancel, { once: true }); queue.push(start); }
+    const start = () => { if (closed || quarantined || signal?.aborted) { reject(new Error("cancelled")); return; } active += 1; resolve(); }; if (closed || quarantined || signal?.aborted) { reject(new Error("cancelled")); return; }
+    if (active < 3) start(); else { const entry = { start, reject: () => reject(new Error("cancelled")) }; const cancel = () => { const index = queue.indexOf(entry); if (index >= 0) queue.splice(index, 1); reject(new Error("cancelled")); }; signal?.addEventListener("abort", cancel, { once: true }); queue.push(entry); }
   });
-  const release = () => { active -= 1; queue.shift()?.(); };
+  const release = () => { active -= 1; if (!closed && !quarantined) queue.shift()?.start(); };
   const executeOne = async (value: unknown, id: string, callerSignal?: AbortSignal): Promise<ClaudeDelegateResult> => {
     if (!validItem(value)) return errorResult(id, "invalid_item", "Each item needs a supported preset and nonblank request; edit-targets and resume are unavailable.");
     try { await acquire(callerSignal); } catch { return errorResult(id, "cancelled", "Invocation was cancelled before this item started."); }
+    if (callerSignal?.aborted || closed || quarantined) { release(); return errorResult(id, "cancelled", "Invocation was cancelled before this item started."); }
     const abort = new AbortController(); controllers.add(abort); const onAbort = () => abort.abort(); callerSignal?.addEventListener("abort", onAbort, { once: true });
-    const timeout = setTimeout(() => abort.abort(new Error("timeout")), deps.timeoutMs ?? 120_000);
+    let timedOut = false; const timeout = setTimeout(() => { timedOut = true; abort.abort(new Error("timeout")); }, deps.timeoutMs ?? 120_000);
     try {
       const output = await runClaudeItem({ ...value, cwd: cwd(), abortController: abort }, deps);
       return { id, status: "success", output: output.output, usage: output.usage };
-    } catch (error) { return errorResult(id, errorCode(error, callerSignal), error instanceof Error ? error.message : String(error)); }
-    finally { clearTimeout(timeout); callerSignal?.removeEventListener("abort", onAbort); abort.abort(); controllers.delete(abort); release(); }
+    } catch (error) { const code = timedOut ? "timeout" : errorCode(error, callerSignal); if (code === "cleanup_failed") quarantined = true; return errorResult(id, code, code === "timeout" ? "Claude request timed out." : "Claude request failed."); }
+    finally { clearTimeout(timeout); callerSignal?.removeEventListener("abort", onAbort); controllers.delete(abort); release(); }
   };
   return {
     async execute(items: unknown, signal?: AbortSignal) {
       if (!Array.isArray(items) || items.length === 0) throw new Error("ws-claude requires a non-empty items array");
       if (closed) throw new Error("ws-claude session is shutting down");
-      const jobs = items.map((item) => { const id = allocateClaudeHandle(used); return executeOne(item, id, signal); });
-      return Promise.all(jobs);
+      const ids: string[] = []; try { for (let index = 0; index < items.length; index += 1) ids.push(allocateClaudeHandle(used)); } catch { return items.map((_item) => errorResult("unavailable", "sdk_error", "Claude delegate handle space exhausted.")); }
+      const jobs = items.map((item, index) => { const job = executeOne(item, ids[index]!, signal); running.add(job); void job.finally(() => running.delete(job)); return job; }); return Promise.allSettled(jobs).then((settled) => settled.map((entry, index) => entry.status === "fulfilled" ? entry.value : errorResult(ids[index]!, "sdk_error", "Claude request failed.")));
     },
-    async shutdown() { closed = true; for (const abort of controllers) abort.abort(); while (queue.length) queue.shift()!(); },
+    async shutdown() { closed = true; for (const entry of queue.splice(0)) entry.reject(); for (const abort of controllers) abort.abort(); await Promise.allSettled([...running]); },
   };
 }
 

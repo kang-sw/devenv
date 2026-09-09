@@ -20,5 +20,20 @@ test("missing terminal result is an item-level SDK failure", async () => {
   const controller = new AbortController();
   await assert.rejects(() => runClaudeItem({ preset: "consult", request: "x", cwd: "/tmp", abortController: controller }, {
     executable: "/usr/bin/true", loadSdk: async () => ({ query: () => ({ close() {}, async *[Symbol.asyncIterator]() {} }) }),
-  }), /missing_result/);
+  }), { code: "missing_result" });
+});
+
+test("unexpected init MCP inventory is rejected without exposing SDK diagnostics", async () => {
+  const controller = new AbortController();
+  await assert.rejects(() => runClaudeItem({ preset: "audit", request: "secret prompt", cwd: "/tmp", abortController: controller }, {
+    executable: "/usr/bin/true", loadSdk: async () => ({ query: () => ({ close() {}, async *[Symbol.asyncIterator]() { yield { type: "system", subtype: "init", tools: ["Read"], mcp_servers: [{ name: "account", status: "connected" }] }; } }) }),
+  }), { code: "profile_violation" });
+});
+
+test("local no-model process fixture receives the typed closed profile and is reaped", async () => {
+  const controller = new AbortController(); let captured: any;
+  const output = await runClaudeItem({ preset: "consult", request: "x", cwd: process.cwd(), abortController: controller }, {
+    executable: "/usr/bin/true", loadSdk: async () => ({ query: ({ options }: any) => { captured = options; options.spawnClaudeCodeProcess({ command: "/usr/bin/true", args: [], cwd: process.cwd(), env: process.env, signal: undefined }); return { close() {}, async *[Symbol.asyncIterator]() { yield { type: "result", subtype: "success", is_error: false, result: "ok", usage: {}, modelUsage: {}, total_cost_usd: 0 }; } }; } }),
+  });
+  assert.equal(output.output, "ok"); assert.equal(captured.pathToClaudeCodeExecutable, "/usr/bin/true"); assert.equal(captured.executable, undefined); assert.deepEqual(captured.tools, ["Read", "Grep", "Glob", "WebSearch", "WebFetch"]); assert.equal(captured.env.WS_SESSION_KEY, undefined);
 });
