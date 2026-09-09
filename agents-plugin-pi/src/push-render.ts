@@ -128,7 +128,8 @@ export async function loadPushTuiModules(): Promise<PushTuiModules> {
 
 /**
  * Assembles one message's component: a one-column-padded box, painted with
- * the shared theme-aware `customMessageBg` background, holding the head line,
+ * the shared theme-aware `customMessageBg` background, holding the head line
+ * (using Pi's `customMessageLabel` only for the registered report family),
  * the payload body (capped at ten logical lines with full recovery on
  * expansion — the same shared bounded-preview seam `tool-result-render.ts`
  * uses), and the status line — all three in a subdued/gray foreground so the
@@ -148,6 +149,7 @@ export function buildPushComponent(
   message: { content?: unknown; details?: unknown },
   theme: PushRenderTheme | undefined,
   expanded = false,
+  family?: string,
 ): unknown {
   const parts = buildPushRenderLines(message);
   if (!parts) return undefined;
@@ -166,7 +168,7 @@ export function buildPushComponent(
     }
   };
   const box = new tui.Box(1, 0, (text) => paintBg("customMessageBg", text));
-  box.addChild(new tui.Text(paint("muted", parts.head), 0, 0));
+  box.addChild(new tui.Text(paint(family === "ws-agent-report" ? "customMessageLabel" : "muted", parts.head), 0, 0));
   if (parts.body.length > 0) {
     const body = createBoundedText(tui);
     updateText(tui, body, parts.body.join("\n"), (text) => paint("muted", text), {
@@ -197,7 +199,7 @@ export async function registerPushMessageRenderers(pi: ExtensionAPI, tuiModules?
   const tui = tuiModules ?? (await loadPushTuiModules());
   for (const family of PUSH_FAMILIES) {
     pi.registerMessageRenderer(family, (message, options, theme) =>
-      buildPushComponent(tui, message as { content?: unknown; details?: unknown }, theme as unknown as PushRenderTheme, (options as { expanded?: boolean } | undefined)?.expanded) as never,
+      buildPushComponent(tui, message as { content?: unknown; details?: unknown }, theme as unknown as PushRenderTheme, (options as { expanded?: boolean } | undefined)?.expanded, family) as never,
     );
   }
   return true;
