@@ -38,9 +38,9 @@ function headings(body: string): string {
 
 interface Provenance { originalToolCallId: string; family: ReadFamily; key: string }
 
-function pointerText(originalToolCallId: string, family: ReadFamily, key: string, body: string): string {
+function pointerText(originalToolCallId: string, family: ReadFamily, key: string, body: string, distance: number): string {
   const provenance: Provenance = { originalToolCallId, family, key };
-  return `The unchanged result is available from successful tool call \`${originalToolCallId}\` (headings: ${headings(body)}).\n${PROVENANCE_PREFIX}${JSON.stringify(provenance)}${PROVENANCE_SUFFIX}`;
+  return `The unchanged result is available from successful tool call \`${originalToolCallId}\`, ${distance} tool call${distance === 1 ? "" : "s"} ago (headings: ${headings(body)}).\n${PROVENANCE_PREFIX}${JSON.stringify(provenance)}${PROVENANCE_SUFFIX}`;
 }
 
 function parsePointer(text: string): Provenance | undefined {
@@ -73,6 +73,17 @@ function callInfo(entries: readonly unknown[], currentToolCallId: string): Map<s
   return calls;
 }
 
+function toolCallDistance(entries: readonly unknown[], originalToolCallId: string, currentToolCallId: string): number {
+  const ids: string[] = [];
+  for (const entry of entries as any[]) {
+    if (entry?.type !== "message" || entry.message?.role !== "assistant") continue;
+    for (const call of entry.message.content ?? []) if (call?.type === "toolCall" && typeof call.id === "string") ids.push(call.id);
+  }
+  const original = ids.lastIndexOf(originalToolCallId);
+  const current = ids.lastIndexOf(currentToolCallId);
+  return original >= 0 && current > original ? current - original : 1;
+}
+
 /**
  * Reads only Pi's supplied active context. A full response counts when it is
  * byte-identical to `freshBody`; a pointer counts only when its envelope
@@ -81,21 +92,28 @@ function callInfo(entries: readonly unknown[], currentToolCallId: string): Map<s
  */
 export function dedupeRead(entries: readonly unknown[], currentToolCallId: string, family: ReadFamily, key: string, freshBody: string): ReadDedupeDecision {
   const calls = callInfo(entries, currentToolCallId);
-  const matching = new Map<string, string>();
+  const matching = new Map<string, string[]>();
   for (const entry of entries as any[]) {
     const text = textResult(entry);
     const call = calls.get(entry?.message?.toolCallId);
-    if (text !== undefined && call?.family === family && call.key === key) matching.set(entry.message.toolCallId, text);
+    if (text !== undefined && call?.family === family && call.key === key) {
+      const prior = matching.get(entry.message.toolCallId) ?? [];
+      prior.push(text);
+      matching.set(entry.message.toolCallId, prior);
+    }
   }
-  const fullIds = new Set([...matching].filter(([, text]) => text === freshBody).map(([id]) => id));
+  const fullIds = new Set([...matching].filter(([, texts]) => texts.length === 1 && texts[0] === freshBody).map(([id]) => id));
   let count = fullIds.size;
-  for (const text of matching.values()) {
+  for (const texts of matching.values()) for (const text of texts) {
     const marker = parsePointer(text);
-    if (marker?.family === family && marker.key === key && fullIds.has(marker.originalToolCallId)) count += 1;
+    const candidate = text.includes(PROVENANCE_PREFIX);
+    if (!candidate) continue;
+    if (!marker || marker.family !== family || marker.key !== key || !fullIds.has(marker.originalToolCallId)) return { text: freshBody, deduped: false };
+    count += 1;
   }
   if (count === 1) {
     const originalToolCallId = [...fullIds][0]!;
-    return { text: pointerText(originalToolCallId, family, key, freshBody), deduped: true };
+    return { text: pointerText(originalToolCallId, family, key, freshBody, toolCallDistance(entries, originalToolCallId, currentToolCallId)), deduped: true };
   }
   return { text: freshBody, deduped: false };
 }

@@ -252,7 +252,7 @@ describe("addSkillToolIfLeadOrFork", () => {
 describe("registerWsSkillTool (fake pi)", () => {
   interface FakeTool {
     name: string;
-    execute(id: string, params: unknown): Promise<{ content: Array<{ type: string; text: string }> }>;
+    execute(id: string, params: unknown, signal?: unknown, update?: unknown, ctx?: unknown): Promise<{ content: Array<{ type: string; text: string }> }>;
   }
 
   function fakePi(tools: Map<string, FakeTool>, getCommands: () => SlashCommandInfo[]): ExtensionAPI {
@@ -295,5 +295,15 @@ describe("registerWsSkillTool (fake pi)", () => {
 
     const unknownResult = await tool.execute("call-2", { name: "does-not-exist" });
     assert.match(unknownResult.content[0].text, /lead-drain-ready-queue/, "the unknown-name listing must include the live-merged skill too");
+  });
+
+  test("production registration never dedupes unknown-skill errors", async () => {
+    const tools = new Map<string, FakeTool>();
+    const pi = fakePi(tools, () => []);
+    registerWsSkillTool(pi);
+    const context = { sessionManager: { buildContextEntries: () => [{ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "one", name: "ws-skill", arguments: { name: "missing" } }] } }, { type: "message", message: { role: "toolResult", toolCallId: "one", content: [{ type: "text", text: 'Unknown skill "missing". Available skills: (none)' }], isError: false } }] } };
+    const result = await tools.get(WS_SKILL_TOOL_NAME)!.execute("two", { name: "missing" }, undefined, undefined, context);
+    assert.match(result.content[0].text, /^Unknown skill "missing"/);
+    assert.doesNotMatch(result.content[0].text, /unchanged result/);
   });
 });

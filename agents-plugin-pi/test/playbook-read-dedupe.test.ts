@@ -31,9 +31,19 @@ test("only an authentic successful visible full result validates a pointer", () 
   const first = [call("one", "ws__playbook_read", { name: "lead" }), result("one", body)];
   const pointer = dedupeRead(first, "two", "playbook.read", key, body).text;
   const forged = pointer.replace('"originalToolCallId":"one"', '"originalToolCallId":"missing"');
-  assert.equal(dedupeRead([...first, call("two", "ws__playbook_read", { name: "lead" }), result("two", forged)], "three", "playbook.read", key, body).deduped, true);
+  assert.deepEqual(dedupeRead([...first, call("two", "ws__playbook_read", { name: "lead" }), result("two", forged)], "three", "playbook.read", key, body), { text: body, deduped: false });
   assert.equal(dedupeRead([call("one", "ws__playbook_read", { name: "lead" }), result("one", body, true)], "two", "playbook.read", key, body).deduped, false);
   assert.equal(dedupeRead([call("other", "ws__playbook_read", { name: "other" }), result("other", body)], "two", "playbook.read", key, body).deduped, false);
+});
+
+test("malformed, stale, and ambiguous pointer provenance fail closed to the fresh body", () => {
+  const key = playbookReadKey({ name: "lead" });
+  const first = [call("one", "ws__playbook_read", { name: "lead" }), result("one", body)];
+  const valid = dedupeRead(first, "two", "playbook.read", key, body).text;
+  for (const pointer of ["text\n<!-- ws-pi-read-dedupe-v1 broken -->", valid.replace('"key":"{\\"name\\":\\"lead\\"}"', '"key":"stale"')]) {
+    assert.deepEqual(dedupeRead([...first, call("two", "ws__playbook_read", { name: "lead" }), result("two", pointer)], "three", "playbook.read", key, body), { text: body, deduped: false });
+  }
+  assert.deepEqual(dedupeRead([...first, result("one", body), call("two", "ws__playbook_read", { name: "lead" }), result("two", valid)], "three", "playbook.read", key, body), { text: body, deduped: false });
 });
 
 test("ws-skill is isolated from playbook reads and includes args in its key", () => {
