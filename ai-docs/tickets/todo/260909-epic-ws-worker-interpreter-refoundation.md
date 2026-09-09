@@ -86,10 +86,13 @@ removed.
   `route.resolve_implement` reads route facts from the sage-stamped ticket
   instead of lead-gathered conversation facts; in-run survey/plan stages and
   the direct-edit/lead-only fast paths are removed.
-- `260909-refactor-retire-spec-mental-model-layers` - delete `ai-docs/spec/`,
-  `ai-docs/mental-model/`, their MCP tools, the spec-address gate, doc
-  coverage alarms, and write-time doc passes; sage promotion gate stays;
-  on-demand digests become untracked caches stamped with a commit hash.
+- `260909-refactor-retire-spec-mental-model-layers` - remove the spec and
+  mental-model MCP tools, the spec-address gate, doc coverage alarms, and
+  write-time doc passes; archive this repository's `ai-docs/spec/` and
+  `ai-docs/mental-model/` corpus under `ai-docs/.old/` (never destroy;
+  bootstrap applies the same archive rule downstream); sage promotion gate
+  stays; on-demand digests become untracked caches stamped with a commit
+  hash.
 - `260909-chore-retire-mercenary-surface` - mercenary is a deprecation
   target; native harness delegation is the only path.
 - `260909-feat-bootstrap-refoundation-template-migration` - new template
