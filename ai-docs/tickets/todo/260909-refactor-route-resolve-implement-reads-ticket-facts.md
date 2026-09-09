@@ -389,8 +389,10 @@ Scope:
 
 - Implement the transport: the fact populator playbook loses its "never edit
   the ticket" clause and gains a single-file edit scope with the `### Result`
-  immutability rule restated; it writes the route-facts body section. The
-  resolver reads that section through the `wsdoc` ticket projection — extend
+  immutability rule restated; it writes the route-facts body section and
+  cites in the ticket's `## Constraints` the manuals that the project's
+  declared path-scoped conventions section maps to the paths the ticket
+  touches (epic Cross-Child Decision 18). The resolver reads that section through the `wsdoc` ticket projection — extend
   the projection rather than adding a second parser.
 - Make a missing or unreadable fact block a defined outcome, not a silent
   default: a ticket that reaches `ready/` without route facts is a sage-gate

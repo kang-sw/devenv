@@ -238,7 +238,20 @@ The item's conditional steps:
 - Remove the two directories and the index file from the scaffold layout block
   so fresh projects never create them.
 - Rewrite the inclusion-test comment so domain-scoped rules have a home that
-  still exists.
+  still exists: short universal rules inline, longer or path-scoped rules in
+  `ai-docs/manuals/` declared through the conventions section below (epic
+  Cross-Child Decision 18).
+- Add the optional path-scoped conventions section under `## Workflow`
+  (for example `### Implementation Conventions` with `paths` -> manual rows),
+  the generic hook the worker playbook reads; a project that declares none
+  has no convention read. Scaffold `ai-docs/manuals/` in the layout block if
+  it is not already there.
+- Instruct a triage of the archived mental-model and spec content before the
+  archive step, as a one-time judgment call for the migrating project:
+  derivable from code (archive only), prescriptive convention (to a manual
+  or inline `AGENTS.md`), site-specific trap (to a code comment),
+  non-derivable external fact (to `ai-docs/ref/`). The item states the four
+  classes and the destinations; it does not automate the classification.
 - Update `## Project Memory` step 1 so it no longer points at a spec inventory,
   and add the binding-anchor read step.
 - Add the optional `### Binding Anchor` section under `## Workflow` with its two

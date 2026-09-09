@@ -398,6 +398,17 @@ directories produces spurious findings.
 
 Scope:
 
+- Triage before archiving (epic Cross-Child Decision 18): a cheap-tier pass
+  classifies every mental-model entry and every spec section as one of:
+  derivable from code (archive only); prescriptive convention (move the
+  rule to `ai-docs/manuals/` or, if short and universal, inline into
+  `AGENTS.md`, and declare it in the path-scoped conventions section);
+  site-specific trap (becomes a code comment at the site that bites);
+  non-derivable external fact (moves to `ai-docs/ref/`). The triage result
+  is recorded in this phase's `### Result` as counts per class plus the
+  moved items, so the after-pass of the measurement manual can see what
+  survived. Nothing is rewritten in place; the archive keeps the original
+  text.
 - `git mv` `ai-docs/spec/` and `ai-docs/mental-model/` (and the
   `ai-docs/mental-model.md` overview) under `ai-docs/.old/` following the
   existing dated-snapshot scheme, content unchanged, so the 228 anchors cited

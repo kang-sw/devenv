@@ -319,6 +319,14 @@ restated in each. It states:
   stem; a reviewer computes its own diff range from git; a worker's summary is
   never another worker's sole input; any planner-style structured output
   carries an explicit omitted/deferred field.
+- **Declared conventions.** The worker reads `AGENTS.md` as the host loads
+  it, then the path-scoped conventions section it declares (epic Cross-Child
+  Decision 18) through a generic hook, reading only the manuals whose
+  `paths` match what the ticket touches, plus every manual the ticket's
+  `## Constraints` cites. A change that contradicts a cited convention is a
+  review finding, not a stop. The hook is the same shape as the
+  binding-anchor declaration: a declared section with fixed keys; a project
+  that declares none has no convention read.
 
 **The conversion.** For each procedure playbook the worker needs, change the
 addressee, satisfy Agent Layout (Identity → Constraints → Process → Heuristics

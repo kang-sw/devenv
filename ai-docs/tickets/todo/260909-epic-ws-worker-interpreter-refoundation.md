@@ -195,6 +195,25 @@ removed.
     any single worker's ticket, so drain keeps it: the lead aggregates the
     workers' reports into the merge-stop report, obtains user approval, and
     performs the merge. This is a git action, not source editing.
+18. **Prescriptive text survives; descriptive text is derived.** A document
+    that prescribes (preferred libraries, patterns, boundaries, domain
+    constraints) is a human decision, is not reconstructible from code, and
+    does not drift with code; it stays. A document that describes code
+    (what it does and why) is reconstructible and is retired. The worker's
+    inputs are exactly: `AGENTS.md` (host-loaded), the sage-stamped ticket,
+    tests, code and git history, notes and manuals, and one worker playbook.
+    Domain constraints live by kind: short universal rules inline in
+    `AGENTS.md`; longer or path-scoped rules in `ai-docs/manuals/`, declared
+    in a path-scoped `AGENTS.md` section (for example
+    `### Implementation Conventions` with `paths` -> manual rows) that the
+    worker playbook reads through a generic hook; testable rules become
+    tests; site-specific traps become code comments; non-derivable external
+    facts go to `ai-docs/ref/`. The fact populator cites the applicable
+    manuals in the ticket's `## Constraints`, and review treats a change
+    contradicting a cited convention as a finding. Prescriptive documents
+    carry no per-commit update obligation; drift is handled by
+    update-on-contact and review. This is what Decision 2's "a few manuals"
+    means.
 
 ## Completion Criteria
 
