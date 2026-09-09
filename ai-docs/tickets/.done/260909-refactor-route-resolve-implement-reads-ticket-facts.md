@@ -13,6 +13,7 @@ related:
 sage-review-completeness: completed
 sage-review-design-reviewed: b39ecf90d7ce1fe4
 sage-review-completeness-reviewed: b39ecf90d7ce1fe4
+completed: 2026-09-09
 ---
 
 # route.resolve_implement reads route facts from the sage-stamped ticket and drops the in-run survey and fast paths
@@ -557,6 +558,81 @@ Touchpoints: `agents-plugin-tool/internal/mcp/implement_resolver.go`,
 carries the Fact Contract at that time (`lead-implement` or `ticket-worker`),
 their wsflow mirrors, the resolver and session-state test files, both
 `manifest.json` pairs, `ai-docs/ref/refound-drafts/README.md`.
+
+### Result (2a2809de) - 2026-09-09
+
+`route.resolve_implement` now derives every routing fact from the ticket's
+`## Route Facts` section. The caller supplies the target, the session key, and
+the runtime policy (`policy.branch.*`, `review.override`, `docs.*`) and nothing
+else; a `facts` argument is refused outright rather than merged, since a fact
+defaulted from the ticket but overridable by the caller leaves the same
+judgment in two places, which is the cost this phase exists to remove.
+
+Landed:
+
+- `wsdoc` projection extended rather than duplicated: `TicketInfo` gains
+  `RouteFactsPresent` and `RouteFacts`, parsed by `ticketRouteFacts` (header
+  and alignment rows skipped by shape, section ended by any heading, only the
+  first two columns read — the evidence column is the reviewer's). `TicketAt`
+  is the new by-path reader; it confines a caller-supplied path to the board
+  and rebases an absolute path under the root first, so the path's spelling
+  does not decide what counts as a ticket.
+- The resolver's `loadImplementRouteFacts` resolves the target to one of four
+  named statuses — `ticket`, `absent`, `unreadable`, `ad-hoc` — reported in the
+  verdict text, the conditions, and the warnings. It resolves the ticket by
+  path, by absolute path, or by stem alone. An unrecognized fact key, a value
+  outside its enum, and a table missing any accepted fact all make the block
+  unreadable: the strictness runs in both directions because an omitted row
+  parses to the same `unknown` an author can write deliberately, and an
+  all-unknown risk set allocates the *smallest* review.
+- The eleven surviving facts are those that feed `implementReviewPartitions`
+  or the verdict's scope statement. `change_points`, `strategy_shape`, and
+  `cold_context` are gone with the derivations Phase 1 deleted, as are
+  `low_ceremony_if_safe` and the orphaned `explicit_*_request` fields, and the
+  legacy top-level argument path is removed with the tests whose subject was
+  that path. `TestRouteResolveImplementSchemaIsOpaque` still passes unchanged.
+- Missing facts are a defined outcome at three points: `SageGate` refuses a
+  `ready/` landing of a non-exempt ticket with no section
+  (`stop_missing_route_facts`, with its own `next_instruction`); `tickets.move`
+  tips the same gap advisorily; and the resolver names the absence instead of
+  falling through to a conservative verdict.
+- An ad-hoc target (`inline`, `unknown`) reads no ticket at all: the verdict
+  says so and points at the worker's closed stop list.
+- The committed populator draft is placed over the shipped playbook with its
+  `[design-review: ...]` marker resolved, its table matching the resolver's
+  keys and enums exactly; `lead-run` populates before spawning when the
+  section is absent or a worker reports it incomplete, and `lead-ticket`
+  always populates for a `ready/` landing.
+
+Verification (all read in full, green): `go build ./...`, `go vet ./...`,
+`go test ./... -count=1` (14 packages), `python3 -m unittest discover
+agents-plugin/tests` (55), `agents-plugin-wsflow/tests` (10),
+`diff -r agents-plugin/rsrc agents-plugin-wsflow/rsrc` empty, all five
+env-gated regeneration entrypoints re-run with `-count=1` producing no drift,
+and a leak scan over every changed shipped surface.
+
+Review: partitioned across correctness, fit, and test. Round 1 raised two
+Important (an incomplete table routing as a deliberate all-unknown verdict and
+so buying the *least* review; an absolute `ticket_path` to a real ticket
+hard-stopping the run with a remediation that could not fix it), one Important
+in the test partition (the confinement test passed by coincidence through an
+unrelated read error), and seven Minor. All Important and four Minor were
+fixed in `8f0093a0` and `7991d938`; round 2 returned clean on all three
+partitions, the test reviewer confirming by mutation that the confinement test
+now genuinely pins its guard. Left as reported: the third read of the same
+ticket in the `ready/` move branch (it matches the shape already there), a
+sparse-checkout-hidden ticket reading as `absent`, `missingRouteFacts` failing
+open on an I/O error, and a second `## Route Facts` section being ignored.
+
+A fresh-reader audit of the placed populator found the fact names and enums
+correct against the resolver but the block itself hazardous to its own reader:
+escaped alternations with no filled example, and no rule that the cells are
+plain text, either of which silently makes a ticket unroutable. Both are closed
+by construction in `92389a0f`.
+
+Open Question 1 ("which facts survive the collapse") is answered by the
+eleven-fact set above, derived from the decision consumers rather than chosen.
+
 
 ## Sage Review Round 1 (2026-09-09)
 
