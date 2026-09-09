@@ -106,6 +106,16 @@ removed.
   `AGENTS.md` with `260909-research-ws-refoundation-evidence-audit` and
   topics covering lead surface, worker interpreter, document-layer
   retirement, and stop conditions, once the anchor ticket is populated.
+- Planned: prose drafts before any child runs. The shipped texts that carry
+  judgment are written first, by the lead-tier model, against
+  `ai-docs/manuals/skill-authoring.md` as re-baselined on 2026-09-09, and
+  committed under `ai-docs/ref/refound-drafts/` on the epic branch: the
+  shared worker stop-and-report protocol, the ticket-execution worker
+  playbook, the five lead skill bodies (discuss, ticket, run, review, ship),
+  the fact-populator revision, the bootstrap template conventions section
+  and migration item, the two new `WORKFLOW.md` sections, and the
+  measurement manual body. Each child's phases move the relevant draft into
+  place and do the mechanical work (Go, tests, manifests, wsflow mirror).
 
 ## Cross-Child Decisions
 
@@ -214,6 +224,16 @@ removed.
     carry no per-commit update obligation; drift is handled by
     update-on-contact and review. This is what Decision 2's "a few manuals"
     means.
+19. **Execution dogfoods the target topology by hand.** The children are not
+    run through the existing drainer, which is the pipeline this epic
+    replaces. The lead promotes them in two batches (the measurement manual
+    alone, then the remaining six after the baseline run), and for each
+    ticket spawns one worker of at least current-mainstream class with a
+    lead-capability key, the ticket path and stem as its only inputs, and
+    the closed stop list of Decision 5 as its prompt; the lead receives the
+    terminal report through the host notification and applies the
+    goal-to-parent merge stop. This run is the measurement manual's first
+    after-sample. Branch: `epic/refound`.
 
 ## Completion Criteria
 
