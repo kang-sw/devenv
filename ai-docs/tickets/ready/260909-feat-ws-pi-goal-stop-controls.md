@@ -56,3 +56,39 @@ compaction; stale callback settlement after stop/new goal; no automatic turn
 after session recovery; successful explicit new-goal rearm. Owner live check
 stops a goal while a child runs and confirms its report still arrives without
 automatic goal continuation. No source implementation is part of preparation.
+
+## Blocked (2026-09-10)
+
+Phase 1 is blocked before source implementation by a verified Pi host admission
+gap. The installed user-message path can accept an automatic `followUp` after
+an asynchronous input/preflight boundary, even when the goal was stopped in the
+intervening microtask. The public extension API provides neither a selective
+queued-message cancellation handle nor a final cancellation check at dequeue.
+Clearing the whole queue would also remove unrelated owner input and child
+reports, violating this ticket's preservation contract. Timer cancellation and
+goal-generation checks alone do not cover an already accepted host message.
+
+The alternative idle `sendMessage` custom-message path starts synchronously, but
+it bypasses the normal `before_agent_start` prompt composition. The installed
+session's prompt-reset/next-turn-refresh behavior can remove the ws system prompt
+on a subsequent tool/continuation turn; active-tool refresh can also remove it
+before the first custom-message response. This transport is therefore rejected
+as a substitute for the existing user-message path. Do not narrow the stop
+contract to adapter timers, abort unrelated work, clear all queues, or bypass
+canonical lead prompt assembly merely to implement the aliases.
+
+Prerequisite: a supported Pi user-prompt admission cancellation contract covering
+asynchronous preflight and queued consumption, or atomic idle-only admission with
+cancellation through preflight, while retaining the normal extension hook and
+system-prompt lifecycle. An upstream capability change (or an explicit owner
+revision of the required behavior) is needed before this Pi-adapter-only phase
+can advance. No additional approval for the already accepted feature scope is
+being requested, and no upstream or shared-runtime implementation was attempted.
+
+Evidence and source-backed alternatives are retained in
+`ai-docs/.plans/2026-09/10-0237-260909-feat-ws-pi-goal-stop-controls.md`.
+Research exercised the installed AgentSession, extension input handling, and
+Agent lifecycle with a local throwing provider stub; no network or model request
+ran. No source/dependency changed and no Phase Result or owner-live acceptance
+is claimed. Keep the separate live child-report acceptance requirement for the
+eventual implementation.
