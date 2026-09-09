@@ -1330,8 +1330,17 @@ channel for an owner question: it registers and carries on.
   persisted per thread (on the thread record, newest 200 items), so a reopen
   after `Esc` or after a lead restart shows the conversation so far; owner
   lines are styled with the host's user-message background, and child text is
-  rendered as Markdown with the host theme. The header states, once, directly after the `opened <time>`
-  line when present, `Esc: close view (thread stays open) · /done: end thread`
+  rendered as Markdown with the host theme. A recorded original question
+  appears as the first dialogue turn with assistant styling, including when
+  its text matches the thread title. Newly inserted or upgraded question
+  turns carry an emphasized `Question:` label; an existing matching first
+  assistant turn is preserved.
+  Reopening an older conversation restores a missing initial question or
+  upgrades its legacy seed note without duplicating it or removing later
+  turns. The compact header shows the thread ID and, when available,
+  `opened <time>` on one line; the question itself stays in the conversation.
+  The next header line states, once,
+  `Esc: close view (thread stays open) · /done: end thread`
   — there is no footer hint. `Esc` closes the view only: the thread stays
   `open` and the fork keeps running, reattachable at any time. `/done` typed
   in the overlay closes the **thread**, on its origin:

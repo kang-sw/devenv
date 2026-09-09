@@ -75,6 +75,7 @@ import {
   MAX_CONTEXT_CHARS,
   resolveChildLiveness,
   buildInitialConversationItems,
+  buildThreadHeaderHint,
   formatSpawnTime,
   buildDoneSummaryPrompt,
   EMPTY_SUMMARY_TEXT,
@@ -299,24 +300,56 @@ describe("threadRegistryPath / serialize / parse", () => {
   });
 
   describe("buildInitialConversationItems", () => {
-    test("an existing transcript wins over the seeded question", () => {
-      const items: ConversationItem[] = [{ kind: "note", text: "already open" }];
-      assert.deepEqual(buildInitialConversationItems({ transcript: items, question: "ignored" }), items);
+    test("the original question is the first assistant dialogue turn even when it equals the metadata title", () => {
+      assert.deepEqual(buildInitialConversationItems({ transcript: [], question: "Rebase or merge?", title: "Rebase or merge?" }), [
+        { kind: "assistant", text: "**Question:** Rebase or merge?" },
+      ]);
     });
 
-    test("an empty transcript falls back to seeding a single note framing the question (V4)", () => {
-      assert.deepEqual(buildInitialConversationItems({ transcript: [], question: "Rebase or merge?" }), [
-        { kind: "note", text: "Question: Rebase or merge?" },
-      ]);
+    test("an empty or absent transcript trims and seeds the question once", () => {
       assert.deepEqual(buildInitialConversationItems({ transcript: undefined, question: "  Rebase or merge?  " }), [
-        { kind: "note", text: "Question: Rebase or merge?" },
+        { kind: "assistant", text: "**Question:** Rebase or merge?" },
       ]);
     });
 
-    test("both absent yields an empty view (fork-raised threads have no seeded question)", () => {
+    test("repairs an existing history that omitted the question without discarding later turns", () => {
+      const items: ConversationItem[] = [
+        { kind: "user", text: "What about blue?" },
+        { kind: "assistant", text: "Blue is also available." },
+      ];
+      assert.deepEqual(buildInitialConversationItems({ transcript: items, question: "Which color do you prefer?" }), [
+        { kind: "assistant", text: "**Question:** Which color do you prefer?" },
+        ...items,
+      ]);
+    });
+
+    test("upgrades both legacy leading note forms and does not duplicate the question on later reopen", () => {
+      const later: ConversationItem[] = [{ kind: "user", text: "Blue." }];
+      for (const noteText of ["Which color?", "Question: Which color?"]) {
+        const upgraded = buildInitialConversationItems({
+          transcript: [{ kind: "note", text: noteText }, ...later],
+          question: "Which color?",
+        });
+        assert.deepEqual(upgraded, [{ kind: "assistant", text: "**Question:** Which color?" }, ...later]);
+        assert.deepEqual(buildInitialConversationItems({ transcript: upgraded, question: "Which color?" }), upgraded);
+      }
+    });
+
+    test("an absent question leaves genuine history unchanged", () => {
+      const items: ConversationItem[] = [{ kind: "note", text: "already open" }];
+      assert.equal(buildInitialConversationItems({ transcript: items, question: undefined }), items);
       assert.deepEqual(buildInitialConversationItems({ transcript: undefined, question: undefined }), []);
       assert.deepEqual(buildInitialConversationItems({ transcript: [], question: undefined }), []);
     });
+  });
+
+  test("buildThreadHeaderHint keeps only compact metadata and controls; the title/question is absent", () => {
+    const hint = buildThreadHeaderHint(thread({ title: "Which color do you prefer?" }));
+    assert.equal(
+      hint,
+      "ws thread q1 · opened 2026-09-05 10:00 UTC\nEsc: close view (thread stays open) · /done: end thread",
+    );
+    assert.ok(!hint.includes("Which color"));
   });
 
   test("C2: origin round-trips, and an unknown/absent one defaults to fork-raised (never stop a task fork by mistake)", () => {

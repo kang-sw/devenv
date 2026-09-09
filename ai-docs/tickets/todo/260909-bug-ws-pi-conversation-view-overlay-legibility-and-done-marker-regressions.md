@@ -56,6 +56,23 @@ the WIP commit `2ff2f75b`.
 - The owner requests one `gpt-5.6-sol` agent at `high` effort for this hotfix,
   continuing the tight fix/verify loop used for the WIP.
 
+### Owner visual follow-up: question placement (2026-09-09)
+
+After `19c2dbdb`, the owner reported that the muted tool/working text and
+background-filled user padding looked much better in the live overlay.
+The next requested hotfix is question placement: the original question is
+buried in the header metadata while the visible conversation begins with the
+owner's follow-up. Present the original question as the first dialogue turn,
+with conversation styling that makes it easy to find. Keep the header focused
+on metadata instead of making it the question's only presentation.
+
+Apply the correction to reopened conversations as well as newly opened ones,
+without duplicating the original question on each reopen or discarding later
+conversation history. This remains a bounded presentation hotfix in the same
+single-agent `gpt-5.6-sol` / `high` loop. The new question placement requires
+its own live visual check; the prior functional acceptance remains recorded
+above.
+
 ### Original observations
 
 Confirmed defects the owner observed live:

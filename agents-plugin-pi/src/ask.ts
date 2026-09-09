@@ -354,21 +354,37 @@ export function normalizeTranscript(value: unknown): ConversationItem[] | undefi
 
 /**
  * The `ConversationViewComponent` initial transcript for opening/reopening a
- * thread: the persisted transcript when there is one, else a single seeded
- * `note` from `thread.question` (never seeded twice — a non-empty transcript
- * already carries it as its first entry), else empty. Exported for direct
- * testing (pure — no component/channel needed).
+ * thread. The original question is always the first dialogue turn when one is
+ * recorded on the thread. Older persisted transcripts either carry it as a
+ * leading `Question: ...` note or omit it because the header used to be its
+ * only presentation; upgrade/prepend that one turn without disturbing the
+ * later history. Exported for direct testing (pure — no component/channel
+ * needed).
  */
 export function buildInitialConversationItems(thread: Pick<ThreadRecord, "transcript" | "question" | "title">): ConversationItem[] {
-  if (thread.transcript && thread.transcript.length > 0) return thread.transcript;
   const question = thread.question?.trim();
-  if (!question) return [];
-  // 260909 V4 (+ density polish): the header block already shows the title, so
-  // a seeded question that merely restates it verbatim is dropped rather than
-  // repeated. Otherwise it is framed as the question under discussion (the
-  // note renders with no bullet — see `renderItem`).
-  if (question === thread.title?.trim()) return [];
-  return [{ kind: "note", text: `Question: ${question}` }];
+  const transcript = thread.transcript ?? [];
+  if (!question) return transcript;
+
+  const questionTurn: ConversationItem = { kind: "assistant", text: `**Question:** ${question}` };
+  const first = transcript[0];
+  if (!first) return [questionTurn];
+
+  const firstText = "text" in first ? first.text.trim() : undefined;
+  if (first.kind === "note" && (firstText === question || firstText === `Question: ${question}`)) {
+    return [questionTurn, ...transcript.slice(1)];
+  }
+  if (first.kind === "assistant" && (firstText === question || firstText === `Question: ${question}` || firstText === `**Question:** ${question}`)) {
+    return transcript;
+  }
+  return [questionTurn, ...transcript];
+}
+
+/** Compact metadata/control header; the question itself belongs in the transcript. */
+export function buildThreadHeaderHint(thread: Pick<ThreadRecord, "threadId" | "createdAt">): string {
+  const opened = formatSpawnTime(thread.createdAt);
+  const metadata = [`ws thread ${thread.threadId}`, ...(opened ? [`opened ${opened}`] : [])].join(" · ");
+  return [metadata, `Esc: close view (thread stays open) · ${DONE_COMMAND}: end thread`].join("\n");
 }
 
 /**
@@ -1593,15 +1609,9 @@ async function openThread(
   // on every append so Esc/reopen and a lead restart both show the
   // conversation so far.
   const initialItems = buildInitialConversationItems(thread);
-  const opened = formatSpawnTime(thread.createdAt);
-  // Tidy header block: title, opened (flush, not oddly indented), key hint.
-  // The component separates this block from the conversation body with a blank
-  // line, so no rule is needed here.
-  const headerHint = [
-    `ws thread ${thread.threadId} · ${thread.title}`,
-    ...(opened ? [`opened ${opened}`] : []),
-    `Esc: close view (thread stays open) · ${DONE_COMMAND}: end thread`,
-  ].join("\n");
+  // Keep identity/time/controls compact. The original question is the first
+  // dialogue turn in `initialItems`, where it receives conversation styling.
+  const headerHint = buildThreadHeaderHint(thread);
   // Review relay #2 C2: only a discussion fork this surface owns is asked
   // for a summary. A live task fork is mid-task — asking it to summarize
   // (and then acting on that turn) would derail the work the lead is

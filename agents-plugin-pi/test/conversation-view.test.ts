@@ -1063,9 +1063,9 @@ describe("ConversationViewComponent — model-turn gutter (V3)", () => {
 describe("ConversationViewComponent — density / vertical rhythm (260909 polish)", () => {
   test("a note renders with no leading '·' bullet (noise removed)", () => {
     const { channel } = fakeChannel();
-    const view = new ConversationViewComponent(fakeTui(), { channel, initialItems: [{ kind: "note", text: "Question: pick one" }] });
+    const view = new ConversationViewComponent(fakeTui(), { channel, initialItems: [{ kind: "note", text: "adapter note" }] });
     const lines = view.render(80);
-    assert.ok(lines.some((l) => l.includes("Question: pick one")));
+    assert.ok(lines.some((l) => l.includes("adapter note")));
     assert.ok(!lines.some((l) => l.trimStart().startsWith("· ")), "the noise bullet must be gone");
   });
 
@@ -1088,12 +1088,13 @@ describe("ConversationViewComponent — density / vertical rhythm (260909 polish
     const view = new ConversationViewComponent(fakeTui(), {
       channel,
       headerHint: "HDR",
-      initialItems: [{ kind: "note", text: "Question: pick one" }, { kind: "assistant", text: "answer here" }],
+      initialItems: [{ kind: "assistant", text: "**Question:** pick one" }, { kind: "user", text: "answer here" }],
     });
     const lines = view.render(80);
     const qIdx = lines.findIndex((l) => l.includes("Question: pick one"));
     const aIdx = lines.findIndex((l) => l.includes("answer here"));
     assert.ok(qIdx >= 0 && aIdx > qIdx, "question and answer both render, answer after question");
+    assert.ok(lines[qIdx].startsWith("▌ "), "the question uses the assistant dialogue gutter");
     assert.ok(lines.slice(qIdx + 1, aIdx).some((l) => l.trim() === ""), "a blank line separates the two turns");
   });
 });
