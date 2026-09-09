@@ -172,6 +172,21 @@ removed.
     `.done/` or `.dropped/`. Historical keys and citations in closed tickets
     (`related-mental-model:`, spec anchors) remain as residue, and any
     reader that resolves them must tolerate an unresolved target.
+15. **The fact populator edits the ticket directly.** It holds edit rights on
+    the one ticket file it is populating (prompt-governed; system-enforced
+    where the host allows) and writes the route facts into a ticket body
+    section rather than returning a verdict for the lead to apply. Body
+    placement is deliberate: the sage stamp digests the body, so facts
+    changed after the stamp invalidate it and the design review always
+    stamps the facts it read. `### Result` sections stay immutable; the
+    lead vetoes through the unstaged diff.
+16. **Notification-driven wait; `session.note` is a carry-over record.** The
+    drain turn spawns the worker and waits for the host's completion or
+    interim notification; it neither blocks in a tool call nor polls. One
+    `session.note` section per lead session records the in-flight
+    worker-to-ticket assignments so a compacted or restarted lead can
+    rebuild them; it is not a live progress board, and the terminal is the
+    host notification.
 
 ## Completion Criteria
 

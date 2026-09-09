@@ -88,9 +88,14 @@ Parallelism is the epic's explicit Deferred item and is not opened here.
 4. **Keep the mint/track mechanism; retire only the entry point.**
    `ferrule(capability: "lead", parent_session_key: ...)`, `session.children`,
    and `session.note` all survive and move under drain: the render step
-   mints on top of `ferrule`, `session.note` records the worker's state against the lead's key so a
-   compacted lead can rebuild the board, `session.children` re-discovers the
-   worker. *This overturns `260730` Phase 2*, whose entire justification was
+   mints on top of `ferrule`, `session.note` records the worker's state
+   against the lead's key so a compacted lead can rebuild the board,
+   `session.children` re-discovers the worker. Per epic Cross-Child Decision
+   16 the drain turn waits for the host's completion or interim notification
+   (no blocking tool call, no polling), so `session.note` is a carry-over
+   record of in-flight worker-to-ticket assignments, one section per lead
+   session, not a live progress board; the terminal is the host
+   notification, which is what closes the `260725` starvation case. *This overturns `260730` Phase 2*, whose entire justification was
    that `session.note` had zero shipped consumers. Re-scoping or dropping
    `260730` is an inventory action for the user and lead (epic Cross-Child
    Decision 8), not this ticket's; this ticket only records that its Phase 1 is
@@ -325,12 +330,6 @@ and `ferrule` all stay — they now have a consumer in drain.
   primitive without becoming host-shaped — the exact defect `260730` recorded
   against fan-out. Settle at design review: a host-neutral phrasing, or a
   declared hook the host adapter fills.
-- **Whether the lead waits synchronously.** Serial-first implies one worker in
-  flight, but the epic does not say whether the drain turn blocks on the worker
-  or ends and is re-invoked when the worker reports. The `260725` starvation
-  finding is about background workers with no terminal; a blocking wait avoids
-  it, a non-blocking one reopens it. This determines whether `session.note` is
-  a live board or a crash-recovery record.
 - **What happens to the goal-branch merge terminal.** Drain currently asks the
   user for approval and merges into PARENT itself. The epic's stop condition
   (a) makes low-reversibility merges a stop, and gives goal-run merges to the

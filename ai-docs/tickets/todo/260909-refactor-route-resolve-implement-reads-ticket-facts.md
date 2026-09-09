@@ -62,10 +62,20 @@ source is read.
 
 - **Route facts come from the sage-stamped ticket, not from the caller.**
   Decision 3 places the judgment at authoring; this ticket makes the resolver
-  consume it. The transport shape is not settled by the epic and is the first
-  `## Open Question` below — the survey found that the fact populator writes
-  nothing today and the sage stamp records only review posture, so no existing
-  artifact already carries these values.
+  consume it. The survey found that the fact populator writes nothing today
+  and the sage stamp records only review posture, so no existing artifact
+  carries these values; epic Cross-Child Decision 15 settles the transport:
+  the fact populator gains edit rights on the ticket it populates and writes
+  a route-facts body section (a table under a stable heading), and the
+  resolver reads that section through the `wsdoc` ticket projection. Body
+  placement is what makes the sage stamp cover the facts: the stamp digests
+  the body, so facts edited after the stamp invalidate it.
+  - Rejected: frontmatter keys — would need a separate freshness check
+    because the stamp digest covers the body only, and grows a ~30-field
+    block. Rejected: extending `SageRecord` — the stamp is review posture, and
+    the facts should be written by the tier that populated them, not the tier
+    that reviewed them. Rejected: run-time derivation — puts derivation back
+    at execution, which is the cost this ticket removes.
   - Rejected: keeping the caller-supplied facts and merely defaulting them from
     the ticket. That leaves two sources of truth for the same judgment and
     preserves the lead turn spent restating it, which is the cost being removed.
@@ -284,24 +294,10 @@ stub sections), `…InstructionsDirectEditLeadOnly`, and
 
 The epic does not settle these; resolve at design review before Phase 2.
 
-- **How route facts travel from ticket to resolver.** Four shapes were found,
-  none of them already in place:
-  (a) **ticket frontmatter keys** written by the fact populator's caller — the
-  parser round-trips arbitrary keys and the writer is line-level and
-  byte-preserving, but `readTicketFromBytes` needs a new projection and the
-  frontmatter grows a ~30-field block;
-  (b) **a ticket body section** (a `## Route Facts` table) parsed like the
-  existing `## Blocked` section — human-legible and reviewable by the sage
-  design stage, but adds a body parser and a format contract to keep;
-  (c) **an extension of the sage stamp** — `SageRecord` already writes
-  frontmatter and a body section at exactly the moment the heavy tier finishes
-  judging, so the facts would be stamped by the agent that decided them, but it
-  widens a tool that is currently about review posture only;
-  (d) **the resolver derives them itself** from the ticket path plus git, with
-  no stored facts at all — smallest surface, but it puts derivation back at run
-  time, which is the cost this ticket removes.
-  The survey favours (c) on placement and (a) on mechanism; the choice is not
-  the author's to make.
+- **Exact heading and table format of the route-facts body section.** The
+  transport is settled (body section written by the populator, epic
+  Cross-Child Decision 15); the heading name, column set, and whether the
+  parser reuses the `## Blocked` section machinery are for design review.
 - **Which facts survive the collapse.** Removing the delegation axis, the plan
   stages, and the lead-only arm leaves `facts.risk` and the review-partition
   inputs clearly needed and the `explicit_*_request` and `low_ceremony_if_safe`
@@ -391,10 +387,11 @@ Depends on Phase 1's landed Result, which fixes the surviving fact set.
 
 Scope:
 
-- Implement the transport chosen in `## Open Questions`, including the writer
-  on the authoring side (fact populator's caller, or `SageRecord`) and the
-  reader on the resolver side. If the reader lives in `wsdoc`, extend the ticket
-  projection rather than adding a second parser.
+- Implement the transport: the fact populator playbook loses its "never edit
+  the ticket" clause and gains a single-file edit scope with the `### Result`
+  immutability rule restated; it writes the route-facts body section. The
+  resolver reads that section through the `wsdoc` ticket projection — extend
+  the projection rather than adding a second parser.
 - Make a missing or unreadable fact block a defined outcome, not a silent
   default: a ticket that reaches `ready/` without route facts is a sage-gate
   problem, and the resolver should say so rather than fall through to a
