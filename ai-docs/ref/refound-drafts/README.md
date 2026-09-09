@@ -19,7 +19,6 @@ through the mirror generator instead.
 
 | Draft | Lands as | Owning child |
 |-------|----------|--------------|
-| `ticket-fact-populator.md` | `agents-plugin/rsrc/ticket-fact-populator/ticket-fact-populator.md` | route-resolve-implement-reads-ticket-facts, Phase 2 |
 | `bootstrap-template.md` | `AGENTS.template.md` sections and the new migration item, both packages | bootstrap-refoundation-template-migration, Phase 1 |
 | `workflow-guide-sections.md` | two new `WORKFLOW.md` sections, both packages and this repository's copy | bootstrap-refoundation-template-migration, Phase 1 |
 

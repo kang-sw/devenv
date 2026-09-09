@@ -29,6 +29,13 @@ description is the contract.
 
 ## Spawn
 
+Route facts before anything else, for a ticket target only: the implementation
+route reads its facts from the ticket's `## Route Facts` section, and a ticket
+promoted before that section existed has none that a worker could supply. When
+the selected ticket has no such section, render `ticket-fact-populator`, run it
+on that ticket once, apply what it returns, and commit — then spawn. Once per
+ticket: a second empty return is a ticket problem, not a retry.
+
 1. Stage a goal branch only when a `/goal` reminder is active and the branch
    is not already `goal/*`: capture the current branch as PARENT
    (`git rev-parse --abbrev-ref HEAD`), then `git checkout -b
