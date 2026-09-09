@@ -7,7 +7,7 @@ related:
   260908-research-ws-pi-claude-code-lead-provider: the spike that established the SDK seam, strictMcpConfig, and cross-process prompt-cache behavior this tool reuses
   260907-feat-ws-pi-lead-tool-profile-and-orchestrator-role: the lead surface that would call this tool; delegation of audit/rewrite/consult is a lead affordance
 spec:
-  - pi-adapter-runtime
+  - 260910-pi-claude-read-only-delegation
 sage-review-design-reviewed: bfdff06e04e9fa40
 sage-review-completeness-reviewed: bfdff06e04e9fa40
 ---
@@ -180,6 +180,57 @@ isolation, never-settling child timeout and cancellation/process cleanup; a live
 `consult` item returning against a real ticket; confirmation that closed tools
 (git/Bash/connectors) are absent from the spawned agent.
 
+### Result (c1acdf07) - 2026-09-10
+
+The Phase 1 implementation and no-model verification landed with the physical
+`{items: [...]}` envelope, read-only audit/consult, aligned results, shared
+three-child admission, and bounded owned-child cleanup. Captured forks can use
+the tool without broadening their active surface. The controller is disposed on
+session replacement/shutdown; handles remain session-local result identities,
+not resumable Claude sessions. Phase 2/3 behavior is not implemented.
+
+Plan and exact sanitized pre-build evidence:
+`ai-docs/.plans/2026-09/10-0144-260908-feat-ws-pi-claude-delegate-tool.md`.
+Source checkpoints: `e1572929`, `9d4c95b0`, `80c613f7`, and final elevated
+fix `c1acdf07`. The earlier source commits accidentally used this ticket stem in
+their `## Spec` sections; the frontmatter above names the actual spec anchor.
+
+Review disposition:
+
+- Correctness C1 (SDK executable), C3 (setup/cancellation), C4 (shutdown), and
+  C5 (captured fork) were resolved in Critical review 2. C6 (atomic handle
+  exhaustion) and the relay-introduced SDK status-event regression were resolved
+  in Critical review 3.
+- C2 (owned cleanup) remained Critical after review 3 and was elevated as
+  R3-C2. `c1acdf07` fixes SDK-close exceptions bypassing process cleanup and
+  completes stream/listener ownership. This is an elevated implementer's
+  `[fixed]` report with red/green regression evidence, not a fourth independent
+  review verdict. No review 4 ran.
+- Important I1-I4 (runtime fields, MCP init, terminal results/usage, safe
+  diagnostics) and T2-T3 (registration and local process fixtures) retain their
+  relay-1 self-reported `[fixed]` dispositions; Important was not re-reviewed.
+- T1 initially remained `[not fixed]` because required lifecycle fixtures were
+  missing. The lead explicitly continued mandatory plan verification after the
+  Important relay budget, preserving that historical disposition rather than
+  treating it as permission to skip checks. The elevated pass supplies the
+  missing cancellation, quarantine, late-settlement, cleanup, and production
+  session tests. No identified required no-model fixture gap remains in that
+  final report. Fit returned clean; no Minor findings were reported.
+
+Verification: the three initial elevated regressions failed before the fix
+(0/3), then passed. Final `node --test agents-plugin-pi/test/claude-*.test.ts`:
+45/45 pass. The matrix includes invocation isolation, FIFO capacity, atomic
+exhaustion, never/late SDK setup and iteration, thrown close, unkillable children,
+quarantine settlement, actual local TERM/KILL and ENOENT, closed pipes/listeners,
+and the production registration/session ownership seam. No additional Claude
+model call ran. Final `cd agents-plugin-pi && npm test`: 1,523 total, 1,393 pass,
+130 failures, matching the existing environment/stale-expectation failure count;
+the package suite is not globally green. `git diff --check` passed.
+
+The post-build owner-run real-ticket audit/consult and actual five-tool profile
+acceptance remain pending. This Result records source and automated evidence,
+not that owner acceptance or ticket closure.
+
 ### Phase 2: edit-scoped rewrite
 
 Add the `rewrite` preset and the `edit-targets` whitelist permission model:
@@ -256,3 +307,13 @@ across overlapping invocations. Each running item has a 120-second deadline
 followed by at most two seconds of cleanup. Cancellation is invocation-local;
 shutdown cancels all owned work. Unconfirmed child termination prevents new
 launches instead of releasing capacity as though cleanup succeeded.
+
+## Blocked (2026-09-10)
+
+Await owner-run Phase 1 acceptance on a normal subscription login: invoke the
+built `ws-claude` with one audit and one consult against a real ticket, confirm
+useful aligned outputs, and inspect the actual five-read-tool and empty-MCP
+profile. The passed text-only pre-build probe and automated fixtures do not
+substitute for this check. Stop/report any refusal without prompt iteration.
+Keep the ticket in `ready/`; do not advance Phases 2/3 automatically before this
+acceptance. No additional live call was made during implementation or review.
