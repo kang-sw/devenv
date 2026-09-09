@@ -8,6 +8,8 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
+import { RpcClient } from "@earendil-works/pi-coding-agent";
 import { buildAgentRows, buildWidgetLines, buildHeadingLine, createAgentWidgetController, shouldArmAgentWidget, AGENT_STATUS_KEY, AGENT_WIDGET_KEY, AGENT_WIDGET_ROW_CAP } from "../src/agent-widget.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "../src/spawner.ts";
 import type { ThreadRecord } from "../src/ask.ts";
@@ -246,6 +248,27 @@ describe("buildWidgetLines", () => {
   test("a thread row's rendered line carries the /answer hint after an em-dash separator", () => {
     const lines = buildWidgetLines([awaitingRow("q7")], 0, 80)!;
     assert.match(lines[1], /— \/answer q7$/);
+  });
+
+  test("telemetry fields remain independent, Unicode-safe, and subordinate to the 40-column answer cue", () => {
+    const complete = { name: "模型-worker", role: "thread" as const, state: "awaiting-owner" as const, elapsedMs: 0, answerHint: "/answer q1", model: "provider/模型", effort: "high", latestInput: 0, estimatedUsd: 0 };
+    const completeWide = { ...complete, name: "模", role: "worker" as const, state: "running" as const, answerHint: undefined };
+    const unknown = { ...completeWide, name: "missing", model: undefined, effort: undefined, latestInput: undefined, estimatedUsd: undefined };
+    const narrow = buildWidgetLines([complete], 1, 40)![1];
+    assert.match(narrow, /\/answer q1$/); assert.ok(visibleWidth(narrow) <= 40);
+    for (const width of [80, 120]) {
+      const lines = buildWidgetLines([completeWide, unknown], 0, width)!;
+      assert.match(lines[1], /provider\/模型 \(high\).*in 0.*est \$0/, `complete reported zero is not rendered as unknown at ${width}`);
+      assert.match(lines[2], /— \(—\).*in —.*est \$—/, `unknown fields remain independently unknown at ${width}`);
+      assert.ok(lines.every(line => visibleWidth(line) <= width), `Unicode display width is bounded at ${width}`);
+    }
+  });
+
+  test("rendering telemetry performs neither disk reads nor RPC", (t) => {
+    t.mock.method(fs, "readFile", async () => assert.fail("widget rendering must not read disk"));
+    t.mock.method(RpcClient.prototype, "getState", async () => assert.fail("widget rendering must not query RPC"));
+    const row = { name: "worker", role: "worker" as const, state: "running" as const, elapsedMs: 0, model: "p/m", effort: "low", latestInput: 1, estimatedUsd: .01 };
+    for (const width of [40, 80, 120]) assert.doesNotThrow(() => buildWidgetLines([row], 0, width));
   });
 
   test("every line is bounded to the given width at 40, 80, and 120 columns", () => {
