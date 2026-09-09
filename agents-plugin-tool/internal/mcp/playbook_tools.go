@@ -876,10 +876,10 @@ func workflowPreferSubagentEnabled(configOpts wsconfig.Options) (bool, error) {
 
 // printPlaybook loads a playbook and returns its rendered body text inline.
 //
-// It has two code-side pragmatic concatenation hooks that append a
-// skills-tree SKILL.md body (via wsrsrc.LoadSkillBody) wrapped in a visible
-// <playbook name=... title=...> boundary, applied post-substitution so the
-// appended static prose (no {{.}} placeholders) never trips the
+// It has two code-side pragmatic concatenation hooks that append a body
+// wrapped in a visible <playbook name=... title=...> boundary — hook 1 a
+// skills-tree SKILL.md via wsrsrc.LoadSkillBody, hook 2 a rendered rsrc
+// playbook — applied post-substitution so the appended text never trips the
 // undeclared-var guard:
 //  1. lead-workflow-manual: gated by the global workflow.prefer_subagent
 //     preference — appends lead-prefer-subagent only when the preference is on.

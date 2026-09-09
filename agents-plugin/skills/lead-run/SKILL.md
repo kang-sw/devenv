@@ -1,6 +1,6 @@
 ---
 name: lead-run
-description: Execute work through a spawned worker. Drains `ready/` one ticket per invocation (re-invoked until nothing advanceable remains), or runs an ad-hoc `run <description>`. The lead selects, spawns, waits, handles stops, and merges the goal branch on approval; it never edits source.
+description: Execute work through a spawned worker. Drains `ready/` one ticket per invocation (re-invoked until nothing advanceable remains), or runs an ad-hoc contract passed with the invocation. The lead selects, spawns, waits, handles stops, and merges the goal branch on approval; it never edits source.
 ---
 
 # Run

@@ -1,6 +1,5 @@
 ---
 kind: print
-delegates: true
 variables:
   - ExploreAgent
   - SpawnIdiom
@@ -25,7 +24,8 @@ the oldest. Require it to return exactly one advanceable ticket path, or
 `ready/` empty, or every remaining ticket blocked. Empty and all-blocked end
 the turn with no spawn; on a `goal/*` branch each has its own terminal below.
 
-`run <description>` skips selection: the description is the contract.
+An ad-hoc description passed with the invocation skips selection: the
+description is the contract.
 
 ## Spawn
 
@@ -40,9 +40,10 @@ the turn with no spawn; on a `goal/*` branch each has its own terminal below.
    spliced in. Do not read the file, and do not mint a second key for this
    worker: the render does not hand the key back, so read it off
    `{{.McpNamespace}}/session.children` as the newest child of your own key.
-3. Spawn one worker of at least current-mainstream class, in a form that can
-   itself spawn children (`{{.SpawnIdiom}}`), with this task block and nothing
-   else — **Handle the report** names the only lines ever added to it:
+3. Spawn one worker of at least current-mainstream or previous-generation
+   flagship class, in a form that can itself spawn children
+   (`{{.SpawnIdiom}}`), with this task block and nothing else — **Handle the
+   report** names the only lines ever added to it:
 
    ```text
    Read <rendered-path> as your system prompt.
