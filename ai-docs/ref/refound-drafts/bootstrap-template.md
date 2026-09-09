@@ -137,8 +137,9 @@ Appended to the checklist as the next version; the head tag moves with it.
   "Suggest declaring `### Implementation Conventions` when the project has
   path-scoped rules, and creating the first ticket through the ticket
   skill."
-- `## On: index health check` route table: drop the two rows that route to
-  the forge skills; behavior and modification knowledge route to
+- `## On: index health check` route table: drop the three rows that route to
+  a forge skill (behavior coverage, modification knowledge, project reading
+  map); behavior and modification knowledge route to
   `ai-docs/manuals/` (prescriptive) or nowhere (derivable).
 - Every handler step that names `spec/`, `mental-model/`, or
   `mental-model.md` as a scaffold target is removed; the archive rule above

@@ -1,6 +1,6 @@
 ---
 title: "Ship the reduced layout downstream: bootstrap template migration for the refoundation"
-sage-review-design: required
+sage-review-design: completed
 parent: 260909-epic-ws-worker-interpreter-refoundation
 related:
   260909-refactor-retire-spec-mental-model-layers: prerequisite; the layers this migration stops scaffolding must already be gone from the tooling, or the template would ship a layout the runtime still expects
@@ -10,6 +10,9 @@ related:
   260909-chore-retire-mercenary-surface: prerequisite; a downstream guide written while the mercenary surface still exists would document a path being removed
   260825-refactor-ws-wsflow-bootstrap-artifact-convergence: converged the two bootstrap lineages onto one shared version counter; this migration item must be authored once and mirrored, never forked
   260807-refactor-dissolve-project-index: precedent; its disposable `acmewidgets` fixture dogfood is the verification shape reused in Phase 2
+sage-review-completeness: completed
+sage-review-design-reviewed: 2dd87bcf59174a5b
+sage-review-completeness-reviewed: 2dd87bcf59174a5b
 ---
 
 # Ship the reduced layout downstream: bootstrap template migration for the refoundation
@@ -104,6 +107,35 @@ have to be re-cut every time an earlier child changed the shape.
    which is precisely the confusion Architecture Rule 4 warns about. If the user
    prefers it bundled, this ticket's last phase is the fallback slot.
 
+- **This ticket owns every sentence in the template, the shipped guide, and
+  the bootstrap playbook; the spec-retirement sibling owns tools and embedded
+  conventions.** The guide's `## Tickets` sentence that calls `ready/` "the
+  spec-addressed implementation-ready status" and any template line that
+  describes promotion under the spec-address gate are rewritten here, in
+  Phase 1, to the sage-reviewed gate epic Cross-Child Decision 8 keeps. No
+  two children edit the same downstream sentence. *Rejected: inherit the
+  wording from the sibling* — it has disclaimed the template.
+- **Superseded checklist items are marked, not left live.** The template's
+  `[obsoleted by vNNNN]` mechanism applies to every earlier item the new
+  item makes wrong — the items that call the spec-authoring, forge, and
+  mental-model-updater skills, the item that adds the `## Spec` trailer, and
+  the item that rewrites `ai-docs/spec/` content — because `adopt` walks
+  every item from the first, not only the head. *Rejected: rely on the
+  forward-only walk* — adopt has no such protection.
+- **Landing the item is the deliverable; the release is not.** The package
+  release that makes the new head tag visible to installed projects is
+  `lead-ship`'s, user-approved (epic Cross-Child Decision 13). Phase 2 ends
+  with the three runs recorded; nothing in this ticket tags or publishes.
+- **Convergence is compared over template-managed sections only.** The
+  bootstrap invariant leaves project-specific sections alone, so the
+  comparison in Phase 2 run (b) covers the sections the upgrade handler
+  rewrites, plus `ai-docs/WORKFLOW.md` whole; project-specific content is
+  excluded by construction. *Rejected: byte equality of `AGENTS.md`* —
+  unreachable for any fixture with content.
+- **No README under `ai-docs/.old/`.** The commit message and the archive
+  step in the item are the record (epic Cross-Child Decision 2's memory
+  tiers); a generated README is a fifth copy of the same sentence.
+
 ## Constraints
 
 - **Shipped-surface rule (`AGENTS.md` Architecture Rule 4, epic decision 11).**
@@ -152,7 +184,7 @@ invoke` and the `fresh` / `upgrade` / `refuse` / `adopt` / `claude-migrate`
 handlers; `## On: fresh` step 3 ("Create `ai-docs/` structure per the template
 setup block"), step 5 (the `.gitignore` entries this ticket keeps), and step 10
 (suggests the two forge skills — must go); the `## On: index health check` route
-table, two of whose rows route to the forge skills and must go; and
+table, three of whose rows route to a forge skill and must go; and
 `judge: migration-condition` (Skip / Apply subset / Apply all), which is the
 judgment the new item is evaluated under.
 
@@ -257,7 +289,18 @@ The item's conditional steps:
 - Add the optional `### Binding Anchor` section under `## Workflow` with its two
   required keys and a note that a project declaring neither has no gate.
 - Reconcile `## Commit Rules`: the `## Spec` trailer and the `renamed-spec:`
-  line have no target once the layer is gone.
+  line have no target once the layer is gone. Before editing, confirm
+  against the spec-retirement sibling's landed Result that no runtime parser
+  still consumes the trailer; if one does, record it and treat the section
+  as a coordination point.
+- Rewrite the template's `## Ticket System` guidance and the guide's
+  `## Tickets` section so `ready/` is described as the sage-reviewed
+  implementation-ready status with no spec-address wording (Decisions).
+- Mark every earlier item the new item supersedes `[obsoleted by v0048]`
+  (Decisions): the items that invoke `lead-write-spec`, `lead-forge-spec`,
+  `lead-forge-mental-model`, or `mental-model-updater`, the item that adds
+  the `## Spec` trailer, and the item that rewrites `ai-docs/spec/` content.
+  Find them by grepping the checklist for those names and paths.
 - Update any `## Project Knowledge` or `## Architecture Rules` guidance bullet
   that routes deep detail to specs or mental models.
 - Keep the `.gitignore` entries the earlier items established; this item adds
@@ -272,8 +315,14 @@ describing the behavioral contract as tests and a section describing the
 worker-and-stop execution model, with the tests-as-contract assumption stated
 plainly and no enforcement attached (Decision 4). Update
 `lead-bootstrap.md`: drop the forge-skill suggestion from the fresh handler,
-drop the forge-skill rows from the index-health route table, and check the
-handler steps that reference the removed layout.
+drop the three index-health route rows that route to a forge skill (behavior
+coverage, modification knowledge, project reading map), and check the
+handler steps that reference the removed layout. The two new guide sections
+also land in this repository's `ai-docs/WORKFLOW.md` (the drafts README
+assigns them here). Place the committed drafts
+`ai-docs/ref/refound-drafts/bootstrap-template.md` and
+`workflow-guide-sections.md`: move the text, delete each draft and its
+README row, fresh-reader audit once on each placed file.
 
 Verification expectations:
 
@@ -295,10 +344,13 @@ Touchpoints: `agents-plugin/skills/lead-bootstrap/AGENTS.template.md`,
 `agents-plugin-wsflow/skills/lead-bootstrap/AGENTS.template.md`,
 `agents-plugin-wsflow/skills/lead-bootstrap/WORKFLOW.md`,
 `agents-plugin-wsflow/skills/lead-bootstrap/SKILL.md` (only if its description
-names a removed layer), `agents-plugin-tool/internal/mcp/bootstrap_alarm_test.go`,
+names a removed layer), `agents-plugin-wsflow/rsrc/lead-bootstrap/lead-bootstrap.md`
+(generated mirror; regenerate with the mirroring manual's env var),
+`ai-docs/WORKFLOW.md`, `ai-docs/ref/refound-drafts/README.md`,
+`agents-plugin-tool/internal/mcp/bootstrap_alarm_test.go`,
 `agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py`.
 
-### Phase 2: Dogfood the upgrade on a disposable fixture, then release
+### Phase 2: Dogfood the upgrade on a disposable fixture
 
 Sequentially dependent on Phase 1: this phase runs the item Phase 1 authored,
 against a live build, and can only be done once the item exists downstream-shaped.
@@ -319,40 +371,49 @@ was missed, before the item reaches any real project.
   `ai-docs/.old/`. Confirm the staleness alarm fires before the run. Run the
   upgrade. Confirm every file is present under `ai-docs/.old/` with history
   preserved by `git mv`, that nothing was deleted, that the alarm clears, and
-  that the resulting `AGENTS.md` and `ai-docs/WORKFLOW.md` match what a fresh
-  bootstrap in an empty repository produces — the convergence invariant.
+  that the resulting `AGENTS.md`'s template-managed sections and the whole
+  `ai-docs/WORKFLOW.md` match what a fresh bootstrap in an empty repository
+  produces — the convergence invariant, scoped per Decisions.
 - **Run (c) — adopt.** Strip the version tag from a copy of the fixture and run
   adopt; it must reach the same end state as run (b) without re-walking the
   archive move destructively.
 - Confirm the doc-coverage alarm no longer exists, or does not fire against the
   archived directories.
-- Release only after all three runs are clean; the tag bump makes every existing
-  project report stale, so a broken item is visible immediately and everywhere.
+- Run (a)'s output — this repository's `AGENTS.md` at the new template
+  version — is committed as part of this phase; without it this repository
+  alarms stale in every session.
+- No release here (Decisions): the tag bump reaches installed projects only
+  through `lead-ship`, after the user approves, and a broken item would then
+  be visible immediately and everywhere — which is why all three runs must be
+  clean and recorded first.
 
 Verification expectations: the three runs above, recorded with the observed
 alarm transitions and the fresh-versus-upgraded comparison, plus the full Go
 suite and both wsflow test modules against the release build.
 
 Touchpoints: a scratch fixture repository (not committed), the built plugin
-under test, and — only if the runs surface a defect — the Phase 1 files.
+under test, this repository's `AGENTS.md` (run (a)'s version tag), and — only
+if the runs surface a defect — the Phase 1 files.
 
 ## Open Questions
 
-- The commit-rules `## Spec` trailer has downstream consumers beyond the
-  template: existing projects' commit history contains the trailer, and this
-  repository's own commit rules declare it. Phase 1 removes it from the template
-  going forward, but whether anything parses the trailer at runtime (a review
-  checkpoint, a ledger, a doctor check) must be confirmed against the sibling
-  layer-retirement ticket's result before Phase 1 edits the section. If that
-  ticket leaves a parser in place, this becomes a coordination point rather than
-  a clean removal.
-- The template's `## Ticket System` guidance and the workflow guide's `## Tickets`
-  section describe promotion into `ready/` under the spec-address gate that epic
-  decision 8 removes. Whether the replacement wording is authored here or
-  inherited from the sibling ticket that removes the gate is not settled; the
-  risk is two children editing the same downstream sentences.
-- Whether the archived `ai-docs/.old/spec` and `ai-docs/.old/mental-model` should
-  carry a short generated README explaining why they were archived, or whether
-  the commit message is sufficient. The epic's memory tiers (decision 2) argue
-  for the commit message; the counter-argument is that a future session listing
-  `.old/` has no context. Not settled by the epic.
+None. The trailer-parser check, the guide-wording ownership, and the `.old/`
+README question are settled under `## Decisions` and carried into Phase 1.
+
+## Sage Review Round 1 (2026-09-09)
+
+### Design Reviewer — block
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | Three open questions are lead decisions, not design-review questions (trailer parser, guide wording ownership, .old README) | critical | All three settled under a new Decisions section: bootstrap owns template and guide wording; trailer check against sibling Result; no README under .old; Open Questions emptied. |
+| 2 | Phase 2 titled as a release step though release is lead-ship's (epic Decision 13) | major | Phase 2 retitled and its release bullet replaced; decision recorded. |
+
+### Completeness Reviewer — concern
+
+| # | Title | Severity |
+|---|-------|----------|
+| 1 | Superseded checklist items not marked obsoleted despite adopt auditing every item | major |
+| 2 | Convergence invariant stated as whole-file equality, unreachable for any fixture with content | major |
+| 3 | Touchpoints miss the wsflow generated mirror, ai-docs/WORKFLOW.md, the drafts and README, and this repo's AGENTS.md at the new version | minor |
+| 4 | Index-health route table has three forge rows, not two | minor |

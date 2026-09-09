@@ -1,13 +1,16 @@
 ---
 title: "drain-ready-queue becomes the single drainer and the worker spawner"
 parent: 260909-epic-ws-worker-interpreter-refoundation
-sage-review-design: required
+sage-review-design: completed
 related:
   260909-chore-ws-refoundation-git-history-measurement-manual: prerequisite; its baseline run must land before this removal
   260730-refactor-retire-goal-fan-out-step-and-session-note: reconciled here; its Phase 1 entry-point deletion is absorbed, its Phase 2 premise is overturned
   260909-refactor-lead-surface-collapse-worker-stop-protocol: dependent; consumes the spawn mechanism this ticket establishes
   260909-research-ws-refoundation-evidence-audit: evidence; harness-capability premises and rejected alternatives
   260725-research-goal-loop-restart-starved-by-background-delegation: the starvation argument that killed background fan-out; this ticket's serial posture is the answer to it
+sage-review-completeness: completed
+sage-review-design-reviewed: 5c3f972c5c00d9bf
+sage-review-completeness-reviewed: 5c3f972c5c00d9bf
 ---
 
 # drain-ready-queue becomes the single drainer and the worker spawner
@@ -62,7 +65,11 @@ Parallelism is the epic's explicit Deferred item and is not opened here.
    rendering (`ferrule` is the base primitive underneath and is not called a
    second time for the same worker; epic Cross-Child Decision 12), and hand
    the worker the whole ticket. The lead does not read `lead-proceed`,
-   does not route, and does not edit source.
+   does not route, and does not edit source. The playbook rendered is
+   `ticket-worker`, whose `role: worker` frontmatter is what makes the render
+   mint a lead-scoped key; both are landed by
+   `260909-refactor-lead-surface-collapse-worker-stop-protocol` Phase 1,
+   which precedes this ticket (epic Cross-Child Decision 21).
    *Rejected: keep fan-out as a second, parallel entry point.* The epic forbids
    a second entry point (Decision 9) and `260730` documents why the existing
    one is unworkable under the Stop-hook loop.
@@ -117,6 +124,28 @@ Parallelism is the epic's explicit Deferred item and is not opened here.
    native harness delegation only. *Rejected: ws runtime as the workflow
    interpreter* — recorded as owner-rejected in the evidence audit.
 
+7. **The drainer is replaced by `lead-run`, shipped as a `playbook.read` shim
+   over a `kind: print` body placed from the committed draft.** The draft at
+   `ai-docs/ref/refound-drafts/lead-run.md` is the body (epic Planned item:
+   move the text, do not rewrite it; delete the draft and its README row on
+   placement; fresh-reader audit once before it lands). It ships as
+   `agents-plugin/rsrc/lead-run/lead-run.md` plus a `skills/lead-run/SKILL.md`
+   shim of the same shape as `lead-discuss`, because the harness-idiom
+   variables the draft uses (`{{.ExploreAgent}}`, `{{.SpawnIdiom}}`) are
+   substituted only on the `playbook.read` / `playbook.render` path — the
+   composed inline `SKILL.md` gets no template expansion, so an inline body
+   would ship the tokens literally. This settles the host-neutral spawn
+   phrasing: the variable is the hook, the host adapter fills it. The draft
+   supersedes the drainer's selection text, both terminals, and the final
+   line; the draft's `[design-review: ...]` marker resolves to: the `/goal`
+   directive and the mandatory final line name `lead-run` (epic Cross-Child
+   Decision 22). `lead-drain-ready-queue` is deleted in the same change, and
+   with it the inline-body pin
+   (`test_skill_dispatch_contracts.py::test_drain_ready_queue_is_inlined_static_body`)
+   and the build-time delegation-posture splice in `skills_compose.go`.
+   *Rejected: edit the drainer's dispatch section in place* — leaves the
+   committed draft stale and the spawn text host-shaped.
+
 ## Constraints
 
 - **Shipped-surface rule (AGENTS.md `## Architecture Rules` 4).** Everything
@@ -146,6 +175,10 @@ Parallelism is the epic's explicit Deferred item and is not opened here.
   `agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py`'s `EXPECTED_SKILLS`
   / `EXPECTED_INLINE_SKILLS` / `EXPECTED_PARALLEL_INIT_SKILLS` /
   `PARALLEL_INIT_TITLES`.
+- **Depends on `260909-refactor-lead-surface-collapse-worker-stop-protocol`
+  Phase 1** (epic Cross-Child Decision 21): `ticket-worker`, the protocol
+  include, and the `role: worker` render mint must be landed before this
+  ticket's Phase 1 starts.
 - **Skill authoring.** Read `ai-docs/manuals/skill-authoring.md` and apply its
   invariant checklist to every changed Invariants/Constraints line before
   editing skill or playbook text (AGENTS.md `## Code Standards` 5).
@@ -216,16 +249,17 @@ Located by search term, not by line number:
 
 ### Phase 1: drain spawns a lead-capability worker per ticket, serially
 
-**Goal.** `lead-drain-ready-queue`'s dispatch step stops handing the ticket to
-`lead-proceed` in the lead's own session and instead: renders the worker
-playbook (which mints a lead-capability child key for the worker's root),
+**Goal.** `lead-run` replaces `lead-drain-ready-queue` (Decision 7). Its
+dispatch renders `ticket-worker` with `playbook.render` (which mints the
+worker's lead-scoped child key for the worker's root),
 spawns one native-harness subagent of at least
-current-mainstream class, hands it the ticket as a source pointer (path and
+current-mainstream or previous-generation-flagship class, hands it the ticket as a source pointer (path and
 stem — never a lead summary of the ticket, per epic Cross-Child Decision 7),
 records the worker against the lead's key, waits for the worker's terminal
-report, and folds that report into the existing turn-ending contract. The
-selection rule, the goal-branch staging, both terminals, the blocker-recording
-rule, and the mandatory verbatim final line are unchanged.
+report, and handles it by stop letter as the draft's `## Handle the report`
+section states. The selection rule, the goal-branch staging, both terminals,
+the blocker-recording rule, and the final line are the draft's; the draft is
+authoritative where it differs from the drainer.
 
 **What the worker is told.** A self-contained task block, not a copy of the
 lead's conversation: its own session key, the ticket path, the branch it works
@@ -233,12 +267,12 @@ on, its stop conditions, and its required terminal report shape. It is expected
 to acquire its own workflow context with its own key rather than receive a
 digest of the lead's.
 
-**What stays open.** This phase does not define the worker's stop-and-report
-protocol text or the worker-facing playbooks — that is
-`260909-refactor-lead-surface-collapse-worker-stop-protocol`. Until that ticket
-lands, the worker runs the existing routing surface with its lead-capability
-key, exactly as the fan-out mini-lead does today. The two tickets are ordered:
-this one supplies the spawn, that one supplies what the spawned worker reads.
+**Ordering.** This phase depends on
+`260909-refactor-lead-surface-collapse-worker-stop-protocol` Phase 1 having
+landed: the protocol include, the `ticket-worker` playbook, and the
+`role: worker` render mint. A worker reaching this ticket before that Result
+exists stops with (c). The sibling's Phase 2 (skill retirement) depends on
+this ticket in turn.
 
 **Verification expectations.**
 
@@ -263,13 +297,20 @@ this one supplies the spawn, that one supplies what the spawned worker reads.
 
 **File touchpoints.**
 
-- `agents-plugin/skills/lead-drain-ready-queue/SKILL.md` — the `## Dispatch a
-  returned ticket` section (grep `lead-proceed`, `merge_confirm`).
-- `agents-plugin-wsflow/skills/lead-drain-ready-queue/SKILL.md` — generated;
-  regenerate, never hand-edit.
-- `agents-plugin/skills/manifest.json` — regenerated hash entry.
-- Possibly `agents-plugin-tool/internal/wsrsrc/skills_compose.go` if the
-  composition anchor (`end of ## Posture`) moves; check `composedSkills`.
+- New: `agents-plugin/rsrc/lead-run/lead-run.md` (from the draft) and
+  `agents-plugin/skills/lead-run/SKILL.md` (shim); the wsflow counterparts by
+  regeneration.
+- Delete: `agents-plugin/skills/lead-drain-ready-queue/` and its wsflow
+  mirror; the drainer's `composedSkills` entry and delegation-posture splice
+  in `agents-plugin-tool/internal/wsrsrc/skills_compose.go`;
+  `test_drain_ready_queue_is_inlined_static_body`.
+- Rename pins: `agents-plugin/skills/manifest.json`,
+  `agents-plugin-wsflow/rsrc/manifest.json`, `skills_mirror_test.go`,
+  `skills_compose_test.go`, `test_wsflow_skill_bundle.py`'s expected sets,
+  `ai-docs/manuals/wsflow-mirroring.md`, and every file that names
+  `lead-drain-ready-queue` (grep both packages and `agents-plugin-tool/`),
+  including the `/goal` loop directive.
+- `ai-docs/ref/refound-drafts/README.md` — drop the placed row.
 - Read-only: the fan-out playbook (source of the mint/track call shapes), the
   session-auth Go files, `ai-docs/manuals/wsflow-mirroring.md`,
   `ai-docs/manuals/skill-authoring.md`.
@@ -321,22 +362,31 @@ and `ferrule` all stay — they now have a consumer in drain.
 - Manifests: `agents-plugin/skills/manifest.json`,
   `agents-plugin/rsrc/manifest.json`,
   `agents-plugin-wsflow/rsrc/manifest.json`.
-- Docs: `ai-docs/manuals/wsflow-mirroring.md` (shipped skills list),
-  `ai-docs/spec/workflow-skills.md` and `ai-docs/spec/plugin-runtime.md` (grep
-  `fan-out`, `transclusion`), `ai-docs/mental-model/workflow-skills.md`
-  (replace the example rather than deleting the sentence), `CHANGELOG.md`.
+- Docs: `ai-docs/manuals/wsflow-mirroring.md` (shipped skills list) and
+  `CHANGELOG.md` only. The spec and mental-model corpus is archived whole by
+  `260909-refactor-retire-spec-mental-model-layers`; do not edit it here.
 
 ## Open Questions
 
-- **How the spawn is expressed host-neutrally.** The epic requires a
-  native-harness subagent "of at least current-mainstream or
-  previous-generation-flagship class" and confirms depth-1 recursion on three
-  hosts, but does not settle how the shipped skill text names the spawn
-  primitive without becoming host-shaped — the exact defect `260730` recorded
-  against fan-out. Settle at design review: a host-neutral phrasing, or a
-  declared hook the host adapter fills.
 - **The disposition of `260730`.** Its Phase 1 is absorbed here and its Phase 2
   premise is overturned; its Phase 3 documentation closeout overlaps this
   ticket's Phase 2. Whether it is dropped, re-scoped to the `session.note`
   question alone, or closed as absorbed is a ticket-inventory decision for the
   user and lead, not something this ticket should decide.
+
+## Sage Review Round 1 (2026-09-09)
+
+### Design Reviewer — pass
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | Host-neutral spawn phrasing left open | minor | Decision 7: lead-run ships as playbook.read shim over a print body; {{.SpawnIdiom}} is the hook the host adapter fills. |
+
+### Completeness Reviewer — block
+
+| # | Title | Severity |
+|---|-------|----------|
+| 1 | Render mint named in Decision 2 does not produce a lead-scoped key | critical |
+| 2 | Committed lead-run draft not referenced; drainer edit-in-place would leave it stale | major |
+| 3 | Spec/mental-model doc touchpoints collide with the spec-retirement sibling | major |
+| 4 | Worker tier phrasing narrower than the epic | minor |

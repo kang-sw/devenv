@@ -1,7 +1,7 @@
 ---
 title: "Collapse the lead skill surface; turn lead procedure playbooks into worker playbooks carrying the stop-and-report protocol"
 parent: 260909-epic-ws-worker-interpreter-refoundation
-sage-review-design: required
+sage-review-design: completed
 related:
   260909-refactor-drain-ready-queue-worker-spawner: prerequisite; supplies the spawn mechanism the worker playbooks are written for
   260909-chore-ws-refoundation-git-history-measurement-manual: prerequisite; its baseline run must land before this removal
@@ -10,6 +10,9 @@ related:
   260909-chore-retire-mercenary-surface: sibling; the auto-injection path for delegate orientation is mercenary-only and dies with it
   260909-research-ws-refoundation-evidence-audit: evidence; assumption verdicts A3/A8 and the rejected alternatives
   260909-bug-proceed-contract-test-pins-pre-diet-lead-proceed-strings: pre-existing failure in the same contract test this ticket edits; distinguish it from a regression
+sage-review-completeness: completed
+sage-review-design-reviewed: a805616b0046fb1b
+sage-review-completeness-reviewed: a805616b0046fb1b
 ---
 
 # Collapse the lead skill surface; turn lead procedure playbooks into worker playbooks carrying the stop-and-report protocol
@@ -22,7 +25,7 @@ and handles first-line escalation" and that "the lead never edits source and
 never reads procedure playbooks" (Cross-Child Decision 4). Two things stand in
 the way, and they are the two halves of this ticket.
 
-**The lead skill surface is still an execution surface.** Eighteen `lead-*`
+**The lead skill surface is still an execution surface.** Seventeen `lead-*`
 skills ship; the run path alone is spread across a routing entry skill, a
 resolver, an implementation playbook that has no skill of its own, and the
 queue drainer. The evidence audit
@@ -36,7 +39,7 @@ judgment", and its conservative biases — "prefer triggering over skipping",
 "when in doubt fall through to full routing" — are exactly what a capable model
 obeys.
 
-**The playbooks are addressed to the lead.** Every `kind: print` playbook in
+**The playbooks are addressed to the lead.** Every `kind: print` playbook (the sample fixture aside) in
 the shipped tree is a `lead-*` playbook, and every `kind: render` playbook is a
 worker or delegate prompt. `print` means "the body comes back inline, the lead
 executes it"; `render` means "the body is written to a file for a subagent, and
@@ -134,7 +137,13 @@ into playbook text the worker actually reads.
    release is a low-reversibility action whose stop belongs to the lead and
    user. The worker's lead-capability key is minted by `playbook.render` when
    the spawner renders the worker playbook; this ticket's stop protocol and
-   worker playbooks assume that key and never mint another. The host agent
+   worker playbooks assume that key and never mint another. Design review
+   found that the render mint maps only delegate roles and never yields a
+   lead scope; per epic Cross-Child Decision 21 this ticket's Phase 1 adds
+   the `worker` frontmatter role, for which `childRoleForPlaybookRole`
+   returns the caller's lead scope, root-bound like `ferrule(capability:
+   "lead")`. That is a capability-model change made under Decisions 12 and
+   21, and it is the only Go change Phase 1 makes beyond instruction strings. The host agent
    id needed to resume a stopped worker is recorded by the lead in the
    per-session `session.note` carry-over section alongside the
    worker-to-ticket assignment (epic Cross-Child Decision 16); re-spawn with
@@ -174,11 +183,40 @@ into playbook text the worker actually reads.
     concurrent lead commit. The fresh-reader audit of the protocol must not
     strike them as unexercised.
 
+11. **Names and the surviving set are fixed** (epic Cross-Child Decision 22).
+    Surviving skills keep the `lead-` prefix. This ticket's Phase 2 renames
+    the ticket-authoring skill to `lead-ticket` and updates every pin; the
+    spawner ships `lead-run`. Housekeeping survives unchanged:
+    `lead-bootstrap`, `lead-tune`, `lead-revive`, `mcp-server-repair`,
+    `lead-workflow-manual`, `lead-check-blockers`. The worktree-scoping,
+    rule-persisting, and delegation-posture skills are not in this ticket's
+    retire list: their deletion is always-ask and undecided, so they survive
+    as they are; the delegation-posture *include* spliced into the drainer
+    dies with the drainer in the spawner ticket regardless.
+    *Rejected: bare names* — see the epic decision.
+
+12. **Phase 1 places the drafts; nothing is converted in place.** The
+    committed drafts `ai-docs/ref/refound-drafts/worker-stop-protocol.md`
+    and `ticket-worker.md` are Phase 1's deliverables (move the text, delete
+    the draft and its README row, fresh-reader audit once). `ticket-worker`
+    supersedes `lead-implement` and `lead-proceed` for the worker; those two
+    are retired in Phase 2, not converted. The reviewer playbooks the worker
+    renders are already `kind: render`. The Phase 1 conversion set is
+    therefore empty, which also settles the landing-order question with the
+    route-facts and spec-retirement siblings: nothing here is converted that
+    they later delete.
+    *Rejected: convert `lead-implement` and `lead-proceed` to `render`* —
+    the draft already carries what a worker needs of them, and both die one
+    phase later.
+
 ## Constraints
 
-- **Depends on `260909-refactor-drain-ready-queue-worker-spawner`.** The worker
-  playbooks are written for a worker that exists; without the spawner they have
-  no reader. Land the spawner first.
+- **Ordering with `260909-refactor-drain-ready-queue-worker-spawner`** (epic
+  Cross-Child Decision 21): this ticket's Phase 1 lands first and is
+  dogfooded by hand-spawned workers (epic Cross-Child Decision 19); the
+  spawner lands next and renders `ticket-worker`; this ticket's Phase 2
+  lands last. A worker reaching Phase 2 before the spawner is `.done/`
+  ends its run after Phase 1's Result with this ticket left in `ready/`.
 - **Shipped-surface rule (AGENTS.md `## Architecture Rules` 4).** Every line
   written here — playbook bodies, skill descriptions, stop-protocol text, any
   Go-emitted instruction string — runs in a project holding only what bootstrap
@@ -195,21 +233,21 @@ into playbook text the worker actually reads.
     playbook contains will fall out under this test rather than needing to be
     rehomed.
   - Text rendered verbatim into a delegate prompt is **exempt** from that
-    destructive-first test and is instead audited under **Agent Layout**:
-    Identity → Constraints → Process → Heuristics → Output (required) →
-    Doctrine, self-contained, with communication rules injected by the calling
-    skill rather than baked into the agent definition. The new worker playbooks
-    are audited under this shape, not the lead-playbook shape.
-  - Every invariant line must pass the seven-item checklist (falsifiable,
-    actionable, one line, context-free, non-redundant, doctrine-aligned,
-    resolvable downstream). The last item is the shipped-surface rule in
-    checklist form.
-  - The **Fresh-Reader Audit** (max three cycles) is mandatory after any edit
-    and its target glob is literally `agents-plugin/rsrc/lead-*/lead-*.md` plus
-    `agents-plugin/skills/*/SKILL.md`; renaming or collapsing lead playbooks
-    changes which files the gate covers, and that change must be deliberate.
-    The **Downstream Consistency Sweep** is mandatory after doctrine, routing,
-    or layout edits.
+    destructive-first test and is written to the manual's **Worker
+    playbook** layout instead: identity and addressee → inputs as pointers →
+    constraints → the closed stop list → report shape, self-contained
+    through pointers, no doctrine section, communication rules injected by
+    the caller. The lead skills use the **Lead skill** layout (thin:
+    identity → what the lead does → the stops it surfaces → output).
+  - Every rule passes the manual's seven **Rule Tests**: falsifiable,
+    actionable, scoped, non-derivable, failure-cited (a failure observed on
+    the current worker tier), non-redundant, resolvable downstream. The last
+    is the shipped-surface rule in test form.
+  - The **fresh-reader audit** runs once per skill or playbook before it
+    lands, not after every edit: one cycle, a second only if a fix produced
+    a new finding; findings classified fix / risk accepted / intentional
+    difference / out of scope. The **mirror sweep** applies whenever a
+    change touches a surface mirrored into the wsflow package.
 - **wsflow mirroring** (`ai-docs/manuals/wsflow-mirroring.md`, mandatory read).
   The wsflow package ships a *superset* of the lead skill names — it carries
   real skills for several playbooks that exist only as rsrc in the full package
@@ -220,9 +258,11 @@ into playbook text the worker actually reads.
   and `skills_compose_test.go`, the mirroring manual's shipped-skills section,
   and `agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py`'s
   `EXPECTED_SKILLS` / `EXPECTED_INLINE_SKILLS` / `EXPECTED_PARALLEL_INIT_SKILLS`
-  / `PARALLEL_INIT_TITLES`. The substitution-eligibility guard fails
-  unbypassably on `ws/`, `ws:`, `ws.`, the word `mercenary`, and a fixed list of
-  retired skill names — a new worker playbook body must satisfy it.
+  / `PARALLEL_INIT_TITLES`. The substitution-eligibility guard applies to
+  `SKILL.md` sources, not to rsrc playbook bodies (those mirror
+  byte-identically); it rejects `ws.`, the word `mercenary`, the
+  `ws:*-only` markers, and a fixed list of retired skill names, while `ws/`
+  and `ws:` are the permitted namespace tokens.
 - **No `mercenary.*` route** (epic Cross-Child Decision 10). Note the coupling:
   `delegate-orientation.md`, which carries the "report user decisions to the
   lead, never wait for human sign-off yourself" rule, is auto-injected only
@@ -314,11 +354,12 @@ Located by search term, not by line number:
 
 ### Phase 1: the stop-and-report protocol and the worker-facing procedure playbooks
 
-**Goal.** Write the protocol once, convert the procedure playbooks the worker
-actually needs from lead-facing `print` to worker-facing `render`, and add the
-lead-side escalation handling that receives their stops. The lead skill
-inventory is untouched in this phase — the old entry points keep working while
-the new reader is proven.
+**Goal.** Place the protocol include and the `ticket-worker` playbook from
+the committed drafts (Decision 12), add the `worker` render role that mints
+the worker's lead-scoped key (Decision 8), and prove the reader with
+hand-spawned workers (epic Cross-Child Decision 19). The lead skill inventory
+is untouched in this phase — the old entry points keep working while the new
+reader is proven.
 
 **The protocol.** One shared body, included by the worker playbooks rather than
 restated in each. It states:
@@ -369,19 +410,29 @@ restated in each. It states:
   binding-anchor declaration: a declared section with fixed keys; a project
   that declares none has no convention read.
 
-**The conversion.** For each procedure playbook the worker needs, change the
-addressee, satisfy Agent Layout (Identity → Constraints → Process → Heuristics
-→ Output → Doctrine, self-contained), set `kind: render` with the appropriate
-`role:` and `tier:`, include the protocol, and update every caller to render
-rather than read. Apply the layer model on the way: Layer 1 and Layer 2
-material is deleted, not rehomed, and "uncertain → delete".
+**Placement.** `worker-stop-protocol.md` becomes the bare-name include
+`agents-plugin/rsrc/worker-stop-protocol.md`; `ticket-worker.md` becomes
+`agents-plugin/rsrc/ticket-worker/ticket-worker.md` with `kind: render`,
+`role: worker`, `tier: large`, `includes: worker-stop-protocol`. Move the
+text; do not rewrite it. Where the placed text still contains a
+`[design-review: ...]` marker, resolve it against this ticket's Decisions and
+delete the marker. Delete each draft and its README row on placement. Apply
+the layer model to anything the drafts carried over from the retiring
+playbooks: Layer 1 and Layer 2 material is deleted, not rehomed.
 
-**Lead-side escalation.** The lead's handling of an arriving stop, written into
-the `run` path: on (c), raise tier and re-run the sage gate over the worker's
-*proposed resolution*, then resume; only an exhausted attempt reaches the user.
-On (e), the lead performs the elevation. On (a) and (d), the lead carries the
-decision to the user. Stops must not be re-summarized on the way to the user —
-the pointer rule applies to the lead too.
+**Lead-side escalation.** The lead's handling of an arriving stop lives in
+the `lead-run` draft's `## Handle the report` section and ships with the
+spawner; in this phase the lead applies it by hand. Per letter: on (a) and
+(d), the lead carries the decision to the user with the report's lines, not a
+summary. On (b), the lead reads the pointers the report names and either
+settles the item from the conversation it holds (an Open Decision Queue item
+the user already answered) or puts it to the user; the existing
+`[escalate-to-lead]` adjudication is reused, not reinvented. On (c), the lead
+routes the `proposed_resolution` through `lead-ticket` as an Edition under
+design review at a raised tier, then resumes; only an exhausted attempt
+reaches the user. On (e), the lead re-spawns on a higher-tier worker. Stops
+must not be re-summarized on the way to the user — the pointer rule applies
+to the lead too.
 
 **Verification expectations.**
 
@@ -391,36 +442,42 @@ the pointer rule applies to the lead too.
   must be identified explicitly rather than absorbed.
 - Compose, then mirror, then the skills manifest, each with `-count=1`; drift
   gates green.
-- Fresh-Reader Audit run on every changed `lead-*` playbook and `SKILL.md`, max
-  three cycles, with each finding classified fix / risk accepted / intentional
-  difference / out of scope. Downstream Consistency Sweep run, since this phase
-  changes doctrine and layout.
-- Every new invariant line checked against the seven-item checklist; record the
-  check, not just the outcome.
+- Fresh-reader audit run once on each placed file before it lands (one
+  cycle; a second only if a fix produced a new finding), each finding
+  classified fix / risk accepted / intentional difference / out of scope.
+  Mirror sweep run, since the rsrc tree mirrors into wsflow.
+- Every new rule checked against the manual's seven Rule Tests; record the
+  check, not just the outcome. Decision 10's two rules cite this epic's
+  first dogfood run as their failure.
+- `playbook.render` on a `role: worker` playbook returns a child key whose
+  scope is lead and whose root is the caller's; a test pins it beside the
+  existing role-mapping tests.
 - `test_shipped_surfaces_downstream_neutral.py` green, plus a human-style read
   of the new protocol text as a lead in a project that has never heard of this
   repository.
-- Dogfood: one real ticket driven end to end by a spawned worker reading the
-  new playbooks, producing a terminal report in the fixed shape; and one
-  deliberately induced stop-condition-(c) case showing the lead resolving it
-  without reaching the user. Record both verbatim.
+- Dogfood: one real ticket driven end to end by a hand-spawned worker
+  reading the placed `ticket-worker` (rendered, so the mint is exercised),
+  producing a terminal report in the fixed shape; and one deliberately
+  induced stop-condition-(c) case showing the lead resolving it without
+  reaching the user. Record both verbatim.
 
 **File touchpoints.**
 
-- New: the shared stop-and-report body under `agents-plugin/rsrc/` (a bare-name
-  include, following the shape of the existing non-`kind:` includes).
-- Converted: the procedure playbook directories under `agents-plugin/rsrc/`
-  found by grepping their frontmatter for `^kind: print` — frontmatter, body
-  addressee, and every caller that currently uses `playbook.read` on them.
-- `agents-plugin/skills/lead-drain-ready-queue/SKILL.md` (the lead-side
-  escalation handling lands on the run path established by
-  `260909-refactor-drain-ready-queue-worker-spawner`).
+- New: `agents-plugin/rsrc/worker-stop-protocol.md` (bare-name include,
+  following the shape of the existing non-`kind:` includes) and
+  `agents-plugin/rsrc/ticket-worker/ticket-worker.md`, both from
+  `ai-docs/ref/refound-drafts/`; the drafts and their README rows deleted.
+- `agents-plugin-tool/internal/mcp/playbook_tools.go` —
+  `childRoleForPlaybookRole` gains `worker` → lead scope; the render path
+  binds it to the caller's root; `playbook_tools_test.go` pins it.
 - `agents-plugin/rsrc/delegate-orientation.md` — the reporting rule's new home
   is the protocol; decide whether the original stays for the mercenary path
   that `260909-chore-retire-mercenary-surface` is removing.
-- `agents-plugin-tool/internal/mcp/playbook_tools.go` and `session_state.go` —
-  only if a Go-emitted instruction string still tells the lead to read a
-  converted playbook; grep `Instruction`, `plannerAuthorityInputs`.
+- `agents-plugin-tool/internal/mcp/session_state.go` — only if a Go-emitted
+  instruction string still tells the lead to read a playbook the worker now
+  owns; grep `Instruction`, `plannerAuthorityInputs`.
+- No spec or mental-model document is edited in either phase: that corpus is
+  archived whole by `260909-refactor-retire-spec-mental-model-layers`.
 - Regenerated: `agents-plugin/rsrc/manifest.json`,
   `agents-plugin-wsflow/rsrc/`, `agents-plugin-wsflow/rsrc/manifest.json`,
   `agents-plugin/skills/manifest.json`.
@@ -431,30 +488,37 @@ Sequentially dependent on Phase 1: a lead skill is only removable once the
 worker-facing replacement it fronts is landed and dogfooded. Removing entry
 points first would leave the queue with no path.
 
-**Goal.** Reduce the shipped lead skill inventory to the working five —
-`discuss`, `ticket`, `run`, `review`, `ship` — plus housekeeping (`bootstrap`, `tune`,
-`revive`, `mcp-server-repair`), across both packages and every inventory that
-names them. Skills fronting a document layer another child retires are
-coordinated with that child, not deleted here.
+Depends on `260909-refactor-drain-ready-queue-worker-spawner` being `.done/`
+(epic Cross-Child Decision 21): the drainer must already be `lead-run` before
+the routing entry skill is retired into it.
 
-**Disposition, per skill, to be confirmed at design review.** Absorbed into
-`run`: the routing entry skill and the queue drainer (the drainer is the run
-surface after the spawner ticket). Absorbed into `ticket`: the ticket authoring
-skill's existing write / promote / drop paths with the Open Decision Queue
-intact. Absorbed into `discuss`: the discussion verification checkpoint.
-Becoming worker playbooks or dying with their layer: the implementation,
-spec-authoring, spec-updating, doc-backfill, and forge skills. Deferred to a
-sibling ticket: anything whose only content is the spec or mental-model layer.
-Kept as the lead's `ship` surface: the release skill (epic Cross-Child
+**Goal.** Reduce the shipped lead skill inventory to the working five —
+`lead-discuss`, `lead-ticket`, `lead-run`, `lead-review`, `lead-ship` — plus
+the housekeeping and undecided skills Decision 11 names, across both packages
+and every inventory that names them. Skills fronting a document layer another
+child retires are coordinated with that child, not deleted here.
+
+**Disposition, per skill (Decision 11).** Retired into `lead-run`: the
+routing entry skill (`lead-proceed`); the drainer is already gone with the
+spawner. Renamed to `lead-ticket`: the ticket authoring skill, with its
+write / promote / drop paths and the Open Decision Queue intact, and the
+`lead-ticket`, `lead-discuss`, `lead-review`, `lead-ship` drafts placed over
+the existing bodies (move the text; delete the drafts and README rows;
+fresh-reader audit once each). Retired into `lead-discuss`: the discussion
+verification checkpoint. Retired, superseded by `ticket-worker`:
+`lead-implement`. Dying with their layer, owned by the spec-retirement
+sibling: the spec-authoring, spec-updating, doc-backfill, and forge skills.
+Kept as the lead's `lead-ship` surface: the release skill (epic Cross-Child
 Decision 13); its procedure body may become a manual handed to a subagent,
-but the release decision and stop stay with the lead. With the ticket
+but the release decision and stop stay with the lead. Surviving unchanged:
+`lead-bootstrap`, `lead-tune`, `lead-revive`, `mcp-server-repair`,
+`lead-workflow-manual`, `lead-check-blockers`, `lead-scope-worktree`,
+`lead-add-rule`, `lead-prefer-subagent`. With the ticket
 authoring skill absorbed, compress `tickets.checklist(phase: "intent")` to
 the three items of Decision 9, leave the `content` phase unchanged, and
 rename the ticket conventions' `lead-write-ticket` reference to the `ticket`
 skill (its spec-gate bullets are removed by the sibling that retires the
-spec layer; whichever lands second reconciles the line). Unsettled and listed
-under Open Questions: the worktree scoping skill, the rule-persisting skill,
-and the delegation-posture skill.
+spec layer; whichever lands second reconciles the line).
 
 **Verification expectations.**
 
@@ -475,9 +539,9 @@ and the delegation-posture skill.
 - A cold-load check that the reduced skill set still presents a complete path:
   a fresh session can discuss, author and promote a ticket, run it, and review
   it, with no reference to a retired skill name anywhere in the flow.
-- Fresh-Reader Audit and Downstream Consistency Sweep re-run on the surviving
-  skills, since the collapse changes what each remaining file must stand alone
-  against.
+- Fresh-reader audit run once on each surviving skill whose body this phase
+  changed, and the mirror sweep run, since the collapse changes what each
+  remaining file must stand alone against.
 
 **File touchpoints.**
 
@@ -499,31 +563,37 @@ and the delegation-posture skill.
   sets.
 - `ai-docs/manuals/wsflow-mirroring.md` — shipped skills list and mirroring
   exceptions.
-- `ai-docs/spec/workflow-skills.md`, `ai-docs/spec/plugin-runtime.md`,
-  `ai-docs/mental-model/workflow-skills.md`, `CHANGELOG.md` — inventory and
-  narrative reconciliation, coordinated with the sibling that retires those
-  layers.
+- `CHANGELOG.md` — inventory reconciliation. The spec and mental-model
+  corpus is not edited (see Phase 1 touchpoints).
+- `ai-docs/ref/refound-drafts/README.md` — drop the placed rows.
 - Manifests: `agents-plugin/skills/manifest.json`,
   `agents-plugin/rsrc/manifest.json`,
   `agents-plugin-wsflow/rsrc/manifest.json`.
 
 ## Open Questions
 
-- **Disposition of the worktree-scoping, rule-persisting, and
-  delegation-posture skills.** None is a procedure playbook and none is
-  housekeeping as the epic names it. The delegation-posture body is currently
-  spliced into the drainer at build time, so retiring it as a *skill* and
-  keeping it as an include may be two separate answers.
-- **Whether `ticket` is one skill or the existing skill renamed.** The epic
-  names a `ticket` surface covering write, batch promotion, and drop with the
-  Open Decision Queue. Whether that is the existing authoring skill under a new
-  name (which breaks stem-stable references and every inventory pin) or the
-  existing skill kept as-is with the batch-promotion path added is not settled.
-  Renaming has a real cost here; the epic does not say the name must change.
-- **Which procedure playbooks the worker actually needs after the sibling
-  tickets land.** `260909-refactor-route-resolve-implement-reads-ticket-facts`
-  removes the in-run survey and plan stages, and
-  `260909-refactor-retire-spec-mental-model-layers` removes the doc passes. The
-  set of playbooks worth converting in Phase 1 depends on their landing order,
-  and converting a playbook that a sibling then deletes is wasted review. Fix
-  the ordering at design review.
+- **Final disposition of `lead-scope-worktree`, `lead-add-rule`, and
+  `lead-prefer-subagent`.** They survive this ticket unchanged (Decision
+  11). Whether they are later retired is a user decision under the Approval
+  Protocol's always-ask category; nothing in this ticket depends on it.
+
+## Sage Review Round 1 (2026-09-09)
+
+### Design Reviewer — concern
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | Decision 8 assumes a render mint that only maps delegate roles | major | Decision 8 amended: Phase 1 adds the worker frontmatter role in childRoleForPlaybookRole returning lead scope root-bound; test pinned; epic Decision 21. |
+| 2 | Skill names and surviving set unsettled (bare vs lead- prefix, three unsettled skills) | major | Decision 11 / epic Decision 22: lead- prefix kept, lead-ticket rename, three unsettled skills survive by default; Open Questions reduced to their later disposition. |
+| 3 | Phase 1 conversion set depends on sibling landing order | major | Decision 12: Phase 1 places the two drafts and converts nothing; lead-implement and lead-proceed retire in Phase 2; ordering fixed by epic Decision 21. |
+
+### Completeness Reviewer — block
+
+| # | Title | Severity |
+|---|-------|----------|
+| 1 | Dependency direction on the spawner is inverted relative to the mint ownership | critical |
+| 2 | Constraints restate the pre-rewrite skill-authoring manual (Agent Layout, seven-item checklist, three-cycle audit) | major |
+| 3 | Substitution guard description wrong (ws/ and ws: are permitted tokens; guard applies to SKILL.md not rsrc) | major |
+| 4 | Lead-side escalation handling written into a path that does not exist yet; stop (b) handling missing | major |
+| 5 | Skill inventory count says eighteen; seventeen lead-* skills exist | minor |
+| 6 | Spec/mental-model doc touchpoints collide with the spec-retirement sibling | minor |

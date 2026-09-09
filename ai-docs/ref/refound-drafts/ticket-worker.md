@@ -57,8 +57,9 @@ below governs; read it first.
    target: {kind: "ticket", ticket_path: <path>, ticket_stem: <stem>})`. The
    returned todo list is your skeleton; the branch and merge steps come from
    it. On a `goal/*` branch pass `policy: {branch: {merge_confirm: "skip"}}`.
-   A verdict that reports missing route facts is stop (c): the ticket
-   reached `ready/` without the facts it needs.
+   A verdict that reports missing route facts is stop (c): the lead
+   populates them before spawning, so reaching one here means the ticket
+   was handed over out of order.
 2. Survey only what the ticket leaves open. When the ticket names the files
    and the call sites, start editing. When a question needs a broad sweep,
    spawn {{.ExploreAgent}} with the question, a read-only boundary, and the
@@ -70,8 +71,9 @@ below governs; read it first.
    `{{.McpNamespace}}/playbook.render(name: <reviewer>, session_key: <your
    key>)` and spawn each reviewer by {{.SpawnIdiom}} with the rendered path,
    the ticket path, and the branch name; each reviewer reads the diff from
-   git. Fix findings by severity; a round is one review plus one fix pass. A
-   Critical finding still open after the third round is stop (e).
+   git. Fix findings by severity. Two rounds: the second verifies the fixes
+   of the first and raises nothing new; there is no third. A Critical
+   finding still open after the fix round is stop (e).
 5. Record: append `### Result (<short-hash>)` to the executed phase with what
    landed, the verification evidence, and the decisions you took. When every
    phase has a Result, `{{.McpNamespace}}/tickets.close(stem: <stem>,

@@ -1,6 +1,6 @@
 ---
 title: "route.resolve_implement reads route facts from the sage-stamped ticket and drops the in-run survey and fast paths"
-sage-review-design: required
+sage-review-design: completed
 parent: 260909-epic-ws-worker-interpreter-refoundation
 related:
   260909-chore-ws-refoundation-git-history-measurement-manual: prerequisite; the epic makes the before-baseline a precondition for every removal
@@ -10,6 +10,9 @@ related:
   260909-research-ws-refoundation-evidence-audit: evidence for the cost table and the rejected alternatives restated below
   260908-feat-implement-skip-survey-for-localized-ticket-target: prior art; introduced the four-fact `plan_depth: none` exception this ticket generalizes into the default
   260908-feat-survey-plan-is-route-not-contract: prior art; already reduced the survey plan to a route rather than a contract
+sage-review-completeness: completed
+sage-review-design-reviewed: b39ecf90d7ce1fe4
+sage-review-completeness-reviewed: b39ecf90d7ce1fe4
 ---
 
 # route.resolve_implement reads route facts from the sage-stamped ticket and drops the in-run survey and fast paths
@@ -113,12 +116,41 @@ source is read.
   only if its content is not already the worker playbook. The reduction is
   stated as a target here and its final content is agreed with
   `260909-refactor-lead-surface-collapse-worker-stop-protocol`.
+- **The low-ceremony current-branch path is removed with the other fast
+  paths.** `currentBranchImplementEligible` is built on the two predicates
+  Phase 1 deletes and `ExplicitDelegationRequest`, so it cannot survive Phase
+  1 unchanged. It goes: the caller is now always a worker on a goal staging
+  branch, one branch per unit of work is the uniform rule, and an ad-hoc
+  target gets a branch exactly as a ticket target does. `low_ceremony_if_safe`
+  is therefore orphaned and removed in Phase 2 with the other orphaned
+  fields; the two tests that pin the path
+  (`TestResolveImplementCurrentBranchPreferenceGate`,
+  `…CurrentBranchCompletionNearMisses`) are deleted in Phase 1, not kept.
+  - Rejected: inline the deleted predicates to keep the path — preserves a
+    third fast path for the one caller class the epic removed from the
+    editing seat.
+- **Missing route facts are a lead-side condition, never a worker stop**
+  (epic Cross-Child Decision 23). Three defined behaviors: the `ready/`
+  promotion gate checks that `## Route Facts` is present (presence only; the
+  sage reviewer judges content); the resolver reports an absent or unreadable
+  block as a named outcome in its verdict text rather than a conservative
+  default; and `lead-run`, before spawning, renders the fact populator once
+  when the section is absent, so tickets promoted before this lands — this
+  repository's own remaining children included — and tickets from older
+  plugins never reach a worker without facts. No downstream migration item.
+  - Rejected: stop (c) on missing facts — a spawn, a stop, and a lead turn
+    per legacy ticket for a fact one cheap-tier call supplies.
+- **Runtime policy inputs stay caller-supplied.** Only the facts a ticket can
+  carry move to the ticket: scope, surface, test surface, and the risk axes.
+  `policy.branch.*` (including `merge_confirm`), `review.override`, and
+  `docs.*` describe the run, not the ticket, and the worker keeps supplying
+  them; the branch-plan machinery they feed is out of scope here.
 - **Ad hoc `implement <description>` proceeds without a ticket.** The worker
   takes the description as its contract, proceeds, and stops only on the closed
   stop list (Decision 5): a low-reversibility merge, an `[escalate-to-lead]`
   entry or Open Decision Queue, a decision contradicted by code reality, an
-  always-ask irreversible action, or a Critical finding surviving three review
-  rounds. Everything else it decides, records in `## AI Context`, and carries
+  always-ask irreversible action, or a Critical finding still open after the
+  fix round. Everything else it decides, records in `## AI Context`, and carries
   into the merge-stop report for veto.
   - Rejected: forcing an ad-hoc description through ticket creation first. The
     epic keeps inventory stage moves as user-and-lead batch actions (Decision 8);
@@ -292,12 +324,10 @@ stub sections), `…InstructionsDirectEditLeadOnly`, and
 
 ## Open Questions
 
-The epic does not settle these; resolve at design review before Phase 2.
+The heading and table format are the placed draft's; the current-branch
+path, the missing-facts behavior, and the caller inputs are settled under
+`## Decisions`. Remaining:
 
-- **Exact heading and table format of the route-facts body section.** The
-  transport is settled (body section written by the populator, epic
-  Cross-Child Decision 15); the heading name, column set, and whether the
-  parser reuses the `## Blocked` section machinery are for design review.
 - **Which facts survive the collapse.** Removing the delegation axis, the plan
   stages, and the lead-only arm leaves `facts.risk` and the review-partition
   inputs clearly needed and the `explicit_*_request` and `low_ceremony_if_safe`
@@ -305,16 +335,6 @@ The epic does not settle these; resolve at design review before Phase 2.
   by review partitioning as well as by the removed paths, so the surviving set
   must be derived from the remaining consumers rather than assumed. `cold_context`
   is dead today and should not be carried forward.
-- **`currentBranchImplementEligible` and the low-ceremony `Branch Action:
-  current` path.** It is a third fast path, inline-only, not named by the epic
-  or by this ticket's scope. It is the only route by which an ad-hoc target
-  avoids branch creation and merge todos, so removing it changes ad-hoc
-  behavior; keeping it means one caller-supplied policy field
-  (`low_ceremony_if_safe`) survives the relocation. Undecided.
-- **The legacy top-level argument path.** `handleEnterImplement` still accepts
-  `delegation` / `plan_depth` / `review_alloc` / `need_review` / `need_doc` as
-  top-level arguments. Whether the relocation deletes it or leaves it as a
-  compatibility shim depends on whether any shipped caller still uses it.
 - **Final content of the reduced `prep` guardrail.** Agreed with
   `260909-refactor-lead-surface-collapse-worker-stop-protocol`; this ticket
   states the target (drop the mental-model clause, keep only what a worker
@@ -343,17 +363,20 @@ Scope:
   update `ai-docs/manuals/wsflow-mirroring.md`'s render-dispatch section in the
   same change.
 - Delete `automaticDirectEditEligible`, `automaticLeadOnlyReviewEligible`,
-  `deriveImplementDelegation`, the `explicit_delegation_request` and
-  `explicit_direct_edit_request` fields, and the `lead-only` arm of
-  `deriveImplementReviewAlloc`. `review_alloc` keeps `single` and its
+  `deriveImplementDelegation`, `currentBranchImplementEligible` and the
+  low-ceremony `Branch Action: current` path it gates, the
+  `explicit_delegation_request` and `explicit_direct_edit_request` fields,
+  and the `lead-only` arm of `deriveImplementReviewAlloc`. `review_alloc` keeps `single` and its
   partitioned outcomes; `implementReviewPartitions` and `partitionedReviewAlloc`
   are unchanged.
 - Reduce `implementPrepInstruction` to the agreed worker preamble: drop the
   mental-model lookup clause, keep the binding-anchor clause only if the
   stop-protocol sibling still needs it before edits, and re-evaluate
   `infra.read("impl-playbook")` against the worker playbook's content.
-- Update the `## Fact Contract` tables in `lead-implement` to match, in both
-  packages.
+- Update the `## Fact Contract` tables to match, in both packages, in
+  whichever playbook carries them when this phase runs: `lead-implement` if
+  `260909-refactor-lead-surface-collapse-worker-stop-protocol` Phase 2 has not
+  landed, otherwise `ticket-worker`.
 
 Verification: `go build ./...` first and record every compile error as a
 discovered consumer; then `go test ./...` and `go vet ./...` under
@@ -363,9 +386,11 @@ vars). Delete the tests whose subject is gone
 (`…DelegatedDefaultsToSurveyPlan`, `…DelegatedLocalizedTicketSkipsSurveyPlan`,
 `…SurveyEscalatesResearchFromSurveySignal`,
 `…AutomaticLeadOnlyReviewEligibleRequiresGenuineLow`,
-`…InstructionsDirectEditLeadOnly`, `…DelegatedNoneStub`); keep and adjust the
-partitioned-review, branch-plan, and merge-root suites, which must be
-behaviourally unchanged. Add a test asserting the emitted todo list for a
+`…InstructionsDirectEditLeadOnly`, `…DelegatedNoneStub`,
+`…CurrentBranchPreferenceGate`, `…CurrentBranchCompletionNearMisses`); keep
+and adjust the partitioned-review, branch-plan, and merge-root suites, which
+must be behaviourally unchanged apart from the removed current-branch
+shortcut. Add a test asserting the emitted todo list for a
 ticket target contains `route`, `prep`, `edit`, `review` and no planning stage,
 and one asserting a low-risk change still allocates an independent reviewer.
 Re-run the shipped-surface guard after each instruction-text edit.
@@ -380,38 +405,51 @@ shape), `internal/mcp/{implement_resolver,session_state,playbook_tools}_test.go`
 
 ### Phase 2: Read the surviving facts from the sage-stamped ticket
 
-Goal: for a ticket target the resolver derives its verdict from the ticket, and
-the caller supplies only the target and the session key. For an ad-hoc
+Goal: for a ticket target the resolver derives its route facts from the
+ticket, and the caller supplies the target, the session key, and the runtime
+policy inputs only (`policy.branch.*`, `review.override`, `docs.*`) — no
+route fact. For an ad-hoc
 description the worker proceeds from the description under the closed stop list.
 Depends on Phase 1's landed Result, which fixes the surviving fact set.
 
 Scope:
 
-- Implement the transport: the fact populator playbook loses its "never edit
-  the ticket" clause and gains a single-file edit scope with the `### Result`
-  immutability rule restated; it writes the route-facts body section and
-  cites in the ticket's `## Constraints` the manuals that the project's
-  declared path-scoped conventions section maps to the paths the ticket
-  touches (epic Cross-Child Decision 18). The resolver reads that section through the `wsdoc` ticket projection — extend
-  the projection rather than adding a second parser.
-- Make a missing or unreadable fact block a defined outcome, not a silent
-  default: a ticket that reaches `ready/` without route facts is a sage-gate
-  problem, and the resolver should say so rather than fall through to a
-  conservative verdict — the audit's A8 verdict names "when in doubt fall
-  through to full routing" as exactly the bias capable models obey.
+- Implement the transport by placing the committed draft
+  `ai-docs/ref/refound-drafts/ticket-fact-populator.md` over
+  `agents-plugin/rsrc/ticket-fact-populator/ticket-fact-populator.md` (move
+  the text; delete the draft and its README row; fresh-reader audit once).
+  The draft already carries the single-file edit scope, the `### Result`
+  immutability rule, the `## Route Facts` table (heading, columns, placement
+  before `## Phases`), and the `## Constraints` convention citations (epic
+  Cross-Child Decision 18); resolve its `[design-review: ...]` marker to the
+  fact set Phase 1's Result fixed and delete the marker. The resolver reads
+  that section through the `wsdoc` ticket projection — extend the projection
+  rather than adding a second parser.
+- Make a missing or unreadable fact block a defined outcome at three points
+  (Decisions): the `ready/` landing in `tickets_sage.go` refuses a
+  non-exempt ticket with no `## Route Facts` section; the resolver names the
+  absence in its verdict text instead of falling through to a conservative
+  verdict — the audit's A8 verdict names "when in doubt fall through to full
+  routing" as exactly the bias capable models obey; and the `lead-run`
+  body gains one pre-spawn line: when the section is absent, render the
+  fact populator on the ticket first.
 - Define the ad-hoc path explicitly for `target.kind` `inline` and `unknown`:
   the description is the contract, the worker proceeds, and the verdict text
-  points at the closed stop list rather than at a planning stage. Decide
-  `currentBranchImplementEligible` per the open question.
-- Remove the orphaned caller-supplied fields and the legacy top-level argument
-  path, or record why the shim stays. Keep the published schema opaque.
+  points at the closed stop list rather than at a planning stage.
+- Remove the orphaned caller-supplied fields (`explicit_*_request`,
+  `low_ceremony_if_safe`) and the legacy top-level argument path
+  (`delegation` / `plan_depth` / `review_alloc` / `need_review` / `need_doc`
+  as top-level arguments), unless a grep of both packages finds a shipped
+  caller, in which case record it and keep the shim. Keep the published
+  schema opaque.
 - Update the `## Fact Contract` section: if the lead no longer supplies facts,
   the section describes what the ticket must carry and where, or it is deleted.
 
 Verification: `go test ./...`, `go vet ./...`, both Python bundles, and the
 wsflow regeneration. New tests: a sage-stamped ticket fixture resolves to a
 verdict with no caller facts; the same ticket with the fact block removed
-produces the defined missing-facts outcome rather than a default verdict; an
+produces the defined missing-facts outcome rather than a default verdict, and
+a `ready/` landing of such a ticket is refused by the gate; an
 ad-hoc inline target resolves without a planning stage and without a ticket
 read; `TestRouteResolveImplementSchemaIsOpaque` still passes unchanged. End to
 end, confirm `enter.implement` installs the expected todo ids for both a ticket
@@ -419,6 +457,26 @@ target and an ad-hoc description.
 
 Touchpoints: `agents-plugin-tool/internal/mcp/implement_resolver.go`,
 `session_state.go`, `internal/wsdoc/{frontmatter,tickets,tickets_mutate,tickets_sage}.go`,
-`agents-plugin/rsrc/{lead-implement,ticket-fact-populator,lead-write-ticket}/`
-and their wsflow mirrors, the resolver and session-state test files, both
-`manifest.json` pairs.
+`agents-plugin/rsrc/{ticket-fact-populator,lead-run}/` and the playbook that
+carries the Fact Contract at that time (`lead-implement` or `ticket-worker`),
+their wsflow mirrors, the resolver and session-state test files, both
+`manifest.json` pairs, `ai-docs/ref/refound-drafts/README.md`.
+
+## Sage Review Round 1 (2026-09-09)
+
+### Design Reviewer — pass
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | Three-round Critical wording predates epic Decision 20 | minor | Reworded to Critical still open after the fix round. |
+
+### Completeness Reviewer — block
+
+| # | Title | Severity |
+|---|-------|----------|
+| 1 | currentBranchImplementEligible cannot survive Phase 1 unchanged yet is left undecided | critical |
+| 2 | Missing route facts behavior undefined for tickets promoted before the change (including this epic's own children) | major |
+| 3 | Route-facts section heading and table format left to design review though the committed populator draft fixes them | major |
+| 4 | Caller-supplied runtime policy inputs ambiguous under 'caller supplies only the target' | major |
+| 5 | Fact Contract table location depends on collapse Phase 2 landing | minor |
+| 6 | Legacy top-level argument path disposition open | minor |

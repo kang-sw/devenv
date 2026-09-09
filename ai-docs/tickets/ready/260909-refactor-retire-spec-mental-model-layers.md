@@ -1,16 +1,20 @@
 ---
 title: "Retire the spec and mental-model layers: tools, gates, write-time doc passes, and conventions"
-sage-review-design: required
+sage-review-design: completed
 parent: 260909-epic-ws-worker-interpreter-refoundation
 related:
   260909-chore-ws-refoundation-git-history-measurement-manual: prerequisite; the epic orders the measurement manual first and requires a before-baseline recorded on this repository before any layer is removed
   260909-research-ws-refoundation-evidence-audit: evidence for verdicts A1, A2, A4 and the rejected alternatives restated below
   260909-refactor-route-resolve-implement-reads-ticket-facts: sibling; that ticket addresses no spec stem because this one retires the anchors describing the resolver
-  260909-feat-bootstrap-refoundation-template-migration: downstream; the bootstrap template still teaches the anchor system and the doc directories after this ticket lands
+  260909-feat-bootstrap-refoundation-template-migration: downstream; owns the bootstrap template and shipped guide, which still teach the anchor system and the doc directories after this ticket lands
+  260909-refactor-lead-surface-collapse-worker-stop-protocol: sibling; both edit lead-write-ticket, lead-implement, and lead-workflow-manual, and both touch ticket-conventions; whichever lands second reconciles the shared lines
   260723-feat-ready-spec-address-hard-gate: drop candidate; this ticket removes the gate that ticket would harden
   260716-feat-mental-model-comment-placement-rule: drop candidate; built on a layer this ticket retires
   260716-feat-mental-model-openup-injection: drop candidate; built on a layer this ticket retires
   260716-feat-sage-related-mental-model-curation: drop candidate; built on a layer this ticket retires
+sage-review-completeness: completed
+sage-review-design-reviewed: 8d66854141604cb7
+sage-review-completeness-reviewed: 8d66854141604cb7
 ---
 
 # Retire the spec and mental-model layers: tools, gates, write-time doc passes, and conventions
@@ -287,21 +291,12 @@ Not settled by the epic; resolve at design review or defer.
   as a deferred phase of this ticket; (c) ship it as a separate child. This
   ticket defaults to (a) and treats (b)/(c) as a follow-up, but the choice is
   not the author's to make.
-- **`references.trace` scope.** The tool resolves spec and mental-model
-  cross-references, which retire — but `tickets_graph.go` also resolves
-  `related:` against spec anchors, and closed tickets cite anchors. Remove the
-  tool wholesale, or keep a ticket-to-ticket trace and remove only the doc half?
-  The parent brief lists it under removal; the ticket-graph coupling was found
-  during survey and may argue for the narrower cut.
 - **`legacy_marker.go` disposition.** It is the largest spec-coupled Go file
   with no exported symbols and its own advisory surface. Whether it dies with
   the layer or has a residual non-spec purpose was not determined; read it
   before Phase 2.
-- **This repository's `AGENTS.md`.** Its `## Documentation System`,
-  `## Code Standards` (item 5), and commit-template `## Spec` trailer describe
-  the retiring layers. Updating it is required for coherence but is a
-  repository-local edit that overlaps the epic's planned binding-anchor
-  replacement; whether it lands here or with that planned item is open.
+- (Settled) This repository's `AGENTS.md` edits land in Phase 3 in one
+  change; the binding-anchor section stays with the epic's planned item.
 
 ## Phases
 
@@ -332,11 +327,10 @@ Scope:
 - Remove the doc coverage alarm: the warning builder, both injection sites, the
   config knob and its key constant, its default, and its `config.tune`
   description. Leave the review-track alarm and the review checkpoint working.
-- Add the replacement review finding — a behavior change with no test change —
-  to the review checklist that carries the retiring spec-drift item, written in
+- In `agents-plugin/rsrc/code-review-correctness/code-review-correctness.md`,
+  remove the spec-drift checklist item and add in its place the replacement
+  finding — a behavior change with no test change — written in
   project-neutral terms.
-- Update this repository's `AGENTS.md` documentation-system and commit-template
-  lines only if the Open Question resolves to landing them here.
 
 Verification: `go test ./...` and `go vet ./...` under `agents-plugin-tool/`;
 `python3 -m unittest discover agents-plugin/tests` and
@@ -354,7 +348,7 @@ Touchpoints: `internal/wsdoc/tickets_mutate.go`, `internal/wsdoc/tickets_verify.
 `internal/mcp/doc_coverage_alarm.go`, `internal/mcp/workflow_manual.go`,
 `internal/mcp/server.go`, `internal/wsconfig/scope.go`,
 `internal/wsreview/checkpoint.go` (verify only),
-`agents-plugin/rsrc/{lead-write-ticket,lead-implement,lead-workflow-manual,code-reviewer}/`
+`agents-plugin/rsrc/{lead-write-ticket,lead-implement,lead-workflow-manual,code-review-correctness}/`
 and the wsflow mirrors, both `manifest.json` pairs.
 
 ### Phase 2: Remove the tools, the playbooks, and the conventions
@@ -391,10 +385,28 @@ Scope:
   explanatory paragraph, and the optional `## Spec Impact` section;
   the `Specs`/`SpecRemoves` ticket fields if nothing else reads them,
   the spec-anchor half of the ticket graph's `related:` resolution, and the
-  spec and mental-model areas from `project_tree` and `doctor`. Resolve
-  `legacy_marker.go` and `references.trace` per `## Open Questions` before
-  cutting.
+  spec and mental-model areas from `project_tree` and `doctor`.
+  `references.trace` is deleted wholesale: the ticket-graph half resolves
+  `related:` against spec anchors that no longer exist, and the collateral
+  (closed tickets' spec-anchor entries stop resolving) is accepted by epic
+  Cross-Child Decision 14. Read `legacy_marker.go` before cutting it and
+  record any non-spec residue in the Result.
 - Remove `related-mental-model:` consumption from `ticket-reviewer-design`.
+- Sweep the survivors: grep the seven tool names and the two directory paths
+  (`ai-docs/spec`, `ai-docs/mental-model`) across `agents-plugin/rsrc`,
+  `agents-plugin/skills`, `agents-plugin-wsflow/`, and `agents-plugin-tool/`
+  (excluding `.claude/worktrees/`), and record a per-file disposition in the
+  Result. Known at authoring: `lead-workflow-manual` (seven call sites),
+  `reference-discovery` (three), `lead-discuss` (two), `lead-add-rule`
+  (two, plus a routing table into `ai-docs/mental-model/<domain>.md` — its
+  rule-persisting destination becomes `ai-docs/manuals/` declared through
+  the path-scoped conventions section, and that reroute is this ticket's),
+  `lead-write-ticket`, `impl-playbook.md`, `executor-wrapup.md`,
+  `code-reviewer.md`, `plan-populator-survey` and `plan-populator-research`
+  (deleted by the route-facts sibling; if still present, edit), and the
+  `note_tools.go` advisory string that names spec and mental-model
+  destinations. A playbook that survives with a dead call is a defect this
+  phase owns.
 
 Verification: the compile is the survey — `go build ./...` first, and treat
 every resulting error as a discovered dependency to record. Then `go test ./...`,
@@ -435,8 +447,11 @@ Scope:
   `ai-docs/mental-model.md` overview) under `ai-docs/.old/` following the
   existing dated-snapshot scheme, content unchanged, so the 228 anchors cited
   by closed tickets stay greppable.
-- Update `ai-docs/WORKFLOW.md` and this repository's `AGENTS.md`
-  `## Documentation System` list to describe the reduced layout.
+- Update `ai-docs/WORKFLOW.md` and this repository's `AGENTS.md` in one
+  edit: the `## Documentation System` list, `## Code Standards` item 5, and
+  the `## Commit Rules` `## Spec` trailer and `renamed-spec:` line, to
+  describe the reduced layout. The `### Binding Anchor` section is the
+  epic's planned item and is not touched here.
 - Record the after-pass input for the measurement manual: the removal changes
   the commit trailers the manual reads, so state the cut-over commit.
 
@@ -444,7 +459,11 @@ Verification: `git status` shows moves only, no content diffs
 (`git diff -M --stat` reports pure renames); `go test ./...` and both Python
 bundles still pass; `project_tree` output no longer names the removed areas; a
 grep for one previously cited anchor still resolves inside `ai-docs/.old/`.
-Confirm no shipped file under either plugin package references the moved paths.
+Confirm no shipped file under either plugin package references the moved
+paths, excluding `skills/lead-bootstrap/AGENTS.template.md` and
+`skills/lead-bootstrap/WORKFLOW.md` in both packages: those are owned by
+`260909-feat-bootstrap-refoundation-template-migration`, which is the
+cross-ticket seam, and they keep naming the directories until it lands.
 
 Touchpoints: `ai-docs/spec/`, `ai-docs/mental-model/`, `ai-docs/mental-model.md`,
 `ai-docs/.old/`, `ai-docs/WORKFLOW.md`, `AGENTS.md`, `CLAUDE.md` only if its

@@ -77,6 +77,9 @@ removed.
 - `260909-bug-workflow-cost-measurement-manual-round-three-findings` - triage
   and fix the manual's reported findings, re-run the baseline at the same
   measured commit. Prerequisite for the after-run, not for the removals.
+- Ordering note (Decision 21): the collapse child's Phase 1 (protocol,
+  `ticket-worker` playbook, `role: worker` render mint) lands before the
+  spawner; the collapse child's Phase 2 (skill retirement) lands after it.
 - `260909-refactor-drain-ready-queue-worker-spawner` - drain-ready-queue
   becomes the single drainer and spawner: mints a lead-capability child key
   per ticket and hands the whole ticket to a native worker; retires the
@@ -256,6 +259,47 @@ removed.
     *Rejected: keep three rounds with a same-root-cause stop* — the rounds
     failed by finding different Criticals each time, which that stop does
     not catch.
+
+21. **`role: worker` is what makes `playbook.render` mint a lead-scoped key,
+    and the collapse child owns that change.** Design review found that the
+    render mint (Decision 12) maps only delegate roles to child keys and
+    never yields a lead scope, so Decisions 12 and 8 named a mechanism that
+    did not exist. The fix is a new frontmatter role, `worker`, for which
+    `playbook.render` mints a child key with the caller's lead capability
+    and root, identical in scope to `ferrule(capability: "lead")`. It is a
+    capability-model change and lands with the playbook that declares the
+    role: the collapse child's Phase 1, which therefore lands before the
+    spawner. Ordering: collapse Phase 1 (protocol, `ticket-worker`, the
+    mint) → spawner (`lead-run`) → collapse Phase 2 (skill retirement). The
+    spawner renders `ticket-worker` by name and mints nothing else.
+    *Rejected: spawner first with a `ferrule` stopgap* — two spawn shapes
+    for one worker, the second thrown away one ticket later.
+22. **Surviving skills keep the `lead-` prefix; two renames; unsettled
+    skills survive by default.** The working five ship as `lead-discuss`,
+    `lead-ticket` (renamed from the ticket-authoring skill, owned by the
+    collapse child's Phase 2), `lead-run` (replaces the queue drainer, owned
+    by the spawner), `lead-review`, `lead-ship`. Housekeeping survives
+    unchanged: `lead-bootstrap`, `lead-tune`, `lead-revive`,
+    `mcp-server-repair`, `lead-workflow-manual`, `lead-check-blockers`. The
+    worktree-scoping, rule-persisting, and delegation-posture skills are
+    not retired by any child: deleting a skill is always-ask, the user has
+    not decided, and survival is the cheap default; their disposition is an
+    open item for the user, not a worker stop. `/goal` and the drainer's
+    verbatim final line name `lead-run`.
+    *Rejected: bare names (`discuss`, `run`)* — every inventory pin, the
+    `/goal` loop, and downstream muscle memory carry the prefix; the
+    rename buys nothing the collapse does not already buy.
+23. **Route facts are grandfathered lead-side, never as a worker stop.** A
+    ticket promoted before the resolver reads route facts, or by an older
+    plugin, has no `## Route Facts` section. Three defined behaviors, all
+    in the route-facts child: the promotion gate checks presence going
+    forward; the resolver reports a missing block as a named outcome rather
+    than falling through to a conservative verdict; and `lead-run`, before
+    spawning, renders the fact populator once when the section is absent.
+    No downstream migration item: the behavior arrives with the plugin.
+    *Rejected: worker stop (c) on missing facts* — one spawn, one stop, and
+    one lead turn per legacy ticket, for a fact the lead can populate in
+    one cheap-tier call before spawning.
 
 ## Completion Criteria
 

@@ -1,6 +1,6 @@
 ---
 title: "Retire the mercenary delegation surface; native harness delegation is the only path"
-sage-review-design: required
+sage-review-design: completed
 parent: 260909-epic-ws-worker-interpreter-refoundation
 related:
   260909-refactor-lead-surface-collapse-worker-stop-protocol: prerequisite; it rewrites the lead playbooks that still carry the mercenary dispatch step, so removing that prose after the collapse avoids editing the same sentences twice
@@ -10,6 +10,9 @@ related:
   260524-bug-ws-agent-register-stale-dir-result-hang: drop candidate; a mercenary runner defect with no runner left to fix
   260611-bug-agent-context-exhaustion-opaque-failure: drop candidate; a mercenary runner defect with no runner left to fix
   260611-research-ws-per-role-delegation-tuning-config: re-scope or drop; its per-role tuning surface is described over the mercenary tier pass-through
+sage-review-completeness: completed
+sage-review-design-reviewed: 4942c0194050de88
+sage-review-completeness-reviewed: 4942c0194050de88
 ---
 
 # Retire the mercenary delegation surface; native harness delegation is the only path
@@ -118,8 +121,10 @@ description strings that name the key.
 **Render-path coupling** — `internal/mcp/playbook_tools.go`: the always-on
 "Mercenary path (always available)" unit inside the delegation tip;
 `mercenaryGuidanceBlock` (the `prefer_mercenary active` block for
-implementer/reviewer roles); `selectProductModeBlocks` with its
-`<!-- ws:mercenary-on:start/end -->` markers; `renderProductModePlaybookBody`;
+implementer/reviewer roles); the `mercenaryEnabled` branch and the
+`mercenaryOnlyStart/End` constants inside `selectProductModeBlocks` (the
+function itself stays: it also strips `ws:full-only` / `ws:wsflow-only`
+blocks, which is the product-mode mechanism); `renderProductModePlaybookBody`;
 and the `preferMercenary` parameter threaded through `renderPlaybookBody`,
 `renderPlaybook`, and the `playbook.render` dispatch case that resolves it.
 
@@ -141,7 +146,14 @@ shells back into `ws-mcp mercenary run-current`, and the
 for async command, cancel process, cancel tree, process snapshot, hook quoting,
 and file replace. Only `cmd/ws-mcp/main.go`, `internal/mcp/server.go`, and their
 tests import this package; `internal/wsrsrc/loader.go` references it in a
-comment only.
+comment only. One coupling is by path, not import:
+`internal/wsstore/store_test.go` (`TestRuntimeMetadataInventoryCoversCurrentJSONFields`)
+parses `../wsagent/agent.go` from disk and fails if the file is gone. The
+store also holds the runner's persistence API — `AgentDefinition`,
+`UpsertAgentDefinition` / `DeleteAgentDefinition`,
+`migrateAgentDefinitionsToInstances`, `PruneAgentInstances` — and the
+`agent.json` / `current/state.json` rows of `metadata_inventory.go`, whose
+only producer is the runner.
 
 **CLI** — `cmd/ws-mcp/main.go`: the `mercenary` subcommand and its
 `register|call|run-current|wait|result|status|interrupt|check-inbox|tail|debug|cancel|recall|print|erase`
@@ -149,7 +161,8 @@ dispatch, the mercenary entries in the tool-name list, and the top-level usage
 string.
 
 **Marker and mirror plumbing** — `internal/wsrsrc/skills_mirror.go` (the
-`mercenary` marker entry in the recognized-marker list), `internal/wsrsrc/wsrsrc.go`
+`mercenary` entry in `disqualifyingTokens`, the substitution-eligibility guard
+that hard-fails a wsflow mirror source containing the word), `internal/wsrsrc/wsrsrc.go`
 (parse-only tier comment referencing mercenary model routing), and
 `internal/mcp/workflow_manual.go` (marker-list comment).
 
@@ -185,8 +198,8 @@ references in its config sections, and the mercenary mentions in
 
 ### Phase 1: Remove the caller-visible mercenary surface
 
-Goal: after this phase no caller — lead, worker, or user — can reach or hear
-about a mercenary. Delete the `mercenary.*` MCP tool family including the
+Goal: after this phase no MCP caller — lead or worker — can reach or hear
+about a mercenary; the CLI family and the runner stay until Phase 2. Delete the `mercenary.*` MCP tool family including the
 `mercenary.debug.*` diagnostics; delete the `workflow.prefer_mercenary` config
 item, its registry entry, its tuning-catalog knob, and its mentions in the
 `config.tune` and `config.list` descriptions; delete the
@@ -221,7 +234,17 @@ Touchpoints: `internal/mcp/server.go`, `internal/mcp/playbook_tools.go`,
 `internal/mcp/workflow_manual.go`, `agents-plugin/rsrc/lead-implement/`,
 `agents-plugin/rsrc/lead-workflow-manual/`, `agents-plugin/rsrc/lead-tune/`,
 `agents-plugin/skills/lead-tune/SKILL.md`, the `agents-plugin-wsflow/` mirrors,
-and the test files listed under Prior Art.
+`agents-plugin-wsflow/skills/lead-tune/SKILL.md` (hand-curated, not a
+substitution mirror), `agents-plugin/runtime.json` (the `mercenary.*`
+tool-window entries; `cmd/ws-mcp/main_test.go` asserts the advertised tool
+set equals that file), `agents-plugin/tests/test_skill_dispatch_contracts.py`
+(pins a `mercenary.call` sentence),
+`agents-plugin/tests/test_ws_mcp_launcher_capabilities.py` (sample payload),
+`agents-plugin/rsrc/delegate-orientation.md` and its manifest entry (its
+only reader is the runner deleted in Phase 2, and its reporting rule now
+lives in the worker stop protocol placed by
+`260909-refactor-lead-surface-collapse-worker-stop-protocol` Phase 1; delete
+it here), and the test files listed under Prior Art.
 
 ### Phase 2: Remove the mercenary runtime, CLI, and marker plumbing
 
@@ -234,11 +257,18 @@ the `ws-mcp mercenary` subcommand family, its entries in the CLI tool-name list,
 and the mercenary token in the usage string; delete the `SelfWorkerStarter`
 re-entry and the `check-inbox` hook command it installs; drop the mercenary
 registration step from `scripts/smoke-ws-mcp.sh`; drop the `mercenary` entry
-from the recognized-marker list in `internal/wsrsrc/skills_mirror.go`; and
-clean the stale references in `internal/wsrsrc/wsrsrc.go` and
-`internal/mcp/workflow_manual.go`. Leave existing on-disk agent registries and
+from `disqualifyingTokens` in `internal/wsrsrc/skills_mirror.go`; clean the
+stale references in `internal/wsrsrc/wsrsrc.go` and
+`internal/mcp/workflow_manual.go`; and remove the runner's persistence API
+from `internal/wsstore` (`AgentDefinition`, `UpsertAgentDefinition`,
+`DeleteAgentDefinition`, `migrateAgentDefinitionsToInstances`,
+`PruneAgentInstances`) together with the `agent.json` / `current/state.json`
+rows of `metadata_inventory.go`, re-anchoring
+`TestRuntimeMetadataInventoryCoversCurrentJSONFields` so it no longer parses
+`../wsagent/agent.go` from disk. Leave existing on-disk agent registries and
 runtime logs under the ws cache home orphaned rather than writing a deletion
-migration, following the retired-session-field precedent.
+migration, following the retired-session-field precedent; the rows are
+orphaned data, the Go API is dead code and goes.
 
 Verification expectations:
 
@@ -249,11 +279,13 @@ Verification expectations:
 - `scripts/smoke-ws-mcp.sh` completes without the mercenary step.
 - `grep -ri mercenary agents-plugin-tool` returns nothing outside deleted-file
   history.
-- The runtime metadata migration gate and the `exec.*` family are unaffected —
-  exercise an `exec.spawn`/`exec.result` round trip to confirm the shared
-  runtime path still works after the runner package is gone.
+- The runtime metadata inventory gate passes against the re-anchored
+  inventory, and the `exec.*` family is unaffected — exercise an
+  `exec.spawn`/`exec.result` round trip to confirm the shared runtime path
+  still works after the runner package is gone.
 
 Touchpoints: `internal/wsagent/` (delete), `cmd/ws-mcp/main.go`,
+`internal/wsstore/{store,metadata_inventory}.go` and `store_test.go`,
 `agents-plugin-tool/scripts/smoke-ws-mcp.sh`,
 `internal/wsrsrc/skills_mirror.go`, `internal/wsrsrc/wsrsrc.go`,
 `internal/mcp/workflow_manual.go`, `cmd/ws-mcp/main_test.go`.
