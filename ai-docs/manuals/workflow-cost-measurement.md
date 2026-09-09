@@ -206,37 +206,41 @@ lifecycle bookkeeping, and a `chore(<other-stem>)` commit that merely lists
 this stem under `## Ticket Updates` belongs to a different ticket.
 
 A later commit is **corrective** when its **subject line** — never the body —
-is typed `fix` or `revert`, or, after every word of the ticket's own stem is
-removed from it, still matches `review round`, `re-review`, `relay`, or
-`fix cycle` case-insensitively while not being typed `docs`.
+is typed `fix` or `revert`. That is the whole automatic rule. Relay and
+re-review evidence is counted by hand: the command prints every
+post-implementation subject, the measurer marks the ones that are repairs, and
+the run records how many were marked and on what reading.
 
-Each restriction closes a way a ticket counts itself. A commit that references
-a ticket reproduces that ticket's own words: the stem and title appear in
-`## Ticket Updates`, so a body-wide match makes a ticket named
-`...-review-relay` corrective against itself; a `docs` commit recording a phase
-Result matches the same vocabulary while correcting nothing; and for that same
-ticket even the subject line collides, because `plan(...): survey plan for
-per-slice review relay` and `merge(...): integrate per-slice review relay` name
-the feature, not a repair — which is why the stem's own words are stripped
-before the vocabulary is matched.
+The automatic rule is deliberately narrow because free-text matching cannot be
+made safe here. A commit that references a ticket reproduces that ticket's own
+words — the stem and title appear in `## Ticket Updates` and usually in the
+subject — so matching `relay` or `review round` anywhere counts a ticket named
+`...-review-relay` as corrective against every one of its own lifecycle
+commits. Stripping the stem's words before matching does not rescue it either:
+the strip is a substring operation, so a ticket whose stem contains `review`
+also destroys `re-review` and `review round` in unrelated subjects and turns
+false positives into silent false negatives. Typed `fix`/`revert` is the only
+part a machine can get right; the rest is a read, and the manual says so
+instead of pretending otherwise.
 
 ```sh
 for stem in $STEMS; do
   first=$(first_impl "$stem")
   if [ -z "$first" ]; then printf '%s unavailable (no implementation commit)\n' "$stem"; continue; fi
+  printf '%s anchor=%s %s\n' "$stem" "$first" "$(git log -1 --format=%s "$first")"
   total=$(git log --format='%h' --grep="$stem" "$first..$BRANCH" | grep -c .)
-  if [ "$total" -eq 0 ]; then printf '%s n/a (no post-implementation commits)\n' "$stem"; continue; fi
-  corrective=$(git log --format='%s' --grep="$stem" "$first..$BRANCH" | awk -v stem="$stem" '
-    BEGIN { n = split(stem, w, "-") }
-    /^docs[(:!]/                    { next }
-    /^(fix[(:!]|[Rr]evert[(:! ])/   { c++; next }
-    { s = tolower($0)
-      for (i = 1; i <= n; i++) if (length(w[i]) > 2) gsub(w[i], " ", s)
-      if (s ~ /review round|re-review|relay|fix cycle/) c++ }
-    END { print c+0 }')
-  printf '%s corrective=%s of %s\n' "$stem" "$corrective" "$total"
+  if [ "$total" -eq 0 ]; then printf '  n/a (no post-implementation commits)\n'; continue; fi
+  corrective=$(git log --format='%s' --grep="$stem" "$first..$BRANCH" \
+    | grep -c -E '^(fix[(:!]|[Rr]evert[(:! ])')
+  printf '  corrective=%s of %s\n' "$corrective" "$total"
+  git log --format='    %h %s' --grep="$stem" "$first..$BRANCH"
 done
 ```
+
+Read the printed `anchor=` line for every stem and say whether that commit is
+plausibly the ticket's first implementation; read the indented subject list and
+mark any further repairs the typed rule missed. Both reads are part of the
+indicator, not optional colour.
 
 Unit: corrective commits out of post-implementation commits, reported as that
 pair, not as a percentage. Unavailable: `unavailable (no implementation
@@ -250,10 +254,18 @@ anecdote; and a project whose implementation commits do not name the stem —
 because the work landed on a branch whose commits name it only in the merge —
 fills up with `unavailable` rows. Count them and report them: a rise in that
 count between the two halves is a change in the commit convention, not in
-re-work. Finally, stripping the stem's words costs a ticket whose own name
-contains the vocabulary its free-text signal — a ticket named
-`...-review-relay` is measured on `fix`/`revert` typing alone — which is the
-deliberate trade for not counting its every lifecycle commit as a repair.
+re-work.
+
+The anchor carries the same weakness in a quieter form. When a ticket's real
+first implementation commit does not name the stem, the selector does not
+always fall through to `unavailable`: it anchors on whatever *later*
+product-typed commit does name it — often a `fix` that is itself the repair,
+which then becomes the anchor and is excluded from its own corrective count,
+while the denominator shrinks to the tail of the ticket. Both readings
+understate the ticket, and only the printed `anchor=` line makes the difference
+visible, which is why reading it is required. The `unavailable` count is the
+window's visible proxy for how often the convention hides implementation
+commits; the wrong-anchor rows are the invisible remainder of the same gap.
 
 ### 4. Escalations recorded in `### Result`
 
@@ -269,18 +281,28 @@ for stem in $STEMS; do
   if ! grep -q '^### Result' "$f"; then
     printf '%s unavailable (no phase Result)\n' "$stem"; continue
   fi
-  n=$(awk '/^### Result/{f=1; next} /^#{2,3} /{f=0} f' "$f" \
-    | grep -c -i -E 'escalat|asked the user|user decision|stopped for|blocked on|awaiting approval')
-  printf '%s escalation_lines=%s\n' "$stem" "$n"
+  m=$(awk '/^### Result/{f=1; next} /^#{2,3} /{f=0} f' "$f" \
+    | grep -i -E 'escalat|asked the user|user decision|stopped for|blocked on|awaiting approval')
+  printf '%s escalation_lines=%s\n' "$stem" "$(printf '%s' "$m" | grep -c .)"
+  [ -n "$m" ] && printf '%s\n' "$m" | sed 's/^/    /'
 done
 ```
 
-Unit: matching lines. Unavailable: a ticket with no `### Result` section
-records `unavailable`, never `0` — a project whose tickets carry no phases has
-this indicator unavailable for the whole window. Limit: a lower bound by
-construction; a stop nobody wrote down is invisible, and a Result that
-discusses escalation in the abstract counts. Read the matched lines before
-reporting the count.
+The matched lines are printed, not just counted, because the count on its own
+is not reportable.
+
+Unit: matching lines, after reading them. Unavailable: a ticket with no
+`### Result` section records `unavailable`, never `0` — a project whose tickets
+carry no phases has this indicator unavailable for the whole window.
+
+Limits. This is a lower bound by construction: a stop nobody wrote down is
+invisible. It is also an upper bound in the other direction, from the same
+self-reference that breaks free-text matching in indicator 3 — a ticket whose
+*deliverable* is escalation behaviour writes the vocabulary all over its own
+Result while recording no stop at all, and there is no automatic mitigation for
+that here. Report the number of lines you read and the number you judged to be
+records of an actual stop, separately; the second number is the indicator, the
+first is only where you started.
 
 ### 5. Judgment items in `## AI Context`
 
@@ -304,7 +326,7 @@ for stem in $STEMS; do
         f && /^[ \t]*$/  { flush(); next }
         f && b != ""     { sub(/^[ \t]+/, ""); b = b " " $0 }
         END              { flush() }'
-done | awk '!seen[$0]++'
+done | awk '!seen[$0]++; END { if (NR == 0) print "unavailable (no ## AI Context in the window)" }'
 ```
 
 Three details of that command are load-bearing. The `@@` prefix marks the
@@ -339,8 +361,10 @@ echo "dropped phases: $(grep -l '\[dropped\]' "$TICKETS"/*/*.md "$TICKETS"/.done
 n=0; for f in "$TICKETS"/.dropped/*.md; do
   [ -e "$f" ] || continue
   stem=$(basename "$f" .md)
-  first_impl "$stem" | grep -q . && n=$((n+1))
-done; echo "dropped with implementation commits: $n"
+  h=$(first_impl "$stem")
+  [ -n "$h" ] || continue
+  n=$((n+1)); printf '  %s <- %s %s\n' "$stem" "$h" "$(git log -1 --format=%s "$h")"
+done; echo "dropped with implementation commits: $n (read the rows above)"
 echo "goal merges on $BRANCH: $(git log "$BRANCH" --merges --format=%s | grep -c '^merge(goal)')"
 echo "goal branches not merged into $BRANCH: $(git branch --list --no-merged "$BRANCH" 'goal/*' | wc -l)"
 git branch --list --no-merged "$BRANCH" 'goal/*'
@@ -355,12 +379,19 @@ age, so compare the after-run against the before-run only as a difference
 (after minus before), and state that the difference covers all work between the
 two commits, not only the window's tickets. A branch that is not merged may be
 in flight rather than abandoned; the listing is printed so the run can say
-which. The dropped-ticket loop reuses `first_impl` precisely because a bare
-`--grep` counts a stem merely listed under another ticket's `## Ticket Updates`
-and counts an administrative `chore(tickets): drop ...` sweep once per ticket
-it closes; even so, read the selected commits before reporting the number. A
-dropped ticket with real implementation commits is the strongest abort signal
-here.
+which.
+
+The dropped-ticket loop reuses `first_impl` because a bare `--grep` counts a
+stem merely listed under another ticket's `## Ticket Updates` and counts an
+administrative `chore(tickets): drop ...` sweep once per ticket it closes. That
+removes the sweeps but not the rest: a `fix`/`feat`/`refactor` commit that
+implements something else while naming this stem as a follow-up, a
+forward-dependency, or the reason the ticket is being dropped still selects.
+Expect roughly a third of the rows to be that; the loop therefore prints each
+stem with its selected subject, and the reported number is the count *after*
+reading them. A dropped ticket with real implementation commits is the
+strongest abort signal available here, which is exactly why it must not be
+reported unread.
 
 ## Procedure
 
