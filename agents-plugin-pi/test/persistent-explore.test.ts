@@ -1,7 +1,9 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync } from "node:fs";
+import { mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createAgentStorageContext } from "../src/agent-storage.ts";
 import { RpcClient, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   registerAgentTools,
@@ -78,7 +80,7 @@ function registerHarness(options: {
     wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" },
   } as never;
   const leafCalls: Array<{ ctx: unknown; opts: unknown }> = [];
-  const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" }, undefined, async (_client, _registry, ctx, _params, opts) => {
+  const handle = registerAgentTools(pi, bridge, { cwd: "/tmp", storage: createAgentStorageContext("test-lead", mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"))) }, undefined, async (_client, _registry, ctx, _params, opts) => {
     leafCalls.push({ ctx, opts });
     return options.leaf?.(ctx, opts) ?? { agentId: "leaf", state: "done", output: "evidence" };
   });

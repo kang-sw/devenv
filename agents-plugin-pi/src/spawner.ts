@@ -83,7 +83,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -96,6 +96,7 @@ import { buildAgentSendSummary, buildAgentSpawnSummary, buildExploreSummary, cre
 import { suggestModels, formatExploreTierRefusal, formatTierWarning, modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx, type ModelCatalogEntry, type TierFailure, type TierRejection } from "./model-catalog.ts";
 import { WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readExploreMode, readSpawnRole, type ExploreMode, type SpawnRole } from "./process-role.ts";
 import { captureForkContext, compareForkRegistrations, removeForkTransport, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
+import { allocateAgentHome, createAgentStorageContext, touchOwnership, updateOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers: tool-group resolution, terminal-stopReason classification,
@@ -557,6 +558,7 @@ export interface AgentRecord {
   /** Explore leaves self-reap from the registry once harvested by wait/exploreLeaf; workers never do. */
   selfReap: boolean;
   waiters: Array<() => void>;
+  ownership?: AgentOwnership;
 }
 
 export type AgentRegistry = Map<string, AgentRecord>;
@@ -659,7 +661,7 @@ function spawnPiProcess(record: AgentRecord, args: string[], cwd: string): void 
   const invocation = getPiInvocation(args);
   const proc = spawn(invocation.command, invocation.args, {
     cwd,
-    env: buildChildProcessEnv(process.env),
+    env: { ...buildChildProcessEnv(process.env), ...(record.ownership ? { [WS_PI_APPROVAL_DIR_ENV]: join(record.ownership.home, "approvals") } : {}) },
     stdio: ["ignore", "pipe", "pipe"],
   });
   record.proc = proc;
@@ -686,6 +688,7 @@ function spawnPiProcess(record: AgentRecord, args: string[], cwd: string): void 
     record.errorMessage = `pi process failed to start: ${err.message}`;
     record.state = "done";
     settleWaiters(record);
+    if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "unknown", observedAt: Date.now() } });
   });
 
   proc.on("close", (code, signal) => {
@@ -694,6 +697,7 @@ function spawnPiProcess(record: AgentRecord, args: string[], cwd: string): void 
     record.exitSignal = signal;
     record.state = "done";
     settleWaiters(record);
+    if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "stopped", running: false, observedAt: Date.now() } });
   });
 }
 
@@ -705,6 +709,15 @@ export interface AgentCallCtx {
   model?: string;
   /** Bridge's sanitized `ws__*` registered tool names, for the `full-worker` group. */
   wsToolNames: readonly string[];
+  storage?: AgentStorageContext;
+}
+
+/** Extracts the immediate dispatcher's stable Pi identity from a live tool call. */
+export function storageContextFromToolCtx(toolCtx: unknown): AgentStorageContext {
+  const value = toolCtx as { sessionManager?: { getSessionId?: () => string }; agentStorageRoot?: string } | undefined;
+  const id = value?.sessionManager?.getSessionId?.();
+  if (!id) throw new Error("ws-pi-agent: current Pi session identity is unavailable");
+  return createAgentStorageContext(id, value?.agentStorageRoot);
 }
 
 export interface ExploreParams {
@@ -758,6 +771,7 @@ export async function exploreLeaf(
   }
 
   const agentId = randomUUID();
+  const ownership = ctx.storage ? allocateAgentHome(ctx.storage, agentId, "explore", undefined, true) : undefined;
   const record: AgentRecord = {
     agentId,
     playbook: "explore",
@@ -769,6 +783,7 @@ export async function exploreLeaf(
     exitSignal: null,
     selfReap: true,
     waiters: [],
+    ownership,
   };
   registry.set(agentId, record);
 
@@ -832,6 +847,8 @@ export interface RpcAgentRecord {
   client?: RpcClient;
   /** Absolute path to the ws-owned `--session` file, reused unchanged across every (re)start. */
   sessionPath: string;
+  /** Durable-home ownership. Absent only for pre-retention legacy records. */
+  ownership?: AgentOwnership;
   /** Lead-rendered playbook prompt path, passed via `--append-system-prompt`; reused unchanged across resumes (no re-render). */
   systemPromptPath?: string;
   /** Resolved `provider/id`, or undefined to inherit pi's own default resolution. Cached so a dormant resume reuses the same model. */
@@ -1624,6 +1641,7 @@ export async function promptAgent(
   // not to the one starting now.
   record.pendingFinal = undefined;
   record.runStartedAt = Date.now();
+  if (record.ownership) updateOwnership(record.ownership.home, { lastActivityAt: Date.now(), liveness: { lifecycle: "live", running: true, observedAt: Date.now() } });
   if (opts?.isLeadPrompt !== false) {
     record.lastLeadPromptAt = Date.now();
   }
@@ -1684,6 +1702,7 @@ export function markAgentExited(
 ): void {
   if (!record.client) return;
   clearLiveState(record);
+  if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "unknown", running: false, observedAt: Date.now() } });
   triggerAgentWidgetRefresh();
   // A child that filed a final and then died before settling still answered;
   // `settled_reason: "exited"` is what tells the lead the death, not silence.
@@ -1770,6 +1789,8 @@ export interface RpcSpawnCtx {
    */
   pi: ExtensionAPI;
   cwd: string;
+  /** Immediate dispatcher's configured Pi home and stable current session identity. */
+  storage?: AgentStorageContext;
   /** `provider/id`, forwarded from the calling tool-execute ctx.model, or undefined to inherit pi's own default. */
   inheritModel?: string;
   /** Current execute/command context's live getAll + configured-auth catalog. */
@@ -1942,10 +1963,17 @@ export function validateForkReadiness(launch: ReturnType<typeof prepareForkLaunc
       ? "missing or reordered callable tools" : compareForkRegistrations(record.forkContext.registeredTools, ready.registeredTools);
     if (mismatch) throw new Error(`ws-pi-agent: fork readiness rejected (${mismatch})`);
   }
+  if (record.ownership && !containedOwnedPath(record.ownership.home, state.sessionFile)) throw new Error("ws-pi-agent: fork readiness rejected (session escaped owned home)");
   record.sessionPath = state.sessionFile;
+  if (record.ownership) updateOwnership(record.ownership.home, { lastActivityAt: Date.now(), liveness: { lifecycle: "live", running: true, observedAt: Date.now() } });
   removeForkTransport(launch.contextPath);
   removeForkTransport(launch.readinessPath);
   rmSync(dirname(launch.contextPath), { recursive: true, force: true });
+}
+
+function containedOwnedPath(home: string, candidate: string): boolean {
+  const r = relative(resolve(home), resolve(candidate));
+  return !!r && !r.startsWith(`..${sep}`) && r !== "..";
 }
 
 async function captureForkSelection(client: RpcClient, record: RpcAgentRecord): Promise<void> {
@@ -1985,6 +2013,7 @@ export function buildRpcClientOptions(
   // stale parent value. Empty values neutralize forced bootstrap selection.
   for (const override of CHILD_BOOTSTRAP_OVERRIDE_ENVS) env[override] = "";
   const args = forkFrom ? ["--fork", forkFrom] : ["--session", sessionPath];
+  args.push("--session-dir", dirname(sessionPath));
   if (role === "fork") args.push("--extension", fileURLToPath(new URL("./index.ts", import.meta.url)));
   else if (systemPromptPath) args.push("--append-system-prompt", systemPromptPath);
   args.push("--tools", tools);
@@ -2008,6 +2037,7 @@ export function recordReport(record: RpcAgentRecord, kind: "question" | "final" 
   if (record.reportLog.length > REPORT_LOG_CAP) {
     record.reportLog.shift();
   }
+  if (record.ownership) touchOwnership(record.ownership.home);
 }
 
 /**
@@ -2563,8 +2593,10 @@ export async function spawnAgent(
     throw new Error("ws-pi-agent: systemPromptPath is required for a non-fork spawn");
   }
   const agentId = randomUUID();
-  const sessionDir = mkdtempSync(join(tmpdir(), "ws-pi-agent-"));
-  const sessionPath = join(sessionDir, "session.jsonl");
+  const role = ctx.spawnRole ?? (ctx.forkFrom ? "fork" : resolveSpawnToolGroup(ctx.toolGroup) === "execute-worker" ? "execute-worker" : "worker");
+  if (!ctx.storage) throw new Error("ws-pi-agent: missing Pi storage context for durable child allocation");
+  const ownership = allocateAgentHome(ctx.storage, agentId, role, ctx.exploreMode);
+  const sessionPath = ownership.sessionPath!;
   const forkLaunch = ctx.forkFrom || ctx.spawnRole === "fork" ? prepareForkLaunch(ctx.forkContext) : undefined;
   let forkSourcePath = ctx.forkFrom;
   if (forkLaunch && ctx.forkSourceEntries) {
@@ -2579,6 +2611,7 @@ export async function spawnAgent(
     alias,
     title: params.title,
     sessionPath,
+    ownership,
     systemPromptPath: params.systemPromptPath,
     modelBase,
     // Explicit caller effort always wins over the config-resolved one
@@ -2594,7 +2627,7 @@ export async function spawnAgent(
     wsToolNames: ctx.wsToolNames,
     toolGroup,
     explicitTools: ctx.explicitTools,
-    spawnRole: ctx.spawnRole ?? (ctx.forkFrom ? "fork" : toolGroup === "execute-worker" ? "execute-worker" : "worker"),
+    spawnRole: role,
     exploreMode: ctx.exploreMode,
     forkContext: ctx.forkContext,
     streaming: false,
@@ -2915,6 +2948,7 @@ export async function stopAgent(
   }
   const client = record.client;
   if (client) {
+    if (record.ownership) updateOwnership(record.ownership.home, { lastActivityAt: Date.now(), liveness: { lifecycle: "stopping", running: true, observedAt: Date.now() } });
     // Review relay #1 (Important, alias/park/cap): clear live state
     // SYNCHRONOUSLY, before either await below, not after both resolve. A
     // record that still reads `client`-live during `abort()`/`stop()` is a
@@ -2937,6 +2971,7 @@ export async function stopAgent(
     } catch {
       // best effort
     }
+    if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "stopped", running: false, observedAt: Date.now() } });
     // Review relay #1 (I2): a stop is a thread-close path too — the ticket
     // names "lead stop" alongside `/done`/fork final/`ws-resolve`. Releasing
     // the bind here keeps a stopped agent from carrying a latched flag into a
@@ -2974,6 +3009,7 @@ export function getAgentTranscriptPath(registry: RpcAgentRegistry, agentId: stri
   if (!record) {
     throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
   }
+  if (record.ownership) touchOwnership(record.ownership.home);
   return { transcript_path: record.sessionPath };
 }
 
@@ -3037,7 +3073,7 @@ export interface AgentToolsHandle {
 export function registerAgentTools(
   pi: ExtensionAPI,
   bridge: BridgeHandle,
-  sessionCtx: { cwd: string },
+  sessionCtx: { cwd: string; storage?: AgentStorageContext },
   /**
    * 260904 Phase 1: see `RpcSpawnCtx.onApprovalPending`'s doc comment.
    * Threaded into both `ws-agent-spawn`'s `spawnAgent` call and
@@ -3156,6 +3192,7 @@ export function registerAgentTools(
         {
           pi,
           cwd: sessionCtx.cwd,
+          storage: sessionCtx.storage ?? storageContextFromToolCtx(toolCtx),
           inheritModel: inheritModelFromToolCtx(toolCtx),
           catalog: modelCatalogFromToolCtx(toolCtx),
           notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx),
@@ -3346,7 +3383,7 @@ export function registerAgentTools(
           const result = await spawnAgent(
             rpcRegistry,
             {
-              pi, cwd: sessionCtx.cwd, inheritModel: mode === "deep" ? inherited : inheritModelFromToolCtx(toolCtx),
+              pi, cwd: sessionCtx.cwd, storage: sessionCtx.storage ?? storageContextFromToolCtx(toolCtx), inheritModel: mode === "deep" ? inherited : inheritModelFromToolCtx(toolCtx),
               catalog: mode === "simple" ? modelCatalogFromToolCtx(toolCtx) : [],
               notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx), wsToolNames: bridge.wsToolNames, client: bridge.client,
               toolGroup: mode === "deep" ? "read-only-explore" : "read-only", spawnRole: "explore", exploreMode: mode,

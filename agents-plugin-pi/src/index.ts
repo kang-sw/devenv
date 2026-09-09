@@ -210,6 +210,7 @@ import {
 import { registerAuditCommands } from "./audit.ts";
 import { registerWsSkillTool } from "./lead-skills.ts";
 import { createToolPreviewTuiRef, loadToolResultTuiModules } from "./tool-result-render.ts";
+import { createAgentStorageContext } from "./agent-storage.ts";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const pluginDir = dirname(srcDir); // agents-plugin-pi/
@@ -454,7 +455,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
         previousOwnKeys,
       });
       const approval = createApprovalRelay(pi, { cwd: ctx.cwd }, rpcRegistryRef);
-      const tools = registerAgentTools(pi, h, { cwd: ctx.cwd }, approval, undefined, exploreGuidePath, toolPreviewTuiRef);
+      const tools = registerAgentTools(pi, h, { cwd: ctx.cwd, storage: createAgentStorageContext(ctx.sessionManager.getSessionId()) }, approval, undefined, exploreGuidePath, toolPreviewTuiRef);
       return { handle: h, agentTools: tools, onApprovalPending: approval };
     });
     if (!sessionBootstrap) return; // notified (and, for a spawned child, already exited) inside bootstrapOrFailLoud — never fall through to a partial/toolless registration.

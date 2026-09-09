@@ -63,6 +63,7 @@ import {
   pushToLead,
   reportKindsSinceLeadPrompt,
   spawnAgent,
+  storageContextFromToolCtx,
   type ResolvedModelInfo,
   type RpcAgentRecord,
   type RpcAgentRegistry,
@@ -720,7 +721,7 @@ export function registerFork(
       let resolvedInfo: ResolvedModelInfo | undefined;
       const result = await spawnAgent(
         rpcRegistry,
-        buildForkSpawnCtx(pi, bridge, sessionCtx, {
+        { ...buildForkSpawnCtx(pi, bridge, sessionCtx, {
           forkFrom,
           forkSourceEntries: captureUnflushedForkSource(toolCtx),
           explicitTools: tools.join(","),
@@ -733,7 +734,7 @@ export function registerFork(
             resolvedInfo = resolved;
             onUpdate?.({ content: [], details: { resolved } });
           },
-        }),
+        }), storage: storageContextFromToolCtx(toolCtx) },
         {
           prompt: buildForkInitialMessage(p.prompt),
           modelName: p.model_name,

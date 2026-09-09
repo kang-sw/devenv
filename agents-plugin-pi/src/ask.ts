@@ -71,6 +71,7 @@ import {
   inheritModelFromToolCtx,
   sendToAgent,
   spawnAgent,
+  storageContextFromToolCtx,
   stopAgent,
   type RpcAgentRecord,
   type RpcAgentRegistry,
@@ -403,6 +404,7 @@ export interface PersistedForkResume {
   toolGroup: ToolGroup;
   modelBase?: string;
   modelEffort?: string;
+  ownership?: import("./agent-storage.ts").AgentOwnership;
 }
 
 /**
@@ -689,6 +691,7 @@ export function captureForkResume(record: RpcAgentRecord): PersistedForkResume {
     toolGroup: record.toolGroup,
     modelBase: record.modelBase,
     modelEffort: record.modelEffort,
+    ...(record.ownership ? { ownership: record.ownership } : {}),
   };
 }
 
@@ -705,6 +708,7 @@ export function rehydrateForkRecord(agentId: string, resume: PersistedForkResume
     agentId,
     client: undefined,
     sessionPath: resume.sessionPath,
+    ...(resume.ownership ? { ownership: resume.ownership } : {}),
     systemPromptPath: resume.systemPromptPath,
     ...(resume.forkContext ? { forkContext: resume.forkContext } : {}),
     modelBase: resume.modelBase,
@@ -1345,6 +1349,7 @@ export async function ensureRespondent(
     {
       pi,
       cwd: sessionCtx.cwd,
+      storage: storageContextFromToolCtx(ctx),
       inheritModel: inheritModelFromToolCtx(ctx),
       catalog: modelCatalogFromToolCtx(ctx),
       notifyTierWarning: tierWarningNotifierFromToolCtx(ctx),

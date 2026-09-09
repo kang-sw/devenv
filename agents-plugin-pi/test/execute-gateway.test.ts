@@ -676,7 +676,7 @@ describe("ws-execute: onModelResolved forwarding (260906 Phase 2)", () => {
     const bridge = { client: { callTool }, wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" } } as unknown as Parameters<typeof registerExecuteGateway>[1];
     const registry: RpcAgentRegistry = new Map();
     registerExecuteGateway(pi, bridge, registry, { cwd: "/tmp", executeWorkerPromptPath: "/tmp/fake-execute-worker-guide.md" });
-    const ctx = { model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.6-high" }, { provider: "pi", id: "small" }], hasConfiguredAuth: () => true } };
+    const ctx = { sessionManager: { getSessionId: () => "test-lead" }, agentStorageRoot: mkdtempSync(join(tmpdir(), "ws-pi-storage-test-")), model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.6-high" }, { provider: "pi", id: "small" }], hasConfiguredAuth: () => true } };
     return { tool: tools.get(EXECUTE_TOOL_NAME)!, registry, ctx };
   }
 

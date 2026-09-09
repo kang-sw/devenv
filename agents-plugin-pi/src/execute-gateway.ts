@@ -115,6 +115,7 @@ import {
   pushToLead,
   resolveAgentId,
   spawnAgent,
+  storageContextFromToolCtx,
   type ResolvedModelInfo,
   type RpcAgentRecord,
   type RpcAgentRegistry,
@@ -670,6 +671,7 @@ export function registerExecuteGateway(
         {
           pi,
           cwd: sessionCtx.cwd,
+          storage: storageContextFromToolCtx(toolCtx),
           inheritModel: inheritModelFromToolCtx(toolCtx),
           catalog: modelCatalogFromToolCtx(toolCtx),
           notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx),
@@ -726,7 +728,7 @@ export function registerExecuteGateway(
         throw new Error(`ws-pi-agent: ${APPROVE_TOOL_NAME} rejected: ${inputValidation.reason}`);
       }
 
-      const sessionDir = dirname(record.sessionPath);
+      const sessionDir = record.ownership?.home ?? dirname(record.sessionPath);
       const decisionPath = approvalDecisionPath(sessionDir, p.cmd_id);
       mkdirSync(dirname(decisionPath), { recursive: true });
       writeFileSync(decisionPath, JSON.stringify({ decision: p.decision, reason: p.reason, command: p.command }));

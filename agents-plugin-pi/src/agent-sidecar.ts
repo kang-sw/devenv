@@ -41,6 +41,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { RpcAgentRecord, RpcAgentRegistry, SpawnAgentRole, ToolGroup } from "./spawner.ts";
 import { parseForkContext, type ForkContext } from "./fork-context.ts";
 import type { ExploreMode } from "./process-role.ts";
+import { validOwnership, type AgentOwnership } from "./agent-storage.ts";
 
 /** Sidecar file version. Bumped only on a breaking shape change; a mismatch is treated as "no sidecar". */
 export const SIDECAR_VERSION = 1;
@@ -82,6 +83,8 @@ export interface PersistedOrphan {
   state?: OrphanState;
   /** ISO time of the newest `reportLog` entry at shutdown; omitted when the child never reported. */
   lastReportAt?: string;
+  /** Additive durable ownership; absence keeps a legacy record resumable. */
+  ownership?: AgentOwnership;
 }
 
 /** See `PersistedOrphan.state`. */
@@ -139,6 +142,7 @@ export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
       // other optional field above — `JSON.stringify` drops it on the way out
       // and `parseOrphans` reads it back the same way.
       lastReportAt: lastReportAt(record),
+      ...(record.ownership ? { ownership: record.ownership } : {}),
     });
   }
   return orphans;
@@ -192,6 +196,7 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
     let forkContext: ForkContext | undefined;
     try { forkContext = parseForkContext(o.forkContext); } catch { continue; }
     if (!o.systemPromptPath && !forkContext) continue;
+    const ownership = o.ownership && validOwnership(o.ownership) && o.ownership.agentId === o.agentId && o.ownership.sessionPath === o.sessionPath ? o.ownership : undefined;
     const toolGroup = o.toolGroup;
     const isKnownToolGroup = toolGroup === undefined || toolGroup === "read-only" || toolGroup === "read-only-explore" || toolGroup === "recon" || toolGroup === "full-worker" || toolGroup === "execute-worker";
     const isKnownRole = o.spawnRole === undefined || o.spawnRole === "worker" || o.spawnRole === "execute-worker" || o.spawnRole === "fork" || o.spawnRole === "explore";
@@ -232,6 +237,7 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
       // and spec both declare ISO. `Number.isFinite(Date.parse(...))` rejects
       // anything that does not parse as a date.
       lastReportAt: typeof o.lastReportAt === "string" && Number.isFinite(Date.parse(o.lastReportAt)) ? o.lastReportAt : undefined,
+      ...(ownership ? { ownership } : {}),
     });
   }
   return out;
@@ -259,6 +265,7 @@ export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
     prompt: orphan.prompt,
     client: undefined,
     sessionPath: orphan.sessionPath,
+    ...(orphan.ownership ? { ownership: orphan.ownership } : {}),
     systemPromptPath: orphan.systemPromptPath,
     ...(orphan.forkContext ? { forkContext: orphan.forkContext } : {}),
     modelBase: orphan.modelBase,
