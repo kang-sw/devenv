@@ -123,11 +123,6 @@ func TestSubstitutionGuardRejectsDisqualifyingContent(t *testing.T) {
 		source string
 	}{
 		{
-			name: "mercenary word anywhere",
-			source: "---\nname: fixture\n---\n\n" +
-				"A ws-managed external subprocess agent (mercenary) is reachable.\n",
-		},
-		{
 			name: "ws:full-only marker",
 			source: "---\nname: fixture\n---\n\n" +
 				"<!-- ws:full-only:start -->\nfull-only content\n<!-- ws:full-only:end -->\n",

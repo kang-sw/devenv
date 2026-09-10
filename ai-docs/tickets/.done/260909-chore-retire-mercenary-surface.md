@@ -13,6 +13,7 @@ related:
 sage-review-completeness: completed
 sage-review-design-reviewed: 4942c0194050de88
 sage-review-completeness-reviewed: 4942c0194050de88
+completed: 2026-09-10
 ---
 
 # Retire the mercenary delegation surface; native harness delegation is the only path
@@ -428,6 +429,104 @@ re-scoping to native tiers or dropping). Tickets that merely mention mercenary
 in passing — the harness-pivot research, the opencode drop-in research, the
 pre-release cleanup and API-namespace epics, the dogfood workset — need a
 mention sweep rather than a drop.
+
+### Result (99573fea) - 2026-09-10
+
+Landed as `3d36decd` (runtime, CLI, and marker plumbing), `65b1a812`
+(delegate-orientation and drifted manuals), `99573fea` (review fixes) on
+`impl/epic/refound/bagel-grape-sway`.
+
+`internal/wsagent/` is gone whole — 26 files, every paired `_unix.go` /
+`_windows.go` among them. The `ws-mcp mercenary` subcommand family, its
+`runtime capabilities` command rows, its `runtime.json` command entries, the
+usage-string token, and the smoke script's registration step went with it, as
+did the matching `HIDDEN_COMMANDS` rows in the wsflow runtime-contract test.
+`usage()` collapsed from a two-branch product-mode string to one, since the
+retired verb was the only difference. From `internal/wsstore`: `AgentDefinition`
+and its upsert/read/delete, `AgentInstanceRetentionTTL`,
+`AgentInstanceCleanupResult`, `PruneAgentInstances`,
+`migrateAgentDefinitionsToInstances`, `AgentInternalKey`, and the private
+helpers that served only them; the `agent.json` and `current/state.json` rows of
+`metadata_inventory.go` went too, and
+`TestRuntimeMetadataInventoryCoversCurrentJSONFields` is re-anchored onto
+`internal/execjob` so it no longer parses a deleted file from disk. The
+`mercenary` entry left `disqualifyingTokens`, and the stale comments in
+`wsrsrc.go`, `loader.go`, and the two `TestMain` docstrings were rewritten.
+`agents-plugin/rsrc/delegate-orientation.md` and its wsflow mirror are deleted
+with the runner that was their only reader; both manifests were regenerated with
+the documented entrypoints in the documented order and came out byte-identical.
+
+Verification: `go build ./...` clean; `go vet ./...` clean; `go test ./...
+-count=1` green across all 13 remaining packages; `gofmt -l` clean for every
+file this phase touched (`internal/wsconfig/config.go` and `global.go` are
+pre-existing offenders this range does not touch); `python3 -m unittest discover
+agents-plugin/tests` 55 OK and `agents-plugin-wsflow/tests` 10 OK. Cross-platform
+builds confirm the whole-package-not-per-platform constraint held: `GOOS=windows
+GOARCH=amd64` and `GOOS=darwin GOARCH=arm64` both build clean, and `go vet` under
+`GOOS=windows` compiles the Windows-side test tree too. Against a binary built
+from the branch: `ws-mcp` usage prints
+`<version|doctor|runtime|serve|smoke|config|path|git|tickets>`;
+`ws-mcp mercenary status --name impl` exits 2 with that usage;
+`ws-mcp runtime capabilities` reports 18 commands and no `mercenary.*` in either
+list; `scripts/smoke-ws-mcp.sh` completes without the registration step. A live
+stdio round trip on that binary confirms the `exec.*` family is unaffected —
+`ferrule` -> `exec.shell` returned `status: succeeded`, `exit_code: 0`, stdout
+captured — and `playbook.render` still succeeds, which forces a full rsrc
+manifest load and proves the manifest-entry deletion left the tree loadable.
+`grep -ri mercenary` over `agents-plugin-tool`, `agents-plugin`, and
+`agents-plugin-wsflow` returns nothing, so Phase 1's deferred clean expectation
+is now met. Reviewed in two partitions by fresh correctness and test reviewers;
+correctness returned clean with three Minor, test returned one Important.
+
+Decisions taken:
+
+- `wsstore` keeps the `agent_defs` / `agent_instances` DDL, their column
+  migrations, and the `Count` allowlist. The phase's instruction is that on-disk
+  state stays orphaned rather than getting a deletion migration, and the schema
+  is what lets an existing store still open with those rows readable. Only the Go
+  API on top of them is dead code. The correctness reviewer flagged the residue
+  as Minor and in-scope-as-written: the remaining schema work is now pure cost on
+  every store open, which is a follow-up for whoever decides to prune the cache
+  home.
+- Three SQLite busy-retry tests observed the retry wrap *through* the
+  agent-definition write and point-read paths; they were retargeted onto
+  `UpsertExecJob` / `ExecJob` rather than deleted, since `withSQLiteRetry` is
+  shared store machinery that outlives the runner and `exec_jobs` is the
+  surviving table with the same single-row write-then-read shape.
+  `TestAgentRolePointerHistoryAndCollision` was deleted instead: per-root pointer
+  collision is a property of the removed API alone.
+- The negative guards naming `mercenary.` in the `tools/list` and
+  playbook-render tests were removed rather than kept, because this phase's own
+  verification expectation is a clean `grep -ri mercenary agents-plugin-tool` and
+  after it no code path can emit the token. Where the token was one entry in a
+  larger forbidden-token list, only that entry was dropped and the test kept.
+- The test reviewer's one Important — add a CLI test invoking the retired
+  subcommand by name and asserting it errors as unknown — is
+  **[won't fix: it reintroduces the exact token the phase's grep-clean
+  expectation exists to remove, and the unknown-subcommand path is already
+  covered three times over by the retired-documentation-verb loop in the same
+  file]**. The concern underneath it is addressed token-free by a new
+  `TestTopLevelUsageListsTheWholeSubcommandSet`, which pins the exact advertised
+  verb set in both product modes: a retired verb's dispatch case and its usage
+  token have to disappear together, and the assertion catches either half going
+  missing. Mutation-checked by inserting a fake verb into the usage string.
+- `ai-docs/manuals/ws-agent-runtime.md` is archived to `ai-docs/.old/manuals/`
+  rather than deleted, following the precedent the sibling layer retirement set.
+  Its entire subject was the deleted runner; leaving it live would have kept the
+  ambient manual index advertising a contract for absent code. The mercenary
+  round-trip item in the Windows dogfood checklist was rewritten onto `exec.*`,
+  which is where the per-platform process start/snapshot/cancel path still lives,
+  with a clause on how to drive tools that dispatch but are never advertised in
+  `tools/list`.
+
+Follow-up left open, both Minor from the correctness review and outside this
+phase's named touchpoints: `wsstate.Layout.AgentsDir` is now a dead field whose
+`Manager.Ensure` still creates an empty `agents/` directory per worktree; and
+the orphaned `agent_defs` / `agent_instances` schema noted above.
+
+Board fallout listed in the phase plan (the four mercenary/runner bug tickets and
+the per-role tuning research) is a user-and-lead inventory action per epic
+decision 8 and was not acted on here.
 
 ## Open Questions
 

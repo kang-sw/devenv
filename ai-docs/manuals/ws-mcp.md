@@ -14,8 +14,6 @@ coupling is the code itself:
 - MCP dispatch, schemas, and tool allowlist: `agents-plugin-tool/internal/mcp/`
 - plugin launcher and release packaging: `agents-plugin-tool/internal/wsrsrc/`
   and each package's `runtime.json`
-- named-agent behavior: `agents-plugin-tool/internal/wsagent/` and
-  `ai-docs/manuals/ws-agent-runtime.md`
 
 For live tool schemas and current inventory, ask the runtime: use MCP
 `tools/list`, `ws/runtime.read`, `ws-mcp runtime capabilities`, or the source

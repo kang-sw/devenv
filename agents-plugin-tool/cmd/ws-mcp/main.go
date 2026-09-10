@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/mcp"
-	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
@@ -44,9 +43,6 @@ func main() {
 		configCommand(os.Args[2:])
 	case "path":
 		path(os.Args[2:])
-	case "mercenary":
-		fatalIfNoAgentCommand("mercenary")
-		agents(os.Args[2:])
 	case "git":
 		gitCommand(os.Args[2:])
 	case "tickets":
@@ -62,11 +58,7 @@ func main() {
 }
 
 func usage() {
-	if mcp.NoAgentMode() {
-		fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|git|tickets>")
-		return
-	}
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|mercenary|git|tickets>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|git|tickets>")
 }
 
 func doctor(args []string) {
@@ -196,23 +188,6 @@ func runtimeCapabilities(args []string) {
 
 func runtimeCapabilityCommandNames() []string {
 	commands := []string{
-		"mercenary.call",
-		"mercenary.cancel",
-		"mercenary.check-inbox",
-		"mercenary.debug.events",
-		"mercenary.debug.runtime-log",
-		"mercenary.debug.stderr",
-		"mercenary.debug.stdout",
-		"mercenary.debug.tail",
-		"mercenary.erase",
-		"mercenary.interrupt",
-		"mercenary.print",
-		"mercenary.register",
-		"mercenary.result",
-		"mercenary.run-current",
-		"mercenary.status",
-		"mercenary.tail",
-		"mercenary.wait",
 		"config.list",
 		"config.tune",
 		"git.commit",
@@ -242,7 +217,7 @@ func runtimeCapabilityCommandNames() []string {
 func filterNoAgentCommands(commands []string) []string {
 	out := make([]string, 0, len(commands))
 	for _, command := range commands {
-		if strings.HasPrefix(command, "mercenary.") || command == "config.tune" {
+		if command == "config.tune" {
 			continue
 		}
 		out = append(out, command)
@@ -924,50 +899,6 @@ func runNativeGitLogText(root, rangeValue string, limit int) (string, error) {
 	return runNativeGitText(root, args...)
 }
 
-func agents(args []string) {
-	if len(args) < 1 {
-		agentsUsage()
-		os.Exit(2)
-	}
-	switch args[0] {
-	case "register":
-		agentsRegister(args[1:])
-	case "call":
-		agentsCall(args[1:])
-	case "run-current":
-		agentsRunCurrent(args[1:])
-	case "wait":
-		agentsWait(args[1:])
-	case "result":
-		agentsResult(args[1:])
-	case "status":
-		agentsStatus(args[1:])
-	case "interrupt":
-		agentsInterrupt(args[1:])
-	case "check-inbox":
-		agentsCheckInbox(args[1:])
-	case "tail":
-		agentsTail(args[1:])
-	case "debug":
-		agentsDebug(args[1:])
-	case "cancel":
-		agentsCancel(args[1:])
-	case "recall":
-		agentsRecall(args[1:])
-	case "print":
-		agentsPrint(args[1:])
-	case "erase":
-		agentsErase(args[1:])
-	default:
-		agentsUsage()
-		os.Exit(2)
-	}
-}
-
-func agentsUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp mercenary <register|call|run-current|wait|result|status|interrupt|check-inbox|tail|debug|cancel|recall|print|erase>")
-}
-
 type multiFlag []string
 
 func (m *multiFlag) String() string {
@@ -977,305 +908,6 @@ func (m *multiFlag) String() string {
 func (m *multiFlag) Set(value string) error {
 	*m = append(*m, value)
 	return nil
-}
-
-func agentsRegister(args []string) {
-	fs := flag.NewFlagSet("mercenary register", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	name := fs.String("name", "", "agent name")
-	backend := fs.String("backend", "", "agent backend")
-	harness := fs.String("harness", "", "MCP host harness for model alias resolution")
-	tier := fs.String("tier", "", "deprecated model alias selector")
-	model := fs.String("model", "", "model alias or concrete backend model")
-	systemFile := fs.String("system-prompt-file", "", "system prompt file")
-	_ = fs.Parse(args)
-
-	systemText, err := readOptionalFile(*systemFile)
-	if err != nil {
-		fatal("mercenary register", err)
-	}
-	agent, _, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{
-		Root:             defaultRoot(*root),
-		Name:             *name,
-		Backend:          *backend,
-		Harness:          *harness,
-		Tier:             *tier,
-		Model:            *model,
-		SystemPromptText: systemText,
-	})
-	if err != nil {
-		fatal("mercenary register", err)
-	}
-	fmt.Printf("%s\n", agent.Name)
-}
-
-func agentsCall(args []string) {
-	fs := flag.NewFlagSet("mercenary call", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	name := fs.String("name", "", "agent name")
-	promptFile := fs.String("prompt-file", "", "prompt file; use - for stdin")
-	_ = fs.Parse(args)
-
-	prompt, err := promptFromArgs(fs.Args(), *promptFile)
-	if err != nil {
-		fatal("mercenary call", err)
-	}
-	result, err := wsagent.NewManager(wsagent.Options{}).Call(wsagent.CallOptions{
-		Root:   defaultRoot(*root),
-		Name:   *name,
-		Prompt: prompt,
-	})
-	if err != nil {
-		fatal("mercenary call", err)
-	}
-	fmt.Printf("%s\t%s\tpid=%d\nfollow_up: ws.mercenary.result --timeout 10m | ws.mercenary.wait --timeout 10m | ws.mercenary.status | ws.mercenary.tail | ws.mercenary.cancel\n", result.AgentName, result.Status, result.PID)
-}
-
-func agentsRunCurrent(args []string) {
-	fs := flag.NewFlagSet("mercenary run-current", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	name := fs.String("name", "", "agent name")
-	_ = fs.Parse(args)
-
-	if err := wsagent.NewManager(wsagent.Options{}).RunCurrent(defaultRoot(*root), *name); err != nil {
-		fatal("mercenary run-current", err)
-	}
-}
-
-func agentsWait(args []string) {
-	fs := flag.NewFlagSet("mercenary wait", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	var names multiFlag
-	fs.Var(&names, "name", "agent name; may be repeated")
-	timeout := fs.Duration("timeout", 0, "maximum wait duration; defaults to 10m")
-	_ = fs.Parse(args)
-	names = append(names, fs.Args()...)
-
-	text, err := wsagent.NewManager(wsagent.Options{}).Wait(wsagent.WaitOptions{
-		Root:    defaultRoot(*root),
-		Names:   names,
-		Timeout: *timeout,
-	})
-	if err != nil {
-		fatal("mercenary wait", err)
-	}
-	fmt.Print(text)
-}
-
-func agentsResult(args []string) {
-	fs := flag.NewFlagSet("mercenary result", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	name := fs.String("name", "", "agent name")
-	timeout := fs.Duration("timeout", 0, "maximum wait duration; defaults to non-blocking")
-	_ = fs.Parse(args)
-
-	text, err := wsagent.NewManager(wsagent.Options{}).Result(wsagent.ResultOptions{
-		Root:    defaultRoot(*root),
-		Name:    *name,
-		Timeout: *timeout,
-	})
-	if err != nil {
-		fatal("mercenary result", err)
-	}
-	fmt.Print(text)
-}
-
-func agentsStatus(args []string) {
-	fs := flag.NewFlagSet("mercenary status", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	name := fs.String("name", "", "agent name")
-	_ = fs.Parse(args)
-
-	text, err := wsagent.NewManager(wsagent.Options{}).Status(defaultRoot(*root), *name)
-	if err != nil {
-		fatal("mercenary status", err)
-	}
-	fmt.Print(text)
-}
-
-func agentsInterrupt(args []string) {
-	fs := flag.NewFlagSet("mercenary interrupt", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	name := fs.String("name", "", "agent name")
-	messageFile := fs.String("message-file", "", "message file; use - for stdin")
-	_ = fs.Parse(args)
-
-	message, err := promptFromArgs(fs.Args(), *messageFile)
-	if err != nil {
-		fatal("mercenary interrupt", err)
-	}
-	result, err := wsagent.NewManager(wsagent.Options{}).Interrupt(wsagent.InterruptOptions{
-		Root:    defaultRoot(*root),
-		Name:    *name,
-		Message: message,
-	})
-	if err != nil {
-		fatal("mercenary interrupt", err)
-	}
-	fmt.Printf("%s\tqueued\tmessage=%s\n", result.AgentName, result.MessageID)
-}
-
-func agentsCheckInbox(args []string) {
-	fs := flag.NewFlagSet("mercenary check-inbox", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	name := fs.String("name", "", "agent name")
-	_ = fs.Parse(args)
-
-	messages, err := wsagent.NewManager(wsagent.Options{}).DeliverPendingInbox(defaultRoot(*root), *name, "hook")
-	if err != nil {
-		fatal("mercenary check-inbox", err)
-	}
-	if len(messages) > 0 {
-		fmt.Fprint(os.Stderr, wsagent.ComposeLeadMessageFeedback(messages))
-		os.Exit(2)
-	}
-}
-
-func agentsTail(args []string) {
-	agentsTailRaw(args, false)
-}
-
-func agentsTailRaw(args []string, raw bool) {
-	fs := flag.NewFlagSet("mercenary tail", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	name := fs.String("name", "", "agent name")
-	lines := fs.Int("lines", 40, "number of lines per section")
-	_ = fs.Parse(args)
-
-	text, err := wsagent.NewManager(wsagent.Options{}).Tail(wsagent.TailOptions{
-		Root:  defaultRoot(*root),
-		Name:  *name,
-		Lines: *lines,
-		Raw:   raw,
-	})
-	if err != nil {
-		fatal("mercenary tail", err)
-	}
-	fmt.Print(text)
-}
-
-func agentsDebug(args []string) {
-	if len(args) < 1 {
-		agentsDebugUsage()
-		os.Exit(2)
-	}
-	switch args[0] {
-	case "tail":
-		agentsTailRaw(args[1:], true)
-	case "stdout":
-		agentsDebugStream("stdout", args[1:])
-	case "stderr":
-		agentsDebugStream("stderr", args[1:])
-	case "runtime-log":
-		agentsDebugStream("runtime_log", args[1:])
-	case "events":
-		agentsDebugStream("events", args[1:])
-	default:
-		agentsDebugUsage()
-		os.Exit(2)
-	}
-}
-
-func agentsDebugUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp mercenary debug <tail|stdout|stderr|runtime-log|events>")
-}
-
-func agentsDebugStream(stream string, args []string) {
-	fs := flag.NewFlagSet("mercenary debug "+stream, flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	name := fs.String("name", "", "agent name")
-	lines := fs.Int("lines", 40, "number of lines")
-	_ = fs.Parse(args)
-
-	text, err := wsagent.NewManager(wsagent.Options{}).DiagnosticStream(wsagent.DiagnosticStreamOptions{
-		Root:   defaultRoot(*root),
-		Name:   *name,
-		Stream: stream,
-		Lines:  *lines,
-	})
-	if err != nil {
-		fatal("mercenary debug "+stream, err)
-	}
-	fmt.Print(text)
-}
-
-func agentsCancel(args []string) {
-	fs := flag.NewFlagSet("mercenary cancel", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	name := fs.String("name", "", "agent name")
-	_ = fs.Parse(args)
-
-	text, err := wsagent.NewManager(wsagent.Options{}).Cancel(defaultRoot(*root), *name)
-	if err != nil {
-		fatal("mercenary cancel", err)
-	}
-	fmt.Print(text)
-}
-
-func agentsRecall(args []string) {
-	fs := flag.NewFlagSet("mercenary recall", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	name := fs.String("name", "", "agent name")
-	promptFile := fs.String("prompt-file", "", "recovery prompt file; use - for stdin")
-	_ = fs.Parse(args)
-
-	prompt, err := optionalPromptFromArgs(fs.Args(), *promptFile)
-	if err != nil {
-		fatal("mercenary recall", err)
-	}
-	text, err := wsagent.NewManager(wsagent.Options{}).Recall(wsagent.RecallOptions{
-		Root:   defaultRoot(*root),
-		Name:   *name,
-		Prompt: prompt,
-	})
-	if err != nil {
-		fatal("mercenary recall", err)
-	}
-	fmt.Print(text)
-}
-
-func agentsPrint(args []string) {
-	fs := flag.NewFlagSet("mercenary print", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	name := fs.String("name", "", "agent name")
-	_ = fs.Parse(args)
-
-	text, err := wsagent.NewManager(wsagent.Options{}).Print(defaultRoot(*root), *name)
-	if err != nil {
-		fatal("mercenary print", err)
-	}
-	fmt.Print(text)
-}
-
-func agentsErase(args []string) {
-	fs := flag.NewFlagSet("mercenary erase", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	name := fs.String("name", "", "agent name")
-	_ = fs.Parse(args)
-
-	if err := wsagent.NewManager(wsagent.Options{}).Erase(defaultRoot(*root), *name); err != nil {
-		fatal("mercenary erase", err)
-	}
-}
-
-func promptFromArgs(args []string, promptFile string) (string, error) {
-	if promptFile != "" {
-		return readInputFile(promptFile, "prompt")
-	}
-	if len(args) == 0 {
-		return "", fmt.Errorf("prompt is required")
-	}
-	return strings.Join(args, " "), nil
-}
-
-func optionalPromptFromArgs(args []string, promptFile string) (string, error) {
-	if promptFile != "" {
-		return readInputFile(promptFile, "prompt")
-	}
-	if len(args) == 0 {
-		return "", nil
-	}
-	return strings.Join(args, " "), nil
 }
 
 func readInputFile(path, label string) (string, error) {
@@ -1289,17 +921,6 @@ func readInputFile(path, label string) (string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("read %s file: %w", label, err)
-	}
-	return string(raw), nil
-}
-
-func readOptionalFile(path string) (string, error) {
-	if path == "" {
-		return "", nil
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("read %s: %w", path, err)
 	}
 	return string(raw), nil
 }
