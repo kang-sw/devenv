@@ -32,8 +32,13 @@ Concretely, downstream projects today are scaffolded with `ai-docs/spec/`,
 domain-scoped rules into `ai-docs/mental-model/<domain>.md ## Domain Rules`,
 carries a `## Spec` commit trailer and a `renamed-spec:` rule, and points
 `## Project Memory` at "generated ticket/spec inventories"; their
-`ai-docs/WORKFLOW.md` has whole `## Specs` and `## Mental Models` sections; and
-bootstrap's fresh handler ends by suggesting the two forge skills. Epic decision
+`ai-docs/WORKFLOW.md` has whole `## Specs` and `## Mental Models` sections.
+Bootstrap's fresh handler no longer ends by suggesting the two forge skills,
+and the index-health route table no longer routes to one: the spec-retirement
+sibling already removed both while patching the playbook's dangling calls to
+the deleted forge playbooks (`agents-plugin/rsrc/lead-bootstrap/lead-bootstrap.md`,
+`## On: fresh` has 9 steps and the route table's rows name no forge skill).
+Epic decision
 1 retires those layers as hand-maintained derived documents, epic decision 2
 names the memory tiers that remain (tickets, commit `## AI Context`, notes, a few
 manuals), and epic decision 3 replaces the spec's role: tests are the contract
@@ -171,6 +176,9 @@ have to be re-cut every time an earlier child changed the shape.
   project — this repository included — report as stale until it upgrades.
 - **Do not delete user content.** Restates Decision 1 as a hard boundary for the
   implementation.
+- Convention: ai-docs/manuals/skill-authoring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/rsrc/, agents-plugin-wsflow/skills/, agents-plugin-tool/internal/wsdoc/conventions/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
 
 ## Prior Art
 
@@ -182,9 +190,13 @@ and guide copies, and grepping for the template version tag and its consumers.
 merge with `<!-- CONFLICT: ... -->` markers); the mode detection in `## On:
 invoke` and the `fresh` / `upgrade` / `refuse` / `adopt` / `claude-migrate`
 handlers; `## On: fresh` step 3 ("Create `ai-docs/` structure per the template
-setup block"), step 5 (the `.gitignore` entries this ticket keeps), and step 10
-(suggests the two forge skills — must go); the `## On: index health check` route
-table, three of whose rows route to a forge skill and must go; and
+setup block") and step 5 (the `.gitignore` entries this ticket keeps) — the
+former step 10 that suggested the two forge skills, and the three
+`## On: index health check` route-table rows that routed to a forge skill
+(behavior coverage, modification knowledge, project reading map), are already
+gone: the spec-retirement sibling removed them while patching dangling calls
+to the deleted forge playbooks (`## On: fresh` now has 9 steps and the route
+table's rows name no forge skill); and
 `judge: migration-condition` (Skip / Apply subset / Apply all), which is the
 judgment the new item is evaluated under.
 
@@ -234,12 +246,14 @@ test that will fail first if the two packages are edited unevenly.
   touch `AGENTS.template.md` or the template version tag — the template counter is
   bumped by hand and is independent of the package version.
 - `agents-plugin-tool/internal/wsdoc/doctor.go` contains no spec or mental-model
-  logic at all. The doc-coverage machinery lives in
-  `internal/mcp/doc_coverage_alarm.go`, `internal/wsreview/checkpoint.go`, and the
-  `doc_coverage_alarm` item in `internal/wsconfig/scope.go`. That alarm is retired
-  by the sibling layer-retirement ticket; if any part of it survives, it will fire
-  against the archived directories, so this ticket must confirm it is gone before
-  the fixture run (the earlier fixture dogfood raised exactly this alarm on spec
+  logic at all. The doc-coverage machinery is gone, not merely scheduled for
+  retirement: `internal/mcp/doc_coverage_alarm.go` and
+  `internal/wsdoc/doc_coverage.go` are deleted, and neither
+  `internal/wsreview/checkpoint.go` nor `internal/wsconfig/scope.go` carries a
+  `doc_coverage_alarm` reference (grepped the whole `agents-plugin-tool/` tree,
+  zero hits) — the sibling layer-retirement ticket already landed this, so
+  Phase 2 confirms it stays gone against the fixture rather than confirming it
+  is gone (the earlier fixture dogfood raised exactly this alarm on spec
   stubs).
 - `internal/wsrsrc` tests pin marker handling and skill mirroring, not template
   content. The template-content pins are `bootstrap_alarm_test.go` and the wsflow
@@ -251,6 +265,22 @@ content, one idempotency no-op run against the already-migrated repository, one
 full migration run against the fixture, the staleness alarm observed firing
 before and clearing after, and the convergence invariant checked by comparing the
 upgraded fixture against a fresh bootstrap.
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin/skills/lead-bootstrap/AGENTS.template.md, agents-plugin/skills/lead-bootstrap/WORKFLOW.md, agents-plugin/rsrc/lead-bootstrap/lead-bootstrap.md, agents-plugin-wsflow/skills/lead-bootstrap/AGENTS.template.md, agents-plugin-wsflow/skills/lead-bootstrap/WORKFLOW.md, agents-plugin-wsflow/rsrc/lead-bootstrap/lead-bootstrap.md, ai-docs/WORKFLOW.md, agents-plugin-tool/internal/mcp/bootstrap_alarm_test.go, agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py, this repository's AGENTS.md |
+| scope.surface | public-interface | shipped template, guide, and playbook text every bootstrapped downstream project's AGENTS.md and ai-docs/WORKFLOW.md are built from; no exported Go symbol changes |
+| scope.new_public_symbol | no | none — bootstrap_alarm_test.go has no hardcoded version number (grepped for v0047/v0048), so latestKnownTemplateVersion resolves the new head from file content alone, needing no code change |
+| scope.new_type_contract | no | none — markdown template/guide/playbook edits and a new checklist item's text only |
+| scope.test_surface | existing | agents-plugin-tool/internal/mcp/bootstrap_alarm_test.go and agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py already pin this content; Phase 2 is a dogfood run against a scratch fixture, not a committed test file |
+| complexity.reuse_points | confirmed | the git-mv-archive pattern (AGENTS.template.md v0038, v0046, v0047) and the acmewidgets-fixture dogfood shape (ai-docs/tickets/.done/260807-refactor-dissolve-project-index.md Phase 2) are both read and reused, not merely cited |
+| complexity.side_effect_risk | moderate | bumping the template head arms the staleness alarm for every already-bootstrapped project including this one (## Constraints), so Phase 2 run (a) must re-tag this repository's own AGENTS.md as part of the change |
+| risk.correctness | moderate | many prose touchpoints across two packages under a byte-parity test (test_bootstrap_scaffolds_emit_converged_output_across_packages), plus judgment-carrying prose rewrites (the four-class triage instruction, the ready/ wording rewrite) that the parity test cannot catch if the two packages drift in meaning rather than bytes |
+| risk.fit | low | squarely the epic's named last deliverable, following the established migration-item and git-mv-archive conventions already used repeatedly in this same template (v0038, v0046, v0047) |
+| risk.test | low | bootstrap_alarm_test.go and the wsflow bundle test gate the mechanical parity, and Phase 2's three-run dogfood protocol (idempotency, full migration, adopt) mirrors a proven precedent (260807-refactor-dissolve-project-index Phase 2) rather than inventing new verification shape |
+| risk.security_or_contract | moderate | removes the shipped `## Spec` commit-trailer and `renamed-spec:` contract from the template every downstream project is scaffolded with, and raising the template head makes every already-bootstrapped project report stale until it upgrades |
 
 ## Phases
 
@@ -313,11 +343,16 @@ Alongside the item: rewrite `WORKFLOW.md` — drop `## Specs` and `## Mental
 Models` entirely, drop their bullets from `## ai-docs/ Layout`, and add a section
 describing the behavioral contract as tests and a section describing the
 worker-and-stop execution model, with the tests-as-contract assumption stated
-plainly and no enforcement attached (Decision 4). Update
-`lead-bootstrap.md`: drop the forge-skill suggestion from the fresh handler,
-drop the three index-health route rows that route to a forge skill (behavior
-coverage, modification knowledge, project reading map), and check the
-handler steps that reference the removed layout. The two new guide sections
+plainly and no enforcement attached (Decision 4). `lead-bootstrap.md` no
+longer needs the forge-skill-suggestion or forge-routing edits this phase
+once called for: the spec-retirement sibling already dropped the fresh
+handler's forge-skill suggestion and the three index-health route rows that
+routed to a forge skill (behavior coverage, modification knowledge, project
+reading map) while patching the playbook's dangling calls to the deleted
+forge playbooks (`agents-plugin/rsrc/lead-bootstrap/lead-bootstrap.md`); a
+grep of that file for `spec`, `mental-model`, and `forge` turns up no
+remaining handler step that references the removed layout, so only confirm
+that stays true after Phase 1's other edits. The two new guide sections
 also land in this repository's `ai-docs/WORKFLOW.md` (the drafts README
 assigns them here). Place the committed drafts
 `ai-docs/ref/refound-drafts/bootstrap-template.md` and
