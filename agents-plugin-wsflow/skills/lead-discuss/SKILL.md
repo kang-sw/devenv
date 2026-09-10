@@ -1,6 +1,6 @@
 ---
 name: lead-discuss
-description: Use before any change when the user wants to think through direction, scope, risk, or approach. Conversation only; capture goes through the ticket skill and execution through run.
+description: Use when the user wants to reason with the lead about direction, scope, risk, or trade-offs before capture or execution. The lead owns the conversation and decision-making; subagents may gather evidence only. Conversation only.
 ---
 
 # Discuss

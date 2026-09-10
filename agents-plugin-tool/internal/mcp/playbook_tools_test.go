@@ -944,7 +944,7 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 		t.Fatalf("printPlaybook: %v", err)
 	}
 	assertCleanWsflowManual("prefer-subagent off", body)
-	if strings.Contains(body, `<playbook name="lead-prefer-subagent" title="Prefer Subagent">`) {
+	if strings.Contains(body, "Prefer delegation for eligible general work") {
 		t.Fatalf("wsflow workflow manual must not append lead-prefer-subagent while preference is off:\n%s", body)
 	}
 
@@ -958,8 +958,8 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 	}
 	assertCleanWsflowManual("prefer-subagent on", bodyOn)
 	for _, want := range []string{
-		`<playbook name="lead-prefer-subagent" title="Prefer Subagent">`,
-		"Maximum-delegation posture for this session",
+		"Prefer delegation for eligible general work",
+		"wsflow:lead-delegate",
 	} {
 		if !strings.Contains(bodyOn, want) {
 			t.Fatalf("wsflow workflow manual with prefer-subagent on missing %q:\n%s", want, bodyOn)
@@ -2326,7 +2326,8 @@ func TestPlaybookPrintGoldenLeadDiscuss(t *testing.T) {
 		t.Fatalf("printPlaybook: %v", err)
 	}
 	for _, want := range []string{
-		"you edit no source and write no document here",
+		"Edit no source and write\nno document here",
+		"ws:lead-delegate",
 		"ws:lead-ticket",
 		"ws:lead-run",
 		"### Binding Anchor",

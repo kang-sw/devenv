@@ -70,7 +70,7 @@ Examples:
 ### judge: tune-target
 - User standing preferences, communication style, language, terminology, or wording conventions -> prompt override (`UserPreferenceSection`).
 - Prompt wording or a named manual section -> prompt override for that named override point.
-- "delegate more/less" or strict subagent posture -> workflow preference (`"workflow.prefer_subagent"`).
+- "delegate more/less" or default delegation of eligible general work -> workflow preference (`"workflow.prefer_subagent"`).
 - A model, tier, or "cheaper/stronger model" preference -> model tier (`agents.tier`).
 - Anything else -> unsupported axis.
 

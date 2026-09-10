@@ -438,19 +438,11 @@ type overridePointDecl struct {
 }
 
 const (
-	workflowManualPlaybookName  = "lead-workflow-manual"
-	preferSubagentPlaybookName  = "lead-prefer-subagent"
-	preferSubagentPlaybookTitle = "Prefer Subagent"
-	preferSubagentEnabledValue  = "on"
+	workflowManualPlaybookName = "lead-workflow-manual"
+	preferSubagentEnabledValue = "on"
 )
 
-// builtinPromptOverrideDefaults returns code-owned default override values for
-// prompt override-points. Currently empty: the sole prior entry
-// (PreferSubagentInvocationGuidance) was retired when lead-prefer-subagent's
-// body moved to a static inlined SKILL.md with no override-marker pass. The
-// function is kept because buildOverrideLookup and
-// builtinConfigAndPromptDefaults (server.go) call it generically for other
-// override points.
+// builtinPromptOverrideDefaults supplies defaults for configurable prompt points.
 func builtinPromptOverrideDefaults() map[string]string {
 	return map[string]string{}
 }
@@ -831,13 +823,8 @@ func workflowPreferSubagentEnabled(configOpts wsconfig.Options) (bool, error) {
 
 // printPlaybook loads a playbook and returns its rendered body text inline.
 //
-// It has one code-side pragmatic concatenation hook: serving
-// lead-workflow-manual appends the lead-prefer-subagent skills-tree SKILL.md
-// body (via wsrsrc.LoadSkillBody), wrapped in a visible
-// <playbook name=... title=...> boundary and gated by the global
-// workflow.prefer_subagent preference. The append is applied
-// post-substitution, so the appended text never trips the undeclared-var
-// guard.
+// The global delegation preference adds an invocation hint, not an executor
+// procedure: eligibility remains owned by lead-delegate.
 //
 // printPlaybook never mints child keys (mintRoot="").
 //
@@ -856,15 +843,7 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 			return "", "", fmt.Errorf("resolve %s: %w", wsconfig.ItemWorkflowPreferSubagent, err)
 		}
 		if enabled {
-			skillsRoot, err := wsrsrc.ResolveSkillsRoot()
-			if err != nil {
-				return "", "", fmt.Errorf("resolve skills root for appended %s: %w", preferSubagentPlaybookName, err)
-			}
-			appendBody, err := wsrsrc.LoadSkillBody(skillsRoot, preferSubagentPlaybookName)
-			if err != nil {
-				return "", "", fmt.Errorf("load appended %s: %w", preferSubagentPlaybookName, err)
-			}
-			body += "\n\n" + wsrsrc.WrapForConcatenation(preferSubagentPlaybookName, preferSubagentPlaybookTitle, appendBody)
+			body += "\n\nPrefer delegation for eligible general work: invoke `" + RuntimeNamespace() + ":lead-delegate` and apply its routing gate before dispatch. This preference does not change workflow ownership or authorize broader permissions."
 		}
 	}
 	return body, recommendedTier, nil
