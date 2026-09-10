@@ -92,7 +92,7 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 	}
 
 	stub := "---\ntitle: \"\"\n"
-	if (state == "todo" || state == "ready") && designRequired {
+	if (state == "ready" || (state == "todo" && !completenessRequired)) && designRequired {
 		stub += "sage-review-design: " + resolved + "\n"
 	}
 	if state == "ready" && completenessRequired {
@@ -106,10 +106,12 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 
 	var tip string
 	switch {
-	case state == "idea":
-		tip = "promoting to 'todo/' stamps the resolved sage-review-design posture."
 	case !designRequired:
 		tip = "sage review is exempt for this ticket category."
+	case completenessRequired && state != "ready":
+		tip = "Populate facts and run design and completeness review at ready promotion; todo authoring is ungated."
+	case state == "idea":
+		tip = "Explicit epic settlement at todo promotion populates facts and runs design review."
 	case readyWarning != "":
 		tip = readyWarning
 	case state == "ready" && completenessRequired:

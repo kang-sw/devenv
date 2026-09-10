@@ -51,10 +51,11 @@ explicitly deferred, and write confirmed items only.
 
 ## Ground: fact population
 
-Run this whenever the body asserts anything the tree can check (a path,
-symbol, count, present behavior, command, quotation) and the landing is
-`todo/` or `ready/` — and always for a `ready/` landing, whose gate requires
-the `## Route Facts` section only this delegate writes:
+Run only at a settlement boundary: actionable promotion to `ready/`, or
+explicit epic design settlement into or within `todo/`. Ordinary actionable
+`todo/` creation and repeated editing run neither fact population nor Sage
+review; research remains ungated. Ground before moving or reviewing, so the
+stamp covers the facts the reviewers read:
 
 1. `{{.McpNamespace}}/playbook.render(name: "ticket-fact-populator",
    session_key: <your key>)`; pass the path on without reading the file, which
@@ -73,7 +74,22 @@ the `## Route Facts` section only this delegate writes:
    corrections than the round before; whatever is still unverified goes to the
    queue.
 
-Not for an `idea/` landing or a pure status move.
+Ordinary epic `todo/` edits do not spawn reviewers. A material change to
+cross-child decisions leaves its prior digest stale; explicitly re-settle the
+revised design before a child relies on it.
+
+## Settle epic design
+
+For explicit epic `idea/` to `todo/` promotion or re-settlement in `todo/`, run
+**Ground: fact population** first. Move to `todo/` only when needed, then call
+`{{.McpNamespace}}/tickets.sage_gate(stem, landing: "todo")`. Render and spawn
+the design reviewer when the gate requests it, passing the ticket path and
+populator's `relations:` table; record its verdict with
+`{{.McpNamespace}}/tickets.sage_stamp`. A block leaves the design unsettled;
+report it before a child relies on it. Commit after stamping.
+
+Epics and research stay in `idea/` or `todo/`; only actionable tickets enter
+the implementation queue.
 
 ## Promote to `ready/`
 
@@ -85,7 +101,7 @@ promotion is a batch of one.
    in `ready/`, `.done/`, or the same batch, recorded as `related: <stem>:
    prerequisite` or a prerequisite `parent:`. Otherwise name the blocking
    stem and stop before any move.
-2. Per ticket in order: `{{.McpNamespace}}/tickets.move(stem, to: "ready")`,
+2. Per actionable ticket in order: run **Ground: fact population**, then `{{.McpNamespace}}/tickets.move(stem, to: "ready")`,
    then `{{.McpNamespace}}/tickets.sage_gate(stem, landing: "ready")` and its
    returned action. For `run`: `playbook.render` the named reviewer, spawn it
    with the ticket path and the populator's `relations:` table when
@@ -111,7 +127,7 @@ Drop: `{{.McpNamespace}}/tickets.close(stem, status: "dropped")`. Closing to
 - Persisting discussion output before the user has explicitly agreed to
   persist.
 - Any Open Decision Queue item the user has not settled.
-- A `block` verdict at a `ready/` landing.
+- A `block` verdict at a settlement boundary.
 - Dependency closure failing.
 
 ## Output

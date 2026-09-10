@@ -1043,3 +1043,34 @@ func asError[T error](err error, target *T) bool {
 	}
 	return errors.As(err, target)
 }
+
+// These ordering checks cover the prompt's dispatch boundary; native model
+// dispatch itself is not executed by Go tests.
+func TestLeadTicketSettlementBoundaries(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "agents-plugin", "rsrc", "lead-ticket", "lead-ticket.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	ground := sectionByHeading(t, text, "## Ground: fact population")
+	for _, want := range []string{"Run only at a settlement boundary", "creation and repeated editing run neither fact population nor Sage", "research remains ungated", "Ordinary epic `todo/` edits do not spawn reviewers"} {
+		if !strings.Contains(ground, want) {
+			t.Fatalf("missing boundary %q: %s", want, ground)
+		}
+	}
+	for _, heading := range []string{"## Promote to `ready/`", "## Settle epic design"} {
+		section := strings.Join(strings.Fields(sectionByHeading(t, text, heading)), " ")
+		facts := strings.Index(section, "run **Ground: fact population**")
+		gate := strings.Index(section, "tickets.sage_gate")
+		if facts < 0 || gate <= facts {
+			t.Fatalf("facts must precede gate in %s: %s", heading, section)
+		}
+		if strings.Count(section, "tickets.sage_gate") != 1 {
+			t.Fatalf("duplicate gate in %s", heading)
+		}
+	}
+	ready := sectionByHeading(t, text, "## Promote to `ready/`")
+	if strings.Index(ready, "run **Ground: fact population**") > strings.Index(ready, "tickets.move") {
+		t.Fatal("ready move precedes fact population")
+	}
+}

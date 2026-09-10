@@ -2242,14 +2242,14 @@ func TestServeStdioTicketsCreateUsesResolvedSageReviewConfig(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 902600, root, nil))
 
 	resp := callToolWithKey(t, server, 1, key, "tickets.create_empty", map[string]any{
-		"stem":          "feat-sage-create",
+		"stem":          "epic-sage-create",
 		"initial_state": "todo",
 	})
 	if !strings.Contains(resp, "Created ai-docs/tickets/todo/") || !strings.Contains(resp, "recommended") {
 		t.Fatalf("tickets.create_empty response missing created path or posture: %s", resp)
 	}
 
-	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "todo", "*-feat-sage-create.md"))
+	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "todo", "*-epic-sage-create.md"))
 	if err != nil {
 		t.Fatalf("glob created ticket: %v", err)
 	}
@@ -2278,14 +2278,14 @@ func TestServeStdioTicketsCreateDefaultsToRequiredSageReview(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 902601, root, nil))
 
 	resp := callToolWithKey(t, server, 1, key, "tickets.create_empty", map[string]any{
-		"stem":          "feat-sage-create-default",
+		"stem":          "epic-sage-create-default",
 		"initial_state": "todo",
 	})
 	if !strings.Contains(resp, "Created ai-docs/tickets/todo/") || !strings.Contains(resp, "required") {
 		t.Fatalf("tickets.create_empty response missing created path or posture: %s", resp)
 	}
 
-	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "todo", "*-feat-sage-create-default.md"))
+	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "todo", "*-epic-sage-create-default.md"))
 	if err != nil {
 		t.Fatalf("glob created ticket: %v", err)
 	}
@@ -2539,7 +2539,7 @@ func TestServeStdioTicketsMoveNonReadyBlockedRejectsInResponse(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
-	stem := "260101-feat-nonready-blocked-dispatch"
+	stem := "260101-epic-nonready-blocked-dispatch"
 	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "idea", stem+".md"),
 		"---\ntitle: Blocked\nsage-review-design: blocked\n---\n\nBody.\n")
 
@@ -2585,7 +2585,7 @@ func TestServeStdioTicketsMoveNonReadyBlockedSurfacesPartialMutationNotice(t *te
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
-	stem := "260101-feat-sage-move-nonready-blocked-partial"
+	stem := "260101-epic-sage-move-nonready-blocked-partial"
 	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "idea", stem+".md"),
 		"---\ntitle: Sage\nsage-review: blocked\n---\n\nBody.\n")
 
@@ -2671,13 +2671,13 @@ func TestServeStdioTicketsMoveDefaultsToRequiredSageReview(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 902602, root, nil))
 
 	createResp := callToolWithKey(t, server, 1, key, "tickets.create_empty", map[string]any{
-		"stem":          "feat-sage-move-default",
+		"stem":          "epic-sage-move-default",
 		"initial_state": "idea",
 	})
 	if !strings.Contains(createResp, "Created ai-docs/tickets/idea/") {
 		t.Fatalf("tickets.create_empty response missing created path: %s", createResp)
 	}
-	createdMatches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "idea", "*-feat-sage-move-default.md"))
+	createdMatches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "idea", "*-epic-sage-move-default.md"))
 	if err != nil || len(createdMatches) != 1 {
 		t.Fatalf("glob created ticket: matches=%v err=%v", createdMatches, err)
 	}
@@ -2691,7 +2691,7 @@ func TestServeStdioTicketsMoveDefaultsToRequiredSageReview(t *testing.T) {
 		t.Fatalf("tickets.move response missing required posture tip (builtin default should now be required): %s", moveResp)
 	}
 
-	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "todo", "*-feat-sage-move-default.md"))
+	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "todo", "*-epic-sage-move-default.md"))
 	if err != nil {
 		t.Fatalf("glob moved ticket: %v", err)
 	}
@@ -2724,13 +2724,13 @@ func TestServeStdioTicketsMoveExplicitOverrideWinsOverBuiltinDefault(t *testing.
 	key, _ := parseLoginResponse(t, callLogin(t, server, 902603, root, nil))
 
 	createResp := callToolWithKey(t, server, 1, key, "tickets.create_empty", map[string]any{
-		"stem":          "feat-sage-move-override",
+		"stem":          "epic-sage-move-override",
 		"initial_state": "idea",
 	})
 	if !strings.Contains(createResp, "Created ai-docs/tickets/idea/") {
 		t.Fatalf("tickets.create_empty response missing created path: %s", createResp)
 	}
-	createdMatches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "idea", "*-feat-sage-move-override.md"))
+	createdMatches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "idea", "*-epic-sage-move-override.md"))
 	if err != nil || len(createdMatches) != 1 {
 		t.Fatalf("glob created ticket: matches=%v err=%v", createdMatches, err)
 	}
@@ -2744,7 +2744,7 @@ func TestServeStdioTicketsMoveExplicitOverrideWinsOverBuiltinDefault(t *testing.
 		t.Fatalf("tickets.move response missing recommended posture tip (explicit override should win): %s", moveResp)
 	}
 
-	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "todo", "*-feat-sage-move-override.md"))
+	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "todo", "*-epic-sage-move-override.md"))
 	if err != nil {
 		t.Fatalf("glob moved ticket: %v", err)
 	}
