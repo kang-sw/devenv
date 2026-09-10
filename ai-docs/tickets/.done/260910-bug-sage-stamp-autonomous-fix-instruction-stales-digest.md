@@ -1,5 +1,6 @@
 ---
 title: "sage_stamp tells the lead to fix autonomous issues after stamping, which stales the digest it just recorded"
+completed: 2026-09-10
 ---
 
 # sage_stamp tells the lead to fix autonomous issues after stamping, which stales the digest it just recorded
@@ -35,3 +36,21 @@ owns the digest and the instruction, so the fix is one string and its test
 pin. Rejected: skipping the digest when autonomous issues exist — the digest
 is what makes a post-stamp fact edit detectable, and the autonomous fixes
 are exactly such edits.
+
+### Result (0d132ea4) - 2026-09-10
+
+Option (a). `sageRecordIssueRouting` in `agents-plugin-tool/internal/mcp/server.go`
+(not `internal/wsdoc/tickets_sage.go`, where the digest lives and which is
+untouched) now closes both autonomous branches with the shared
+`sageRestampAfterFixes` clause: apply the fixes, call `tickets.sage_stamp`
+again with the same verdicts so the recorded digest covers the fixed body, and
+commit after that second stamp. The missing-only branch is unchanged.
+`TestFormatSageRecordAutonomousOrdersRestamp` pins the clause in both
+autonomous branches, its position ahead of the commit direction, and its
+absence from a clean pass; the pre-existing routing pins still hold.
+
+The `lead-ticket` promotion note said re-running the gate was the only repair
+for a post-stamp edit, which pointed the reader at the heavier path the tool
+now tells it to skip; it names the re-stamp instead and keeps the gate re-run
+scoped to edits the reviewers have not seen. Manifest and wsflow rsrc mirror
+regenerated. `ws-mcp.md` does not mention the sequence and was left alone.
