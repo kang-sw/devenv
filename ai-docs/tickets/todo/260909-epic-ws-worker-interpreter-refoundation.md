@@ -90,6 +90,10 @@ removed.
   procedure playbooks move to worker-facing `kind: render` playbooks whose
   core is the stop-and-report protocol; delegate prompts carry source
   pointers, never summaries.
+- `260910-feat-lead-delegate-session-local-executor` - add a session-local
+  free-form native-subagent entry for bounded arbitrary work, keep material
+  implementation on `lead-run`, and retire the overlapping
+  `lead-prefer-subagent` entry while preserving its tuning posture.
 - `260909-refactor-route-resolve-implement-reads-ticket-facts` -
   `route.resolve_implement` reads route facts from the sage-stamped ticket
   instead of lead-gathered conversation facts; in-run survey/plan stages and
@@ -278,18 +282,21 @@ removed.
     spawner renders `ticket-worker` by name and mints nothing else.
     *Rejected: spawner first with a `ferrule` stopgap* — two spawn shapes
     for one worker, the second thrown away one ticket later.
-22. **Surviving skills keep the `lead-` prefix; two renames; unsettled
-    skills survive by default.** The working five ship as `lead-discuss`,
+22. **Surviving skills keep the `lead-` prefix; two renames; free-form
+    delegation gets its own entry.** The working six ship as `lead-discuss`,
     `lead-ticket` (renamed from the ticket-authoring skill, owned by the
     collapse child's Phase 2), `lead-run` (replaces the queue drainer, owned
-    by the spawner), `lead-review`, `lead-ship`. Housekeeping survives
+    by the spawner), `lead-delegate`, `lead-review`, `lead-ship`.
+    `lead-delegate` owns session-local arbitrary native-subagent execution;
+    material implementation remains on `lead-run`. Housekeeping survives
     unchanged: `lead-bootstrap`, `lead-tune`, `lead-revive`,
-    `mcp-server-repair`, `lead-workflow-manual`, `lead-check-blockers`. The
-    worktree-scoping, rule-persisting, and delegation-posture skills are
-    not retired by any child: deleting a skill is always-ask, the user has
-    not decided, and survival is the cheap default; their disposition is an
-    open item for the user, not a worker stop. `/goal` and the drainer's
-    verbatim final line name `lead-run`.
+    `mcp-server-repair`, `lead-workflow-manual`, `lead-check-blockers`.
+    `lead-prefer-subagent` is retired by
+    `260910-feat-lead-delegate-session-local-executor`; its
+    `workflow.prefer_subagent` setting remains as a tuning posture that defaults
+    eligible work to `lead-delegate`. The worktree-scoping and rule-persisting
+    skills survive. `/goal` and the drainer's verbatim final line name
+    `lead-run`.
     *Rejected: bare names (`discuss`, `run`)* — every inventory pin, the
     `/goal` loop, and downstream muscle memory carry the prefix; the
     rename buys nothing the collapse does not already buy.
