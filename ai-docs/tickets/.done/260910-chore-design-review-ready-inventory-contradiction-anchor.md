@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 12dd1b397df7223c
 sage-review-completeness-reviewed: 12dd1b397df7223c
+completed: 2026-09-10
 ---
 
 # Anchor the design-review contradiction check on the ready/ inventory plus the parent epic, dropping the model-authored related: marker
@@ -96,3 +97,34 @@ Verify the rendered design-reviewer prompt instructs the reviewer to compare
 against the current `ready/` inventory and the named parent epic, does not use
 `related:` as an independent contradiction anchor, and keeps the ws and wsflow
 copies byte-identical.
+
+### Result (a5a7ec48) - 2026-09-10
+
+Implemented the bounded contradiction check in the shared design-reviewer
+playbook and regenerated both manifests and the byte-identical wsflow mirror.
+The reviewer enumerates current ready tickets directly, excludes itself, and
+resolves the exact parent including terminal statuses. The checklist and
+critical row compare against those anchors; related markers do not independently
+expand the read set. Anchor lookup/read failures remain visible. Corrected the
+existing sufficiency field's stale Process step pointer without changing its
+output shape.
+
+Decision: direct enumeration is supported by the existing reviewer-to-delegate
+role mapping and `roleAllowsTool` permission for `tickets.query`; no lead spawn
+digest or interface change is needed. Added a rendered-prompt regression in
+`internal/mcp` because namespace injection belongs to the MCP renderer, not the
+lower-level resource loader.
+
+Verification:
+- Both required manifest/mirror regeneration commands passed with `-count=1`.
+- `go test ./internal/mcp -run TestTicketDesignReviewContradictionAnchors -count=1`
+  passed for ws and wsflow rendering.
+- `TMPDIR=/private/tmp go test ./...` passed all packages. The default macOS
+  temporary path exposed the existing absolute-path alias failure in
+  `TestEnterImplementResolvesTargetPathForms`; canonical TMPDIR avoids it.
+- `go build ./...` and `scripts/smoke-ws-mcp.sh ..` passed.
+- `python3 -m unittest discover agents-plugin-wsflow/tests` passed 10 tests.
+- Independent correctness and test reviews were clean; the correctness reviewer
+  also completed the required fresh-reader audit without findings.
+
+Unresolved: none. Deferred: none.

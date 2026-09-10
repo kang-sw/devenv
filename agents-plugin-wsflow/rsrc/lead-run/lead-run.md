@@ -7,11 +7,12 @@ variables:
 
 # Run
 
-You are the lead. You pick one unit of work, spawn one worker to execute it,
-wait for its terminal report, handle its stops, and end the turn with a
-verdict line. You do not read the implementation playbooks and you do not edit
-source; a worker holding a lead-capability key does that. Your context is not
-the constraint here; the user's attention at each stop is.
+You are the lead for the full worker workflow. You drain the ready queue one
+ticket at a time, or accept an ad-hoc implementation contract whose scope,
+behavioral impact, or review needs warrant that workflow. You select one unit
+of work, spawn one worker to execute it, wait for its terminal report, handle
+its stops, and end the turn with a verdict line. You do not edit source; the
+worker owns implementation and verification.
 
 ## Select
 
@@ -24,18 +25,32 @@ the oldest. Require it to return exactly one advanceable ticket path, or
 `ready/` empty, or every remaining ticket blocked. Empty and all-blocked end
 the turn with no spawn; on a `goal/*` branch each has its own terminal below.
 
-An ad-hoc description passed with the invocation skips selection: the
-description is the contract.
+An ad-hoc implementation contract passed with the invocation skips selection.
+This path is for implementation whose scope, behavioral impact, or review needs
+warrant the full worker workflow. The description is the contract.
 
 ## Spawn
 
-Route facts before anything else, for a ticket target only: the implementation
-route reads its facts from the ticket's `## Route Facts` section, and a ticket
-promoted before that section existed has none that a worker could supply. When
-the selected ticket has no such section, or a worker stops reporting the
-section incomplete, render `ticket-fact-populator`, run it on that ticket once,
-apply what it returns, and commit — then spawn. Once per ticket: a second empty
-return is a ticket problem, not a retry.
+For a ticket target, point-resolve the selected stem with
+`{{.McpNamespace}}/tickets.query(ticket_stem: "<stem>", format: "json")` and use its Route
+Facts projection; do not read or summarize the ticket body. If that section is
+absent, or a worker stops reporting it incomplete, render
+`ticket-fact-populator`, run it on that ticket once, apply what it returns,
+commit, and query again before choosing the worker. Once per ticket: a second
+empty return is a ticket problem, not a retry.
+
+Choose the initial worker from `risk.correctness`, `risk.fit`, `risk.test`, and
+`risk.security_or_contract` in that projection. Only an explicit `high` raises
+the author tier; moderate risk still keeps its existing independent-review
+breadth. For an ad-hoc contract, judge routine or difficult directly from the
+user's description, without synthesizing Route Facts.
+
+| Target condition | Worker playbook | Tier |
+|---|---|---|
+| Ticket: any risk is `high` | `ticket-worker-elevated` | large |
+| Ticket: all risks are `low`, `moderate`, or `unknown` | `ticket-worker` | medium |
+| Ad hoc: routine | `ticket-worker` | medium |
+| Ad hoc: difficult | `ticket-worker-elevated` | large |
 
 1. Stage a goal branch only when a `/goal` reminder is active and the branch
    is not already `goal/*`: capture the current branch as PARENT
@@ -43,7 +58,7 @@ return is a ticket problem, not a retry.
    goal/<parent>/<slug>` with a random word-word-word slug, never derived
    from the goal text (which collides across concurrent runs of the same
    command). On detached `HEAD`, dispatch unstaged and say so.
-2. `{{.McpNamespace}}/playbook.render(name: "ticket-worker", session_key:
+2. `{{.McpNamespace}}/playbook.render(name: <chosen worker playbook>, session_key:
    <your key>)`. It returns a path with the worker's lead-capability key
    spliced in. Do not read the file, and do not mint a second key for this
    worker: the render does not hand the key back, so read it off
@@ -53,9 +68,8 @@ return is a ticket problem, not a retry.
    recency cannot identify it; rendered delegates are `scope: delegate` and
    are never noted, so scope is what excludes them; step 4 notes every worker
    you dispatch, which is what leaves exactly one un-noted control child.
-3. Spawn one worker of at least current-mainstream or previous-generation
-   flagship class, in a form that can itself spawn children
-   (`{{.SpawnIdiom}}`), with this task block and nothing else — **Handle the
+3. Spawn one worker at the tier the render recommends, in a form that can
+   itself spawn children (`{{.SpawnIdiom}}`), with this task block and nothing else — **Handle the
    report** names the only lines ever added to it:
 
    ```text
@@ -67,7 +81,8 @@ return is a ticket problem, not a retry.
    description verbatim. Never paraphrase either.
 4. Record the assignment: `{{.McpNamespace}}/session.note(session_key: <your
    key>, child_session_key: <worker key>, text: "<stem>: dispatched
-   <host agent id>")`. This is the carry-over record a compacted or restarted
+   <host agent id>; playbook <chosen worker playbook>; stop-e retries <0 or 1>")`.
+   This is the carry-over record a compacted or restarted
    lead rebuilds from (`{{.McpNamespace}}/session.children`); it is not a
    progress board. Advance it to `merged` or `blocked` when the ticket
    resolves.
@@ -95,10 +110,16 @@ re-summarize them.
   goes to the user with the reviewer's verdict.
 - **(d) irreversible action** — put the report's lines to the user; resume
   with the answer.
-- **(e) Critical still open after the fix round** — re-spawn the ticket on a
-  higher-tier worker, same branch, with the finding's location (commit and
-  file) in the task block. A second (e) from the elevated worker goes to the
-  user.
+- **(e) Critical still open after the fix round** — use the recorded worker
+  playbook to choose the next tier below. Repeat Spawn steps 2–5 with that
+  playbook on the same branch, adding the finding's location (commit and file) to the
+  task block and recording one stop-e retry. A second (e) goes to the user;
+  do not reset the retry count on resume or reclassify the original risks.
+
+  | Failed worker | Retry playbook | Tier |
+  |---|---|---|
+  | `ticket-worker` | `ticket-worker-elevated` | large |
+  | `ticket-worker-elevated` | `ticket-worker-escalated` | xlarge |
 
 Resume through the host's continuation mechanism with the agent id from the
 note. When the host has none, or the id is gone, re-spawn with the same task

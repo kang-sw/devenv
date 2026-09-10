@@ -13,7 +13,6 @@ import (
 // deliberately migrated out of playbook.read. This is not a blanket
 // auto-mirror mechanism — see ai-docs/manuals/wsflow-mirroring.md.
 var substitutionMirroredSkills = []string{
-	"lead-prefer-subagent",
 	"mcp-server-repair",
 }
 

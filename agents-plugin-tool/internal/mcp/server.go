@@ -1884,7 +1884,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	appendKnob(subagentEntry, tuningKnob{
 		ID:          "workflow.prefer_subagent",
 		Kind:        "workflow_preference",
-		Description: "Select whether the workflow manual loads strict subagent posture.",
+		Description: "Default eligible general work to lead-delegate, subject to its routing gate.",
 		Writer:      tuningWriter{Tool: subagentEntry.WriterTool, FixedArguments: map[string]string{"key": subagentEntry.Key}},
 		Reset: &tuningWriter{
 			Tool:           subagentEntry.ResetTool,
@@ -2148,14 +2148,14 @@ func formatGitCommit(result wsgit.CommitResult) string {
 }
 
 // formatTicketCreate's next_instruction line carries the acceptance-check
-// caveat verbatim ("valid empty skeleton + initial posture") so a caller
+// caveat verbatim ("valid empty skeleton + applicable initial posture") so a caller
 // never mistakes tickets.create_empty for a full mutation orchestrator —
 // tickets.template owns the body skeleton, and this tool never renders one.
 func formatTicketCreate(res wsdoc.TicketCreateResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Created %s\n", res.Path)
 	fmt.Fprintf(&b, "Tip: %s\n", res.Tip)
-	b.WriteString("next_instruction: This is a valid empty skeleton + initial posture only, not a full mutation orchestrator; call tickets.template for the body skeleton before treating this ticket as populated.\n")
+	b.WriteString("next_instruction: This is a valid empty skeleton + applicable initial posture only, not a full mutation orchestrator; call tickets.template for the body skeleton before treating this ticket as populated.\n")
 	return b.String()
 }
 
@@ -3436,7 +3436,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.move",
-			"description": "Move a ticket along the idea <-> todo <-> ready axis. Upward moves stamp or validate a resolved sage-review posture from config. Downward moves from ready/ return a spec-cleanup tip. Stages atomically; does not commit.",
+			"description": "Move a ticket along the idea <-> todo <-> ready axis. Ready promotion and epic todo settlement resolve sage-review posture from config; actionable todo moves are ungated. Stages atomically; does not commit.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -3448,11 +3448,11 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.create_empty",
-			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus resolved sage-review posture for todo/ready). Yields only a valid empty skeleton + initial posture, not a full mutation orchestrator — populate the body via tickets.template. Returns the path and a promotion tip; does not stage or commit.",
+			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus resolved sage-review posture for ready or epic todo). Yields only a valid empty skeleton + applicable initial posture, not a full mutation orchestrator — populate the body via tickets.template. Returns the path and a promotion tip; does not stage or commit.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"stem":          stringProperty("Semantic ticket stem without date prefix (e.g. feat-foo-bar)."),
+					"stem":          stringProperty("Semantic ticket stem without date prefix (e.g. feat-foo-bar). Authoring categories: feat, bug, refactor, chore, research, epic."),
 					"initial_state": stringProperty("Ticket status: idea, todo, or ready."),
 				},
 				"required": []string{"stem", "initial_state"},
@@ -3464,7 +3464,7 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"type": stringProperty("Ticket category: feat, bug, refactor, chore, research, workset, or epic."),
+					"type": stringProperty("Ticket category: feat, bug, refactor, chore, research, or epic."),
 				},
 				"required": []string{"type"},
 			},
@@ -3475,7 +3475,7 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"type":  stringProperty("Ticket category: feat, bug, refactor, chore, research, workset, or epic."),
+					"type":  stringProperty("Ticket category: feat, bug, refactor, chore, research, or epic."),
 					"phase": enumStringProperty("Ticket-authoring phase.", []string{"content", "intent"}),
 				},
 				"required": []string{"type", "phase"},
@@ -3483,12 +3483,12 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.sage_gate",
-			"description": "Resolve the sage-review gate for a ticket landing. Owns posture resolution (legacy sage-review: migration, config.list fallback), the category×stage matrix, and standalone/combined mode selection. Returns an action (skip | stop_blocked | stop_missing_route_facts | ask | run); for run, the reviewer(s) to spawn and the mode. A ready/ landing is refused with stop_missing_route_facts when the ticket carries no ## Route Facts section. Does not spawn reviewers.",
+			"description": "Resolve the sage-review gate for a ticket landing. Todo is for epic design settlement only: actionable todo calls fail; research and legacy worksets skip. Actionable review runs at ready promotion after fact population. Owns posture resolution (legacy sage-review: migration, config.list fallback), the category×stage matrix, and standalone/combined mode selection. Returns an action (skip | stop_blocked | stop_missing_route_facts | ask | run); for run, the reviewer(s) to spawn and the mode. A ready/ landing is refused with stop_missing_route_facts when the ticket carries no ## Route Facts section. Does not spawn reviewers.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"stem":    stringProperty("Ticket stem (YYMMDD-category-name)."),
-					"landing": enumStringProperty("Landing status the gate is resolving for.", []string{"idea", "todo", "ready"}),
+					"landing": enumStringProperty("Settlement boundary: todo for epic design only, ready for actionable design and completeness, idea skips.", []string{"idea", "todo", "ready"}),
 					"answer":  enumStringProperty("Optional follow-up answer to a prior ask action.", []string{"yes", "no"}),
 				},
 				"required": []string{"stem", "landing"},

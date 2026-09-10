@@ -206,16 +206,18 @@ choice.
 
 ### Sage review
 
-Sage review is an independent-reviewer gate a ticket passes through before a
-stage boundary is treated as settled: a **design** review gates the `todo/`
-stage (does the approach still make sense), and a **completeness** review
-gates the `ready/` stage (is the ticket's contract and verification story
-actually complete). A ticket that reaches `ready/` without a prior `todo/`
-design pass runs both stages together. Stage applicability follows category:
-`research`/`workset` need neither stage (nothing decompositional to review),
-`epic` needs design only (epics never reach implementation, so completeness
-never applies), and actionable categories (`bug`/`feat`/`refactor`/`chore`)
-need both.
+Actionable tickets (`bug`/`feat`/`refactor`/`chore`) are authored and edited in
+`todo/` without fact population or Sage review. Promotion to `ready/` is their
+settlement boundary: populate facts first, then run design and completeness
+review against that populated body. Existing completed or skipped stages keep
+their posture and freshness behavior.
+
+Epics settle cross-child design explicitly at `idea/` to `todo/`: populate
+checkable facts, then run design-only Sage review. Later material changes to
+cross-child decisions need explicit re-settlement before a child relies on
+them; ordinary todo edits do not automatically spawn reviewers. Epics and
+research remain in `idea/` or `todo/`. Research requires neither
+stage; `ready/` remains the actionable implementation queue.
 
 Posture (per-stage, stored in ticket frontmatter) resolves the gate:
 `pending` falls back to the project's configured default; `skipped` means
@@ -234,20 +236,16 @@ is itself the reviewable deliverable. A phase write-up states its completed
 behavior, deferred scope, and verification boundary. Phases accumulate
 `### Result` (and later `#### Edition`) entries as work lands, giving the
 ticket a durable record of what actually happened per phase versus what was
-planned. Epics and worksets do not carry implementation phases; phase-level
-detail belongs in the child or included tickets they reference.
+planned. Epics do not carry implementation phases; phase-level detail belongs in
+their child tickets.
 
-### Epic vs. workset
+### Epics and execution scope
 
-Both are board artifacts, not implementation targets — but they organize
-differently. An `epic` is
-hierarchical: child tickets collectively deliver one parent outcome, and
-cross-child invariant decisions live in the epic body. A `workset` is
-non-hierarchical: it groups independent or cross-cutting tickets for
-coordination, sequencing, or focus without owning decomposition — included
-tickets are listed, never made children. Choose `epic` when the request is a
-parent-outcome breakdown; choose `workset` when it is a coordination/focus
-grouping with no decomposition ownership.
+An `epic` is hierarchical: child tickets collectively deliver one parent
+outcome, and cross-child invariant decisions live in the epic body. Use
+`epic` for single-outcome decomposition. The goal loop over the scoped
+`ready/` queue handles mixed-parent execution; frontmatter `related:` records
+non-hierarchical relationships between tickets.
 
 ## Planned Or Specialized
 

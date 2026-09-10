@@ -18,8 +18,8 @@ const (
 // Well-known item key constants for registered config items. Use these instead of
 // raw string literals to ensure consistent naming across packages.
 const (
-	// ItemWorkflowPreferSubagent is the global bootstrap preference for loading
-	// strict subagent posture with the workflow manual. Builtin default: off.
+	// ItemWorkflowPreferSubagent is the global preference for default
+	// delegation of eligible general work through lead-delegate. Builtin default: off.
 	ItemWorkflowPreferSubagent = "workflow.prefer_subagent"
 
 	// ItemSageReview is the layered config key for the sage review gate on ticket
@@ -33,11 +33,6 @@ const (
 	// delegate. Accepted values mirror the ws tier vocabulary (small/medium/large/xlarge).
 	// Builtin default: "large".
 	ItemSageReviewDesignTier = "sage_review_design_tier"
-
-	// ItemSageReviewCompleteness controls whether the completeness reviewer runs
-	// alongside the design reviewer. Value "true" enables it; "false" disables.
-	// Builtin default: "true".
-	ItemSageReviewCompleteness = "sage_review_completeness"
 
 	// ItemSageReviewCompletenessTier is the model capability tier for the
 	// completeness reviewer delegate. Builtin default: "medium".
@@ -74,7 +69,6 @@ func init() {
 	// that should persist across sessions for the same project.
 	RegisterDefaultScope(ItemSageReview, ScopeProject)
 	RegisterDefaultScope(ItemSageReviewDesignTier, ScopeProject)
-	RegisterDefaultScope(ItemSageReviewCompleteness, ScopeProject)
 	RegisterDefaultScope(ItemSageReviewCompletenessTier, ScopeProject)
 	// workflow.lang defaults to global scope: language is a cross-project user preference.
 	RegisterDefaultScope(ItemWorkflowLang, ScopeGlobal)

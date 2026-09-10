@@ -272,7 +272,7 @@ func TestTicketsMoveUpwardIdeaToTodo(t *testing.T) {
 // to, so removing this rejection would move enforcement to nowhere.
 func TestTicketsMoveUpwardNonReadyBlockedRejectsMove(t *testing.T) {
 	root := t.TempDir()
-	stem := "260101-feat-nonready-blocked"
+	stem := "260101-epic-nonready-blocked"
 	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "idea", stem+".md"),
 		"---\ntitle: Blocked\nsage-review-design: blocked\n---\n\nBody.\n")
 	runner := &mockGitRunner{}
@@ -309,7 +309,7 @@ func TestTicketsMoveUpwardNonReadyBlockedRejectsMove(t *testing.T) {
 // mistake this for an unchanged file.
 func TestTicketsMoveUpwardNonReadyBlockedReturnsPartialMutationNotice(t *testing.T) {
 	root := t.TempDir()
-	stem := "260101-feat-sage-legacy-nonready-blocked"
+	stem := "260101-epic-sage-legacy-nonready-blocked"
 	oldRel := filepath.Join("ai-docs", "tickets", "idea", stem+".md")
 	oldAbs := filepath.Join(root, oldRel)
 	mustWrite(t, root, oldRel, "---\ntitle: Sage\nsage-review: blocked\n---\n\nBody.\n")
@@ -336,7 +336,7 @@ func TestTicketsMoveUpwardNonReadyBlockedReturnsPartialMutationNotice(t *testing
 	// Confirm the notice isn't a no-op: the frontmatter file itself was
 	// self-healed (migrated from the legacy single field) before the block.
 	after := readFileString(t, oldAbs)
-	for _, wantLine := range []string{"sage-review-design: blocked", "sage-review-completeness: blocked"} {
+	for _, wantLine := range []string{"sage-review-design: blocked"} {
 		if !strings.Contains(after, wantLine) {
 			t.Fatalf("ticket missing %s after self-healing migration write:\n%s", wantLine, after)
 		}
@@ -363,43 +363,24 @@ func TestTicketsMoveRejectsSameStatus(t *testing.T) {
 	}
 }
 
-func TestTicketsMoveUpwardToTodoStampsResolvedSageReviewPostures(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		config     string
-		wantReview string
-	}{
-		{"empty", "", "skipped"},
-		{"off", "off", "skipped"},
-		{"ask", "ask", "recommended"},
-		{"auto", "auto", "required"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+func TestTicketsMoveActionableTodoIsUngated(t *testing.T) {
+	for _, category := range []string{"feat", "bug", "refactor", "chore"} {
+		for _, posture := range []string{"", "sage-review-design: blocked\nsage-review-completeness: blocked\n", "sage-review: blocked\n"} {
 			root := t.TempDir()
-			stem := "260101-feat-sage-" + tc.name
-			mustWrite(t, root, filepath.Join("ai-docs", "tickets", "idea", stem+".md"),
-				"---\ntitle: Sage\n---\n\nBody.\n")
-			runner := &mockGitRunner{}
-
-			result, err := TicketsMove(root, runner, TicketMoveOptions{
-				TicketStem: stem,
-				To:         "todo",
-				SageReview: tc.config,
-			})
+			stem := "260101-" + category + "-backlog"
+			before := "---\ntitle: Backlog\n" + posture + "---\n\nBody.\n"
+			mustWrite(t, root, filepath.Join("ai-docs", "tickets", "idea", stem+".md"), before)
+			result, err := TicketsMove(root, &mockGitRunner{}, TicketMoveOptions{TicketStem: stem, To: "todo", SageReview: "auto"})
 			if err != nil {
-				t.Fatalf("TicketsMove idea->todo: %v", err)
+				t.Fatal(err)
 			}
-			body := readFileString(t, filepath.Join(root, filepath.FromSlash(result.NewPath)))
-			for _, field := range []string{"sage-review-design", "sage-review-completeness"} {
-				wantLine := field + ": " + tc.wantReview
-				if !strings.Contains(body, wantLine) {
-					t.Fatalf("moved ticket missing %s:\n%s", wantLine, body)
-				}
+			if got := readFileString(t, filepath.Join(root, filepath.FromSlash(result.NewPath))); got != before {
+				t.Fatalf("todo move changed backlog body: %s", got)
 			}
-			if !strings.Contains(result.Tip, "design "+tc.wantReview) || !strings.Contains(result.Tip, "completeness "+tc.wantReview) {
-				t.Fatalf("Tip = %q, want both stages at resolved posture %q", result.Tip, tc.wantReview)
+			if result.Tip != "" {
+				t.Fatalf("ungated move returned review tip: %s", result.Tip)
 			}
-		})
+		}
 	}
 }
 

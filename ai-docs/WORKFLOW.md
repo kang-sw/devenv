@@ -84,6 +84,15 @@ contact and by review.
 
 ## Execution Model
 
+The working entries are `lead-discuss`, `lead-ticket`, `lead-delegate`,
+`lead-run`, `lead-review`, and `lead-ship`. `lead-delegate` manages a bounded,
+session-local native executor with follow-up continuity. It permits reversible,
+self-verifying low-impact work; ready tickets, material behavior or contract
+changes, unclear or cross-module scope, independent-review needs, and unresolved
+design decisions route to `lead-run`. Ticket capture, standalone review, and
+release retain their owning workflows. `workflow.prefer_subagent` defaults only
+eligible general work to `lead-delegate`.
+
 The ticket is the plan. Its decisions are settled when it is written: its
 stated facts are checked against the code and written into it, and its plan
 passes independent design review, before it enters `ready/`. Execution

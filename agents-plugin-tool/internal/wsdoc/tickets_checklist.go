@@ -7,7 +7,7 @@ import (
 // ticketChecklistAcceptedTypes mirrors TicketTemplate's accepted category set.
 var ticketChecklistAcceptedTypes = map[string]bool{
 	"feat": true, "bug": true, "refactor": true, "chore": true,
-	"research": true, "workset": true, "epic": true,
+	"research": true, "epic": true,
 }
 
 // ticketChecklistContent is the phase:"content" capture checklist. This
@@ -19,7 +19,7 @@ const ticketChecklistContent = `1. Capture every settled decision, contract, agr
 // one question the promotion-time sage review cannot answer, because the sage
 // reviewer never sees the conversation. It is deliberately three items and
 // category-invariant — enumeration of what to capture belongs to the content
-// checklist, epic and workset shape to the ticket conventions, and
+// checklist, epic shape to the ticket conventions, and
 // fix-then-summarize to the skill that runs the check. This constant is the
 // checklist's single source; no playbook restates it.
 const ticketChecklistIntent = `1. Test: could a fresh implementer build a materially different caller-visible, workflow, API, or verification result from the settled discussion without contradicting the ticket? If yes, capture the missing settled decision.
@@ -32,7 +32,7 @@ const ticketChecklistIntent = `1. Test: could a fresh implementer build a materi
 // text held only here.
 func TicketChecklist(typeStr, phase string) (string, error) {
 	if !ticketChecklistAcceptedTypes[typeStr] {
-		return "", fmt.Errorf("unknown ticket type %q; accepted: feat, bug, refactor, chore, research, workset, epic", typeStr)
+		return "", fmt.Errorf("unknown ticket type %q; accepted: feat, bug, refactor, chore, research, epic", typeStr)
 	}
 	switch phase {
 	case "content":

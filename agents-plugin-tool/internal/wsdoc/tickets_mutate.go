@@ -191,7 +191,7 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 	}
 	newPath := ticketRelPath(to, stem)
 	// Both scope pre-flights run before prepareSageReviewForUpwardMove, which
-	// persists sage-review frontmatter on every upward move. Refusing after
+	// persists sage-review frontmatter at settlement boundaries. Refusing after
 	// that write would leave the working tree dirty while the caller was told
 	// the call was a no-op.
 	if hidden {
@@ -208,9 +208,11 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 	// and its git-move failure returns exactly today's empty result.
 	before := captureTicketBytes(scope, absOld)
 
+	designRequired, completenessRequired := sageReviewStageRequirement(stem)
+	settlesReview := isUpwardMove(curStatus, to) && (to == "ready" || (designRequired && !completenessRequired))
 	var readySageWarning string
 	var written sageReviewPostures
-	if isUpwardMove(curStatus, to) {
+	if settlesReview {
 		postures, err := prepareSageReviewForUpwardMove(absOld, stem, opts.SageReview)
 		if err != nil {
 			return TicketMutateResult{}, err
@@ -229,15 +231,7 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 			designRequired, completenessRequired := sageReviewStageRequirement(stem)
 			readySageWarning = readySagePostureWarning(readyPostureProblems(designRequired, postures.Design, completenessRequired, postures.Completeness))
 		} else if err := blockedUpwardMoveError(postures); err != nil {
-			// Non-ready upward moves (idea -> todo, or a demote/re-promote
-			// round trip re-entering todo) have no ready-sage-posture
-			// guardrail downstream to relocate enforcement to —
-			// tickets_verify.go's guardrail only runs for status == "ready".
-			// Removing this rejection would move enforcement to nowhere, so
-			// the pre-existing hard block for a blocked required stage stays
-			// here, unlike the ready-landing case (de-blocked, soft warning
-			// only, per the single-chokepoint decision).
-			//
+			// Epic idea -> todo settlement keeps its blocked-design guard.
 			// prepareSageReviewForUpwardMove already wrote the resolved
 			// postures to disk above (self-healing legacy migration or
 			// posture-normalization write), so this rejection is a
@@ -263,7 +257,7 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 	}
 
 	result := TicketMutateResult{OldPath: oldPath, NewPath: newPath}
-	if isUpwardMove(curStatus, to) {
+	if settlesReview {
 		postures := currentSageReviewPostures(filepath.Join(root, filepath.FromSlash(newPath)), stem)
 		if tip := sageReviewPostureTip(postures); tip != "" {
 			result.Tip = appendTip(result.Tip, tip)
@@ -301,7 +295,7 @@ var ticketCategoryRE = regexp.MustCompile(`^\d{6}-([a-z]+)-`)
 
 // nonImplementationCategories are the ticket categories that never carry
 // implementation phases: an epic decomposes into children, and research and
-// workset tickets are board artifacts. Checks that only make sense for a
+// legacy workset tickets are board artifacts. Checks that only make sense for a
 // ticket that will actually be routed and implemented skip these.
 var nonImplementationCategories = map[string]bool{
 	"epic":     true,
@@ -449,15 +443,8 @@ func sageReviewBlockedError(field string) error {
 	return fmt.Errorf("%s: blocked; address blocked review before promoting", field)
 }
 
-// blockedUpwardMoveError restores the hard rejection for a non-ready upward
-// move (e.g. idea -> todo) that leaves a required sage-review stage blocked,
-// design checked before completeness. ready/ landings are exempt from this
-// call site: their blocked case is a soft warning instead
-// (readySagePostureWarning), because ws/git.commit's ready-sage-posture
-// guardrail is the sole HARD enforcement point there. Outside a ready
-// landing, tickets_verify.go's guardrail never runs (it is gated on
-// status == "ready"), so there is no chokepoint downstream to catch a
-// blocked non-ready move; this call site remains the only enforcement.
+// blockedUpwardMoveError keeps unresolved epic design from being re-settled
+// by a status move alone. Actionable todo moves never call it.
 func blockedUpwardMoveError(postures sageReviewPostures) error {
 	if postures.Design == "blocked" {
 		return sageReviewBlockedError("sage-review-design")

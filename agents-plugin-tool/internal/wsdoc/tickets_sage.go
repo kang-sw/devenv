@@ -159,6 +159,9 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 	ticketAbs := filepath.Join(root, filepath.FromSlash(ticketRel))
 
 	if landing == "todo" {
+		if completenessRequired {
+			return SageGateResult{}, fmt.Errorf("landing todo is only for epic design settlement; actionable tickets run sage review at ready promotion")
+		}
 		// Design-stage-exempt categories (research/workset) skip entirely.
 		if !designRequired {
 			return SageGateResult{Action: "skip"}, nil
@@ -239,7 +242,7 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 		return sageGateStandalone(ticketAbs, "completeness", "sage-review-completeness", completeness, resolvedSageReviewConfig, answer)
 	}
 	// Design not yet terminal: the never-skippable design invariant fires for a
-	// ticket that reached ready without a prior todo design pass. Run design +
+	// ticket entering its actionable ready-promotion boundary. Run design +
 	// completeness in combined mode.
 	return sageGateCombined(ticketAbs, design, completeness, resolvedSageReviewConfig, answer)
 }

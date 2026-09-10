@@ -8,7 +8,7 @@ rules and hard invariants only.
 ## Path & Naming
 
 - Path: `ai-docs/tickets/<status>/YYMMDD-<category>-<name>.md` — `YYMMDD` is creation date, never changes on move.
-- Categories: `bug`, `feat`, `refactor`, `chore`, `research`, `epic`, `workset`.
+- Categories: `bug`, `feat`, `refactor`, `chore`, `research`, `epic`.
 - Reference tickets by **stem only** (e.g., `260115-feat-foo-bar`), never by full path.
 
 ## Status Flow
@@ -19,25 +19,19 @@ rules and hard invariants only.
 - Move tickets with `tickets.close(stem, status)` (to done/dropped) or
   `tickets.move(stem, to)` (idea/todo/ready) MCP tools; use native `git mv`
   as fallback when MCP tools are unavailable. No cross-link updates needed.
+- Actionable `todo/` creation and editing are ungated. Populate facts, then run design and completeness Sage review at `ready/` promotion against the populated body.
+- Epics settle design explicitly at `idea/` to `todo/`: populate checkable facts, then run design-only Sage review. Material cross-child decision edits require explicit re-settlement before children rely on them; ordinary edits do not auto-review.
+- Epics and research stay in `idea/` or `todo/`; research is ungated.
 - Add `completed:` date on move to `.done/`.
-- Workset tickets are non-hierarchical operating-context boards and normally stay in `idea/` or `todo/` rather than `ready/`.
 
 ## Epic Tickets
 
-See the workflow manual's **Ticket System Concepts** section for epic-vs-workset rationale.
+An epic decomposes one outcome into child tickets and owns their cross-child invariants.
 
 - Epic tickets do not use implementation phases; child tickets carry phases when needed.
 - A single child ticket may carry multiple phases when they form sequential complete implementation units.
 - Move implementation detail out of the epic body into an implementation child ticket; the epic body carries scope, cross-child invariants, and closure conditions only.
 - Move deliberation that outgrows a settled decision line out of the epic body into a `research` ticket and reference it; the epic body carries settled decisions only.
-
-## Workset Tickets
-
-See the workflow manual's **Ticket System Concepts** section for epic-vs-workset rationale.
-
-- Worksets list included tickets without making them children; do not add, remove, or change `parent:` based on workset inclusion.
-- Worksets do not own decomposition, cross-child invariants, or implementation phases.
-- If the grouping starts owning scope decomposition or invariant decisions, create or use an `epic` instead.
 
 ## Phases
 

@@ -346,7 +346,7 @@ func TestFormatSageRecordAutonomousOrdersRestamp(t *testing.T) {
 func TestServeStdioSageGateDispatch(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
-	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", "260101-feat-sg.md"),
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", "260101-epic-sg.md"),
 		"---\ntitle: Sage\nsage-review-design: required\n---\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| scope.span | single-file |\n\nBody.\n")
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
@@ -356,7 +356,7 @@ func TestServeStdioSageGateDispatch(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 9701, root, nil))
 
 	resp := callToolWithKey(t, server, 9702, key, "tickets.sage_gate", map[string]any{
-		"stem":    "260101-feat-sg",
+		"stem":    "260101-epic-sg",
 		"landing": "todo",
 	})
 	if !strings.Contains(resp, "action: run") || !strings.Contains(resp, "reviewers: design") || !strings.Contains(resp, "mode: standalone") {
@@ -416,7 +416,7 @@ func TestServeStdioSageGateDetectsStaleCompletedReview(t *testing.T) {
 func TestServeStdioSageGateDeclineDoesNotAutoCommit(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
-	ticketRel := filepath.Join("ai-docs", "tickets", "todo", "260101-feat-decline.md")
+	ticketRel := filepath.Join("ai-docs", "tickets", "todo", "260101-epic-decline.md")
 	mustWrite(t, root, ticketRel,
 		"---\ntitle: Sage\nsage-review-design: recommended\n---\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| scope.span | single-file |\n\nBody.\n")
 	initGit(t, root)
@@ -430,7 +430,7 @@ func TestServeStdioSageGateDeclineDoesNotAutoCommit(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 9705, root, nil))
 
 	resp := callToolWithKey(t, server, 9706, key, "tickets.sage_gate", map[string]any{
-		"stem":    "260101-feat-decline",
+		"stem":    "260101-epic-decline",
 		"landing": "todo",
 		"answer":  "no",
 	})
@@ -562,5 +562,29 @@ func TestServeStdioSageStampDelegateKeyBlocked(t *testing.T) {
 	}
 	if strings.Contains(string(body), "sage-review-design: completed") {
 		t.Errorf("delegate key: rejected call must not have written frontmatter:\n%s", body)
+	}
+}
+
+func TestServeStdioActionableTodoGateRejects(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 9800, root, nil))
+	for _, category := range []string{"feat", "bug", "refactor", "chore"} {
+		stem := "260101-" + category + "-todo"
+		rel := filepath.Join("ai-docs", "tickets", "todo", stem+".md")
+		before := "---\ntitle: Backlog\n---\n\nBody.\n"
+		mustWrite(t, root, rel, before)
+		resp := callToolWithKey(t, server, 9801, key, "tickets.sage_gate", map[string]any{"stem": stem, "landing": "todo"})
+		if !strings.Contains(resp, "actionable tickets run sage review at ready promotion") || strings.Contains(resp, "action: run") {
+			t.Fatalf("todo did not fail loudly: %s", resp)
+		}
+		raw, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil || string(raw) != before {
+			t.Fatalf("rejected call mutated body: %s %v", raw, err)
+		}
 	}
 }

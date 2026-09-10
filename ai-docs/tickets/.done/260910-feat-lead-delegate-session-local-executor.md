@@ -7,6 +7,7 @@ related:
 sage-review-design-reviewed: b1ff2211cc19899f
 sage-review-completeness: completed
 sage-review-completeness-reviewed: b1ff2211cc19899f
+completed: 2026-09-10
 ---
 
 # Add lead-delegate as the session-local arbitrary executor and retire lead-prefer-subagent
@@ -277,3 +278,42 @@ spawn/continuation/recovery, lead-selected permission posture, every reroute
 condition, scope-growth escalation, prefer-subagent tuning behavior, retired
 skill absence, generated inventories, ws/wsflow mirroring, and existing
 lead-run ticket execution.
+
+### Result (84ec42c2) - 2026-09-10
+
+Installed the exact delegate procedure and three entry descriptions in ws and
+wsflow, with the specified discuss/run replacements. Both packages expose the
+thin delegate entry and retire the inline posture skill. The global preference
+now adds only a namespace-aware eligibility-scoped invocation hint; it no longer
+loads a skill body. Updated project execution orientation and mirroring guidance;
+the parent epic already declares the working six, so its settled inventory
+needed no further edit. Generated manifests and rsrc mirrors through the
+prescribed generators.
+
+Verification:
+
+- `TMPDIR=/private/tmp go test ./...` in `agents-plugin-tool`: all packages passed.
+- `TMPDIR=/private/tmp scripts/smoke-ws-mcp.sh ..`: passed.
+- `python3 -m unittest discover agents-plugin/tests`: 56 passed.
+- `python3 -m unittest discover agents-plugin-wsflow/tests`: 10 passed.
+- Final inventory-comment adjustment: focused skill-dispatch suite, 8 passed.
+- Exact-prose fixture and real MCP entry tests cover both product namespaces,
+  all authored routing/continuity/permission boundaries, retired entry absence,
+  preference toggling without a skills root, and existing run dispatch.
+- Correctness, fit, and test reviews were clean. Fresh-reader audit was clean;
+  exact-prose authority accepts the possible cost of routing a small investigation
+  attached to a ready ticket or unresolved implementation decision through run.
+
+Decisions: keep all executor state and lifecycle semantics host-owned, with no
+new registry or server executor contract. Repair the pre-existing Python run
+assertion that still expected a fixed worker name; retain the selected-worker
+behavior already present at the branch base. Update the discussion golden to
+its authorized replacement opening. The initial full-suite absolute-path failure
+matches the existing `260910-bug-route-ticket-absolute-path-symlink-alias` follow-up;
+canonical TMPDIR passed without broadening this implementation.
+
+Omitted: no empirical host implicit-trigger selection, native lifecycle,
+compaction recovery, permission enforcement, or live ticket execution was run.
+The checks establish the authored procedure and MCP integration, not host
+judgment. Installed-cache verification was not performed; this change does not
+alter the launcher or MCP configuration. No source implementation scope remains.

@@ -8,6 +8,7 @@ related:
 sage-review-completeness: completed
 sage-review-design-reviewed: 1ee2e902c5f7feb1
 sage-review-completeness-reviewed: 1ee2e902c5f7feb1
+completed: 2026-09-10
 ---
 
 # Run actionable ticket facts and Sage review only at ready promotion
@@ -102,3 +103,43 @@ delegate or reviewer; actionable ready promotion runs facts then design and
 completeness exactly once; epic settlement runs facts then design only;
 research remains ungated; direct actionable `landing: "todo"` fails loudly;
 and existing ready execution and historical ticket discovery remain intact.
+
+
+### Result (dc532266) - 2026-09-10
+
+Actionable todo creation and editing no longer ground or review the ticket;
+todo creation does not add Sage posture, and todo moves preserve existing
+metadata without validating or restamping it. Direct actionable todo Sage
+calls reject without mutation. Ready promotion grounds before moving and
+reviewing; explicit epic settlement grounds then runs design-only review.
+Research remains ungated and historical ready/freshness behavior is preserved.
+
+Conventions, ticket concepts, MCP help, bootstrap v0049 guidance, and generated
+wsflow mirrors now describe these boundaries. Existing standalone-review tests
+use epic fixtures; actionable rejection, metadata preservation, once-only
+combined ready review, and post-stamp fact-edit staleness have regressions.
+Native delegate spawning is covered by static procedure-boundary checks rather
+than a live model invocation.
+
+Verification:
+- `TMPDIR=/private/tmp go test ./...` from `agents-plugin-tool`: passed.
+- `TMPDIR=/private/tmp scripts/smoke-ws-mcp.sh ..`: passed.
+- `python3 -m unittest discover agents-plugin-wsflow/tests`: 10 tests passed.
+- Resource/skills manifest and wsflow resource regeneration: passed.
+- Independent correctness, fit (including fresh-reader audit), and test
+  reviews: clean; no second round required.
+
+Decisions and follow-ups:
+- Kept existing completed/skipped posture and freshness handling at ready,
+  including historical tickets; changed the todo boundary only.
+- Removed the stale spec-cleanup sentence while updating the same tickets.move
+  schema description. This pre-fulfills item 1 of
+  `260910-chore-prune-dead-workflow-remnants`; its unread-config item is untouched.
+- Used canonical `/private/tmp` for Go test fixtures to avoid the existing
+  macOS absolute-path symlink-alias failure. Initial pre-regeneration manifest
+  failures and obsolete todo-review fixtures were corrected; a whitespace-only
+  mismatch in the new procedure test was fixed by normalizing whitespace.
+- Captured the runtime review-todo/worker-protocol mismatch separately as
+  `260910-bug-implementation-review-todo-retains-retired-relays`.
+
+Unresolved: none.

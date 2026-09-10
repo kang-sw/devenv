@@ -648,6 +648,26 @@ func TestZeroMigrationProjectWinsOverGlobal(t *testing.T) {
 	}
 }
 
+func TestScopedShowOmitsRetiredSageCompletenessSetting(t *testing.T) {
+	r, opts := newTestResolver(t, nil, nil)
+	view, err := ScopedShow(&r, opts, "")
+	if err != nil {
+		t.Fatalf("ScopedShow: %v", err)
+	}
+	keys := map[string]bool{}
+	for _, item := range view.ResolvedOverrides {
+		keys[item.Key] = true
+	}
+	if keys["sage_review_completeness"] {
+		t.Fatal("config list advertises the retired completeness setting")
+	}
+	for _, key := range []string{ItemSageReview, ItemSageReviewDesignTier, ItemSageReviewCompletenessTier} {
+		if !keys[key] {
+			t.Errorf("config list missing active Sage setting %q", key)
+		}
+	}
+}
+
 // TestScopedShowReportsResolvedScopes verifies that ScopedShow returns
 // ResolvedOverrides with correct scope labels.
 func TestScopedShowReportsResolvedScopes(t *testing.T) {

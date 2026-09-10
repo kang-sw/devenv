@@ -1,4 +1,5 @@
 import re
+import json
 import unittest
 from pathlib import Path
 
@@ -12,6 +13,7 @@ RSRC_DIR = Path(__file__).resolve().parents[1] / "rsrc"
 EXPECTED_LEAD_SKILLS = {
     # working
     "lead-discuss",
+    "lead-delegate",
     "lead-ticket",
     "lead-run",
     "lead-review",
@@ -24,12 +26,12 @@ EXPECTED_LEAD_SKILLS = {
     # undecided disposition; survive unchanged
     "lead-scope-worktree",
     "lead-add-rule",
-    "lead-prefer-subagent",
 }
 
 # Names that must not reappear anywhere on the shipped skill or playbook
 # surface: each was retired into a surviving skill, or renamed.
 RETIRED_SKILL_NAMES = (
+    "lead-prefer-subagent",
     "lead-proceed",
     "lead-implement",
     "lead-verify-discussion",
@@ -46,6 +48,25 @@ RETIRED_SKILL_NAMES = (
 
 
 class SkillDispatchContractsTest(unittest.TestCase):
+    def test_delegate_and_sibling_exact_prose(self):
+        contract = json.loads((Path(__file__).parent / "fixtures" / "lead_delegate_contract.json").read_text())
+        for package in (SKILLS_DIR.parent, SKILLS_DIR.parent.parent / "agents-plugin-wsflow"):
+            for name, expected in contract["descriptions"].items():
+                shim = (package / "skills" / name / "SKILL.md").read_text()
+                self.assertEqual(re.search(r"^description: (.*)$", shim, re.M).group(1), expected)
+        delegate = (RSRC_DIR / "lead-delegate" / "lead-delegate.md").read_text().split("---", 2)[2].strip()
+        self.assertEqual(delegate, contract["delegate"])
+        discuss = (RSRC_DIR / "lead-discuss" / "lead-discuss.md").read_text()
+        run = (RSRC_DIR / "lead-run" / "lead-run.md").read_text()
+        self.assertIn(contract["discuss_opening"], discuss)
+        self.assertIn(contract["run_opening"], run)
+        self.assertIn(contract["run_ad_hoc"], run)
+        self.assertIn("Do not read the file", run)
+        self.assertNotIn("lead-delegate", run)
+        shim = (SKILLS_DIR / "lead-delegate" / "SKILL.md").read_text()
+        self.assertIn('ws/playbook.read(name: "lead-delegate", session_key:', shim)
+        self.assertIn("ws/workflow_manual", shim)
+
     def test_lead_skill_surface_is_collapsed(self):
         actual = {path.name for path in SKILLS_DIR.iterdir() if path.is_dir()}
         self.assertEqual(actual, EXPECTED_LEAD_SKILLS)
@@ -102,7 +123,7 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn('ws/playbook.read(name: "lead-run", session_key:', shim)
         self.assertIn("{{.ExploreAgent}}", text)
         self.assertIn("{{.SpawnIdiom}}", text)
-        self.assertIn('{{.McpNamespace}}/playbook.render(name: "ticket-worker"', text)
+        self.assertIn('{{.McpNamespace}}/playbook.render(name: <chosen worker playbook>', text)
         self.assertIn("{{.McpNamespace}}/session.note(session_key:", text)
         self.assertIn("One worker in flight per invocation.", text)
         self.assertIn("prerequisite", text)

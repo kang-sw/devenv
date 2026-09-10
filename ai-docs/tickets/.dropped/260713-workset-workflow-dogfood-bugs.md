@@ -1,5 +1,6 @@
 ---
 title: "Workset: workflow dogfood bug tickets"
+dropped: 2026-09-10
 ---
 
 # Workset: workflow dogfood bug tickets
@@ -48,3 +49,8 @@ instead of being force-promoted.
 - Deferred: dashboard-facing bug tickets (`260523-bug-worktree-local-index-missing`,
   `260525-bug-ws-dashboard-agent-tab-close-confirmation-sticky`) are explicitly
   out of scope for this workset.
+
+
+## Resolution (2026-09-10)
+
+Retired by 260726-refactor-retire-workset-convention. All eight listed tickets remain independently discoverable: three are done, two dropped, one idea, and two todo. No ticket declares this workset as its parent. The listed tickets keep their existing content, status, and history; no replacement grouping ticket is created.
