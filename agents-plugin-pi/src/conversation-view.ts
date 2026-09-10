@@ -102,6 +102,8 @@ import {
   type EditorTheme,
   type MarkdownTheme,
   type SelectListTheme,
+  type TuiMouseEvent,
+  type TuiMouseEventResult,
 } from "./pi-tui.ts";
 import { completedTextPreview, logicalPreview, yamlContainerDisplay, yamlInputPreview } from "./tool-result-render.ts";
 import { visibleWidth } from "./text-width.ts";
@@ -703,11 +705,9 @@ export class ConversationViewComponent implements Component {
     return false;
   }
 
-  handleMouse(event: { type?: string; deltaY?: number; direction?: number }): { handled: boolean; render: boolean } | undefined {
-    if (event.type !== "wheel") return undefined;
-    const delta = event.deltaY ?? event.direction ?? 0;
-    if (!delta) return undefined;
-    this.scrollView.scrollBy(delta < 0 ? -1 : 1);
+  handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+    if (event.type !== "wheel" || !event.wheelDelta) return undefined;
+    this.scrollView.scrollBy(event.wheelDelta < 0 ? -1 : 1);
     return { handled: true, render: true };
   }
 

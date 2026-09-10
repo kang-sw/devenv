@@ -87,6 +87,18 @@ export const {
 } = piTuiStatic;
 export type { Component, EditorOptions, EditorTheme, MarkdownTheme, ScrollViewOptions, SelectItem, SelectListTheme, TUI };
 
+/** Newer host runtimes deliver normalized pointer events to focused overlays. */
+export interface TuiMouseEvent {
+  type: string;
+  /** Wheel ticks; negative is up, positive is down. */
+  wheelDelta?: number;
+}
+
+export interface TuiMouseEventResult {
+  handled: boolean;
+  render?: boolean;
+}
+
 /**
  * Runtime path: resolves `@earendil-works/pi-tui` through the host (see the
  * Addendum above). Falls back to the static import when the dynamic import

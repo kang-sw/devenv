@@ -1148,8 +1148,13 @@ describe("ConversationViewComponent — bounded transcript scrolling", () => {
     assert.equal(view.getScrollTop(), 1);
     view.handleInput("\x1b[<65;1;1M");
     assert.equal(view.getScrollTop(), 2);
-    assert.deepEqual(view.handleMouse({ type: "wheel", deltaY: -1 }), { handled: true, render: true });
-    assert.equal(view.getScrollTop(), 1);
+    assert.deepEqual(view.handleMouse({ type: "wheel", wheelDelta: -1 }), { handled: true, render: true });
+    assert.equal(view.getScrollTop(), 1, "negative wheelDelta scrolls up");
+    assert.deepEqual(view.handleMouse({ type: "wheel", wheelDelta: 1 }), { handled: true, render: true });
+    assert.equal(view.getScrollTop(), 2, "positive wheelDelta scrolls down");
+    assert.equal(view.handleMouse({ type: "wheel", wheelDelta: 0 }), undefined, "zero wheelDelta falls through");
+    assert.equal(view.handleMouse({ type: "wheel" }), undefined, "missing wheelDelta falls through");
+    assert.equal(view.handleMouse({ type: "click", wheelDelta: 1 }), undefined, "non-wheel events preserve selection/link routing");
     view.setMode("interactive");
     view.handleInput("\x1b[A");
     view.handleInput("home");
