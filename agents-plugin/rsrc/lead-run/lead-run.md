@@ -47,8 +47,9 @@ return is a ticket problem, not a retry.
    <your key>)`. It returns a path with the worker's lead-capability key
    spliced in. Do not read the file, and do not mint a second key for this
    worker: the render does not hand the key back, so read it off
-   `{{.McpNamespace}}/session.children` as the one `scope: control` child of
-   your key carrying no note. That listing is ordered by key, not by age, so
+   `{{.McpNamespace}}/session.children(session_key: <your key>, scope:
+   "control", unnoted_only: true)` as the one child of your key carrying no
+   note. That listing is ordered by key, not by age, so
    recency cannot identify it; rendered delegates are `scope: delegate` and
    are never noted, so scope is what excludes them; step 4 notes every worker
    you dispatch, which is what leaves exactly one un-noted control child.
