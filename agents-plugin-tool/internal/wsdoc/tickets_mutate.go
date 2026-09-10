@@ -269,13 +269,7 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 			result.Tip = appendTip(result.Tip, tip)
 		}
 	}
-	if curStatus == "ready" && (to == "todo" || to == "idea") {
-		result.Tip = appendTip(result.Tip, "This ticket had spec entries; clear spec:, spec-remove:, and review ## Spec Impact before re-promoting.")
-	}
 	if to == "ready" {
-		if warning := readyGateWarning(filepath.Join(root, filepath.FromSlash(newPath)), stem); warning != "" {
-			result.Tip = appendTip(result.Tip, warning)
-		}
 		if missingRouteFacts(filepath.Join(root, filepath.FromSlash(newPath)), stem) {
 			result.Tip = appendTip(result.Tip, routeFactsMoveTip)
 		}
@@ -305,53 +299,25 @@ func appendTip(existing, addition string) string {
 // (YYMMDD-<category>-<slug>), mirroring the ticket-authoring convention.
 var ticketCategoryRE = regexp.MustCompile(`^\d{6}-([a-z]+)-`)
 
-// exemptReadyGateCategories are ticket categories exempt from the spec-address
-// gate enforced by the lead-ticket playbook when promoting to ready/.
-var exemptReadyGateCategories = map[string]bool{
+// nonImplementationCategories are the ticket categories that never carry
+// implementation phases: an epic decomposes into children, and research and
+// workset tickets are board artifacts. Checks that only make sense for a
+// ticket that will actually be routed and implemented skip these.
+var nonImplementationCategories = map[string]bool{
 	"epic":     true,
 	"research": true,
 	"workset":  true,
-}
-
-// readyGateWarning returns a soft, non-blocking warning when a non-exempt
-// ticket is moved to ready/ without detected spec addressing (a confirmed
-// spec:/spec-remove: frontmatter entry or a ## Spec Impact section). The
-// spec-address gate itself is documented and enforced only at the
-// lead-ticket playbook layer; this primitive-layer warning exists so a
-// lead calling tickets_move directly still gets a signal.
-func readyGateWarning(ticketAbsPath, stem string) string {
-	match := ticketCategoryRE.FindStringSubmatch(stem)
-	if len(match) == 2 && exemptReadyGateCategories[match[1]] {
-		return ""
-	}
-
-	fm := frontmatter(ticketAbsPath)
-	if len(scalarList(fm["spec"])) > 0 || len(scalarList(fm["spec-remove"])) > 0 {
-		return ""
-	}
-
-	raw, err := os.ReadFile(ticketAbsPath)
-	if err == nil {
-		for _, line := range strings.Split(string(raw), "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), "## Spec Impact") {
-				return ""
-			}
-		}
-	}
-
-	return "ready gate is normally enforced by lead-ticket; no spec addressing detected."
 }
 
 // missingRouteFacts reports whether a ticket landing in ready/ owes a
 // `## Route Facts` section and does not have one. It is presence-only by
 // design: the section's values are the completeness reviewer's subject, and a
 // mechanical value check here would duplicate the resolver's own enum
-// validation in a place that cannot report it usefully. Exemption follows the
-// spec-address gate's category set — a ticket with no implementation phases is
-// never routed, so it has no facts to carry.
+// validation in a place that cannot report it usefully. A ticket with no
+// implementation phases is never routed, so it has no facts to carry.
 func missingRouteFacts(ticketAbsPath, stem string) bool {
 	match := ticketCategoryRE.FindStringSubmatch(stem)
-	if len(match) == 2 && exemptReadyGateCategories[match[1]] {
+	if len(match) == 2 && nonImplementationCategories[match[1]] {
 		return false
 	}
 	raw, err := os.ReadFile(ticketAbsPath)
@@ -405,13 +371,13 @@ func ResolvedSageReviewPosture(sageReview string) string {
 }
 
 // sageReviewStageRequirement reports whether a ticket category requires the
-// design and/or completeness sage-review stage. It reuses the same
-// ticketCategoryRE category-detection mechanism as exemptReadyGateCategories
-// rather than inventing a new one: `research`/`workset` are exempt from both
-// stages (mirroring their blanket spec-address-gate exemption), `epic` needs
-// only design (epics never reach implementation so completeness never
-// applies), and every other category (the default/actionable categories)
-// needs both.
+// design and/or completeness sage-review stage. The per-stage rule is stated
+// here in full and owned here, so that changing any other category-keyed check
+// cannot move this gate: `research`/`workset` need neither stage (there is
+// nothing decompositional to review), `epic` needs only design (epics never
+// reach implementation so completeness never applies), and every other
+// category (the default/actionable categories) needs both. Only the shared
+// ticketCategoryRE stem parser is reused; the category set is not.
 func sageReviewStageRequirement(stem string) (design, completeness bool) {
 	category := ""
 	if match := ticketCategoryRE.FindStringSubmatch(stem); len(match) == 2 {

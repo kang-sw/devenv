@@ -188,12 +188,6 @@ func verifyTicketFile(root, path, status, stem string, result *VerifyResult) {
 	for _, problem := range ticketPhaseHeadingProblems(text) {
 		addFinding("phase-result-heading", problem)
 	}
-
-	if status == "ready" {
-		if warning := readyGateWarning(absPath, stem); warning != "" {
-			addWarning("spec-address", warning)
-		}
-	}
 }
 
 func sageReviewFreshnessWarningMessage(freshness sageReviewFreshness) string {
