@@ -5,6 +5,8 @@ parent: 260909-epic-ws-worker-interpreter-refoundation
 related:
   260605-research-ws-native-subagent-pivot: native-subagent continuity and host-owned lifecycle anchor
 sage-review-design-reviewed: b1ff2211cc19899f
+sage-review-completeness: completed
+sage-review-completeness-reviewed: b1ff2211cc19899f
 ---
 
 # Add lead-delegate as the session-local arbitrary executor and retire lead-prefer-subagent
