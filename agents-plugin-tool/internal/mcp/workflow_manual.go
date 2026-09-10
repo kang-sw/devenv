@@ -281,12 +281,6 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				warning := bootstrapStalenessWarning(canonical, skillsRoot, &warningResolver, mintedKey)
 				body = injectBootstrapStalenessWarning(body, warning)
 			}
-			{
-				warningAdapter := sessionConfigAdapter{s: s.sessions}
-				warningResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), warningAdapter, warningAdapter)
-				warning := docCoverageWarning(canonical, &warningResolver, mintedKey)
-				body = injectDocCoverageWarning(body, warning)
-			}
 			body = injectBootstrapStalenessWarning(body, scopeAnnouncement(canonical))
 			body = injectBootstrapStalenessWarning(body, computeManuals(canonical))
 			body = injectBootstrapStalenessWarning(body, wsreview.CheckpointNudge(context.Background(), canonical))
@@ -317,12 +311,6 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				warningResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), warningAdapter, warningAdapter)
 				warning := bootstrapStalenessWarning(rec.Root, skillsRoot, &warningResolver, key)
 				body = injectBootstrapStalenessWarning(body, warning)
-			}
-			{
-				warningAdapter := sessionConfigAdapter{s: s.sessions}
-				warningResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), warningAdapter, warningAdapter)
-				warning := docCoverageWarning(rec.Root, &warningResolver, key)
-				body = injectDocCoverageWarning(body, warning)
 			}
 			body = injectBootstrapStalenessWarning(body, scopeAnnouncement(rec.Root))
 			body = injectBootstrapStalenessWarning(body, computeManuals(rec.Root))

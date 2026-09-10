@@ -137,19 +137,6 @@ var configRegistry = []configKeyEntry{
 		ResolverBacked:        true,
 	},
 	{
-		Key:        wsconfig.ItemDocCoverageAlarm,
-		WriterTool: "config.tune",
-		ResetTool:  "config.tune",
-		ValueFields: []tuningField{{
-			Name:        "value",
-			Description: "Desired mode: on or off. Omit when reset is true.",
-			Enum:        onOffEnum,
-		}},
-		NoAgentVisible:        true,
-		RequiresLeadAuthority: wsconfig.GlobalOnly(wsconfig.ItemDocCoverageAlarm),
-		ResolverBacked:        true,
-	},
-	{
 		// agents.tier has no wsconfig item key — it bypasses the resolver
 		// entirely (see ResolverBacked doc above), so Key here is the
 		// catalog knob id rather than a wsconfig.Item* constant.
