@@ -26,8 +26,8 @@ type PlaybookMeta struct {
 	Role string
 	// Tier is the first-class delegation tier this playbook declares.
 	// Values: small | medium | large | xlarge (capability axis).
-	// Recognized here (parse-only); honoring it for mercenary model routing is
-	// a later phase. Empty when absent from frontmatter.
+	// Recognized here (parse-only) and surfaced as playbook.render's
+	// recommended tier. Empty when absent from frontmatter.
 	Tier string
 	// Includes is the ordered list of bare text-dep names to auto-include.
 	Includes []string

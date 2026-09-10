@@ -906,7 +906,7 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 
 	assertCleanWsflowManual := func(label, body string) {
 		t.Helper()
-		for _, forbidden := range []string{fullOnlyStart, fullOnlyEnd, wsflowOnlyStart, wsflowOnlyEnd, "ws.mercenary.", "exec.", "Full ws", "full ws", "ws:override:", "ws:/override:"} {
+		for _, forbidden := range []string{fullOnlyStart, fullOnlyEnd, wsflowOnlyStart, wsflowOnlyEnd, "exec.", "Full ws", "full ws", "ws:override:", "ws:/override:"} {
 			if strings.Contains(body, forbidden) {
 				t.Fatalf("%s: wsflow playbook output contains forbidden %q:\n%s", label, forbidden, body)
 			}
@@ -989,11 +989,8 @@ func TestPlaybookPrintLeadTuneUsesWorkflowPreferenceCatalogKnobs(t *testing.T) {
 	}
 	for _, forbidden := range []string{
 		"Call `config.workflow_prefer_subagent`",
-		"Call `config.workflow_prefer_mercenary`",
 		"prompt.DelegationSection",
 		"DelegationSection",
-		"delegation.prefer_mercenary",
-		"ws.lead.prefer_mercenary",
 		"session-scoped",
 	} {
 		if strings.Contains(body, forbidden) {
@@ -1027,10 +1024,6 @@ func TestPlaybookPrintWsflowLeadTuneOmitsFullWsOnlyCatalogKnobs(t *testing.T) {
 		}
 	}
 	for _, forbidden := range []string{
-		`"workflow.prefer_mercenary"`,
-		"config.workflow_prefer_mercenary",
-		"delegation.prefer_mercenary",
-		"ws.mercenary.",
 		"Full ws",
 		"full ws",
 		"ws:override:",
@@ -1159,7 +1152,7 @@ func TestRenderPlaybookWsflowProductModeUsesShippedDelegate(t *testing.T) {
 	if strings.Contains(body, "Continuity tip") {
 		t.Fatalf("rendered implementer output must not include delegation continuity tip:\n%s", body)
 	}
-	for _, forbidden := range []string{fullOnlyStart, fullOnlyEnd, wsflowOnlyStart, wsflowOnlyEnd, "Mercenary path", "ws.mercenary.", "exec.", "showsflow", "knowsflow", "followsflow", "workflowsflow"} {
+	for _, forbidden := range []string{fullOnlyStart, fullOnlyEnd, wsflowOnlyStart, wsflowOnlyEnd, "exec.", "showsflow", "knowsflow", "followsflow", "workflowsflow"} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("rendered wsflow delegate contains forbidden %q:\n%s", forbidden, body)
 		}

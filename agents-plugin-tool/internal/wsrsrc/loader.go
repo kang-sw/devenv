@@ -26,9 +26,6 @@ const envSkillsRoot = "WS_SKILLS_ROOT"
 // verification item (see Phase-2 brief for 260609-feat-ws-playbook-surface-mvp).
 // If the derived path does not contain a valid manifest, callers will see
 // ErrManifestMissing at Load time rather than a silent fallback.
-//
-// See internal/wsagent/agent.go SelfWorkerStarter.StartAsyncCall for the
-// os.Executable() pattern this derivation mirrors.
 func ResolveRoot() (string, error) {
 	if env := os.Getenv(envRsrcRoot); env != "" {
 		return env, nil

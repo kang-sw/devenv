@@ -14,12 +14,10 @@ import (
 	"testing"
 
 	"github.com/kang-sw/devenv/internal/mcp"
-	"github.com/kang-sw/devenv/internal/wsagent"
 )
 
-// TestMain defaults WS_RSRC_ROOT to the shipped rsrc tree so `mercenary register`
-// can load delegate-orientation (260611 Phase 6b moved it off the wsprompt
-// go:embed bundle).
+// TestMain defaults WS_RSRC_ROOT to the shipped rsrc tree so CLI paths that
+// resolve bundled resources find them without a per-test override.
 func TestMain(m *testing.M) {
 	if os.Getenv("WS_RSRC_ROOT") == "" {
 		_ = os.Setenv("WS_RSRC_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "rsrc"))
@@ -91,11 +89,6 @@ func TestRuntimeCapabilitiesCommandReportsLauncherContractSurface(t *testing.T) 
 	if !slices.Equal(got.Tools, wantTools) {
 		t.Fatalf("tools = %v, want full lead runtime contract tools %v", got.Tools, wantTools)
 	}
-	for _, hidden := range []string{"ws.lead.prefer_mercenary", "ws.mercenary.call", "ws.mercenary.register"} {
-		if slices.Contains(got.Tools, hidden) {
-			t.Fatalf("runtime capabilities exposed hidden mercenary tool %s in %v", hidden, got.Tools)
-		}
-	}
 	wantCommands := sortedMapKeys(contract.Commands)
 	slices.Sort(got.Commands)
 	if !slices.Equal(got.Commands, wantCommands) {
@@ -121,7 +114,7 @@ func TestRuntimeCapabilitiesCommandReportsNoAgentSurface(t *testing.T) {
 		Commands []string `json:"commands"`
 	}
 	mustUnmarshalCLIJSON(t, out, &got)
-	for _, hidden := range []string{"ws.lead.prefer_mercenary", "ws.mercenary.call", "ws.mercenary.register", "ws.mercenary.debug.tail", "subquery", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel", "ws.setup", "exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep"} {
+	for _, hidden := range []string{"subquery", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel", "ws.setup", "exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep"} {
 		if slices.Contains(got.Tools, hidden) {
 			t.Fatalf("no-agent capabilities exposed hidden tool %s in %v", hidden, got.Tools)
 		}
@@ -131,7 +124,7 @@ func TestRuntimeCapabilitiesCommandReportsNoAgentSurface(t *testing.T) {
 			t.Fatalf("no-agent capabilities missing visible tool %s in %v", visible, got.Tools)
 		}
 	}
-	for _, hidden := range []string{"mercenary.call", "mercenary.cancel", "mercenary.run-current", "subquery", "config.tune"} {
+	for _, hidden := range []string{"subquery", "config.tune"} {
 		if slices.Contains(got.Commands, hidden) {
 			t.Fatalf("no-agent capabilities exposed hidden command %s in %v", hidden, got.Commands)
 		}
@@ -197,7 +190,6 @@ func TestNoAgentCLICommandsReturnDisabledErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: "mercenary", args: []string{"mercenary", "status", "--name", "impl"}, want: "wsflow agentless mode disables agent-backed command: mercenary"},
 		{name: "config tune", args: []string{"config", "tune", "--tier", "core"}, want: "wsflow agentless mode disables agent-backed command: config tune"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -464,58 +456,6 @@ func TestDocumentationCLICommandsDefaultToTextAndKeepJSONFormat(t *testing.T) {
 		if !strings.Contains(string(out), "usage: ws-mcp") {
 			t.Fatalf("ws-mcp %v = %q", args, string(out))
 		}
-	}
-}
-
-func TestAgentsDebugCLICommandsReturnDiagnostics(t *testing.T) {
-	bin := wsMCPTestBin(t)
-	build := exec.Command("go", "build", "-o", bin, ".")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("go build failed: %v\n%s", err, string(out))
-	}
-
-	root := t.TempDir()
-	runGit(t, root, "init")
-	cache := filepath.Join(t.TempDir(), "cache")
-	t.Setenv("WS_CACHE_HOME", cache)
-	_, layout, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{Root: root, Name: "impl"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	mustWriteCLITest(t, layout.CurrentStdout, "stdout old\nstdout new\n")
-	mustWriteCLITest(t, layout.CurrentStderr, "stderr old\nstderr new\n")
-	mustWriteCLITest(t, layout.CurrentRuntimeLog, "runtime old\nruntime new\n")
-	mustWriteCLITest(t, layout.EventsFile, "event old\nevent new\n")
-
-	for _, tc := range []struct {
-		name string
-		args []string
-		want string
-	}{
-		{name: "stdout", args: []string{"mercenary", "debug", "stdout", "--root", root, "--name", "impl", "--lines", "1"}, want: "stdout new\n"},
-		{name: "stderr", args: []string{"mercenary", "debug", "stderr", "--root", root, "--name", "impl", "--lines", "1"}, want: "stderr new\n"},
-		{name: "runtime-log", args: []string{"mercenary", "debug", "runtime-log", "--root", root, "--name", "impl", "--lines", "1"}, want: "runtime new\n"},
-		{name: "events", args: []string{"mercenary", "debug", "events", "--root", root, "--name", "impl", "--lines", "1"}, want: "event new\n"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cmd := exec.Command(bin, tc.args...)
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				t.Fatalf("ws-mcp %v failed: %v\n%s", tc.args, err, string(out))
-			}
-			if string(out) != tc.want {
-				t.Fatalf("ws-mcp %v = %q, want %q", tc.args, out, tc.want)
-			}
-		})
-	}
-
-	cmd := exec.Command(bin, "mercenary", "debug", "tail", "--root", root, "--name", "impl", "--lines", "1")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("ws-mcp mercenary debug tail failed: %v\n%s", err, string(out))
-	}
-	if text := string(out); !strings.Contains(text, "== events ==") || !strings.Contains(text, "event new") || !strings.Contains(text, "== stdout ==") {
-		t.Fatalf("debug tail output mismatch: %q", text)
 	}
 }
 
@@ -825,11 +765,6 @@ func TestToolsCommandBareListMatchesToolsList(t *testing.T) {
 			}
 
 			if tc.name == "agentless" {
-				for _, hidden := range []string{"mercenary.call", "mercenary.register", "mercenary.debug.tail"} {
-					if slices.Contains(gotNames, hidden) {
-						t.Fatalf("agentless tools output exposed hidden tool %s in %v", hidden, gotNames)
-					}
-				}
 				if !slices.Contains(gotNames, "config.tune") {
 					t.Fatalf("agentless tools output missing shared tool config.tune in %v", gotNames)
 				}

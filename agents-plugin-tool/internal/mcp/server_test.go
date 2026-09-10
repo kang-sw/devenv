@@ -22,10 +22,9 @@ import (
 	"github.com/kang-sw/devenv/internal/wsdoc"
 )
 
-// TestMain defaults WS_RSRC_ROOT to the shipped rsrc tree so agent registration
-// can load delegate-orientation (260611 Phase 6b moved it off the wsprompt
-// go:embed bundle). Tests that exercise a custom rsrc tree override it per-test
-// with t.Setenv.
+// TestMain defaults WS_RSRC_ROOT to the shipped rsrc tree so playbook and
+// convention loads resolve bundled resources. Tests that exercise a custom
+// rsrc tree override it per-test with t.Setenv.
 //
 // It also defaults WS_CACHE_HOME to a throwaway temp dir so the file-backed
 // session store (keys/<key>.json under the cache root) never reads or writes the
@@ -1007,11 +1006,6 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 		if strings.Contains(byID["2"], gone) {
 			t.Fatalf("tools/list still advertises retired surface %s: %s", gone, byID["2"])
 		}
-	}
-	// The mercenary delegation surface retired with its runner; tools/list must
-	// advertise no member of it, or an agent calls a tool that no longer dispatches.
-	if strings.Contains(byID["2"], "mercenary.") {
-		t.Fatalf("tools/list still advertises a retired mercenary tool: %s", byID["2"])
 	}
 	// exec.* tools are permanently hidden from the public MCP surface in all modes.
 	for _, execTool := range []string{"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep"} {

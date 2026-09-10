@@ -26,23 +26,6 @@ HIDDEN_TOOLS = {
 }
 
 HIDDEN_COMMANDS = {
-    "mercenary.register",
-    "mercenary.call",
-    "mercenary.run-current",
-    "mercenary.wait",
-    "mercenary.result",
-    "mercenary.status",
-    "mercenary.interrupt",
-    "mercenary.check-inbox",
-    "mercenary.tail",
-    "mercenary.debug.tail",
-    "mercenary.debug.stdout",
-    "mercenary.debug.stderr",
-    "mercenary.debug.runtime-log",
-    "mercenary.debug.events",
-    "mercenary.cancel",
-    "mercenary.print",
-    "mercenary.erase",
     "config.tune",
 }
 
