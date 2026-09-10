@@ -144,7 +144,7 @@ a skill to this list requires updating both this section and the generator's
 curated list in `agents-plugin-tool/internal/wsrsrc/skills_mirror_test.go`.
 
 - **Eligibility guard:** generation fails loudly if the source body contains
-  anything beyond namespace-only tokens — the word "mercenary",
+  anything beyond namespace-only tokens —
   `<!-- ws:full-only:... -->`/`<!-- ws:wsflow-only:... -->` markers, or literal
   names of denylisted skills (`lead-write-code`, `lead-write-skeleton`,
   `lead-salvage`, `lead-skill-authoring`). The guard is strict/conservative by
@@ -323,9 +323,6 @@ Forbidden distributed-skill references include:
 - `ws:`
 - `ws.`
 - `subquery`
-- `ws.mercenary.register`
-- `ws.mercenary.call`
-- `ws.mercenary.result`
 - `lead-write-code`
 - `lead-write-skeleton`
 - `lead-sprint`
