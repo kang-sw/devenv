@@ -34,11 +34,6 @@ const (
 	// Builtin default: "large".
 	ItemSageReviewDesignTier = "sage_review_design_tier"
 
-	// ItemSageReviewCompleteness controls whether the completeness reviewer runs
-	// alongside the design reviewer. Value "true" enables it; "false" disables.
-	// Builtin default: "true".
-	ItemSageReviewCompleteness = "sage_review_completeness"
-
 	// ItemSageReviewCompletenessTier is the model capability tier for the
 	// completeness reviewer delegate. Builtin default: "medium".
 	ItemSageReviewCompletenessTier = "sage_review_completeness_tier"
@@ -74,7 +69,6 @@ func init() {
 	// that should persist across sessions for the same project.
 	RegisterDefaultScope(ItemSageReview, ScopeProject)
 	RegisterDefaultScope(ItemSageReviewDesignTier, ScopeProject)
-	RegisterDefaultScope(ItemSageReviewCompleteness, ScopeProject)
 	RegisterDefaultScope(ItemSageReviewCompletenessTier, ScopeProject)
 	// workflow.lang defaults to global scope: language is a cross-project user preference.
 	RegisterDefaultScope(ItemWorkflowLang, ScopeGlobal)

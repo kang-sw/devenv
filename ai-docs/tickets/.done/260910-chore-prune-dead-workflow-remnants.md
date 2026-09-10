@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: e0299e5b0789be35
 sage-review-completeness-reviewed: e0299e5b0789be35
+completed: 2026-09-10
 ---
 
 # Remove the stale tickets.move tip and unread Sage completeness config
@@ -102,3 +103,18 @@ prior work and execute item 2 as the remaining implementation scope, adding
 config-list regression coverage. Verification still confirms that
 `spec-cleanup` is absent from `agents-plugin-tool` and runs the phase's full
 build, vet, and test commands.
+
+### Result (c0d10c44) - 2026-09-10
+
+Removed the unread completeness config constant and registration. Fresh config
+listing no longer advertises the retired setting; regression coverage also
+confirms the Sage gate setting and both reviewer tier settings remain listed.
+Existing stored arbitrary overrides retain their generic resolution behavior.
+The category-based gate and doc-mode outputs were not changed. Item 1 remains
+completed by `dc532266`, with no `spec-cleanup` source hits.
+
+Verification: `go build ./...`, `go vet ./...`,
+`TMPDIR=/private/tmp go test ./...`, `scripts/smoke-ws-mcp.sh ..`, and
+`git diff --check` passed. The canonical temporary directory avoids the known
+macOS symlink-alias test environment issue. One independent full-scope reviewer
+returned clean; no unresolved findings or omitted phase work remain.
