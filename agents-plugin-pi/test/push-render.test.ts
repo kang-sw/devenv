@@ -219,17 +219,17 @@ describe("buildPushComponent", () => {
 
     const rendered = component.render(80);
     assert.deepEqual(rendered.map(plainLine), [
-      "[ws-agent-report] agent w1",
+      "w1 · report",
       "kind: final",
       "report: Outcome: done",
       status,
     ]);
     assert.equal(tui.boxes.length, 1);
-    assert.deepEqual(tui.boxes[0].padding, [1, 0], "compact: one column of padding, no blank rows");
+    assert.deepEqual(tui.boxes[0].padding, [1, 1], "reports get one column and one blank row of breathing room on each side");
     assert.ok(theme.bgCalls.every((call) => call.color === "customMessageBg"), "every background paint uses the shared token");
     assert.ok(theme.bgCalls.length > 0, "the box paints a background");
     assert.ok(
-      theme.fgCalls.some((call) => call.color === "customMessageLabel" && call.text.includes("[ws-agent-report] agent w1")),
+      theme.fgCalls.some((call) => call.color === "customMessageLabel" && call.text.includes("w1 · report")),
       "report head uses the theme's existing label role",
     );
     assert.ok(
@@ -246,11 +246,29 @@ describe("buildPushComponent", () => {
     );
   });
 
+  test("report heads prefer the alias and hide the machine UUID without changing model-facing content", () => {
+    const agentId = "0a0cdddb-12dc-459e-8089-11d9aa283b98";
+    const content = buildPushContent("ws-agent-report", `gutter-probe (${agentId})`, { report: "done" }, undefined);
+    const tui = fakeTui();
+    const component = buildPushComponent(tui.modules, { content, details: { agent_id: agentId } }, undefined, false, "ws-agent-report") as FakeComponent;
+    assert.equal(component.render(80)[0], "gutter-probe · report");
+    assert.match(content, new RegExp(agentId), "the model-facing provenance remains intact");
+
+    const fallback = buildPushComponent(
+      fakeTui().modules,
+      { content: buildPushContent("ws-agent-report", agentId, { report: "done" }, undefined), details: { agent_id: agentId } },
+      undefined,
+      false,
+      "ws-agent-report",
+    ) as FakeComponent;
+    assert.equal(fallback.render(80)[0], "0a0cdddb · report", "an unaliased report keeps a compact disambiguator");
+  });
+
   test("no theme (and a throwing theme) degrade to unpainted text rather than to no component", () => {
     const plain = fakeTui();
     const plainComponent = buildPushComponent(plain.modules, message, undefined, false, "ws-agent-report") as FakeComponent;
     assert.ok(plainComponent);
-    assert.equal(plainComponent.render(80)[0], "[ws-agent-report] agent w1");
+    assert.equal(plainComponent.render(80)[0], "w1 · report");
 
     const broken = fakeTui();
     const brokenComponent = buildPushComponent(broken.modules, message, {
@@ -262,7 +280,7 @@ describe("buildPushComponent", () => {
       },
     }, false, "ws-agent-report") as FakeComponent;
     assert.ok(brokenComponent);
-    assert.equal(brokenComponent.render(80)[0], "[ws-agent-report] agent w1");
+    assert.equal(brokenComponent.render(80)[0], "w1 · report");
   });
 
   test("a status-less message draws no status row", () => {
@@ -408,7 +426,8 @@ describe("registerPushMessageRenderers", () => {
       ) as FakeComponent;
       component.render(80);
       const headColor = family === "ws-agent-report" ? "customMessageLabel" : "muted";
-      assert.ok(theme.fgCalls.some((call) => call.color === headColor && call.text.includes(`[${family}]`)), `${family} head uses ${headColor}`);
+      const headText = family === "ws-agent-report" ? "a1 · report" : `[${family}]`;
+      assert.ok(theme.fgCalls.some((call) => call.color === headColor && call.text.includes(headText)), `${family} head uses ${headColor}`);
       assert.ok(theme.fgCalls.some((call) => call.color === "muted" && call.text.includes("note: body")), `${family} body stays muted`);
       if (status) assert.ok(theme.fgCalls.some((call) => call.color === "dim" && call.text === status), "report status stays dim");
     }

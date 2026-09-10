@@ -14,7 +14,9 @@
  * `pi.registerMessageRenderer(family, ...)` draws the head once, the payload
  * body underneath it (capped at ten logical lines, full recovery on
  * expansion), and the status line — all three muted/gray, on a shared
- * theme-aware `customMessageBg` background (260906 Phase 1).
+ * theme-aware `customMessageBg` background (260906 Phase 1). Agent reports
+ * render an alias-first human head and vertical breathing room while their
+ * model-facing content retains the full provenance head.
  *
  * `@earendil-works/pi-tui` is reached through `./pi-tui.ts`'s
  * `loadHostPiTui()` — the one resolution point that resolves the package
@@ -118,6 +120,20 @@ export interface PushRenderTheme {
   bold?(text: string): string;
 }
 
+/** Human-facing report head: prefer alias, otherwise a compact id; model-facing content stays unchanged. */
+function humanReportHead(head: string, details: unknown): string {
+  const prefix = "[ws-agent-report] agent ";
+  if (!head.startsWith(prefix)) return head;
+  let label = head.slice(prefix.length);
+  const agentId = (details as { agent_id?: unknown } | undefined)?.agent_id;
+  if (typeof agentId === "string" && agentId.length > 0) {
+    const suffix = ` (${agentId})`;
+    if (label.endsWith(suffix)) label = label.slice(0, -suffix.length);
+    else if (label === agentId) label = agentId.slice(0, 8);
+  }
+  return `${label} · report`;
+}
+
 /**
  * `./pi-tui.ts`'s `loadHostPiTui()`, narrowed to the slice this module needs.
  * Always resolves — see `pi-tui.ts`'s Addendum doc comment.
@@ -127,8 +143,9 @@ export async function loadPushTuiModules(): Promise<PushTuiModules> {
 }
 
 /**
- * Assembles one message's component: a one-column-padded box, painted with
- * the shared theme-aware `customMessageBg` background, holding the head line
+ * Assembles one message's component: a one-column-padded box (plus one row
+ * above and below agent reports), painted with the shared theme-aware
+ * `customMessageBg` background, holding the head line
  * (using Pi's `customMessageLabel` only for the registered report family),
  * the payload body (capped at ten logical lines with full recovery on
  * expansion — the same shared bounded-preview seam `tool-result-render.ts`
@@ -167,8 +184,10 @@ export function buildPushComponent(
       return text;
     }
   };
-  const box = new tui.Box(1, 0, (text) => paintBg("customMessageBg", text));
-  box.addChild(new tui.Text(paint(family === "ws-agent-report" ? "customMessageLabel" : "muted", parts.head), 0, 0));
+  const isAgentReport = family === "ws-agent-report";
+  const box = new tui.Box(1, isAgentReport ? 1 : 0, (text) => paintBg("customMessageBg", text));
+  const displayHead = isAgentReport ? humanReportHead(parts.head, message.details) : parts.head;
+  box.addChild(new tui.Text(paint(isAgentReport ? "customMessageLabel" : "muted", displayHead), 0, 0));
   if (parts.body.length > 0) {
     const body = createBoundedText(tui);
     updateText(tui, body, parts.body.join("\n"), (text) => paint("muted", text), {
