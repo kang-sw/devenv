@@ -13,6 +13,7 @@ RSRC_DIR = Path(__file__).resolve().parents[1] / "rsrc"
 EXPECTED_LEAD_SKILLS = {
     # working
     "lead-discuss",
+    "lead-delegate",
     "lead-ticket",
     "lead-run",
     "lead-review",
@@ -25,7 +26,6 @@ EXPECTED_LEAD_SKILLS = {
     # undecided disposition; survive unchanged
     "lead-scope-worktree",
     "lead-add-rule",
-    "lead-delegate",
 }
 
 # Names that must not reappear anywhere on the shipped skill or playbook
