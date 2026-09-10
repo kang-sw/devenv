@@ -69,8 +69,8 @@ Prescriptive knowledge - preferred libraries, patterns, boundaries, domain
 constraints - is a human decision that code cannot reconstruct, so it is
 written down: one-line universal rules inline in `AGENTS.md`; longer or
 path-scoped rules as one manual each under `ai-docs/manuals/`, declared in
-`AGENTS.md` under `## Workflow` -> `### Implementation Conventions` with the
-paths they cover. A rule a test can check becomes a test; a trap tied to one
+`AGENTS.md` under `## Workflow` -> `### Implementation Conventions` (add that
+section when it is absent) with the paths they cover. A rule a test can check becomes a test; a trap tied to one
 site becomes a code comment at that site; a fact about an external system
 goes in `ai-docs/ref/`. Descriptive knowledge - what the code does and why -
 is reconstructed from the code, the tests, and commit `## AI Context` bodies
@@ -79,10 +79,10 @@ per-commit update obligation; drift is fixed on contact and by review.
 
 ## Execution Model
 
-The ticket is the plan. Its decisions are settled when it is written: facts
-are checked by a cheap-tier populator that writes them into the ticket, and
-design is reviewed by a heavy-tier reviewer before the ticket enters
-`ready/`. Execution consumes those decisions instead of re-making them.
+The ticket is the plan. Its decisions are settled when it is written: its
+stated facts are checked against the code and written into it, and its plan
+passes independent design review, before it enters `ready/`. Execution
+consumes those decisions instead of re-making them.
 
 One worker executes one whole ticket: it routes, edits, verifies, runs
 independent review, commits, records the phase result, and closes the
@@ -94,18 +94,21 @@ spawns workers, and handles what they escalate; it edits no source.
 The worker stops only for: a merge into a parent branch (user approval; the
 veto point for everything the worker decided alone); an unresolved decision
 the ticket does not settle; a ticket decision contradicted by code reality;
-an irreversible action in the Approval Protocol's always-ask category; a
-Critical review finding still open after the single fix round. Every other
-decision is recorded in the commit's `## AI Context` and the ticket's
+an irreversible action in the always-ask category of the `### Approval
+Protocol` the project's `AGENTS.md` declares; a Critical (blocking) review
+finding still open after the single fix round. Every other decision is
+recorded in the commit's `## AI Context` and the ticket's
 `### Result` and listed in the worker's terminal report for veto. The lead
 resolves a contradicted decision itself when it can (design review over the
-worker's proposed resolution), and elevates a surviving Critical finding to a
-higher-tier worker; the user sees low-reversibility decisions and exhausted
-lead attempts.
+worker's proposed resolution), and hands a surviving Critical finding to a
+stronger worker; the user sees low-reversibility decisions and exhausted lead
+attempts.
 
-Without the workflow tooling, the same model holds: read the ticket and the
-declared manuals, work on a branch, keep the stop list, and record decisions
-in the commit body and the ticket result.
+Without the workflow tooling, one maintainer plays both roles and the same
+model holds: before promoting a ticket to `ready/`, check its stated facts
+against the code and have its plan reviewed by someone who did not write it;
+then read the ticket and the declared manuals, work on a branch, keep the stop
+list, and record decisions in the commit body and the ticket result.
 
 ## Index Health
 

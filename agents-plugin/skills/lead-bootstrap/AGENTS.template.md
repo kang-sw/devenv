@@ -49,7 +49,9 @@ Read at every session start, before other action:
 
 <!-- Optional. Names one ticket a lead must read before answering or editing
      when the task touches one of the topics. Both keys are required; a
-     section with one key, or no section, declares no anchor. -->
+     section with one key, no section, or a section still holding the
+     placeholder values below declares no anchor. Delete this section, code
+     fence included, when the project declares none. -->
 
 ```text
 anchor: ai-docs/tickets/<status>/<stem>.md
@@ -142,8 +144,8 @@ Adapt structure to the project; this is a starting point, not a schema.
      covers. A rule a test can check becomes a test. A trap tied to one site
      becomes a code comment at that site. A fact about an external system
      goes in `ai-docs/ref/`. Context goes in this file's
-     `## Project Orientation` section or the `repo` note layer; process goes
-     in skills. -->
+     `## Project Orientation` section or the `repo` note layer; a procedure
+     goes in `ai-docs/manuals/`. -->
 
 <!-- MIGRATION CHECKLIST
      Template-internal. NEVER copy into a project AGENTS.md; only the Template
@@ -265,8 +267,8 @@ Adapt structure to the project; this is a starting point, not a schema.
   projects never create them; rewrite the Inclusion test comment to the
   current wording. In `ai-docs/WORKFLOW.md`, drop the sections teaching the
   retired layers along with their layout bullets and the spec-entry bullet
-  under commit traceability, and merge in the current guide's
-  `## Behavioral Contract` and `## Execution Model` sections. Promotion to
+  under commit traceability, and merge in the bootstrap workflow guide
+  source's `## Behavioral Contract` and `## Execution Model` sections. Promotion to
   `ready/` is gated by the ticket's own design review, not by spec
   addressing; read any earlier item's spec-address qualifier that way. This
   is a one-time migration judgment call, not an automated reconciliation; do
