@@ -69,37 +69,6 @@ const ticketBodyResearch = `
 
 Research tickets have no phases. Sections after ` + "`## Background`" + ` are freeform topic headings.`
 
-// ticketBodyWorkset is the Workset body block.
-const ticketBodyWorkset = `
-### Workset body (category = ` + "`workset`" + `)
-
-` + "```markdown" + `
-# <title>
-
-## Context
-
-<why this operating set exists>
-
-## Tickets
-
-- ` + "`<stem-or-path>`" + ` - <status; role in this workset; dependency note>
-
-## Planned References
-
-- ` + "`<provisional label>`" + ` - <intended role; creation condition>
-
-## Focus
-
-<current session, goal, sprint, or temporary operating focus>
-
-## Exit Criteria
-
-- Done: <conditions for closing this workset>
-- Deferred: <what moves out of this workset>
-` + "```" + `
-
-Workset bodies define a non-hierarchical ticket collection, not decomposition. Included tickets do not set ` + "`parent:`" + ` to the workset; planned references do not receive status, path, or ` + "`parent:`" + ` until a real ticket exists.`
-
 // ticketBodyEpic is the Epic body block.
 const ticketBodyEpic = `
 ### Epic body (category = ` + "`epic`" + `)
@@ -140,11 +109,9 @@ func TicketTemplate(typeStr string) (string, error) {
 		return ticketFrontmatter + "\n" + ticketBodyActionable, nil
 	case "research":
 		return ticketFrontmatter + "\n" + ticketBodyResearch, nil
-	case "workset":
-		return ticketFrontmatter + "\n" + ticketBodyWorkset, nil
 	case "epic":
 		return ticketFrontmatter + "\n" + ticketBodyEpic, nil
 	default:
-		return "", fmt.Errorf("unknown ticket type %q; accepted: feat, bug, refactor, chore, research, workset, epic", typeStr)
+		return "", fmt.Errorf("unknown ticket type %q; accepted: feat, bug, refactor, chore, research, epic", typeStr)
 	}
 }

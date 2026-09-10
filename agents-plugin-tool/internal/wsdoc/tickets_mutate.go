@@ -295,7 +295,7 @@ var ticketCategoryRE = regexp.MustCompile(`^\d{6}-([a-z]+)-`)
 
 // nonImplementationCategories are the ticket categories that never carry
 // implementation phases: an epic decomposes into children, and research and
-// workset tickets are board artifacts. Checks that only make sense for a
+// legacy workset tickets are board artifacts. Checks that only make sense for a
 // ticket that will actually be routed and implemented skip these.
 var nonImplementationCategories = map[string]bool{
 	"epic":     true,

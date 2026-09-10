@@ -216,7 +216,7 @@ Epics settle cross-child design explicitly at `idea/` to `todo/`: populate
 checkable facts, then run design-only Sage review. Later material changes to
 cross-child decisions need explicit re-settlement before a child relies on
 them; ordinary todo edits do not automatically spawn reviewers. Epics and
-research remain in `idea/` or `todo/`. Research and workset require neither
+research remain in `idea/` or `todo/`. Research requires neither
 stage; `ready/` remains the actionable implementation queue.
 
 Posture (per-stage, stored in ticket frontmatter) resolves the gate:
@@ -236,20 +236,16 @@ is itself the reviewable deliverable. A phase write-up states its completed
 behavior, deferred scope, and verification boundary. Phases accumulate
 `### Result` (and later `#### Edition`) entries as work lands, giving the
 ticket a durable record of what actually happened per phase versus what was
-planned. Epics and worksets do not carry implementation phases; phase-level
-detail belongs in the child or included tickets they reference.
+planned. Epics do not carry implementation phases; phase-level detail belongs in
+their child tickets.
 
-### Epic vs. workset
+### Epics and execution scope
 
-Both are board artifacts, not implementation targets — but they organize
-differently. An `epic` is
-hierarchical: child tickets collectively deliver one parent outcome, and
-cross-child invariant decisions live in the epic body. A `workset` is
-non-hierarchical: it groups independent or cross-cutting tickets for
-coordination, sequencing, or focus without owning decomposition — included
-tickets are listed, never made children. Choose `epic` when the request is a
-parent-outcome breakdown; choose `workset` when it is a coordination/focus
-grouping with no decomposition ownership.
+An `epic` is hierarchical: child tickets collectively deliver one parent
+outcome, and cross-child invariant decisions live in the epic body. Use
+`epic` for single-outcome decomposition. The goal loop over the scoped
+`ready/` queue handles mixed-parent execution; frontmatter `related:` records
+non-hierarchical relationships between tickets.
 
 ## Planned Or Specialized
 

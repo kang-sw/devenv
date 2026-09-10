@@ -16,8 +16,7 @@ asking, so judgment is spent here and not at run time.
   session; `{{.McpNamespace}}/tickets.template(type: <category>)` for a new
   ticket's skeleton; `{{.McpNamespace}}/tickets.checklist(type, phase)` for
   the capture and intent checklists, both satisfied against the written text.
-- The target ticket, and only those graph tickets (parent, `related:`,
-  worksets listing it) whose decisions constrain it.
+- The target ticket, and only those graph tickets (parent and `related:`) whose decisions constrain it.
 
 ## Write
 
@@ -29,8 +28,8 @@ asking, so judgment is spent here and not at run time.
   product, API, or verification decision: decisions with their rejected
   alternatives, constraints, verification expectations, and the manuals that
   apply.
-- Epics and worksets stay board-level; implementation detail goes into the
-  child, as a separate invocation. Worksets never enter `ready/`.
+- Epics stay board-level; implementation detail goes into the child, as a
+  separate invocation.
 - Plan text with a `### Result` is frozen; append `#### Edition (<hash>) -
   <date>` for later changes.
 - Create through `{{.McpNamespace}}/tickets.create_empty`, move through
@@ -134,6 +133,6 @@ Drop: `{{.McpNamespace}}/tickets.close(stem, status: "dropped")`. Closing to
 
 Commit edited paths with `{{.McpNamespace}}/git.commit(paths, title,
 ai_context)`, one logical unit. Suggest the next action: a child ticket for an
-epic or workset; `{{.SkillNamespace}}:lead-run` for an actionable ticket now
+epic; `{{.SkillNamespace}}:lead-run` for an actionable ticket now
 in `ready/`. End with `Ticket: ai-docs/tickets/<status>/<stem>.md` per ticket
 written, the last of them on its own final line.

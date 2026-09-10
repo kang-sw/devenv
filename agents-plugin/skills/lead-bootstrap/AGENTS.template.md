@@ -193,7 +193,7 @@ Adapt structure to the project; this is a starting point, not a schema.
 - v0032: If `AGENTS.md` is absent and `CLAUDE.md` exists, create `AGENTS.md` from current `CLAUDE.md`.
 - v0033: Replace `CLAUDE.md` body with `@AGENTS.md`.
 - v0034: Treat `AGENTS.md` as the canonical managed template target.
-- v0035: Create `ai-docs/tickets/ready/` if absent. Move existing non-`epic`, non-`research`, non-`workset` implementation-ready tickets from `todo/` to `ready/` with `git mv` when they have spec addressing; keep `epic`, `research`, `workset`, missing-spec-address, and uncertain tickets in `todo/`; recreate/keep an empty `todo/` directory when needed; treat `ready/` as the implementation queue and `## Ticket Queue` source; promote scoped `idea/` tickets to `todo/` through `ws:lead-discuss`.
+- v0035: Create `ai-docs/tickets/ready/` if absent. Move existing non-`epic`, non-`research`, non-`workset` implementation-ready tickets from `todo/` to `ready/` with `git mv` when they have spec addressing; keep `epic`, `research`, legacy `workset`, missing-spec-address, and uncertain tickets in `todo/`; recreate/keep an empty `todo/` directory when needed; treat `ready/` as the implementation queue and `## Ticket Queue` source; promote scoped `idea/` tickets to `todo/` through `ws:lead-discuss`.
 - v0036: If `ai-docs/WORKFLOW.md` is absent, create it from the bootstrap workflow guide source. If `AGENTS.md` lacks the workflow-guide Project Knowledge bullet, add it without expanding root context into convention detail. The guide is explanatory only and does not override ws runtime or MCP parser behavior.
 - v0037: Add `ai-docs/.deps/` to `.gitignore` if absent; API documentation cache contents are runtime-managed local data, not project memory.
 - v0038: Create `ai-docs/.old/` as the tracked project archive for files kept only as possible future reference and hidden from default listings. Move legacy spec archives with `git mv`: `ai-docs/ref/old-spec` or `ai-docs/old-spec` -> `ai-docs/.old/spec`; move `ai-docs/old` -> `ai-docs/.old/misc` when present and not already project-specific.
@@ -291,6 +291,12 @@ Adapt structure to the project; this is a starting point, not a schema.
   completeness review settle ready promotion. Epic todo settlement runs facts
   then design only; material cross-child decisions require explicit
   re-settlement before child use. Research stays ungated outside ready.
+- v0050: Remove workset from local ticket authoring inventories, templates,
+  checklists, and workflow guidance. Preserve existing workset files and their
+  references as historical records; earlier migration exclusions still apply
+  to legacy worksets. Epics remain single-outcome decomposition, the goal loop
+  over scoped `ready/` handles mixed-parent execution, and `related:` records
+  non-hierarchical relationships. Do not convert worksets into epics.
 -->
 
-<!-- Template Version: v0049 -->
+<!-- Template Version: v0050 -->

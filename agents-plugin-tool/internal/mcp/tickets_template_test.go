@@ -8,8 +8,8 @@ import (
 )
 
 func TestTicketTemplate(t *testing.T) {
-	// Each of the 7 accepted type values returns non-empty text and no error.
-	accepted := []string{"feat", "bug", "refactor", "chore", "research", "workset", "epic"}
+	// Each of the 6 accepted type values returns non-empty text and no error.
+	accepted := []string{"feat", "bug", "refactor", "chore", "research", "epic"}
 	for _, tt := range accepted {
 		text, err := wsdoc.TicketTemplate(tt)
 		if err != nil {
@@ -37,12 +37,6 @@ func TestTicketTemplate(t *testing.T) {
 	}
 	if strings.Contains(researchText, "## Phases") {
 		t.Error("TicketTemplate(\"research\") unexpectedly contains \"## Phases\"")
-	}
-
-	// workset return includes ## Tickets heading.
-	worksetText, _ := wsdoc.TicketTemplate("workset")
-	if !strings.Contains(worksetText, "## Tickets") {
-		t.Error("TicketTemplate(\"workset\") does not contain \"## Tickets\"")
 	}
 
 	// epic return includes ## Child Tickets heading.
