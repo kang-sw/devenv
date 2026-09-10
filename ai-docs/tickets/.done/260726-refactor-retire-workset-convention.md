@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: d8cced4412bf89e1
 sage-review-completeness-reviewed: d8cced4412bf89e1
+completed: 2026-09-10
 ---
 
 # Retire the workset ticket convention
@@ -95,6 +96,38 @@ category list that omits workset; active and archived workset stems remain
 queryable; the open workset closes without changing listed tickets; no shipped
 skill or convention recommends workset; ws/wsflow mirrors agree; and existing
 epic, research, and actionable ticket behavior remains intact.
+
+### Result (f262e488) - 2026-09-10
+
+Retired workset creation, templates, checklists, accepted-category errors, and
+live authoring guidance. Historical category recognition remains available for
+query, status, graph, and close operations. Shared bootstrap v0050 removes old
+guidance without converting worksets into epics or rewriting legacy files;
+resource mirrors and manifests were regenerated.
+
+Dropped `260713-workset-workflow-dogfood-bugs` in `4c00f454`. All eight included
+tickets were independently resolved, and review compared their paths and blob
+IDs against the base: three done, two dropped, one idea, and two todo, with no
+content or status changes and no parent relationship to the workset. Existing
+archived worksets and the cleanup epic were unchanged.
+
+Verification: `go test ./...` passed with canonical macOS `TMPDIR`;
+`scripts/smoke-ws-mcp.sh ..` passed; all 10 wsflow package tests passed;
+resource, mirror, and skills-manifest generators passed; `git diff --check`
+passed. New regressions cover rejection before filesystem mutation in each
+authorable status, accepted-category lists, active and archived legacy
+lifecycle operations, related links, and independent ticket preservation.
+Correctness, fit (including fresh-reader prose audit), and test reviews were
+clean; correctness review also passed the focused wsdoc/MCP tests.
+
+Decisions: creation rejects the retired category specifically, preserving
+unrelated existing category behavior; historical bootstrap migration exclusions
+remain explicit compatibility rules. The first full-suite run exposed a new
+test's incorrect terminal-status expectation, corrected to `.done`/`.dropped`,
+and reproduced the already captured
+`260910-bug-route-ticket-absolute-path-symlink-alias`; canonical `TMPDIR` avoided
+that unrelated environment failure without changing path-resolution source.
+No unresolved review findings or deferred retirement scope.
 
 ## Out of Scope
 
