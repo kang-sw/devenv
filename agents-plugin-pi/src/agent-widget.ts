@@ -280,47 +280,64 @@ function formatEstimatedUsd(usd: number | undefined): string {
   return String(Number(usd.toFixed(3)));
 }
 
-function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, emphasizeAttention = false): string {
+function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, emphasizeAttention = false, theme?: AgentWidgetTheme): string {
   const primary = row.answerHint ? `/answer ${row.answerDisplay ?? row.name}` : row.name;
   const stateLabel = STATE_LABEL[row.state];
   const base = `${primary} · ${row.role} · ${stateLabel} · ${formatElapsed(row.elapsedMs)}`;
-  const selection = `${row.model ?? "—"} (${row.effort ?? "—"})`;
-  const telemetry = ` · ${selection} · in ${formatInputTokens(row.latestInput)} · est $${formatEstimatedUsd(row.estimatedUsd)}`;
+  const model = row.model ?? "—";
+  const effort = row.effort ?? "—";
+  const input = `in ${formatInputTokens(row.latestInput)}`;
+  const estimate = `est $${formatEstimatedUsd(row.estimatedUsd)}`;
+  const telemetry = ` · ${model} (${effort}) · ${input} · ${estimate}`;
   const protectedHint = row.answerHint ?? row.inspectionHint;
   const hint = protectedHint ? ` — ${protectedHint}` : "";
-  // The owner action is the only non-negotiable tail.  Allocate its columns
+  // The owner action is the only non-negotiable tail. Allocate its columns
   // first, then progressively omit telemetry and identity detail.
   let line: string;
   let appendedHint = false;
+  let appendedTelemetry = false;
   if (protectedHint && visibleWidth(hint) <= width) {
     const available = width - visibleWidth(hint);
     const withTelemetry = base + telemetry;
-    line = visibleWidth(withTelemetry) <= available ? withTelemetry + hint : truncateToWidth(base, available) + hint;
+    appendedTelemetry = visibleWidth(withTelemetry) <= available;
+    line = appendedTelemetry ? withTelemetry + hint : truncateToWidth(base, available) + hint;
     appendedHint = true;
   } else {
-    line = visibleWidth(base + telemetry) <= width ? base + telemetry : truncateToWidth(base, width);
+    appendedTelemetry = visibleWidth(base + telemetry) <= width;
+    line = appendedTelemetry ? base + telemetry : truncateToWidth(base, width);
   }
   // Add ANSI only after width truncation: styling before truncation can leave
   // an incomplete escape sequence in a narrow terminal.
-  if (!emphasizeAttention || !isAttentionState(row.state)) return line;
-  // A protected hint that does not fit was never appended. Track that fact
-  // rather than inferring it from row metadata, or narrow styling would
-  // reconstruct an over-width tail after the bounded line was built.
-  const content = appendedHint ? line.slice(0, -hint.length) : line;
+  let content = appendedHint ? line.slice(0, -hint.length) : line;
   const suffix = appendedHint ? hint : "";
-  if (content.length === 0) return line;
-  if (row.answerHint) {
-    // The question cue is the first structured field. Its visible prefix is
-    // the only styled part even if width truncation removes later fields.
-    const cueEnd = Math.min(content.length, primary.length);
-    return bold(content.slice(0, cueEnd), true) + content.slice(cueEnd) + suffix;
+  if (appendedTelemetry && theme) {
+    const styledTelemetry =
+      theme.fg("dim", " · ") +
+      theme.fg("accent", model) +
+      theme.fg("dim", ` (${effort})`) +
+      theme.fg("dim", " · ") +
+      theme.fg("syntaxNumber", input) +
+      theme.fg("dim", " · ") +
+      theme.fg("warning", estimate);
+    content = base + styledTelemetry;
   }
-  // State begins after fixed, structured name and role fields. Never search
-  // rendered text: names may contain the state label or separator glyphs.
-  const stateStart = primary.length + 3 + row.role.length + 3;
-  const stateEnd = stateStart + stateLabel.length;
-  if (content.length < stateEnd) return line;
-  return content.slice(0, stateStart) + bold(stateLabel, true) + content.slice(stateEnd) + suffix;
+  if (emphasizeAttention && isAttentionState(row.state) && content.length > 0) {
+    if (row.answerHint) {
+      // The question cue is the first structured field. Its visible prefix is
+      // the only styled part even if width truncation removes later fields.
+      const cueEnd = Math.min(content.length, primary.length);
+      content = bold(content.slice(0, cueEnd), true) + content.slice(cueEnd);
+    } else {
+      // State begins after fixed, structured name and role fields. Never search
+      // rendered text: names may contain the state label or separator glyphs.
+      const stateStart = primary.length + 3 + row.role.length + 3;
+      const stateEnd = stateStart + stateLabel.length;
+      if (content.length >= stateEnd) {
+        content = content.slice(0, stateStart) + bold(stateLabel, true) + content.slice(stateEnd);
+      }
+    }
+  }
+  return content + suffix;
 }
 
 /**
@@ -367,7 +384,7 @@ export function buildHeadingLine(rows: readonly AgentRow[], pendingCount: number
  * `truncateToWidth`. `undefined` only when rows and pending questions are
  * both absent.
  */
-export function buildWidgetLines(rows: readonly AgentRow[], pendingCount: number, width: number = DEFAULT_AGENT_WIDGET_WIDTH, emphasizeAttention = false): string[] | undefined {
+export function buildWidgetLines(rows: readonly AgentRow[], pendingCount: number, width: number = DEFAULT_AGENT_WIDGET_WIDTH, emphasizeAttention = false, theme?: AgentWidgetTheme): string[] | undefined {
   const heading = buildHeadingLine(rows, pendingCount, width, emphasizeAttention);
   if (heading === undefined) return undefined;
 
@@ -384,7 +401,7 @@ export function buildWidgetLines(rows: readonly AgentRow[], pendingCount: number
     hiddenRunning = running.length - runningSlots;
   }
 
-  const lines = [heading, ...shown.map((row) => formatRow(row, width, emphasizeAttention && isAttentionState(row.state)))];
+  const lines = [heading, ...shown.map((row) => formatRow(row, width, emphasizeAttention && isAttentionState(row.state), theme))];
   if (hiddenRunning > 0) lines.push(truncateToWidth(`+${hiddenRunning} more`, width));
   return lines;
 }
@@ -416,6 +433,16 @@ export function shouldArmAgentWidget(role: SpawnRole | undefined, mode: string |
  */
 export interface AgentWidgetComponent {
   render(width: number): string[];
+  invalidate(): void;
+}
+
+/** Theme subset used by the widget's semantic telemetry accents. */
+export interface AgentWidgetTheme {
+  fg(color: "accent" | "dim" | "syntaxNumber" | "warning", text: string): string;
+}
+
+function asAgentWidgetTheme(theme: unknown): AgentWidgetTheme | undefined {
+  return typeof (theme as { fg?: unknown } | undefined)?.fg === "function" ? theme as AgentWidgetTheme : undefined;
 }
 
 /**
@@ -498,7 +525,11 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
       // width-is-a-render-time-input contract.
       ctx.ui?.setWidget?.(
         AGENT_WIDGET_KEY,
-        visible ? () => ({ render: (width: number) => buildWidgetLines(rows, pendingCount, width, emphasize) ?? [] }) : undefined,
+        visible ? (_tui, theme) => ({
+          render: (width: number) => buildWidgetLines(rows, pendingCount, width, emphasize, asAgentWidgetTheme(theme)) ?? [],
+          // Rendering is stateless and consults the live Theme object each time.
+          invalidate() {},
+        }) : undefined,
         { placement: "belowEditor" },
       );
       ctx.ui?.setStatus?.(AGENT_STATUS_KEY, undefined);

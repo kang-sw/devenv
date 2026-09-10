@@ -261,6 +261,18 @@ describe("buildWidgetLines", () => {
     assert.match(buildWidgetLines([compact], 0, 80)![1], /p \(l\).*in 132.4k.*est \$0.123/);
     const noMegabyteUnit = { ...compact, latestInput: 1_354_100, estimatedUsd: 12.34567 };
     assert.match(buildWidgetLines([noMegabyteUnit], 0, 120)![1], /in 1354.1k.*est \$12.346/);
+
+    const themedSpans: Array<[string, string]> = [];
+    const themed = buildWidgetLines([compact], 0, 80, false, {
+      fg(color, text) {
+        themedSpans.push([color, text]);
+        return `\u001b[38;5;1m${text}\u001b[39m`;
+      },
+    })![1];
+    assert.ok(themedSpans.some(([color, text]) => color === "accent" && text === "p"), "model uses the theme accent");
+    assert.ok(themedSpans.some(([color, text]) => color === "syntaxNumber" && text === "in 132.4k"), "input telemetry uses the numeric theme color");
+    assert.ok(themedSpans.some(([color, text]) => color === "warning" && text === "est $0.123"), "estimated cost uses the warning/gold theme color");
+    assert.ok(visibleWidth(themed) <= 80, "ANSI theme styling does not change width accounting");
   });
   function runningRow(elapsedMs: number, name = "w") {
     return { name, role: "worker" as const, state: "running" as const, elapsedMs, answerHint: undefined };
