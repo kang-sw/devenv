@@ -43,14 +43,19 @@ func TestShippedManifestUpToDate(t *testing.T) {
 	}
 }
 
+// TestRetiredAPIGuidanceNotShipped scans the shipped trees only. It used to
+// scan ai-docs/spec and ai-docs/mental-model too; those layers were retired and
+// their corpus now sits unchanged under the ai-docs/.old archive, where a hit is
+// not a bug to fix - archived text is kept verbatim, and three archived files do
+// still name the retired api.ask guidance. Nothing under ai-docs/ is shipped, so
+// the guard loses no coverage of what the test is named for.
 func TestRetiredAPIGuidanceNotShipped(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 	roots := []string{
 		filepath.Join(repoRoot, "agents-plugin", "rsrc"),
 		filepath.Join(repoRoot, "agents-plugin-wsflow", "rsrc"),
 		filepath.Join(repoRoot, "agents-plugin", "skills"),
-		filepath.Join(repoRoot, "ai-docs", "spec"),
-		filepath.Join(repoRoot, "ai-docs", "mental-model"),
+		filepath.Join(repoRoot, "agents-plugin-wsflow", "skills"),
 	}
 	forbidden := []string{
 		"ws/api.ask(prompt",

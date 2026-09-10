@@ -7,20 +7,30 @@ summary: MCP operational runbook, launcher environment, release and verification
 Operational runbook for the host-neutral `ws-mcp` runtime used by the `ws`
 plugin package.
 
-This file is not the MCP tool contract or current tool inventory. Caller-visible
-behavior belongs in specs, and modification-relevant coupling belongs in mental
-models:
+This file is not the MCP tool contract or current tool inventory. That contract
+is the test suite under `agents-plugin-tool/internal/`, and the implementation
+coupling is the code itself:
 
-- MCP behavior contract: `ai-docs/spec/mcp-tools.md`
-- plugin launcher and release contract: `ai-docs/spec/plugin-runtime.md`
-- named-agent behavior contract: `ai-docs/spec/named-agent-runtime.md`
-- MCP implementation mental model: `ai-docs/mental-model/mcp-runtime.md`
-- plugin packaging mental model: `ai-docs/mental-model/plugin-runtime.md`
-- named-agent mental model: `ai-docs/mental-model/named-agent-runtime.md`
+- MCP dispatch, schemas, and tool allowlist: `agents-plugin-tool/internal/mcp/`
+- plugin launcher and release packaging: `agents-plugin-tool/internal/wsrsrc/`
+  and each package's `runtime.json`
+- named-agent behavior: `agents-plugin-tool/internal/wsagent/` and
+  `ai-docs/manuals/ws-agent-runtime.md`
 
 For live tool schemas and current inventory, ask the runtime: use MCP
 `tools/list`, `ws/runtime.read`, `ws-mcp runtime capabilities`, or the source
 registry in `agents-plugin-tool/internal/mcp/server.go`.
+
+## Tool Output Convention
+
+An MCP tool's output is read by an LLM before it is read by anything else, so a
+new tool's default response is compact, readable text. Return JSON only when a
+caller needs stable machine parsing, protocol metadata, or a
+compatibility-preserving shape, and put it behind an explicit opt-in (a
+`format: "json"` argument) rather than making it the default. Nothing enforces
+this - `toolTextResponse` and `toolJSONResponse` are equally available at every
+dispatch site in `agents-plugin-tool/internal/mcp/server.go` - so it has to be
+applied when the tool is written.
 
 ## Process Model
 
@@ -43,10 +53,9 @@ ws-mcp runtime capabilities
 ws-mcp serve --stdio --root <repo-root>
 ```
 
-`doctor` is a host-independent smoke check. In this repository it verifies the
-repository root, `ai-docs/`, `agents-plugin/`, and `AGENTS.md`; downstream
-projects should rely on MCP tools for bundled conventions rather than
-repository-local source paths.
+`doctor` is a host-independent smoke check. It verifies the repository root,
+`ai-docs/`, and `AGENTS.md`; downstream projects should rely on MCP tools for
+bundled conventions rather than repository-local source paths.
 
 ## Plugin-Managed Startup
 
