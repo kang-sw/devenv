@@ -18,8 +18,8 @@ const (
 // Well-known item key constants for registered config items. Use these instead of
 // raw string literals to ensure consistent naming across packages.
 const (
-	// ItemWorkflowPreferSubagent is the global bootstrap preference for loading
-	// strict subagent posture with the workflow manual. Builtin default: off.
+	// ItemWorkflowPreferSubagent is the global preference for default
+	// delegation of eligible general work through lead-delegate. Builtin default: off.
 	ItemWorkflowPreferSubagent = "workflow.prefer_subagent"
 
 	// ItemSageReview is the layered config key for the sage review gate on ticket

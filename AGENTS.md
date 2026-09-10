@@ -305,7 +305,8 @@ ai-docs/tickets/.dropped/
 - **Canonical flows.**
   ```text
   Full ceremony:  discuss -> ticket -> run -> review
-  Direct:         run <ticket-path or description>
+  Delegate:       delegate <bounded task> -> follow-up on the same native agent
+  Direct:         run <ticket-path or implementation contract>
   Queue:          run (no argument) -> next ready/ ticket, one worker per cycle
   Review:         review [branch|range] -> verdict -> (fix via run | comment | discuss | merge)
   Release:        ship <project> -> release gate -> execute

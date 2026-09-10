@@ -24,7 +24,7 @@ EXPECTED_SKILLS = {
     "lead-tune",
     "lead-workflow-manual",
     "lead-ticket",
-    "lead-prefer-subagent",
+    "lead-delegate",
     "lead-revive",
     "lead-scope-worktree",
     "mcp-server-repair",
@@ -33,14 +33,15 @@ EXPECTED_SKILLS = {
 EXPECTED_WSFLOW_ONLY_SKILLS: set = set()
 EXPECTED_INLINE_SKILLS = {
     "lead-revive",
-    "lead-prefer-subagent",
     "mcp-server-repair",
 }
 EXPECTED_PARALLEL_INIT_SKILLS = {
+    "lead-delegate",
     "lead-discuss",
     "lead-run",
 }
 PARALLEL_INIT_TITLES = {
+    "lead-delegate": "Delegate",
     "lead-discuss": "Discuss",
     "lead-run": "Run",
 }
@@ -60,6 +61,7 @@ POINTER_TAIL_TITLES = {
 }
 
 FORBIDDEN_PATTERNS = {
+    "retired posture skill": re.compile(r"\blead-prefer-subagent\b"),
     "full ws MCP notation": re.compile(r"\bws/"),
     "full ws skill namespace": re.compile(r"\bws:"),
     "full ws dotted namespace": re.compile(r"\bws\."),
@@ -197,6 +199,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
         # optional regex group) so a missing pointer on any of them fails
         # loudly instead of silently passing.
         pointer_tail = {
+            "lead-delegate": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
             "lead-discuss": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
             "lead-run": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
         }

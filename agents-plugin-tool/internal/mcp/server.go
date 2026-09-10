@@ -1884,7 +1884,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	appendKnob(subagentEntry, tuningKnob{
 		ID:          "workflow.prefer_subagent",
 		Kind:        "workflow_preference",
-		Description: "Select whether the workflow manual loads strict subagent posture.",
+		Description: "Default eligible general work to lead-delegate, subject to its routing gate.",
 		Writer:      tuningWriter{Tool: subagentEntry.WriterTool, FixedArguments: map[string]string{"key": subagentEntry.Key}},
 		Reset: &tuningWriter{
 			Tool:           subagentEntry.ResetTool,

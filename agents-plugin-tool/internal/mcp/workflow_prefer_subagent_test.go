@@ -103,7 +103,7 @@ func TestWorkflowPreferSubagentWorkflowManualPrintProductionPath(t *testing.T) {
 	useLeadProfile(t)
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
-	t.Setenv("WS_SKILLS_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "skills"))
+	t.Setenv("WS_SKILLS_ROOT", filepath.Join(t.TempDir(), "missing-skills"))
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
@@ -118,7 +118,7 @@ func TestWorkflowPreferSubagentWorkflowManualPrintProductionPath(t *testing.T) {
 	offText := toolText(t, callToolOnce(t, s, 1, "playbook.read", map[string]any{
 		"name": "lead-workflow-manual",
 	}))
-	if strings.Contains(offText, `<playbook name="lead-prefer-subagent" title="Prefer Subagent">`) {
+	if strings.Contains(offText, "Prefer delegation for eligible general work") {
 		t.Fatalf("builtin/off workflow.prefer_subagent must not append lead-prefer-subagent:\n%s", offText)
 	}
 
@@ -135,12 +135,17 @@ func TestWorkflowPreferSubagentWorkflowManualPrintProductionPath(t *testing.T) {
 		"name": "lead-workflow-manual",
 	}))
 	for _, want := range []string{
-		`<playbook name="lead-prefer-subagent" title="Prefer Subagent">`,
-		"Maximum-delegation posture for this session",
-		"</playbook>",
+		"Prefer delegation for eligible general work",
+		"ws:lead-delegate",
+		"apply its routing gate before dispatch",
 	} {
 		if !strings.Contains(onText, want) {
 			t.Fatalf("prefer-subagent manual render missing %q:\n%s", want, onText)
+		}
+	}
+	for _, retired := range []string{"lead-prefer-subagent", "Maximum-delegation posture", "\n# Delegate\n", "## Assignment"} {
+		if strings.Contains(onText, retired) {
+			t.Fatalf("manual must contain only an invocation hint, found %q", retired)
 		}
 	}
 	if strings.Contains(onText, "ws:override:") || strings.Contains(onText, "ws:/override:") {
@@ -158,24 +163,16 @@ func TestWorkflowPreferSubagentWorkflowManualPrintProductionPath(t *testing.T) {
 	offAgainText := toolText(t, callToolOnce(t, s, 5, "playbook.read", map[string]any{
 		"name": "lead-workflow-manual",
 	}))
-	if strings.Contains(offAgainText, `<playbook name="lead-prefer-subagent" title="Prefer Subagent">`) {
+	if strings.Contains(offAgainText, "Prefer delegation for eligible general work") {
 		t.Fatalf("global off workflow.prefer_subagent must remove appended lead-prefer-subagent:\n%s", offAgainText)
 	}
 }
 
-// TestWorkflowPreferSubagentWorkflowManualClaudeGetsStaticSkillBody verifies
-// that the lead-prefer-subagent append is now a static SKILL.md body loaded
-// via wsrsrc.LoadSkillBody, identical across harnesses. This replaces the
-// prior per-harness override-marker divergence test
-// (TestWorkflowPreferSubagentWorkflowManualClaudeOmitsCodexGuidance): the
-// PreferSubagentInvocationGuidance override point and its Codex-only builtin
-// default were retired when the skill body was inlined, so Claude and Codex
-// now both see the same body.
-func TestWorkflowPreferSubagentWorkflowManualClaudeGetsStaticSkillBody(t *testing.T) {
+func TestWorkflowPreferSubagentWorkflowManualClaudeGetsInvocationHint(t *testing.T) {
 	useLeadProfile(t)
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
-	t.Setenv("WS_SKILLS_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "skills"))
+	t.Setenv("WS_SKILLS_ROOT", filepath.Join(t.TempDir(), "missing-skills"))
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
@@ -199,14 +196,14 @@ func TestWorkflowPreferSubagentWorkflowManualClaudeGetsStaticSkillBody(t *testin
 	text := toolText(t, callToolOnce(t, s, 2, "playbook.read", map[string]any{
 		"name": "lead-workflow-manual",
 	}))
-	if !strings.Contains(text, `<playbook name="lead-prefer-subagent" title="Prefer Subagent">`) {
-		t.Fatalf("prefer-subagent manual render must append wrapper for Claude:\n%s", text)
+	if !strings.Contains(text, "Prefer delegation for eligible general work") {
+		t.Fatalf("prefer-subagent manual render must add invocation hint for Claude:\n%s", text)
 	}
 	for _, want := range []string{
-		"Maximum-delegation posture for this session",
+		"ws:lead-delegate",
 	} {
 		if !strings.Contains(text, want) {
-			t.Fatalf("Claude appended playbook must include static skill body %q:\n%s", want, text)
+			t.Fatalf("Claude manual must include invocation hint %q:\n%s", want, text)
 		}
 	}
 }
