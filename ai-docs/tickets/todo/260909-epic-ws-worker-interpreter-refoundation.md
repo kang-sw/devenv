@@ -16,6 +16,22 @@ related:
 
 # ws refoundation: worker as workflow interpreter, lead as escalation handler
 
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | Cross-Child Decisions 4, 8, 12, and 15 name the lead surface, playbook rendering, routing, ticket body, and review flow; the landed child results span agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/, and ai-docs/. |
+| scope.surface | public-interface | The ticket changes user-invoked lead skills and MCP-mediated ticket routing; the shipped lead-run procedure dispatches ticket-worker through playbook.render (agents-plugin/rsrc/lead-run/lead-run.md#L30-L58). |
+| scope.new_public_symbol | yes | lead-delegate and the ticket-worker playbook are named new workflow entry points; ticket-worker is a shipped render playbook (agents-plugin/rsrc/ticket-worker/ticket-worker.md#L1-L17). |
+| scope.new_type_contract | yes | role: worker maps a rendered playbook to a lead-scoped child key (agents-plugin-tool/internal/mcp/playbook_tools.go#L322-L345). |
+| scope.test_surface | existing | agents-plugin-tool/internal/mcp/playbook_render_surface_test.go#L50-L70 covers the worker role mapping; the repository contains existing MCP, resource, and plugin test suites for the named surfaces. |
+| complexity.reuse_points | confirmed | playbook.render already mints the worker child key and lead-run already consumes ticket route facts before spawning (agents-plugin-tool/internal/mcp/playbook_tools.go#L669-L760; agents-plugin/rsrc/lead-run/lead-run.md#L30-L58). |
+| complexity.side_effect_risk | high | The scope changes capability-scoped child keys, execution routing, independent review, merge stops, and ticket lifecycle behavior. |
+| risk.correctness | high | A wrong stop, key scope, or route can bypass required review, misroute an implementation, or grant a worker incorrect authority. |
+| risk.fit | high | The epic coordinates completed children with open todo children and leaves several board and anchor updates planned. |
+| risk.test | high | Behavioral coverage must keep aligned across Go MCP handlers, rendered ws and wsflow playbooks, ticket lifecycle tests, and downstream bootstrap migration. |
+| risk.security_or_contract | high | The role: worker contract deliberately grants a rendered child lead scope, which changes capability boundaries (agents-plugin-tool/internal/mcp/playbook_tools.go#L328-L342). |
+
 ## Scope
 
 Re-found the ws workflow on the capability of current-generation models
@@ -94,6 +110,11 @@ removed.
   free-form native-subagent entry for bounded arbitrary work, keep material
   implementation on `lead-run`, and retire the overlapping
   `lead-prefer-subagent` entry while preserving its tuning posture.
+- `260910-refactor-ready-only-actionable-ticket-gates` - stop fact population
+  and Sage review during ordinary actionable todo authoring; run both at ready
+  promotion, while preserving explicit todo design settlement for epics.
+- `260726-refactor-retire-workset-convention` - remove workset from new ticket
+  authoring while preserving read/close compatibility for historical stems.
 - `260909-refactor-route-resolve-implement-reads-ticket-facts` -
   `route.resolve_implement` reads route facts from the sage-stamped ticket
   instead of lead-gathered conversation facts; in-run survey/plan stages and
@@ -177,11 +198,15 @@ removed.
    sole input. Reviewers compute the diff range from git and read the ticket
    source; planners' structured output must carry an explicit omitted/deferred
    field. This replaces lead-side caution as the information-loss mitigation.
-8. **Authoring pipeline keeps the sage gate.** Fact population (cheap tier)
-   and design review (heavy tier) remain the `ready/` gate; the spec-address
-   half is removed. Inventory stage moves (idea, todo, ready, dropped) are
-   user-and-lead actions performed as batches of related tickets; `.done/`
-   closing is the worker's.
+8. **Authoring gates run at the category's settlement boundary.** For
+   actionable tickets, ordinary `todo/` authoring runs neither fact population
+   nor Sage review; fact population, design review, and completeness review run
+   together at promotion to `ready/`. An epic remains a board artifact and
+   settles design explicitly at `idea/` to `todo/`: fact population precedes
+   its design-only review, and later cross-child decision changes require
+   explicit re-settlement rather than automatic review on every edit. Research
+   remains ungated in `idea/` or `todo/`. Inventory moves are user-and-lead
+   actions; `.done/` closing is the worker's.
 9. **Single drainer.** `drain-ready-queue` is the only goal-loop entry point.
    Parallelism is opened inside it later; no second entry point.
 10. **Mercenary is deprecated.** No child may route new behavior through
@@ -311,6 +336,12 @@ removed.
     *Rejected: worker stop (c) on missing facts* — one spawn, one stop, and
     one lead turn per legacy ticket, for a fact the lead can populate in
     one cheap-tier call before spawning.
+24. **Workset retires as an authorable category.** Goal-mode `lead-run` over
+    the actionable ready queue owns mixed-parent execution grouping; `epic` +
+    `parent:` owns single-outcome decomposition; `related:` owns loose
+    association. New worksets are rejected, the sole open workset is dropped,
+    and active or archived workset stems remain readable and closable for
+    compatibility. Workset semantics do not transfer to epic.
 
 ## Completion Criteria
 
