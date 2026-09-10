@@ -132,8 +132,9 @@ topics: plugin architecture, host-neutral migration, spawn-removal, adapter boun
 `anchor` names the ticket a lead must read before answering or editing when a
 target touches one of the `topics`. `lead-discuss` reads it directly, and the
 routed run path injects it through the generic binding-anchor hook rather than
-naming this repository's anchor in shipped text. Both keys are required: a project that
-declares no such section (or only one key) has no binding-anchor gate, and the
+naming this repository's anchor in shipped text. Both keys are required: a
+project that declares no such section (or only one key) has no binding-anchor
+gate, and the
 proceed fact normalizes to `n/a`.
 
 ### Implementation Conventions
@@ -144,10 +145,16 @@ proceed fact normalizes to `n/a`.
 | `ai-docs/manuals/wsflow-mirroring.md` | `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin-wsflow/` |
 | `ai-docs/manuals/ws-mcp.md` | `agents-plugin-tool/internal/mcp/` |
 
-Each row's manual is read before editing a file its `paths` cover. The rows
-restate read-before-edit requirements this file already states in prose; the
-section exists so a path-scoped reader finds them without parsing the prose,
-and so `ws:lead-add-rule` has a declared home for a domain-scoped rule.
+Each row's manual is read before editing a file its `paths` cover. This is a
+live obligation, not a pointer list: the worker playbook reads every matching
+row's manual before editing, and ticket fact population copies matching rows
+into a ticket's `## Constraints`. The first two rows were already required -
+`skill-authoring.md` by `## Code Standards` above, `wsflow-mirroring.md` by its
+own `summary:` - and declaring them here is what makes that requirement reach a
+path-scoped reader; the `ws-mcp.md` row is new, added with the tool-output
+convention that manual now carries. Adding a row binds every future edit under
+its `paths`, so add one only for a manual whose rules a change to those paths
+must not contradict.
 
 ### Commit Rules
 
@@ -278,7 +285,8 @@ ai-docs/tickets/.dropped/
 - **Repo identity.** Meta-workflow repository for workflow documents, skills,
   agents, plugin packaging, helper commands, MCP tooling, and dev-environment
   templates. Tickets and manuals here describe the workflow system itself;
-  downstream application material belongs in downstream projects. Active plugin package: `agents-plugin/` (`ws@0.45.2`). Agentless
+  downstream application material belongs in downstream projects. Active plugin
+  package: `agents-plugin/` (`ws@0.45.2`). Agentless
   derivative package: `agents-plugin-wsflow/` (`wsflow@0.45.2`). Native
   MCP/tooling source: `agents-plugin-tool/`. Retired Claude source material:
   `ai-docs/ref/claude-home-legacy.md` and git history.

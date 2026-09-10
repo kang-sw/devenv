@@ -10,6 +10,11 @@ When this guide and installed ws tooling disagree, treat the installed plugin,
 runtime, and bundled conventions as canonical. Update the upstream bootstrap
 template rather than relying on a project-local guide override.
 
+This copy has diverged from that template on purpose: this repository retired
+its spec and mental-model layers, so the sections teaching them are gone here
+while the bootstrap template still carries them for downstream projects that
+have not migrated. The template's own migration item closes the gap.
+
 ## Authority Files
 
 - `AGENTS.md` is the canonical root workflow context for agents.

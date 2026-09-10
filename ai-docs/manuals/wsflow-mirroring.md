@@ -95,8 +95,8 @@ a separate mechanism — see the note there.
   integration responsibilities.
 - Use subagents for bounded exploration, implementation, verification, audit, or
   review when useful.
-- Keep workflow integration lead-owned: docs, ticket/spec changes, mental-model
-  updates, commits, and final judgment stay with the lead.
+- Keep workflow integration lead-owned: docs, ticket changes, commits, and
+  final judgment stay with the lead.
 - Feed playbook delegate prompts to native subagents only through wsflow-mode
   `playbook.render`; never hand-paste full playbook prompt text.
 
