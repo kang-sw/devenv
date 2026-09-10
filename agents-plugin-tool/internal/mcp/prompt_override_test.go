@@ -1294,18 +1294,68 @@ func TestConfigTuningCatalogNoAgentShape(t *testing.T) {
 	if subagentKnob.Writer.Tool != "config.tune" || subagentKnob.Writer.FixedArguments["key"] != "workflow.prefer_subagent" {
 		t.Fatalf("workflow.prefer_subagent writer tool mismatch in no-agent catalog: %+v", subagentKnob.Writer)
 	}
-	// The agentless catalog cut is driven per entry by NoAgentVisible; every
-	// live knob declares it true, so the catalog must project the full set.
-	for _, knob := range catalog.Knobs {
-		if entry, ok := resolveConfigEntryForKey(knob.ID); ok && !entry.NoAgentVisible {
-			t.Fatalf("no-agent config.tuning exposed a knob declaring NoAgentVisible false: %+v", knob)
-		}
-	}
-
 	agentsKnob := requireTuningKnob(t, catalog, "agents.tier")
 	assertFieldEnum(t, agentsKnob.ValueFields, "tier", []string{"small", "medium", "large", "xlarge"})
 	assertFieldEnum(t, agentsKnob.ValueFields, "effort", []string{"", "none", "low", "medium", "high", "xhigh"})
 	assertFieldEnum(t, agentsKnob.SelectorFields, "harness", []string{"claude", "codex", "pi", "default"})
+}
+
+// TestConfigTuningCatalogNoAgentCutHonorsNoAgentVisible exercises the agentless
+// catalog cut itself. Every live registry entry declares NoAgentVisible true, so
+// no fixed key can demonstrate the cut; the test flips one live entry for its
+// duration instead. Without this, buildTuningCatalog's `noAgentMode &&
+// !entry.NoAgentVisible` filter could be deleted or inverted and every test in
+// the package would still pass.
+func TestConfigTuningCatalogNoAgentCutHonorsNoAgentVisible(t *testing.T) {
+	useLeadProfile(t)
+
+	const hidden = "bootstrap_alarm"
+	idx := -1
+	for i, entry := range configRegistry {
+		if entry.Key == hidden {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		t.Fatalf("config registry no longer declares %q; repoint this test at a live no-agent-visible knob", hidden)
+	}
+	if !configRegistry[idx].NoAgentVisible {
+		t.Fatalf("%q already declares NoAgentVisible false; the cut is no longer demonstrated by flipping it", hidden)
+	}
+
+	rsrcRoot := buildOverrideTestTree(t)
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	t.Setenv("WS_MCP_NO_AGENT", "1")
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	s := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, s, 900501, root, nil))
+
+	// Visible while the entry declares NoAgentVisible true.
+	before := parseTuningCatalogResponse(t, callToolOnce(t, s, 1, "config.list", map[string]any{
+		"session_key": key,
+		"format":      "json",
+	}))
+	requireTuningKnob(t, before, hidden)
+
+	configRegistry[idx].NoAgentVisible = false
+	t.Cleanup(func() { configRegistry[idx].NoAgentVisible = true })
+
+	after := parseTuningCatalogResponse(t, callToolOnce(t, s, 2, "config.list", map[string]any{
+		"session_key": key,
+		"format":      "json",
+	}))
+	if knob := findTuningKnob(after, hidden); knob != nil {
+		t.Fatalf("no-agent config.list exposed %q after it declared NoAgentVisible false: %+v", hidden, *knob)
+	}
+	// The cut is per entry, not a wholesale agentless suppression.
+	requireTuningKnob(t, after, "workflow.prefer_subagent")
 }
 
 func parseTuningCatalogResponse(t *testing.T, line string) tuningCatalog {

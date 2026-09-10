@@ -96,11 +96,13 @@ synthesizing.
 
 ### Delegate prompts
 
-Bundled delegate prompts are rendered, not named by stem: obtain a delegate's
-self-contained prompt with `{{.McpNamespace}}/playbook.render(name: "<delegate>")`
-and hand the rendered text to a native subagent, spawned at the tier the render
-recommends. A lead key splices the delegate's own session credential into the
-rendered prompt, so the subagent starts already authenticated.
+Bundled delegate prompts are rendered, not named by stem: call
+`{{.McpNamespace}}/playbook.render(name: "<delegate>", session_key: <your key>)`
+and hand the returned path to a native subagent, spawned at the tier the render
+recommends. Pass the session_key: with a lead key the render splices the
+delegate's own session credential into the prompt file, so the subagent starts
+already authenticated; without one it does not, and the delegate arrives
+unkeyed. Hand over the path, not the file's contents.
 `reference-discovery` is such a delegate playbook, not a workflow skill.
 
 ### Artifact paths

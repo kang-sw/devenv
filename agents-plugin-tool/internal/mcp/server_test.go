@@ -563,15 +563,6 @@ func mustWrite(t *testing.T, root, rel, text string) {
 	}
 }
 
-func mustMarshalForTest(t *testing.T, value any) []byte {
-	t.Helper()
-	raw, err := json.Marshal(value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return raw
-}
-
 func assertStringAbsentFromTree(t *testing.T, root, needle string) {
 	t.Helper()
 	if strings.TrimSpace(root) == "" {
