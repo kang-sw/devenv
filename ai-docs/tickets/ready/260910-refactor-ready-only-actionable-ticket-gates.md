@@ -1,10 +1,13 @@
 ---
 title: "Run actionable ticket facts and Sage review only at ready promotion"
-sage-review-design: recommended
+sage-review-design: completed
 parent: 260909-epic-ws-worker-interpreter-refoundation
 related:
   260910-chore-prune-dead-workflow-remnants: resolves the unused todo-landing Sage API decision
   260726-refactor-retire-workset-convention: removes the remaining nonimplementation category that no longer has a workflow role
+sage-review-completeness: completed
+sage-review-design-reviewed: 1ee2e902c5f7feb1
+sage-review-completeness-reviewed: 1ee2e902c5f7feb1
 ---
 
 # Run actionable ticket facts and Sage review only at ready promotion

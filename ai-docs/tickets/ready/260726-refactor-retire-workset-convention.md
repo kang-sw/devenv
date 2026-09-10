@@ -2,12 +2,14 @@
 title: "Retire the workset ticket convention"
 related:
   260726-feat-verify-ticket-graph-advisories: the epic/workset boundary analysis that surfaced this; its Out of Scope carries the supporting measurements
-  260624-epic-pre-release-cleanup: currently categorized `epic` but shaped as a workset (`## Items` + `### 1.`-`### 7.`, zero `parent:` children); it remains outside this retirement (ai-docs/tickets/todo/260624-epic-pre-release-cleanup.md#L14-L18)
+  260624-epic-pre-release-cleanup: currently categorized `epic` but shaped as a workset (`## Items` + `### 1.`-`### 8.`, zero `parent:` children); it remains outside this retirement (ai-docs/tickets/todo/260624-epic-pre-release-cleanup.md; `rg -n '^parent: 260624-epic-pre-release-cleanup$' ai-docs/tickets` returned nothing)
   260713-workset-workflow-dogfood-bugs: the sole open workset; close it as dropped after verifying its listed tickets remain independent
   260910-refactor-ready-only-actionable-ticket-gates: preserves ready as the actionable implementation queue while this category retires
 parent: 260909-epic-ws-worker-interpreter-refoundation
-sage-review-design: recommended
-sage-review-completeness: recommended
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: d8cced4412bf89e1
+sage-review-completeness-reviewed: d8cced4412bf89e1
 ---
 
 # Retire the workset ticket convention
@@ -55,16 +57,17 @@ non-hierarchical annotation need is served by frontmatter `related:`.
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
 - Convention: ai-docs/manuals/skill-authoring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/rsrc/, agents-plugin-wsflow/skills/, agents-plugin-tool/internal/wsdoc/conventions/)
 - Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
 
 ## Route Facts
 
 | fact | value | evidence |
 |---|---|---|
-| scope.span | multi-file | agents-plugin-tool/internal/wsdoc/tickets_template.go, agents-plugin-tool/internal/wsdoc/tickets_checklist.go, agents-plugin/rsrc/lead-ticket/lead-ticket.md, and agents-plugin-wsflow mirrors |
+| scope.span | multi-file | agents-plugin-tool/internal/wsdoc/tickets_template.go, agents-plugin-tool/internal/wsdoc/tickets_checklist.go, agents-plugin-tool/internal/wsdoc/conventions/ticket-conventions.md, agents-plugin/rsrc/lead-ticket/lead-ticket.md, agents-plugin/rsrc/lead-workflow-manual/lead-workflow-manual.md, and wsflow mirrors |
 | scope.surface | public-interface | tickets.template and tickets.checklist expose the accepted category list in agents-plugin-tool/internal/mcp/server.go#L3462-L3482 |
 | scope.new_public_symbol | no | removes an accepted category from existing interfaces; no new symbol named |
 | scope.new_type_contract | no | no new type or signature named |
-| scope.test_surface | existing | agents-plugin-tool/internal/mcp/tickets_template_test.go and agents-plugin-tool/internal/mcp/tickets_checklist_test.go cover accepted categories |
+| scope.test_surface | existing | agents-plugin-tool/internal/mcp/tickets_template_test.go, agents-plugin-tool/internal/mcp/tickets_checklist_test.go, and agents-plugin-tool/internal/wsdoc/tickets_mutate_test.go cover accepted categories and legacy lifecycle behavior |
 | complexity.reuse_points | confirmed | existing query and close operations are registered in agents-plugin-tool/internal/mcp/server.go#L3384-L3406 |
 | complexity.side_effect_risk | moderate | category recognition must remain for historical reads and close operations |
 | risk.correctness | moderate | authoring rejects workset while legacy stems must remain readable and closable |
