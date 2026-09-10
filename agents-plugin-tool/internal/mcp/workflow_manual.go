@@ -194,8 +194,9 @@ func (s *Server) handleWorkflowState(id json.RawMessage, args map[string]any) re
 	//    (its CONTINUE branch appends "\n\n"+computeNotes(rec.Root) after
 	//    renderSessionState, then a final "\n") so workflow_state's output
 	//    stays byte-identical to workflow_manual's "## Session State" suffix
-	//    for every resolved session, per the standing invariant documented at
-	//    ai-docs/mental-model/mcp-runtime.md {#260702-workflow-state-tool}.
+	//    for every resolved session. That byte-identity is the invariant: a
+	//    change to either renderer must be made in both, or workflow_state
+	//    silently diverges from the manual it mirrors.
 	return toolTextResponse(id, renderSessionState(rec)+"\n\n"+computeNotes(rec.Root)+"\n", nil)
 }
 

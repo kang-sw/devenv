@@ -2,14 +2,13 @@
 
 ## Invariants
 
-- Before implementing, load relevant mental-model docs; use `{{.McpNamespace}}/mental_models.query` or `{{.McpNamespace}}/mental_models.status` when available.
 - Claim "pass" only after reading full test/build output — never "should pass" or "looks correct."
 - Diagnose blame (test vs implementation) before fixing any failure.
 - Structural deviations → escalate before proceeding. Cosmetic → adapt silently, note in report.
 - Review subprocess results before committing. Roll back on criteria failure.
 - Plan annotations (TDD/post-impl/manual) override default test strategy when present.
-- If a spec or doc entry led to a wrong assumption that you only discovered by checking code, include the discrepancy in your completion report.
-- When implementation creates a non-obvious invariant, ordering constraint, lifecycle assumption, or cross-module contract, record it under `## AI Context` -> `### Mental Model Notes` in the commit body.
+- If a doc entry led to a wrong assumption that you only discovered by checking code, include the discrepancy in your completion report.
+- When implementation creates a non-obvious invariant, ordering constraint, lifecycle assumption, or cross-module contract, record it under `## AI Context` in the commit body.
 
 ## §Test Strategy
 
@@ -26,7 +25,7 @@ Determine blame before fixing:
 
 - **Implementation wrong** — logic error, missing edge case → fix the code.
 - **Test wrong** — stale assumption, incorrect setup → fix the test.
-- **Spec ambiguity** — both readings are plausible → escalate for clarification.
+- **Contract ambiguity** — both readings are plausible → escalate for clarification.
 - **Test infrastructure** — setup/teardown/harness issue, not a logic defect → fix the test environment.
 
 Never patch tests to match broken implementation or vice versa.

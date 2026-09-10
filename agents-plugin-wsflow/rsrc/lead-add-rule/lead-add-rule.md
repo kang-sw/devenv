@@ -8,25 +8,33 @@ Target: user request
 
 ## Project Map
 
-Call `{{.McpNamespace}}/mental_models.list()` to load the current mental-model catalog.
+Read `AGENTS.md` — its `## Architecture Rules` section, and its `## Workflow` ->
+`### Implementation Conventions` section for the manuals this project scopes to
+paths. A project that declares no conventions section has no manual to match a
+rule against yet; a domain-scoped rule there takes the **no matching manual** row of
+`judge: domain-match`, which proposes the project's first one.
+
+`AGENTS.md` is the rule target, never `CLAUDE.md`: in a ws-bootstrapped project
+`CLAUDE.md` is a one-line `@AGENTS.md` shim, and a rule appended to the shim is
+invisible to every playbook that reads `AGENTS.md`.
 
 ## Invariants
 
 - Never modify existing rule content - this skill only appends new rules. Correcting or editing a stale rule is the user's responsibility via manual edit.
-- Never write the same rule to both `CLAUDE.md` and a mental-model doc in one invocation.
+- Never write the same rule to both `AGENTS.md` and a path-scoped manual in one invocation.
 - One invocation writes to exactly one target file.
 - All written rules are in English regardless of conversation language.
-- Commit the change at the end following CLAUDE.md commit rules. Include `## AI Context` recording the classification decision.
-- Domain Rules must appear immediately after the frontmatter body. When the section is absent, create it there. When it exists elsewhere, surface its current position to the user before appending.
+- Commit the change at the end following the project's commit rules in `AGENTS.md`. Include `## AI Context` recording the classification decision.
+- A manual's rule section is whichever section that manual already uses for rules. When it has none, create `## Rules` at the end of the manual and report the new section to the user.
 
 ## On: invoke
 
 ### 1. Read
 
 1. Parse the rule from `user request`. If `user request` is empty, ask the user for the rule description and wait.
-2. Read `CLAUDE.md` to see current `## Architecture Rules` entries and avoid near-duplicates.
-3. Use the `{{.McpNamespace}}/mental_models.list()` result for the current domain catalog and hierarchy.
-4. For direct-child sub-domain candidates (`mental-model/<domain>/<sub>.md`), read `mental-model/<domain>/index.md` first; inherited `## Domain Rules` may already cover the rule.
+2. Read `AGENTS.md` to see current `## Architecture Rules` entries and avoid near-duplicates.
+3. Use the declared conventions section for the current catalog of path-scoped manuals.
+4. Read each candidate manual before proposing it; a rule it already states is a near-duplicate.
 
 ### 2. Classify
 
@@ -36,17 +44,17 @@ Apply `judge: classification`: **cross-cutting**, **domain-scoped**, or **ambigu
 
 | Classification | Route target |
 |---|---|
-| cross-cutting | `CLAUDE.md` -> append to `## Architecture Rules`. |
-| domain-scoped | Enumerate candidate domain docs; apply `judge: domain-match`. |
-| ambiguous | Stop. Prompt the user with the two plausible classifications plus the best-match domain candidate; wait for selection. |
+| cross-cutting | `AGENTS.md` -> append to `## Architecture Rules`. |
+| domain-scoped | Enumerate the manuals the conventions section declares; apply `judge: domain-match`. |
+| ambiguous | Stop. Prompt the user with the two plausible classifications plus the best-match manual candidate; wait for selection. |
 
 For domain-scoped rules, apply `judge: domain-match`:
 
 | Match | Action |
 |---|---|
-| **single clear domain** | Target = that domain's `mental-model/<domain>.md` or `<domain>/index.md` when inherited across sub-domains. Propose and write. |
+| **single clear manual** | Target = the declared manual whose `paths` cover the rule's subject. Propose and write. |
 | **multiple candidates** | Stop. Present the candidate list with one-line rationales. Wait for user selection. |
-| **no matching doc** | Stop. Propose creating a new `ai-docs/mental-model/<new-domain>.md` with the minimal frontmatter (`domain`, `description`, `sources`). Wait for user confirmation before writing. |
+| **no matching manual** | Stop. Propose creating `ai-docs/manuals/<topic>.md` and declaring it as a new row of `### Implementation Conventions` with the `paths` it scopes — including when the project declares no conventions section yet, in which case propose the section too. Wait for user confirmation before writing. |
 
 ### 4. Propose or prompt
 
@@ -56,16 +64,16 @@ For domain-scoped rules, apply `judge: domain-match`:
 ### 5. Write
 
 1. Open the target doc.
-2. Locate the target section (`## Architecture Rules` or `## Domain Rules`).
-   - If the section is **absent**: In a mental-model doc, add the `## Domain Rules` heading immediately after the frontmatter body. In `CLAUDE.md`, add the `## Architecture Rules` heading after `## Code Standards`, or at end-of-file if that section is absent.
-   - If the section is **present**: For mental-model docs, verify it sits immediately after the frontmatter body. If it does not, report the misplacement to the user before appending - do not silently append to a misplaced section.
+2. Locate the target section (`## Architecture Rules` in `AGENTS.md`, or the manual's rule section).
+   - If the section is **absent**: In a manual, add a `## Rules` heading at the end of the file. In `AGENTS.md`, add the `## Architecture Rules` heading after `## Code Standards`, or at end-of-file if that section is absent.
+   - If the section is **present**: append to it as written; do not move it.
 3. Append the rule as a new bullet under the section, preserving the existing formatting convention.
 4. Do not reorder, rewrap, or edit any existing bullet.
 
 ### 6. Commit
 
 1. Stage the single modified (or newly created) target file.
-2. Commit per CLAUDE.md commit rules. Commit type `docs`; scope is `architecture-rule` for `CLAUDE.md` changes or the domain name for mental-model changes.
+2. Commit per the project's commit rules in `AGENTS.md`. Commit type `docs`; scope is `architecture-rule` for `AGENTS.md` changes or the manual's topic for manual changes.
 3. Include an `## AI Context` section recording the classification decision, the rejected alternative, and any user input that resolved ambiguity.
 
 ### 7. Report
@@ -97,26 +105,25 @@ Applied only for domain-scoped rules.
 
 | Outcome | When |
 |---|---|
-| Single clear domain | One domain doc's `domain`/`description`/`sources` matches the rule's subject; no other doc is a plausible fit. |
-| Multiple candidates | Two or more domains cover related surface area or overlapping sources. |
-| No matching doc | No existing domain doc covers the rule's subject - a new doc is warranted. |
+| Single clear manual | One declared manual's `paths` and subject match the rule's subject; no other is a plausible fit. |
+| Multiple candidates | Two or more declared manuals cover related paths or overlapping subject area. |
+| No matching manual | No declared manual covers the rule's subject - a new manual is warranted. |
 
-For directory-layout domains (`<domain>/index.md` + children), route to
-`index.md` when the rule applies across all sub-domains; route to the
-specific child when it applies to only one sub-concern.
+When two declared manuals' `paths` nest, route to the one whose `paths` are the
+narrowest set that still covers every path the rule governs.
 
 ## Templates
 
 ### Rule append
 
 ```markdown
-## Domain Rules
+## Rules
 
 - <existing rule>.
 - <new rule ending in a period>.
 ```
 
-Use the same bullet form for `## Architecture Rules` in `CLAUDE.md`. Keep
+Use the same bullet form for `## Architecture Rules` in `AGENTS.md`. Keep
 each rule one sentence unless a second sentence is required to name a
 hidden constraint.
 
@@ -133,35 +140,29 @@ docs(<scope>): add <cross-cutting|domain-scoped> rule - <short summary>
 - <Any user input that resolved ambiguity>.
 ```
 
-### New mental-model doc (when proposed)
+### New manual (when proposed)
 
-When the user confirms creating a new domain doc, write it with the
-minimal frontmatter and the `## Domain Rules` section primed with the
-new rule:
+When the user confirms creating a new manual, write it with a `## Rules`
+section primed with the new rule, then declare it under
+`AGENTS.md`'s `### Implementation Conventions` so path-scoped readers find it:
 
 ```markdown
----
-domain: <new-domain>
-description: "<one-line summary of the domain's scope>"
-sources:
-  - <directory-pattern>/
----
+# <Topic>
 
-# <Domain Name>
+<one-line statement of what this manual governs>
 
-## Domain Rules
+## Rules
 
 - <new rule>.
 ```
 
-Add sibling sections (Entry Points, Module Contracts, etc.) only if the
-user asks - `{{.SkillNamespace}}:lead-add-rule` is a rule authoring skill, not a mental-model
-scaffolding skill. `{{.SkillNamespace}}:lead-forge-mental-model` owns full-doc authorship.
+Add sibling sections only if the user asks - `{{.SkillNamespace}}:lead-add-rule`
+is a rule authoring skill, not a manual scaffolding skill.
 
 ## Doctrine
 
 `{{.SkillNamespace}}:lead-add-rule` optimizes for **classification accuracy at capture time**.
 A mis-routed rule either dilutes `## Architecture Rules` or hides a cross-cutting
-invariant in a domain doc. The skill writes autonomously only when classification
+invariant in a path-scoped manual. The skill writes autonomously only when classification
 is unambiguous, asks on ambiguity, never edits existing rule content, and
 preserves the user's phrasing except grammar and active voice.

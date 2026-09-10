@@ -1547,7 +1547,7 @@ func TestRenderedImplementerDelegatesShareOneDispositionVocabulary(t *testing.T)
 // settles as "not fixed" (see 260831's Risk Signal / `implementer-relay.md`
 // Process step 4 and Output). A future edit that "fixes" this back into
 // symmetry with implementer-elevated is the regression this test exists to
-// catch — see `ai-docs/mental-model/prompt-bundle.md`'s pitfall bullet.
+// catch.
 func TestImplementerRelayNotFixedMarkerPresentOnlyOnImportantPath(t *testing.T) {
 	relayProcess, relayBullets, elevatedProcess, elevatedBullets := renderedImplementerDispositionEnumerations(t)
 
@@ -1694,7 +1694,7 @@ func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
 	s := newTestServerWithHarness(t, "codex")
 
 	codeReviewerPath, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "code-reviewer", map[string]string{
-		"note": "see ws/specs.query for details",
+		"note": "see ws/tickets.query for details",
 	}, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybook code-reviewer with legacy context: %v", err)
@@ -1704,7 +1704,7 @@ func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
 		t.Fatalf("read code-reviewer render: %v", err)
 	}
 	codeReviewerBody := string(codeReviewerData)
-	for _, want := range []string{"wsflow/", "## Render Context", "- note: see ws/specs.query for details"} {
+	for _, want := range []string{"wsflow/", "## Render Context", "- note: see ws/tickets.query for details"} {
 		if !strings.Contains(codeReviewerBody, want) {
 			t.Fatalf("code-reviewer render missing %q:\n%s", want, codeReviewerBody)
 		}
@@ -2186,64 +2186,21 @@ func TestPlaybookPrintGoldenLeadCheckBlockers(t *testing.T) {
 	}
 }
 
-// TestPlaybookPrintGoldenLeadBackfillDocs verifies lead-backfill-docs resolves
-// and keeps the two boundaries that make it correct: spec authoring stays with
-// the lead, and the mental-model range is extended through the spec commit.
-func TestPlaybookPrintGoldenLeadBackfillDocs(t *testing.T) {
+// TestPlaybookPrintRetiredSpecStemsGone pins the retirement of the spec and
+// mental-model playbooks: printPlaybook must fail to resolve each stem rather
+// than serve a stale body left behind in the rsrc tree.
+func TestPlaybookPrintRetiredSpecStemsGone(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-backfill-docs", nil, wsconfig.Options{}, "", nil)
-	if err != nil {
-		t.Fatalf("printPlaybook: %v", err)
-	}
-	if !strings.Contains(body, "judgment placed once") {
-		t.Errorf("body %q: expected doctrine text 'judgment placed once'", body)
-	}
-	if !strings.Contains(body, "never delegate spec authoring") {
-		t.Errorf("body %q: lost the invariant keeping spec authoring with the lead", body)
-	}
-	if !strings.Contains(body, "never once per group") {
-		t.Errorf("body %q: lost the single mental-model sweep; per-group dispatch re-reads the whole corpus N times and lets two delegates edit one domain doc from partial views", body)
-	}
-	// The discovery delegate must never be handed a lead playbook stem
-	// (idea/260626-research-playbook-print-lead-surface-leak).
-	discovery, _, err := printPlaybook(s, rsrcRoot, "doc-gap-discovery", nil, wsconfig.Options{}, "", nil)
-	if err != nil {
-		t.Fatalf("printPlaybook doc-gap-discovery: %v", err)
-	}
-	if strings.Contains(discovery, "lead-update-spec") {
-		t.Error("doc-gap-discovery must not name a lead playbook stem")
-	}
-}
-
-// TestPlaybookPrintGoldenLeadUpdateSpec verifies lead-update-spec resolves
-// and contains the updated rsrc path reference.
-func TestPlaybookPrintGoldenLeadUpdateSpec(t *testing.T) {
-	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	s := newTestServerWithHarness(t, "claude")
-
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-update-spec", nil, wsconfig.Options{}, "", nil)
-	if err != nil {
-		t.Fatalf("printPlaybook: %v", err)
-	}
-	if !strings.Contains(body, "spec coverage at commit boundaries") {
-		t.Errorf("body %q: expected doctrine text 'spec coverage at commit boundaries'", body)
-	}
-	// Verify the dead-path fix: the cross-playbook reference resolves through
-	// playbook.read, not a raw repo path or a stale SKILL.md path.
-	if !strings.Contains(body, `playbook.read(name: "lead-write-spec")`) {
-		t.Errorf("body %q: expected playbook.read(lead-write-spec) reference", body)
-	}
-	if strings.Contains(body, "agents-plugin/skills/lead-write-spec/SKILL.md") {
-		t.Errorf("body %q: must not contain stale SKILL.md path reference", body)
-	}
-	if strings.Contains(body, "agents-plugin/rsrc/lead-write-spec/lead-write-spec.md") {
-		t.Errorf("body %q: must not contain raw rsrc path reference", body)
-	}
-	// delegates:false — no tip.
-	if strings.Contains(body, "Continuity tip") {
-		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	for _, name := range []string{
+		"lead-update-spec", "lead-write-spec", "lead-forge-spec",
+		"lead-forge-mental-model", "lead-backfill-docs",
+		"mental-model-updater", "doc-gap-discovery",
+	} {
+		if _, _, err := printPlaybook(s, rsrcRoot, name, nil, wsconfig.Options{}, "", nil); err == nil {
+			t.Errorf("printPlaybook(%q) still resolves a retired playbook", name)
+		}
 	}
 }
 
@@ -2270,25 +2227,6 @@ func TestPlaybookPrintGoldenLeadWorkflowManual(t *testing.T) {
 	// delegates:false — no tip.
 	if strings.Contains(body, "Continuity tip") {
 		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
-	}
-}
-
-// TestPlaybookPrintGoldenLeadWriteSpec verifies lead-write-spec resolves
-// and is delegates:true (tip must appear).
-func TestPlaybookPrintGoldenLeadWriteSpec(t *testing.T) {
-	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	s := newTestServerWithHarness(t, "claude")
-
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-write-spec", nil, wsconfig.Options{}, "", nil)
-	if err != nil {
-		t.Fatalf("printPlaybook: %v", err)
-	}
-	if !strings.Contains(body, "behavioral drift resistance") {
-		t.Errorf("body %q: expected doctrine text 'behavioral drift resistance'", body)
-	}
-	// delegates:true (conditional Explore accuracy check) — tip must appear.
-	if !strings.Contains(body, "Continuity tip") {
-		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
 	}
 }
 
@@ -2345,7 +2283,7 @@ func TestShippedExecutorWrapupResultIncludesBehavioralDelta(t *testing.T) {
 	}
 	body := string(data)
 	for _, want := range []string{
-		"`Result` records the completed phase's behavioral delta; `Edition` records only\nits follow-up pass's delta. For either, include deviations — diffed between the\nticket's selected phase text and what landed, not recalled from the implementer —\nverification evidence, unresolved findings, and deferred follow-ups; do not\nrestate unchanged plan or spec content.",
+		"`Result` records the completed phase's behavioral delta; `Edition` records only\nits follow-up pass's delta. For either, include deviations — diffed between the\nticket's selected phase text and what landed, not recalled from the implementer —\nverification evidence, unresolved findings, and deferred follow-ups; do not\nrestate unchanged plan content.",
 		"#### Edition (<short-hash>) - YYYY-MM-DD` under that phase's Result area.\n   Use the result commit supplied by the caller.",
 	} {
 		if !strings.Contains(body, want) {
@@ -2532,44 +2470,6 @@ func TestSkillAuthoringRelocatedOutOfRsrc(t *testing.T) {
 	}
 	if strings.Contains(frontmatter, "kind:") {
 		t.Error("relocated manual still carries rsrc playbook-serving frontmatter")
-	}
-}
-
-// TestPlaybookPrintGoldenLeadForgeSpec verifies lead-forge-spec resolves from the
-// real rsrc tree and is delegates:true (native exploration-worker spawns — tip must appear).
-func TestPlaybookPrintGoldenLeadForgeSpec(t *testing.T) {
-	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	s := newTestServerWithHarness(t, "claude")
-
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-forge-spec", nil, wsconfig.Options{}, "", nil)
-	if err != nil {
-		t.Fatalf("printPlaybook: %v", err)
-	}
-	if !strings.Contains(body, "low-friction throughput per domain") {
-		t.Errorf("body %q: expected doctrine text 'low-friction throughput per domain'", body)
-	}
-	// delegates:true (native exploration-worker spawns) — tip must appear.
-	if !strings.Contains(body, "Continuity tip") {
-		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
-	}
-}
-
-// TestPlaybookPrintGoldenLeadForgeMentalModel verifies lead-forge-mental-model resolves
-// from the real rsrc tree and is delegates:true (native exploration-worker spawns — tip must appear).
-func TestPlaybookPrintGoldenLeadForgeMentalModel(t *testing.T) {
-	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	s := newTestServerWithHarness(t, "claude")
-
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-forge-mental-model", nil, wsconfig.Options{}, "", nil)
-	if err != nil {
-		t.Fatalf("printPlaybook: %v", err)
-	}
-	if !strings.Contains(body, "confirmed operational knowledge per domain") {
-		t.Errorf("body %q: expected doctrine text 'confirmed operational knowledge per domain'", body)
-	}
-	// delegates:true (native exploration-worker spawns) — tip must appear.
-	if !strings.Contains(body, "Continuity tip") {
-		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
 	}
 }
 

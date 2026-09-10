@@ -307,55 +307,30 @@ func TestCommitAcceptsLargeAIContextArray(t *testing.T) {
 	}
 }
 
-func TestCommitMessageRendersMentalModelNotesUnderAIContext(t *testing.T) {
+// The commit message renders exactly two structured sections: `## AI Context`
+// and `## Updated Tickets`. Pinning the whole string is deliberate — the spec
+// and mental-model trailer options this tool once carried were removed with
+// their layer, and a full-message assertion fails if any of them is
+// reintroduced, where a contains-check would not.
+func TestCommitMessageRendersOnlyAIContextAndTicketSections(t *testing.T) {
 	message := CommitMessage(CommitOptions{
-		Title:               "docs(workflow): capture model note",
-		AIContext:           []string{"User intent: record commit-message context."},
-		MentalModelNotes:    []string{"git.commit now emits structured Mental Model Notes."},
-		UpdatedTickets:      []string{"260519-bug-git-commit-mental-model-notes"},
-		UpdatedSpecs:        []string{"260519-git-commit-mental-model-notes"},
-		UpdatedMentalModels: []string{"git-workflow-tools"},
+		Title:          "docs(workflow): capture commit context",
+		AIContext:      []string{"User intent: record commit-message context."},
+		UpdatedTickets: []string{"260519-bug-git-commit-message-sections"},
 	})
 
 	want := strings.Join([]string{
-		"docs(workflow): capture model note",
+		"docs(workflow): capture commit context",
 		"",
 		"## AI Context",
 		"- User intent: record commit-message context.",
 		"",
-		"### Mental Model Notes",
-		"- git.commit now emits structured Mental Model Notes.",
-		"",
 		"",
 		"## Updated Tickets",
-		"- 260519-bug-git-commit-mental-model-notes",
-		"",
-		"",
-		"## Updated Specs",
-		"- 260519-git-commit-mental-model-notes",
-		"",
-		"",
-		"## Updated Mental Models",
-		"- git-workflow-tools",
+		"- 260519-bug-git-commit-message-sections",
 	}, "\n")
 	if message != want {
 		t.Fatalf("CommitMessage =\n%s\nwant:\n%s", message, want)
-	}
-}
-
-func TestCommitMessageOmitsEmptyMentalModelNotes(t *testing.T) {
-	opts, err := normalizeCommitOptions(CommitOptions{
-		Paths:            []string{"src"},
-		Title:            "docs(workflow): keep model notes optional",
-		AIContext:        []string{"User intent: preserve existing commits."},
-		MentalModelNotes: []string{"", " \t\n"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	message := CommitMessage(opts)
-	if strings.Contains(message, "### Mental Model Notes") {
-		t.Fatalf("message emitted empty Mental Model Notes subsection:\n%s", message)
 	}
 }
 

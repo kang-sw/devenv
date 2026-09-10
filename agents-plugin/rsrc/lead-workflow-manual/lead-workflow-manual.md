@@ -133,22 +133,15 @@ Use `{{.McpNamespace}}/runtime.read` for runtime compatibility checks and featur
 
 ### Reference discovery
 
-Use the {{.McpNamespace}}-owned ticket, spec, and mental-model discovery tools for
-path/status/reference lookup before shell search. Use native file reads after a
-discovery tool returns the path to inspect or edit.
+Use the {{.McpNamespace}}-owned ticket discovery tools for path/status lookup
+before shell search. Use native file reads after a discovery tool returns the
+path to inspect or edit.
 
 Prefer:
 - `{{.McpNamespace}}/tickets.query(status: "ready")` for implementation-ready discovery; use `status: "todo"` for accepted backlog.
 - `{{.McpNamespace}}/tickets.query(ticket_stem: "<stem>")` for ticket lookup by stem.
 - `{{.McpNamespace}}/tickets.query(mentions_ticket_stem: "<stem>")` for parent/related scans.
 - `{{.McpNamespace}}/tickets.query(ticket_stem: "<stem>", include_done: true)` for status checks.
-- `{{.McpNamespace}}/specs.query(spec_stem: "<stem>")` for anchor lookup.
-- `{{.McpNamespace}}/specs.query(ticket_stem: "<stem>")` for ticket-linked specs.
-- `{{.McpNamespace}}/specs.query(spec_stem: "<stem>")` for duplicate-safe anchor location.
-- `{{.McpNamespace}}/mental_models.query(query: "<topic>")` for domain discovery.
-- `{{.McpNamespace}}/mental_models.status(domain: "<domain>")` for known-domain docs.
-- `{{.McpNamespace}}/references.trace(ticket_stem: "<stem>")` for ticket/spec/model links.
-- `{{.McpNamespace}}/references.trace(spec_stem: "<stem>")` for spec/ticket/model links.
 
 ### Notes / durable memory
 
@@ -206,10 +199,9 @@ exists so those rules read as intentional rather than arbitrary.
 A ticket's status is its directory, not a frontmatter field. `idea/` is a
 rough capture surface for underspecified or exploratory topics — nothing yet
 needs to be actionable. `todo/` is accepted backlog: the intent is
-recoverable and worth doing, but implementation has not started and a spec
-contract may not exist yet. `ready/` is the implementation-ready status: the
-ticket's caller-visible behavior is addressed by a spec (existing or newly
-declared), and the dependencies blocking its earliest unfinished phase are
+recoverable and worth doing, but implementation has not started. `ready/` is
+the implementation-ready status: the ticket has passed its completeness sage
+review, and the dependencies blocking its earliest unfinished phase are
 themselves in `ready/` or `.done/` — so the `ready/` set is a closed work front
 that drains in dependency order, and a dependent reaches `ready/` only alongside
 or after its prerequisites (recorded as `related:`/`parent:` edges). `.done/` and
@@ -218,8 +210,8 @@ or after its prerequisites (recorded as `related:`/`parent:` edges). `.done/` an
 ### Type prefix: feat / bug / refactor / chore
 
 `feat`, `bug`, `refactor`, and `chore` are **mechanically identical** in the
-workflow — same phase model, same spec-address gate, same sage-review stage
-requirements (see `judge: ticket-category`). The prefix is a categorization
+workflow — same phase model, same sage-review stage requirements (see
+`judge: ticket-category`). The prefix is a categorization
 label for human and agent scanning, not a behavioral switch. Pick by
 plain-word fit: `feat` introduces a new capability or behavior; `bug`
 corrects behavior that deviates from intent; `refactor` restructures
@@ -248,18 +240,6 @@ issues and the gate stops until they are addressed; `recommended` asks
 before running; `required` always runs; `completed` means the stage already
 ran and passed.
 
-### Spec addressing
-
-Entering `ready/` (for non-`epic`, non-`research`, non-`workset` tickets)
-requires each phase's caller-visible behavior to be addressed by a spec: an
-existing confirmed `spec:` stem, a `spec-remove:` entry, or a `## Spec
-Impact` section describing what a spec will need to cover. The purpose is to
-stop implementation from starting against an undocumented or unstable
-contract — either point at an already-addressed spec area, or explicitly
-declare the ticket only needs post-implementation closeout documentation.
-`idea/` and `todo/` tickets may hold `spec:` links as optional recovery
-hints; the check only applies at the `ready/` boundary.
-
 ### Phases
 
 A phase is one complete, reviewable, verifiable behavior slice — sized so a
@@ -275,8 +255,8 @@ detail belongs in the child or included tickets they reference.
 
 ### Epic vs. workset
 
-Both are board artifacts, not implementation targets, and both skip the
-ready spec-address gate — but they organize differently. An `epic` is
+Both are board artifacts, not implementation targets — but they organize
+differently. An `epic` is
 hierarchical: child tickets collectively deliver one parent outcome, and
 cross-child invariant decisions live in the epic body. A `workset` is
 non-hierarchical: it groups independent or cross-cutting tickets for

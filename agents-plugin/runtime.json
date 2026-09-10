@@ -34,13 +34,6 @@
     "project_tree": ">=0.45.2-dev <0.46.0",
     "infra.read": ">=0.45.2-dev <0.46.0",
     "convention.read": ">=0.45.2-dev <0.46.0",
-    "spec_stem.generate": ">=0.45.2-dev <0.46.0",
-    "spec_index.verify": ">=0.45.2-dev <0.46.0",
-    "specs.query": ">=0.45.2-dev <0.46.0",
-    "mental_models.list": ">=0.45.2-dev <0.46.0",
-    "mental_models.query": ">=0.45.2-dev <0.46.0",
-    "mental_models.status": ">=0.45.2-dev <0.46.0",
-    "references.trace": ">=0.45.2-dev <0.46.0",
     "tickets.query": ">=0.45.2-dev <0.46.0",
     "tickets.close": ">=0.45.2-dev <0.46.0",
     "tickets.move": ">=0.45.2-dev <0.46.0",
@@ -99,12 +92,6 @@
     "tickets.close": ">=0.45.2-dev <0.46.0",
     "tickets.move": ">=0.45.2-dev <0.46.0",
     "tickets.create-empty": ">=0.45.2-dev <0.46.0",
-    "tickets.verify": ">=0.45.2-dev <0.46.0",
-    "specs.list": ">=0.45.2-dev <0.46.0",
-    "specs.find": ">=0.45.2-dev <0.46.0",
-    "specs.status": ">=0.45.2-dev <0.46.0",
-    "mental-models.find": ">=0.45.2-dev <0.46.0",
-    "mental-models.status": ">=0.45.2-dev <0.46.0",
-    "references.trace": ">=0.45.2-dev <0.46.0"
+    "tickets.verify": ">=0.45.2-dev <0.46.0"
   }
 }

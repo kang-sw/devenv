@@ -12,24 +12,14 @@ import (
 var conventionFS embed.FS
 
 var conventionCanonicalNames = []string{
-	"mental-model-conventions",
-	"spec-conventions",
 	"ticket-conventions",
 }
 
 var conventionAliases = map[string]string{
-	"mental-model":             "mental-model-conventions",
-	"mental-model-convention":  "mental-model-conventions",
-	"mental-model-conventions": "mental-model-conventions",
-	"mental-models":            "mental-model-conventions",
-	"spec":                     "spec-conventions",
-	"spec-convention":          "spec-conventions",
-	"spec-conventions":         "spec-conventions",
-	"specs":                    "spec-conventions",
-	"ticket":                   "ticket-conventions",
-	"ticket-convention":        "ticket-conventions",
-	"ticket-conventions":       "ticket-conventions",
-	"tickets":                  "ticket-conventions",
+	"ticket":             "ticket-conventions",
+	"ticket-convention":  "ticket-conventions",
+	"ticket-conventions": "ticket-conventions",
+	"tickets":            "ticket-conventions",
 }
 
 func ReadConvention(name string) (string, error) {

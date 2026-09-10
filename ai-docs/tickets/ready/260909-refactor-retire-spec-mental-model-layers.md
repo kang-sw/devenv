@@ -583,6 +583,95 @@ Touchpoints: `internal/wsdoc/{spec_discovery,spec_tools,mental_model_discovery,m
 skill directories in both packages, both manifest pairs,
 `ai-docs/manuals/wsflow-mirroring.md`.
 
+### Result (0fd8fb33) - 2026-09-10
+
+The spec and mental-model layers have no code, no tool surface, no playbook, and
+no convention document. Landed in three commits on
+`impl/epic/refound/swipe-panda-food`: `17bb97db` (tool surface), `835c9d85`
+(playbook surface), `0fd8fb33` (review fixes).
+
+**Tools.** All seven removed at each of the four sites the phase names, plus
+formatters and the `wsdoc` implementations: `spec_discovery.go`, `spec_tools.go`,
+`mental_model_discovery.go`, `mental_models.go`, `references.go`,
+`query_match.go`, `legacy_marker.go` and their tests, the two convention
+documents with their canonical names and aliases, and the matching CLI
+subcommands and `runtime.json` capability entries in both packages.
+`legacy_marker.go` was read before cutting: it dies whole, with no non-spec
+residue — its generic markdown helpers (`fenceTracker`, `htmlCommentTracker`,
+`splitMarkdownIndent`, `yamlFrontmatterEnd`, `markdownFence`, `collectSpecImpact`)
+had no caller outside the file, and its only entry points were `spec_discovery.go`
+and `project_tree.go`'s spec area. `query_match.go` died with its two callers.
+
+**Open question resolved.** `Specs`/`SpecRemoves` are removed from `TicketInfo`:
+all three named readers are gone (`server.go`'s flag, `legacy_marker.go`,
+`references.go`). `Plans`/`Skeletons` stay — a separate legacy artifact this
+ticket removes only from the skeleton.
+
+**project_tree.** `renderAIDocs` stops skipping `ai-docs/spec`, so the directory
+now renders as a plain `ai-docs/` subdirectory exactly as mental-model already
+did. Pinned by fixture in `project_tree_test.go`: the directory lists, and
+neither a `spec:` header nor an anchor entry appears.
+
+**Conventions.** `ticket-conventions.md` lost exactly the spec-gate Status Flow
+bullets and the `idea/`/`todo/` `spec:` allowances. Three further lines were
+trimmed rather than deleted because only a clause referenced the retired layer:
+the workset ready-exemption, the workset "spec-ready behavior" phrase, and the
+Result-text "or linked spec" clause. Every other line is intact.
+
+**Per-file disposition of the survivor sweep.** Rewritten because a deleted call
+carried the step's meaning: `ticket-reviewer-design` (spec-territory conflict
+check replaced by a declared-constraint check over `parent:`/`related:`, the two
+edges that still exist), `reference-discovery` (reads `ai-docs/manuals/` and
+`ai-docs/ref/` through `project_tree` instead of the deleted discovery tools, and
+shortlists before reading now that no call is brief-scoped), `lead-add-rule` (see
+below), `lead-bootstrap` (two `_index.md` drift routes replaced so the two
+Candidate/Signal rows that fed them still resolve),
+`ticket-reviewer-completeness` (the `ready/` sage-gate field check asked for a
+retired `spec:` key on every promoted ticket). Trimmed: `code-reviewer`,
+`impl-playbook` (its `### Mental Model Notes` commit subsection went with the
+`git.commit` option, so the invariant now names `## AI Context` itself),
+`executor-wrapup` (lost the Ancestor Loading section whole),
+`lead-review`, `lead-workflow-manual`, `delegate-orientation`, `implementer`,
+`fresh-reader-audit`, `lead-check-blockers`, `lead-ticket/task-list`.
+Deliberately untouched: `skills/lead-bootstrap/AGENTS.template.md` and
+`WORKFLOW.md` in both packages, whose versioned migration entries are a replay
+log owned by the bootstrap-template sibling.
+Deliberately kept: `hasSpecStemArgument` — the tickets tools have no generic
+unknown-argument rejection, so removing it would turn a stale caller's
+`spec_stem` into a silently unfiltered ticket list instead of an error.
+
+**lead-add-rule reroute.** Domain-scoped rules now land in a manual under
+`ai-docs/manuals/` declared through `AGENTS.md` `## Workflow` ->
+`### Implementation Conventions`, the same generic hook the worker playbook
+reads. Two consequences the review surfaced and this phase fixed: the skill now
+targets `AGENTS.md` rather than `CLAUDE.md` (which is the `@AGENTS.md` shim in a
+bootstrapped project, so a rule appended there is invisible to every playbook
+that reads `AGENTS.md`), and the no-conventions-section case — the default
+downstream state — routes to the no-matching-manual row, which proposes the
+project's first manual and the section together, rather than to an absolute
+"route everything to the root file" sentence that made the new destination
+unreachable.
+
+**Tests.** Suites whose subject is gone are deleted; every other deletion is
+converted into an assertion that fails on reintroduction — `tools/list`
+advertises none of the seven tools nor the three commit trailers,
+`printPlaybook` resolves none of the seven stems, `ReadConvention` misses on the
+retired names, the CLI rejects the retired flags and subcommands,
+`TicketTemplate` carries none of the retired keys, the ticket graph resolves
+ticket stems only, `project_tree` renders no spec area, and
+`RETIRED_SKILL_NAMES` now catches a retired stem named in prose, not just a
+restored directory.
+
+**Verification** (full output read): `go build ./...` clean; `go vet ./...`
+clean; `go test ./... -count=1` 15 packages ok; `agents-plugin/tests` 55 OK;
+`agents-plugin-wsflow/tests` 10 OK; all five regen generators re-run and then
+idempotent with no env var set; `diff -r agents-plugin/rsrc
+agents-plugin-wsflow/rsrc` empty. A live stdio `tools/list` advertises none of
+the seven tools and none of the three `git.commit` options, and
+`convention.read(name: "ticket-conventions")` still returns the document.
+Two review rounds: round 1 raised 5 Important + 5 Minor, all fixed in `0fd8fb33`
+except `hasSpecStemArgument` (kept, rationale above); round 2 returned clean.
+
 ### Phase 3: Archive this repository's spec and mental-model corpus
 
 Goal: `ai-docs/spec/` and `ai-docs/mental-model/` no longer exist as maintained

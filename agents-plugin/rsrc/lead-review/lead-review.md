@@ -83,17 +83,14 @@ the config template and confirm it before reviewing.
 ### intent
 Commit messages and ## AI Context match the stated ticket or MR purpose.
 ### alignment
-Diff is consistent with ai-docs/spec and mental-model docs.
+Diff is consistent with the ticket's stated contract and the project's declared conventions.
 ### risk
 No breaking changes, security issues, or missing tests without justification.
 
 ## Landing Lens                        ← optional to customize; range scenario always runs it (built-in default below if omitted); branch scenario never runs it
 Diff follows the repo's own conventions (`AGENTS.md` and any authoring manual it
-names). Caller-visible behavior changes have a matching spec update
-(spec describes caller-visible behavior); workflow-system modification-relevant
-changes have a matching mental-model update (mental model captures
-modification-relevant operational knowledge) — each doc updated per its own
-function, not just "any doc touched."
+names). A document the change contradicts is updated in the same range — the
+document whose own function the change invalidates, not just "any doc touched."
 
 ## Checklist                           ← optional
 - [ ] <gate item>

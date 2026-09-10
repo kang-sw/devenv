@@ -1004,7 +1004,7 @@ func TestNoteOversizeChallengeForIsLayerBranchedAndDropsLargeTextKeepCarveOut(t 
 	}{
 		{
 			layer:    wsnote.LayerRepo,
-			mustHave: []string{"ticket/spec/mental-model", "relative pointer"},
+			mustHave: []string{"ticket or a tracked manual", "relative pointer"},
 		},
 		{
 			layer:    wsnote.LayerWorktree,

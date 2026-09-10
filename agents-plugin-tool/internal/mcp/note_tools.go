@@ -303,7 +303,7 @@ const noteOversizeThreshold = 300
 func noteOversizeChallengeFor(layer wsnote.Layer) string {
 	switch layer {
 	case wsnote.LayerRepo:
-		return "Large note (≥300 bytes; saved). Prefer: move the detail into a ticket/spec/mental-model and keep a <300-byte relative pointer here, or erase. Not mute."
+		return "Large note (≥300 bytes; saved). Prefer: move the detail into a ticket or a tracked manual and keep a <300-byte relative pointer here, or erase. Not mute."
 	case wsnote.LayerWorktree:
 		return "Large note (≥300 bytes; saved). Prefer: move the detail into a gitignored local doc (e.g. a sibling *.local.md) and keep a <300-byte relative pointer here, or erase. Not mute."
 	case wsnote.LayerClone:

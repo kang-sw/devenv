@@ -6,13 +6,11 @@ import (
 )
 
 // validReadyTicketBody is a ready/ ticket that satisfies every hard
-// guardrail and carries spec addressing, so it also produces no soft warning.
+// guardrail and produces no soft warning.
 const validReadyTicketBody = "---\n" +
 	"title: Valid ready ticket\n" +
 	"sage-review-design: completed\n" +
 	"sage-review-completeness: completed\n" +
-	"spec:\n" +
-	"  - 260723-spec-demo\n" +
 	"---\n\n" +
 	"# Valid ready ticket\n\n" +
 	"## Phases\n\n" +
@@ -50,7 +48,7 @@ func TestTicketVerifyPassingFixtureIsOK(t *testing.T) {
 		t.Fatalf("result = %#v, want OK with no findings", result)
 	}
 	if len(result.Warnings) != 0 {
-		t.Fatalf("result.Warnings = %#v, want none (spec: frontmatter present)", result.Warnings)
+		t.Fatalf("result.Warnings = %#v, want none", result.Warnings)
 	}
 }
 
@@ -62,7 +60,7 @@ func TestTicketVerifyRequiresAtLeastOnePath(t *testing.T) {
 
 func TestTicketVerifySkipsNonTicketPaths(t *testing.T) {
 	root := t.TempDir()
-	result, err := TicketVerify(root, []string{"src/main.go", "ai-docs/spec/demo.md"})
+	result, err := TicketVerify(root, []string{"src/main.go", "ai-docs/manuals/demo.md"})
 	if err != nil {
 		t.Fatalf("TicketVerify returned error: %v", err)
 	}
