@@ -223,8 +223,8 @@ describe("buildWidgetLines", () => {
     };
     const approval = { name: "awaiting approval audit", role: "execute" as const, state: "awaiting-approval" as const, elapsedMs: 3_000, model: "test-model", effort: "high", latestInput: 42, estimatedUsd: .1 };
     const animated = buildWidgetLines([question, approval], 1, 180, true)!;
-    assert.equal(animated[1], "\u001b[1m/answer Choose — database\u001b[22m · fork · awaiting owner · 3s · test-model (high) · in 0.0k · est $0.1 — /answer q7");
-    assert.equal(animated[2], "awaiting approval audit · execute · \u001b[1mawaiting approval\u001b[22m · 3s · test-model (high) · in 0.0k · est $0.1");
+    assert.equal(animated[1], "\u001b[1m/answer Choose — database\u001b[22m · fork · awaiting owner · 3s · test-model (high) · 0.0k · $0.1 — /answer q7");
+    assert.equal(animated[2], "awaiting approval audit · execute · \u001b[1mawaiting approval\u001b[22m · 3s · test-model (high) · 0.0k · $0.1");
     assert.ok(!animated[1].slice(animated[1].indexOf(" · fork")).includes("\u001b[1m"), "role, elapsed, telemetry, separators, and qN stay plain");
     assert.ok(!animated[2].startsWith("\u001b[1m"), "a state-like name cannot redirect approval styling");
     const staticDisabled = buildWidgetLines([question, approval], 1, 180, true)!;
@@ -234,7 +234,7 @@ describe("buildWidgetLines", () => {
   test("a supplied future idle-awaiting-owner row emphasizes its state and preserves only its supplied inspection hint", () => {
     const row = { name: "parked reviewer", role: "fork" as const, state: "idle-awaiting-owner" as const, elapsedMs: 3_000, inspectionHint: "/audit reviewer" };
     const line = buildWidgetLines([row], 0, 120, true)![1];
-    assert.equal(line, "parked reviewer · fork · \u001b[1midle awaiting owner\u001b[22m · 3s · — (—) · in — · est $— — /audit reviewer");
+    assert.equal(line, "parked reviewer · fork · \u001b[1midle awaiting owner\u001b[22m · 3s · — (—) · — · $— — /audit reviewer");
     assert.ok(!line.includes("/answer"), "presentation never fabricates an answer target for an owner-held idle row");
   });
 
@@ -253,14 +253,14 @@ describe("buildWidgetLines", () => {
   });
   test("telemetry exposes compact token and cost fields at wide widths and never displaces a 40-column answer cue", () => {
     const telemetry = { name: "模型-worker", role: "worker" as const, state: "running" as const, elapsedMs: 0, model: "provider/模型", effort: "high", latestInput: 0, estimatedUsd: 0 };
-    assert.match(buildWidgetLines([telemetry], 0, 120)![1], /provider\/模型 \(high\).*in 0.0k.*est \$0/);
+    assert.match(buildWidgetLines([telemetry], 0, 120)![1], /provider\/模型 \(high\).*0.0k.*\$0/);
     const missing = { ...telemetry, model: undefined, effort: undefined, latestInput: undefined, estimatedUsd: undefined, answerHint: "/answer q1" };
     assert.match(buildWidgetLines([missing], 0, 40)![1], /\/answer q1$/);
     assert.ok(visibleWidth(buildWidgetLines([missing], 0, 40)![1]) <= 40);
     const compact = { ...telemetry, name: "a", model: "p", effort: "l", latestInput: 132_400, estimatedUsd: .123456789 };
-    assert.match(buildWidgetLines([compact], 0, 80)![1], /p \(l\).*in 132.4k.*est \$0.123/);
+    assert.match(buildWidgetLines([compact], 0, 80)![1], /p \(l\).*132.4k.*\$0.123/);
     const noMegabyteUnit = { ...compact, latestInput: 1_354_100, estimatedUsd: 12.34567 };
-    assert.match(buildWidgetLines([noMegabyteUnit], 0, 120)![1], /in 1354.1k.*est \$12.346/);
+    assert.match(buildWidgetLines([noMegabyteUnit], 0, 120)![1], /1354.1k.*\$12.346/);
 
     const themedSpans: Array<[string, string]> = [];
     const themed = buildWidgetLines([compact], 0, 80, false, {
@@ -270,8 +270,8 @@ describe("buildWidgetLines", () => {
       },
     })![1];
     assert.ok(themedSpans.some(([color, text]) => color === "accent" && text === "p"), "model uses the theme accent");
-    assert.ok(themedSpans.some(([color, text]) => color === "syntaxNumber" && text === "in 132.4k"), "input telemetry uses the numeric theme color");
-    assert.ok(themedSpans.some(([color, text]) => color === "warning" && text === "est $0.123"), "estimated cost uses the warning/gold theme color");
+    assert.ok(themedSpans.some(([color, text]) => color === "syntaxNumber" && text === "132.4k"), "input telemetry uses the numeric theme color without a label");
+    assert.ok(themedSpans.some(([color, text]) => color === "warning" && text === "$0.123"), "estimated cost uses the warning/gold theme color without a label");
     assert.ok(visibleWidth(themed) <= 80, "ANSI theme styling does not change width accounting");
   });
   function runningRow(elapsedMs: number, name = "w") {
@@ -333,8 +333,8 @@ describe("buildWidgetLines", () => {
     assert.match(narrow, /\/answer q1$/); assert.ok(visibleWidth(narrow) <= 40);
     for (const width of [80, 120]) {
       const lines = buildWidgetLines([completeWide, unknown], 0, width)!;
-      assert.match(lines[1], /provider\/模型 \(high\).*in 0.0k.*est \$0/, `complete reported zero is not rendered as unknown at ${width}`);
-      assert.match(lines[2], /— \(—\).*in —.*est \$—/, `unknown fields remain independently unknown at ${width}`);
+      assert.match(lines[1], /provider\/模型 \(high\).*0.0k.*\$0/, `complete reported zero is not rendered as unknown at ${width}`);
+      assert.match(lines[2], /— \(—\).*· — · \$—/, `unknown fields remain independently unknown at ${width}`);
       assert.ok(lines.every(line => visibleWidth(line) <= width), `Unicode display width is bounded at ${width}`);
     }
   });
