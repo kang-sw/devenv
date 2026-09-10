@@ -12,6 +12,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: ba84d64a2bb52bdc
 sage-review-design-reviewed: ba84d64a2bb52bdc
+completed: 2026-09-10
 ---
 
 # Stateless in-window dedupe for `playbook.read` and `ws-skill`: a repeat read of an unchanged body returns a short pointer instead of the body
@@ -177,12 +178,38 @@ exposure expectation; `ws-ask` remains hidden. The original plan command
 claimed. The implementation stayed within Pi source/tests; shared ws-mcp,
 playbook text, schemas, and workflow-manual behavior were not changed.
 
-## Blocked (2026-09-10)
+### Phase 2: Make the pointer action-oriented and remove agent-facing provenance noise
 
-Awaiting the explicitly required owner-run dogfood: in the actual adapter lead
-session, re-enter `lead-discuss` or `lead-proceed` and confirm that the unchanged
-second read returns a useful pointer and the procedure continues without a
-third read. Automated registration and SDK fixtures prove execution behavior,
-not that human-observed workflow outcome. Record that result before closing
-the ticket; autonomous queue selection should skip this ticket while the
-owner acceptance remains outstanding.
+Owner dogfood confirmed that the second unchanged read suppresses the full body and preserves enough context to continue, but the pointer mixes useful retrieval cues with machine-only provenance. Retain the unchanged/freshness signal, tool-call distance, and heading list. Replace the passive `available from successful tool call` sentence with the action-oriented contract:
+
+> The result is unchanged. Continue using the full result already present N tool calls ago; do not read it again.
+
+Do not repeat the long original `toolCallId` in agent-facing prose when the provenance envelope already carries it. Minimize any remaining model-visible provenance payload where that can be done without weakening stateless pointer validation, original-result resolution, or the third-read safety valve. Human-facing appearance is secondary to agent signal density: the output should spend semantic tokens on reuse and continuation, not on identifiers the agent cannot dereference.
+
+Verification:
+
+- The unchanged second read returns the action-oriented sentence, distance, and headings without a prose `toolCallId`.
+- The lead continues the loaded procedure without a third read.
+- Forged, stale, ambiguous, and missing provenance still fall back to the full body.
+- The third and later matching calls retain the existing full-body safety behavior.
+- Focused renderer, bridge, and `ws-skill` fixtures pass.
+
+### Result (22f7d05f) - 2026-09-10
+
+Changed repeated unchanged reads to tell the agent to continue with the full
+result already present in context and not read it again. The pointer retains
+the tool-call distance and heading summary while removing the long original
+`toolCallId` from agent-facing prose. Structured provenance, freshness and
+ambiguity fallback validation, and the third-read full-body safety behavior
+remain unchanged.
+
+Focused renderer, bridge, and `ws-skill` verification passed 111 tests. Owner
+live dogfood confirmed that the second unchanged read suppresses the duplicate
+body, gives enough direction to continue without a third read, and emits the
+action-oriented pointer with no agent-facing provenance noise. The owner
+accepted the resulting workflow behavior.
+
+
+## Resolution (2026-09-10)
+
+Phase 2 landed in `22f7d05f`. Focused verification passed 111 tests, and owner live dogfood confirmed the action-oriented unchanged-result pointer supports continuation without a third read while preserving validation and safety behavior.
