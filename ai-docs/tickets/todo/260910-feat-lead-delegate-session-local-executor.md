@@ -4,7 +4,7 @@ sage-review-design: completed
 parent: 260909-epic-ws-worker-interpreter-refoundation
 related:
   260605-research-ws-native-subagent-pivot: native-subagent continuity and host-owned lifecycle anchor
-sage-review-design-reviewed: ba603f8e6443d6e6
+sage-review-design-reviewed: b1ff2211cc19899f
 ---
 
 # Add lead-delegate as the session-local arbitrary executor and retire lead-prefer-subagent
@@ -173,17 +173,56 @@ was verified. Choose the report format for the task; no fixed terminal
 block is required.
 ```
 
+Replace the opening prose of the rendered `lead-discuss` playbook with the
+following text verbatim. Keep its Evidence, Conversation, Stops, and Output
+sections unchanged.
+
+```markdown
+You are the lead in conversation. Reason with the user about direction, scope,
+risk, and trade-offs before capture or execution. You own the conversation and
+decision-making; subagents may gather evidence only. Edit no source and write
+no document here.
+
+What the user confirms is captured through
+`{{.SkillNamespace}}:lead-ticket`. When the user moves to execution, invoke
+`{{.SkillNamespace}}:lead-delegate` for a bounded task or
+`{{.SkillNamespace}}:lead-run` for implementation that warrants the full
+worker workflow.
+```
+
+Replace the opening prose of the rendered `lead-run` playbook with the
+following text verbatim.
+
+```markdown
+You are the lead for the full worker workflow. You drain the ready queue one
+ticket at a time, or accept an ad-hoc implementation contract whose scope,
+behavioral impact, or review needs warrant that workflow. You select one unit
+of work, spawn one worker to execute it, wait for its terminal report, handle
+its stops, and end the turn with a verdict line. You do not edit source; the
+worker owns implementation and verification.
+```
+
+Replace the ad-hoc paragraph under `lead-run`'s Select section with the
+following text verbatim. Keep the rest of the procedure unchanged, including
+the rendered-playbook read prohibition in Spawn.
+
+```markdown
+An ad-hoc implementation contract passed with the invocation skips selection.
+This path is for implementation whose scope, behavioral impact, or review needs
+warrant the full worker workflow. The description is the contract.
+```
+
+An explicit `lead-run` invocation remains authoritative; do not add a reverse
+reroute from `lead-run` to `lead-delegate`. General-request attention comes
+from the three skill descriptions, while only `lead-delegate` escalates
+material implementation to `lead-run`.
+
 ## Constraints
 
-- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for
-  agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
-- Convention: ai-docs/manuals/skill-authoring.md (declared for
-  agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/rsrc/,
-  agents-plugin-wsflow/skills/, agents-plugin-tool/internal/wsdoc/conventions/)
-- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for
-  agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/)
-- Convention: ai-docs/manuals/ws-mcp.md (declared for
-  agents-plugin-tool/internal/mcp/)
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/rsrc/, agents-plugin-wsflow/skills/, agents-plugin-tool/internal/wsdoc/conventions/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
 - Preserve host-neutral terminology and native host ownership of spawn,
   continuation, interruption, and task handles.
 - Do not route full implementation through the free-form delegate merely
@@ -195,12 +234,12 @@ block is required.
 
 | fact | value | evidence |
 |---|---|---|
-| scope.span | multi-file | agents-plugin/, agents-plugin-wsflow/, and agents-plugin-tool/ are named by the phase and constraints |
-| scope.surface | public-interface | lead-delegate is a new user-invoked entry skill alongside lead-run |
+| scope.span | multi-file | agents-plugin/, agents-plugin-wsflow/, and agents-plugin-tool/ are named in Phase 1 |
+| scope.surface | public-interface | Phase 1 adds lead-delegate to the user-invoked lead skill inventory alongside lead-run |
 | scope.new_public_symbol | yes | lead-delegate |
 | scope.new_type_contract | unknown | the ticket requires session-local label and host-handle recovery but names no type or signature |
-| scope.test_surface | existing | agents-plugin-tool/internal/mcp/workflow_prefer_subagent_test.go and shipped manifest tests cover the retired setting and generated surfaces |
-| complexity.reuse_points | confirmed | agents-plugin/skills/lead-prefer-subagent/SKILL.md contains the existing fresh-spawn and same-work-item continuation rules |
+| scope.test_surface | existing | agents-plugin-tool/internal/mcp/workflow_prefer_subagent_test.go, agents-plugin-tool/internal/wsrsrc/skills_mirror_test.go, agents-plugin/tests/test_skill_dispatch_contracts.py, and agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py |
+| complexity.reuse_points | confirmed | agents-plugin/skills/lead-prefer-subagent/SKILL.md#L12-L14 contains the fresh-spawn and same-work-item continuation rules |
 | complexity.side_effect_risk | moderate | the entry changes delegation routing and can authorize bounded repository mutations |
 | risk.correctness | high | continuation recovery and reroute boundaries determine whether material work is executed through lead-run |
 | risk.fit | high | the change alters the public lead-skill inventory and delegation posture |
@@ -216,10 +255,11 @@ as its lead-facing procedure. Treat that prose as settled behavior rather than
 a design prompt; implementation is limited to installing, wiring, and
 verifying it.
 
-Apply the Exact Required Prose to `lead-discuss`, `lead-delegate`, and
-`lead-run`. Implement the owning-workflow checks and the exact reroute gate
-before spawn and again when the delegate reports scope growth. The free-form
-path has no ticket-worker route/edit/review/commit protocol.
+Apply every frontmatter description, complete procedure, and replacement block
+under Exact Required Prose verbatim. Implement the owning-workflow checks and
+the exact reroute gate before spawn and again when the delegate reports scope
+growth. The free-form path has no ticket-worker route/edit/review/commit
+protocol.
 
 Retire `lead-prefer-subagent` from the ws and wsflow skill inventories and
 remove its standalone inline procedure, mirror exceptions, manifest entries,
