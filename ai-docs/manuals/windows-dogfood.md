@@ -75,6 +75,9 @@ restart. `WS_MCP_LAUNCHER_DEBUG=1` prints cold-load diagnostics to stderr.
 - `ws.ferrule` login resolves a session key.
 - Process round-trip: `exec.spawn` -> `exec.status` -> `exec.result`, plus
   `exec.abort` (the surviving per-platform process start/snapshot/cancel path).
+  These tools dispatch but are never advertised in `tools/list`, so the host
+  agent cannot be asked to call them: drive this item from a raw JSON-RPC
+  stdio client the way `agents-plugin-tool/scripts/smoke-ws-mcp.sh` does.
 - Workflow bootstrapping: skill invoke -> `playbook.read` / `playbook.render`.
 
 ## Hard constraint

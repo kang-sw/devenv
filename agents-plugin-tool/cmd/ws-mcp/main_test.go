@@ -178,6 +178,41 @@ func TestRuntimeCapabilitiesCommandReportsWsflowContractSurface(t *testing.T) {
 	}
 }
 
+// TestTopLevelUsageListsTheWholeSubcommandSet pins the advertised verb set as
+// a contract in both product modes. A retired subcommand's dispatch case and
+// its usage token have to disappear together: dropping the case alone leaves
+// the verb advertised and failing, dropping the token alone leaves a hidden
+// verb still dispatching. Asserting the exact line catches either half, and
+// the equality across modes pins that the verb set no longer varies by mode.
+func TestTopLevelUsageListsTheWholeSubcommandSet(t *testing.T) {
+	bin := wsMCPTestBin(t)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	const wantUsage = "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|git|tickets>"
+	for _, tc := range []struct {
+		name string
+		env  []string
+	}{
+		{name: "full", env: nil},
+		{name: "agentless", env: []string{"WS_MCP_NO_AGENT=1", "WS_MCP_NAMESPACE=wsflow"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(bin)
+			cmd.Env = append(os.Environ(), tc.env...)
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("ws-mcp with no subcommand unexpectedly succeeded: %s", string(out))
+			}
+			if got := strings.TrimSpace(string(out)); got != wantUsage {
+				t.Fatalf("usage = %q, want %q", got, wantUsage)
+			}
+		})
+	}
+}
+
 func TestNoAgentCLICommandsReturnDisabledErrors(t *testing.T) {
 	bin := wsMCPTestBin(t)
 	build := exec.Command("go", "build", "-o", bin, ".")
