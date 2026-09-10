@@ -284,6 +284,91 @@ and its manifest entry stay until Phase 2: `internal/wsagent/agent.go`
 its reader there (its reporting rule already lives in the worker stop protocol
 placed by `260909-refactor-lead-surface-collapse-worker-stop-protocol` Phase 1).
 
+### Result (86aca803) - 2026-09-10
+
+Landed as `232752e2` (surface removal), `09c055b7` (shipped text and mirrors),
+`86aca803` (review fixes) on `impl/epic/refound/bagel-grape-sway`.
+
+The `mercenary.*` MCP family is gone: dispatch cases, tool schemas, the
+tool-profile name list, `mercenaryHiddenFromConfig` /
+`mercenaryHiddenFromGlobalConfig` / `canonicalPreferMercenaryValue` /
+`agentCallHandleText` / `agentDebugSchema`, and the mercenary arms of
+`toolAllowed`, `roleAllowsTool`, `noAgentHiddenTool`, `filteredTools`,
+`publicToolDefinition`, `toolSchemaRequiresSessionKey`, and `LeadToolNames`.
+`workflow.prefer_mercenary` is gone from `wsconfig` scope, the config registry,
+the tuning catalog, and the builtin defaults. The `ws:mercenary-on` marker
+branch, the `preferMercenary` parameter through
+`renderProductModePlaybookBody` / `renderPlaybookBody` / `renderPlaybook`, the
+"Mercenary path (always available)" delegation-tip unit, and
+`mercenaryGuidanceBlock` are gone. `internal/mcp` no longer imports
+`internal/wsagent`; the runner and the `ws-mcp mercenary` CLI stay live for
+Phase 2.
+
+Shipped text: `lead-workflow-manual` lost all three mercenary passages — the
+English-prompt rule now covers delegated subagents generally, the
+register/call/result walkthrough became a product-neutral "Delegate prompts"
+section (render the delegate prompt, hand the returned path to a native
+subagent at the recommended tier), and the cancellation note now says
+interruption is the harness's affordance. `lead-tune` lost the "tune delegation
+mode" handler and its request-mapping row; the `lead-tune` skill description
+lost "mercenary-vs-native delegation". Those were the only `ws:full-only`
+blocks in either file, so the full-ws/wsflow difference for both playbooks is
+now the namespace substitution alone. wsflow mirrors regenerated with the
+documented entrypoints in the documented order; nothing hand-edited.
+
+Verification: `go build ./...` clean; `go test ./... -count=1` green across all
+14 packages; `gofmt -l` clean for every file this phase touched;
+`python3 -m unittest discover agents-plugin/tests` 55 OK and
+`agents-plugin-wsflow/tests` 10 OK. Against a binary built from the branch:
+`tools/list` advertises 50 tools and no `mercenary.*`; `mercenary.call` returns
+`-32602 unknown tool`; `config.list` offers no `workflow.prefer_mercenary` and
+`config.tune` on that key errors as an unknown config key rather than writing
+orphaned state. A before/after `playbook.render` diff at `c0a23a2f` vs the
+branch head, in both product modes: `code-review-correctness` differs by
+exactly the removed "Mercenary path" paragraph and nothing else; `implementer`
+is byte-identical (it declares `delegates: false`, so it never carried the
+tip). Reviewed in two rounds by fresh correctness and test reviewers
+(partitioned); round 1 raised three Important findings, all fixed in
+`86aca803`; round 2 verified all three and raised nothing new.
+
+Decisions taken:
+
+- `agents-plugin/runtime.json` needed no edit. The phase's touchpoint list
+  calls its mercenary rows "tool-window entries", but `runtime.json["tools"]`
+  holds none — all 17 mercenary rows are under `["commands"]`, which describes
+  the `ws-mcp mercenary` CLI that this phase deliberately keeps.
+  `cmd/ws-mcp/main_test.go` asserts the advertised command set equals that
+  file, so removing the rows here would break the contract against a CLI that
+  still exists. The same reasoning keeps the `mercenary.*` rows in
+  `agents-plugin-wsflow/tests/test_wsflow_runtime_contract.py`'s
+  `HIDDEN_COMMANDS`; its `HIDDEN_TOOLS` mercenary rows were removed. Therefore
+  the phase's `grep -ri mercenary agents-plugin agents-plugin-wsflow` clean
+  expectation is not met yet and lands with the CLI in Phase 2.
+- Two mercenary-named test files were pruned and renamed rather than deleted:
+  they also carried child-key mint, golden shipped-delegate render,
+  recommended-tier, and `workflow.prefer_subagent` coverage that outlives the
+  surface. `mercenary_surface_test.go` -> `playbook_render_surface_test.go`;
+  `prefer_mercenary_phase2_test.go` -> `workflow_prefer_subagent_test.go`.
+- Three tests observed harness detection and tier/effort clearing *through*
+  `mercenary.call`; they were retargeted onto `config.resolve_agent` rather
+  than deleted, so decision 5's surviving tier resolution keeps its coverage.
+  The ServeStdio concurrency test was rebuilt on `exec.shell` + `exec.result`.
+- The surviving `NoAgentVisible` mechanism lost its only `false` entry with the
+  mercenary registry row, which made the agentless tuning-catalog test vacuous.
+  A new test flips one live entry for its duration to exercise
+  `buildTuningCatalog`'s agentless cut; it was mutation-checked against both a
+  neutered and an inverted filter.
+- The "Delegate prompts" section is product-neutral rather than `ws:full-only`:
+  its subject is native subagents, which both product modes have, and leaving
+  it gated would have kept a product-mode difference this phase exists to
+  collapse. It is the manual's only remaining description of rendering a
+  delegate prompt.
+
+Not done here (Phase 2): `internal/wsagent/`, the `ws-mcp mercenary` CLI and
+its usage string, `runtime.json` command rows, `scripts/smoke-ws-mcp.sh`,
+`delegate-orientation.md`, the `wsstore` runner persistence API, and the
+`disqualifyingTokens` / `wsrsrc` / `workflow_manual.go` marker-comment cleanup.
+
 ### Phase 2: Remove the mercenary runtime, CLI, and marker plumbing
 
 Sequentially dependent on Phase 1: the runner tree is reachable only through

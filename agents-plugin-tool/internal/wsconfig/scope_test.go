@@ -277,7 +277,7 @@ func TestDefaultScopeFallbackToProject(t *testing.T) {
 }
 
 func TestWorkflowPreferenceDefaultScopesAreGlobalOnly(t *testing.T) {
-	for _, key := range []string{ItemWorkflowPreferSubagent, ItemWorkflowPreferMercenary} {
+	for _, key := range []string{ItemWorkflowPreferSubagent, ItemWorkflowSkepticalPosture, ItemBootstrapAlarm} {
 		if got := DefaultScope(key); got != ScopeGlobal {
 			t.Fatalf("DefaultScope(%q) = %s, want global", key, got)
 		}

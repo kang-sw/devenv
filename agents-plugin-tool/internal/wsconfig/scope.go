@@ -18,18 +18,9 @@ const (
 // Well-known item key constants for registered config items. Use these instead of
 // raw string literals to ensure consistent naming across packages.
 const (
-	// ItemPreferMercenary is the retired unprefixed mercenary preference key.
-	// Keep the constant for legacy record tests and orphaned local state checks;
-	// new code must use ItemWorkflowPreferMercenary and must not migrate this key.
-	ItemPreferMercenary = "prefer_mercenary"
-
 	// ItemWorkflowPreferSubagent is the global bootstrap preference for loading
 	// strict subagent posture with the workflow manual. Builtin default: off.
 	ItemWorkflowPreferSubagent = "workflow.prefer_subagent"
-
-	// ItemWorkflowPreferMercenary is the global workflow preference for mercenary
-	// visibility and default render guidance. Builtin default: hide.
-	ItemWorkflowPreferMercenary = "workflow.prefer_mercenary"
 
 	// ItemSageReview is the layered config key for the sage review gate on ticket
 	// writes. Value "auto" runs reviewers unconditionally after a todo/ready commit;
@@ -77,7 +68,6 @@ const (
 
 func init() {
 	RegisterGlobalOnly(ItemWorkflowPreferSubagent)
-	RegisterGlobalOnly(ItemWorkflowPreferMercenary)
 	RegisterGlobalOnly(ItemWorkflowSkepticalPosture)
 	RegisterGlobalOnly(ItemBootstrapAlarm)
 	// sage_review* keys default to project scope: they are project-level opt-ins

@@ -51,16 +51,6 @@ Examples:
 4. Call `config.tune` with `key` set to `"workflow.prefer_subagent"`, `session_key`, and the selected value.
 5. Report the global state and that it applies to the next workflow-manual load.
 
-<!-- ws:full-only:start -->
-## On: tune delegation mode
-
-1. Map the request to the `"workflow.prefer_mercenary"` catalog knob.
-2. Choose the new state from the catalog value field.
-3. Confirm the Tuning Proposal with the selected value.
-4. Call `config.tune` with `key` set to `"workflow.prefer_mercenary"`, `session_key`, and the selected value.
-5. Report the global state and that it controls both mercenary visibility and default render guidance.
-<!-- ws:full-only:end -->
-
 ## On: tune model tier
 
 1. Map the request to the `agents.tier` catalog knob.
@@ -81,9 +71,6 @@ Examples:
 - User standing preferences, communication style, language, terminology, or wording conventions -> prompt override (`UserPreferenceSection`).
 - Prompt wording or a named manual section -> prompt override for that named override point.
 - "delegate more/less" or strict subagent posture -> workflow preference (`"workflow.prefer_subagent"`).
-<!-- ws:full-only:start -->
-- A preference for mercenary delegation mode, including persistent agents where supported -> workflow preference (`"workflow.prefer_mercenary"`).
-<!-- ws:full-only:end -->
 - A model, tier, or "cheaper/stronger model" preference -> model tier (`agents.tier`).
 - Anything else -> unsupported axis.
 

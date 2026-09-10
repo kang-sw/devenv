@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/execjob"
-	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
@@ -458,10 +457,9 @@ func RuntimeNamespace() string {
 
 func builtinConfigDefaults() map[string]string {
 	return map[string]string{
-		wsconfig.ItemWorkflowPreferSubagent:  "off",
-		wsconfig.ItemWorkflowPreferMercenary: "hide",
-		wsconfig.ItemSageReview:              "auto",
-		wsconfig.ItemBootstrapAlarm:          "on",
+		wsconfig.ItemWorkflowPreferSubagent: "off",
+		wsconfig.ItemSageReview:             "auto",
+		wsconfig.ItemBootstrapAlarm:         "on",
 	}
 }
 
@@ -494,7 +492,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	if NoAgentMode() && noAgentHiddenTool(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("%s agentless mode disables agent-backed tool: %s", RuntimeNamespace(), params.Name))
 	}
-	if !s.toolAllowed(params.Name, s.mercenaryHiddenFromConfig()) {
+	if !s.toolAllowed(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
 	}
 	// Keyed capability gate: when a session_key is present and maps to a known
@@ -677,7 +675,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		// config.tuning path: project the per-key writer schema + current values,
-		// with the no-agent full-ws-only cut (today: workflow.prefer_mercenary).
+		// with the no-agent full-ws-only cut applied per entry.
 		catalogAdapter := sessionConfigAdapter{s: s.sessions}
 		catalogResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigAndPromptDefaults(), catalogAdapter, catalogAdapter)
 		catalog, err := buildTuningCatalog(rsrcRoot, &catalogResolver, sessionKey, NoAgentMode())
@@ -856,7 +854,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			}
 			return toolTextResponse(req.ID, fmt.Sprintf("prompt override set: %s/%s (scope: %s)\n", pointID, storedHarness, resolvedScope), nil)
 		default:
-			// scalar resolver-backed knob (subagent / mercenary / bootstrap_alarm).
+			// scalar resolver-backed knob (subagent / bootstrap_alarm).
 			// Resolver.Set enforces global-only + session-key.
 			value, _ := params.Arguments["value"].(string)
 			value = strings.ToLower(strings.TrimSpace(value))
@@ -1395,7 +1393,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		// mintRoot is empty when caller is not a lead (no mint).
 		var mintRoot string
 		var parentKey string
-		var preferMercenary bool
 		// Override lookup is built for any present session_key (shared helper with
 		// the playbook.read path); it is independent of the lead-gate.
 		renderSessionKey, _ := params.Arguments["session_key"].(string)
@@ -1410,12 +1407,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 					mintRoot = entry.root
 				}
 				parentKey = capturedKey
-				// Mercenary preference is a global workflow setting because it
-				// also controls keyless tool-surface visibility.
-				adapter := sessionConfigAdapter{s: s.sessions}
-				resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-				rv, _ := resolver.Get("", wsconfig.ItemWorkflowPreferMercenary)
-				preferMercenary = canonicalPreferMercenaryValue(rv.Value) == "on"
 			}
 		}
 
@@ -1423,186 +1414,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		renderLangAdapter := sessionConfigAdapter{s: s.sessions}
 		renderLangResolver := wsconfig.NewResolver(wsconfig.Options{}, nil, renderLangAdapter, renderLangAdapter)
 		renderWorkflowLangRV, _ := renderLangResolver.Get(renderSessionKey, wsconfig.ItemWorkflowLang)
-		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, preferMercenary, renderWorkflowLangRV.Value, renderOverrideLookup)
+		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, renderWorkflowLangRV.Value, renderOverrideLookup)
 		return toolTextResponse(req.ID, withRecommendedRenderBinding(path, s.currentHarness(), recommendedTier, wsconfig.Options{})+"\n", err)
 
-	case "mercenary.register":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		backend, _ := params.Arguments["backend"].(string)
-		systemPromptText, _ := params.Arguments["system_prompt_text"].(string)
-		// Phase 1 (260620): `tier` is a PASS-THROUGH of the recommended tier that
-		// playbook.render returns (origin = playbook frontmatter). The tier flows
-		// directly as a capability word to RegisterOptions.Tier; downstream
-		// ResolveAgentForHarnessConfig normalizes via normalizedTier. Empty/unknown
-		// tier leaves RegisterOptions.Tier empty so Register applies its built-in
-		// default instead of pinning to medium when a tier WAS declared. The other
-		// former fields (prompts/prompt_refs/model) stay removed from the MCP
-		// schema; RegisterOptions struct fields remain for internal callers (api_docs).
-		tier, _ := params.Arguments["tier"].(string)
-		agent, _, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{
-			Root:             root,
-			Name:             name,
-			Backend:          backend,
-			Harness:          s.currentHarness(),
-			SystemPromptText: systemPromptText,
-			Tier:             tier,
-		})
-		return toolTextResponse(req.ID, agent.Name+"\n", err)
-	case "mercenary.call":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		prompt, _ := params.Arguments["prompt"].(string)
-		result, err := wsagent.NewManager(wsagent.Options{}).Call(wsagent.CallOptions{
-			Root:   root,
-			Name:   name,
-			Prompt: prompt,
-		})
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		// Unit 5: native-shaped continuation handle — same shape as a host-native
-		// subagent id so the lead reuses one continuation idiom across both paths.
-		// Handle format: agentId=<name> matches the native agentId shape referenced
-		// by terminologyForHarness ContinueIdiom (e.g. SendMessage(to: <agentId>)).
-		return toolTextResponse(req.ID, agentCallHandleText(result.AgentName, result.Status, result.PID), nil)
-	case "mercenary.wait":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		names := stringList(params.Arguments["names"])
-		text, err := wsagent.NewManager(wsagent.Options{}).Wait(wsagent.WaitOptions{
-			Root:    root,
-			Name:    name,
-			Names:   names,
-			Timeout: durationFromSeconds(params.Arguments["timeout_seconds"]),
-			Context: ctx,
-		})
-		return toolTextResponse(req.ID, text, err)
-	case "mercenary.result":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		text, err := wsagent.NewManager(wsagent.Options{}).Result(wsagent.ResultOptions{
-			Root:    root,
-			Name:    name,
-			Timeout: durationFromSeconds(params.Arguments["timeout_seconds"]),
-			Context: ctx,
-		})
-		return toolTextResponse(req.ID, text, err)
-	case "mercenary.status":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		text, err := wsagent.NewManager(wsagent.Options{}).Status(root, name)
-		return toolTextResponse(req.ID, text, err)
-	case "mercenary.interrupt":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		message, _ := params.Arguments["message"].(string)
-		result, err := wsagent.NewManager(wsagent.Options{}).Interrupt(wsagent.InterruptOptions{
-			Root:    root,
-			Name:    name,
-			Message: message,
-		})
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		return toolTextResponse(req.ID, fmt.Sprintf("%s\tqueued\tmessage=%s\n", result.AgentName, result.MessageID), nil)
-	case "mercenary.tail":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		lines := intFromArgument(params.Arguments["lines"], 40)
-		text, err := wsagent.NewManager(wsagent.Options{}).Tail(wsagent.TailOptions{
-			Root:  root,
-			Name:  name,
-			Lines: lines,
-		})
-		return toolTextResponse(req.ID, text, err)
-	case "mercenary.debug.tail":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		lines := intFromArgument(params.Arguments["lines"], 40)
-		text, err := wsagent.NewManager(wsagent.Options{}).Tail(wsagent.TailOptions{
-			Root:  root,
-			Name:  name,
-			Lines: lines,
-			Raw:   true,
-		})
-		return toolTextResponse(req.ID, text, err)
-	case "mercenary.debug.stdout", "mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		lines := intFromArgument(params.Arguments["lines"], 40)
-		stream := strings.TrimPrefix(params.Name, "mercenary.debug.")
-		text, err := wsagent.NewManager(wsagent.Options{}).DiagnosticStream(wsagent.DiagnosticStreamOptions{
-			Root:   root,
-			Name:   name,
-			Stream: stream,
-			Lines:  lines,
-		})
-		return toolTextResponse(req.ID, text, err)
-	case "mercenary.cancel":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		text, err := wsagent.NewManager(wsagent.Options{}).Cancel(root, name)
-		return toolTextResponse(req.ID, text, err)
-	case "mercenary.recall":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		prompt, _ := params.Arguments["prompt"].(string)
-		text, err := wsagent.NewManager(wsagent.Options{}).Recall(wsagent.RecallOptions{
-			Root:   root,
-			Name:   name,
-			Prompt: prompt,
-		})
-		return toolTextResponse(req.ID, text, err)
-	case "mercenary.print":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		text, err := wsagent.NewManager(wsagent.Options{}).Print(root, name)
-		return toolTextResponse(req.ID, text, err)
-	case "mercenary.erase":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		err = wsagent.NewManager(wsagent.Options{}).Erase(root, name)
-		return toolTextResponse(req.ID, "erased\n", err)
 	default:
 		return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
 	}
@@ -2013,9 +1827,8 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 
 	catalog := tuningCatalog{Knobs: make([]tuningKnob, 0, len(promptListing)+5)}
 	// appendKnob drives the noAgentMode cut off each entry's NoAgentVisible
-	// flag rather than a positional early-return, so the invariant (today:
-	// only workflow.prefer_mercenary is hidden in no-agent mode) is explicit
-	// per-entry instead of depending on append order.
+	// flag rather than a positional early-return, so a knob's agentless
+	// visibility is declared per-entry instead of depending on append order.
 	appendKnob := func(entry configKeyEntry, knob tuningKnob) {
 		if noAgentMode && !entry.NoAgentVisible {
 			return
@@ -2086,39 +1899,14 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		Current:        agentTiers,
 	})
 
-	mercenaryEntry := registryEntryByKey(wsconfig.ItemWorkflowPreferMercenary)
-	appendKnob(mercenaryEntry, tuningKnob{
-		ID:          "workflow.prefer_mercenary",
-		Kind:        "workflow_preference",
-		Description: "Select whether lead renders prefer native subagents, prefer ws.mercenary, or hide ws.mercenary surfaces.",
-		Writer:      tuningWriter{Tool: mercenaryEntry.WriterTool, FixedArguments: map[string]string{"key": mercenaryEntry.Key}},
-		ValueFields: mercenaryEntry.ValueFields,
-		Current:     currentWorkflowPreference(resolver, wsconfig.ItemWorkflowPreferMercenary),
-	})
-
 	return catalog, nil
 }
 
 func currentWorkflowPreference(resolver *wsconfig.Resolver, itemKey string) tuningScopedValue {
 	rv, _ := resolver.Get("", itemKey)
-	value := rv.Value
-	if itemKey == wsconfig.ItemWorkflowPreferMercenary {
-		value = canonicalPreferMercenaryValue(value)
-	}
 	return tuningScopedValue{
-		Value: value,
+		Value: rv.Value,
 		Scope: string(rv.Scope),
-	}
-}
-
-func canonicalPreferMercenaryValue(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "true", "on":
-		return "on"
-	case "false", "off":
-		return "off"
-	default:
-		return "hide"
 	}
 }
 
@@ -3360,11 +3148,11 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "config.tune",
-			"description": "Write one ws config knob, selected by its key (e.g. workflow.prefer_subagent, bootstrap_alarm, workflow.prefer_mercenary, agents.tier, prompt.<pointId>). Call config.list first for each key's exact value domain, scope rules, and harness applicability. value is a string for scalar knobs and an object ({tier, backend, model, effort}) for agents.tier. scope is optional and backstops to the key's declared default; harness is load-bearing for prompt.* and agents.tier and warning-only (ignored) for keys that do not vary by harness. reset: true drops a knob's override back to its builtin/inherited default (only for keys that support reset). session_key is required at dispatch for lead-authority keys and prompt.* keys. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
+			"description": "Write one ws config knob, selected by its key (e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>). Call config.list first for each key's exact value domain, scope rules, and harness applicability. value is a string for scalar knobs and an object ({tier, backend, model, effort}) for agents.tier. scope is optional and backstops to the key's declared default; harness is load-bearing for prompt.* and agents.tier and warning-only (ignored) for keys that do not vary by harness. reset: true drops a knob's override back to its builtin/inherited default (only for keys that support reset). session_key is required at dispatch for lead-authority keys and prompt.* keys. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"key":         stringProperty("Config knob key to write, e.g. workflow.prefer_subagent, bootstrap_alarm, workflow.prefer_mercenary, agents.tier, or prompt.<pointId>. See config.list for the supported set."),
+					"key":         stringProperty("Config knob key to write, e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, or prompt.<pointId>. See config.list for the supported set."),
 					"value":       anyProperty("New value. A string for scalar knobs (e.g. on/off), or an object {tier, backend, model, effort} for agents.tier. Omit when reset is true."),
 					"scope":       enumStringProperty("Optional storage scope. When omitted the write lands in the key's declared default scope. Global-only keys reject non-global scopes; agents.tier only supports project scope.", wsconfig.ScopeSchemaEnum()),
 					"harness":     stringProperty("Optional harness selector. Load-bearing for prompt.* (claude, codex, pi, or * for all) and agents.tier (alias key); ignored for keys that do not vary by harness. When omitted for a harness-applicable key, defaults to the current session's detected harness."),
@@ -3757,149 +3545,6 @@ func tools() []map[string]any {
 				"required": []string{"name"},
 			},
 		},
-		{
-			"name":        "mercenary.register",
-			"description": "Register a durable ws mercenary agent for the current worktree. Use a self-contained prompt from playbook.render as system_prompt_text, and pass playbook.render's returned recommended-tier through as tier; the former prompts/model registration fields are removed.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name":               stringProperty("Agent name."),
-					"backend":            stringProperty("Optional backend name (codex or claude). Uses harness default when omitted."),
-					"system_prompt_text": stringProperty("Self-contained system prompt text (from playbook.render). Replaces the former prompts/model registration fields."),
-					"tier":               stringProperty("Optional first-class capability tier (small/medium/large/xlarge) to pass through from playbook.render's recommended-tier. Selects the mercenary's model via config.tune(key: agents.tier); omit to use the default."),
-				},
-				"required": []string{"name"},
-			},
-		},
-		{
-			"name":        "mercenary.call",
-			"description": "Start an asynchronous call for a registered ws agent and return immediately.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name":   stringProperty("Agent name."),
-					"prompt": stringProperty("Prompt to send to the agent."),
-				},
-				"required": []string{"name", "prompt"},
-			},
-		},
-		{
-			"name":        "mercenary.wait",
-			"description": "Wait for one or more registered ws agents to become ready; returns status metadata, not final output.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name":            stringProperty("Agent name. Compatibility alias for a single name."),
-					"names":           stringArrayProperty("Agent names to wait for."),
-					"timeout_seconds": numberProperty("Maximum seconds to wait. Defaults to 600."),
-				},
-			},
-		},
-		{
-			"name":        "mercenary.result",
-			"description": "Return a completed agent result, optionally waiting; successful ephemeral results are consumed and erased.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name":            stringProperty("Agent name."),
-					"timeout_seconds": numberProperty("Maximum seconds to wait. Omit or set 0 for a non-blocking read."),
-				},
-				"required": []string{"name"},
-			},
-		},
-		{
-			"name":        "mercenary.status",
-			"description": "Return current status for a registered ws agent.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name": stringProperty("Agent name."),
-				},
-				"required": []string{"name"},
-			},
-		},
-		{
-			"name":        "mercenary.interrupt",
-			"description": "Queue an interrupt or redirect message for a registered ws agent.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name":    stringProperty("Agent name."),
-					"message": stringProperty("Interrupt or redirect message to deliver to the agent."),
-				},
-				"required": []string{"name", "message"},
-			},
-		},
-		{
-			"name":        "mercenary.tail",
-			"description": "Return context-bounded recent event, stream, and output lines for a registered ws agent.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name":  stringProperty("Agent name."),
-					"lines": integerProperty("Number of lines per section. Defaults to 40."),
-				},
-				"required": []string{"name"},
-			},
-		},
-		{
-			"name":        "mercenary.debug.tail",
-			"description": "Debug only: return raw diagnostic tail sections for a registered ws agent.",
-			"inputSchema": agentDebugSchema("Number of lines per section. Defaults to 40."),
-		},
-		{
-			"name":        "mercenary.debug.stdout",
-			"description": "Debug only: return recent raw stdout lines for the current agent call.",
-			"inputSchema": agentDebugSchema("Number of stdout lines. Defaults to 40."),
-		},
-		{
-			"name":        "mercenary.debug.stderr",
-			"description": "Debug only: return recent raw stderr lines for the current agent call.",
-			"inputSchema": agentDebugSchema("Number of stderr lines. Defaults to 40."),
-		},
-		{
-			"name":        "mercenary.debug.runtime_log",
-			"description": "Debug only: return recent raw runtime log lines for the current agent call.",
-			"inputSchema": agentDebugSchema("Number of runtime log lines. Defaults to 40."),
-		},
-		{
-			"name":        "mercenary.debug.events",
-			"description": "Debug only: return recent raw agent events log lines.",
-			"inputSchema": agentDebugSchema("Number of event log lines. Defaults to 40."),
-		},
-		{
-			"name":        "mercenary.cancel",
-			"description": "Best-effort cancel the current async call for a registered ws agent.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name": stringProperty("Agent name."),
-				},
-				"required": []string{"name"},
-			},
-		},
-		{
-			"name":        "mercenary.print",
-			"description": "Deprecated compatibility alias: return the last plain-text output without consuming ephemeral agents.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name": stringProperty("Agent name."),
-				},
-				"required": []string{"name"},
-			},
-		},
-		{
-			"name":        "mercenary.erase",
-			"description": "Erase a registered ws agent directory for the current worktree.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name": stringProperty("Agent name."),
-				},
-				"required": []string{"name"},
-			},
-		},
 	}
 	return withSessionKeyToolSchemas(toolList)
 }
@@ -3934,11 +3579,7 @@ func toolSchemaRequiresSessionKey(name string) bool {
 		"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep",
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
 		"project_tree",
-		"tickets.query", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify", "path.generate", "playbook.render",
-		"mercenary.register", "mercenary.call", "mercenary.wait", "mercenary.result", "mercenary.status",
-		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
-		"mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events",
-		"mercenary.cancel", "mercenary.print", "mercenary.erase":
+		"tickets.query", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify", "path.generate", "playbook.render":
 		return true
 	default:
 		if entry, ok := configKeyEntryForTool(name); ok {
@@ -3959,7 +3600,6 @@ func appendRequiredString(raw any, value string) []string {
 }
 
 func LeadToolNames() []string {
-	mercenaryHidden := mercenaryHiddenFromGlobalConfig()
 	names := make([]string, 0, len(tools()))
 	for _, tool := range tools() {
 		name, _ := tool["name"].(string)
@@ -3968,9 +3608,6 @@ func LeadToolNames() []string {
 			continue
 		}
 		if NoAgentMode() && noAgentHiddenTool(name) {
-			continue
-		}
-		if mercenaryHidden && strings.HasPrefix(name, "mercenary.") {
 			continue
 		}
 		if name != "" {
@@ -3984,17 +3621,13 @@ func LeadToolNames() []string {
 func (s *Server) filteredTools() []map[string]any {
 	base := tools()
 	filtered := make([]map[string]any, 0, len(base))
-	mercenaryHidden := s.mercenaryHiddenFromConfig()
 	for _, tool := range base {
 		name, _ := tool["name"].(string)
 		name = advertisedToolName(name)
 		if permanentlyHiddenTool(name) {
 			continue
 		}
-		if mercenaryHidden && strings.HasPrefix(name, "mercenary.") {
-			continue
-		}
-		if s.toolAllowed(name, mercenaryHidden) {
+		if s.toolAllowed(name) {
 			filtered = append(filtered, publicToolDefinition(tool, name))
 		}
 	}
@@ -4002,7 +3635,6 @@ func (s *Server) filteredTools() []map[string]any {
 }
 
 func publicToolDefinition(tool map[string]any, advertisedName string) map[string]any {
-	name, _ := tool["name"].(string)
 	clone := make(map[string]any, len(tool))
 	for key, value := range tool {
 		clone[key] = value
@@ -4016,33 +3648,11 @@ func publicToolDefinition(tool map[string]any, advertisedName string) map[string
 	if schema, ok := clone["inputSchema"].(map[string]any); ok {
 		clone["inputSchema"] = namespaceValue(schema)
 	}
-	if !strings.HasPrefix(name, "mercenary.") {
-		return clone
-	}
-	schema, ok := clone["inputSchema"].(map[string]any)
-	if !ok {
-		return clone
-	}
-	schemaClone := make(map[string]any, len(schema))
-	for key, value := range schema {
-		schemaClone[key] = value
-	}
-	if properties, ok := schema["properties"].(map[string]any); ok {
-		propertiesClone := make(map[string]any, len(properties))
-		for key, value := range properties {
-			propertiesClone[key] = value
-		}
-		schemaClone["properties"] = propertiesClone
-	}
-	clone["inputSchema"] = schemaClone
 	return clone
 }
 
-func (s *Server) toolAllowed(name string, mercenaryHidden bool) bool {
+func (s *Server) toolAllowed(name string) bool {
 	if NoAgentMode() && noAgentHiddenTool(name) {
-		return false
-	}
-	if strings.HasPrefix(name, "mercenary.") && mercenaryHidden {
 		return false
 	}
 	if allowed := explicitAllowedTools(); len(allowed) > 0 {
@@ -4059,9 +3669,9 @@ func roleAllowsTool(role toolRole, name string) bool {
 		if strings.HasPrefix(name, "session.") {
 			return false
 		}
-		return !strings.HasPrefix(name, "mercenary.") && !strings.HasPrefix(name, "config.")
+		return !strings.HasPrefix(name, "config.")
 	case roleLeaf:
-		return !strings.HasPrefix(name, "mercenary.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && name != "git.commit"
+		return !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && name != "git.commit"
 	default:
 		return false
 	}
@@ -4125,35 +3735,12 @@ func namespaceValue(value any) any {
 	}
 }
 
-// agentCallHandleText formats the ws.mercenary.call response. The handle is shaped as
-// agentId=<name> so the lead reuses one native-shaped continuation idiom across
-// the native-subagent and mercenary paths (Phase 2c interface parity).
-func agentCallHandleText(name, status string, pid int) string {
-	return fmt.Sprintf("agentId=%s\tstatus=%s\tpid=%d\ncontinue: use the agentId above with the host continuation idiom (e.g. SendMessage(to: agentId) or resume by task id)\nfollow_up: ws.mercenary.result --timeout 10m | ws.mercenary.wait --timeout 10m | ws.mercenary.status | ws.mercenary.tail | ws.mercenary.cancel\n", name, status, pid)
-}
-
 // permanentlyHiddenTool returns true for tools that must never appear on the
 // public MCP surface regardless of mode. exec.* tools are under active
 // development (epic 260524) and not yet documented in lead-workflow-manual;
 // they are hidden until the surface stabilizes.
 func permanentlyHiddenTool(name string) bool {
 	return strings.HasPrefix(name, "exec.")
-}
-
-// mercenaryHiddenFromConfig returns true when workflow.prefer_mercenary resolves
-// to "hide" from global/builtin state. The item is global-only because
-// filteredTools and toolAllowed are request-level, not session/root keyed.
-func (s *Server) mercenaryHiddenFromConfig() bool {
-	return mercenaryHiddenFromGlobalConfig()
-}
-
-func mercenaryHiddenFromGlobalConfig() bool {
-	resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), nil, nil)
-	rv, err := resolver.Get("", wsconfig.ItemWorkflowPreferMercenary)
-	if err != nil {
-		return false
-	}
-	return canonicalPreferMercenaryValue(rv.Value) == "hide"
 }
 
 func (s *Server) requireLeadSessionKey(toolName string, arguments map[string]any) (string, error) {
@@ -4176,14 +3763,9 @@ func noAgentHiddenTool(name string) bool {
 	if permanentlyHiddenTool(name) {
 		return true
 	}
-	if strings.HasPrefix(name, "mercenary.") {
-		return true
-	}
-	// Mercenary render-mode control is ws-only; the agentless wsflow surface
-	// has no mercenary path, so config.workflow_prefer_mercenary (the only
-	// config.* entry with NoAgentVisible: false) is hidden there. Every other
-	// config.* knob, including the bootstrap tool, stays visible (wsflow
-	// still needs session-key bootstrap).
+	// A config.* knob declaring NoAgentVisible: false is hidden on the
+	// agentless surface. Every other config.* knob, including the bootstrap
+	// tool, stays visible (wsflow still needs session-key bootstrap).
 	if strings.HasPrefix(name, "config.") {
 		if entry, ok := configKeyEntryForTool(name); ok {
 			return !entry.NoAgentVisible
@@ -4234,17 +3816,6 @@ func explicitAllowedTools() map[string]bool {
 		}
 	}
 	return allowed
-}
-
-func agentDebugSchema(linesDescription string) map[string]any {
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"name":  stringProperty("Agent name."),
-			"lines": integerProperty(linesDescription),
-		},
-		"required": []string{"name"},
-	}
 }
 
 func execLaunchSchema(shell bool) map[string]any {

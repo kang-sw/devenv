@@ -102,10 +102,7 @@ class SkillDispatchContractsTest(unittest.TestCase):
     def test_workflow_manual_requires_english_agent_prompts(self):
         text = (RSRC_DIR / "lead-workflow-manual" / "lead-workflow-manual.md").read_text(encoding="utf-8")
 
-        self.assertIn("Write prompts sent to native Explore-style subagents in English.", text)
-        self.assertIn("<!-- ws:full-only:start -->", text)
-        self.assertIn("Write prompts sent to `mercenary.call` in English.", text)
-        self.assertIn("<!-- ws:full-only:end -->", text)
+        self.assertIn("Write prompts sent to delegated subagents in English.", text)
 
     def test_run_dispatches_through_playbook_read(self):
         # lead-run is a playbook.read shim over an rsrc body, not an inline
