@@ -3,7 +3,10 @@ title: "Fix the workflow-cost measurement manual's round-three findings and re-r
 related:
   260909-chore-ws-refoundation-git-history-measurement-manual: prerequisite; placed the manual and recorded the first baseline
 parent: 260909-epic-ws-worker-interpreter-refoundation
-sage-review-design: required
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: ed1f3fe34b450cd8
+sage-review-completeness-reviewed: ed1f3fe34b450cd8
 ---
 
 # Fix the workflow-cost measurement manual's round-three findings and re-run the baseline
@@ -39,6 +42,22 @@ after-run.
   only `fix`. A second fresh sweep of the manual is exactly what the epic's
   Cross-Child Decision 20 forbids. *Rejected: a new round-1 review of the
   manual* — the third round already found what a fresh reviewer finds.
+  This does not waive the route's own review of this ticket's diff: Decision
+  20 mandates round 1 on the change at the route's allocation and forbids
+  only a third round on the same work. Round 1 here is scoped to the diff;
+  a reviewer finding about manual text the diff did not touch goes to the
+  report's `unresolved:` line, not into the finding list above.
+- **Every Critical is a `fix`.** The classification freedom above applies to
+  Major and Minor findings only. *Rejected: risk-accepting a Critical* — the
+  Background bars a manual whose Critical indicators are known to be wrong
+  from the after-run, so a risk-accepted Critical would defeat the ticket.
+- **An unexplained baseline delta is recorded, not re-reviewed.** When the
+  new baseline differs from the superseded one on an indicator that no
+  finding explains, the worker records the delta and its most plausible
+  cause in the Result and proceeds (the epic's Decision 5 default: the
+  worker decides, records, and continues). *Rejected: a fourth review round*
+  — the lead stopped the third by directive; *rejected: silent acceptance* —
+  the after-run compares against these figures.
 
 ## Constraints
 
@@ -115,20 +134,45 @@ Major:
   closed that phase and none counts as corrective, which is the window's
   strongest evidence for the Edition's own thesis and is left unstated.
 
-Minor (fourteen, reported as one line): indicator 5's "order the bullets were
-written in" is backwards; an `@@` diff-hunk line inside a bullet truncates
-it; indicator 4's awk terminator misses `# ` and `{2,3}` intervals are absent
-from older mawk; the read-only Rule does not cover mktemp/git archive/tar and
-the temp tree is never cleaned; indicator 2's unavailable condition is
-unsurfaced and a zero-commit stem prints a bare unlabelled row; `epoch()`'s
-BSD fallback can silently return a constant; indicator 5 folds indented
-sub-bullets and states no "what a movement does not license"; indicator 5's
-unavailable message can state the wrong reason; `git branch --list` sees
-local refs only; `printf '%s\n' $STEMS | wc -l` reports 1 for an empty
-window, disagreeing with `window | wc -l`; `comm -13` needs lexical sort
-while window emits date order; plus three Edition description errors
-(`cd878e98`'s commit shape, `0221f6fe`'s heading and effect, the n/a row's
-cause) whose classifications remain correct.
+Minor (fourteen, reported by the worker as one line; itemized here so each
+carries its own classification):
+
+- indicator 5's "order the bullets were written in" is backwards.
+- an `@@` diff-hunk line inside a bullet truncates it.
+- indicator 4's awk terminator misses `# `.
+- `{2,3}` intervals are absent from older mawk.
+- the read-only Rule does not cover mktemp/git archive/tar and the temp tree
+  is never cleaned.
+- indicator 2's unavailable condition is unsurfaced and a zero-commit stem
+  prints a bare unlabelled row.
+- `epoch()`'s BSD fallback can silently return a constant.
+- indicator 5 folds indented sub-bullets and states no "what a movement does
+  not license".
+- indicator 5's unavailable message can state the wrong reason.
+- `git branch --list` sees local refs only.
+- `printf '%s\n' $STEMS | wc -l` reports 1 for an empty window, disagreeing
+  with `window | wc -l`.
+- `comm -13` needs lexical sort while window emits date order.
+- three Edition description errors (`cd878e98`'s commit shape, `0221f6fe`'s
+  heading and effect, the n/a row's cause) whose classifications remain
+  correct. (Edition is frozen; restate the corrections in this ticket's
+  Result.)
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | ai-docs/manuals/workflow-cost-measurement.md (the fix target); this ticket file (Result recording the re-run baseline) |
+| scope.surface | internal | no exported code symbol; the file is markdown prose plus embedded sh/awk blocks, not compiled/imported code |
+| scope.new_public_symbol | no | none |
+| scope.new_type_contract | no | none |
+| scope.test_surface | existing | agents-plugin-tool/internal/wsdoc/manuals_test.go covers manuals-inventory listing only (generic summary: frontmatter check); no test asserts this manual's indicator output, so verification is the phase's own three-shell verbatim run |
+| complexity.reuse_points | not-applicable | self-contained edit to one existing manual's prose and shell blocks; no separate component is reused |
+| complexity.side_effect_risk | low | read-only git-history procedure with no runtime code path; Constraints bar any shipped-surface (agents-plugin*/) edit |
+| risk.correctness | moderate | six indicators' shell/awk selection logic (BRANCH pinning, first_impl scope match, indicator 6's four counters) are being corrected together and must stay byte-identical across sh/bash/dash |
+| risk.fit | low | follows the prerequisite ticket's already-established manual structure, Rules, and Decisions rather than introducing a new shape |
+| risk.test | moderate | no automated test covers indicator correctness; the only verification is a manual three-shell re-run plus the hand-read judgments the manual itself mandates (indicators 3, 4, 5) |
+| risk.security_or_contract | low | no public API, security boundary, or code contract touched; the manual only reads git history and the ticket tree |
 
 ## Phases
 
@@ -143,11 +187,25 @@ in the Result as the epic's before-run baseline, superseding Edition
 
 Order the Criticals first: the `$BRANCH` / `git archive` pair (one fix: pin
 both forms to the measured commit), then indicator 1's first-parent chain,
-then indicator 6's four lines, then the Window's unavailable condition and
+then indicator 6's four lines (the three Criticals above plus the Major
+unreachable-unavailable-condition finding, which lives in the same block and
+lands in the same step), then the Window's unavailable condition and
 execution floor. The Majors that describe prose contradicted by the
 commands are fixed by changing whichever side is wrong, stated in the
 Result. The Edition-description findings cannot be fixed in place (the
 Edition is frozen); the Result restates the corrected claims.
+
+Two Criticals name the defect but not the target: indicator 6's goal-merges
+line (what it should count) and the Window's execution floor (its value,
+reconciled with the existing "fewer than 20 records all of them and says
+so" sentence). The manual's own Rules constrain the shape — no score, pairs
+rather than percentages, unavailable never substituted — so the worker
+chooses within them and the Result states the shape chosen, since both
+halves of the comparison are then locked to it. Indicator 6's two
+`git branch --list` lines read the live local ref set, not the measured
+commit, so a re-run "at the measured commit" cannot pin them as written:
+make them derivable from the measured commit or emit them as unavailable,
+and state which in the Result.
 
 Verification: the three-shell verbatim run; a leak grep on the manual; a
 diff of the new baseline against the superseded one, each changed indicator
