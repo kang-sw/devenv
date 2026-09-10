@@ -1108,6 +1108,57 @@ describe("ConversationViewComponent — density / vertical rhythm (260909 polish
   });
 });
 
+describe("ConversationViewComponent — bounded transcript scrolling", () => {
+  const bindings = {
+    matches(data: string, id: string): boolean {
+      return ({ "tui.altScreen.pageUp": "pgup", "tui.altScreen.pageDown": "pgdown", "tui.altScreen.top": "home", "tui.altScreen.bottom": "end" } as Record<string, string>)[id] === data;
+    },
+  };
+  const items = Array.from({ length: 12 }, (_, index) => ({ kind: "note" as const, text: `line-${index}` }));
+
+  test("opens at the tail, retains manual scroll on append and mode promotion, and resumes follow at end", () => {
+    const { channel } = fakeChannel();
+    const editor = new FakeEditor();
+    const view = new ConversationViewComponent(fakeTui(), { channel, initialItems: items, viewportHeight: () => 6, keybindings: bindings, primitives: { Editor: class { constructor() { return editor as never; } } as never } });
+    assert.ok(view.render(80).some((line) => line.includes("line-11")), "initial render follows the tail");
+    view.handleInput("pgup");
+    const backedUp = view.getScrollTop();
+    view.appendItem({ kind: "note", text: "late" });
+    view.render(80);
+    assert.equal(view.getScrollTop(), backedUp, "manual scroll does not jump on append");
+    view.handleInput("end");
+    view.render(80);
+    assert.equal(view.isFollowingTail(), true);
+    assert.ok(view.render(80).some((line) => line.includes("late")));
+    view.handleInput("pgup");
+    const promotedFrom = view.getScrollTop();
+    view.setMode("interactive");
+    view.render(80);
+    assert.equal(view.getScrollTop(), promotedFrom, "mode promotion retains manual scroll position");
+  });
+
+  test("view mode supports line/page/start/end plus wheel while interactive mode leaves editor arrows/home/end alone", () => {
+    const { channel } = fakeChannel();
+    const editor = new FakeEditor();
+    const view = new ConversationViewComponent(fakeTui(), { channel, initialItems: items, viewportHeight: () => 6, keybindings: bindings, primitives: { Editor: class { constructor() { return editor as never; } } as never } });
+    view.render(80);
+    view.handleInput("home");
+    assert.equal(view.getScrollTop(), 0);
+    view.handleInput("\x1b[B");
+    assert.equal(view.getScrollTop(), 1);
+    view.handleInput("\x1b[<65;1;1M");
+    assert.equal(view.getScrollTop(), 2);
+    assert.deepEqual(view.handleMouse({ type: "wheel", deltaY: -1 }), { handled: true, render: true });
+    assert.equal(view.getScrollTop(), 1);
+    view.setMode("interactive");
+    view.handleInput("\x1b[A");
+    view.handleInput("home");
+    assert.deepEqual(editor.received, ["\x1b[A", "home"], "interactive editor keeps normal navigation keys");
+    view.handleInput("pgdown");
+    assert.ok(view.getScrollTop() > 1, "interactive PageDown scrolls the transcript");
+  });
+});
+
 describe("ConversationViewComponent — working marker location (F2)", () => {
   test("'working…' renders at the END of the agent dialogue (the streaming slot at the foot), never in the header", () => {
     const { channel } = fakeChannel("running");

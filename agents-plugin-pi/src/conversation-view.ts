@@ -221,6 +221,24 @@ export interface ConversationChannel {
 /** Minimal `pi-tui` `TUI` surface this component needs directly. The real `TUI` (needed by the real `Editor`) is a structural superset — see the `primitives` doc below. */
 export interface ConversationViewTui {
   requestRender(): void;
+  /** The live host TUI exposes terminal rows; test fakes may omit it. */
+  terminal?: { rows?: number };
+}
+
+/** The shared overlays use `maxHeight: "80%"`; derive that live cap from the host terminal on every render. */
+export function conversationOverlayHeight(tui: ConversationViewTui): number {
+  const rows = tui.terminal?.rows;
+  return typeof rows === "number" && rows > 0 ? Math.max(1, Math.floor(rows * 0.8)) : Number.POSITIVE_INFINITY;
+}
+
+interface ScrollViewLike extends Component {
+  readonly scrollTop: number;
+  readonly isFollowingEnd: boolean;
+  readonly viewportHeight: number;
+  updateLayout(contentHeight: number, viewportHeight: number, requestRender: () => void): void;
+  scrollBy(lines: number): number;
+  scrollToStart(): void;
+  scrollToEnd(): void;
 }
 
 /** The `pi-tui` primitive surface `Editor` needs beyond `Component` — `handleInput` narrowed from `Component`'s optional to required, since this component always forwards keys to it while interactive. */
@@ -237,7 +255,7 @@ export interface EditorLike extends Component {
  * static classes.
  */
 export interface ConversationViewPrimitives {
-  ScrollView: new (component: Component) => Component;
+  ScrollView: new (component: Component, options?: { follow?: "none" | "end"; overscroll?: "chain" | "contain" }) => ScrollViewLike;
   Markdown: new (text: string, paddingX: number, paddingY: number, theme: MarkdownTheme) => Component;
   Text: new (text?: string, paddingX?: number, paddingY?: number, customBgFn?: (text: string) => string) => Component;
   Editor: new (tui: unknown, theme: EditorTheme) => EditorLike;
@@ -311,6 +329,10 @@ export interface ConversationViewOptions {
   workingTextFg?: (text: string) => string;
   /** Fired with a full copy of the transcript after every append — never for the streaming tail. Lets a host persist the transcript as it grows. */
   onItemsChange?: (items: readonly ConversationItem[]) => void;
+  /** Live overlay height, supplied by each consumer from host TUI geometry. Unset keeps non-overlay/unit consumers unbounded. */
+  viewportHeight?: () => number;
+  /** Host keybinding matcher injected by the custom-overlay factory. */
+  keybindings?: { matches(data: string, id: string): boolean };
   /**
    * 260909 V1/V2: draw a single-line box border (with a one-column horizontal
    * margin) around the whole view so it separates from the lead's background.
@@ -400,7 +422,7 @@ export class ConversationViewComponent implements Component {
   private readonly options: ConversationViewOptions;
   private readonly primitives: ConversationViewPrimitives;
   private readonly unsubscribe: () => void;
-  private readonly scrollView: Component;
+  private readonly scrollView: ScrollViewLike;
 
   private mode: ConversationViewMode = "view";
   private items: ConversationItem[] = [];
@@ -414,7 +436,7 @@ export class ConversationViewComponent implements Component {
     this.options = options;
     this.primitives = { ...DEFAULT_PRIMITIVES, ...options.primitives };
     this.items = options.initialItems ? [...options.initialItems] : [];
-    this.scrollView = new this.primitives.ScrollView(new ClosureComponent((width) => this.renderItems(width)));
+    this.scrollView = new this.primitives.ScrollView(new ClosureComponent((width) => this.renderItems(width)), { follow: "end", overscroll: "contain" });
     this.unsubscribe = options.channel.onEvent((evt) => this.handleEvent(evt));
   }
 
@@ -434,6 +456,14 @@ export class ConversationViewComponent implements Component {
 
   getFocusedIndex(): number | undefined {
     return this.focusIndex;
+  }
+
+  getScrollTop(): number {
+    return this.scrollView.scrollTop;
+  }
+
+  isFollowingTail(): boolean {
+    return this.scrollView.isFollowingEnd;
   }
 
   /** Appends one item to the transcript and requests a repaint. */
@@ -518,6 +548,7 @@ export class ConversationViewComponent implements Component {
       this.toggleExpandAll();
       return;
     }
+    if (this.handleTranscriptNavigation(data)) return;
     if (this.mode === "interactive" && this.editor) {
       const editor = this.editor;
       // Ticket key-precedence table for "interactive" mode: Tab/Shift+Tab
@@ -625,8 +656,6 @@ export class ConversationViewComponent implements Component {
 
   render(width: number): string[] {
     const w = Math.max(1, width);
-    // V1/V2: with the border on, inner content is rendered narrower and then
-    // wrapped, so the finished lines stay exactly `w` wide.
     const border = this.options.border === true;
     const innerW = border ? Math.max(1, w - BORDER_OVERHEAD) : w;
     const inner = this.renderInner(innerW).map((line) => (visibleWidth(line) > innerW ? truncateToWidth(line, innerW) : line));
@@ -635,31 +664,51 @@ export class ConversationViewComponent implements Component {
 
   private renderInner(w: number): string[] {
     const liveness = this.options.channel.liveness();
-    const lines: string[] = [];
-    // Header block: the hint (title / opened / key hint), and the loud idle
-    // banner when awaiting the owner. "idle-awaiting-owner" must be visibly
-    // louder than the other two states — render its banner at BOTH the header
-    // and the transcript foot. The "working…" activity marker is NOT a header
-    // banner; it lives in the streaming slot at the foot (see `renderItems`).
-    lines.push(...this.textLines(this.hintText(), w));
-    const idleBanner = liveness === "idle-awaiting-owner" ? AWAITING_OWNER_BANNER : undefined;
-    if (idleBanner) lines.push(...this.textLines(idleBanner, w));
-    // One blank line separates the header block from the conversation body
-    // (density polish: a blank line, not a full-width rule).
-    const body = this.scrollView.render(w);
-    if (body.length > 0) {
-      lines.push("");
-      lines.push(...body);
-    }
-    if (idleBanner) {
-      lines.push("");
-      lines.push(...this.textLines(idleBanner, w));
-    }
-    if (this.mode === "interactive" && this.editor) {
-      lines.push("");
-      lines.push(...this.editor.render(w));
-    }
+    const idleBanner = liveness === "idle-awaiting-owner" ? this.textLines(AWAITING_OWNER_BANNER, w) : [];
+    const header = [...this.textLines(this.hintText(), w), ...idleBanner];
+    const body = this.renderItems(w);
+    const editor = this.mode === "interactive" && this.editor ? this.editor.render(w) : [];
+    // The scroll slice owns only the transcript. Header, idle footer, editor,
+    // and border breathing rows remain fixed chrome outside the viewport.
+    const fixedRows = header.length + idleBanner.length + (body.length > 0 ? 1 : 0) + (idleBanner.length > 0 ? 1 : 0) + (editor.length > 0 ? editor.length + 1 : 0);
+    const frameRows = this.options.border === true ? 4 : 0;
+    const cap = this.options.viewportHeight?.() ?? Number.POSITIVE_INFINITY;
+    const viewport = Number.isFinite(cap) ? Math.max(1, Math.floor(cap) - frameRows - fixedRows) : body.length;
+    this.scrollView.updateLayout(body.length, viewport, () => this.tui.requestRender());
+    const transcript = body.slice(this.scrollView.scrollTop, this.scrollView.scrollTop + viewport);
+    const lines = [...header];
+    if (transcript.length > 0) lines.push("", ...transcript);
+    if (idleBanner.length > 0) lines.push("", ...idleBanner);
+    if (editor.length > 0) lines.push("", ...editor);
     return lines;
+  }
+
+  private handleTranscriptNavigation(data: string): boolean {
+    const matches = (id: string) => this.options.keybindings?.matches(data, id) === true;
+    const page = Math.max(1, this.scrollView.viewportHeight - 4);
+    const wheel = /^\x1b\[<(64|65);\d+;\d+[Mm]$/.exec(data);
+    if (wheel) {
+      this.scrollView.scrollBy(wheel[1] === "64" ? -1 : 1);
+      return true;
+    }
+    if (matches("tui.altScreen.pageUp")) { this.scrollView.scrollBy(-page); return true; }
+    if (matches("tui.altScreen.pageDown")) { this.scrollView.scrollBy(page); return true; }
+    if (this.mode === "interactive") return false;
+    if (matches("tui.altScreen.halfPageUp")) { this.scrollView.scrollBy(-Math.max(1, Math.floor(page / 2))); return true; }
+    if (matches("tui.altScreen.halfPageDown")) { this.scrollView.scrollBy(Math.max(1, Math.floor(page / 2))); return true; }
+    if (matches("tui.altScreen.lineUp") || data === "\x1b[A") { this.scrollView.scrollBy(-1); return true; }
+    if (matches("tui.altScreen.lineDown") || data === "\x1b[B") { this.scrollView.scrollBy(1); return true; }
+    if (matches("tui.altScreen.top") || data === "\x1b[H") { this.scrollView.scrollToStart(); return true; }
+    if (matches("tui.altScreen.bottom") || data === "\x1b[F") { this.scrollView.scrollToEnd(); return true; }
+    return false;
+  }
+
+  handleMouse(event: { type?: string; deltaY?: number; direction?: number }): { handled: boolean; render: boolean } | undefined {
+    if (event.type !== "wheel") return undefined;
+    const delta = event.deltaY ?? event.direction ?? 0;
+    if (!delta) return undefined;
+    this.scrollView.scrollBy(delta < 0 ? -1 : 1);
+    return { handled: true, render: true };
   }
 
   private hintText(): string {

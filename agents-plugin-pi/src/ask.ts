@@ -84,6 +84,7 @@ import { computeForkToolSurface, getForkSourceSessionFile } from "./fork.ts";
 import { readSpawnRole, type SpawnRole } from "./process-role.ts";
 import {
   ConversationViewComponent,
+  conversationOverlayHeight,
   DONE_COMMAND,
   type ChildLiveness,
   type ConversationChannel,
@@ -1671,7 +1672,7 @@ async function openThread(
 
   try {
     await (ctx as unknown as AskCustomUiCtx).ui.custom<undefined>(
-      async (tui, theme, _keybindings, done) => {
+      async (tui, theme, keybindings, done) => {
         const hostPiTui = await loadHostPiTui();
         let overlayHandle: OverlayHandle | undefined;
         // Review relay #2 I1a: the one `summarizeThenClose` listener that may
@@ -1689,6 +1690,8 @@ async function openThread(
           // 260909 V1/V2: the overlay draws its own border + horizontal margin
           // so it separates from the lead's background behind it.
           border: true,
+          viewportHeight: () => conversationOverlayHeight(tui),
+          keybindings: keybindings as { matches(data: string, id: string): boolean },
           userLineBg: (text) => theme?.bg?.("userMessageBg", text) ?? text,
           toolTextFg: (text) => theme?.fg?.("muted", text) ?? text,
           workingTextFg: (text) => theme?.fg?.("dim", text) ?? text,

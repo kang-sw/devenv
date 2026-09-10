@@ -38,6 +38,7 @@ import { classifyRegistryRowState, rowName, type AgentRowState } from "./agent-w
 import { resolveChildLiveness } from "./ask.ts";
 import {
   ConversationViewComponent,
+  conversationOverlayHeight,
   toolResultContentText,
   wrapInBorder,
   type ConversationChannel,
@@ -444,7 +445,7 @@ export async function openViewer(ctx: AuditUiCtx & { ui?: { custom?: unknown } }
   }
 
   try {
-    await (ctx as unknown as AuditCustomUiCtx).ui.custom<undefined>(async (tui, theme, _keybindings, done) => {
+    await (ctx as unknown as AuditCustomUiCtx).ui.custom<undefined>(async (tui, theme, keybindings, done) => {
       const hostPiTui = await loadHostPiTui();
       const component: ConversationViewComponent = new ConversationViewComponent(tui, {
         channel,
@@ -455,6 +456,8 @@ export async function openViewer(ctx: AuditUiCtx & { ui?: { custom?: unknown } }
         toolTextFg: (text) => theme?.fg?.("muted", text) ?? text,
         workingTextFg: (text) => theme?.fg?.("dim", text) ?? text,
         border: true,
+        viewportHeight: () => conversationOverlayHeight(tui),
+        keybindings: keybindings as { matches(data: string, id: string): boolean },
         primitives: { ScrollView: hostPiTui.ScrollView, Markdown: hostPiTui.Markdown, Text: hostPiTui.Text, Editor: hostPiTui.Editor },
         // No modal — Phase 1's "Esc closes the viewer directly" (contrast
         // `ask.ts`'s `openThread`, which routes Esc through `overlayHandle`
