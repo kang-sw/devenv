@@ -14,8 +14,8 @@
  * `pi.registerMessageRenderer(family, ...)` draws the head once, the payload
  * body underneath it (capped at ten logical lines, full recovery on
  * expansion), and the status line — all three muted/gray, on a shared
- * theme-aware `customMessageBg` background (260906 Phase 1). Agent reports
- * render an alias-first human head and vertical breathing room while their
+ * theme-aware `customMessageBg` background (260906 Phase 1). Every family
+ * renders an alias-first human head and vertical breathing room while its
  * model-facing content retains the full provenance head.
  *
  * `@earendil-works/pi-tui` is reached through `./pi-tui.ts`'s
@@ -120,18 +120,40 @@ export interface PushRenderTheme {
   bold?(text: string): string;
 }
 
-/** Human-facing report head: prefer alias, otherwise a compact id; model-facing content stays unchanged. */
-function humanReportHead(head: string, details: unknown): string {
-  const prefix = "[ws-agent-report] agent ";
-  if (!head.startsWith(prefix)) return head;
-  let label = head.slice(prefix.length);
+const PUSH_FAMILY_SUFFIXES: Record<string, string> = {
+  "ws-agent-report": "report",
+  "ws-agent-settled": "settled",
+  "ws-agent-question": "question",
+  "ws-agent-approval": "approval",
+  "ws-agent-advisory": "advisory",
+  "ws-agent-orphaned": "orphaned",
+};
+
+const UUID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+const ALIAS_WITH_UUID_PATTERN = /^(.*?) \(([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\)$/i;
+
+/** Human-facing identity: retain an alias, otherwise use an eight-character UUID disambiguator. */
+function humanAgentIdentity(label: string | undefined, details: unknown): string | undefined {
+  let identity = label?.trim();
   const agentId = (details as { agent_id?: unknown } | undefined)?.agent_id;
   if (typeof agentId === "string" && agentId.length > 0) {
-    const suffix = ` (${agentId})`;
-    if (label.endsWith(suffix)) label = label.slice(0, -suffix.length);
-    else if (label === agentId) label = agentId.slice(0, 8);
+    const provenanceSuffix = ` (${agentId})`;
+    if (identity?.endsWith(provenanceSuffix)) identity = identity.slice(0, -provenanceSuffix.length);
+    else if (identity === agentId) identity = agentId.slice(0, 8);
   }
-  return `${label} · report`;
+  const aliasWithUuid = identity?.match(ALIAS_WITH_UUID_PATTERN);
+  if (aliasWithUuid?.[1]) return aliasWithUuid[1];
+  if (identity && UUID_PATTERN.test(identity)) return identity.slice(0, 8);
+  return identity || undefined;
+}
+
+/** Human-facing push head; content and details retain the full model-facing provenance. */
+function humanPushHead(head: string, details: unknown, registeredFamily: string | undefined): string {
+  const match = /^\[(ws-agent-[^\]]+)\](?: agent (.*))?$/.exec(head);
+  const family = registeredFamily && PUSH_FAMILY_SUFFIXES[registeredFamily] ? registeredFamily : match?.[1];
+  const suffix = family ? PUSH_FAMILY_SUFFIXES[family] : undefined;
+  if (!suffix) return head;
+  return `${humanAgentIdentity(match?.[2], details) ?? "Agents"} · ${suffix}`;
 }
 
 /**
@@ -143,9 +165,9 @@ export async function loadPushTuiModules(): Promise<PushTuiModules> {
 }
 
 /**
- * Assembles one message's component: a one-column-padded box (plus one row
- * above and below agent reports), painted with the shared theme-aware
- * `customMessageBg` background, holding the head line
+ * Assembles one message's component: a one-column-padded box with one row
+ * above and below every card, painted with the shared theme-aware
+ * `customMessageBg` background, holding the alias-first head line
  * (using Pi's `customMessageLabel` only for the registered report family),
  * the payload body (capped at ten logical lines with full recovery on
  * expansion — the same shared bounded-preview seam `tool-result-render.ts`
@@ -185,8 +207,8 @@ export function buildPushComponent(
     }
   };
   const isAgentReport = family === "ws-agent-report";
-  const box = new tui.Box(1, isAgentReport ? 1 : 0, (text) => paintBg("customMessageBg", text));
-  const displayHead = isAgentReport ? humanReportHead(parts.head, message.details) : parts.head;
+  const box = new tui.Box(1, 1, (text) => paintBg("customMessageBg", text));
+  const displayHead = humanPushHead(parts.head, message.details, family);
   box.addChild(new tui.Text(paint(isAgentReport ? "customMessageLabel" : "muted", displayHead), 0, 0));
   if (parts.body.length > 0) {
     const body = createBoundedText(tui);

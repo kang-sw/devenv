@@ -246,22 +246,47 @@ describe("buildPushComponent", () => {
     );
   });
 
-  test("report heads prefer the alias and hide the machine UUID without changing model-facing content", () => {
+  test("every family uses alias-first heads, compact UUID fallbacks, and vertically padded cards without changing model-facing content", () => {
     const agentId = "0a0cdddb-12dc-459e-8089-11d9aa283b98";
-    const content = buildPushContent("ws-agent-report", `gutter-probe (${agentId})`, { report: "done" }, undefined);
-    const tui = fakeTui();
-    const component = buildPushComponent(tui.modules, { content, details: { agent_id: agentId } }, undefined, false, "ws-agent-report") as FakeComponent;
-    assert.equal(component.render(80)[0], "gutter-probe · report");
-    assert.match(content, new RegExp(agentId), "the model-facing provenance remains intact");
+    const suffixes: Record<string, string> = {
+      "ws-agent-report": "report",
+      "ws-agent-settled": "settled",
+      "ws-agent-question": "question",
+      "ws-agent-approval": "approval",
+      "ws-agent-advisory": "advisory",
+      "ws-agent-orphaned": "orphaned",
+    };
 
-    const fallback = buildPushComponent(
-      fakeTui().modules,
-      { content: buildPushContent("ws-agent-report", agentId, { report: "done" }, undefined), details: { agent_id: agentId } },
-      undefined,
-      false,
-      "ws-agent-report",
-    ) as FakeComponent;
-    assert.equal(fallback.render(80)[0], "0a0cdddb · report", "an unaliased report keeps a compact disambiguator");
+    for (const family of PUSH_FAMILIES) {
+      const aliasContent = buildPushContent(family, `gutter-probe (${agentId})`, { note: "done" }, undefined);
+      const aliasTui = fakeTui();
+      const aliasComponent = buildPushComponent(aliasTui.modules, { content: aliasContent, details: { agent_id: agentId } }, undefined, false, family) as FakeComponent;
+      assert.equal(aliasComponent.render(80)[0], `gutter-probe · ${suffixes[family]}`, `${family} hides UUID behind its alias`);
+      assert.deepEqual(aliasTui.boxes[0].padding, [1, 1], `${family} gets vertical breathing room`);
+      assert.match(aliasContent, new RegExp(agentId), `${family} keeps model-facing UUID provenance`);
+
+      const bareComponent = buildPushComponent(
+        fakeTui().modules,
+        { content: buildPushContent(family, agentId, { note: "done" }, undefined), details: { agent_id: agentId } },
+        undefined,
+        false,
+        family,
+      ) as FakeComponent;
+      assert.equal(bareComponent.render(80)[0], `0a0cdddb · ${suffixes[family]}`, `${family} abbreviates a bare UUID`);
+    }
+  });
+
+  test("aggregate and no-agent pushes use a concise unambiguous head", () => {
+    for (const family of PUSH_FAMILIES) {
+      const component = buildPushComponent(
+        fakeTui().modules,
+        { content: buildPushContent(family, undefined, { count: 2 }, undefined) },
+        undefined,
+        false,
+        family,
+      ) as FakeComponent;
+      assert.equal(component.render(80)[0], `Agents · ${family.slice("ws-agent-".length)}`);
+    }
   });
 
   test("no theme (and a throwing theme) degrade to unpainted text rather than to no component", () => {
@@ -290,7 +315,7 @@ describe("buildPushComponent", () => {
       { content: buildPushContent("ws-agent-orphaned", undefined, { count: 2 }, undefined) },
       undefined,
     ) as FakeComponent;
-    assert.deepEqual(component.render(80), ["[ws-agent-orphaned]", "count: 2"]);
+    assert.deepEqual(component.render(80), ["Agents · orphaned", "count: 2"]);
   });
 
   test("an unrecognizable message returns undefined so Pi's default rendering stands", () => {
@@ -358,7 +383,7 @@ describe("buildPushComponent", () => {
   test("260906 Phase 1: a head-only message with no body draws no empty body row", () => {
     const tui = fakeTui();
     const component = buildPushComponent(tui.modules, { content: "[ws-agent-orphaned]" }, undefined) as FakeComponent;
-    assert.deepEqual(component.render(80), ["[ws-agent-orphaned]"]);
+    assert.deepEqual(component.render(80), ["Agents · orphaned"]);
   });
 });
 
@@ -381,7 +406,7 @@ describe("registerPushMessageRenderers", () => {
       undefined,
     ) as FakeComponent;
     assert.ok(rendered);
-    assert.deepEqual(rendered.render(80), ["[ws-agent-settled] agent a1", "reason: idle"]);
+    assert.deepEqual(rendered.render(80), ["a1 · settled", "reason: idle"]);
   });
 
   test("260906 Phase 1: the shared customMessageBg background reaches every push family", async () => {
@@ -426,7 +451,7 @@ describe("registerPushMessageRenderers", () => {
       ) as FakeComponent;
       component.render(80);
       const headColor = family === "ws-agent-report" ? "customMessageLabel" : "muted";
-      const headText = family === "ws-agent-report" ? "a1 · report" : `[${family}]`;
+      const headText = `a1 · ${family.slice("ws-agent-".length)}`;
       assert.ok(theme.fgCalls.some((call) => call.color === headColor && call.text.includes(headText)), `${family} head uses ${headColor}`);
       assert.ok(theme.fgCalls.some((call) => call.color === "muted" && call.text.includes("note: body")), `${family} body stays muted`);
       if (status) assert.ok(theme.fgCalls.some((call) => call.color === "dim" && call.text === status), "report status stays dim");
