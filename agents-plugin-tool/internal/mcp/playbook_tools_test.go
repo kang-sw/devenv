@@ -2326,7 +2326,8 @@ func TestPlaybookPrintGoldenLeadDiscuss(t *testing.T) {
 		t.Fatalf("printPlaybook: %v", err)
 	}
 	for _, want := range []string{
-		"you edit no source and write no document here",
+		"Edit no source and write\nno document here",
+		"ws:lead-delegate",
 		"ws:lead-ticket",
 		"ws:lead-run",
 		"### Binding Anchor",
