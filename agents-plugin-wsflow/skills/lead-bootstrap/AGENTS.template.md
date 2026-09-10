@@ -35,28 +35,32 @@ Read at every session start, before other action:
 ### Implementation Conventions
 
 <!-- Optional. Rules that are longer than one line or apply to some paths
-     only live in `ai-docs/manuals/` and are declared here. A worker reads
-     the manual of every row whose `paths` match a file the ticket names or
-     the change touches, before editing those paths; review treats a change
-     that contradicts a cited manual as a finding. Delete this section when
-     the project has no such rules; an absent section means nothing is read. -->
+     only live in `ai-docs/manuals/` and are declared here, as a table with
+     `paths` and `manual` columns and one row per manual:
 
-| paths | manual |
-|-------|--------|
-| `[glob, comma-separated]` | `ai-docs/manuals/[name].md` |
+       | paths | manual |
+       |-------|--------|
+       | `src/api/**, tests/api/**` | `ai-docs/manuals/api-conventions.md` |
+
+     A worker reads the manual of every row whose `paths` match a file the
+     ticket names or the change touches, before editing those paths; review
+     treats a change that contradicts a cited manual as a finding. Leave the
+     section empty until the project has such a rule; an empty or absent
+     section means nothing is read, so delete it when the project has none. -->
 
 ### Binding Anchor
 
 <!-- Optional. Names one ticket a lead must read before answering or editing
-     when the task touches one of the topics. Both keys are required; a
-     section with one key, no section, or a section still holding the
-     placeholder values below declares no anchor. Delete this section, code
-     fence included, when the project declares none. -->
+     when the task touches one of the topics. When the project declares one,
+     add a `text` code fence here holding both keys, each at the start of its
+     own line:
 
-```text
-anchor: ai-docs/tickets/<status>/<stem>.md
-topics: [comma-separated topics]
-```
+       anchor: ai-docs/tickets/<status>/<stem>.md
+       topics: [comma-separated topics]
+
+     Both keys are required; an empty section, a section carrying only one
+     key, or no section at all declares no anchor. Leave the section empty
+     until the project declares one, and delete it when it declares none. -->
 
 ### Commit Rules
 
@@ -258,19 +262,26 @@ Adapt structure to the project; this is a starting point, not a schema.
   Delete nothing. Remove the `## Spec` block and the `renamed-spec:` sentence
   from `### Commit Rules`; rewrite `## Project Memory` step 1 so it names the
   ticket status directories instead of a spec inventory, and add the
-  binding-anchor read step; add the optional `### Implementation Conventions`
-  and `### Binding Anchor` sections under `## Workflow` when absent; replace
-  any `## Project Orientation`, `## Project Knowledge`, or
-  `## Architecture Rules` wording that routes detail to specs or mental models
-  with `ai-docs/manuals/`; remove `spec/`, `mental-model/`, and
+  binding-anchor read step when absent; add the optional
+  `### Implementation Conventions` and `### Binding Anchor` sections under
+  `## Workflow` when absent, in the shape this template carries above and
+  with no value filled in; replace any `## Project Orientation`,
+  `## Project Knowledge`, or `## Architecture Rules` wording that routes
+  detail to specs or mental models with `ai-docs/manuals/`; relocate any
+  `## Architecture Rules` entry that runs longer than one line or applies to
+  some paths only into `ai-docs/manuals/<name>.md` and declare it under
+  `### Implementation Conventions`; remove `spec/`, `mental-model/`, and
   `mental-model.md` from this template's scaffold layout above so fresh
   projects never create them; rewrite the Inclusion test comment to the
-  current wording. In `ai-docs/WORKFLOW.md`, drop the sections teaching the
-  retired layers along with their layout bullets and the spec-entry bullet
-  under commit traceability, and merge in the bootstrap workflow guide
-  source's `## Behavioral Contract` and `## Execution Model` sections. Promotion to
-  `ready/` is gated by the ticket's own design review, not by spec
-  addressing; read any earlier item's spec-address qualifier that way. This
+  wording this template carries above. Then bring `ai-docs/WORKFLOW.md` to
+  what a fresh bootstrap would write: for every section the bootstrap
+  workflow guide source still carries, replace the project's copy with the
+  source's current text and re-apply the project's own additions on top;
+  drop every section the source no longer carries, along with the layout
+  bullets and the commit-traceability bullet naming the retired layers.
+  Promotion to `ready/` is gated by the ticket's own design review, not by
+  spec addressing; read any earlier item's spec-address qualifier that way.
+  This
   is a one-time migration judgment call, not an automated reconciliation; do
   not build staleness-detection tooling for it.
 -->

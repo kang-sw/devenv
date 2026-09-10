@@ -70,12 +70,13 @@ constraints - is a human decision that code cannot reconstruct, so it is
 written down: one-line universal rules inline in `AGENTS.md`; longer or
 path-scoped rules as one manual each under `ai-docs/manuals/`, declared in
 `AGENTS.md` under `## Workflow` -> `### Implementation Conventions` (add that
-section when it is absent) with the paths they cover. A rule a test can check becomes a test; a trap tied to one
-site becomes a code comment at that site; a fact about an external system
-goes in `ai-docs/ref/`. Descriptive knowledge - what the code does and why -
-is reconstructed from the code, the tests, and commit `## AI Context` bodies
-when needed, and is not maintained as a document. Manuals carry no
-per-commit update obligation; drift is fixed on contact and by review.
+section when it is absent) with the paths they cover. A rule a test can check
+becomes a test; a trap tied to one site becomes a code comment at that site; a
+fact about an external system goes in `ai-docs/ref/`. Descriptive knowledge -
+what the code does and why - is reconstructed from the code, the tests, and
+commit `## AI Context` bodies when needed, and is not maintained as a
+document. Manuals carry no per-commit update obligation; drift is fixed on
+contact and by review.
 
 ## Execution Model
 
