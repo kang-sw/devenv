@@ -29,10 +29,7 @@ Write MCP calls as `{{.McpNamespace}}/tool.name(arg: value)`.
 Show optional arguments only when the skill needs a non-default value.
 Omit `root` when the current repository root is intended.
 Use `prompt: <block below>` or `question: <block below>` for large text payloads.
-Write prompts sent to native Explore-style subagents in English.
-<!-- ws:full-only:start -->
-Write prompts sent to `mercenary.call` in English.
-<!-- ws:full-only:end -->
+Write prompts sent to delegated subagents in English.
 
 When writing shared skill text, name only primitives that exist in the {{.McpNamespace}} runtime.
 If a workflow needs a surface that is still planned, state the required MCP
@@ -97,29 +94,14 @@ English prompt and require cited evidence, gaps, and follow-up needs. For
 parallel dispatch, spawn multiple in one turn; collect all before
 synthesizing.
 
-<!-- ws:full-only:start -->
-### Persistent agents
+### Delegate prompts
 
-Register a stable task name with a self-contained system prompt. Registration
-takes `name`, optional `backend`, `system_prompt_text`, and `tier`; the removed
-`prompts`/`prompt_refs`/`model` fields are gone. Omit `system_prompt_text` for a
-general-purpose named agent; registration applies delegate orientation and the
-default tier mapping. Call the agent for each continuity turn.
-Bundled delegate prompts are not registered by stem — render them. Obtain a
-delegate's self-contained prompt with `{{.McpNamespace}}/playbook.render(name: "<delegate>")`
-(a lead key splices a child-key credential block). Hand the rendered prompt to a native
-subagent (default), or pass it as `system_prompt_text` with `tier:
-<recommended-tier>` to a mercenary `mercenary.register` + `mercenary.call`, then
-collect through `mercenary.result`. `reference-discovery` is such a delegate
-playbook, not a workflow skill.
-`mercenary.call` starts async and returns promptly. Use
-`wait(timeout_seconds: 600)` for readiness metadata, `result(timeout_seconds:
-600)` or a longer bound for final output, `status` before waiting,
-`tail(lines: 3)` for small diagnostics, `print` only as a compatibility output
-alias, `cancel` to stop active work, retry `call` on the same registered agent
-with a recovery prompt when cancellation followed a no-result timeout, and
-`erase` when task-scoped state should be removed.
-<!-- ws:full-only:end -->
+Bundled delegate prompts are rendered, not named by stem: obtain a delegate's
+self-contained prompt with `{{.McpNamespace}}/playbook.render(name: "<delegate>")`
+and hand the rendered text to a native subagent, spawned at the tier the render
+recommends. A lead key splices the delegate's own session credential into the
+rendered prompt, so the subagent starts already authenticated.
+`reference-discovery` is such a delegate playbook, not a workflow skill.
 
 ### Artifact paths
 
@@ -265,10 +247,9 @@ tickets are listed, never made children. Choose `epic` when the request is a
 parent-outcome breakdown; choose `workset` when it is a coordination/focus
 grouping with no decomposition ownership.
 
-<!-- ws:full-only:start -->
 ## Planned Or Specialized
 
 Check `{{.McpNamespace}}/runtime.read` before assuming richer interrupt or
-active-agent/message-queue behavior than the runtime exposes; basic async
-cancellation exists through `mercenary.cancel`, with retry via `mercenary.call`.
-<!-- ws:full-only:end -->
+active-agent/message-queue behavior than the runtime exposes. Interrupting a
+dispatched subagent, or retrying one, is the harness's affordance rather than a
+workflow tool.
