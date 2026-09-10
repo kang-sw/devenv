@@ -263,9 +263,9 @@ func buildPlaybookVars(declared []string, callerContext map[string]string, harne
 }
 
 // delegationTip returns the harness-aware continuity tip fragment appended to the
-// rendered body of delegates:true playbooks. Full ws output includes the
-// always-on mercenary tip; wsflow no-agent output omits it because the mercenary
-// surface is hidden there.
+// rendered body of delegates:true playbooks. The text is product-neutral: both
+// product modes delegate to host-native subagents, so the fragment differs only
+// by the harness continuation idiom.
 func delegationTip(harness string) string {
 	term := terminologyForHarness(harness)
 	continueIdiom := term["ContinueIdiom"]
@@ -277,22 +277,14 @@ func delegationTip(harness string) string {
 	sb.WriteString("` to send follow-up messages to the same agent rather than spawning a new one. ")
 	sb.WriteString("The playbook surface keeps no agent registry; ")
 	sb.WriteString("record the agent id in your workflow state if you need it across turns.")
-	if !NoAgentMode() {
-		// Unit 3: always-on mercenary tip — present in every full-ws delegates:true rendering.
-		sb.WriteString("\n\n**Mercenary path (always available):** A ws-managed external subprocess agent")
-		sb.WriteString(" (mercenary) is always reachable on request via `ws.mercenary.call`, even without")
-		sb.WriteString(" enabling `workflow.prefer_mercenary`. Pass the session_key received with this prompt and")
-		sb.WriteString(" a self-contained prompt from `ws/playbook.render`; the returned handle is an")
-		sb.WriteString(" agent id you can resume with the same continuation idiom.")
-	}
 	return sb.String()
 }
 
 // withRecommendedTier appends a `recommended-tier: <first-class>` metadata line to
 // a playbook tool payload when the playbook declares a tier. Empty tier leaves the
 // payload unchanged. This is the render/print return channel the lead reads to
-// route a delegation's model selection — native uses it as a host model-selection
-// guide, mercenary passes it to ws.mercenary.register's pass-through tier arg.
+// route a delegation's model selection: the host uses it to pick the subagent's
+// model tier.
 func withRecommendedTier(payload, tier string) string {
 	if strings.TrimSpace(tier) == "" {
 		return payload
@@ -304,7 +296,7 @@ func withRecommendedTier(payload, tier string) string {
 // a playbook.render payload. The stable path and recommended-tier lines remain
 // first; model and reasoning effort are additive, optional metadata. Resolver
 // failures intentionally preserve the tier-only contract so callers can still
-// choose a native default or the mercenary tier fallback.
+// choose a host default from the tier alone.
 //
 // playbook.read deliberately continues to use withRecommendedTier only: its
 // tier-only return contract is host-neutral and unchanged by render bindings.
@@ -351,16 +343,6 @@ func childRoleForPlaybookRole(role string) (toolRole, bool) {
 	default:
 		return "", false
 	}
-}
-
-// mercenaryGuidanceBlock returns the prefer-mercenary guidance text fragment for
-// implementer/reviewer delegation playbooks when preferMercenary is true.
-// When preferMercenary is false, the always-on tip in delegationTip already
-// mentions the mercenary path as available on request.
-func mercenaryGuidanceBlock() string {
-	return "\n\n**Delegation mode (prefer_mercenary active):** Default guidance for this session is" +
-		" to use the mercenary path (`ws.mercenary.call`) rather than a host-native subagent." +
-		" The native subagent path remains available if you prefer it."
 }
 
 // overrideLookupFn is an injectable function for resolving override values for a
@@ -639,29 +621,25 @@ func applyOverrideMarkers(body, harness string, lookup overrideLookupFn) string 
 	return strings.Join(result, "\n")
 }
 
-func renderProductModePlaybookBody(body string, mercenaryEnabled bool) string {
-	return selectProductModeBlocks(body, mercenaryEnabled)
+func renderProductModePlaybookBody(body string) string {
+	return selectProductModeBlocks(body)
 }
 
 const (
-	fullOnlyStart      = "<!-- ws:full-only:start -->"
-	fullOnlyEnd        = "<!-- ws:full-only:end -->"
-	wsflowOnlyStart    = "<!-- ws:wsflow-only:start -->"
-	wsflowOnlyEnd      = "<!-- ws:wsflow-only:end -->"
-	mercenaryOnlyStart = "<!-- ws:mercenary-on:start -->"
-	mercenaryOnlyEnd   = "<!-- ws:mercenary-on:end -->"
+	fullOnlyStart   = "<!-- ws:full-only:start -->"
+	fullOnlyEnd     = "<!-- ws:full-only:end -->"
+	wsflowOnlyStart = "<!-- ws:wsflow-only:start -->"
+	wsflowOnlyEnd   = "<!-- ws:wsflow-only:end -->"
 )
 
 // selectProductModeBlocks removes marker comments and keeps only the sections
-// that apply to the current product mode and mercenary preference. The source
-// rsrc remains shared; the rendered playbook is the product-specific contract.
-// mercenaryEnabled=true preserves ws:mercenary-on blocks; false strips them.
-func selectProductModeBlocks(body string, mercenaryEnabled bool) string {
+// that apply to the current product mode. The source rsrc remains shared; the
+// rendered playbook is the product-specific contract.
+func selectProductModeBlocks(body string) string {
 	lines := strings.Split(body, "\n")
 	filtered := make([]string, 0, len(lines))
 	fullOnly := false
 	wsflowOnly := false
-	mercenaryOnly := false
 	noAgent := NoAgentMode()
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -678,14 +656,8 @@ func selectProductModeBlocks(body string, mercenaryEnabled bool) string {
 		case wsflowOnlyEnd:
 			wsflowOnly = false
 			continue
-		case mercenaryOnlyStart:
-			mercenaryOnly = true
-			continue
-		case mercenaryOnlyEnd:
-			mercenaryOnly = false
-			continue
 		}
-		if (fullOnly && noAgent) || (wsflowOnly && !noAgent) || (mercenaryOnly && !mercenaryEnabled) {
+		if (fullOnly && noAgent) || (wsflowOnly && !noAgent) {
 			continue
 		}
 		filtered = append(filtered, line)
@@ -724,19 +696,15 @@ func resolveRsrcRoot(rsrcRootOverride string) (string, error) {
 // so the delegate's ws calls are pre-keyed. When mintRoot is empty or the playbook
 // role is not delegate-eligible, no key is minted and the body is unchanged.
 //
-// preferMercenary: when true and the playbook is an implementer/reviewer role,
-// appends a guidance block advising the mercenary spawn idiom as primary.
-//
 // overrideLookup: when non-nil, a session-keyed resolver closure used to resolve
 // override-point marker values before product-mode selection. Pass nil (e.g. from
 // printPlaybook or unit tests that do not seed overrides) to render every
 // override-point with its inline seed default.
 //
 // Returns (body, recommendedTier, error): recommendedTier is the first-class tier
-// declared in the playbook frontmatter, surfaced so one render call routes both
-// delegation paths — native uses it as a host model-selection guide, mercenary
-// passes it to ws.mercenary.register's pass-through tier arg.
-func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, preferMercenary bool, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
+// declared in the playbook frontmatter, surfaced so the caller can pick the
+// delegate's model from one render call.
+func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
 	harness := s.currentHarness()
 
 	// Load once with nil vars so the MCP playbook layer can add reserved
@@ -747,8 +715,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 	}
 
 	// recommendedTier is the first-class tier declared in frontmatter, surfaced to
-	// the caller so it can route both delegation paths from one render call: native
-	// uses it as a host model-selection guide, mercenary passes it to ws.mercenary.register.
+	// the caller as a host model-selection guide for the spawned subagent.
 	recommendedTier := pb.Meta.Tier
 
 	vars, err := buildPlaybookVars(pb.Meta.Variables, callerContext, harness, recommendedTier, configOpts, workflowLang)
@@ -761,14 +728,6 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 	}
 	if pb.Meta.Delegates {
 		body += delegationTip(harness)
-	}
-
-	// Unit 2: prefer_mercenary guidance — implementer/reviewer only.
-	if preferMercenary {
-		switch strings.ToLower(strings.TrimSpace(pb.Meta.Role)) {
-		case "implementer", "reviewer":
-			body += mercenaryGuidanceBlock()
-		}
 	}
 
 	// Unit 1: render-minted child key — only when caller is lead (mintRoot != "").
@@ -795,7 +754,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 	// every override-point renders its inline seed default.
 	body = applyOverrideMarkers(body, harness, overrideLookup)
 
-	return renderProductModePlaybookBody(body, preferMercenary), recommendedTier, nil
+	return renderProductModePlaybookBody(body), recommendedTier, nil
 }
 
 func substitutePlaybookVars(body string, declared []string, vars map[string]string) (string, error) {
@@ -880,14 +839,14 @@ func workflowPreferSubagentEnabled(configOpts wsconfig.Options) (bool, error) {
 // post-substitution, so the appended text never trips the undeclared-var
 // guard.
 //
-// printPlaybook never mints child keys (mintRoot="") and ignores preferMercenary.
+// printPlaybook never mints child keys (mintRoot="").
 //
 // rsrcRoot is a call-site-overridable seam for root_override support.
 // configOpts controls config-backed model alias resolution.
 // overrideLookup: when non-nil, the session-keyed closure for resolving prompt
 // override-point values; pass nil to render every override-point with its seed.
 func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
-	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, "", "", false, workflowLang, overrideLookup)
+	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, "", "", workflowLang, overrideLookup)
 	if err != nil {
 		return "", "", err
 	}
@@ -913,15 +872,14 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 
 // renderPlaybook loads a playbook, renders it (with optional child-key mint and
 // splice), writes it to a worktree-scoped tmp file, and returns the file path.
-// The caller hands this path to a host-native subagent or mercenary.
+// The caller hands this path to a host-native subagent.
 //
 // rsrcRoot and worktreeRoot are call-site-overridable seams for root_override support.
 // mintRoot: when non-empty, caller is a lead and a child key is minted for the delegate.
-// preferMercenary: when true and playbook is implementer/reviewer, adds mercenary-primary guidance.
 // configOpts controls config-backed model alias resolution.
 // overrideLookup: when non-nil, the session-keyed closure for resolving prompt
 // override-point values; pass nil to render every override-point with its seed.
-func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, preferMercenary bool, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
+func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
 	templateContext := callerContext
 	var renderContext map[string]string
 	if NoAgentMode() && wsflowRenderEligibleStems[name] && len(callerContext) > 0 {
@@ -934,7 +892,7 @@ func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContex
 		}
 		templateContext, renderContext = splitDeclaredRenderContext(callerContext, declared)
 	}
-	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, templateContext, configOpts, mintRoot, parentKey, preferMercenary, workflowLang, overrideLookup)
+	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, templateContext, configOpts, mintRoot, parentKey, workflowLang, overrideLookup)
 	if err != nil {
 		return "", "", err
 	}

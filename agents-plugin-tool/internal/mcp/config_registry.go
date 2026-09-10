@@ -15,7 +15,6 @@ import (
 // changes, only where these enum values live.
 var (
 	onOffEnum             = []string{"on", "off"}
-	preferMercenaryEnum   = []string{"on", "off", "hide"}
 	agentsTierEnum        = []string{"small", "medium", "large", "xlarge"}
 	agentsEffortEnum      = []string{"", "none", "low", "medium", "high", "xhigh"}
 	promptHarnessEnum     = []string{"claude", "codex", "pi", "*"}
@@ -93,7 +92,7 @@ func (e configKeyEntry) DefaultScope() wsconfig.Scope {
 	return wsconfig.DefaultScope(e.Key)
 }
 
-// configRegistry holds the 5 static per-key entries. The dynamic prompt.*
+// configRegistry holds the static per-key entries. The dynamic prompt.*
 // family is not represented here — it is generated per discovered override
 // point by promptKnobEntry at catalog-build time (see buildTuningCatalog).
 var configRegistry = []configKeyEntry{
@@ -108,19 +107,6 @@ var configRegistry = []configKeyEntry{
 		}},
 		NoAgentVisible:        true,
 		RequiresLeadAuthority: wsconfig.GlobalOnly(wsconfig.ItemWorkflowPreferSubagent),
-		ResolverBacked:        true,
-	},
-	{
-		Key:        wsconfig.ItemWorkflowPreferMercenary,
-		WriterTool: "config.tune",
-		ValueFields: []tuningField{{
-			Name:        "value",
-			Description: "Desired mode: on, off, or hide.",
-			Enum:        preferMercenaryEnum,
-			Required:    true,
-		}},
-		NoAgentVisible:        false,
-		RequiresLeadAuthority: wsconfig.GlobalOnly(wsconfig.ItemWorkflowPreferMercenary),
 		ResolverBacked:        true,
 	},
 	{

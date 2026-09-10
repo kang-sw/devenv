@@ -10,8 +10,7 @@ package mcp
 //   3. "all" override: applies when no harness-specific override is stored.
 //   4. Empty-seed slot: renders stored override or nothing when none is set.
 //   5. Production-path case: override stored via the real resolver/session store
-//      is honored at playbook.render time (mirrors
-//      TestPreferMercenaryOnOffRenderGuidanceProductionPath).
+//      is honored at playbook.render time.
 //   6. Phase 2 shipped manual: DelegationSection is absent, while the
 //      UserPreferenceSection marker remains the shipped freeform slot.
 //
@@ -85,7 +84,7 @@ func TestOverrideNoOverrideSeedRenders(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// nil lookup: every override-point falls back to its seed.
-	body, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", nil)
+	body, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -129,7 +128,7 @@ func TestOverridePerHarnessReplacement(t *testing.T) {
 
 	// Claude harness: should get the per-harness override.
 	sClaude := newTestServerWithHarness(t, "claude")
-	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookup)
+	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (claude): %v", err)
 	}
@@ -142,7 +141,7 @@ func TestOverridePerHarnessReplacement(t *testing.T) {
 
 	// Codex harness: no codex-specific or "all" override → must fall back to seed.
 	sCodex := newTestServerWithHarness(t, "codex")
-	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookup)
+	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (codex): %v", err)
 	}
@@ -174,7 +173,7 @@ func TestOverrideAllBucketFallback(t *testing.T) {
 
 	// Claude harness: no claude-specific override → "all" applies.
 	sClaude := newTestServerWithHarness(t, "claude")
-	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookup)
+	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (claude): %v", err)
 	}
@@ -187,7 +186,7 @@ func TestOverrideAllBucketFallback(t *testing.T) {
 
 	// Codex harness: same expectation.
 	sCodex := newTestServerWithHarness(t, "codex")
-	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookup)
+	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (codex): %v", err)
 	}
@@ -200,7 +199,7 @@ func TestOverrideAllBucketFallback(t *testing.T) {
 		"SeedSection/claude": "claude wins",
 		"SeedSection/all":    "all-bucket",
 	})
-	bodyBoth, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookupBoth)
+	bodyBoth, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookupBoth)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (both): %v", err)
 	}
@@ -221,7 +220,7 @@ func TestOverrideEmptySeedSlot(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// No override stored: extension slot must render nothing (empty body).
-	bodyNoOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", nil)
+	bodyNoOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (no override): %v", err)
 	}
@@ -234,7 +233,7 @@ func TestOverrideEmptySeedSlot(t *testing.T) {
 	lookup := staticLookup(map[string]string{
 		"ExtSlot/claude": "injected extension text",
 	})
-	bodyWithOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookup)
+	bodyWithOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (with override): %v", err)
 	}
@@ -376,8 +375,7 @@ func TestApplyOverrideMarkersUnclosedMarkerPreservesContent(t *testing.T) {
 // wsconfig resolver/session store is resolved by playbook.render at render time
 // and that marker syntax never appears in the output file.
 //
-// This mirrors TestPreferMercenaryOnOffRenderGuidanceProductionPath in structure:
-// sequential callToolOnce calls on the same *Server guarantee session-write
+// Sequential callToolOnce calls on the same *Server guarantee session-write
 // visibility, and the override is seeded directly via the resolver (not via
 // config.prompt.set which belongs to the sibling ticket).
 func TestOverrideProductionPath(t *testing.T) {
@@ -1254,16 +1252,13 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 		t.Fatalf("workflow.prefer_subagent default should be cataloged as off: %+v", subagentKnob.Current)
 	}
 
-	mercenaryKnob := requireTuningKnob(t, catalog, "workflow.prefer_mercenary")
-	if mercenaryKnob.Writer.Tool != "config.tune" || mercenaryKnob.Writer.FixedArguments["key"] != "workflow.prefer_mercenary" {
-		t.Fatalf("workflow.prefer_mercenary writer tool mismatch: %+v", mercenaryKnob.Writer)
+	bootstrapKnob := requireTuningKnob(t, catalog, "bootstrap_alarm")
+	if bootstrapKnob.Writer.Tool != "config.tune" || bootstrapKnob.Writer.FixedArguments["key"] != "bootstrap_alarm" {
+		t.Fatalf("bootstrap_alarm writer tool mismatch: %+v", bootstrapKnob.Writer)
 	}
-	assertFieldEnum(t, mercenaryKnob.ValueFields, "value", []string{"on", "off", "hide"})
-	if findTuningField(mercenaryKnob.ValueFields, "enabled") != nil {
-		t.Fatalf("workflow.prefer_mercenary catalog must not expose legacy enabled field: %+v", mercenaryKnob.ValueFields)
-	}
-	if !strings.Contains(mustMarshalJSON(t, mercenaryKnob.Current), `"value":"hide"`) {
-		t.Fatalf("workflow.prefer_mercenary default should be cataloged as hide: %+v", mercenaryKnob.Current)
+	assertFieldEnum(t, bootstrapKnob.ValueFields, "value", []string{"on", "off"})
+	if !strings.Contains(mustMarshalJSON(t, bootstrapKnob.Current), `"value":"on"`) {
+		t.Fatalf("bootstrap_alarm default should be cataloged as on: %+v", bootstrapKnob.Current)
 	}
 
 	agentsKnob := requireTuningKnob(t, catalog, "agents.tier")
@@ -1272,7 +1267,7 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 	assertFieldEnum(t, agentsKnob.SelectorFields, "harness", []string{"claude", "codex", "pi", "default"})
 }
 
-func TestConfigTuningCatalogNoAgentOmitsFullWsKnobs(t *testing.T) {
+func TestConfigTuningCatalogNoAgentShape(t *testing.T) {
 	useLeadProfile(t)
 
 	rsrcRoot := buildOverrideTestTree(t)
@@ -1299,9 +1294,11 @@ func TestConfigTuningCatalogNoAgentOmitsFullWsKnobs(t *testing.T) {
 	if subagentKnob.Writer.Tool != "config.tune" || subagentKnob.Writer.FixedArguments["key"] != "workflow.prefer_subagent" {
 		t.Fatalf("workflow.prefer_subagent writer tool mismatch in no-agent catalog: %+v", subagentKnob.Writer)
 	}
-	for _, hidden := range []string{"workflow.prefer_mercenary", "delegation.prefer_mercenary"} {
-		if knob := findTuningKnob(catalog, hidden); knob != nil {
-			t.Fatalf("no-agent config.tuning exposed full-ws-only knob %s: %+v", hidden, knob)
+	// The agentless catalog cut is driven per entry by NoAgentVisible; every
+	// live knob declares it true, so the catalog must project the full set.
+	for _, knob := range catalog.Knobs {
+		if entry, ok := resolveConfigEntryForKey(knob.ID); ok && !entry.NoAgentVisible {
+			t.Fatalf("no-agent config.tuning exposed a knob declaring NoAgentVisible false: %+v", knob)
 		}
 	}
 

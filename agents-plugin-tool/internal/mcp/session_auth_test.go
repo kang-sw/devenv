@@ -455,7 +455,7 @@ func TestCapabilityScopedKeyGatesTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint leaf key: %v", err)
 	}
-	// ws.mercenary.register is blocked for roleDelegate.
+	// config.* is blocked for roleDelegate.
 	delegateKey, err := server.sessions.mint(root, roleDelegate, "")
 	if err != nil {
 		t.Fatalf("mint delegate key: %v", err)
@@ -491,8 +491,6 @@ func TestCapabilityScopedKeyGatesTools(t *testing.T) {
 	assertGateError(t, "leaf/git.commit", deniedLeafResp, -32601)
 
 	// delegate key: config.tune must be denied with -32601 (config.* prefix).
-	// ws.mercenary.* tools are also blocked for delegates but hit actorGate before the
-	// keyed gate, producing a toolTextResponse error rather than -32601.
 	deniedDelegateResp := callToolOnce(t, server, 2, "config.tune", map[string]any{
 		"session_key": delegateKey,
 		"key":         "agents.tier",
@@ -729,10 +727,10 @@ func TestLegacySessionRecordWithoutParentResolves(t *testing.T) {
 		t.Fatalf("keysDir: %v", err)
 	}
 	const key = "legacy-key-00"
-	// The legacy record carries the retired typed prefer_mercenary field; it must
-	// be silently ignored on read (the toggle now lives in Overrides), while the
-	// record still resolves with an empty parent edge.
-	legacyJSON := `{"schema_version":1,"root":"/legacy/root","scope":"delegate","prefer_mercenary":true}`
+	// The legacy record carries a retired typed field this struct no longer
+	// declares; it must be silently ignored on read, while the record still
+	// resolves with an empty parent edge.
+	legacyJSON := `{"schema_version":1,"root":"/legacy/root","scope":"delegate","retired_typed_field":true}`
 	if err := os.WriteFile(store.keyPath(dir, key), []byte(legacyJSON), 0o644); err != nil {
 		t.Fatalf("write legacy record: %v", err)
 	}
@@ -749,8 +747,7 @@ func TestLegacySessionRecordWithoutParentResolves(t *testing.T) {
 }
 
 // TestSetOverridePreservesParent guards the read-modify-write override path
-// (the live successor to the retired setPreferMercenary) against clobbering the
-// parent lineage edge stored on the same record.
+// against clobbering the parent lineage edge stored on the same record.
 func TestSetOverridePreservesParent(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	store := newSessionStore()
@@ -759,10 +756,10 @@ func TestSetOverridePreservesParent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	if err := store.setOverride(key, "prefer_mercenary", "true"); err != nil {
+	if err := store.setOverride(key, "workflow.prefer_subagent", "true"); err != nil {
 		t.Fatalf("setOverride(%q): %v", key, err)
 	}
-	if v, ok := store.getOverride(key, "prefer_mercenary"); !ok || v != "true" {
+	if v, ok := store.getOverride(key, "workflow.prefer_subagent"); !ok || v != "true" {
 		t.Fatalf("getOverride after set = (%q, %v), want (\"true\", true)", v, ok)
 	}
 	entry, ok := store.lookup(key)
@@ -1184,23 +1181,5 @@ func TestSessionNoteSurvivesFreshServerInstance(t *testing.T) {
 	}
 	if len(children) != 1 || children[0].note != "persisted note" {
 		t.Fatalf("fresh-instance children = %#v, want single child with note %q", children, "persisted note")
-	}
-}
-
-func TestKeylessAgentCallRequiresSessionKey(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	initGit(t, root)
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	mustEnableMercenary(t)
-	server := NewServer(root, "test")
-
-	resp := callToolOnce(t, server, 1, "mercenary.status", map[string]any{"name": "worker"})
-	if !toolIsError(t, resp) {
-		t.Fatalf("keyless ws.mercenary.status should be a tool error: %s", resp)
-	}
-	text := toolText(t, resp)
-	if !strings.Contains(text, "mandatory_session_key") || !strings.Contains(text, "workflow-manual") {
-		t.Fatalf("agent keyless error missing mandatory session-key guidance (manual route): %q", text)
 	}
 }

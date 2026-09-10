@@ -1,21 +1,17 @@
 package mcp
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
-	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 )
 
-// Phase 2c: mercenary delegation surface — render-minted child keys,
-// prefer_mercenary render-mode flip, always-on tip, register schema narrowing.
+// playbook.render surface: render-minted child keys, the delegation
+// continuity tip, and the recommended-tier return channel.
 
 // implementerPlaybookContent is a delegate-eligible (role: implementer) playbook.
 const implementerPlaybookContent = `---
@@ -84,7 +80,7 @@ func TestRenderMintsChildKeyForLeadDelegatePlaybook(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 	mintRoot := "/work/tree-a"
 
-	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, mintRoot, "", false, "", nil)
+	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, mintRoot, "", "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -103,7 +99,7 @@ func TestRenderMintsChildKeyForLeadDelegatePlaybook(t *testing.T) {
 	}
 
 	// A second render mints a DISTINCT key (registry uniqueness).
-	body2, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, mintRoot, "", false, "", nil)
+	body2, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, mintRoot, "", "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (2nd): %v", err)
 	}
@@ -119,7 +115,7 @@ func TestRenderNoMintForNonLeadCaller(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// mintRoot empty → caller is not a lead → no mint, no key block.
-	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", false, "", nil)
+	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -141,7 +137,7 @@ func TestRenderNoMintForNonDelegateRole(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// Lead caller (mintRoot set) but the playbook role is not delegate-eligible → no mint.
-	body, _, err := renderPlaybookBody(s, root, "delegate-pb", nil, wsconfig.Options{}, "/work/tree-a", "", false, "", nil)
+	body, _, err := renderPlaybookBody(s, root, "delegate-pb", nil, wsconfig.Options{}, "/work/tree-a", "", "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -159,7 +155,7 @@ func TestRenderRootOverrideBindsChildKey(t *testing.T) {
 
 	// renderPlaybookBody binds the minted key to mintRoot; the dispatch passes
 	// root_override as mintRoot when set (server.go playbook.render handler).
-	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, overrideRoot, "", false, "", nil)
+	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, overrideRoot, "", "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -173,250 +169,7 @@ func TestRenderRootOverrideBindsChildKey(t *testing.T) {
 	}
 }
 
-func TestPreferMercenaryGuidanceAndAlwaysOnTip(t *testing.T) {
-	root := buildTestRsrcTree(t, map[string]string{
-		"impl-pb/impl-pb.md": implementerPlaybookContent,
-	})
-	s := newTestServerWithHarness(t, "claude")
-
-	// preferMercenary=false: always-on mercenary tip present (delegates:true),
-	// but the prefer-mercenary "Delegation mode" guidance block absent.
-	bodyOff, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", false, "", nil)
-	if err != nil {
-		t.Fatalf("renderPlaybookBody off: %v", err)
-	}
-	if !strings.Contains(bodyOff, "Mercenary path (always available)") {
-		t.Errorf("always-on mercenary tip missing for delegates:true playbook:\n%s", bodyOff)
-	}
-	if strings.Contains(bodyOff, "prefer_mercenary active") {
-		t.Errorf("prefer-mercenary guidance must be absent when flag off:\n%s", bodyOff)
-	}
-
-	// preferMercenary=true on an implementer playbook: guidance block present.
-	bodyOn, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", true, "", nil)
-	if err != nil {
-		t.Fatalf("renderPlaybookBody on: %v", err)
-	}
-	if !strings.Contains(bodyOn, "prefer_mercenary active") {
-		t.Errorf("prefer-mercenary guidance missing when flag on for implementer:\n%s", bodyOn)
-	}
-	if !strings.Contains(bodyOn, "Mercenary path (always available)") {
-		t.Errorf("always-on tip must remain present when flag on:\n%s", bodyOn)
-	}
-}
-
-func TestPreferMercenaryGuidanceAbsentForNonImplementerRole(t *testing.T) {
-	root := buildTestRsrcTree(t, map[string]string{
-		"leaf-pb/leaf-pb.md": leafPlaybookContent,
-	})
-	s := newTestServerWithHarness(t, "claude")
-
-	// preferMercenary=true but role is leaf (not implementer/reviewer): no guidance block.
-	body, _, err := renderPlaybookBody(s, root, "leaf-pb", nil, wsconfig.Options{}, "", "", true, "", nil)
-	if err != nil {
-		t.Fatalf("renderPlaybookBody: %v", err)
-	}
-	if strings.Contains(body, "prefer_mercenary active") {
-		t.Errorf("prefer-mercenary guidance must be implementer/reviewer only, not leaf:\n%s", body)
-	}
-}
-
-// TestWorkflowPreferMercenaryViaResolver verifies that the workflow-prefixed
-// mercenary preference is global-only and stores canonical on/off/hide values.
-func TestWorkflowPreferMercenaryViaResolver(t *testing.T) {
-	s := newTestServerWithHarness(t, "claude")
-	key, err := s.sessions.mint("/work/root", roleLead, "")
-	if err != nil {
-		t.Fatalf("mint: %v", err)
-	}
-
-	adapter := sessionConfigAdapter{s: s.sessions}
-	resolver := wsconfig.NewResolver(wsconfig.Options{CacheHome: t.TempDir(), ConfigHome: t.TempDir()}, builtinConfigDefaults(), adapter, adapter)
-
-	// Enable.
-	if err := resolver.Set(wsconfig.ItemWorkflowPreferMercenary, "on", wsconfig.SetOptions{}); err != nil {
-		t.Fatalf("set workflow.prefer_mercenary=on: %v", err)
-	}
-	got, err := resolver.Get(key, wsconfig.ItemWorkflowPreferMercenary)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if got.Value != "on" || got.Scope != wsconfig.ScopeGlobal {
-		t.Errorf("after enable: got=%s scope=%s, want on/global", got.Value, got.Scope)
-	}
-
-	// Verify the session entry root/scope were not corrupted.
-	entry, _ := s.sessions.lookup(key)
-	if entry.root != "/work/root" || entry.scope != roleLead {
-		t.Errorf("set corrupted entry: %+v", entry)
-	}
-
-	// Disable.
-	if err := resolver.Set(wsconfig.ItemWorkflowPreferMercenary, "off", wsconfig.SetOptions{}); err != nil {
-		t.Fatalf("set workflow.prefer_mercenary=off: %v", err)
-	}
-	got2, err := resolver.Get(key, wsconfig.ItemWorkflowPreferMercenary)
-	if err != nil {
-		t.Fatalf("Get after disable: %v", err)
-	}
-	if got2.Value != "off" || got2.Scope != wsconfig.ScopeGlobal {
-		t.Errorf("after disable: got=%s scope=%s, want off/global", got2.Value, got2.Scope)
-	}
-
-	// Explicit non-global scopes are rejected for this global-only item.
-	if err := resolver.Set(wsconfig.ItemWorkflowPreferMercenary, "on", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeSession, SessionKey: key}); err == nil {
-		t.Errorf("session-scope set for workflow.prefer_mercenary must return an error")
-	}
-}
-
-// --- integration: register schema narrowing + prefer_mercenary handler ---
-
-func TestRegisterSchemaDropsLegacyFields(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
-	initGit(t, root)
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	mustEnableMercenary(t)
-
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}` + "\n"
-	var out bytes.Buffer
-	if err := serveStdioWithSession(t, NewServer(root, "test"), root, input, &out); err != nil {
-		t.Fatalf("ServeStdio: %v", err)
-	}
-	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	props := toolPropertiesByName(t, byID["1"], "mercenary.register")
-	// prompts/prompt_refs/model stay removed; `tier` is re-introduced in Phase 2
-	// (260611) as a pass-through of playbook.render's recommended-tier.
-	for _, dropped := range []string{"prompts", "prompt_refs", "model"} {
-		if _, present := props[dropped]; present {
-			t.Errorf("ws.mercenary.register schema still exposes removed field %q", dropped)
-		}
-	}
-	for _, kept := range []string{"name", "backend", "system_prompt_text", "tier"} {
-		if _, present := props[kept]; !present {
-			t.Errorf("ws.mercenary.register schema missing expected field %q", kept)
-		}
-	}
-}
-
-func TestWorkflowPreferMercenaryWriterSetsGlobalPreference(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
-	initGit(t, root)
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
-
-	server := NewServer(root, "test")
-	key, _ := parseLoginResponse(t, callLogin(t, server, 900006, root, nil))
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.tune","arguments":{"session_key":"` + key + `","key":"workflow.prefer_mercenary","value":"on"}}}` + "\n"
-	var out bytes.Buffer
-	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
-		t.Fatalf("ServeStdio: %v", err)
-	}
-	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	text := toolText(t, byID["1"])
-	if !strings.Contains(text, "workflow.prefer_mercenary: on [scope:global]") {
-		t.Fatalf("workflow prefer mercenary did not enable: %s", byID["1"])
-	}
-}
-
-// TestPreferMercenaryHiddenInNoAgentMode verifies the full-ws-only
-// workflow.prefer_mercenary knob is unreachable in no-agent (wsflow) mode.
-// After the 260814 config-surface collapse there is no distinct
-// config.workflow_prefer_mercenary TOOL name to hide from tools/list, so the
-// suppression now lives at two other layers: (a) config.list's catalog omits
-// the knob, and (b) config.tune rejects the key directly with the same
-// agentless-mode error the outer per-tool gate uses.
-func TestPreferMercenaryHiddenInNoAgentMode(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
-	initGit(t, root)
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
-	t.Setenv("WS_MCP_NO_AGENT", "1")
-	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
-
-	// tools/list: the generic config tools stay visible; the removed lead tool must not.
-	listInput := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}` + "\n"
-	var out bytes.Buffer
-	if err := serveStdioWithSession(t, NewServer(root, "test"), root, listInput, &out); err != nil {
-		t.Fatalf("ServeStdio: %v", err)
-	}
-	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	if strings.Contains(byID["1"], `"name":"ws.lead.prefer_mercenary"`) {
-		t.Fatalf("removed ws.lead.prefer_mercenary must not appear in no-agent mode: %s", byID["1"])
-	}
-	if !strings.Contains(byID["1"], `"name":"config.list"`) || !strings.Contains(byID["1"], `"name":"config.tune"`) {
-		t.Fatalf("config.list/config.tune must remain visible in no-agent mode: %s", byID["1"])
-	}
-	if !strings.Contains(byID["1"], `"name":"ferrule"`) {
-		t.Fatalf("ws.ferrule must remain visible in no-agent mode: %s", byID["1"])
-	}
-
-	server := NewServer(root, "test")
-	key, _ := parseLoginResponse(t, callLogin(t, server, 2, root, nil))
-
-	// (a) config.list's knob catalog must omit the full-ws-only knob in no-agent mode.
-	listJSON := toolText(t, callToolOnce(t, server, 3, "config.list", map[string]any{
-		"session_key": key,
-		"format":      "json",
-	}))
-	var listPayload struct {
-		Knobs []struct {
-			ID string `json:"id"`
-		} `json:"knobs"`
-	}
-	if err := json.Unmarshal([]byte(listJSON), &listPayload); err != nil {
-		t.Fatalf("parse config.list JSON: %v\n%s", err, listJSON)
-	}
-	var haveSubagent bool
-	for _, k := range listPayload.Knobs {
-		if k.ID == "workflow.prefer_mercenary" {
-			t.Fatalf("config.list knobs must omit workflow.prefer_mercenary in no-agent (wsflow) mode: %s", listJSON)
-		}
-		if k.ID == "workflow.prefer_subagent" {
-			haveSubagent = true
-		}
-	}
-	if !haveSubagent {
-		t.Fatalf("config.list knobs must keep workflow.prefer_subagent in no-agent mode: %s", listJSON)
-	}
-
-	// (b) config.tune targeting the full-ws-only key directly is rejected with the
-	// agentless-mode error, even though config.tune itself is never tool-hidden.
-	tuneResp := callToolOnce(t, server, 4, "config.tune", map[string]any{
-		"session_key": key,
-		"key":         "workflow.prefer_mercenary",
-		"value":       "on",
-	})
-	if !toolIsError(t, tuneResp) || !strings.Contains(toolText(t, tuneResp), "agentless mode disables agent-backed tool") {
-		t.Fatalf("config.tune(workflow.prefer_mercenary) must be rejected in no-agent mode: %s", tuneResp)
-	}
-}
-
-func TestPreferMercenaryRemovedLeadToolUnknownAndOmittedFromLeadToolNames(t *testing.T) {
-	useLeadProfile(t)
-	t.Setenv("WS_MCP_NO_AGENT", "")
-	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
-
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
-	initGit(t, root)
-
-	server := NewServer(root, "test")
-	resp := callToolOnce(t, server, 1, "ws.lead.prefer_mercenary", map[string]any{})
-	if !strings.Contains(resp, `"error"`) || !strings.Contains(resp, "unknown tool") {
-		t.Fatalf("removed ws.lead.prefer_mercenary explicit call must be unknown: %s", resp)
-	}
-	for _, name := range LeadToolNames() {
-		if name == "ws.lead.prefer_mercenary" {
-			t.Fatalf("removed ws.lead.prefer_mercenary must not appear in LeadToolNames: %v", LeadToolNames())
-		}
-	}
-}
+// --- integration: workflow preference writers ---
 
 // TestWorkflowPreferenceWritersRequireLeadSessionKey verifies that global
 // workflow preference writers still require lead authority even though they
@@ -441,10 +194,6 @@ func TestWorkflowPreferenceWritersRequireLeadSessionKey(t *testing.T) {
 		name string
 		args map[string]any
 	}{
-		{
-			name: "config.tune",
-			args: map[string]any{"key": "workflow.prefer_mercenary", "value": "on"},
-		},
 		{
 			name: "config.tune",
 			args: map[string]any{"key": "workflow.prefer_subagent", "value": "on"},
@@ -475,22 +224,6 @@ func TestWorkflowPreferenceWritersRequireLeadSessionKey(t *testing.T) {
 	}
 }
 
-// TestAgentCallHandleTextShape verifies the native-shaped continuation handle
-// (agentId=<name>) so the lead reuses one continuation idiom across the native
-// and mercenary paths (Phase 2c parity). Unit-tested directly because the full
-// ws.mercenary.call dispatch would require spawning a real backend.
-func TestAgentCallHandleTextShape(t *testing.T) {
-	got := agentCallHandleText("implementer", "running", 4242)
-	if !strings.HasPrefix(got, "agentId=implementer\t") {
-		t.Errorf("handle must lead with agentId=<name>: %q", got)
-	}
-	for _, want := range []string{"status=running", "pid=4242", "SendMessage(to: agentId)"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("handle text missing %q: %q", want, got)
-		}
-	}
-}
-
 // shippedRsrcRootForTest is the real shipped rsrc tree
 // (internal/mcp → repo root → agents-plugin/rsrc).
 func shippedRsrcRootForTest() string {
@@ -514,7 +247,7 @@ func TestRenderGoldenShippedDelegateChildKey(t *testing.T) {
 			if name == "implementer" {
 				ctx = shippedImplementerContext()
 			}
-			body, _, err := renderPlaybookBody(s, rsrcRoot, name, ctx, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", false, "", nil)
+			body, _, err := renderPlaybookBody(s, rsrcRoot, name, ctx, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", "", nil)
 			if err != nil {
 				t.Fatalf("renderPlaybookBody(%s): %v", name, err)
 			}
@@ -561,7 +294,7 @@ func TestRenderGoldenShippedDelegatesContainNoModelAliases(t *testing.T) {
 		if name == "implementer" {
 			ctx = shippedImplementerContext()
 		}
-		body, _, err := renderPlaybookBody(s, rsrcRoot, name, ctx, wsconfig.Options{CacheHome: t.TempDir()}, "", "", false, "", nil)
+		body, _, err := renderPlaybookBody(s, rsrcRoot, name, ctx, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil)
 		if err != nil {
 			t.Fatalf("renderPlaybookBody(%s, %q): %v", name, harness, err)
 		}
@@ -604,7 +337,7 @@ func TestRenderGoldenShippedPhase4Delegates(t *testing.T) {
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			s := newTestServerWithHarness(t, "claude")
-			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", false, "", nil)
+			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", "", nil)
 			if err != nil {
 				t.Fatalf("renderPlaybookBody(%s): %v", name, err)
 			}
@@ -638,7 +371,7 @@ func TestRenderGoldenShippedReviewPartitionIncludesBase(t *testing.T) {
 	for _, name := range []string{"code-review-correctness", "code-review-fit", "code-review-test"} {
 		t.Run(name, func(t *testing.T) {
 			s := newTestServerWithHarness(t, "claude")
-			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", false, "", nil)
+			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil)
 			if err != nil {
 				t.Fatalf("renderPlaybookBody(%s): %v", name, err)
 			}
@@ -738,7 +471,7 @@ func TestWithRecommendedRenderBinding(t *testing.T) {
 
 // TestRenderReturnsFrontmatterRecommendedTier verifies renderPlaybookBody surfaces
 // the first-class frontmatter tier from the REAL shipped delegate playbooks. This
-// is the value the lead routes to both native (model guide) and mercenary (register).
+// is the value the lead routes to the host as the subagent's model guide.
 func TestRenderReturnsFrontmatterRecommendedTier(t *testing.T) {
 	rsrcRoot := shippedRsrcRootForTest()
 	want := map[string]string{
@@ -753,57 +486,12 @@ func TestRenderReturnsFrontmatterRecommendedTier(t *testing.T) {
 		if name == "implementer" {
 			ctx = shippedImplementerContext()
 		}
-		_, tier, err := renderPlaybookBody(s, rsrcRoot, name, ctx, wsconfig.Options{CacheHome: t.TempDir()}, "", "", false, "", nil)
+		_, tier, err := renderPlaybookBody(s, rsrcRoot, name, ctx, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil)
 		if err != nil {
 			t.Fatalf("renderPlaybookBody(%s): %v", name, err)
 		}
 		if tier != wantTier {
 			t.Errorf("shipped %s recommended tier = %q, want %q (from frontmatter)", name, tier, wantTier)
-		}
-	}
-}
-
-// TestMercenaryTierRoutingResolvesCustomModel is the Phase 1 key coverage: with
-// small & large customized via config.agents_tier, a mercenary registered with a
-// capability tier flows straight through to wsconfig resolution — NOT the built-in
-// medium default. The tier passes directly without firstClassTierToAlias translation;
-// downstream ResolveAgentForHarnessConfig normalizes via normalizedTier.
-// (A real subprocess is not spawned; Register resolves the backend/model the call
-// would use.)
-func TestMercenaryTierRoutingResolvesCustomModel(t *testing.T) {
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
-	initGit(t, root)
-	cache := filepath.Join(t.TempDir(), "cache")
-	// Custom small & large models distinct from the medium default (gpt-5.6-terra): a
-	// resolved custom model proves the capability tier flowed straight through.
-	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{CacheHome: cache}, "small", "", "claude-custom-small"); err != nil {
-		t.Fatalf("set small tier: %v", err)
-	}
-	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{CacheHome: cache}, "large", "", "gpt-custom-large"); err != nil {
-		t.Fatalf("set large tier: %v", err)
-	}
-	mgr := wsagent.NewManager(wsagent.Options{CacheHome: cache})
-	cases := []struct {
-		name, tier, wantBackend, wantModel string
-	}{
-		{"impl", "small", "claude", "claude-custom-small"},
-		{"rev", "large", "codex", "gpt-custom-large"},
-	}
-	for _, tc := range cases {
-		agent, _, err := mgr.Register(wsagent.RegisterOptions{
-			Root:             root,
-			Name:             tc.name,
-			Tier:             tc.tier, // capability tier flows directly, no alias translation
-			SystemPromptText: "x",
-		})
-		if err != nil {
-			t.Fatalf("Register %s: %v", tc.name, err)
-		}
-		if agent.Backend != tc.wantBackend || agent.Model != tc.wantModel {
-			t.Errorf("%s (tier %q): backend/model = %q/%q, want %q/%q (must not pin to medium)",
-				tc.name, tc.tier,
-				agent.Backend, agent.Model, tc.wantBackend, tc.wantModel)
 		}
 	}
 }

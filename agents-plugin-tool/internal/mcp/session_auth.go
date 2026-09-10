@@ -39,10 +39,9 @@ type sessionChild struct {
 // the format can grow (render lineage, permission/capability metadata) without a
 // migration; unknown future fields are simply ignored by older readers.
 //
-// Note: the former typed PreferMercenary bool field has been retired. Old records
-// with a "prefer_mercenary" JSON field are silently ignored on read (Go's
-// json.Unmarshal drops unknown fields). The live mercenary preference is the
-// global-only wsconfig.ItemWorkflowPreferMercenary item, not session state.
+// Note: retired typed fields are not migrated. Old records carrying a field
+// this struct no longer declares are silently ignored on read (Go's
+// json.Unmarshal drops unknown fields).
 type sessionRecord struct {
 	SchemaVersion int    `json:"schema_version"`
 	Root          string `json:"root"`

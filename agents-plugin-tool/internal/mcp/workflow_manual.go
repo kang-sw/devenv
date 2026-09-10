@@ -14,7 +14,7 @@ import (
 
 // freshOnlyStart and freshOnlyEnd are the dedicated mode-gating marker tokens
 // for the ws.workflow_manual tool. They are distinct from the product-mode
-// markers (ws:full-only, ws:wsflow-only, ws:mercenary-on) and the override
+// markers (ws:full-only, ws:wsflow-only) and the override
 // markers (ws:override:) so none of those passes consume or choke on them.
 //
 // Under playbook.read the markers surface verbatim as inert HTML comments
