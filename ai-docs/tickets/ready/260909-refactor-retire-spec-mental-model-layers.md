@@ -199,9 +199,14 @@ Found by search; rerun the greps rather than trusting these coordinates.
 shared by both query tools; `references.go` (`ReferencesTrace`) resolves
 spec/mental-model cross-references; `legacy_marker.go` (about 17 KB, no exported
 symbols) is the legacy spec-marker advisory and `## Spec Impact` collector;
-`doc_coverage.go` is only two predicates (`SpecAreaHasFrontmatterFile`,
-`MentalModelAreaHasFrontmatterFile`); `project_tree.go` renders the spec and
-mental-model areas; `doctor.go` is reached from `cmd/ws-mcp/main.go`.
+`doc_coverage.go` no longer exists — Phase 1 deleted it whole, predicates and
+walker, with the doc coverage alarm (`### Result (e2810a33)`); `project_tree.go`
+renders only a dedicated spec area (`renderSpecs`, project_tree.go#L28-L37,128-136)
+— mental-model has no dedicated area there, only the generic `ai-docs/`
+directory listing (project_tree.go has no "mental" occurrence); `doctor.go`'s
+`Doctor` no longer checks spec/mental-model presence (that check went with
+`doc_coverage.go` in Phase 1) and now only verifies repo root, `ai-docs/`, and
+`AGENTS.md` (doctor.go#L14-L47), reached from `cmd/ws-mcp/main.go`.
 
 **Go — MCP registration.** `internal/mcp/server.go` is a single dispatch switch
 plus a schema table plus a tool-name allowlist, so each retiring tool has three
@@ -211,21 +216,25 @@ sites: `specs.query`, `spec_stem.generate`, `spec_index.verify`,
 `hasSpecStemArgument`, the `mentions_ticket_stem` rejection) sit beside the
 dispatch entries.
 
-**Go — doc coverage alarm.** `internal/mcp/doc_coverage_alarm.go`
-(`docCoverageWarning`, `injectDocCoverageWarning`), injected from the lead-login
-path in `server.go` and from `internal/mcp/workflow_manual.go`; the config knob
-is registered in `server.go` with the key constant in
-`internal/wsconfig/scope.go`. `internal/mcp/review_track_alarm.go` and
+**Go — doc coverage alarm (resolved in Phase 1).** `internal/mcp/doc_coverage_alarm.go`,
+`docCoverageWarning`, `injectDocCoverageWarning`, and the `internal/wsconfig/scope.go`
+key constant no longer exist — Phase 1 deleted this paragraph's whole subject
+(`### Result (e2810a33)`). `internal/mcp/review_track_alarm.go` and
 `internal/wsreview/checkpoint.go` model themselves on the same warning shape and
-must keep working after the doc alarm is gone.
+are confirmed (by that Result) to still work after the doc alarm's removal.
 
-**Go — spec-address gate.** `internal/wsdoc/tickets_mutate.go`
-(`readyGateWarning`, `exemptReadyGateCategories`, `ticketCategoryRE`) and
-`internal/wsdoc/tickets_verify.go` (`TicketVerify` adds a `spec-address`
-warning for `ready`). Both are soft warnings today, not hard blocks; the hard
-half lives in the playbook judgment. `sageReviewStageRequirement` in the same
-mutate file reuses `ticketCategoryRE` — that is the coupling to unpick.
-`internal/wsdoc/tickets.go` exposes `Specs`/`SpecRemoves` from frontmatter;
+**Go — spec-address gate (resolved in Phase 1).** `readyGateWarning` and
+`exemptReadyGateCategories` in `internal/wsdoc/tickets_mutate.go`, and the
+`spec-address` warning `internal/wsdoc/tickets_verify.go`'s `TicketVerify` added
+for `ready`, no longer exist — Phase 1 removed them (`### Result (e2810a33)`).
+`ticketCategoryRE` survives (still read by `sageReviewStageRequirement`, whose
+doc comment that Result says now states its own rule in full rather than
+deriving it from the removed gate); the exemption map survives too, renamed
+`nonImplementationCategories` around its surviving reader (`missingRouteFacts`)
+rather than deleted. `internal/wsdoc/tickets.go` exposes `Specs`/`SpecRemoves`
+from frontmatter (still current — confirmed read by `internal/mcp/server.go`,
+`internal/wsdoc/legacy_marker.go`, and `internal/wsdoc/references.go` besides
+`tickets.go` itself);
 `internal/wsdoc/tickets_graph.go` builds a `specAnchors` set and resolves
 `related:` against ticket stems union spec anchors;
 `internal/wsdoc/tickets_template.go` carries `spec:` and
@@ -239,11 +248,16 @@ Models`. Note the section names differ from the `## Spec` heading in this
 repository's own `AGENTS.md` commit template, which is a separate,
 repository-local convention line to update.
 
-**Go — implement pipeline doc todos.** `internal/mcp/session_state.go` installs
-`doc-pre-pass`, `doc-commit-gate`, and `doc-closeout` and builds their
-instruction text in `implementDocPrePassInstruction`,
-`implementDocCommitGateInstruction`, `implementDocCloseoutInstruction`; the
-pre-pass text names `mental-model-updater` conditionally.
+**Go — implement pipeline doc todos (resolved in Phase 1).** `internal/mcp/session_state.go`
+no longer installs `doc-pre-pass`, `doc-commit-gate`, or `doc-closeout`, and
+`implementDocPrePassInstruction`, `implementDocCommitGateInstruction`, and
+`implementDocCloseoutInstruction` no longer exist — Phase 1 removed them
+(`### Result (e2810a33)`). `mental-model-updater` is no longer named from that
+pipeline; it is still named by `internal/mcp/server.go` (render-eligible stem
+list), `lead-backfill-docs`, `lead-forge-mental-model`, and
+`skills/lead-bootstrap/AGENTS.template.md`, which Phase 2's own scope (the
+render-eligible-stem-list bullet) and the out-of-scope bootstrap template
+already account for separately.
 
 **Shipped playbooks (both packages, byte-identical `rsrc/` trees).**
 `lead-update-spec` (84 lines), `lead-write-spec` (110), `lead-forge-spec` (307),
@@ -251,11 +265,16 @@ pre-pass text names `mental-model-updater` conditionally.
 `mental-model-updater` (67), `doc-gap-discovery` (80). Skill directories exist
 for `lead-backfill-docs`, `lead-forge-spec`, `lead-forge-mental-model` in the
 full package and additionally for `lead-write-spec` and `lead-update-spec` in
-wsflow. `lead-implement` dispatches the doc todos to `lead-update-spec`;
+wsflow. `lead-implement` no longer exists — the sibling
+`260909-refactor-lead-surface-collapse-worker-stop-protocol` (done) retired it
+in favor of `ticket-worker`, which has no `lead-update-spec` reference; the
+only remaining caller of `lead-update-spec` by name is `lead-backfill-docs`.
 `lead-backfill-docs` renders `doc-gap-discovery`; `ticket-reviewer-design`
-consumes `related-mental-model:`; `lead-write-ticket` carries the
-`spec-address-gate` and `missing-spec-address` judgments and couples them to the
-sage gate in the cascade-edit and bulk-promotion sections. Manifests
+consumes `related-mental-model:`; `lead-write-ticket` is now `lead-ticket`
+(same sibling) and, per this ticket's own `### Result (e2810a33)`, no longer
+carries a `spec-address-gate` or `missing-spec-address` judgment or an
+`On: Spec-address Check` procedure — that half of Phase 1's scope already
+landed. Manifests
 (`rsrc/manifest.json`, `skills/manifest.json`) carry per-stem hashes in both
 packages.
 
@@ -264,8 +283,10 @@ packages.
 `//go:embed conventions/*.md` in `conventions.go` with canonical names and
 aliases, served as `convention.read`. Nine playbook call sites read them.
 
-**Tests.** Concentrated in `internal/wsdoc/{spec_discovery,mental_model_discovery,references,doc_coverage,legacy_marker,project_tree,tickets_verify,tickets_mutate}_test.go`,
-`internal/mcp/{server,doc_coverage_alarm,legacy_marker_render,session_state,tickets_verify,tickets_template,playbook_tools}_test.go`,
+**Tests.** Concentrated in `internal/wsdoc/{spec_discovery,mental_model_discovery,references,legacy_marker,project_tree,tickets_verify,tickets_mutate}_test.go`
+(`doc_coverage_test.go` was already deleted with its subject in Phase 1),
+`internal/mcp/{server,legacy_marker_render,session_state,tickets_verify,tickets_template,playbook_tools}_test.go`
+(`doc_coverage_alarm_test.go` likewise already deleted in Phase 1),
 `internal/wsgit/git_test.go`, `internal/wsrsrc/{forge_spec_ambiguity,skills_mirror,manifest_shipped,skills_manifest,workflow_guide}_test.go`,
 and the Python bundles under `agents-plugin/tests/` and
 `agents-plugin-wsflow/tests/`. The `legacy_marker` suites are the largest single
@@ -297,6 +318,22 @@ Not settled by the epic; resolve at design review or defer.
   before Phase 2.
 - (Settled) This repository's `AGENTS.md` edits land in Phase 3 in one
   change; the binding-anchor section stays with the epic's planned item.
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/wsdoc/{spec_discovery,spec_tools,mental_model_discovery,mental_models,references,query_match,legacy_marker,conventions,project_tree,tickets,tickets_graph,tickets_template}.go, internal/mcp/{server,format}.go, internal/wsgit/git.go, cmd/ws-mcp/main.go, seven rsrc stems and skill dirs in both agents-plugin and agents-plugin-wsflow, both manifest.json pairs, ai-docs/manuals/wsflow-mirroring.md, ai-docs/spec/, ai-docs/mental-model/, ai-docs/WORKFLOW.md, AGENTS.md |
+| scope.surface | public-interface | deletes seven shipped MCP tools confirmed live in internal/mcp/server.go (dispatch at L1043-1140, schema at L3844-3980, allowlist at L4368-4369): specs.query, spec_stem.generate, spec_index.verify, mental_models.list, mental_models.query, mental_models.status, references.trace |
+| scope.new_public_symbol | no | none — Phase 2 and Phase 3 only delete tools, symbols, playbooks, conventions, and directories |
+| scope.new_type_contract | no | none — no new type or function signature is introduced |
+| scope.test_surface | existing | go test ./..., go vet ./..., python3 -m unittest discover (agents-plugin/tests and agents-plugin-wsflow/tests), and the wsflow mirror-regeneration tests all already exist and passed at Phase 1's e2810a33; Phase 2 deletes the matching *_test.go files (doc_coverage_test.go and doc_coverage_alarm_test.go already gone in Phase 1) rather than adding new ones |
+| complexity.reuse_points | confirmed | Phase 3 reuses the existing ai-docs/.old/ dated-snapshot archive scheme (ai-docs/.old/spec/260421 and ai-docs/.old/spec/260505 already exist there); Phase 2's sage-gate note reuses Phase 1's already-landed `nonImplementationCategories` unpicking |
+| complexity.side_effect_risk | moderate | the sweep spans two shipped plugin packages (agents-plugin, agents-plugin-wsflow) plus a shipped MCP tool contract, and several Prior Art claims were found stale by already-landed sibling work in this pass (lead-write-ticket to lead-ticket, lead-implement to ticket-worker, doc_coverage.go/doctor.go already deleted) — a worker following the uncorrected Prior Art literally would chase dead targets |
+| risk.correctness | moderate | large multi-file, multi-package deletion sweep with several call sites only estimated ("Known at authoring") rather than pinned; the compile-as-survey verification step is the safety net the phase itself relies on |
+| risk.fit | low | verified against the parent epic: Cross-Child Decisions 1, 2, 3, 8, 14, and 18 all exist in ai-docs/tickets/todo/260909-epic-ws-worker-interpreter-refoundation.md and match this ticket's paraphrase of each |
+| risk.test | low | both phases name concrete verification commands (go build/vet/test, python3 -m unittest discover x2, wsflow mirror regen with -count=1) already exercised successfully once through Phase 1's landing |
+| risk.security_or_contract | moderate | removes a shipped MCP tool contract (seven tools) and shipped git.commit trailer options (mental_model_notes, updated_specs, updated_mental_models) that agents-plugin/agents-plugin-wsflow consumers may already call; mitigated by the AGENTS.md Architecture Rule 4 shipped-surface test but is a real external contract removal |
 
 ## Phases
 
@@ -492,9 +529,16 @@ Scope:
 - Remove `spec:`, `spec-remove:`, and `related-mental-model:` from the ticket
   skeleton, together with the legacy `plans:` / `skeletons:` keys, their
   explanatory paragraph, and the optional `## Spec Impact` section;
-  the `Specs`/`SpecRemoves` ticket fields if nothing else reads them,
+  the `Specs`/`SpecRemoves` ticket fields if nothing else reads them (three
+  other readers exist today: `internal/mcp/server.go`,
+  `internal/wsdoc/legacy_marker.go`, and `internal/wsdoc/references.go` —
+  check each after this phase's own removals land),
   the spec-anchor half of the ticket graph's `related:` resolution, and the
-  spec and mental-model areas from `project_tree` and `doctor`.
+  spec area from `project_tree` (its only dedicated renderer, `renderSpecs`;
+  mental-model has no dedicated area there to remove — it already renders as
+  a plain `ai-docs/` subdirectory) — `doctor` has nothing left to remove here,
+  since its spec/mental-model presence check was already deleted with
+  `doc_coverage.go` in Phase 1.
   `references.trace` is deleted wholesale: the ticket-graph half resolves
   `related:` against spec anchors that no longer exist, and the collateral
   (closed tickets' spec-anchor entries stop resolving) is accepted by epic
@@ -506,11 +550,16 @@ Scope:
   `agents-plugin/skills`, `agents-plugin-wsflow/`, and `agents-plugin-tool/`
   (excluding `.claude/worktrees/`), and record a per-file disposition in the
   Result. Known at authoring: `lead-workflow-manual` (seven call sites),
-  `reference-discovery` (three), `lead-discuss` (two), `lead-add-rule`
+  `reference-discovery` (three), `lead-discuss` (zero today — no "spec" or
+  "mental" text found in `agents-plugin/rsrc/lead-discuss/lead-discuss.md`;
+  the "two" no longer holds), `lead-add-rule`
   (two, plus a routing table into `ai-docs/mental-model/<domain>.md` — its
   rule-persisting destination becomes `ai-docs/manuals/` declared through
   the path-scoped conventions section, and that reroute is this ticket's),
-  `lead-write-ticket`, `impl-playbook.md`, `executor-wrapup.md`,
+  `lead-ticket` (renamed from `lead-write-ticket` by
+  `260909-refactor-lead-surface-collapse-worker-stop-protocol`, done; no
+  spec/mental-model text found there beyond the generic word "spec" in
+  `task-list.md`), `impl-playbook.md`, `executor-wrapup.md`,
   `code-reviewer.md`, `plan-populator-survey` and `plan-populator-research`
   (deleted by the route-facts sibling; if still present, edit), and the
   `note_tools.go` advisory string that names spec and mental-model
@@ -526,7 +575,9 @@ subject is gone; keep and adjust `internal/wsdoc/tickets_graph_test.go`,
 `tools/list` no longer advertises the seven tools and that `convention.read`
 still serves `ticket-conventions`.
 
-Touchpoints: `internal/wsdoc/{spec_discovery,spec_tools,mental_model_discovery,mental_models,references,query_match,legacy_marker,doc_coverage,conventions,project_tree,doctor,tickets,tickets_graph,tickets_template}.go`,
+Touchpoints: `internal/wsdoc/{spec_discovery,spec_tools,mental_model_discovery,mental_models,references,query_match,legacy_marker,conventions,project_tree,tickets,tickets_graph,tickets_template}.go`
+(`doc_coverage.go` was already deleted in Phase 1; `doctor.go` needs no change
+— its spec/mental-model check went with it),
 `internal/wsdoc/conventions/`, `internal/mcp/{server,format}.go`,
 `internal/wsgit/git.go`, `cmd/ws-mcp/main.go`, the seven `rsrc/` stems and their
 skill directories in both packages, both manifest pairs,
@@ -557,7 +608,12 @@ Scope:
   existing dated-snapshot scheme, content unchanged, so the 228 anchors cited
   by closed tickets stay greppable.
 - Update `ai-docs/WORKFLOW.md` and this repository's `AGENTS.md` in one
-  edit: the `## Documentation System` list, `## Code Standards` item 5, and
+  edit: the `## Documentation System` list, `## Code Standards` item 5
+  (currently "Skill/agent authoring", naming `ai-docs/manuals/skill-authoring.md`
+  only — AGENTS.md#L79-82 has no spec/mental-model content, so this bullet's
+  third target does not exist as stated; the only other `## Code Standards`
+  items are simplicity, surgical changes, responsibility check, and
+  testability, none of them spec/mental-model either), and
   the `## Commit Rules` `## Spec` trailer and `renamed-spec:` line, to
   describe the reduced layout. The `### Binding Anchor` section is the
   epic's planned item and is not touched here.
