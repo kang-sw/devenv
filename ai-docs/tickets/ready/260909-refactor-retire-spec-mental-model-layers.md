@@ -351,6 +351,115 @@ Touchpoints: `internal/wsdoc/tickets_mutate.go`, `internal/wsdoc/tickets_verify.
 `agents-plugin/rsrc/{lead-write-ticket,lead-implement,lead-workflow-manual,code-review-correctness}/`
 and the wsflow mirrors, both `manifest.json` pairs.
 
+### Result (e2810a33) - 2026-09-10
+
+Landed as `91621687..e2810a33` on `impl/epic/refound/swipe-panda-food`,
+branched from `epic/refound` at `fb2d7602`.
+
+**What landed.** `91621687` retired the ready spec-address gate: deleted
+`readyGateWarning`, the `spec-address` warning `TicketVerify` added for
+`ready`, and the `ready -> todo/idea` demote tip telling a caller to clear
+`spec:`/`spec-remove:`/`## Spec Impact`. `07facc32` removed `doc-pre-pass`,
+`doc-commit-gate`, and `doc-closeout` from `deriveImplementTodosFromVerdict`
+and deleted their three instruction builders. `1ba8c89e` removed the
+doc-coverage alarm whole: `internal/mcp/doc_coverage_alarm.go`, its two
+`workflow_manual.go` injection sites, the `ferrule` result entry in
+`server.go`, `internal/wsdoc/doc_coverage.go`'s two predicates and their
+`dirHasFrontmatterFile` walker, the `doc_coverage_alarm` config-registry
+entry, `wsconfig.ItemDocCoverageAlarm` with its `RegisterGlobalOnly` call and
+its `builtinConfigDefaults` entry, the tuning-catalog knob, and both
+hand-enumerated `config.tune` schema strings. `9997d584` replaced the
+correctness reviewer's spec-drift checklist item and dropped `doc-closeout`
+from the workflow manual's branch note. `fd50a281` and `e2810a33` are the
+review fix commits (below).
+
+**Unpicking the sage gate.** The coupling the phase named turned out to be
+narrower than the ticket's Prior Art suggested: `sageReviewStageRequirement`
+never read `exemptReadyGateCategories`, only the shared `ticketCategoryRE`
+stem parser, so its behavior needed no change at all. What did couple them was
+justification — the function's doc comment derived its per-stage rule from the
+spec-address gate's exemptions. It now states the rule in full and owns it.
+The map itself has a surviving reader (`missingRouteFacts`), so it is renamed
+`nonImplementationCategories` and re-documented around what it actually means,
+rather than deleted or duplicated. `tickets_sage.go`'s route-facts exemption
+comment is repointed the same way.
+
+**Replacement finding.** `code-review-correctness` item 6 is now: *"Unrecorded
+behavior change: observable behavior changes but no test changes with it —
+tests are the behavioral contract, so the diff leaves no executable record of
+the contract it just changed. Assertion quality and coverage depth stay with
+the Test partition."* The second sentence is load-bearing: without it the item
+collides with the `## Out of scope` line directly below that routes test
+coverage to the Test partition.
+
+**Cross-ticket reconciliation (structural deviation, adapted).** The sibling
+`260909-refactor-lead-surface-collapse-worker-stop-protocol` landed on
+`epic/refound` first (`ce5f30ef`), so two of this phase's named targets no
+longer exist: `lead-write-ticket` is now `lead-ticket` and carries no
+`spec-address-gate` / `missing-spec-address` judgment and no `On: Spec-address
+Check` procedure, and `lead-implement` is retired entirely in favor of
+`ticket-worker`, which already states "Tests are the behavioral contract;
+there is no separate behavior document to keep in sync." Both phase items were
+verified satisfied against the tree, not assumed. This is the reconciliation
+the ticket's `related:` entry anticipated for whichever sibling landed second.
+
+**Deliberately not done in this phase.** `lead-workflow-manual`'s
+`### Spec addressing` concept section and the two Ticket System Concepts lines
+that name the ready spec-address gate are left standing: they are the prose
+twin of the `ticket-conventions.md` Status Flow bullets that Phase 2 owns by
+name, and splitting them across phases would leave the convention and its
+explanation disagreeing. **Phase 2 must remove them with the convention
+bullets.** The doc-mode plumbing (`doc_mode`, `doc_reason`, `need_doc` in the
+resolver verdict and agenda JSON, and their rendered lines) is retained: the
+todos behind it are gone, but changing a published output shape is an
+always-ask decision under `AGENTS.md` `### Approval Protocol` and no phase of
+this ticket scopes it. A worker therefore still reads `Doc Mode: standard` in
+a verdict whose `Next:` line and todo skeleton name no documentation step — a
+cosmetic inconsistency, recorded here so a later API-shape decision can clear
+it.
+
+**Verification** (all output read in full, all green, re-run at `e2810a33`):
+`go build ./...`; `go vet ./...`; `go test ./...` (14 packages ok);
+`python3 -m unittest discover agents-plugin/tests` (55 tests, OK);
+`python3 -m unittest discover agents-plugin-wsflow/tests` (10 tests, OK);
+`WSRSRC_REGEN=1 ... TestGenerateRealManifest` and
+`WS_REGEN_WSFLOW_RSRC=1 ... TestRegenerateWsflowRsrcMirror`, both with
+`-count=1`, after the playbook edits; `diff -r agents-plugin/rsrc
+agents-plugin-wsflow/rsrc` empty. `gofmt -l internal/` reports only the three
+files already dirty at `fb2d7602`.
+
+**Tests.** Both assertions the phase required exist:
+`TestTicketsMoveToReadyNoSpecAddressingWarning` (a non-exempt `ready/` move
+with no spec addressing produces no spec warning and still succeeds) and
+`TestTicketVerifyReadySageGateStillRefusesUnstampedTicket` (the sage gate is
+unchanged). `TestTicketVerifyReadyEmitsNoSpecAddressWarning` and
+`TestTicketsVerifyNoSpecAddressingIsClean` cover the same removal from
+`tickets.verify` and end-to-end through `git.commit`. The six spec-addressing
+move tests collapse into one negative test rather than being deleted, so a
+reintroduced gate fails; `TestDeriveImplementTodos` now pins the full todo key
+list for the same reason. Deleted with their subject:
+`internal/mcp/doc_coverage_alarm_test.go` and
+`internal/wsdoc/doc_coverage_test.go`.
+
+**Review.** One full-scope reviewer, the allocation the route set. Round 1:
+3 Important, 6 Minor, no Critical — all three Important were the same defect
+in three places, an agent-facing string that outlived its subject
+(`route.resolve_implement`'s `Next:` line promising "standard documentation
+gates"; the final action gate telling a worker to verify a "standard
+documentation closeout"; `tickets.verify`'s tool description advertising
+"spec-address is reported as a warning only"). All [fixed] in `fd50a281`,
+along with a gofmt regression and four stale comments naming the deleted
+`readyGateWarning`. The final gate's documentation clause was removed from
+*both* doc modes, not only the standard one, which left `DocMode`/`DocReason`
+without a reader on `implementTodoVerdict` and took them off that struct.
+Round 2 (verification-only): clean with 1 Minor — the round-1 comment fix had
+substituted a new wrong claim (`sage-review-freshness` is one of two surviving
+warning producers, not the only one); [fixed] in `e2810a33` by stating the
+invariant without naming a producer. [won't fix: predates this range, is not
+produced by this change, and a `.gitignore` edit is outside the phase's
+touchpoints] — the untracked `agents-plugin-tool/ws-mcp` build artifact,
+reported to the lead instead.
+
 ### Phase 2: Remove the tools, the playbooks, and the conventions
 
 Goal: the spec and mental-model layers have no code, no tool surface, no
