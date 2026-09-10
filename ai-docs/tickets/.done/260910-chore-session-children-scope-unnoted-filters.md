@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 90110a3a7cd7b32e
 sage-review-completeness-reviewed: 90110a3a7cd7b32e
+completed: 2026-09-10
 ---
 
 # Add scope and unnoted filters to session.children so the lead-run worker-key lookup reads one row, not the whole subtree
@@ -96,3 +97,49 @@ Verify on one installed-build cycle that the lookup returns a single row.
 
 Rejected: pruning resolved keys automatically (see Decisions) — the fix is a
 narrowing filter, not deletion.
+
+### Result (00f8f976) - 2026-09-10
+
+Added optional `scope` (`control`, `delegate`, `any`) and `unnoted_only`
+filters to the existing handler and MCP schema. Invalid filter values return
+an error. Filtering happens after traversal, preserving matching descendants
+under excluded ancestors. `any` includes leaf scope. No records or notes are
+pruned. `lead-run` now requests the unnoted control child explicitly; the
+manifest and byte-identical wsflow mirror were regenerated.
+
+The ticket's whole-subtree shorthand does not describe the existing default:
+no optional arguments return immediate live children, while `depth: 0`
+requests the full subtree. Both existing behaviors remain unchanged, including
+response fields and ordering.
+
+Verification:
+
+- New filter tests initially failed because the implementation did not yet
+  honor the new fields; after implementation, `go test ./internal/mcp -run
+  TestSessionChildren -count=1` passed. Coverage includes each scope, toggle
+  on/off, omission defaults, nested matches, dead keys, invalid values, and
+  text/JSON output.
+- `TMPDIR=/private/tmp go test ./...` passed. The initial plain command failed
+  in an unrelated absolute-ticket-path test under macOS's `/var` symlink
+  alias; no source or test change was made for that failure. Follow-up:
+  `260910-bug-route-ticket-absolute-path-symlink-alias`.
+- `scripts/smoke-ws-mcp.sh ..` passed.
+- Both documented rsrc manifest/mirror regeneration commands passed with
+  `-count=1`; `python3 -m unittest discover agents-plugin-wsflow/tests`
+  passed all 10 tests; `git diff --check` passed.
+- Installed-cache launcher source-build cycle passed using the installed
+  `ws/0.45.2/bin/ws-mcp-launcher.py`, its existing local-runtime marker,
+  a temporary isolated session cache, and current source rsrc via
+  `WS_RSRC_ROOT`. The schema advertised both fields. Rendering a noted old
+  worker, an unnoted reviewer, and a fresh worker produced three children;
+  the filtered lookup returned exactly one unnoted control child in JSON
+  and text. This validates the installed launcher and current runtime;
+  the existing host connection was not reconnected and installed prompt
+  files were not refreshed.
+
+Independent full-scope review of `epic/refound..00f8f976` was clean, including
+fresh-reader audit, committed mirror/digest verification, and an independent
+focused test run. No findings remain. Source inputs stayed unchanged after
+that verified commit. Implementation is retained on
+`impl/epic/refound/sweat-thaw-thumb`; merge into `epic/refound` belongs to the
+lead.
