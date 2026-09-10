@@ -34,7 +34,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme, getSelectListTheme } from "@earendil-works/pi-coding-agent";
 import { lastActivityAt, resolveAgentId, type RpcAgentRegistry } from "./spawner.ts";
 import { touchOwnership } from "./agent-storage.ts";
-import { classifyRegistryRowState, rowName, type AgentRowState } from "./agent-widget.ts";
+import { classifyRegistryRowState, formatCompactDuration, formatLatestInputTokens, rowName, type AgentRowState } from "./agent-widget.ts";
 import { resolveChildLiveness } from "./ask.ts";
 import {
   ConversationViewComponent,
@@ -45,7 +45,7 @@ import {
   type ConversationItem,
   type ConversationViewTui,
 } from "./conversation-view.ts";
-import { loadHostPiTui, SelectList, truncateToWidth, type Component, type MarkdownTheme, type SelectItem, type SelectListTheme } from "./pi-tui.ts";
+import { loadHostPiTui, SelectList, truncateToWidth, visibleWidth, type Component, type MarkdownTheme, type SelectItem, type SelectListTheme } from "./pi-tui.ts";
 import type { SpawnRole } from "./process-role.ts";
 
 // ---------------------------------------------------------------------------
@@ -233,41 +233,108 @@ const LIVE_STATE_LABEL: Record<AgentRowState, string> = {
 
 /**
  * One row per registry child, running AND dormant. Tiers 1-3 reuse
- * `agent-widget.ts`'s own `classifyRegistryRowState`/`rowName` and its
- * three-state ordering (awaiting-owner, awaiting-approval, running by
- * elapsed descending) verbatim. Tier 4 is picker-only: every `undefined`
- * (dormant) record, ordered by `spawner.ts`'s `lastActivityAt`, most-recent
- * first — the widget itself never rows a dormant child at all. Unlike
+ * `agent-widget.ts`'s own `classifyRegistryRowState` and its three-state
+ * ordering (awaiting-owner, awaiting-approval, running by elapsed
+ * descending) verbatim. Tier 4 is picker-only: every `undefined` (dormant)
+ * record, ordered by `spawner.ts`'s `lastActivityAt`, most-recent first —
+ * the widget itself never rows a dormant child at all. Unlike
  * `agent-widget.ts`'s `buildAgentRows`, this reads the registry alone (no
  * `ThreadRecord` union) — the ticket scopes the picker to "the registry's
- * children," not `ask.ts`'s pending-thread rows (see the plan's Out of
- * Scope).
+ * children," not `ask.ts`'s pending-thread rows.
  */
-export function buildAuditPickerItems(registry: RpcAgentRegistry, now: number): SelectItem[] {
-  const live: { agentId: string; label: string; state: AgentRowState; elapsedMs: number }[] = [];
-  const dormant: { agentId: string; label: string; lastActivity: number }[] = [];
+interface AuditPickerRow {
+  agentId: string;
+  identity: string;
+  status: string;
+  model: string;
+  latestInput: string;
+  activity: string;
+  state?: AgentRowState;
+  elapsedMs: number;
+  lastActivity?: number;
+}
+
+/** Alias-first audit identity; otherwise the eight-character human-facing ID. */
+function auditIdentity(record: { agentId: string; alias?: string }): string {
+  return record.alias ?? record.agentId.slice(0, 8);
+}
+
+function elapsedSince(now: number, timestamp: number): number {
+  return Number.isFinite(timestamp) ? Math.max(0, now - timestamp) : 0;
+}
+
+/**
+ * Fits the three non-optional fields without ever leaving a partial telemetry
+ * value behind. At very narrow widths the identity is the expendable part of
+ * this protected group; only after that does normal whole-row truncation run.
+ */
+function fitProtectedAuditFields(identity: string, status: string, activity: string, width: number): string {
+  if (width <= 0) return "";
+  const separator = " · ";
+  const suffix = `${status}${separator}${activity}`;
+  const remainingIdentity = width - visibleWidth(separator) - visibleWidth(suffix);
+  if (remainingIdentity >= 1) return `${truncateToWidth(identity, remainingIdentity)}${separator}${suffix}`;
+  return truncateToWidth(`${identity}${separator}${suffix}`, width);
+}
+
+/** Formats one picker row, dropping whole optional telemetry fields in order. */
+export function formatAuditPickerLabel(row: Omit<AuditPickerRow, "agentId" | "state" | "elapsedMs" | "lastActivity">, width = Number.POSITIVE_INFINITY): string {
+  const separator = " · ";
+  const complete = [row.identity, row.status, row.model, row.latestInput, row.activity].join(separator);
+  if (visibleWidth(complete) <= width) return complete;
+  const withoutTokens = [row.identity, row.status, row.model, row.activity].join(separator);
+  if (visibleWidth(withoutTokens) <= width) return withoutTokens;
+  const protectedFields = [row.identity, row.status, row.activity].join(separator);
+  if (visibleWidth(protectedFields) <= width) return protectedFields;
+  return fitProtectedAuditFields(row.identity, row.status, row.activity, width);
+}
+
+export function buildAuditPickerItems(registry: RpcAgentRegistry, now: number, labelWidth = Number.POSITIVE_INFINITY): SelectItem[] {
+  const live: AuditPickerRow[] = [];
+  const dormant: AuditPickerRow[] = [];
 
   for (const record of registry.values()) {
     const state = classifyRegistryRowState(record);
-    const name = rowName(record);
+    const identity = auditIdentity(record);
+    const model = record.telemetry?.model ?? record.observedModel ?? "—";
+    const latestInput = formatLatestInputTokens(record.telemetry?.latestInput ?? record.observedLatestInput);
     if (state === undefined) {
-      dormant.push({ agentId: record.agentId, label: `${name} · dormant`, lastActivity: lastActivityAt(record) });
+      const activityAt = lastActivityAt(record);
+      dormant.push({
+        agentId: record.agentId,
+        identity,
+        status: "dormant",
+        model,
+        latestInput,
+        activity: `last active ${formatCompactDuration(elapsedSince(now, activityAt))} ago`,
+        elapsedMs: elapsedSince(now, activityAt),
+        lastActivity: activityAt,
+      });
       continue;
     }
-    const elapsedMs = Math.max(0, now - (record.runStartedAt ?? now));
-    live.push({ agentId: record.agentId, label: `${name} · ${LIVE_STATE_LABEL[state]}`, state, elapsedMs });
+    const elapsedMs = elapsedSince(now, record.runStartedAt ?? now);
+    live.push({
+      agentId: record.agentId,
+      identity,
+      status: LIVE_STATE_LABEL[state],
+      model,
+      latestInput,
+      activity: `running for ${formatCompactDuration(elapsedMs)}`,
+      state,
+      elapsedMs,
+    });
   }
 
   live.sort((a, b) => {
-    const rankDiff = LIVE_STATE_RANK[a.state] - LIVE_STATE_RANK[b.state];
+    const rankDiff = LIVE_STATE_RANK[a.state!] - LIVE_STATE_RANK[b.state!];
     return rankDiff !== 0 ? rankDiff : b.elapsedMs - a.elapsedMs;
   });
-  dormant.sort((a, b) => b.lastActivity - a.lastActivity);
+  dormant.sort((a, b) => b.lastActivity! - a.lastActivity!);
 
-  return [
-    ...live.map(({ agentId, label }) => ({ value: agentId, label })),
-    ...dormant.map(({ agentId, label }) => ({ value: agentId, label })),
-  ];
+  return [...live, ...dormant].map(({ agentId, identity, status, model, latestInput, activity }) => ({
+    value: agentId,
+    label: formatAuditPickerLabel({ identity, status, model, latestInput, activity }, labelWidth),
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -343,19 +410,49 @@ const AUDIT_OVERLAY_OPTIONS = { overlay: true, overlayOptions: { width: "80%", m
  * without changing the list's selection/cancel behavior. The wrapper forwards
  * all input directly to the list and only requests a repaint after it acts.
  */
-function wrapAuditPicker(list: SelectList, tui: ConversationViewTui, header: string): Component {
+function wrapAuditPicker(
+  itemsForLabelWidth: (width: number) => SelectItem[],
+  tui: ConversationViewTui,
+  header: string,
+  theme: SelectListTheme,
+  done: (result: string | undefined) => void,
+): Component {
+  let labelWidth = -1;
+  let selectedValue: string | undefined;
+  let list: SelectList | undefined;
+
+  function ensureList(nextLabelWidth: number): SelectList {
+    if (list && nextLabelWidth === labelWidth) return list;
+    const items = itemsForLabelWidth(nextLabelWidth);
+    const next = new SelectList(items, Math.min(10, items.length), theme);
+    const selectedIndex = selectedValue === undefined ? 0 : items.findIndex((item) => item.value === selectedValue);
+    next.setSelectedIndex(selectedIndex >= 0 ? selectedIndex : 0);
+    next.onSelectionChange = (item) => { selectedValue = item.value; };
+    next.onSelect = (item) => done(item.value);
+    next.onCancel = () => done(undefined);
+    list = next;
+    labelWidth = nextLabelWidth;
+    return next;
+  }
+
   return {
     render(width: number): string[] {
       const w = Math.max(1, width);
       const innerWidth = Math.max(1, w - 4);
-      const innerLines = [header, "", ...list.render(innerWidth)].map((line) => truncateToWidth(line, innerWidth));
+      // SelectList reserves two columns for its cursor plus two safety
+      // columns before truncating a value. Give the formatter that exact
+      // budget so model/token values are omitted whole rather than clipped.
+      const currentList = ensureList(Math.max(0, innerWidth - 4));
+      const innerLines = [header, "", ...currentList.render(innerWidth)].map((line) => truncateToWidth(line, innerWidth));
       return wrapInBorder(innerLines, w, innerWidth);
     },
     invalidate(): void {
-      list.invalidate();
+      list?.invalidate();
     },
     handleInput(data: string): void {
-      list.handleInput(data);
+      const currentList = ensureList(labelWidth < 0 ? 0 : labelWidth);
+      currentList.handleInput(data);
+      selectedValue = currentList.getSelectedItem()?.value ?? selectedValue;
       tui.requestRender();
     },
   };
@@ -386,12 +483,14 @@ export async function openPicker(ctx: AuditUiCtx & { ui?: { custom?: unknown } }
     // best effort — mirrors `ask.ts`'s own `getMarkdownTheme()` precedent.
   }
   return (ctx as unknown as AuditCustomUiCtx).ui.custom<string | undefined>(
-    (tui, hostTheme, _keybindings, done) => {
-      const list = new SelectList(items, Math.min(10, items.length), theme ?? IDENTITY_SELECT_LIST_THEME);
-      list.onSelect = (item) => done(item.value);
-      list.onCancel = () => done(undefined);
-      return wrapAuditPicker(list, tui, hostTheme?.fg?.("accent", "ws audit: select subagent") ?? "ws audit: select subagent");
-    },
+    (tui, hostTheme, _keybindings, done) =>
+      wrapAuditPicker(
+        (labelWidth) => buildAuditPickerItems(rpcRegistry, Date.now(), labelWidth),
+        tui,
+        hostTheme?.fg?.("accent", "ws audit: select subagent") ?? "ws audit: select subagent",
+        theme ?? IDENTITY_SELECT_LIST_THEME,
+        done,
+      ),
     AUDIT_OVERLAY_OPTIONS,
   );
 }

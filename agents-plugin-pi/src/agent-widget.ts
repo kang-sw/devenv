@@ -145,7 +145,7 @@ function isLiveThreadStatus(status: ThreadRecord["status"]): boolean {
   return status === "pending" || status === "open";
 }
 
-/** `Math.max(0, deltaMs)`, but a malformed/missing clock (`Date.parse` of a bad `touchedAt`, review relay #1 Minor) collapses to 0 instead of propagating `NaN` through `formatElapsed`. */
+/** `Math.max(0, deltaMs)`, but a malformed/missing clock (`Date.parse` of a bad `touchedAt`, review relay #1 Minor) collapses to 0 instead of propagating `NaN` through `formatCompactDuration`. */
 function clampElapsed(deltaMs: number): number {
   return Number.isFinite(deltaMs) ? Math.max(0, deltaMs) : 0;
 }
@@ -256,8 +256,8 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
 }
 
 /** `Xs` under a minute, `Xm` under an hour, else `XhYYm` — a compact, always-non-negative elapsed label. */
-function formatElapsed(elapsedMs: number): string {
-  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+export function formatCompactDuration(elapsedMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(Number.isFinite(elapsedMs) ? elapsedMs / 1000 : 0));
   if (totalSeconds < 60) return `${totalSeconds}s`;
   const totalMinutes = Math.floor(totalSeconds / 60);
   if (totalMinutes < 60) return `${totalMinutes}m`;
@@ -273,7 +273,8 @@ function isAttentionState(state: AgentRowState): boolean {
   return state === "awaiting-owner" || state === "idle-awaiting-owner";
 }
 
-function formatInputTokens(tokens: number | undefined): string {
+/** Latest assistant-call input tokens, never a cumulative total. */
+export function formatLatestInputTokens(tokens: number | undefined): string {
   return tokens === undefined ? "—" : `${(tokens / 1_000).toFixed(1)}k`;
 }
 
@@ -285,10 +286,10 @@ function formatEstimatedUsd(usd: number | undefined): string {
 function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, emphasizeAttention = false, theme?: AgentWidgetTheme): string {
   const primary = row.answerHint ? `/answer ${row.answerDisplay ?? row.name}` : row.name;
   const stateLabel = STATE_LABEL[row.state];
-  const base = `${primary} · ${row.role} · ${stateLabel} · ${formatElapsed(row.elapsedMs)}`;
+  const base = `${primary} · ${row.role} · ${stateLabel} · ${formatCompactDuration(row.elapsedMs)}`;
   const model = row.model ?? "—";
   const effort = row.effort ?? "—";
-  const input = formatInputTokens(row.latestInput);
+  const input = formatLatestInputTokens(row.latestInput);
   const estimate = `$${formatEstimatedUsd(row.estimatedUsd)}`;
   const telemetry = ` · ${model} (${effort}) · ${input} · ${estimate}`;
   const protectedHint = row.answerHint ?? row.inspectionHint;
