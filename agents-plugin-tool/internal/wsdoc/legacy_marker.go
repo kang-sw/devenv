@@ -35,16 +35,11 @@ var (
 )
 
 // specImpactHeading is the section heading whose body the resolver harvests. It
-// is matched as a loose prefix, deliberately: `readyGateWarning` in
-// tickets_mutate.go opens on exactly the same prefix test, and the two sites
-// must agree on what a Spec Impact section is. A ticket the ready gate accepts
-// as spec-addressed must never then have its markers reported as orphaned.
-//
-// Loose is also the safe direction on its own terms — see collectLegacyMarkerRefs:
-// a spurious harvest can only add a bystander ticket to the *matched* branch,
-// while a missed harvest produces a "strip it" instruction against a live
-// contract. Do not tighten this to an exact-form match without changing the
-// ready gate in the same commit.
+// is matched as a loose prefix, deliberately: loose is the safe direction here —
+// see collectLegacyMarkerRefs — because a spurious harvest can only add a
+// bystander ticket to the *matched* branch, while a missed harvest produces a
+// "strip it" instruction against a live contract. Do not tighten this to an
+// exact-form match.
 const specImpactHeading = "## Spec Impact"
 
 // maxMarkdownBlockIndent is CommonMark's limit: a block-level construct may be

@@ -258,7 +258,11 @@ func TestTicketVerifyCloseDateFieldPresentPasses(t *testing.T) {
 	}
 }
 
-func TestTicketVerifySpecAddressIsSoftWarnOnly(t *testing.T) {
+// TestTicketVerifyReadyEmitsNoSpecAddressWarning pins the retired ready
+// spec-address gate from tickets.verify's side: a ready/ ticket that names no
+// spec passes clean, with neither a hard finding nor a warning about spec
+// addressing.
+func TestTicketVerifyReadyEmitsNoSpecAddressWarning(t *testing.T) {
 	root := t.TempDir()
 	body := "---\n" +
 		"title: No spec addressing\n" +
@@ -272,26 +276,44 @@ func TestTicketVerifySpecAddressIsSoftWarnOnly(t *testing.T) {
 		t.Fatalf("TicketVerify returned error: %v", err)
 	}
 	if !result.OK {
-		t.Fatalf("result.OK = false, want true: spec-address must warn, not block; findings=%#v", result.Findings)
+		t.Fatalf("result.OK = false, want true for a ready ticket with no spec addressing; findings=%#v", result.Findings)
 	}
 	if guardrails := findingGuardrails(t, result.Findings); containsGuardrail(guardrails, "spec-address") {
-		t.Fatalf("findings = %#v, spec-address must never be a hard finding", result.Findings)
+		t.Fatalf("findings = %#v, the spec-address gate is retired", result.Findings)
 	}
-	warningGuardrails := make([]string, 0, len(result.Warnings))
 	for _, w := range result.Warnings {
-		warningGuardrails = append(warningGuardrails, w.Guardrail)
-	}
-	if !containsGuardrail(warningGuardrails, "spec-address") {
-		t.Fatalf("warnings = %#v, want a spec-address warning", result.Warnings)
+		if w.Guardrail == "spec-address" {
+			t.Fatalf("warnings = %#v, the spec-address gate is retired", result.Warnings)
+		}
 	}
 }
 
-func TestTicketVerifySpecAddressExemptCategorySkipsWarning(t *testing.T) {
+// TestTicketVerifyReadySageGateStillRefusesUnstampedTicket is the other half of
+// the same removal: unpicking the spec-address gate from the shared
+// category-keyed mechanism must leave the sage gate exactly as it was, so an
+// actionable ready/ ticket with no sage-review stamp is still a hard finding.
+func TestTicketVerifyReadySageGateStillRefusesUnstampedTicket(t *testing.T) {
 	root := t.TempDir()
-	// research/workset/epic categories are exempt from the ready spec-address
-	// gate (exemptReadyGateCategories); research is also exempt from both
-	// sage-review stages (sageReviewStageRequirement), so this fixture is a
-	// clean pass with no findings and no warnings.
+	mustWrite(t, root, "ai-docs/tickets/ready/260723-feat-unstamped.md",
+		"---\ntitle: Unstamped\n---\n\nBody.\n")
+
+	result, err := TicketVerify(root, []string{"ai-docs/tickets/ready/260723-feat-unstamped.md"})
+	if err != nil {
+		t.Fatalf("TicketVerify returned error: %v", err)
+	}
+	if result.OK {
+		t.Fatalf("result = %#v, want a hard finding: the sage gate still refuses an unstamped ready ticket", result)
+	}
+	if guardrails := findingGuardrails(t, result.Findings); !containsGuardrail(guardrails, "ready-sage-posture") {
+		t.Fatalf("findings = %#v, want the ready-sage-posture guardrail", result.Findings)
+	}
+}
+
+func TestTicketVerifyReadyExemptCategoryIsClean(t *testing.T) {
+	root := t.TempDir()
+	// research is exempt from both sage-review stages
+	// (sageReviewStageRequirement), so this fixture is a clean pass with no
+	// findings and no warnings.
 	body := "---\ntitle: Research ticket\n---\n\nBody.\n"
 	mustWrite(t, root, "ai-docs/tickets/ready/260723-research-nospec.md", body)
 

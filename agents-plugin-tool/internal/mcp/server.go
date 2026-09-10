@@ -462,7 +462,6 @@ func builtinConfigDefaults() map[string]string {
 		wsconfig.ItemWorkflowPreferMercenary: "hide",
 		wsconfig.ItemSageReview:              "auto",
 		wsconfig.ItemBootstrapAlarm:          "on",
-		wsconfig.ItemDocCoverageAlarm:        "on",
 	}
 }
 
@@ -857,8 +856,8 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			}
 			return toolTextResponse(req.ID, fmt.Sprintf("prompt override set: %s/%s (scope: %s)\n", pointID, storedHarness, resolvedScope), nil)
 		default:
-			// scalar resolver-backed knob (subagent / mercenary / bootstrap_alarm /
-			// doc_coverage_alarm). Resolver.Set enforces global-only + session-key.
+			// scalar resolver-backed knob (subagent / mercenary / bootstrap_alarm).
+			// Resolver.Set enforces global-only + session-key.
 			value, _ := params.Arguments["value"].(string)
 			value = strings.ToLower(strings.TrimSpace(value))
 			if err := validateEnumValue("config.tune", entry.ValueFields, "value", value); err != nil {
@@ -1786,15 +1785,6 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 			text += "\n" + warning + "\n"
 		}
 	}
-	{
-		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-		warning := docCoverageWarning(canonical, &resolver, "")
-		if warning != "" {
-			result["doc_coverage_alarm"] = warning
-			text += "\n" + warning + "\n"
-		}
-	}
 	if wantsJSON(arguments) {
 		return toolJSONResponse(id, result, nil)
 	}
@@ -2181,20 +2171,6 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		},
 		ValueFields: bootstrapEntry.ValueFields,
 		Current:     currentWorkflowPreference(resolver, wsconfig.ItemBootstrapAlarm),
-	})
-
-	docCoverageEntry := registryEntryByKey(wsconfig.ItemDocCoverageAlarm)
-	appendKnob(docCoverageEntry, tuningKnob{
-		ID:          "doc_coverage_alarm",
-		Kind:        "workflow_preference",
-		Description: "Select whether the session-bootstrap doc-coverage warning fires when ai-docs/spec/ or ai-docs/mental-model/ has no frontmatter-bearing .md file.",
-		Writer:      tuningWriter{Tool: docCoverageEntry.WriterTool, FixedArguments: map[string]string{"key": docCoverageEntry.Key}},
-		Reset: &tuningWriter{
-			Tool:           docCoverageEntry.ResetTool,
-			FixedArguments: map[string]string{"key": docCoverageEntry.Key, "reset": "true"},
-		},
-		ValueFields: docCoverageEntry.ValueFields,
-		Current:     currentWorkflowPreference(resolver, wsconfig.ItemDocCoverageAlarm),
 	})
 
 	agentTiers, err := currentAgentTierMappings()
@@ -3733,11 +3709,11 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "config.tune",
-			"description": "Write one ws config knob, selected by its key (e.g. workflow.prefer_subagent, bootstrap_alarm, doc_coverage_alarm, workflow.prefer_mercenary, agents.tier, prompt.<pointId>). Call config.list first for each key's exact value domain, scope rules, and harness applicability. value is a string for scalar knobs and an object ({tier, backend, model, effort}) for agents.tier. scope is optional and backstops to the key's declared default; harness is load-bearing for prompt.* and agents.tier and warning-only (ignored) for keys that do not vary by harness. reset: true drops a knob's override back to its builtin/inherited default (only for keys that support reset). session_key is required at dispatch for lead-authority keys and prompt.* keys. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
+			"description": "Write one ws config knob, selected by its key (e.g. workflow.prefer_subagent, bootstrap_alarm, workflow.prefer_mercenary, agents.tier, prompt.<pointId>). Call config.list first for each key's exact value domain, scope rules, and harness applicability. value is a string for scalar knobs and an object ({tier, backend, model, effort}) for agents.tier. scope is optional and backstops to the key's declared default; harness is load-bearing for prompt.* and agents.tier and warning-only (ignored) for keys that do not vary by harness. reset: true drops a knob's override back to its builtin/inherited default (only for keys that support reset). session_key is required at dispatch for lead-authority keys and prompt.* keys. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"key":         stringProperty("Config knob key to write, e.g. workflow.prefer_subagent, bootstrap_alarm, doc_coverage_alarm, workflow.prefer_mercenary, agents.tier, or prompt.<pointId>. See config.list for the supported set."),
+					"key":         stringProperty("Config knob key to write, e.g. workflow.prefer_subagent, bootstrap_alarm, workflow.prefer_mercenary, agents.tier, or prompt.<pointId>. See config.list for the supported set."),
 					"value":       anyProperty("New value. A string for scalar knobs (e.g. on/off), or an object {tier, backend, model, effort} for agents.tier. Omit when reset is true."),
 					"scope":       enumStringProperty("Optional storage scope. When omitted the write lands in the key's declared default scope. Global-only keys reject non-global scopes; agents.tier only supports project scope.", wsconfig.ScopeSchemaEnum()),
 					"harness":     stringProperty("Optional harness selector. Load-bearing for prompt.* (claude, codex, pi, or * for all) and agents.tier (alias key); ignored for keys that do not vary by harness. When omitted for a harness-applicable key, defaults to the current session's detected harness."),
@@ -4141,7 +4117,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.verify",
-			"description": "Run the ticket-write guardrails (stem/status-dir, frontmatter fence integrity, ready-landing sage-review posture, phase/Result heading well-formedness, close date-field presence) against ticket-shaped paths without staging or committing. These are the same hard guardrails git.commit enforces before it will commit a ticket-touching change; spec-address is reported as a warning only, never a block. Non-ticket paths are silently skipped. Use standalone for mid-edit red/green feedback before staging.",
+			"description": "Run the ticket-write guardrails (stem/status-dir, frontmatter fence integrity, ready-landing sage-review posture, phase/Result heading well-formedness, close date-field presence) against ticket-shaped paths without staging or committing. These are the same hard guardrails git.commit enforces before it will commit a ticket-touching change; soft warnings are reported but never block. Non-ticket paths are silently skipped. Use standalone for mid-edit red/green feedback before staging.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

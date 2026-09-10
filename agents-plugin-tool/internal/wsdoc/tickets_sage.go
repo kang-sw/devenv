@@ -183,8 +183,8 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 	// that reaches ready/ without them cannot be routed at all, and spending a
 	// completeness reviewer on it first would review a ticket that is
 	// structurally incomplete. Presence only — the reviewer judges the values.
-	// The categories exempt from the spec-address gate are exempt here for the
-	// same reason: they carry no phases and never reach an implementation run.
+	// nonImplementationCategories are exempt here because they carry no phases
+	// and never reach an implementation run, so they have no facts to carry.
 	if missingRouteFacts(ticketAbs, stem) {
 		return SageGateResult{Action: "stop_missing_route_facts"}, nil
 	}

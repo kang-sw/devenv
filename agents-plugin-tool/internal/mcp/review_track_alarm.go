@@ -16,8 +16,8 @@ import (
 //     instead of an explicit declaration.
 //
 // This function is stateless and always safe to call — like
-// docCoverageWarning, it is not itself the once-per-session gate. The two
-// workflow_manual.go wiring sites own the once-per-session suppression via
+// bootstrapStalenessWarning, it is not itself the once-per-session gate. The
+// two workflow_manual.go wiring sites own the once-per-session suppression via
 // sessionRecord.ReviewTrackNudgeShown / setReviewTrackNudgeShown.
 func reviewTrackNudge(root string) string {
 	if wsreview.ReadAgentsReviewPolicy(root).ReviewTrack != "" {

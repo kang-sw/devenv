@@ -44,7 +44,7 @@ type VerifyAdvisory struct {
 
 // VerifyResult aggregates every guardrail outcome across the paths passed to
 // TicketVerify. OK is true only when Findings is empty; Warnings never affect
-// OK (spec-address is soft-warn only, per the ticket's stated posture), and
+// OK (they report suspicions and open loops, not guardrail violations), and
 // neither do Advisories.
 type VerifyResult struct {
 	OK         bool
@@ -187,12 +187,6 @@ func verifyTicketFile(root, path, status, stem string, result *VerifyResult) {
 
 	for _, problem := range ticketPhaseHeadingProblems(text) {
 		addFinding("phase-result-heading", problem)
-	}
-
-	if status == "ready" {
-		if warning := readyGateWarning(absPath, stem); warning != "" {
-			addWarning("spec-address", warning)
-		}
 	}
 }
 

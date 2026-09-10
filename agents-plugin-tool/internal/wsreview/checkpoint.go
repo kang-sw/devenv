@@ -20,8 +20,8 @@ const SizeThresholdCommits = 20
 
 // CheckpointNudge computes the cheap review-watermark checkpoint advisory.
 //
-// It is pure, root-in/string-out, and fail-open — mirroring
-// doc_coverage_alarm.go's docCoverageWarning shape — and it NEVER spawns a
+// It is pure, root-in/string-out, and fail-open — mirroring the other
+// session-bootstrap advisory builders — and it NEVER spawns a
 // review and NEVER appends to the ledger; it only reads (wsreview.Frontier,
 // not wsreview.Bootstrap). This is the ledger-honesty guard: a checkpoint
 // recompute/nudge must never grow the ledger file. Only the explicit,
