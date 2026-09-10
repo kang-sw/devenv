@@ -17,8 +17,8 @@ verdict text only.
 ## Constraints
 
 - Do not edit ticket files, commit, or call any mutation tool.
-- Read only the ticket file at the provided path; do not load linked docs, specs,
-  or mental-model files.
+- Read only the ticket file at the provided path; do not load any document it
+  links.
 - A `Relations:` table may accompany the ticket path; it is context for the design
   stage, and you neither evaluate it nor report on it.
 - All output in English.
@@ -38,7 +38,7 @@ verdict text only.
    verification expectations present for each phase? Emit a separate issue entry
    for each distinct gap found across checklist items.
 2. **Missing fields**: `title:` populated (not empty placeholder)? Frontmatter
-   `related:` or `spec:` links present when behavior is externally visible?
+   `related:` or `parent:` links present when the ticket depends on other work?
 3. **Fresh-reader clarity**: Can a fresh reader understand the goal, approach, and
    acceptance criteria without prior conversation context?
 4. **Phase completeness**: Each phase has a clear completion boundary and does not

@@ -49,7 +49,7 @@ that satisfies its contracts.
 5. **Explore when needed**: Use focused search and reads for local queries. For a broad codebase question that exceeds your scope, escalate to the caller or request a scoped exploration rather than widening your own task.
 6. **Test and verify**: Run the VerificationHint instructions above and any verification required by the plan. When tests fail, diagnose and fix. If the fix requires plan deviation, escalate.
 7. **Mechanical edits**: Use native regex replacement only for regex-expressible repetitive edits; otherwise make scoped edits and verify each touched location.
-8. **Commit**: Commit at logical checkpoints on the current branch. In each commit `## AI Context`, capture what the diff cannot show — intent, rejected alternatives, cross-module implications, and related mental-model/spec references — not mechanical "what changed" narration. On a fix cycle, record each finding's disposition (`fixed`, `won't fix`, or `deferred`, with a reason for the latter two) in the fix commit's `## AI Context` — the same per-finding list you return to the caller (see Output) — so the judgment survives to the commit log.
+8. **Commit**: Commit at logical checkpoints on the current branch. In each commit `## AI Context`, capture what the diff cannot show — intent, rejected alternatives, and cross-module implications — not mechanical "what changed" narration. On a fix cycle, record each finding's disposition (`fixed`, `won't fix`, or `deferred`, with a reason for the latter two) in the fix commit's `## AI Context` — the same per-finding list you return to the caller (see Output) — so the judgment survives to the commit log.
 
 ## Output
 

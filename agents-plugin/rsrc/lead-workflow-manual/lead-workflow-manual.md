@@ -134,8 +134,8 @@ Use `{{.McpNamespace}}/runtime.read` for runtime compatibility checks and featur
 ### Reference discovery
 
 Use the {{.McpNamespace}}-owned ticket discovery tools for path/status lookup
-before shell search. Use native file reads after a
-discovery tool returns the path to inspect or edit.
+before shell search. Use native file reads after a discovery tool returns the
+path to inspect or edit.
 
 Prefer:
 - `{{.McpNamespace}}/tickets.query(status: "ready")` for implementation-ready discovery; use `status: "todo"` for accepted backlog.

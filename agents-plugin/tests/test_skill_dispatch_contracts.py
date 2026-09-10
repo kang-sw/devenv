@@ -34,7 +34,19 @@ RETIRED_SKILL_NAMES = (
     "lead-implement",
     "lead-verify-discussion",
     "lead-write-ticket",
+    # retired with the spec and mental-model document layers
+    "lead-backfill-docs",
+    "lead-write-spec",
+    "lead-update-spec",
+    "lead-forge-spec",
+    "lead-forge-mental-model",
+    "mental-model-updater",
+    "doc-gap-discovery",
 )
+
+
+# Files exempt from RETIRED_SKILL_NAMES: see the comment at the skip site.
+RETIRED_NAME_EXEMPT_FILES = frozenset({"AGENTS.template.md", "WORKFLOW.md"})
 
 
 class SkillDispatchContractsTest(unittest.TestCase):
@@ -47,6 +59,14 @@ class SkillDispatchContractsTest(unittest.TestCase):
         for root in (SKILLS_DIR, RSRC_DIR):
             for path in sorted(root.rglob("*")):
                 if not path.is_file() or path.suffix not in {".md", ".json"}:
+                    continue
+                if path.name in RETIRED_NAME_EXEMPT_FILES:
+                    # The bootstrap template and guide carry a versioned
+                    # migration checklist whose past entries name the skills
+                    # that were live when each entry was written; rewriting
+                    # history there would break replay for projects still
+                    # below that version. Their own migration item retires
+                    # the entries; until then they are exempt.
                     continue
                 text = path.read_text(encoding="utf-8")
                 for name in RETIRED_SKILL_NAMES:

@@ -12,6 +12,10 @@ func TestProjectTreeRendersCoreSections(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
 	mustWrite(t, root, "ai-docs/ref/guide.md", "# Guide\n")
+	// ai-docs/spec/ used to get a dedicated `spec:` area with anchor entries.
+	// The renderer no longer skips the directory, so it must now appear as an
+	// ordinary ai-docs/ subdirectory and produce no `spec:` section header.
+	mustWrite(t, root, "ai-docs/spec/legacy.md", "# Legacy\n\n## Anchor {#260101-legacy-anchor}\n")
 	mustWrite(t, root, "ai-docs/tickets/ready/260503-feat-demo.md", "---\ntitle: Demo ticket\nparent: 260503-epic-demo\nrelated:\n  260503-research-demo: source\n---\n# Demo ticket\n")
 	mustWrite(t, root, "ai-docs/tickets/idea/260503-research-demo.md", "---\ntitle: Research demo\n---\n# Research demo\n")
 	mustWrite(t, root, "ai-docs/tickets/todo/260503-epic-demo.md", "---\ntitle: Epic demo\n---\n# Epic demo\n")
@@ -27,9 +31,16 @@ func TestProjectTreeRendersCoreSections(t *testing.T) {
 		"tickets:",
 		"  todo/260503-epic-demo",
 		"    ready/260503-feat-demo",
+		"  spec/",
+		"    legacy.md",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("ProjectTree output missing %q\n%s", want, got)
+		}
+	}
+	for _, gone := range []string{"spec:", "260101-legacy-anchor"} {
+		if strings.Contains(got, gone) {
+			t.Fatalf("ProjectTree output still renders a dedicated spec area (%q)\n%s", gone, got)
 		}
 	}
 	if strings.Contains(got, "related:") {
