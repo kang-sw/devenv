@@ -4,7 +4,7 @@ sage-review-design: completed
 parent: 260909-epic-ws-worker-interpreter-refoundation
 related:
   260605-research-ws-native-subagent-pivot: native-subagent continuity and host-owned lifecycle anchor
-sage-review-design-reviewed: d961114899f52e22
+sage-review-design-reviewed: ba603f8e6443d6e6
 ---
 
 # Add lead-delegate as the session-local arbitrary executor and retire lead-prefer-subagent
@@ -88,11 +88,26 @@ lead-run:
   the result, and commits.
 ```
 
-Install the following routing text verbatim in the lead-delegate procedure.
-The owning-workflow checks for `lead-ticket`, `lead-review`, and `lead-ship`
-run before this block.
+Install the following procedure verbatim as the rendered `lead-delegate`
+playbook. The implementation may substitute the configured skill namespace,
+but must not paraphrase or independently evolve the prose.
 
-```text
+```markdown
+# Delegate
+
+You are the lead managing a session-local native executor. Turn the user's
+request into a bounded assignment, choose the executor's prompt, model,
+tools, and permissions, and carry the work through follow-up exchanges.
+
+## Routing
+
+Route collaborative direction-setting to {{.SkillNamespace}}:lead-discuss.
+Ticket authoring and status changes belong to {{.SkillNamespace}}:lead-ticket;
+standalone review and merge adjudication to {{.SkillNamespace}}:lead-review;
+release execution to {{.SkillNamespace}}:lead-ship.
+
+For other work, apply this gate before dispatch and when scope changes.
+
 Use lead-run when any of these is true:
 
 - a ready ticket owns the work;
@@ -108,6 +123,54 @@ mechanical updates, and localized internal hotfixes.
 
 If the delegate discovers broader scope or material impact, it stops before
 that expanded change and returns an implementation contract for lead-run.
+
+Invoke {{.SkillNamespace}}:lead-run for that handoff.
+
+## Assignment
+
+Give the executor the intended outcome, relevant input paths, permitted
+actions, verification appropriate to the task, and the boundary at which
+it should return to the lead. Choose these for the assignment; there is no
+fixed executor role or read-only default. Permissions stay within existing
+user authorization and the host's available capabilities.
+
+Keep decisions made in this conversation with the lead. Give the executor
+the settled constraints and room to decide how to complete the assignment.
+When the assignment is evidence gathering, require sources and material gaps.
+
+## Continuity
+
+Start a fresh agent for a new assignment or an independent judgment.
+Continue the same agent for follow-up work on its existing assignment,
+so corrections and intermediate findings remain available to it.
+
+Keep a session-local label, native task handle, purpose, and active or
+released state. Preserve these, the last material result, and the next
+instruction through lead compaction; no cross-session registry is required.
+
+If the native handle is unavailable, start a fresh agent with the original
+purpose, relevant input paths, last material result, and next instruction.
+Make clear that this is a replacement, not a resumed agent.
+
+Keep the agent available for follow-up until the user or lead releases it.
+Use the host's lifecycle capabilities; a local label does not establish
+whether an agent is running or has been cancelled.
+
+## Follow-through
+
+Evaluate the result against the assignment. Send corrections or missing
+work back to the same agent while the scope remains eligible.
+
+Resolve routine execution questions within existing authorization.
+Bring a blocker to the user only when progress needs information or a
+decision the lead cannot supply. Apply the routing gate when the work grows.
+
+## Output
+
+Report the result or current blocker, relevant evidence or artifact paths,
+and any unfinished scope. For mutations, include what changed and how it
+was verified. Choose the report format for the task; no fixed terminal
+block is required.
 ```
 
 ## Constraints
@@ -148,19 +211,15 @@ that expanded change and returns an implementation contract for lead-run.
 
 ### Phase 1: Add the sustained delegate entry and retire the posture skill
 
-Add the thin `lead-delegate` entry skill and its lead-facing procedure. The
-procedure accepts an arbitrary bounded prompt, creates a session-local label,
-spawns a native subagent with lead-selected model/tools/permissions, records
-the host task handle for compaction recovery, resumes the same task for
-follow-up messages, and releases it on user or lead direction. When the handle
-is unavailable, create a fresh agent from the original purpose, last material
-result, and next instruction.
+Add the thin `lead-delegate` entry skill and install the Exact Required Prose
+as its lead-facing procedure. Treat that prose as settled behavior rather than
+a design prompt; implementation is limited to installing, wiring, and
+verifying it.
 
 Apply the Exact Required Prose to `lead-discuss`, `lead-delegate`, and
 `lead-run`. Implement the owning-workflow checks and the exact reroute gate
 before spawn and again when the delegate reports scope growth. The free-form
-path has no ticket-worker route/edit/review/commit protocol and no mandatory
-worker terminal block; its response shape serves the arbitrary task.
+path has no ticket-worker route/edit/review/commit protocol.
 
 Retire `lead-prefer-subagent` from the ws and wsflow skill inventories and
 remove its standalone inline procedure, mirror exceptions, manifest entries,
