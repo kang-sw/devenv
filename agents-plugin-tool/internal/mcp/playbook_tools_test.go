@@ -2590,37 +2590,110 @@ func TestRenderMintsLeadScopedChildKeyForWorkerPlaybook(t *testing.T) {
 // receive a lead-scoped child key. This is the end-to-end counterpart of
 // TestRenderMintsLeadScopedChildKeyForWorkerPlaybook, which uses a fixture.
 func TestPlaybookRenderGoldenTicketWorker(t *testing.T) {
-	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	s := newTestServerWithHarness(t, "claude")
-	mintRoot := "/work/tree-a"
+	for _, product := range []string{"ws", "wsflow"} {
+		t.Run(product, func(t *testing.T) {
+			t.Setenv(envNoAgent, map[string]string{"ws": "", "wsflow": "1"}[product])
+			t.Setenv(envNamespace, product)
+			for _, tc := range []struct{ name, tier string }{
+				{"ticket-worker", "medium"},
+				{"ticket-worker-elevated", "large"},
+				{"ticket-worker-escalated", "xlarge"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					rsrcRoot := filepath.Join("..", "..", "..", map[string]string{"ws": "agents-plugin", "wsflow": "agents-plugin-wsflow"}[product], "rsrc")
+					s := newTestServerWithHarness(t, "claude")
+					mintRoot := "/work/tree-a"
 
-	body, tier, err := renderPlaybookBody(s, rsrcRoot, "ticket-worker", nil, wsconfig.Options{}, mintRoot, "", "", nil)
+					body, tier, err := renderPlaybookBody(s, rsrcRoot, tc.name, nil, wsconfig.Options{}, mintRoot, "", "", nil)
+					if err != nil {
+						t.Fatalf("renderPlaybookBody: %v", err)
+					}
+					if tier != tc.tier {
+						t.Errorf("recommended tier = %q, want %q", tier, tc.tier)
+					}
+					// The shared protocol include must arrive with the playbook body.
+					for _, want := range []string{"# Worker Protocol", "## Stop List", "status: [ok] | [escalate-to-lead]"} {
+						if !strings.Contains(body, want) {
+							t.Errorf("rendered body missing protocol text %q", want)
+						}
+					}
+					// delegates:true → the harness continuity tip carries the continuation idiom.
+					if !strings.Contains(body, "SendMessage(to: <agentId>)") {
+						t.Errorf("rendered body missing claude continuation idiom")
+					}
+					// No unsubstituted template variables may survive rendering.
+					if strings.Contains(body, "{{.") {
+						t.Errorf("rendered body has unsubstituted variables:\n%s", body)
+					}
+					key := extractSplicedKey(t, body)
+					entry, ok := s.sessions.lookup(key)
+					if !ok {
+						t.Fatalf("minted key %q not found in registry", key)
+					}
+					if entry.scope != roleLead || entry.root != mintRoot {
+						t.Errorf("minted key = (scope %q, root %q), want (%q, %q)", entry.scope, entry.root, roleLead, mintRoot)
+					}
+				})
+			}
+		})
+	}
+}
+
+// The lead interprets this policy as prose, so pin the rendered decision rows
+// rather than duplicate the routing logic in a test-only Go implementation.
+func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
+	for _, product := range []string{"ws", "wsflow"} {
+		t.Run(product, func(t *testing.T) {
+			t.Setenv(envNoAgent, map[string]string{"ws": "", "wsflow": "1"}[product])
+			t.Setenv(envNamespace, product)
+			packageDir := map[string]string{"ws": "agents-plugin", "wsflow": "agents-plugin-wsflow"}[product]
+			root := filepath.Join("..", "..", "..", packageDir, "rsrc")
+			s := newTestServerWithHarness(t, "codex")
+			body, _, err := printPlaybook(s, root, "lead-run", nil, isolatedPlaybookConfigOptions(t), "", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body = strings.Join(strings.Fields(body), " ")
+			for _, want := range []string{
+				product + `/tickets.query(ticket_stem: "<stem>")`,
+				"do not read or summarize the ticket body",
+				"`risk.correctness`, `risk.fit`, `risk.test`, and `risk.security_or_contract`",
+				"| Ticket: any risk is `high` | `ticket-worker-elevated` | large |",
+				"| Ticket: all risks are `low`, `moderate`, or `unknown` | `ticket-worker` | medium |",
+				"| Ad hoc: routine | `ticket-worker` | medium |",
+				"| Ad hoc: difficult | `ticket-worker-elevated` | large |",
+				"moderate risk still keeps its existing independent-review breadth",
+				"Spawn one worker at the tier the render recommends",
+				"playbook <chosen worker playbook>; stop-e retries <0 or 1>",
+				"| `ticket-worker` | `ticket-worker-elevated` | large |",
+				"| `ticket-worker-elevated` | `ticket-worker-escalated` | xlarge |",
+				"A second (e) goes to the user",
+				"do not reset the retry count on resume or reclassify the original risks",
+			} {
+				if !strings.Contains(body, want) {
+					t.Errorf("rendered policy missing %q", want)
+				}
+			}
+			if strings.Contains(body, "flagship class") || strings.Contains(body, "{{.") {
+				t.Error("rendered policy retains a fixed flagship floor or template variable")
+			}
+		})
+	}
+}
+
+func TestTicketWorkerVariantsDifferOnlyByTier(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	base, err := os.ReadFile(filepath.Join(root, "ticket-worker", "ticket-worker.md"))
 	if err != nil {
-		t.Fatalf("renderPlaybookBody: %v", err)
+		t.Fatal(err)
 	}
-	if tier != "large" {
-		t.Errorf("recommended tier = %q, want %q", tier, "large")
-	}
-	// The shared protocol include must arrive with the playbook body.
-	for _, want := range []string{"# Worker Protocol", "## Stop List", "status: [ok] | [escalate-to-lead]"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("rendered body missing protocol text %q", want)
+	for name, tier := range map[string]string{"ticket-worker-elevated": "large", "ticket-worker-escalated": "xlarge"} {
+		data, err := os.ReadFile(filepath.Join(root, name, name+".md"))
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	// delegates:true → the harness continuity tip carries the continuation idiom.
-	if !strings.Contains(body, "SendMessage(to: <agentId>)") {
-		t.Errorf("rendered body missing claude continuation idiom")
-	}
-	// No unsubstituted template variables may survive rendering.
-	if strings.Contains(body, "{{.") {
-		t.Errorf("rendered body has unsubstituted variables:\n%s", body)
-	}
-	key := extractSplicedKey(t, body)
-	entry, ok := s.sessions.lookup(key)
-	if !ok {
-		t.Fatalf("minted key %q not found in registry", key)
-	}
-	if entry.scope != roleLead || entry.root != mintRoot {
-		t.Errorf("minted key = (scope %q, root %q), want (%q, %q)", entry.scope, entry.root, roleLead, mintRoot)
+		if got := strings.Replace(string(data), "tier: "+tier+"\n", "tier: medium\n", 1); got != string(base) {
+			t.Errorf("%s differs from the base beyond tier frontmatter", name)
+		}
 	}
 }

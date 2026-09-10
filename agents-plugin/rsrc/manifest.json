@@ -18,7 +18,7 @@
     "lead-check-blockers/lead-check-blockers.md": "76ed9be9cc75929bd90304d7918c73f6db7d59ac898c5c568ce5e8f1e7058ecc",
     "lead-discuss/lead-discuss.md": "126c92e9408a9219f24a0f95b06506385bc58c41e77a0a453b54bba36362625b",
     "lead-review/lead-review.md": "b36c3f2a0a079b72dae32713783802e4b4051957d4b1e00b4ad75d52e8d87755",
-    "lead-run/lead-run.md": "3b1d7141d038979db1d8275d0e0c163baeb00a58e2f570325fbfc5b688c9706a",
+    "lead-run/lead-run.md": "d2a83055497986b9567f785ba3fe9e280d360feb02b37f8a1e57db76a1a609b8",
     "lead-scope-worktree/lead-scope-worktree.md": "c0b875c6f46c1a104816ba8212d528c6c373b00a449a051610011f8afe4b8894",
     "lead-ship/lead-ship.md": "0f4e2e5d92f40ab8603a5660a9caec840d88bbfc6d2ef8ab9dec29eb7d171dfe",
     "lead-ticket/lead-ticket.md": "fbc6e4e5dc27dc7cf2db4ecd7bc70c5595e2c03f6db35417b7f4dc3bc235a696",
@@ -38,7 +38,9 @@
     "ticket-fact-populator/ticket-fact-populator.md": "e6e15b125cf8610b743d45eb2b1e551e28e0db5dee0179ffe1e966f2c4234148",
     "ticket-reviewer-completeness/ticket-reviewer-completeness.md": "12efbce33b5311810a162974d99702252549639f1a064fd84331005328c60b37",
     "ticket-reviewer-design/ticket-reviewer-design.md": "819b4cffaa1d7f95858e2ab79cfedbd301d3205803dba23984ccb57f7aac3eaf",
-    "ticket-worker/ticket-worker.md": "b0e72b9614abb945d9abd3ab95f304ff247360bd616888e5ee41412af3b3f20f",
+    "ticket-worker-elevated/ticket-worker-elevated.md": "b0e72b9614abb945d9abd3ab95f304ff247360bd616888e5ee41412af3b3f20f",
+    "ticket-worker-escalated/ticket-worker-escalated.md": "5e29e0c1f294d2e6a74ac7d94bf091fc8f9ccb848fcb8bb33cc8b4f12ad5a34b",
+    "ticket-worker/ticket-worker.md": "8c79f86468e8da4a9346546290fb91fda110eeb2d86bbf26008aae7564bb214a",
     "worker-stop-protocol.md": "321b3e81f53199f338286c0973e54e752e74b6383067a80eb92987e49807c8bc"
   }
 }

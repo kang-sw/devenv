@@ -2,7 +2,7 @@
 kind: render
 delegates: true
 role: worker
-tier: medium
+tier: xlarge
 includes:
   - worker-stop-protocol
 variables:
