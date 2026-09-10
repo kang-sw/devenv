@@ -1413,3 +1413,89 @@ func TestSageGateInvalidInputs(t *testing.T) {
 		t.Error("expected error for bad stage")
 	}
 }
+
+// TestSageRecordPassRetitlesBlockedSection covers the round-2 pass after a
+// round-1 block: the pass write path retitles the stale "## Blocked (<date>)"
+// heading as "## Sage Review Round N (<date>)" instead of leaving a heading
+// that says "blocked" beside a `completed` posture. The round's tables are
+// kept verbatim (they carry the finding-to-resolution record), the retitle
+// happens before the digest is stamped so freshness stays clean, and round
+// numbering continues across a later block/pass cycle.
+func TestSageRecordPassRetitlesBlockedSection(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-feat-round"
+	path := writeSageTicket(t, root, stem, map[string]string{"sage-review-design": "required"})
+	initSageFreshnessRepo(t, root)
+	commitSageFreshnessRepo(t, root, "initial")
+
+	blockRound := func(today, title string) {
+		t.Helper()
+		if _, err := SageRecord(root, SageRecordOptions{
+			TicketStem: stem,
+			Stage:      "design",
+			Today:      today,
+			Verdicts:   []SageVerdict{{Reviewer: "design", Verdict: "block", Issues: []SageIssue{{Title: title, Severity: "high", Resolution: "missing"}}}},
+		}); err != nil {
+			t.Fatalf("SageRecord block (%s): %v", today, err)
+		}
+	}
+	passRound := func(today string) SageRecordResult {
+		t.Helper()
+		res, err := SageRecord(root, SageRecordOptions{
+			TicketStem: stem,
+			Stage:      "design",
+			Today:      today,
+			Verdicts:   []SageVerdict{{Reviewer: "design", Verdict: "pass"}},
+		})
+		if err != nil {
+			t.Fatalf("SageRecord pass (%s): %v", today, err)
+		}
+		return res
+	}
+
+	blockRound("2026-09-09", "first finding")
+	if !strings.Contains(readFileString(t, path), "## Blocked (2026-09-09)") {
+		t.Fatalf("round-1 block did not write a Blocked section:\n%s", readFileString(t, path))
+	}
+
+	res := passRound("2026-09-10")
+	if res.Posture["sage-review-design"] != "completed" {
+		t.Fatalf("posture = %v, want completed", res.Posture)
+	}
+	body := readFileString(t, path)
+	if strings.Contains(body, "## Blocked (") {
+		t.Fatalf("pass left a Blocked heading in the body:\n%s", body)
+	}
+	if !strings.Contains(body, "## Sage Review Round 1 (2026-09-09)") {
+		t.Fatalf("pass did not retitle the Blocked heading as round 1:\n%s", body)
+	}
+	const round1Body = "### Design Reviewer — block\n\n| # | Title | Severity | Resolution |\n|---|-------|----------|------------|\n| 1 | first finding | high | missing |"
+	if !strings.Contains(body, round1Body) {
+		t.Fatalf("round-1 body not preserved verbatim:\n%s", body)
+	}
+	if !strings.Contains(body, "sage-review-design: completed") {
+		t.Fatalf("frontmatter not updated to completed:\n%s", body)
+	}
+
+	// The digest stamped on the pass covers the retitled body, so the
+	// freshness check must not ask for a re-review of an untouched ticket.
+	commitSageFreshnessRepo(t, root, "round 1 resolved")
+	gate, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "todo"}, "auto")
+	if err != nil {
+		t.Fatalf("SageGate: %v", err)
+	}
+	if gate.Action == "check_review_required" {
+		t.Fatalf("retitled body left the recorded digest stale: %+v", gate)
+	}
+
+	// A second block/pass cycle numbers the next round 2 and keeps round 1.
+	blockRound("2026-09-11", "second finding")
+	passRound("2026-09-12")
+	body = readFileString(t, path)
+	if !strings.Contains(body, "## Sage Review Round 1 (2026-09-09)") || !strings.Contains(body, "## Sage Review Round 2 (2026-09-11)") {
+		t.Fatalf("second cycle did not continue round numbering:\n%s", body)
+	}
+	if strings.Index(body, "## Sage Review Round 1 (") > strings.Index(body, "## Sage Review Round 2 (") {
+		t.Fatalf("round 2 must follow round 1:\n%s", body)
+	}
+}

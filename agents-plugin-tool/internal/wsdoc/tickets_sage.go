@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -473,6 +474,9 @@ func sageRecordSingle(ticketAbs, ticketRel, today, reviewer, field, heading stri
 
 	// pass or concern resolved to pass.
 	res.Posture[field] = "completed"
+	if err := retitleBlockedSectionsAsRounds(ticketAbs); err != nil {
+		return SageRecordResult{}, err
+	}
 	digest, err := sageReviewCurrentBodyDigest(ticketAbs)
 	if err != nil {
 		return SageRecordResult{}, err
@@ -529,6 +533,9 @@ func sageRecordCombined(ticketAbs, ticketRel, today string, verdicts []SageVerdi
 
 	res.Posture["sage-review-design"] = "completed"
 	res.Posture["sage-review-completeness"] = "completed"
+	if err := retitleBlockedSectionsAsRounds(ticketAbs); err != nil {
+		return SageRecordResult{}, err
+	}
 	digest, err := sageReviewCurrentBodyDigest(ticketAbs)
 	if err != nil {
 		return SageRecordResult{}, err
@@ -654,4 +661,45 @@ func appendOrReplaceBlockedSection(path, section string) error {
 	}
 	body := strings.TrimRight(strings.Join(kept, "\n"), "\n")
 	return os.WriteFile(path, []byte(body+"\n\n"+section+"\n"), 0o644)
+}
+
+// sageRoundHeadingPrefix is the heading a resolved Blocked section is retitled
+// to, so the round's finding-to-resolution tables survive as history.
+const sageRoundHeadingPrefix = "## Sage Review Round"
+
+// retitleBlockedSectionsAsRounds rewrites every "## Blocked (<date>)" heading
+// in the ticket as "## Sage Review Round N (<date>)", leaving each section body
+// verbatim. The pass-resolving write path calls it so a ticket stamped
+// completed no longer carries a heading that says it is blocked; the tables
+// below the heading are the round's finding-to-resolution record and are kept
+// rather than deleted. N continues the existing round numbering in the file, so
+// a third round lands below rounds 1 and 2. Callers must invoke it before
+// computing the body digest: the heading is part of the body the digest covers,
+// so retitling afterwards would leave the stamped digest stale and make
+// tickets_sage_freshness.go warn on an untouched ticket.
+func retitleBlockedSectionsAsRounds(path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(raw), "\n")
+	next := 1
+	for _, line := range lines {
+		if strings.HasPrefix(line, sageRoundHeadingPrefix) {
+			next++
+		}
+	}
+	changed := false
+	for i, line := range lines {
+		if !strings.HasPrefix(line, "## Blocked (") {
+			continue
+		}
+		lines[i] = sageRoundHeadingPrefix + " " + strconv.Itoa(next) + " " + strings.TrimPrefix(line, "## Blocked ")
+		next++
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
 }

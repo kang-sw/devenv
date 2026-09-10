@@ -27,3 +27,20 @@ message otherwise has to repeat.
 Touchpoint: `agents-plugin-tool/internal/wsdoc/tickets_sage.go` (the
 `verdict == "block"` branch and the pass path just below it);
 `appendOrReplaceBlockedSection` already knows how to find the section.
+
+## Result
+
+Fixed by retitling rather than removing. `SageRecord`'s two pass-resolving
+paths (standalone stage and combined aggregation) now call
+`retitleBlockedSectionsAsRounds` in `tickets_sage.go` before stamping the
+digest: every `## Blocked (<date>)` heading becomes
+`## Sage Review Round N (<date>)`, with N continuing the file's existing round
+numbering and each section body left verbatim. Ordering matters and is
+documented at the helper — the heading is inside the body the freshness digest
+covers, so retitling after the stamp would make `tickets_sage_freshness.go`
+warn on an untouched ticket.
+
+`TestSageRecordPassRetitlesBlockedSection` in `tickets_sage_test.go` covers
+block -> pass (heading retitled, tables preserved, posture `completed`, gate
+does not ask for a re-review) and a second block/pass cycle (round 2 follows
+round 1). Verified failing before the fix and passing after.
