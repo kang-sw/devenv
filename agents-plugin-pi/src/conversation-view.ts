@@ -168,6 +168,10 @@ const BORDER_OVERHEAD = 4;
  * visible width is exactly `width`.
  */
 export function wrapInBorder(innerLines: readonly string[], width: number, innerWidth: number): string[] {
+  // The four chrome columns plus one content column need five columns. At
+  // narrower widths, retain the content (clamped by callers) rather than
+  // emitting over-wide Unicode.
+  if (width <= BORDER_OVERHEAD) return innerLines.map((line) => truncateToWidth(line, Math.max(1, width)));
   const horizontal = "─".repeat(Math.max(0, width - 2));
   const top = `┌${horizontal}┐`;
   const bottom = `└${horizontal}┘`;
@@ -310,8 +314,8 @@ export interface ConversationViewOptions {
   /**
    * 260909 V1/V2: draw a single-line box border (with a one-column horizontal
    * margin) around the whole view so it separates from the lead's background.
-   * Opt-in — the `/answer` overlay sets it; a `"view"`-only embed (e.g. the
-   * audit window) that supplies its own chrome leaves it off (the default).
+   * Opt-in — `/answer` and `/audit` overlays set it; compact embeds leave it
+   * off (the default).
    */
   border?: boolean;
 }

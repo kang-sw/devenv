@@ -39,11 +39,12 @@ import { resolveChildLiveness } from "./ask.ts";
 import {
   ConversationViewComponent,
   toolResultContentText,
+  wrapInBorder,
   type ConversationChannel,
   type ConversationItem,
   type ConversationViewTui,
 } from "./conversation-view.ts";
-import { loadHostPiTui, SelectList, type Component, type MarkdownTheme, type SelectItem, type SelectListTheme } from "./pi-tui.ts";
+import { loadHostPiTui, SelectList, truncateToWidth, type Component, type MarkdownTheme, type SelectItem, type SelectListTheme } from "./pi-tui.ts";
 import type { SpawnRole } from "./process-role.ts";
 
 // ---------------------------------------------------------------------------
@@ -337,6 +338,29 @@ const IDENTITY_SELECT_LIST_THEME: SelectListTheme = {
 const AUDIT_OVERLAY_OPTIONS = { overlay: true, overlayOptions: { width: "80%", maxHeight: "80%", anchor: "center" } } as const;
 
 /**
+ * Adds the conversation view's width-safe box chrome around a `SelectList`
+ * without changing the list's selection/cancel behavior. The wrapper forwards
+ * all input directly to the list and only requests a repaint after it acts.
+ */
+function wrapAuditPicker(list: SelectList, tui: ConversationViewTui, header: string): Component {
+  return {
+    render(width: number): string[] {
+      const w = Math.max(1, width);
+      const innerWidth = Math.max(1, w - 4);
+      const innerLines = [header, "", ...list.render(innerWidth)].map((line) => truncateToWidth(line, innerWidth));
+      return wrapInBorder(innerLines, w, innerWidth);
+    },
+    invalidate(): void {
+      list.invalidate();
+    },
+    handleInput(data: string): void {
+      list.handleInput(data);
+      tui.requestRender();
+    },
+  };
+}
+
+/**
  * Opens the picker: one row per registry child (running and dormant, via
  * `buildAuditPickerItems`), arrow keys move, Enter selects, Esc cancels —
  * `SelectList`'s own `handleInput` already implements all three. Resolves
@@ -351,16 +375,21 @@ export async function openPicker(ctx: AuditUiCtx & { ui?: { custom?: unknown } }
   }
   let theme: SelectListTheme | undefined;
   try {
-    theme = getSelectListTheme();
+    const candidate = getSelectListTheme();
+    // The host's selector theme is lazily backed by its global TUI theme.
+    // Touch it here so headless/test callers fall back before render rather
+    // than leaving a deferred "Theme not initialized" failure in the picker.
+    candidate.selectedText("");
+    theme = candidate;
   } catch {
     // best effort — mirrors `ask.ts`'s own `getMarkdownTheme()` precedent.
   }
   return (ctx as unknown as AuditCustomUiCtx).ui.custom<string | undefined>(
-    (_tui, _theme, _keybindings, done) => {
+    (tui, hostTheme, _keybindings, done) => {
       const list = new SelectList(items, Math.min(10, items.length), theme ?? IDENTITY_SELECT_LIST_THEME);
       list.onSelect = (item) => done(item.value);
       list.onCancel = () => done(undefined);
-      return list;
+      return wrapAuditPicker(list, tui, hostTheme?.fg?.("accent", "ws audit: select subagent") ?? "ws audit: select subagent");
     },
     AUDIT_OVERLAY_OPTIONS,
   );
@@ -425,6 +454,7 @@ export async function openViewer(ctx: AuditUiCtx & { ui?: { custom?: unknown } }
         userLineBg: (text) => theme?.bg?.("userMessageBg", text) ?? text,
         toolTextFg: (text) => theme?.fg?.("muted", text) ?? text,
         workingTextFg: (text) => theme?.fg?.("dim", text) ?? text,
+        border: true,
         primitives: { ScrollView: hostPiTui.ScrollView, Markdown: hostPiTui.Markdown, Text: hostPiTui.Text, Editor: hostPiTui.Editor },
         // No modal — Phase 1's "Esc closes the viewer directly" (contrast
         // `ask.ts`'s `openThread`, which routes Esc through `overlayHandle`

@@ -26,6 +26,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   buildAuditPickerItems,
   createAuditChannel,
+  openPicker,
   openViewer,
   parseSessionFile,
   registerAuditCommands,
@@ -33,6 +34,7 @@ import {
 } from "../src/audit.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "../src/spawner.ts";
 import type { ConversationViewComponent } from "../src/conversation-view.ts";
+import { visibleWidth } from "../src/text-width.ts";
 
 function record(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
   return {
@@ -71,6 +73,31 @@ function fakePi() {
  * makes. `close()` resolves it from the outside, standing in for an owner
  * Esc that never happens in a given test.
  */
+interface PickerComponent {
+  render(width: number): string[];
+  handleInput?(data: string): void;
+}
+
+function fakePickerCtx(theme?: { fg?(color: string, text: string): string }) {
+  let resolveComponent!: (c: PickerComponent) => void;
+  const componentReady = new Promise<PickerComponent>((res) => {
+    resolveComponent = res;
+  });
+  let renderCount = 0;
+  const ctx = {
+    mode: "tui",
+    ui: {
+      notify: () => {},
+      custom: (factory: (...args: unknown[]) => unknown) =>
+        new Promise((resolve) => {
+          const built = factory({ requestRender: () => { renderCount += 1; } }, theme, undefined, resolve);
+          Promise.resolve(built).then((component) => resolveComponent(component as PickerComponent));
+        }),
+    },
+  };
+  return { ctx, componentReady, get renderCount() { return renderCount; } };
+}
+
 function fakeViewerCtx(theme?: { bg?(color: string, text: string): string; fg?(color: string, text: string): string }) {
   let resolveComponent!: (c: ConversationViewComponent) => void;
   const componentReady = new Promise<ConversationViewComponent>((res) => {
@@ -259,35 +286,47 @@ describe("registerAuditCommands", () => {
     const { pi, commands, shortcuts } = fakePi();
     registerAuditCommands(pi, registry, undefined, "tui");
 
-    // Reads the constructed `SelectList`'s own `items` field directly rather
-    // than `render()`ing it — `render()` reaches into the real
-    // `getSelectListTheme()`'s host theme, which is never initialized under
-    // `node --test` (no live TUI host); comparing the underlying item list
-    // proves "the same picker" without that unrelated dependency.
-    async function capture(invoke: (ctx: unknown) => Promise<void>): Promise<unknown> {
-      let items: unknown;
-      const ctx = {
-        mode: "tui",
-        ui: {
-          notify: () => {},
-          custom: (factory: (...args: unknown[]) => unknown) =>
-            new Promise((resolve) => {
-              const built = factory({ requestRender: () => {} }, undefined, undefined, resolve);
-              Promise.resolve(built).then((component) => {
-                items = (component as { items?: unknown }).items;
-                (component as { onCancel?: () => void }).onCancel?.();
-              });
-            }),
-        },
-      };
-      await invoke(ctx);
-      return items;
+    async function capturePicker(invoke: (ctx: unknown) => Promise<void>): Promise<string[]> {
+      const opened = fakePickerCtx();
+      const command = invoke(opened.ctx);
+      const component = await opened.componentReady;
+      const lines = component.render(40);
+      component.handleInput?.("\x1b");
+      await command;
+      return lines;
     }
 
-    const fromCommand = await capture((ctx) => commands.get("audit")!.handler("", ctx));
-    const fromShortcut = await capture((ctx) => shortcuts.get("ctrl+shift+u")!.handler(ctx));
+    const fromCommand = await capturePicker((ctx) => commands.get("audit")!.handler("", ctx));
+    const fromShortcut = await capturePicker((ctx) => shortcuts.get("ctrl+shift+u")!.handler(ctx));
     assert.deepEqual(fromCommand, fromShortcut);
-    assert.deepEqual(fromCommand, [{ value: "a1", label: "scout · running" }]);
+  });
+
+  test("the picker frames its SelectList and delegates selection and cancellation", async () => {
+    const registry = registryOf(
+      record({ agentId: "a1", alias: "scout", client: {} as never, runStartedAt: Date.now() - 2_000 }),
+      record({ agentId: "a2", alias: "reviewer", client: {} as never, runStartedAt: Date.now() - 1_000 }),
+    );
+
+    const selected = fakePickerCtx();
+    const selectedResult = openPicker(selected.ctx as never, registry);
+    const selectedComponent = await selected.componentReady;
+    for (const width of [8, 40]) {
+      const lines = selectedComponent.render(width);
+      assert.ok(lines[0]?.startsWith("┌") && lines[0]?.endsWith("┐"), `top border at width ${width}`);
+      assert.ok(lines.at(-1)?.startsWith("└") && lines.at(-1)?.endsWith("┘"), `bottom border at width ${width}`);
+      if (width === 40) assert.ok(lines.some((line) => line.includes("ws audit: select subagent")), "audit picker header");
+      for (const line of lines) assert.ok(visibleWidth(line) <= width, `picker line exceeds ${width}: ${JSON.stringify(line)}`);
+    }
+    selectedComponent.handleInput?.("\x1b[B");
+    selectedComponent.handleInput?.("\r");
+    assert.equal(await selectedResult, "a2", "down then Enter selects through the framed wrapper");
+    assert.ok(selected.renderCount >= 2, "delegated input requests repaint");
+
+    const cancelled = fakePickerCtx();
+    const cancelledResult = openPicker(cancelled.ctx as never, registry);
+    const cancelledComponent = await cancelled.componentReady;
+    cancelledComponent.handleInput?.("\x1b");
+    assert.equal(await cancelledResult, undefined, "Esc cancels through the framed wrapper");
   });
 });
 
@@ -313,6 +352,25 @@ describe("openViewer (the read-only overlay: Esc/Enter contract and the one-over
     component.render(120);
     assert.ok(calls.some((call) => call.color === "muted" && call.text.includes("bash")), "tool use is painted with the host's muted semantic");
     assert.ok(calls.some((call) => call.color === "dim" && call.text === "working…"), "the activity marker is painted with the host's dim semantic");
+
+    opened.close();
+    await promise;
+  });
+
+  test("uses the /answer border frame and remains width-safe at narrow and normal widths", async () => {
+    const registry = registryOf(record({ agentId: "a1" }));
+    const opened = fakeViewerCtx();
+    const promise = openViewer(opened.ctx as never, registry, "a1");
+    const component = await opened.componentReady;
+
+    for (const width of [5, 40]) {
+      const lines = component.render(width);
+      assert.ok(lines[0]?.startsWith("┌") && lines[0]?.endsWith("┐"), `top border at width ${width}`);
+      assert.ok(lines.at(-1)?.startsWith("└") && lines.at(-1)?.endsWith("┘"), `bottom border at width ${width}`);
+      assert.ok(lines[1]?.startsWith("│ ") && lines[1]?.endsWith(" │"), `top breathing row at width ${width}`);
+      assert.ok(lines.at(-2)?.startsWith("│ ") && lines.at(-2)?.endsWith(" │"), `bottom breathing row at width ${width}`);
+      for (const line of lines) assert.ok(visibleWidth(line) <= width, `viewer line exceeds ${width}: ${JSON.stringify(line)}`);
+    }
 
     opened.close();
     await promise;

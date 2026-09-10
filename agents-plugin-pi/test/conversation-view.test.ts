@@ -1003,10 +1003,19 @@ describe("ConversationViewComponent — overlay border chrome (V1/V2)", () => {
     }
   });
 
-  test("border defaults off — the view renders with no box-drawing chrome (audit-window/read-only embeds stay bare)", () => {
+  test("border defaults off — compact embeds render with no box-drawing chrome", () => {
     const { channel } = fakeChannel();
     const view = new ConversationViewComponent(fakeTui(), { channel, initialItems: ALL_ITEM_KINDS });
     assert.ok(!view.render(80).some((l) => /[┌┐└┘│]/.test(l)), "no border chrome unless border:true");
+  });
+
+  test("border:true remains width-safe below the four-column frame minimum", () => {
+    const { channel } = fakeChannel();
+    const view = new ConversationViewComponent(fakeTui(), { channel, initialItems: ALL_ITEM_KINDS, border: true });
+    for (const width of [1, 2, 3, 4]) {
+      const lines = view.render(width);
+      assertWidthBounded(lines, width, `width ${width} (narrow bordered)`);
+    }
   });
 });
 
