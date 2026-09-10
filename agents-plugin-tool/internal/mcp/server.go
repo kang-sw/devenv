@@ -2394,17 +2394,27 @@ func formatSageRecord(result wsdoc.SageRecordResult) string {
 	return b.String()
 }
 
+// sageRestampAfterFixes closes every autonomous-issue routing clause: apply the
+// fixes, re-stamp with the same verdicts so the recorded digest covers the fixed
+// body, and only then commit.
+const sageRestampAfterFixes = " Once those edits are in the ticket, call ws/tickets.sage_stamp again with the same verdicts: the digest recorded now covers the body as it stands at this stamp, and only the re-stamp makes it cover the fixed body. Commit after that second stamp, not before it."
+
 // sageRecordIssueRouting renders the per-resolution routing clause that leads
 // every next_instruction carrying issues. Both reviewer playbooks classify each
 // issue as `autonomous` (planning or implementation can settle it) or `missing`
 // (a policy choice those stages cannot make); this is the consumer of that
 // split. Empty when the stage recorded no issues, so a clean pass stays terse.
+//
+// An autonomous fix edits the ticket body after this stamp took its digest, so
+// every autonomous branch also orders a re-stamp: without it the digest this
+// call recorded is stale the moment the fixes land, tickets.verify warns, and
+// the next sage_gate asks to rerun the reviewers whose findings were applied.
 func sageRecordIssueRouting(result wsdoc.SageRecordResult) string {
 	switch {
 	case result.Autonomous > 0 && result.Missing > 0:
-		return fmt.Sprintf(" Route the recorded issues first: fix the %d autonomous issue(s) in the ticket yourself, and take the %d missing issue(s) through the Open Decision Queue — they need a user decision you cannot supply.", result.Autonomous, result.Missing)
+		return fmt.Sprintf(" Route the recorded issues first: fix the %d autonomous issue(s) in the ticket yourself, and take the %d missing issue(s) through the Open Decision Queue — they need a user decision you cannot supply.%s", result.Autonomous, result.Missing, sageRestampAfterFixes)
 	case result.Autonomous > 0:
-		return fmt.Sprintf(" Fix the %d autonomous issue(s) in the ticket yourself first; none of them need a user decision.", result.Autonomous)
+		return fmt.Sprintf(" Fix the %d autonomous issue(s) in the ticket yourself first; none of them need a user decision.%s", result.Autonomous, sageRestampAfterFixes)
 	case result.Missing > 0:
 		return fmt.Sprintf(" Take the %d missing issue(s) through the Open Decision Queue first — they need a user decision you cannot supply.", result.Missing)
 	}

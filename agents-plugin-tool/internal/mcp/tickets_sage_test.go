@@ -301,6 +301,48 @@ func TestFormatSageRecordIssueRouting(t *testing.T) {
 	}
 }
 
+// TestFormatSageRecordAutonomousOrdersRestamp pins the digest rule the routing
+// clause has to respect: an autonomous fix edits the body after this stamp took
+// its digest, so every branch that orders such a fix also orders a re-stamp
+// with the same verdicts, before the commit direction. Without it the recorded
+// digest is stale as soon as the fixes land, and the next sage_gate asks to
+// rerun the reviewers whose findings were just applied.
+func TestFormatSageRecordAutonomousOrdersRestamp(t *testing.T) {
+	const restamp = "call ws/tickets.sage_stamp again with the same verdicts"
+
+	for name, result := range map[string]wsdoc.SageRecordResult{
+		"autonomous-only": {
+			Verdict:    "pass",
+			Posture:    map[string]string{"sage-review-design": "completed"},
+			Autonomous: 3,
+		},
+		"autonomous-and-missing": {
+			Verdict:    "concern",
+			Posture:    map[string]string{"sage-review-design": "completed"},
+			Autonomous: 2,
+			Missing:    1,
+		},
+	} {
+		out := formatSageRecord(result)
+		restampIdx := strings.Index(out, restamp)
+		if restampIdx == -1 {
+			t.Fatalf("%s routing must order a re-stamp so the digest covers the fixed body:\n%s", name, out)
+		}
+		commitIdx := strings.Index(out, "ws/git.commit")
+		if commitIdx != -1 && restampIdx > commitIdx {
+			t.Fatalf("%s: re-stamp (offset %d) must precede the commit direction (offset %d):\n%s", name, restampIdx, commitIdx, out)
+		}
+	}
+
+	clean := formatSageRecord(wsdoc.SageRecordResult{
+		Verdict: "pass",
+		Posture: map[string]string{"sage-review-design": "completed"},
+	})
+	if strings.Contains(clean, restamp) {
+		t.Fatalf("a stage with no issues edits nothing and must stay terse:\n%s", clean)
+	}
+}
+
 func TestServeStdioSageGateDispatch(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()

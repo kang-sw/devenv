@@ -97,8 +97,9 @@ promotion is a batch of one.
    the batch, its `## AI Context` naming the order.
 
 The stamp digests the body, so any `## Route Facts` the populator wrote are
-covered: a fact edited after the stamp invalidates it, and re-running the gate
-is the only repair.
+covered: an edit after the stamp invalidates it. Re-stamp with the same
+verdicts to cover the edited body; re-run the gate only when the edit changes
+what the reviewers judged.
 
 ## Drop and close
 
