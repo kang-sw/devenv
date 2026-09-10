@@ -769,7 +769,7 @@ func CommitMessage(opts CommitOptions) string {
 	for _, item := range opts.AIContext {
 		fmt.Fprintf(&b, "- %s\n", item)
 	}
-	writeCommitSection(&b, "## Updated Tickets", opts.UpdatedTickets)
+	writeCommitSection(&b, "## Ticket Updates", opts.UpdatedTickets)
 	return strings.TrimRight(b.String(), "\n")
 }
 

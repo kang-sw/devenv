@@ -1863,8 +1863,8 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 		t.Fatalf("git.commit text response = %q", commitText)
 	}
 	commitBody := string(runGitOutput(t, root, "log", "-1", "--format=%B"))
-	if !strings.Contains(commitBody, "## AI Context\n- User intent: verify git.commit.\n- Verification: server test.\n\n## Updated Tickets\n") {
-		t.Fatalf("git.commit message is not AI Context followed directly by Updated Tickets:\n%s", commitBody)
+	if !strings.Contains(commitBody, "## AI Context\n- User intent: verify git.commit.\n- Verification: server test.\n\n## Ticket Updates\n") {
+		t.Fatalf("git.commit message is not AI Context followed directly by Ticket Updates:\n%s", commitBody)
 	}
 
 	mustWrite(t, root, "file.txt", "one\ntwo\nthree\n")

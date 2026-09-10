@@ -262,7 +262,7 @@ func TestCommitStagesExplicitPathsAndBuildsMessage(t *testing.T) {
 			t.Fatalf("message missing %q:\n%s", want, message)
 		}
 	}
-	if !strings.Contains(message, "## Updated Tickets") || !strings.Contains(message, "260503-feat-demo: added ### Result") {
+	if !strings.Contains(message, "## Ticket Updates") || !strings.Contains(message, "260503-feat-demo: added ### Result") {
 		t.Fatalf("message missing auto ticket summary:\n%s", message)
 	}
 }
@@ -308,7 +308,7 @@ func TestCommitAcceptsLargeAIContextArray(t *testing.T) {
 }
 
 // The commit message renders exactly two structured sections: `## AI Context`
-// and `## Updated Tickets`. Pinning the whole string is deliberate — the spec
+// and `## Ticket Updates`. Pinning the whole string is deliberate — the spec
 // and mental-model trailer options this tool once carried were removed with
 // their layer, and a full-message assertion fails if any of them is
 // reintroduced, where a contains-check would not.
@@ -326,7 +326,7 @@ func TestCommitMessageRendersOnlyAIContextAndTicketSections(t *testing.T) {
 		"- User intent: record commit-message context.",
 		"",
 		"",
-		"## Updated Tickets",
+		"## Ticket Updates",
 		"- 260519-bug-git-commit-message-sections",
 	}, "\n")
 	if message != want {

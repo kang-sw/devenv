@@ -40,3 +40,28 @@ through the tool or through `git commit -F`. Nothing warned.
   item for projects whose `AGENTS.md` already documents the other form.
 - Should any consumer accept both spellings during the transition, given that
   history contains both?
+
+## Result
+
+The emitter changed, not the convention: `CommitMessage` in
+`agents-plugin-tool/internal/wsgit/git.go` now writes `## Ticket Updates`.
+`## Ticket Updates` has the larger surface (the bootstrap `AGENTS.template.md`
+commit-message template and its migration items, the bootstrap `WORKFLOW.md`,
+and this repository's `AGENTS.md` `### Commit Rules`), so the single emitter
+was the outlier. The lead authorized the observable-output change.
+
+Answers to the open questions:
+
+- Canonical spelling: `## Ticket Updates`.
+- No migration item is needed. The bootstrap template already teaches
+  `## Ticket Updates` and its v0009 migration item already adds that heading,
+  so a downstream `AGENTS.md` produced by any template version already matches
+  the new emitter output.
+- No consumer needs to accept both spellings: nothing under
+  `agents-plugin-tool/` parses either heading, and the `doc-gap-discovery`
+  playbook the ticket named as a keyed consumer no longer exists. History
+  keeps both forms; nothing reads it by heading.
+
+Three tests pinned the old string (`internal/wsgit/git_test.go` x2 plus a
+comment, `internal/mcp/server_test.go` x1) and were updated with the emitter.
+Documentation of history in closed tickets and plans keeps the old spelling.
