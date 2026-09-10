@@ -179,6 +179,12 @@ func TestTicketsVerifySageFreshnessWarningDoesNotBlockCommit(t *testing.T) {
 	if !strings.Contains(verifyText, "WARN [sage-review-freshness]") || !strings.Contains(verifyText, "review baseline:") {
 		t.Fatalf("tickets.verify text = %q, want sage freshness warning", verifyText)
 	}
+	// Sage freshness is the surviving warning producer, so it is what keeps the
+	// PASS-with-warnings next_instruction branch pinned now that the
+	// spec-address warning is gone.
+	if !strings.Contains(verifyText, "next_instruction: PASS with warnings above") {
+		t.Fatalf("tickets.verify text = %q, want the PASS-with-warnings next_instruction", verifyText)
+	}
 
 	if toolIsError(t, byID["2"]) {
 		t.Fatalf("git.commit blocked a sage freshness soft warning: %s", byID["2"])

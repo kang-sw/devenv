@@ -1022,7 +1022,7 @@ func implementBranchNextInstruction(verdict implementVerdict) string {
 }
 
 func implementNextAfterBranch(verdict implementVerdict) string {
-	return fmt.Sprintf("execute the installed Prep and Edit todos, %s review, and %s documentation gates in order.", verdict.ReviewAlloc, verdict.DocMode)
+	return fmt.Sprintf("execute the installed Prep and Edit todos, %s review, and the final action gate in order.", verdict.ReviewAlloc)
 }
 
 func implementConditions(n normalizedImplementFacts, source implementRouteFactsSource) []string {

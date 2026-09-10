@@ -73,7 +73,6 @@ const (
 	// default) or "off". Global-only: this is a cross-project user preference
 	// about warning noise, not a per-project opt-in.
 	ItemBootstrapAlarm = "bootstrap_alarm"
-
 )
 
 func init() {

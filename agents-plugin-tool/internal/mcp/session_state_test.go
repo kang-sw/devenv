@@ -75,7 +75,6 @@ func TestDeriveImplementTodos(t *testing.T) {
 			Delegation:  implementDelegationMode,
 			ReviewAlloc: "partitioned",
 			NeedReview:  tc.needReview,
-			DocMode:     "standard",
 		})
 		if !eqKeys(keysOf(got), tc.want...) {
 			t.Fatalf("derive(review=%v) = %v, want %v", tc.needReview, keysOf(got), tc.want)
@@ -129,7 +128,6 @@ func TestDeriveImplementTodoInstructionsPrepGuardrails(t *testing.T) {
 				BranchPlan:          implementBranchPlan{Action: "continue", CurrentBranch: "impl/demo/demo"},
 				ReviewAlloc:         "single",
 				NeedReview:          true,
-				DocMode:             "skipped",
 				BindingAnchorClause: tc.anchorClause,
 			})
 			prep := requireInstruction(t, todoByKey(t, got, "prep"))
@@ -161,7 +159,6 @@ func TestDeriveImplementTodoInstructionsPartitionedReview(t *testing.T) {
 		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
 		ReviewAlloc: "partitioned: correctness, test",
 		NeedReview:  true,
-		DocMode:     "standard",
 	})
 	review := requireInstruction(t, todoByKey(t, got, "review"))
 	if !strings.Contains(review, "Dispatch correctness and test reviewers") {
@@ -241,7 +238,6 @@ func TestDeriveImplementTodoInstructionsBarePartitionedReviewFallback(t *testing
 		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
 		ReviewAlloc: "partitioned",
 		NeedReview:  true,
-		DocMode:     "standard",
 	})
 	review := requireInstruction(t, todoByKey(t, got, "review"))
 	if !strings.Contains(review, "Dispatch the selected reviewers") {
@@ -259,46 +255,32 @@ func TestDeriveImplementTodoInstructionsBarePartitionedReviewFallback(t *testing
 	}
 }
 
-// TestDeriveImplementTodoInstructionsFinalGateDocMode pins what is left of the
+// TestDeriveImplementTodoInstructionsFinalGate pins what is left of the
 // documentation surface after the write-time doc pass was retired: no doc todo
-// is installed in either doc mode, and the final gate still carries the
-// verification guidance plus, in skipped mode, the caller's reason.
-func TestDeriveImplementTodoInstructionsFinalGateDocMode(t *testing.T) {
-	standard := deriveImplementTodosFromVerdict(implementTodoVerdict{
+// is installed, and the final gate carries the verification guidance with no
+// clause promising a documentation closeout the skeleton can no longer run.
+func TestDeriveImplementTodoInstructionsFinalGate(t *testing.T) {
+	got := deriveImplementTodosFromVerdict(implementTodoVerdict{
 		Delegation:  "delegated",
 		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
 		ReviewAlloc: "single",
 		NeedReview:  true,
-		DocMode:     "standard",
 	})
 	for _, key := range []string{"doc-pre-pass", "doc-commit-gate", "doc-closeout"} {
-		if idx := indexOfTodo(standard, key); idx >= 0 {
-			t.Fatalf("standard doc mode must install no %s todo: %v", key, keysOf(standard))
+		if idx := indexOfTodo(got, key); idx >= 0 {
+			t.Fatalf("no doc todo may be installed, found %s: %v", key, keysOf(got))
 		}
 	}
-	finalAction := requireInstruction(t, todoByKey(t, standard, "final-action-gate"))
+	finalAction := requireInstruction(t, todoByKey(t, got, "final-action-gate"))
 	for _, want := range []string{"impl-playbook unchanged-input verification rule", "documentation-only commits run affected checks", "Verify review disposition"} {
 		if !strings.Contains(finalAction, want) {
 			t.Fatalf("final-action-gate instruction missing reusable verification guidance %q: %q", want, finalAction)
 		}
 	}
-
-	skipped := deriveImplementTodosFromVerdict(implementTodoVerdict{
-		Delegation:  "delegated",
-		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
-		ReviewAlloc: "single",
-		NeedReview:  true,
-		DocMode:     "skipped",
-		DocReason:   "documentation tracked in follow-up",
-	})
-	for _, key := range []string{"doc-pre-pass", "doc-commit-gate", "doc-closeout"} {
-		if idx := indexOfTodo(skipped, key); idx >= 0 {
-			t.Fatalf("skipped doc mode must install no %s todo: %v", key, keysOf(skipped))
+	for _, forbidden := range []string{"documentation closeout", "documentation policy"} {
+		if strings.Contains(finalAction, forbidden) {
+			t.Fatalf("final-action-gate instruction still promises %q, but no documentation todo is installed: %q", forbidden, finalAction)
 		}
-	}
-	final := requireInstruction(t, todoByKey(t, skipped, "final-action-gate"))
-	if !strings.Contains(final, "documentation tracked in follow-up") {
-		t.Fatalf("skipped doc reason not carried to final gate: %q", final)
 	}
 }
 
@@ -315,7 +297,6 @@ func TestDeriveImplementTodoInstructionsMergeConfirmSkip(t *testing.T) {
 			BranchPlan:  implementBranchPlan{Action: action, CurrentBranch: "goal/drain-example", MergeConfirm: "skip"},
 			ReviewAlloc: "single",
 			NeedReview:  true,
-			DocMode:     "standard",
 		})
 		finalAction := requireInstruction(t, todoByKey(t, skip, "final-action-gate"))
 		if !strings.Contains(finalAction, "default no-merge outcome") {
@@ -336,21 +317,6 @@ func TestDeriveImplementTodoInstructionsMergeConfirmSkip(t *testing.T) {
 		}
 	}
 
-	skippedDocs := deriveImplementTodosFromVerdict(implementTodoVerdict{
-		Delegation:  "delegated",
-		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "goal/drain-example", MergeConfirm: "skip"},
-		ReviewAlloc: "single",
-		NeedReview:  true,
-		DocMode:     "skipped",
-		DocReason:   "documentation tracked in follow-up",
-	})
-	skippedFinal := requireInstruction(t, todoByKey(t, skippedDocs, "final-action-gate"))
-	for _, want := range []string{"impl-playbook unchanged-input verification rule", "documentation tracked in follow-up", "default no-merge outcome", "without asking for approval"} {
-		if !strings.Contains(skippedFinal, want) {
-			t.Fatalf("skipped-doc merge_confirm=skip final action missing %q: %q", want, skippedFinal)
-		}
-	}
-
 	for _, tc := range []struct {
 		name         string
 		mergeConfirm string
@@ -364,7 +330,6 @@ func TestDeriveImplementTodoInstructionsMergeConfirmSkip(t *testing.T) {
 				BranchPlan:  implementBranchPlan{Action: action, CurrentBranch: "implement/demo", MergeConfirm: tc.mergeConfirm},
 				ReviewAlloc: "single",
 				NeedReview:  true,
-				DocMode:     "standard",
 			})
 			finalAction := requireInstruction(t, todoByKey(t, verdict, "final-action-gate"))
 			if !strings.Contains(finalAction, "default no-merge outcome") {
@@ -390,7 +355,6 @@ func TestDeriveImplementTodoInstructionsBranchStop(t *testing.T) {
 		BranchPlan:  implementBranchPlan{Action: "stop", Reason: "merge target required while already on an implementation branch"},
 		ReviewAlloc: "partitioned: correctness, fit, test",
 		NeedReview:  true,
-		DocMode:     "standard",
 	})
 	for _, key := range []string{"route", "prep", "edit", "review", "final-action-gate", "merge"} {
 		instruction := requireInstruction(t, todoByKey(t, got, key))
@@ -1801,7 +1765,7 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 		"Next: Create impl/feature/base/jot-pug-mossy",
 		"installed Prep and Edit todos",
 		"partitioned: correctness, fit, test review",
-		"standard documentation gates",
+		"and the final action gate in order",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("route.resolve_implement verdict missing %q:\n%s", want, text)
@@ -1957,7 +1921,6 @@ func TestDeriveImplementTodoInstructionsCriticalReviewBranch(t *testing.T) {
 		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
 		ReviewAlloc: "single",
 		NeedReview:  true,
-		DocMode:     "standard",
 	})
 	review := requireInstruction(t, todoByKey(t, got, "review"))
 	for _, want := range []string{

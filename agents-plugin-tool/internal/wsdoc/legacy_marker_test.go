@@ -558,12 +558,11 @@ func TestSpecImpactSectionIgnoresFencedHeading(t *testing.T) {
 	t.Fatal("demo.md missing from SpecsList")
 }
 
-// The advisory and `readyGateWarning` must agree on what a Spec Impact section
-// is. The ready gate opens on the loose prefix `## Spec Impact`, so a ticket
-// headed `## Spec Impact and Phases` is promoted as spec-addressed; if the
-// advisory required a stricter form, that same ticket's markers would then be
-// reported as orphaned and the caller told to delete a live contract.
-func TestSpecImpactSectionOpensOnTheSameLoosePrefixAsTheReadyGate(t *testing.T) {
+// The advisory opens on the loose prefix `## Spec Impact`, so a ticket headed
+// `## Spec Impact and Phases` still has its section harvested; if the advisory
+// required a stricter form, that same ticket's markers would be reported as
+// orphaned and the caller told to delete a live contract.
+func TestSpecImpactSectionOpensOnALoosePrefix(t *testing.T) {
 	for _, heading := range []string{
 		"## Spec Impact",
 		"## Spec Impact and Phases",

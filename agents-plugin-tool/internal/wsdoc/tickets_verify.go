@@ -44,8 +44,8 @@ type VerifyAdvisory struct {
 
 // VerifyResult aggregates every guardrail outcome across the paths passed to
 // TicketVerify. OK is true only when Findings is empty; Warnings never affect
-// OK (spec-address is soft-warn only, per the ticket's stated posture), and
-// neither do Advisories.
+// OK (sage-review freshness, the surviving warning producer, reports a
+// staleness suspicion rather than a defect), and neither do Advisories.
 type VerifyResult struct {
 	OK         bool
 	Findings   []VerifyFinding

@@ -383,8 +383,6 @@ type implementTodoVerdict struct {
 	BranchPlan  implementBranchPlan
 	ReviewAlloc string
 	NeedReview  bool
-	DocMode     string
-	DocReason   string
 	// BindingAnchorClause is the pre-rendered Prep-guardrail anchor clause,
 	// empty when the project declares no `### Binding Anchor` in AGENTS.md. It
 	// is filled by the route.resolve_implement handlers (which hold the session
@@ -535,10 +533,7 @@ func implementFinalActionInstruction(verdict implementTodoVerdict) string {
 	} else {
 		mergeOption = "If a merge is explicitly chosen instead, ask for approval before performing it."
 	}
-	if strings.EqualFold(strings.TrimSpace(verdict.DocMode), "skipped") {
-		return fmt.Sprintf("%s and skipped documentation policy, then report the retained branch and commit range as the default no-merge outcome: %s. %s", verification, firstNonEmpty(verdict.DocReason, "no documentation updates are reachable in this verdict"), mergeOption)
-	}
-	return fmt.Sprintf("%s and standard documentation closeout, then report the retained branch and commit range as the default no-merge outcome. %s", verification, mergeOption)
+	return fmt.Sprintf("%s, then report the retained branch and commit range as the default no-merge outcome. %s", verification, mergeOption)
 }
 
 // implementMergeInstruction is opt-in: this step runs only when a merge was
@@ -966,8 +961,6 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 		BranchPlan:          result.Verdict.BranchPlan,
 		ReviewAlloc:         result.Verdict.ReviewAlloc,
 		NeedReview:          result.Verdict.NeedReview,
-		DocMode:             result.Verdict.DocMode,
-		DocReason:           result.Agenda.DocReason,
 		BindingAnchorClause: wsreview.ReadAgentsBindingAnchor(record.Root).PrepClause(),
 	})
 	if err := s.sessions.enterMode(sessionKey, "implement", rawAgenda, todos); err != nil {

@@ -4117,7 +4117,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.verify",
-			"description": "Run the ticket-write guardrails (stem/status-dir, frontmatter fence integrity, ready-landing sage-review posture, phase/Result heading well-formedness, close date-field presence) against ticket-shaped paths without staging or committing. These are the same hard guardrails git.commit enforces before it will commit a ticket-touching change; spec-address is reported as a warning only, never a block. Non-ticket paths are silently skipped. Use standalone for mid-edit red/green feedback before staging.",
+			"description": "Run the ticket-write guardrails (stem/status-dir, frontmatter fence integrity, ready-landing sage-review posture, phase/Result heading well-formedness, close date-field presence) against ticket-shaped paths without staging or committing. These are the same hard guardrails git.commit enforces before it will commit a ticket-touching change; soft warnings are reported but never block. Non-ticket paths are silently skipped. Use standalone for mid-edit red/green feedback before staging.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
