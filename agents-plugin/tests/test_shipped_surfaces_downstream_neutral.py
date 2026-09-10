@@ -106,10 +106,18 @@ def iter_ticket_stems(tracked):
     return stems
 
 
+# The spec layer was retired; its corpus lives under the tracked archive, and
+# closed tickets still cite its anchors. Rule 1 resolves stem-shaped tokens
+# against those anchors, so it reads them where they now are - scanning only the
+# retired live path would leave that half of the rule matching nothing and
+# silently stop catching anchor citations in shipped text.
+SPEC_ANCHOR_SOURCES = ("ai-docs/spec/", "ai-docs/.old/spec/")
+
+
 def iter_spec_anchors(tracked, repo_root: Path):
     anchors = set()
     for path in tracked:
-        if path.startswith("ai-docs/spec/") and path.endswith(".md"):
+        if path.startswith(SPEC_ANCHOR_SOURCES) and path.endswith(".md"):
             try:
                 text = (repo_root / path).read_text(encoding="utf-8")
             except (UnicodeDecodeError, OSError):

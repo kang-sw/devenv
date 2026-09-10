@@ -15,6 +15,7 @@ related:
 sage-review-completeness: completed
 sage-review-design-reviewed: 8d66854141604cb7
 sage-review-completeness-reviewed: 8d66854141604cb7
+completed: 2026-09-10
 ---
 
 # Retire the spec and mental-model layers: tools, gates, write-time doc passes, and conventions
@@ -722,3 +723,127 @@ cross-ticket seam, and they keep naming the directories until it lands.
 Touchpoints: `ai-docs/spec/`, `ai-docs/mental-model/`, `ai-docs/mental-model.md`,
 `ai-docs/.old/`, `ai-docs/WORKFLOW.md`, `AGENTS.md`, `CLAUDE.md` only if its
 shim body changes.
+
+### Result (cae86a03) - 2026-09-10
+
+`ai-docs/spec/` and `ai-docs/mental-model/` no longer exist as maintained
+directories here. Landed in two commits on `impl/epic/refound/swipe-panda-food`:
+`dcefa5e7` (triage, archive, doc repoint) and `cae86a03` (review fixes).
+
+**Triage (epic Cross-Child Decision 18).** Five read-only delegates classified
+every unit before anything moved: one behavior section per `{#anchor}` in spec,
+one `##`/`###` section in mental-model. 299 units total.
+
+| class | spec (228) | mental-model (71) | total |
+|---|---|---|---|
+| derivable from code | 175 | 54 | 229 |
+| stale (subject no longer exists) | 53 | 15 | 68 |
+| prescriptive convention | 0 | 1 | 1 |
+| site-specific trap | 0 | 1 | 1 |
+| non-derivable external fact | 0 | 0 | 0 |
+
+The 68 stale units are the expected shape, not a surprise: Phases 1 and 2
+deleted the tools, gates, trailers and playbooks those units describe, so
+`workflow-skills.md` (34 of 61) and `documentation-system.md` in both layers are
+mostly obituary. Nothing was rewritten in place; the archive keeps the original
+text.
+
+**Moved items (2 of 299).**
+
+- *Convention* - `mental-model/mcp-runtime.md ## Domain Rules`: MCP tool output
+  is read by an LLM first, so a new tool's default response is compact text and
+  JSON is an explicit opt-in. Nothing forces a *new* tool to follow the pattern
+  the existing ones exemplify. Now `## Tool Output Convention` in
+  `ai-docs/manuals/ws-mcp.md`, declared for `agents-plugin-tool/internal/mcp/`.
+- *Trap* - `mental-model/developer-environment-tools.md ## Common Mistakes`: in
+  `shell/statusline.sh` the `DIR`/`PROJECT_DIR` backslash normalization sits far
+  below the `jq` extraction block and covers only those two names, so a new path
+  field added at the extraction site silently keeps Windows separators under Git
+  Bash/WSL. Now two comments in that file - one at the extraction block where a
+  future field is added, one at the normalization block bounding what it covers.
+
+Every other candidate was rejected against source: each was already a code
+comment at its own site (the `server.go` panic-recover defer ordering, the
+`execjob.finalize` lock ordering, the `tickets_scope.go` sparse-checkout git
+version facts), already a manual (`ferrule` non-idempotency in `ws-mcp.md`, the
+Windows Python Store alias in `windows-dogfood.md`, wsflow drift in
+`wsflow-mirroring.md`), already a shipped playbook line (the `lead-ship`
+`rev-list --count` quirk, the `lead-review` marker-base drift), or already a
+closed ticket's `## Decisions` (the review-watermark multi-maintainer design,
+the Windows Job Object deferral).
+
+**Archive.** 20 pure renames into the existing dated-snapshot scheme -
+`ai-docs/.old/spec/260910/` and `ai-docs/.old/mental-model/260910/`, the
+`mental-model.md` overview alongside its domain files. `git diff -M --stat`
+reports 20 files changed, 0 insertions, 0 deletions.
+
+**Documents repointed.** `AGENTS.md` lost the `## Documentation System` spec and
+mental-model entries and their convention-read bullets, the `## Commit Rules`
+`## Spec` trailer and `renamed-spec:` line, the two spec-anchor citations in
+`### Review Policy` and `### Binding Anchor`, the `mental-model lookup` entry in
+Rule 4's generic-hook list, and the spec/mental-model wording in `## Project
+Scope`, Architecture Rule 1, `## Project Memory`, `## Ticket System`,
+`## Project Orientation` and the trailing inclusion-test comment. `## Code
+Standards` item 5 needed no edit, as this phase predicted. `ai-docs/WORKFLOW.md`
+lost its `## Specs` and `## Mental Models` sections whole plus the layer clauses
+in `## ai-docs/ Layout`, `## Index Health`, `## Commit Traceability` and
+`## Manual Fallback`, and now states why it has diverged from the bootstrap
+template it is a copy of. Four more repo-local documents were repointed on
+contact because the move would have left them dangling:
+`ai-docs/manuals/ws-mcp.md` and `codex-integration.md` each opened by naming the
+spec files as the MCP contract, `ai-docs/ref/worktree-ticket-scope.md` cited two
+spec anchors as its contract, and `ai-docs/manuals/wsflow-mirroring.md` still
+routed "ticket/spec changes, mental-model updates" to the lead. A pre-existing
+drift found the same way is fixed: `ws-mcp.md` claimed `doctor` checks
+`agents-plugin/`, which Phase 1's doctor change had already stopped doing.
+
+**Conventions section declared.** The triage's convention class routes a rule to
+a manual *and* to the path-scoped conventions section, so `AGENTS.md`
+`## Workflow` now declares `### Implementation Conventions` with three rows
+(`skill-authoring.md`, `wsflow-mirroring.md`, `ws-mcp.md`). This is a live
+obligation, not a pointer list - `worker-stop-protocol` reads every matching
+row's manual before editing and `ticket-fact-populator` copies matching rows
+into a ticket's `## Constraints` - and the section says so, along with what
+adding a row costs.
+
+**Tests.** Three changed because their subject moved. `workflow_guide_test`
+dropped `ai-docs/WORKFLOW.md` from the guides it pins: that copy lost its
+`## Specs` section, so it has no implemented-behavior-only rule left; the two
+shipped bootstrap copies still do and are still checked.
+`TestRetiredAPIGuidanceNotShipped` stopped walking the two `ai-docs/` doc roots
+(scanning an archive is the wrong shape - a hit there could not be fixed) and
+gained `agents-plugin-wsflow/skills`, which it had been missing.
+`test_shipped_surfaces_downstream_neutral` now reads spec anchors from
+`ai-docs/.old/spec/` as well; without that its rule-1 anchor arm would resolve
+against an empty set and silently stop catching anchor citations in shipped
+text. 365 anchors resolve after the change.
+
+**Measurement-manual after-pass input.** Two boundaries, not one. The commit
+trailers the manual counts (`## Updated Specs`, `## Updated Mental Models`,
+`(mental-model-updated)`) stopped being emittable when Phase 2 merged at
+`a20cc4e6`; the corpus left the live tree at `dcefa5e7`. An after-pass therefore
+measures commits after this ticket's merge into `epic/refound`, and the
+before-baseline is the range ending at `28c0dcba^`.
+
+**Verification** (full output read): `go build ./...` clean; `go vet ./...`
+clean; `go test ./... -count=1` 14 packages ok; `agents-plugin/tests` 55 OK;
+`agents-plugin-wsflow/tests` 10 OK. Against a fresh source build (the installed
+plugin cache is a pre-Phase-2 binary and still renders the retired `spec:`
+area), `project_tree` names neither `spec/`, `mental-model/`, nor
+`mental-model.md`, and `doctor` reports only repo root, `ai-docs/` and
+`AGENTS.md`. `{#260830-review-policy-config-surface}`, cited by closed tickets,
+still resolves inside `ai-docs/.old/`. No file under either plugin package names
+the moved paths except the declared bootstrap-template seam. Review: round 1
+raised 1 Important + 5 Minor, all fixed in `cae86a03`; round 2 verified every
+one and raised nothing new.
+
+**Deliberately untouched.** `skills/lead-bootstrap/AGENTS.template.md` and
+`WORKFLOW.md` in both packages, the declared cross-ticket seam owned by
+`260909-feat-bootstrap-refoundation-template-migration`;
+`related-mental-model:` frontmatter on live `idea/`/`todo/`/`ready/` tickets,
+which no code parses and whose removal would be the mechanical rewrite this
+ticket's `## Decisions` already rejected for closed tickets;
+`ai-docs/ref/verify-dashboard-archive-recovery.sh`, whose
+`ai-docs/mental-model/` path is read out of a git tag rather than the working
+tree; and the `Doc Mode: standard` verdict plumbing, which Phase 1 named as an
+always-ask API-shape decision outside this ticket.

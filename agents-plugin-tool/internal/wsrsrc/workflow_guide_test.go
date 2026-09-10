@@ -7,13 +7,17 @@ import (
 	"testing"
 )
 
-// workflowGuides are the three hand-maintained parallel copies of the workflow
-// guide: this repo's own guide plus the two lead-bootstrap templates that ship
+// workflowGuides are the hand-maintained parallel copies of the workflow guide
+// that still teach the spec layer: the two lead-bootstrap templates that ship
 // downstream. No generator relates them - lead-bootstrap is deliberately absent
 // from substitutionMirroredSkills - so they can only drift apart by hand.
+//
+// This repository's own ai-docs/WORKFLOW.md is deliberately not in the list any
+// more: it lost its Specs section when the spec layer was retired here, so it
+// has no implemented-behavior-only rule to keep. Add it back only if this
+// repository ever teaches a spec layer again.
 func workflowGuides() []string {
 	return []string{
-		filepath.Join("..", "..", "..", "ai-docs", "WORKFLOW.md"),
 		filepath.Join(fullSkillsRoot(), "lead-bootstrap", "WORKFLOW.md"),
 		filepath.Join(wsflowSkillsRoot(), "lead-bootstrap", "WORKFLOW.md"),
 	}
@@ -84,7 +88,7 @@ func containsAllTokens(text string, tokens []string) bool {
 }
 
 // TestWorkflowGuidesKeepImplementationGapException pins the one sentence the
-// three copies must not diverge on. Without the exception, "verify the behavior
+// shipped copies must not diverge on. Without the exception, "verify the behavior
 // exists before writing or keeping its entry" reads as an instruction to delete
 // Implementation Gap callouts, which are the sanctioned home for a
 // known-but-unscheduled gap. A copy that loses it teaches a verification pass to
@@ -98,9 +102,9 @@ func containsAllTokens(text string, tokens []string) bool {
 // says nothing about the rest of the shared content; see
 // 260728-research-parallel-workflow-guide-divergence.
 //
-// Every copy is checked in one pass: a simultaneous loss in two of the three
-// must not report only the first, or the operator fixes one file and reruns
-// into a second red.
+// Every copy is checked in one pass: a simultaneous loss in both must not
+// report only the first, or the operator fixes one file and reruns into a
+// second red.
 func TestWorkflowGuidesKeepImplementationGapException(t *testing.T) {
 	for _, path := range workflowGuides() {
 		raw, err := os.ReadFile(path)
