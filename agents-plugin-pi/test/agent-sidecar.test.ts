@@ -26,7 +26,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   SIDECAR_VERSION,
-  MID_TURN_ORPHAN_CAVEAT,
   noSessionSidecarPath,
   buildOrphanPush,
   buildOrphanSummary,
@@ -460,39 +459,46 @@ describe("buildOrphanSummary", () => {
     return { agentId: "a1", sessionPath: "s", systemPromptPath: "p", wsToolNames: [], toolGroup: "full-worker", ...overrides };
   }
 
-  test("names every RUNNING orphan with its role, last-report time and the re-issue caveat, one per line", () => {
+  test("renders each interrupted agent as a concise, actionable dormant recovery block", () => {
     assert.equal(
       buildOrphanSummary([
-        orphan({ agentId: "a1", spawnRole: "fork", state: "running", lastReportAt: "2026-09-05T10:00:00.000Z" }),
-        orphan({ agentId: "a2", state: "running" }),
+        orphan({ agentId: "01234567-89ab-cdef-0123-456789abcdef", alias: "scout", title: "Inspect recovery copy", spawnRole: "fork", state: "running", lastReportAt: "2026-09-05T10:00:00.000Z" }),
+        orphan({ agentId: "fedcba98-7654-3210-fedc-ba9876543210", state: "running" }),
       ]),
       [
-        `a1 (fork, running, last report 2026-09-05T10:00:00.000Z) — ${MID_TURN_ORPHAN_CAVEAT}`,
-        `a2 (worker, running, no reports) — ${MID_TURN_ORPHAN_CAVEAT}`,
+        "2 mid-turn agents recovered as dormant",
+        "scout · fork",
+        "Inspect recovery copy",
+        "State at shutdown: running, last report 2026-09-05T10:00:00.000Z",
+        "Resume: ws-agent-send scout \"<repeat the interrupted instruction>\"",
+        "Inspect first: ws-agent-transcript scout",
+        "fedcba98 · worker",
+        "State at shutdown: running, no reports",
+        "Resume: ws-agent-send fedcba98-7654-3210-fedc-ba9876543210 \"<repeat the interrupted instruction>\"",
+        "Inspect first: ws-agent-transcript fedcba98-7654-3210-fedc-ba9876543210",
       ].join("\n"),
     );
   });
 
-  test("Edition: idle entries collapse into one closing line — they lost nothing and need no instruction re-issued", () => {
+  test("summarizes previously idle restored agents without naming their IDs", () => {
     const summary = buildOrphanSummary([
       orphan({ agentId: "a1", state: "running" }),
       orphan({ agentId: "a2", state: "idle" }),
       orphan({ agentId: "a3" }),
     ]);
-    assert.equal(summary.split("\n").length, 2);
-    assert.match(summary, /^a1 \(worker, running, no reports\) — /);
-    assert.equal(summary.split("\n")[1], "2 idle agents re-registered dormant: a2, a3", "an orphan with no state field reads as idle");
+    assert.equal(summary.split("\n").slice(-2).join("\n"), "2 previously idle agents were also restored.\nUse ws-agent-list to inspect them.", "an orphan with no state field reads as idle");
+    assert.ok(!summary.includes("a2") && !summary.includes("a3"));
   });
 
-  test("Edition: an all-running set has no idle line at all", () => {
-    const summary = buildOrphanSummary([orphan({ agentId: "a1", state: "running" })]);
-    assert.equal(summary.split("\n").length, 1);
-    assert.ok(!summary.includes("re-registered dormant"));
-  });
-
-  test("Edition: the idle line agrees in number", () => {
+  test("uses singular grammar for one previously idle agent", () => {
     const summary = buildOrphanSummary([orphan({ agentId: "a1", state: "running" }), orphan({ agentId: "a2", state: "idle" })]);
-    assert.match(summary, /1 idle agent re-registered dormant: a2$/);
+    assert.match(summary, /1 previously idle agent was also restored\.\nUse ws-agent-list to inspect it\.$/);
+  });
+
+  test("an all-running set has no idle-restoration note", () => {
+    const summary = buildOrphanSummary([orphan({ agentId: "a1", state: "running" })]);
+    assert.equal(summary.split("\n").length, 5);
+    assert.ok(!summary.includes("previously idle"));
   });
 });
 
@@ -515,7 +521,7 @@ describe("buildOrphanPush (announce only what was cut off)", () => {
     assert.equal(buildOrphanPush([]), undefined);
   });
 
-  test("a mixed set announces the running entries, counts only those, and names the idle ones once", () => {
+  test("a mixed set announces the running entries, counts only those, and retains idle IDs structurally", () => {
     const push = buildOrphanPush([
       orphan({ agentId: "a1", state: "running" }),
       orphan({ agentId: "a2", state: "idle" }),
@@ -524,17 +530,19 @@ describe("buildOrphanPush (announce only what was cut off)", () => {
     assert.equal(push.count, 1, "count is what the lead must act on, not how many were re-registered");
     assert.deepEqual(push.idle_agent_ids, ["a2", "a3"]);
     const agents = String(push.agents).split("\n");
-    assert.equal(agents.length, 2);
-    assert.ok(agents[0].startsWith("a1 ("));
-    assert.ok(agents[0].includes(MID_TURN_ORPHAN_CAVEAT));
-    assert.equal(agents[1], "2 idle agents re-registered dormant: a2, a3");
+    assert.equal(agents[0], "1 mid-turn agent recovered as dormant");
+    assert.ok(agents.includes("a1 · worker"));
+    assert.ok(agents.includes("State at shutdown: running, no reports"));
+    assert.ok(agents.includes("Resume: ws-agent-send a1 \"<repeat the interrupted instruction>\""));
+    assert.ok(agents.includes("2 previously idle agents were also restored."));
+    assert.ok(!String(push.agents).includes("a2") && !String(push.agents).includes("a3"));
   });
 
   test("an all-running set carries no idle_agent_ids field to render", () => {
     const push = buildOrphanPush([orphan({ agentId: "a1", state: "running" }), orphan({ agentId: "a2", state: "running" })])!;
     assert.equal(push.count, 2);
     assert.equal("idle_agent_ids" in push, false);
-    assert.equal(String(push.agents).split("\n").length, 2);
+    assert.equal(String(push.agents).split("\n").length, 9, "one header plus four concise recovery lines per interrupted agent");
   });
 });
 

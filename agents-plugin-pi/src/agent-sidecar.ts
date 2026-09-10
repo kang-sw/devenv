@@ -364,15 +364,6 @@ export function reviveOrphans(registry: RpcAgentRegistry, orphans: PersistedOrph
 }
 
 /**
- * The caveat a `"running"` orphan carries. A child cut off mid-turn resumes
- * from its last FLUSHED turn, so whatever the lead had asked for is gone with
- * the process — re-issuing the instruction is the only way to get it done, and
- * a lead that assumes the work merely paused would wait forever for a report
- * nobody is writing.
- */
-export const MID_TURN_ORPHAN_CAVEAT = "was mid-turn at shutdown; resumes from its last flushed turn — re-issue the instruction after ws-agent-send";
-
-/**
  * Splits a revived set by what the lead has to DO about each entry. Every
  * entry is re-registered either way (an idle reviewer must stay reachable
  * through `ws-agent-send`); only the `"running"` ones carry lost work.
@@ -393,33 +384,40 @@ export function partitionOrphansByState(orphans: PersistedOrphan[]): {
  * The `ws-agent-orphaned` push body. One message for the whole set (not one
  * per agent): a lead restarting after a crash wants a single roll-call it can
  * act on, not N interleaved notices. One LINE per agent that was mid-turn —
- * each carries its role, its state at shutdown, its last-report time and the
- * re-issue caveat, which is more than fits a comma-joined run — plus, when
- * there were also idle entries, one closing line naming them together.
- *
- * Edition (live-run fix): the idle entries are a summary line rather than a
- * line each. They lost nothing and need no instruction re-issued; naming them
- * at length invited the lead to treat re-registration as a task.
+ * gives each interrupted agent an immediately executable recovery block.
+ * Previously idle agents are summarized, not named: their IDs remain in the
+ * structured payload for tools, while prose stays focused on interrupted work.
  */
-/**
- * 260905 (alias/park/cap ticket): the roll-call's per-agent label — `alias
- * (agentId)` when an alias is set (mirrors the pushed-message head convention
- * in `spawner.ts`'s `sendPush`), else the bare `agentId`; a `title`, when
- * set, is appended for extra context.
- */
-function orphanLabel(o: PersistedOrphan): string {
-  const idPart = o.alias ? `${o.alias} (${o.agentId})` : o.agentId;
-  return o.title ? `${idPart} "${o.title}"` : idPart;
+function orphanDisplayId(orphan: PersistedOrphan): string {
+  return orphan.alias ?? orphan.agentId.slice(0, 8);
+}
+
+function orphanRecoveryTarget(orphan: PersistedOrphan): string {
+  return orphan.alias ?? orphan.agentId;
+}
+
+function reportSummary(orphan: PersistedOrphan): string {
+  return orphan.lastReportAt ? `last report ${orphan.lastReportAt}` : "no reports";
 }
 
 export function buildOrphanSummary(orphans: PersistedOrphan[]): string {
   const { running, idle } = partitionOrphansByState(orphans);
-  const lines = running.map((o) => {
-    const facts = [o.spawnRole ?? "worker", "running", ...(o.lastReportAt ? [`last report ${o.lastReportAt}`] : ["no reports"])];
-    return `${orphanLabel(o)} (${facts.join(", ")}) — ${MID_TURN_ORPHAN_CAVEAT}`;
-  });
+  const lines = [`${running.length} mid-turn agent${running.length === 1 ? "" : "s"} recovered as dormant`];
+  for (const orphan of running) {
+    const target = orphanRecoveryTarget(orphan);
+    lines.push(
+      `${orphanDisplayId(orphan)} · ${orphan.spawnRole ?? "worker"}`,
+      ...(orphan.title ? [orphan.title] : []),
+      `State at shutdown: running, ${reportSummary(orphan)}`,
+      `Resume: ws-agent-send ${target} "<repeat the interrupted instruction>"`,
+      `Inspect first: ws-agent-transcript ${target}`,
+    );
+  }
   if (idle.length > 0) {
-    lines.push(`${idle.length} idle agent${idle.length === 1 ? "" : "s"} re-registered dormant: ${idle.map((o) => orphanLabel(o)).join(", ")}`);
+    lines.push(
+      `${idle.length} previously idle agent${idle.length === 1 ? " was" : "s were"} also restored.`,
+      `Use ws-agent-list to inspect ${idle.length === 1 ? "it" : "them"}.`,
+    );
   }
   return lines.join("\n");
 }
@@ -446,8 +444,6 @@ export function buildOrphanPush(orphans: PersistedOrphan[]): Record<string, unkn
     count: running.length,
     agents: buildOrphanSummary(orphans),
     ...(idle.length > 0 ? { idle_agent_ids: idle.map((o) => o.agentId) } : {}),
-    detail:
-      "A previous run of this session left these delegated agents behind. Every agent named here is registered as dormant: ws-agent-send revives one from its own session file, ws-agent-transcript reads what it did, ws-agent-stop drops it. The agents listed individually were mid-turn when the session went away — they resume from their last flushed turn, so re-issue that instruction when you revive one rather than waiting for a report nobody is writing.",
   };
 }
 

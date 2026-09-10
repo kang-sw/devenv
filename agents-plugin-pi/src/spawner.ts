@@ -1372,9 +1372,15 @@ export function buildPushContent(
   status: string | undefined,
 ): string {
   const head = agentId ? `[${family}] agent ${agentId}` : `[${family}]`;
-  const body = Object.entries(payload)
-    .filter(([, value]) => value !== undefined && value !== null && value !== "")
-    .map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
+  // Orphan recovery keeps its tool-facing fields in `details`, but its model
+  // copy is an action block rather than YAML-like metadata. In particular,
+  // `idle_agent_ids` remains structured without enumerating dormant IDs in
+  // prose. Other orphan-shaped payloads retain the ordinary generic rendering.
+  const body = family === "ws-agent-orphaned" && typeof payload.agents === "string"
+    ? payload.agents.split("\n")
+    : Object.entries(payload)
+      .filter(([, value]) => value !== undefined && value !== null && value !== "")
+      .map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
   return [head, ...body, ...(status ? [status] : [])].join("\n");
 }
 

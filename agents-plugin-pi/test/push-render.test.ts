@@ -46,6 +46,29 @@ describe("buildPushRenderLines", () => {
     });
   });
 
+  test("orphan recovery uses its action block as model copy while idle IDs remain structured", () => {
+    const payload = {
+      count: 1,
+      agents: [
+        "1 mid-turn agent recovered as dormant",
+        "scout · worker",
+        "State at shutdown: running, no reports",
+        "Resume: ws-agent-send scout \"<repeat the interrupted instruction>\"",
+        "Inspect first: ws-agent-transcript scout",
+        "2 previously idle agents were also restored.",
+        "Use ws-agent-list to inspect them.",
+      ].join("\n"),
+      idle_agent_ids: ["idle-1", "idle-2"],
+    };
+    const content = buildPushContent("ws-agent-orphaned", undefined, payload, undefined);
+    assert.deepEqual(buildPushRenderLines({ content, details: payload }), {
+      head: "[ws-agent-orphaned]",
+      body: payload.agents.split("\n"),
+      status: undefined,
+    });
+    assert.ok(!content.includes("idle_agent_ids") && !content.includes("idle-1") && !content.includes("idle-2"));
+  });
+
   test("without a details.status the status line is still recognized by shape", () => {
     const content = ["[ws-agent-settled] agent a1", "reason: idle", "0 delegated agents still running"].join("\n");
     const parts = buildPushRenderLines({ content });

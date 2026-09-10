@@ -584,7 +584,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
             if (readSpawnRole(process.env) === "fork") {
               // Startup custom messages bypass input; queue without triggering a
               // model turn so restored work first passes the own-key guard.
-              pi.sendMessage({ customType: "ws-agent-orphaned", content: orphanPush, display: true }, { deliverAs: "nextTurn" });
+              pi.sendMessage({ customType: "ws-agent-orphaned", content: orphanPush, display: true, details: orphanPush as never }, { deliverAs: "nextTurn" });
             } else pushToLead(pi, agentTools.rpcRegistry, undefined, "ws-agent-orphaned", orphanPush, "followUp");
           }
         }
