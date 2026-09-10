@@ -24,10 +24,11 @@ workflow semantics.
 Read at every session start, before other action:
 
 1. **Preamble** - repo identity, plugin topology, and canonical flows live in
-   this file's `## Project Orientation` section below; read repo-tracked notes
-   (`ws/note.search(layer: "repo")`) for volatile session context,
-   `ai-docs/manuals/` for procedures, and the generated ticket inventory for
-   current status. Keep only context a session must not re-derive.
+   this file's `## Project Orientation` section below; read the `repo` note
+   layer at `ai-docs/ws-notes/` (one file per key) for volatile session
+   context, `ai-docs/manuals/` for procedures, and the ticket status
+   directories for current work. Keep only context a session must not
+   re-derive.
 2. **Project arc** - run `git log --oneline --graph -50`.
 3. **Binding anchor** - read this project's declared binding anchor
    (`## Workflow` -> `### Binding Anchor`) when the task touches one of its
@@ -139,22 +140,22 @@ proceed fact normalizes to `n/a`.
 
 ### Implementation Conventions
 
-| manual | paths |
+| paths | manual |
 |---|---|
-| `ai-docs/manuals/skill-authoring.md` | `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin-wsflow/rsrc/`, `agents-plugin-wsflow/skills/`, `agents-plugin-tool/internal/wsdoc/conventions/` |
-| `ai-docs/manuals/wsflow-mirroring.md` | `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin-wsflow/` |
-| `ai-docs/manuals/ws-mcp.md` | `agents-plugin-tool/internal/mcp/` |
+| `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/` | `ai-docs/manuals/shipped-surface-boundary.md` |
+| `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin-wsflow/rsrc/`, `agents-plugin-wsflow/skills/`, `agents-plugin-tool/internal/wsdoc/conventions/` | `ai-docs/manuals/skill-authoring.md` |
+| `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin-wsflow/` | `ai-docs/manuals/wsflow-mirroring.md` |
+| `agents-plugin-tool/internal/mcp/` | `ai-docs/manuals/ws-mcp.md` |
 
 Each row's manual is read before editing a file its `paths` cover. This is a
 live obligation, not a pointer list: the worker playbook reads every matching
 row's manual before editing, and ticket fact population copies matching rows
-into a ticket's `## Constraints`. The first two rows were already required -
-`skill-authoring.md` by `## Code Standards` above, `wsflow-mirroring.md` by its
-own `summary:` - and declaring them here is what makes that requirement reach a
-path-scoped reader; the `ws-mcp.md` row is new, added with the tool-output
-convention that manual now carries. Adding a row binds every future edit under
-its `paths`, so add one only for a manual whose rules a change to those paths
-must not contradict.
+into a ticket's `## Constraints`. `skill-authoring.md` and
+`wsflow-mirroring.md` were already required - the first by `## Code Standards`
+above, the second by its own `summary:` - and declaring them here is what
+makes that requirement reach a path-scoped reader. Adding a row binds every
+future edit under its `paths`, so add one only for a manual whose rules a
+change to those paths must not contradict.
 
 ### Commit Rules
 
@@ -192,44 +193,15 @@ not stage it unless explicitly requested.
 3. **Host-neutral first.** Shared skill text should prefer canonical MCP tool
    names and host-neutral behavior. Treat Claude-specific commands and paths as
    adapter or fallback behavior.
-4. **Shipped surfaces are downstream-first. This is not negotiable.**
-   Every playbook, skill, convention, and template under `agents-plugin/`
-   and `agents-plugin-wsflow/`, every embedded convention, and every string
-   `agents-plugin-tool/` emits to an agent (todo instructions, advisories,
-   banners, doctor checks, tool descriptions) runs inside projects that are
-   not this one and that hold only what bootstrap installs. The test for every sentence of such
-   text: **does it depend on something a downstream project does not
-   have?** If yes, it is a leak. Concretely, shipped text MUST NOT name:
-   - a ticket of this repository: a real `26xxxx-...` stem, an
-     `ai-docs/tickets/...` path to one, an epic name, or a bare ticket
-     number used as a citation (example stems that resolve to nothing are
-     fine; ticket-directory names and `<status>/<stem>` placeholders are
-     ws conventions and fine);
-   - a commit hash;
-   - a specific file of this repository that bootstrap does not install
-     (`ai-docs/ref/worktree-ticket-scope.md`, the `skill-authoring` manual),
-     or this repository's own layout and tooling: `agents-plugin/`,
-     `agents-plugin-tool/`, `agents-plugin-wsflow/`, `claude-plugin/`,
-     `install.sh`, `wsflow-mirroring`;
-   - this repository's migration vocabulary as a rule: migration anchor,
-     native-subagent pivot, spawn-removal, host-neutral migration, adapter
-     boundaries, retired Claude tree, Codex-first.
-   A rule this file imposes on sessions in this repository is a rule for this
-   repository, not a rule the shipped playbooks impose on every project. When
-   shipped text needs project-specific input it reads it through a generic
-   hook (`infra.read`, `convention.read`, a declared `AGENTS.md` section, a
-   `config.list` key) and this repository declares its
-   own value behind that hook. A ticket that asks shipped playbooks to
-   "honor" or "enforce" a rule from this file is asking for a leak; push
-   back and redirect it to a hook. A test that pins shipped text pins the
-   leak too: a pinned devenv-only string is a bug in the test as well as in
-   the text. Before committing any change under the shipped surfaces,
-   re-read the changed text as a lead in a project that has never heard of
-   devenv.
+4. **Shipped surfaces are downstream-first. This is not negotiable.** Text
+   that ships to a downstream project must not depend on anything this
+   repository alone has; `ai-docs/manuals/shipped-surface-boundary.md` states
+   what that excludes and which generic hook to use instead.
 5. **Shell state is ephemeral.** Shell state does not persist between tool calls;
    values needed later must be captured from output and passed explicitly.
 6. **Retired Claude tree.** Do not reintroduce `claude-plugin/`; preserve
    historical Claude material under `ai-docs/ref/` when needed.
+
 ## Documentation System
 
 - Project orientation: this file's `## Project Orientation` section.
@@ -237,6 +209,7 @@ not stage it unless explicitly requested.
   (`ai-docs/ws-notes/`, written via `ws/note.write(layer: "repo", ...)`).
 - Tickets: `ai-docs/tickets/`
 - Static references: `ai-docs/ref/`
+- Shipped-surface boundary: `ai-docs/manuals/shipped-surface-boundary.md`
 - Skill/agent authoring: `ai-docs/manuals/skill-authoring.md`
 - Codex behavior notes: `ai-docs/manuals/codex-integration.md`
 - MCP operational runbook: `ai-docs/manuals/ws-mcp.md`
@@ -361,4 +334,4 @@ ai-docs/tickets/.dropped/
      Context goes in this file's `## Project Orientation` section or the
      `repo` note layer; process goes in skills. -->
 
-<!-- Template Version: v0047 -->
+<!-- Template Version: v0048 -->
