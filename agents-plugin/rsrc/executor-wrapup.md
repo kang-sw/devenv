@@ -8,13 +8,6 @@ completed implementation phase has a reviewable result commit.
 - Wait for the Doc Pipeline step and any ticket updates to complete before running the doc-commit gate.
 - Doc-commit gate always runs; prior steps may have dirtied `ai-docs/`.
 - Commit message for doc updates follows AGENTS.md commit rules; type is `docs`.
-- Ancestor loading: any agent that reads `ai-docs/mental-model/<domain>/<sub>.md` must read `ai-docs/mental-model/<domain>/index.md` first.
-
-## Ancestor Loading
-
-1. Callers using `{{.McpNamespace}}/mental_models.query` should read returned parent docs before child docs.
-2. Callers using manual paths must read the parent before the child.
-3. Delegation prompts must include the ancestor-loading rule when subagents read mental models.
 
 ## Doc Pipeline
 
@@ -39,7 +32,7 @@ Ticket-driven only:
 its follow-up pass's delta. For either, include deviations — diffed between the
 ticket's selected phase text and what landed, not recalled from the implementer —
 verification evidence, unresolved findings, and deferred follow-ups; do not
-restate unchanged plan or spec content.
+restate unchanged plan content.
 
 1. Append `### Result (<short-hash>) - YYYY-MM-DD` to each newly completed phase.
    Use the result commit supplied by the caller.

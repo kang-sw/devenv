@@ -44,7 +44,6 @@ Mode: user request
 7. Set `<!-- Template Version: vNNNN -->` to the latest version from the template.
 8. Write `CLAUDE.md` with body `@AGENTS.md`.
 9. Commit scaffolding.
-10. Suggest `{{.SkillNamespace}}:lead-forge-spec` and `{{.SkillNamespace}}:lead-forge-mental-model` if baselines are absent.
 
 ## On: upgrade
 
@@ -94,8 +93,8 @@ not have one. This flow only runs when a project still has one (gated by
 
 1. Read `ai-docs/_index.md`.
 2. Apply **judge: index-scope-drift** as a cheap first pass.
-3. Do not read the full spec or mental-model corpus for this pass.
-4. Do not move semantic content into specs, mental models, tickets, or refs.
+3. Do not read the full document corpus for this pass.
+4. Do not move semantic content into manuals, tickets, or refs.
 5. Emit a concise health note when drift candidates exist.
 6. When candidates exist, ask whether to clean up `_index.md` now, defer cleanup, or route semantic follow-up.
 7. Route user-approved second passes by the table below.
@@ -103,11 +102,11 @@ not have one. This flow only runs when a project still has one (gated by
 | Finding | Route |
 |---------|-------|
 | Source-derived detail | Compact to source pointers; use `{{.SkillNamespace}}:lead-discuss` if meaning is unclear |
-| Behavior coverage | `{{.SkillNamespace}}:lead-forge-spec` or the lead-write-spec procedure |
-| Modification knowledge | `{{.SkillNamespace}}:lead-forge-mental-model` |
+| Behavior inventory | Compact to the tests and source that already state the behavior |
+| Modification knowledge | Prescriptive convention to `ai-docs/manuals/`; site-specific trap to a code comment at the site |
 | Static reference material | Compact to `ai-docs/ref/` or API-doc pointers |
 | Procedure or how-to content (has a one-line applicability description) | Move to `ai-docs/manuals/` with a `summary:` frontmatter line equal to that description |
-| Project reading map | `{{.SkillNamespace}}:lead-forge-mental-model` or `{{.SkillNamespace}}:lead-discuss` when mixed with status claims |
+| Project reading map | `AGENTS.md`'s `## Project Orientation` section, or `{{.SkillNamespace}}:lead-discuss` when mixed with status claims |
 | Focus or ticket ordering | the lead-ticket procedure |
 | Work history | Compact to Git history, ticket archives, or roadmap pointers |
 | Duplicated doc map | Compact to start-here pointers |
@@ -120,7 +119,7 @@ not have one. This flow only runs when a project still has one (gated by
 3. Keep summary, stack, workspace, build/test commands, read-before-edit pointers, active inventory, and compact notes.
 4. Compact deep sections into links only when a clear owning document already exists.
 5. Leave unique project direction, active priorities, and unresolved operational caveats in place.
-6. Do not author or semantically update specs, mental models, tickets, or refs.
+6. Do not author or semantically update manuals, tickets, or refs.
 7. Report each compacted section with its replacement path or retained-note reason.
 
 ## Judgments
@@ -153,7 +152,7 @@ Cheap `_index.md` scan only; report candidates, not confirmed defects.
 | Static reference material | Dependency API notes, archived design excerpts, or long external-reference summaries |
 | Project reading map | Stable task/topic -> docs routing maps mixed into `_index.md`; feature or status claims remain behavior inventory |
 | Work history | Done/dropped tickets, completed milestones, or stale session chronology |
-| Duplicated doc map | Long spec, mental-model, module, or ticket indexes beyond start-here pointers |
+| Duplicated doc map | Long manual, module, or ticket indexes beyond start-here pointers |
 
 ## Templates
 

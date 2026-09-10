@@ -87,8 +87,8 @@ func TicketVerify(root string, paths []string) (VerifyResult, error) {
 		})
 		verifyTicketFile(root, path, status, stem, &result)
 	}
-	// A whole-board graph load or spec-anchor scan can fail on a malformed file
-	// unrelated to this commit. Such a failure drops the advisories and lets the
+	// A whole-board graph load can fail on a malformed file unrelated to this
+	// commit. Such a failure drops the advisories and lets the
 	// commit proceed; it must never become an error return, or the non-blocking
 	// invariant would be violated by the very code meant to honor it.
 	if advisories, err := ticketGraphAdvisories(root, verified); err == nil {

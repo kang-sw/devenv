@@ -598,7 +598,7 @@ func TestRenderGoldenShippedPhase4Delegates(t *testing.T) {
 
 	names := []string{
 		"code-review-correctness", "code-review-fit", "code-review-test",
-		"reference-discovery", "mental-model-updater",
+		"reference-discovery",
 		"ticket-reviewer-design", "ticket-reviewer-completeness",
 	}
 	for _, name := range names {

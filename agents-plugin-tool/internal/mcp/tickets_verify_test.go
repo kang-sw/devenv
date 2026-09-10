@@ -151,10 +151,7 @@ func TestTicketsVerifySageFreshnessWarningDoesNotBlockCommit(t *testing.T) {
 		"title: Stale review\n" +
 		"sage-review-design: completed\n" +
 		"sage-review-completeness: completed\n" +
-		"spec:\n" +
-		"  260101-demo: covered\n" +
 		"---\n\nBody.\n"
-	mustWrite(t, root, "ai-docs/spec/demo.md", "# Demo\n\n## Demo {#260101-demo}\n")
 	mustWrite(t, root, path, body)
 	runGit(t, root, "add", "ai-docs")
 	runGit(t, root, "commit", "-m", "stamp review")
@@ -205,10 +202,7 @@ func TestGitCommitIgnoresStaleSageReviewOnUntouchedTicket(t *testing.T) {
 		"title: Stale review\n" +
 		"sage-review-design: completed\n" +
 		"sage-review-completeness: completed\n" +
-		"spec:\n" +
-		"  260101-demo: covered\n" +
 		"---\n\nBody.\n"
-	mustWrite(t, root, "ai-docs/spec/demo.md", "# Demo\n\n## Demo {#260101-demo}\n")
 	mustWrite(t, root, path, body)
 	runGit(t, root, "add", "ai-docs")
 	runGit(t, root, "commit", "-m", "stamp review")

@@ -25,10 +25,6 @@ EXPECTED_LEAD_SKILLS = {
     "lead-scope-worktree",
     "lead-add-rule",
     "lead-prefer-subagent",
-    # dying with the document layer they front, in a separate change
-    "lead-backfill-docs",
-    "lead-forge-spec",
-    "lead-forge-mental-model",
 }
 
 # Names that must not reappear anywhere on the shipped skill or playbook

@@ -36,16 +36,11 @@ Included:
 
 - `lead-workflow-manual`
 - `lead-discuss`
-- `lead-backfill-docs`
-- `lead-write-spec`
 - `lead-ticket`
 - `lead-check-blockers`
-- `lead-update-spec`
 - `lead-bootstrap`
 - `lead-add-rule`
 - `lead-ship`
-- `lead-forge-spec`
-- `lead-forge-mental-model`
 - `lead-review`
 - `lead-tune`
 - `lead-prefer-subagent`
@@ -118,13 +113,11 @@ only undeclared caller `context` extras as a free-text Render Context block;
 declared context keys are templated normally. Other playbooks still treat
 `context` as declared template variables only.
 
-- Render-eligible prompt stems: `reference-discovery`, `code-reviewer`,
-  `mental-model-updater`. These bare stems are not full-ws references and may
-  appear in distributed wsflow skill text.
-- File-writing prompts (`mental-model-updater`) receive a caller-created output
-  path in `context`; free-response prompts (`reference-discovery`,
-  `code-reviewer`) return text. `playbook.render` does not mint an
-  `expected_output_path`.
+- Render-eligible prompt stems: `reference-discovery`, `code-reviewer`. These
+  bare stems are not full-ws references and may appear in distributed wsflow
+  skill text.
+- Both are free-response prompts and return text. `playbook.render` does not
+  mint an `expected_output_path`.
 - The `implementer` prompt is not render-eligible in wsflow.
 
 The retired `prompt.render` tool is no longer advertised or callable in wsflow

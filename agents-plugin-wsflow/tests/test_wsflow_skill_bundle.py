@@ -15,19 +15,14 @@ SKILLS_DIR = PLUGIN_DIR / "skills"
 
 EXPECTED_SKILLS = {
     "lead-add-rule",
-    "lead-backfill-docs",
     "lead-bootstrap",
     "lead-discuss",
-    "lead-forge-mental-model",
-    "lead-forge-spec",
     "lead-check-blockers",
     "lead-review",
     "lead-run",
     "lead-ship",
     "lead-tune",
-    "lead-update-spec",
     "lead-workflow-manual",
-    "lead-write-spec",
     "lead-ticket",
     "lead-prefer-subagent",
     "lead-revive",
@@ -42,12 +37,10 @@ EXPECTED_INLINE_SKILLS = {
     "mcp-server-repair",
 }
 EXPECTED_PARALLEL_INIT_SKILLS = {
-    "lead-backfill-docs",
     "lead-discuss",
     "lead-run",
 }
 PARALLEL_INIT_TITLES = {
-    "lead-backfill-docs": "Backfill Docs",
     "lead-discuss": "Discuss",
     "lead-run": "Run",
 }
@@ -56,16 +49,12 @@ PARALLEL_INIT_TITLES = {
 # the generic "stop and report that blocker" un-pointed form.
 POINTER_TAIL_TITLES = {
     "lead-ticket": "Ticket",
-    "lead-write-spec": "Write Spec",
     "lead-add-rule": "Add Rule",
     "lead-bootstrap": "Bootstrap",
-    "lead-forge-mental-model": "Forge Mental Model",
-    "lead-forge-spec": "Forge Spec",
     "lead-review": "Review",
     "lead-ship": "Ship",
     "lead-tune": "Workflow Tuning",
     "lead-check-blockers": "Check Blockers",
-    "lead-update-spec": "Update Spec",
     "lead-workflow-manual": "Workflow Manual",
     "lead-scope-worktree": "Scope Worktree",
 }
@@ -146,9 +135,8 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_skill_files_are_thin_playbook_shims(self):
-        # lead-ticket, lead-write-spec, lead-add-rule, lead-bootstrap,
-        # lead-forge-mental-model, lead-forge-spec, lead-review, lead-ship,
-        # lead-tune, lead-check-blockers, lead-update-spec, and
+        # lead-ticket, lead-add-rule, lead-bootstrap, lead-review,
+        # lead-ship, lead-tune, lead-check-blockers, and
         # lead-workflow-manual all
         # carry the mcp-server-repair pointer in place of the generic "stop
         # and report that blocker" tail, so they are checked separately below
@@ -209,7 +197,6 @@ class WsflowSkillBundleTest(unittest.TestCase):
         # optional regex group) so a missing pointer on any of them fails
         # loudly instead of silently passing.
         pointer_tail = {
-            "lead-backfill-docs": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
             "lead-discuss": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
             "lead-run": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
         }

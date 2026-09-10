@@ -323,7 +323,7 @@ func TestNamespaceTermsSubstitution(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"use ws/specs.query here", "use wsflow/specs.query here"},
+		{"use ws/tickets.query here", "use wsflow/tickets.query here"},
 		{"call ws:lead-run skill", "call wsflow:lead-run skill"},
 		{"rows: many items", "rows: many items"},
 		{"news/feed here", "news/feed here"},
@@ -1641,7 +1641,7 @@ func TestWsflowModePlaybookRenderAbsorbsPromptRenderContext(t *testing.T) {
 
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"code-reviewer","context":{"reviewer_scope":"correctness only","note":"see ws/specs.query for details"}}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"code-reviewer","context":{"reviewer_scope":"correctness only","note":"see ws/tickets.query for details"}}}}`,
 	}, "\n") + "\n"
 
 	var out bytes.Buffer
@@ -1665,7 +1665,7 @@ func TestWsflowModePlaybookRenderAbsorbsPromptRenderContext(t *testing.T) {
 		t.Fatalf("read code-reviewer render: %v", err)
 	}
 	codeReviewerText := string(codeReviewerData)
-	for _, want := range []string{"wsflow/", "## Render Context", "- note: see ws/specs.query for details", "- reviewer_scope: correctness only"} {
+	for _, want := range []string{"wsflow/", "## Render Context", "- note: see ws/tickets.query for details", "- reviewer_scope: correctness only"} {
 		if !strings.Contains(codeReviewerText, want) {
 			t.Fatalf("code-reviewer playbook render missing %q:\n%s", want, codeReviewerText)
 		}
@@ -2184,7 +2184,6 @@ func TestServeStdioGitCommitSurfacesTicketVerifyWarningsAsAdvisories(t *testing.
 func ticketGraphAdvisoryFixture(t *testing.T) (string, []string) {
 	t.Helper()
 	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/spec/demo.md", "# Demo\n\n## Anchor {#260101-demo-anchor}\n")
 	mustWrite(t, root, "ai-docs/tickets/todo/260726-refactor-graph-parent.md",
 		"---\ntitle: Graph parent\n---\n\n# Graph parent\n")
 	child := "ai-docs/tickets/.done/260726-feat-graph-child.md"
@@ -2317,7 +2316,6 @@ func TestServeStdioGitCommitSurfacesTicketGraphParentBoard(t *testing.T) {
 	runGit(t, root, "add", "file.txt")
 	runGit(t, root, "commit", "-m", "initial")
 
-	mustWrite(t, root, "ai-docs/spec/demo.md", "# Demo\n\n## Anchor {#260101-demo-anchor}\n")
 	mustWrite(t, root, "ai-docs/tickets/todo/260726-epic-graph-e2e.md",
 		"---\ntitle: E2E epic\n---\n\n# E2E epic\n")
 
