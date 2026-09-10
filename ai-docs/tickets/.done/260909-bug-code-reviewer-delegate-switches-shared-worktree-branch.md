@@ -49,3 +49,27 @@ parallelism inside the drain loop later.
 - Round-1 review of commit `f2294816` on branch
   `impl/epic/refound/acid-fried-exile`; the worker's following `git branch
   --show-current` returned `develop`.
+
+## Result
+
+Took the prose direction, not the per-review-checkout one. `code-reviewer.md`
+gained one paragraph under `## Constraints`: the checkout is shared with a
+live caller still editing in it; read the range with `git diff <base>..<head>`,
+`git show`, and `git log`, which reach any commit from any checkout; never
+`checkout`, `switch`, `stash`, `reset`, `rebase`, or otherwise move `HEAD` or
+the index; never build or test on a checkout other than the one handed over.
+It names the failure the reviewer cannot observe itself - the caller's next
+edit or commit lands on the wrong branch over pre-change contents - because
+the delegate has no other way to know moving `HEAD` costs anything.
+
+The paragraph is downstream-neutral: no repository-specific names, paths, or
+vocabulary. Mirror regenerated (`WSRSRC_REGEN=1` manifest, then
+`WS_REGEN_WSFLOW_RSRC=1`); `diff -r agents-plugin/rsrc
+agents-plugin-wsflow/rsrc` is empty and the drift tests pass with no env var
+set.
+
+Not settled here: whether the same boundary belongs on every delegate a worker
+spawns rather than reviewers only, and whether reviewers should eventually get
+a structural per-review checkout instead of a prose rule. Prose was chosen now
+because it costs nothing at spawn time and covers the observed failure; a
+structural boundary is a separate change with its own cost.

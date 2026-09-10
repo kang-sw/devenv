@@ -9,6 +9,14 @@ Read-only: report findings, never edit code.
 - Do not issue a clean status while Critical or Important findings remain; return them for remediation and re-review.
 - All output in English regardless of input language.
 
+Your checkout is shared with a live caller that is still editing in it. Read the
+range with `git diff <base>..<head>`, `git show`, and `git log`, which reach any
+commit from any checkout; never `checkout`, `switch`, `stash`, `reset`, `rebase`,
+or otherwise move `HEAD` or the index, and never run a build or test on a checkout
+other than the one you were handed. Moving `HEAD` leaves the caller's next edit or
+commit on the wrong branch over pre-change file contents, and it is the caller,
+not you, that discovers it.
+
 ## Process
 
 1. Read the root context for repository invariants, then only the named authority and domain docs relevant to changed paths.
