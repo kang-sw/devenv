@@ -6,8 +6,8 @@ related:
   260910-refactor-ready-only-actionable-ticket-gates: owns the category-aware todo/ready fact and Sage boundary; supersedes former item 4
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: 07f7f634b28026d4
-sage-review-completeness-reviewed: 07f7f634b28026d4
+sage-review-design-reviewed: e0299e5b0789be35
+sage-review-completeness-reviewed: e0299e5b0789be35
 ---
 
 # Remove the stale tickets.move tip and unread Sage completeness config
@@ -15,19 +15,19 @@ sage-review-completeness-reviewed: 07f7f634b28026d4
 ## Background
 
 A source audit of the run/worker workflow (before the `epic/refound` ->
-`develop` merge) surfaced two unconditional remnants left by earlier tracks:
-stale schema text and an unread config item. Neither causes an error today, but
-both misdescribe the live workflow surface.
+`develop` merge) surfaced a stale schema tip and an unread config item. The
+schema tip has since been removed; the config item remains unread. Neither
+causes an error today, but the config item still misdescribes the live workflow
+surface.
 
-1. **Stale `tickets.move` schema tip.** The MCP tool schema description
-   (`agents-plugin-tool/internal/mcp/server.go#L3439`) still reads "Downward
-   moves from ready/ return a spec-cleanup tip." The spec-cleanup tip was
-   deleted with the ready spec-gate in `91621687`; `TicketsMove`
-   (`agents-plugin-tool/internal/wsdoc/tickets_mutate.go#L266-L282`) now emits
-   sage-review-posture tips on upward moves and missing-route-facts and
-   ready-posture tips on `ready/` moves. The string is the only `spec-cleanup`
-   hit in plugin source (`rg -n -F 'spec-cleanup' agents-plugin-tool`) and is
-   visible to any caller reading `tools/list`.
+1. **Removed `tickets.move` schema tip.** The MCP tool schema description now
+   states that ready promotion and epic todo settlement resolve sage-review
+   posture and actionable todo moves are ungated
+   (`agents-plugin-tool/internal/mcp/server.go#L3439`). The former
+   `spec-cleanup` tip was deleted with the ready spec-gate in `91621687` and
+   remains absent from plugin source (`rg -n -F 'spec-cleanup'
+   agents-plugin-tool` returned no results); the removal is visible to callers
+   reading `tools/list`.
 
 2. **Unread `sage_review_completeness` config item.** Declared and registered
    (`agents-plugin-tool/internal/wsconfig/scope.go:37-40,77`) with a doc comment claiming it "controls
@@ -73,23 +73,32 @@ live scenario axis.
 
 | fact | value | evidence |
 |---|---|---|
-| scope.span | multi-file | agents-plugin-tool/internal/mcp/server.go, agents-plugin-tool/internal/wsconfig/scope.go, and agents-plugin-tool/internal/wsdoc/tickets_mutate.go |
-| scope.surface | public-interface | tools/list-visible MCP schema description text changes; the unread config item is removed |
+| scope.span | multi-file | agents-plugin-tool/internal/wsconfig/scope.go and agents-plugin-tool/internal/wsconfig/scope_test.go |
+| scope.surface | public-interface | removing the registered config key changes config.list output |
 | scope.new_public_symbol | no | none |
 | scope.new_type_contract | no | removes no type or signature; the deleted config item is an existing registered value |
-| scope.test_surface | existing | agents-plugin-tool/internal/mcp/server_test.go and internal/wsconfig/scope_test.go cover the MCP tools/list and config-scope surfaces |
-| complexity.reuse_points | not-applicable | removes stale description text and one unread config item; no existing component is being reused |
-| complexity.side_effect_risk | moderate | removing the registered config key changes config.list output while leaving Sage category logic unchanged |
-| risk.correctness | moderate | source searches identify the schema text as stale and the config item as unread, while registration still exposes the key |
-| risk.fit | low | the change removes only surfaces that no live decision path consumes |
-| risk.test | low | existing schema/config coverage can pin the removals |
-| risk.security_or_contract | moderate | the schema description is corrected and config.list stops reporting a registered key |
+| scope.test_surface | existing | agents-plugin-tool/internal/wsconfig/scope_test.go covers registered default scopes and config-list resolution |
+| complexity.reuse_points | not-applicable | removes one unread config item; no existing component is being reused |
+| complexity.side_effect_risk | moderate | removing the registered config key changes config.list output while Sage category logic remains unchanged |
+| risk.correctness | moderate | source searches show the config item is registered but never read by the Sage gate |
+| risk.fit | low | the remaining change removes only a surface that no live decision path consumes |
+| risk.test | low | existing config-scope coverage can pin the removal |
+| risk.security_or_contract | moderate | config.list stops reporting a registered key |
 
 ## Phases
 
 ### Phase 1: Remove the two unconditional remnants
 
-Delete the stale `spec-cleanup` tip string (item 1); remove the unread
-`sage_review_completeness` config item and its registration (item 2). Update
-pinned tests accordingly and run `go build ./...`, `go vet ./...`, and
+Confirm that the stale `spec-cleanup` tip remains absent (item 1); remove the
+unread `sage_review_completeness` config item and its registration (item 2).
+Update pinned tests accordingly and run `go build ./...`, `go vet ./...`, and
 `go test ./...` to confirm no dangling references remain.
+
+#### Edition (dc532266) - 2026-09-10
+
+Item 1 was completed by `dc532266` while the related ready-only-gates ticket
+rewrote the same `tickets.move` description. Treat that removal as verified
+prior work and execute item 2 as the remaining implementation scope, adding
+config-list regression coverage. Verification still confirms that
+`spec-cleanup` is absent from `agents-plugin-tool` and runs the phase's full
+build, vet, and test commands.
