@@ -34,9 +34,9 @@ Read at every session start, before other action:
 
 ### Implementation Conventions
 
-<!-- Optional. Rules that are longer than one line or apply to some paths
-     only live in `ai-docs/manuals/` and are declared here, as a table with
-     `paths` and `manual` columns and one row per manual:
+<!-- Optional. Rules that take more than one sentence or apply to some
+     paths only live in `ai-docs/manuals/` and are declared here, as a
+     table with `paths` and `manual` columns and one row per manual:
 
        | paths | manual |
        |-------|--------|
@@ -142,12 +142,12 @@ Adapt structure to the project; this is a starting point, not a schema.
 -->
 
 <!-- Inclusion test: keep a rule in this file only if it applies to every
-     path and fits in one line. A rule that is longer, or applies to some
-     paths only, goes in `ai-docs/manuals/<name>.md` and is declared under
-     `## Workflow` -> `### Implementation Conventions` with the paths it
-     covers. A rule a test can check becomes a test. A trap tied to one site
-     becomes a code comment at that site. A fact about an external system
-     goes in `ai-docs/ref/`. Context goes in this file's
+     path and states itself in one sentence. A rule that takes more, or
+     applies to some paths only, goes in `ai-docs/manuals/<name>.md` and is
+     declared under `## Workflow` -> `### Implementation Conventions` with
+     the paths it covers. A rule a test can check becomes a test. A trap
+     tied to one site becomes a code comment at that site. A fact about an
+     external system goes in `ai-docs/ref/`. Context goes in this file's
      `## Project Orientation` section or the `repo` note layer; a procedure
      goes in `ai-docs/manuals/`. -->
 
@@ -268,8 +268,8 @@ Adapt structure to the project; this is a starting point, not a schema.
   with no value filled in; replace any `## Project Orientation`,
   `## Project Knowledge`, or `## Architecture Rules` wording that routes
   detail to specs or mental models with `ai-docs/manuals/`; relocate any
-  `## Architecture Rules` entry that runs longer than one line or applies to
-  some paths only into `ai-docs/manuals/<name>.md` and declare it under
+  `## Architecture Rules` entry that takes more than one sentence or applies
+  to some paths only into `ai-docs/manuals/<name>.md` and declare it under
   `### Implementation Conventions`; remove `spec/`, `mental-model/`, and
   `mental-model.md` from this template's scaffold layout above so fresh
   projects never create them; rewrite the Inclusion test comment to the
