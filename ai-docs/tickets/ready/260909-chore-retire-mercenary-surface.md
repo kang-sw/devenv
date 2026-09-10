@@ -79,16 +79,22 @@ maintenance without a consumer.
 ## Constraints
 
 - **Shipped-surface rule (`AGENTS.md` Architecture Rule 4, epic decision 11).**
-  The removal edits text that ships: `lead-implement`, `lead-workflow-manual`,
-  `lead-tune`, the `lead-tune` skill description, and the delegation footer the
-  Go render path appends to every `delegates: true` playbook. Each rewritten
-  sentence must read correctly in a project that has never heard of this
-  repository — no refoundation vocabulary, no ticket stems, no package paths.
-  The replacement text should describe native delegation on its own terms rather
-  than describing what was removed.
+  The removal edits text that ships: `lead-workflow-manual`, `lead-tune`, the
+  `lead-tune` skill description, and the delegation footer the Go render path
+  appends to every `delegates: true` playbook. `lead-implement` no longer
+  exists under that name: `260909-refactor-lead-surface-collapse-worker-stop-protocol`
+  landed and renamed it to `agents-plugin/rsrc/implementer/implementer.md`,
+  which already carries no mercenary sentence (`grep -in mercenary
+  agents-plugin/rsrc/implementer/implementer.md` returns nothing), so it needs
+  no rewrite here. Each rewritten sentence must read correctly in a project
+  that has never heard of this repository — no refoundation vocabulary, no
+  ticket stems, no package paths. The replacement text should describe native
+  delegation on its own terms rather than describing what was removed.
 - **wsflow mirroring (`ai-docs/manuals/wsflow-mirroring.md`).**
-  `lead-implement`, `lead-tune`, and `lead-workflow-manual` are all in the
-  shipped wsflow skill set; `agents-plugin-wsflow/rsrc/` is generated
+  `lead-tune` and `lead-workflow-manual` are in the shipped wsflow skill set
+  (`lead-implement` is not: it was renamed to `implementer`, which ships only
+  under `rsrc/`, carries no skill wrapper in either package, and already has
+  no mercenary text); `agents-plugin-wsflow/rsrc/` is generated
   byte-identical from the shared playbooks. wsflow already omits
   `workflow.prefer_mercenary` as a full-ws-only knob and already strips
   `ws:full-only` and `ws:mercenary-on` blocks, so this removal *collapses* a
@@ -103,6 +109,9 @@ maintenance without a consumer.
 - **On-disk agent state is not migrated.** Prior art: the retired typed
   `PreferMercenary` session field is silently ignored on read rather than
   migrated away. Follow that precedent unless the sage review says otherwise.
+- Convention: ai-docs/manuals/skill-authoring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/rsrc/, agents-plugin-wsflow/skills/, agents-plugin-tool/internal/wsdoc/conventions/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
 
 ## Prior Art
 
@@ -169,8 +178,12 @@ that hard-fails a wsflow mirror source containing the word), `internal/wsrsrc/ws
 **Smoke** — `agents-plugin-tool/scripts/smoke-ws-mcp.sh` registers a
 `smoke-reviewer` mercenary as part of the smoke run.
 
-**Shipped text** — `agents-plugin/rsrc/lead-implement/lead-implement.md` (the
-`ws:full-only` step 5 mercenary dispatch),
+**Shipped text** — `agents-plugin/rsrc/lead-implement/lead-implement.md` no
+longer exists: `260909-refactor-lead-surface-collapse-worker-stop-protocol`
+landed and renamed it to `agents-plugin/rsrc/implementer/implementer.md`,
+which already carries no mercenary or `ws:full-only` text (`grep -in
+"mercenary\|full-only" agents-plugin/rsrc/implementer/implementer.md` returns
+nothing) — nothing to rewrite there.
 `agents-plugin/rsrc/lead-workflow-manual/lead-workflow-manual.md` (English-prompt
 rule, the register/call/result delegation walkthrough, and the cancellation
 note), `agents-plugin/rsrc/lead-tune/lead-tune.md` (the
@@ -187,12 +200,32 @@ of each.
 `internal/wsrsrc/skills_mirror_test.go`; and
 `agents-plugin-wsflow/tests/test_wsflow_runtime_contract.py`.
 
-**Contract text retiring under the sibling ticket, listed here for traceability
-only** — `ai-docs/spec/named-agent-runtime.md` (whole file),
-`ai-docs/spec/mcp-tools.md` `{#260505-named-agent-mcp-tools}` and
-`{#260610-mercenary-delegation-surface}` plus the `workflow.prefer_mercenary`
-references in its config sections, and the mercenary mentions in
-`ai-docs/spec/workflow-skills.md` and `ai-docs/spec/plugin-runtime.md`.
+**Contract text retired under the sibling ticket, listed here for traceability
+only** — `260909-refactor-retire-spec-mental-model-layers` has landed and
+archived `ai-docs/spec/` and `ai-docs/mental-model/` in full (`ls ai-docs/spec/
+ai-docs/mental-model/`: no such file or directory), so
+`ai-docs/spec/named-agent-runtime.md`, the `{#260505-named-agent-mcp-tools}`
+and `{#260610-mercenary-delegation-surface}` sections of
+`ai-docs/spec/mcp-tools.md`, and the mercenary mentions in
+`ai-docs/spec/workflow-skills.md` and `ai-docs/spec/plugin-runtime.md` are
+already gone with the rest of the corpus; no spec text remains for this
+ticket to touch.
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | internal/mcp/server.go, internal/mcp/playbook_tools.go, internal/mcp/config_registry.go, internal/mcp/workflow_manual.go, internal/mcp/session_auth.go, internal/wsconfig/scope.go, internal/wsagent/ (whole package), internal/wsstore/store.go, internal/wsstore/metadata_inventory.go, internal/wsrsrc/skills_mirror.go, internal/wsrsrc/wsrsrc.go, cmd/ws-mcp/main.go, agents-plugin/rsrc/lead-workflow-manual/lead-workflow-manual.md, agents-plugin/rsrc/lead-tune/lead-tune.md, agents-plugin/skills/lead-tune/SKILL.md, plus the agents-plugin-wsflow/ mirrors and the listed test files |
+| scope.surface | public-interface | removes the mercenary.* MCP tool family, the workflow.prefer_mercenary config key, and the ws-mcp mercenary CLI subcommand, all caller-facing surface even though currently hidden by default |
+| scope.new_public_symbol | no | none; both phases are pure removal, confirmed against internal/mcp/server.go, internal/wsconfig/scope.go, internal/mcp/config_registry.go |
+| scope.new_type_contract | no | none; no new type or function signature is introduced |
+| scope.test_surface | existing | internal/mcp/mercenary_surface_test.go, prefer_mercenary_phase2_test.go, playbook_tools_test.go, prompt_override_test.go, server_test.go, session_auth_test.go, cmd/ws-mcp/main_test.go, internal/wsagent/*_test.go, internal/wsconfig/scope_test.go, internal/wsrsrc/skills_mirror_test.go, agents-plugin-wsflow/tests/test_wsflow_runtime_contract.py all exist today and carry mercenary references (verified by grep) |
+| complexity.reuse_points | not-applicable | this is a deletion ticket; it removes an existing component rather than reusing one |
+| complexity.side_effect_risk | moderate | removes a config key, CLI subcommand, and MCP tool family that a downstream installation could still be calling even though workflow.prefer_mercenary already defaults to hide; also edits Architecture-Rule-4 shipped text read by projects that never installed this repository |
+| risk.correctness | moderate | large mechanical removal across paired _unix.go/_windows.go platform files and several packages (internal/mcp, internal/wsagent, internal/wsstore, internal/wsrsrc, cmd/ws-mcp) where a missed reference leaves one platform building and the other not, per the ticket's own whole-package-not-per-platform constraint |
+| risk.fit | low | matches the landed epic decisions (4, 10) and the already-landed sibling removals (260909-refactor-lead-surface-collapse-worker-stop-protocol, 260909-refactor-retire-spec-mental-model-layers) in shape and rationale |
+| risk.test | moderate | many existing mercenary-asserting tests must be deleted or rewritten rather than skipped (epic constraint); the delegate-orientation.md deletion was moved from Phase 1 to Phase 2 at fact population so `ws-mcp mercenary register` (still run by scripts/smoke-ws-mcp.sh until Phase 2) keeps loading it through Phase 1 |
+| risk.security_or_contract | moderate | removing a documented MCP tool family, config key, and CLI subcommand is a breaking contract change for any already-installed downstream caller of mercenary.*, even though the surface is hidden by default today |
 
 ## Phases
 
@@ -206,9 +239,11 @@ item, its registry entry, its tuning-catalog knob, and its mentions in the
 `<!-- ws:mercenary-on -->` marker branch and the `preferMercenary` parameter
 threaded through the render path; delete the always-on "Mercenary path (always
 available)" delegation-tip unit and `mercenaryGuidanceBlock`; and rewrite the
-mercenary sentences in `lead-implement`, `lead-workflow-manual`, `lead-tune`,
-and the `lead-tune` skill description so each reads as native-delegation
-guidance on its own terms. Mirror every shared-playbook edit into
+mercenary sentences in `lead-workflow-manual`, `lead-tune`, and the `lead-tune`
+skill description so each reads as native-delegation guidance on its own terms
+(`lead-implement` was renamed to `agents-plugin/rsrc/implementer/implementer.md`
+by `260909-refactor-lead-surface-collapse-worker-stop-protocol` and already
+carries no mercenary text; nothing to rewrite there). Mirror every shared-playbook edit into
 `agents-plugin-wsflow/`. Leave `internal/wsagent/` in the tree so this phase is
 one reviewable removal of the surface rather than a mixed surface-and-runtime
 change.
@@ -231,7 +266,9 @@ Verification expectations:
 
 Touchpoints: `internal/mcp/server.go`, `internal/mcp/playbook_tools.go`,
 `internal/mcp/config_registry.go`, `internal/wsconfig/scope.go`,
-`internal/mcp/workflow_manual.go`, `agents-plugin/rsrc/lead-implement/`,
+`internal/mcp/workflow_manual.go` (not `agents-plugin/rsrc/lead-implement/`:
+that path is gone, renamed to `agents-plugin/rsrc/implementer/implementer.md`,
+which already has no mercenary text to remove),
 `agents-plugin/rsrc/lead-workflow-manual/`, `agents-plugin/rsrc/lead-tune/`,
 `agents-plugin/skills/lead-tune/SKILL.md`, the `agents-plugin-wsflow/` mirrors,
 `agents-plugin-wsflow/skills/lead-tune/SKILL.md` (hand-curated, not a
@@ -240,11 +277,12 @@ tool-window entries; `cmd/ws-mcp/main_test.go` asserts the advertised tool
 set equals that file), `agents-plugin/tests/test_skill_dispatch_contracts.py`
 (pins a `mercenary.call` sentence),
 `agents-plugin/tests/test_ws_mcp_launcher_capabilities.py` (sample payload),
-`agents-plugin/rsrc/delegate-orientation.md` and its manifest entry (its
-only reader is the runner deleted in Phase 2, and its reporting rule now
-lives in the worker stop protocol placed by
-`260909-refactor-lead-surface-collapse-worker-stop-protocol` Phase 1; delete
-it here), and the test files listed under Prior Art.
+the test files listed under Prior Art. `agents-plugin/rsrc/delegate-orientation.md`
+and its manifest entry stay until Phase 2: `internal/wsagent/agent.go`
+(`loadDelegateOrientation`) still loads it while the runner and the
+`ws-mcp mercenary` CLI remain live through this phase, so it is deleted with
+its reader there (its reporting rule already lives in the worker stop protocol
+placed by `260909-refactor-lead-surface-collapse-worker-stop-protocol` Phase 1).
 
 ### Phase 2: Remove the mercenary runtime, CLI, and marker plumbing
 
@@ -256,7 +294,9 @@ Goal: delete `internal/wsagent/` including every paired platform file; delete
 the `ws-mcp mercenary` subcommand family, its entries in the CLI tool-name list,
 and the mercenary token in the usage string; delete the `SelfWorkerStarter`
 re-entry and the `check-inbox` hook command it installs; drop the mercenary
-registration step from `scripts/smoke-ws-mcp.sh`; drop the `mercenary` entry
+registration step from `scripts/smoke-ws-mcp.sh`; delete
+`agents-plugin/rsrc/delegate-orientation.md` and its manifest entry in both
+packages together with the runner that was its only reader; drop the `mercenary` entry
 from `disqualifyingTokens` in `internal/wsrsrc/skills_mirror.go`; clean the
 stale references in `internal/wsrsrc/wsrsrc.go` and
 `internal/mcp/workflow_manual.go`; and remove the runner's persistence API
@@ -284,7 +324,8 @@ Verification expectations:
   `exec.spawn`/`exec.result` round trip to confirm the shared runtime path
   still works after the runner package is gone.
 
-Touchpoints: `internal/wsagent/` (delete), `cmd/ws-mcp/main.go`,
+Touchpoints: `internal/wsagent/` (delete), `agents-plugin/rsrc/delegate-orientation.md`
+and its manifest entries (delete), `cmd/ws-mcp/main.go`,
 `internal/wsstore/{store,metadata_inventory}.go` and `store_test.go`,
 `agents-plugin-tool/scripts/smoke-ws-mcp.sh`,
 `internal/wsrsrc/skills_mirror.go`, `internal/wsrsrc/wsrsrc.go`,
