@@ -124,7 +124,7 @@ describe("buildAgentRows", () => {
   test("review relay #1 Critical: a pending ws-ask thread with NO respondent yet (empty registry) still renders one row, named by the thread's own title, carrying the /answer hint", () => {
     const t = thread({ threadId: "q9", title: "why is the build red", status: "pending", origin: "lead-ask", respondentAgentId: undefined, touchedAt: new Date(NOW - 5_000).toISOString() });
     const rows = buildAgentRows(registryOf(), [t], NOW);
-    assert.deepEqual(rows, [{ name: "why is the build red", role: "thread", state: "awaiting-owner", elapsedMs: 5_000, answerHint: "/answer q9", answerDisplay: "why is the build red" }]);
+    assert.deepEqual(rows, [{ name: "why is the build red", role: "thread", state: "awaiting-owner", elapsedMs: 5_000, answerHint: "/answer q9" }]);
   });
 
   test("review relay #1 Critical: the lead-restart scenario — a thread with a respondentAgentId but no matching registry record (reviveOrphans never re-sets threadBound) — still renders one row", () => {
@@ -132,7 +132,7 @@ describe("buildAgentRows", () => {
     // The orphan record IS in the registry (reviveOrphans always re-registers it), just not threadBound.
     const orphan = record({ agentId: "ffffffff-0000-0000-0000-000000000000" });
     const rows = buildAgentRows(registryOf(orphan), [t], NOW);
-    assert.deepEqual(rows, [{ name: "post-restart question", role: "thread", state: "awaiting-owner", elapsedMs: 9_000, answerHint: "/answer q10", answerDisplay: "post-restart question" }]);
+    assert.deepEqual(rows, [{ name: "post-restart question", role: "thread", state: "awaiting-owner", elapsedMs: 9_000, answerHint: "/answer q10" }]);
   });
 
   test("review relay #1 Critical: dedupe — once a live threadBound record covers the thread, no second synthetic row is added for the same thread", () => {
@@ -189,20 +189,28 @@ describe("buildAgentRows", () => {
 });
 
 describe("buildWidgetLines", () => {
-  test("owner-question display titles are sanitized and width-bound while qN remains the only command hint", () => {
-    const title = "very long\u001b[31m owner\nquestion\u0000 title that must truncate";
+  test("owner-question titles never reach the gutter; one valid qN command leads the row", () => {
+    const title = "very long\u001b[31m owner\nquestion\u0000 title that must never render";
     const rows = buildAgentRows(registryOf(), [thread({ threadId: "q42", title })], NOW);
-    for (const width of [0, 1, 8, 40, 80, 120]) {
+    for (const width of [0, 1, 8, 10, 11, 20, 30, 40, 80, 120]) {
       const line = buildWidgetLines(rows, 1, width, true)![1];
-      assert.ok(!line.includes("\u001b[31m") && !line.includes("\u0000") && !line.includes("\n"), `control input is absent at ${width}`);
-      if (width >= 40) assert.match(line, /\/answer q42$/, `qN survives at ${width}`);
+      assert.ok(!line.includes("very long") && !line.includes("ownerquestion") && !line.includes("\u001b[31m") && !line.includes("\u0000") && !line.includes("\n"), `title and controls are absent at ${width}`);
+      const plainLine = line.replace(/\u001b\[[0-9;]*m/g, "");
+      const answerFragments = plainLine.match(/\/answer(?:\s+\S*)?/g) ?? [];
+      assert.ok(answerFragments.every((fragment) => fragment === "/answer q42"), `no partial or invented answer command at ${width}`);
+      if (width >= 40) {
+        assert.match(line, /^\u001b\[1m⚠ OWNER ACTION · \/answer q42/, `qN leads the owner cue at ${width}`);
+        assert.equal(line.match(/\/answer q42/g)?.length, 1, `only one qN command appears at ${width}`);
+      }
       assert.ok(visibleWidth(line) <= width, `display fits at ${width}`);
     }
   });
 
-  test("an unusable owner-question title falls back to its id, while approval has no fabricated answer target", () => {
+  test("an unusable owner-question title is irrelevant to the qN cue, while approval has no fabricated answer target", () => {
     const question = buildAgentRows(registryOf(), [thread({ threadId: "q43", title: "\n\t" })], NOW);
-    assert.match(buildWidgetLines(question, 1, 80, true)![1], /\/answer q43.*— \/answer q43$/);
+    const questionLine = buildWidgetLines(question, 1, 80, true)![1];
+    assert.match(questionLine, /^\u001b\[1m⚠ OWNER ACTION · \/answer q43/);
+    assert.equal(questionLine.match(/\/answer q43/g)?.length, 1);
     const approval = buildWidgetLines([{ name: "exec", role: "execute", state: "awaiting-approval", elapsedMs: 0 }], 0, 80, true)![1];
     assert.match(approval, /awaiting approval/);
     assert.ok(!approval.includes("/answer"));
@@ -215,7 +223,6 @@ describe("buildWidgetLines", () => {
       state: "awaiting-owner" as const,
       elapsedMs: 3_000,
       answerHint: "/answer q7",
-      answerDisplay: "Choose — database",
       model: "test-model",
       effort: "high",
       latestInput: 42,
@@ -225,10 +232,10 @@ describe("buildWidgetLines", () => {
     const semanticCalls: Array<[string, string]> = [];
     const theme = { fg(color: "error" | "warning" | "accent" | "dim" | "syntaxNumber", text: string) { semanticCalls.push([color, text]); return text; } };
     const animated = buildWidgetLines([question, approval], 1, 180, true, theme)!;
-    assert.equal(animated[1], "\u001b[1m⚠ OWNER ACTION · /answer Choose — database\u001b[22m · fork · awaiting owner · 3s · test-model (high) · 0.0k · $0.1 — /answer q7");
+    assert.equal(animated[1], "\u001b[1m⚠ OWNER ACTION · /answer q7\u001b[22m · fork · awaiting owner · 3s · test-model (high) · 0.0k · $0.1");
     assert.equal(animated[2], "awaiting approval audit · execute · awaiting approval · 3s · test-model (high) · 0.0k · $0.1");
-    assert.deepEqual(semanticCalls.filter(([, text]) => text.startsWith("⚠ OWNER ACTION") || text.startsWith("ws:")), [["error", "ws: 2 agents · 1 question"], ["error", "⚠ OWNER ACTION · /answer Choose — database"]]);
-    assert.ok(!animated[1].slice(animated[1].indexOf(" · fork")).includes("\u001b[1m"), "role, elapsed, telemetry, separators, and qN stay plain");
+    assert.deepEqual(semanticCalls.filter(([, text]) => text.startsWith("⚠ OWNER ACTION") || text.startsWith("ws:")), [["error", "ws: 2 agents · 1 question"], ["error", "⚠ OWNER ACTION · /answer q7"]]);
+    assert.ok(!animated[1].slice(animated[1].indexOf(" · fork")).includes("\u001b[1m"), "role, elapsed, telemetry, and separators stay plain");
     assert.ok(!animated[2].includes("\u001b[1m"), "approval remains entirely ordinary even beside an animated question");
   });
 
@@ -240,7 +247,7 @@ describe("buildWidgetLines", () => {
   });
 
   test("narrow-width formatting preserves owner cues without reconstructing hints, while approval-only rows stay plain", () => {
-    const question = { name: "worker", role: "thread" as const, state: "awaiting-owner" as const, elapsedMs: 0, answerHint: "/answer q8", answerDisplay: "a long owner question" };
+    const question = { name: "worker", role: "thread" as const, state: "awaiting-owner" as const, elapsedMs: 0, answerHint: "/answer q8" };
     const ownerHeld = { name: "reviewer", role: "fork" as const, state: "idle-awaiting-owner" as const, elapsedMs: 0, inspectionHint: "/audit a-very-long-inspection-target" };
     const approval = { name: "exec", role: "execute" as const, state: "awaiting-approval" as const, elapsedMs: 0 };
     for (const emphasize of [false, true]) {
@@ -261,8 +268,8 @@ describe("buildWidgetLines", () => {
   test("telemetry exposes compact token and cost fields at wide widths and never displaces a 40-column answer cue", () => {
     const telemetry = { name: "模型-worker", role: "worker" as const, state: "running" as const, elapsedMs: 0, model: "provider/模型", effort: "high", latestInput: 0, estimatedUsd: 0 };
     assert.match(buildWidgetLines([telemetry], 0, 120)![1], /provider\/模型 \(high\).*0.0k.*\$0/);
-    const missing = { ...telemetry, model: undefined, effort: undefined, latestInput: undefined, estimatedUsd: undefined, answerHint: "/answer q1" };
-    assert.match(buildWidgetLines([missing], 0, 40)![1], /\/answer q1$/);
+    const missing = { ...telemetry, state: "awaiting-owner" as const, model: undefined, effort: undefined, latestInput: undefined, estimatedUsd: undefined, answerHint: "/answer q1" };
+    assert.match(buildWidgetLines([missing], 0, 40)![1], /^⚠ OWNER ACTION · \/answer q1/);
     assert.ok(visibleWidth(buildWidgetLines([missing], 0, 40)![1]) <= 40);
     const compact = { ...telemetry, name: "a", model: "p", effort: "l", latestInput: 132_400, estimatedUsd: .123456789 };
     assert.match(buildWidgetLines([compact], 0, 80)![1], /p \(l\).*132.4k.*\$0.123/);
@@ -327,9 +334,10 @@ describe("buildWidgetLines", () => {
     assert.ok(!lines.some((l) => l.includes("more")), "no synthetic tail — only running rows are ever trimmed");
   });
 
-  test("a thread row's rendered line carries the /answer hint after an em-dash separator", () => {
+  test("a thread row's rendered line carries its sole /answer hint in the leading owner-action cue", () => {
     const lines = buildWidgetLines([awaitingRow("q7")], 0, 80)!;
-    assert.match(lines[1], /— \/answer q7$/);
+    assert.match(lines[1], /^⚠ OWNER ACTION · \/answer q7/);
+    assert.equal(lines[1].match(/\/answer q7/g)?.length, 1);
   });
 
   test("telemetry fields remain independent, Unicode-safe, and subordinate to the 40-column answer cue", () => {
@@ -337,7 +345,7 @@ describe("buildWidgetLines", () => {
     const completeWide = { ...complete, name: "模", role: "worker" as const, state: "running" as const, answerHint: undefined };
     const unknown = { ...completeWide, name: "missing", model: undefined, effort: undefined, latestInput: undefined, estimatedUsd: undefined };
     const narrow = buildWidgetLines([complete], 1, 40)![1];
-    assert.match(narrow, /\/answer q1$/); assert.ok(visibleWidth(narrow) <= 40);
+    assert.match(narrow, /^⚠ OWNER ACTION · \/answer q1/); assert.ok(visibleWidth(narrow) <= 40);
     for (const width of [80, 120]) {
       const lines = buildWidgetLines([completeWide, unknown], 0, width)!;
       assert.match(lines[1], /provider\/模型 \(high\).*0.0k.*\$0/, `complete reported zero is not rendered as unknown at ${width}`);
@@ -411,11 +419,11 @@ describe("createAgentWidgetController", () => {
     controller.refresh();
     assert.equal(AGENT_WIDGET_ATTENTION_TICK_MS, 330, "the ticket cadence is literal, not merely self-referential");
     assert.deepEqual(schedules.map(({ ms }) => ms).sort((a, b) => a - b), [330, AGENT_WIDGET_TICK_MS]);
-    const renderPhase = (themeName: string, color: string, title = "owner needs this") => {
+    const renderPhase = (themeName: string, color: string, answerId = "q1") => {
       semanticCalls.length = 0;
       const output = widget!({}, themed(themeName)).render(120).join("\n");
       assert.match(output, /\u001b\[1mws: 2 agents/, "heading is bold in every phase");
-      assert.match(output, new RegExp(`\\u001b\\[1m⚠ OWNER ACTION · /answer ${title}`), "cue is bold and explicitly labeled in every phase");
+      assert.match(output, new RegExp(`\\u001b\\[1m⚠ OWNER ACTION · /answer ${answerId}`), "cue is bold and explicitly labeled in every phase");
       assert.doesNotMatch(output, /\u001b\[1mawaiting approval/, "approval never joins the owner-action cycle");
       assert.ok(semanticCalls.some(([theme, actual, text]) => theme === themeName && actual === color && text.startsWith("ws:")), `${color} styles the heading through the current theme`);
       assert.ok(semanticCalls.some(([theme, actual, text]) => theme === themeName && actual === color && text.startsWith("⚠ OWNER ACTION")), `${color} styles only the owner cue through the current theme`);
@@ -436,7 +444,7 @@ describe("createAgentWidgetController", () => {
     threads.set("q2", thread({ threadId: "q2", title: "static wait" }));
     controller.refresh();
     assert.equal(schedules.filter(({ ms }) => ms === 330).length, 1, "disabled config never re-arms animation");
-    renderPhase("disabled-theme", "error", "static wait");
+    renderPhase("disabled-theme", "error", "q2");
     controller.stop();
   });
 
@@ -531,7 +539,8 @@ describe("createAgentWidgetController", () => {
     controller.refresh();
     const lines = widget!({}, {}).render(80);
     assert.equal(lines[0], "ws: 1 agents · 1 question");
-    assert.ok(lines[1].includes("need owner"));
+    assert.match(lines[1], /^⚠ OWNER ACTION · \/answer q1/);
+    assert.equal(lines[1].match(/\/answer q1/g)?.length, 1);
     controller.stop();
   });
 
@@ -561,7 +570,8 @@ describe("createAgentWidgetController", () => {
     controller.refresh();
     const lines = widget!({}, {}).render(80);
     assert.equal(lines[0], "ws: 7 agents · 1 question", "the matched thread is counted once, while its pending suffix remains visible");
-    assert.ok(lines[1].includes("/answer a question") && lines[1].includes("/answer q1"), "the protected waiting row uses its display title and remains ahead of capped running rows");
+    assert.match(lines[1], /^⚠ OWNER ACTION · \/answer q1/, "the protected waiting row leads with its sole valid command ahead of capped running rows");
+    assert.equal(lines[1].match(/\/answer q1/g)?.length, 1);
     assert.equal(lines.length, AGENT_WIDGET_ROW_CAP + 2, "heading plus five body rows and the capped-running summary");
     assert.equal(lines.at(-1), "+2 more");
     controller.stop();

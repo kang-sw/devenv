@@ -70,10 +70,8 @@ export interface AgentRow {
   state: AgentRowState;
   /** Milliseconds since the clock this row's state uses — `ThreadRecord.touchedAt` for a `"thread"` row, `RpcAgentRecord.runStartedAt` otherwise. Never negative. */
   elapsedMs: number;
-  /** The `/answer <id>` hint text, set only for a `"thread"` row (the ticket's merged-in owner-question cue). */
+  /** The valid `/answer <id>` command for an owner-question row. */
   answerHint?: string;
-  /** Human-readable question phrase. It is display-only and never a resolution key. */
-  answerDisplay?: string;
   /** A supplied owner-held inspection affordance. Presentation preserves it but never invents one. */
   inspectionHint?: string;
   model?: string;
@@ -227,10 +225,7 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
       role: isAwaitingOwnerWithThread && boundThread!.origin === "lead-ask" ? "thread" : roleFromSpawnRole(record.spawnRole),
       state,
       elapsedMs,
-      ...(isAwaitingOwnerWithThread ? {
-        answerHint: `/answer ${boundThread!.threadId}`,
-        answerDisplay: sanitizeDisplayTitle(boundThread!.title, boundThread!.threadId),
-      } : {}),
+      ...(isAwaitingOwnerWithThread ? { answerHint: `/answer ${boundThread!.threadId}` } : {}),
       ...(record.telemetry?.model ?? record.observedModel ? { model: record.telemetry?.model ?? record.observedModel } : {}),
       ...(record.telemetry?.effort ?? record.observedEffort ? { effort: record.telemetry?.effort ?? record.observedEffort } : {}),
       ...((record.telemetry?.latestInput ?? record.observedLatestInput) !== undefined ? { latestInput: record.telemetry?.latestInput ?? record.observedLatestInput } : {}),
@@ -246,7 +241,6 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
       state: "awaiting-owner",
       elapsedMs: clampElapsed(now - Date.parse(thread.touchedAt)),
       answerHint: `/answer ${thread.threadId}`,
-      answerDisplay: sanitizeDisplayTitle(thread.title, thread.threadId),
       ...(thread.forkResume?.telemetry?.model ?? thread.forkResume?.observedModel ? { model: thread.forkResume?.telemetry?.model ?? thread.forkResume?.observedModel } : {}),
       ...(thread.forkResume?.telemetry?.effort ?? thread.forkResume?.observedEffort ? { effort: thread.forkResume?.telemetry?.effort ?? thread.forkResume?.observedEffort } : {}),
       ...((thread.forkResume?.telemetry?.latestInput ?? thread.forkResume?.observedLatestInput) !== undefined ? { latestInput: thread.forkResume?.telemetry?.latestInput ?? thread.forkResume?.observedLatestInput } : {}),
@@ -273,7 +267,7 @@ export function formatCompactDuration(elapsedMs: number): string {
   return `${hours}h${String(minutes).padStart(2, "0")}m`;
 }
 
-/** `name · role · state · elapsed`, plus the `/answer <id>` hint for a `"thread"` row — the ticket's literal row shape. */
+/** Formats role/state/elapsed rows; answer-capable owner rows lead with their valid `/answer qN` cue. */
 function isAttentionState(state: AgentRowState): boolean {
   // Approval waits remain actionable lead-agent work through `ws-approve`, not
   // owner work. Only owner-held `/answer` paths receive the loud cue.
@@ -290,11 +284,29 @@ function formatEstimatedUsd(usd: number | undefined): string {
   return String(Number(usd.toFixed(3)));
 }
 
+function ownerAnswerCue(answerHint: string, width: number): string {
+  const fullCue = `⚠ OWNER ACTION · ${answerHint}`;
+  if (visibleWidth(fullCue) <= width) return fullCue;
+  const compactCue = `⚠ ${answerHint}`;
+  if (visibleWidth(compactCue) <= width) return compactCue;
+  if (visibleWidth(answerHint) <= width) return answerHint;
+  // A partial `/answer` text could look like a different command. When the
+  // command itself cannot fit, retain only the non-command owner identity.
+  return truncateToWidth("⚠ OWNER ACTION", width);
+}
+
+function truncateWithProtectedPrimary(primary: string, base: string, width: number): string {
+  if (visibleWidth(base) <= width) return base;
+  const primaryWidth = visibleWidth(primary);
+  if (primaryWidth >= width) return primary;
+  const suffixWidth = width - primaryWidth;
+  return suffixWidth <= 1 ? primary : primary + truncateToWidth(base.slice(primary.length), suffixWidth);
+}
+
 function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActionColor: OwnerActionColor | undefined, theme?: AgentWidgetTheme): string {
   const ownerAction = isAttentionState(row.state);
-  const actionTitle = sanitizeDisplayTitle(row.answerDisplay ?? row.name, row.answerHint ?? row.name);
   const primary = row.answerHint
-    ? `⚠ OWNER ACTION · /answer ${actionTitle}`
+    ? ownerAnswerCue(row.answerHint, width)
     : ownerAction
       ? `⚠ OWNER ACTION · ${sanitizeDisplayTitle(row.name, "owner action")}`
       : row.name;
@@ -305,10 +317,10 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
   const input = formatLatestInputTokens(row.latestInput);
   const estimate = `$${formatEstimatedUsd(row.estimatedUsd)}`;
   const telemetry = ` · ${model} (${effort}) · ${input} · ${estimate}`;
-  const protectedHint = row.answerHint ?? row.inspectionHint;
+  const protectedHint = row.inspectionHint;
   const hint = protectedHint ? ` — ${protectedHint}` : "";
-  // The owner action is the only non-negotiable tail. Allocate its columns
-  // first, then progressively omit telemetry and identity detail.
+  // A supplied inspection affordance remains the only protected tail. The
+  // valid owner-answer command is protected inside the leading primary cue.
   let line: string;
   let appendedHint = false;
   let appendedTelemetry = false;
@@ -316,11 +328,11 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
     const available = width - visibleWidth(hint);
     const withTelemetry = base + telemetry;
     appendedTelemetry = visibleWidth(withTelemetry) <= available;
-    line = appendedTelemetry ? withTelemetry + hint : truncateToWidth(base, available) + hint;
+    line = appendedTelemetry ? withTelemetry + hint : (row.answerHint ? truncateWithProtectedPrimary(primary, base, available) : truncateToWidth(base, available)) + hint;
     appendedHint = true;
   } else {
     appendedTelemetry = visibleWidth(base + telemetry) <= width;
-    line = appendedTelemetry ? base + telemetry : truncateToWidth(base, width);
+    line = appendedTelemetry ? base + telemetry : row.answerHint ? truncateWithProtectedPrimary(primary, base, width) : truncateToWidth(base, width);
   }
   // Add ANSI only after width truncation: styling before truncation can leave
   // an incomplete escape sequence in a narrow terminal.
