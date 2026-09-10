@@ -30,7 +30,7 @@ description is the contract.
 ## Spawn
 
 For a ticket target, point-resolve the selected stem with
-`{{.McpNamespace}}/tickets.query(ticket_stem: "<stem>")` and use its Route
+`{{.McpNamespace}}/tickets.query(ticket_stem: "<stem>", format: "json")` and use its Route
 Facts projection; do not read or summarize the ticket body. If that section is
 absent, or a worker stops reporting it incomplete, render
 `ticket-fact-populator`, run it on that ticket once, apply what it returns,

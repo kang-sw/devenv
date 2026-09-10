@@ -2655,7 +2655,7 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 			}
 			body = strings.Join(strings.Fields(body), " ")
 			for _, want := range []string{
-				product + `/tickets.query(ticket_stem: "<stem>")`,
+				product + `/tickets.query(ticket_stem: "<stem>", format: "json")`,
 				"do not read or summarize the ticket body",
 				"`risk.correctness`, `risk.fit`, `risk.test`, and `risk.security_or_contract`",
 				"| Ticket: any risk is `high` | `ticket-worker-elevated` | large |",
@@ -2694,6 +2694,53 @@ func TestTicketWorkerVariantsDifferOnlyByTier(t *testing.T) {
 		}
 		if got := strings.Replace(string(data), "tier: "+tier+"\n", "tier: medium\n", 1); got != string(base) {
 			t.Errorf("%s differs from the base beyond tier frontmatter", name)
+		}
+	}
+}
+
+// Pin the real query boundary the lead consumes: compact text omits Route
+// Facts, so the policy must request the existing JSON projection explicitly.
+func TestLeadRunTicketQueryRiskProjection(t *testing.T) {
+	root := initGitRepo(t)
+	mustWrite(t, root, "ai-docs/tickets/ready/260910-feat-risk-fixture.md", `---
+title: Risk fixture
+---
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| risk.correctness | high | fixture |
+| risk.fit | low | fixture |
+| risk.test | moderate | fixture |
+| risk.security_or_contract | unknown | fixture |
+`)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	s := newTestServerWithHarness(t, "codex")
+	key, err := s.sessions.mint(canonicalRootForTest(t, root), roleLead, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := callToolOnce(t, s, 1, "tickets.query", map[string]any{
+		"session_key": key,
+		"ticket_stem": "260910-feat-risk-fixture",
+		"format":      "json",
+	})
+	var projection struct {
+		Present bool              `json:"route_facts_present"`
+		Facts   map[string]string `json:"route_facts"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, resp)), &projection); err != nil {
+		t.Fatal(err)
+	}
+	if !projection.Present {
+		t.Fatal("point query did not expose Route Facts presence")
+	}
+	for fact, want := range map[string]string{
+		"risk.correctness": "high", "risk.fit": "low",
+		"risk.test": "moderate", "risk.security_or_contract": "unknown",
+	} {
+		if got := projection.Facts[fact]; got != want {
+			t.Errorf("projected %s = %q, want %q", fact, got, want)
 		}
 	}
 }
