@@ -191,6 +191,18 @@ describe("buildAuditPickerItems", () => {
     ]);
   });
 
+  test("dormant activity labels make missing, non-positive, and invalid timestamps unknown while preserving valid old and future values", () => {
+    const NOW = Date.parse("2026-09-09T10:00:00.000Z");
+    const labelFor = (overrides: Partial<RpcAgentRecord>) => buildAuditPickerItems(registryOf(record(overrides)), NOW)[0]!.label;
+
+    assert.match(labelFor({ agentId: "missing-id" }), /last active —$/);
+    assert.match(labelFor({ agentId: "zero-id", lastLeadPromptAt: 0 }), /last active —$/);
+    assert.match(labelFor({ agentId: "nan-id", lastLeadPromptAt: Number.NaN }), /last active —$/);
+    assert.match(labelFor({ agentId: "invalid-id", lastReportAtOverride: "not-a-timestamp" }), /last active —$/);
+    assert.match(labelFor({ agentId: "old-id", lastLeadPromptAt: NOW - 90_000 }), /last active 1m ago$/);
+    assert.match(labelFor({ agentId: "future-id", lastLeadPromptAt: NOW + 60_000 }), /last active 0s ago$/);
+  });
+
   test("a plain idle record with no client/threadBound/pendingApproval is dormant (tier 4), never one of the first three tiers", () => {
     const NOW = Date.parse("2026-09-09T10:00:00.000Z");
     const idle = record({ agentId: "idle-1", lastLeadPromptAt: NOW });

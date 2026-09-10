@@ -263,6 +263,13 @@ function elapsedSince(now: number, timestamp: number): number {
   return Number.isFinite(timestamp) ? Math.max(0, now - timestamp) : 0;
 }
 
+/** Display validity is stricter than the sort key: spawner keeps zero/NaN
+ * fallbacks for ordering, but neither describes a meaningful last activity. */
+function formatDormantActivity(now: number, activityAt: number): string {
+  if (!Number.isFinite(activityAt) || activityAt <= 0) return "last active —";
+  return `last active ${formatCompactDuration(elapsedSince(now, activityAt))} ago`;
+}
+
 /**
  * Fits the three non-optional fields without ever leaving a partial telemetry
  * value behind. At very narrow widths the identity is the expendable part of
@@ -306,7 +313,7 @@ export function buildAuditPickerItems(registry: RpcAgentRegistry, now: number, l
         status: "dormant",
         model,
         latestInput,
-        activity: `last active ${formatCompactDuration(elapsedSince(now, activityAt))} ago`,
+        activity: formatDormantActivity(now, activityAt),
         elapsedMs: elapsedSince(now, activityAt),
         lastActivity: activityAt,
       });
