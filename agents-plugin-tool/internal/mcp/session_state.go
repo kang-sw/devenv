@@ -385,7 +385,6 @@ type implementTodoVerdict struct {
 	NeedReview  bool
 	DocMode     string
 	DocReason   string
-	NeedDoc     bool
 	// BindingAnchorClause is the pre-rendered Prep-guardrail anchor clause,
 	// empty when the project declares no `### Binding Anchor` in AGENTS.md. It
 	// is filled by the route.resolve_implement handlers (which hold the session
@@ -401,13 +400,6 @@ func deriveImplementTodosFromVerdict(verdict implementTodoVerdict) []todoItem {
 	}
 	if verdict.NeedReview {
 		items = append(items, todoItem{Key: "review", Title: implementReviewTitle(verdict.ReviewAlloc), Instruction: implementInstructionPtr(implementReviewInstruction(verdict))})
-	}
-	if verdict.NeedDoc {
-		items = append(items,
-			todoItem{Key: "doc-pre-pass", Title: "Doc pre-pass", Instruction: implementInstructionPtr(implementDocPrePassInstruction(verdict))},
-			todoItem{Key: "doc-commit-gate", Title: "Doc commit gate", Instruction: implementInstructionPtr(implementDocCommitGateInstruction(verdict))},
-			todoItem{Key: "doc-closeout", Title: "Doc closeout", Instruction: implementInstructionPtr(implementDocCloseoutInstruction(verdict))},
-		)
 	}
 	items = append(items,
 		todoItem{Key: "final-action-gate", Title: "Final action gate", Instruction: implementInstructionPtr(implementFinalActionInstruction(verdict))},
@@ -521,27 +513,6 @@ func implementReviewInstruction(verdict implementTodoVerdict) string {
 		return fmt.Sprintf("Render `reviewer` and dispatch one full-scope review with the rendered path and a generated findings path. %s %s %s", implementReviewDispositionClause, implementReviewRelayClause, implementReviewCriticalBranchClause)
 	}
 	return fmt.Sprintf("Dispatch the selected reviewers with the rendered reviewer playbook and generated review paths. %s %s %s", implementReviewDispositionClause, implementReviewRelayClause, implementReviewCriticalBranchClause)
-}
-
-func implementDocPrePassInstruction(verdict implementTodoVerdict) string {
-	if isBranchStop(verdict) {
-		return fmt.Sprintf("Do not start documentation work before implementation can run; resolve the branch blocker first: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
-	}
-	return "Run the documentation pre-pass: update specs, then dispatch mental-model-updater only for a new non-obvious invariant, reusable domain rule, or modification guideline absent from the authoritative spec."
-}
-
-func implementDocCommitGateInstruction(verdict implementTodoVerdict) string {
-	if isBranchStop(verdict) {
-		return fmt.Sprintf("Do not open the documentation commit gate before source edits can run; resolve the branch blocker first: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
-	}
-	return "Run the documentation commit gate: read executor-wrapup, update ticket result or project memory when reachable, and commit documentation changes before the final action gate."
-}
-
-func implementDocCloseoutInstruction(verdict implementTodoVerdict) string {
-	if isBranchStop(verdict) {
-		return fmt.Sprintf("Do not close documentation before implementation can run; resolve the branch blocker first: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
-	}
-	return "Run documentation closeout compaction only for a safe documentation-only branch-tip suffix; otherwise record the skipped compaction status."
 }
 
 // implementFinalActionInstruction's default outcome is continue-on-branch
@@ -997,7 +968,6 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 		NeedReview:          result.Verdict.NeedReview,
 		DocMode:             result.Verdict.DocMode,
 		DocReason:           result.Agenda.DocReason,
-		NeedDoc:             result.Verdict.DocMode == "standard",
 		BindingAnchorClause: wsreview.ReadAgentsBindingAnchor(record.Root).PrepClause(),
 	})
 	if err := s.sessions.enterMode(sessionKey, "implement", rawAgenda, todos); err != nil {
