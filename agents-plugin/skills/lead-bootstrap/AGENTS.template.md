@@ -281,9 +281,8 @@ Adapt structure to the project; this is a starting point, not a schema.
   bullets and the commit-traceability bullet naming the retired layers.
   Promotion to `ready/` is gated by the ticket's own design review, not by
   spec addressing; read any earlier item's spec-address qualifier that way.
-  This
-  is a one-time migration judgment call, not an automated reconciliation; do
-  not build staleness-detection tooling for it.
+  This is a one-time migration judgment call, not an automated
+  reconciliation; do not build staleness-detection tooling for it.
 -->
 
 <!-- Template Version: v0048 -->
