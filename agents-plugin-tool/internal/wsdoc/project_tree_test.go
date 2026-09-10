@@ -6,14 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestProjectTreeRendersCoreSections(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
 	mustWrite(t, root, "ai-docs/ref/guide.md", "# Guide\n")
-	mustWrite(t, root, "ai-docs/spec/demo.md", "---\ntitle: Demo\nfeatures:\n  - done {#260503-done}\n  - 🚧 pending [260503-feat-demo/p1]\n---\n# Demo\n")
 	mustWrite(t, root, "ai-docs/tickets/ready/260503-feat-demo.md", "---\ntitle: Demo ticket\nparent: 260503-epic-demo\nrelated:\n  260503-research-demo: source\n---\n# Demo ticket\n")
 	mustWrite(t, root, "ai-docs/tickets/idea/260503-research-demo.md", "---\ntitle: Research demo\n---\n# Research demo\n")
 	mustWrite(t, root, "ai-docs/tickets/todo/260503-epic-demo.md", "---\ntitle: Epic demo\n---\n# Epic demo\n")
@@ -26,8 +24,6 @@ func TestProjectTreeRendersCoreSections(t *testing.T) {
 	for _, want := range []string{
 		"ai-docs/",
 		"  ref/",
-		"spec:",
-		"  demo.md  - Demo  [2f]",
 		"tickets:",
 		"  todo/260503-epic-demo",
 		"    ready/260503-feat-demo",
@@ -263,67 +259,28 @@ func TestReadConventionUsesBundledDocs(t *testing.T) {
 	if !strings.Contains(got, "# Ticket Conventions") {
 		t.Fatalf("ReadConvention returned unexpected text: %q", got[:min(len(got), 80)])
 	}
-	for _, name := range []string{"spec", "ticket", "mental-model"} {
+	for _, name := range []string{"ticket", "tickets", "ticket-convention"} {
 		got, err := ReadConvention(name)
 		if err != nil {
 			t.Fatalf("ReadConvention(%q) returned error: %v", name, err)
 		}
-		if !strings.Contains(got, "#") {
+		if !strings.Contains(got, "# Ticket Conventions") {
 			t.Fatalf("ReadConvention(%q) returned unexpected text: %q", name, got[:min(len(got), 80)])
+		}
+	}
+	// The spec and mental-model convention documents retired with their layer;
+	// asking for either must miss rather than resolve through a surviving alias.
+	for _, name := range []string{"spec", "spec-conventions", "mental-model", "mental-model-conventions"} {
+		if _, err := ReadConvention(name); err == nil {
+			t.Fatalf("ReadConvention(%q) still resolves a retired convention", name)
 		}
 	}
 	if _, err := ReadConvention("../ticket-conventions"); err == nil {
 		t.Fatal("ReadConvention accepted path traversal")
 	}
 	_, err = ReadConvention("unknown")
-	if err == nil || !strings.Contains(err.Error(), "spec-conventions") || !strings.Contains(err.Error(), "ticket") || !strings.Contains(err.Error(), "mental-model") {
+	if err == nil || !strings.Contains(err.Error(), "ticket-conventions") {
 		t.Fatalf("ReadConvention missing-name error = %v", err)
-	}
-}
-
-func TestGenerateSpecStemAvoidsCollisions(t *testing.T) {
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/spec/demo.md", "## Demo {#260503-demo}\n")
-
-	got, err := GenerateSpecStem(root, "Demo", time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC))
-	if err != nil {
-		t.Fatalf("GenerateSpecStem returned error: %v", err)
-	}
-	if got != "260503-demo-2" {
-		t.Fatalf("GenerateSpecStem = %q", got)
-	}
-}
-
-func TestVerifySpecIndexReportsDuplicates(t *testing.T) {
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/spec/a.md", "## A {#260503-dup}\n")
-	mustWrite(t, root, "ai-docs/spec/b.md", "## B {#260503-dup}\n")
-
-	got, err := VerifySpecIndex(root)
-	if err != nil {
-		t.Fatalf("VerifySpecIndex returned error: %v", err)
-	}
-	if !strings.Contains(got, "duplicate anchors") || !strings.Contains(got, "260503-dup") {
-		t.Fatalf("VerifySpecIndex output missing duplicate report:\n%s", got)
-	}
-}
-
-func TestMentalModelsListRendersFrontmatter(t *testing.T) {
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/mental-model/demo.md", "---\ndomain: demo\ndescription: \"Demo domain\"\nsources:\n  - demo/\n---\n# Demo\n")
-
-	got, err := MentalModelsList(root)
-	if err != nil {
-		t.Fatalf("MentalModelsList returned error: %v", err)
-	}
-	for _, want := range []string{
-		"mental-models:",
-		"ai-docs/mental-model/demo.md  - demo  # Demo domain",
-		"sources: demo/",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("MentalModelsList output missing %q\n%s", want, got)
-		}
 	}
 }
 

@@ -27,9 +27,9 @@ type TicketFindOptions struct {
 	// Resolve marks this call as a resolution query rather than a discovery
 	// one: under an active sparse-checkout scope the board is completed from
 	// the index, so a stem hidden by this worktree still resolves. It is a
-	// property of the call, not of the function — references.trace shares this
-	// entry point with discovery callers and must be able to ask for the whole
-	// board through it.
+	// property of the call, not of the function — resolution and discovery
+	// callers share this entry point, and a resolution caller must be able to
+	// ask for the whole board through it.
 	Resolve bool
 }
 
@@ -48,8 +48,6 @@ type TicketInfo struct {
 	Title              string            `json:"title,omitempty"`
 	Parent             string            `json:"parent,omitempty"`
 	Related            map[string]string `json:"related,omitempty"`
-	Specs              []string          `json:"specs,omitempty"`
-	SpecRemoves        []string          `json:"spec_removes,omitempty"`
 	Plans              []string          `json:"plans,omitempty"`
 	Skeletons          []string          `json:"skeletons,omitempty"`
 	Completed          string            `json:"completed,omitempty"`
@@ -109,9 +107,9 @@ func TicketsFind(root string, opts TicketFindOptions) ([]TicketInfo, error) {
 	out := []TicketInfo{}
 	for _, ticket := range tickets {
 		// A hidden ticket has no file to read; its body comes from the index
-		// blob the scan already batched. Skipping it here instead would break
-		// references.trace's spec branch, which matches spec stems against
-		// ticket bodies.
+		// blob the scan already batched. Skipping it here instead would hide
+		// it from every body-matching filter below, which is exactly what a
+		// resolution query must not do.
 		text, ok := bodies[ticket.Path]
 		if !ok {
 			raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(ticket.Path)))
@@ -461,8 +459,6 @@ func readTicketFromBytes(relPath, status, text string) TicketInfo {
 	info.Title, _ = fm["title"].(string)
 	info.Parent, _ = fm["parent"].(string)
 	info.Related = relatedEntries(fm["related"])
-	info.Specs = scalarList(fm["spec"])
-	info.SpecRemoves = scalarList(fm["spec-remove"])
 	info.Plans = scalarList(fm["plans"])
 	info.Skeletons = scalarList(fm["skeletons"])
 	info.Completed, _ = fm["completed"].(string)

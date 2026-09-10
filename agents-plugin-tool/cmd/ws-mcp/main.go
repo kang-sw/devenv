@@ -51,12 +51,6 @@ func main() {
 		gitCommand(os.Args[2:])
 	case "tickets":
 		ticketsCommand(os.Args[2:])
-	case "specs":
-		specsCommand(os.Args[2:])
-	case "mental-models":
-		mentalModelsCommand(os.Args[2:])
-	case "references":
-		referencesCommand(os.Args[2:])
 	case "tools":
 		toolsCommand(os.Args[2:])
 	case "call":
@@ -69,10 +63,10 @@ func main() {
 
 func usage() {
 	if mcp.NoAgentMode() {
-		fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|git|tickets|specs|mental-models|references>")
+		fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|git|tickets>")
 		return
 	}
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|mercenary|git|tickets|specs|mental-models|references>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|mercenary|git|tickets>")
 }
 
 func doctor(args []string) {
@@ -226,16 +220,10 @@ func runtimeCapabilityCommandNames() []string {
 		"git.log",
 		"git.merge-base",
 		"git.status",
-		"mental-models.find",
-		"mental-models.status",
 		"path.generate",
-		"references.trace",
 		"runtime.capabilities",
 		"runtime.info",
 		"smoke",
-		"specs.find",
-		"specs.list",
-		"specs.status",
 		"tickets.close",
 		"tickets.create-empty",
 		"tickets.find",
@@ -472,16 +460,10 @@ func gitCommit(args []string) {
 	format := fs.String("format", "", `output format: text or json`)
 	var paths multiFlag
 	var aiContext multiFlag
-	var mentalModelNotes multiFlag
 	var updatedTickets multiFlag
-	var updatedSpecs multiFlag
-	var updatedMentalModels multiFlag
 	fs.Var(&paths, "path", "path to stage and commit; may be repeated")
 	fs.Var(&aiContext, "ai-context", "AI Context bullet; may be repeated")
-	fs.Var(&mentalModelNotes, "mental-model-note", "Mental Model Notes bullet under AI Context; may be repeated")
 	fs.Var(&updatedTickets, "updated-ticket", "ticket update summary; may be repeated")
-	fs.Var(&updatedSpecs, "updated-spec", "spec update summary; may be repeated")
-	fs.Var(&updatedMentalModels, "updated-mental-model", "mental-model update summary; may be repeated")
 	_ = fs.Parse(args)
 	paths = append(paths, fs.Args()...)
 
@@ -494,14 +476,11 @@ func gitCommit(args []string) {
 		body = text
 	}
 	result, err := wsgit.Client{Runner: wsgit.ExecRunner{}, Verifier: mcp.VerifyAdapter}.Commit(context.Background(), defaultRoot(*root), wsgit.CommitOptions{
-		Paths:               paths,
-		Title:               *title,
-		Description:         body,
-		AIContext:           aiContext,
-		MentalModelNotes:    mentalModelNotes,
-		UpdatedTickets:      updatedTickets,
-		UpdatedSpecs:        updatedSpecs,
-		UpdatedMentalModels: updatedMentalModels,
+		Paths:          paths,
+		Title:          *title,
+		Description:    body,
+		AIContext:      aiContext,
+		UpdatedTickets: updatedTickets,
 	})
 	if outputJSON(*format) {
 		printJSONOrFatal("git commit", result, err)
@@ -699,186 +678,6 @@ func ticketsVerify(args []string) {
 		return
 	}
 	printTextOrFatal("tickets verify", mcp.FormatTicketVerify(result), err)
-}
-
-func specsCommand(args []string) {
-	if len(args) < 1 {
-		specsUsage()
-		os.Exit(2)
-	}
-	switch args[0] {
-	case "list":
-		specsList(args[1:])
-	case "find":
-		specsFind(args[1:])
-	case "status":
-		specsStatus(args[1:])
-	default:
-		specsUsage()
-		os.Exit(2)
-	}
-}
-
-func specsUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp specs <list|find|status>")
-}
-
-func specsList(args []string) {
-	fs := flag.NewFlagSet("specs list", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	format := fs.String("format", "", `output format: text or json`)
-	_ = fs.Parse(args)
-
-	result, err := wsdoc.SpecsList(defaultRoot(*root))
-	if outputJSON(*format) {
-		printJSONOrFatal("specs list", result, err)
-		return
-	}
-	printTextOrFatal("specs list", mcp.FormatSpecs(result), err)
-}
-
-func specsFind(args []string) {
-	fs := flag.NewFlagSet("specs find", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	query := fs.String("query", "", "case-insensitive text query")
-	specStem := fs.String("spec-stem", "", "exact spec anchor stem")
-	ticketStem := fs.String("ticket-stem", "", "ticket stem referenced by specs")
-	format := fs.String("format", "", `output format: text or json`)
-	_ = fs.Parse(args)
-
-	result, err := wsdoc.SpecsFind(defaultRoot(*root), wsdoc.SpecFindOptions{
-		Query:      *query,
-		SpecStem:   *specStem,
-		TicketStem: *ticketStem,
-	})
-	if outputJSON(*format) {
-		printJSONOrFatal("specs find", result, err)
-		return
-	}
-	if strings.TrimSpace(*query) != "" {
-		printTextOrFatal("specs find", mcp.FormatSpecFind(*query, result), err)
-		return
-	}
-	printTextOrFatal("specs find", mcp.FormatSpecs(result), err)
-}
-
-func specsStatus(args []string) {
-	fs := flag.NewFlagSet("specs status", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	specStem := fs.String("spec-stem", "", "spec anchor stem to inspect")
-	format := fs.String("format", "", `output format: text or json`)
-	_ = fs.Parse(args)
-	if *specStem == "" && len(fs.Args()) > 0 {
-		*specStem = fs.Args()[0]
-	}
-
-	result, err := wsdoc.SpecsStatus(defaultRoot(*root), wsdoc.SpecStatusOptions{SpecStem: *specStem})
-	if outputJSON(*format) {
-		printJSONOrFatal("specs status", result, err)
-		return
-	}
-	printTextOrFatal("specs status", mcp.FormatSpecStatus(result), err)
-}
-
-func mentalModelsCommand(args []string) {
-	if len(args) < 1 {
-		mentalModelsUsage()
-		os.Exit(2)
-	}
-	switch args[0] {
-	case "find":
-		mentalModelsFind(args[1:])
-	case "status":
-		mentalModelsStatus(args[1:])
-	default:
-		mentalModelsUsage()
-		os.Exit(2)
-	}
-}
-
-func mentalModelsUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp mental-models <find|status>")
-}
-
-func mentalModelsFind(args []string) {
-	fs := flag.NewFlagSet("mental-models find", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	query := fs.String("query", "", "case-insensitive text query")
-	specStem := fs.String("spec-stem", "", "spec anchor stem referenced by mental models")
-	domain := fs.String("domain", "", "mental-model domain")
-	format := fs.String("format", "", `output format: text or json`)
-	_ = fs.Parse(args)
-
-	result, err := wsdoc.MentalModelsFind(defaultRoot(*root), wsdoc.MentalModelFindOptions{
-		Query:    *query,
-		SpecStem: *specStem,
-		Domain:   *domain,
-	})
-	if outputJSON(*format) {
-		printJSONOrFatal("mental-models find", result, err)
-		return
-	}
-	if strings.TrimSpace(*query) != "" {
-		printTextOrFatal("mental-models find", mcp.FormatMentalModelFind(*query, result), err)
-		return
-	}
-	printTextOrFatal("mental-models find", mcp.FormatMentalModels(result), err)
-}
-
-func mentalModelsStatus(args []string) {
-	fs := flag.NewFlagSet("mental-models status", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	domain := fs.String("domain", "", "mental-model domain")
-	path := fs.String("path", "", "relative path under ai-docs/mental-model")
-	format := fs.String("format", "", `output format: text or json`)
-	_ = fs.Parse(args)
-	if *domain == "" && *path == "" && len(fs.Args()) > 0 {
-		*domain = fs.Args()[0]
-	}
-
-	result, err := wsdoc.MentalModelsStatus(defaultRoot(*root), wsdoc.MentalModelStatusOptions{Domain: *domain, Path: *path})
-	if outputJSON(*format) {
-		printJSONOrFatal("mental-models status", result, err)
-		return
-	}
-	printTextOrFatal("mental-models status", mcp.FormatMentalModels(result), err)
-}
-
-func referencesCommand(args []string) {
-	if len(args) < 1 {
-		referencesUsage()
-		os.Exit(2)
-	}
-	switch args[0] {
-	case "trace":
-		referencesTrace(args[1:])
-	default:
-		referencesUsage()
-		os.Exit(2)
-	}
-}
-
-func referencesUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp references <trace>")
-}
-
-func referencesTrace(args []string) {
-	fs := flag.NewFlagSet("references trace", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	ticketStem := fs.String("ticket-stem", "", "ticket stem to trace")
-	specStem := fs.String("spec-stem", "", "spec anchor stem to trace")
-	format := fs.String("format", "", `output format: text or json`)
-	_ = fs.Parse(args)
-
-	result, err := wsdoc.ReferencesTrace(defaultRoot(*root), wsdoc.ReferenceTraceOptions{
-		TicketStem: *ticketStem,
-		SpecStem:   *specStem,
-	})
-	if outputJSON(*format) {
-		printJSONOrFatal("references trace", result, err)
-		return
-	}
-	printTextOrFatal("references trace", mcp.FormatReferenceTrace(result), err)
 }
 
 // --- Generic MCP tool passthrough (tools / call) ---

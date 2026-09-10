@@ -992,15 +992,12 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		// enumeration), matching #260810's guardrail that the unscoped path
 		// (the common case) pays no extra cost.
 		result, err := wsgit.Client{Runner: wsgit.ExecRunner{}, Verifier: verifyAdapter}.Commit(context.Background(), root, wsgit.CommitOptions{
-			Paths:               stringList(params.Arguments["paths"]),
-			Title:               title,
-			Description:         description,
-			AIContext:           aiContext,
-			MentalModelNotes:    stringList(params.Arguments["mental_model_notes"]),
-			UpdatedTickets:      stringList(params.Arguments["updated_tickets"]),
-			UpdatedSpecs:        stringList(params.Arguments["updated_specs"]),
-			UpdatedMentalModels: stringList(params.Arguments["updated_mental_models"]),
-			SparseScopeActive:   wsdoc.SparseCheckoutActive(root),
+			Paths:             stringList(params.Arguments["paths"]),
+			Title:             title,
+			Description:       description,
+			AIContext:         aiContext,
+			UpdatedTickets:    stringList(params.Arguments["updated_tickets"]),
+			SparseScopeActive: wsdoc.SparseCheckoutActive(root),
 		})
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
@@ -1040,93 +1037,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsdoc.ReadConvention(name)
 		return toolTextResponse(req.ID, text, err)
-	case "spec_stem.generate":
-		slug, _ := params.Arguments["slug"].(string)
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		stem, err := wsdoc.GenerateSpecStem(root, slug, time.Now())
-		return toolTextResponse(req.ID, stem+"\n", err)
-	case "spec_index.verify":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		text, err := wsdoc.VerifySpecIndex(root)
-		return toolTextResponse(req.ID, text, err)
-	case "specs.query":
-		if _, ok := params.Arguments["mentions_ticket_stem"]; ok {
-			return toolTextResponse(req.ID, "", fmt.Errorf("specs.query uses ticket_stem, not mentions_ticket_stem"))
-		}
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		query, _ := params.Arguments["query"].(string)
-		specStem, _ := params.Arguments["spec_stem"].(string)
-		ticketStem, _ := params.Arguments["ticket_stem"].(string)
-		// A pure point-resolve call - spec_stem set, no query text and no
-		// ticket_stem filter - is exactly the old specs.status shape: reuse its
-		// logic (SpecsStatus + formatSpecStatus) so the object-shaped JSON and
-		// not-found error survive the collapse byte-identically instead of
-		// falling through to SpecsFind's array/empty-on-miss discovery shape.
-		if strings.TrimSpace(specStem) != "" && strings.TrimSpace(query) == "" && strings.TrimSpace(ticketStem) == "" {
-			result, err := wsdoc.SpecsStatus(root, wsdoc.SpecStatusOptions{SpecStem: specStem})
-			if wantsJSON(params.Arguments) {
-				return toolJSONResponse(req.ID, result, err)
-			}
-			return toolTextResponse(req.ID, formatSpecStatus(result), err)
-		}
-		result, err := wsdoc.SpecsFind(root, wsdoc.SpecFindOptions{Query: query, SpecStem: specStem, TicketStem: ticketStem})
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, result, err)
-		}
-		if strings.TrimSpace(query) != "" {
-			return toolTextResponse(req.ID, formatSpecFind(query, result), err)
-		}
-		return toolTextResponse(req.ID, formatSpecs(result), err)
-	case "mental_models.list":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		text, err := wsdoc.MentalModelsList(root)
-		return toolTextResponse(req.ID, text, err)
-	case "mental_models.query":
-		if hasTicketStemArgument(params.Arguments) {
-			return toolTextResponse(req.ID, "", fmt.Errorf("mental_models.query uses spec_stem, not ticket_stem"))
-		}
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		query, _ := params.Arguments["query"].(string)
-		specStem, _ := params.Arguments["spec_stem"].(string)
-		domain, _ := params.Arguments["domain"].(string)
-		result, err := wsdoc.MentalModelsFind(root, wsdoc.MentalModelFindOptions{Query: query, SpecStem: specStem, Domain: domain})
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, result, err)
-		}
-		if strings.TrimSpace(query) != "" {
-			return toolTextResponse(req.ID, formatMentalModelFind(query, result), err)
-		}
-		return toolTextResponse(req.ID, formatMentalModels(result), err)
-	case "mental_models.status":
-		if hasSpecStemArgument(params.Arguments) {
-			return toolTextResponse(req.ID, "", fmt.Errorf("mental_models.status uses domain or path"))
-		}
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		domain, _ := params.Arguments["domain"].(string)
-		path, _ := params.Arguments["path"].(string)
-		result, err := wsdoc.MentalModelsStatus(root, wsdoc.MentalModelStatusOptions{Domain: domain, Path: path})
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, result, err)
-		}
-		return toolTextResponse(req.ID, formatMentalModels(result), err)
 	case "note.write":
 		return s.handleNoteWrite(req.ID, params.Arguments, params.Meta)
 	case "note.erase":
@@ -1137,18 +1047,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return s.handleNoteUnmute(req.ID, params.Arguments, params.Meta)
 	case "note.query":
 		return s.handleNoteSearch(req.ID, params.Arguments, params.Meta)
-	case "references.trace":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		ticketStem, _ := params.Arguments["ticket_stem"].(string)
-		specStem, _ := params.Arguments["spec_stem"].(string)
-		result, err := wsdoc.ReferencesTrace(root, wsdoc.ReferenceTraceOptions{TicketStem: ticketStem, SpecStem: specStem})
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, result, err)
-		}
-		return toolTextResponse(req.ID, formatReferenceTrace(result), err)
 	case "tickets.query":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -2437,180 +2335,6 @@ func formatGitCommit(result wsgit.CommitResult) string {
 	return b.String()
 }
 
-func formatSpecs(specs []wsdoc.SpecInfo) string {
-	var b strings.Builder
-	for _, spec := range specs {
-		fmt.Fprintf(&b, "%s", spec.Path)
-		if spec.Title != "" {
-			fmt.Fprintf(&b, " - %s", spec.Title)
-		}
-		if spec.Summary != "" {
-			fmt.Fprintf(&b, " # %s", spec.Summary)
-		}
-		flags := []string{}
-		if spec.MatchesSpecStem {
-			flags = append(flags, "matches_spec_stem")
-		}
-		if spec.MatchesTicketRef {
-			flags = append(flags, "matches_ticket_ref")
-		}
-		if len(spec.Anchors) > 0 {
-			flags = append(flags, fmt.Sprintf("anchors=%d", len(spec.Anchors)))
-		}
-		if len(spec.TicketRefs) > 0 {
-			flags = append(flags, "tickets="+strings.Join(spec.TicketRefs, ","))
-		}
-		if len(flags) > 0 {
-			fmt.Fprintf(&b, " [%s]", strings.Join(flags, " "))
-		}
-		b.WriteString("\n")
-		writeIndentedLines(&b, "  snippet: ", spec.MatchingSnippets)
-		writeIndentedLines(&b, "  legacy-marker: ", []string{spec.LegacyMarkerAdvisory})
-	}
-	return b.String()
-}
-
-// formatSpecFind inherits nothing from formatSpecs: it delegates wholly to
-// formatDocumentFind, which knows nothing of SpecInfo. The legacy-marker
-// advisory therefore has to be appended here explicitly, or the specs.query
-// query path silently loses it while the no-query fallback keeps it. Each line
-// is prefixed with the spec path so the note stays attributable.
-//
-// The advisory loop is bounded by the same maxFindTextDocuments cut the
-// delegated body applies, so the note can never name a spec that was truncated
-// out of the response above it.
-func formatSpecFind(query string, specs []wsdoc.SpecInfo) string {
-	var b strings.Builder
-	b.WriteString(formatDocumentFind(query, "spec", "specs", len(specs), func(writeDoc func(path string, score, hits int, matches []wsdoc.MatchEvidence)) {
-		for _, spec := range specs {
-			writeDoc(spec.Path, spec.MatchScore, len(spec.Matches), spec.Matches)
-		}
-	}))
-	rendered := specs
-	if len(rendered) > maxFindTextDocuments {
-		rendered = rendered[:maxFindTextDocuments]
-	}
-	separated := false
-	for _, spec := range rendered {
-		if strings.TrimSpace(spec.LegacyMarkerAdvisory) == "" {
-			continue
-		}
-		if !separated {
-			// Each document block is emitted with a leading "\n", so without
-			// this the first advisory runs flush against the last hit line.
-			b.WriteString("\n")
-			separated = true
-		}
-		fmt.Fprintf(&b, "legacy-marker: %s: %s\n", spec.Path, strings.TrimSpace(spec.LegacyMarkerAdvisory))
-	}
-	return b.String()
-}
-
-func formatMentalModelFind(query string, models []wsdoc.MentalModelInfo) string {
-	return formatDocumentFind(query, "mental model", "mental models", len(models), func(writeDoc func(path string, score, hits int, matches []wsdoc.MatchEvidence)) {
-		for _, model := range models {
-			writeDoc(model.Path, model.MatchScore, len(model.Matches), model.Matches)
-		}
-	})
-}
-
-const (
-	maxFindTextDocuments      = 10
-	maxFindTextEvidencePerDoc = 3
-)
-
-func formatDocumentFind(query, singular, plural string, count int, each func(func(string, int, int, []wsdoc.MatchEvidence))) string {
-	type doc struct {
-		path    string
-		score   int
-		hits    int
-		matches []wsdoc.MatchEvidence
-	}
-	docs := []doc{}
-	each(func(path string, score, hits int, matches []wsdoc.MatchEvidence) {
-		docs = append(docs, doc{path: path, score: score, hits: hits, matches: matches})
-	})
-
-	var b strings.Builder
-	label := plural
-	if count == 1 {
-		label = singular
-	}
-	truncatedDocs := len(docs) > maxFindTextDocuments
-	truncatedHits := false
-	for _, d := range docs {
-		if len(d.matches) > maxFindTextEvidencePerDoc {
-			truncatedHits = true
-			break
-		}
-	}
-	fmt.Fprintf(&b, "%d candidate %s for query=%q", count, label, query)
-	if truncatedDocs || truncatedHits {
-		fmt.Fprintf(&b, " (showing subset: first %d documents, up to %d hits each)", maxFindTextDocuments, maxFindTextEvidencePerDoc)
-	}
-	b.WriteString("\n")
-	if count == 0 {
-		fmt.Fprintf(&b, "No candidates met the query threshold; retry with shorter noun phrases.\n")
-		return b.String()
-	}
-	if len(docs) > maxFindTextDocuments {
-		docs = docs[:maxFindTextDocuments]
-	}
-	for _, d := range docs {
-		matches := selectFindTextEvidence(d.matches)
-		fmt.Fprintf(&b, "\n%s\tscore=%d\thits=%d\n", d.path, d.score, d.hits)
-		for _, match := range matches {
-			fmt.Fprintf(&b, "  %d: %s\n", match.Line, match.Snippet)
-		}
-	}
-	return b.String()
-}
-
-func selectFindTextEvidence(matches []wsdoc.MatchEvidence) []wsdoc.MatchEvidence {
-	selected := append([]wsdoc.MatchEvidence(nil), matches...)
-	if len(selected) > maxFindTextEvidencePerDoc {
-		sort.SliceStable(selected, func(i, j int) bool {
-			if len(selected[i].MatchedTerms) != len(selected[j].MatchedTerms) {
-				return len(selected[i].MatchedTerms) > len(selected[j].MatchedTerms)
-			}
-			return selected[i].Line < selected[j].Line
-		})
-		selected = selected[:maxFindTextEvidencePerDoc]
-	}
-	sort.SliceStable(selected, func(i, j int) bool { return selected[i].Line < selected[j].Line })
-	return selected
-}
-
-func formatSpecStatus(status *wsdoc.SpecAnchorStatus) string {
-	if status == nil {
-		return ""
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "spec_stem: %s\n", status.SpecStem)
-	if len(status.Locations) > 0 {
-		b.WriteString("locations:\n")
-		for _, loc := range status.Locations {
-			fmt.Fprintf(&b, "  - line %d", loc.Line)
-			if loc.Heading != "" {
-				fmt.Fprintf(&b, " %s", loc.Heading)
-			}
-			b.WriteString("\n")
-		}
-	}
-	if len(status.Files) > 0 {
-		b.WriteString("files:\n")
-		for _, spec := range status.Files {
-			fmt.Fprintf(&b, "  - %s", spec.Path)
-			if spec.Title != "" {
-				fmt.Fprintf(&b, " - %s", spec.Title)
-			}
-			b.WriteString("\n")
-		}
-	}
-	writeIndentedLines(&b, "legacy-marker: ", strings.Split(status.LegacyMarkerAdvisory, "\n"))
-	return b.String()
-}
-
 // formatTicketCreate's next_instruction line carries the acceptance-check
 // caveat verbatim ("valid empty skeleton + initial posture") so a caller
 // never mistakes tickets.create_empty for a full mutation orchestrator —
@@ -2999,85 +2723,12 @@ func formatTickets(tickets []wsdoc.TicketInfo) string {
 		if ticket.Parent != "" {
 			flags = append(flags, "parent="+ticket.Parent)
 		}
-		if len(ticket.Specs) > 0 {
-			flags = append(flags, "spec="+strings.Join(ticket.Specs, ","))
-		}
 		if len(flags) > 0 {
 			fmt.Fprintf(&b, " [%s]", strings.Join(flags, " "))
 		}
 		b.WriteString("\n")
 		writeIndentedLines(&b, "  unresolved: ", ticket.UnresolvedPhases)
 		writeIndentedLines(&b, "  snippet: ", ticket.MatchingSnippets)
-	}
-	return b.String()
-}
-
-func formatMentalModels(models []wsdoc.MentalModelInfo) string {
-	var b strings.Builder
-	for _, model := range models {
-		fmt.Fprintf(&b, "%s - %s", model.Path, displayOrDash(model.Domain))
-		if model.Description != "" {
-			fmt.Fprintf(&b, " # %s", model.Description)
-		}
-		flags := []string{}
-		if model.MatchesDomain {
-			flags = append(flags, "matches_domain")
-		}
-		if model.MatchesSpecStem {
-			flags = append(flags, "matches_spec_stem")
-		}
-		if len(model.SpecRefs) > 0 {
-			flags = append(flags, fmt.Sprintf("spec_refs=%d", len(model.SpecRefs)))
-		}
-		if len(flags) > 0 {
-			fmt.Fprintf(&b, " [%s]", strings.Join(flags, " "))
-		}
-		b.WriteString("\n")
-		writeIndentedLines(&b, "  source: ", model.Sources)
-		writeIndentedLines(&b, "  ancestor: ", model.AncestorHints)
-		writeIndentedLines(&b, "  index: ", model.IndexHints)
-		writeIndentedLines(&b, "  snippet: ", model.MatchingSnippets)
-	}
-	return b.String()
-}
-
-func formatReferenceTrace(trace *wsdoc.ReferenceTrace) string {
-	if trace == nil {
-		return ""
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "input: %s %s\n", trace.InputType, trace.Input)
-	if len(trace.Tickets) > 0 {
-		b.WriteString("tickets:\n")
-		for _, ticket := range trace.Tickets {
-			fmt.Fprintf(&b, "  [%s] %s", ticket.Status, ticket.Stem)
-			if ticket.Title != "" {
-				fmt.Fprintf(&b, " - %s", ticket.Title)
-			}
-			if ticket.Path != "" {
-				fmt.Fprintf(&b, " (%s)", ticket.Path)
-			}
-			b.WriteString("\n")
-		}
-	}
-	if len(trace.Specs) > 0 {
-		b.WriteString("specs:\n")
-		for _, spec := range trace.Specs {
-			fmt.Fprintf(&b, "  %s", spec.Path)
-			if spec.Title != "" {
-				fmt.Fprintf(&b, " - %s", spec.Title)
-			}
-			if len(spec.Anchors) > 0 {
-				fmt.Fprintf(&b, " [anchors=%d]", len(spec.Anchors))
-			}
-			b.WriteString("\n")
-		}
-	}
-	if len(trace.MentalModels) > 0 {
-		b.WriteString("mental_models:\n")
-		for _, model := range trace.MentalModels {
-			fmt.Fprintf(&b, "  %s - %s\n", model.Path, displayOrDash(model.Domain))
-		}
 	}
 	return b.String()
 }
@@ -3791,22 +3442,19 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"paths":                 stringArrayProperty("Explicit paths to stage and commit. Only these paths are staged."),
-					"title":                 stringProperty("Single-line commit title."),
-					"description":           stringProperty("Optional commit message body before AI Context."),
-					"ai_context":            stringArrayProperty("Required AI Context bullets for the commit message."),
-					"mental_model_notes":    stringArrayProperty("Optional Mental Model Notes bullets rendered as an H3 subsection under AI Context."),
-					"updated_tickets":       stringArrayProperty("Optional ticket update summaries. If omitted, staged ticket moves and Result/Edition headings are detected."),
-					"updated_specs":         stringArrayProperty("Optional spec update summaries."),
-					"updated_mental_models": stringArrayProperty("Optional mental-model update summaries."),
-					"format":                stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+					"paths":           stringArrayProperty("Explicit paths to stage and commit. Only these paths are staged."),
+					"title":           stringProperty("Single-line commit title."),
+					"description":     stringProperty("Optional commit message body before AI Context."),
+					"ai_context":      stringArrayProperty("Required AI Context bullets for the commit message."),
+					"updated_tickets": stringArrayProperty("Optional ticket update summaries. If omitted, staged ticket moves and Result/Edition headings are detected."),
+					"format":          stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 				"required": []string{"paths", "title", "ai_context"},
 			},
 		},
 		{
 			"name":        "project_tree",
-			"description": "Render the ws project document map, spec inventory, and active ticket inventory.",
+			"description": "Render the ws project document map and active ticket inventory.",
 			"inputSchema": map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -3838,74 +3486,6 @@ func tools() []map[string]any {
 					},
 				},
 				"required": []string{"name"},
-			},
-		},
-		{
-			"name":        "spec_stem.generate",
-			"description": "Generate a collision-free spec anchor stem for a slug.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"slug": map[string]string{
-						"type":        "string",
-						"description": "Descriptive slug seed.",
-					},
-				},
-				"required": []string{"slug"},
-			},
-		},
-		{
-			"name":        "spec_index.verify",
-			"description": "Verify basic spec anchor index health.",
-			"inputSchema": map[string]any{
-				"type":       "object",
-				"properties": map[string]any{},
-			},
-		},
-		{
-			"name":        "specs.query",
-			"description": "Query spec files by text query, spec anchor stem, or ticket stem reference. A spec_stem given alone (no query, no ticket_stem) point-resolves that anchor and returns its locations and file metadata, erroring if the stem is not found; otherwise this is a discovery search. Defaults to compact text; use format=json for structured metadata.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"query":       stringProperty("Optional case-insensitive text query."),
-					"spec_stem":   stringProperty("Optional exact spec anchor stem. Given alone, point-resolves that anchor."),
-					"ticket_stem": stringProperty("Optional ticket stem referenced by spec frontmatter or feature entries."),
-					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
-				},
-			},
-		},
-		{
-			"name":        "mental_models.list",
-			"description": "List mental-model documents with domains, descriptions, and sources.",
-			"inputSchema": map[string]any{
-				"type":       "object",
-				"properties": map[string]any{},
-			},
-		},
-		{
-			"name":        "mental_models.query",
-			"description": "Query mental-model paths by text query, spec stem reference, or domain. Defaults to compact text; use format=json for structured metadata.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"query":     stringProperty("Optional case-insensitive text query."),
-					"spec_stem": stringProperty("Optional spec anchor stem referenced by the mental model."),
-					"domain":    stringProperty("Optional mental-model domain."),
-					"format":    stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
-				},
-			},
-		},
-		{
-			"name":        "mental_models.status",
-			"description": "Return path-first metadata for mental-model documents selected by domain or path. Defaults to compact text; use format=json for structured metadata.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"domain": stringProperty("Optional mental-model domain."),
-					"path":   stringProperty("Optional relative path under ai-docs/mental-model."),
-					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
-				},
 			},
 		},
 		{
@@ -3974,18 +3554,6 @@ func tools() []map[string]any {
 					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 				"required": []string{"session_key"},
-			},
-		},
-		{
-			"name":        "references.trace",
-			"description": "Trace ticket/spec/mental-model references from exactly one ticket_stem or spec_stem. Defaults to compact text; use format=json for structured output.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"ticket_stem": stringProperty("Optional ticket stem to trace."),
-					"spec_stem":   stringProperty("Optional spec anchor stem to trace."),
-					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
-				},
 			},
 		},
 		{
@@ -4365,8 +3933,7 @@ func toolSchemaRequiresSessionKey(name string) bool {
 	case "api.list",
 		"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep",
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
-		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.query",
-		"mental_models.list", "mental_models.query", "mental_models.status", "references.trace",
+		"project_tree",
 		"tickets.query", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify", "path.generate", "playbook.render",
 		"mercenary.register", "mercenary.call", "mercenary.wait", "mercenary.result", "mercenary.status",
 		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
@@ -4629,9 +4196,8 @@ func noAgentHiddenTool(name string) bool {
 // eligible for the wsflow playbook.render legacy context bridge.
 // Add entries here as the spec expands the set.
 var wsflowRenderEligibleStems = map[string]bool{
-	"reference-discovery":  true,
-	"code-reviewer":        true,
-	"mental-model-updater": true,
+	"reference-discovery": true,
+	"code-reviewer":       true,
 }
 
 func appendRenderContext(body string, context map[string]string) string {
@@ -4840,13 +4406,6 @@ func hasSpecStemArgument(arguments map[string]any) bool {
 func hasTicketOnlyArgument(arguments map[string]any) bool {
 	_, ok := arguments["mentions_ticket_stem"]
 	return ok
-}
-
-func hasTicketStemArgument(arguments map[string]any) bool {
-	if _, ok := arguments["ticket_stem"]; ok {
-		return true
-	}
-	return hasTicketOnlyArgument(arguments)
 }
 
 func stringProperty(description string) map[string]string {

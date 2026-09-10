@@ -2,7 +2,7 @@ package wsdoc
 
 import "fmt"
 
-// ticketFrontmatter is the shared Frontmatter block from ticket-conventions.md lines 66–88.
+// ticketFrontmatter is the shared Frontmatter block from ticket-conventions.md.
 const ticketFrontmatter = `### Frontmatter
 
 ` + "```yaml" + `
@@ -10,24 +10,12 @@ const ticketFrontmatter = `### Frontmatter
 title: <title>
 related:             # optional; map of stem → relationship note
   260301-feat-foo: prerequisite
-spec:                # optional; list of spec-stems this ticket implements
-  - 260421-feat-example
-spec-remove:         # optional; list of spec-stems this ticket's implementation will remove
-  - 260421-feat-removed-feature
 parent:              # optional; epic stem (e.g., 260401-epic-auth-rewrite)
-plans:               # maps phases to plan path stems under ai-docs/.plans/ (without .md)
-  phase-1: 2026-03/28-1430.event-serialization
-skeletons:           # legacy: maps phases to skeleton artifact commit hashes
-  phase-1: abc1234
-related-mental-model:  # optional; mental-model stems (filename without .md) consulted
-  - workflow-routing   #   during ticket authoring — recovery hint for future sessions
 completed:           # YYYY-MM-DD, added on move to .done/
 ---
-` + "```" + `
+` + "```"
 
-Both ` + "`plans:`" + ` and legacy ` + "`skeletons:`" + ` list only phases that have artifacts — omit phases without an artifact (no null placeholders). Absence of ` + "`skeletons:`" + ` means "not needed"; normal implementation routing does not create new skeleton artifacts.`
-
-// ticketBodyActionable is the Body block for feat/bug/refactor/chore (lines 90–116).
+// ticketBodyActionable is the Body block for feat/bug/refactor/chore.
 const ticketBodyActionable = `
 ### Body (actionable: ` + "`feat`, `bug`, `refactor`, `chore`" + `)
 
@@ -61,10 +49,9 @@ Optional sections — add between ` + "`## Background`" + ` and ` + "`## Phases`
 
 - ` + "`## Decisions`" + ` — design choices with rationale and rejected alternatives.
 - ` + "`## Constraints`" + ` — non-obvious boundaries (performance, compatibility, etc.).
-- ` + "`## Prior Art`" + ` — existing patterns or components to reuse.
-- ` + "`## Spec Impact`" + ` — ready-only spec addressing when no existing stem yet covers the behavior; include target spec area and expected caller-visible change.`
+- ` + "`## Prior Art`" + ` — existing patterns or components to reuse.`
 
-// ticketBodyResearch is the Body block for research (lines 125–139).
+// ticketBodyResearch is the Body block for research.
 const ticketBodyResearch = `
 ### Body (category = ` + "`research`" + `)
 
@@ -82,7 +69,7 @@ const ticketBodyResearch = `
 
 Research tickets have no phases. Sections after ` + "`## Background`" + ` are freeform topic headings.`
 
-// ticketBodyWorkset is the Workset body block (lines 141–168).
+// ticketBodyWorkset is the Workset body block.
 const ticketBodyWorkset = `
 ### Workset body (category = ` + "`workset`" + `)
 
@@ -113,7 +100,7 @@ const ticketBodyWorkset = `
 
 Workset bodies define a non-hierarchical ticket collection, not decomposition. Included tickets do not set ` + "`parent:`" + ` to the workset; planned references do not receive status, path, or ` + "`parent:`" + ` until a real ticket exists.`
 
-// ticketBodyEpic is the Epic body block (lines 170–197).
+// ticketBodyEpic is the Epic body block.
 const ticketBodyEpic = `
 ### Epic body (category = ` + "`epic`" + `)
 
@@ -145,8 +132,8 @@ const ticketBodyEpic = `
 ` + "```"
 
 // TicketTemplate returns the fill-in body skeleton for a given ticket type.
-// It returns the shared Frontmatter block followed by the type-specific Body section,
-// extracted verbatim from ticket-conventions.md lines 64–199.
+// It returns the shared Frontmatter block followed by the type-specific Body
+// section.
 func TicketTemplate(typeStr string) (string, error) {
 	switch typeStr {
 	case "feat", "bug", "refactor", "chore":

@@ -52,40 +52,6 @@ func runTestMain(m *testing.M) int {
 	return m.Run()
 }
 
-func TestFormatBroadDocumentationFindGroupsEvidence(t *testing.T) {
-	specs := []wsdoc.SpecInfo{{Path: "ai-docs/spec/plugin-runtime.md", MatchScore: 18, Matches: []wsdoc.MatchEvidence{{Line: 18, MatchedTerms: []string{"marketplace"}, Snippet: "marketplace release packaging"}}}}
-	text := formatSpecFind("wsflow installer marketplace release packaging", specs)
-	if !strings.Contains(text, `1 candidate spec for query="wsflow installer marketplace release packaging"`) || !strings.Contains(text, "ai-docs/spec/plugin-runtime.md	score=18	hits=1") || !strings.Contains(text, "  18: marketplace release packaging") {
-		t.Fatalf("spec find text = %q", text)
-	}
-	if strings.Contains(text, "matched:") {
-		t.Fatalf("spec find text included matched line: %q", text)
-	}
-
-	models := []wsdoc.MentalModelInfo{{Path: "ai-docs/mental-model/runtime.md", MatchScore: 9, Matches: []wsdoc.MatchEvidence{{Line: 7, MatchedTerms: []string{"runtime", "cli"}, Snippet: "runtime CLI mirror"}}}}
-	text = formatMentalModelFind("runtime readable CLI mirror", models)
-	if !strings.Contains(text, `1 candidate mental model for query="runtime readable CLI mirror"`) || !strings.Contains(text, "ai-docs/mental-model/runtime.md	score=9	hits=1") || !strings.Contains(text, "  7: runtime CLI mirror") {
-		t.Fatalf("mental model find text = %q", text)
-	}
-}
-
-func TestFormatBroadDocumentationFindBoundsEvidenceAndGuidesZeroResults(t *testing.T) {
-	matches := []wsdoc.MatchEvidence{}
-	for i := 1; i <= 5; i++ {
-		matches = append(matches, wsdoc.MatchEvidence{Line: i, MatchedTerms: []string{"workflow"}, Snippet: fmt.Sprintf("workflow line %d", i)})
-	}
-	specs := []wsdoc.SpecInfo{{Path: "ai-docs/spec/a.md", MatchScore: 5, Matches: matches}}
-	text := formatSpecFind("workflow", specs)
-	if !strings.Contains(text, "showing subset") || strings.Count(text, "workflow line") != maxFindTextEvidencePerDoc {
-		t.Fatalf("bounded spec find text = %q", text)
-	}
-
-	text = formatSpecFind("absent phrase", nil)
-	if !strings.Contains(text, "0 candidate specs") || !strings.Contains(text, "retry with shorter noun phrases") {
-		t.Fatalf("zero-result text = %q", text)
-	}
-}
-
 func toolPropertiesByName(t *testing.T, listLine, toolName string) map[string]any {
 	t.Helper()
 	var listResp map[string]any
@@ -391,7 +357,7 @@ func TestWsflowPlaybookRenderAllLegacyStemsFromRsrc(t *testing.T) {
 	s := NewServer(root, "test")
 
 	for _, stem := range []string{
-		"reference-discovery", "code-reviewer", "mental-model-updater",
+		"reference-discovery", "code-reviewer",
 	} {
 		t.Run(stem, func(t *testing.T) {
 			context := map[string]string{"bridge_probe": "context for " + stem}
@@ -767,74 +733,6 @@ func TestServeStdioTicketsQueryPointResolveMatchesRemovedStatusShape(t *testing.
 	}
 }
 
-// TestServeStdioSpecsQueryPointResolveMatchesRemovedStatusShape is the specs
-// counterpart of TestServeStdioTicketsQueryPointResolveMatchesRemovedStatusShape:
-// specs.query(spec_stem: X) alone (no query, no ticket_stem) must error on a
-// not-found anchor exactly like the removed specs.status did, and a found
-// anchor's text/JSON must use SpecAnchorStatus's spec_stem/locations/files
-// shape (formatSpecStatus), not SpecsFind's per-file formatSpecs listing.
-func TestServeStdioSpecsQueryPointResolveMatchesRemovedStatusShape(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/spec/demo.md", "# Demo\n\n## Feature {#260504-spec-demo}\n")
-	initGit(t, root)
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-
-	notFoundInput := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"specs.query","arguments":{"spec_stem":"260504-missing"}}}` + "\n"
-	var out bytes.Buffer
-	server := NewServer(root, "test")
-	if err := serveStdioWithSession(t, server, root, notFoundInput, &out); err != nil {
-		t.Fatalf("ServeStdio returned error: %v", err)
-	}
-	if !strings.Contains(out.String(), `"isError":true`) || !strings.Contains(out.String(), "spec anchor not found: 260504-missing") {
-		t.Fatalf("specs.query(spec_stem:) not-found case did not error like the removed specs.status: %s", out.String())
-	}
-
-	textInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"specs.query","arguments":{"spec_stem":"260504-spec-demo"}}}` + "\n"
-	out.Reset()
-	if err := serveStdioWithSession(t, server, root, textInput, &out); err != nil {
-		t.Fatalf("ServeStdio returned error: %v", err)
-	}
-	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["2"])
-	if !strings.Contains(text, "spec_stem:") || !strings.Contains(text, "locations:") || !strings.Contains(text, "files:") {
-		t.Fatalf("specs.query(spec_stem:) text did not use the removed specs.status's spec_stem/locations/files shape: %s", text)
-	}
-
-	jsonInput := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"specs.query","arguments":{"spec_stem":"260504-spec-demo","format":"json"}}}` + "\n"
-	out.Reset()
-	if err := serveStdioWithSession(t, server, root, jsonInput, &out); err != nil {
-		t.Fatalf("ServeStdio returned error: %v", err)
-	}
-	jsonText := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["3"])
-	var obj map[string]any
-	if err := json.Unmarshal([]byte(jsonText), &obj); err != nil {
-		t.Fatalf("specs.query(spec_stem:) json mode is not a bare object like the removed specs.status: %v\n%s", err, jsonText)
-	}
-	if obj["spec_stem"] != "260504-spec-demo" {
-		t.Fatalf("specs.query(spec_stem:) json object missing expected spec_stem: %s", jsonText)
-	}
-}
-
-func TestServeStdioMentalModelToolsRejectSpecStemOnStatus(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/mental-model/workflow.md", "---\ndomain: workflow\n---\n# Workflow\n")
-	initGit(t, root)
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"mental_models.status","arguments":{"spec_stem":"260504-spec-demo"}}}` + "\n"
-
-	var out bytes.Buffer
-	server := NewServer(root, "test")
-	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
-		t.Fatalf("ServeStdio returned error: %v", err)
-	}
-	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"])
-	if !strings.Contains(text, "domain or path") || !strings.Contains(out.String(), `"isError":true`) {
-		t.Fatalf("mental_models.status accepted spec_stem argument: %s", out.String())
-	}
-}
-
 // callToolsList issues a single tools/list request and returns the raw response
 // line. Used by capability-scope tests to assert advertised schema visibility.
 func callToolsList(t *testing.T, server *Server) string {
@@ -1038,8 +936,6 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
-	mustWrite(t, root, "ai-docs/spec/demo.md", "---\ntitle: Demo\nfeatures:\n  - planned [260503-feat-demo/p1]\n---\n# Demo\n\n## Feature {#260503-spec-demo}\n\nSpec discovery text.\n")
-	mustWrite(t, root, "ai-docs/mental-model/workflow.md", "---\ndomain: workflow\ndescription: Workflow model\nsources:\n  - ai-docs/spec/demo.md#260503-spec-demo\n---\n# Workflow\n\nReferences {#260503-spec-demo} with discovery text.\n")
 	mustWrite(t, root, "ai-docs/tickets/todo/260503-feat-demo.md", "---\ntitle: Demo ticket\n---\n# Demo\n\nMentions 260503-epic-demo.\n")
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
@@ -1057,11 +953,6 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 		`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"runtime.debug_events","arguments":{"limit":10}}}`,
 		`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"config.list","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"tickets.query","arguments":{"mentions_ticket_stem":"260503-epic-demo"}}}`,
-		`{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"specs.query","arguments":{"spec_stem":"260503-spec-demo","ticket_stem":"260503-feat-demo","query":"discovery"}}}`,
-		`{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"mental_models.query","arguments":{"spec_stem":"260503-spec-demo","domain":"workflow","query":"discovery"}}}`,
-		`{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"specs.query","arguments":{"query":"discovery","format":"json"}}}`,
-		`{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"mental_models.query","arguments":{"query":"discovery","format":"json"}}}`,
-		`{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"references.trace","arguments":{"spec_stem":"260503-spec-demo"}}}`,
 	}, "\n")
 
 	var out bytes.Buffer
@@ -1071,8 +962,8 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 15 {
-		t.Fatalf("expected 15 responses, got %d\n%s", len(lines), out.String())
+	if len(lines) != 10 {
+		t.Fatalf("expected 10 responses, got %d\n%s", len(lines), out.String())
 	}
 	byID := responseLinesByID(t, lines)
 
@@ -1123,8 +1014,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	rootAwareTools := []string{
 		"api.list",
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
-		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.query",
-		"mental_models.list", "mental_models.query", "mental_models.status", "references.trace",
+		"project_tree",
 		"tickets.query", "path.generate", "playbook.render",
 		"mercenary.register", "mercenary.call", "mercenary.wait", "mercenary.result", "mercenary.status",
 		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
@@ -1170,13 +1060,18 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["2"], "\"system_prompt_text\"") {
 		t.Fatalf("tools/list ws.mercenary.register schema missing system_prompt_text: %s", byID["2"])
 	}
-	for _, tool := range []string{"mercenary.wait", "mercenary.result", "mercenary.status", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout", "mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events", "mercenary.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.query", "specs.query", "mental_models.query", "mental_models.status", "references.trace"} {
+	for _, tool := range []string{"mercenary.wait", "mercenary.result", "mercenary.status", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout", "mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events", "mercenary.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.query"} {
 		if !strings.Contains(byID["2"], tool) {
 			t.Fatalf("tools/list missing %s: %s", tool, byID["2"])
 		}
 	}
-	if !strings.Contains(byID["2"], `"mental_model_notes"`) {
-		t.Fatalf("tools/list missing git.commit mental_model_notes schema: %s", byID["2"])
+	// The spec and mental-model tool surface retired with its layer, and
+	// git.commit's doc trailers went with it. tools/list must advertise none
+	// of them, or an agent calls a tool that no longer dispatches.
+	for _, gone := range []string{"spec_stem.generate", "spec_index.verify", "specs.query", "mental_models.list", "mental_models.query", "mental_models.status", "references.trace", `"mental_model_notes"`, `"updated_specs"`, `"updated_mental_models"`} {
+		if strings.Contains(byID["2"], gone) {
+			t.Fatalf("tools/list still advertises retired surface %s: %s", gone, byID["2"])
+		}
 	}
 	if strings.Contains(byID["2"], "ws.mercenary.recall") {
 		t.Fatalf("tools/list should not advertise ws.mercenary.recall: %s", byID["2"])
@@ -1212,24 +1107,6 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	ticketsText := toolText(t, byID["10"])
 	if !strings.Contains(ticketsText, "260503-feat-demo") || !strings.Contains(ticketsText, "mentions_ticket_stem") {
 		t.Fatalf("tickets.query response missing mention result: %s", byID["10"])
-	}
-	specsText := toolText(t, byID["11"])
-	if !strings.Contains(specsText, "1 candidate spec for query=\"discovery\"") || !strings.Contains(specsText, "ai-docs/spec/demo.md\tscore=") || strings.Contains(specsText, "matched:") {
-		t.Fatalf("specs.query response missing spec result: %s", byID["11"])
-	}
-	mentalModelsText := toolText(t, byID["12"])
-	if !strings.Contains(mentalModelsText, "1 candidate mental model for query=\"discovery\"") || !strings.Contains(mentalModelsText, "ai-docs/mental-model/workflow.md\tscore=") || strings.Contains(mentalModelsText, "matched:") {
-		t.Fatalf("mental_models.query response missing result: %s", byID["12"])
-	}
-	if !strings.Contains(byID["13"], "matches") || !strings.Contains(byID["13"], "matched_terms") {
-		t.Fatalf("specs.query json missing evidence: %s", byID["13"])
-	}
-	if !strings.Contains(byID["14"], "matches") || !strings.Contains(byID["14"], "matched_terms") {
-		t.Fatalf("mental_models.query json missing evidence: %s", byID["14"])
-	}
-	referencesText := toolText(t, byID["15"])
-	if !strings.Contains(referencesText, "input: spec") || !strings.Contains(referencesText, "tickets:") || !strings.Contains(referencesText, "mental_models:") {
-		t.Fatalf("references.trace response missing graph result: %s", byID["15"])
 	}
 }
 
@@ -2161,7 +2038,7 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 	}
 
 	out.Reset()
-	commitInput := `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt","ai-docs/tickets/todo/260503-feat-demo.md"],"title":"test: mcp commit","ai_context":["User intent: verify git.commit.","Verification: server test."],"mental_model_notes":["git.commit accepts structured Mental Model Notes."]}}}`
+	commitInput := `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt","ai-docs/tickets/todo/260503-feat-demo.md"],"title":"test: mcp commit","ai_context":["User intent: verify git.commit.","Verification: server test."]}}}`
 	if err := serveStdioWithSession(t, server, root, commitInput, &out); err != nil {
 		t.Fatalf("ServeStdio commit returned error: %v", err)
 	}
@@ -2180,8 +2057,8 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 		t.Fatalf("git.commit text response = %q", commitText)
 	}
 	commitBody := string(runGitOutput(t, root, "log", "-1", "--format=%B"))
-	if !strings.Contains(commitBody, "## AI Context\n- User intent: verify git.commit.\n- Verification: server test.\n\n### Mental Model Notes\n- git.commit accepts structured Mental Model Notes.") {
-		t.Fatalf("git.commit message missing Mental Model Notes subsection:\n%s", commitBody)
+	if !strings.Contains(commitBody, "## AI Context\n- User intent: verify git.commit.\n- Verification: server test.\n\n## Updated Tickets\n") {
+		t.Fatalf("git.commit message is not AI Context followed directly by Updated Tickets:\n%s", commitBody)
 	}
 
 	mustWrite(t, root, "file.txt", "one\ntwo\nthree\n")
@@ -2398,12 +2275,25 @@ func TestFormatTicketVerifyRendersAdvisoriesWithoutAmendRecipe(t *testing.T) {
 // are produced; this proves the commit still lands, since wsgit.Commit vetoes
 // on a non-nil verifier error and nothing else.
 func TestVerifyAdapterDegradesToSilenceOnGraphLoadFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX mode bits do not make a file unreadable on Windows")
+	}
 	root := t.TempDir()
-	// No ai-docs/spec, so the spec-anchor scan fails. The dangling related:
-	// would otherwise produce a FIX:, which makes the silence non-vacuous.
+	// The dangling related: would otherwise produce a FIX:, which makes the
+	// silence non-vacuous; the unreadable sibling is what fails the board scan.
 	path := "ai-docs/tickets/.done/260726-feat-graph-load-failure.md"
 	mustWrite(t, root, path,
 		"---\ntitle: Load failure\ncompleted: 2026-07-27\nrelated:\n  260726-nope-dangling: no such stem\n---\n\n# Load failure\n")
+	broken := "ai-docs/tickets/todo/260726-feat-unreadable.md"
+	mustWrite(t, root, broken, "---\ntitle: Unreadable\n---\n\n# Unreadable\n")
+	brokenAbs := filepath.Join(root, filepath.FromSlash(broken))
+	if err := os.Chmod(brokenAbs, 0o000); err != nil {
+		t.Skipf("cannot make a file unreadable here: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(brokenAbs, 0o644) })
+	if _, err := os.ReadFile(brokenAbs); err == nil {
+		t.Skip("mode 000 is still readable (running as root?)")
+	}
 
 	advisories, err := verifyAdapter(root, []string{path})
 	if err != nil {
@@ -2660,28 +2550,6 @@ func TestServeStdioGitCommitAIContextConditionsAndDebugEvent(t *testing.T) {
 	}
 	if rawBytes, _ := largeArrayEvent["raw_bytes"].(float64); rawBytes < 5000 {
 		t.Fatalf("large-array debug event raw_bytes too small: %v", rawBytes)
-	}
-}
-
-func TestServeStdioReferencesTraceRejectsAmbiguousSelectors(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/tickets/todo/260504-ticket-demo.md", "---\ntitle: Demo\n---\n# Demo\n")
-	mustWrite(t, root, "ai-docs/spec/demo.md", "# Demo\n\n## Feature {#260504-spec-demo}\n")
-	mustWrite(t, root, "ai-docs/mental-model/demo.md", "---\ndomain: demo\n---\n# Demo\n")
-	initGit(t, root)
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"references.trace","arguments":{"ticket_stem":"260504-ticket-demo","spec_stem":"260504-spec-demo"}}}` + "\n"
-
-	var out bytes.Buffer
-	server := NewServer(root, "test")
-	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
-		t.Fatalf("ServeStdio returned error: %v", err)
-	}
-	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"])
-	if !strings.Contains(text, "exactly one") || !strings.Contains(out.String(), `"isError":true`) {
-		t.Fatalf("references.trace accepted ambiguous selectors: %s", out.String())
 	}
 }
 
