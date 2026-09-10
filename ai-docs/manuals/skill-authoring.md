@@ -19,9 +19,8 @@ and the worker's context window; the lead's context is not the constraint.
 - Therefore every rule says when it applies and what the default is when it
   does not. A one-clause rationale is content, not overhead: the reader uses it
   to decide non-application.
-- Reader tiers differ. A **worker** (current-mainstream or previous-generation
-  flagship class, holding a whole ticket) gets outcome, constraints, and a
-  closed stop list. A **cheap-tier delegate** (fact population, survey, review
+- Reader tiers differ. A **worker** (at the risk-selected render tier, holding a
+  whole ticket) gets outcome, constraints, and a closed stop list. A **cheap-tier delegate** (fact population, survey, review
   scouting) gets a bounded task, pointer inputs, and a fixed output shape.
   Text written for one tier is wrong for the other.
 
