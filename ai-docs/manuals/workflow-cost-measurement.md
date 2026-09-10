@@ -62,8 +62,9 @@ one of `epic`, `workset`, `research`, `idea`, or `design`, and recency is the
 frontmatter `completed:` date, ties broken by stem. Change the size only when
 both halves change together.
 
-The window has three sizes that mean different things, and the run states
-which it hit:
+The window has four sizes that mean different things, and the run states
+which it hit. The block below prints the verdict, so it is a command and not
+a reading:
 
 - **Zero stems** — the selector matched nothing: no `.done/` directory, no
   actionable stem in it, or no `completed:` frontmatter anywhere. The whole
@@ -73,12 +74,14 @@ which it hit:
   scope for it.
 - **Fewer than `FLOOR` stems (default 5)** — below the execution floor. Run
   and record every indicator, mark the run `below floor (<n> of <FLOOR>)`,
-  and do not perform step 5's indicator-by-indicator comparison: place the
-  two records side by side and read them as anecdote. One or two tickets
-  move every figure in a five-ticket window.
-- **Fewer than `SIZE` but at least `FLOOR`** — records all of them and says
-  so. This is a smaller window, not a broken one; both halves must still use
-  the same `SIZE` setting.
+  and do not perform the comparison step's indicator-by-indicator reading:
+  place the two records side by side and read them as anecdote. One or two
+  tickets move every figure in a five-ticket window.
+- **Fewer than `SIZE` but at least `FLOOR`** — `short`: records all of them
+  and says so. This is a smaller window, not a broken one; both halves must
+  still use the same `SIZE` setting.
+- **Exactly `SIZE`** — `full`: the normal case, the window the default
+  describes.
 
 Shell setup used by every command below, run from the repository root. The
 checkout does not have to be at the measured commit and does not have to be on
@@ -86,8 +89,14 @@ the measured branch: the commands read `$COMMIT`, and the ticket tree is
 materialized from `$COMMIT` too, so the working tree is never read and cannot
 disagree with the history.
 
-`COMMIT` is the measured commit, resolved to a hash once so a later ref move
-cannot change what the run means. `BRANCH` records which line that commit sat
+`COMMIT` is the measured commit, a hash. Take it from the environment: a
+retroactive run — the usual shape for the second half of a comparison, and for
+any before-run reconstructed after the change landed — exports the hash its
+counterpart recorded, and the setup block then reads that and nothing else.
+Only a run taken at the branch tip may let the block resolve the hash itself,
+and that resolution is the act that fixes it: record the resolved value at once,
+because it is the input the other half will need. The block derives `AT_TIP`
+from the two, and indicator 6 reads it. `BRANCH` records which line that commit sat
 on — it is a record field and the one input to indicator 6's branch listing,
 never a revision the history is read through. Pick it as the branch the
 project's work lands on; some projects declare a tracked branch in their
@@ -100,14 +109,19 @@ so the two indicators cannot drift apart.
 
 ```sh
 BRANCH=develop                 # record only; never read history through it
-COMMIT=$(git rev-parse --verify "$BRANCH^{commit}")   # pin it, then keep the hash
+                               # retroactive run: COMMIT=<recorded hash> in the
+                               # environment. Tip run: leave it unset, then
+                               # record the hash this resolves to.
+COMMIT=${COMMIT:-$(git rev-parse --verify "$BRANCH^{commit}")}
+AT_TIP=no
+[ "$COMMIT" = "$(git rev-parse --verify --quiet "$BRANCH^{commit}")" ] && AT_TIP=yes
 SIZE=20
 FLOOR=5
 
 TREE=$(mktemp -d); git archive "$COMMIT" ai-docs/tickets | tar -x -C "$TREE"
 TICKETS=$TREE/ai-docs/tickets
 FPCHAIN=$TREE/first-parent-chain; git rev-list --first-parent "$COMMIT" > "$FPCHAIN"
-# at the end of the run: rm -rf "$TREE"
+# the teardown block after the Procedure removes $TREE; it is the run's last command
 
 completed_date() { awk '/^---$/{c++; next} c==1 && /^completed:/{sub(/^completed:/,""); gsub(/[^0-9-]/,""); print; exit}' "$1"; }
 epoch() {   # $1 = a bare YYYY-MM-DD; prints seconds, or nothing at all.
@@ -130,6 +144,7 @@ fp_pos() {   # $1 = commit; prints its position on $COMMIT's first-parent chain
 }
 count_marker() {   # $1 = ERE; rest = files. Counts matching lines outside fenced blocks.
   pat=$1; shift
+  if [ "$#" -eq 0 ]; then printf 'unavailable (no ticket files at the measured commit)\n'; return 0; fi
   awk -v pat="$pat" '
     FNR==1              { fence=0 }
     /^[ \t]*(```|~~~)/  { fence=!fence; next }
@@ -173,7 +188,12 @@ merge topology and not about the ticket. `fp_pos` instead maps a commit to a
 position on `$COMMIT`'s first-parent chain: its own position if it sits on the
 chain, otherwise the position of the oldest chain commit that has it as an
 ancestor — the point where it was integrated. Two positions subtract to a
-distance that means the same thing for every row.
+distance that means the same thing for every row. Positions run oldest-largest,
+so the subtraction is normally positive; it inverts when the ticket's `.done/`
+addition was integrated onto the measured line *before* the first commit that
+names the stem, which a long-lived side branch merged after the close can
+produce. That row is reported `inverted`, not as a negative number, and is
+excluded from the distribution.
 
 `$TICKETS` is a filesystem path, used only to read ticket files. Git pathspecs
 stay repo-relative (`ai-docs/tickets/...`) in every command below; do not
@@ -181,15 +201,31 @@ substitute `$TICKETS` into a `git log -- <path>` argument, or the pathspec
 matches nothing and the row reports `unavailable` for the wrong reason.
 
 `window` prints the stems, oldest first, and names on stderr every closed
-actionable ticket it skipped for lacking `completed:`
-(`window 2>&1 >/dev/null | grep -c skipped` counts them). Record both with the
-run, along with `window | grep -c .`. A skipped ticket pulls an older one into
-the window, so the window's span silently widens; if the two halves skip
-different numbers, note that the two windows span different periods. When the
-skipped count exceeds `SIZE`, say so as `window unrepresentative (skipped <n>
-> SIZE)`: the window is then drawn from a minority of the project's closures,
-and the honest reading compares the two halves over the calendar period they
-share rather than over their whole spans.
+actionable ticket it skipped for lacking `completed:`. Capture the window once
+and let the block below name the size it hit:
+
+```sh
+STEMS=$(window)
+SKIPPED=$(window 2>&1 >/dev/null | grep -c skipped)
+N=$(printf '%s\n' "$STEMS" | grep -c .)
+if   [ "$N" -eq 0 ];       then echo "window: unavailable (no closed actionable ticket window)"
+elif [ "$N" -lt "$FLOOR" ]; then echo "window: below floor ($N of $FLOOR)"
+elif [ "$N" -lt "$SIZE" ];  then echo "window: short ($N of $SIZE; all closures recorded)"
+else                             echo "window: full ($N)"
+fi
+echo "skipped (no completed:): $SKIPPED"
+if [ "$SKIPPED" -gt "$SIZE" ]; then
+  echo "window unrepresentative (skipped $SKIPPED > SIZE $SIZE)"
+fi
+```
+
+The skip count is a second axis, independent of the size: a skipped ticket
+pulls an older one into the window, so the window's span silently widens, and
+if the two halves skip different numbers the two windows span different
+periods. Above `SIZE` the window is drawn from a minority of the project's
+closures, and the honest reading compares the two halves over the calendar
+period they share rather than over their whole spans. Record the size verdict,
+the skip count, and the stems.
 
 ## Indicators
 
@@ -234,7 +270,10 @@ for stem in $STEMS; do
   first=$(git log "$COMMIT" --reverse --format=%h --grep="$stem" | head -1)
   close=$(git log "$COMMIT" --format=%h --diff-filter=A -- "ai-docs/tickets/.done/$stem.md" | tail -1)
   pf=$(fp_pos "$first"); pc=$(fp_pos "$close")
-  gap=$([ -n "$pf" ] && [ -n "$pc" ] && echo $(( pf - pc )) || echo unavailable)
+  if   [ -z "$pf" ] || [ -z "$pc" ]; then gap=unavailable
+  elif [ "$pf" -lt "$pc" ];          then gap=inverted
+  else                                    gap=$(( pf - pc ))
+  fi
   printf '%s days=%s commits=%s\n' "$stem" "$days" "$gap"
 done
 ```
@@ -243,7 +282,10 @@ Unit: days; first-parent commits along the measured line. Unavailable:
 `days=unavailable` when either date is unparseable (`completed:` must be a bare
 `YYYY-MM-DD`); `commits=unavailable` when no commit names the stem, when the
 ticket file's addition is not reachable from `$COMMIT`, or when either endpoint
-does not resolve to a position on the measured first-parent chain.
+does not resolve to a position on the measured first-parent chain;
+`commits=inverted` when the close integrated onto the measured line before the
+first stem-naming commit did. An `inverted` row is excluded from the gap
+distribution and counted separately, like an `unavailable` one.
 
 Limits: a ticket that sat in `idea/` for weeks inflates days without any
 workflow cost, so read days together with the commit gap and read neither as
@@ -409,7 +451,7 @@ for stem in $STEMS; do
   m=$(awk '/^### Result/{f=1; next} /^(#|##|###) /{f=0} f' "$f" \
     | grep -i -E 'escalat|asked the user|user decision|stopped for|blocked on|awaiting approval')
   printf '%s escalation_lines=%s\n' "$stem" "$(printf '%s' "$m" | grep -c .)"
-  [ -n "$m" ] && printf '%s\n' "$m" | sed 's/^/    /'
+  if [ -n "$m" ]; then printf '%s\n' "$m" | sed 's/^/    /'; fi
 done
 ```
 
@@ -501,17 +543,29 @@ one of them records that line as `unavailable`, not zero.
 
 A count of zero and an absent convention print the same integer, so the
 question is answered before the counting, not from it: check each convention
-against the project's ticket conventions and set the four flags below. A flag
-left unset prints `unavailable`; a flag set to `yes` makes a printed zero a
-real zero. Record the four answers and where you checked them.
+against the project's ticket conventions and export the four flags below. They
+carry no default, because a default is not an answer — a run that has not
+checked prints `unavailable` four times, which is the truthful output for a
+run that has not checked. A flag set to `yes` makes a printed zero a real zero.
+Record the four answers and where you checked them.
 
 ```sh
-USES_BLOCKED=yes        # the project's tickets carry a `## Blocked` note heading
-USES_DROPPED_PHASE=yes  # the project's tickets mark a dropped phase `[dropped]`
-USES_GOAL_MERGE=yes     # the project types multi-ticket run merges `merge(goal)`
-USES_GOAL_BRANCH=yes    # the project runs multi-ticket work on `goal/*` branches
+# Answer these first, from the project's ticket conventions, and export them.
+# Unset is the correct state until you have checked, and prints `unavailable`.
+USES_BLOCKED=${USES_BLOCKED:-}              # tickets carry a `## Blocked` note heading
+USES_DROPPED_PHASE=${USES_DROPPED_PHASE:-}  # tickets mark a dropped phase `[dropped]`
+USES_GOAL_MERGE=${USES_GOAL_MERGE:-}        # run merges are typed `merge(goal)`
+USES_GOAL_BRANCH=${USES_GOAL_BRANCH:-}      # multi-ticket work runs on `goal/*` branches
 
-set -- "$TICKETS"/*/*.md "$TICKETS"/.done/*.md "$TICKETS"/.dropped/*.md
+# Every ticket file that exists, in every status directory. The filter is not
+# optional: an unmatched glob survives as a literal word in POSIX sh, and a
+# nonexistent filename is fatal to awk. Built here, not in a function, because
+# a function's positional parameters do not reach its caller.
+set --
+for f in "$TICKETS"/*/*.md "$TICKETS"/.done/*.md "$TICKETS"/.dropped/*.md; do
+  if [ -f "$f" ]; then set -- "$@" "$f"; fi
+done
+
 if [ "$USES_BLOCKED" = yes ]; then
   echo "blocked notes: $(count_marker '^## Blocked([ (]|$)' "$@")"
 else echo "blocked notes: unavailable (convention not used)"; fi
@@ -533,14 +587,22 @@ if [ "$USES_GOAL_MERGE" = yes ]; then
   echo "goal runs landed on the measured line: $landed"
   echo "other merge(goal) merges reachable: $((reachable - landed))"
 else echo "goal merges: unavailable (convention not used)"; fi
-if [ "$USES_GOAL_BRANCH" = yes ]; then
+if [ "$USES_GOAL_BRANCH" != yes ]; then
+  echo "goal branches not merged: unavailable (convention not used)"
+elif [ "$AT_TIP" != yes ]; then
+  echo "goal branches not merged: unavailable (live ref set, run is retroactive)"
+else
   echo "goal branches not merged into $COMMIT: $(git branch --list --no-merged "$COMMIT" 'goal/*' | grep -c .)"
   git branch --list --no-merged "$COMMIT" 'goal/*'
-else echo "goal branches not merged: unavailable (convention not used)"; fi
+fi
 ```
 
-`count_marker` counts *lines*, not files, and skips fenced code blocks. Both
-matter: a ticket carrying two `## Blocked` rounds is two aborts and one file,
+The `set --` loop filters the three globs down to files that exist, because an
+unmatched glob survives as a literal word in POSIX sh and a nonexistent
+filename is a *fatal* error to awk — the count would abort before printing
+anything, and a project that has dropped nothing yet has no `.dropped/`
+directory. `count_marker` counts *lines*, not files, and skips fenced code
+blocks. Both matter: a ticket carrying two `## Blocked` rounds is two aborts and one file,
 and a ticket that documents the convention by showing it — a fenced
 `## Blocked (YYYY-MM-DD)` template, a sentence containing `[dropped]` in
 backticks — matches itself and inflates the count. The heading patterns are
@@ -550,7 +612,12 @@ marker is itself one of the false positives. The `## Blocked` pattern accepts a
 bare heading as well as a dated one, because both are written.
 
 The file list covers every status directory: the visible ones plus `.done/`
-and `.dropped/`, which the `*/` glob does not reach.
+and `.dropped/`, which the `*/` glob does not reach. The fence skip has one
+failure direction worth knowing: an unbalanced fence inside a ticket file
+suppresses every match below it in *that* file — `FNR==1` re-zeroes the toggle
+so the damage cannot spread to the next file, but the count is then a lower
+bound. A run that wants the counts exactly checks fence parity per file first
+and says what it found.
 
 Unit: counts. Unavailable: any line whose convention the project does not use,
 declared by the flags above.
@@ -594,19 +661,18 @@ available here, which is exactly why it must not be reported unread.
 
 ## Procedure
 
-1. Fix the measured commit and record it: `git rev-parse` the branch once, keep
-   the hash, and record the hash, the branch it sat on, the date of the run,
-   whether the run is at that branch's tip or retroactive, and the commit
-   convention in force. Nothing after this step reads a branch name as a
-   revision.
-2. Run the shell setup, then capture the window once and record it:
-   `STEMS=$(window)`, `window 2>&1 >/dev/null | grep -c skipped`, and
-   `window | grep -c .`. Apply the three window sizes above: zero stems ends
-   the run as `unavailable (no closed actionable ticket window)`; fewer than
-   `FLOOR` marks it `below floor`; a skipped count above `SIZE` marks it
-   `window unrepresentative`.
-3. Answer indicator 6's four convention questions and set its flags, recording
-   where you checked.
+1. Fix the measured commit. A retroactive run exports the hash its counterpart
+   recorded; a tip run leaves `COMMIT` unset and lets the setup block resolve
+   it. Either way, record the resolved hash, the branch it sat on, the date of
+   the run, the `AT_TIP` the block derived, and the commit convention in
+   force. Nothing after this step reads a branch name as a revision.
+2. Run the shell setup, then the window block. It prints the size verdict —
+   `unavailable`, `below floor`, `short`, or `full` — and the skip count, and
+   flags `window unrepresentative` when the skips exceed `SIZE`. Record all of
+   it with the stem list. An `unavailable` verdict ends the run here.
+3. Answer indicator 6's four convention questions against the project's ticket
+   conventions, export its four flags, and record both the answers and where
+   you checked.
 4. Run indicators 1 through 5 over `$STEMS` and record each per-ticket value,
    plus the distribution each indicator defines, or `unavailable`/`n/a` with
    the reason. Run indicator 6 once for the tree and record its counts and the
@@ -614,8 +680,8 @@ available here, which is exactly why it must not be reported unread.
    anchors and post-implementation subjects, indicator 4's matched lines,
    indicator 5's classification, indicator 6's dropped-ticket rows.
 5. Record every place a command's output did not match the shape described
-   here, and every judgment call made in indicators 3, 4, 5, and 6. Then
-   `rm -rf "$TREE"`.
+   here, and every judgment call made in indicators 3, 4, 5, and 6. Then tear
+   the scratch tree down with the block below.
 6. For the after-run, place the before-run's record beside it. Partition the
    after-window by stem — the new partition is the after-window's stems minus
    the before-window's stems, `comm -13 before-stems after-stems` with both
@@ -627,6 +693,12 @@ available here, which is exactly why it must not be reported unread.
    shapes match and whether the commit convention changed between the runs. A
    half marked `below floor` is not compared this way; a half marked
    `unavailable` is not compared at all.
+
+Teardown, step 5's last action and the run's last command:
+
+```sh
+rm -rf "$TREE"
+```
 
 ## Record
 
@@ -640,15 +712,17 @@ manual — one record per run, with these sections:
 - **Commands as run** — the setup block's variable values (`BRANCH`,
   `COMMIT`, `SIZE`, `FLOOR`, the four indicator-6 flags), and every place the
   run departed from the commands as written here, quoted.
-- **Window** — the stems, oldest first; the skipped count; the window size;
-  and which of the three window sizes the run hit.
+- **Window** — the stems, oldest first; the skipped count; the window size
+  verdict the block printed (`unavailable`, `below floor`, `short`, or
+  `full`); and whether the skips tripped `window unrepresentative`.
 - **Indicators 1–6** — per-ticket rows, the distribution each indicator
   defines, the count of `unavailable` rows and of `n/a` rows per indicator
   with their reasons, and for the indicators that mandate a read, both
   numbers: printed and judged.
 - **Judgments** — who did indicator 5's classification and under what
-  protocol; indicator 3's anchor verdicts; indicator 4's judged stops;
-  indicator 6's real-versus-printed dropped rows.
+  protocol; indicator 3's anchor verdicts and how many of its rows were
+  selected through a date-only scope that several same-day tickets share;
+  indicator 4's judged stops; indicator 6's real-versus-printed dropped rows.
 - **Ambiguities** — every place this manual's wording proved unclear during
   the run, and how the run resolved it.
 
