@@ -268,7 +268,9 @@ function formatElapsed(elapsedMs: number): string {
 
 /** `name · role · state · elapsed`, plus the `/answer <id>` hint for a `"thread"` row — the ticket's literal row shape. */
 function isAttentionState(state: AgentRowState): boolean {
-  return state === "awaiting-owner" || state === "idle-awaiting-owner" || state === "awaiting-approval";
+  // Approval waits remain actionable lead-agent work through `ws-approve`, not
+  // owner work. Only owner-held `/answer` paths receive the loud cue.
+  return state === "awaiting-owner" || state === "idle-awaiting-owner";
 }
 
 function formatInputTokens(tokens: number | undefined): string {
@@ -372,7 +374,7 @@ export function buildHeadingLine(rows: readonly AgentRow[], pendingCount: number
   if (rows.length === 0 && pendingCount <= 0) return undefined;
   const questionPart = pendingCount > 0 ? ` · ${pendingCount} question${pendingCount === 1 ? "" : "s"}` : "";
   const heading = `ws: ${rows.length} agents${questionPart}`;
-  return bold(truncateToWidth(heading, width), emphasizeAttention);
+  return bold(truncateToWidth(heading, width), emphasizeAttention && rows.some((row) => isAttentionState(row.state)));
 }
 
 /**
@@ -385,7 +387,8 @@ export function buildHeadingLine(rows: readonly AgentRow[], pendingCount: number
  * both absent.
  */
 export function buildWidgetLines(rows: readonly AgentRow[], pendingCount: number, width: number = DEFAULT_AGENT_WIDGET_WIDTH, emphasizeAttention = false, theme?: AgentWidgetTheme): string[] | undefined {
-  const heading = buildHeadingLine(rows, pendingCount, width, emphasizeAttention);
+  const emphasizeOwnerAttention = emphasizeAttention && rows.some((row) => isAttentionState(row.state));
+  const heading = buildHeadingLine(rows, pendingCount, width, emphasizeOwnerAttention);
   if (heading === undefined) return undefined;
 
   const awaiting = rows.filter((row) => row.state !== "running");
@@ -401,7 +404,7 @@ export function buildWidgetLines(rows: readonly AgentRow[], pendingCount: number
     hiddenRunning = running.length - runningSlots;
   }
 
-  const lines = [heading, ...shown.map((row) => formatRow(row, width, emphasizeAttention && isAttentionState(row.state), theme))];
+  const lines = [heading, ...shown.map((row) => formatRow(row, width, emphasizeOwnerAttention && isAttentionState(row.state), theme))];
   if (hiddenRunning > 0) lines.push(truncateToWidth(`+${hiddenRunning} more`, width));
   return lines;
 }
