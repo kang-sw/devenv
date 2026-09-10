@@ -76,8 +76,9 @@ not apply, or names its cheap default) · **Non-derivable** (a reader with the
 code, the tests, and the tool schemas could not infer it) · **Failure-cited**
 (names the failure it prevents, reproducible on the current tier) ·
 **Non-redundant** (no other line covers it) · **Resolvable downstream**
-(resolves in a project holding only what bootstrap installs; see `AGENTS.md`
-Architecture Rule 4 for what shipped text may not name).
+(resolves in a project holding only what bootstrap installs; see
+`ai-docs/manuals/shipped-surface-boundary.md` for what shipped text may not
+name).
 
 Grouped rules are allowed: `Group Name` / `- <rule>`. Group names classify;
 they are not rules.

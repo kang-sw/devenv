@@ -188,18 +188,21 @@ not stage it unless explicitly requested.
 1. **Workflow repo scope.** Tickets and manuals describe the ws workflow system
    itself; downstream application rules belong in downstream projects.
 2. **Grouped migration layout.** `agents-plugin/` and `agents-plugin-tool/` own
-   the Codex/plugin-runtime migration surface. Do not introduce new root module
-   directories without a ticket.
-3. **Host-neutral first.** Shared skill text should prefer canonical MCP tool
-   names and host-neutral behavior. Treat Claude-specific commands and paths as
+   the Codex/plugin-runtime migration surface; do not introduce new root
+   module directories without a ticket.
+3. **Host-neutral first.** Shared skill text prefers canonical MCP tool names
+   and host-neutral behavior, treating Claude-specific commands and paths as
    adapter or fallback behavior.
-4. **Shipped surfaces are downstream-first. This is not negotiable.** Text
-   that ships to a downstream project must not depend on anything this
-   repository alone has; `ai-docs/manuals/shipped-surface-boundary.md` states
-   what that excludes and which generic hook to use instead.
-5. **Shell state is ephemeral.** Shell state does not persist between tool calls;
+4. **Shipped surfaces are downstream-first, non-negotiably.** Text that ships
+   to a downstream project must not depend on anything this repository alone
+   has; `ai-docs/manuals/shipped-surface-boundary.md` states what that
+   excludes and which generic hook to use instead.
+5. **A ticket may not ask a shipped playbook to enforce a rule from this
+   file.** Such a ticket is asking for a leak; push back and redirect it to a
+   generic hook the playbook already reads.
+6. **Shell state is ephemeral.** Shell state does not persist between tool calls;
    values needed later must be captured from output and passed explicitly.
-6. **Retired Claude tree.** Do not reintroduce `claude-plugin/`; preserve
+7. **Retired Claude tree.** Do not reintroduce `claude-plugin/`; preserve
    historical Claude material under `ai-docs/ref/` when needed.
 
 ## Documentation System
@@ -328,14 +331,14 @@ ai-docs/tickets/.dropped/
   new `claude-plugin/` mirror for Codex behavior.
 
 <!-- Inclusion test: keep a rule in this file only if it applies to every
-     path and states itself in one sentence. A rule that takes more, or
-     applies to some paths only, goes in `ai-docs/manuals/<name>.md` and is
-     declared under `## Workflow` -> `### Implementation Conventions` with
-     the paths it covers, via `ws:lead-add-rule`. A rule a test can check
-     becomes a test. A trap tied to one site becomes a code comment at that
-     site. A fact about an external system goes in `ai-docs/ref/`. Context
-     goes in this file's `## Project Orientation` section or the `repo` note
-     layer; a procedure goes in `ai-docs/manuals/`; process goes in
-     skills. -->
+     path and its body is one sentence after the bold name. A rule whose
+     body takes more, or that applies to some paths only, goes in
+     `ai-docs/manuals/<name>.md` and is declared under `## Workflow` ->
+     `### Implementation Conventions` with the paths it covers, via
+     `ws:lead-add-rule`. A rule a test can check becomes a test. A trap
+     tied to one site becomes a code comment at that site. A fact about an
+     external system goes in `ai-docs/ref/`. Context goes in this file's
+     `## Project Orientation` section or the `repo` note layer; a procedure
+     goes in `ai-docs/manuals/`; process goes in skills. -->
 
 <!-- Template Version: v0048 -->

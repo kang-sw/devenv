@@ -47,9 +47,6 @@ hook - `infra.read`, `convention.read`, a declared `AGENTS.md` section, a
 `config.list` key - and this repository declares its own value behind that
 hook.
 
-A ticket that asks shipped playbooks to "honor" or "enforce" a rule from
-`AGENTS.md` is asking for a leak; push back and redirect it to a hook.
-
 A test that pins shipped text pins the leak too: a pinned devenv-only string
 is a bug in the test as well as in the text.
 

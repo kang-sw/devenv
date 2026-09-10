@@ -2,8 +2,9 @@
 what bootstrap installs.
 
 This test is the mechanical form of AGENTS.md Architecture Rule 4 ("Shipped
-surfaces are downstream-first"). The rule itself lives only in AGENTS.md; this
-file does not restate it. It scans the shipped trees for tokens that would fail
+surfaces are downstream-first"), whose enumeration lives in
+ai-docs/manuals/shipped-surface-boundary.md. This file does not restate it.
+It scans the shipped trees for tokens that would fail
 to resolve for a reader in a project that has never heard of this repository:
 real ticket stems, ai-docs file paths bootstrap does not install, bare
 ticket-number citations, commit hashes, and this repository's own layout /
