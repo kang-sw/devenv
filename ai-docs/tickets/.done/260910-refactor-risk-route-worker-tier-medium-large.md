@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: ee3ce6c079fe8b1b
 sage-review-completeness-reviewed: ee3ce6c079fe8b1b
+completed: 2026-09-10
 ---
 
 # Route ticket workers by high risk and reserve xlarge for escalation
@@ -109,6 +110,29 @@ three rendered names return their declared tiers, ticket selection distinguishes
 `high` from every other allowed risk value without changing `materialRisk`,
 ad-hoc selection covers both classifications, stop (e) advances each initial
 tier, and ws/wsflow copies remain byte-identical.
+
+### Result (74e79931) - 2026-09-10
+
+- Shipped medium `ticket-worker`, large `ticket-worker-elevated`, and xlarge
+  `ticket-worker-escalated` playbooks whose bodies differ only by tier
+  frontmatter; regenerated manifests and byte-identical wsflow mirrors.
+- Lead-run selects large only for an explicit high risk, classifies ad-hoc
+  contracts as routine or difficult, and follows the rendered tier binding.
+  Assignment notes retain the selected playbook and stop-e retry count so the
+  medium-to-large and large-to-xlarge retry paths survive session recovery.
+- Corrected the contacted skill-authoring manual's obsolete fixed flagship
+  worker description to refer to the selected render tier.
+- Verification: `TMPDIR=/private/tmp go test ./...` passed;
+  `scripts/smoke-ws-mcp.sh ..` passed; `python3 -m unittest discover
+  agents-plugin-wsflow/tests` passed (10 tests); `git diff --check` passed.
+  Coverage checks rendered metadata and policy in both products, identical
+  worker bodies, the real four-key risk projection, and mirror drift.
+- Independent review: test partition clean in round 1; correctness reported
+  one Critical finding, [fixed] in 728628d7 and verified in round 2. The
+  existing query projection requires `format: "json"`; compact text omits
+  Route Facts. The instruction now opts into JSON and the regression test
+  exercises that real query boundary. No runtime/API changes were needed.
+- Unresolved: none. Deferred: none.
 
 ## Sage Review Round 1 (2026-09-10)
 
