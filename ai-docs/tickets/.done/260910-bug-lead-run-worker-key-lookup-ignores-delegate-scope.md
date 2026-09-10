@@ -2,6 +2,7 @@
 title: "lead-run identifies the worker key as the one un-noted child, but delegate keys are never noted"
 related:
   260909-refactor-drain-ready-queue-worker-spawner: shipped the un-noted-child lookup rule this ticket corrects
+completed: 2026-09-10
 ---
 
 # lead-run identifies the worker key as the one un-noted child, but delegate keys are never noted
@@ -34,3 +35,14 @@ your key carrying no note", regenerate the rsrc manifest and the wsflow
 mirror, and update any test that pins the sentence. Rejected: making
 `lead-ticket` and `lead-review` note every delegate they render — the note is
 the run's carry-over record, not a registry, and delegate keys are disposable.
+
+### Result (bf365ddd) - 2026-09-10
+
+`agents-plugin/rsrc/lead-run/lead-run.md` step 2 now reads the worker key off
+`session.children` as the one `scope: control` child of the lead key carrying
+no note, and the adjacent clause names delegate scope as what the filter
+excludes. `sessionChildScopeLabel` in `internal/mcp/server.go` confirmed the
+labels the playbook now cites: lead-capability children print `control`,
+delegates print `delegate`. The rsrc manifest and the byte-identical
+`agents-plugin-wsflow/rsrc/` mirror were regenerated; no test pinned the old
+sentence.
