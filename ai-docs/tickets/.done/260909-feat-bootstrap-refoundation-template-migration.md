@@ -13,6 +13,7 @@ related:
 sage-review-completeness: completed
 sage-review-design-reviewed: 2dd87bcf59174a5b
 sage-review-completeness-reviewed: 2dd87bcf59174a5b
+completed: 2026-09-10
 ---
 
 # Ship the reduced layout downstream: bootstrap template migration for the refoundation
@@ -552,6 +553,150 @@ suite and both wsflow test modules against the release build.
 Touchpoints: a scratch fixture repository (not committed), the built plugin
 under test, this repository's `AGENTS.md` (run (a)'s version tag), and — only
 if the runs surface a defect — the Phase 1 files.
+
+### Result (81c40cf1) - 2026-09-10
+
+Landed as `8f5b8f07` (run (a)), `98d1b023` and `81c40cf1` (the defects the runs
+surfaced), `b3f95bc7` (run (a) completion) on
+`impl/epic/refound/salad-kite-chump`. Nothing was released; the head tag stays
+`v0048`.
+
+All three runs were executed against a working-tree `ws-mcp` build
+(`WS_RSRC_ROOT` and `WS_SKILLS_ROOT` pointed at the working tree, isolated
+`WS_CACHE_HOME`), because the installed server is a pre-epic binary carrying
+neither v0048 nor the new playbooks. `playbook.read(lead-bootstrap)` from that
+build is the text that was executed.
+
+**Run (a) - idempotency, against this repository.** The staleness alarm fired
+before (v0047 against v0048) and is silent after. Every archive step evaluated
+Skip: `ai-docs/spec/`, `ai-docs/mental-model/`, and `ai-docs/mental-model.md`
+were already gone, `### Commit Rules` already carried no `## Spec` trailer or
+`renamed-spec:` sentence, and `ai-docs/WORKFLOW.md` already matched the guide
+source plus this project's own additions, so no guide refresh was due. What did
+change: `## Project Memory` step 1, off the generated ticket inventory and off a
+`ws/note.search` call that names no live tool; the
+`### Implementation Conventions` columns to `| paths | manual |`; Architecture
+Rule 4's path-scoped detail relocated to the new
+`ai-docs/manuals/shipped-surface-boundary.md`, declared for `agents-plugin/`,
+`agents-plugin-wsflow/`, `agents-plugin-tool/`; the Inclusion test comment
+rewritten to the template's wording with this project's two additions
+re-applied; the tag. A second pass over every v0048 condition produced no
+further change and a clean working tree.
+
+**Run (b) - full migration, on a throwaway `acmewidgets` fixture** built under
+scratch at v0047 with two spec files, an `ai-docs/mental-model.md` carrying a
+reading map, three mental-model domain docs including a nested
+`mental-model/pricing/rounding.md`, no `ai-docs/.old/`, and source files for a
+trap to land in. The alarm fired before and cleared after. The triage exercised
+all four classes: the spec bodies and the structure/coupling sections were
+archived only; the `## Domain Rules` became
+`ai-docs/manuals/pricing-conventions.md` and
+`ai-docs/manuals/ledger-conventions.md`, declared for `pricing/**` and
+`store/**`; the rounding trap became a comment in `pricing/tax.py`; the tax
+authority's revision became `ai-docs/ref/tax-rounding-guidance.md`. All six
+archived files moved as pure renames into `ai-docs/.old/` with zero content
+change, `git log --follow` crosses the move, and the commit records no deletion.
+The migrated manuals then surfaced live in the ambient `# Manuals` block, which
+is the reachability replacement for the retired layer. Convergence against a
+fresh v0048 bootstrap in an empty repository: identical section sets, all eight
+template-managed sections byte-identical, the `### Implementation Conventions`
+comment preserved verbatim with only the project's rows appended, the Inclusion
+test comment and version tag identical, and `ai-docs/WORKFLOW.md`
+byte-identical.
+
+**Run (c) - adopt, on a tag-stripped copy of the fixture's pre-migration
+state.** The alarm is correctly silent on an untagged project. The audit from
+v0001 found exactly two applicable items: v0038 (create `ai-docs/.old/`; its
+legacy-spec sub-moves found nothing) and v0048. Every obsoleted item was skipped
+and no earlier item contradicted v0048. The archive move was non-destructive -
+the same six pure renames. The resulting `AGENTS.md` was derived independently
+from the adopt fixture's own starting text rather than copied, and the whole
+tree is byte-identical to run (b)'s.
+
+The doc-coverage alarm no longer exists: `doc_coverage` / `docCoverage` /
+`doc-coverage` grep clean across `agents-plugin-tool/`, `agents-plugin/`, and
+`agents-plugin-wsflow/`, and nothing resembling a coverage alarm appeared in any
+of the three runs.
+
+**Two defects the runs surfaced, both in Phase 1's item text, both fixed.**
+
+1. The relocation criterion read "an `## Architecture Rules` entry that runs
+   longer than one line". Read literally that is a column-width test: every
+   hard-wrapped rule qualifies, and rewrapping a file would change a rule's
+   classification, so the Skip/Apply decision was unreproducible. Replaced with
+   a sentence count at all three sites that carried the wording - the
+   `### Implementation Conventions` comment, the Inclusion test comment, and the
+   v0048 item's relocate clause - in both packages.
+2. Review then found the first fix still had no fixed point: every entry opens
+   with a bold name, so "one sentence" counted the name, and two of this
+   repository's six entries carried two body sentences. The criterion now
+   measures the body after the bold name; rules 2 and 3 were compressed to one
+   body sentence each, and the template's own commented GUI/TUI example rule was
+   compressed too, so a project that adopts it does not immediately owe a
+   relocation. Verified mechanically: every live Architecture Rules body in this
+   repository, the fixture, and the fresh project is now one sentence.
+
+The head tag was not moved for either fix. `### Implementation Conventions`
+entered the template only at v0048, no released project holds the earlier
+wording, the only project stamped v0048 is this one, and the corrected criterion
+is strictly narrower than the one already applied here - so no re-application is
+owed to anyone. `agents-plugin/skills/manifest.json` was regenerated for each
+template edit, as the mirroring manual requires.
+
+Verification: `go test ./... -count=1` green across all 13 packages including
+the `wsrsrc` drift suite; `python3 -m unittest discover agents-plugin/tests` 55
+OK and `agents-plugin-wsflow/tests` 10 OK; the two packages'
+`AGENTS.template.md` differ only by the namespace token plus two pre-existing
+wrap/token differences inside stripped blocks, and all changed sites are
+byte-identical; `latestKnownTemplateVersion` resolves v0048 from both skill
+roots; `playbook.read(lead-bootstrap)` in both product modes names no spec,
+mental-model, or forge surface (the only matches are "project-specific" and
+"site-specific"). Review round 1 (one reviewer, large tier) returned 2 Important
+and 4 Minor, no Critical.
+
+Review dispositions:
+
+- Important - run (a) did not reach a fixed point under the criterion the same
+  run installed. **[fixed]** in `81c40cf1`, as defect 2 above.
+- Important - the ticket-authoring half of the old rule 4 lost its reader: it
+  lived only in the manual, which is declared for the three package
+  directories, so a session authoring a ticket matched no row and never read
+  it. **[fixed]** in `81c40cf1`: back in `## Architecture Rules` as its own
+  one-sentence entry and removed from the manual. Chosen over widening the
+  row's `paths` to `ai-docs/tickets/`, because the clause applies to every path
+  and states itself in one sentence, so the inclusion test puts it in
+  `AGENTS.md`.
+- Minor - the downstream-neutrality guard's docstring and `skill-authoring.md`'s
+  Resolvable-downstream pointer both described rule 4 as carrying the
+  enumeration: fixed in `81c40cf1`.
+- Minor - the new row binds all of `agents-plugin-tool/` while rule 4 governs
+  only the strings that tree emits to an agent: accepted as deliberate
+  over-coverage, since those strings are scattered across the tree and a
+  narrower row would miss them.
+- Minor - no Phase 2 `### Result` yet: this section.
+
+Decisions taken beyond the phase text:
+
+1. Run (a) relocated Architecture Rule 4, which the phase text did not predict
+   ("the only change is the template-managed section updates and the new version
+   tag"). The relocate clause entered v0048 during Phase 1's review round, after
+   this phase text was written, and rule 4 was about 40 lines scoped to three
+   package directories - squarely what it targets. Applying the item faithfully
+   is the dogfood; the divergence from the prediction is the finding.
+2. The `| manual | paths |` column order Phase 1 forwarded was flipped to the
+   shipped `| paths | manual |`. No parser reads the table positionally
+   (`agents-plugin-tool` has zero hits for the section name; the three shipped
+   consumers name the columns), so this is consistency only.
+3. Run (a)'s first pass missed the item's Inclusion-test clause, and the
+   condition re-run that found it did not itself cover that clause. Recorded
+   rather than silently folded in, and fixed in `b3f95bc7`.
+
+Phase 1's other two forwarded observations stand as observations. `## On: fresh`
+still never prompts the deletion the two optional sections' comments describe:
+both ship as comment-only, parse as undeclared, and step 10 already suggests
+declaring the conventions one, so a fresh project carrying them inert costs
+nothing. The `## Ticket Updates` versus `## Updated Tickets` trailer naming
+remains deferred - pre-existing on both sides and not owned by this ticket.
 
 ## Open Questions
 
