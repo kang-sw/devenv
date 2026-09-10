@@ -1528,15 +1528,39 @@ func (s *Server) handleSessionChildren(id json.RawMessage, arguments map[string]
 	}
 	includeDead, _ := arguments["include_dead"].(bool)
 
+	scope := "any"
+	if raw, exists := arguments["scope"]; exists {
+		value, ok := raw.(string)
+		if !ok || (value != "any" && value != "control" && value != "delegate") {
+			return toolTextResponse(id, "", fmt.Errorf("session.children: scope must be control, delegate, or any"))
+		}
+		scope = value
+	}
+	unnotedOnly := false
+	if raw, exists := arguments["unnoted_only"]; exists {
+		value, ok := raw.(bool)
+		if !ok {
+			return toolTextResponse(id, "", fmt.Errorf("session.children: unnoted_only must be a boolean"))
+		}
+		unnotedOnly = value
+	}
+
 	children, err := s.sessions.children(sessionKey, depth)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
 	filtered := make([]sessionChild, 0, len(children))
 	for _, child := range children {
-		if child.live || includeDead {
-			filtered = append(filtered, child)
+		if !child.live && !includeDead {
+			continue
 		}
+		if scope != "any" && sessionChildScopeLabel(child.scope) != scope {
+			continue
+		}
+		if unnotedOnly && child.note != "" {
+			continue
+		}
+		filtered = append(filtered, child)
 	}
 
 	out := make([]sessionChildOutput, 0, len(filtered))
@@ -2890,6 +2914,8 @@ func tools() []map[string]any {
 					"session_key":  stringProperty("Caller's lead session key whose descendants should be enumerated."),
 					"depth":        integerProperty("Maximum descendant depth to return. Defaults to 1; 0 returns the full subtree."),
 					"include_dead": boolProperty("Include keys whose bound root path no longer exists. Defaults to false."),
+					"scope":        enumStringProperty("Filter descendants by scope. Defaults to any (all scopes).", []string{"control", "delegate", "any"}),
+					"unnoted_only": boolProperty("Return only descendants carrying no note. Defaults to false."),
 					"format":       stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
 				"required": []string{"session_key"},

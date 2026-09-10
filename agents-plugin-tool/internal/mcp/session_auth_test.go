@@ -992,6 +992,111 @@ func TestSessionChildrenJSONOutputStableFields(t *testing.T) {
 	}
 }
 
+func TestSessionChildrenScopeAndUnnotedFilters(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := t.TempDir()
+	initGit(t, root)
+	server := NewServer(root, "test")
+	writeSessionRecordForTest(t, server.sessions, "lead-root-00", root, roleLead, "")
+	for _, child := range []struct {
+		key, parent, note string
+		role              toolRole
+	}{
+		{"control-fresh-00", "lead-root-00", "", roleLead},
+		{"control-noted-00", "lead-root-00", "finished", roleLead},
+		{"delegate-fresh-00", "lead-root-00", "", roleDelegate},
+		{"delegate-noted-00", "lead-root-00", "reviewed", roleDelegate},
+		{"leaf-fresh-00", "delegate-noted-00", "", roleLeaf},
+		{"control-nested-00", "delegate-noted-00", "", roleLead},
+	} {
+		writeSessionRecordForTest(t, server.sessions, child.key, root, child.role, child.parent)
+		if err := server.sessions.setNote(child.key, child.note); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deadRoot := filepath.Join(t.TempDir(), "missing")
+	writeSessionRecordForTest(t, server.sessions, "control-dead-00", deadRoot, roleLead, "lead-root-00")
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+		want []string
+	}{
+		{"default", nil, []string{"control-fresh-00", "control-noted-00", "delegate-fresh-00", "delegate-noted-00"}},
+		{"control", map[string]any{"scope": "control"}, []string{"control-fresh-00", "control-noted-00"}},
+		{"delegate", map[string]any{"scope": "delegate"}, []string{"delegate-fresh-00", "delegate-noted-00"}},
+		{"any", map[string]any{"scope": "any"}, []string{"control-fresh-00", "control-noted-00", "delegate-fresh-00", "delegate-noted-00"}},
+		{"unnoted", map[string]any{"unnoted_only": true}, []string{"control-fresh-00", "delegate-fresh-00"}},
+		{"noted allowed", map[string]any{"unnoted_only": false}, []string{"control-fresh-00", "control-noted-00", "delegate-fresh-00", "delegate-noted-00"}},
+		{"worker lookup", map[string]any{"scope": "control", "unnoted_only": true}, []string{"control-fresh-00"}},
+		{"full subtree", map[string]any{"depth": 0}, []string{"control-fresh-00", "control-noted-00", "delegate-fresh-00", "delegate-noted-00", "leaf-fresh-00", "control-nested-00"}},
+		{"nested match", map[string]any{"scope": "control", "unnoted_only": true, "depth": 0}, []string{"control-fresh-00", "control-nested-00"}},
+		{"any includes leaf", map[string]any{"scope": "any", "unnoted_only": true, "depth": 0}, []string{"control-fresh-00", "delegate-fresh-00", "leaf-fresh-00", "control-nested-00"}},
+		{"include dead", map[string]any{"scope": "control", "unnoted_only": true, "include_dead": true}, []string{"control-fresh-00", "control-dead-00"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := map[string]any{"session_key": "lead-root-00", "format": "json"}
+			for key, value := range tc.args {
+				args[key] = value
+			}
+			resp := callToolOnce(t, server, 1, "session.children", args)
+			if toolIsError(t, resp) {
+				t.Fatalf("session.children: %s", resp)
+			}
+			var parsed struct {
+				Children []sessionChildOutput `json:"children"`
+			}
+			if err := json.Unmarshal([]byte(toolText(t, resp)), &parsed); err != nil {
+				t.Fatal(err)
+			}
+			got := make(map[string]bool)
+			for _, child := range parsed.Children {
+				got[child.Key] = true
+			}
+			if len(parsed.Children) != len(tc.want) {
+				t.Fatalf("children = %#v, want %v", parsed.Children, tc.want)
+			}
+			for _, key := range tc.want {
+				if !got[key] {
+					t.Fatalf("missing %s: %#v", key, parsed.Children)
+				}
+			}
+			delete(args, "format")
+			textResp := callToolOnce(t, server, 2, "session.children", args)
+			if toolIsError(t, textResp) {
+				t.Fatalf("session.children text: %s", textResp)
+			}
+			text := toolText(t, textResp)
+			if strings.Count(text, "- key: ") != len(tc.want) {
+				t.Fatalf("unexpected text rows: %s", text)
+			}
+			for _, key := range tc.want {
+				if !strings.Contains(text, "- key: "+key+" ") {
+					t.Fatalf("missing %s: %s", key, text)
+				}
+			}
+		})
+	}
+}
+
+func TestSessionChildrenRejectsInvalidFilters(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := t.TempDir()
+	initGit(t, root)
+	server := NewServer(root, "test")
+	writeSessionRecordForTest(t, server.sessions, "lead-root-00", root, roleLead, "")
+	for _, args := range []map[string]any{
+		{"scope": "leaf"}, {"scope": ""}, {"scope": true}, {"unnoted_only": "true"},
+	} {
+		args["session_key"] = "lead-root-00"
+		resp := callToolOnce(t, server, 1, "session.children", args)
+		if !toolIsError(t, resp) {
+			t.Fatalf("invalid filters accepted: %s", resp)
+		}
+	}
+}
+
 func TestSessionChildrenMissingSessionKeyErrors(t *testing.T) {
 	useLeadProfile(t)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
