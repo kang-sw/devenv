@@ -327,11 +327,15 @@ ai-docs/tickets/.dropped/
 - Claude plugin source artifacts were retired from the live tree; do not add a
   new `claude-plugin/` mirror for Codex behavior.
 
-<!-- Inclusion test: if breaking this rule makes a skill produce wrong results
-     AND it applies everywhere, keep it here. Domain-scoped rules belong in a
-     manual under `ai-docs/manuals/`, declared in `## Workflow` ->
-     `### Implementation Conventions`, via `ws:lead-add-rule`.
-     Context goes in this file's `## Project Orientation` section or the
-     `repo` note layer; process goes in skills. -->
+<!-- Inclusion test: keep a rule in this file only if it applies to every
+     path and states itself in one sentence. A rule that takes more, or
+     applies to some paths only, goes in `ai-docs/manuals/<name>.md` and is
+     declared under `## Workflow` -> `### Implementation Conventions` with
+     the paths it covers, via `ws:lead-add-rule`. A rule a test can check
+     becomes a test. A trap tied to one site becomes a code comment at that
+     site. A fact about an external system goes in `ai-docs/ref/`. Context
+     goes in this file's `## Project Orientation` section or the `repo` note
+     layer; a procedure goes in `ai-docs/manuals/`; process goes in
+     skills. -->
 
 <!-- Template Version: v0048 -->
