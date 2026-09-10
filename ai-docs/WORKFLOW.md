@@ -10,11 +10,6 @@ When this guide and installed ws tooling disagree, treat the installed plugin,
 runtime, and bundled conventions as canonical. Update the upstream bootstrap
 template rather than relying on a project-local guide override.
 
-This copy has diverged from that template on purpose: this repository retired
-its spec and mental-model layers, so the sections teaching them are gone here
-while the bootstrap template still carries them for downstream projects that
-have not migrated. The template's own migration item closes the gap.
-
 ## Authority Files
 
 - `AGENTS.md` is the canonical root workflow context for agents.
@@ -31,10 +26,10 @@ have not migrated. The template's own migration item closes the gap.
 - `AGENTS.md`'s `## Project Orientation` section is the every-session
   orientation: repo identity, project map/topology, and canonical flows. Keep
   it compact; route deep detail to `ai-docs/manuals/`.
-- `manuals/` stores procedures and how-to content, one file per procedure with
-  a `summary:` frontmatter line describing when it applies; a `*.local.md`
-  sibling (gitignored) holds machine-local procedure content such as
-  credentials, IPs, hostnames, or host-specific runbooks.
+- `manuals/` stores procedures, how-to content, and path-scoped conventions,
+  one file per topic with a `summary:` frontmatter line describing when it
+  applies; a `*.local.md` sibling (gitignored) holds machine-local procedure
+  content such as credentials, IPs, hostnames, or host-specific runbooks.
 - Volatile local context (not shared through Git) lives in the `worktree` or
   `clone` note layer, written through `ws/note.write(layer: "worktree" | "clone",
   ...)` - `worktree` by default, `clone` only when the content is shared
@@ -44,7 +39,8 @@ have not migrated. The template's own migration item closes the gap.
   session context; prune stale entries qualitatively as the project advances.
 - `tickets/` stores work by status directory: `idea/`, `todo/`, `ready/`,
   `.done/`, and `.dropped/`.
-- `ref/` stores static references that are not active workflow state.
+- `ref/` stores static references and non-derivable external facts that are
+  not active workflow state.
 - `.old/` stores tracked project archive material kept only as possible future
   reference and hidden from default listings.
 - `WORKFLOW.md` is this human-readable fallback guide.
@@ -54,13 +50,66 @@ have not migrated. The template's own migration item closes the gap.
 - Reference tickets by stem, never by path; stems stay stable when tickets move
   between status directories.
 - `idea/` is rough intake, `todo/` is accepted backlog, and `ready/` is the
-  implementation-ready status.
+  implementation-ready status: a ticket reaches it once its plan and decisions
+  have passed independent design review.
 - Actionable tickets use `## Phases` with stable `### Phase N: <title>`
   headings. Research tickets may use freeform topic sections.
 - After a phase has a `### Result` section, treat its plan text and existing
   result entries as frozen. Add later implementation tweaks as a
   `#### Edition` entry under that Result area.
 - Move tickets with `git mv` when possible so history preserves status changes.
+
+## Behavioral Contract
+
+Tests are the behavioral contract. A behavior that matters has a test; a
+change that alters behavior changes a test in the same change, and review
+treats a behavior change without a test change as a finding. There is no
+separate specification document to keep in step with the code, and nothing
+checks whether a project's tests are strong enough to carry this role: that
+is the project's own property, and the workflow assumes it rather than
+enforcing it.
+
+Prescriptive knowledge - preferred libraries, patterns, boundaries, domain
+constraints - is a human decision that code cannot reconstruct, so it is
+written down: one-line universal rules inline in `AGENTS.md`; longer or
+path-scoped rules as one manual each under `ai-docs/manuals/`, declared in
+`AGENTS.md` under `## Workflow` -> `### Implementation Conventions` with the
+paths they cover. A rule a test can check becomes a test; a trap tied to one
+site becomes a code comment at that site; a fact about an external system
+goes in `ai-docs/ref/`. Descriptive knowledge - what the code does and why -
+is reconstructed from the code, the tests, and commit `## AI Context` bodies
+when needed, and is not maintained as a document. Manuals carry no
+per-commit update obligation; drift is fixed on contact and by review.
+
+## Execution Model
+
+The ticket is the plan. Its decisions are settled when it is written: facts
+are checked by a cheap-tier populator that writes them into the ticket, and
+design is reviewed by a heavy-tier reviewer before the ticket enters
+`ready/`. Execution consumes those decisions instead of re-making them.
+
+One worker executes one whole ticket: it routes, edits, verifies, runs
+independent review, commits, records the phase result, and closes the
+ticket. It reads the ticket, `AGENTS.md`, the declared conventions and cited
+manuals, the tests, the code, and git history; it receives no summary of any
+of them. The lead converses with the user, manages the ticket inventory,
+spawns workers, and handles what they escalate; it edits no source.
+
+The worker stops only for: a merge into a parent branch (user approval; the
+veto point for everything the worker decided alone); an unresolved decision
+the ticket does not settle; a ticket decision contradicted by code reality;
+an irreversible action in the Approval Protocol's always-ask category; a
+Critical review finding still open after the single fix round. Every other
+decision is recorded in the commit's `## AI Context` and the ticket's
+`### Result` and listed in the worker's terminal report for veto. The lead
+resolves a contradicted decision itself when it can (design review over the
+worker's proposed resolution), and elevates a surviving Critical finding to a
+higher-tier worker; the user sees low-reversibility decisions and exhausted
+lead attempts.
+
+Without the workflow tooling, the same model holds: read the ticket and the
+declared manuals, work on a branch, keep the stop list, and record decisions
+in the commit body and the ticket result.
 
 ## Index Health
 

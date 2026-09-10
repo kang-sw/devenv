@@ -4,7 +4,7 @@ This guide is copied to `ai-docs/WORKFLOW.md` by bootstrap so a
 maintainer can preserve the project shape when plugin skills or MCP tools are not
 available. It is an explanation and manual fallback only: editing this file does
 not change MCP parser behavior, plugin/runtime semantics, ticket status logic,
-spec indexing, or any other machine contract.
+or any other machine contract.
 
 When this guide and installed plugin tooling disagree, treat the installed plugin,
 runtime, and bundled conventions as canonical. Update the upstream bootstrap
@@ -25,21 +25,18 @@ template rather than relying on a project-local guide override.
 
 - `AGENTS.md`'s `## Project Orientation` section is the every-session
   orientation: repo identity, project map/topology, and canonical flows. Keep
-  it compact; route deep detail to specs, mental models, or manuals.
-- `manuals/` stores procedures and how-to content, one file per procedure with
-  a `summary:` frontmatter line describing when it applies; a `*.local.md`
-  sibling (gitignored) holds machine-local procedure content such as
-  credentials, IPs, hostnames, or host-specific runbooks.
+  it compact; route deep detail to `ai-docs/manuals/`.
+- `manuals/` stores procedures, how-to content, and path-scoped conventions,
+  one file per topic with a `summary:` frontmatter line describing when it
+  applies; a `*.local.md` sibling (gitignored) holds machine-local procedure
+  content such as credentials, IPs, hostnames, or host-specific runbooks.
 - `ws-notes/` is the git-tracked `repo` note layer, one file per key. It holds
   volatile or tracked session context; prune stale entries qualitatively as
   the project advances.
 - `tickets/` stores work by status directory: `idea/`, `todo/`, `ready/`,
   `.done/`, and `.dropped/`.
-- `spec/` stores caller-visible behavior specs with stable stem anchors.
-- `mental-model.md` stores the mental-model index and optional project reading
-  map; `mental-model/` stores modification-relevant operational knowledge and
-  domain rules.
-- `ref/` stores static references that are not active workflow state.
+- `ref/` stores static references and non-derivable external facts that are
+  not active workflow state.
 - `.old/` stores tracked project archive material kept only as possible future
   reference and hidden from default listings.
 - `WORKFLOW.md` is this human-readable fallback guide.
@@ -49,7 +46,8 @@ template rather than relying on a project-local guide override.
 - Reference tickets by stem, never by path; stems stay stable when tickets move
   between status directories.
 - `idea/` is rough intake, `todo/` is accepted backlog, and `ready/` is the
-  spec-addressed implementation-ready status.
+  implementation-ready status: a ticket reaches it once its plan and decisions
+  have passed independent design review.
 - Actionable tickets use `## Phases` with stable `### Phase N: <title>`
   headings. Research tickets may use freeform topic sections.
 - After a phase has a `### Result` section, treat its plan text and existing
@@ -57,62 +55,85 @@ template rather than relying on a project-local guide override.
   `#### Edition` entry under that Result area.
 - Move tickets with `git mv` when possible so history preserves status changes.
 
-## Specs
+## Behavioral Contract
 
-- Specs describe caller-visible behavior, not implementation details that can
-  change without changing behavior.
-- Each behavior entry uses a stable `{#YYMMDD-slug}` anchor. The anchor stem is
-  the identifier used in tickets, commits, and mental-model cross-references.
-- Planned work stays in ticket `## Spec Impact` until implementation closeout;
-  spec entries describe implemented behavior only. Verify the behavior exists
-  before writing or keeping its entry. A known-but-unscheduled gap with no
-  ticket is the exception: it stays as a
-  `> [!note] Implementation Gap · YYYY-MM-DD` callout, and a verification pass
-  keeps it rather than deleting it.
-- If stem-generation or duplicate-anchor tools are unavailable, choose a clear
-  date-prefixed stem manually, search the spec tree for duplicates, and verify
-  with plugin tooling when it becomes available.
+Tests are the behavioral contract. A behavior that matters has a test; a
+change that alters behavior changes a test in the same change, and review
+treats a behavior change without a test change as a finding. There is no
+separate specification document to keep in step with the code, and nothing
+checks whether a project's tests are strong enough to carry this role: that
+is the project's own property, and the workflow assumes it rather than
+enforcing it.
 
-## Mental Models
+Prescriptive knowledge - preferred libraries, patterns, boundaries, domain
+constraints - is a human decision that code cannot reconstruct, so it is
+written down: one-line universal rules inline in `AGENTS.md`; longer or
+path-scoped rules as one manual each under `ai-docs/manuals/`, declared in
+`AGENTS.md` under `## Workflow` -> `### Implementation Conventions` with the
+paths they cover. A rule a test can check becomes a test; a trap tied to one
+site becomes a code comment at that site; a fact about an external system
+goes in `ai-docs/ref/`. Descriptive knowledge - what the code does and why -
+is reconstructed from the code, the tests, and commit `## AI Context` bodies
+when needed, and is not maintained as a document. Manuals carry no
+per-commit update obligation; drift is fixed on contact and by review.
 
-- Mental models capture knowledge needed to safely modify the project: module
-  contracts, coupling, extension recipes, common mistakes, and technical debt.
-- The root `mental-model.md` may include a compact project reading map that
-  routes task/topic intents to specs, mental-model docs, references, or lookup
-  guidance. It must not become a current build inventory.
-- Domain-scoped user rules belong in `## Domain Rules` inside the matching
-  mental-model document, not in root `AGENTS.md`.
-- If a domain has nested documents, read the parent `index.md` before any child
-  document so inherited domain rules are visible.
-- Include relevant spec stems in mental-model prose so future agents can trace
-  operational guidance back to caller-visible behavior.
+## Execution Model
+
+The ticket is the plan. Its decisions are settled when it is written: facts
+are checked by a cheap-tier populator that writes them into the ticket, and
+design is reviewed by a heavy-tier reviewer before the ticket enters
+`ready/`. Execution consumes those decisions instead of re-making them.
+
+One worker executes one whole ticket: it routes, edits, verifies, runs
+independent review, commits, records the phase result, and closes the
+ticket. It reads the ticket, `AGENTS.md`, the declared conventions and cited
+manuals, the tests, the code, and git history; it receives no summary of any
+of them. The lead converses with the user, manages the ticket inventory,
+spawns workers, and handles what they escalate; it edits no source.
+
+The worker stops only for: a merge into a parent branch (user approval; the
+veto point for everything the worker decided alone); an unresolved decision
+the ticket does not settle; a ticket decision contradicted by code reality;
+an irreversible action in the Approval Protocol's always-ask category; a
+Critical review finding still open after the single fix round. Every other
+decision is recorded in the commit's `## AI Context` and the ticket's
+`### Result` and listed in the worker's terminal report for veto. The lead
+resolves a contradicted decision itself when it can (design review over the
+worker's proposed resolution), and elevates a surviving Critical finding to a
+higher-tier worker; the user sees low-reversibility decisions and exhausted
+lead attempts.
+
+Without the workflow tooling, the same model holds: read the ticket and the
+declared manuals, work on a branch, keep the stop list, and record decisions
+in the commit body and the ticket result.
 
 ## Index Health
 
 `ai-docs/_index.md` is a legacy all-in-one memory file. Current projects route
 every-session orientation into `AGENTS.md`'s `## Project Orientation` section,
 procedures into `ai-docs/manuals/`, volatile or tracked session context into
-the `repo` note layer, and ticket/spec inventory into generated project-tree
+the `repo` note layer, and ticket inventory into generated project-tree
 output; they do not have an `_index.md`. This section only applies to a
 project that still has one, until it runs the bootstrap migration item that
 dissolves it.
 
 When `ai-docs/_index.md` exists, bootstrap reports scope-drift candidates as
 an advisory health note and asks whether to clean up now, defer cleanup, or
-migrate to the current model. The first pass reads `_index.md` only; it does
-not load the full spec or mental-model corpus and does not move semantic
-content.
+migrate to the current model. The first pass reads `_index.md` only and does
+not move semantic content.
 
 Common drift candidates:
 
 - deep source trees, file-by-file roles, type listings, or implementation inventory;
-- long behavior inventories that belong in specs or a linked "what works" doc;
+- long behavior inventories that belong in the test suite or a linked
+  "what works" doc;
 - data-flow narratives, lifecycle descriptions, extension recipes, common
-  mistakes, audit rules, or logging rules that belong in mental models;
+  mistakes, audit rules, or logging rules that belong in `ai-docs/manuals/` or
+  in a code comment at the site they bite;
 - dependency API notes, archived design excerpts, or external-reference summaries;
 - done/dropped ticket history, completed milestones, or stale session chronology;
 - stable task/topic reading maps mixed into `_index.md`;
-- long duplicated spec, mental-model, module, or ticket indexes.
+- long duplicated module or ticket indexes.
 
 When a maintainer approves cleanup, prefer the dissolution migration (move
 `_index.md` content into `AGENTS.md`'s `## Project Orientation`, the `repo`
@@ -128,15 +149,14 @@ instead of full dissolution:
    exists.
 4. Keep unique project direction, active priorities, and unresolved operational
    caveats in `_index.md`.
-5. Do not author or semantically update specs, mental models, tickets, or refs
-   during index cleanup.
+5. Do not author or semantically update tickets, manuals, or refs during index
+   cleanup.
 6. Compact source-derived detail to source pointers, static material to
    `ai-docs/ref/` or API-doc pointers, work history to Git or ticket archives,
    and duplicated maps to start-here pointers.
-7. Route deeper semantic work through the owning workflow: behavior into
-   `ai-docs/spec/`, modification knowledge into `ai-docs/mental-model/`,
-   ticket readiness/status wording into the ticket body, and ambiguous
-   direction to a discussion pass.
+7. Route deeper semantic work through the owning workflow: procedures into
+   `ai-docs/manuals/`, ticket readiness/status wording into the ticket body,
+   and ambiguous direction to a discussion pass.
 
 ## Commit Traceability
 
@@ -144,16 +164,13 @@ instead of full dissolution:
   approach was chosen and what alternatives or constraints mattered.
 - Ticket-driven commits may include `## Ticket Updates` with forward-facing
   findings for future phases.
-- Behavior-changing commits should include `## Spec` entries naming affected
-  spec stems. If a spec anchor is renamed, record
-  `renamed-spec: <old-stem> -> <new-stem>`.
 
 ## Manual Fallback
 
 When workflow skills, MCP tools, or Claude compatibility commands are unavailable:
 
 1. Read `AGENTS.md`, this guide, and the relevant current docs.
-2. Use existing nearby tickets, specs, and mental models as formatting examples.
+2. Use existing nearby tickets and manuals as formatting examples.
 3. Prefer conservative, append-only changes when parser behavior is uncertain.
 4. Keep generated AI docs and commit messages in English unless a human-facing
    product string requires another language.

@@ -4,8 +4,9 @@
 
 Read at every session start, before other action:
 
-1. **Preamble** - repo identity, project map/topology, and canonical flows live in this file's `## Project Orientation` section below; read the `repo` note layer at `ai-docs/ws-notes/` (one file per key) for volatile session context, `ai-docs/manuals/` for procedures, and generated ticket/spec inventories for current status. Keep only context a session must not re-derive.
+1. **Preamble** - repo identity, project map/topology, and canonical flows live in this file's `## Project Orientation` section below; read the `repo` note layer at `ai-docs/ws-notes/` (one file per key) for volatile session context, `ai-docs/manuals/` for procedures, and the ticket status directories for current work. Keep only context a session must not re-derive.
 2. **Project arc** - run `git log --oneline --graph -50`.
+3. **Binding anchor** - when the task touches a topic declared under `## Workflow` -> `### Binding Anchor`, read the declared anchor before answering or editing.
 
 ## Response Discipline
 
@@ -31,6 +32,30 @@ Read at every session start, before other action:
 - **Ask first:** new components/protocols, architecture changes, cross-module interfaces, observable behavior changes.
 - **Always ask:** deleting functionality, changing protocol/API semantics, modifying persistence schema.
 
+### Implementation Conventions
+
+<!-- Optional. Rules that are longer than one line or apply to some paths
+     only live in `ai-docs/manuals/` and are declared here. A worker reads
+     the manual of every row whose `paths` match a file the ticket names or
+     the change touches, before editing those paths; review treats a change
+     that contradicts a cited manual as a finding. Delete this section when
+     the project has no such rules; an absent section means nothing is read. -->
+
+| paths | manual |
+|-------|--------|
+| `[glob, comma-separated]` | `ai-docs/manuals/[name].md` |
+
+### Binding Anchor
+
+<!-- Optional. Names one ticket a lead must read before answering or editing
+     when the task touches one of the topics. Both keys are required; a
+     section with one key, or no section, declares no anchor. -->
+
+```text
+anchor: ai-docs/tickets/<status>/<stem>.md
+topics: [comma-separated topics]
+```
+
 ### Commit Rules
 
 Auto-create one commit per logical unit. Include `## AI Context` explaining why the approach was chosen.
@@ -46,12 +71,7 @@ Auto-create one commit per logical unit. Include `## AI Context` explaining why 
 ## Ticket Updates                          # optional - ticket-driven only
 - <ticket-stem>[: <optional-label>]
   > Forward: <future-phase finding>
-
-## Spec                                    # optional - omit when none
-- <spec-stem>
 ```
-
-When a spec heading `{#slug}` changes, include `renamed-spec: <old-stem> -> <new-stem>`.
 
 ### Context Window Discipline
 
@@ -73,7 +93,7 @@ When a spec heading `{#slug}` changes, include `renamed-spec: <old-stem> -> <new
 
 <!-- Every-session orientation an AI session needs without re-deriving it each
      time: repo identity, project map/topology, and canonical flows. Keep
-     compact; route deep detail to specs, mental models, or manuals. -->
+     compact; route procedures and path-scoped rules to `ai-docs/manuals/`. -->
 
 - **Repo identity.** [Project-specific summary: what this repo is, its scope boundaries.]
 - **Project map / topology.** [Project-specific: key directories/packages and their roles.]
@@ -92,13 +112,10 @@ When a spec heading `{#slug}` changes, include `renamed-spec: <old-stem> -> <new
 <!-- MIGRATION: Set up ai-docs/ for this project, then delete this block.
 
 ai-docs/
-  mental-model.md    - overall mental-model index and optional project reading map
-  mental-model/      - contracts, coupling, architecture narrative
-  spec/              - external-perspective specs
-  manuals/           - procedures and how-to content (one file per procedure, `summary:` frontmatter)
+  manuals/           - procedures, how-to content, and path-scoped conventions (one file per topic, `summary:` frontmatter)
   ws-notes/          - git-tracked repo note layer (one file per key), written via ws/note.write(layer: "repo")
   .old/              - tracked project archive hidden from default listings
-  ref/               - static reference material
+  ref/               - static reference material and non-derivable external facts
   WORKFLOW.md        - plugin-less maintenance guide
   tickets/<status>/  - idea/ todo/ ready/ .done/ .dropped/
 
@@ -108,9 +125,9 @@ CLAUDE.md compatibility shim:
 
 Populate this template's `## Project Orientation` section directly with repo
 identity, project map/topology, and canonical flows; do not create a separate
-`_index.md` orientation document. Route procedures and how-to content to
-`ai-docs/manuals/`. Ticket and spec inventories are source-derivable; do not
-hand-maintain a table for them. Volatile or tracked session context (open
+`_index.md` orientation document. Route procedures and path-scoped rules to
+`ai-docs/manuals/`. Ticket inventory is the status directories; do not
+hand-maintain a table for it. Volatile or tracked session context (open
 threads, session notes) goes to the `repo` note layer via
 `ws/note.write(layer: "repo", ...)`, one key per topic, pruned qualitatively as
 it goes stale.
@@ -118,11 +135,15 @@ it goes stale.
 Adapt structure to the project; this is a starting point, not a schema.
 -->
 
-<!-- Inclusion test: if breaking this rule makes a skill produce wrong results
-     AND it applies everywhere, keep it here. Domain-scoped rules belong in
-     `ai-docs/mental-model/<domain>.md ## Domain Rules`.
-     Context goes in this file's `## Project Orientation` section or the
-     `repo` note layer; process goes in skills. -->
+<!-- Inclusion test: keep a rule in this file only if it applies to every
+     path and fits in one line. A rule that is longer, or applies to some
+     paths only, goes in `ai-docs/manuals/<name>.md` and is declared under
+     `## Workflow` -> `### Implementation Conventions` with the paths it
+     covers. A rule a test can check becomes a test. A trap tied to one site
+     becomes a code comment at that site. A fact about an external system
+     goes in `ai-docs/ref/`. Context goes in this file's
+     `## Project Orientation` section or the `repo` note layer; process goes
+     in skills. -->
 
 <!-- MIGRATION CHECKLIST
      Template-internal. NEVER copy into a project AGENTS.md; only the Template
@@ -151,14 +172,14 @@ Adapt structure to the project; this is a starting point, not a schema.
 - v0018: For GUI/TUI projects, add the headless-testable Architecture Rule if missing.
 - v0019: Replace per-file `ai-docs/*.local.md` ignores with `ai-docs/**/*.local.md`.
 - v0020: Convert ticket `related:` list format to map format across all ticket statuses.
-- v0021: If `ai-docs/mental-model/overview.md` exists, `git mv` it to `ai-docs/mental-model.md`; then run mental-model-updater to add required frontmatter to domain docs. If no `(mental-model-updated)` checkpoint exists, pass the initial commit as base. Commit with `(mental-model-updated)`.
-- v0022: If flat `ai-docs/spec/` has multi-doc areas, reorganize to `ai-docs/spec/<area>/index.md` plus children; run the lead-write-spec procedure via `ws/playbook.read(name: "lead-write-spec")` to rebuild `features:` frontmatter.
-- v0023: If Commit Rules lack `## Spec`, add it after `## Ticket Updates`; add `renamed-spec: <old-stem> -> <new-stem>`.
-- v0024: Replace `[!note] Constraints` in specs: permanent invariants -> body prose; known unscheduled gaps -> `[!note] Implementation Gap · <YYYY-MM-DD>`.
+- v0021: [obsoleted by v0048]
+- v0022: [obsoleted by v0048]
+- v0023: [obsoleted by v0048]
+- v0024: [obsoleted by v0048]
 - v0025: Delete `ai-docs/_continue.local.md` if present; the removed exit-session consumer no longer reads it.
-- v0026: If specs exist but no `{#YYMMDD-slug}` anchor exists, suggest `ws:lead-forge-spec`; do not edit specs automatically.
-- v0027: If mental-model docs exist but embed no spec stem, suggest `ws:lead-forge-mental-model`; do not edit mental models automatically.
-- v0028: Reclassify domain-scoped rules from `## Architecture Rules` or `_index.md` into `ai-docs/mental-model/<domain>.md ## Domain Rules` via `ws:lead-add-rule`.
+- v0026: [obsoleted by v0048]
+- v0027: [obsoleted by v0048]
+- v0028: [obsoleted by v0048]
 - v0029: If `ai-docs/tickets/wip/` exists, `git mv` tickets to `todo/`, remove empty `wip/`, add `## Ticket Queue` if absent, then use `ws:lead-discuss` to agree order.
 - v0030: Rename archive dirs to dot-prefix via `git mv`: `tickets/done` -> `.done`, `tickets/dropped` -> `.dropped`, `ai-docs/plans` -> `.plans`; update references.
 - v0031: If `ai-docs/deps/` exists, archive it to `ai-docs/ref/deps-old`; local API documentation cache data belongs under `ai-docs/.deps/`.
@@ -174,10 +195,7 @@ Adapt structure to the project; this is a starting point, not a schema.
   `_index.md`. Do not move semantic content into specs or mental models from
   bootstrap; the lead compacts `_index.md` only after user approval and only when an
   owning document already preserves the meaning.
-- v0040: Treat stable task/topic -> document routing maps as candidates for
-  `ai-docs/mental-model.md ## Project Reading Map` during later
-  mental-model work. Bootstrap may report the drift, but must not move mixed
-  status or feature inventory automatically.
+- v0040: [obsoleted by v0048]
 - v0041: Replace `_index.md ## Ticket Queue` with `## Ticket Focus`. If both
   sections exist, preserve `Ticket Focus` and remove `Ticket Queue`; if only
   `Ticket Queue` exists, move the entries already listed in that section into
@@ -190,21 +208,7 @@ Adapt structure to the project; this is a starting point, not a schema.
 - v0042: Replace step 4 in `## Project Memory` from `git log -10` to `git log --oneline -20` with description "recent commit stems".
 - v0043: Remove step 4 (`git log --oneline -20`) from `## Project Memory`; it is a redundant subset of step 3 (`git log --oneline --graph -50`). Renumber former step 5 to step 4 when present.
 - v0044: Remove the `Check '## Ticket Focus' in 'ai-docs/_index.md'` reader-instruction bullet from `## Project Knowledge` on upgrade; do not re-add it or any replacement section. Active-attention discovery is filesystem-backed (`tickets.query`/`project_tree` over the status directories) and each ticket's own body, not a cached index section.
-- v0045: Retire spec planned markers. Remove every `🚧` from `ai-docs/spec/` in
-  all three forms: `🚧 <Feature Name>` headings at any level (`#` through
-  `######`), `> [!<keyword>] Planned 🚧` body callouts under any alphabetic
-  callout keyword (`note`, `warning`, and the like), and `- 🚧 <name>` items in
-  `features:` frontmatter, with or without a trailing `[<stem>/p<N>]` reference.
-  Resolve each marker before removing it: when a live `idea/`, `todo/`, or
-  `ready/` ticket references that spec, move the pending text into that ticket's
-  `## Spec Impact`; otherwise verify the behavior against source and keep the
-  text as an ordinary implemented entry when it shipped, or as
-  `> [!note] Implementation Gap · <YYYY-MM-DD>` when it did not. For a
-  `features:` item that shipped, strip the `🚧 ` prefix and any `[<stem>/p<N>]`
-  reference instead of deleting the line. Preserve every `{#YYMMDD-slug}` anchor
-  on the retained text, and update mental-model files that cross-reference a
-  changed anchor in the same commit. Planned behavior no longer belongs in a
-  spec; it lives in the owning ticket's `## Spec Impact`.
+- v0045: [obsoleted by v0048]
 - v0046: Dissolve `ai-docs/_index.md` as the project memory store. If
   `ai-docs/_index.md` exists: migrate its repo-identity, project-map/topology,
   and canonical-flow content into this file's `## Project Orientation` section
@@ -236,6 +240,37 @@ Adapt structure to the project; this is a starting point, not a schema.
   scaffold comment above. Fresh bootstrap must never create
   `ai-docs/_index.local.md`. This is a one-time migration judgment call, not an
   automated reconciliation; do not build staleness-detection tooling for it.
+- v0048: Retire the spec and mental-model document layers; tests are the
+  behavioral contract and the ticket is the plan. Before moving anything,
+  triage the content of `ai-docs/spec/`, `ai-docs/mental-model/`, and
+  `ai-docs/mental-model.md` once, by judgment, into four classes: derivable
+  from code (archive only); a prescriptive convention (move to
+  `ai-docs/manuals/<name>.md` and declare it under `## Workflow` ->
+  `### Implementation Conventions`, or inline in this file when it is one
+  universal line); a site-specific trap (move to a code comment at that
+  site); a non-derivable external fact (move to `ai-docs/ref/`). Then, if
+  `ai-docs/spec/` exists, `git mv` it to `ai-docs/.old/spec` (merge into an
+  existing archive rather than replacing it); likewise `ai-docs/mental-model/`
+  to `ai-docs/.old/mental-model` and `ai-docs/mental-model.md` to
+  `ai-docs/.old/mental-model.md`; create `ai-docs/.old/` first if absent.
+  Delete nothing. Remove the `## Spec` block and the `renamed-spec:` sentence
+  from `### Commit Rules`; rewrite `## Project Memory` step 1 so it names the
+  ticket status directories instead of a spec inventory, and add the
+  binding-anchor read step; add the optional `### Implementation Conventions`
+  and `### Binding Anchor` sections under `## Workflow` when absent; replace
+  any `## Project Orientation`, `## Project Knowledge`, or
+  `## Architecture Rules` wording that routes detail to specs or mental models
+  with `ai-docs/manuals/`; remove `spec/`, `mental-model/`, and
+  `mental-model.md` from this template's scaffold layout above so fresh
+  projects never create them; rewrite the Inclusion test comment to the
+  current wording. In `ai-docs/WORKFLOW.md`, drop the sections teaching the
+  retired layers along with their layout bullets and the spec-entry bullet
+  under commit traceability, and merge in the current guide's
+  `## Behavioral Contract` and `## Execution Model` sections. Promotion to
+  `ready/` is gated by the ticket's own design review, not by spec
+  addressing; read any earlier item's spec-address qualifier that way. This
+  is a one-time migration judgment call, not an automated reconciliation; do
+  not build staleness-detection tooling for it.
 -->
 
-<!-- Template Version: v0047 -->
+<!-- Template Version: v0048 -->

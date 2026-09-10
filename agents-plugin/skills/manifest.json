@@ -2,9 +2,9 @@
   "schema_version": 1,
   "files": {
     "lead-add-rule/SKILL.md": "2e113a12f9bbc72af2210f2cbab63b2a44802f1a342b4ec730fa02d48c545d04",
-    "lead-bootstrap/AGENTS.template.md": "9432fa34aa1ec3998a9a6a5b724c6cbd776e39531a8345e2954d3d7904edcdd6",
+    "lead-bootstrap/AGENTS.template.md": "5dd420d3a6b2e44ba000fd88169ab3cdf646bb529611319374d6d2a053f7924c",
     "lead-bootstrap/SKILL.md": "a15f6e640341b35a2b770239768c714e51cedb4b9c04c8fbd1c1effc9694a631",
-    "lead-bootstrap/WORKFLOW.md": "561446b4c3444c982bfb363b4adec0c09b436e534a5145cca01ee97e933aed58",
+    "lead-bootstrap/WORKFLOW.md": "c8d89947497bc00609a992d500565c14e3e653c5eb48ee357a676f4f20dd2ab0",
     "lead-discuss/SKILL.md": "4354b3bc5aa007b814bb3bfd498bec4cdd453dee9f99a581b68492ed976b3b02",
     "lead-discuss/agents/openai.yaml": "25bf5112c8b0d204f522e117248c26e683d6e4543bfd21a43a2d0e08eff15f69",
     "lead-prefer-subagent/SKILL.md": "a8b4076eca459b5eb9ef90873c95b099fbb5d1a603bf32c7e1ff9508a5522033",
