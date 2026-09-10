@@ -271,12 +271,21 @@ function isAttentionState(state: AgentRowState): boolean {
   return state === "awaiting-owner" || state === "idle-awaiting-owner" || state === "awaiting-approval";
 }
 
+function formatInputTokens(tokens: number | undefined): string {
+  return tokens === undefined ? "—" : `${(tokens / 1_000).toFixed(1)}k`;
+}
+
+function formatEstimatedUsd(usd: number | undefined): string {
+  if (usd === undefined) return "—";
+  return String(Number(usd.toFixed(3)));
+}
+
 function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, emphasizeAttention = false): string {
   const primary = row.answerHint ? `/answer ${row.answerDisplay ?? row.name}` : row.name;
   const stateLabel = STATE_LABEL[row.state];
   const base = `${primary} · ${row.role} · ${stateLabel} · ${formatElapsed(row.elapsedMs)}`;
   const selection = `${row.model ?? "—"} (${row.effort ?? "—"})`;
-  const telemetry = ` · ${selection} · in ${row.latestInput ?? "—"} · est $${row.estimatedUsd ?? "—"}`;
+  const telemetry = ` · ${selection} · in ${formatInputTokens(row.latestInput)} · est $${formatEstimatedUsd(row.estimatedUsd)}`;
   const protectedHint = row.answerHint ?? row.inspectionHint;
   const hint = protectedHint ? ` — ${protectedHint}` : "";
   // The owner action is the only non-negotiable tail.  Allocate its columns

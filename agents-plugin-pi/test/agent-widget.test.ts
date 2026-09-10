@@ -223,8 +223,8 @@ describe("buildWidgetLines", () => {
     };
     const approval = { name: "awaiting approval audit", role: "execute" as const, state: "awaiting-approval" as const, elapsedMs: 3_000, model: "test-model", effort: "high", latestInput: 42, estimatedUsd: .1 };
     const animated = buildWidgetLines([question, approval], 1, 180, true)!;
-    assert.equal(animated[1], "\u001b[1m/answer Choose — database\u001b[22m · fork · awaiting owner · 3s · test-model (high) · in 42 · est $0.1 — /answer q7");
-    assert.equal(animated[2], "awaiting approval audit · execute · \u001b[1mawaiting approval\u001b[22m · 3s · test-model (high) · in 42 · est $0.1");
+    assert.equal(animated[1], "\u001b[1m/answer Choose — database\u001b[22m · fork · awaiting owner · 3s · test-model (high) · in 0.0k · est $0.1 — /answer q7");
+    assert.equal(animated[2], "awaiting approval audit · execute · \u001b[1mawaiting approval\u001b[22m · 3s · test-model (high) · in 0.0k · est $0.1");
     assert.ok(!animated[1].slice(animated[1].indexOf(" · fork")).includes("\u001b[1m"), "role, elapsed, telemetry, separators, and qN stay plain");
     assert.ok(!animated[2].startsWith("\u001b[1m"), "a state-like name cannot redirect approval styling");
     const staticDisabled = buildWidgetLines([question, approval], 1, 180, true)!;
@@ -251,15 +251,16 @@ describe("buildWidgetLines", () => {
       }
     }
   });
-  test("telemetry exposes independent fields at wide widths and never displaces a 40-column answer cue", () => {
+  test("telemetry exposes compact token and cost fields at wide widths and never displaces a 40-column answer cue", () => {
     const telemetry = { name: "模型-worker", role: "worker" as const, state: "running" as const, elapsedMs: 0, model: "provider/模型", effort: "high", latestInput: 0, estimatedUsd: 0 };
-    assert.match(buildWidgetLines([telemetry], 0, 120)![1], /provider\/模型 \(high\).*in 0.*est \$0/);
+    assert.match(buildWidgetLines([telemetry], 0, 120)![1], /provider\/模型 \(high\).*in 0.0k.*est \$0/);
     const missing = { ...telemetry, model: undefined, effort: undefined, latestInput: undefined, estimatedUsd: undefined, answerHint: "/answer q1" };
     assert.match(buildWidgetLines([missing], 0, 40)![1], /\/answer q1$/);
     assert.ok(visibleWidth(buildWidgetLines([missing], 0, 40)![1]) <= 40);
-    const compact = { ...telemetry, name: "a", model: "p", effort: "l", latestInput: 7, estimatedUsd: .1 };
-    assert.match(buildWidgetLines([compact], 0, 80)![1], /p \(l\).*in 7.*est \$0.1/);
-    assert.match(buildWidgetLines([compact], 0, 120)![1], /p \(l\).*in 7.*est \$0.1/);
+    const compact = { ...telemetry, name: "a", model: "p", effort: "l", latestInput: 132_400, estimatedUsd: .123456789 };
+    assert.match(buildWidgetLines([compact], 0, 80)![1], /p \(l\).*in 132.4k.*est \$0.123/);
+    const noMegabyteUnit = { ...compact, latestInput: 1_354_100, estimatedUsd: 12.34567 };
+    assert.match(buildWidgetLines([noMegabyteUnit], 0, 120)![1], /in 1354.1k.*est \$12.346/);
   });
   function runningRow(elapsedMs: number, name = "w") {
     return { name, role: "worker" as const, state: "running" as const, elapsedMs, answerHint: undefined };
@@ -320,7 +321,7 @@ describe("buildWidgetLines", () => {
     assert.match(narrow, /\/answer q1$/); assert.ok(visibleWidth(narrow) <= 40);
     for (const width of [80, 120]) {
       const lines = buildWidgetLines([completeWide, unknown], 0, width)!;
-      assert.match(lines[1], /provider\/模型 \(high\).*in 0.*est \$0/, `complete reported zero is not rendered as unknown at ${width}`);
+      assert.match(lines[1], /provider\/模型 \(high\).*in 0.0k.*est \$0/, `complete reported zero is not rendered as unknown at ${width}`);
       assert.match(lines[2], /— \(—\).*in —.*est \$—/, `unknown fields remain independently unknown at ${width}`);
       assert.ok(lines.every(line => visibleWidth(line) <= width), `Unicode display width is bounded at ${width}`);
     }
