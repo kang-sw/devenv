@@ -385,6 +385,129 @@ names a removed layer), `agents-plugin-wsflow/rsrc/lead-bootstrap/lead-bootstrap
 `agents-plugin-tool/internal/mcp/bootstrap_alarm_test.go`,
 `agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py`.
 
+### Result (7b19c4d2) - 2026-09-10
+
+Landed as `e85856e7` (item, template, guide, playbook), `32e74bfa` (fresh-reader
+audit fixes), `7b19c4d2` (review round-1 fixes) on
+`impl/epic/refound/salad-kite-chump`.
+
+Both packages' `AGENTS.template.md` carry `<!-- Template Version: v0048 -->` and
+one new checklist item at the head. v0048 retires the spec and mental-model
+layers: it triages their content by judgment into four classes (derivable from
+code, prescriptive convention, site-specific trap, non-derivable external fact)
+before `git mv`-ing `ai-docs/spec/`, `ai-docs/mental-model/`, and
+`ai-docs/mental-model.md` into `ai-docs/.old/` (merging into an existing archive,
+deleting nothing); removes the `## Spec` trailer and the `renamed-spec:` sentence
+from `### Commit Rules`; rewrites `## Project Memory` step 1 off the spec
+inventory and adds a binding-anchor read step when absent; adds the optional
+`### Implementation Conventions` and `### Binding Anchor` sections when absent,
+in the shape the template carries and with no value filled in; relocates
+path-scoped or multi-line `## Architecture Rules` entries into
+`ai-docs/manuals/`; reroutes every `## Project Orientation` /
+`## Project Knowledge` / `## Architecture Rules` mention of the retired layers to
+`ai-docs/manuals/`; strips `spec/`, `mental-model/`, and `mental-model.md` from
+the scaffold layout block; rewrites the Inclusion test comment; brings
+`ai-docs/WORKFLOW.md` to what a fresh bootstrap would write; restates the
+`ready/` gate as the ticket's own design review rather than spec addressing, and
+says to read every earlier item's spec-address qualifier that way. It carries the
+one-time-judgment-call caveat. Nine earlier items are marked
+`[obsoleted by v0048]`: v0021, v0022, v0023, v0024, v0026, v0027, v0028, v0040,
+v0045 — every item naming a retired forge/spec/mental-model skill, plus the items
+the new one makes wrong for the `adopt` handler, which audits from v0001.
+
+The shipped `WORKFLOW.md` lost `## Specs` and `## Mental Models` and gained
+`## Behavioral Contract` (tests are the contract, the assumption stated with no
+enforcement attached) and `## Execution Model` (the ticket is the plan, one
+worker per ticket, the stop list, and the solo-maintainer form of the same
+model). Layout, Tickets, Index Health, Commit Traceability, and Manual Fallback
+lost their retired-layer wording. The same two sections landed in this
+repository's `ai-docs/WORKFLOW.md`. `agents-plugin/rsrc/lead-bootstrap/` gained
+`## On: fresh` step 10 (suggest `### Implementation Conventions` and the first
+ticket through the ticket skill), the replacement the spec-retirement sibling's
+removal left open; the wsflow mirror was regenerated, not hand-edited. The two
+committed drafts under `ai-docs/ref/refound-drafts/` were placed and deleted
+along with the now-empty README.
+
+Two tests moved with their subject.
+`agents-plugin-tool/internal/wsrsrc/workflow_guide_test.go` was deleted whole: its
+only subject was the `## Specs` implemented-behavior-only bullet, and its
+secondary drift-catching role is covered by the wsflow bundle test's byte-equality
+assertion on the two guides. `RETIRED_NAME_EXEMPT_FILES` was deleted from
+`agents-plugin/tests/test_skill_dispatch_contracts.py` — the exemption existed
+only because live checklist items named skills that were later retired, and
+v0048 has now obsoleted every one, so the sweep strictly widens.
+`test_bootstrap_installed_set_is_current` narrowed to `{"ai-docs/WORKFLOW.md"}`
+because the scaffold block it derives from no longer names `ai-docs/mental-model.md`.
+New `agents-plugin-tool/internal/mcp/bootstrap_template_anchor_test.go` pins that
+the shipped optional sections parse as undeclared.
+
+Verification: `go build ./...` and `go vet ./...` clean; `go test ./... -count=1`
+green across all 13 packages; `python3 -m unittest discover agents-plugin/tests`
+55 OK and `agents-plugin-wsflow/tests` 10 OK. The two packages' emitted fresh-mode
+template bodies are byte-identical (every raw difference is the namespace token
+and lies inside a stripped block); the two shipped `WORKFLOW.md` copies are
+byte-identical; `latestKnownTemplateVersion` resolves 48 from both skill roots;
+both packages' `lead-bootstrap` playbooks grep clean for `spec`, `mental-model`,
+and `forge`. Review round 1 (one reviewer, large tier) returned 1 Critical, 1
+Important, 7 Minor; round 2 (Critical-scoped verification) returned `clean`.
+
+Review dispositions:
+
+- Critical — the shipped `### Binding Anchor` scaffold parsed as a real
+  declaration: `ReadAgentsBindingAnchor` matches `anchor:`/`topics:` at the start
+  of any line in the section body and does not exclude code fences, so every
+  freshly bootstrapped project would have declared a placeholder anchor, turning
+  the binding-anchor proceed fact live and splicing a path that resolves to
+  nothing into the worker Prep guardrail. **[fixed]** in `7b19c4d2`: both optional
+  sections now ship as a comment only, with the example table and the example key
+  pair indented inside it, so the section body is empty until a project fills it
+  in. Reshaping the scaffold was chosen over teaching the parser to reject
+  bracketed placeholders, so the rule holds for any placeholder notation.
+  `TestBootstrapTemplateDeclaresNoBindingAnchor` pins it for both packages,
+  against the file as shipped and the comment-stripped fresh-mode body; round 2
+  reproduced its failure on the pre-fix template (four failures) and re-derived
+  `Declared == false` from the real parser rather than from the test.
+- Important — v0048's `ai-docs/WORKFLOW.md` clause enumerated three edits while
+  the guide changed in about twelve places, and `## On: upgrade` step 5 only
+  merges *missing* semantics, so a migrated project would keep stale text and
+  never converge with a fresh bootstrap. **[fixed]** in `7b19c4d2`: replaced with a
+  goal-framed wholesale refresh — replace every section the guide source still
+  carries with the source's current text, re-apply the project's own additions,
+  drop the sections the source no longer carries.
+- Minor — missing `when absent` guard on the binding-anchor read step,
+  ambiguous "the current wording" for the Inclusion test rewrite, and no
+  replacement for the v0028 migration that relocated domain-scoped
+  `## Architecture Rules` entries: **[fixed]** in `7b19c4d2`, all three folded into
+  v0048.
+- Minor — a 112-character line left in all three guide copies: **[fixed]**;
+  paragraph rewrapped.
+- Minor — v0035's live spec-address qualifier is corrected only 13 items later,
+  so an `adopt` walk meets the old gate first: **[won't fix: v0048 already supplies
+  the reinterpretation for every earlier item, and rewriting a shipped item's text
+  in place is a migration-semantics change this phase does not carry. The residual
+  error is conservative — a ticket stays in `todo/`.]**
+- Minor — the template scaffolds a `## Ticket Updates` commit trailer while the
+  commit tool emits `## Updated Tickets`: **[deferred: pre-existing on both sides,
+  including this repository's own `AGENTS.md`; the phase does not own the
+  commit-tool heading.]**
+
+Decisions taken beyond the phase text: (1) `## On: fresh` gained step 10, the
+replacement text the committed draft assigned to the removed forge-skill
+suggestion, which the sibling deleted without placing; (2)
+`ai-docs/ref/refound-drafts/README.md` was deleted with its last two rows, per its
+own stated placement rule; (3) `workflow_guide_test.go` was deleted rather than
+narrowed, since nothing of its subject survives.
+
+Forward to Phase 2: this repository's own `AGENTS.md` still carries
+`<!-- Template Version: v0047 -->` and still holds `## Project Memory`,
+`## Documentation System`, and `### Commit Rules` text naming the retired layers —
+running v0048 here is Phase 2's job, not this one's. Two round-2 observations are
+recorded rather than fixed: this repository's `### Implementation Conventions`
+table orders its columns `| manual | paths |` while the shipped template and every
+shipped consumer's prose say `| paths | manual |`; and `## On: fresh` never prompts
+the deletion the two optional sections' comments describe for a project that
+declares neither (step 10 suggests only the conventions section).
+
 ### Phase 2: Dogfood the upgrade on a disposable fixture
 
 Sequentially dependent on Phase 1: this phase runs the item Phase 1 authored,

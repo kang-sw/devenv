@@ -44,6 +44,7 @@ Mode: user request
 7. Set `<!-- Template Version: vNNNN -->` to the latest version from the template.
 8. Write `CLAUDE.md` with body `@AGENTS.md`.
 9. Commit scaffolding.
+10. Suggest declaring `### Implementation Conventions` when the project has path-scoped rules, and creating the first ticket through `{{.SkillNamespace}}:lead-ticket`.
 
 ## On: upgrade
 

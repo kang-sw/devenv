@@ -409,12 +409,11 @@ class ShippedSurfacesDownstreamNeutralTest(unittest.TestCase):
 
     def test_bootstrap_installed_set_is_current(self):
         # Derived from the migration scaffold block; asserted so a template edit
-        # that silently changes the set is caught. Both ai-docs/WORKFLOW.md and
-        # ai-docs/mental-model.md are listed there as concrete filenames.
-        self.assertEqual(
-            self.installed,
-            {"ai-docs/WORKFLOW.md", "ai-docs/mental-model.md"},
-        )
+        # that silently changes the set is caught. ai-docs/WORKFLOW.md is the
+        # only concrete filename the scaffold lists; everything else there is a
+        # directory. ai-docs/mental-model.md was the second entry until the
+        # template stopped scaffolding the spec and mental-model layers.
+        self.assertEqual(self.installed, {"ai-docs/WORKFLOW.md"})
 
     def test_go_string_extractor_excludes_comments(self):
         # Comment-exclusion is load-bearing: real comments naming ticket stems
