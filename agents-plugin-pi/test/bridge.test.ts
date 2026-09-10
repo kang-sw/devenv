@@ -127,7 +127,9 @@ test("production bridge registration returns the pointer on a repeat playbook.re
       { type: "message", message: { role: "toolResult", toolCallId: "one", content: [{ type: "text", text: "# Repeat\n## Detail" }], isError: false } },
     ] } };
     const result = await tools.get("ws__playbook_read").execute("two", { name: "repeat" }, undefined, undefined, context);
-    assert.match(result.content[0].text, /unchanged result.*`one`.*1 tool call ago/s);
+    const [prose] = result.content[0].text.split("\n");
+    assert.equal(prose, "The result is unchanged. Continue using the full result already present 1 tool call ago. Do not read it again (headings: # Repeat; ## Detail).");
+    assert.doesNotMatch(prose!, /one/, "the toolCallId is carried only by the provenance envelope");
     handle.shutdown();
   } finally {
     if (oldRole === undefined) delete process.env.WS_PI_SPAWN_ROLE; else process.env.WS_PI_SPAWN_ROLE = oldRole;

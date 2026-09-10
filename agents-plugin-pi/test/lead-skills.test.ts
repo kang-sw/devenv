@@ -326,7 +326,9 @@ describe("registerWsSkillTool (fake pi)", () => {
       { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "two", name: "ws-skill", arguments: { name: "repeat" } }] } },
     ] } };
     const second = await tool.execute("two", { name: "repeat" }, undefined, undefined, secondContext);
-    assert.match(second.content[0].text, /unchanged result.*`one`/s);
+    const [prose] = second.content[0].text.split("\n");
+    assert.equal(prose, "The result is unchanged. Continue using the full result already present 1 tool call ago. Do not read it again (headings: # Repeat; ## Detail).");
+    assert.doesNotMatch(prose!, /one/, "the toolCallId is carried only by the provenance envelope");
     const thirdContext = { sessionManager: { buildContextEntries: () => [...secondContext.sessionManager.buildContextEntries(), { type: "message", message: { role: "toolResult", toolCallId: "two", content: second.content, isError: false } }, { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "three", name: "ws-skill", arguments: { name: "repeat" } }] } }] } };
     const third = await tool.execute("three", { name: "repeat" }, undefined, undefined, thirdContext);
     assert.equal(third.content[0].text, first.content[0].text);

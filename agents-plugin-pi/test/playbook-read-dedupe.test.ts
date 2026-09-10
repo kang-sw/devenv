@@ -18,8 +18,10 @@ test("playbook repeat is full, pointer, then full and ignores session_key/map or
   const first = [call("one", "ws__playbook_read", { name: "lead", context: { a: 1, b: 2 } }), result("one", body)];
   const second = dedupeRead(first, "two", "playbook.read", key, body);
   assert.equal(second.deduped, true);
-  assert.match(second.text, /`one`/);
-  assert.match(second.text, /# Title; ## Detail; ### Leaf/);
+  const [prose, provenance] = second.text.split("\n");
+  assert.equal(prose, "The result is unchanged. Continue using the full result already present 1 tool call ago. Do not read it again (headings: # Title; ## Detail; ### Leaf).");
+  assert.doesNotMatch(prose!, /one/, "the original toolCallId belongs only in machine provenance");
+  assert.equal(provenance, '<!-- ws-pi-read-dedupe-v1 {"originalToolCallId":"one","family":"playbook.read","key":"{\\"context\\":{\\"a\\":1,\\"b\\":2},\\"name\\":\\"lead\\"}"} -->');
   const third = dedupeRead([...first, call("two", "ws__playbook_read", { name: "lead", context: { b: 2, a: 1 } }), result("two", second.text)], "three", "playbook.read", key, body);
   assert.deepEqual(third, { text: body, deduped: false });
   const fourth = dedupeRead([...first, call("two", "ws__playbook_read", { name: "lead", context: { a: 1, b: 2 } }), result("two", second.text), call("three", "ws__playbook_read", { name: "lead", context: { a: 1, b: 2 } }), result("three", body)], "four", "playbook.read", key, body);

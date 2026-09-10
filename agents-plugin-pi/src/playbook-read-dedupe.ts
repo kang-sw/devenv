@@ -9,6 +9,8 @@ export interface ReadDedupeDecision {
 
 const PROVENANCE_PREFIX = "<!-- ws-pi-read-dedupe-v1 ";
 const PROVENANCE_SUFFIX = " -->";
+const POINTER_PROSE_PREFIX = "The result is unchanged. Continue using the full result already present ";
+const LEGACY_POINTER_PROSE_PREFIX = "The unchanged result is available from successful tool call `";
 
 function stable(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -37,7 +39,7 @@ interface Provenance { originalToolCallId: string; family: ReadFamily; key: stri
 
 function pointerText(originalToolCallId: string, family: ReadFamily, key: string, body: string, distance: number): string {
   const provenance: Provenance = { originalToolCallId, family, key };
-  return `The unchanged result is available from successful tool call \`${originalToolCallId}\`, ${distance} tool call${distance === 1 ? "" : "s"} ago (headings: ${headings(body)}).\n${PROVENANCE_PREFIX}${JSON.stringify(provenance)}${PROVENANCE_SUFFIX}`;
+  return `${POINTER_PROSE_PREFIX}${distance} tool call${distance === 1 ? "" : "s"} ago. Do not read it again (headings: ${headings(body)}).\n${PROVENANCE_PREFIX}${JSON.stringify(provenance)}${PROVENANCE_SUFFIX}`;
 }
 
 function parsePointer(text: string): Provenance | undefined {
@@ -106,7 +108,7 @@ export function dedupeRead(entries: readonly unknown[], currentToolCallId: strin
     // A prior pointer's human paragraph may survive a transcript transform
     // while its provenance line is removed. It is still a pointer candidate,
     // never evidence for emitting another pointer.
-    const candidate = text.startsWith("The unchanged result is available from successful tool call `") || text.includes(PROVENANCE_PREFIX);
+    const candidate = text.startsWith(POINTER_PROSE_PREFIX) || text.startsWith(LEGACY_POINTER_PROSE_PREFIX) || text.includes(PROVENANCE_PREFIX);
     if (!candidate) continue;
     if (!marker || marker.family !== family || marker.key !== key || !fullIds.has(marker.originalToolCallId)) return { text: freshBody, deduped: false };
     count += 1;
