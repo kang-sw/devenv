@@ -139,13 +139,13 @@ func TestSageGateReadyRefusesMissingRouteFacts(t *testing.T) {
 }
 
 // TestSageGateTodoLandingIgnoresRouteFacts pins that the refusal is scoped to
-// the ready/ landing: facts are a promotion-time requirement, and a design
-// review at todo/ runs long before they exist.
+// the ready/ landing: epic design settlement checks claims without requiring
+// implementation route facts.
 func TestSageGateTodoLandingIgnoresRouteFacts(t *testing.T) {
 	root := t.TempDir()
-	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", "260101-feat-sample.md"),
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", "260101-epic-sample.md"),
 		"---\ntitle: Sample\nsage-review-design: required\n---\n\n# Sample\n\nBody text.\n")
-	res, err := SageGate(root, SageGateOptions{TicketStem: "260101-feat-sample", Landing: "todo"}, "auto")
+	res, err := SageGate(root, SageGateOptions{TicketStem: "260101-epic-sample", Landing: "todo"}, "auto")
 	if err != nil {
 		t.Fatalf("SageGate: %v", err)
 	}

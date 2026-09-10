@@ -31,7 +31,7 @@ func TestTicketCreateIdea(t *testing.T) {
 	}
 }
 
-func TestTicketCreateTodoStampsResolvedSageReviewDesignPosture(t *testing.T) {
+func TestTicketCreateEpicTodoStampsResolvedSageReviewDesignPosture(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		config     string
@@ -44,7 +44,7 @@ func TestTicketCreateTodoStampsResolvedSageReviewDesignPosture(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			res, err := TicketCreate(root, TicketCreateOptions{Stem: "feat-foo", InitialState: "todo", SageReview: tc.config, Today: "260101"})
+			res, err := TicketCreate(root, TicketCreateOptions{Stem: "epic-foo", InitialState: "todo", SageReview: tc.config, Today: "260101"})
 			if err != nil {
 				t.Fatalf("TicketCreate todo: %v", err)
 			}
@@ -224,5 +224,22 @@ func TestTicketCreateDatePrefix(t *testing.T) {
 	}
 	if !strings.HasPrefix(res.Path, "ai-docs/tickets/idea/260101-") {
 		t.Fatalf("path = %q, want prefix ai-docs/tickets/idea/260101-", res.Path)
+	}
+}
+
+func TestTicketCreateActionableTodoHasNoReviewPosture(t *testing.T) {
+	for _, category := range []string{"feat", "bug", "refactor", "chore"} {
+		root := t.TempDir()
+		res, err := TicketCreate(root, TicketCreateOptions{Stem: category + "-backlog", InitialState: "todo", SageReview: "auto", Today: "260101"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := readFileString(t, filepath.Join(root, res.Path))
+		if strings.Contains(body, "sage-review") {
+			t.Fatalf("ungated backlog acquired posture: %s", body)
+		}
+		if !strings.Contains(res.Tip, "todo authoring is ungated") {
+			t.Fatalf("misleading tip: %s", res.Tip)
+		}
 	}
 }

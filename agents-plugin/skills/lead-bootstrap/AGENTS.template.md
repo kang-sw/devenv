@@ -281,10 +281,16 @@ Adapt structure to the project; this is a starting point, not a schema.
   source's current text and re-apply the project's own additions on top;
   drop every section the source no longer carries, along with the layout
   bullets and the commit-traceability bullet naming the retired layers.
-  Promotion to `ready/` is gated by the ticket's own design review, not by
-  spec addressing; read any earlier item's spec-address qualifier that way.
+  Promotion to `ready/` is gated by fact population followed by the ticket's
+  design and completeness review, not by spec addressing; read any earlier item's spec-address qualifier that way.
   This is a one-time migration judgment call, not an automated
   reconciliation; do not build staleness-detection tooling for it.
+- v0049: Refresh the Tickets and Execution Model sections of
+  `ai-docs/WORKFLOW.md` from the workflow guide source, preserving project
+  additions. Actionable todo authoring is ungated; facts then design and
+  completeness review settle ready promotion. Epic todo settlement runs facts
+  then design only; material cross-child decisions require explicit
+  re-settlement before child use. Research stays ungated outside ready.
 -->
 
-<!-- Template Version: v0048 -->
+<!-- Template Version: v0049 -->

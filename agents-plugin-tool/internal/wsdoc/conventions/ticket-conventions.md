@@ -19,6 +19,9 @@ rules and hard invariants only.
 - Move tickets with `tickets.close(stem, status)` (to done/dropped) or
   `tickets.move(stem, to)` (idea/todo/ready) MCP tools; use native `git mv`
   as fallback when MCP tools are unavailable. No cross-link updates needed.
+- Actionable `todo/` creation and editing are ungated. Populate facts, then run design and completeness Sage review at `ready/` promotion against the populated body.
+- Epics settle design explicitly at `idea/` to `todo/`: populate checkable facts, then run design-only Sage review. Material cross-child decision edits require explicit re-settlement before children rely on them; ordinary edits do not auto-review.
+- Epics and research stay in `idea/` or `todo/`; research is ungated.
 - Add `completed:` date on move to `.done/`.
 - Workset tickets are non-hierarchical operating-context boards and normally stay in `idea/` or `todo/` rather than `ready/`.
 
