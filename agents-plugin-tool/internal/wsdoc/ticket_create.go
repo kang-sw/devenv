@@ -26,6 +26,13 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 		return TicketCreateResult{}, fmt.Errorf("stem must not be empty")
 	}
 
+	// Retired authoring must not disable historical stem recognition.
+	category, _, _ := strings.Cut(stem, "-")
+	if category == "workset" {
+		_, err := TicketTemplate(category)
+		return TicketCreateResult{}, err
+	}
+
 	state := strings.TrimSpace(opts.InitialState)
 	switch state {
 	case "idea", "todo", "ready":

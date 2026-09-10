@@ -3452,7 +3452,7 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"stem":          stringProperty("Semantic ticket stem without date prefix (e.g. feat-foo-bar)."),
+					"stem":          stringProperty("Semantic ticket stem without date prefix (e.g. feat-foo-bar). Authoring categories: feat, bug, refactor, chore, research, epic."),
 					"initial_state": stringProperty("Ticket status: idea, todo, or ready."),
 				},
 				"required": []string{"stem", "initial_state"},
@@ -3464,7 +3464,7 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"type": stringProperty("Ticket category: feat, bug, refactor, chore, research, workset, or epic."),
+					"type": stringProperty("Ticket category: feat, bug, refactor, chore, research, or epic."),
 				},
 				"required": []string{"type"},
 			},
@@ -3475,7 +3475,7 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"type":  stringProperty("Ticket category: feat, bug, refactor, chore, research, workset, or epic."),
+					"type":  stringProperty("Ticket category: feat, bug, refactor, chore, research, or epic."),
 					"phase": enumStringProperty("Ticket-authoring phase.", []string{"content", "intent"}),
 				},
 				"required": []string{"type", "phase"},
@@ -3483,7 +3483,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.sage_gate",
-			"description": "Resolve the sage-review gate for a ticket landing. Todo is for epic design settlement only: actionable todo calls fail; research/workset skip. Actionable review runs at ready promotion after fact population. Owns posture resolution (legacy sage-review: migration, config.list fallback), the category×stage matrix, and standalone/combined mode selection. Returns an action (skip | stop_blocked | stop_missing_route_facts | ask | run); for run, the reviewer(s) to spawn and the mode. A ready/ landing is refused with stop_missing_route_facts when the ticket carries no ## Route Facts section. Does not spawn reviewers.",
+			"description": "Resolve the sage-review gate for a ticket landing. Todo is for epic design settlement only: actionable todo calls fail; research and legacy worksets skip. Actionable review runs at ready promotion after fact population. Owns posture resolution (legacy sage-review: migration, config.list fallback), the category×stage matrix, and standalone/combined mode selection. Returns an action (skip | stop_blocked | stop_missing_route_facts | ask | run); for run, the reviewer(s) to spawn and the mode. A ready/ landing is refused with stop_missing_route_facts when the ticket carries no ## Route Facts section. Does not spawn reviewers.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

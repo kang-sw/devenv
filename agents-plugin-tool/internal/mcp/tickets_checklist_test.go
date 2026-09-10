@@ -8,7 +8,7 @@ import (
 )
 
 func TestTicketChecklist(t *testing.T) {
-	accepted := []string{"feat", "bug", "refactor", "chore", "research", "workset", "epic"}
+	accepted := []string{"feat", "bug", "refactor", "chore", "research", "epic"}
 	phases := []string{"content", "intent"}
 
 	// Every accepted (type, phase) combination returns non-empty text and no error.
@@ -45,7 +45,7 @@ func TestTicketChecklist(t *testing.T) {
 	}
 
 	// phase:"intent" is the three-item conversation-fidelity check and is
-	// category-invariant: the capture enumeration, the epic/workset shape rules,
+	// category-invariant: the capture enumeration, the epic shape rules,
 	// and the fix-then-summarize procedure moved out. Assert every surviving
 	// item's text travels verbatim, and that the dropped items stay dropped.
 	featIntent, _ := wsdoc.TicketChecklist("feat", "intent")
