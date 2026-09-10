@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { createAgentStorageContext } from "../src/agent-storage.ts";
 import { RpcClient, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
-  registerAgentTools,
+  registerAgentTools as registerAgentToolsBase,
   resolveTools,
   sendToAgent,
   type RpcAgentRecord,
@@ -15,6 +15,11 @@ import {
 import { WS_PI_EXPLORE_MODE_ENV, WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 import { captureOrphans, parseOrphans, reviveOrphans, serializeOrphans } from "../src/agent-sidecar.ts";
 import type { McpToolCallResult } from "../src/mcp-stdio-client.ts";
+
+const TEST_EXTENSION_ENTRY = "/tmp/loaded ws adapter/index copy.ts";
+function registerAgentTools(pi: any, bridge: any, sessionCtx: any, ...rest: any[]) {
+  return registerAgentToolsBase(pi, bridge, { ...sessionCtx, extensionPath: sessionCtx.extensionPath ?? TEST_EXTENSION_ENTRY }, ...rest);
+}
 
 const storageRoots = new Set<string>();
 afterEach(() => {
@@ -167,13 +172,13 @@ describe("persistent explore registration, dispatch, and frozen selection", () =
         const revived = restored.get(result.agent_id)!;
         assert.deepEqual([revived.spawnRole, revived.exploreMode, revived.toolGroup, revived.modelBase, revived.modelEffort], ["explore", "simple", "read-only", "pi/small", "high"]);
         rpc.calls.length = 0;
-        await sendToAgent(restored, { cwd: "/tmp" }, revived.agentId, "follow up");
+        await sendToAgent(restored, { cwd: "/tmp", extensionPath: TEST_EXTENSION_ENTRY }, revived.agentId, "follow up");
         assert.deepEqual(rpc.calls.filter(c => c.startsWith("thinking:")), ["thinking:high"], "sidecar-restored resume uses the frozen effective effort");
         revived.client = undefined;
         const restoredTwice: RpcAgentRegistry = new Map();
         reviveOrphans(restoredTwice, parseOrphans(serializeOrphans(captureOrphans(restored))));
         rpc.calls.length = 0;
-        await sendToAgent(restoredTwice, { cwd: "/tmp" }, revived.agentId, "second resume");
+        await sendToAgent(restoredTwice, { cwd: "/tmp", extensionPath: TEST_EXTENSION_ENTRY }, revived.agentId, "second resume");
         assert.deepEqual(rpc.calls.filter(c => c.startsWith("thinking:")), ["thinking:high"], "second sidecar cycle keeps the actual effective effort");
         assert.equal(h.lookups(), 1, "resume never re-resolves small");
         await h.handle.stopAll();

@@ -175,7 +175,7 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
       assert.equal(orphans.length, 1);
       for (let generation = 0; generation < 2; generation++) {
         const registry = new Map(); sidecar.reviveOrphans(registry, sidecar.parseOrphans(sidecar.serializeOrphans(orphans)));
-        await spawner.sendToAgent(registry, { cwd: directory }, id, `Resume ${generation}`);
+        await spawner.sendToAgent(registry, { cwd: directory, extensionPath: join(plugin, "src/index.ts") }, id, `Resume ${generation}`);
         const resumed = children.at(-1);
         assert.equal(resumed.requests[0].context.systemPrompt, observed.context.systemPrompt);
         assert.deepEqual(resumed.requests[0].payload.tools, observed.payload.tools);
@@ -209,7 +209,7 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
         const roundtrip = ask.parseThreadRegistry(ask.serializeThreadRegistry(threads));
         const record = ask.rehydrateForkRecord("discussion", roundtrip[0].forkResume);
         const registry = new Map([[record.agentId, record]]);
-        await spawner.sendToAgent(registry, { cwd: directory }, record.agentId, "Continue owner dialogue");
+        await spawner.sendToAgent(registry, { cwd: directory, extensionPath: join(plugin, "src/index.ts") }, record.agentId, "Continue owner dialogue");
         const resumed = children.at(-1);
         assert.equal(resumed.requests[0].context.systemPrompt, observed.context.systemPrompt);
         threads[0].forkResume = ask.captureForkResume(record);

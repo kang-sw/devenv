@@ -70,13 +70,18 @@ import {
   ONE_LINER_EXEC_TOOL_NAME,
   ONE_LINER_TIMEOUT_MS,
   ONE_LINER_OUTPUT_CAP_BYTES,
-  registerExecuteGateway,
+  registerExecuteGateway as registerExecuteGatewayBase,
   type PendingApproval,
   type WorkingContext,
 } from "../src/execute-gateway.ts";
-import { leadIdleRef, registerPushFlush, GATED_EXEC_TOOL_NAME, TOOL_GROUPS, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { leadIdleRef, registerPushFlush, GATED_EXEC_TOOL_NAME, TOOL_GROUPS, resolveTools, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+const TEST_EXTENSION_ENTRY = "/tmp/loaded ws adapter/index copy.ts";
+function registerExecuteGateway(pi: any, bridge: any, registry: any, sessionCtx: any, ...rest: any[]) {
+  return registerExecuteGatewayBase(pi, bridge, registry, { ...sessionCtx, extensionPath: sessionCtx.extensionPath ?? TEST_EXTENSION_ENTRY }, ...rest);
+}
 
 describe("buildExecuteWorkerPrompt", () => {
   test("no command: returns the lead's prompt unchanged", () => {
@@ -546,6 +551,19 @@ describe("createApprovalRelay (260905: unconditional ws-agent-approval push)", (
       assert.equal(pi.sent[0].message.details?.status, undefined, "Edition: no readable fan-in means no status line");
       assert.equal(pi.sent[0].message.details?.cmd_id, "call-4", "the approval itself still relays");
     });
+  });
+});
+
+describe("execute-worker registration boundary", () => {
+  test("the execute-worker's allowlist reaches the registered ws-worker-exec implementation while excluded tools stay unavailable", () => {
+    const registered = new Map<string, { name: string }>();
+    const pi = { registerTool: (tool: { name: string }) => registered.set(tool.name, tool) } as unknown as ExtensionAPI;
+    registerExecuteGateway(pi, {} as never, new Map(), { cwd: "/tmp", executeWorkerPromptPath: "/tmp/guide.md" });
+    const active = new Set(resolveTools("execute-worker").split(","));
+    assert.ok(registered.has(GATED_EXEC_TOOL_NAME), "registerExecuteGateway installs the actual gated tool implementation");
+    assert.ok(active.has(GATED_EXEC_TOOL_NAME), "the execute-worker can reach that registered implementation");
+    assert.ok(active.has("ws-report-to-lead"), "the execute-worker retains its report channel");
+    for (const unavailable of ["bash", "edit", "write", "ws-agent-spawn"]) assert.ok(!active.has(unavailable), `execute-worker must not receive ${unavailable}`);
   });
 });
 

@@ -112,7 +112,7 @@ import {
   getAgentTranscriptPath,
   listAgents,
   sendToAgent,
-  buildRpcClientOptions,
+  buildRpcClientOptions as buildRpcClientOptionsBase,
   buildChildProcessEnv,
   inheritModelFromToolCtx,
   resolveSpawnToolGroup,
@@ -125,14 +125,14 @@ import {
   WS_PI_AGENT_REGISTRY_CAP_ENV,
   DEFAULT_AGENT_REGISTRY_CAP,
   PROMPT_STORAGE_CAP_BYTES,
-  registerAgentTools,
+  registerAgentTools as registerAgentToolsBase,
   exploreLeaf,
   type AgentRecord,
   type RpcAgentRecord,
   type RpcAgentRegistry,
   type ToolGroup,
 } from "../src/spawner.ts";
-import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
+import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, type SpawnRole } from "../src/process-role.ts";
 // 260906 (registerAgentTools's role-keyed explore registration): a VALUE
 // import, not `import type` — the new describe block below monkey-patches
 // RpcClient.prototype.{start,onEvent,prompt} for the lead/fork execute() path
@@ -145,6 +145,18 @@ import type { McpStdioClient, McpToolCallResult } from "../src/mcp-stdio-client.
 import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+// Deliberately contains spaces: argv is passed as an array, so this exact
+// loaded-entry identity must reach the child without shell escaping/rebuilds.
+const TEST_EXTENSION_ENTRY = "/tmp/loaded ws adapter/index copy.ts";
+function buildRpcClientOptions(...args: any[]) {
+  return buildRpcClientOptionsBase(
+    args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], TEST_EXTENSION_ENTRY,
+  );
+}
+function registerAgentTools(pi: any, bridge: any, sessionCtx: any, ...rest: any[]) {
+  return registerAgentToolsBase(pi, bridge, { ...sessionCtx, extensionPath: sessionCtx.extensionPath ?? TEST_EXTENSION_ENTRY }, ...rest);
+}
 
 const storageRoots = new Set<string>();
 afterEach(() => {
@@ -3190,6 +3202,22 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
     }, "building RPC options never mutates the parent environment");
   });
 
+  test("every persistent role disables ambient discovery and loads exactly the captured entry without changing its tools", () => {
+    const cases: Array<{ role: SpawnRole; tools: string }> = [
+      { role: "worker", tools: "read,bash,ws-report-to-lead" },
+      { role: "execute-worker", tools: `read,${GATED_EXEC_TOOL_NAME},${REPORT_TO_LEAD_TOOL_NAME}` },
+      { role: "fork", tools: "read,ws-execute" },
+      { role: "explore", tools: "read,grep,find,ls" },
+    ];
+    for (const { role, tools } of cases) {
+      const options = buildRpcClientOptions("/repo", undefined, "/tmp/resume.jsonl", "/tmp/prompt.md", tools, undefined, undefined, role);
+      const noExtensions = options.args!.indexOf("--no-extensions");
+      assert.ok(noExtensions >= 0, `${role} disables ambient extension discovery`);
+      assert.deepEqual(options.args!.slice(noExtensions, noExtensions + 3), ["--no-extensions", "--extension", TEST_EXTENSION_ENTRY], `${role} receives the exact loaded entry path`);
+      assert.equal(options.args![options.args!.indexOf("--tools") + 1], tools, `${role} keeps its existing allowlist`);
+    }
+  });
+
   test("built options carry the worker role marker and the approvals dir derived from sessionPath's own directory", () => {
     const options = buildRpcClientOptions("/repo", "provider/model", "/tmp/ws-pi-agent-x/session.jsonl", "/tmp/system.md", "read,bash");
     assert.deepEqual(options.env, {
@@ -3226,7 +3254,7 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
       "read,bash",
       "/lead/session.jsonl",
     );
-    assert.deepEqual(options.args, ["--fork", "/lead/session.jsonl", "--session-dir", "/tmp/ws-pi-agent-w", "--extension", new URL("../src/index.ts", import.meta.url).pathname, "--tools", "read,bash"]);
+    assert.deepEqual(options.args, ["--fork", "/lead/session.jsonl", "--session-dir", "/tmp/ws-pi-agent-w", "--no-extensions", "--extension", TEST_EXTENSION_ENTRY, "--tools", "read,bash"]);
     assert.equal(options.env?.[WS_PI_SPAWN_ROLE_ENV], "fork");
   });
 
@@ -3250,7 +3278,7 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
 
   test("workers provide their owned session directory", () => {
     const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-w4/session.jsonl", "/tmp/system.md", "read");
-    assert.deepEqual(options.args, ["--session", "/tmp/ws-pi-agent-w4/session.jsonl", "--session-dir", "/tmp/ws-pi-agent-w4", "--append-system-prompt", "/tmp/system.md", "--tools", "read"]);
+    assert.deepEqual(options.args, ["--session", "/tmp/ws-pi-agent-w4/session.jsonl", "--session-dir", "/tmp/ws-pi-agent-w4", "--append-system-prompt", "/tmp/system.md", "--no-extensions", "--extension", TEST_EXTENSION_ENTRY, "--tools", "read"]);
     assert.equal(options.env?.[WS_PI_SPAWN_ROLE_ENV], "worker");
     assert.equal(options.env?.[WS_PI_PARENT_SESSION_KEY_ENV], "");
   });
@@ -3258,7 +3286,7 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
   test("260906 (lead explore as an async RPC child): spawnRoleOverride:\"explore\" wins outright over the forkFrom?fork:worker default", () => {
     const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-w5/session.jsonl", "/tmp/system.md", "read,grep,find,ls,bash", undefined, undefined, "explore");
     assert.equal(options.env?.[WS_PI_SPAWN_ROLE_ENV], "explore");
-    assert.deepEqual(options.args, ["--session", "/tmp/ws-pi-agent-w5/session.jsonl", "--session-dir", "/tmp/ws-pi-agent-w5", "--append-system-prompt", "/tmp/system.md", "--tools", "read,grep,find,ls,bash"]);
+    assert.deepEqual(options.args, ["--session", "/tmp/ws-pi-agent-w5/session.jsonl", "--session-dir", "/tmp/ws-pi-agent-w5", "--append-system-prompt", "/tmp/system.md", "--no-extensions", "--extension", TEST_EXTENSION_ENTRY, "--tools", "read,grep,find,ls,bash"]);
   });
 
   test("260906: omitting spawnRoleOverride preserves today's forkFrom?fork:worker behavior unchanged", () => {

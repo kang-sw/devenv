@@ -13,6 +13,7 @@ import { readForkLaunchContext, writePrivateJson } from "../src/fork-context.ts"
 const message = (usage: unknown = { input: 189, cacheRead: 73344 }, stopReason = "toolUse") => ({ role: "assistant", content: [], usage, stopReason });
 const event = (m = message()) => ({ type: "message_end", message: m });
 const context = { version: 1, kind: "task", effectiveSystemPrompt: "captured", activeTools: [], registeredTools: [] };
+const TEST_EXTENSION_ENTRY = "/tmp/loaded ws adapter/index copy.ts";
 function harness(recordOverrides = {}, ownerOverrides = {}) {
   const notices: string[] = [];
   const listeners: ((e: any) => void)[] = [];
@@ -127,14 +128,14 @@ test("production initial spawn attaches before prompt; live/dormant sends never 
     async prompt() { for (const fn of this.listeners) fn(event()); },
   });
   try {
-    const result = await spawnAgent(registry, { storage, pi, cwd: root, inheritModel: "offline/test", catalog: [], wsToolNames: [], client: {} as any, forkFrom: "/tmp/notice-parent.jsonl", spawnRole: "fork", forkContext: context as any, forkCacheNoticeOwner: owner }, { prompt: "task", alias: "cache-task" });
+    const result = await spawnAgent(registry, { storage, pi, cwd: root, inheritModel: "offline/test", catalog: [], wsToolNames: [], extensionPath: TEST_EXTENSION_ENTRY, client: {} as any, forkFrom: "/tmp/notice-parent.jsonl", spawnRole: "fork", forkContext: context as any, forkCacheNoticeOwner: owner }, { prompt: "task", alias: "cache-task" });
     assert.equal(notices.length, 1, "the very first prompt response is observed");
-    await sendToAgent(registry, { cwd: "/tmp", pi }, result.agent_id, "followup");
+    await sendToAgent(registry, { cwd: "/tmp", pi, extensionPath: TEST_EXTENSION_ENTRY }, result.agent_id, "followup");
     assert.equal(notices.length, 1);
     const record = registry.get(result.agent_id)!;
     assert.equal(Object.hasOwn(record, "forkCacheNoticeOwner"), false);
     record.client = undefined;
-    await sendToAgent(registry, { cwd: "/tmp", pi }, result.agent_id, "resume");
+    await sendToAgent(registry, { cwd: "/tmp", pi, extensionPath: TEST_EXTENSION_ENTRY }, result.agent_id, "resume");
     assert.equal(notices.length, 1, "new resume client has no cosmetic listener");
     assert.equal(diagnostics.mock.callCount(), 0);
   } finally {

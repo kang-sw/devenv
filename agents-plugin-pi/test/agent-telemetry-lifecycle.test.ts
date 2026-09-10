@@ -7,8 +7,13 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RpcClient, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { agentWidgetRefreshRef, attachEventListener, refreshAgentTelemetry, registerAgentTools, sendToAgent, stopAgent, type RpcAgentRecord } from "../src/spawner.ts";
+import { agentWidgetRefreshRef, attachEventListener, refreshAgentTelemetry, registerAgentTools as registerAgentToolsBase, sendToAgent, stopAgent, type RpcAgentRecord } from "../src/spawner.ts";
 import { captureOrphans, parseOrphans, rehydrateOrphanRecord, serializeOrphans } from "../src/agent-sidecar.ts";
+
+const TEST_EXTENSION_ENTRY = "/tmp/loaded ws adapter/index copy.ts";
+function registerAgentTools(pi: any, bridge: any, sessionCtx: any, ...rest: any[]) {
+  return registerAgentToolsBase(pi, bridge, { ...sessionCtx, extensionPath: sessionCtx.extensionPath ?? TEST_EXTENSION_ENTRY }, ...rest);
+}
 import { captureForkResume, createThreadRegistryHandle, hydrateThreadRegistry, rehydrateForkRecord, saveThreadRegistryFile } from "../src/ask.ts";
 import { persistShutdownAgentSnapshots } from "../src/index.ts";
 
@@ -153,7 +158,7 @@ describe("agent telemetry lifecycle at production boundaries", () => {
       assert.deepEqual(record.telemetry?.origin, { sessionId: "child", sessionPath: session, emptyPrefix: true });
       assert.equal(record.observedModel, "actual/clamped"); assert.equal(record.observedEffort, "low"); assert.deepEqual(prompts, ["first"]);
       await stopAgent(handle.rpcRegistry, record.agentId, undefined, { silent: true }); resumed = true;
-      await sendToAgent(handle.rpcRegistry, { cwd: dir }, record.agentId, "resume");
+      await sendToAgent(handle.rpcRegistry, { cwd: dir, extensionPath: TEST_EXTENSION_ENTRY }, record.agentId, "resume");
       assert.deepEqual(prompts, ["first", "resume"], "the actual dormant send path relaunches then prompts");
       assert.equal(record.observedModel, "actual/resumed"); assert.equal(record.observedEffort, "medium");
       await handle.stopAll();

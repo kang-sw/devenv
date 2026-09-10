@@ -3,11 +3,16 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { dirname } from "node:path";
 import { applyForkAffinity, captureForkContext, effectiveForkDescriptor, frameForkInput, restoreForkKeys, writePrivateJson } from "../src/fork-context.ts";
-import { buildChildProcessEnv, buildRpcClientOptions, prepareForkLaunch, validateForkReadiness } from "../src/spawner.ts";
+import { buildChildProcessEnv, buildRpcClientOptions as buildRpcClientOptionsBase, prepareForkLaunch, validateForkReadiness } from "../src/spawner.ts";
 import * as role from "../src/process-role.ts";
 import * as context from "../src/fork-context.ts";
 import { registerLeadBootstrap, type LeadPromptRef } from "../src/lead-bootstrap.ts";
 import { normalizeSessionKey } from "../src/bridge.ts";
+
+const TEST_EXTENSION_ENTRY = "/tmp/loaded ws adapter/index copy.ts";
+function buildRpcClientOptions(...args: any[]) {
+  return buildRpcClientOptionsBase(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], TEST_EXTENSION_ENTRY);
+}
 
 const fork = captureForkContext({ kind: "task", effectiveSystemPrompt: "original", parentSessionKey: "parent-key", parentPiSessionId: "parent-id", parentAffinityId: "parent-id", activeTools: ["read"], registeredTools: [{ name: "read", description: "Read", parameters: { type: "object" } }] });
 
@@ -105,12 +110,13 @@ test("C6/I1/I2: source adapter argv and canonical markers isolate every descenda
     const options = buildRpcClientOptions("/repo", undefined, "/child", "/worker-prompt", "read", undefined, undefined, spawnRole, mode);
     const merged = { ...poison, ...options.env };
     for (const key of markers) assert.equal(merged[key], "");
-    assert.deepEqual(options.args, ["--session", "/child", "--session-dir", "/", "--append-system-prompt", "/worker-prompt", "--tools", "read"]);
+    assert.deepEqual(options.args, ["--session", "/child", "--session-dir", "/", "--append-system-prompt", "/worker-prompt", "--no-extensions", "--extension", TEST_EXTENSION_ENTRY, "--tools", "read"]);
   }
   for (const source of [undefined, "/lead"]) {
     const options = buildRpcClientOptions("/repo", undefined, "/child", "/old-directive", "read", source, "original-parent", "fork");
     assert.equal(options.args?.includes("--append-system-prompt"), false);
-    assert.equal(options.args?.[options.args.indexOf("--extension") + 1], new URL("../src/index.ts", import.meta.url).pathname);
+    assert.ok(options.args?.includes("--no-extensions"));
+    assert.equal(options.args?.[options.args.indexOf("--extension") + 1], TEST_EXTENSION_ENTRY);
     assert.equal(options.env?.[role.WS_PI_PARENT_SESSION_KEY_ENV], "original-parent");
   }
 });

@@ -216,7 +216,11 @@ import { createToolPreviewTuiRef, loadToolResultTuiModules } from "./tool-result
 import { createAgentStorageContext } from "./agent-storage.ts";
 import { addClaudeDelegateIfLead, registerClaudeDelegateSession } from "./claude-delegate.ts";
 
-const srcDir = dirname(fileURLToPath(import.meta.url));
+// This is the exact physical entry module Pi loaded (whether from `-e`, an
+// installed package, or a cache). Every RPC child receives this path verbatim
+// rather than rediscovering an ambient extension copy.
+const extensionEntryPath = fileURLToPath(import.meta.url);
+const srcDir = dirname(extensionEntryPath);
 const pluginDir = dirname(srcDir); // agents-plugin-pi/
 const repoRoot = dirname(pluginDir);
 const skillsDir = resolveSkillsDir(pluginDir, repoRoot);
@@ -490,7 +494,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
         previousOwnKeys,
       });
       const approval = createApprovalRelay(pi, { cwd: ctx.cwd }, rpcRegistryRef);
-      const tools = registerAgentTools(pi, h, { cwd: ctx.cwd, storage: createAgentStorageContext(ctx.sessionManager.getSessionId()) }, approval, undefined, exploreGuidePath, toolPreviewTuiRef);
+      const tools = registerAgentTools(pi, h, { cwd: ctx.cwd, storage: createAgentStorageContext(ctx.sessionManager.getSessionId()), extensionPath: extensionEntryPath }, approval, undefined, exploreGuidePath, toolPreviewTuiRef);
       return { handle: h, agentTools: tools, onApprovalPending: approval };
     });
     if (!sessionBootstrap) return; // notified (and, for a spawned child, already exited) inside bootstrapOrFailLoud — never fall through to a partial/toolless registration.
@@ -502,6 +506,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     registerExecuteGateway(pi, handle, agentTools.rpcRegistry, {
       cwd: ctx.cwd,
       executeWorkerPromptPath: executeWorkerGuidePath,
+      extensionPath: extensionEntryPath,
       onApprovalPending,
     }, toolPreviewTuiRef);
     // 260904 Phase 1 (side-thread fork): registered declaratively/globally,
@@ -527,7 +532,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       const thread = handleForkRaisedQuestion(threadHandle, agentTools!.rpcRegistry, agentId, message, pi);
       return threadHandle.ctxRef.current?.mode === "tui" ? buildForkQuestionLeadNotice(agentId, thread.threadId) : undefined;
     };
-    registerFork(pi, handle, agentTools.rpcRegistry, { cwd: ctx.cwd, effectivePromptRef }, onForkQuestion, toolPreviewTuiRef);
+    registerFork(pi, handle, agentTools.rpcRegistry, { cwd: ctx.cwd, effectivePromptRef, extensionPath: extensionEntryPath }, onForkQuestion, toolPreviewTuiRef);
 
     // 260904 Phase 2 (owner question surface), same declarative/global
     // registration placement as registerFork above: ws-ask/ws-resolve must
@@ -610,7 +615,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       }
     }
     registerAsk(pi, threadHandle, agentTools.rpcRegistry, toolPreviewTuiRef);
-    registerThreadCommands(pi, handle, agentTools.rpcRegistry, threadHandle, { cwd: ctx.cwd, effectivePromptRef });
+    registerThreadCommands(pi, handle, agentTools.rpcRegistry, threadHandle, { cwd: ctx.cwd, extensionPath: extensionEntryPath, effectivePromptRef });
     // 260908 (subagent audit window ticket): stricter than `isLeadOrFork`
     // above — `shouldRegisterAudit` requires a true lead (no spawn-role
     // marker at all), so a fork child never registers `/audit`. Neither

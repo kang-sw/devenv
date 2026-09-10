@@ -81,7 +81,6 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -813,7 +812,9 @@ export async function exploreLeaf(
 
 /**
  * Every `new RpcClient(...)` construction passes `cliPath: process.argv[1]`
- * explicitly — spawn and resume-from-dormant alike. `RpcClient.start()` in
+ * explicitly — spawn and resume-from-dormant alike. It also receives the
+ * exact entry path captured by the loaded manifest module, with ambient
+ * extension discovery disabled, so a child cannot load a duplicate adapter. `RpcClient.start()` in
  * the installed `@earendil-works/pi-coding-agent` package always does
  * `spawn("node", [cliPath, ...args])` with `cliPath = this.options.cliPath
  * ?? "dist/cli.js"`; there is no bare-`pi` fallback inside `RpcClient`
@@ -1844,6 +1845,8 @@ export interface RpcSpawnCtx {
    */
   pi: ExtensionAPI;
   cwd: string;
+  /** Exact `fileURLToPath(import.meta.url)` captured by the loaded manifest entry. */
+  extensionPath: string;
   /** Immediate dispatcher's configured Pi home and stable current session identity. */
   storage?: AgentStorageContext;
   /** `provider/id`, forwarded from the calling tool-execute ctx.model, or undefined to inherit pi's own default. */
@@ -1934,6 +1937,8 @@ export interface RpcResumeCtx {
   /** See `RpcSpawnCtx.pi`. Optional here only because a resume can be driven from a call site with no push channel of its own; pushes are then skipped rather than erroring. */
   pi?: ExtensionAPI;
   cwd: string;
+  /** Exact loaded manifest entry path, propagated to a dormant child's replacement process. */
+  extensionPath: string;
   /** See `RpcSpawnCtx.onApprovalPending` — threaded through `sendToAgent`'s dormant-auto-resume branch so a resumed `execute-worker`'s approval relay keeps working. */
   onApprovalPending?: (record: RpcAgentRecord) => void;
   /**
@@ -2047,7 +2052,9 @@ export function buildRpcClientOptions(
   spawnRoleOverride?: SpawnRole,
   exploreMode?: ExploreMode,
   forkLaunch?: { contextPath: string; readinessPath: string; nonce: string; affinityId?: string },
+  extensionPath: string,
 ): RpcClientOptions {
+  if (!extensionPath) throw new Error("ws-pi-agent: missing loaded extension entry path for RPC child");
   const role = spawnRoleOverride ?? (forkFrom ? "fork" : "worker");
   forkLaunch = role === "fork" ? forkLaunch : undefined;
   const env: Record<string, string> = {
@@ -2068,9 +2075,10 @@ export function buildRpcClientOptions(
   for (const override of CHILD_BOOTSTRAP_OVERRIDE_ENVS) env[override] = "";
   const args = forkFrom ? ["--fork", forkFrom] : ["--session", sessionPath];
   args.push("--session-dir", dirname(sessionPath));
-  if (role === "fork") args.push("--extension", fileURLToPath(new URL("./index.ts", import.meta.url)));
-  else if (systemPromptPath) args.push("--append-system-prompt", systemPromptPath);
-  args.push("--tools", tools);
+  if (role !== "fork" && systemPromptPath) args.push("--append-system-prompt", systemPromptPath);
+  // Do not let Pi discover an installed/cache copy alongside the exact parent
+  // entry we explicitly load; `--tools` remains the sole active-surface gate.
+  args.push("--no-extensions", "--extension", extensionPath, "--tools", tools);
   return {
     cliPath: RPC_CLI_PATH,
     cwd,
@@ -2760,6 +2768,7 @@ export async function spawnAgent(
       ctx.spawnRole === "explore" ? "explore" : undefined,
       ctx.exploreMode,
       forkLaunch,
+      ctx.extensionPath,
     ),
   );
   record.client = client;
@@ -2892,6 +2901,7 @@ export async function sendToAgent(
         record.spawnRole === "fork" ? "fork" : record.spawnRole === "explore" ? "explore" : "worker",
         record.exploreMode,
         forkLaunch,
+        ctx.extensionPath,
       ),
     );
     record.client = client;
@@ -3199,7 +3209,7 @@ export interface AgentToolsHandle {
 export function registerAgentTools(
   pi: ExtensionAPI,
   bridge: BridgeHandle,
-  sessionCtx: { cwd: string; storage?: AgentStorageContext },
+  sessionCtx: { cwd: string; storage?: AgentStorageContext; extensionPath: string },
   /**
    * 260904 Phase 1: see `RpcSpawnCtx.onApprovalPending`'s doc comment.
    * Threaded into both `ws-agent-spawn`'s `spawnAgent` call and
@@ -3323,6 +3333,7 @@ export function registerAgentTools(
           catalog: modelCatalogFromToolCtx(toolCtx),
           notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx),
           wsToolNames: bridge.wsToolNames,
+          extensionPath: sessionCtx.extensionPath,
           client: bridge.client,
           onApprovalPending,
           onModelResolved: (resolved) => {
@@ -3367,7 +3378,7 @@ export function registerAgentTools(
       // `RpcResumeCtx.leadSend`), unlike ask.ts's overlay channel.
       const result = await sendToAgent(
         rpcRegistry,
-        { pi, cwd: sessionCtx.cwd, onApprovalPending, leadSend: true },
+        { pi, cwd: sessionCtx.cwd, extensionPath: sessionCtx.extensionPath, onApprovalPending, leadSend: true },
         p.agent_id,
         p.message,
         p.interrupt,
@@ -3511,7 +3522,7 @@ export function registerAgentTools(
             {
               pi, cwd: sessionCtx.cwd, storage: sessionCtx.storage ?? storageContextFromToolCtx(toolCtx), inheritModel: mode === "deep" ? inherited : inheritModelFromToolCtx(toolCtx),
               catalog: mode === "simple" ? modelCatalogFromToolCtx(toolCtx) : [],
-              notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx), wsToolNames: bridge.wsToolNames, client: bridge.client,
+              notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx), wsToolNames: bridge.wsToolNames, extensionPath: sessionCtx.extensionPath, client: bridge.client,
               toolGroup: mode === "deep" ? "read-only-explore" : "read-only", spawnRole: "explore", exploreMode: mode,
               requireTier: mode === "simple", aliasPrefix: "explore", onApprovalPending,
               onModelResolved: (resolved) => {

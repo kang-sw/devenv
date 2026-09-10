@@ -874,6 +874,8 @@ function nowIso(): string {
 
 export interface AskSessionCtx {
   cwd: string;
+  /** Exact manifest entry module loaded by this parent, used by dormant fork resumes. */
+  extensionPath: string;
   effectivePromptRef?: LeadPromptRef;
 }
 
@@ -1163,7 +1165,7 @@ export function resolveChildLiveness(streaming: boolean): ChildLiveness {
   return streaming ? "running" : "settled";
 }
 
-function createForkChannel(pi: ExtensionAPI, rpcRegistry: RpcAgentRegistry, cwd: string, agentId: string): ConversationChannel {
+function createForkChannel(pi: ExtensionAPI, rpcRegistry: RpcAgentRegistry, cwd: string, extensionPath: string, agentId: string): ConversationChannel {
   const listeners = new Set<(evt: unknown) => void>();
   let attached: unknown;
   let detach: (() => void) | undefined;
@@ -1196,7 +1198,7 @@ function createForkChannel(pi: ExtensionAPI, rpcRegistry: RpcAgentRegistry, cwd:
       return resolveChildLiveness(rpcRegistry.get(agentId)?.streaming === true);
     },
     async send(text) {
-      await sendToAgent(rpcRegistry, { pi, cwd }, agentId, text, resolveOwnerSendInterrupt(rpcRegistry.get(agentId)?.streaming === true));
+      await sendToAgent(rpcRegistry, { pi, cwd, extensionPath }, agentId, text, resolveOwnerSendInterrupt(rpcRegistry.get(agentId)?.streaming === true));
       sync();
     },
   };
@@ -1388,6 +1390,7 @@ export async function ensureRespondent(
       catalog: modelCatalogFromToolCtx(ctx),
       notifyTierWarning: tierWarningNotifierFromToolCtx(ctx),
       wsToolNames: bridge.wsToolNames,
+      extensionPath: sessionCtx.extensionPath,
       client: bridge.client,
       forkFrom,
       forkSourceEntries: captureUnflushedForkSource(ctx),
@@ -1642,7 +1645,7 @@ async function openThread(
   const attachedRecord = rpcRegistry.get(agentId);
   if (attachedRecord) attachedRecord.overlayAttached = true;
 
-  const channel = createForkChannel(pi, rpcRegistry, sessionCtx.cwd, agentId);
+  const channel = createForkChannel(pi, rpcRegistry, sessionCtx.cwd, sessionCtx.extensionPath, agentId);
   // The transcript lives on the record, not in the view: restored here (or
   // seeded from the question when there is no transcript yet), and persisted
   // on every append so Esc/reopen and a lead restart both show the

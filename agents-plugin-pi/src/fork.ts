@@ -318,6 +318,8 @@ export function buildForkInitialMessage(leadPrompt: string): string {
 
 export interface ForkSessionCtx {
   cwd: string;
+  /** Exact manifest entry module loaded by this parent, passed to every fork. */
+  extensionPath: string;
   effectivePromptRef?: LeadPromptRef;
 }
 
@@ -586,6 +588,7 @@ export function buildForkSpawnCtx(
     // Load-bearing: the fork's whole report channel back to the lead.
     pi,
     cwd: sessionCtx.cwd,
+    extensionPath: sessionCtx.extensionPath,
     inheritModel: opts.inheritModel,
     catalog: opts.catalog,
     notifyTierWarning: opts.notifyTierWarning,

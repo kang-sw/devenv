@@ -66,13 +66,18 @@ import {
   armForkRoleWiring,
   buildForkSpawnCtx,
 } from "../src/fork.ts";
-import { registerFork } from "../src/fork.ts";
+import { registerFork as registerForkBase } from "../src/fork.ts";
 import { leadIdleRef, registerPushFlush, applyRpcEvent, attachEventListener, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV } from "../src/process-role.ts";
 import type { BridgeHandle } from "../src/bridge.ts";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+
+const TEST_EXTENSION_ENTRY = "/tmp/loaded ws adapter/index copy.ts";
+function registerFork(pi: any, bridge: any, registry: any, sessionCtx: any, ...rest: any[]) {
+  return registerForkBase(pi, bridge, registry, { ...sessionCtx, extensionPath: sessionCtx.extensionPath ?? TEST_EXTENSION_ENTRY }, ...rest);
+}
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 

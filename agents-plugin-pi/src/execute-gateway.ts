@@ -528,6 +528,8 @@ export function waitForDecisionFile(path: string, signal: AbortSignal | undefine
 
 export interface ExecuteGatewaySessionCtx {
   cwd: string;
+  /** Exact manifest entry module loaded by this parent, passed to every execute-worker. */
+  extensionPath: string;
   /** Fixed, adapter-authored execute-worker system prompt (execute-worker-guide.md) — NOT lead-rendered, see that file's header comment. */
   executeWorkerPromptPath: string;
   /** See spawner.ts's `RpcSpawnCtx.onApprovalPending` — threaded into every `spawnAgent` call this module makes for `ws-execute`. */
@@ -680,6 +682,7 @@ export function registerExecuteGateway(
           catalog: modelCatalogFromToolCtx(toolCtx),
           notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx),
           wsToolNames: bridge.wsToolNames,
+          extensionPath: sessionCtx.extensionPath,
           client: bridge.client,
           toolGroup: "execute-worker",
           onApprovalPending: sessionCtx.onApprovalPending,
