@@ -182,10 +182,9 @@ Prefer:
 Use native Git only for operations without an exposed ws primitive, such as
 branch creation, tag push, merge execution, or path-filtered file history.
 
-`impl/*` and `goal/*` are workflow-owned branches carrying plan, review, and
-doc-closeout history: merge them with `git merge --no-ff` by default, and
-squash instead only when the branch is one logical change with noisy or
-dependent commits.
+`impl/*` and `goal/*` are workflow-owned branches carrying plan and review
+history: merge them with `git merge --no-ff` by default, and squash instead
+only when the branch is one logical change with noisy or dependent commits.
 
 ### API documentation
 

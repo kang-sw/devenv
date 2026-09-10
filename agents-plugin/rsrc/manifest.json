@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "files": {
-    "code-review-correctness/code-review-correctness.md": "b04521c764f885c8c654fd8c03999e6328d7d426d1b8743b5964b48732bf62c3",
+    "code-review-correctness/code-review-correctness.md": "9a37a714215f7456f90c8c72440de9831e66b5369276e839b2517dd6d19ad9f3",
     "code-review-fit/code-review-fit.md": "14887cd488fdc5fc750f2507161b1698de152f35a302b7b8f253ced09ea4fe72",
     "code-review-test/code-review-test.md": "97d1527dec453c47106297d8f4fd9516ce65f61abeb68949607a31c25dab5bce",
     "code-reviewer.md": "96490edca00819b56828b3c6f92c48f4ba22c1a304447950c527022ad81edf4f",
@@ -31,7 +31,7 @@
     "lead-ticket/task-list.md": "ae2ebfbd6992970db2f4430042dcfc386a7ef7913371e340f6a65d80066793f0",
     "lead-tune/lead-tune.md": "19c6d3f5a53c27789b22883867ed31007e007d556523627b6082a17187dc0940",
     "lead-update-spec/lead-update-spec.md": "291943c68fb512c6fbaeee40b208699a257467e4df37d2c0985acfdc6315880a",
-    "lead-workflow-manual/lead-workflow-manual.md": "f946ec1d4a245943629be059e085922ad4c40a8f41ad76ef795962f1ce1fa516",
+    "lead-workflow-manual/lead-workflow-manual.md": "d8ae82b31f7a8aebf53a49a8a429a22ee02eeabf8f662f1b775be880b4f3d1c8",
     "lead-workflow-manual/native-spawn-binding.codex.md": "d89b7c7f6f59d8d1cd50b3fe15e1fb1c689aafa55a1f81e56b8c200c97a3edb7",
     "lead-workflow-manual/native-spawn-binding.md": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "lead-write-spec/lead-write-spec.md": "9c9b3a4b65651f64283333bc15ab2e6e8ecb156d8f5d99ca2e33a951ccbdef2f",
