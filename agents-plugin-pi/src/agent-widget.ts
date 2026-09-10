@@ -84,9 +84,16 @@ export interface AgentRow {
 
 const BOLD = "\u001b[1m";
 const RESET = "\u001b[22m";
+const OWNER_ACTION_COLORS = ["error", "warning", "accent"] as const;
+type OwnerActionColor = (typeof OWNER_ACTION_COLORS)[number];
 
 function bold(text: string, enabled: boolean): string {
   return enabled ? `${BOLD}${text}${RESET}` : text;
+}
+
+/** The owner-action identity is the only non-telemetry span that changes semantic foreground. */
+function semanticBold(text: string, color: OwnerActionColor, theme: AgentWidgetTheme | undefined): string {
+  return bold(theme?.fg(color, text) ?? text, true);
 }
 
 /** Removes terminal/control input before it reaches a TUI row. */
@@ -234,7 +241,7 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
   for (const thread of threads) {
     if (!isLiveThreadStatus(thread.status) || coveredThreadIds.has(thread.threadId)) continue;
     rows.push({
-      name: thread.title,
+      name: sanitizeDisplayTitle(thread.title, thread.threadId),
       role: "thread",
       state: "awaiting-owner",
       elapsedMs: clampElapsed(now - Date.parse(thread.touchedAt)),
@@ -283,8 +290,14 @@ function formatEstimatedUsd(usd: number | undefined): string {
   return String(Number(usd.toFixed(3)));
 }
 
-function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, emphasizeAttention = false, theme?: AgentWidgetTheme): string {
-  const primary = row.answerHint ? `/answer ${row.answerDisplay ?? row.name}` : row.name;
+function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActionColor: OwnerActionColor | undefined, theme?: AgentWidgetTheme): string {
+  const ownerAction = isAttentionState(row.state);
+  const actionTitle = sanitizeDisplayTitle(row.answerDisplay ?? row.name, row.answerHint ?? row.name);
+  const primary = row.answerHint
+    ? `⚠ OWNER ACTION · /answer ${actionTitle}`
+    : ownerAction
+      ? `⚠ OWNER ACTION · ${sanitizeDisplayTitle(row.name, "owner action")}`
+      : row.name;
   const stateLabel = STATE_LABEL[row.state];
   const base = `${primary} · ${row.role} · ${stateLabel} · ${formatCompactDuration(row.elapsedMs)}`;
   const model = row.model ?? "—";
@@ -324,21 +337,13 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, emphasizeA
       theme.fg("warning", estimate);
     content = base + styledTelemetry;
   }
-  if (emphasizeAttention && isAttentionState(row.state) && content.length > 0) {
-    if (row.answerHint) {
-      // The question cue is the first structured field. Its visible prefix is
-      // the only styled part even if width truncation removes later fields.
-      const cueEnd = Math.min(content.length, primary.length);
-      content = bold(content.slice(0, cueEnd), true) + content.slice(cueEnd);
-    } else {
-      // State begins after fixed, structured name and role fields. Never search
-      // rendered text: names may contain the state label or separator glyphs.
-      const stateStart = primary.length + 3 + row.role.length + 3;
-      const stateEnd = stateStart + stateLabel.length;
-      if (content.length >= stateEnd) {
-        content = content.slice(0, stateStart) + bold(stateLabel, true) + content.slice(stateEnd);
-      }
-    }
+  if (ownerActionColor && ownerAction && content.length > 0) {
+    // The owner-action identity/cue is the first structured field. It stays
+    // bold in every color phase; role, state, separators, and telemetry retain
+    // their existing semantic styling. Styling after truncation avoids partial
+    // escape sequences at narrow widths.
+    const cueEnd = Math.min(content.length, primary.length);
+    content = semanticBold(content.slice(0, cueEnd), ownerActionColor, theme) + content.slice(cueEnd);
   }
   return content + suffix;
 }
@@ -371,11 +376,13 @@ function truncateToWidth(text: string, width: number): string {
  * `buildAgentRows` already produced) plus ` · M question(s)` only while
  * `pendingCount > 0`. It is shown whenever rows or pending questions exist.
  */
-export function buildHeadingLine(rows: readonly AgentRow[], pendingCount: number, width: number = DEFAULT_AGENT_WIDGET_WIDTH, emphasizeAttention = false): string | undefined {
+export function buildHeadingLine(rows: readonly AgentRow[], pendingCount: number, width: number = DEFAULT_AGENT_WIDGET_WIDTH, emphasizeAttention = false, theme?: AgentWidgetTheme, ownerActionColor: OwnerActionColor = "error"): string | undefined {
   if (rows.length === 0 && pendingCount <= 0) return undefined;
   const questionPart = pendingCount > 0 ? ` · ${pendingCount} question${pendingCount === 1 ? "" : "s"}` : "";
-  const heading = `ws: ${rows.length} agents${questionPart}`;
-  return bold(truncateToWidth(heading, width), emphasizeAttention && rows.some((row) => isAttentionState(row.state)));
+  const heading = truncateToWidth(`ws: ${rows.length} agents${questionPart}`, width);
+  return emphasizeAttention && rows.some((row) => isAttentionState(row.state))
+    ? semanticBold(heading, ownerActionColor, theme)
+    : heading;
 }
 
 /**
@@ -387,9 +394,9 @@ export function buildHeadingLine(rows: readonly AgentRow[], pendingCount: number
  * `truncateToWidth`. `undefined` only when rows and pending questions are
  * both absent.
  */
-export function buildWidgetLines(rows: readonly AgentRow[], pendingCount: number, width: number = DEFAULT_AGENT_WIDGET_WIDTH, emphasizeAttention = false, theme?: AgentWidgetTheme): string[] | undefined {
+export function buildWidgetLines(rows: readonly AgentRow[], pendingCount: number, width: number = DEFAULT_AGENT_WIDGET_WIDTH, emphasizeAttention = false, theme?: AgentWidgetTheme, ownerActionColor: OwnerActionColor = "error"): string[] | undefined {
   const emphasizeOwnerAttention = emphasizeAttention && rows.some((row) => isAttentionState(row.state));
-  const heading = buildHeadingLine(rows, pendingCount, width, emphasizeOwnerAttention);
+  const heading = buildHeadingLine(rows, pendingCount, width, emphasizeOwnerAttention, theme, ownerActionColor);
   if (heading === undefined) return undefined;
 
   const awaiting = rows.filter((row) => row.state !== "running");
@@ -405,7 +412,7 @@ export function buildWidgetLines(rows: readonly AgentRow[], pendingCount: number
     hiddenRunning = running.length - runningSlots;
   }
 
-  const lines = [heading, ...shown.map((row) => formatRow(row, width, emphasizeOwnerAttention && isAttentionState(row.state), theme))];
+  const lines = [heading, ...shown.map((row) => formatRow(row, width, emphasizeOwnerAttention && isAttentionState(row.state) ? ownerActionColor : undefined, theme))];
   if (hiddenRunning > 0) lines.push(truncateToWidth(`+${hiddenRunning} more`, width));
   return lines;
 }
@@ -440,9 +447,9 @@ export interface AgentWidgetComponent {
   invalidate(): void;
 }
 
-/** Theme subset used by the widget's semantic telemetry accents. */
+/** Theme subset used by the widget's semantic owner-action and telemetry accents. */
 export interface AgentWidgetTheme {
-  fg(color: "accent" | "dim" | "syntaxNumber" | "warning", text: string): string;
+  fg(color: "error" | "warning" | "accent" | "dim" | "syntaxNumber", text: string): string;
 }
 
 function asAgentWidgetTheme(theme: unknown): AgentWidgetTheme | undefined {
@@ -501,7 +508,7 @@ export interface AgentWidgetControllerOptions {
 export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: RpcAgentRegistry, threads: Map<string, ThreadRecord>, options: AgentWidgetControllerOptions = {}): AgentWidgetController {
   let timer: ReturnType<typeof setInterval> | undefined;
   let attentionTimer: ReturnType<typeof setInterval> | undefined;
-  let attentionPhase = true;
+  let attentionPhase = 0;
 
   function clearAttentionTimer(): void {
     if (attentionTimer) {
@@ -518,7 +525,9 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
     const qualifying = rows.some((row) => isAttentionState(row.state));
     const animationEnabled = options.animationEnabled?.() !== false;
     const animate = options.ownerLead === true && animationEnabled && qualifying;
-    const emphasize = qualifying && (!animationEnabled || (animate && attentionPhase));
+    const ownerActionColor = qualifying && (!animationEnabled || animate)
+      ? (animationEnabled ? OWNER_ACTION_COLORS[attentionPhase] : "error")
+      : undefined;
     try {
       // 260905 review relay #1 (Important #3): pass the factory overload, not
       // a pre-rendered line array, so `render(width)` is called by the host
@@ -530,7 +539,7 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
       ctx.ui?.setWidget?.(
         AGENT_WIDGET_KEY,
         visible ? (_tui, theme) => ({
-          render: (width: number) => buildWidgetLines(rows, pendingCount, width, emphasize, asAgentWidgetTheme(theme)) ?? [],
+          render: (width: number) => buildWidgetLines(rows, pendingCount, width, ownerActionColor !== undefined, asAgentWidgetTheme(theme), ownerActionColor ?? "error") ?? [],
           // Rendering is stateless and consults the live Theme object each time.
           invalidate() {},
         }) : undefined,
@@ -555,12 +564,12 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
     }
     if (animate && !attentionTimer) {
       attentionTimer = setInterval(() => {
-        attentionPhase = !attentionPhase;
+        attentionPhase = (attentionPhase + 1) % OWNER_ACTION_COLORS.length;
         paint();
       }, AGENT_WIDGET_ATTENTION_TICK_MS);
       attentionTimer.unref?.();
     } else if (!animate) {
-      attentionPhase = true;
+      attentionPhase = 0;
       clearAttentionTimer();
     }
   }

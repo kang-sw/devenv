@@ -190,12 +190,12 @@ describe("buildAgentRows", () => {
 
 describe("buildWidgetLines", () => {
   test("owner-question display titles are sanitized and width-bound while qN remains the only command hint", () => {
-    const title = "very long\u001b[31m owner\nquestion title that must truncate";
+    const title = "very long\u001b[31m owner\nquestion\u0000 title that must truncate";
     const rows = buildAgentRows(registryOf(), [thread({ threadId: "q42", title })], NOW);
-    for (const width of [40, 80, 120]) {
+    for (const width of [0, 1, 8, 40, 80, 120]) {
       const line = buildWidgetLines(rows, 1, width, true)![1];
-      assert.ok(!line.includes("\u001b[31m"), `injected SGR is absent at ${width}`);
-      assert.match(line, /\/answer q42$/, `qN survives at ${width}`);
+      assert.ok(!line.includes("\u001b[31m") && !line.includes("\u0000") && !line.includes("\n"), `control input is absent at ${width}`);
+      if (width >= 40) assert.match(line, /\/answer q42$/, `qN survives at ${width}`);
       assert.ok(visibleWidth(line) <= width, `display fits at ${width}`);
     }
   });
@@ -208,7 +208,7 @@ describe("buildWidgetLines", () => {
     assert.ok(!approval.includes("/answer"));
   });
 
-  test("attention styles only owner-answer cue fields; approval identity and status remain ordinary", () => {
+  test("owner actions have a labeled semantic cue while approval identity, telemetry, and qN remain ordinary", () => {
     const question = {
       name: "worker",
       role: "fork" as const,
@@ -222,17 +222,20 @@ describe("buildWidgetLines", () => {
       estimatedUsd: .1,
     };
     const approval = { name: "awaiting approval audit", role: "execute" as const, state: "awaiting-approval" as const, elapsedMs: 3_000, model: "test-model", effort: "high", latestInput: 42, estimatedUsd: .1 };
-    const animated = buildWidgetLines([question, approval], 1, 180, true)!;
-    assert.equal(animated[1], "\u001b[1m/answer Choose — database\u001b[22m · fork · awaiting owner · 3s · test-model (high) · 0.0k · $0.1 — /answer q7");
+    const semanticCalls: Array<[string, string]> = [];
+    const theme = { fg(color: "error" | "warning" | "accent" | "dim" | "syntaxNumber", text: string) { semanticCalls.push([color, text]); return text; } };
+    const animated = buildWidgetLines([question, approval], 1, 180, true, theme)!;
+    assert.equal(animated[1], "\u001b[1m⚠ OWNER ACTION · /answer Choose — database\u001b[22m · fork · awaiting owner · 3s · test-model (high) · 0.0k · $0.1 — /answer q7");
     assert.equal(animated[2], "awaiting approval audit · execute · awaiting approval · 3s · test-model (high) · 0.0k · $0.1");
+    assert.deepEqual(semanticCalls.filter(([, text]) => text.startsWith("⚠ OWNER ACTION") || text.startsWith("ws:")), [["error", "ws: 2 agents · 1 question"], ["error", "⚠ OWNER ACTION · /answer Choose — database"]]);
     assert.ok(!animated[1].slice(animated[1].indexOf(" · fork")).includes("\u001b[1m"), "role, elapsed, telemetry, separators, and qN stay plain");
     assert.ok(!animated[2].includes("\u001b[1m"), "approval remains entirely ordinary even beside an animated question");
   });
 
-  test("a supplied future idle-awaiting-owner row emphasizes its state and preserves only its supplied inspection hint", () => {
+  test("an owner-held row without qN receives an honest labeled inspection presentation", () => {
     const row = { name: "parked reviewer", role: "fork" as const, state: "idle-awaiting-owner" as const, elapsedMs: 3_000, inspectionHint: "/audit reviewer" };
     const line = buildWidgetLines([row], 0, 120, true)![1];
-    assert.equal(line, "parked reviewer · fork · \u001b[1midle awaiting owner\u001b[22m · 3s · — (—) · — · $— — /audit reviewer");
+    assert.equal(line, "\u001b[1m⚠ OWNER ACTION · parked reviewer\u001b[22m · fork · idle awaiting owner · 3s · — (—) · — · $— — /audit reviewer");
     assert.ok(!line.includes("/answer"), "presentation never fabricates an answer target for an owner-held idle row");
   });
 
@@ -385,7 +388,7 @@ describe("buildHeadingLine", () => {
 });
 
 describe("createAgentWidgetController", () => {
-  test("only owner-answer waits pulse at 330ms; approval-only state remains ordinary and disarms the timer", (t) => {
+  test("owner-answer waits cycle error, warning, accent at 330ms; disabled state is static error and approval remains ordinary", (t) => {
     const waiting = record({ agentId: "aaaaaaaa-0000-0000-0000-000000000000", threadBound: true });
     const approval = record({ agentId: "bbbbbbbb-0000-0000-0000-000000000000", pendingApproval: { cmdId: "a", command: "x" } });
     const threads = new Map([["q1", thread({ respondentAgentId: waiting.agentId, title: "owner needs this" })]]);
@@ -395,6 +398,8 @@ describe("createAgentWidgetController", () => {
     let next = 1;
     let widget: ((tui: unknown, theme: unknown) => { render(width: number): string[] }) | undefined;
     let enabled = true;
+    const semanticCalls: Array<[string, string, string]> = [];
+    const themed = (name: string) => ({ fg(color: string, text: string) { semanticCalls.push([name, color, text]); return text; } });
     t.mock.method(global, "setInterval", ((callback: () => void, ms: number) => {
       const id = next++; callbacks.set(id, callback); schedules.push({ id, ms }); return { id, unref() {} } as never;
     }) as typeof setInterval);
@@ -406,17 +411,21 @@ describe("createAgentWidgetController", () => {
     controller.refresh();
     assert.equal(AGENT_WIDGET_ATTENTION_TICK_MS, 330, "the ticket cadence is literal, not merely self-referential");
     assert.deepEqual(schedules.map(({ ms }) => ms).sort((a, b) => a - b), [330, AGENT_WIDGET_TICK_MS]);
-    const initial = widget!({}, {}).render(120).join("\n");
-    assert.match(initial, /\u001b\[1mws: 2 agents/);
-    assert.match(initial, /\u001b\[1m\/answer owner needs this/);
-    assert.doesNotMatch(initial, /\u001b\[1mawaiting approval/, "approval never joins the owner-answer pulse");
+    const renderPhase = (themeName: string, color: string, title = "owner needs this") => {
+      semanticCalls.length = 0;
+      const output = widget!({}, themed(themeName)).render(120).join("\n");
+      assert.match(output, /\u001b\[1mws: 2 agents/, "heading is bold in every phase");
+      assert.match(output, new RegExp(`\\u001b\\[1m⚠ OWNER ACTION · /answer ${title}`), "cue is bold and explicitly labeled in every phase");
+      assert.doesNotMatch(output, /\u001b\[1mawaiting approval/, "approval never joins the owner-action cycle");
+      assert.ok(semanticCalls.some(([theme, actual, text]) => theme === themeName && actual === color && text.startsWith("ws:")), `${color} styles the heading through the current theme`);
+      assert.ok(semanticCalls.some(([theme, actual, text]) => theme === themeName && actual === color && text.startsWith("⚠ OWNER ACTION")), `${color} styles only the owner cue through the current theme`);
+    };
+    renderPhase("first-theme", "error");
     const attentionId = schedules.find(({ ms }) => ms === 330)!.id;
-    const attention = [attentionId, callbacks.get(attentionId)!] as const;
-    attention[1]();
-    const plain = widget!({}, {}).render(120).join("\n");
-    assert.ok(!plain.includes("\u001b[1m"), "the plain phase has no emphasis");
-    assert.match(plain, /\/answer owner needs this.*\/answer q1/, "the question cue remains visible in the plain phase");
-    assert.match(plain, /awaiting approval/, "the approval state remains visible in the plain phase");
+    callbacks.get(attentionId)!();
+    renderPhase("mutated-theme", "warning");
+    callbacks.get(attentionId)!();
+    renderPhase("mutated-theme", "accent");
     threads.clear(); waiting.threadBound = false;
     controller.refresh();
     assert.ok(cleared.includes(attentionId), "resolving the last question clears the timer even while approval remains");
@@ -427,9 +436,7 @@ describe("createAgentWidgetController", () => {
     threads.set("q2", thread({ threadId: "q2", title: "static wait" }));
     controller.refresh();
     assert.equal(schedules.filter(({ ms }) => ms === 330).length, 1, "disabled config never re-arms animation");
-    const disabled = widget!({}, {}).render(120).join("\n");
-    assert.match(disabled, /\u001b\[1m\/answer static wait/, "disabled animation uses static owner-answer emphasis");
-    assert.doesNotMatch(disabled, /\u001b\[1mawaiting approval/, "disabled mode keeps approval ordinary");
+    renderPhase("disabled-theme", "error", "static wait");
     controller.stop();
   });
 
