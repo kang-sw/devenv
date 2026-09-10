@@ -140,13 +140,17 @@ removed.
    is a test. Key decisions are encoded at ticket authoring; the sage-stamped
    ticket carries the route facts. A behavior change with no test change is
    a review finding, replacing the retired spec-drift check.
-4. **Worker as interpreter.** The worker is a native-harness subagent of at
-   least current-mainstream or previous-generation-flagship class, spawned
-   with a lead-capability child key (`ferrule(capability: "lead",
-   parent_session_key: ...)`), and executes the whole ticket. The lead never
-   edits source and never reads procedure playbooks. Spawn depth is
-   recommended at one level (worker spawns Explore-class children for
-   survey and review); deeper nesting is discouraged in prose, not blocked.
+4. **Worker as interpreter.** The worker is a native-harness subagent whose
+   initial tier follows the sage-reviewed ticket risk: `low` or `moderate`
+   routes to medium, and `high` routes to large. For ad-hoc contracts the lead
+   makes the equivalent binary judgment (`routine` -> medium, `difficult` ->
+   large). A stop-(e) escalation raises medium to large or large to xlarge.
+   The worker is spawned with a lead-capability child key
+   (`ferrule(capability: "lead", parent_session_key: ...)`) and executes the
+   whole ticket. The lead never edits source and never reads procedure
+   playbooks. Spawn depth is recommended at one level (worker spawns
+   Explore-class children for survey and review); deeper nesting is discouraged
+   in prose, not blocked.
 5. **Closed stop list.** The worker stops only on: (a) a merge into a
    parent branch: the goal branch `goal/<parent>/<stem>` merging into
    `<parent>` requires user approval whatever `<parent>` is, because the

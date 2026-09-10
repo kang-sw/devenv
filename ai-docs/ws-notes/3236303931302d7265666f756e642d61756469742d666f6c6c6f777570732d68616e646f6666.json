@@ -1,7 +1,0 @@
-{
-  "key": "260910-refound-audit-followups-handoff",
-  "value": "TOP PRIORITY next: promote these three populated idea tickets to ready/ (Route Facts already populated; sage gate + design/completeness review + stamp, then commit/push on epic/refound):\n  1. 260910-chore-design-review-ready-inventory-contradiction-anchor\n  2. 260910-refactor-risk-route-worker-tier-medium-large\n  3. 260910-chore-prune-dead-workflow-remnants\nExcluded (not yet ready-bound): 260910-feat-lead-run-worktree-parallel-route (still idea, no Route Facts).\nContext: all four captured from an interactive source-audit of the run/worker workflow before the epic/refound -\u003e develop merge; each ticket's Background carries file:line evidence. The prune ticket's items 3-4 are decision-gated (item 3 landing-order vs 260726-feat-enter-verdict-scenario-output; item 4 todo-landing design-gate API semantics) - only items 1-2 land unconditionally.",
-  "priority": 90,
-  "written_at": "2026-09-10T08:32:34Z",
-  "visible": true
-}

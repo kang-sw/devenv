@@ -3,6 +3,10 @@ title: "Prune dead workflow remnants surfaced by the refoundation audit: stale m
 related:
   260726-feat-enter-verdict-scenario-output: landing-order; that ticket (todo, sage-design passed) plans to keep doc_mode as a live verdict axis, so item 3's removal must sequence behind or reconcile with it
   260626-bug-sage-review-config-setter-missing: overlap; both touch sage_review_completeness (item 2), no hard conflict
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: f5aa8c5eadbfc1cd
+sage-review-completeness-reviewed: f5aa8c5eadbfc1cd
 ---
 
 # Prune dead workflow remnants surfaced by the refoundation audit

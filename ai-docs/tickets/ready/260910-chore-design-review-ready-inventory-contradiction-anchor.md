@@ -1,5 +1,9 @@
 ---
 title: "Anchor the design-review contradiction check on the ready/ inventory plus the parent epic, dropping the model-authored related: marker"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 12dd1b397df7223c
+sage-review-completeness-reviewed: 12dd1b397df7223c
 ---
 
 # Anchor the design-review contradiction check on the ready/ inventory plus the parent epic, dropping the model-authored related: marker
@@ -87,3 +91,8 @@ delegate; confirm whether the reviewer role may enumerate `ready/` itself (e.g.
 reviewer a `ready/` digest at spawn time. Prefer the reviewer reading the
 inventory directly if the role allows it; fall back to a spawn-time digest only
 if it does not. Update the reviewer playbook's Inputs/Constraints accordingly.
+
+Verify the rendered design-reviewer prompt instructs the reviewer to compare
+against the current `ready/` inventory and the named parent epic, does not use
+`related:` as an independent contradiction anchor, and keeps the ws and wsflow
+copies byte-identical.
