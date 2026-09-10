@@ -88,9 +88,14 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
       async start(this: any) {
         const args = this.options.args; const env = this.options.env;
         assert.equal(args.includes("--append-system-prompt"), false);
-        assert.equal(args[args.indexOf("--extension") + 1], join(plugin, "src/index.ts"));
+        const extension = args.indexOf("--extension");
+        assert.ok(args.includes("--no-extensions"), "RPC children disable ambient extension discovery");
+        assert.deepEqual(args.slice(extension - 1, extension + 2), ["--no-extensions", "--extension", join(plugin, "src/index.ts")]);
+        assert.equal(args.filter((arg: string) => arg === "--extension").length, 1, "the child loads exactly one adapter entry");
         const fork = args.indexOf("--fork");
-        const sm = fork >= 0 ? sdk.SessionManager.forkFrom(args[fork + 1], directory, join(directory, "sessions")) : sdk.SessionManager.open(args[args.indexOf("--session") + 1]);
+        const sessionDir = args.indexOf("--session-dir");
+        assert.ok(sessionDir >= 0, "the RPC argv owns its child session directory");
+        const sm = fork >= 0 ? sdk.SessionManager.forkFrom(args[fork + 1], directory, args[sessionDir + 1]) : sdk.SessionManager.open(args[args.indexOf("--session") + 1]);
         this.harness = await makeSession(sm, env, args[args.indexOf("--tools") + 1].split(","), "CHANGED CHILD APPEND");
         const sourcePath = fork >= 0 ? args[fork + 1] : sm.getSessionFile();
         const sourceId = JSON.parse(readFileSync(sourcePath, "utf8").split("\n")[0]).id;
@@ -153,11 +158,12 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
       const threadsBeforeRefusals = threadSnapshot();
       const listTool = child.session.agent.state.tools.find((t: any) => t.name === "ws-agent-list");
       const registryBeforeRefusals = await withEnv(child.env, () => listTool.execute("list", {}));
-      for (const name of ["ws-fork", "ws-ask", "ws-resolve"]) await withEnv(child.env, async () => {
-        const tool = child.session.agent.state.tools.find((t: any) => t.name === name);
-        assert.ok(tool, `${name} remains callable`);
-        await assert.rejects(() => tool.execute("refuse", {}), /unavailable in a fork/);
-      });
+      const nestedFork = child.session.agent.state.tools.find((tool: any) => tool.name === "ws-fork");
+      assert.ok(nestedFork, "the inherited fork tool remains active so its role handler can refuse recursive forks");
+      await withEnv(child.env, () => assert.rejects(() => nestedFork.execute("refuse", {}), /unavailable in a fork/));
+      for (const name of ["ws-ask", "ws-resolve"]) {
+        assert.equal(child.session.agent.state.tools.find((tool: any) => tool.name === name), undefined, `${name} is excluded from the inherited --tools allowlist`);
+      }
       assert.equal(children.length, callsBefore);
       assert.deepEqual(child.sm.getEntries(), entriesBeforeRefusals, "refusals do not mutate session state");
       assert.equal(threadSnapshot(), threadsBeforeRefusals, "refusals do not mutate the thread store");
@@ -188,12 +194,17 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
         await stop(resumed);
       }
       // Lead restart before a new model turn: discussion dispatch must read the durable capture.
-      const restarted = await makeSession(sdk.SessionManager.open(lead.sm.getSessionFile()));
+      // ws-ask/ws-resolve are intentionally absent from active tool lists, so
+      // seed the same persisted pending-thread contract that /answer consumes.
+      const restartedManager = sdk.SessionManager.open(lead.sm.getSessionFile(), join(directory, "sessions"));
+      const now = new Date().toISOString();
+      ask.saveThreadRegistryFile(ask.threadRegistryPath(restartedManager.getSessionFile()), [{
+        threadId: "q1", title: "Choice", question: "Which choice?", entryId: restartedManager.getLeafId(),
+        status: "pending", origin: "lead-ask", createdAt: now, touchedAt: now,
+      }]);
+      const restarted = await makeSession(restartedManager);
       restarted.oracle = observed.context;
       restarted.parentAffinityId = lead.sm.getSessionId();
-      const askTool = restarted.session.agent.state.tools.find((t: any) => t.name === "ws-ask");
-      const question = await askTool.execute("question", { title: "Choice", question: "Which choice?" });
-      assert.ok(question);
       await prompt(restarted, "/answer");
       const discussion = children.at(-1);
       assert.equal(discussion.sm.getEntries().findLast((e: any) => e.customType === "ws-pi-fork-context").data.context.kind, "discussion", errors.join("\n"));
@@ -234,8 +245,13 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
       const driftCount = drifted.requests.length;
       await withEnv(drifted.env, async () => { drifted.api.setActiveTools([...drifted.api.getActiveTools()].reverse()); await drifted.session.prompt("must block drift"); });
       assert.equal(drifted.requests.length, driftCount);
-      const noPrior = await makeSession(sdk.SessionManager.create(directory, join(directory, "sessions")), {}, undefined, "Never-paid explicit Ω\r\n  ", true);
-      await noPrior.session.agent.state.tools.find((t: any) => t.name === "ws-ask").execute("new-discussion", { title: "Before first turn", question: "Discuss without prior turn" });
+      const noPriorManager = sdk.SessionManager.create(directory, join(directory, "sessions"));
+      const noPriorNow = new Date().toISOString();
+      ask.saveThreadRegistryFile(ask.threadRegistryPath(noPriorManager.getSessionFile()), [{
+        threadId: "q1", title: "Before first turn", question: "Discuss without prior turn", entryId: noPriorManager.getLeafId(),
+        status: "pending", origin: "lead-ask", createdAt: noPriorNow, touchedAt: noPriorNow,
+      }]);
+      const noPrior = await makeSession(noPriorManager, {}, undefined, "Never-paid explicit Ω\r\n  ", true);
       await prompt(noPrior, "/answer");
       const composed = children.at(-1);
       const composedContext = composed.sm.getEntries().findLast((e: any) => e.customType === "ws-pi-fork-context").data.context;
