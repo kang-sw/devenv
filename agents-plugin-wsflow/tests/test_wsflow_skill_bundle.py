@@ -18,6 +18,7 @@ EXPECTED_SKILLS = {
     "lead-bootstrap",
     "lead-discuss",
     "lead-check-blockers",
+    "lead-proceed",
     "lead-review",
     "lead-run",
     "lead-ship",
@@ -30,7 +31,17 @@ EXPECTED_SKILLS = {
     "mcp-server-repair",
 }
 
-EXPECTED_WSFLOW_ONLY_SKILLS: set = set()
+# wsflow-only backward-compat aliases mapped to the shared playbook they route
+# to. lead-proceed is a deprecation tombstone for the retired lead-proceed name:
+# it has no full-ws counterpart (the flagship surface keeps that name
+# unresolvable) and no rsrc body of its own — its body is lead-run's
+# parallel-init shim pointing at the lead-run playbook. Each alias is therefore
+# excused from the full-ws-counterpart, name-keyed shim-shape, and
+# shared-playbook checks and asserted directly by
+# test_wsflow_only_aliases_route_to_target.
+WSFLOW_ALIAS_TARGET = {"lead-proceed": "lead-run"}
+
+EXPECTED_WSFLOW_ONLY_SKILLS: set = set(WSFLOW_ALIAS_TARGET)
 EXPECTED_INLINE_SKILLS = {
     "lead-revive",
     "mcp-server-repair",
@@ -122,7 +133,9 @@ class WsflowSkillBundleTest(unittest.TestCase):
         )
 
         self.assertEqual(missing_full_counterparts, [])
-        self.assertEqual(sorted(EXPECTED_WSFLOW_ONLY_SKILLS), [])
+        # Exactly the declared wsflow-only aliases carry no full-ws counterpart;
+        # a new divergence must be added to WSFLOW_ALIAS_TARGET deliberately.
+        self.assertEqual(sorted(EXPECTED_WSFLOW_ONLY_SKILLS), sorted(WSFLOW_ALIAS_TARGET))
         self.assertEqual(unexpected_wsflow_skills, [])
 
     def test_skill_files_do_not_reference_full_ws_agent_surface(self):
@@ -130,8 +143,20 @@ class WsflowSkillBundleTest(unittest.TestCase):
         for path in sorted(SKILLS_DIR.rglob("*")):
             if not path.is_file():
                 continue
+            # A wsflow-only alias legitimately names itself; its own directory
+            # is exempt from the guard for its own retired name (and only that
+            # guard) so the tombstone carve-out does not trip the full-ws sweep.
+            # Every other forbidden pattern still applies to it.
+            skill_dir = path.relative_to(SKILLS_DIR).parts[0]
+            exempt = (
+                {f"retired {skill_dir.removeprefix('lead-')} skill"}
+                if skill_dir in WSFLOW_ALIAS_TARGET
+                else set()
+            )
             text = path.read_text(encoding="utf-8")
             for label, pattern in FORBIDDEN_PATTERNS.items():
+                if label in exempt:
+                    continue
                 if pattern.search(text):
                     offenders.append(f"{path.relative_to(PLUGIN_DIR)}: {label}")
         self.assertEqual(offenders, [])
@@ -151,6 +176,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
             - EXPECTED_INLINE_SKILLS
             - EXPECTED_PARALLEL_INIT_SKILLS
             - set(POINTER_TAIL_TITLES)
+            - set(WSFLOW_ALIAS_TARGET)
         ):
             path = SKILLS_DIR / skill / "SKILL.md"
             text = path.read_text(encoding="utf-8")
@@ -227,13 +253,56 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_skill_shims_point_to_shared_playbooks(self):
+        # wsflow-only aliases point at a shared playbook under a different stem
+        # than their own name (D5: no rsrc body of their own), so they are
+        # covered by test_wsflow_only_aliases_route_to_target, which asserts the
+        # target playbook exists.
         missing = []
-        for skill in sorted(EXPECTED_SKILLS - EXPECTED_INLINE_SKILLS):
+        for skill in sorted(EXPECTED_SKILLS - EXPECTED_INLINE_SKILLS - set(WSFLOW_ALIAS_TARGET)):
             subdir_playbook = FULL_PLUGIN_RSRC_DIR / skill / f"{skill}.md"
             flat_playbook = FULL_PLUGIN_RSRC_DIR / f"{skill}.md"
             if not subdir_playbook.exists() and not flat_playbook.exists():
                 missing.append(skill)
         self.assertEqual(missing, [])
+
+    def test_wsflow_only_aliases_route_to_target(self):
+        # A wsflow-only backward-compat alias (e.g. the retired lead-proceed
+        # name) is a thin shim whose body is the target's parallel-init shim
+        # pointing at the target playbook, so a by-name caller runs the current
+        # target procedure. Its description does double duty as the tombstone:
+        # it names both the retired alias and the canonical target so an
+        # auto-selector is steered to the target while a by-name call still
+        # runs. The alias has no rsrc body of its own; the target's shared
+        # playbook must exist.
+        offenders = []
+        for alias, target in sorted(WSFLOW_ALIAS_TARGET.items()):
+            path = SKILLS_DIR / alias / "SKILL.md"
+            text = path.read_text(encoding="utf-8")
+            description = re.search(r"^description: (.*)$", text, re.M)
+            if description is None or alias not in description.group(1) or target not in description.group(1):
+                offenders.append(f"{path.relative_to(PLUGIN_DIR)}: description must name both {alias} and {target}")
+                continue
+            subdir_playbook = FULL_PLUGIN_RSRC_DIR / target / f"{target}.md"
+            flat_playbook = FULL_PLUGIN_RSRC_DIR / f"{target}.md"
+            if not subdir_playbook.exists() and not flat_playbook.exists():
+                offenders.append(f"{path.relative_to(PLUGIN_DIR)}: target playbook {target} missing")
+                continue
+            match = re.fullmatch(
+                r"---\n"
+                rf"name: {re.escape(alias)}\n"
+                r"description: .+\n"
+                r"---\n\n"
+                r"# .+\n\n"
+                r"Call in parallel:\n"
+                rf'- `wsflow/playbook\.read\(name: "{re.escape(target)}", session_key: <your key, omit if fresh>\)`\n'
+                r'- `wsflow/workflow_manual\(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>\)`\n\n'
+                r"After both return, execute the procedure returned by `wsflow/playbook\.read`\."
+                r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.\n",
+                text,
+            )
+            if match is None:
+                offenders.append(f"{path.relative_to(PLUGIN_DIR)}: body is not the {target} parallel-init shim")
+        self.assertEqual(offenders, [])
 
     def test_bootstrap_scaffolds_emit_converged_output_across_packages(self):
         # Ticket 260825 Phase 4: assert positive convergence. Both packages'
