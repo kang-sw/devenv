@@ -493,7 +493,18 @@ func TicketAt(root, relPath string) (TicketInfo, error) {
 	// carries. Rebasing it here keeps the confinement below the sole test of
 	// what counts as a ticket, instead of letting the path's spelling decide.
 	if filepath.IsAbs(relPath) {
-		rebased, err := filepath.Rel(root, relPath)
+		// Reconcile symlink aliases before rebasing. The root arrives already
+		// canonicalized (canonicalGitRoot evaluates it), while the caller
+		// relays whatever absolute path its task block carries — which may
+		// spell a parent directory through a symlink alias, as macOS spells a
+		// /var/folders temp dir as an alias of /private/var/folders. Rebasing
+		// the two spellings directly rebases the same directory to a `../`
+		// escape and rejects a real ticket. Evaluating both with the same
+		// best-effort idiom the root canonicalization already uses collapses
+		// them onto one spelling; a genuine escape (including a ticket-shaped
+		// symlink pointing off the board) still resolves outside the root and
+		// is refused by the board-prefix check below.
+		rebased, err := filepath.Rel(evalSymlinksBestEffort(root), evalSymlinksBestEffort(relPath))
 		if err != nil {
 			return TicketInfo{}, fmt.Errorf("not a ticket path: %s", relPath)
 		}
@@ -517,6 +528,18 @@ func TicketAt(root, relPath string) (TicketInfo, error) {
 		return TicketInfo{}, err
 	}
 	return readTicketFromBytes(clean, status, string(raw)), nil
+}
+
+// evalSymlinksBestEffort resolves symlink aliases in a path, returning the path
+// unchanged when it cannot be evaluated (it does not exist yet, or a lookup
+// fails). It matches the canonicalization idiom the root already carries
+// (canonicalGitRoot in the MCP server, canonicalPath in wsstate), so the two
+// sides of a rebase are spelled the same way.
+func evalSymlinksBestEffort(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return path
 }
 
 // ticketRouteFacts parses the `## Route Facts` markdown table into its

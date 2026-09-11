@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 303d1a06872053ed
 sage-review-completeness-reviewed: 303d1a06872053ed
+completed: 2026-09-11
 ---
 
 # Accept equivalent absolute ticket paths through a symlinked root alias
@@ -52,3 +53,41 @@ then accept absolute ticket paths that resolve inside that repository's ticket
 board. Preserve rejection of paths escaping the board, including symlink
 escapes. Cover both equivalent aliases and confinement rejection through the
 caller-visible route.
+
+### Result (110ce16e) - 2026-09-11
+
+`TicketAt` (agents-plugin-tool/internal/wsdoc/tickets.go) now evaluates both the
+root and the absolute caller path with a best-effort `EvalSymlinks` before
+`filepath.Rel`, so a parent directory reached through a symlink alias
+(macOS `/var` -> `/private/var`) rebases to the same board-relative path instead
+of a `../` escape. The board-prefix confinement guard is unchanged and runs on
+the resolved path, so it still refuses genuine escapes; resolving the full
+caller path additionally closes a pre-existing hole where a ticket-shaped
+symlink on the board pointing off it would have been read (confirmed by the
+correctness reviewer).
+
+New `evalSymlinksBestEffort` helper reuses the `EvalSymlinks`-then-fallback
+idiom already established for root canonicalization (`canonicalGitRoot`,
+`wsstate.canonicalPath`).
+
+Regression coverage at both layers the ticket names:
+- `TestTicketAtAcceptsASymlinkAliasedAbsolutePath` (wsdoc) — accepts an aliased
+  absolute path and rejects an off-board symlink escape.
+- `TestEnterImplementResolvesSymlinkAliasedTicketPath` (mcp) — reproduces the
+  exact `missing (unreadable)` route symptom through
+  `route.resolve_implement`.
+Both fail without the source change (verified by stashing the fix).
+
+Verification: `go build ./...` clean; `go vet ./internal/wsdoc/ ./internal/mcp/`
+clean; `go test ./internal/wsdoc/ ./internal/mcp/` both pass.
+
+Review: partitioned correctness + fit, round 1 clean (no Critical/Important).
+Two Minors recorded, neither actioned: fit flagged an unrelated idea-ticket edit
+that is not in this diff range (false positive, verified via `git diff --stat`);
+correctness noted that a *missing* ticket under an aliased root reports
+`not a ticket path` rather than a read error — outside this ticket's
+equivalent-existing-path contract, a message nuance only.
+
+Decision: resolve the full caller path (not just its parent) via `EvalSymlinks`
+— chosen because it both reconciles the alias and preserves symlink-escape
+rejection in one step; rationale carried in the commit `## AI Context`.

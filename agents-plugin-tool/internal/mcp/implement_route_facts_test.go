@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -279,5 +280,38 @@ func TestEnterImplementResolvesTargetPathForms(t *testing.T) {
 				t.Fatalf("route facts = %q, want the ticket source", result.RouteFacts)
 			}
 		})
+	}
+}
+
+// TestEnterImplementResolvesSymlinkAliasedTicketPath pins the route-visible side
+// of the same reconciliation: a worker relays an absolute ticket_path that
+// spells a parent directory through a symlink alias (as macOS spells a
+// /var/folders temp dir), while the server holds the canonicalized root. The
+// route must still find the ticket and read its facts rather than reporting it
+// unreadable.
+func TestEnterImplementResolvesSymlinkAliasedTicketPath(t *testing.T) {
+	useLeadProfile(t)
+	realRoot := t.TempDir()
+	initGit(t, realRoot)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer(realRoot, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 1, realRoot, nil))
+	writeImplementReadyTicket(t, realRoot, implementReadyFacts())
+
+	aliasRoot := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(realRoot, aliasRoot); err != nil {
+		t.Skipf("symlinks unsupported on this platform: %v", err)
+	}
+
+	const rel = "ai-docs/tickets/ready/260627-feat-enter-implement-deterministic-verdict-engine.md"
+	args := implementReadyArgs("json")
+	args["target"].(map[string]any)["ticket_path"] = filepath.Join(aliasRoot, filepath.FromSlash(rel))
+
+	var result implementResult
+	if err := json.Unmarshal([]byte(callToolWithKey(t, server, 2, key, "route.resolve_implement", args)), &result); err != nil {
+		t.Fatalf("json verdict did not parse: %v", err)
+	}
+	if result.RouteFacts != "read from the ticket" {
+		t.Fatalf("route facts = %q, want the ticket source through the aliased path", result.RouteFacts)
 	}
 }
