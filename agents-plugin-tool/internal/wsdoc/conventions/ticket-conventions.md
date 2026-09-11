@@ -20,8 +20,8 @@ rules and hard invariants only.
   `tickets.move(stem, to)` (idea/todo/ready) MCP tools; use native `git mv`
   as fallback when MCP tools are unavailable. No cross-link updates needed.
 - Actionable `todo/` creation and editing are ungated. Populate facts, then run design and completeness Sage review at `ready/` promotion against the populated body.
-- Epics settle design explicitly at `idea/` to `todo/`: populate checkable facts, then run design-only Sage review. Material cross-child decision edits require explicit re-settlement before children rely on them; ordinary edits do not auto-review.
-- Epics and research stay in `idea/` or `todo/`; research is ungated.
+- An epic is a living board that is never an execution target, so it never enters `ready/` (the move is barred); a research ticket is likewise barred and ungated. Only actionable tickets enter `ready/`.
+- Epic design review is design-only (completeness never applies) and lead-judgment-invoked, not boundary-gated: run it when the epic's cross-child design has drifted materially, populating checkable facts first. Ordinary epic edits do not auto-review.
 - Add `completed:` date on move to `.done/`.
 
 ## Epic Tickets

@@ -50,11 +50,10 @@ explicitly deferred, and write confirmed items only.
 
 ## Ground: fact population
 
-Run only at a settlement boundary: actionable promotion to `ready/`, or
-explicit epic design settlement into or within `todo/`. Ordinary actionable
-`todo/` creation and repeated editing run neither fact population nor Sage
-review; research remains ungated. Ground before moving or reviewing, so the
-stamp covers the facts the reviewers read:
+Run at actionable promotion to `ready/`, or before you run epic design
+review. Ordinary actionable `todo/` creation and repeated editing run neither
+fact population nor Sage review; research remains ungated. Ground before moving
+or reviewing, so the stamp covers the facts the reviewers read:
 
 1. `{{.McpNamespace}}/playbook.render(name: "ticket-fact-populator",
    session_key: <your key>)`; pass the path on without reading the file, which
@@ -77,18 +76,20 @@ Ordinary epic `todo/` edits do not spawn reviewers. A material change to
 cross-child decisions leaves its prior digest stale; explicitly re-settle the
 revised design before a child relies on it.
 
-## Settle epic design
+## Review epic design
 
-For explicit epic `idea/` to `todo/` promotion or re-settlement in `todo/`, run
-**Ground: fact population** first. Move to `todo/` only when needed, then call
-`{{.McpNamespace}}/tickets.sage_gate(stem, landing: "todo")`. Render and spawn
-the design reviewer when the gate requests it, passing the ticket path and
-populator's `relations:` table; record its verdict with
-`{{.McpNamespace}}/tickets.sage_stamp`. A block leaves the design unsettled;
-report it before a child relies on it. Commit after stamping.
+An epic is a living board: it accretes child and follow-up tickets over time and
+is never itself an execution target, so it never enters `ready/` (nor does a
+research ticket; the move is barred either way). Its design review is not pinned
+to a status boundary — run it on your judgment, when the epic's cross-child
+design has drifted materially, not as a promotion step.
 
-Epics and research stay in `idea/` or `todo/`; only actionable tickets enter
-the implementation queue.
+When you judge a review is due, run **Ground: fact population** first, then call
+`{{.McpNamespace}}/tickets.sage_gate(stem, landing: "todo")` (design only;
+completeness never applies to an epic). Render and spawn the design reviewer when
+the gate requests it, passing the ticket path and populator's `relations:` table;
+record its verdict with `{{.McpNamespace}}/tickets.sage_stamp`. A block leaves the
+design unsettled; report it before a child relies on it. Commit after stamping.
 
 ## Promote to `ready/`
 

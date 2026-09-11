@@ -98,6 +98,11 @@ its branch: advance the note and go to **End the turn**. Otherwise act by stop
 letter. Carry lines from the worker's report to the user verbatim; do not
 re-summarize them.
 
+When the closed ticket was an epic's last open child, surface that epic to the
+user for a close decision before ending — nothing auto-closes an epic, so an
+otherwise-complete board floats until you raise it (interim guard until a
+reliable trigger lands).
+
 - **(a) parent merge** — this is the run's terminal; see below.
 - **(b) unresolved decision** — read what the worker points at (the ticket,
   the graph tickets, the delegate's result). If they settle it, resume the

@@ -1052,13 +1052,13 @@ func TestLeadTicketSettlementBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(raw)
-	ground := sectionByHeading(t, text, "## Ground: fact population")
-	for _, want := range []string{"Run only at a settlement boundary", "creation and repeated editing run neither fact population nor Sage", "research remains ungated", "Ordinary epic `todo/` edits do not spawn reviewers"} {
+	ground := strings.Join(strings.Fields(sectionByHeading(t, text, "## Ground: fact population")), " ")
+	for _, want := range []string{"before you run epic design review", "creation and repeated editing run neither fact population nor Sage", "research remains ungated", "Ordinary epic `todo/` edits do not spawn reviewers"} {
 		if !strings.Contains(ground, want) {
 			t.Fatalf("missing boundary %q: %s", want, ground)
 		}
 	}
-	for _, heading := range []string{"## Promote to `ready/`", "## Settle epic design"} {
+	for _, heading := range []string{"## Promote to `ready/`", "## Review epic design"} {
 		section := strings.Join(strings.Fields(sectionByHeading(t, text, heading)), " ")
 		facts := strings.Index(section, "run **Ground: fact population**")
 		gate := strings.Index(section, "tickets.sage_gate")
