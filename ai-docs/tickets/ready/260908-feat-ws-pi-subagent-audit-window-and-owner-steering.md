@@ -14,8 +14,8 @@ related-mental-model:
   - plugin-runtime
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-completeness-reviewed: 40ba2366bd9fd4e7
-sage-review-design-reviewed: 40ba2366bd9fd4e7
+sage-review-completeness-reviewed: 082de120d64f7559
+sage-review-design-reviewed: 082de120d64f7559
 ---
 
 # Pi adapter: owner audit window for subagent conversations (`/audit`) and owner steering with last-writer settle ownership
@@ -119,11 +119,15 @@ ticket puts the audit window and the steering rule on it.
   unchanged. Owner-time settles are never replayed to the lead.
 - **Owner-held is exempt like thread-bound** on: park-at-idle, the fan-in
   presence/count (`computeFanIn` excludes it), alias-reuse rejection, cap
-  eviction. The shutdown sidecar persists it like any other child (it has no
-  `.ws-threads.json` counterpart) **including `lastWriter` and
-  `ownerSends`**, so an owner-held child is still owner-held after `/reload`
-  or a lead restart. `ws-agent-list` rows carry `owner_held: true`; widget
-  rows show the flag.
+  eviction. The shutdown sidecar persists plain owner-held non-thread children;
+  those have no `.ws-threads.json` counterpart, while a fork-raised thread does.
+  Persist `lastWriter` and `ownerSends` in the authoritative store for each
+  record. Once `/done` starts for a fork-raised thread, its `.ws-threads.json`
+  record remains the canonical owner through terminal delivery and successful
+  park; do not transfer the in-progress reconciliation to the generic shutdown
+  sidecar. Thus owner-held children and finish reconciliation retain their exact
+  state after `/reload`, adapter-process restart, or lead restart.
+  `ws-agent-list` rows carry `owner_held: true`; widget rows show the flag.
 - **The modal.** In `interactive` mode Esc opens
   `[ hold ] [ finish ] [ interrupt ]` with an `Esc: cancel` hint line; Esc
   again closes the modal; `hold` is the default highlight.
@@ -140,7 +144,35 @@ ticket puts the audit window and the steering rule on it.
     `lead-ask` discussion thread `finish` is `/done` (summary turn,
     `ws-thread-summary` injection, no generic handoff); on a `fork-raised`
     thread it follows the general rule (handoff only if owner-held) and the
-    fork's own `final` still reaches the lead as a report.
+    fork's own `final` still reaches the lead as a report. For a fork-raised
+    thread, `finish` is also an idempotent lifecycle-reconciliation boundary.
+    The first `/done` allocates and persists one unique `reconciliationId`
+    before releasing the binding. A durable state machine advances from
+    authoritative report acceptance, `agent_settled` observation, lead-delivery
+    enqueue, closeout dispatch, and park completion; it must not infer delivery
+    from `running`, `streaming`, timestamps, or the absence of `pendingFinal`.
+    If the fork is still streaming, defer reconciliation to its next settle. If
+    it is idle and its final was already delivered, do not prompt or duplicate
+    any delivery; silently park it. If it is idle with neither a delivered final
+    nor a lead-visible settlement, send exactly one lead-attributed closeout turn
+    requiring the normal final-report contract. A closeout turn that settles
+    without a valid final, or asks another question after the owner finished,
+    enqueues the existing missing-final advisory and then parks; the adapter
+    never manufactures a successful final.
+
+    Terminal final/settled/advisory delivery uses a persisted outbox event keyed
+    by `reconciliationId`. Crash recovery replays the event at least once; the
+    lead ingress durably deduplicates that event ID before exposing it to the
+    model. Closeout dispatch uses an adapter control envelope carrying the same
+    ID rather than an unidentifiable raw-text retry: the receiving child durably
+    records acceptance before admitting the closeout prompt to its model queue,
+    and acknowledges a repeated ID without creating a second turn. Persist state
+    before every externally visible transition so a crash between state write,
+    child acceptance, closeout dispatch acknowledgement, terminal enqueue, and
+    park either resumes the pending step or recognizes it as complete. Clear the
+    reconciliation/outbox only after terminal delivery is durably acknowledged
+    and the child is parked. Repeated `/done` after the
+    open/bound → dormant/unbound transition is a no-op.
   - `interrupt`: abort the child's current turn only — never a stop/park;
     the view stays open; ownership unchanged; disabled (greyed, no-op) when
     the child is not `running`. Phase 2 first verifies that pi-coding-agent's
@@ -303,7 +335,16 @@ handoff and the following settle takes the lead path, `finish` on a child
 the owner never wrote to sends nothing; `finish` on a `lead-ask` thread
 takes the `/done` route; parsed history attributes logged owner sends as
 `user` and everything else as `lead-message`; Ctrl+C in viewer and modal
-changes nothing. Live check
+changes nothing. Add fork-raised reconciliation coverage for `/done` while
+streaming, `/done` after an owner-held idle settle was suppressed, an
+already-delivered final, repeated `/done`, a closeout turn that returns no
+final or another question, and reload/process restart at each durable marker
+boundary. Inject crashes between every persisted state transition, closeout
+send, child-side durable acceptance, sender acknowledgement, terminal enqueue,
+lead-ingress dedupe, and park; assert transport retry of one closeout ID creates
+one child model turn, at-least-once outbox replay creates one model-visible
+terminal event per `reconciliationId`, exactly one closeout attempt, no duplicate
+final or settled delivery, no synthetic success, and eventual silent park. Live check
 (owner-run): steer a running worker, `hold`, see the idle-awaiting-owner
 rendering and the toast when it settles with no lead turn, reopen and
 `finish`, confirm the lead receives the child's next settle or report and

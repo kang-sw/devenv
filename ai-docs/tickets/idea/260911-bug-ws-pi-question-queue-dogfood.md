@@ -2,6 +2,7 @@
 title: Resolve ws-queue-question live dogfood findings
 related:
   260911-feat-ws-pi-async-question-queue: feature under live acceptance
+  260908-feat-ws-pi-subagent-audit-window-and-owner-steering: Phase 2 owns durable fork-raised `/done` reconciliation and owner-to-lead handoff
   260906-workset-ws-pi-dogfood-ux: Pi dogfood UX collection
   260908-bug-ws-pi-delegated-tool-surface-unavailable: blocks fork-raised question-path live acceptance before the fork starts
 ---
@@ -33,7 +34,9 @@ Passed in the current Pi session:
 - pending-question withdrawal and post-answer withdrawal no-op;
 - active-edit withdrawal deferral without modal or draft loss (`q3` remained open after withdrawal returned `deferred`, then returned `EDITING-IN-PROGRESS` from commit `e0f92cef`, entry `f8dde1e8`);
 - plugin reload persistence and anchored answer recovery (`q1` asked at commit `a7f5d521`, entry `ccb097ae`, returned verbatim as `PERSIST-OK`);
-- fork-raised question registration and existing-fork overlay attachment (`q4`), owner `/done` continuation, and final `Decisions:` delivery preserving the owner's `alpha` choice; the same fork's first task also confirmed the `codex_generate_image` unavailable-tool notice after `260908-bug-ws-pi-delegated-tool-surface-unavailable` was loaded.
+- fork-raised question registration and existing-fork overlay attachment (`q4`), owner answer continuation, and final `Decisions:` delivery preserving the owner's `alpha` choice; the same fork's first task also confirmed the `codex_generate_image` unavailable-tool notice after `260908-bug-ws-pi-delegated-tool-surface-unavailable` was loaded.
+
+Residual from that acceptance: `/done` detached the fork-raised thread after its owner-held settle path, but agent `9481f7d3-b589-43f3-bf38-770c213e1744` remained registry-idle and rendered as running for more than 28 minutes instead of being parked. The durable, idempotent `/done` reconciliation fix is owned by `260908-feat-ws-pi-subagent-audit-window-and-owner-steering` Phase 2 rather than duplicated in this rolling ticket.
 
 Remaining live coverage for a later session:
 
