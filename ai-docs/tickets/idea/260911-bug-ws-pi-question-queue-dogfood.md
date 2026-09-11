@@ -22,13 +22,33 @@ Keep the remaining findings from this dogfood run together in this rolling actio
 5. **One model turn per answer from one modal submission.** The owner submitted `q6` and `q7` together while the lead was working, but the two answers later popped as separate owner messages across separate lead turns. The modal's batch boundary was lost, adding avoidable model-turn cost.
 6. **Explicit terminal target falls through to another question.** `/answer q6` on an already answered question displayed `Warning: ws: question q6 was already answered or withdrawn — showing the rest of the queue instead.` and then opened another pending question. The warning was not visually salient enough to prevent the owner from entering `adf`, which was submitted as the answer to `q10`. The explicit target was not honored, and fallback changed which question received the input.
 
+## Live Acceptance Status (2026-09-11)
+
+Passed in the current Pi session:
+
+- fork-less single-question registration and anchored answer injection;
+- Korean IME input, multiline editing, Esc/reopen draft restoration, and exact answer preservation;
+- multi-question Tab/Shift+Tab navigation, independent drafts, commit-and-advance, partial submission, and blank-question retention;
+- pending-question withdrawal and post-answer withdrawal no-op.
+
+Remaining live coverage for a later session:
+
+- withdrawal while the owner is actively editing an open question;
+- the fork-raised `kind:"question"` path, existing-fork attachment, `/done`, and final `Decisions:` delivery;
+- optional post-compaction and restart persistence/anchor recovery.
+
 ## Constraints
 
 - Keep `No` as the confirmation's initial safe default.
 - Use bounded spatial confirmation navigation: Left moves toward the visually left option, Right moves toward the visually right option, and input at an outer edge does not wrap.
 - Use Pi theme semantics rather than fixed colors so hierarchy remains usable across light, dark, and custom themes.
 - Replace destructive question/context truncation in this modal type with a bounded, scrollable question region. Keep the answer editor and shortcut footer visible while making the full original question reachable. Any remaining overflow cue must be visually distinct from ordinary prose.
-- Bare `/answer` starts at the oldest answerable lead-ask item; explicit `/answer qN` continues to focus the requested item.
+- Answer commands are target-strict:
+  - bare `/answer` starts at the oldest answerable lead-ask item;
+  - `/answer qN` opens exactly `qN` when it is answerable;
+  - `/answer qN` for an answered or withdrawn question reports that state and returns without opening another modal;
+  - `/answer qN` for an unknown ID reports an error and returns without opening another modal.
+  `Ctrl+Shift+A` behavior is not decided by this finding.
 - Answers accepted by one lead-ask modal submission return in one injected lead follow-up and consume one lead turn. Preserve every included question's full question, context, verbatim answer, ask-time commit hash, and entry anchor in deterministic queue order; exclude blank questions that remain pending.
 - Preserve fork-less registration, draft and withdrawal semantics, and the separate fork-raised question path. Do not generalize batching to unrelated user input or child-message families without separately deciding their ordering and wake behavior.
 
@@ -38,4 +58,4 @@ Keep the remaining findings from this dogfood run together in this rolling actio
 
 Resolve the accepted findings while preserving the behaviors that passed live acceptance.
 
-Verify confirmation positions and both arrow keys, including edge no-ops; long questions at constrained viewport heights with complete scroll reach and fixed editor/footer visibility; bare versus explicit `/answer` focus with multiple pending questions; semantic hierarchy in a live Pi theme; and single-turn delivery of multiple answers submitted together while the lead is busy. Retest the already-passing single answer, Korean multiline draft, partial multi-question submission, blank retention, and per-question provenance paths for regression.
+Verify confirmation positions and both arrow keys, including edge no-ops; long questions at constrained viewport heights with complete scroll reach and fixed editor/footer visibility; oldest-first bare `/answer`, exact explicit-ID targeting, and terminal/unknown explicit-ID refusal without fallback; semantic hierarchy in a live Pi theme; and single-turn delivery of multiple answers submitted together while the lead is busy. Retest the already-passing single answer, Korean multiline draft, partial multi-question submission, blank retention, and per-question provenance paths for regression.
