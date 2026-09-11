@@ -277,6 +277,49 @@ func TestSageGateCategoryMatrix(t *testing.T) {
 	}
 }
 
+// TestSageGateReadyNonImplementationCategoriesSkipMissingRouteFacts pins
+// missingRouteFacts's category early-return: a non-implementation category
+// carries no ## Route Facts section, so the ready-landing route-facts gate must
+// not refuse it with stop_missing_route_facts. This is the branch the removed
+// "exempt category" case in tickets_route_facts_test.go once covered via
+// TicketsMove; that move path is now barred for these categories, so the direct
+// sage_gate path is where the exemption is exercised. writeSageTicket always
+// embeds a Route Facts section, so these fixtures are written without one on
+// purpose — that absence is the whole point of the test.
+func TestSageGateReadyNonImplementationCategoriesSkipMissingRouteFacts(t *testing.T) {
+	// research and workset need no stage at all, so they skip and never stop on
+	// route facts.
+	for _, category := range []string{"research", "workset"} {
+		t.Run(category, func(t *testing.T) {
+			root := t.TempDir()
+			stem := "260101-" + category + "-nofacts"
+			mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
+				"---\ntitle: Sample\n---\n\n# Sample\n\nBody text.\n")
+			res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, "auto")
+			if err != nil {
+				t.Fatalf("SageGate: %v", err)
+			}
+			if res.Action != "skip" {
+				t.Fatalf("%s ready (no route facts) action = %q, want skip (never stop_missing_route_facts)", category, res.Action)
+			}
+		})
+	}
+
+	// epic: design-only; a missing Route Facts section must not stop it either —
+	// it runs design standalone rather than refusing on route facts.
+	root := t.TempDir()
+	stem := "260101-epic-nofacts"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
+		"---\ntitle: Sample\nsage-review-design: required\n---\n\n# Sample\n\nBody text.\n")
+	res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, "auto")
+	if err != nil {
+		t.Fatalf("SageGate epic: %v", err)
+	}
+	if res.Action != "run" || res.Mode != "standalone" || len(res.Reviewers) != 1 || res.Reviewers[0] != "design" {
+		t.Fatalf("epic ready (no route facts) = %+v, want run/standalone/[design], never stop_missing_route_facts", res)
+	}
+}
+
 func TestSageGateReadyBothStages(t *testing.T) {
 	// Design terminal -> completeness stands alone.
 	root := t.TempDir()

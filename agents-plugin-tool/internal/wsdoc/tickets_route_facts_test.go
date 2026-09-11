@@ -174,8 +174,9 @@ func TestTicketsMoveReadyTipsMissingRouteFacts(t *testing.T) {
 // advisory: the tip fires on a real gap, not on every `ready/` move. A ticket
 // carrying the section moves quietly. (The non-implementation categories the
 // route-facts exemption once also covered here can no longer reach this move at
-// all — they are barred from ready/; the exemption's live coverage is now the
-// direct sage_gate path in tickets_sage_test.go.)
+// all — they are barred from ready/; the exemption's live coverage is now
+// TestSageGateReadyNonImplementationCategoriesSkipMissingRouteFacts in
+// tickets_sage_test.go, which exercises the missing-section branch directly.)
 func TestTicketsMoveReadyStaysSilentWhenFactsAreNotOwed(t *testing.T) {
 	cases := []struct {
 		name string
