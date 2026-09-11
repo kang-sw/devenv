@@ -291,6 +291,15 @@ func TestResolveImplementAheadOfMergeRootBlocksRenameRegardlessOfAllowRename(t *
 	}
 }
 
+func TestObserveImplementBranchFailsClosedWhenAheadStateCannotBeVerified(t *testing.T) {
+	root := t.TempDir()
+	initGit(t, root)
+	runGit(t, root, "checkout", "-b", "impl/missing-root/owner")
+	if _, err := observeImplementBranch(root, ""); err == nil {
+		t.Fatal("observeImplementBranch unexpectedly treated an unresolvable merge root as zero commits ahead")
+	}
+}
+
 func TestResolveImplementNoAheadOfMergeRootAllowsRename(t *testing.T) {
 	input := implementInput{
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 2", ScopeSlug: "new"},
