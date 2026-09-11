@@ -547,25 +547,23 @@ func parseImplementPolicy(raw any) (implementPolicyInput, error) {
 }
 
 // aheadOfMergeRootCount returns the number of commits currentBranch carries
-// ahead of mergeRoot's merge-base with currentBranch. It fails open to 0 on
-// any git error (unresolvable ref, unrelated histories): an infra failure
-// here is out of the ticket's test matrix, not a normal false-negative risk
-// case, consistent with the existing err == nil truthy pattern this file
-// already uses for TargetExists/MergeRootRefConflict.
-func aheadOfMergeRootCount(root, mergeRoot, currentBranch string) int {
+// ahead of mergeRoot's merge-base with currentBranch. Callers must surface an
+// error: treating an unverifiable branch as clean would let unrelated ticket
+// work be mixed precisely when the safety check cannot run.
+func aheadOfMergeRootCount(root, mergeRoot, currentBranch string) (int, error) {
 	result, err := wsgit.NewClient().MergeBase(context.Background(), root, mergeRoot, currentBranch)
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	out, err := (wsgit.ExecRunner{}).RunGit(context.Background(), root, "rev-list", "--count", result.MergeBase+".."+currentBranch)
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	count, err := strconv.Atoi(strings.TrimSpace(string(out)))
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("parse ahead count: %w", err)
 	}
-	return count
+	return count, nil
 }
 
 // implementCloseMergeReviewNudge computes the tickets.close merge-review
@@ -610,7 +608,11 @@ func observeImplementBranch(root string, targetBranch string) (implementBranchOb
 	if validObservedBranch(obs.CurrentBranch) {
 		mergeRoot := implementMergeRootFor(obs.CurrentBranch)
 		if mergeRoot != "" && mergeRoot != obs.CurrentBranch {
-			obs.AheadOfMergeRoot = aheadOfMergeRootCount(root, mergeRoot, obs.CurrentBranch)
+			count, err := aheadOfMergeRootCount(root, mergeRoot, obs.CurrentBranch)
+			if err != nil {
+				return implementBranchObservation{}, fmt.Errorf("verify implementation branch ahead state: %w", err)
+			}
+			obs.AheadOfMergeRoot = count
 		}
 	}
 	if targetBranch != "" {

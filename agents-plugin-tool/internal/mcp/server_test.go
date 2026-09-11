@@ -20,6 +20,8 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
+	"github.com/kang-sw/devenv/internal/wsgit"
+	"github.com/kang-sw/devenv/internal/wskey"
 )
 
 // TestMain defaults WS_RSRC_ROOT to the shipped rsrc tree so playbook and
@@ -648,6 +650,87 @@ func initTicketRepo(t *testing.T, stem string) string {
 	mustWrite(t, root, filepath.Join("ai-docs/tickets/todo", stem+".md"), "---\ntitle: Demo\n---\n# Demo\n")
 	initGit(t, root)
 	return root
+}
+
+func TestActiveImplTicketAndGitStatusFormatting(t *testing.T) {
+	root := t.TempDir()
+	initGit(t, root)
+	stem := "260911-feat-active-impl-owner"
+	suffix := wskey.Derive(stem, 3)
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "ready", stem+".md"), "---\ntitle: Active owner\n---\n")
+
+	active, err := activeImplTicket(root, "impl/feature/base/"+suffix)
+	if err != nil {
+		t.Fatalf("activeImplTicket active: %v", err)
+	}
+	if active == nil || active.State != "active" || active.Stem != stem || active.Status != "ready" {
+		t.Fatalf("activeImplTicket = %#v, want ready %q", active, stem)
+	}
+	status := wsgit.StatusResult{Branch: wsgit.BranchStatus{Head: "impl/feature/base/" + suffix}, Clean: true}
+	if got := formatGitStatusWithImplTicket(status, active); !strings.Contains(got, "active ticket: "+stem+" (ready)\n") {
+		t.Fatalf("active text = %q", got)
+	}
+
+	missing, err := activeImplTicket(root, "impl/feature/base/no-match")
+	if err != nil || missing == nil || missing.State != "missing" {
+		t.Fatalf("missing = %#v, %v", missing, err)
+	}
+	if got := formatGitStatusWithImplTicket(status, missing); !strings.Contains(got, "no active ticket matches") {
+		t.Fatalf("missing text = %q", got)
+	}
+
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"), "---\ntitle: Duplicate owner\n---\n")
+	ambiguous, err := activeImplTicket(root, "impl/feature/base/"+suffix)
+	if err != nil || ambiguous == nil || ambiguous.State != "ambiguous" {
+		t.Fatalf("ambiguous = %#v, %v", ambiguous, err)
+	}
+	if got := formatGitStatusWithImplTicket(status, ambiguous); !strings.Contains(got, "multiple active tickets match") {
+		t.Fatalf("ambiguous text = %q", got)
+	}
+
+	nonImpl, err := activeImplTicket(root, "feature/base")
+	if err != nil || nonImpl != nil {
+		t.Fatalf("non-impl = %#v, %v", nonImpl, err)
+	}
+	if got := formatGitStatusWithImplTicket(status, nil); strings.Contains(got, "ticket:") || strings.Contains(got, "nudge:") {
+		t.Fatalf("non-impl format changed: %q", got)
+	}
+}
+
+func TestActiveImplTicketFailsClosedOnUnreadableInventory(t *testing.T) {
+	root := t.TempDir()
+	initGit(t, root)
+	if _, err := activeImplTicket(root, "impl/feature/base/no-match"); err == nil {
+		t.Fatal("activeImplTicket unexpectedly treated a missing ticket inventory as missing ownership")
+	}
+}
+
+func TestServeStdioGitStatusImplTicketContract(t *testing.T) {
+	useLeadProfile(t)
+	for _, status := range []string{"idea", "todo", "ready"} {
+		t.Run(status, func(t *testing.T) {
+			root := t.TempDir()
+			initGit(t, root)
+			stem := "260911-feat-impl-status-" + status
+			mustWrite(t, root, filepath.Join("ai-docs", "tickets", status, stem+".md"), "---\ntitle: Owner\n---\n")
+			runGit(t, root, "add", ".")
+			runGit(t, root, "commit", "-m", "ticket")
+			runGit(t, root, "checkout", "-b", "impl/base/"+wskey.Derive(stem, 3))
+			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+			server := NewServer(root, "test")
+			key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+			text := callToolWithKey(t, server, 2, key, "git.status", nil)
+			jsonText := callToolWithKey(t, server, 3, key, "git.status", map[string]any{"format": "json"})
+			if !strings.Contains(text, "active ticket: "+stem+" ("+status+")") {
+				t.Fatalf("text status missing active owner: %s", text)
+			}
+			for _, want := range []string{`"impl_ticket"`, `"state":"active"`, `"stem":"` + stem + `"`, `"status":"` + status + `"`} {
+				if !strings.Contains(jsonText, want) {
+					t.Fatalf("JSON status missing %s: %s", want, jsonText)
+				}
+			}
+		})
+	}
 }
 
 func TestServeStdioTicketToolsRejectSpecStemArgument(t *testing.T) {
