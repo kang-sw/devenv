@@ -6,6 +6,7 @@ related:
   260906-research-ws-pi-recon-preset-agent-alias: the recon preset is the orchestrator's own explore surface under this design; settle its API with this ticket in view
   260907-feat-ws-pi-persistent-explore-deep-research: persistent explore is the corpus-search child this design delegates to instead of lead-side tool calls
   260906-feat-ws-pi-tool-and-push-tui-polish: lineage rendering (§5) coordinates with the dispatch-presentation work there
+parent: 260911-epic-ws-pi-refound-resync-harness-peer
 ---
 
 # Redefine the Pi lead as a curated-tool, discuss-only decision seat that delegates everything else to an orchestrator child
@@ -286,3 +287,46 @@ since the autonomy urge is usually learned from "asking breaks the flow".
   heavy workflow-management infrastructure.
 - No orchestrator fork, no worker-spawned workers.
 - No replacement of the develop-side tool diets; they proceed independently.
+
+## Confirmed direction - 2026-09-11 (refound subsumes the core)
+
+Coordinated by `260911-epic-ws-pi-refound-resync-harness-peer`.
+
+`epic/refound` (`260909-epic-ws-worker-interpreter-refoundation`, bound for
+`develop`) makes "worker as workflow interpreter, lead as escalation handler"
+the shared default, which absorbs the core of this ticket:
+
+- The lead is already a dispatch/escalation seat by default via `lead-discuss` /
+  `lead-delegate` / `lead-run`; the heavy per-phase ceremony (implement / review
+  / verify / commit) now runs inside the discardable medium-tier `ticket-worker`,
+  so it no longer stays resident in the lead. This captures most of the
+  ~200k/phase resident-context saving this ticket targeted.
+- The server tool surface is trimmed for every host (refound's 7-tool removal),
+  partly addressing the schema-tax concern.
+
+**Residual scope (what refound does NOT provide, kept here):**
+
+- **Curated lead registration allowlist** (`bridge.ts`): hide tools from the Pi
+  lead at the extension registration layer. Distinct from the server-side surface
+  trim — it curates lead-vs-worker visibility. Urgency is lower now that the lead
+  is a dispatch seat, but it is still Pi-extension-local and unprovided by
+  refound.
+- **Lineage-aware TUI rendering + agent picker** (pure Pi): unaffected by
+  refound; coordinates with its own TUI tickets.
+- **Adapter-owned mechanism guides** (execute-worker / orchestrator) describing
+  `ws-execute` / `ws-worker-exec` / approval and `ws-report-to-lead`: pure-Pi text
+  with no shared base, per the epic's text-home split.
+
+**Deferred open question — the extra orchestrator level.** The original design
+pushed the whole `proceed` pipeline (drain / select / dispatch loop included)
+into a medium-tier orchestrator child so the lead holds nothing but
+discuss + question/final. refound already discards the per-phase ceremony via
+`ticket-worker`, so the marginal value of also moving the drain/dispatch loop off
+the lead is unclear. Undecided; hold pending Pi dogfood signal on the lead's
+remaining resident footprint under refound's default flow. This is the only
+piece of the original delegation vision still open.
+
+Withdrawn premise: this ticket's Non-goal "No change to ws-mcp tool contracts /
+root worktree role" and its "delegation redefinition lives only in the Pi
+extension" stance are overtaken — the redefinition is now the shared ws-mcp
+default, consumed rather than re-built.
