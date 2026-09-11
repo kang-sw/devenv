@@ -70,3 +70,30 @@ without eliminating research's freeform topic structure. At minimum, determine:
 The resulting rule must live on the shipped ticket-authoring/convention surface,
 not only in a project-local manual, so downstream leads receive it through the
 same convention path used for other ticket semantics.
+
+## Confirmed Contract
+
+```markdown
+## Outcome Ledger
+
+### Verified Findings
+<!-- Evidence-backed observations. These may support later tickets but do not choose behavior. -->
+
+### Confirmed Decisions
+<!-- Normative choices explicitly confirmed by the user. -->
+
+### Proposals
+<!-- Unconfirmed candidates. Never treat these as actionable authority. -->
+
+### Open Questions
+<!-- Unresolved choices that require further investigation or user input. -->
+
+### Rejected Alternatives
+<!-- Alternatives explicitly rejected, with the reason when useful. -->
+```
+
+> Persist only decisions the user confirmed. Research tickets may preserve explicitly non-authoritative proposals and open questions in their Outcome Ledger.
+
+> When deriving actionable work from research, treat the Outcome Ledger as the sole authority: use `Verified Findings` as evidence and `Confirmed Decisions` as contract; read the narrative only as supporting context, and never promote `Proposals`, `Open Questions`, or unlisted narrative into the child.
+
+> If the research has no Outcome Ledger, stop and ask whether to add one or settle the child’s decisions directly through the Open Decision Queue.
