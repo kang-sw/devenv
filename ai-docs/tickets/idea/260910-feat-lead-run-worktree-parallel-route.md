@@ -80,9 +80,18 @@ the lead batches N concurrent stop reports without regressing the serial
 veto/merge-approval model; (c) whether the `/goal` Stop-hook starvation that
 killed the old fan-out is fully avoided by worktree isolation or needs its own
 guard; (d) a cap on concurrent workers; (e) how a worker key is bound to its
-worktree root (see Background — `render(root_override)` targets the rsrc root,
-not a repo worktree, so a worktree-run worker has no correctly-bound ws session
-key today; this needs a first-class worktree-binding render/spawn mode); (f)
+worktree root. Root cause confirmed in code: `playbook.render`'s `root_override`
+is a single knob fused into three roles at once — the worktree root, the
+rsrc-resolution root, and the child-key mint root (`server.go#L1377-L1408`;
+`resolveRsrcRoot` returns the override verbatim rather than resolving the plugin
+cache, `playbook_tools.go#L667-L671`). It was born as a test/advanced rsrc-root
+override (read-variant schema: "test/advanced use") for rsrc-dev worktrees whose
+own root holds `manifest.json`, then overloaded onto render, so it is valid only
+when all three roots coincide. For a consuming-repo worktree the rsrc tree lives
+in the plugin cache, so redirecting the rsrc root to the repo worktree fails with
+"rsrc manifest missing". This is internal ws plumbing, not a shipped-surface
+leak. The fix is to separate the worktree/mint root from the rsrc root so a
+worker key can bind to a repo worktree while rsrc still resolves to the cache; (f)
 reconciling `ticket-worker`'s own PARENT-branch capture and `impl/<parent>/<slug>`
 creation with a pre-provisioned worktree — decide whether the route pre-creates
 the impl branch and suppresses the worker's branch capture, or lets the worker
