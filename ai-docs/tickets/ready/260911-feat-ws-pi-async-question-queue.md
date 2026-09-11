@@ -362,3 +362,126 @@ never submits; a withdrawal on an open, non-empty question shows the banner and
 still delivers the owner's content; each answer re-reports to the lead with its
 question context and, when the lead is compacted past the ask point, the
 recovered options + ask-time anchor.
+
+### Result (a085aa5a) - 2026-09-11
+
+Landed on `impl/track/pi-agent/argue-roman-dodgy`: `6b24e141` (modal
+component + queue helpers), `f7b520a0` (pure-helper + interaction tests),
+`8bd39c18` (guide/spec docs), `134ddb7a` + `a085aa5a` (review-round-1
+fixes and their tests).
+
+**What landed:** `LeadAskQueueComponent` (`agents-plugin-pi/src/ask.ts`)
+is the batch owner-facing surface superseding Phase 1's interim
+`openLeadAskThread` (removed). It renders every queued `"lead-ask"`
+question at once via `collectLeadAskQueue`, one focused pi-tui `Editor`
+per question:
+- `Enter` commits the focused answer and advances to the next question
+  (no wrap); on the last question it raises a final confirm
+  (`LeadAskQueueConfirmState`, cursor defaulting to "No") that submits
+  only answered questions on "Yes", leaving blanks pending with a count
+  (`buildQueueSubmitConfirmMessage`).
+- `shift+Enter` / `ctrl+j` insert a newline — native `Editor` behavior,
+  no custom handling needed.
+- `Esc` is the partial-submit/exit entry: with nothing answered it closes
+  immediately; with any answered question it raises the same-shaped
+  confirm, defaulting to "No" (preserve drafts, no submit).
+- `tab` / `shift+tab` (`QUEUE_SHIFT_TAB = "\x1b[Z"`) wrap-around navigate
+  between questions and never submit.
+- `↑`/`↓`/`pgup`/`pgdn` reach the focused `Editor`'s own native scroll —
+  no custom handling.
+- Coverage line via `buildQueueCoverageLine` (`"Qn/N · answered"`,
+  `countQueueAnswered` counting non-empty-after-trim drafts).
+- Per-question drafts persist on `ThreadRecord.draftAnswer`, restored
+  into each `Editor` at construction and cleared by `deliverQueuedAnswer`.
+- A withdrawn-pending question shows a non-destructive banner in place
+  without discarding typed prose; `repaintActiveQueue()` (a module-scope
+  `activeQueueRepaint` hook, mirroring `activeOverlay`) live-repaints an
+  open queue the moment `withdrawQueuedQuestion` marks a thread
+  `withdrawnPending`, so the owner sees it without having to close/reopen.
+- Completion wires to the unchanged Phase 1 `deliverQueuedAnswer` /
+  `resolveLeadAskEscapeAction` / `runLeadAskEscapeAction` chain via a new
+  thin wrapper, `resolveLeadAskQueueEntryAction(mode, withdrawnPending,
+  draft)`, that adds only the batch-submit "deliver if non-blank" branch
+  and otherwise defers to the existing (Phase 1, still directly tested)
+  function — so the owner-side open/Esc decision logic is not duplicated.
+- Answers are stored and delivered verbatim; `#1./#2.` option text is
+  never parsed, only carried through as ask-time context (Phase 1's
+  anchor mechanism, unchanged).
+- `openThread`'s `origin === "lead-ask"` branch now opens
+  `openLeadAskQueue(pi, ctx, handle, thread.threadId)` (the whole queue,
+  focused on the requested thread) instead of a single-question overlay.
+
+**Decisions taken beyond the ticket's literal text:**
+- Chose a manual height-budget truncation over a `ScrollView` for the
+  question/context block (`renderInner`, using the existing
+  `conversationOverlayHeight(tui)`): the ticket's own scope only asks the
+  **answer Editor** to scroll, not the question text, so a full
+  `ScrollView` rearchitecture there would be disproportionate. An
+  overlong question is truncated with a visible "truncated — see
+  `/thread <id>`" marker so the answer `Editor` and the `Esc` exit hint
+  can never be pushed off a short viewport.
+- Kept `resolveLeadAskEscapeAction`'s existing (Phase 1, tested)
+  "already-trimmed input" contract unchanged rather than widening it to
+  trim internally; `LeadAskQueueComponent.liveDrafts()` is the single
+  choke point that trims every `Editor.getText()` once, so every
+  downstream consumer (confirm counts, `handleEscape`, `finish`,
+  `openLeadAskQueue`'s `onClose`) agrees on emptiness.
+- `activeOverlay` and the new `activeQueueRepaint` hook are cleared
+  together, guarded by the same `overlayToken` comparison, so a
+  superseded queue instance can never clear a later one's repaint hook.
+
+**Verification (per the ticket's own bar, deferring TTY-only key-sequence
+behavior to a manual runbook):**
+- Coverage, advance-on-Enter, last-question confirm, blanks-pending count,
+  Esc partial-submit/preserve, wrap-around tab navigation never
+  submitting, withdrawal-banner content-preservation, per-question draft
+  persistence across construction, `initialFocusIndex` (including
+  clamping out-of-bounds), and the whitespace-trim regression are all
+  covered directly in `agents-plugin-pi/test/ask.test.ts`'s
+  `LeadAskQueueComponent` describe block (34 tests) plus the
+  `resolveLeadAskQueueEntryAction`/`collectLeadAskQueue`/coverage-helper
+  describe blocks.
+- Completion wiring to `deliverQueuedAnswer` is exercised through the
+  existing Phase 1 `runLeadAskEscapeAction`/`deliverQueuedAnswer` tests,
+  unchanged, plus the new queue-level `onClose` tests confirming each
+  thread's draft reaches that chain.
+- The adapter suite is green: `npm test` inside `agents-plugin-pi/` —
+  1624 passed, 225 suites, 0 failed, 0 skipped (final run, after all
+  review-round fixes).
+
+**Review**: two rounds, partitioned correctness/test per the route
+verdict. Round 1 — correctness: `non-clean: 1 critical` (a whitespace-only
+draft on a withdrawn-pending question could be delivered as a real answer,
+because the queue's draft map used raw untrimmed `Editor.getText()`
+against `resolveLeadAskEscapeAction`'s already-trimmed contract) + 1
+important (a very long question could push the answer `Editor` and the
+`Esc` hint off a short viewport) + 3 minor. Test — `non-clean: 3
+important` (untested stale-submit text-restore path, untested
+ordinary-keystroke default routing, untested `initialFocusIndex`
+clamping) + 3 minor (the fake test `Editor` didn't trim on submit,
+understating its fidelity to the real contract; the single-question
+queue path untested; `openLeadAskQueue`'s own notify branches untested).
+
+Dispositions — Critical: **[fixed]** in `134ddb7a` (the `liveDrafts()`
+trim choke point) with a regression test in `a085aa5a`; round 2
+(Critical-scoped, fresh reviewer) confirmed **clean**, with every
+consumer of a draft traced back through the single trim point and the
+regression test confirmed to fail pre-fix / pass post-fix. Important
+(viewport): **[fixed]** in `134ddb7a` (height-budget truncation) with
+long/short-question coverage tests in `a085aa5a`. Test-partition's 3
+important: **[fixed]**, tests added in `a085aa5a`. Test-partition's
+fake-editor-trim and single-question minors: **[fixed]**, in `a085aa5a`.
+Remaining minors, all **[won't fix]**: (a) batch-wide `"open"` marking on
+open has no rollback if the overlay throws or is closed externally —
+pre-existing pattern shared by every overlay in this file, and
+`hydrateThreadRegistry` already heals a stuck `"open"` status on restart;
+(b) `openLeadAskQueue`'s "no queued questions" notify branch is
+unreachable dead code — the only caller always passes `thread.threadId`,
+kept as a defensive fallback; (c) the withdrawal banner shows only for
+the focused question — consistent with the banner's job of warning
+before that specific answer is submitted, not broadcasting withdrawal
+state queue-wide; (d) (test-partition) `openLeadAskQueue`'s own notify
+branches remain untested — a pre-existing gap pattern in this file, not a
+Phase 2 regression. No Critical/Important findings remain open.
+
+This was the ticket's final phase; both phases are now landed.
