@@ -81,20 +81,29 @@ One worker in flight per invocation.
 
 ## Handle the report
 
-The worker ends with a fixed block. On a `stop: none` close-on-impl report, take the impl
-branch from the report or assignment note and retain it in the note until merged.
-Merging belongs to you: `merge_confirm: skip` auto-calls
-`{{.McpNamespace}}/git.merge` with that branch; `ask` (including absent)
-surfaces the report for user approval first. Use the worker's reported route
-value, so goal-run skip survives the handoff. The explicit branch lets the tool
-run from your base checkout. A refusal leaves the assignment unmerged; a conflict
-goes to `{{.SkillNamespace}}:lead-delegate` as a bounded resolution task.
-Advance the note to `merged` only after successful integration, then go to
-**End the turn**. When that closed ticket was an epic's last open child, first surface that epic to the user for a
-close decision, since nothing auto-closes an epic and an otherwise-complete board
-floats until you raise it (interim guard until a reliable trigger lands).
-Otherwise act by stop letter. Carry lines from the worker's report to the user
-verbatim; do not re-summarize them.
+The worker ends with a fixed block. Read `stop:` and `completion:` as one
+terminal pair: accept `stop: none` only with `completion: phase` or `ticket`,
+and stops `a` through `e` only with `completion: none`. Missing, unknown, or
+incompatible values are a protocol mismatch: do not query the ticket, infer a
+path, merge, or advance the assignment note; surface the raw report and end
+this invocation. `completion: ad_hoc` is incompatible with this ticket-only
+run. Otherwise act by stop letter. Carry lines from the worker's report to the
+user verbatim; do not re-summarize them.
+
+On an accepted `stop: none` report, take the impl branch from the report or
+assignment note and retain it in the note until merged. Merging belongs to you:
+`merge_confirm: skip` auto-calls `{{.McpNamespace}}/git.merge` with that
+branch; `ask` (including absent) surfaces the report for user approval first.
+Use the worker's reported route value, so goal-run skip survives the handoff.
+The explicit branch lets the tool run from your base checkout. A refusal leaves
+the assignment unmerged; a conflict goes to `{{.SkillNamespace}}:lead-delegate`
+as a bounded resolution task. Advance the note to `merged` only after
+successful integration. With `completion: phase`, leave the ticket active for a
+later cycle and go to **End the turn**. With `completion: ticket`, then go to
+**End the turn**; when that closed ticket was an epic's last open child, first
+surface that epic to the user for a close decision, since nothing auto-closes an
+epic and an otherwise-complete board floats until you raise it (interim guard
+until a reliable trigger lands).
 
 - **(a) parent merge** — this is the run's terminal; see below.
 - **(b) unresolved decision** — read what the worker points at (the ticket,

@@ -83,12 +83,14 @@ branch, and git; keep it there, not in your conversation.
 
 Write all output in English. End every run, stopped or complete, with this
 block as the last thing you emit. `stop:` is `none` exactly when `status:` is
-`[ok]`; `decisions:` and `proposed_resolution:` take `none` and `n/a` when they
-do not apply.
+`[ok]`; `completion:` states the completed work unit independently of that
+escalation outcome. `decisions:` and `proposed_resolution:` take `none` and
+`n/a` when they do not apply.
 
 ```
 status: [ok] | [escalate-to-lead]
 stop: none | a | b | c | d | e
+completion: phase | ticket | ad_hoc | none
 ticket: <path> | ad hoc
 branch: <branch>
 merge_confirm: skip | ask (from the route verdict; absent means ask)
@@ -100,3 +102,15 @@ unresolved: <finding, severity>, one per line | none
 proposed_resolution: <stop c only>
 omitted: <what you did not do and why> | none
 ```
+
+- `phase`: the current phase Result was recorded, later phases remain, and the
+  ticket remains in `ready/`.
+- `ticket`: every phase is complete and closing the ticket to `.done/`
+  succeeded.
+- `ad_hoc`: the ad-hoc work contract completed without a ticket lifecycle.
+- `none`: no phase, ticket, or ad-hoc work unit completed.
+
+Valid terminal pairs are `[ok]` with `stop: none` and `completion: phase`,
+`ticket`, or `ad_hoc`; and `[escalate-to-lead]` with stop `a` through `e` and
+`completion: none`. Any other pair is a protocol mismatch for the lead to
+fail closed.

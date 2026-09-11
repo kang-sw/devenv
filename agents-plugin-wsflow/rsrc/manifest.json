@@ -20,7 +20,7 @@
     "lead-delegate/lead-delegate.md": "f7f76a5f9771da41ddca76e606ec96b25527d6bea15318b9802e0c730f4e88d7",
     "lead-discuss/lead-discuss.md": "d5361bb7e0ddc0ababf043e73e6aea5bf59235cb90cfe5106f844198fbf2e589",
     "lead-review/lead-review.md": "b36c3f2a0a079b72dae32713783802e4b4051957d4b1e00b4ad75d52e8d87755",
-    "lead-run/lead-run.md": "9b5e1fd27d716f7d9232679ade2d00bf5ce1588d9a3ab96d35c41b800bbb16b4",
+    "lead-run/lead-run.md": "345df506c28e24747fd13daf906933e334f2d66d2a661252a2151dc6d983e0f0",
     "lead-scope-worktree/lead-scope-worktree.md": "c0b875c6f46c1a104816ba8212d528c6c373b00a449a051610011f8afe4b8894",
     "lead-ship/lead-ship.md": "0f4e2e5d92f40ab8603a5660a9caec840d88bbfc6d2ef8ab9dec29eb7d171dfe",
     "lead-ticket/lead-ticket.md": "2c4709a93997777126bc71537dbaa30a1ef43293e464c89885246559c1da9a81",
@@ -44,6 +44,6 @@
     "ticket-worker-elevated/ticket-worker-elevated.md": "03dc4a9faea119c599e9d98d77a552fd159a980489fc83d3a30c7a37f580428c",
     "ticket-worker-escalated/ticket-worker-escalated.md": "f8c19df464737adc0fc67f12916499bf7510a5a52ac7425171e62ffdca8ee608",
     "ticket-worker/ticket-worker.md": "91be3ef8ff04bc030871bc9a9088efce8e6f76f08e80257a882cd4880dbcd2c9",
-    "worker-stop-protocol.md": "9dcc9c25ca22f868ef72a62135bff4e7f2319764b8cf4fe312d3fcaf3cc671c6"
+    "worker-stop-protocol.md": "dd25c92df6437fcdd74ffc302f0cb4c2e9c06505775c00504f84f85d7b3ee99d"
   }
 }

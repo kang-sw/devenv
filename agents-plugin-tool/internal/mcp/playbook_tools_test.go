@@ -2618,7 +2618,7 @@ func TestPlaybookRenderGoldenTicketWorker(t *testing.T) {
 						t.Errorf("recommended tier = %q, want %q", tier, tc.tier)
 					}
 					// The shared protocol include must arrive with the playbook body.
-					for _, want := range []string{"# Worker Protocol", "## Stop List", "status: [ok] | [escalate-to-lead]", "The lead owns merging after your report; do not merge.", "merge_confirm: skip | ask"} {
+					for _, want := range []string{"# Worker Protocol", "## Stop List", "status: [ok] | [escalate-to-lead]", "completion: phase | ticket | ad_hoc | none", "Valid terminal pairs are `[ok]` with `stop: none`", "The lead owns merging after your report; do not merge.", "merge_confirm: skip | ask"} {
 						if !strings.Contains(body, want) {
 							t.Errorf("rendered body missing protocol text %q", want)
 						}
@@ -2674,6 +2674,11 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				"A second (e) goes to the user",
 				"`merge_confirm: skip` auto-calls `" + product + "/git.merge`",
 				"`ask` (including absent) surfaces the report for user approval first",
+				"accept `stop: none` only with `completion: phase` or `ticket`, and stops `a` through `e` only with `completion: none`",
+				"Missing, unknown, or incompatible values are a protocol mismatch",
+				"do not query the ticket, infer a path, merge, or advance the assignment note",
+				"With `completion: phase`, leave the ticket active for a later cycle",
+				"With `completion: ticket`, then go to **End the turn**",
 				"goes to `" + product + ":lead-delegate` as a bounded resolution task",
 				"goal-to-PARENT terminal uses raw Git",
 				"do not reset the retry count on resume or reclassify the original risks",

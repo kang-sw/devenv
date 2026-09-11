@@ -144,11 +144,17 @@ class SkillDispatchContractsTest(unittest.TestCase):
         protocol = (RSRC_DIR / "worker-stop-protocol.md").read_text(encoding="utf-8")
         self.assertIn("all merges, including impl into goal, belong to the lead", protocol)
         self.assertIn("merge_confirm: skip | ask", protocol)
+        self.assertIn("completion: phase | ticket | ad_hoc | none", protocol)
+        self.assertIn("Valid terminal pairs are `[ok]` with `stop: none`", protocol)
         text = (RSRC_DIR / "lead-run" / "lead-run.md").read_text(encoding="utf-8")
         self.assertIn("`merge_confirm: skip` auto-calls", text)
         self.assertIn("`ask` (including absent)", text)
         self.assertIn("{{.McpNamespace}}/git.merge", text)
         self.assertIn("goal-to-PARENT terminal uses raw Git", text)
+        self.assertIn("`completion: phase`, leave the ticket active", text)
+        self.assertIn("With `completion: ticket`", text)
+        self.assertIn("incompatible values are a protocol mismatch", text)
+        self.assertIn("do not query the ticket, infer a\npath, merge", text)
 
     def test_run_dispatches_through_playbook_read(self):
         # lead-run is a playbook.read shim over an rsrc body, not an inline
