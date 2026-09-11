@@ -1375,6 +1375,25 @@ func TestConfigTuningCatalogNoAgentShape(t *testing.T) {
 
 	requireTuningKnob(t, catalog, "prompt.SeedSection")
 	requireTuningKnob(t, catalog, wsconfig.ItemSageReview)
+	for i, args := range []map[string]any{
+		{
+			"key":         wsconfig.ItemSageReview,
+			"scope":       "session",
+			"value":       "off",
+			"session_key": key,
+		},
+		{
+			"key":         wsconfig.ItemSageReview,
+			"scope":       "session",
+			"reset":       true,
+			"session_key": key,
+		},
+	} {
+		result := callToolOnce(t, s, 10+i, "config.tune", args)
+		if strings.Contains(result, `"isError":true`) {
+			t.Fatalf("no-agent config.tune sage_review request failed: %s", result)
+		}
+	}
 	subagentKnob := requireTuningKnob(t, catalog, "workflow.prefer_subagent")
 	if subagentKnob.Writer.Tool != "config.tune" || subagentKnob.Writer.FixedArguments["key"] != "workflow.prefer_subagent" {
 		t.Fatalf("workflow.prefer_subagent writer tool mismatch in no-agent catalog: %+v", subagentKnob.Writer)
