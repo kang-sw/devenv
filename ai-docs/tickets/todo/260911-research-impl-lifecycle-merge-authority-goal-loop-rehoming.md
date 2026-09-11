@@ -134,30 +134,70 @@ is the **activation driver**.
   `thread/goal/*` is "bookkeeping only, not an auto-looping primitive"
   (`ai-docs/ref/agent-harness-capability-tiers.md:29-30`).
 
-**Open architecture question (the reason this is research, not a fix):** where does
-a host-neutral ws re-supply goal-loop *activation and re-fire*? Options to weigh:
-(a) an explicit ws entry point that arms goal mode + stages the branch, with the
-loop self-sustaining on the `goal/*` branch-name trigger + terminal-line protocol
-(no per-turn emitter needed); (b) a host adapter re-implementation of the
-Stop-hook re-fire (Codex/Claude specific); (c) retire the dangling goal consumers
-in `lead-run` if the loop is not coming back. This choice is entangled with the
-binding anchor `260605-research-ws-native-subagent-pivot`.
+**Two separable axes, decided.** (1) *Goal-branch handling* — develop's
+`lead-drain-ready-queue` goal prose (Posture, staging, `goal/*` terminals) is
+known-good and worked in dogfooding; the concrete direction is to restore it
+**verbatim-grade into `lead-run`'s goal path**, where the refoundation's
+condensation degraded it. This is a localized, low-risk edit, not an open
+question. (2) *Loop re-fire / emitter* — re-invoking `lead-run` each turn is
+inherently harness-dependent (the Claude `/goal` built-in emits the reminder the
+staging condition reads; hosts without it need an adapter). This axis stays
+deferred and is entangled with the binding anchor
+`260605-research-ws-native-subagent-pivot`; retiring the dangling consumers
+applies only if the loop is abandoned. Do not conflate the two: restoring the
+prose fixes goal-branch *creation* under a host that emits `/goal`; the auto-loop
+is separate.
 
-**Prior art for 260910.** develop's `lead-goal-fan-out-step` is the original
-worktree-parallel design: one worktree + fresh `impl/<parent>/<stem>` per ticket,
-`ferrule(root, capability: "lead", parent_session_key)` minting each mini-lead
-key, a **merge subagent in the parent's sole checkout serializing all merges**,
-and a session-note board as the in-flight ledger. It degenerates to serial when
-fewer than two independent tickets exist or nested spawn is rejected. This should
-feed 260910 directly.
+**Fan-out is a lead-run extension mode, not a separate skill.** develop factored
+the parallel path into a separate `lead-goal-fan-out-step` overlay; the decision
+here is the opposite — when it returns, reintroduce it as an extension *mode* of
+`lead-run` to keep the cognition point unified. develop's overlay is the prior-art
+design: one worktree + fresh `impl/<parent>/<stem>` per ticket, `ferrule(root,
+capability: "lead", parent_session_key)` minting each mini-lead key, a **merge
+subagent in the parent's sole checkout serializing all merges**, and a
+session-note board as the in-flight ledger, degenerating to serial below two
+independent tickets. This feeds 260910 directly.
+
+## Design: branch-aware selection via a `ticket-selector` playbook
+
+`lead-run`'s Select ignores the git branch today (`lead-run.md:19-25`, scanning
+`ready/` files only), so it can pick a different ticket while sitting on an
+in-progress impl branch — a wasted spawn the resolver then stops. Select must
+become branch-state-aware:
+
+- **On a base branch:** current behavior (skip Blocked; in-progress >
+  prerequisite > oldest over `ready/`).
+- **On `impl/<root>/<slug>`:** the branch owns an in-progress ticket. If that
+  ticket has an unfinished phase, select it (continue on the same branch) and do
+  not consider other `ready/` candidates — starting a different ticket would
+  strand this impl branch. If the owning ticket is closed but the branch is
+  unmerged, selection cannot proceed: raise a merge recommendation to the lead
+  (the merge gate above).
+
+The hard part is the branch→owning-ticket reverse map: the opaque `wskey.Derive`
+slug is not reversible, so this couples to the readable-slug hardening (derivation
+finding above) or needs a deterministic resolver helper returning the owning stem
+for a branch (deriving candidate slugs and matching). Keep that determinism in the
+tool/resolver; the playbook only orchestrates.
+
+Decision: **extract Select into a renderable `ticket-selector` playbook.** The
+branch-aware logic is shared by lead-run's serial mode, the future fan-out mode's
+batch selection (a superset), and the wsflow mirror; a single rendered playbook
+beats inlined duplication and unifies the cognition point. Split of concern:
+`ticket-selector` orchestrates (branch detect → owning-ticket lookup → ordering →
+merge-recommendation terminal); the resolver/tool computes the deterministic
+branch→stem and slug derivation. New playbook = Ask-first at implementation time.
 
 ## Deferred: child-ticket split
 
-Child derivation is intentionally deferred per the user. The natural clusters:
-**(A) merge authority** (`ws/git.merge` + worker/stop-protocol reversal + lead-run
-report merge step + `merge_confirm` re-home + auto-delete; new MCP tool =
-protocol/Ask-first, plus shipped-surface edits and a wsflow mirror), **(B)
-derivation hardening** (fail-open→fail-closed, slug legibility; mostly Go
-resolver), and **(C) goal-loop re-homing** (the open architecture question above).
-A separately parked minor idea — commit-history soft continuity in `lead-run`
-Select — is out of scope here.
+Child derivation is deferred to the next session (context is nearly full). The
+natural clusters: **(A) merge authority** (`ws/git.merge` + worker/stop-protocol
+reversal + lead-run report merge step + `merge_confirm` re-home + auto-delete; new
+MCP tool = protocol/Ask-first, plus shipped-surface edits and a wsflow mirror);
+**(B) derivation hardening** (fail-open→fail-closed, readable+hash slug; mostly Go
+resolver); **(C) goal-branch prose restore** (verbatim-grade from develop into
+lead-run; the loop re-fire/emitter is the separate deferred host axis); and
+**(D) branch-aware selection** (the `ticket-selector` playbook + resolver
+branch→owning-ticket helper, coupled to B's readable slug). The commit-history
+soft-continuity idea folds into D as a lower-priority refinement rather than a
+separate parked item.
