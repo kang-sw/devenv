@@ -654,75 +654,38 @@ func TestTicketsMoveUpwardToReadyFromIdeaWarnsOnUnresolvedSageReviewPosture(t *t
 	}
 }
 
-func TestTicketsMoveUpwardToReadyEpicOnlyChecksDesign(t *testing.T) {
-	root := t.TempDir()
-	stem := "260101-epic-checked"
-	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
-		"---\ntitle: Epic\nsage-review-design: completed\nsage-review-completeness: blocked\n---\n\nBody.\n")
-	runner := &mockGitRunner{}
-
-	result, err := TicketsMove(root, runner, TicketMoveOptions{
-		TicketStem: stem,
-		To:         "ready",
-		SageReview: "auto",
-	})
-	if err != nil {
-		t.Fatalf("TicketsMove epic ready promotion should ignore completeness: %v", err)
-	}
-	if strings.Contains(result.Tip, "completeness") {
-		t.Fatalf("Tip = %q, want no completeness mention for epic", result.Tip)
-	}
-}
-
-// TestTicketsMoveUpwardToReadyEpicWarnsOnUnresolvedDesign complements
-// TestTicketsMoveUpwardToReadyEpicOnlyChecksDesign: that test only covers the
-// terminal/ignore-completeness case (design completed, completeness
-// blocked, promotion succeeds). This asserts the epic-specific gate still
-// surfaces the warning when sage-review-design itself is non-terminal (the
-// move itself now always succeeds; ws/git.commit is the sole hard gate).
-func TestTicketsMoveUpwardToReadyEpicWarnsOnUnresolvedDesign(t *testing.T) {
-	root := t.TempDir()
-	stem := "260101-epic-unresolved"
-	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
-		"---\ntitle: Epic\nsage-review-design: recommended\n---\n\nBody.\n")
-	runner := &mockGitRunner{}
-
-	result, err := TicketsMove(root, runner, TicketMoveOptions{
-		TicketStem: stem,
-		To:         "ready",
-		SageReview: "auto",
-	})
-	if err != nil {
-		t.Fatalf("TicketsMove epic ready promotion with unresolved design: %v", err)
-	}
-	if !strings.Contains(result.Tip, "sage-review-design is unreviewed (posture recommended; review has not run yet)") {
-		t.Fatalf("Tip = %q, want design-recommended warning", result.Tip)
-	}
-	if len(runner.calls) == 0 {
-		t.Fatalf("git was not called; the move must still succeed (soft warning only, not a block)")
-	}
-}
-
-func TestTicketsMoveUpwardToReadyExemptCategoriesNoFieldTouchedNoError(t *testing.T) {
-	for _, category := range []string{"research", "workset"} {
+// TestTicketsMoveToReadyBarsNonImplementationCategories pins the hard ready/
+// bar: epic, research, and workset are board artifacts, never execution
+// targets, so a move to ready/ is rejected outright. The rejection is a genuine
+// no-op — git is never called and the ticket file stays in its source
+// directory — so a stray promotion can never hand a worker one of these
+// categories. sage_gate's own epic-at-ready design-only path is exercised
+// separately in tickets_sage_test.go (it is decoupled from this move).
+func TestTicketsMoveToReadyBarsNonImplementationCategories(t *testing.T) {
+	for _, category := range []string{"epic", "research", "workset"} {
 		t.Run(category, func(t *testing.T) {
 			root := t.TempDir()
-			stem := "260101-" + category + "-untouched"
-			mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
-				"---\ntitle: Exempt\n---\n\nBody.\n")
+			stem := "260101-" + category + "-board"
+			oldRel := filepath.Join("ai-docs", "tickets", "todo", stem+".md")
+			mustWrite(t, root, oldRel, "---\ntitle: Board\n---\n\nBody.\n")
 			runner := &mockGitRunner{}
 
-			result, err := TicketsMove(root, runner, TicketMoveOptions{
+			_, err := TicketsMove(root, runner, TicketMoveOptions{
 				TicketStem: stem,
 				To:         "ready",
 				SageReview: "auto",
 			})
-			if err != nil {
-				t.Fatalf("TicketsMove: %v", err)
+			if err == nil {
+				t.Fatalf("TicketsMove %s -> ready must be rejected, got nil error", category)
 			}
-			body := readFileString(t, filepath.Join(root, filepath.FromSlash(result.NewPath)))
-			if strings.Contains(body, "sage-review") {
-				t.Fatalf("exempt category ticket must not contain sage-review: %s", body)
+			if !strings.Contains(err.Error(), "ready/") {
+				t.Fatalf("error = %q, want it to name the ready/ bar", err.Error())
+			}
+			if len(runner.calls) != 0 {
+				t.Fatalf("git was called; the rejection must be a no-op (no move)")
+			}
+			if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(oldRel))); statErr != nil {
+				t.Fatalf("source ticket no longer at %s after rejected move: %v", oldRel, statErr)
 			}
 		})
 	}

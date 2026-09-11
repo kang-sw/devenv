@@ -172,8 +172,10 @@ func TestTicketsMoveReadyTipsMissingRouteFacts(t *testing.T) {
 
 // TestTicketsMoveReadyStaysSilentWhenFactsAreNotOwed pins the other side of the
 // advisory: the tip fires on a real gap, not on every `ready/` move. A ticket
-// carrying the section, and a category the ready gate exempts, both move
-// quietly.
+// carrying the section moves quietly. (The non-implementation categories the
+// route-facts exemption once also covered here can no longer reach this move at
+// all — they are barred from ready/; the exemption's live coverage is now the
+// direct sage_gate path in tickets_sage_test.go.)
 func TestTicketsMoveReadyStaysSilentWhenFactsAreNotOwed(t *testing.T) {
 	cases := []struct {
 		name string
@@ -184,11 +186,6 @@ func TestTicketsMoveReadyStaysSilentWhenFactsAreNotOwed(t *testing.T) {
 			name: "section present",
 			stem: "260101-feat-sample",
 			body: "---\ntitle: Sample\nspec: 260101-sample\n---\n\n# Sample\n\nBody.\n\n## Route Facts\n\n| fact | value | evidence |\n|---|---|---|\n| scope.span | single-file | a.go |\n",
-		},
-		{
-			name: "exempt category",
-			stem: "260101-research-sample",
-			body: "---\ntitle: Sample\n---\n\n# Sample\n\nBody.\n",
 		},
 	}
 	for _, tc := range cases {
