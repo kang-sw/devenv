@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 35433d5f4d279db8
 sage-review-completeness-reviewed: 35433d5f4d279db8
+completed: 2026-09-11
 ---
 
 # Align Result heading guidance with the date required by ticket verification
@@ -48,3 +49,24 @@ conventions, and make their examples include the date the validator already
 requires. Preserve validator semantics and regenerate affected manifests and
 mirrors. Verify that a heading copied from the shipped guidance passes the
 existing ticket guard.
+
+### Result (e0c7631a) - 2026-09-11
+
+Changed the `### Result (<short-hash>)` example to `### Result (<short-hash>) -
+YYYY-MM-DD` in the three canonical worker playbooks
+(`agents-plugin/rsrc/ticket-worker/`, `ticket-worker-escalated/`,
+`ticket-worker-elevated/`, line 79) and in the bundled
+`ticket-conventions.md` General section (line 56), matching the adjacent
+Edition example and the already-dated `executor-wrapup.md` guidance.
+`ticketResultHeadingRE` semantics were untouched; the guidance now matches
+the guard it feeds.
+
+Regenerated (never hand-edited) per `wsflow-mirroring.md`: both
+`rsrc/manifest.json` via `WSRSRC_REGEN`, and the byte-identical
+`agents-plugin-wsflow/rsrc/` mirror via `WS_REGEN_WSFLOW_RSRC`.
+
+Verification: `go test ./internal/wsdoc/... ./internal/wsrsrc/...` pass
+(mirror-drift and `phase-result-heading` guards included); wsflow package
+tests (`python3 -m unittest discover agents-plugin-wsflow/tests`) pass; a
+concrete heading `### Result (abc1234) - 2026-09-11` built from the shipped
+form matches `ticketResultHeadingRE`. Independent review verdict: clean.
