@@ -84,6 +84,7 @@ export const {
   stripTerminalSequences,
   truncateToWidth,
   visibleWidth,
+  wrapTextWithAnsi,
 } = piTuiStatic;
 export type { Component, EditorOptions, EditorTheme, MarkdownTheme, ScrollViewOptions, SelectItem, SelectListTheme, TUI };
 
