@@ -981,14 +981,17 @@ foreground" below for that renderer's collapse and coloring contract.
 
 The report branch consults the record's owner-thread hooks first: a report the
 hook consumes (a `lead-ask` thread's final, which becomes the `ws-thread-summary`
-injection) is not pushed, while a `fork-raised` final closes its thread and is
-then pushed. A record that is **thread-bound** — bound to a non-closed owner
-thread, from thread open (first open and every reopen) or from question
-registration until the thread closes (`/done`, fork final, `ws-resolve`) —
-pushes no further settle or advisory and is outside the status line, so
-owner↔fork exchanges reach the lead only through the summary / fork-final
-paths. The one carve-out is the `fork-question-thread` registration notice
-itself: it is pushed for the very record the same hook call just made
+injection — pre-`260911` only, since a `260911` fork-less `lead-ask` thread
+never has a bound live record to report from) is not pushed, while a
+`fork-raised` final closes its thread and is then pushed. A record that is
+**thread-bound** — bound to a non-closed owner thread, from thread open
+(first open and every reopen) or from question registration until the thread
+closes (`/done`, fork final, `ws-withdraw-question`) — pushes no further
+settle or advisory and is outside the status line, so owner↔fork exchanges
+reach the lead only through the summary / fork-final paths (in current
+`260911` practice, this is the `fork-raised` path only). The one carve-out is
+the `fork-question-thread` registration notice itself: it is pushed for the
+very record the same hook call just made
 thread-bound, since that push is how the lead learns the thread exists at
 all; every later settle or advisory for that record is suppressed as above. A
 child's turn therefore never reaches the lead twice, and within a live
@@ -1278,7 +1281,8 @@ both published through `details` without altering the model-visible result.
   names, descriptions, schemas and order without adding, deleting or deduplicating
   tools. Actual registrations are checked before work delivery and again at input
   after resource merging; missing or changed registrations are visible failures,
-  not synthetic schema replay. `ws-fork`, `ws-ask` and `ws-resolve` remain visible
+  not synthetic schema replay. `ws-fork`, `ws-queue-question` and
+  `ws-withdraw-question` remain visible
   with identical metadata but throw fork-role tool errors before allocating a
   child or mutating a thread. Task questions use `ws-report-to-lead` instead.
 - **Prefix and cache boundary.** Task and discussion forks preserve the captured
@@ -1373,19 +1377,40 @@ both published through `details` without altering the model-visible result.
 The lead can hand a decision to the **owner** (the human at the TUI) without
 blocking on it, and a task fork's own `kind:"question"` report is routed to the
 same owner surface. One primitive — a **thread** — has two entry points: the lead
-registers a question (`ws-ask`), or a running task fork raises one. Both show up
-in the owner's pending count; the owner opens either in a chat overlay, and the
-thread's *origin* decides what closing it does. The lead is never the answering
-channel for an owner question: it registers and carries on.
+registers a question (`ws-queue-question`), or a running task fork raises one.
+Both show up in the owner's pending count; the owner opens either in a chat
+overlay, and the thread's *origin* decides what opening and closing it does.
+The lead is never the answering channel for an owner question: it registers
+and carries on.
 
-- **`ws-ask` / `ws-resolve` (lead tools, register-only).** `ws-ask(title,
+`260911` (`260911-feat-ws-pi-async-question-queue` Phase 1) renamed
+`ws-ask`/`ws-resolve` to `ws-queue-question`/`ws-withdraw-question` (the old
+names read as "ask now", inviting a blocking framing the tool never had) and
+made the lead-raised (`lead-ask`) path fork-less end to end: opening a
+`lead-ask` thread no longer forks a discussion agent at all (the "Lazy
+discussion fork at the lead's tip" design below this note described the
+pre-`260911` behavior and is superseded by "Fork-less lead-ask answer
+overlay"). The fork-raised path — a task fork's own `kind:"question"` report,
+its live-fork attach, and its overlay — is unchanged by `260911` and is
+covered by the "Attach to a live task fork" bullet below exactly as before.
+
+- **`ws-queue-question` / `ws-withdraw-question` (lead tools, register-only;
+  renamed by `260911` from `ws-ask`/`ws-resolve`).** `ws-queue-question(title,
   question, context?)` records a thread and returns `{question_id}` at once; it
-  spawns nothing and never blocks. `ws-resolve(question_id)` withdraws a
-  question the lead answered by itself (status `closed`, removed from the
-  pending count, no owner notification, no injection); an unknown id is an
-  error. Both remain in a fork's inherited callable surface with unchanged
-  schemas/descriptions, but their handlers refuse fork-role calls before thread
-  mutation. A task fork raises questions through `ws-report-to-lead` instead.
+  spawns nothing and never blocks, and stamps the record with a best-effort
+  ask-time anchor (a short git commit hash plus the lead-session `entry_id` at
+  registration — see "D3 return-path anchor" below) so the lead can recover
+  where the question came from even past a compaction boundary.
+  `ws-withdraw-question(question_id)` withdraws a question the lead answered
+  by itself, under a concurrency contract keyed on the thread's status: a
+  `pending` (unopened) thread closes immediately; an `open` thread (the owner
+  already has it open) defers the close — an already-typed but unsubmitted
+  answer is still delivered once the owner submits or dismisses with a draft,
+  never yanked mid-edit — and a `dormant` (already answered) or already-`closed`
+  thread is a no-op. An unknown id is an error. Both remain in a fork's
+  inherited callable surface with unchanged schemas/descriptions, but their
+  handlers refuse fork-role calls before thread mutation. A task fork raises
+  questions through `ws-report-to-lead` instead.
 - **`context` is bounded by warning, not truncation.** The lead-authored
   `context` (2–3 sentences, no paths or hashes) is stored unchanged; past an
   adapter-side character budget (400) the lead receives a warning notification.
@@ -1398,8 +1423,16 @@ channel for an owner question: it registers and carries on.
   `fork-raised`), and — once a respondent has run — a denormalized resume
   snapshot (session path, optional legacy system-prompt path, tool surface,
   ws tool names, tool group, model, effort, and original fork prompt/context
-  metadata). Repeated recovery retains the original capture rather than the
-  restarting lead's current prompt or identity. The registry is written on every
+  metadata). A `lead-ask` record also carries the `260911` **D3 return-path
+  anchor** — a best-effort short git commit hash captured at ask time
+  (`askCommitHash`, alongside the existing `entryId`) — so a returned answer
+  can point back to where it was asked even past a compaction boundary; and a
+  transient `withdrawnPending` flag that implements `ws-withdraw-question`'s
+  deferred-close contract for a thread the owner currently has open (cleared
+  and normalized to `closed`/`pending` on the next `session_start`, since an
+  overlay never survives a restart). Repeated recovery retains the original
+  capture rather than the restarting lead's current prompt or identity. The
+  registry is written on every
   transition to
   `<lead session file>.ws-threads.json` and reloaded on `session_start`; load
   and save never throw (a missing or malformed file reads as empty; an
@@ -1419,20 +1452,38 @@ channel for an owner question: it registers and carries on.
   refreshes the widget, nothing more. One overlay is attached at a time; the
   overlay header shows the thread title and the time it was opened, so two
   lead-voiced agents cannot be mistaken for one.
-- **Lazy discussion fork at the lead's tip (lead-ask threads).** A registered
-  question costs nothing until the owner opens it. Opening a `lead-ask` thread
-  for the first time forks a **discussion** fork from the lead's *current* tip
-  (`pi --fork`), preserving the lead's full effective prompt and exact callable
-  surface under the same readiness, key-refusal and affinity rules as task forks.
-  Its first message carries the conversational directive, current own key and
-  role-refusal reminders, followed by `context + question` and, when the
-  thread's `entry_id` is no longer on the lead's live branch (a compaction has
-  passed it), a **verbatim excerpt** of the lead-session entries around that id,
-  read from the append-only session file. A discussion fork gets **no**
-  task structural anti-bleed frame and **no** task completion loop or required
-  task-final fields. It retains owner dialogue, `/done` and a short 2–4 sentence
-  decision summary, including after recovery, and is spawned only from a TUI lead.
-  Owner-run discussion acceptance for the message-only directive remains pending.
+- **Fork-less lead-ask answer overlay (`260911` Phase 1).** A registered
+  question costs nothing until the owner opens it, and opening one spawns
+  **nothing** — no discussion fork, no live process of any kind. `/answer`
+  (or the reopen shortcut) on a `lead-ask` thread opens a single-question
+  overlay, built from the same shared conversation-view component as the
+  fork-raised path's overlay chat, but with a local `ConversationChannel`
+  that has no respondent to stream from or report liveness for: the owner
+  types one prose reply and sends it, and that send IS the answer — there is
+  no back-and-forth turn loop. On send the adapter delivers the answer
+  straight to the lead session through the existing `followUp` custom-message
+  path (the same `sendToLead` primitive `/done`'s discussion-summary
+  injection used before this redesign), carrying the D3 anchor
+  (`askCommitHash` + `entryId`) and, when that `entryId` is no longer on the
+  lead's live branch (a compaction has passed it), a **verbatim excerpt** of
+  the lead-session entries around it, read from the append-only session file
+  exactly as the pre-`260911` discussion fork's first message did. The
+  thread then goes `dormant`. An `Esc` with nothing typed leaves the thread
+  `pending` (or, if `ws-withdraw-question` was called while the view was
+  open, finalizes the deferred withdrawal to `closed`); an `Esc` with an
+  unsubmitted draft while a withdrawal is pending still delivers that draft
+  before closing, per `ws-withdraw-question`'s concurrency contract above. A
+  thread already `dormant` or `closed` notifies instead of reopening, since
+  re-answering it would re-inject a stale reply. This is an interim
+  single-question presentation only; Phase 2 (`260911`, not yet landed)
+  replaces it with a sequential prose-modal tier for a batch of queued
+  questions, wired onto the same `deliverQueuedAnswer`/`ws-withdraw-question`
+  contract this phase ships. The pre-`260911` discussion-fork machinery this
+  bypasses (the spawn itself, its directive/initial-message builders, and its
+  `/done` summarize-and-close path, described in the paragraph this note
+  replaces) is kept in source as insurance against a persisted
+  pre-redesign registry entry, but no live `lead-ask` path can reach it
+  anymore — it is exercised only by direct unit tests.
 - **Attach to a live task fork (fork-raised threads).** When a `ws-fork` task
   fork reports `kind:"question"` from a TUI lead, the adapter registers a
   `fork-raised` thread whose respondent is that fork, increments the pending
@@ -1451,7 +1502,13 @@ channel for an owner question: it registers and carries on.
   an owner overlay is attached, the fork's anti-bleed loop treats the fork's
   turns as owner-driven (no nudge, no fail-loud) and re-arms the moment the
   overlay detaches.
-- **Overlay chat.** The overlay is the shared conversation-view component (see
+- **Overlay chat (fork-raised).** This bullet describes the fork-raised
+  overlay — a live respondent to stream from, `/done` ending a multi-turn
+  dialogue — and, as insurance, the pre-`260911` discussion fork's identical
+  wiring for an old persisted registry entry; the current `lead-ask` overlay
+  ("Fork-less lead-ask answer overlay" above) is a simpler single-send variant
+  of the same shared component with no respondent and no `/done` summary turn.
+  The overlay is the shared conversation-view component (see
   "Shared conversation-view component" below), opened in its interactive mode.
   Owner text goes to the respondent as a `prompt` when it is
   idle and as a `steer` when it is streaming; child text deltas render into the
@@ -1484,18 +1541,17 @@ channel for an owner question: it registers and carries on.
   — there is no footer hint. `Esc` closes the view only: the thread stays
   `open` and the fork keeps running, reattachable at any time. `/done` typed
   in the overlay closes the **thread**, on its origin:
-  - `lead-ask` — the discussion fork is asked for a summary turn; on settle the
-    adapter injects `context + question + summary` into the lead session as a
-    custom message (type `ws-thread-summary`, delivered `followUp` so it lands
-    only once the lead is idle, in close order when several threads close). The
-    message carries **owner authority**. The fork's resume snapshot is captured,
-    the fork is stopped (`ws-agent-stop` semantics: dormant, retained), and the
-    thread goes `dormant` — reopenable later, rehydrated into a plain dormant
-    record and resumed on its own session file. The fork may also end the
-    thread itself: once the owner states a decision, its own
-    `ws-report-to-lead(kind:"final")` closes the thread through the same path,
-    with the report text as the summary and no summary turn (the attached
-    overlay, if any, closes with it).
+  - `lead-ask` — `260911` Phase 1: there is no discussion fork left to
+    summarize, so `/done` in the fork-less answer overlay is just an `Esc`
+    with nothing typed (see "Fork-less lead-ask answer overlay" above) — the
+    thread stays `pending` and the view closes; the actual answer delivery
+    happens on **send**, not on `/done`. (Pre-`260911`: the discussion fork
+    was asked for a summary turn; on settle the adapter injected
+    `context + question + summary` into the lead session as a custom message
+    — type `ws-thread-summary`, delivered `followUp` — carrying owner
+    authority; the fork's resume snapshot was captured, the fork stopped, and
+    the thread went `dormant`. That path is kept in source, unreachable from
+    any live `lead-ask` thread; see the note above.)
   - `fork-raised` — no summary, no injection, no stop: the overlay closes at
     once and the thread goes `dormant` while the task fork carries on. What was
     decided reaches the lead through that fork's own `kind:"final"` report under
@@ -1507,9 +1563,10 @@ channel for an owner question: it registers and carries on.
 - **Headless baseline preserved.** Off the TUI (`ctx.mode !== "tui"`, e.g.
   `--mode rpc`), a fork-raised question is pushed to the lead byte-for-byte as
   a `ws-agent-question` custom message delivered `steer` (the lead asks the
-  owner and answers with `ws-agent-send`); a lead
-  `ws-ask` registers the thread and fires a `notify` toward the RPC host, spawns
-  no fork, and the owner's reply arrives as an ordinary lead turn. The overlay
+  owner and answers with `ws-agent-send`); a lead `ws-queue-question`
+  registers the thread and fires a `notify` toward the RPC host, spawns
+  no fork, and the owner's reply arrives as an ordinary lead turn — this was
+  already fork-less pre-`260911` and is unchanged by the rename. The overlay
   is the TUI optimization over these baselines.
 
 > [!note] Live verification · 2026-09-05
@@ -2034,7 +2091,10 @@ stays byte-identical.
 >   model-driven compaction lever with its advisory surfacing, config knobs, and
 >   observe-only `session_before_compact` companion), the side-thread task fork
 >   with its anti-bleed loop, and the side-thread owner question surface
->   (`ws-ask`/`ws-resolve`, the persisted thread registry, the overlay chat,
->   origin-routed `/done`, and the `ws-thread-summary` injection). The one post-MVP surface
+>   (`ws-queue-question`/`ws-withdraw-question`, renamed by `260911` from
+>   `ws-ask`/`ws-resolve`; the persisted thread registry; the fork-less
+>   `lead-ask` answer overlay and the fork-raised overlay chat; origin-routed
+>   `/done`; and the `ws-thread-summary` injection, kept as pre-`260911`
+>   insurance and no longer reachable from a live `lead-ask` thread). The one post-MVP surface
 >   still deferred to a follow-up ticket under the epic — an always-visible TODO —
 >   is not part of this contract yet.
