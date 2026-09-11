@@ -66,7 +66,8 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn(contract["discuss_opening"], discuss)
         self.assertIn(contract["run_opening"], run)
         self.assertIn("Do not read the file", run)
-        self.assertNotIn("lead-delegate", run)
+        self.assertNotIn("lead-delegate", run.split("## Handle the report")[0])
+        self.assertIn("{{.SkillNamespace}}:lead-delegate", run.split("## Handle the report")[1])
         # lead-run is ticket-only: the ad-hoc implementation-contract route is
         # gone from the shipped body (retired 260911).
         self.assertNotIn("Contract:", run)
@@ -135,6 +136,20 @@ class SkillDispatchContractsTest(unittest.TestCase):
 
         self.assertIn("Write prompts sent to delegated subagents in English.", text)
 
+    def test_workers_report_and_lead_owns_impl_merge(self):
+        for name in ("ticket-worker", "ticket-worker-elevated", "ticket-worker-escalated"):
+            text = (RSRC_DIR / name / (name + ".md")).read_text(encoding="utf-8")
+            self.assertIn("The lead owns merging after your report; do not merge.", text)
+            self.assertNotIn("Merge per the route verdict", text)
+        protocol = (RSRC_DIR / "worker-stop-protocol.md").read_text(encoding="utf-8")
+        self.assertIn("all merges, including impl into goal, belong to the lead", protocol)
+        self.assertIn("merge_confirm: skip | ask", protocol)
+        text = (RSRC_DIR / "lead-run" / "lead-run.md").read_text(encoding="utf-8")
+        self.assertIn("`merge_confirm: skip` auto-calls", text)
+        self.assertIn("`ask` (including absent)", text)
+        self.assertIn("{{.McpNamespace}}/git.merge", text)
+        self.assertIn("goal-to-PARENT terminal uses raw Git", text)
+
     def test_run_dispatches_through_playbook_read(self):
         # lead-run is a playbook.read shim over an rsrc body, not an inline
         # SKILL.md: the body uses harness-idiom template variables, and those
@@ -143,13 +158,16 @@ class SkillDispatchContractsTest(unittest.TestCase):
         text = (RSRC_DIR / "lead-run" / "lead-run.md").read_text(encoding="utf-8")
 
         self.assertIn('ws/playbook.read(name: "lead-run", session_key:', shim)
-        self.assertIn("{{.ExploreAgent}}", text)
+        self.assertIn("ticket-selector", text)
+        self.assertNotIn("{{.ExploreAgent}}", text)
         self.assertIn("{{.SpawnIdiom}}", text)
         self.assertIn('{{.McpNamespace}}/playbook.render(name: <chosen worker playbook>', text)
         self.assertIn("{{.McpNamespace}}/session.note(session_key:", text)
         self.assertIn("One worker in flight per invocation.", text)
-        self.assertIn("prerequisite", text)
-        self.assertIn("do not list `ready/` or read", text)
+        selector = (RSRC_DIR / "ticket-selector" / "ticket-selector.md").read_text(encoding="utf-8")
+        self.assertIn("prerequisite", selector)
+        self.assertIn("impl_ticket", selector)
+        self.assertIn("Do not list\n`ready/` or read", text)
         self.assertIn(
             "A goal run is the current branch `goal/*` or an active goal reminder.",
             text,

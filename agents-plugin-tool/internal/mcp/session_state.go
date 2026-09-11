@@ -502,43 +502,25 @@ func implementReviewInstruction(verdict implementTodoVerdict) string {
 	return fmt.Sprintf("Dispatch the selected reviewers with the rendered reviewer playbook and generated review paths. %s %s", implementReviewFixClause, implementReviewRoundsClause)
 }
 
-// implementFinalActionInstruction's default outcome is continue-on-branch
-// without merging, for every phase — this package carries no phase-index/position
-// field, so the same wording applies regardless of where in a multi-phase
-// run this gate falls. An explicit merge stays available as a caller-chosen
-// option; verdict.BranchPlan.MergeConfirm governs approval for that chosen
-// merge only ("skip" drops the ask, "ask"/absent requires it) and no longer
-// gates an always-happening merge. tickets.close later surfaces its own
-// merge-review nudge if the branch is left unmerged.
+// Workers terminate with a retained-branch report; merge confirmation belongs
+// to the lead that receives it.
 func implementFinalActionInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not ask for final action approval while branch action is stop: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
-	skipConfirm := strings.EqualFold(strings.TrimSpace(verdict.BranchPlan.MergeConfirm), "skip")
 	verification := "Apply the impl-playbook unchanged-input verification rule; after documentation-only commits run affected checks. Verify the review is resolved"
-	var mergeOption string
-	if skipConfirm {
-		mergeOption = "If a merge is explicitly chosen instead, perform it without asking for approval (caller merge confirm is skip)."
-	} else {
-		mergeOption = "If a merge is explicitly chosen instead, ask for approval before performing it."
-	}
-	return fmt.Sprintf("%s, then report the retained branch and commit range as the default no-merge outcome. %s", verification, mergeOption)
+	return fmt.Sprintf("%s, then report the retained branch, commit range, and merge_confirm: %s to the lead. Do not merge; the worker ends at the report.", verification, implementMergeConfirmText(verdict.BranchPlan))
 }
 
-// implementMergeInstruction is opt-in: this step runs only when a merge was
-// explicitly chosen, either at the final-action gate above or later during
-// tickets.close review. verdict.BranchPlan.MergeConfirm governs approval for
-// that chosen merge only ("skip" drops the ask, "ask"/absent requires it);
-// it is not a trigger for merging by default. Continuing on the branch
-// without merging remains the default outcome for every phase.
+// Keep the installed todo key stable while making it a lead handoff.
 func implementMergeInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not merge while branch action is stop: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
 	if strings.EqualFold(strings.TrimSpace(verdict.BranchPlan.MergeConfirm), "skip") {
-		return "This step runs only when a merge was explicitly chosen at the final action gate or later at tickets.close review; when chosen, perform it against the verdict merge target without asking for user approval (caller merge confirm is skip) and preserve the workflow-owned merge record. Otherwise skip this step: continuing on the branch without merging is the default outcome."
+		return "Do not merge from the worker. Report merge_confirm: skip and the retained impl branch; on closure the lead auto-calls git.merge with that branch."
 	}
-	return "This step runs only when a merge was explicitly chosen at the final action gate or later at tickets.close review; when chosen, perform it against the verdict merge target after user approval and preserve the workflow-owned merge record. Otherwise skip this step: continuing on the branch without merging is the default outcome."
+	return "Do not merge from the worker. Report merge_confirm: ask and the retained impl branch; on closure the lead surfaces the report for user approval before calling git.merge with that branch."
 }
 
 func isBranchStop(verdict implementTodoVerdict) bool {

@@ -57,8 +57,7 @@ this file. The Worker Protocol appended below governs; read it first.
 1. Route: `{{.McpNamespace}}/route.resolve_implement(session_key: <your key>,
    target: {kind: "ticket", ticket_path: <path>, ticket_stem: <stem>})`. The
    returned todo list is your skeleton; its branch action creates or reuses your
-   work branch from the branch your task block names, and its merge step names
-   the target. On a `goal/*` branch pass
+   work branch from the branch your task block names. On a `goal/*` branch pass
    `policy: {branch: {merge_confirm: "skip"}}`. A verdict that reports missing
    route facts is stop (c): the lead populates them before spawning, so reaching
    one here means the ticket was handed over out of order.
@@ -80,6 +79,5 @@ this file. The Worker Protocol appended below governs; read it first.
    landed, the verification evidence, and the decisions you took. When every
    phase has a Result, `{{.McpNamespace}}/tickets.close(stem: <stem>,
    status: "done")` and commit the closure.
-6. Merge per the route verdict: into the goal branch on your own; into a
-   parent branch never (stop (a)).
-7. Emit the Report block.
+6. Emit the Report block with the retained impl branch and the route verdict's
+   merge_confirm. The lead owns merging after your report; do not merge.

@@ -24,7 +24,7 @@ func TestTicketChecklist(t *testing.T) {
 		}
 	}
 
-	// phase:"content" is category-invariant; assert every item's text travels
+	// Non-research content stays unchanged; assert every item's text travels
 	// verbatim (a truncated/dropped item would otherwise still pass).
 	contentFragments := []string{
 		"forward-compatibility guardrail, and verification expectation; include suggested implementation strategy only when it was agreed, constrains implementation, or is needed to recover the intended contract",
@@ -38,6 +38,9 @@ func TestTicketChecklist(t *testing.T) {
 		}
 	}
 	for _, tt := range accepted[1:] {
+		if tt == "research" {
+			continue
+		}
 		got, _ := wsdoc.TicketChecklist(tt, "content")
 		if got != first {
 			t.Errorf("TicketChecklist(%q, \"content\") differs from TicketChecklist(%q, \"content\"); expected identical content", tt, accepted[0])
@@ -45,7 +48,7 @@ func TestTicketChecklist(t *testing.T) {
 	}
 
 	// phase:"intent" is the three-item conversation-fidelity check and is
-	// category-invariant: the capture enumeration, the epic shape rules,
+	// shared by non-research categories: the capture enumeration, the epic shape rules,
 	// and the fix-then-summarize procedure moved out. Assert every surviving
 	// item's text travels verbatim, and that the dropped items stay dropped.
 	featIntent, _ := wsdoc.TicketChecklist("feat", "intent")
@@ -75,6 +78,9 @@ func TestTicketChecklist(t *testing.T) {
 		}
 	}
 	for _, tt := range accepted[1:] {
+		if tt == "research" {
+			continue
+		}
 		got, _ := wsdoc.TicketChecklist(tt, "intent")
 		if got != featIntent {
 			t.Errorf("TicketChecklist(%q, \"intent\") differs from TicketChecklist(\"feat\", \"intent\"); the intent checklist is category-invariant", tt)

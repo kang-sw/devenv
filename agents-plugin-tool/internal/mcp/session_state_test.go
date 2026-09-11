@@ -283,12 +283,8 @@ func TestDeriveImplementTodoInstructionsFinalGate(t *testing.T) {
 	}
 }
 
-// TestDeriveImplementTodoInstructionsMergeConfirmSkip covers Phase 2's flip:
-// the default final-action/merge outcome is continue-on-branch without
-// merging, for every BranchPlan.Action (continue and create both stand in
-// for "any phase", since this package carries no phase-index field); an
-// explicit merge choice still honors MergeConfirm ask/skip for that chosen
-// merge only.
+// Both todo paths prohibit worker merging and hand the confirmation signal
+// to the lead, including when skip is explicitly selected.
 func TestDeriveImplementTodoInstructionsMergeConfirmSkip(t *testing.T) {
 	for _, action := range []string{"continue", "create"} {
 		skip := deriveImplementTodosFromVerdict(implementTodoVerdict{
@@ -298,20 +294,20 @@ func TestDeriveImplementTodoInstructionsMergeConfirmSkip(t *testing.T) {
 			NeedReview:  true,
 		})
 		finalAction := requireInstruction(t, todoByKey(t, skip, "final-action-gate"))
-		if !strings.Contains(finalAction, "default no-merge outcome") {
+		if !strings.Contains(finalAction, "Do not merge; the worker ends at the report") {
 			t.Fatalf("[action=%s] final-action-gate instruction should default to no-merge: %q", action, finalAction)
 		}
-		if !strings.Contains(finalAction, "without asking for approval") {
+		if !strings.Contains(finalAction, "merge_confirm: skip") {
 			t.Fatalf("[action=%s] final-action-gate instruction with merge_confirm=skip should describe the explicit-merge no-approval path: %q", action, finalAction)
 		}
 		merge := requireInstruction(t, todoByKey(t, skip, "merge"))
 		if strings.Contains(merge, "After user approval") {
 			t.Fatalf("[action=%s] merge instruction with merge_confirm=skip should not require approval when a merge is chosen: %q", action, merge)
 		}
-		if !strings.Contains(merge, "without asking for user approval") {
+		if !strings.Contains(merge, "the lead auto-calls git.merge") {
 			t.Fatalf("[action=%s] merge instruction with merge_confirm=skip missing explicit-merge no-approval guidance: %q", action, merge)
 		}
-		if !strings.Contains(merge, "runs only when a merge was explicitly chosen") || !strings.Contains(merge, "continuing on the branch without merging is the default outcome") {
+		if !strings.Contains(merge, "Do not merge from the worker") {
 			t.Fatalf("[action=%s] merge instruction should be opt-in with no-merge default stated: %q", action, merge)
 		}
 	}
@@ -331,17 +327,17 @@ func TestDeriveImplementTodoInstructionsMergeConfirmSkip(t *testing.T) {
 				NeedReview:  true,
 			})
 			finalAction := requireInstruction(t, todoByKey(t, verdict, "final-action-gate"))
-			if !strings.Contains(finalAction, "default no-merge outcome") {
+			if !strings.Contains(finalAction, "Do not merge; the worker ends at the report") {
 				t.Fatalf("[mergeConfirm=%s action=%s] final-action-gate instruction should default to no-merge: %q", tc.name, action, finalAction)
 			}
-			if !strings.Contains(finalAction, "ask for approval before performing it") {
+			if !strings.Contains(finalAction, "merge_confirm: ask") {
 				t.Fatalf("[mergeConfirm=%s action=%s] final-action-gate instruction should still require approval for an explicitly chosen merge: %q", tc.name, action, finalAction)
 			}
 			merge := requireInstruction(t, todoByKey(t, verdict, "merge"))
-			if !strings.Contains(merge, "after user approval") {
+			if !strings.Contains(merge, "the lead surfaces the report for user approval before calling git.merge") {
 				t.Fatalf("[mergeConfirm=%s action=%s] merge instruction with merge_confirm=%s should still require approval when a merge is chosen: %q", tc.name, action, tc.mergeConfirm, merge)
 			}
-			if !strings.Contains(merge, "continuing on the branch without merging is the default outcome") {
+			if !strings.Contains(merge, "Do not merge from the worker") {
 				t.Fatalf("[mergeConfirm=%s action=%s] merge instruction should state no-merge as the default outcome: %q", tc.name, action, merge)
 			}
 		}
@@ -2073,7 +2069,7 @@ func TestEnterImplementNearMissesPreserveStandardBranchAndMergeTodos(t *testing.
 			}
 			finalAction := requireInstruction(t, todoByKey(t, record.Todos, "final-action-gate"))
 			merge := requireInstruction(t, todoByKey(t, record.Todos, "merge"))
-			if !strings.Contains(finalAction, "default no-merge outcome") || !strings.Contains(merge, "continuing on the branch without merging is the default outcome") {
+			if !strings.Contains(finalAction, "Do not merge; the worker ends at the report") || !strings.Contains(merge, "Do not merge from the worker") {
 				t.Fatalf("standard merge instructions changed: final=%q merge=%q", finalAction, merge)
 			}
 		})
@@ -2295,6 +2291,34 @@ func TestServeStdioTicketsCreateDefaultsToRequiredSageReview(t *testing.T) {
 	}
 }
 
+func TestServeStdioGlobalSageReviewAutoRequiresTicketBoundaryReview(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902602, root, nil))
+
+	tuneResp := callToolWithKey(t, server, 1, key, "config.tune", map[string]any{
+		"key":   wsconfig.ItemSageReview,
+		"value": "auto",
+		"scope": "global",
+	})
+	if !strings.Contains(tuneResp, "sage_review: auto [scope:global]") {
+		t.Fatalf("global sage_review tune response = %s", tuneResp)
+	}
+
+	resp := callToolWithKey(t, server, 2, key, "tickets.create_empty", map[string]any{
+		"stem":          "epic-sage-create-global-auto",
+		"initial_state": "todo",
+	})
+	if !strings.Contains(resp, "required") {
+		t.Fatalf("global sage_review=auto must resolve to required ticket posture: %s", resp)
+	}
+}
+
 // TestServeStdioTicketsCreateEmptyStatesSkeletonCaveat is the 260723 Phase 2
 // review-fix regression test: formatTicketCreate's next_instruction caveat
 // ("valid empty skeleton + initial posture") must actually reach the
@@ -2410,10 +2434,32 @@ func TestServeStdioTicketsCloseMergeReviewNudgeOnUnmergedImplBranch(t *testing.T
 	if !strings.Contains(closeResp, "next_instruction:") {
 		t.Fatalf("tickets.close response missing merge-review next_instruction: %s", closeResp)
 	}
-	for _, want := range []string{"impl/root-branch/close-nudge", "root-branch"} {
+	for _, want := range []string{"Warning:", "impl/root-branch/close-nudge", "root-branch", "the lead integrates it with git.merge", "Do not merge from the worker"} {
 		if !strings.Contains(closeResp, want) {
 			t.Fatalf("tickets.close merge-review next_instruction missing %q: %s", want, closeResp)
 		}
+	}
+}
+
+func TestServeStdioTicketsCloseWarnsWhenImplMergeStateUnverifiable(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	runGit(t, root, "checkout", "-b", "impl/missing-root/close-nudge")
+	mustWrite(t, root, "README.md", "root\n")
+	runGit(t, root, "add", "README.md")
+	runGit(t, root, "commit", "-m", "root commit")
+	stem := "260101-feat-close-unverifiable-merge"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"), "---\ntitle: Merge warning\n---\n\nBody.\n")
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+	resp := callToolWithKey(t, server, 2, key, "tickets.close", map[string]any{"stem": stem, "status": "done"})
+	if !strings.Contains(resp, "Warning: could not verify implementation merge state") {
+		t.Fatalf("missing observable merge-state warning: %s", resp)
+	}
+	if _, err := os.Stat(filepath.Join(root, "ai-docs", "tickets", ".done", stem+".md")); err != nil {
+		t.Fatalf("advisory blocked closure: %v; response: %s", err, resp)
 	}
 }
 

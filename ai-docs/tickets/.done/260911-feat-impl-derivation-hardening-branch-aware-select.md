@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: db7ab4e6eb60e376
 sage-review-completeness-reviewed: db7ab4e6eb60e376
+completed: 2026-09-11
 ---
 
 # Impl-branch guard hardening and branch-aware selection
@@ -141,6 +142,12 @@ stops-and-surfaces rather than returning `0`. Independent of the later phases;
 land it first as a standalone safety fix. Verify with a resolver test that injects
 a git failure and asserts the stop path instead of a silent proceed.
 
+### Result (aaaed31a) - 2026-09-11
+
+Changed ahead-state observation to return git and parse failures to the
+implementation route rather than treating them as zero commits ahead. Added a
+real-git regression for an impl branch whose merge root cannot be resolved.
+
 ### Phase 2: Active-ticket status and the ticket-selector playbook
 
 Uses the existing deterministic `wskey.Derive(stem, 3)` contract unchanged.
@@ -183,3 +190,13 @@ ahead-count failure and branch-invariant resolver tests, the dispatch-contract
 suite in `agents-plugin/tests/`
 (lead-run still satisfies its pinned assertions after the Select edit), and wsflow
 package tests; run the full suite touching every edited shipped file.
+
+### Result (aa6e35a) - 2026-09-11
+
+`git.status` now attaches deterministic active-ticket ownership for named
+`impl/*` branches without coupling `wsgit` to ticket documents. Added the
+renderable `ticket-selector` and rewired `lead-run` to use it; regenerated the
+canonical manifest and wsflow rsrc mirror. Ownership inventory failures stop
+instead of reporting a missing owner, and handler-level tests cover active
+idea/todo/ready text and JSON output. Correctness and test review rounds
+completed clean after fixes.

@@ -15,6 +15,7 @@ import (
 // changes, only where these enum values live.
 var (
 	onOffEnum             = []string{"on", "off"}
+	sageReviewEnum        = []string{"off", "ask", "auto"}
 	agentsTierEnum        = []string{"small", "medium", "large", "xlarge"}
 	agentsEffortEnum      = []string{"", "none", "low", "medium", "high", "xhigh"}
 	promptHarnessEnum     = []string{"claude", "codex", "pi", "*"}
@@ -121,6 +122,23 @@ var configRegistry = []configKeyEntry{
 		NoAgentVisible:        true,
 		RequiresLeadAuthority: wsconfig.GlobalOnly(wsconfig.ItemBootstrapAlarm),
 		ResolverBacked:        true,
+	},
+	{
+		Key:        wsconfig.ItemSageReview,
+		WriterTool: "config.tune",
+		ResetTool:  "config.tune",
+		SelectorFields: []tuningField{{
+			Name:        "scope",
+			Description: "Storage scope. When omitted the write lands in the item's declared default scope (project).",
+			Enum:        wsconfig.ScopeSchemaEnum(),
+		}},
+		ValueFields: []tuningField{{
+			Name:        "value",
+			Description: "Review posture: off skips review, ask recommends it, auto requires it. Omit when reset is true.",
+			Enum:        sageReviewEnum,
+		}},
+		NoAgentVisible: true,
+		ResolverBacked: true,
 	},
 	{
 		// agents.tier has no wsconfig item key — it bypasses the resolver

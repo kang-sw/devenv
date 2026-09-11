@@ -157,11 +157,11 @@ Prefer:
 - `{{.McpNamespace}}/git.commit(paths: ["<path>"], title: "<title>", ai_context: ["<bullet>"])` for workflow commits.
 
 Use native Git only for operations without an exposed ws primitive, such as
-branch creation, tag push, merge execution, or path-filtered file history.
+branch creation, tag push, goal-branch promotion, or path-filtered file history.
 
-`impl/*` and `goal/*` are workflow-owned branches carrying plan and review
-history: merge them with `git merge --no-ff` by default, and squash instead
-only when the branch is one logical change with noisy or dependent commits.
+`impl/*` integration is lead-owned through `{{.McpNamespace}}/git.merge`,
+which preserves the branch boundary. For `goal/*` promotion, the lead uses
+`git merge --no-ff` under the goal terminal's approval gate.
 
 ### API documentation
 

@@ -547,51 +547,37 @@ func parseImplementPolicy(raw any) (implementPolicyInput, error) {
 }
 
 // aheadOfMergeRootCount returns the number of commits currentBranch carries
-// ahead of mergeRoot's merge-base with currentBranch. It fails open to 0 on
-// any git error (unresolvable ref, unrelated histories): an infra failure
-// here is out of the ticket's test matrix, not a normal false-negative risk
-// case, consistent with the existing err == nil truthy pattern this file
-// already uses for TargetExists/MergeRootRefConflict.
-func aheadOfMergeRootCount(root, mergeRoot, currentBranch string) int {
+// ahead of mergeRoot's merge-base with currentBranch. Callers must surface an
+// error: treating an unverifiable branch as clean would let unrelated ticket
+// work be mixed precisely when the safety check cannot run.
+func aheadOfMergeRootCount(root, mergeRoot, currentBranch string) (int, error) {
 	result, err := wsgit.NewClient().MergeBase(context.Background(), root, mergeRoot, currentBranch)
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	out, err := (wsgit.ExecRunner{}).RunGit(context.Background(), root, "rev-list", "--count", result.MergeBase+".."+currentBranch)
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	count, err := strconv.Atoi(strings.TrimSpace(string(out)))
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("parse ahead count: %w", err)
 	}
-	return count
+	return count, nil
 }
 
-// implementCloseMergeReviewNudge computes the tickets.close merge-review
-// advisory: closing a ticket while the current branch is an unmerged
-// impl/<root>/<stem> branch leaves that branch's work unreviewed-and-merged,
-// so the close response nudges the lead to review-and-merge it into <root>
-// after the close-move commit lands. tickets.close itself never merges or
-// commits (see {#260620-ticket-close-tool}), so this is advisory text only,
-// computed from the pre-close-commit git state via observeImplementBranch's
-// existing AheadOfMergeRoot observation (Phase 1) — no new git-observation
-// code, and no marker/schema/code path for the ticket-declared stop-gate
-// exception, which stays ordinary lead judgment outside this hook. Failing
-// open to "" on any git error, a non-impl branch, or a merged/clean impl
-// branch keeps this from ever blocking or erroring the close call, and
-// leaves room for epic 260824's later review-watermark hook to compose
-// without rework.
+// Closure never merges. Warn without blocking closure when integration is
+// outstanding or cannot be verified, so Git errors cannot silently hide it.
 func implementCloseMergeReviewNudge(root string) string {
 	obs, err := observeImplementBranch(root, "")
 	if err != nil {
-		return ""
+		return fmt.Sprintf("Warning: could not verify implementation merge state: %v. After committing closure, report the retained branch to the lead for integration review; do not merge from the worker.", err)
 	}
 	mergeRoot, stem, ok := parseImplBranchRoot(obs.CurrentBranch)
 	if !ok || obs.AheadOfMergeRoot <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("This tool performed no merge. After the close-move commit for this ticket lands, review and merge %s into %s.", "impl/"+mergeRoot+"/"+stem, mergeRoot)
+	return fmt.Sprintf("Warning: %s remains unmerged into %s. This tool performed no merge. After the close-move commit lands, the worker reports the branch; the lead integrates it with git.merge under merge_confirm. Do not merge from the worker.", "impl/"+mergeRoot+"/"+stem, mergeRoot)
 }
 
 func observeImplementBranch(root string, targetBranch string) (implementBranchObservation, error) {
@@ -610,7 +596,11 @@ func observeImplementBranch(root string, targetBranch string) (implementBranchOb
 	if validObservedBranch(obs.CurrentBranch) {
 		mergeRoot := implementMergeRootFor(obs.CurrentBranch)
 		if mergeRoot != "" && mergeRoot != obs.CurrentBranch {
-			obs.AheadOfMergeRoot = aheadOfMergeRootCount(root, mergeRoot, obs.CurrentBranch)
+			count, err := aheadOfMergeRootCount(root, mergeRoot, obs.CurrentBranch)
+			if err != nil {
+				return implementBranchObservation{}, fmt.Errorf("verify implementation branch ahead state: %w", err)
+			}
+			obs.AheadOfMergeRoot = count
 		}
 	}
 	if targetBranch != "" {
