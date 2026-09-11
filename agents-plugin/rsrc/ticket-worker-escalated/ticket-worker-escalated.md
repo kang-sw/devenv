@@ -80,6 +80,5 @@ this file. The Worker Protocol appended below governs; read it first.
    landed, the verification evidence, and the decisions you took. When every
    phase has a Result, `{{.McpNamespace}}/tickets.close(stem: <stem>,
    status: "done")` and commit the closure.
-6. Merge per the route verdict: into the goal branch on your own; into a
-   parent branch never (stop (a)).
-7. Emit the Report block.
+6. Emit the Report block with the retained impl branch and the route verdict's
+   merge_confirm. The lead owns merging after your report; do not merge.

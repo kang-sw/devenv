@@ -20,7 +20,7 @@
     "lead-delegate/lead-delegate.md": "f7f76a5f9771da41ddca76e606ec96b25527d6bea15318b9802e0c730f4e88d7",
     "lead-discuss/lead-discuss.md": "d5361bb7e0ddc0ababf043e73e6aea5bf59235cb90cfe5106f844198fbf2e589",
     "lead-review/lead-review.md": "b36c3f2a0a079b72dae32713783802e4b4051957d4b1e00b4ad75d52e8d87755",
-    "lead-run/lead-run.md": "7366b7277e39ad8b3e4afcae3924afe87a9a0b878f636a955263b3e3cca2245b",
+    "lead-run/lead-run.md": "9b5e1fd27d716f7d9232679ade2d00bf5ce1588d9a3ab96d35c41b800bbb16b4",
     "lead-scope-worktree/lead-scope-worktree.md": "c0b875c6f46c1a104816ba8212d528c6c373b00a449a051610011f8afe4b8894",
     "lead-ship/lead-ship.md": "0f4e2e5d92f40ab8603a5660a9caec840d88bbfc6d2ef8ab9dec29eb7d171dfe",
     "lead-ticket/lead-ticket.md": "006ae147787c373eab40b2b7fb6b84410e16fa8652332749f2d31222b47d512c",
@@ -41,9 +41,9 @@
     "ticket-reviewer-completeness/ticket-reviewer-completeness.md": "12efbce33b5311810a162974d99702252549639f1a064fd84331005328c60b37",
     "ticket-reviewer-design/ticket-reviewer-design.md": "819b4cffaa1d7f95858e2ab79cfedbd301d3205803dba23984ccb57f7aac3eaf",
     "ticket-selector/ticket-selector.md": "99d059f3a872b13a336a2ff983e509021c5f438976e5bd2de995c8d94ede48b0",
-    "ticket-worker-elevated/ticket-worker-elevated.md": "d91b5f5cd60675bc9fc4fca65500c00247a671238e6049ae2656dbb06eb738df",
-    "ticket-worker-escalated/ticket-worker-escalated.md": "61eea31d1a386d23782e4ad0be6a43845066ea2a8a33bf3641c304ea4bbfcfd3",
-    "ticket-worker/ticket-worker.md": "7576e46aed0d0998846be8ed5c441ce1afa7a847361fff47e57d7df8658bebe4",
-    "worker-stop-protocol.md": "321b3e81f53199f338286c0973e54e752e74b6383067a80eb92987e49807c8bc"
+    "ticket-worker-elevated/ticket-worker-elevated.md": "17257c04ebbb972aeaee1ca906c594658296e85bd228ddb71cf54a0d1c3c6b6f",
+    "ticket-worker-escalated/ticket-worker-escalated.md": "12b7eecba98ee3516a5bfd4665d9dad4ce2f890d0307bf220edfb52f91385279",
+    "ticket-worker/ticket-worker.md": "ad9c65d50cc7e11fb0d4f95b7ea6208893737b0a81d586a93975065dddd8b70c",
+    "worker-stop-protocol.md": "9dcc9c25ca22f868ef72a62135bff4e7f2319764b8cf4fe312d3fcaf3cc671c6"
   }
 }
