@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: f8bcdc92885f04e9
 sage-review-completeness-reviewed: f8bcdc92885f04e9
+completed: 2026-09-11
 ---
 
 # Redesign lead-raised ws-ask as a fork-less async question queue with a sequential prose-modal tier
@@ -485,3 +486,8 @@ branches remain untested — a pre-existing gap pattern in this file, not a
 Phase 2 regression. No Critical/Important findings remain open.
 
 This was the ticket's final phase; both phases are now landed.
+
+
+## Resolution (2026-09-11)
+
+Both phases landed. Phase 1 (fork-less async contract, D3 return-path anchor, withdrawal concurrency contract, tool-surface-hide lift) landed at 75f123c9. Phase 2 (sequential prose-modal tier, LeadAskQueueComponent, superseding the Phase 1 interim single-question overlay) landed at a085aa5a, with a Critical whitespace-trim finding from round-1 correctness review fixed and confirmed clean by a Critical-scoped round-2 review. Adapter suite green: 1624/1624.
