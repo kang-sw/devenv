@@ -3,6 +3,7 @@ title: Resolve ws-queue-question live dogfood findings
 related:
   260911-feat-ws-pi-async-question-queue: feature under live acceptance
   260906-workset-ws-pi-dogfood-ux: Pi dogfood UX collection
+  260908-bug-ws-pi-delegated-tool-surface-unavailable: blocks fork-raised question-path live acceptance before the fork starts
 ---
 
 # Resolve ws-queue-question live dogfood findings
@@ -34,7 +35,7 @@ Passed in the current Pi session:
 Remaining live coverage for a later session:
 
 - withdrawal while the owner is actively editing an open question;
-- the fork-raised `kind:"question"` path, existing-fork attachment, `/done`, and final `Decisions:` delivery;
+- the fork-raised `kind:"question"` path, existing-fork attachment, `/done`, and final `Decisions:` delivery — blocked on 2026-09-11 before fork creation by `fork readiness rejected (expected 79 callable tools, got 78)`; this is tracked by `260908-bug-ws-pi-delegated-tool-surface-unavailable`, not duplicated here;
 - optional post-compaction and restart persistence/anchor recovery.
 
 ## Constraints
