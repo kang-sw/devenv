@@ -214,7 +214,7 @@ withdrawal after submit is a no-op; the fork-raised `/answer` overlay path is
 unchanged; `pi-lead-guide.md` and the `pi-adapter-runtime` spec passage reflect
 the renamed tool(s); the adapter suite is green.
 
-### Result (75f123c9)
+### Result (75f123c9) - 2026-09-11
 
 Landed on `impl/track/pi-agent/argue-roman-dodgy` (4 commits, merged into
 `track/pi-agent`): `e4967a56` (rename), `5ec41d18` (fork-less redesign, D3
@@ -338,6 +338,8 @@ findings remain.
 
 **Not carried forward**: Phase 2 (sequential prose-modal tier) is not
 started; this ticket stays open in `ready/` for it.
+
+### Phase 2: Sequential prose-modal tier
 
 Depends on Phase 1. Build the modal tier: `Enter` = respond-and-advance,
 last-question `Enter` → final confirm (cursor default "No") submitting answered

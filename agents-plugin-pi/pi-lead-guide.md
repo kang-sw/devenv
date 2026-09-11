@@ -106,12 +106,19 @@ spawned yet this session, or every prior record has since been evicted by the
 registry cap — a message with no status line is telling you there is no
 fan-in to wait on.
 
-The owner side of a question is theirs, not yours: `/answer <id>` opens one in
-a chat overlay (which is when a discussion thread is actually forked, at your
-tip at that moment), `/thread` lists pending, open and dormant threads, and
-`/done` inside the overlay ends one — its summary comes back to you as a
-distinct injected message, not as an owner turn. Never prompt the owner to run
-these; just register the question and carry on.
+The owner side of a question is theirs, not yours, and which surface they see
+depends on how the question was raised. A `ws-queue-question` you raise is
+fork-less end to end: `/answer <id>` opens the owner's sequential prose-modal
+queue (every queued question at once, one at a time — never a discussion
+fork), and their answer is delivered straight back to you as a follow-up,
+verbatim, with nothing spawned on either side. An owner-raised question (the
+owner explicitly starting a discussion with a fork of yours) is different:
+`/answer <id>` there opens a chat overlay, and that IS when a discussion
+thread is actually forked, at your tip at that moment. `/thread` lists
+pending, open and dormant threads across both kinds, and `/done` inside the
+fork-raised overlay ends one — its summary comes back to you as a distinct
+injected message, not as an owner turn. Never prompt the owner to run any of
+this; just register the question and carry on.
 
 The same applies when a `ws-fork` you spawned raises a question of its own: in
 an interactive session you receive only a notice naming the thread id, and the
