@@ -31,9 +31,10 @@ self-verifying task, including repository mutations such as housekeeping,
 mechanical updates, and localized internal hotfixes.
 
 If the delegate discovers broader scope or material impact, it stops before
-that expanded change and returns an implementation contract for lead-run.
-
-Invoke {{.SkillNamespace}}:lead-run for that handoff.
+that expanded change and returns its findings to the lead, which captures the
+work as a ticket through {{.SkillNamespace}}:lead-ticket rather than expanding
+the delegate assignment. The ready ticket then routes to
+{{.SkillNamespace}}:lead-run.
 
 ## Assignment
 
@@ -45,6 +46,15 @@ user authorization and the host's available capabilities. Resolve the
 executor's model by judging the assignment's difficulty tier (small / medium /
 large / xlarge) and passing it to `{{.McpNamespace}}/config.resolve_agent(tier)`,
 rather than naming a model directly.
+
+When the assignment writes code — any repository mutation — render the
+implementer floor with `{{.McpNamespace}}/playbook.render(name:
+"delegate-implementer", session_key: <your key>)` and give the returned path to
+the executor as part of its system prompt; it carries the minimum commit,
+verification, and convention discipline every code change meets, beneath the
+assignment above it. A pure evidence-gathering or investigation assignment does
+not get it. The floor names no tier; resolve the executor's model separately as
+above.
 
 Keep decisions made in this conversation with the lead. Give the executor
 the settled constraints and room to decide how to complete the assignment.

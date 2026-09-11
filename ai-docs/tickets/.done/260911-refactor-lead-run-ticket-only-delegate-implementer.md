@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0858c3ae54efac5f
 sage-review-completeness-reviewed: 0858c3ae54efac5f
+completed: 2026-09-11
 ---
 
 # Make lead-run ticket-only and give lead-delegate a disciplined implementer
@@ -184,3 +185,54 @@ dispatch-contract suite and the wsflow package tests green throughout.
 Verification: `agents-plugin/tests` full suite green, `agents-plugin-wsflow` suite
 green, and a grep confirming no `run_ad_hoc` / ad-hoc-contract prose remains on
 either shipped surface.
+
+### Result (8db4527) - 2026-09-11
+
+Landed the whole surface change as one commit (`8db4527`):
+
+- **lead-run** reduced to ticket-only: removed the intro contract clause, the
+  Select-skip paragraph, the tier-selection ad-hoc clause, the two `Ad hoc`
+  worker rows, and the `Contract:` task-block substitution. Queue-drain,
+  direct-ticket-path, the terminal-line contract, and one-worker-per-invocation
+  are intact.
+- **delegate-implementer** added at `agents-plugin/rsrc/delegate-implementer/`:
+  a tier-unaware (no `tier:` field), reviewer-free implementer floor stating
+  verify-before-pass, diagnose-before-fix, surgical convention-following edits,
+  and commit-on-branch with recoverable rationale — expressed as a generic
+  commit-discipline floor, not devenv's `## AI Context` heading, per
+  `shipped-surface-boundary.md`. `role: implementer` so a lead render mints a
+  pre-keyed delegate child.
+- **lead-delegate** renders `delegate-implementer` when the assignment writes
+  code and passes its path as part of the executor system prompt; the
+  broader-scope handoff re-points from an implementation contract for lead-run
+  to authoring a ticket via `lead-ticket`.
+- **AGENTS.md** `Direct:` canonical-flow line dropped `or implementation
+  contract`.
+- **Tests/golden**: removed `run_ad_hoc` from the fixture and its assertion,
+  regenerated the `delegate` body and `run_opening` fixture values byte-for-byte,
+  added a `delegate-implementer` floor contract test. Regenerated the rsrc
+  manifest and the byte-identical `agents-plugin-wsflow/` mirror.
+
+Verification (all read to completion):
+- `python3 -m unittest discover agents-plugin/tests`: 57 tests OK.
+- `python3 -m unittest discover agents-plugin-wsflow/tests`: 11 tests OK.
+- `go test ./...` (agents-plugin-tool): all packages ok (incl. wsrsrc drift
+  guards, `TestLeadDelegateReadContract`, `TestPlaybookPrintLeadRunWorkerTierPolicy`).
+- grep: no `run_ad_hoc` / retired ad-hoc lead-run route prose on either shipped
+  surface; no devenv-only nouns in the three changed shipped files.
+- Independent review (fresh delegate, single allocation): clean — no Critical,
+  Important, or Minor findings.
+
+Decisions taken during execution (recorded, not escalated):
+- Beyond the ticket's Phase 5 test list (python golden only), two Go prose-pin
+  tests also pinned the edited body and had to move with it:
+  `playbook_tools_test.go` (dropped the removed `Ad hoc` rows) and
+  `lead_delegate_test.go` (the new handoff prose + the floor render). The ticket
+  under-named the test surface; the edits are mechanical drift-follows.
+- Left the runtime `route.resolve_implement` ad-hoc-target path and
+  `worker-stop-protocol.md`'s generic "a ticket, or an ad-hoc contract" worker
+  identity untouched. They remain a coherent, still-reachable worker capability
+  that lead-run simply no longer triggers — consistent with the ticket's
+  explicit rejection of worker-layer changes. This is why the verification grep
+  is scoped to the retired lead-run route prose, not every occurrence of the
+  words "ad hoc".

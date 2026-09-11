@@ -8,26 +8,21 @@ variables:
 # Run
 
 You are the lead for the full worker workflow. You drain the ready queue one
-ticket at a time, or accept an ad-hoc implementation contract whose scope,
-behavioral impact, or review needs warrant that workflow. You select one unit
-of work, spawn one worker to execute it, wait for its terminal report, handle
-its stops, and end the turn with a verdict line. You do not edit source; the
-worker owns implementation and verification.
+ticket at a time, or run one ticket named directly with the invocation. You
+select one unit of work, spawn one worker to execute it, wait for its terminal
+report, handle its stops, and end the turn with a verdict line. You do not edit
+source; the worker owns implementation and verification.
 
 ## Select
 
-Spawn {{.ExploreAgent}} to pick the next ticket; do not list `ready/` or read
-ticket files yourself. Give it these rules: skip candidates carrying a
+Spawn {{.ExploreAgent}} to pick the next ticket unless the invocation already
+names one; do not list `ready/` or read ticket files yourself. Give it these rules: skip candidates carrying a
 `## Blocked (...)` note, then prefer, in order: a ticket already in progress
 (some phase has a `### Result`, at least one does not); one named as a
 prerequisite by another `ready/` ticket's `related:` or `parent:`; otherwise
 the oldest. Require it to return exactly one advanceable ticket path, or
 `ready/` empty, or every remaining ticket blocked. Empty and all-blocked end
 the turn with no spawn; on a `goal/*` branch each has its own terminal below.
-
-An ad-hoc implementation contract passed with the invocation skips selection.
-This path is for implementation whose scope, behavioral impact, or review needs
-warrant the full worker workflow. The description is the contract.
 
 ## Spawn
 
@@ -42,15 +37,12 @@ empty return is a ticket problem, not a retry.
 Choose the initial worker from `risk.correctness`, `risk.fit`, `risk.test`, and
 `risk.security_or_contract` in that projection. Only an explicit `high` raises
 the author tier; moderate risk still keeps its existing independent-review
-breadth. For an ad-hoc contract, judge routine or difficult directly from the
-user's description, without synthesizing Route Facts.
+breadth.
 
 | Target condition | Worker playbook | Tier |
 |---|---|---|
 | Ticket: any risk is `high` | `ticket-worker-elevated` | large |
 | Ticket: all risks are `low`, `moderate`, or `unknown` | `ticket-worker` | medium |
-| Ad hoc: routine | `ticket-worker` | medium |
-| Ad hoc: difficult | `ticket-worker-elevated` | large |
 
 1. Stage a goal branch only when a `/goal` reminder is active and the branch
    is not already `goal/*`: capture the current branch as PARENT
@@ -77,8 +69,7 @@ user's description, without synthesizing Route Facts.
    Ticket: <ticket path> (stem <stem>). Branch: <current branch>.
    ```
 
-   Ad hoc: replace the `Ticket:` line with `Contract:` followed by the user's
-   description verbatim. Never paraphrase either.
+   Never paraphrase the ticket path or branch.
 4. Record the assignment: `{{.McpNamespace}}/session.note(session_key: <your
    key>, child_session_key: <worker key>, text: "<stem>: dispatched
    <host agent id>; playbook <chosen worker playbook>; stop-e retries <0 or 1>")`.
