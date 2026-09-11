@@ -457,13 +457,14 @@ describe("loadThreadRegistryFile / saveThreadRegistryFile (never-throw IO)", () 
     assert.equal(record.withdrawnPending, false);
   });
 
-  test("a persisted lead-ask/pending (not open) thread is untouched by the restart normalization", () => {
+  test("a persisted lead-ask/pending (not open) thread has its status untouched by the restart normalization, though withdrawnPending is still reset (it applies to any lead-ask record, not only \"open\" ones)", () => {
     const dir = mkdtempSync(join(tmpdir(), "ws-pi-ask-test-"));
     const path = join(dir, "threads.json");
     saveThreadRegistryFile(path, [thread({ threadId: "q1", origin: "lead-ask", status: "pending" })]);
     const handle = createThreadRegistryHandle();
     hydrateThreadRegistry(handle, path);
     assert.equal(handle.threads.get("q1")!.status, "pending");
+    assert.equal(handle.threads.get("q1")!.withdrawnPending, false);
   });
 
   test("a persisted fork-raised/open thread is never touched by the lead-ask restart normalization, and gains no stray withdrawnPending field", () => {
