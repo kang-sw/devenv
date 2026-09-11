@@ -214,7 +214,130 @@ withdrawal after submit is a no-op; the fork-raised `/answer` overlay path is
 unchanged; `pi-lead-guide.md` and the `pi-adapter-runtime` spec passage reflect
 the renamed tool(s); the adapter suite is green.
 
-### Phase 2: Sequential prose-modal tier
+### Result (75f123c9)
+
+Landed on `impl/track/pi-agent/argue-roman-dodgy` (4 commits, merged into
+`track/pi-agent`): `e4967a56` (rename), `5ec41d18` (fork-less redesign, D3
+anchor, withdrawal, tool-surface-hide lift), `ed10d065` (spec doc), `93cf8587`
++ `75f123c9` (review-round fixes).
+
+**What landed, against each Decision:**
+- **D4 (rename)**: `ws-ask`/`ws-resolve` → `ws-queue-question`/
+  `ws-withdraw-question`. Chose `ws-withdraw-question` as the exact
+  replacement token (explicitly left open by the ticket) — it reads
+  correctly against the new async-queue framing. Fans out across
+  `index.ts`/`fork.ts`/`fork-context.ts`/`spawner.ts`/`agent-widget.ts`,
+  `pi-lead-guide.md`, `ai-docs/spec/pi-adapter-runtime.md`, and every test
+  file that hardcoded the old literals; `ASK_TOOL_NAME`/`RESOLVE_TOOL_NAME`
+  symbol names are unchanged (only their string values), so no caller had to
+  be touched beyond the literal-string sites.
+- **D1 (fork-less)**: `openThread` gained an early-dispatch guard —
+  a `"lead-ask"` thread opens via a new `openLeadAskThread`, which never
+  spawns a discussion fork. The answer is delivered back into the lead
+  session through the pre-existing `sendToLead(pi, message, "followUp")`
+  push/hold path (`deliverQueuedAnswer`), landing on the lead's next idle.
+  **Decision**: the old discussion-fork-spawn branch inside
+  `ensureRespondent` is kept in place rather than deleted — `openThread`'s
+  new early return makes it unreachable for `lead-ask` (and it was already
+  unreachable for `fork-raised`, which always registers with a
+  `respondentAgentId` set, so it never took that branch either) — kept as
+  inert insurance rather than risk a larger deletion diff for a phase that
+  scopes the fork-raised path as unchanged; documented as such at the call
+  site and in the spec.
+- **D3 (return-path anchor)**: `captureAskCommitHash` (best-effort short git
+  hash, never throws) + the existing `entryId`, combined via
+  `buildAskAnchorLine`, captured at queue time on the thread record and
+  carried into the delivered answer message, with a verbatim excerpt
+  attached when the anchored entry has fallen off the live branch by
+  delivery time.
+- **Model-side withdrawal + concurrency contract**: `withdrawQueuedQuestion`
+  (`ws-withdraw-question`) implements pending→immediate removal,
+  open→deferred (`withdrawnPending`, never yanking an in-progress edit —
+  delivered once submitted or closed with a non-empty draft),
+  dormant/closed→no-op. The owner-side open/Esc decision (deliver the draft
+  vs. finalize the withdrawal vs. revert to pending) was extracted into
+  `resolveLeadAskEscapeAction`/`runLeadAskEscapeAction` (mirroring the
+  existing `resolveDoneAction`/`runDoneAction` split) during review-round 1,
+  so it has direct unit coverage rather than only living inside the
+  TUI-only `onEscape` closure. `fork-raised` withdrawal keeps its
+  unconditional-immediate-close, unchanged.
+- **Tool-surface hide lift**: `addAskToolsIfLead` again appends the ask
+  tools only for the true lead (`role === undefined`), a no-op for any
+  other role; `computeForkToolSurface` stays an identity function.
+  **Clarification** (non-obvious, worth recording): since a fork's
+  `--tools` argv snapshot is taken from the lead's own active tools at
+  fork-spawn time, this means a forked child's own tool list now shows
+  `ws-queue-question`/`ws-withdraw-question` again too — **visible**, with
+  identical metadata, but refused only at the **handler level**
+  (`readSpawnRole(env) === "fork"` throws inside `execute()`), exactly
+  mirroring how `ws-fork` itself is inherited-but-refused in a fork. This
+  is a re-enable of the tool surface, not a re-enable of fork-spawning
+  behavior, matching the ticket's Constraints framing.
+- **Interim UI scope note**: `openLeadAskThread`'s single-question overlay
+  (reusing `ConversationViewComponent` with an agent-less local
+  `ConversationChannel`) is Phase-1-only scaffolding — Phase 2's sequential
+  prose-modal tier supersedes it as the owner-facing surface; it is not a
+  preview of Phase 2's UX.
+- Headless (`--mode rpc`) baselines: unaffected — `registerAsk`'s
+  `execute()` bodies don't branch on TUI mode beyond the pre-existing
+  `notify`-only fallback, and headless was already fork-less pre-`260911`.
+
+**Test-scenario changes in `fork-lifecycle.integration.test.ts`** (the one
+file whose existing scenarios directly assumed the removed spawn
+behavior): the "lead restart" scenario was rewritten to assert the
+fork-less contract directly (no process spawn on `/answer`, no paid model
+turn, thread opens with status `"open"` and no `respondentAgentId`/
+`forkResume`) in place of the old discussion-fork-spawn assertions, and the
+dependent forkResume-rehydration-across-generations loop was removed as
+now-parasitic (it only ever drove the now-unreachable insurance code) —
+`captureForkResume`/`rehydrateForkRecord` keep independent direct unit
+coverage in `ask.test.ts` and `agent-telemetry-lifecycle.test.ts`, so this
+removed no coverage (round-2 test-partition review independently confirmed
+this). The tool-visibility assertion for a fork's inherited tool list was
+rewritten from "excluded" to "visible but handler-refused", mirroring the
+adjacent `ws-fork`/`nestedFork` pattern, to match the tool-surface-hide-lift
+consequence above.
+
+**Verification (per the ticket's own bar):**
+- No fork spawns on opening a lead-raised question, and its answer arrives
+  as an injected lead message on idle — `fork-lifecycle.integration.test.ts`'s
+  rewritten "lead restart"/"noPrior" scenarios; `ask.test.ts`'s
+  `deliverQueuedAnswer` suite for the injection shape itself.
+- The registry records the ask-time anchor and it appears on the returned
+  report — `ask.test.ts`'s `captureAskCommitHash`/`buildAskAnchorLine` and
+  `deliverQueuedAnswer` describe blocks.
+- Withdrawal semantics (pending/open/dormant-closed, for both `lead-ask`
+  and unchanged `fork-raised`) — `ask.test.ts`'s `withdrawQueuedQuestion`
+  describe block, plus the extracted `resolveLeadAskEscapeAction`/
+  `runLeadAskEscapeAction` unit tests for the owner-side open/Esc decision,
+  plus a real `saveThreadRegistryFile` → `hydrateThreadRegistry`
+  persisted-restart round-trip for the open→pending/closed normalization.
+- The fork-raised `/answer` overlay path is unchanged — confirmed by
+  round-1 correctness review (no functional diff to `handleForkRaisedQuestion`,
+  `ensureRespondent`'s live/rehydrate/spawn branches, `closeThreadOnDone`,
+  `injectDiscussionSummary`, or the overlay-chat component beyond
+  comment/doc renames).
+- `pi-lead-guide.md` and `ai-docs/spec/pi-adapter-runtime.md` reflect the
+  renamed tool(s) and the new fork-less contract (round-1 correctness
+  review found no drift between the updated spec prose and the actual
+  code).
+- The adapter suite is green: `npm test` inside `agents-plugin-pi/` —
+  1583 passed, 221 suites, 0 failed, 0 skipped.
+
+**Review**: two independent rounds, partitioned correctness/test per the
+route verdict. Round 1: correctness `non-clean: 1 important` (untested
+`onEscape` withdrawal/draft decision) + 1 minor (`hydrateThreadRegistry`
+setting a stray `withdrawnPending` field on `fork-raised` records); test
+`non-clean: 2 important` (the same `onEscape` gap, independently found,
+plus the `hydrateThreadRegistry` restart-normalization block untested via
+an actual persisted round-trip). Both fixed in `93cf8587` (extraction +
+new tests) and `75f123c9` (one follow-up test-precision fix). Round 2:
+correctness `clean`; test `clean with 3 minor remaining` (2 pre-existing,
+declined as optional; 1 addressed in `75f123c9`). No Critical/Important
+findings remain.
+
+**Not carried forward**: Phase 2 (sequential prose-modal tier) is not
+started; this ticket stays open in `ready/` for it.
 
 Depends on Phase 1. Build the modal tier: `Enter` = respond-and-advance,
 last-question `Enter` → final confirm (cursor default "No") submitting answered
