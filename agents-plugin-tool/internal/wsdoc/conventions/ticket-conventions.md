@@ -33,6 +33,37 @@ An epic decomposes one outcome into child tickets and owns their cross-child inv
 - Move implementation detail out of the epic body into an implementation child ticket; the epic body carries scope, cross-child invariants, and closure conditions only.
 - Move deliberation that outgrows a settled decision line out of the epic body into a `research` ticket and reference it; the epic body carries settled decisions only.
 
+## Research Tickets
+
+Research tickets remain ungated and have no phases. Topic sections are freeform;
+the standard Outcome Ledger lives in the ticket and separates investigation
+output from implementation authority:
+
+```markdown
+## Outcome Ledger
+
+### Verified Findings
+<!-- Evidence-backed observations. These may support later tickets but do not choose behavior. -->
+
+### Confirmed Decisions
+<!-- Normative choices explicitly confirmed by the user. -->
+
+### Proposals
+<!-- Unconfirmed candidates. Never treat these as actionable authority. -->
+
+### Open Questions
+<!-- Unresolved choices that require further investigation or user input. -->
+
+### Rejected Alternatives
+<!-- Alternatives explicitly rejected, with the reason when useful. -->
+```
+
+For actionable derivation, only Verified Findings supply evidence and Confirmed
+Decisions supply contract. Narrative is supporting context; Proposals, Open
+Questions, and unlisted narrative never become child authority. When the ledger
+is absent, ask whether to add it or settle the child's decisions directly through
+the Open Decision Queue.
+
 ## Phases
 
 See the workflow manual's **Ticket System Concepts** section for what a phase is and how to size one.
