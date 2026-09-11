@@ -27,6 +27,20 @@ serialization for the lead to own. The harness already supports worktree
 isolation (`isolation: "worktree"` on spawned agents, `EnterWorktree`), so the
 primitive exists.
 
+A 2026-09-11 ad-hoc rehearsal exercised both halves against the live `ready/`
+queue. The detection half works cleanly: a medium-tier Explore over Route Facts
+scope paths produced a correct parallel-safe batch (two disjoint bug tickets
+parallel, a third refactor sequenced behind one of them because both edit
+`ticket-conventions.md`). The execution half hit a hard wall the harness
+primitive does not cover: there is no way to bind a worker's ws session key to a
+git worktree of this repo. `playbook.render(root_override=<worktree>)` treats
+its argument as an rsrc manifest root, not a repo worktree, and fails with
+`rsrc manifest missing at <worktree>/manifest.json`; a normal render binds the
+worker key to the main root instead. So `isolation: "worktree"` isolates the
+filesystem but leaves the worker's ws tools (tickets.move, git.commit) resolving
+against the wrong root — the missing piece is a first-class render/spawn mode
+that binds a worker key to a repo-worktree root.
+
 ## Decisions
 
 - **Serial stays the default; parallel is an explicit-approval route.** Reopening
@@ -65,4 +79,11 @@ Route Facts scope paths (disjointness granularity — file vs directory); (b) ho
 the lead batches N concurrent stop reports without regressing the serial
 veto/merge-approval model; (c) whether the `/goal` Stop-hook starvation that
 killed the old fan-out is fully avoided by worktree isolation or needs its own
-guard; (d) a cap on concurrent workers.
+guard; (d) a cap on concurrent workers; (e) how a worker key is bound to its
+worktree root (see Background — `render(root_override)` targets the rsrc root,
+not a repo worktree, so a worktree-run worker has no correctly-bound ws session
+key today; this needs a first-class worktree-binding render/spawn mode); (f)
+reconciling `ticket-worker`'s own PARENT-branch capture and `impl/<parent>/<slug>`
+creation with a pre-provisioned worktree — decide whether the route pre-creates
+the impl branch and suppresses the worker's branch capture, or lets the worker
+own branch creation inside the worktree.
