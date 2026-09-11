@@ -76,7 +76,7 @@ this file. The Worker Protocol appended below governs; read it first.
    git. Fix findings by severity. Two rounds: the second verifies the fixes
    of the first and raises nothing new; there is no third. A Critical finding
    still open after round 2 is stop (e).
-5. Record: append `### Result (<short-hash>)` to the executed phase with what
+5. Record: append `### Result (<short-hash>) - YYYY-MM-DD` to the executed phase with what
    landed, the verification evidence, and the decisions you took. When every
    phase has a Result, `{{.McpNamespace}}/tickets.close(stem: <stem>,
    status: "done")` and commit the closure.
