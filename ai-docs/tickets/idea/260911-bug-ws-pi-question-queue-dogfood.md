@@ -20,6 +20,7 @@ Keep the remaining findings from this dogfood run together in this rolling actio
 3. **Inaccessible long-question truncation.** Long question/context content is replaced by `question truncated`; Up/Down and PageUp/PageDown cannot reveal the omitted text. The marker uses the same foreground treatment as ordinary prose and does not clearly communicate the inaccessible boundary.
 4. **Bare `/answer` enters at the newest item.** With `q6`, `q7`, and `q8` pending, bare `/answer` opened on `q8`. A sequential oldest-first queue should begin at the oldest answerable item unless the owner explicitly names an ID.
 5. **One model turn per answer from one modal submission.** The owner submitted `q6` and `q7` together while the lead was working, but the two answers later popped as separate owner messages across separate lead turns. The modal's batch boundary was lost, adding avoidable model-turn cost.
+6. **Explicit terminal target falls through to another question.** `/answer q6` on an already answered question displayed `Warning: ws: question q6 was already answered or withdrawn — showing the rest of the queue instead.` and then opened another pending question. The warning was not visually salient enough to prevent the owner from entering `adf`, which was submitted as the answer to `q10`. The explicit target was not honored, and fallback changed which question received the input.
 
 ## Constraints
 
