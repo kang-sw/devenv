@@ -106,22 +106,29 @@ spawned yet this session, or every prior record has since been evicted by the
 registry cap — a message with no status line is telling you there is no
 fan-in to wait on.
 
-The owner side of a question is theirs, not yours: `/answer <id>` opens one in
-a chat overlay (which is when a discussion thread is actually forked, at your
-tip at that moment), `/thread` lists pending, open and dormant threads, and
-`/done` inside the overlay ends one — its summary comes back to you as a
-distinct injected message, not as an owner turn. Never prompt the owner to run
-these; just register the question and carry on.
+The owner side of a question is theirs, not yours, and which surface they see
+depends on how the question was raised. A `ws-queue-question` you raise is
+fork-less end to end: `/answer <id>` opens the owner's sequential prose-modal
+queue (every queued question at once, one at a time — never a discussion
+fork), and their answer is delivered straight back to you as a follow-up,
+verbatim, with nothing spawned on either side. A question raised by a
+`ws-fork` you already spawned is different, and covered next — either way,
+`/thread` lists pending, open and dormant threads across both kinds. Never
+prompt the owner to run any of this; just register the question and carry on.
 
 The same applies when a `ws-fork` you spawned raises a question of its own: in
 an interactive session you receive only a notice naming the thread id, and the
-owner answers that fork directly in their overlay. Do not relay it, do not
-answer it yourself, and do not ask the owner about it — just end your turn.
-That fork keeps running its task through and after the discussion; what was
-decided reaches you in its own pushed `kind:"final"` report, under
-`Decisions:` — not as a separate thread-summary message. While that thread is
-open the fork is excluded from your still-running count, so a message with no
-status line at all does not mean it is gone.
+owner answers that fork directly in an overlay chat — `/answer <id>` attaches
+to that already-live fork rather than spawning a new one. `/done` inside that
+overlay just closes the thread and the view; it carries no summary of its
+own, and the fork keeps running its task through and after the discussion.
+What was decided reaches you only through that fork's own pushed
+`kind:"final"` report, under `Decisions:` — not as a separate
+thread-summary message, and not as anything tied to when `/done` was typed.
+Do not relay the question, do not answer it yourself, and do not ask the
+owner about it — just end your turn. While that thread is open the fork is
+excluded from your still-running count, so a message with no status line at
+all does not mean it is gone.
 
 This table grows as later tickets land more primitives — treat any verb not
 listed here as not yet available, not as a naming mismatch to guess around.

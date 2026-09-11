@@ -65,9 +65,11 @@
  * drove the model toward "ask now"). Entry B above is now genuinely
  * fork-less end to end — `/answer` on a `"lead-ask"` thread never reaches
  * `ensureRespondent`'s discussion-fork spawn branch at all (see
- * `openLeadAskThread`, dispatched from `openThread`); the owner's one prose
- * reply is delivered straight to the lead via `deliverQueuedAnswer` (the
- * existing `followUp` custom-message path, `sendToLead`, unchanged), carrying
+ * `openLeadAskQueue`, dispatched from `openThread` — Phase 2's sequential
+ * prose-modal tier, superseding Phase 1's interim `openLeadAskThread`); the
+ * owner's one prose reply is delivered straight to the lead via
+ * `deliverQueuedAnswer` (the existing `followUp` custom-message path,
+ * `sendToLead`, unchanged), carrying
  * the D3 return-path anchor (`ThreadRecord.askCommitHash` + the existing
  * `entryId`, plus a verbatim excerpt when that entry has since fallen behind
  * a compaction boundary) so the lead can recover where the question came
@@ -116,12 +118,15 @@ import {
   ConversationViewComponent,
   conversationOverlayHeight,
   DONE_COMMAND,
+  isEscapeKey,
+  wrapInBorder,
   type ChildLiveness,
   type ConversationChannel,
   type ConversationItem,
   type ConversationViewTui,
+  type EditorLike,
 } from "./conversation-view.ts";
-import { loadHostPiTui, type MarkdownTheme } from "./pi-tui.ts";
+import { loadHostPiTui, wrapTextWithAnsi, type Component, type EditorTheme, type MarkdownTheme } from "./pi-tui.ts";
 import { captureForkContext, captureRegisteredTools, captureUnflushedForkSource, effectiveForkDescriptor, type ForkContext } from "./fork-context.ts";
 import type { LeadPromptRef } from "./lead-bootstrap.ts";
 import { readOwnership, validDescriptor } from "./agent-storage.ts";
@@ -312,12 +317,25 @@ export interface ThreadRecord {
    * `ws-withdraw-question` is called while the owner has this thread's
    * fork-less answer view open (`status === "open"`) — the removal cannot be
    * applied immediately without yanking an in-progress edit, so it is
-   * deferred to whenever that view closes (`openLeadAskThread`'s
-   * `onEscape`). Always `false`/absent otherwise; normalized back to
+   * deferred to whenever that view closes (Phase 2's
+   * `LeadAskQueueComponent.onClose`, via `runLeadAskEscapeAction`). Always
+   * `false`/absent otherwise; normalized back to
    * `false` on hydrate (see `hydrateThreadRegistry`) since no view can
    * survive a lead-process restart.
    */
   withdrawnPending?: boolean;
+  /**
+   * Phase 2 (`260911`, sequential prose-modal tier, `"lead-ask"`-origin
+   * only): the owner's current, unsubmitted prose for this question,
+   * persisted so closing and reopening the queue resumes typed text (D3
+   * "per-question drafts persist" — the persistence MECHANISM already
+   * existed pre-Phase-2; this field is what it now carries). Cleared once
+   * the answer is delivered (`deliverQueuedAnswer`) or the question is
+   * finalized as withdrawn with nothing typed (`runLeadAskEscapeAction`'s
+   * `"finalize-withdrawal"` branch); left as-is while the question simply
+   * stays `"pending"` between sittings.
+   */
+  draftAnswer?: string;
 }
 
 /**
@@ -1017,6 +1035,24 @@ function refreshAgentWidget(): void {
   }
 }
 
+/**
+ * Phase 2 (`260911`, sequential prose-modal tier): the live host repaint hook
+ * for the currently-open batch queue modal, if any — mirrors `activeOverlay`'s
+ * module-scope singleton precedent. `undefined` outside a live queue modal.
+ * Filled/cleared by `openLeadAskQueue`; consulted (best-effort) by
+ * `withdrawQueuedQuestion` so a model withdrawal's banner shows up
+ * immediately rather than waiting for the owner's next keystroke.
+ */
+let activeQueueRepaint: (() => void) | undefined;
+
+function repaintActiveQueue(): void {
+  try {
+    activeQueueRepaint?.();
+  } catch {
+    // best effort — see doc comment above.
+  }
+}
+
 function notify(ctx: AskUiCtx | undefined, message: string, type?: "info" | "warning" | "error"): void {
   ctx?.ui?.notify?.(message, type);
 }
@@ -1119,8 +1155,9 @@ export type WithdrawOutcome = "removed" | "deferred" | "no-op";
  * - `"lead-ask"` `"open"` (the owner has the fork-less answer view open right
  *   now): the removal cannot be applied without yanking an in-progress edit,
  *   so it is deferred (`withdrawnPending`) to whenever that view closes
- *   (`openLeadAskThread`'s `onEscape`) — an already-typed, unsubmitted answer
- *   is still delivered to the lead at that point, never silently discarded.
+ *   (Phase 2's `LeadAskQueueComponent.onClose`, via
+ *   `runLeadAskEscapeAction`) — an already-typed, unsubmitted answer is
+ *   still delivered to the lead at that point, never silently discarded.
  * - `"lead-ask"` `"dormant"`/`"closed"` (already answered, or already
  *   withdrawn): a no-op — the answer, if any, was already injected.
  */
@@ -1143,6 +1180,10 @@ export function withdrawQueuedQuestion(
     thread.touchedAt = nowIso();
     persistThreads(handle);
     refreshAgentWidget();
+    // Phase 2 (260911): if a batch queue modal has this thread open right
+    // now, repaint it immediately so the non-destructive withdrawal banner
+    // shows up without waiting for the owner's next keystroke.
+    repaintActiveQueue();
     return "deferred";
   }
   // "pending" — never opened.
@@ -1362,9 +1403,9 @@ export function injectDiscussionSummary(
  * fork-less thread never spawns).
  *
  * Terminal state is `"dormant"` (delivered, retained) regardless of how
- * delivery was triggered — a normal submit, or `openLeadAskThread`'s
- * `onEscape` still-delivering an in-progress, already-typed answer behind a
- * deferred model withdrawal (`ThreadRecord.withdrawnPending`, cleared here).
+ * delivery was triggered — a normal submit, or the queue modal's exit path
+ * still-delivering an in-progress, already-typed answer behind a deferred
+ * model withdrawal (`ThreadRecord.withdrawnPending`, cleared here).
  */
 export function deliverQueuedAnswer(
   pi: ExtensionAPI,
@@ -1396,6 +1437,9 @@ export function deliverQueuedAnswer(
 
   thread.status = "dormant";
   thread.withdrawnPending = false;
+  // Phase 2 (260911): the draft is delivered, not merely persisted — clear it
+  // so a later hand-edited/inspected registry never shows a stale one.
+  thread.draftAnswer = undefined;
   thread.touchedAt = nowIso();
   persistThreads(handle);
   refreshAgentWidget();
@@ -1701,7 +1745,7 @@ interface AskCustomUiCtx {
         theme: { bg?(color: string, text: string): string; fg?(color: string, text: string): string } | undefined,
         keybindings: unknown,
         done: (result: T) => void,
-      ) => ConversationViewComponent | Promise<ConversationViewComponent>,
+      ) => Component | Promise<Component>,
       options?: { overlay?: boolean; overlayOptions?: unknown },
     ): Promise<T>;
   };
@@ -1851,12 +1895,13 @@ export function buildOverlayHandle(
 }
 
 /**
- * `openLeadAskThread`'s `onEscape` decision (D-model-side-withdrawal),
- * extracted as its own pure function — mirroring `resolveDoneAction` — so
- * the withdrawal/in-progress-draft interaction is unit-lockable independent
- * of a live `ConversationViewComponent`. Only consulted while nothing has
- * been delivered yet (`!delivered` at the call site); once `send()` has
- * fired, Esc is a plain close with no further transition to resolve.
+ * The Phase 1 single-question overlay's `onEscape` decision
+ * (D-model-side-withdrawal), extracted as its own pure function — mirroring
+ * `resolveDoneAction` — so the withdrawal/in-progress-draft interaction is
+ * unit-lockable independent of a live `ConversationViewComponent`. Reused
+ * unchanged (via `resolveLeadAskQueueEntryAction`) as Phase 2's per-question
+ * "preserve" decision inside the sequential prose-modal tier's own close
+ * path — see `LeadAskQueueComponent`.
  *
  * `draft` is the owner's current, already-trimmed editor text.
  *
@@ -1868,11 +1913,11 @@ export function buildOverlayHandle(
  * - `"finalize-withdrawal"` — a model withdrawal arrived and nothing was
  *   typed: the withdrawal completes with nothing to deliver.
  * - `"revert-pending"` — no withdrawal arrived; the owner is simply closing
- *   an unanswered thread, so it stays available for a later `/answer`.
- *   Phase 1 intentionally does not persist an in-progress, non-withdrawn
- *   draft across this transition (a plain Esc with no model withdrawal
- *   discards the draft) — carrying one forward is Phase 2's sequential
- *   prose-modal tier's concern, not this interim single-question overlay's.
+ *   an unanswered thread, so it stays available for a later `/answer`. Phase
+ *   2 now persists whatever was typed as `ThreadRecord.draftAnswer` (see
+ *   `runLeadAskEscapeAction`) so it resumes on a later reopen — the "Phase 1
+ *   does not carry a draft forward" limitation this bullet used to describe
+ *   is what Phase 2's D3 "per-question drafts persist" lifts.
  */
 export type LeadAskEscapeAction = "deliver" | "finalize-withdrawal" | "revert-pending";
 export function resolveLeadAskEscapeAction(withdrawnPending: boolean, draft: string): LeadAskEscapeAction {
@@ -1881,12 +1926,34 @@ export function resolveLeadAskEscapeAction(withdrawnPending: boolean, draft: str
 }
 
 /**
- * Runs a `resolveLeadAskEscapeAction` result against the real thread record
- * — the other half of the `resolveDoneAction`/`runDoneAction` split.
- * `"deliver"` routes through `deliverQueuedAnswer` exactly as a normal
- * `send()` would (same anchor/excerpt/`"dormant"` handling); the other two
- * actions mutate `thread` directly and persist, mirroring the pre-extraction
- * inline branches byte for byte.
+ * Phase 2 (`260911`, sequential prose-modal tier): the queue's per-question
+ * batch-close decision, generalizing `resolveLeadAskEscapeAction` with a
+ * `mode` the single-question overlay never needed — the queue's final
+ * confirm and Esc-partial-submit-accept paths both SUBMIT every answered,
+ * unwithdrawn question, not just close the view. A still-pending model
+ * withdrawal (`withdrawnPending`) takes the same precedence either way: a
+ * non-empty draft is always delivered (a withdrawal never discards typed
+ * prose) and an empty one is always finalized; `mode` only changes what
+ * happens to an UNWITHDRAWN question — deliver it (`"submit"`) or persist it
+ * as a draft and leave the question pending (`"preserve"`, i.e. exactly
+ * `resolveLeadAskEscapeAction`'s own behavior).
+ */
+export function resolveLeadAskQueueEntryAction(
+  mode: "submit" | "preserve",
+  withdrawnPending: boolean,
+  draft: string,
+): LeadAskEscapeAction {
+  if (mode === "submit" && !withdrawnPending && draft.trim().length > 0) return "deliver";
+  return resolveLeadAskEscapeAction(withdrawnPending, draft);
+}
+
+/**
+ * Runs a `resolveLeadAskEscapeAction`/`resolveLeadAskQueueEntryAction` result
+ * against the real thread record — the other half of the
+ * `resolveDoneAction`/`runDoneAction` split. `"deliver"` routes through
+ * `deliverQueuedAnswer` exactly as a normal `send()` would (same
+ * anchor/excerpt/`"dormant"` handling, and clears `draftAnswer`); the other
+ * two actions mutate `thread` directly and persist.
  */
 export function runLeadAskEscapeAction(
   action: LeadAskEscapeAction,
@@ -1903,8 +1970,14 @@ export function runLeadAskEscapeAction(
   if (action === "finalize-withdrawal") {
     thread.withdrawnPending = false;
     thread.status = "closed";
+    thread.draftAnswer = undefined;
   } else {
+    // "revert-pending": Phase 2 (260911) D3 — persist whatever the owner had
+    // typed as this question's draft so a later reopen of the queue (or the
+    // single-question overlay) resumes it; an empty draft clears any earlier
+    // one rather than leaving a stale value behind.
     thread.status = "pending";
+    thread.draftAnswer = draft.trim().length > 0 ? draft : undefined;
   }
   thread.touchedAt = nowIso();
   persistThreads(handle);
@@ -1912,41 +1985,407 @@ export function runLeadAskEscapeAction(
 }
 
 /**
- * `260911` D1: opens (or reopens) a `"lead-ask"` thread's fork-less answer
- * view — dispatched from `openThread` before it ever reaches
- * `ensureRespondent`'s discussion-fork spawn branch, so nothing is spawned or
- * reattached here. Reuses `ConversationViewComponent` exactly as `openThread`
- * does for the fork-raised chat (§5 "reuse, do not rebuild"), with a local,
- * agent-less `ConversationChannel` in place of `createForkChannel`: there is
- * no respondent to stream events from or report liveness for, and a `send`
- * IS the final answer — `deliverQueuedAnswer` fires and the view closes.
- *
- * This is an interim single-question presentation only; Phase 2's sequential
- * prose-modal tier (D3) replaces it as the owner-facing surface for a BATCH
- * of queued questions, wired onto the same `deliverQueuedAnswer`/
- * `withdrawQueuedQuestion` contract this phase ships.
- *
- * Terminal-state guard: only `"pending"`/`"open"` are answerable — an already
- * `"dormant"` (delivered) or `"closed"` (withdrawn) thread notifies instead
- * of reopening, since re-answering it would re-inject a stale reply.
+ * Phase 2 (`260911`, D3) queue order: every answerable
+ * (`"pending"`/`"open"`) `"lead-ask"` thread, oldest-asked first — the order
+ * the owner is meant to work through them in. `"fork-raised"` threads never
+ * enter the batch queue (Scope: "lead-raised only" — see this file's
+ * header); they keep the single overlay-chat surface via `openThread`'s
+ * existing dispatch, unchanged.
  */
-async function openLeadAskThread(
+export function collectLeadAskQueue(records: readonly ThreadRecord[]): ThreadRecord[] {
+  return records
+    .filter((record) => record.origin === "lead-ask" && (record.status === "pending" || record.status === "open"))
+    .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.threadId.localeCompare(b.threadId)));
+}
+
+/** Non-empty (trimmed) drafts across the batch — the queue's live "answered" count for the coverage indicator and both confirm screens. */
+export function countQueueAnswered(drafts: ReadonlyMap<string, string>): number {
+  let count = 0;
+  for (const draft of drafts.values()) {
+    if (draft.trim().length > 0) count += 1;
+  }
+  return count;
+}
+
+/** The `"Qn/N · answered"` coverage indicator (D3). `index` is 0-based; `answered` is `countQueueAnswered`'s live count. */
+export function buildQueueCoverageLine(index: number, total: number, answered: number): string {
+  return `Q${index + 1}/${total} · ${answered} answered`;
+}
+
+/**
+ * The final-confirm / Esc-partial-submit screen's message: how many answered
+ * questions would submit and how many would stay pending. Shared by both
+ * confirm screens (`LeadAskQueueComponent`) — they differ only in how they
+ * are reached and in the safe default they cancel back to, never in this
+ * wording.
+ */
+export function buildQueueSubmitConfirmMessage(answered: number, total: number): string {
+  const pending = Math.max(0, total - answered);
+  return `Submit ${answered} answered question${answered === 1 ? "" : "s"}? ${pending} left pending.`;
+}
+
+/** `EditorLike` (conversation-view.ts) widened with the `Focusable.focused` flag the real host `Editor` exposes. Needed here — unlike `conversation-view.ts`'s own single-`Editor` use — because `LeadAskQueueComponent` holds one `Editor` per queued question and only the currently focused one should draw its cursor marker. */
+export interface FocusableEditorLike extends EditorLike {
+  focused: boolean;
+}
+
+/** Mirrors `conversation-view.ts`'s private `SHIFT_TAB`/`BORDER_OVERHEAD` constants (not exported — see that file's own `isEscapeKey` precedent for why a small constant is duplicated rather than reached into a private symbol). */
+const QUEUE_SHIFT_TAB = "\x1b[Z";
+const QUEUE_BORDER_OVERHEAD = 4;
+
+/** Minimal, unpainted `EditorTheme` — the queue draws no host theme colors into the `Editor` itself (its surrounding text uses the same `theme.fg`/`theme.bg` seam every other overlay tier does). */
+const QUEUE_IDENTITY_EDITOR_THEME: EditorTheme = {
+  borderColor: (text) => text,
+  selectList: {
+    selectedPrefix: (text) => text,
+    selectedText: (text) => text,
+    description: (text) => text,
+    scrollInfo: (text) => text,
+    noMatch: (text) => text,
+  },
+};
+
+/** One `LeadAskQueueComponent` confirm sub-screen: which one, and the cursor's current side. Both screens default to `"no"` (Decisions D3: "cursor defaulting to the safe No"). */
+interface LeadAskQueueConfirmState {
+  kind: "final" | "esc";
+  choice: "yes" | "no";
+}
+
+export interface LeadAskQueueOptions {
+  /** Fixed batch snapshot — Phase 2 queue order, from `collectLeadAskQueue`. Never mutated by the component itself; the host applies every close decision afterward. */
+  threads: readonly ThreadRecord[];
+  /** Which index to focus first (from `/answer <id>` or the reopen shortcut); clamped into range. */
+  initialFocusIndex: number;
+  /** Constructs one fresh `Editor` bound to the live host TUI — injectable for tests. */
+  editorFactory: () => FocusableEditorLike;
+  /** The live host's `matchesKey` (resolved through `loadHostPiTui()` by the caller — never the static import; see `pi-tui.ts`'s dual-package-instance note) for confirm-screen arrow/enter detection across raw and Kitty-protocol encodings. */
+  matchesKey: (data: string, keyId: string) => boolean;
+  /** Word-wraps one line of plain text (the live host's `wrapTextWithAnsi`, or an injected fake in tests). */
+  wrapText: (text: string, width: number) => string[];
+  /** Draws the single-line box border, matching every other overlay tier. */
+  border?: boolean;
+  /** Fires exactly once, with the owner's final decision and every question's live draft text keyed by `threadId`. */
+  onClose: (mode: "submit" | "preserve", drafts: ReadonlyMap<string, string>) => void;
+}
+
+/**
+ * `260911` Phase 2 (D3): the sequential prose-modal tier — distinct from
+ * `audit.ts`'s read-only viewer and the fork-raised `ConversationViewComponent`
+ * overlay chat. Shows the owner ONE queued `"lead-ask"` question at a time
+ * from a fixed batch, prose-only (never parses `#1./#2.` options the lead may
+ * have embedded in the question text — those travel to the lead verbatim on
+ * delivery via the existing D3 return-path anchor, `deliverQueuedAnswer`),
+ * with per-question free-typed answers that persist across navigation and
+ * reopen. See `openLeadAskQueue` for the surrounding IO glue (marking the
+ * batch `"open"`, the withdrawal-banner repaint hook, and the close/deliver
+ * contract) — it supersedes Phase 1's `openLeadAskThread` (removed; see the
+ * ticket's Phase 1 Result for why it was scoped as scaffolding).
+ *
+ * Key contract (ticket Decisions D3):
+ *   - `Enter` commits the focused question's current text as its answer and
+ *     advances to the next one; on the LAST question it raises the final
+ *     confirm instead of advancing further. This reuses the host `Editor`'s
+ *     own native `tui.input.submit`/`tui.input.newLine` routing rather than
+ *     reimplementing it: `Enter` calls `onSubmit` (submit), `shift+Enter`/
+ *     `ctrl+j` insert a newline, and `↑`/`↓`/`pgUp`/`pgDn` move/scroll within
+ *     the focused question's own text — all already true of a bare `Editor`
+ *     with no extra code here. `Editor.onSubmit` clears its own text before
+ *     firing; `handleQuestionSubmit` restores it immediately, since Enter
+ *     here COMMITS the answer rather than sending-and-clearing it.
+ *   - `Tab`/`shift+Tab` move focus with wrap-around (last -> first) and never
+ *     submit or open a confirm screen — intercepted here, ahead of the
+ *     `Editor`, so its own tab-autocomplete never fires.
+ *   - `Esc` is the exit path: with nothing answered anywhere in the batch it
+ *     closes at once (`"preserve"` — nothing to ask about); otherwise it
+ *     raises the Esc-partial-submit confirm.
+ *   - Both confirm screens default to `"no"` and execute on `Enter`; `Esc`
+ *     inside either always takes the `"no"` branch — but the two branches
+ *     differ, matching how each screen was reached: the final confirm's "no"
+ *     cancels back to editing the last question (Enter did not mean to
+ *     leave), while the Esc confirm's "no" exits without submitting (Esc
+ *     always means "leave" — only whether it submits on the way out is in
+ *     question).
+ */
+export class LeadAskQueueComponent implements Component {
+  private readonly tui: ConversationViewTui;
+  private readonly options: LeadAskQueueOptions;
+  private readonly threads: readonly ThreadRecord[];
+  private readonly editors: FocusableEditorLike[];
+  private index: number;
+  private confirm: LeadAskQueueConfirmState | undefined;
+  private finished = false;
+
+  constructor(tui: ConversationViewTui, options: LeadAskQueueOptions) {
+    this.tui = tui;
+    this.options = options;
+    this.threads = options.threads;
+    this.index = Math.min(Math.max(0, options.initialFocusIndex), this.threads.length - 1);
+    this.editors = this.threads.map((thread, i) => {
+      const editor = options.editorFactory();
+      editor.setText(thread.draftAnswer ?? "");
+      editor.onSubmit = (text) => this.handleQuestionSubmit(i, text);
+      editor.focused = i === this.index;
+      return editor;
+    });
+  }
+
+  invalidate(): void {
+    for (const editor of this.editors) editor.invalidate();
+  }
+
+  handleInput(data: string): void {
+    if (data === "\x03") return; // Ctrl+C swallowed, matching every other overlay tier.
+    if (this.confirm) {
+      this.handleConfirmInput(data);
+      return;
+    }
+    if (isEscapeKey(data)) {
+      this.handleEscape();
+      return;
+    }
+    if (data === "\t") {
+      this.focusNext(1);
+      return;
+    }
+    if (data === QUEUE_SHIFT_TAB) {
+      this.focusNext(-1);
+      return;
+    }
+    this.editors[this.index].handleInput(data);
+  }
+
+  render(width: number): string[] {
+    const w = Math.max(1, width);
+    const border = this.options.border === true;
+    const innerW = border ? Math.max(1, w - QUEUE_BORDER_OVERHEAD) : w;
+    const inner = this.renderInner(innerW);
+    return border ? wrapInBorder(inner, w, innerW) : inner;
+  }
+
+  // ---- decisions ------------------------------------------------------------
+
+  /**
+   * Review-round-1 correctness Critical fix: trims here, once, so every
+   * consumer (the coverage count, both confirm screens, and `onClose`'s
+   * drafts map handed to `resolveLeadAskEscapeAction` — whose own contract
+   * assumes already-trimmed text, exactly as Phase 1's caller trimmed
+   * before it) agrees on what counts as "empty." Reading the raw untrimmed
+   * `Editor` buffer here let a whitespace-only draft (e.g. a lone space, or
+   * a `shift+Enter` newline) on a `withdrawnPending` question read as
+   * non-empty to `resolveLeadAskEscapeAction`'s `draft.length > 0` check,
+   * delivering literal whitespace as the owner's "answer" instead of
+   * finalizing the withdrawal — trimming outer whitespace does not touch
+   * D3's "store answers verbatim" (that decision is about never parsing
+   * `#1./#2.` options out of the text, not about preserving invisible
+   * padding).
+   */
+  private liveDrafts(): Map<string, string> {
+    const drafts = new Map<string, string>();
+    for (let i = 0; i < this.threads.length; i += 1) drafts.set(this.threads[i].threadId, this.editors[i].getText().trim());
+    return drafts;
+  }
+
+  private focusNext(direction: 1 | -1): void {
+    const total = this.threads.length;
+    if (total <= 1) return;
+    this.editors[this.index].focused = false;
+    this.index = (this.index + direction + total) % total;
+    this.editors[this.index].focused = true;
+    this.tui.requestRender();
+  }
+
+  private handleQuestionSubmit(i: number, text: string): void {
+    // Restore before the focus guard below (review-round-1 correctness Minor
+    // fix): the real `Editor.submitValue()` has already cleared its own
+    // buffer by the time this callback fires, so returning early WITHOUT
+    // restoring first would discard the owner's just-typed text outright,
+    // not merely ignore a stale event.
+    this.editors[i].setText(text);
+    if (i !== this.index) return; // defensive — input only ever reaches the focused editor.
+    if (i === this.threads.length - 1) {
+      this.confirm = { kind: "final", choice: "no" };
+      this.tui.requestRender();
+      return;
+    }
+    this.focusNext(1);
+  }
+
+  private handleEscape(): void {
+    if (countQueueAnswered(this.liveDrafts()) === 0) {
+      this.finish("preserve");
+      return;
+    }
+    this.confirm = { kind: "esc", choice: "no" };
+    this.tui.requestRender();
+  }
+
+  private handleConfirmInput(data: string): void {
+    const confirm = this.confirm;
+    if (!confirm) return;
+    const matches = this.options.matchesKey;
+    if (isEscapeKey(data)) {
+      this.resolveConfirm(confirm.kind, "no");
+      return;
+    }
+    if (matches(data, "left") || matches(data, "up")) {
+      confirm.choice = "no";
+      this.tui.requestRender();
+      return;
+    }
+    if (matches(data, "right") || matches(data, "down")) {
+      confirm.choice = "yes";
+      this.tui.requestRender();
+      return;
+    }
+    if (matches(data, "enter")) this.resolveConfirm(confirm.kind, confirm.choice);
+  }
+
+  private resolveConfirm(kind: "final" | "esc", choice: "yes" | "no"): void {
+    if (choice === "yes") {
+      this.finish("submit");
+      return;
+    }
+    if (kind === "final") {
+      // Decline: return to editing the last question — Enter did not mean to leave.
+      this.confirm = undefined;
+      this.tui.requestRender();
+      return;
+    }
+    // Esc confirm declined: Esc always means "leave" — exit preserving drafts.
+    this.finish("preserve");
+  }
+
+  private finish(mode: "submit" | "preserve"): void {
+    if (this.finished) return;
+    this.finished = true;
+    this.options.onClose(mode, this.liveDrafts());
+  }
+
+  // ---- rendering --------------------------------------------------------
+
+  private renderInner(w: number): string[] {
+    const total = this.threads.length;
+    const answered = countQueueAnswered(this.liveDrafts());
+    const header = [this.line(buildQueueCoverageLine(this.index, total, answered), w), ""];
+    if (this.confirm) {
+      return [...header, ...this.renderConfirm(w, answered, total)];
+    }
+    const thread = this.threads[this.index];
+    const banner = thread.withdrawnPending
+      ? [this.line("⚠ the agent withdrew this question — your answer, if any, is still delivered when you close.", w), ""]
+      : [];
+    // Full multi-line wrap, not `this.line`'s single-line truncation (review-
+    // round-1 correctness Minor fix): at a narrow width this hint — the
+    // modal's only exit, since Ctrl+C is swallowed — wraps past one line,
+    // and `this.line` silently drops everything after the first.
+    const hint = this.options.wrapText(
+      "Enter: answer & next · Shift+Enter/Ctrl+J: newline · Tab/Shift+Tab: switch question · Esc: exit",
+      w,
+    );
+    const editorLines = this.editors[this.index].render(w);
+    let questionLines = this.options.wrapText(thread.question ?? thread.title, w);
+    if (thread.context && thread.context.trim().length > 0) {
+      questionLines = [...questionLines, "", ...this.options.wrapText(thread.context, w)];
+    }
+    // Height budget (review-round-1 correctness Important fix): the host
+    // overlay hard-truncates from the BOTTOM past `overlayOptions.maxHeight`
+    // — with no budget here, a long lead-authored question/context can push
+    // the answer Editor and the Esc hint above off screen entirely, with no
+    // way back to either (↑/↓/pgUp/pgDn scroll the Editor's own ANSWER text
+    // per the ticket, not the question). Cap the question/context block
+    // instead, so the editor and the hint always render.
+    const viewportRows = conversationOverlayHeight(this.tui);
+    if (Number.isFinite(viewportRows)) {
+      const borderOverhead = this.options.border === true ? QUEUE_BORDER_OVERHEAD : 0;
+      const fixedRows =
+        borderOverhead + header.length + banner.length + 1 /* blank before editor */ + editorLines.length + 1 /* blank after editor */ + hint.length;
+      const budget = Math.max(1, viewportRows - fixedRows);
+      if (questionLines.length > budget) {
+        const shown = Math.max(1, budget - 1);
+        questionLines = [
+          ...questionLines.slice(0, shown),
+          this.line(`… question truncated — see /thread ${thread.threadId} for the full text`, w),
+        ];
+      }
+    }
+    return [...header, ...banner, ...questionLines, "", ...editorLines, "", ...hint];
+  }
+
+  private renderConfirm(w: number, answered: number, total: number): string[] {
+    const choice = this.confirm?.choice;
+    const yes = choice === "yes" ? "[Yes]" : " Yes ";
+    const no = choice === "no" ? "[No]" : " No ";
+    return [
+      ...this.options.wrapText(buildQueueSubmitConfirmMessage(answered, total), w),
+      "",
+      this.line(`  ${yes}   ${no}`, w),
+      "",
+      ...this.options.wrapText("←/→ select · Enter confirm · Esc cancel", w),
+    ];
+  }
+
+  private line(text: string, width: number): string {
+    return this.options.wrapText(text, width)[0] ?? "";
+  }
+
+  /** The owner's current text for question `index`, for a host or test to read without depending on `onClose` having fired. */
+  getDraft(index: number): string {
+    return this.editors[index]?.getText() ?? "";
+  }
+
+  getFocusedIndex(): number {
+    return this.index;
+  }
+}
+
+/**
+ * `260911` Phase 2 (D3): opens the sequential prose-modal tier over every
+ * answerable `"lead-ask"` thread at once — the async-queue owner surface
+ * that supersedes Phase 1's `openLeadAskThread` (removed). Marks every batch
+ * member `"open"` up front so a model's `ws-withdraw-question` mid-session
+ * correctly takes the "deferred, banner, still-delivers-a-draft" branch
+ * (`withdrawQueuedQuestion`) for any of them, exactly as the Phase 1 single-
+ * question view did for one thread at a time. `startThreadId` positions the
+ * initial focus (from `/answer <id>` or the reopen shortcut); omitted or no
+ * longer answerable falls back to the first question in queue order, with a
+ * notice in the latter case.
+ */
+async function openLeadAskQueue(
   pi: ExtensionAPI,
   ctx: AskUiCtx & { ui?: { custom?: unknown }; sessionManager?: unknown },
   handle: ThreadRegistryHandle,
-  thread: ThreadRecord,
+  startThreadId?: string,
 ): Promise<void> {
-  if (thread.status !== "pending" && thread.status !== "open") {
-    notify(ctx, `ws: question ${thread.threadId} was already answered or withdrawn.`, "warning");
+  const threads = collectLeadAskQueue([...handle.threads.values()]);
+  const requestedIndex = startThreadId ? threads.findIndex((thread) => thread.threadId === startThreadId) : -1;
+
+  if (threads.length === 0) {
+    const requested = startThreadId ? handle.threads.get(startThreadId) : undefined;
+    if (requested && requested.origin === "lead-ask") {
+      notify(ctx, `ws: question ${startThreadId} was already answered or withdrawn.`, "warning");
+    } else {
+      notify(ctx, "ws: no queued questions to answer.", "info");
+    }
     return;
   }
+  if (startThreadId && requestedIndex < 0) {
+    const requested = handle.threads.get(startThreadId);
+    if (requested && requested.origin === "lead-ask") {
+      notify(ctx, `ws: question ${startThreadId} was already answered or withdrawn — showing the rest of the queue instead.`, "warning");
+    }
+  }
+  const initialFocusIndex = requestedIndex >= 0 ? requestedIndex : 0;
 
-  thread.status = "open";
-  thread.touchedAt = nowIso();
+  const now = nowIso();
+  for (const thread of threads) {
+    thread.status = "open";
+    thread.touchedAt = now;
+  }
   persistThreads(handle);
   refreshAgentWidget();
 
-  // One overlay at a time (§5): the previous one is closed first.
+  // One overlay at a time (§5, carried over from Phase 1): a live
+  // fork-raised chat, if any, is closed first.
   activeOverlay?.handle.close();
   activeOverlay = undefined;
   const token = ++overlayToken;
@@ -1954,74 +2393,46 @@ async function openLeadAskThread(
   const sessionManager = (ctx as { sessionManager?: { buildContextEntries?: () => { id: string }[]; getBranch?: (id: string) => { id: string }[] } })
     .sessionManager;
 
-  let delivered = false;
-  let closeView: (() => void) | undefined;
-  const channel: ConversationChannel = {
-    onEvent: () => () => {
-      // No respondent ever exists for a fork-less thread — nothing to
-      // subscribe to, so unsubscribe is a no-op.
-    },
-    liveness: () => "settled",
-    async send(text) {
-      delivered = true;
-      deliverQueuedAnswer(pi, handle, thread, text, sessionManager);
-      closeView?.();
-    },
-  };
-
-  const initialItems = buildInitialConversationItems(thread);
-  const headerHint = buildThreadHeaderHint(thread);
-  let markdownTheme: MarkdownTheme | undefined;
   try {
-    markdownTheme = getMarkdownTheme();
-  } catch {
-    // best effort — see `openThread`'s identical try/catch for why.
-  }
-
-  try {
-    await (ctx as unknown as AskCustomUiCtx).ui.custom<undefined>(
-      async (tui, theme, keybindings, done) => {
+    await (ctx as unknown as { ui: AskCustomUiCtx["ui"] }).ui.custom<undefined>(
+      async (tui, _theme, _keybindings, done) => {
         const hostPiTui = await loadHostPiTui();
-        let overlayHandle: OverlayHandle | undefined;
-        const component: ConversationViewComponent = new ConversationViewComponent(tui, {
-          channel,
-          initialItems,
-          headerHint,
-          markdownTheme,
+        const component = new LeadAskQueueComponent(tui, {
+          threads,
+          initialFocusIndex,
           border: true,
-          viewportHeight: () => conversationOverlayHeight(tui),
-          keybindings: keybindings as { matches(data: string, id: string): boolean },
-          userLineBg: (text) => theme?.bg?.("userMessageBg", text) ?? text,
-          toolTextFg: (text) => theme?.fg?.("muted", text) ?? text,
-          workingTextFg: (text) => theme?.fg?.("dim", text) ?? text,
-          primitives: { ScrollView: hostPiTui.ScrollView, Markdown: hostPiTui.Markdown, Text: hostPiTui.Text, Editor: hostPiTui.Editor },
-          onEscape: () => {
-            if (!delivered) {
-              const draft = component.getEditorText().trim();
-              const action = resolveLeadAskEscapeAction(thread.withdrawnPending === true, draft);
-              if (action === "deliver") delivered = true;
+          matchesKey: hostPiTui.matchesKey as (data: string, keyId: string) => boolean,
+          wrapText: (text, width) => hostPiTui.wrapTextWithAnsi(text, width),
+          editorFactory: () => new hostPiTui.Editor(tui as never, QUEUE_IDENTITY_EDITOR_THEME) as unknown as FocusableEditorLike,
+          onClose: (mode, drafts) => {
+            for (const thread of threads) {
+              const draft = drafts.get(thread.threadId) ?? "";
+              const action = resolveLeadAskQueueEntryAction(mode, thread.withdrawnPending === true, draft);
               runLeadAskEscapeAction(action, pi, handle, thread, draft, sessionManager);
             }
-            overlayHandle?.close();
-          },
-          // No fork to summarize (D1) — /done just exits, same as an Esc
-          // with nothing typed.
-          onDone: () => overlayHandle?.close(),
-          onItemsChange: (items) => {
-            thread.transcript = items.length > THREAD_TRANSCRIPT_CAP ? items.slice(-THREAD_TRANSCRIPT_CAP) : [...items];
-            persistThreads(handle);
+            done(undefined);
           },
         });
-        component.setMode("interactive");
-        overlayHandle = { close: () => done(undefined), closeWithSummary: () => done(undefined) };
-        closeView = () => overlayHandle?.close();
-        activeOverlay = { token, threadId: thread.threadId, handle: overlayHandle };
+        activeOverlay = {
+          token,
+          threadId: threads[initialFocusIndex].threadId,
+          handle: { close: () => done(undefined), closeWithSummary: () => done(undefined) },
+        };
+        activeQueueRepaint = () => tui.requestRender();
         return component;
       },
       { overlay: true, overlayOptions: { width: "80%", maxHeight: "80%", anchor: "center" } },
     );
   } finally {
-    if (activeOverlay?.token === token) activeOverlay = undefined;
+    // Review-round-1 correctness Minor fix: guard both clears under the same
+    // token check (matching every other `finally` in this file) rather than
+    // unconditionally clearing `activeQueueRepaint` — harmless while only one
+    // queue can hold focus at a time, but the asymmetry could clear a
+    // successor's hook if that single-overlay invariant ever loosens.
+    if (activeOverlay?.token === token) {
+      activeOverlay = undefined;
+      activeQueueRepaint = undefined;
+    }
   }
 }
 
@@ -2045,9 +2456,10 @@ async function openThread(
 
   // `260911` D1: a `"lead-ask"` thread is fork-less end to end — it never
   // reaches `ensureRespondent`'s discussion-fork spawn branch below. See
-  // `openLeadAskThread` and this file's header comment.
+  // `openLeadAskQueue` (Phase 2's sequential prose-modal tier) and this
+  // file's header comment.
   if (thread.origin === "lead-ask") {
-    await openLeadAskThread(pi, ctx, handle, thread);
+    await openLeadAskQueue(pi, ctx, handle, thread.threadId);
     return;
   }
 

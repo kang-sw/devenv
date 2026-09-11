@@ -1389,8 +1389,8 @@ names read as "ask now", inviting a blocking framing the tool never had) and
 made the lead-raised (`lead-ask`) path fork-less end to end: opening a
 `lead-ask` thread no longer forks a discussion agent at all (the "Lazy
 discussion fork at the lead's tip" design below this note described the
-pre-`260911` behavior and is superseded by "Fork-less lead-ask answer
-overlay"). The fork-raised path — a task fork's own `kind:"question"` report,
+pre-`260911` behavior and is superseded by "Fork-less lead-ask sequential
+prose-modal queue"). The fork-raised path — a task fork's own `kind:"question"` report,
 its live-fork attach, and its overlay — is unchanged by `260911` and is
 covered by the "Attach to a live task fork" bullet below exactly as before.
 
@@ -1452,38 +1452,59 @@ covered by the "Attach to a live task fork" bullet below exactly as before.
   refreshes the widget, nothing more. One overlay is attached at a time; the
   overlay header shows the thread title and the time it was opened, so two
   lead-voiced agents cannot be mistaken for one.
-- **Fork-less lead-ask answer overlay (`260911` Phase 1).** A registered
+- **Fork-less lead-ask sequential prose-modal queue (`260911` Phase 1 fork-less
+  redesign + Phase 2 sequential-modal tier, both landed).** A registered
   question costs nothing until the owner opens it, and opening one spawns
-  **nothing** — no discussion fork, no live process of any kind. `/answer`
-  (or the reopen shortcut) on a `lead-ask` thread opens a single-question
-  overlay, built from the same shared conversation-view component as the
-  fork-raised path's overlay chat, but with a local `ConversationChannel`
-  that has no respondent to stream from or report liveness for: the owner
-  types one prose reply and sends it, and that send IS the answer — there is
-  no back-and-forth turn loop. On send the adapter delivers the answer
-  straight to the lead session through the existing `followUp` custom-message
-  path (the same `sendToLead` primitive `/done`'s discussion-summary
-  injection used before this redesign), carrying the D3 anchor
-  (`askCommitHash` + `entryId`) and, when that `entryId` is no longer on the
-  lead's live branch (a compaction has passed it), a **verbatim excerpt** of
-  the lead-session entries around it, read from the append-only session file
-  exactly as the pre-`260911` discussion fork's first message did. The
-  thread then goes `dormant`. An `Esc` with nothing typed leaves the thread
-  `pending` (or, if `ws-withdraw-question` was called while the view was
-  open, finalizes the deferred withdrawal to `closed`); an `Esc` with an
-  unsubmitted draft while a withdrawal is pending still delivers that draft
-  before closing, per `ws-withdraw-question`'s concurrency contract above. A
-  thread already `dormant` or `closed` notifies instead of reopening, since
-  re-answering it would re-inject a stale reply. This is an interim
-  single-question presentation only; Phase 2 (`260911`, not yet landed)
-  replaces it with a sequential prose-modal tier for a batch of queued
-  questions, wired onto the same `deliverQueuedAnswer`/`ws-withdraw-question`
-  contract this phase ships. The pre-`260911` discussion-fork machinery this
-  bypasses (the spawn itself, its directive/initial-message builders, and its
-  `/done` summarize-and-close path, described in the paragraph this note
-  replaces) is kept in source as insurance against a persisted
-  pre-redesign registry entry, but no live `lead-ask` path can reach it
-  anymore — it is exercised only by direct unit tests.
+  **nothing** — no discussion fork, no live process of any kind. `/answer
+  <id>` (or the reopen shortcut) on a `lead-ask` thread opens
+  `LeadAskQueueComponent`: every answerable (`pending`/`open`) `lead-ask`
+  thread at once, oldest-asked first, one question shown at a time, focused
+  on the requested thread (or the first in queue order). Each question has
+  its own per-question `Editor`, so switching questions never loses typed
+  text. Key contract: `Enter` commits the focused question's current text
+  and advances to the next question (no wrap); on the **last** question,
+  `Enter` instead raises a final confirm (cursor defaulting to `No`) that, on
+  `Yes`, submits every answered question and leaves blanks `pending`, with a
+  shown count. `shift+Enter`/`ctrl+j` insert a newline rather than
+  submitting — this and all cursor movement/scrolling (`↑`/`↓`/`pgUp`/`pgDn`)
+  is the host `Editor`'s own native behavior, not custom-handled. `Tab`/
+  `shift+Tab` move focus with wrap-around (last→first) and never submit.
+  `Esc` is the only mid-sequence partial-submit path: with nothing answered
+  anywhere in the batch it closes at once; otherwise it raises a second
+  confirm (also defaulting to `No`) offering to submit the completed
+  questions only, again leaving blanks `pending`. A `Qn/N · answered` line
+  tracks batch coverage. The modal never parses embedded `#1./#2.` options in
+  a question's text — an answer is stored, and later delivered, verbatim.
+  Draft text that a question is left on (from typing without submitting, or
+  from `revert-pending`/`Esc`-decline) persists on `ThreadRecord.draftAnswer`
+  across close/reopen, using the same registry-persistence mechanism as
+  everything else on the record.
+
+  Submission itself is unchanged from Phase 1: for each question the modal
+  hands off to submit, the adapter delivers the answer straight to the lead
+  session through the existing `followUp` custom-message path (the same
+  `sendToLead` primitive `/done`'s discussion-summary injection used before
+  the fork-less redesign), carrying the D3 anchor (`askCommitHash` +
+  `entryId`) and, when that `entryId` is no longer on the lead's live branch
+  (a compaction has passed it), a **verbatim excerpt** of the lead-session
+  entries around it, read from the append-only session file exactly as the
+  pre-`260911` discussion fork's first message did. Each submitted thread
+  then goes `dormant`; a question left blank stays `pending`, still visible
+  the next time the queue opens. `ws-withdraw-question` called while the
+  owner has a thread's question open in the modal cannot remove it without
+  yanking an in-progress edit, so removal is deferred (`withdrawnPending`)
+  and shown as a non-destructive banner on that question — closing the modal
+  (by any exit path) still delivers a typed answer, if any, before finalizing
+  the withdrawal; a withdrawal never discards typed prose, only a truly empty
+  question. A thread already `dormant` or `closed` is excluded from the
+  batch outright — `/answer <id>` on one notifies instead of reopening, since
+  re-answering it would re-inject a stale reply. The pre-`260911`
+  discussion-fork machinery this bypasses (the spawn itself, its
+  directive/initial-message builders, and its `/done` summarize-and-close
+  path, described in the paragraph this note replaces) is kept in source as
+  insurance against a persisted pre-redesign registry entry, but no live
+  `lead-ask` path can reach it anymore — it is exercised only by direct unit
+  tests.
 - **Attach to a live task fork (fork-raised threads).** When a `ws-fork` task
   fork reports `kind:"question"` from a TUI lead, the adapter registers a
   `fork-raised` thread whose respondent is that fork, increments the pending
@@ -1505,9 +1526,11 @@ covered by the "Attach to a live task fork" bullet below exactly as before.
 - **Overlay chat (fork-raised).** This bullet describes the fork-raised
   overlay — a live respondent to stream from, `/done` ending a multi-turn
   dialogue — and, as insurance, the pre-`260911` discussion fork's identical
-  wiring for an old persisted registry entry; the current `lead-ask` overlay
-  ("Fork-less lead-ask answer overlay" above) is a simpler single-send variant
-  of the same shared component with no respondent and no `/done` summary turn.
+  wiring for an old persisted registry entry; a `lead-ask` thread never
+  reaches this component at all post-`260911` — it uses the sequential
+  prose-modal queue ("Fork-less lead-ask sequential prose-modal queue" above)
+  instead, which has no respondent, no `/done` command, and no notion of a
+  multi-turn dialogue (Enter/Esc key semantics replace the typed `/done`).
   The overlay is the shared conversation-view component (see
   "Shared conversation-view component" below), opened in its interactive mode.
   Owner text goes to the respondent as a `prompt` when it is
@@ -1540,25 +1563,16 @@ covered by the "Attach to a live task fork" bullet below exactly as before.
   `Esc: close view (thread stays open) · /done: end thread`
   — there is no footer hint. `Esc` closes the view only: the thread stays
   `open` and the fork keeps running, reattachable at any time. `/done` typed
-  in the overlay closes the **thread**, on its origin:
-  - `lead-ask` — `260911` Phase 1: there is no discussion fork left to
-    summarize, so `/done` in the fork-less answer overlay is just an `Esc`
-    with nothing typed (see "Fork-less lead-ask answer overlay" above) — the
-    thread stays `pending` and the view closes; the actual answer delivery
-    happens on **send**, not on `/done`. (Pre-`260911`: the discussion fork
-    was asked for a summary turn; on settle the adapter injected
-    `context + question + summary` into the lead session as a custom message
-    — type `ws-thread-summary`, delivered `followUp` — carrying owner
-    authority; the fork's resume snapshot was captured, the fork stopped, and
-    the thread went `dormant`. That path is kept in source, unreachable from
-    any live `lead-ask` thread; see the note above.)
-  - `fork-raised` — no summary, no injection, no stop: the overlay closes at
-    once and the thread goes `dormant` while the task fork carries on. What was
-    decided reaches the lead through that fork's own `kind:"final"` report under
-    `Decisions:`; stopping the fork here would destroy its in-flight task, and
-    the fork's own final is the lead's completion signal. Closing the thread
-    clears the fork's thread-bound flag, so it re-enters the pushed status
-    line and its final is pushed as an ordinary `ws-agent-report`.
+  in the overlay closes the **thread** — this bullet's fork-raised path only;
+  `lead-ask` has no `/done` command post-`260911` (see the queue's own
+  Enter/Esc contract above). No summary, no injection, no stop: the overlay
+  closes at once and the thread goes `dormant` while the task fork carries
+  on. What was decided reaches the lead through that fork's own
+  `kind:"final"` report under `Decisions:`; stopping the fork here would
+  destroy its in-flight task, and the fork's own final is the lead's
+  completion signal. Closing the thread clears the fork's thread-bound flag,
+  so it re-enters the pushed status line and its final is pushed as an
+  ordinary `ws-agent-report`.
   The lead session is never rewound; injection is forward-only.
 - **Headless baseline preserved.** Off the TUI (`ctx.mode !== "tui"`, e.g.
   `--mode rpc`), a fork-raised question is pushed to the lead byte-for-byte as
@@ -2093,8 +2107,9 @@ stays byte-identical.
 >   with its anti-bleed loop, and the side-thread owner question surface
 >   (`ws-queue-question`/`ws-withdraw-question`, renamed by `260911` from
 >   `ws-ask`/`ws-resolve`; the persisted thread registry; the fork-less
->   `lead-ask` answer overlay and the fork-raised overlay chat; origin-routed
->   `/done`; and the `ws-thread-summary` injection, kept as pre-`260911`
->   insurance and no longer reachable from a live `lead-ask` thread). The one post-MVP surface
+>   `lead-ask` sequential prose-modal queue and the fork-raised overlay chat;
+>   origin-routed `/done`; and the `ws-thread-summary` injection, kept as
+>   pre-`260911` insurance and no longer reachable from a live `lead-ask`
+>   thread). The one post-MVP surface
 >   still deferred to a follow-up ticket under the epic — an always-visible TODO —
 >   is not part of this contract yet.
