@@ -42,3 +42,9 @@ drives spend.
   instruction lands without bloating the section.
 - Shipped-surface reach: `lead-delegate.md` plus the `agents-plugin-wsflow/`
   mirror and the skill-authoring invariant checklist.
+
+## Release gate
+
+This ticket is the release gate for the current cycle: the `epic/refound ->
+develop` merge and the subsequent release proceed once it lands (user decision,
+2026-09-11). It is the last planned change before the epic's work is shipped.

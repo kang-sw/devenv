@@ -62,6 +62,15 @@ skill creates no worktree without explicit user approval for that run.
   parallel worker runs in its own worktree+branch; the lead serializes the
   merges back into the goal branch in dependency order. This keeps the existing
   shared-branch rule intact rather than fighting it.
+- **Worktrees are pooled and recycled behind a single user gate.** The only user
+  approval is "may this run use a worktree at all"; with it granted, the lead
+  follows three paths in order — reuse an idle detached worktree from the pool,
+  else create a new one — and on completion *detaches* the worktree rather than
+  deleting it, returning it to the reusable pool (worktree derivation is the
+  expensive step this amortizes). All worktrees live under one consistent,
+  locally git-ignored location (registered via `.git/info/exclude`, never a
+  committed `.gitignore`, to avoid a shipped/downstream leak), so paths are
+  predictable and never tracked.
 
 ## Constraints
 
@@ -106,4 +115,10 @@ worker key can bind to a repo worktree while rsrc still resolves to the cache; (
 reconciling `ticket-worker`'s own PARENT-branch capture and `impl/<parent>/<slug>`
 creation with a pre-provisioned worktree — decide whether the route pre-creates
 the impl branch and suppresses the worker's branch capture, or lets the worker
-own branch creation inside the worktree.
+own branch creation inside the worktree; (g) pool reuse hygiene — before handing
+a pooled worktree to a worker, reset it to the base branch and clean
+untracked/ignored cruft so no prior run's state leaks into the next; (h) a claim
+or lock so two concurrent runs never grab the same idle worktree, plus a pool
+cap and GC policy; (i) where the pool directory lives — an ignored directory
+inside the repo (nesting cost, must be excluded) versus a sibling directory
+(no ignore concern but less "registered"), and how to name worktrees within it.
