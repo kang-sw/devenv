@@ -2164,9 +2164,24 @@ export class LeadAskQueueComponent implements Component {
 
   // ---- decisions ------------------------------------------------------------
 
+  /**
+   * Review-round-1 correctness Critical fix: trims here, once, so every
+   * consumer (the coverage count, both confirm screens, and `onClose`'s
+   * drafts map handed to `resolveLeadAskEscapeAction` — whose own contract
+   * assumes already-trimmed text, exactly as Phase 1's caller trimmed
+   * before it) agrees on what counts as "empty." Reading the raw untrimmed
+   * `Editor` buffer here let a whitespace-only draft (e.g. a lone space, or
+   * a `shift+Enter` newline) on a `withdrawnPending` question read as
+   * non-empty to `resolveLeadAskEscapeAction`'s `draft.length > 0` check,
+   * delivering literal whitespace as the owner's "answer" instead of
+   * finalizing the withdrawal — trimming outer whitespace does not touch
+   * D3's "store answers verbatim" (that decision is about never parsing
+   * `#1./#2.` options out of the text, not about preserving invisible
+   * padding).
+   */
   private liveDrafts(): Map<string, string> {
     const drafts = new Map<string, string>();
-    for (let i = 0; i < this.threads.length; i += 1) drafts.set(this.threads[i].threadId, this.editors[i].getText());
+    for (let i = 0; i < this.threads.length; i += 1) drafts.set(this.threads[i].threadId, this.editors[i].getText().trim());
     return drafts;
   }
 
@@ -2180,8 +2195,13 @@ export class LeadAskQueueComponent implements Component {
   }
 
   private handleQuestionSubmit(i: number, text: string): void {
-    if (i !== this.index) return; // defensive — input only ever reaches the focused editor.
+    // Restore before the focus guard below (review-round-1 correctness Minor
+    // fix): the real `Editor.submitValue()` has already cleared its own
+    // buffer by the time this callback fires, so returning early WITHOUT
+    // restoring first would discard the owner's just-typed text outright,
+    // not merely ignore a stale event.
     this.editors[i].setText(text);
+    if (i !== this.index) return; // defensive — input only ever reaches the focused editor.
     if (i === this.threads.length - 1) {
       this.confirm = { kind: "final", choice: "no" };
       this.tui.requestRender();
@@ -2246,22 +2266,49 @@ export class LeadAskQueueComponent implements Component {
   private renderInner(w: number): string[] {
     const total = this.threads.length;
     const answered = countQueueAnswered(this.liveDrafts());
-    const lines: string[] = [this.line(buildQueueCoverageLine(this.index, total, answered), w), ""];
+    const header = [this.line(buildQueueCoverageLine(this.index, total, answered), w), ""];
     if (this.confirm) {
-      lines.push(...this.renderConfirm(w, answered, total));
-      return lines;
+      return [...header, ...this.renderConfirm(w, answered, total)];
     }
     const thread = this.threads[this.index];
-    if (thread.withdrawnPending) {
-      lines.push(this.line("⚠ the agent withdrew this question — your answer, if any, is still delivered when you close.", w), "");
-    }
-    lines.push(...this.options.wrapText(thread.question ?? thread.title, w));
+    const banner = thread.withdrawnPending
+      ? [this.line("⚠ the agent withdrew this question — your answer, if any, is still delivered when you close.", w), ""]
+      : [];
+    // Full multi-line wrap, not `this.line`'s single-line truncation (review-
+    // round-1 correctness Minor fix): at a narrow width this hint — the
+    // modal's only exit, since Ctrl+C is swallowed — wraps past one line,
+    // and `this.line` silently drops everything after the first.
+    const hint = this.options.wrapText(
+      "Enter: answer & next · Shift+Enter/Ctrl+J: newline · Tab/Shift+Tab: switch question · Esc: exit",
+      w,
+    );
+    const editorLines = this.editors[this.index].render(w);
+    let questionLines = this.options.wrapText(thread.question ?? thread.title, w);
     if (thread.context && thread.context.trim().length > 0) {
-      lines.push("", ...this.options.wrapText(thread.context, w));
+      questionLines = [...questionLines, "", ...this.options.wrapText(thread.context, w)];
     }
-    lines.push("", ...this.editors[this.index].render(w), "");
-    lines.push(this.line("Enter: answer & next · Shift+Enter/Ctrl+J: newline · Tab/Shift+Tab: switch question · Esc: exit", w));
-    return lines;
+    // Height budget (review-round-1 correctness Important fix): the host
+    // overlay hard-truncates from the BOTTOM past `overlayOptions.maxHeight`
+    // — with no budget here, a long lead-authored question/context can push
+    // the answer Editor and the Esc hint above off screen entirely, with no
+    // way back to either (↑/↓/pgUp/pgDn scroll the Editor's own ANSWER text
+    // per the ticket, not the question). Cap the question/context block
+    // instead, so the editor and the hint always render.
+    const viewportRows = conversationOverlayHeight(this.tui);
+    if (Number.isFinite(viewportRows)) {
+      const borderOverhead = this.options.border === true ? QUEUE_BORDER_OVERHEAD : 0;
+      const fixedRows =
+        borderOverhead + header.length + banner.length + 1 /* blank before editor */ + editorLines.length + 1 /* blank after editor */ + hint.length;
+      const budget = Math.max(1, viewportRows - fixedRows);
+      if (questionLines.length > budget) {
+        const shown = Math.max(1, budget - 1);
+        questionLines = [
+          ...questionLines.slice(0, shown),
+          this.line(`… question truncated — see /thread ${thread.threadId} for the full text`, w),
+        ];
+      }
+    }
+    return [...header, ...banner, ...questionLines, "", ...editorLines, "", ...hint];
   }
 
   private renderConfirm(w: number, answered: number, total: number): string[] {
@@ -2273,7 +2320,7 @@ export class LeadAskQueueComponent implements Component {
       "",
       this.line(`  ${yes}   ${no}`, w),
       "",
-      this.line("←/→ select · Enter confirm · Esc cancel", w),
+      ...this.options.wrapText("←/→ select · Enter confirm · Esc cancel", w),
     ];
   }
 
@@ -2377,8 +2424,15 @@ async function openLeadAskQueue(
       { overlay: true, overlayOptions: { width: "80%", maxHeight: "80%", anchor: "center" } },
     );
   } finally {
-    if (activeOverlay?.token === token) activeOverlay = undefined;
-    activeQueueRepaint = undefined;
+    // Review-round-1 correctness Minor fix: guard both clears under the same
+    // token check (matching every other `finally` in this file) rather than
+    // unconditionally clearing `activeQueueRepaint` — harmless while only one
+    // queue can hold focus at a time, but the asymmetry could clear a
+    // successor's hook if that single-overlay invariant ever loosens.
+    if (activeOverlay?.token === token) {
+      activeOverlay = undefined;
+      activeQueueRepaint = undefined;
+    }
   }
 }
 
