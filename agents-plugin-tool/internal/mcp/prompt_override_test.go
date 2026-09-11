@@ -1261,10 +1261,94 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 		t.Fatalf("bootstrap_alarm default should be cataloged as on: %+v", bootstrapKnob.Current)
 	}
 
+	sageReviewKnob := requireTuningKnob(t, catalog, wsconfig.ItemSageReview)
+	if sageReviewKnob.Writer.Tool != "config.tune" || sageReviewKnob.Writer.FixedArguments["key"] != wsconfig.ItemSageReview {
+		t.Fatalf("sage_review writer tool mismatch: %+v", sageReviewKnob.Writer)
+	}
+	if sageReviewKnob.Reset == nil || sageReviewKnob.Reset.Tool != "config.tune" || sageReviewKnob.Reset.FixedArguments["key"] != wsconfig.ItemSageReview || sageReviewKnob.Reset.FixedArguments["reset"] != "true" {
+		t.Fatalf("sage_review reset mismatch: %+v", sageReviewKnob.Reset)
+	}
+	assertFieldEnum(t, sageReviewKnob.SelectorFields, "scope", []string{"session", "project", "global"})
+	assertFieldEnum(t, sageReviewKnob.ValueFields, "value", []string{"off", "ask", "auto"})
+	if !strings.Contains(mustMarshalJSON(t, sageReviewKnob.Current), `"value":"auto"`) || !strings.Contains(mustMarshalJSON(t, sageReviewKnob.Current), `"scope":"builtin"`) {
+		t.Fatalf("sage_review builtin default should be cataloged as auto/builtin: %+v", sageReviewKnob.Current)
+	}
+
 	agentsKnob := requireTuningKnob(t, catalog, "agents.tier")
 	assertFieldEnum(t, agentsKnob.ValueFields, "tier", []string{"small", "medium", "large", "xlarge"})
 	assertFieldEnum(t, agentsKnob.ValueFields, "effort", []string{"", "none", "low", "medium", "high", "xhigh"})
 	assertFieldEnum(t, agentsKnob.SelectorFields, "harness", []string{"claude", "codex", "pi", "default"})
+}
+
+func TestConfigTuneSageReviewScopesAndValidation(t *testing.T) {
+	useLeadProfile(t)
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	s := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, s, 900450, root, nil))
+
+	for i, tc := range []struct {
+		scope string
+		value string
+	}{
+		{scope: "session", value: "off"},
+		{scope: "project", value: "ask"},
+		{scope: "global", value: "auto"},
+	} {
+		resp := callToolOnce(t, s, 10+i, "config.tune", map[string]any{
+			"session_key": key,
+			"key":         wsconfig.ItemSageReview,
+			"scope":       tc.scope,
+			"value":       tc.value,
+		})
+		if got := toolText(t, resp); !strings.Contains(got, "sage_review: "+tc.value+" [scope:"+tc.scope+"]") {
+			t.Fatalf("sage_review %s write response = %q", tc.scope, got)
+		}
+	}
+	catalog := parseTuningCatalogResponse(t, callToolOnce(t, s, 19, "config.list", map[string]any{
+		"session_key": key,
+		"format":      "json",
+	}))
+	if current := mustMarshalJSON(t, requireTuningKnob(t, catalog, wsconfig.ItemSageReview).Current); !strings.Contains(current, `"value":"off"`) || !strings.Contains(current, `"scope":"session"`) {
+		t.Fatalf("config.list must report the session-effective sage_review posture: %s", current)
+	}
+
+	for i, tc := range []struct {
+		scope string
+		value string
+		from  string
+	}{
+		{scope: "global", value: "off", from: "session"},
+		{scope: "session", value: "ask", from: "project"},
+		{scope: "project", value: "auto", from: "builtin"},
+	} {
+		resp := callToolOnce(t, s, 20+i, "config.tune", map[string]any{
+			"session_key": key,
+			"key":         wsconfig.ItemSageReview,
+			"scope":       tc.scope,
+			"reset":       true,
+		})
+		if got := toolText(t, resp); !strings.Contains(got, "sage_review: "+tc.value+" [scope:"+tc.from+"]") {
+			t.Fatalf("sage_review %s reset response = %q", tc.scope, got)
+		}
+	}
+
+	for i, tc := range []map[string]any{
+		{"key": wsconfig.ItemSageReview, "value": "required"},
+		{"key": wsconfig.ItemSageReview, "scope": "builtin", "value": "auto"},
+		{"key": wsconfig.ItemSageReview, "reset": true, "value": "auto"},
+	} {
+		tc["session_key"] = key
+		resp := callToolOnce(t, s, 30+i, "config.tune", tc)
+		if !strings.Contains(resp, `"isError":true`) {
+			t.Fatalf("invalid sage_review config.tune call succeeded: %s", resp)
+		}
+	}
 }
 
 func TestConfigTuningCatalogNoAgentShape(t *testing.T) {
@@ -1290,6 +1374,26 @@ func TestConfigTuningCatalogNoAgentShape(t *testing.T) {
 	catalog := parseTuningCatalogResponse(t, resp)
 
 	requireTuningKnob(t, catalog, "prompt.SeedSection")
+	requireTuningKnob(t, catalog, wsconfig.ItemSageReview)
+	for i, args := range []map[string]any{
+		{
+			"key":         wsconfig.ItemSageReview,
+			"scope":       "session",
+			"value":       "off",
+			"session_key": key,
+		},
+		{
+			"key":         wsconfig.ItemSageReview,
+			"scope":       "session",
+			"reset":       true,
+			"session_key": key,
+		},
+	} {
+		result := callToolOnce(t, s, 10+i, "config.tune", args)
+		if strings.Contains(result, `"isError":true`) {
+			t.Fatalf("no-agent config.tune sage_review request failed: %s", result)
+		}
+	}
 	subagentKnob := requireTuningKnob(t, catalog, "workflow.prefer_subagent")
 	if subagentKnob.Writer.Tool != "config.tune" || subagentKnob.Writer.FixedArguments["key"] != "workflow.prefer_subagent" {
 		t.Fatalf("workflow.prefer_subagent writer tool mismatch in no-agent catalog: %+v", subagentKnob.Writer)

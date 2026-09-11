@@ -21,6 +21,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
+	"github.com/kang-sw/devenv/internal/wskey"
 	"github.com/kang-sw/devenv/internal/wsreview"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 	"github.com/kang-sw/devenv/internal/wsstate"
@@ -33,6 +34,21 @@ type Server struct {
 	rootMu         sync.RWMutex
 	sessionHarness string
 	sessions       *sessionStore
+}
+
+// gitStatusResult keeps the generic git observation intact while allowing the
+// MCP layer to attach workflow context. wsgit deliberately has no wsdoc
+// dependency, so ticket ownership is resolved here rather than in wsgit.
+type gitStatusResult struct {
+	wsgit.StatusResult
+	ImplTicket *implTicketStatus `json:"impl_ticket,omitempty"`
+}
+
+type implTicketStatus struct {
+	State  string `json:"state"`
+	Stem   string `json:"stem,omitempty"`
+	Path   string `json:"path,omitempty"`
+	Status string `json:"status,omitempty"`
 }
 
 type toolRole string
@@ -72,7 +88,7 @@ const bootstrapToolName = "ferrule"
 // preserved no-op, since the pre-rename tickets.sage_record was reachable by
 // a delegate-scoped key.
 func isLeadOnlyTool(name string) bool {
-	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
+	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || name == "git.merge" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
 }
 
 func workflowPreferenceWriterTool(name string) bool {
@@ -794,10 +810,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			// Reset means "drop the override and fall back to the builtin default" —
 			// distinct from explicitly writing the builtin's current value.
 			resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-			if err := resolver.Unset(entry.Key, wsconfig.SetOptions{}); err != nil {
+			if err := resolver.Unset(entry.Key, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
-			resolved, err := resolver.Get("", entry.Key)
+			resolved, err := resolver.Get(sessionKey, entry.Key)
 			if err != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
@@ -902,10 +918,18 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		result, err := wsgit.NewClient().Status(context.Background(), root)
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, result, err)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
-		return toolTextResponse(req.ID, formatGitStatus(result), err)
+		implTicket, err := activeImplTicket(root, result.Branch.Head)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		status := gitStatusResult{StatusResult: result, ImplTicket: implTicket}
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, status, nil)
+		}
+		return toolTextResponse(req.ID, formatGitStatusWithImplTicket(result, implTicket), nil)
 	case "git.diff":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -942,6 +966,22 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolJSONResponse(req.ID, result, err)
 		}
 		return toolTextResponse(req.ID, formatMergeBase(result), err)
+	case "git.merge":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		branch, _ := params.Arguments["branch"].(string)
+		target, _ := params.Arguments["target"].(string)
+		title, _ := params.Arguments["title"].(string)
+		description, _ := params.Arguments["description"].(string)
+		result, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, target, wsgit.CommitOptions{
+			Title: title, Description: description, AIContext: stringList(params.Arguments["ai_context"]), UpdatedTickets: stringList(params.Arguments["updated_tickets"]),
+		})
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, result.text(), err)
 	case "git.commit":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -1891,7 +1931,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 			FixedArguments: map[string]string{"key": subagentEntry.Key, "reset": "true"},
 		},
 		ValueFields: subagentEntry.ValueFields,
-		Current:     currentWorkflowPreference(resolver, wsconfig.ItemWorkflowPreferSubagent),
+		Current:     currentWorkflowPreference(resolver, sessionKey, wsconfig.ItemWorkflowPreferSubagent),
 	})
 
 	bootstrapEntry := registryEntryByKey(wsconfig.ItemBootstrapAlarm)
@@ -1905,7 +1945,22 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 			FixedArguments: map[string]string{"key": bootstrapEntry.Key, "reset": "true"},
 		},
 		ValueFields: bootstrapEntry.ValueFields,
-		Current:     currentWorkflowPreference(resolver, wsconfig.ItemBootstrapAlarm),
+		Current:     currentWorkflowPreference(resolver, sessionKey, wsconfig.ItemBootstrapAlarm),
+	})
+
+	sageReviewEntry := registryEntryByKey(wsconfig.ItemSageReview)
+	appendKnob(sageReviewEntry, tuningKnob{
+		ID:          sageReviewEntry.Key,
+		Kind:        "sage_review",
+		Description: "Set the default ticket-boundary Sage review posture.",
+		Writer:      tuningWriter{Tool: sageReviewEntry.WriterTool, FixedArguments: map[string]string{"key": sageReviewEntry.Key}},
+		Reset: &tuningWriter{
+			Tool:           sageReviewEntry.ResetTool,
+			FixedArguments: map[string]string{"key": sageReviewEntry.Key, "reset": "true"},
+		},
+		SelectorFields: sageReviewEntry.SelectorFields,
+		ValueFields:    sageReviewEntry.ValueFields,
+		Current:        currentWorkflowPreference(resolver, sessionKey, sageReviewEntry.Key),
 	})
 
 	agentTiers, err := currentAgentTierMappings()
@@ -1926,8 +1981,8 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	return catalog, nil
 }
 
-func currentWorkflowPreference(resolver *wsconfig.Resolver, itemKey string) tuningScopedValue {
-	rv, _ := resolver.Get("", itemKey)
+func currentWorkflowPreference(resolver *wsconfig.Resolver, sessionKey, itemKey string) tuningScopedValue {
+	rv, _ := resolver.Get(sessionKey, itemKey)
 	return tuningScopedValue{
 		Value: rv.Value,
 		Scope: string(rv.Scope),
@@ -2059,6 +2114,76 @@ func formatGitStatus(result wsgit.StatusResult) string {
 		}
 	}
 	return b.String()
+}
+
+func formatGitStatusWithImplTicket(result wsgit.StatusResult, implTicket *implTicketStatus) string {
+	text := formatGitStatus(result)
+	if implTicket == nil {
+		return text
+	}
+	switch implTicket.State {
+	case "active":
+		return text + fmt.Sprintf("active ticket: %s (%s)\n", implTicket.Stem, implTicket.Status)
+	case "missing":
+		return text + "nudge: current branch is impl/* but no active ticket matches; inspect before selecting another ticket\n"
+	case "ambiguous":
+		return text + "nudge: current branch is impl/* but multiple active tickets match; inspect before selecting another ticket\n"
+	default:
+		return text
+	}
+}
+
+// activeImplTicket finds an active ticket only for a name-rooted implementation
+// branch. Resolve mode includes active tickets hidden by a sparse checkout; an
+// unreadable inventory is unsafe to label missing and therefore returns error.
+func activeImplTicket(root, branch string) (*implTicketStatus, error) {
+	_, suffix, ok := parseImplBranchRoot(branch)
+	if !ok {
+		return nil, nil
+	}
+	if err := verifyActiveTicketInventory(root); err != nil {
+		return nil, err
+	}
+	candidates, err := wsdoc.TicketsFind(root, wsdoc.TicketFindOptions{
+		Statuses: []string{"idea", "todo", "ready"}, Resolve: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("git.status: inspect active ticket inventory: %w", err)
+	}
+	matches := make([]wsdoc.TicketInfo, 0, 1)
+	for _, candidate := range candidates {
+		if wskey.Derive(candidate.Stem, 3) == suffix {
+			matches = append(matches, candidate)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return &implTicketStatus{State: "missing"}, nil
+	case 1:
+		match := matches[0]
+		return &implTicketStatus{State: "active", Stem: match.Stem, Path: match.Path, Status: match.Status}, nil
+	default:
+		return &implTicketStatus{State: "ambiguous"}, nil
+	}
+}
+
+// verifyActiveTicketInventory closes the gap in wsdoc's discovery-oriented
+// walk, where an unreadable directory can look like an empty one. Missing
+// individual status directories are normal; an absent board or an I/O error is
+// not evidence that an impl branch has no owner.
+func verifyActiveTicketInventory(root string) error {
+	board := filepath.Join(root, "ai-docs", "tickets")
+	if _, err := os.Stat(board); err != nil {
+		return fmt.Errorf("git.status: inspect active ticket inventory: %w", err)
+	}
+	for _, status := range []string{"idea", "todo", "ready"} {
+		_, err := os.ReadDir(filepath.Join(board, status))
+		if err == nil || os.IsNotExist(err) {
+			continue
+		}
+		return fmt.Errorf("git.status: inspect active ticket inventory: %w", err)
+	}
+	return nil
 }
 
 func formatGitLog(result wsgit.LogResult) string {
@@ -3261,6 +3386,23 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "git.merge",
+			"description": "Lead-only. Merge a local impl branch into its encoded root using --no-ff, then delete the merged branch. Refuses main, master, mismatched targets, and dirty worktrees. Conflicts remain on the target for lead-delegate to resolve. Defaults to text; use format=json for structured output.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"branch":          stringProperty("Optional local impl/<root>/<stem> branch; defaults to the current branch. May be supplied while checked out on another branch."),
+					"target":          stringProperty("Optional target assertion; must equal the impl branch's encoded root."),
+					"title":           stringProperty("Single-line merge commit title."),
+					"description":     stringProperty("Optional merge commit description."),
+					"ai_context":      stringArrayProperty("Required AI Context bullets for the merge record."),
+					"updated_tickets": stringArrayProperty("Optional ticket update summaries."),
+					"format":          stringProperty("Use json for structured output."),
+				},
+				"required": []string{"title", "ai_context"},
+			},
+		},
+		{
 			"name":        "git.commit",
 			"description": "Create a workflow-aware Git commit from explicit paths and structured message fields. Defaults to compact text; use format=json for structured output.",
 			"inputSchema": map[string]any{
@@ -3613,7 +3755,7 @@ func toolSchemaRequiresSessionKey(name string) bool {
 	switch name {
 	case "api.list",
 		"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep",
-		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
+		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "git.merge",
 		"project_tree",
 		"tickets.query", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify", "path.generate", "playbook.render":
 		return true

@@ -20,7 +20,8 @@ asking, so judgment is spent here and not at run time.
 
 ## Write
 
-- Persist only what the user confirmed. Any mechanism decision, rejected
+- Persist only decisions the user confirmed. Research tickets may preserve explicitly non-authoritative proposals and open questions in their Outcome Ledger.
+- Outside those research ledger entries, any mechanism decision, rejected
   alternative, future-scope hint, or cleanup the user has not explicitly
   confirmed goes through the **Open Decision Queue** first. Never write a
   draft decision for later correction.
@@ -39,7 +40,7 @@ asking, so judgment is spent here and not at run time.
 
 ## Open Decision Queue
 
-List every unconfirmed item that could change ticket text, as a visible task
+For settlement, list every unconfirmed item that could change ticket text, as a visible task
 list (the included task-list guidance applies). Ask the whole queue in one
 response, each item restated in full, your recommendation for it in the
 response body rather than in the item text. Reconcile item by item; re-ask
@@ -47,6 +48,16 @@ what the answer did not reach as one batch; where an answer's reach is
 unclear, state your reading on its own line and leave the item open until
 the user confirms it. Proceed only when every item is confirmed, rejected, or
 explicitly deferred, and write confirmed items only.
+
+Research entries explicitly labeled as non-authoritative Proposals or Open
+Questions may be preserved without settlement; they do not open a queue item
+unless a decision is needed.
+
+## Derive actionable work from research
+
+When deriving actionable work from research, treat the Outcome Ledger as the sole authority: use `Verified Findings` as evidence and `Confirmed Decisions` as contract; read the narrative only as supporting context, and never promote `Proposals`, `Open Questions`, or unlisted narrative into the child.
+
+If the research has no Outcome Ledger, stop and ask whether to add one or settle the child’s decisions directly through the Open Decision Queue.
 
 ## Ground: fact population
 

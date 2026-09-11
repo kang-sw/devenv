@@ -1,7 +1,6 @@
 ---
 kind: print
 variables:
-  - ExploreAgent
   - SpawnIdiom
 ---
 
@@ -15,14 +14,11 @@ source; the worker owns implementation and verification.
 
 ## Select
 
-Spawn {{.ExploreAgent}} to pick the next ticket unless the invocation already
-names one; do not list `ready/` or read ticket files yourself. Give it these rules: skip candidates carrying a
-`## Blocked (...)` note, then prefer, in order: a ticket already in progress
-(some phase has a `### Result`, at least one does not); one named as a
-prerequisite by another `ready/` ticket's `related:` or `parent:`; otherwise
-the oldest. Require it to return exactly one advanceable ticket path, or
-`ready/` empty, or every remaining ticket blocked. Empty and all-blocked end
-the turn with no spawn; on a `goal/*` branch each has its own terminal below.
+Unless the invocation already names a ticket, render `ticket-selector`, spawn
+it at its recommended tier, and use its one `selection:` result. Do not list
+`ready/` or read ticket files yourself. Its empty and all-blocked results end
+the turn with no worker spawn; on a `goal/*` branch each has its own terminal
+below. Its implementation-branch stop is terminal for this invocation.
 
 ## Spawn
 
@@ -85,9 +81,16 @@ One worker in flight per invocation.
 
 ## Handle the report
 
-The worker ends with a fixed block. `stop: none` means the ticket is closed on
-its branch: advance the note and go to **End the turn** — but when that closed
-ticket was an epic's last open child, first surface that epic to the user for a
+The worker ends with a fixed block. On a `stop: none` close-on-impl report, take the impl
+branch from the report or assignment note and retain it in the note until merged.
+Merging belongs to you: `merge_confirm: skip` auto-calls
+`{{.McpNamespace}}/git.merge` with that branch; `ask` (including absent)
+surfaces the report for user approval first. Use the worker's reported route
+value, so goal-run skip survives the handoff. The explicit branch lets the tool
+run from your base checkout. A refusal leaves the assignment unmerged; a conflict
+goes to `{{.SkillNamespace}}:lead-delegate` as a bounded resolution task.
+Advance the note to `merged` only after successful integration, then go to
+**End the turn**. When that closed ticket was an epic's last open child, first surface that epic to the user for a
 close decision, since nothing auto-closes an epic and an otherwise-complete board
 floats until you raise it (interim guard until a reliable trigger lands).
 Otherwise act by stop letter. Carry lines from the worker's report to the user
@@ -129,7 +132,9 @@ PARENT is everything between `goal/` and the last `/`; a single-segment
 run's worker reports: every `decisions:` and `unresolved:` line, by ticket,
 verbatim. Put it to the user and ask for explicit approval to merge into
 PARENT; on approval merge yourself with plain `git merge --no-ff` under the
-repository's commit rules. Never push.
+repository's commit rules. This goal-to-PARENT terminal uses raw Git because
+`{{.McpNamespace}}/git.merge` accepts only impl branches and derives their
+encoded root; it does not serve goal-branch promotion. Never push.
 
 ## Terminal: every remaining ticket blocked on a goal branch
 
