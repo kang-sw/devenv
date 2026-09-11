@@ -5,6 +5,10 @@ related:
   260904-feat-ws-pi-side-thread-fork-question-surface: the mechanism this redesigns for the lead-raised path (registry, widget, /thread, /answer, injection are reused); this reverses its "no fork-less quick-answer path / discussions dominate" decision on dogfood evidence and extends its §7 entry_id anchoring to the answer return path. Its fork-raised path (§1 "Entry A meets Entry B") is explicitly OUT of scope and untouched
   260903-feat-human-relay-interactive-gate: the "minimize how much, and how often, the work touches the user's hands" philosophy the pre-authored options follow
   260906-workset-ws-pi-dogfood-ux: the dogfood UX board this owner-friction fix belongs to
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: f8bcdc92885f04e9
+sage-review-completeness-reviewed: f8bcdc92885f04e9
 ---
 
 # Redesign lead-raised ws-ask as a fork-less async question queue with a sequential prose-modal tier
@@ -81,8 +85,9 @@ Settled in discuss (2026-09-11); D-tags map to the confirmed decisions.
     the question; a parser would flatten it.)
   - **Submission model (canonical = Enter through the sequence → final confirm):**
     - `Enter` = respond and advance to the next question; on the **last** question
-      `Enter` raises the **final confirm modal with the cursor defaulting to
-      "No"** = submit. `shift+Enter` / `ctrl+j` insert a newline within a prose
+      `Enter` raises the **final confirm modal** — the single submit gate, its
+      cursor defaulting to the safe **"No"** so nothing submits by accident;
+      confirming submits. `shift+Enter` / `ctrl+j` insert a newline within a prose
       answer (so `Enter` is free to advance, per the Slack/Discord convention).
     - **Blank questions stay pending on submit.** The final confirm submits only
       answered questions and shows an "N unanswered — left pending" count; it never
@@ -135,24 +140,56 @@ Settled in discuss (2026-09-11); D-tags map to the confirmed decisions.
   (then develop-authored per the harness-peer clause). Kept adapter-local here;
   revisit promotion only once the contract is stable.
 - Reuse, do not rebuild: the persisted thread registry
-  (`<lead session>.ws-threads.json`), the `aboveEditor` "N pending" widget,
+  (`<lead session>.ws-threads.json`), the pending-question row in
+  `agent-widget.ts`'s merged `belowEditor` live-agent panel (`260905` folded
+  the former standalone `aboveEditor` "N pending" widget into it;
+  `agents-plugin-pi/src/agent-widget.ts#L1-8`, `agents-plugin-pi/src/ask.ts#L847-859`),
   `/thread` / `/answer` / reopen shortcut, never-auto-pop, `MAX_CONTEXT_CHARS`
   warning, and idle-`followUp` injection carry over from `260904`.
 - **Do not retire the overlay-chat component** — the fork-raised direct-comm
   surface keeps using it. This ticket adds a tier; it does not replace one.
 - Lifting the current lead-raised tool-surface hide (`ac998f77` / `a8cf1183`) is
   part of landing the fork-less path, not a re-enable of the old fork behavior.
+- **Rename fan-out is in scope.** D4 is a documented-contract change: the
+  `ws-ask` / `ws-resolve` names live in `agents-plugin-pi/pi-lead-guide.md` and
+  the `pi-adapter-runtime` spec (`ai-docs/spec/pi-adapter-runtime.md`), and the
+  literal fans out across the adapter source (`index.ts`, `fork.ts`,
+  `fork-context.ts`, `spawner.ts`, `agent-widget.ts`) and its tests. The rename
+  must update the guide and the spec passage, not only the tool registration.
+  Stale references in not-yet-landed `ready/` siblings
+  (`260908-feat-ws-pi-subagent-audit-window-and-owner-steering`,
+  `260909-feat-ws-pi-agent-count-panel-header`,
+  `260909-feat-ws-pi-agent-row-model-and-usage`) are a coordination note for
+  whoever lands them after this — this ticket does not edit those tickets.
 
 ## Prior Art
 
 - `260904` `ask.ts` (registry, `/answer` / `/thread`, widget, injection), and its
-  fork-raised overlay chat (`overlay-chat.ts`, `conversation-view.ts`) which
-  stays as the fork-raised surface; `audit.ts` (the read-only viewer tier the new
-  tier is distinct from). The `260904` Prior Art `questionnaire.ts` (a custom
+  fork-raised overlay chat — the standalone `overlay-chat.ts` module no longer
+  exists; it was merged into `agents-plugin-pi/src/conversation-view.ts`
+  (`770d8fc3`, with its tests migrated off in `22def4f0`) — which stays as the
+  fork-raised surface; `audit.ts` (the read-only viewer tier the new tier is
+  distinct from). The `260904` Prior Art `questionnaire.ts` (a custom
   component from a tool `execute()`) is the building block for the sequential
   prose modal.
 - `260904` §7 `entry_id` anchoring + post-compaction excerpt insertion — the
   inbound analog of the return-path anchoring.
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-pi/src/ask.ts, agents-plugin-pi/src/conversation-view.ts, plus the ws-ask/ws-resolve tool-name literal in agents-plugin-pi/src/index.ts, fork.ts, fork-context.ts, spawner.ts, agent-widget.ts, pi-lead-guide.md and their test files |
+| scope.surface | public-interface | model-facing tool contract: registerWsTool's ASK_TOOL_NAME/RESOLVE_TOOL_NAME (agents-plugin-pi/src/ask.ts#L106-109), documented in agents-plugin-pi/pi-lead-guide.md and ai-docs/spec/pi-adapter-runtime.md#L1376-1383 |
+| scope.new_public_symbol | yes | renamed tool name ws-queue-question (D4) replacing ws-ask; the ws-resolve replacement token is left as an implementation detail |
+| scope.new_type_contract | yes | Phase 1's ask-time snapshot fields (offered options + short-hash/entry_id anchor) added to ThreadRecord (agents-plugin-pi/src/ask.ts#L221-259), and Phase 2's sequential prose-modal component are both new to the tree |
+| scope.test_surface | existing | agents-plugin-pi/test/ask.test.ts, conversation-view.test.ts, agent-widget.test.ts, fork.test.ts, fork-lifecycle.integration.test.ts, fork-prefix.integration.test.ts, fork-review-regressions.test.ts already exercise ws-ask/ws-resolve, the registry and the widget |
+| complexity.reuse_points | confirmed | persisted registry (agents-plugin-pi/src/ask.ts#L796-845 ThreadRegistryHandle), belowEditor widget row (agent-widget.ts#L1-8), followUp injection (ask.ts#L1109-1126 injectDiscussionSummary/sendToLead), entryId anchoring (ask.ts#L221-233, #L536-600) all read and present |
+| complexity.side_effect_risk | moderate | the ws-ask/ws-resolve rename's literal fans out across 7+ source files, their tests, the documented spec ai-docs/spec/pi-adapter-runtime.md (Constraints puts the guide + spec update in scope), and stale references in not-yet-landed sibling tickets (260908-feat-ws-pi-subagent-audit-window-and-owner-steering, 260909-feat-ws-pi-agent-count-panel-header, 260909-feat-ws-pi-agent-row-model-and-usage, all status ready) |
+| risk.correctness | moderate | the three-way withdrawal concurrency contract (pending / open-in-modal / already-submitted) and the new fork-less injection path are new branchy state layered on the existing dormant-fork-resume logic (ask.ts#L714-751 rehydrateForkRecord) |
+| risk.fit | low | built entirely from already-present, already-read mechanisms per the ticket's own Constraints (persisted registry, merged widget row, followUp injection, entryId anchoring) |
+| risk.test | moderate | Phase 2's own verification section defers TTY-only key-sequence behavior (Enter/Esc/tab) to a manual "260903-shape owner runbook", not fully agent-driven |
+| risk.security_or_contract | moderate | D4 itself calls the ws-ask -> ws-queue-question rename "a contract change ... not cosmetic"; it changes a model-facing tool name documented in ai-docs/spec/pi-adapter-runtime.md, which Constraints names as in-scope to update |
 
 ## Phases
 
@@ -174,7 +211,8 @@ message on idle; the registry records the ask-time anchor and it appears on the
 returned report; a withdrawal of a pending question removes it, a withdrawal of a
 question the owner has already answered still delivers the owner's content, and a
 withdrawal after submit is a no-op; the fork-raised `/answer` overlay path is
-unchanged; the adapter suite is green.
+unchanged; `pi-lead-guide.md` and the `pi-adapter-runtime` spec passage reflect
+the renamed tool(s); the adapter suite is green.
 
 ### Phase 2: Sequential prose-modal tier
 
