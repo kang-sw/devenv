@@ -1811,7 +1811,11 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
     invalidate(): void {}
     handleInput(data: string): void {
       if (data === "\r" || data === "\n") {
-        const pending = this.text;
+        // Matches the real Editor.submitValue(): clears its own buffer, THEN
+        // fires onSubmit with the pre-clear text, trimmed (review-round-1
+        // test Minor fix — this fake previously didn't trim, understating
+        // its fidelity to the contract it claims to mirror).
+        const pending = this.text.trim();
         this.text = "";
         this.onSubmit?.(pending);
         return;
@@ -2026,6 +2030,117 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
     editors[0].handleInput("\r"); // fires editor 0's onSubmit directly, out of band
     assert.equal(component.getFocusedIndex(), 1, "the stale submit never advances focus");
     assert.equal(closes.length, 0);
+  });
+
+  test("a stale submit still restores its own editor's text before the focus guard returns (no silent data loss)", () => {
+    const { component, editors } = buildQueue(threeThreads());
+    component.handleInput("\t"); // focus moves to index 1
+    editors[0].handleInput("late answer");
+    editors[0].handleInput("\r");
+    assert.equal(editors[0].getText(), "late answer", "the real Editor already cleared its buffer before firing onSubmit — the callback must restore it even when the submit is stale");
+  });
+
+  test("an ordinary keystroke through the component's own handleInput reaches the currently focused editor (the default-dispatch path), not a fixed one", () => {
+    const { component, editors } = buildQueue(threeThreads(), { initialFocusIndex: 1 });
+    component.handleInput("h");
+    component.handleInput("i");
+    assert.equal(editors[1].getText(), "hi");
+    assert.equal(editors[0].getText(), "");
+    assert.equal(editors[2].getText(), "");
+  });
+
+  test("review-round-1 correctness Critical regression: a whitespace-only draft on a withdrawn-pending question never delivers as an answer", () => {
+    const threads = [
+      thread({ threadId: "q1", question: "Only one?", origin: "lead-ask", status: "open", withdrawnPending: true, createdAt: "2026-09-05T10:00:00.000Z" }),
+    ];
+    const { component, editors, closes } = buildQueue(threads);
+    editors[0].handleInput(" "); // whitespace only, never committed via Enter
+    component.handleInput("\x1b"); // Esc — nothing "answered" once trimmed, so this closes immediately with no confirm
+    assert.equal(closes.length, 1);
+    assert.equal(closes[0].mode, "preserve");
+    assert.equal(closes[0].drafts.get("q1"), "", "the draft handed to the host must be trimmed — a lone space must never read as a real answer");
+  });
+
+  test("a withdrawn-pending question's typed content still reaches onClose's drafts map on submit (a withdrawal never discards typed prose)", () => {
+    const threads = threeThreads();
+    threads[2].withdrawnPending = true;
+    const { component, editors, closes } = buildQueue(threads, { initialFocusIndex: 2 });
+    editors[2].handleInput("answered despite the withdrawal");
+    editors[2].handleInput("\r"); // raises the final confirm (last question)
+    component.handleInput("\x1b[C"); // -> Yes
+    component.handleInput("\r");
+    assert.equal(closes.length, 1);
+    assert.equal(closes[0].mode, "submit");
+    assert.equal(closes[0].drafts.get("q3"), "answered despite the withdrawal");
+  });
+
+  test("initialFocusIndex is clamped into range for an out-of-bounds value (negative or overflowing)", () => {
+    const low = buildQueue(threeThreads(), { initialFocusIndex: -5 });
+    assert.equal(low.component.getFocusedIndex(), 0);
+    const high = buildQueue(threeThreads(), { initialFocusIndex: 99 });
+    assert.equal(high.component.getFocusedIndex(), 2);
+  });
+
+  test("a single-question queue: Enter raises the final confirm directly (there is no 'next' to advance to)", () => {
+    const threads = [
+      thread({ threadId: "q1", question: "Only one?", origin: "lead-ask", status: "open", createdAt: "2026-09-05T10:00:00.000Z" }),
+    ];
+    const { component, editors, closes } = buildQueue(threads);
+    editors[0].handleInput("the only answer");
+    editors[0].handleInput("\r");
+    assert.equal(closes.length, 0, "the confirm intercepts first, even with only one question in the batch");
+    const lines = component.render(80);
+    assert.ok(lines.some((l) => l.includes("Q1/1")), lines.join("\n"));
+    component.handleInput("\x1b[C");
+    component.handleInput("\r");
+    assert.equal(closes.length, 1);
+    assert.equal(closes[0].drafts.get("q1"), "the only answer");
+  });
+
+  test("review-round-1 correctness Important fix: a very long question never pushes the answer Editor or the Esc hint off a short viewport", () => {
+    const threads = threeThreads();
+    threads[0].question = Array.from({ length: 200 }, (_, i) => `line ${i}`).join("\n");
+    const tui: ConversationViewTui & { renderCount: number } = { requestRender: () => {}, renderCount: 0, terminal: { rows: 20 } };
+    const editors: FakeQueueEditor[] = [];
+    const component = new LeadAskQueueComponent(tui, {
+      threads,
+      initialFocusIndex: 0,
+      editorFactory: () => {
+        const editor = new FakeQueueEditor();
+        editors.push(editor);
+        return editor;
+      },
+      matchesKey: fakeMatchesKey,
+      wrapText: fakeWrapText,
+      border: true,
+      onClose: () => {},
+    });
+    const lines = component.render(80);
+    assert.ok(lines.length <= 20, `rendered ${lines.length} lines against a 20-row viewport`);
+    assert.ok(lines.some((l) => l.includes("Esc: exit")), "the exit hint (the modal's only way out — Ctrl+C is swallowed) must survive even behind a very long question");
+    assert.ok(lines.some((l) => l.includes("[e:")), "the answer editor itself must still render");
+    assert.ok(lines.some((l) => l.includes("truncated")), "the dropped question tail is flagged, not silently vanished");
+  });
+
+  test("a short question well within the viewport is never truncated", () => {
+    const tui: ConversationViewTui & { renderCount: number } = { requestRender: () => {}, renderCount: 0, terminal: { rows: 40 } };
+    const editors: FakeQueueEditor[] = [];
+    const component = new LeadAskQueueComponent(tui, {
+      threads: threeThreads(),
+      initialFocusIndex: 0,
+      editorFactory: () => {
+        const editor = new FakeQueueEditor();
+        editors.push(editor);
+        return editor;
+      },
+      matchesKey: fakeMatchesKey,
+      wrapText: fakeWrapText,
+      border: true,
+      onClose: () => {},
+    });
+    const lines = component.render(80);
+    assert.ok(lines.some((l) => l.includes("First?")));
+    assert.ok(!lines.some((l) => l.includes("truncated")));
   });
 });
 
