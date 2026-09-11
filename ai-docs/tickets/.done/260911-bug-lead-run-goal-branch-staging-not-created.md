@@ -8,6 +8,7 @@ sage-review-completeness: completed
 sage-review-design: completed
 sage-review-design-reviewed: 1d5a39242c296d27
 sage-review-completeness-reviewed: 1d5a39242c296d27
+completed: 2026-09-11
 ---
 
 # Restore goal-branch staging into lead-run
@@ -132,3 +133,25 @@ then-current body rather than a fixed layout. Update every guarding golden/fixtu
 mirror into `agents-plugin-wsflow/`. Verify: the dispatch-contract suite in
 `agents-plugin/tests/` and the wsflow package tests pass; run the full suite touching
 every edited shipped file.
+
+### Result (3877bc5) - 2026-09-11
+
+Restored the explicit host-neutral goal-run declaration and changed the branch
+staging condition to use an active goal reminder rather than the retired literal
+`/goal` token. Preserved the existing random-slug staging and goal terminals,
+then regenerated the canonical and wsflow rsrc manifests and their byte-identical
+wsflow mirror. The dispatch contract now pins both the declaration and the
+host-neutral staging condition.
+
+Verification: `python3 -m unittest agents-plugin/tests/test_skill_dispatch_contracts.py`,
+`python3 -m unittest agents-plugin/tests/test_shipped_surfaces_downstream_neutral.py`,
+`python3 -m unittest agents-plugin-wsflow/tests/test_wsflow_runtime_contract.py agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py`, and
+`(cd agents-plugin-tool && go test ./internal/wsrsrc -count=1)` passed.
+
+Reviews: round-one correctness and fit reviews found no findings; round two
+confirmed no round-one findings remained.
+
+
+## Resolution (2026-09-11)
+
+Restored the host-neutral goal-run trigger declaration, regenerated mirrored playbook artifacts, and added dispatch-contract coverage.

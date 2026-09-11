@@ -44,7 +44,8 @@ breadth.
 | Ticket: any risk is `high` | `ticket-worker-elevated` | large |
 | Ticket: all risks are `low`, `moderate`, or `unknown` | `ticket-worker` | medium |
 
-1. Stage a goal branch only when a `/goal` reminder is active and the branch
+1. A goal run is the current branch `goal/*` or an active goal reminder. Stage
+   a goal branch only when an active goal reminder is present and the branch
    is not already `goal/*`: capture the current branch as PARENT
    (`git rev-parse --abbrev-ref HEAD`), then `git checkout -b
    goal/<parent>/<slug>` with a random word-word-word slug, never derived

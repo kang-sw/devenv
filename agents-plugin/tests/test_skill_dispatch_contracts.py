@@ -151,6 +151,15 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn("prerequisite", text)
         self.assertIn("do not list `ready/` or read", text)
         self.assertIn(
+            "A goal run is the current branch `goal/*` or an active goal reminder.",
+            text,
+        )
+        self.assertIn(
+            "a goal branch only when an active goal reminder is present",
+            text,
+        )
+        self.assertNotIn("/goal", text)
+        self.assertIn(
             "next cycle: {{.SkillNamespace}}:lead-run.",
             text,
         )
