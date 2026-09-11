@@ -254,3 +254,49 @@ func TestTicketAtAcceptsAnAbsolutePathUnderTheRoot(t *testing.T) {
 		t.Fatal("an absolute path outside the root was accepted; want a refusal")
 	}
 }
+
+// TestTicketAtAcceptsASymlinkAliasedAbsolutePath reproduces the route failure a
+// macOS /var/folders temp dir triggers: the root is handed to TicketAt already
+// canonicalized (EvalSymlinks), while the caller relays an absolute path that
+// still spells a parent directory through a symlink alias. The two spellings
+// name the same ticket and must resolve to it, without weakening the board
+// confinement against a symlink that escapes the board.
+func TestTicketAtAcceptsASymlinkAliasedAbsolutePath(t *testing.T) {
+	realRoot := t.TempDir()
+	rel := "ai-docs/tickets/ready/260101-feat-sample.md"
+	mustWrite(t, realRoot, filepath.FromSlash(rel), "# Sample\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| risk.fit | low |\n")
+
+	// Alias the repository root through a symlink. The server canonicalizes the
+	// root it holds, so TicketAt sees the resolved root while the caller carries
+	// the aliased absolute path.
+	aliasRoot := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(realRoot, aliasRoot); err != nil {
+		t.Skipf("symlinks unsupported on this platform: %v", err)
+	}
+	canonicalRoot, err := filepath.EvalSymlinks(realRoot)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(realRoot): %v", err)
+	}
+
+	info, err := TicketAt(canonicalRoot, filepath.Join(aliasRoot, filepath.FromSlash(rel)))
+	if err != nil {
+		t.Fatalf("TicketAt(symlink-aliased absolute): %v", err)
+	}
+	if info.Path != rel || info.Status != "ready" || info.RouteFacts["risk.fit"] != "low" {
+		t.Fatalf("aliased path projected as %+v, want the same ticket as the canonical form", info)
+	}
+
+	// A ticket-shaped symlink that resolves off the board is still not a ticket:
+	// reconciling aliases must not turn the confinement into an escape hatch.
+	outside := filepath.Join(t.TempDir(), "outside.md")
+	if err := os.WriteFile(outside, []byte("# Outside\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	escape := filepath.Join(canonicalRoot, filepath.FromSlash("ai-docs/tickets/ready/260101-feat-escape.md"))
+	if err := os.Symlink(outside, escape); err != nil {
+		t.Skipf("symlinks unsupported on this platform: %v", err)
+	}
+	if _, err := TicketAt(canonicalRoot, escape); err == nil {
+		t.Fatal("a board symlink resolving outside the root was accepted; want a refusal")
+	}
+}
