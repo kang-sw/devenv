@@ -116,6 +116,13 @@ fail-open fix (1) is an independent safety fix in the same file, landed first.
 | risk.test | low | each phase names concrete test additions (fail-closed injection test, slug/collision tests, reverse-map helper + dispatch-contract + wsflow suite) |
 | risk.security_or_contract | moderate | the branch-naming change must not break resolution of already-live opaque-slug impl/* branches (confirmed present, e.g. impl/epic/refound/acid-fried-exile), and the merge-recommendation terminal couples to the not-yet-landed 260911-feat-ws-git-merge-lead-owned-merge-authority |
 
+## Blocked (2026-09-11)
+
+- [ ] Confirm the Phase 3 public query contract after stop (c): whether to
+  replace the target-dependent `route.resolve_implement` output plan with an
+  exclusive, read-only `tickets.query` branch-ownership mode available before
+  ticket selection.
+
 ## Phases
 
 ### Phase 1: Fail the ahead-count guard closed
