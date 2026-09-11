@@ -66,7 +66,8 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn(contract["discuss_opening"], discuss)
         self.assertIn(contract["run_opening"], run)
         self.assertIn("Do not read the file", run)
-        self.assertNotIn("lead-delegate", run)
+        self.assertNotIn("lead-delegate", run.split("## Handle the report")[0])
+        self.assertIn("{{.SkillNamespace}}:lead-delegate", run.split("## Handle the report")[1])
         # lead-run is ticket-only: the ad-hoc implementation-contract route is
         # gone from the shipped body (retired 260911).
         self.assertNotIn("Contract:", run)
@@ -134,6 +135,20 @@ class SkillDispatchContractsTest(unittest.TestCase):
         text = (RSRC_DIR / "lead-workflow-manual" / "lead-workflow-manual.md").read_text(encoding="utf-8")
 
         self.assertIn("Write prompts sent to delegated subagents in English.", text)
+
+    def test_workers_report_and_lead_owns_impl_merge(self):
+        for name in ("ticket-worker", "ticket-worker-elevated", "ticket-worker-escalated"):
+            text = (RSRC_DIR / name / (name + ".md")).read_text(encoding="utf-8")
+            self.assertIn("The lead owns merging after your report; do not merge.", text)
+            self.assertNotIn("Merge per the route verdict", text)
+        protocol = (RSRC_DIR / "worker-stop-protocol.md").read_text(encoding="utf-8")
+        self.assertIn("all merges, including impl into goal, belong to the lead", protocol)
+        self.assertIn("merge_confirm: skip | ask", protocol)
+        text = (RSRC_DIR / "lead-run" / "lead-run.md").read_text(encoding="utf-8")
+        self.assertIn("`merge_confirm: skip` auto-calls", text)
+        self.assertIn("`ask` (including absent)", text)
+        self.assertIn("{{.McpNamespace}}/git.merge", text)
+        self.assertIn("goal-to-PARENT terminal uses raw Git", text)
 
     def test_run_dispatches_through_playbook_read(self):
         # lead-run is a playbook.read shim over an rsrc body, not an inline

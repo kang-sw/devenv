@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: bbb23ea0e5e9ada7
 sage-review-design-reviewed: bbb23ea0e5e9ada7
+completed: 2026-09-11
 ---
 
 # Lead-owned merge authority via ws/git.merge
@@ -182,3 +183,32 @@ Verify: the dispatch-contract and any worker-prose golden/fixture suites in
 prose; run the full suite touching every edited shipped file (guard against the
 golden-fixture verification gap). This edit regenerates the shared `lead-run.md`
 exact-prose goldens; see the shared-surface coordination note in `## Constraints`.
+
+### Result (d72ccac1) - 2026-09-11
+
+Moved impl integration to the lead after the worker report. Worker variants,
+the shared stop protocol, installed implementation todos, and the injected Git
+manual now agree on retained-branch reporting. The report carries merge_confirm;
+lead-run calls git.merge for skip and surfaces ask/absent for approval. Goal
+promotion retains its separate raw no-ff terminal. Regenerated the canonical
+manifest and wsflow mirrors.
+
+Closure now warns for an unmerged impl branch and for unverifiable Git state
+without blocking the ticket move. Real-Git tests cover the observation-failure
+case, and rendered-policy checks cover all worker tiers and both products.
+
+Verification: go test ./... passed; scripts/smoke-ws-mcp.sh .. passed;
+python3 -m unittest discover agents-plugin/tests passed (58 tests);
+python3 -m unittest discover agents-plugin-wsflow/tests passed (11 tests).
+The initial suites exposed stale no-delegate and legacy merge-todo assertions;
+both were updated to the approved lead conflict/handoff behavior.
+
+Independent correctness, fit, and test reviews are clean. Fit's minor stale
+merge-todo description was removed in 519e9a6f and its focused second round
+passed. No unresolved findings.
+
+Decisions: preserve the installed merge todo key as a lead-handoff instruction
+to avoid unnecessary state-shape churn. Align the injected Git manual because
+its raw impl merge/squash advice would contradict the worker's new terminal.
+Use the fresh cedar-river-lantern impl slug after the route proposed creating
+the previous phase's existing marry-hurt-list branch; no old branch was reset.

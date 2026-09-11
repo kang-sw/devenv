@@ -2618,7 +2618,7 @@ func TestPlaybookRenderGoldenTicketWorker(t *testing.T) {
 						t.Errorf("recommended tier = %q, want %q", tier, tc.tier)
 					}
 					// The shared protocol include must arrive with the playbook body.
-					for _, want := range []string{"# Worker Protocol", "## Stop List", "status: [ok] | [escalate-to-lead]"} {
+					for _, want := range []string{"# Worker Protocol", "## Stop List", "status: [ok] | [escalate-to-lead]", "The lead owns merging after your report; do not merge.", "merge_confirm: skip | ask"} {
 						if !strings.Contains(body, want) {
 							t.Errorf("rendered body missing protocol text %q", want)
 						}
@@ -2672,6 +2672,10 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				"| `ticket-worker` | `ticket-worker-elevated` | large |",
 				"| `ticket-worker-elevated` | `ticket-worker-escalated` | xlarge |",
 				"A second (e) goes to the user",
+				"`merge_confirm: skip` auto-calls `" + product + "/git.merge`",
+				"`ask` (including absent) surfaces the report for user approval first",
+				"goes to `" + product + ":lead-delegate` as a bounded resolution task",
+				"goal-to-PARENT terminal uses raw Git",
 				"do not reset the retry count on resume or reclassify the original risks",
 			} {
 				if !strings.Contains(body, want) {
