@@ -122,6 +122,34 @@ Ship the tool's schema and behavior; do not yet change any playbook. Verify with
 Go tests covering: no-ff always, target-root validation (match accepts, mismatch
 refuses), forbidden-target refusal, auto-delete on success, conflict advisory.
 
+### Result (f6255a1f) - 2026-09-11
+
+Implemented the lead-only `git.merge` MCP tool and advertised it in both
+package runtime contracts. It accepts the current or an explicit local impl
+branch, validates its encoded root and optional target assertion, writes a
+structured AI Context merge record with `--no-ff`, and safely deletes the
+source ref after success. Conflicts retain the merge state and source ref with
+a lead-delegate advisory.
+
+Decisions: reject both main and master as release-class targets; require a
+clean index/worktree and refuse already-contained branches before checkout.
+The operation stays in MCP beside the existing branch parser and reuses the
+wsgit runner and commit-message formatter. Explicit branch input supports the
+lead's base checkout without requiring the caller to switch first.
+
+Verification: `go test ./...` passed; `scripts/smoke-ws-mcp.sh ..` passed;
+`python3 -m unittest discover agents-plugin-wsflow/tests` passed (11 tests).
+Real-Git tests cover the five acceptance behaviors, current/explicit branch
+input, dirty-tree refusal, structured merge records, and MCP lead/delegate
+authorization. Full-suite verification caught the missing runtime inventory
+entries, fixed in c812dd57.
+
+Independent correctness, fit, and test partitions are clean. Correctness
+review found a checkout-shorthand bypass for an encoded `-` target; ef5e5eb6
+rejects leading-hyphen targets and verifies symbolic HEAD after checkout.
+The regression and the reviewer's focused second round passed. No unresolved
+findings. Phase 2 remains unimplemented in this invocation.
+
 ### Phase 2: Take merge off the worker and re-home the lifecycle
 
 Depends on Phase 1 (the tool must exist before the worker's merge is removed).
