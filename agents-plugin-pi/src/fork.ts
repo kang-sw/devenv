@@ -7,7 +7,8 @@
  * depth-consuming worker (§3 — no depth-budget consumption, termination
  * unchanged). Its own tool surface is the lead's exact active-tools snapshot
  * at spawn time, minus the small excluded set (`FORK_EXCLUDED_TOOL_NAMES` —
- * `ws-fork` itself, plus Phase 2's `ws-ask`/`ws-resolve`), plus
+ * `ws-fork` itself, plus Phase 2's `ws-queue-question`/`ws-withdraw-question`
+ * (`260911` renamed from `ws-ask`/`ws-resolve`)), plus
  * `ws-report-to-lead` (Decision §3). Approval routing for a fork's own
  * `ws-execute`-spawned worker falls out for free from the existing
  * per-process registration pattern (see `spawner.ts`'s Codebase Findings in
@@ -86,7 +87,8 @@ export const FORK_TOOL_NAME = "ws-fork";
  * another fork (lateral, not recursive: §3's depth rule falls out at the
  * tool-allowlist layer, the same way a `full-worker` spawn can never
  * re-reach `ws-agent-spawn`) — plus, since Phase 2, the owner-question
- * primitives `ws-ask`/`ws-resolve` (§3): a fork's only question path stays
+ * primitives `ws-queue-question`/`ws-withdraw-question` (§3, renamed by
+ * `260911` from `ws-ask`/`ws-resolve`): a fork's only question path stays
  * `ws-report-to-lead(kind:"question")`, which the lead surfaces as a thread
  * of its own (`ask.ts`'s `handleForkRaisedQuestion`).
  *
@@ -674,7 +676,7 @@ export function registerFork(
     name: FORK_TOOL_NAME,
     label: FORK_TOOL_NAME,
     description:
-      'Spawn a lateral task-thread fork that inherits your full current context (a clone of your own session) to work a sub-task alongside you — not a worker (no depth-budget consumption). It retains the lead tool surface but refuses ws-fork, ws-ask, and ws-resolve in fork role. It reports back only via ws-report-to-lead(kind:"question"|"final"); expects_commit:true flags a kind:"final" report whose Commit field is missing or "none" as incomplete. Returns {agent_id, warning?} immediately — end your turn afterwards; its reports and settles arrive as pushed messages.',
+      'Spawn a lateral task-thread fork that inherits your full current context (a clone of your own session) to work a sub-task alongside you — not a worker (no depth-budget consumption). It retains the lead tool surface but refuses ws-fork, ws-queue-question, and ws-withdraw-question in fork role. It reports back only via ws-report-to-lead(kind:"question"|"final"); expects_commit:true flags a kind:"final" report whose Commit field is missing or "none" as incomplete. Returns {agent_id, warning?} immediately — end your turn afterwards; its reports and settles arrive as pushed messages.',
     parameters: {
       type: "object",
       properties: {

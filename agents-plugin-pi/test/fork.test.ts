@@ -110,7 +110,7 @@ describe("FORK_TOOL_NAME / FORK_EXCLUDED_TOOL_NAMES", () => {
 
 describe("computeForkToolSurface", () => {
   test("returns an ordered copy unchanged, including duplicate and role-restricted registrations", () => {
-    const source = ["bash", "ws-ask", FORK_TOOL_NAME, "ws-ask"];
+    const source = ["bash", "ws-queue-question", FORK_TOOL_NAME, "ws-queue-question"];
     const result = computeForkToolSurface(source);
     assert.deepEqual(result, source);
     assert.notEqual(result, source);

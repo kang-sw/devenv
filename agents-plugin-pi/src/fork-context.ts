@@ -170,7 +170,7 @@ export async function effectiveForkDescriptor(ctx: { model?: unknown; modelRegis
 }
 
 export function frameForkInput(text: string, ownKey: string): string {
-  return `Current fork-owned ws session_key: ${ownKey}. Use this key, not the inherited parent or any historical own key. ws-fork, ws-ask, and ws-resolve are refused in fork role; report to the lead instead.\n\n${text}`;
+  return `Current fork-owned ws session_key: ${ownKey}. Use this key, not the inherited parent or any historical own key. ws-fork, ws-queue-question, and ws-withdraw-question are refused in fork role; report to the lead instead.\n\n${text}`;
 }
 
 export function configDigest(value: unknown): string {

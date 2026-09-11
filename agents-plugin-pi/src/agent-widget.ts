@@ -11,7 +11,7 @@
  * agent registry (`spawner.ts`) and the owner-question thread registry
  * (`ask.ts`) — never a separate widget-owned model. `buildAgentRows` is pure
  * and reads the UNION of both at render time (not the RPC registry alone —
- * review relay #1's Critical fix: a pending `ws-ask` thread has no
+ * review relay #1's Critical fix: a pending `ws-queue-question` (ex-`ws-ask`) thread has no
  * respondent yet, and a fork-raised thread's respondent can come back from a
  * lead restart revived dormant with no `threadBound` re-set; both still owe
  * the owner a row); there is no cached/derived state to keep in sync.
@@ -158,7 +158,7 @@ function clampElapsed(deltaMs: number): number {
 /**
  * Pure row builder over the UNION of the two registries — the RPC agent
  * registry and the owner-question thread registry — never the RPC registry
- * alone (review relay #1 Critical: a pending `ws-ask` thread has no
+ * alone (review relay #1 Critical: a pending `ws-queue-question` (ex-`ws-ask`) thread has no
  * `respondentAgentId` until `/answer` lazily spawns its fork, and a
  * fork-raised thread's respondent can come back from a lead restart revived
  * dormant with `threadBound` unset (`agent-sidecar.ts`'s `reviveOrphans`) —

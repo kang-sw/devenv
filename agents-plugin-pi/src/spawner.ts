@@ -974,7 +974,8 @@ export interface RpcAgentRecord {
    * to this agent — set by `ask.ts` on every open/reopen (`ensureRespondent`/
    * `openThread`) and on fork-raised question registration
    * (`handleForkRaisedQuestion`), cleared only when the thread actually closes
-   * (`/done`, the respondent's own fork final, `ws-resolve`). While set, this
+   * (`/done`, the respondent's own fork final, `ws-withdraw-question`
+   * — renamed by `260911` from `ws-resolve`). While set, this
    * agent produces no settle/advisory push and is left out of the fan-in
    * status line entirely: the exchange belongs to the owner, and the lead is
    * not part of it.
@@ -3108,7 +3109,8 @@ export async function stopAgent(
     if (record.ownership && record.launchGeneration === generation && !record.client) updateOwnership(record.ownership.home, { liveness: { lifecycle: stopped ? "stopped" : "unknown", running: false, observedAt: Date.now() } });
     if (record.ownership && record.launchGeneration === generation && !record.client) observeSessionWrite(record.ownership.home, record.sessionPath);
     // Review relay #1 (I2): a stop is a thread-close path too — the ticket
-    // names "lead stop" alongside `/done`/fork final/`ws-resolve`. Releasing
+    // names "lead stop" alongside `/done`/fork final/`ws-withdraw-question`
+    // (renamed by `260911` from `ws-resolve`). Releasing
     // the bind here keeps a stopped agent from carrying a latched flag into a
     // later `ws-agent-send` revival, where it would silently suppress every
     // settle push for the rest of the session.

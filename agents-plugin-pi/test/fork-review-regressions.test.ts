@@ -20,7 +20,7 @@ test("C1: frame preserves every byte of task/discussion input and identifies own
   for (const body of ["task Ω\r\ntrailing  ", "discussion /done\r\n"]) {
     const framed = frameForkInput(body, "current-own");
     assert.ok(framed.endsWith(body));
-    for (const text of ["current-own", "inherited parent", "historical own key", "ws-fork", "ws-ask", "ws-resolve"]) assert.ok(framed.includes(text));
+    for (const text of ["current-own", "inherited parent", "historical own key", "ws-fork", "ws-queue-question", "ws-withdraw-question"]) assert.ok(framed.includes(text));
   }
 });
 

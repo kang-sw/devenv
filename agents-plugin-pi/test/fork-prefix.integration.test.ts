@@ -154,8 +154,8 @@ describe("fork prefix actual SDK serializers (offline)", () => {
     assert.deepEqual(captured.registeredTools, registrations);
     assert.deepEqual(captured.activeTools, activeTools);
     assert.ok(captured.activeTools.includes("ws-fork"));
-    assert.ok(captured.activeTools.includes("ws-ask"));
-    assert.ok(captured.activeTools.includes("ws-resolve"));
+    assert.ok(captured.activeTools.includes("ws-queue-question"));
+    assert.ok(captured.activeTools.includes("ws-withdraw-question"));
   });
 
   for (const [sdkName, root] of [["local-0.84.4", LOCAL_SDK], ["global-0.85.1", GLOBAL_SDK]] as const) {

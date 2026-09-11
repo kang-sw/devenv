@@ -86,7 +86,8 @@
  * doc comment for the full risk-signal trace).
  *
  * That ticket's Phase 2 adds the owner-question surface (src/ask.ts, built on
- * src/conversation-view.ts's shared component): `ws-ask`/`ws-resolve`, a
+ * src/conversation-view.ts's shared component): `ws-queue-question`/`ws-withdraw-question` (renamed by `260911`
+ * from `ws-ask`/`ws-resolve`), a
  * persisted per-lead-session thread registry, `/thread`, `/answer <id>`
  * (which lazily forks a discussion thread at the lead's tip AT OPEN TIME and
  * attaches a live conversation view to it), and the `/done` summary injected
@@ -535,7 +536,8 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     registerFork(pi, handle, agentTools.rpcRegistry, { cwd: ctx.cwd, effectivePromptRef, extensionPath: extensionEntryPath }, onForkQuestion, toolPreviewTuiRef);
 
     // 260904 Phase 2 (owner question surface), same declarative/global
-    // registration placement as registerFork above: ws-ask/ws-resolve must
+    // registration placement as registerFork above: ws-queue-question/
+    // ws-withdraw-question must
     // exist in a fork child's own process too, so computeForkToolSurface has
     // them present to exclude. Whether they are ever ACTIVE is
     // addAskToolsIfLead's job, applied below via computeSessionBootstrap.

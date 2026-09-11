@@ -121,7 +121,7 @@ describe("buildAgentRows", () => {
     assert.equal(forkRaisedRow.elapsedMs, 6_000, "the fork-raised row's clock is the thread's touchedAt, not runStartedAt");
   });
 
-  test("review relay #1 Critical: a pending ws-ask thread with NO respondent yet (empty registry) still renders one row, named by the thread's own title, carrying the /answer hint", () => {
+  test("review relay #1 Critical: a pending ws-queue-question thread with NO respondent yet (empty registry) still renders one row, named by the thread's own title, carrying the /answer hint", () => {
     const t = thread({ threadId: "q9", title: "why is the build red", status: "pending", origin: "lead-ask", respondentAgentId: undefined, touchedAt: new Date(NOW - 5_000).toISOString() });
     const rows = buildAgentRows(registryOf(), [t], NOW);
     assert.deepEqual(rows, [{ name: "why is the build red", role: "thread", state: "awaiting-owner", elapsedMs: 5_000, answerHint: "/answer q9" }]);
