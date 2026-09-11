@@ -44,3 +44,20 @@ existing-thread handling and the affected guidance/tool contracts. No deletion,
 replacement interaction design, automatic re-enable condition, or wider fork
 policy is chosen in this ticket. Do not expand this idea into implementation
 until the owner decides its fate.
+
+## Resolution direction (2026-09-11)
+
+The deferred decision is settled (discuss): **redesign, not removal.** The
+diagnosis is that the entire cost driver is the discussion fork spawned when a
+**lead-raised** question is opened — waste, because for a lead-raised question
+the main lead is already the owner's conversation partner; only a **fork-raised**
+question (a live worker waiting on an answer) ever needed an inheriting peer, and
+that worker already exists (attach, never spawn). Making the path fork-less
+answers the cost concern with no capability loss, so the removal question is
+moot. The tool is reframed as an async, non-blocking question queue
+(`ws-queue-question`) with a new sequential prose-modal tier.
+
+This ticket stays as the cost/decision anchor and is not promoted; the redesign
+is carried by `260911-feat-ws-pi-async-question-queue`. The current
+tool-surface hide (`ac998f77` / `a8cf1183`) is lifted as part of landing the
+fork-less path there, not by re-enabling the old fork behavior.
