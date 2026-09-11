@@ -63,6 +63,9 @@ import {
   buildAskAnchorLine,
   withdrawQueuedQuestion,
   deliverQueuedAnswer,
+  resolveLeadAskEscapeAction,
+  runLeadAskEscapeAction,
+  type LeadAskEscapeAction,
   type WithdrawOutcome,
   captureForkResume,
   rehydrateForkRecord,
@@ -424,6 +427,54 @@ describe("loadThreadRegistryFile / saveThreadRegistryFile (never-throw IO)", () 
     hydrateThreadRegistry(handle, path);
     assert.equal(handle.pathRef.current, path);
     assert.deepEqual([...handle.threads.keys()], ["q1", "q2"]);
+  });
+
+  // 260911: no fork-less lead-ask answer VIEW can survive a lead-process
+  // restart (there is no live overlay to reattach to), so `hydrateThreadRegistry`
+  // normalizes a persisted "open" lead-ask thread on load. These drive that
+  // normalization through a REAL saveThreadRegistryFile -> hydrateThreadRegistry
+  // round-trip (not a record seeded directly into the in-memory map), since
+  // that persisted-restart path is the actual guarantee being made.
+  test("a persisted lead-ask/open thread with no deferred withdrawal reverts to pending on restart", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ws-pi-ask-test-"));
+    const path = join(dir, "threads.json");
+    saveThreadRegistryFile(path, [thread({ threadId: "q1", origin: "lead-ask", status: "open" })]);
+    const handle = createThreadRegistryHandle();
+    hydrateThreadRegistry(handle, path);
+    const record = handle.threads.get("q1")!;
+    assert.equal(record.status, "pending", "still answerable via a fresh /answer");
+    assert.equal(record.withdrawnPending, false);
+  });
+
+  test("a persisted lead-ask/open thread with a deferred withdrawal finalizes to closed on restart", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ws-pi-ask-test-"));
+    const path = join(dir, "threads.json");
+    saveThreadRegistryFile(path, [thread({ threadId: "q1", origin: "lead-ask", status: "open", withdrawnPending: true })]);
+    const handle = createThreadRegistryHandle();
+    hydrateThreadRegistry(handle, path);
+    const record = handle.threads.get("q1")!;
+    assert.equal(record.status, "closed", "no view survives restart to protect from being yanked, so the deferred removal now finalizes");
+    assert.equal(record.withdrawnPending, false);
+  });
+
+  test("a persisted lead-ask/pending (not open) thread is untouched by the restart normalization", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ws-pi-ask-test-"));
+    const path = join(dir, "threads.json");
+    saveThreadRegistryFile(path, [thread({ threadId: "q1", origin: "lead-ask", status: "pending" })]);
+    const handle = createThreadRegistryHandle();
+    hydrateThreadRegistry(handle, path);
+    assert.equal(handle.threads.get("q1")!.status, "pending");
+  });
+
+  test("a persisted fork-raised/open thread is never touched by the lead-ask restart normalization, and gains no stray withdrawnPending field", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ws-pi-ask-test-"));
+    const path = join(dir, "threads.json");
+    saveThreadRegistryFile(path, [thread({ threadId: "q1", origin: "fork-raised", status: "open", respondentAgentId: "agent-7" })]);
+    const handle = createThreadRegistryHandle();
+    hydrateThreadRegistry(handle, path);
+    const record = handle.threads.get("q1")!;
+    assert.equal(record.status, "open", "fork-raised is out of 260911's scope — its persisted view-survival contract is unchanged");
+    assert.equal(record.withdrawnPending, undefined, "withdrawnPending is a lead-ask-only field; a fork-raised record must not pick up a stray false");
   });
 });
 
@@ -1562,6 +1613,69 @@ describe("deliverQueuedAnswer (260911 D1: the fork-less lead-ask send path — n
     deliverQueuedAnswer(pi, handle, record, "decided", sessionManager as never);
     assert.equal(sent.length, 1, "the answer still arrives");
     assert.equal(handle.threads.get("q1")!.status, "dormant");
+  });
+});
+
+describe("resolveLeadAskEscapeAction / runLeadAskEscapeAction (260911 D-model-side-withdrawal: openLeadAskThread's onEscape decision, extracted per review relay #1/#2)", () => {
+  test("resolveLeadAskEscapeAction: withdrawn + non-empty draft -> deliver (a withdrawal never discards typed prose)", () => {
+    assert.equal(resolveLeadAskEscapeAction(true, "we take the second anchor"), "deliver");
+  });
+
+  test("resolveLeadAskEscapeAction: withdrawn + empty draft -> finalize-withdrawal", () => {
+    assert.equal(resolveLeadAskEscapeAction(true, ""), "finalize-withdrawal");
+  });
+
+  test("resolveLeadAskEscapeAction: not withdrawn + non-empty draft -> revert-pending (Phase 1 does not carry an in-progress, non-withdrawn draft forward)", () => {
+    assert.equal(resolveLeadAskEscapeAction(false, "half-typed answer"), "revert-pending");
+  });
+
+  test("resolveLeadAskEscapeAction: not withdrawn + empty draft -> revert-pending", () => {
+    assert.equal(resolveLeadAskEscapeAction(false, ""), "revert-pending");
+  });
+
+  function setup() {
+    const sent: Array<{ message: unknown; options: unknown }> = [];
+    leadIdleRef.current = () => true;
+    const handlers = new Map<string, () => void>();
+    const pi = {
+      on: (event: string, fn: () => void) => handlers.set(event, fn),
+      sendUserMessage: () => handlers.get("agent_start")?.(),
+      sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }),
+    } as unknown as ExtensionAPI;
+    registerPushFlush(pi, { delayMs: () => 10 });
+    const handle = createThreadRegistryHandle();
+    const dir = mkdtempSync(join(tmpdir(), "ws-pi-ask-test-"));
+    const path = join(dir, "session.jsonl.ws-threads.json");
+    hydrateThreadRegistry(handle, path);
+    const record = thread({ threadId: "q1", question: "Which anchor?", origin: "lead-ask", status: "open" });
+    handle.threads.set(record.threadId, record);
+    return { pi, sent, handle, record };
+  }
+
+  test("runLeadAskEscapeAction(\"deliver\"): routes through deliverQueuedAnswer exactly as a normal send — dormant, message sent, withdrawnPending cleared", () => {
+    const { pi, sent, handle, record } = setup();
+    record.withdrawnPending = true;
+    runLeadAskEscapeAction("deliver", pi, handle, record, "we take the second anchor", undefined);
+    assert.equal(sent.length, 1);
+    assert.ok((sent[0].message as { content: string }).content.includes("we take the second anchor"));
+    assert.equal(record.status, "dormant");
+    assert.equal(record.withdrawnPending, false);
+  });
+
+  test("runLeadAskEscapeAction(\"finalize-withdrawal\"): closes with nothing delivered", () => {
+    const { pi, sent, handle, record } = setup();
+    record.withdrawnPending = true;
+    runLeadAskEscapeAction("finalize-withdrawal", pi, handle, record, "", undefined);
+    assert.equal(sent.length, 0, "nothing to deliver");
+    assert.equal(record.status, "closed");
+    assert.equal(record.withdrawnPending, false);
+  });
+
+  test("runLeadAskEscapeAction(\"revert-pending\"): closes with nothing delivered, stays answerable via a later /answer", () => {
+    const { pi, sent, handle, record } = setup();
+    runLeadAskEscapeAction("revert-pending", pi, handle, record, "half-typed answer", undefined);
+    assert.equal(sent.length, 0, "the discarded draft is never delivered");
+    assert.equal(record.status, "pending");
   });
 });
 

@@ -982,10 +982,10 @@ export function hydrateThreadRegistry(handle: ThreadRegistryHandle, path: string
     // left deferred behind it, in which case that removal now finalizes
     // since there is no longer a view whose in-progress edit it must not
     // yank (see `withdrawQueuedQuestion`/`ThreadRecord.withdrawnPending`).
-    if (record.origin === "lead-ask" && record.status === "open") {
-      record.status = record.withdrawnPending ? "closed" : "pending";
+    if (record.origin === "lead-ask") {
+      if (record.status === "open") record.status = record.withdrawnPending ? "closed" : "pending";
+      record.withdrawnPending = false;
     }
-    record.withdrawnPending = false;
     handle.threads.set(record.threadId, record);
   }
 }
@@ -1851,6 +1851,67 @@ export function buildOverlayHandle(
 }
 
 /**
+ * `openLeadAskThread`'s `onEscape` decision (D-model-side-withdrawal),
+ * extracted as its own pure function — mirroring `resolveDoneAction` — so
+ * the withdrawal/in-progress-draft interaction is unit-lockable independent
+ * of a live `ConversationViewComponent`. Only consulted while nothing has
+ * been delivered yet (`!delivered` at the call site); once `send()` has
+ * fired, Esc is a plain close with no further transition to resolve.
+ *
+ * `draft` is the owner's current, already-trimmed editor text.
+ *
+ * - `"deliver"` — a model withdrawal arrived while the view was open
+ *   (`thread.withdrawnPending`) AND the owner had already typed something:
+ *   the answer is still delivered on Esc, never silently discarded (the
+ *   ticket's headline "a withdrawal never discards the owner's typed
+ *   prose" contract).
+ * - `"finalize-withdrawal"` — a model withdrawal arrived and nothing was
+ *   typed: the withdrawal completes with nothing to deliver.
+ * - `"revert-pending"` — no withdrawal arrived; the owner is simply closing
+ *   an unanswered thread, so it stays available for a later `/answer`.
+ *   Phase 1 intentionally does not persist an in-progress, non-withdrawn
+ *   draft across this transition (a plain Esc with no model withdrawal
+ *   discards the draft) — carrying one forward is Phase 2's sequential
+ *   prose-modal tier's concern, not this interim single-question overlay's.
+ */
+export type LeadAskEscapeAction = "deliver" | "finalize-withdrawal" | "revert-pending";
+export function resolveLeadAskEscapeAction(withdrawnPending: boolean, draft: string): LeadAskEscapeAction {
+  if (withdrawnPending) return draft.length > 0 ? "deliver" : "finalize-withdrawal";
+  return "revert-pending";
+}
+
+/**
+ * Runs a `resolveLeadAskEscapeAction` result against the real thread record
+ * — the other half of the `resolveDoneAction`/`runDoneAction` split.
+ * `"deliver"` routes through `deliverQueuedAnswer` exactly as a normal
+ * `send()` would (same anchor/excerpt/`"dormant"` handling); the other two
+ * actions mutate `thread` directly and persist, mirroring the pre-extraction
+ * inline branches byte for byte.
+ */
+export function runLeadAskEscapeAction(
+  action: LeadAskEscapeAction,
+  pi: ExtensionAPI,
+  handle: ThreadRegistryHandle,
+  thread: ThreadRecord,
+  draft: string,
+  sessionManager?: { buildContextEntries?: () => { id: string }[]; getBranch?: (id: string) => { id: string }[] },
+): void {
+  if (action === "deliver") {
+    deliverQueuedAnswer(pi, handle, thread, draft, sessionManager);
+    return;
+  }
+  if (action === "finalize-withdrawal") {
+    thread.withdrawnPending = false;
+    thread.status = "closed";
+  } else {
+    thread.status = "pending";
+  }
+  thread.touchedAt = nowIso();
+  persistThreads(handle);
+  refreshAgentWidget();
+}
+
+/**
  * `260911` D1: opens (or reopens) a `"lead-ask"` thread's fork-less answer
  * view — dispatched from `openThread` before it ever reaches
  * `ensureRespondent`'s discussion-fork spawn branch, so nothing is spawned or
@@ -1936,30 +1997,10 @@ async function openLeadAskThread(
           primitives: { ScrollView: hostPiTui.ScrollView, Markdown: hostPiTui.Markdown, Text: hostPiTui.Text, Editor: hostPiTui.Editor },
           onEscape: () => {
             if (!delivered) {
-              // D-model-side-withdrawal: never yank an in-progress edit. If
-              // the model withdrew this while the view was open, an
-              // already-typed (but unsubmitted) answer is still delivered
-              // now; an empty one means the withdrawal finalizes with
-              // nothing to deliver.
               const draft = component.getEditorText().trim();
-              if (thread.withdrawnPending) {
-                if (draft.length > 0) {
-                  delivered = true;
-                  deliverQueuedAnswer(pi, handle, thread, draft, sessionManager);
-                } else {
-                  thread.withdrawnPending = false;
-                  thread.status = "closed";
-                  thread.touchedAt = nowIso();
-                  persistThreads(handle);
-                  refreshAgentWidget();
-                }
-              } else {
-                // Nothing answered yet — stays pending for a later /answer.
-                thread.status = "pending";
-                thread.touchedAt = nowIso();
-                persistThreads(handle);
-                refreshAgentWidget();
-              }
+              const action = resolveLeadAskEscapeAction(thread.withdrawnPending === true, draft);
+              if (action === "deliver") delivered = true;
+              runLeadAskEscapeAction(action, pi, handle, thread, draft, sessionManager);
             }
             overlayHandle?.close();
           },
