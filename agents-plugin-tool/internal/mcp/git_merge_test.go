@@ -108,6 +108,23 @@ func TestImplMergeConflictAdvisory(t *testing.T) {
 	runGit(t, root, "show-ref", "--verify", "refs/heads/"+branch)
 }
 
+func TestImplMergeRejectsCheckoutShorthand(t *testing.T) {
+	root, branch := mergeFixture(t, "main")
+	mainBefore := string(runGitOutput(t, root, "rev-parse", "refs/heads/main"))
+	runGit(t, root, "update-ref", "refs/heads/-", "refs/heads/main")
+	runGit(t, root, "branch", "-m", branch, "impl/-/unit")
+	_, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, "impl/-/unit", "", mergeMessage())
+	if err == nil || !strings.Contains(err.Error(), "invalid merge target") {
+		t.Fatalf("shorthand target accepted: %v", err)
+	}
+	if after := string(runGitOutput(t, root, "rev-parse", "refs/heads/main")); after != mainBefore {
+		t.Fatal("forbidden main branch changed")
+	}
+	if current := strings.TrimSpace(string(runGitOutput(t, root, "symbolic-ref", "--short", "HEAD"))); current != "impl/-/unit" {
+		t.Fatalf("refusal changed checkout: %s", current)
+	}
+}
+
 func TestImplMergeMCPAuthorityAndSchema(t *testing.T) {
 	root, branch := mergeFixture(t, "develop")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))

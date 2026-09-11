@@ -58,6 +58,11 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 	if mergeRoot == "main" || mergeRoot == "master" {
 		return result, fmt.Errorf("forbidden merge target %q", mergeRoot)
 	}
+	// A refs/heads/- ref is valid, but switch interprets "-" as the previous
+	// checkout even after "--". Never let branch shorthand select the target.
+	if strings.HasPrefix(mergeRoot, "-") {
+		return result, fmt.Errorf("invalid merge target %q", mergeRoot)
+	}
 	result.Branch, result.Target = branch, mergeRoot
 	for _, ref := range []string{branch, mergeRoot} {
 		if _, err := run("check-ref-format", "refs/heads/"+ref); err != nil {
@@ -90,8 +95,15 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 	if count == "0" {
 		return result, fmt.Errorf("impl branch is already contained in target; no merge performed")
 	}
-	if _, err := run("switch", "--no-guess", mergeRoot); err != nil {
+	if _, err := run("switch", "--no-guess", "--", mergeRoot); err != nil {
 		return result, err
+	}
+	checkedOut, err := run("symbolic-ref", "--quiet", "HEAD")
+	if err != nil {
+		return result, err
+	}
+	if checkedOut != "refs/heads/"+mergeRoot {
+		return result, fmt.Errorf("checkout target mismatch: got %q, want %q", checkedOut, mergeRoot)
 	}
 	if _, err := run("merge", "--no-ff", "--no-squash", "--commit", "-m", wsgit.CommitMessage(message), source); err != nil {
 		unmerged, checkErr := run("diff", "--name-only", "--diff-filter=U")
