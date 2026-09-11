@@ -65,9 +65,26 @@ const ticketBodyResearch = `
 ## <Topic heading>
 
 <findings, decisions, rejected alternatives>
+
+## Outcome Ledger
+
+### Verified Findings
+<!-- Evidence-backed observations. These may support later tickets but do not choose behavior. -->
+
+### Confirmed Decisions
+<!-- Normative choices explicitly confirmed by the user. -->
+
+### Proposals
+<!-- Unconfirmed candidates. Never treat these as actionable authority. -->
+
+### Open Questions
+<!-- Unresolved choices that require further investigation or user input. -->
+
+### Rejected Alternatives
+<!-- Alternatives explicitly rejected, with the reason when useful. -->
 ` + "```" + `
 
-Research tickets have no phases. Sections after ` + "`## Background`" + ` are freeform topic headings.`
+Research tickets have no phases. Topic sections remain freeform; the standard ` + "`## Outcome Ledger`" + ` distinguishes evidence, confirmed contract, and non-authoritative investigation output.`
 
 // ticketBodyEpic is the Epic body block.
 const ticketBodyEpic = `
