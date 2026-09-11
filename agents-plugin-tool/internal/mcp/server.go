@@ -88,7 +88,7 @@ const bootstrapToolName = "ferrule"
 // preserved no-op, since the pre-rename tickets.sage_record was reachable by
 // a delegate-scoped key.
 func isLeadOnlyTool(name string) bool {
-	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
+	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || name == "git.merge" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
 }
 
 func workflowPreferenceWriterTool(name string) bool {
@@ -966,6 +966,22 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolJSONResponse(req.ID, result, err)
 		}
 		return toolTextResponse(req.ID, formatMergeBase(result), err)
+	case "git.merge":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		branch, _ := params.Arguments["branch"].(string)
+		target, _ := params.Arguments["target"].(string)
+		title, _ := params.Arguments["title"].(string)
+		description, _ := params.Arguments["description"].(string)
+		result, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, target, wsgit.CommitOptions{
+			Title: title, Description: description, AIContext: stringList(params.Arguments["ai_context"]), UpdatedTickets: stringList(params.Arguments["updated_tickets"]),
+		})
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, result.text(), err)
 	case "git.commit":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -3370,6 +3386,23 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "git.merge",
+			"description": "Lead-only. Merge a local impl branch into its encoded root using --no-ff, then delete the merged branch. Refuses main, master, mismatched targets, and dirty worktrees. Conflicts remain on the target for lead-delegate to resolve. Defaults to text; use format=json for structured output.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"branch":          stringProperty("Optional local impl/<root>/<stem> branch; defaults to the current branch. May be supplied while checked out on another branch."),
+					"target":          stringProperty("Optional target assertion; must equal the impl branch's encoded root."),
+					"title":           stringProperty("Single-line merge commit title."),
+					"description":     stringProperty("Optional merge commit description."),
+					"ai_context":      stringArrayProperty("Required AI Context bullets for the merge record."),
+					"updated_tickets": stringArrayProperty("Optional ticket update summaries."),
+					"format":          stringProperty("Use json for structured output."),
+				},
+				"required": []string{"title", "ai_context"},
+			},
+		},
+		{
 			"name":        "git.commit",
 			"description": "Create a workflow-aware Git commit from explicit paths and structured message fields. Defaults to compact text; use format=json for structured output.",
 			"inputSchema": map[string]any{
@@ -3722,7 +3755,7 @@ func toolSchemaRequiresSessionKey(name string) bool {
 	switch name {
 	case "api.list",
 		"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep",
-		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
+		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "git.merge",
 		"project_tree",
 		"tickets.query", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify", "path.generate", "playbook.render":
 		return true
