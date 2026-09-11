@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 6d9d90ff01fbdf78
 sage-review-completeness-reviewed: 6d9d90ff01fbdf78
+completed: 2026-09-11
 ---
 
 # Research Outcome Ledger and derivation contract
@@ -105,3 +106,26 @@ verbatim; research content and intent checklists allow labeled proposals and ope
 questions; actionable checklist output remains unchanged; `lead-ticket` and its
 wsflow mirror contain the approved sentences verbatim; convention/resource drift
 and the full affected Go and package test suites pass.
+
+### Result (b833d898) - 2026-09-11
+
+Installed the exact Outcome Ledger headings and comments in the research template
+and bundled convention, and the approved general-write and derivation sentences
+in the shared lead-ticket playbook. Research content and intent checklists now
+distinguish evidence, confirmed contract, and non-authoritative investigation
+output; actionable and epic checklist output remains byte-for-byte unchanged.
+Regenerated the canonical resource manifest and wsflow resource mirror.
+
+Decision: scoped the Open Decision Queue guidance to allow explicitly
+non-authoritative research entries without settlement, preventing that general
+guidance from negating the approved research capture exception. Fact population
+and Sage design/completeness behavior were not changed.
+
+Verification: `TMPDIR=/private/tmp go test ./...` and
+`TMPDIR=/private/tmp scripts/smoke-ws-mcp.sh ..` passed from agents-plugin-tool;
+`python3 -m unittest discover agents-plugin-wsflow/tests` passed 11 tests and
+`python3 -m unittest discover agents-plugin/tests` passed 58 tests. Regression
+coverage pins the exact ledger, unchanged non-research checklists, and both ws
+and wsflow rendered derivation rules. Resource/convention and mirror checks
+passed. Independent correctness, fit (including fresh-reader audit), and test
+reviews were clean in round 1. Unresolved and deferred findings: none.
