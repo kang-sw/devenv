@@ -21,6 +21,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
+	"github.com/kang-sw/devenv/internal/wskey"
 	"github.com/kang-sw/devenv/internal/wsreview"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 	"github.com/kang-sw/devenv/internal/wsstate"
@@ -33,6 +34,21 @@ type Server struct {
 	rootMu         sync.RWMutex
 	sessionHarness string
 	sessions       *sessionStore
+}
+
+// gitStatusResult keeps the generic git observation intact while allowing the
+// MCP layer to attach workflow context. wsgit deliberately has no wsdoc
+// dependency, so ticket ownership is resolved here rather than in wsgit.
+type gitStatusResult struct {
+	wsgit.StatusResult
+	ImplTicket *implTicketStatus `json:"impl_ticket,omitempty"`
+}
+
+type implTicketStatus struct {
+	State  string `json:"state"`
+	Stem   string `json:"stem,omitempty"`
+	Path   string `json:"path,omitempty"`
+	Status string `json:"status,omitempty"`
 }
 
 type toolRole string
@@ -902,10 +918,18 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		result, err := wsgit.NewClient().Status(context.Background(), root)
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, result, err)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
-		return toolTextResponse(req.ID, formatGitStatus(result), err)
+		implTicket, err := activeImplTicket(root, result.Branch.Head)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		status := gitStatusResult{StatusResult: result, ImplTicket: implTicket}
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, status, nil)
+		}
+		return toolTextResponse(req.ID, formatGitStatusWithImplTicket(result, implTicket), nil)
 	case "git.diff":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -2074,6 +2098,54 @@ func formatGitStatus(result wsgit.StatusResult) string {
 		}
 	}
 	return b.String()
+}
+
+func formatGitStatusWithImplTicket(result wsgit.StatusResult, implTicket *implTicketStatus) string {
+	text := formatGitStatus(result)
+	if implTicket == nil {
+		return text
+	}
+	switch implTicket.State {
+	case "active":
+		return text + fmt.Sprintf("active ticket: %s (%s)\n", implTicket.Stem, implTicket.Status)
+	case "missing":
+		return text + "nudge: current branch is impl/* but no active ticket matches; inspect before selecting another ticket\n"
+	case "ambiguous":
+		return text + "nudge: current branch is impl/* but multiple active tickets match; inspect before selecting another ticket\n"
+	default:
+		return text
+	}
+}
+
+// activeImplTicket finds an active ticket only for a name-rooted implementation
+// branch. Resolve mode includes active tickets hidden by a sparse checkout; an
+// unreadable inventory is unsafe to label missing and therefore returns error.
+func activeImplTicket(root, branch string) (*implTicketStatus, error) {
+	_, suffix, ok := parseImplBranchRoot(branch)
+	if !ok {
+		return nil, nil
+	}
+	candidates, err := wsdoc.TicketsFind(root, wsdoc.TicketFindOptions{
+		Statuses: []string{"idea", "todo", "ready"}, Resolve: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("git.status: inspect active ticket inventory: %w", err)
+	}
+	matches := make([]wsdoc.TicketInfo, 0, 1)
+	for _, candidate := range candidates {
+		if wskey.Derive(candidate.Stem, 3) == suffix {
+			matches = append(matches, candidate)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return &implTicketStatus{State: "missing"}, nil
+	case 1:
+		match := matches[0]
+		return &implTicketStatus{State: "active", Stem: match.Stem, Path: match.Path, Status: match.Status}, nil
+	default:
+		return &implTicketStatus{State: "ambiguous"}, nil
+	}
 }
 
 func formatGitLog(result wsgit.LogResult) string {

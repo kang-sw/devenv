@@ -1,7 +1,6 @@
 ---
 kind: print
 variables:
-  - ExploreAgent
   - SpawnIdiom
 ---
 
@@ -15,14 +14,11 @@ source; the worker owns implementation and verification.
 
 ## Select
 
-Spawn {{.ExploreAgent}} to pick the next ticket unless the invocation already
-names one; do not list `ready/` or read ticket files yourself. Give it these rules: skip candidates carrying a
-`## Blocked (...)` note, then prefer, in order: a ticket already in progress
-(some phase has a `### Result`, at least one does not); one named as a
-prerequisite by another `ready/` ticket's `related:` or `parent:`; otherwise
-the oldest. Require it to return exactly one advanceable ticket path, or
-`ready/` empty, or every remaining ticket blocked. Empty and all-blocked end
-the turn with no spawn; on a `goal/*` branch each has its own terminal below.
+Unless the invocation already names a ticket, render `ticket-selector`, spawn
+it at its recommended tier, and use its one `selection:` result. Do not list
+`ready/` or read ticket files yourself. Its empty and all-blocked results end
+the turn with no worker spawn; on a `goal/*` branch each has its own terminal
+below. Its implementation-branch stop is terminal for this invocation.
 
 ## Spawn
 

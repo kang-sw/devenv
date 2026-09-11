@@ -143,13 +143,16 @@ class SkillDispatchContractsTest(unittest.TestCase):
         text = (RSRC_DIR / "lead-run" / "lead-run.md").read_text(encoding="utf-8")
 
         self.assertIn('ws/playbook.read(name: "lead-run", session_key:', shim)
-        self.assertIn("{{.ExploreAgent}}", text)
+        self.assertIn("ticket-selector", text)
+        self.assertNotIn("{{.ExploreAgent}}", text)
         self.assertIn("{{.SpawnIdiom}}", text)
         self.assertIn('{{.McpNamespace}}/playbook.render(name: <chosen worker playbook>', text)
         self.assertIn("{{.McpNamespace}}/session.note(session_key:", text)
         self.assertIn("One worker in flight per invocation.", text)
-        self.assertIn("prerequisite", text)
-        self.assertIn("do not list `ready/` or read", text)
+        selector = (RSRC_DIR / "ticket-selector" / "ticket-selector.md").read_text(encoding="utf-8")
+        self.assertIn("prerequisite", selector)
+        self.assertIn("impl_ticket", selector)
+        self.assertIn("Do not list\n`ready/` or read", text)
         self.assertIn(
             "A goal run is the current branch `goal/*` or an active goal reminder.",
             text,
