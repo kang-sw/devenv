@@ -30,13 +30,14 @@ Passed in the current Pi session:
 - fork-less single-question registration and anchored answer injection;
 - Korean IME input, multiline editing, Esc/reopen draft restoration, and exact answer preservation;
 - multi-question Tab/Shift+Tab navigation, independent drafts, commit-and-advance, partial submission, and blank-question retention;
-- pending-question withdrawal and post-answer withdrawal no-op.
+- pending-question withdrawal and post-answer withdrawal no-op;
+- plugin reload persistence and anchored answer recovery (`q1` asked at commit `a7f5d521`, entry `ccb097ae`, returned verbatim as `PERSIST-OK`).
 
 Remaining live coverage for a later session:
 
 - withdrawal while the owner is actively editing an open question;
 - the fork-raised `kind:"question"` path, existing-fork attachment, `/done`, and final `Decisions:` delivery — blocked on 2026-09-11 before fork creation by `fork readiness rejected (expected 79 callable tools, got 78)`; this is tracked by `260908-bug-ws-pi-delegated-tool-surface-unavailable`, not duplicated here;
-- optional post-compaction and restart persistence/anchor recovery.
+- optional post-compaction persistence/anchor recovery; plugin reload persistence is covered above.
 
 ## Constraints
 
