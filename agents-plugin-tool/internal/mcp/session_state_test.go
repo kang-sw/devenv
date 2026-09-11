@@ -2295,6 +2295,34 @@ func TestServeStdioTicketsCreateDefaultsToRequiredSageReview(t *testing.T) {
 	}
 }
 
+func TestServeStdioGlobalSageReviewAutoRequiresTicketBoundaryReview(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902602, root, nil))
+
+	tuneResp := callToolWithKey(t, server, 1, key, "config.tune", map[string]any{
+		"key":   wsconfig.ItemSageReview,
+		"value": "auto",
+		"scope": "global",
+	})
+	if !strings.Contains(tuneResp, "sage_review: auto [scope:global]") {
+		t.Fatalf("global sage_review tune response = %s", tuneResp)
+	}
+
+	resp := callToolWithKey(t, server, 2, key, "tickets.create_empty", map[string]any{
+		"stem":          "epic-sage-create-global-auto",
+		"initial_state": "todo",
+	})
+	if !strings.Contains(resp, "required") {
+		t.Fatalf("global sage_review=auto must resolve to required ticket posture: %s", resp)
+	}
+}
+
 // TestServeStdioTicketsCreateEmptyStatesSkeletonCaveat is the 260723 Phase 2
 // review-fix regression test: formatTicketCreate's next_instruction caveat
 // ("valid empty skeleton + initial posture") must actually reach the

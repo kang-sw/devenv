@@ -981,6 +981,9 @@ func TestPlaybookPrintLeadTuneUsesWorkflowPreferenceCatalogKnobs(t *testing.T) {
 		`ws/config.list(session_key: <lead key>)`,
 		`"workflow.prefer_subagent"`,
 		"`config.tune` with `key` set to `\"workflow.prefer_subagent\"`",
+		"## On: tune Sage review posture",
+		"skipped to `off`, recommended to `ask`, and required to `auto`",
+		"`key` set to `sage_review`",
 		"prompt.UserPreferenceSection",
 	} {
 		if !strings.Contains(body, want) {
@@ -1016,6 +1019,8 @@ func TestPlaybookPrintWsflowLeadTuneOmitsFullWsOnlyCatalogKnobs(t *testing.T) {
 		"`config.tune` with `key` set to `\"workflow.prefer_subagent\"`",
 		"prompt.UserPreferenceSection",
 		"## On: tune model tier",
+		"## On: tune Sage review posture",
+		"skipped to `off`, recommended to `ask`, and required to `auto`",
 		"Map the request to the `agents.tier` catalog knob",
 		"model tier (`agents.tier`)",
 	} {
