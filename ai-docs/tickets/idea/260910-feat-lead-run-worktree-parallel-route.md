@@ -41,12 +41,23 @@ filesystem but leaves the worker's ws tools (tickets.move, git.commit) resolving
 against the wrong root — the missing piece is a first-class render/spawn mode
 that binds a worker key to a repo-worktree root.
 
+The same rehearsal also surfaced a shared-worktree collision on the *default*
+serial path: a lead housekeeping `git.commit` run while the worker was live
+landed on the worker's impl branch, because the worker had switched the shared
+working tree's branch out from under the lead. Isolation removes this class for
+lead-side git operations too, but the interim guard for the un-isolated serial
+flow is researched separately in
+`260911-research-lead-commit-guard-during-worker-run`.
+
 ## Decisions
 
 - **Serial stays the default; parallel is an explicit-approval route.** Reopening
   the deferred-parallelism decision is a canonical-flow change, so the parallel
   path fires only on explicit user approval per run, never as an inferred
-  default. With no approval, `lead-run` behaves exactly as today.
+  default. With no approval, `lead-run` behaves exactly as today. This per-run
+approval gates worktree *provisioning* itself, not only the parallel decision:
+worktree derivation can be very expensive in large repositories, so the final
+skill creates no worktree without explicit user approval for that run.
 - **Isolation is per-worker worktree, not shared-branch concurrency.** Each
   parallel worker runs in its own worktree+branch; the lead serializes the
   merges back into the goal branch in dependency order. This keeps the existing
