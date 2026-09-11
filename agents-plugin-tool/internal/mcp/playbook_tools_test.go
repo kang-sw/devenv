@@ -2661,8 +2661,6 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				"`risk.correctness`, `risk.fit`, `risk.test`, and `risk.security_or_contract`",
 				"| Ticket: any risk is `high` | `ticket-worker-elevated` | large |",
 				"| Ticket: all risks are `low`, `moderate`, or `unknown` | `ticket-worker` | medium |",
-				"| Ad hoc: routine | `ticket-worker` | medium |",
-				"| Ad hoc: difficult | `ticket-worker-elevated` | large |",
 				"moderate risk still keeps its existing independent-review breadth",
 				"Spawn one worker at the tier the render recommends",
 				"playbook <chosen worker playbook>; stop-e retries <0 or 1>",

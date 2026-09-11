@@ -65,12 +65,29 @@ class SkillDispatchContractsTest(unittest.TestCase):
         run = (RSRC_DIR / "lead-run" / "lead-run.md").read_text()
         self.assertIn(contract["discuss_opening"], discuss)
         self.assertIn(contract["run_opening"], run)
-        self.assertIn(contract["run_ad_hoc"], run)
         self.assertIn("Do not read the file", run)
         self.assertNotIn("lead-delegate", run)
+        # lead-run is ticket-only: the ad-hoc implementation-contract route is
+        # gone from the shipped body (retired 260911).
+        self.assertNotIn("Contract:", run)
+        self.assertNotIn("ad-hoc", run)
         shim = (SKILLS_DIR / "lead-delegate" / "SKILL.md").read_text()
         self.assertIn('ws/playbook.read(name: "lead-delegate", session_key:', shim)
         self.assertIn("ws/workflow_manual", shim)
+
+    def test_delegate_implementer_is_a_tier_unaware_reviewer_free_floor(self):
+        # The delegate-side implementer floor is a render-only rsrc playbook with
+        # no lead-skill entry; lead-delegate renders it when the assignment writes
+        # code (260911). It must stay tier-unaware (delegate resolves the tier via
+        # config.resolve_agent) and reviewer-free (that is the delegate/worker line).
+        for package in (RSRC_DIR, SKILLS_DIR.parent.parent / "agents-plugin-wsflow" / "rsrc"):
+            body = (package / "delegate-implementer" / "delegate-implementer.md").read_text(encoding="utf-8")
+            head = body.split("---", 2)[1]
+            self.assertNotIn("tier:", head)
+            self.assertNotRegex(body, r"(?i)\breview(er)?\b")
+        self.assertFalse((SKILLS_DIR / "delegate-implementer").exists())
+        delegate = (RSRC_DIR / "lead-delegate" / "lead-delegate.md").read_text(encoding="utf-8")
+        self.assertIn('playbook.render(name:\n"delegate-implementer"', delegate)
 
     def test_lead_skill_surface_is_collapsed(self):
         actual = {path.name for path in SKILLS_DIR.iterdir() if path.is_dir()}
