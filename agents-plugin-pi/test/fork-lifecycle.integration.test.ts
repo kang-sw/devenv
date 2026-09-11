@@ -17,6 +17,12 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
     const plugin = join(directory, "plugin");
     mkdirSync(plugin);
     for (const name of ["src", "runtime.json", "goal-loop-config.json", "pi-lead-guide.md", "execute-worker-guide.md", "explore-guide.md"]) cpSync(join(process.cwd(), name), join(plugin, name), { recursive: true });
+    const childIndexPath = join(plugin, "src/index.ts");
+    const childIndexSource = readFileSync(childIndexPath, "utf8");
+    writeFileSync(childIndexPath, childIndexSource.replace(
+      "    if (readSpawnRole(process.env) === \"fork\") {\n      try {\n        const unavailable = installMissingTaskForkTools(pi, durableForkContextRef.current);",
+      "    if (process.env.WS_PI_TEST_OMIT_FORK_REPORT === \"1\") pi.setActiveTools(pi.getActiveTools().filter((name) => name !== \"ws-report-to-lead\"));\n\n    if (readSpawnRole(process.env) === \"fork\") {\n      try {\n        const unavailable = installMissingTaskForkTools(pi, durableForkContextRef.current);",
+    ));
     symlinkSync(join(process.cwd(), "node_modules"), join(plugin, "node_modules"));
     mkdirSync(join(plugin, "bin"));
     const version = JSON.parse(readFileSync(join(plugin, "runtime.json"), "utf8")).plugin_version;
@@ -87,6 +93,7 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
       }
     }
     async function stop(h: any) { if (!h.stopped) { h.stopped = true; await withEnv(h.env, () => h.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" })); h.session.dispose(); } }
+    let omitCompletionReport = false;
     const transport = {
       async start(this: any) {
         const args = this.options.args; const env = this.options.env;
@@ -99,7 +106,11 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
         const sessionDir = args.indexOf("--session-dir");
         assert.ok(sessionDir >= 0, "the RPC argv owns its child session directory");
         const sm = fork >= 0 ? sdk.SessionManager.forkFrom(args[fork + 1], directory, args[sessionDir + 1]) : sdk.SessionManager.open(args[args.indexOf("--session") + 1]);
-        this.harness = await makeSession(sm, env, args[args.indexOf("--tools") + 1].split(","), "CHANGED CHILD APPEND");
+        const childEnv = omitCompletionReport ? { ...env, WS_PI_TEST_OMIT_FORK_REPORT: "1" } : env;
+        const readinessPath = omitCompletionReport ? JSON.parse(readFileSync(env.WS_PI_FORK_CONTEXT, "utf8")).readinessPath : undefined;
+        this.harness = await makeSession(sm, childEnv, args[args.indexOf("--tools") + 1].split(","), "CHANGED CHILD APPEND");
+        this.harness.parentClient = this;
+        if (omitCompletionReport) assert.match(readFileSync(readinessPath, "utf8"), /missing completion-critical callable tool: ws-report-to-lead/, "child bootstrap records the missing completion channel before readiness validation");
         const sourcePath = fork >= 0 ? args[fork + 1] : sm.getSessionFile();
         const sourceId = JSON.parse(readFileSync(sourcePath, "utf8").split("\n")[0]).id;
         const source = sessions.findLast(h => h !== this.harness && (h.sm.getSessionFile() === sourcePath || h.sm.getSessionId() === sourceId));
@@ -109,7 +120,8 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
         this.harness.unavailableTools = source.unavailableTools ?? (source.parentOnlyTool ? ["parent-only-extension"] : []);
         children.push(this.harness);
       },
-      async stop(this: any) { if (this.harness) await stop(this.harness); }, async abort() {}, onEvent() { return () => {}; },
+      async stop(this: any) { if (this.harness) await stop(this.harness); }, async abort() {},
+      onEvent(this: any, listener: (event: unknown) => void) { (this.wsPiTestEventListeners ??= new Set()).add(listener); return () => this.wsPiTestEventListeners?.delete(listener); },
       async getState(this: any) { return { sessionFile: this.harness.sm.getSessionFile(), sessionId: this.harness.sm.getSessionId(), model, thinkingLevel: this.harness.session.thinkingLevel }; },
       async setThinkingLevel(this: any, level: string) { this.harness.session.setThinkingLevel(level); },
       async prompt(this: any, text: string) { await prompt(this.harness, text); },
@@ -120,6 +132,7 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
       process.env.PI_OFFLINE = "1";
       for (const key of Object.keys(process.env)) if (key.startsWith("WS_PI_FORK_") || key === "WS_PI_PARENT_SESSION_KEY" || key === "WS_PI_SPAWN_ROLE") delete process.env[key];
       const lead = await makeSession(sdk.SessionManager.create(directory, join(directory, "sessions")), {}, undefined, "Explicit append Ω\r\ntrailing  ", false, true);
+      if (!lead.api.getActiveTools().includes("ws-report-to-lead")) lead.api.setActiveTools([...lead.api.getActiveTools(), "ws-report-to-lead"]);
       await prompt(lead, "Original lead history Ω");
       assert.equal(lead.requests.length, 1, errors.join("\n") + JSON.stringify(lead.session.messages));
       const observed = lead.requests[0];
@@ -195,8 +208,26 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
           assert.match(JSON.stringify(result), new RegExp(value ?? firstKey));
         }
       });
+      const finalReport = "Outcome: degraded fork completed\nFiles changed: none\nVerification: lifecycle fixture\nBlockers: none\nCommit: none\nDecisions: report channel remained available";
+      const reportTool = child.session.agent.state.tools.find((tool: any) => tool.name === "ws-report-to-lead");
+      assert.deepEqual(await withEnv(child.env, () => reportTool.execute("final", { kind: "final", message: finalReport })), { content: [{ type: "text", text: "reported" }] });
+      assert.ok(child.parentClient.wsPiTestEventListeners.size > 0, "the parent client owns the fork report relay");
+      for (const listener of child.parentClient.wsPiTestEventListeners) listener({ type: "tool_execution_start", toolName: "ws-report-to-lead", args: { kind: "final", message: finalReport } });
+      for (const listener of child.parentClient.wsPiTestEventListeners) listener({ type: "agent_settled" });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const leadListTool = lead.session.agent.state.tools.find((tool: any) => tool.name === "ws-agent-list");
+      const listedAgents = JSON.parse((await leadListTool.execute("list", {})).content[0].text);
+      const reportedChild = (Array.isArray(listedAgents) ? listedAgents : listedAgents.agents).find((agent: any) => agent.agent_id === id);
+      assert.equal(reportedChild.status, "dormant", "the final report settles the degraded fork");
+      assert.ok(reportedChild.last_report_at, "the final report reaches the parent registry");
+      assert.ok(childContext.registeredTools.some((tool: any) => tool.name === "ws-report-to-lead"), "the parent capture treats the report channel as completion-critical");
+      omitCompletionReport = true;
+      await assert.rejects(() => forkTool.execute("missing completion", { prompt: "must not reach provider" }), /missing completion-critical callable tool: ws-report-to-lead/);
+      const missingCompletionChild = children.at(-1);
+      assert.equal(missingCompletionChild.requests.length, 0, "missing ws-report-to-lead rejects during child bootstrap before provider prompt");
+      omitCompletionReport = false;
       await stop(lead); // Actual shutdown writes the task sidecar.
-      let orphans = sidecar.readAndClearSidecar(lead.sm.getSessionFile());
+      let orphans = sidecar.readAndClearSidecar(lead.sm.getSessionFile()).filter((orphan: any) => orphan.agentId === id);
       assert.equal(orphans.length, 1);
       for (let generation = 0; generation < 2; generation++) {
         const registry = new Map(); sidecar.reviveOrphans(registry, sidecar.parseOrphans(sidecar.serializeOrphans(orphans)));
