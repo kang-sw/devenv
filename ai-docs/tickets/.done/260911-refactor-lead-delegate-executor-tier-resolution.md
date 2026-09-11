@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: fc58427c4dcde683
 sage-review-design-reviewed: fc58427c4dcde683
+completed: 2026-09-11
 ---
 
 # Route the lead-delegate executor model through config.resolve_agent tier resolution
@@ -97,6 +98,39 @@ checklist to every changed line. Verify the ws/wsflow rsrc mirror is
 byte-identical and the skill/mirror drift tests pass, and that the rendered
 `lead-delegate` reads as one added tier-resolution sentence with the rest of
 `## Assignment` intact.
+
+### Result (90f71fa6) - 2026-09-11
+
+Landed in `agents-plugin/rsrc/lead-delegate/lead-delegate.md` and its
+byte-identical wsflow mirror:
+
+- Intro line reconciled — dropped "model" from the freehand enumeration
+  ("choose the executor's prompt, tools, and permissions"), so it no longer
+  implies a freehand model pick (D1).
+- `## Assignment` gained one sentence: "Resolve the executor's model by judging
+  the assignment's difficulty tier (small / medium / large / xlarge) and passing
+  it to `{{.McpNamespace}}/config.resolve_agent(tier)`, rather than naming a
+  model directly." No scoring rubric; inline tool call, not a render step
+  (D1, D2, D4).
+- Prompt / tools / permissions freehand guidance left unchanged (D3).
+- Used the `{{.McpNamespace}}` template token (renders `ws`/`wsflow` at render
+  time) rather than a literal `ws/`, keeping the shared rsrc source
+  byte-identical and satisfying the wsflow forbidden-reference guard;
+  `config.resolve_agent` is a canonical ws MCP tool, staying within the
+  shipped-surface boundary (D5).
+
+Mirror and manifest regenerated via the documented wsflow regen path
+(`WSRSRC_REGEN` + `WS_REGEN_WSFLOW_RSRC`), not hand-edited.
+
+Verification:
+- `diff` ws vs wsflow rsrc copy: IDENTICAL.
+- `go test ./internal/wsrsrc -run TestWsflowRsrcMirrorUpToDate|TestGenerateRealManifest`: ok.
+- `python3 -m unittest discover agents-plugin-wsflow/tests`: OK (10 tests).
+- Independent review (single, `reviewer`): clean — no Critical/Important/Minor
+  findings.
+
+Decisions: none beyond the ticket; the `{{.McpNamespace}}` token choice is the
+established sibling-playbook convention, not a deviation.
 
 ## Release gate
 
