@@ -28,8 +28,13 @@ EXPECTED_LEAD_SKILLS = {
     "lead-add-rule",
 }
 
-# Names that must not reappear anywhere on the shipped skill or playbook
-# surface: each was retired into a surviving skill, or renamed.
+# Names that must not reappear on this flagship package's shipped skill or
+# playbook surface (SKILLS_DIR/RSRC_DIR below are agents-plugin/): each was
+# retired into a surviving skill, or renamed. The flagship keeps lead-proceed
+# unresolvable; the conservative wsflow derivative deliberately re-adds it as a
+# deprecation alias routing to lead-run, asserted in that package's
+# test_wsflow_only_aliases_route_to_target. Do not extend this sweep to the
+# wsflow surface — that would break the intended one-package carve-out.
 RETIRED_SKILL_NAMES = (
     "lead-prefer-subagent",
     "lead-proceed",

@@ -7,6 +7,7 @@ sage-review-completeness: completed
 sage-review-design: completed
 sage-review-design-reviewed: 07231d4e71fe7e35
 sage-review-completeness-reviewed: 07231d4e71fe7e35
+completed: 2026-09-11
 ---
 
 # wsflow-only: lead-proceed as a tombstone alias routing to lead-run
@@ -103,3 +104,50 @@ refuses `lead-proceed`.
 Open point for execution: the exact description wording that both works-if-called
 and steers-to-`lead-run` without reading as "you cannot call this" (which would
 confuse an agent that did land on it).
+
+### Result (4c0dec07) - 2026-09-11
+
+Added `agents-plugin-wsflow/skills/lead-proceed/SKILL.md`: a thin shim whose
+body is byte-identical to `lead-run`'s parallel-init shim except the frontmatter
+`name`, pointing `playbook.read` at `lead-run` (D2, no fork). Its description
+resolves the open wording point — "Retired former name of lead-run; invoking it
+runs the current lead-run workflow. Prefer lead-run directly for new work.
+lead-proceed is kept so the old name routes to the run workflow instead of
+failing." — naming both the retired alias and the canonical successor so an
+auto-selector is steered to `lead-run` while a by-name call still runs (D3).
+
+Carve-out recorded and asserted, not hidden:
+- `WSFLOW_ALIAS_TARGET = {"lead-proceed": "lead-run"}` in
+  `agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py` excuses the alias
+  from the full-ws-counterpart, name-keyed shim-shape, and shared-playbook
+  guards; the new `test_wsflow_only_aliases_route_to_target` pins its body,
+  its description (must name both alias and target), and the target playbook's
+  existence. `EXPECTED_WSFLOW_ONLY_SKILLS` now asserts exactly the alias set.
+- The forbidden-reference sweep exempts only the alias's own directory for its
+  own `retired proceed skill` label; every other forbidden pattern still applies.
+- `ai-docs/manuals/wsflow-mirroring.md` gains a "wsflow-only aliases" section,
+  registers the alias, updates the "no wsflow-only skills" claim, and notes the
+  forbidden-list exemption.
+
+Flagship untouched (D1, D5): no `lead-proceed` under `agents-plugin/skills` or
+`agents-plugin/rsrc`; the rsrc-level pin `TestRetiredLeadPlaybooksNoLongerResolve`
+stays green. The flagship `test_skill_dispatch_contracts.py` scans only the
+flagship surface, so it needed no functional change; a scope comment was added
+to its retired-name guard so a future editor does not extend the sweep into
+wsflow and break the one-package carve-out (adapted from the ticket's assumption
+that both guards' allow-lists change).
+
+Verify:
+- `python3 -m unittest discover agents-plugin-wsflow/tests`: 11 tests, OK.
+- `python3 -m unittest agents-plugin.tests.test_skill_dispatch_contracts` ...
+  `test_retired_skill_names_are_gone_from_shipped_surfaces`,
+  `test_lead_skill_surface_is_collapsed`: OK.
+- `go test ./internal/mcp -run TestRetiredLeadPlaybooksNoLongerResolve`: ok
+  (flagship still refuses `lead-proceed`).
+- `go test ./internal/wsrsrc/...`: ok (no mirror/drift regression).
+- Independent review (single allocation): clean, zero findings.
+
+Out of scope: a pre-existing branch failure in
+`test_skill_dispatch_contracts.py::test_delegate_and_sibling_exact_prose`
+(flagship `lead-delegate` playbook prose drift vs its fixture) reproduces with
+this commit fully reverted and touches none of this ticket's files.

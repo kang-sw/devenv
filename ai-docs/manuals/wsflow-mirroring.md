@@ -48,6 +48,8 @@ Included:
 - `lead-scope-worktree`
 - `lead-revive` (inline-body exception; see below)
 - `mcp-server-repair` (inline-body exception; see below)
+- `lead-proceed` (wsflow-only backward-compat alias; see **wsflow-only
+  aliases** below)
 
 Excluded:
 
@@ -59,6 +61,35 @@ Excluded:
 and relocated the second out of the plugin surface entirely, so neither is an
 exclusion any more. Both names survive in the eligibility guard below, which is
 a separate mechanism — see the note there.
+
+### wsflow-only aliases
+
+The flagship lead-surface collapse retired `lead-proceed` into `lead-run` and
+pinned the retired name unresolvable on the flagship surface. wsflow is the
+conservative derivative, so it — and only it — re-adds `lead-proceed` as a
+**deprecation tombstone alias**: a thin shim whose body is `lead-run`'s
+parallel-init shim pointing at the `lead-run` playbook, so a caller using the
+old name runs the current `lead-run` procedure instead of hitting a bare
+"no longer resolves" failure. This is a deliberate ws↔wsflow divergence, not
+drift, and it is the one exception to "wsflow ships no wsflow-only skills":
+
+- The alias exists in `agents-plugin-wsflow/skills/` only. The flagship `ws`
+  package keeps `lead-proceed` unresolvable; do not add a `lead-proceed` rsrc
+  playbook or skill there.
+- The alias has no rsrc body of its own — it points at the shared `lead-run`
+  playbook, so it never forks `lead-run`'s text.
+- Its description does double duty as the tombstone: it names both the retired
+  alias and the canonical `lead-run` successor, steering an auto-selector to
+  `lead-run` while a by-name call still runs.
+- Every wsflow-only alias is registered in `WSFLOW_ALIAS_TARGET` in
+  `agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py` (alias → target
+  playbook). That set is what excuses the alias from the full-ws-counterpart,
+  name-keyed shim-shape, and shared-playbook guards and asserts its body,
+  description, and target playbook via `test_wsflow_only_aliases_route_to_target`.
+  Add a new alias by extending that map, not by loosening a guard.
+- `lead-proceed` stays in the forbidden-reference list below (the flagship name
+  must not leak into other wsflow text); the guard exempts only the alias's own
+  skill directory for its own name.
 
 ## wsflow Skill Rules
 
@@ -296,7 +327,9 @@ The wsflow distributed skill bundle has package tests that fail when shipped
 skill files contain forbidden full-ws references, excluded skills, non-shim
 bodies, missing shared playbook stems, or inventory drift.
 
-wsflow ships no wsflow-only skills. Any new wsflow-only skill or tool must be
+wsflow ships exactly the wsflow-only aliases registered in `WSFLOW_ALIAS_TARGET`
+(currently `lead-proceed` → `lead-run`; see **wsflow-only aliases** above) and
+no other wsflow-only skills. Any new wsflow-only skill or tool must be
 documented here and in the package test before release.
 
 Run:
@@ -329,7 +362,9 @@ Forbidden distributed-skill references include:
 
 Allow exceptions only in repository maintenance documents, tests,
 compatibility comments, or hidden implementation details where the full ws name
-is the precise implementation surface.
+is the precise implementation surface. `lead-proceed` is additionally exempt
+inside its own wsflow alias skill directory, where it is a live wsflow skill
+name rather than a full-ws reference (see **wsflow-only aliases** above).
 
 ## Doctrine
 
