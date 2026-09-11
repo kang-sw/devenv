@@ -794,10 +794,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			// Reset means "drop the override and fall back to the builtin default" —
 			// distinct from explicitly writing the builtin's current value.
 			resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-			if err := resolver.Unset(entry.Key, wsconfig.SetOptions{}); err != nil {
+			if err := resolver.Unset(entry.Key, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
-			resolved, err := resolver.Get("", entry.Key)
+			resolved, err := resolver.Get(sessionKey, entry.Key)
 			if err != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
@@ -1891,7 +1891,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 			FixedArguments: map[string]string{"key": subagentEntry.Key, "reset": "true"},
 		},
 		ValueFields: subagentEntry.ValueFields,
-		Current:     currentWorkflowPreference(resolver, wsconfig.ItemWorkflowPreferSubagent),
+		Current:     currentWorkflowPreference(resolver, sessionKey, wsconfig.ItemWorkflowPreferSubagent),
 	})
 
 	bootstrapEntry := registryEntryByKey(wsconfig.ItemBootstrapAlarm)
@@ -1905,7 +1905,22 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 			FixedArguments: map[string]string{"key": bootstrapEntry.Key, "reset": "true"},
 		},
 		ValueFields: bootstrapEntry.ValueFields,
-		Current:     currentWorkflowPreference(resolver, wsconfig.ItemBootstrapAlarm),
+		Current:     currentWorkflowPreference(resolver, sessionKey, wsconfig.ItemBootstrapAlarm),
+	})
+
+	sageReviewEntry := registryEntryByKey(wsconfig.ItemSageReview)
+	appendKnob(sageReviewEntry, tuningKnob{
+		ID:          sageReviewEntry.Key,
+		Kind:        "sage_review",
+		Description: "Set the default ticket-boundary Sage review posture.",
+		Writer:      tuningWriter{Tool: sageReviewEntry.WriterTool, FixedArguments: map[string]string{"key": sageReviewEntry.Key}},
+		Reset: &tuningWriter{
+			Tool:           sageReviewEntry.ResetTool,
+			FixedArguments: map[string]string{"key": sageReviewEntry.Key, "reset": "true"},
+		},
+		SelectorFields: sageReviewEntry.SelectorFields,
+		ValueFields:    sageReviewEntry.ValueFields,
+		Current:        currentWorkflowPreference(resolver, sessionKey, sageReviewEntry.Key),
 	})
 
 	agentTiers, err := currentAgentTierMappings()
@@ -1926,8 +1941,8 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	return catalog, nil
 }
 
-func currentWorkflowPreference(resolver *wsconfig.Resolver, itemKey string) tuningScopedValue {
-	rv, _ := resolver.Get("", itemKey)
+func currentWorkflowPreference(resolver *wsconfig.Resolver, sessionKey, itemKey string) tuningScopedValue {
+	rv, _ := resolver.Get(sessionKey, itemKey)
 	return tuningScopedValue{
 		Value: rv.Value,
 		Scope: string(rv.Scope),

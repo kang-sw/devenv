@@ -51,6 +51,15 @@ Examples:
 4. Call `config.tune` with `key` set to `"workflow.prefer_subagent"`, `session_key`, and the selected value.
 5. Report the global state and that it applies to the next workflow-manual load.
 
+## On: tune Sage review posture
+
+1. Map a request to skip, recommend, or require Sage review to the `sage_review` catalog knob.
+2. Obtain its writer, `off`/`ask`/`auto` value choices, and scope choices from `config.list`; map skipped to `off`, recommended to `ask`, and required to `auto`.
+3. Choose the catalog-provided scope, using its declared default unless the user selects session, project, or global scope.
+4. Confirm the Tuning Proposal with the selected posture value and scope.
+5. Call the catalog writer with `key` set to `sage_review`, `session_key`, the selected scope, and the mapped value.
+6. Report the stored posture and scope; it applies to subsequent ticket boundaries.
+
 ## On: tune model tier
 
 1. Map the request to the `agents.tier` catalog knob.
@@ -71,6 +80,7 @@ Examples:
 - User standing preferences, communication style, language, terminology, or wording conventions -> prompt override (`UserPreferenceSection`).
 - Prompt wording or a named manual section -> prompt override for that named override point.
 - "delegate more/less" or default delegation of eligible general work -> workflow preference (`"workflow.prefer_subagent"`).
+- A default request to skip, recommend, or require Sage review at ticket boundaries -> Sage review posture (`sage_review`).
 - A model, tier, or "cheaper/stronger model" preference -> model tier (`agents.tier`).
 - Anything else -> unsupported axis.
 
