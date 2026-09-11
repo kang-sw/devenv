@@ -86,13 +86,50 @@ export function captureRegisteredTools(activeNames: readonly string[], allTools:
   });
 }
 
+/** A task fork cannot complete if this parent-visible channel is absent. */
+export const COMPLETION_CRITICAL_FORK_TOOL_NAMES = ["ws-report-to-lead"] as const;
+
+export function isCompletionCriticalForkTool(name: string): boolean {
+  return (COMPLETION_CRITICAL_FORK_TOOL_NAMES as readonly string[]).includes(name);
+}
+
+/** Strict registration comparison, retaining the parent-captured order in every result list. */
+export interface ForkRegistrationComparison {
+  missing: ForkToolDefinition[];
+  extra: ForkToolDefinition[];
+  reordered: boolean;
+  changed: string[];
+}
+
+export function classifyForkRegistrations(expected: readonly ForkToolDefinition[], actual: readonly ForkToolDefinition[]): ForkRegistrationComparison {
+  const expectedNames = new Set(expected.map((tool) => tool.name));
+  const actualByName = new Map(actual.map((tool) => [tool.name, tool]));
+  const missing = expected.filter((tool) => !actualByName.has(tool.name));
+  const extra = actual.filter((tool) => !expectedNames.has(tool.name));
+  const changed = expected
+    .filter((tool) => {
+      const registered = actualByName.get(tool.name);
+      return registered !== undefined && JSON.stringify(tool) !== JSON.stringify(registered);
+    })
+    .map((tool) => tool.name);
+  const expectedCommonOrder = expected.filter((tool) => actualByName.has(tool.name)).map((tool) => tool.name);
+  const actualCommonOrder = actual.filter((tool) => expectedNames.has(tool.name)).map((tool) => tool.name);
+  const reordered = JSON.stringify(expectedCommonOrder) !== JSON.stringify(actualCommonOrder);
+  return { missing, extra, reordered, changed };
+}
+
+export function formatForkRegistrationMismatch(comparison: ForkRegistrationComparison): string | undefined {
+  const parts: string[] = [];
+  if (comparison.missing.length) parts.push(`missing callable tools: ${comparison.missing.map((tool) => tool.name).join(", ")}`);
+  if (comparison.extra.length) parts.push(`extra callable tools: ${comparison.extra.map((tool) => tool.name).join(", ")}`);
+  if (comparison.reordered) parts.push("reordered callable tools");
+  if (comparison.changed.length) parts.push(`changed callable tools: ${comparison.changed.join(", ")}`);
+  return parts.length ? parts.join("; ") : undefined;
+}
+
 /** Exact order/schema comparison; no sorting, deduplication, or schema replay. */
 export function compareForkRegistrations(expected: readonly ForkToolDefinition[], actual: readonly ForkToolDefinition[]): string | undefined {
-  if (expected.length !== actual.length) return `expected ${expected.length} callable tools, got ${actual.length}`;
-  for (let i = 0; i < expected.length; i += 1) {
-    if (JSON.stringify(expected[i]) !== JSON.stringify(actual[i])) return `callable tool registration differs at index ${i} (${expected[i]?.name ?? "missing"})`;
-  }
-  return undefined;
+  return formatForkRegistrationMismatch(classifyForkRegistrations(expected, actual));
 }
 
 export interface ForkReadiness {
@@ -169,8 +206,10 @@ export async function effectiveForkDescriptor(ctx: { model?: unknown; modelRegis
   } catch { return undefined; } // Unsupported affinity never discards the prompt.
 }
 
-export function frameForkInput(text: string, ownKey: string): string {
-  return `Current fork-owned ws session_key: ${ownKey}. Use this key, not the inherited parent or any historical own key. ws-fork, ws-queue-question, and ws-withdraw-question are refused in fork role; report to the lead instead.\n\n${text}`;
+export function frameForkInput(text: string, ownKey: string, unavailableTools: readonly string[] = []): string {
+  const frame = `Current fork-owned ws session_key: ${ownKey}. Use this key, not the inherited parent or any historical own key. ws-fork, ws-queue-question, and ws-withdraw-question are refused in fork role; report to the lead instead.\n\n${text}`;
+  if (!unavailableTools.length) return frame;
+  return `${frame}\n\nUnavailable tools in this fork: ${unavailableTools.join(", ")}. Their parent extension was not loaded; calling one fails deterministically.`;
 }
 
 export function configDigest(value: unknown): string {

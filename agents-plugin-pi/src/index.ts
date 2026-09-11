@@ -195,7 +195,7 @@ import { buildDiscussKickoff } from "./discuss.ts";
 import { registerGoalLoop, readGoalLoopConfig, resolveAgentWaitAnimation, resolveSettleDelayMs } from "./goal-loop.ts";
 import { resolveSkillsDir } from "./skills-dir.ts";
 import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
-import { applyForkAffinity, captureRegisteredTools, compareForkRegistrations, effectiveForkDescriptor, frameForkInput, readForkLaunchContext, removeForkTransport, restoreForkContext, restoreForkKeys, writePrivateJson, type ForkContext } from "./fork-context.ts";
+import { applyForkAffinity, captureRegisteredTools, classifyForkRegistrations, compareForkRegistrations, effectiveForkDescriptor, formatForkRegistrationMismatch, frameForkInput, isCompletionCriticalForkTool, readForkLaunchContext, removeForkTransport, restoreForkContext, restoreForkKeys, writePrivateJson, type ForkContext } from "./fork-context.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, type SpawnRole } from "./process-role.ts";
 import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
 import { armForkRoleWiring, registerFork } from "./fork.ts";
@@ -297,6 +297,36 @@ export async function bootstrapOrFailLoud<T>(
   }
 }
 
+/**
+ * Replays only a missing task-fork tool's captured provider metadata. The
+ * handler remains local and truthful: the parent extension is absent, so no
+ * dispatch route exists in this child process.
+ */
+function installMissingTaskForkTools(
+  pi: ExtensionAPI,
+  context: ForkContext | undefined,
+): { unavailableTools: string[]; error?: string } {
+  if (context?.kind !== "task") return { unavailableTools: [] };
+  const comparison = classifyForkRegistrations(context.registeredTools, captureRegisteredTools(pi.getActiveTools(), pi.getAllTools()));
+  const structuralError = formatForkRegistrationMismatch({ ...comparison, missing: [] });
+  if (structuralError) return { unavailableTools: [], error: structuralError };
+  const critical = comparison.missing.find((tool) => isCompletionCriticalForkTool(tool.name));
+  if (critical) return { unavailableTools: [], error: `missing completion-critical callable tool: ${critical.name}` };
+  for (const tool of comparison.missing) {
+    pi.registerTool({
+      name: tool.name,
+      label: tool.name,
+      description: tool.description,
+      parameters: tool.parameters as never,
+      async execute() {
+        throw new Error(`ws-pi-agent: unavailable fork tool "${tool.name}": its parent extension was not loaded`);
+      },
+    });
+  }
+  if (comparison.missing.length) pi.setActiveTools([...context.activeTools]);
+  return { unavailableTools: comparison.missing.map((tool) => tool.name) };
+}
+
 export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   // Filled before the bridge starts so native tool renderers are available
   // independently of async MCP startup; absent helpers retain Pi fallback.
@@ -331,6 +361,8 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   // Absence keeps local prompt fallback, never a missing own-key bypass.
   let forkReady = readSpawnRole(process.env) !== "fork";
   let firstForkInput = true;
+  let unavailableForkTools: string[] = [];
+  let forkRegistrationError: string | undefined;
   let previousOwnKeys: string[] = [];
   // 260905 (push model): the shared RPC registry, published as a mutable ref
   // so `createApprovalRelay` — which must be constructed BEFORE
@@ -395,7 +427,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   registerLeadBootstrap(pi, wsBlockBaseRef, skillsBlockCacheRef, effectivePromptRef, inheritedForkPromptRef, sessionKeyRef);
   pi.on("input", (event, ctx) => {
     if (readSpawnRole(process.env) !== "fork") return undefined;
-    let error = forkContextError ?? (!forkReady || !handle?.defaultSessionKeyRef.current?.trim() ? "fork bootstrap is not ready: no valid own key" : undefined);
+    let error = forkContextError ?? forkRegistrationError ?? (!forkReady || !handle?.defaultSessionKeyRef.current?.trim() ? "fork bootstrap is not ready: no valid own key" : undefined);
     try {
       if (!error && durableForkContextRef.current) error = compareForkRegistrations(durableForkContextRef.current.registeredTools, captureRegisteredTools(pi.getActiveTools(), pi.getAllTools()));
     } catch (cause) { error = String(cause); }
@@ -405,7 +437,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     }
     if (firstForkInput) {
       firstForkInput = false;
-      return { action: "transform", text: frameForkInput(event.text, handle!.defaultSessionKeyRef.current!), images: event.images };
+      return { action: "transform", text: frameForkInput(event.text, handle!.defaultSessionKeyRef.current!, unavailableForkTools), images: event.images };
     }
     return undefined;
   });
@@ -440,6 +472,8 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     if (readSpawnRole(process.env) === "fork") {
       forkReady = false;
       firstForkInput = true;
+      unavailableForkTools = [];
+      forkRegistrationError = undefined;
       previousOwnKeys = restoreForkKeys(ctx.sessionManager.getEntries(), ctx.sessionManager.getSessionId());
     }
     // 260905 Edition: hand the spawner this session's idleness accessor (the
@@ -625,6 +659,19 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // is false (see `audit.ts`'s own doc comment).
     registerAuditCommands(pi, agentTools.rpcRegistry, readSpawnRole(process.env), ctx.mode);
 
+    // A task fork inherits the parent's ordered callable surface. A missing
+    // parent-only extension may be represented only by a metadata-identical
+    // local stub; all other drift remains a pre-prompt readiness failure.
+    if (readSpawnRole(process.env) === "fork") {
+      try {
+        const unavailable = installMissingTaskForkTools(pi, durableForkContextRef.current);
+        unavailableForkTools = unavailable.unavailableTools;
+        forkRegistrationError = unavailable.error;
+      } catch (error) {
+        forkRegistrationError = String(error);
+      }
+    }
+
     // §1/§4/260906: one pure call produces BOTH the ws block's static base
     // (manual snapshot + Pi lead guide) AND the fully reshaped lead/fork
     // tool surface — see lead-bootstrap.ts's `computeSessionBootstrap` doc
@@ -683,7 +730,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       const ownKey = handle.defaultSessionKeyRef.current;
       const keyError = !ownKey?.trim() || ownKey === (durableForkContextRef.current?.parentSessionKey ?? process.env[WS_PI_PARENT_SESSION_KEY_ENV]) || previousOwnKeys.includes(ownKey) || durableForkContextRef.current?.parentSessionKeys?.includes(ownKey)
         ? "fork bootstrap did not issue a distinct current own key" : undefined;
-      const readinessError = registrationError ?? keyError;
+      const readinessError = forkRegistrationError ?? registrationError ?? keyError;
       const readiness = {
         nonce: deliveredFork?.nonce,
         sessionId: ctx.sessionManager.getSessionId(),

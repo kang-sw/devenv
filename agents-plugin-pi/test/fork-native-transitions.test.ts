@@ -1,9 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-agent"), "/home/linuxbrew/.linuxbrew/lib/node_modules/@earendil-works/pi-coding-agent"]) {
+const GLOBAL_SDK = existsSync("/home/linuxbrew/.linuxbrew/lib/node_modules/@earendil-works/pi-coding-agent")
+  ? "/home/linuxbrew/.linuxbrew/lib/node_modules/@earendil-works/pi-coding-agent"
+  : "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent";
+for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-agent"), GLOBAL_SDK]) {
   const version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
   async function provider(prefix: string) {
     const directory = join(root, "dist/bundle/chunks");

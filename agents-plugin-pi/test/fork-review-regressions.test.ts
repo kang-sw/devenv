@@ -22,6 +22,9 @@ test("C1: frame preserves every byte of task/discussion input and identifies own
     assert.ok(framed.endsWith(body));
     for (const text of ["current-own", "inherited parent", "historical own key", "ws-fork", "ws-queue-question", "ws-withdraw-question"]) assert.ok(framed.includes(text));
   }
+  const unavailable = frameForkInput("task", "current-own", ["parent-only", "second-parent-only"]);
+  assert.match(unavailable, /Unavailable tools in this fork: parent-only, second-parent-only/);
+  assert.match(unavailable, /parent extension was not loaded/);
 });
 
 test("C2: every launch has fresh readiness; stale nonce/key/id/path/schema/order is rejected", () => {
@@ -40,6 +43,29 @@ test("C2: every launch has fresh readiness; stale nonce/key/id/path/schema/order
     assert.notEqual(first.contextPath, second.contextPath);
     assert.equal(context.readForkLaunchContext({ [role.WS_PI_FORK_CONTEXT_ENV]: first.contextPath })?.context, undefined, "explicit legacy exchange does not invent a historical prompt");
   } finally { for (const launch of [first, second]) rmSync(dirname(launch.contextPath), { recursive: true, force: true }); }
+});
+
+test("C2a: readiness diagnostics identify missing, extra, reordered, and changed registrations", () => {
+  const expected = captureForkContext({
+    kind: "task", effectiveSystemPrompt: "original", activeTools: ["first", "second"],
+    registeredTools: [
+      { name: "first", description: "First", parameters: { type: "object" } },
+      { name: "second", description: "Second", parameters: { type: "object" } },
+    ],
+  });
+  const cases = [
+    { registeredTools: expected.registeredTools.slice(1), activeTools: ["second"], diagnostic: /missing callable tools: first/ },
+    { registeredTools: [...expected.registeredTools, { name: "extra", description: "Extra", parameters: {} }], activeTools: ["first", "second", "extra"], diagnostic: /extra callable tools: extra/ },
+    { registeredTools: [...expected.registeredTools].reverse(), activeTools: ["second", "first"], diagnostic: /reordered callable tools/ },
+    { registeredTools: [{ ...expected.registeredTools[0], parameters: { type: "object", properties: { changed: {} } } }, expected.registeredTools[1]], activeTools: expected.activeTools, diagnostic: /changed callable tools: first/ },
+  ];
+  for (const patch of cases) {
+    const launch = prepareForkLaunch(expected);
+    try {
+      writePrivateJson(launch.readinessPath, { nonce: launch.nonce, ownSessionKey: "child-key", sessionId: "child-id", sessionPath: "/child", ...patch });
+      assert.throws(() => validateForkReadiness(launch, { forkContext: expected } as never, { sessionFile: "/child", sessionId: "child-id" }), patch.diagnostic);
+    } finally { rmSync(dirname(launch.contextPath), { recursive: true, force: true }); }
+  }
 });
 
 test("C3: own-key history is bound to child identity across two recovery generations", () => {
