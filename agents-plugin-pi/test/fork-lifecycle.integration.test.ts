@@ -205,8 +205,8 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
       // end. /answer on one never reaches the discussion-fork spawn below —
       // that branch of `ensureRespondent` is reachable only through
       // `openThread`'s pre-260911 fall-through, which its new "lead-ask"
-      // early return (see `openLeadAskThread`) now always short-circuits
-      // before. ws-queue-question/ws-withdraw-question (renamed from
+      // early return (see Phase 2's `openLeadAskQueue`) now always
+      // short-circuits before. ws-queue-question/ws-withdraw-question (renamed from
       // ws-ask/ws-resolve) are intentionally absent from active tool lists,
       // so seed the same persisted pending-thread contract that /answer
       // consumes, and assert the fork-less contract: no process spawns, no

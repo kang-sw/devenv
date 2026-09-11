@@ -92,11 +92,19 @@ import {
   buildOverlayHandle,
   resolveDoneAction,
   runDoneAction,
+  collectLeadAskQueue,
+  countQueueAnswered,
+  buildQueueCoverageLine,
+  buildQueueSubmitConfirmMessage,
+  resolveLeadAskQueueEntryAction,
+  LeadAskQueueComponent,
   type ThreadRecord,
   type OverlayHandle,
   type DoneAction,
+  type FocusableEditorLike,
+  type LeadAskQueueOptions,
 } from "../src/ask.ts";
-import { ConversationViewComponent, type ConversationItem, type ConversationChannel } from "../src/conversation-view.ts";
+import { ConversationViewComponent, type ConversationItem, type ConversationChannel, type ConversationViewTui } from "../src/conversation-view.ts";
 import { FORK_EXCLUDED_TOOL_NAMES } from "../src/fork.ts";
 import {
   agentWidgetRefreshRef,
@@ -1617,7 +1625,7 @@ describe("deliverQueuedAnswer (260911 D1: the fork-less lead-ask send path — n
   });
 });
 
-describe("resolveLeadAskEscapeAction / runLeadAskEscapeAction (260911 D-model-side-withdrawal: openLeadAskThread's onEscape decision, extracted per review relay #1/#2)", () => {
+describe("resolveLeadAskEscapeAction / runLeadAskEscapeAction (260911 D-model-side-withdrawal: the queue modal's exit decision, extracted per review relay #1/#2)", () => {
   test("resolveLeadAskEscapeAction: withdrawn + non-empty draft -> deliver (a withdrawal never discards typed prose)", () => {
     assert.equal(resolveLeadAskEscapeAction(true, "we take the second anchor"), "deliver");
   });
@@ -1677,6 +1685,347 @@ describe("resolveLeadAskEscapeAction / runLeadAskEscapeAction (260911 D-model-si
     runLeadAskEscapeAction("revert-pending", pi, handle, record, "half-typed answer", undefined);
     assert.equal(sent.length, 0, "the discarded draft is never delivered");
     assert.equal(record.status, "pending");
+  });
+
+  test("runLeadAskEscapeAction(\"revert-pending\"): persists a non-empty draft (260911 Phase 2 D3 — per-question drafts persist)", () => {
+    const { pi, handle, record } = setup();
+    runLeadAskEscapeAction("revert-pending", pi, handle, record, "half-typed answer", undefined);
+    assert.equal(record.draftAnswer, "half-typed answer");
+  });
+
+  test("runLeadAskEscapeAction(\"revert-pending\"): an empty draft clears any earlier persisted one", () => {
+    const { pi, handle, record } = setup();
+    record.draftAnswer = "stale earlier draft";
+    runLeadAskEscapeAction("revert-pending", pi, handle, record, "", undefined);
+    assert.equal(record.draftAnswer, undefined);
+  });
+
+  test("runLeadAskEscapeAction(\"deliver\"): clears any persisted draft once the answer lands", () => {
+    const { pi, handle, record } = setup();
+    record.withdrawnPending = true;
+    record.draftAnswer = "an earlier draft";
+    runLeadAskEscapeAction("deliver", pi, handle, record, "final answer", undefined);
+    assert.equal(record.draftAnswer, undefined);
+  });
+
+  test("runLeadAskEscapeAction(\"finalize-withdrawal\"): clears any persisted draft too", () => {
+    const { pi, handle, record } = setup();
+    record.withdrawnPending = true;
+    record.draftAnswer = "an earlier draft";
+    runLeadAskEscapeAction("finalize-withdrawal", pi, handle, record, "", undefined);
+    assert.equal(record.draftAnswer, undefined);
+  });
+});
+
+describe("resolveLeadAskQueueEntryAction (260911 Phase 2 D3: the queue modal's per-question close decision)", () => {
+  test("mode=\"submit\", not withdrawn, non-empty draft -> deliver", () => {
+    assert.equal(resolveLeadAskQueueEntryAction("submit", false, "an answer"), "deliver");
+  });
+
+  test("mode=\"submit\", not withdrawn, whitespace-only draft -> falls through to revert-pending (blank stays pending)", () => {
+    assert.equal(resolveLeadAskQueueEntryAction("submit", false, "   "), "revert-pending");
+  });
+
+  test("mode=\"submit\", not withdrawn, empty draft -> revert-pending", () => {
+    assert.equal(resolveLeadAskQueueEntryAction("submit", false, ""), "revert-pending");
+  });
+
+  test("mode=\"submit\", withdrawn pending, non-empty draft -> deliver via the withdrawal branch too (either path agrees)", () => {
+    assert.equal(resolveLeadAskQueueEntryAction("submit", true, "an answer"), "deliver");
+  });
+
+  test("mode=\"submit\", withdrawn pending, empty draft -> finalize-withdrawal, never delivered as a false submit", () => {
+    assert.equal(resolveLeadAskQueueEntryAction("submit", true, ""), "finalize-withdrawal");
+  });
+
+  test("mode=\"preserve\" (Esc-declined submit) -> always defers to resolveLeadAskEscapeAction, non-empty draft included", () => {
+    assert.equal(resolveLeadAskQueueEntryAction("preserve", false, "an answer"), "revert-pending");
+    assert.equal(resolveLeadAskQueueEntryAction("preserve", true, "an answer"), "deliver");
+    assert.equal(resolveLeadAskQueueEntryAction("preserve", true, ""), "finalize-withdrawal");
+  });
+});
+
+describe("collectLeadAskQueue (260911 Phase 2 D3: batch queue order)", () => {
+  test("keeps only lead-ask origin, pending/open status, oldest-asked first", () => {
+    const records = [
+      thread({ threadId: "q3", origin: "lead-ask", status: "pending", createdAt: "2026-09-05T12:00:00.000Z" }),
+      thread({ threadId: "q1", origin: "lead-ask", status: "open", createdAt: "2026-09-05T10:00:00.000Z" }),
+      thread({ threadId: "q2", origin: "lead-ask", status: "pending", createdAt: "2026-09-05T11:00:00.000Z" }),
+      thread({ threadId: "f1", origin: "fork-raised", status: "pending", createdAt: "2026-09-05T09:00:00.000Z" }),
+      thread({ threadId: "d1", origin: "lead-ask", status: "dormant", createdAt: "2026-09-05T08:00:00.000Z" }),
+      thread({ threadId: "c1", origin: "lead-ask", status: "closed", createdAt: "2026-09-05T07:00:00.000Z" }),
+    ];
+    const queue = collectLeadAskQueue(records);
+    assert.deepEqual(queue.map((t) => t.threadId), ["q1", "q2", "q3"]);
+  });
+
+  test("ties on createdAt break by threadId", () => {
+    const records = [
+      thread({ threadId: "q2", origin: "lead-ask", status: "pending", createdAt: "2026-09-05T10:00:00.000Z" }),
+      thread({ threadId: "q1", origin: "lead-ask", status: "pending", createdAt: "2026-09-05T10:00:00.000Z" }),
+    ];
+    assert.deepEqual(collectLeadAskQueue(records).map((t) => t.threadId), ["q1", "q2"]);
+  });
+
+  test("empty input -> empty queue", () => {
+    assert.deepEqual(collectLeadAskQueue([]), []);
+  });
+});
+
+describe("countQueueAnswered / buildQueueCoverageLine / buildQueueSubmitConfirmMessage (260911 Phase 2 D3)", () => {
+  test("countQueueAnswered counts only non-empty-after-trim drafts", () => {
+    const drafts = new Map([
+      ["q1", "an answer"],
+      ["q2", ""],
+      ["q3", "   "],
+      ["q4", "  another  "],
+    ]);
+    assert.equal(countQueueAnswered(drafts), 2);
+  });
+
+  test("countQueueAnswered on an empty map is zero", () => {
+    assert.equal(countQueueAnswered(new Map()), 0);
+  });
+
+  test("buildQueueCoverageLine renders 1-based question index with the live answered count", () => {
+    assert.equal(buildQueueCoverageLine(0, 3, 1), "Q1/3 · 1 answered");
+    assert.equal(buildQueueCoverageLine(2, 3, 3), "Q3/3 · 3 answered");
+  });
+
+  test("buildQueueSubmitConfirmMessage pluralizes and reports the pending remainder", () => {
+    assert.equal(buildQueueSubmitConfirmMessage(1, 3), "Submit 1 answered question? 2 left pending.");
+    assert.equal(buildQueueSubmitConfirmMessage(3, 3), "Submit 3 answered questions? 0 left pending.");
+    assert.equal(buildQueueSubmitConfirmMessage(0, 2), "Submit 0 answered questions? 2 left pending.");
+  });
+});
+
+describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)", () => {
+  /** Mirrors the real host `Editor`'s clear-then-callback `onSubmit` contract (see `editor.js`'s `submitValue`) — the component must restore the text itself. */
+  class FakeQueueEditor implements FocusableEditorLike {
+    text = "";
+    focused = false;
+    onSubmit: ((text: string) => void) | undefined;
+    render(width: number): string[] {
+      return [`[e:${this.text}]`.slice(0, Math.max(1, width))];
+    }
+    invalidate(): void {}
+    handleInput(data: string): void {
+      if (data === "\r" || data === "\n") {
+        const pending = this.text;
+        this.text = "";
+        this.onSubmit?.(pending);
+        return;
+      }
+      this.text += data;
+    }
+    getText(): string {
+      return this.text;
+    }
+    setText(text: string): void {
+      this.text = text;
+    }
+  }
+
+  function fakeTui(): ConversationViewTui & { renderCount: number } {
+    const state = { requestRender: () => {}, renderCount: 0 };
+    state.requestRender = () => {
+      state.renderCount += 1;
+    };
+    return state as ConversationViewTui & { renderCount: number };
+  }
+
+  /** Minimal fake covering only the keyIds the confirm screens actually probe. */
+  function fakeMatchesKey(data: string, keyId: string): boolean {
+    if (keyId === "enter") return data === "\r" || data === "\n";
+    if (keyId === "left") return data === "\x1b[D";
+    if (keyId === "right") return data === "\x1b[C";
+    if (keyId === "up") return data === "\x1b[A";
+    if (keyId === "down") return data === "\x1b[B";
+    return false;
+  }
+
+  /** No-op word-wrap — tests use widths and strings that never need to split. */
+  function fakeWrapText(text: string, _width: number): string[] {
+    return text.length === 0 ? [""] : text.split("\n");
+  }
+
+  function buildQueue(threads: ThreadRecord[], overrides: Partial<LeadAskQueueOptions> = {}) {
+    const editors: FakeQueueEditor[] = [];
+    const tui = fakeTui();
+    const closes: Array<{ mode: "submit" | "preserve"; drafts: Map<string, string> }> = [];
+    const component = new LeadAskQueueComponent(tui, {
+      threads,
+      initialFocusIndex: 0,
+      editorFactory: () => {
+        const editor = new FakeQueueEditor();
+        editors.push(editor);
+        return editor;
+      },
+      matchesKey: fakeMatchesKey,
+      wrapText: fakeWrapText,
+      border: false,
+      onClose: (mode, drafts) => closes.push({ mode, drafts }),
+      ...overrides,
+    });
+    return { component, editors, tui, closes };
+  }
+
+  function threeThreads(): ThreadRecord[] {
+    return [
+      thread({ threadId: "q1", question: "First?", origin: "lead-ask", status: "open", createdAt: "2026-09-05T10:00:00.000Z" }),
+      thread({ threadId: "q2", question: "Second?", origin: "lead-ask", status: "open", createdAt: "2026-09-05T11:00:00.000Z" }),
+      thread({ threadId: "q3", question: "Third?", origin: "lead-ask", status: "open", createdAt: "2026-09-05T12:00:00.000Z" }),
+    ];
+  }
+
+  test("Enter on a non-last question commits the draft and advances focus, without closing", () => {
+    const { component, editors, closes } = buildQueue(threeThreads());
+    editors[0].handleInput("first answer");
+    editors[0].handleInput("\r");
+    assert.equal(component.getFocusedIndex(), 1);
+    assert.equal(component.getDraft(0), "first answer", "Enter commits — the text is restored after the real Editor's clear");
+    assert.equal(closes.length, 0);
+  });
+
+  test("the coverage line reports the focused 1-based index, total, and live answered count", () => {
+    const { component, editors } = buildQueue(threeThreads());
+    editors[0].handleInput("first answer");
+    const lines = component.render(80);
+    assert.ok(lines.some((l) => l.includes(buildQueueCoverageLine(0, 3, 1))), lines.join("\n"));
+    editors[0].handleInput("\r");
+    const linesAfter = component.render(80);
+    assert.ok(linesAfter.some((l) => l.includes(buildQueueCoverageLine(1, 3, 1))), linesAfter.join("\n"));
+  });
+
+  test("Enter on the LAST question raises the final confirm instead of advancing, cursor defaulting to No", () => {
+    const { component, editors, closes } = buildQueue(threeThreads(), { initialFocusIndex: 2 });
+    editors[2].handleInput("last answer");
+    editors[2].handleInput("\r");
+    assert.equal(closes.length, 0, "the confirm intercepts — it does not close on its own");
+    const lines = component.render(80);
+    assert.ok(lines.some((l) => l.includes("[No]")), lines.join("\n"));
+    assert.ok(lines.some((l) => l.includes(" Yes ")), lines.join("\n"));
+  });
+
+  test("final confirm: Enter on the default No cancels back to editing the last question", () => {
+    const { component, editors, closes } = buildQueue(threeThreads(), { initialFocusIndex: 2 });
+    editors[2].handleInput("last answer");
+    editors[2].handleInput("\r"); // raises the confirm
+    component.handleInput("\r"); // Enter on default No
+    assert.equal(closes.length, 0);
+    const lines = component.render(80);
+    assert.ok(lines.some((l) => l.includes("Third?")), "back to editing the last question, not the confirm screen");
+    assert.equal(component.getDraft(2), "last answer", "declining never discards the typed answer");
+  });
+
+  test("final confirm: moving to Yes then Enter submits with every drafted answer, including blanks", () => {
+    const { component, editors, closes } = buildQueue(threeThreads(), { initialFocusIndex: 2 });
+    editors[0].handleInput("first answer");
+    editors[2].handleInput("last answer");
+    editors[2].handleInput("\r"); // raises the confirm on the last question
+    component.handleInput("\x1b[C"); // -> right/Yes
+    component.handleInput("\r"); // confirm
+    assert.equal(closes.length, 1);
+    assert.equal(closes[0].mode, "submit");
+    assert.equal(closes[0].drafts.get("q1"), "first answer");
+    assert.equal(closes[0].drafts.get("q2"), "");
+    assert.equal(closes[0].drafts.get("q3"), "last answer");
+  });
+
+  test("Esc with nothing answered anywhere closes immediately, preserving, with no confirm screen", () => {
+    const { component, closes } = buildQueue(threeThreads());
+    component.handleInput("\x1b");
+    assert.equal(closes.length, 1);
+    assert.equal(closes[0].mode, "preserve");
+  });
+
+  test("Esc with something answered raises the Esc-partial-submit confirm instead of closing", () => {
+    const { component, editors, closes } = buildQueue(threeThreads());
+    editors[0].handleInput("first answer");
+    component.handleInput("\x1b");
+    assert.equal(closes.length, 0);
+    const lines = component.render(80);
+    assert.ok(lines.some((l) => l.includes(buildQueueSubmitConfirmMessage(1, 3))), lines.join("\n"));
+    assert.ok(lines.some((l) => l.includes("[No]")), "defaults to the safe No");
+  });
+
+  test("Esc confirm: Enter on default No exits WITHOUT submitting, but still preserves the typed draft", () => {
+    const { component, editors, closes } = buildQueue(threeThreads());
+    editors[0].handleInput("first answer");
+    component.handleInput("\x1b"); // raises the esc confirm
+    component.handleInput("\r"); // Enter on default No
+    assert.equal(closes.length, 1);
+    assert.equal(closes[0].mode, "preserve");
+    assert.equal(closes[0].drafts.get("q1"), "first answer", "Esc never discards typed prose even when declining to submit");
+  });
+
+  test("Esc confirm: moving to Yes then Enter submits only the answered questions", () => {
+    const { component, editors, closes } = buildQueue(threeThreads());
+    editors[0].handleInput("first answer");
+    component.handleInput("\x1b");
+    component.handleInput("\x1b[B"); // down -> Yes
+    component.handleInput("\r");
+    assert.equal(closes.length, 1);
+    assert.equal(closes[0].mode, "submit");
+    assert.equal(closes[0].drafts.get("q1"), "first answer");
+  });
+
+  test("Esc inside a confirm screen always takes the No branch, regardless of the cursor's current side", () => {
+    const { component, editors, closes } = buildQueue(threeThreads());
+    editors[0].handleInput("first answer");
+    component.handleInput("\x1b"); // esc confirm raised, default No
+    component.handleInput("\x1b[C"); // move to Yes
+    component.handleInput("\x1b"); // Esc inside the confirm -> No branch (exit, no submit)
+    assert.equal(closes.length, 1);
+    assert.equal(closes[0].mode, "preserve");
+  });
+
+  test("Tab/Shift+Tab wrap last->first and first->last, and never submit or raise a confirm", () => {
+    const { component, closes } = buildQueue(threeThreads(), { initialFocusIndex: 2 });
+    component.handleInput("\t");
+    assert.equal(component.getFocusedIndex(), 0, "wraps from the last question to the first");
+    component.handleInput("\x1b[Z"); // Shift+Tab
+    assert.equal(component.getFocusedIndex(), 2, "wraps back from the first to the last");
+    assert.equal(closes.length, 0);
+  });
+
+  test("Ctrl+C is swallowed, not forwarded to the focused editor", () => {
+    const { component, editors } = buildQueue(threeThreads());
+    component.handleInput("\x03");
+    assert.equal(editors[0].getText(), "");
+  });
+
+  test("a withdrawn-pending question's banner renders without touching its preloaded draft", () => {
+    const threads = threeThreads();
+    threads[0].withdrawnPending = true;
+    threads[0].draftAnswer = "typed before the withdrawal";
+    const { component } = buildQueue(threads);
+    const lines = component.render(80);
+    assert.ok(lines.some((l) => l.toLowerCase().includes("withdrew")), lines.join("\n"));
+    assert.equal(component.getDraft(0), "typed before the withdrawal");
+  });
+
+  test("per-question drafts persist across construction — a thread's draftAnswer seeds its editor", () => {
+    const threads = threeThreads();
+    threads[1].draftAnswer = "resumed draft text";
+    const { component } = buildQueue(threads);
+    assert.equal(component.getDraft(1), "resumed draft text");
+  });
+
+  test("initialFocusIndex positions the focused question (e.g. from /answer <id> or the reopen shortcut)", () => {
+    const { component } = buildQueue(threeThreads(), { initialFocusIndex: 1 });
+    assert.equal(component.getFocusedIndex(), 1);
+    const lines = component.render(80);
+    assert.ok(lines.some((l) => l.includes("Second?")));
+  });
+
+  test("a stale submit from a no-longer-focused editor is ignored (defensive — input is only ever forwarded to the focused editor)", () => {
+    const { component, editors, closes } = buildQueue(threeThreads());
+    component.handleInput("\t"); // focus moves to index 1, without touching editor 0
+    editors[0].handleInput("late answer");
+    editors[0].handleInput("\r"); // fires editor 0's onSubmit directly, out of band
+    assert.equal(component.getFocusedIndex(), 1, "the stale submit never advances focus");
+    assert.equal(closes.length, 0);
   });
 });
 
