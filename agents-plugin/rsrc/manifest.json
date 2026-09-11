@@ -41,9 +41,9 @@
     "ticket-reviewer-completeness/ticket-reviewer-completeness.md": "12efbce33b5311810a162974d99702252549639f1a064fd84331005328c60b37",
     "ticket-reviewer-design/ticket-reviewer-design.md": "819b4cffaa1d7f95858e2ab79cfedbd301d3205803dba23984ccb57f7aac3eaf",
     "ticket-selector/ticket-selector.md": "99d059f3a872b13a336a2ff983e509021c5f438976e5bd2de995c8d94ede48b0",
-    "ticket-worker-elevated/ticket-worker-elevated.md": "17257c04ebbb972aeaee1ca906c594658296e85bd228ddb71cf54a0d1c3c6b6f",
-    "ticket-worker-escalated/ticket-worker-escalated.md": "12b7eecba98ee3516a5bfd4665d9dad4ce2f890d0307bf220edfb52f91385279",
-    "ticket-worker/ticket-worker.md": "ad9c65d50cc7e11fb0d4f95b7ea6208893737b0a81d586a93975065dddd8b70c",
+    "ticket-worker-elevated/ticket-worker-elevated.md": "03dc4a9faea119c599e9d98d77a552fd159a980489fc83d3a30c7a37f580428c",
+    "ticket-worker-escalated/ticket-worker-escalated.md": "f8c19df464737adc0fc67f12916499bf7510a5a52ac7425171e62ffdca8ee608",
+    "ticket-worker/ticket-worker.md": "91be3ef8ff04bc030871bc9a9088efce8e6f76f08e80257a882cd4880dbcd2c9",
     "worker-stop-protocol.md": "9dcc9c25ca22f868ef72a62135bff4e7f2319764b8cf4fe312d3fcaf3cc671c6"
   }
 }

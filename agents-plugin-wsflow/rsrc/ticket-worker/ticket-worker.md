@@ -57,8 +57,7 @@ this file. The Worker Protocol appended below governs; read it first.
 1. Route: `{{.McpNamespace}}/route.resolve_implement(session_key: <your key>,
    target: {kind: "ticket", ticket_path: <path>, ticket_stem: <stem>})`. The
    returned todo list is your skeleton; its branch action creates or reuses your
-   work branch from the branch your task block names, and its merge step names
-   the target. On a `goal/*` branch pass
+   work branch from the branch your task block names. On a `goal/*` branch pass
    `policy: {branch: {merge_confirm: "skip"}}`. A verdict that reports missing
    route facts is stop (c): the lead populates them before spawning, so reaching
    one here means the ticket was handed over out of order.
