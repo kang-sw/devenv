@@ -2069,7 +2069,7 @@ func TestEnterImplementNearMissesPreserveStandardBranchAndMergeTodos(t *testing.
 			}
 			finalAction := requireInstruction(t, todoByKey(t, record.Todos, "final-action-gate"))
 			merge := requireInstruction(t, todoByKey(t, record.Todos, "merge"))
-			if !strings.Contains(finalAction, "default no-merge outcome") || !strings.Contains(merge, "continuing on the branch without merging is the default outcome") {
+			if !strings.Contains(finalAction, "Do not merge; the worker ends at the report") || !strings.Contains(merge, "Do not merge from the worker") {
 				t.Fatalf("standard merge instructions changed: final=%q merge=%q", finalAction, merge)
 			}
 		})
