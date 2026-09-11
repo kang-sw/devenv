@@ -164,64 +164,63 @@ func TestDeriveImplementTodoInstructionsPartitionedReview(t *testing.T) {
 	if !strings.Contains(review, "Dispatch correctness and test reviewers") {
 		t.Fatalf("review instruction missing selected partitions: %q", review)
 	}
-	if !strings.Contains(review, "rendered reviewer playbook") || !strings.Contains(review, "`implementer-relay` playbook") || !strings.Contains(review, "fresh reviewer render") {
+	if !strings.Contains(review, "rendered reviewer playbook") || !strings.Contains(review, "fresh reviewer render") {
 		t.Fatalf("review instruction missing named template guidance: %q", review)
 	}
 	if strings.Contains(review, "fit") {
 		t.Fatalf("review instruction mentioned unselected fit partition: %q", review)
 	}
-	for _, want := range implementOrdinaryRelayWants() {
+	for _, want := range implementReviewRoundWants() {
 		if !strings.Contains(review, want) {
 			t.Fatalf("partitioned review instruction missing %q: %q", want, review)
 		}
 	}
-	for _, forbidden := range implementOrdinaryRelayForbidden() {
+	for _, forbidden := range implementReviewRoundForbidden() {
 		if strings.Contains(review, forbidden) {
-			t.Fatalf("partitioned review instruction retained superseded relay/adjudication wording %q: %q", forbidden, review)
+			t.Fatalf("partitioned review instruction retained superseded relay/elevation wording %q: %q", forbidden, review)
 		}
 	}
 }
 
-// implementOrdinaryRelayWants pins the severity-graded clause set every
-// review-dispatching allocation shape (single, partitioned, bare partitioned)
-// shares. Each entry is load-bearing:
-//   - the disposition-marker set is exhaustive and file-first (a marker per
-//     finding, not a copied finding body), including the Important-only
-//     self-reported [not fixed: <reason>];
-//   - relay #1 dispositions Critical and Important at once, and Important's
-//     entire relay budget is spent there with no re-review to follow;
-//   - Minor drives no relay at any point;
-//   - the Critical branch is bounded to 3 review rounds (up to 2 Critical-scoped
-//     relays) and ends in unconditional elevate at the ceiling, never a hard
-//     stop, with the run continuing to the remaining todos.
-func implementOrdinaryRelayWants() []string {
+// implementReviewRoundWants pins the two-round clause set every review-dispatching
+// allocation shape (single, partitioned, bare partitioned) shares, matching the
+// shipped ticket-worker review protocol. Each entry is load-bearing:
+//   - the worker fixes findings itself, by severity, with no relay delegate;
+//   - Minor findings are recorded in the review summary only;
+//   - review is two rounds, never more, and round two uses a fresh reviewer
+//     render that verifies round one's fixes only and raises nothing new;
+//   - a new observation from round two is reported as unresolved, not a third
+//     round;
+//   - a Critical finding still open after round two is a stop reported to the
+//     lead, never a silent elevation or re-review.
+func implementReviewRoundWants() []string {
 	return []string{
-		"Record exactly one disposition marker for every non-clean Critical/Important finding review #1 returns",
-		"[fixed], [won't fix: <reason>], [deferred: <reason>], or [escalate: <reason>]",
-		"carry each disposition into the final report",
-		"An Important finding still non-clean after its own relay instead carries the implementer's self-reported [not fixed: <reason>]",
-		"since Important is never re-reviewed",
-		"Relay #1 dispositions every non-clean Critical/Important finding from review #1 at once with the `implementer-relay` playbook",
-		"Important is best-effort: its one-relay budget is spent in relay #1",
-		"Minor drives no relay at any point; record Minor findings in the review summary only",
-		"Critical exception: if review #1 reports any Critical finding, follow relay #1 with one Critical-scoped review #2 using a fresh reviewer render, limited to the Critical findings",
-		"If review #2 still reports that Critical non-clean, follow it with a second Critical-scoped relay (relay #2) via the `implementer-relay` playbook, then a Critical-scoped review #3 using a fresh reviewer render",
-		"if review #3 still reports the Critical finding non-clean, unconditionally elevate that finding to `implementer-elevated`",
-		"never a hard stop",
-		"continue to the remaining todos with the elevation recorded in the final report",
-		"do not schedule a review #4 or a third relay",
+		"Fix the findings yourself by severity; there is no relay delegate",
+		"Record Minor findings in the review summary only",
+		"Review is two rounds, never more",
+		"round two uses a fresh reviewer render that checks only whether round one's findings were fixed",
+		"raises nothing new, and reports any new observation as unresolved rather than opening a third round",
+		"A Critical finding still open after round two is a stop",
+		"report it to the lead rather than elevating or re-reviewing it",
 	}
 }
 
-// implementOrdinaryRelayForbidden pins the superseded review-adjudicator
-// contested-finding arbitration vocabulary out of existence on the ordinary
-// review-dispatching path. Unlike the one-relay model this replaces, the
-// severity-graded budget legitimately reintroduces round/relay-count language
-// and the `implementer-elevated` token (bounded-3-round Critical, ceiling
-// elevate), so this list narrows to arbitration-only terms: nothing in the
-// budget reproduces review-adjudicator's contested-finding trigger.
-func implementOrdinaryRelayForbidden() []string {
+// implementReviewRoundForbidden pins the superseded relay/elevation vocabulary
+// out of existence on every review-dispatching path. The two-round worker-owned
+// model retires the relay delegate, the disposition-marker vocabulary, the
+// bounded multi-round Critical branch, and the ceiling elevation, plus the
+// still-older review-adjudicator arbitration terms.
+func implementReviewRoundForbidden() []string {
 	return []string{
+		"implementer-relay",
+		"implementer-elevated",
+		"Critical exception",
+		"review #2",
+		"review #3",
+		"relay #1",
+		"unconditionally elevate",
+		"disposition marker",
+		"[won't fix: <reason>]",
 		"review-adjudicator",
 		"[maintained]",
 		"Adjudicate at most once per relay slot",
@@ -243,14 +242,14 @@ func TestDeriveImplementTodoInstructionsBarePartitionedReviewFallback(t *testing
 	if !strings.Contains(review, "Dispatch the selected reviewers") {
 		t.Fatalf("bare partitioned alloc did not reach the fallback review instruction: %q", review)
 	}
-	for _, want := range implementOrdinaryRelayWants() {
+	for _, want := range implementReviewRoundWants() {
 		if !strings.Contains(review, want) {
 			t.Fatalf("fallback review instruction missing %q: %q", want, review)
 		}
 	}
-	for _, forbidden := range implementOrdinaryRelayForbidden() {
+	for _, forbidden := range implementReviewRoundForbidden() {
 		if strings.Contains(review, forbidden) {
-			t.Fatalf("fallback review instruction retained superseded relay/adjudication wording %q: %q", forbidden, review)
+			t.Fatalf("fallback review instruction retained superseded relay/elevation wording %q: %q", forbidden, review)
 		}
 	}
 }
@@ -272,7 +271,7 @@ func TestDeriveImplementTodoInstructionsFinalGate(t *testing.T) {
 		}
 	}
 	finalAction := requireInstruction(t, todoByKey(t, got, "final-action-gate"))
-	for _, want := range []string{"impl-playbook unchanged-input verification rule", "documentation-only commits run affected checks", "Verify review disposition"} {
+	for _, want := range []string{"impl-playbook unchanged-input verification rule", "documentation-only commits run affected checks", "Verify the review is resolved"} {
 		if !strings.Contains(finalAction, want) {
 			t.Fatalf("final-action-gate instruction missing reusable verification guidance %q: %q", want, finalAction)
 		}
@@ -1889,7 +1888,7 @@ func TestEnterImplementAllocatesSingleReviewForBoundedPublicExistingTestChange(t
 			t.Fatalf("single-review todo instruction missing %q: %q", want, review)
 		}
 	}
-	for _, want := range implementOrdinaryRelayWants() {
+	for _, want := range implementReviewRoundWants() {
 		if !strings.Contains(review, want) {
 			t.Fatalf("single-review todo instruction missing %q: %q", want, review)
 		}
@@ -1897,25 +1896,22 @@ func TestEnterImplementAllocatesSingleReviewForBoundedPublicExistingTestChange(t
 	if strings.Contains(review, "reviewers") {
 		t.Fatalf("single-review todo instruction = %q", review)
 	}
-	// The severity-graded budget still gives review-adjudicator no reachable
-	// trigger on any allocation shape, single included; implementer-elevated is
-	// reachable but only at the Critical ceiling, so it is not in this forbidden
-	// list (see implementOrdinaryRelayForbidden's own doc comment).
-	for _, forbidden := range implementOrdinaryRelayForbidden() {
+	// The two-round worker-owned model retires the relay delegate and the
+	// ceiling elevation on every allocation shape, single included: neither
+	// implementer-relay nor implementer-elevated is reachable here.
+	for _, forbidden := range implementReviewRoundForbidden() {
 		if strings.Contains(review, forbidden) {
-			t.Fatalf("single-review todo instruction retained superseded relay/adjudication wording %q: %q", forbidden, review)
+			t.Fatalf("single-review todo instruction retained superseded relay/elevation wording %q: %q", forbidden, review)
 		}
 	}
 }
 
-// TestDeriveImplementTodoInstructionsCriticalReviewBranch pins the Critical-only
-// branch text at the generation source (independent of allocation shape, since
-// the clause is shared): bounded-3-round iteration — review #1's relay #1,
-// then a Critical-scoped review #2, then (if still non-clean) a second
-// Critical-scoped relay #2 and a Critical-scoped review #3 — ending in
-// unconditional elevate to `implementer-elevated` at the ceiling, never a
-// hard stop, with the run continuing past it.
-func TestDeriveImplementTodoInstructionsCriticalReviewBranch(t *testing.T) {
+// TestDeriveImplementTodoInstructionsCriticalStop pins the Critical terminal at
+// the generation source (independent of allocation shape, since the clause is
+// shared): an unresolved Critical after round two is a stop reported to the
+// lead, matching the shipped ticket-worker stop (e). The superseded bounded
+// multi-round Critical branch and its ceiling elevation must be gone.
+func TestDeriveImplementTodoInstructionsCriticalStop(t *testing.T) {
 	got := deriveImplementTodosFromVerdict(implementTodoVerdict{
 		Delegation:  "delegated",
 		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
@@ -1924,24 +1920,21 @@ func TestDeriveImplementTodoInstructionsCriticalReviewBranch(t *testing.T) {
 	})
 	review := requireInstruction(t, todoByKey(t, got, "review"))
 	for _, want := range []string{
-		"Critical exception: if review #1 reports any Critical finding, follow relay #1 with one Critical-scoped review #2 using a fresh reviewer render, limited to the Critical findings",
-		"If review #2 still reports that Critical non-clean, follow it with a second Critical-scoped relay (relay #2) via the `implementer-relay` playbook, then a Critical-scoped review #3 using a fresh reviewer render",
-		"if review #3 still reports the Critical finding non-clean, unconditionally elevate that finding to `implementer-elevated`",
-		"never a hard stop",
-		"continue to the remaining todos with the elevation recorded in the final report",
-		"do not schedule a review #4 or a third relay",
+		"Review is two rounds, never more",
+		"round two uses a fresh reviewer render that checks only whether round one's findings were fixed",
+		"A Critical finding still open after round two is a stop",
+		"report it to the lead rather than elevating or re-reviewing it",
 	} {
 		if !strings.Contains(review, want) {
-			t.Fatalf("Critical-branch review instruction missing %q: %q", want, review)
+			t.Fatalf("Critical-stop review instruction missing %q: %q", want, review)
 		}
 	}
-	// The ceiling replaces the old hard-stop terminal outright: the slice must
-	// never be described as blocked from merging or awaiting user direction —
-	// it elevates and the run continues past the ceiling with no further
-	// review or relay scheduled.
-	for _, forbidden := range []string{"stops the slice from merging", "does not merge", "wait for direction rather than relaying again"} {
+	// The two-round stop replaces the bounded multi-round Critical branch and
+	// its ceiling elevation outright: no relay delegate, no third round, and no
+	// elevation to a heavier worker.
+	for _, forbidden := range implementReviewRoundForbidden() {
 		if strings.Contains(review, forbidden) {
-			t.Fatalf("Critical-branch review instruction still implies a hard-stop outcome %q: %q", forbidden, review)
+			t.Fatalf("Critical-stop review instruction retained superseded relay/elevation wording %q: %q", forbidden, review)
 		}
 	}
 }

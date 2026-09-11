@@ -469,48 +469,37 @@ func implementEditInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not start source edits while branch action is stop: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
-	return "Apply the source edits, verify them against the project's build and test commands, commit each logical checkpoint with ## AI Context, and capture the resulting commit range for review and relays."
+	return "Apply the source edits, verify them against the project's build and test commands, commit each logical checkpoint with ## AI Context, and capture the resulting commit range for review."
 }
 
-// implementReviewDispositionClause states the disposition-marker requirement for
-// every non-clean Critical/Important finding review #1 returns, plus the
-// Important-only self-reported non-resolution marker. It is shared by every
-// allocation shape that dispatches a review, so the marker vocabulary and the
-// final-report carry-forward requirement never diverge between single,
+// implementReviewFixClause states that the worker dispositions review findings
+// itself — there is no relay delegate — and fixes them by severity, matching the
+// shipped ticket-worker protocol. It is shared by every allocation shape that
+// dispatches a review, so the fix-ownership rule never diverges between single,
 // partitioned, and bare-partitioned generation.
-const implementReviewDispositionClause = "Record exactly one disposition marker for every non-clean Critical/Important finding review #1 returns: [fixed], [won't fix: <reason>], [deferred: <reason>], or [escalate: <reason>]; carry each disposition into the final report. An Important finding still non-clean after its own relay instead carries the implementer's self-reported [not fixed: <reason>] — a self-report, not a re-review verdict, since Important is never re-reviewed."
+const implementReviewFixClause = "Fix the findings yourself by severity; there is no relay delegate. Record Minor findings in the review summary only."
 
-// implementReviewRelayClause states relay #1's scope and the Important/Minor
-// budgets. Relay #1 dispositions every non-clean Critical/Important finding at
-// once; Important's entire relay budget is spent there, so a still-non-clean
-// Important afterward is never re-reviewed — it stands on the self-reported
-// [not fixed: <reason>] from implementReviewDispositionClause. Minor drives no
-// relay at any point. Critical's own further budget lives in
-// implementReviewCriticalBranchClause, not here.
-const implementReviewRelayClause = "Relay #1 dispositions every non-clean Critical/Important finding from review #1 at once with the `implementer-relay` playbook. Important is best-effort: its one-relay budget is spent in relay #1, is never re-reviewed, and a still-non-clean Important after relay #1 stands on that self-reported [not fixed: <reason>] rather than another relay. Minor drives no relay at any point; record Minor findings in the review summary only."
-
-// implementReviewCriticalBranchClause states the Critical exception: bounded 3
-// review rounds (review #1 plus up to 2 Critical-scoped re-reviews), affording
-// up to 2 Critical-scoped relays (relay #1 shared with Important, plus a second
-// Critical-only relay #2). A Critical still non-clean after review #3 is the
-// ceiling: it unconditionally elevates to `implementer-elevated` rather than
-// halting, and the run continues to the remaining todos — restoring the
-// elevation shape from before 260828 without reviving the mid-budget
-// capacity/root-cause trigger or review-adjudicator arbitration that shape also
-// carried.
-const implementReviewCriticalBranchClause = "Critical exception: if review #1 reports any Critical finding, follow relay #1 with one Critical-scoped review #2 using a fresh reviewer render, limited to the Critical findings. If review #2 still reports that Critical non-clean, follow it with a second Critical-scoped relay (relay #2) via the `implementer-relay` playbook, then a Critical-scoped review #3 using a fresh reviewer render. Ceiling: if review #3 still reports the Critical finding non-clean, unconditionally elevate that finding to `implementer-elevated` — never a hard stop — and continue to the remaining todos with the elevation recorded in the final report; do not schedule a review #4 or a third relay."
+// implementReviewRoundsClause states the two-round budget and the stop on an
+// unresolved Critical finding after round two, mirroring the shipped
+// ticket-worker review protocol and worker-stop-protocol exactly: review is two
+// rounds, never more; round two uses a fresh reviewer render that verifies round
+// one's fixes only, raises nothing new, and reports any new observation as
+// unresolved rather than opening a third round; and a Critical finding still
+// open after round two is a stop reported to the lead, never a silent elevation
+// or a re-review.
+const implementReviewRoundsClause = "Review is two rounds, never more: round two uses a fresh reviewer render that checks only whether round one's findings were fixed, raises nothing new, and reports any new observation as unresolved rather than opening a third round. A Critical finding still open after round two is a stop — report it to the lead rather than elevating or re-reviewing it."
 
 func implementReviewInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not start review before implementation can run; resolve the branch blocker first: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(verdict.ReviewAlloc)), "partitioned:") {
-		return fmt.Sprintf("Dispatch %s reviewers with the rendered reviewer playbook and generated review paths. %s %s %s", formatReviewPartitions(verdict.ReviewAlloc), implementReviewDispositionClause, implementReviewRelayClause, implementReviewCriticalBranchClause)
+		return fmt.Sprintf("Dispatch %s reviewers with the rendered reviewer playbook and generated review paths. %s %s", formatReviewPartitions(verdict.ReviewAlloc), implementReviewFixClause, implementReviewRoundsClause)
 	}
 	if strings.EqualFold(strings.TrimSpace(verdict.ReviewAlloc), "single") {
-		return fmt.Sprintf("Render `reviewer` and dispatch one full-scope review with the rendered path and a generated findings path. %s %s %s", implementReviewDispositionClause, implementReviewRelayClause, implementReviewCriticalBranchClause)
+		return fmt.Sprintf("Render `reviewer` and dispatch one full-scope review with the rendered path and a generated findings path. %s %s", implementReviewFixClause, implementReviewRoundsClause)
 	}
-	return fmt.Sprintf("Dispatch the selected reviewers with the rendered reviewer playbook and generated review paths. %s %s %s", implementReviewDispositionClause, implementReviewRelayClause, implementReviewCriticalBranchClause)
+	return fmt.Sprintf("Dispatch the selected reviewers with the rendered reviewer playbook and generated review paths. %s %s", implementReviewFixClause, implementReviewRoundsClause)
 }
 
 // implementFinalActionInstruction's default outcome is continue-on-branch
@@ -526,7 +515,7 @@ func implementFinalActionInstruction(verdict implementTodoVerdict) string {
 		return fmt.Sprintf("Do not ask for final action approval while branch action is stop: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
 	skipConfirm := strings.EqualFold(strings.TrimSpace(verdict.BranchPlan.MergeConfirm), "skip")
-	verification := "Apply the impl-playbook unchanged-input verification rule; after documentation-only commits run affected checks. Verify review disposition"
+	verification := "Apply the impl-playbook unchanged-input verification rule; after documentation-only commits run affected checks. Verify the review is resolved"
 	var mergeOption string
 	if skipConfirm {
 		mergeOption = "If a merge is explicitly chosen instead, perform it without asking for approval (caller merge confirm is skip)."

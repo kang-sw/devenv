@@ -5,6 +5,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: efe5ffc9f7191f3b
 sage-review-completeness-reviewed: efe5ffc9f7191f3b
+completed: 2026-09-11
 ---
 
 # Align implementation review todos with the current ticket-worker protocol
@@ -87,3 +88,46 @@ include so the todo and the playbook agree. Verify by exercising
 implementation routing for each review allocation and comparing the emitted
 todo instructions against the shipped worker's review ownership, round budget,
 and stop condition.
+
+### Result (e62e8fc) - 2026-09-11
+
+Realigned the review-instruction clauses `route.resolve_implement` installs to
+the shipped `ticket-worker` two-round protocol.
+
+- `agents-plugin-tool/internal/mcp/session_state.go`: replaced the three retired
+  clauses (`implementReviewDispositionClause`, `implementReviewRelayClause`,
+  `implementReviewCriticalBranchClause`) with two shared constants —
+  `implementReviewFixClause` (worker owns its own fixes; no relay delegate;
+  Minor recorded in the summary) and `implementReviewRoundsClause` (review is at
+  most two rounds; round two verifies round one's fixes and raises nothing new;
+  an unresolved Critical after round two is a stop reported to the lead, never an
+  `implementer-elevated` escalation). `implementReviewInstruction` assembles the
+  two into all three allocation shapes (single, `partitioned:`, bare partitioned)
+  with reviewer dispatch and partitioned allocation intact.
+- Removed the disposition-marker vocabulary entirely (the shipped protocol has
+  none; the worker records outcomes via its Report block), and cleaned the two
+  adjacent instructions that a round-1 review found still stranded the retired
+  wording: `implementEditInstruction` ("...for review and relays" ->
+  "...for review.") and `implementFinalActionInstruction` ("Verify review
+  disposition" -> "Verify the review is resolved").
+- `session_state_test.go`: retitled the shared pinning helpers to
+  `implementReviewRoundWants` / `implementReviewRoundForbidden` with the
+  two-round wants and a forbidden list that blocks `implementer-relay`,
+  `implementer-elevated`, the bounded multi-round Critical branch, the
+  disposition-marker vocabulary, and the older review-adjudicator terms;
+  rewrote the Critical-branch test into `...CriticalStop` pinning the
+  round-two stop; updated the final-gate positive pin to the new wording.
+
+Decisions (recorded, not escalated): dropped the disposition-marker vocabulary
+rather than reconciling it, matching the shipped protocol which carries no such
+markers; renamed the two clause constants and the shared test helpers since the
+old names encoded the retired relay/critical-branch model (cosmetic, no external
+contract). Reviewer dispatch and partitioned allocation are unchanged, per the
+ticket's retained-review decision.
+
+Verification: `go build ./...` (agents-plugin-tool) OK;
+`go test ./internal/mcp/` OK; `go test ./...` OK;
+`gofmt -l` clean; `go vet ./internal/mcp/` clean. Independent review: two
+rounds, single allocation. Round 1 raised two Important findings (stranded
+`relays` / `disposition` wording), both fixed; round 2 verified the fixes clean
+with no new blocking finding.
