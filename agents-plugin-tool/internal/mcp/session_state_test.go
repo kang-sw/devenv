@@ -271,7 +271,7 @@ func TestDeriveImplementTodoInstructionsFinalGate(t *testing.T) {
 		}
 	}
 	finalAction := requireInstruction(t, todoByKey(t, got, "final-action-gate"))
-	for _, want := range []string{"impl-playbook unchanged-input verification rule", "documentation-only commits run affected checks", "Verify review disposition"} {
+	for _, want := range []string{"impl-playbook unchanged-input verification rule", "documentation-only commits run affected checks", "Verify the review is resolved"} {
 		if !strings.Contains(finalAction, want) {
 			t.Fatalf("final-action-gate instruction missing reusable verification guidance %q: %q", want, finalAction)
 		}

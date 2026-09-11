@@ -469,7 +469,7 @@ func implementEditInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not start source edits while branch action is stop: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
-	return "Apply the source edits, verify them against the project's build and test commands, commit each logical checkpoint with ## AI Context, and capture the resulting commit range for review and relays."
+	return "Apply the source edits, verify them against the project's build and test commands, commit each logical checkpoint with ## AI Context, and capture the resulting commit range for review."
 }
 
 // implementReviewFixClause states that the worker dispositions review findings
@@ -515,7 +515,7 @@ func implementFinalActionInstruction(verdict implementTodoVerdict) string {
 		return fmt.Sprintf("Do not ask for final action approval while branch action is stop: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
 	skipConfirm := strings.EqualFold(strings.TrimSpace(verdict.BranchPlan.MergeConfirm), "skip")
-	verification := "Apply the impl-playbook unchanged-input verification rule; after documentation-only commits run affected checks. Verify review disposition"
+	verification := "Apply the impl-playbook unchanged-input verification rule; after documentation-only commits run affected checks. Verify the review is resolved"
 	var mergeOption string
 	if skipConfirm {
 		mergeOption = "If a merge is explicitly chosen instead, perform it without asking for approval (caller merge confirm is skip)."
