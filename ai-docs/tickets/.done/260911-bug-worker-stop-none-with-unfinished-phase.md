@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0783af7a1911adf0
 sage-review-completeness-reviewed: 0783af7a1911adf0
+completed: 2026-09-11
 ---
 
 # ticket worker reports stop none while later phases remain unfinished
@@ -97,3 +98,24 @@ surfaces.
 Verify every supported completion value, the phase-versus-ticket lead paths,
 and fail-closed handling for missing, unknown, or incompatible values. Run the
 focused playbook and mirroring checks plus the relevant plugin package suites.
+
+### Result (11874f2f) - 2026-09-11
+
+Added the required shared `completion:` terminal-report field and its valid
+stop/completion pairs. `lead-run` now keeps `completion: phase` tickets active,
+uses `completion: ticket` as the only completion that permits epic-terminal
+handling, and fails closed without ticket queries or path inference for missing,
+unknown, or incompatible reports. Regenerated the byte-identical wsflow rsrc
+mirror and both manifests.
+
+Verification:
+
+- `go test ./internal/mcp -count=1 -run 'TestPlaybook(RenderGoldenTicketWorker|PrintLeadRunWorkerTierPolicy)$'` — pass
+- `go test ./internal/wsrsrc -count=1 -run TestWsflowRsrcMirrorUpToDate` — pass
+- `python3 -m unittest discover agents-plugin/tests` — pass (58 tests)
+- `python3 -m unittest discover agents-plugin-wsflow/tests` — pass (11 tests)
+
+
+## Resolution (2026-09-11)
+
+Phase 1 implemented in 11874f2f: completion is explicit and lead-run now fails closed on invalid terminal-report pairs.
