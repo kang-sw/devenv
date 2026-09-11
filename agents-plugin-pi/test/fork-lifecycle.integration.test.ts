@@ -70,7 +70,7 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
       const before = h.requests.length;
       const keys = h.sm.getEntries().findLast((e: any) => e.customType === "ws-pi-fork-keys" && e.data.sessionId === h.sm.getSessionId());
       // Independently defined new-message fixture, never copied from child payload.
-      const framed = h.referenceHistory && !h.hasInput ? `Current fork-owned ws session_key: ${keys?.data.current}. Use this key, not the inherited parent or any historical own key. ws-fork, ws-ask, and ws-resolve are refused in fork role; report to the lead instead.\n\n${text}` : text;
+      const framed = h.referenceHistory && !h.hasInput ? `Current fork-owned ws session_key: ${keys?.data.current}. Use this key, not the inherited parent or any historical own key. ws-fork, ws-queue-question, and ws-withdraw-question are refused in fork role; report to the lead instead.\n\n${text}` : text;
       await withEnv(h.env, () => h.session.prompt(text));
       if (h.referenceHistory && h.requests.length > before) {
         const user = { role: "user", content: [{ type: "text", text: framed }], timestamp: 1 };
@@ -161,8 +161,16 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
       const nestedFork = child.session.agent.state.tools.find((tool: any) => tool.name === "ws-fork");
       assert.ok(nestedFork, "the inherited fork tool remains active so its role handler can refuse recursive forks");
       await withEnv(child.env, () => assert.rejects(() => nestedFork.execute("refuse", {}), /unavailable in a fork/));
-      for (const name of ["ws-ask", "ws-resolve"]) {
-        assert.equal(child.session.agent.state.tools.find((tool: any) => tool.name === name), undefined, `${name} is excluded from the inherited --tools allowlist`);
+      // 260911 lifts the tool-surface hide (ac998f77/a8cf1183/5f366eff): the
+      // fork's tool surface is the lead's exact active-tools snapshot
+      // (`computeForkToolSurface` adds/removes/dedupes nothing), so
+      // ws-queue-question/ws-withdraw-question stay VISIBLE with identical
+      // metadata in a fork's own tool list — refused only at the handler
+      // level, exactly like ws-fork itself just above.
+      for (const name of ["ws-queue-question", "ws-withdraw-question"]) {
+        const tool = child.session.agent.state.tools.find((t: any) => t.name === name);
+        assert.ok(tool, `${name} remains visible in the inherited --tools allowlist`);
+        await withEnv(child.env, () => assert.rejects(() => tool.execute("refuse", {}), /unavailable in a fork/));
       }
       assert.equal(children.length, callsBefore);
       assert.deepEqual(child.sm.getEntries(), entriesBeforeRefusals, "refusals do not mutate session state");
@@ -193,9 +201,23 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
         assert.deepEqual(orphans[0].forkContext, childContext);
         await stop(resumed);
       }
-      // Lead restart before a new model turn: discussion dispatch must read the durable capture.
-      // ws-ask/ws-resolve are intentionally absent from active tool lists, so
-      // seed the same persisted pending-thread contract that /answer consumes.
+      // 260911 Phase 1: a lead-raised ("lead-ask") thread is fork-less end to
+      // end. /answer on one never reaches the discussion-fork spawn below —
+      // that branch of `ensureRespondent` is reachable only through
+      // `openThread`'s pre-260911 fall-through, which its new "lead-ask"
+      // early return (see `openLeadAskThread`) now always short-circuits
+      // before. ws-queue-question/ws-withdraw-question (renamed from
+      // ws-ask/ws-resolve) are intentionally absent from active tool lists,
+      // so seed the same persisted pending-thread contract that /answer
+      // consumes, and assert the fork-less contract: no process spawns, no
+      // respondent or forkResume is ever attached, and opening the thread
+      // costs no paid model turn. (The discussion-fork-spawn scenario this
+      // replaced, plus its dependent forkResume-rehydration-across-
+      // generations loop, exercised code now unreachable for every thread
+      // origin — fork-raised always already has a respondentAgentId at
+      // registration, so it never takes ensureRespondent's spawn branch
+      // either. captureForkResume/rehydrateForkRecord keep their own direct
+      // unit coverage in ask.test.ts.)
       const restartedManager = sdk.SessionManager.open(lead.sm.getSessionFile(), join(directory, "sessions"));
       const now = new Date().toISOString();
       ask.saveThreadRegistryFile(ask.threadRegistryPath(restartedManager.getSessionFile()), [{
@@ -205,27 +227,29 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
       const restarted = await makeSession(restartedManager);
       restarted.oracle = observed.context;
       restarted.parentAffinityId = lead.sm.getSessionId();
+      const childrenBeforeAnswer = children.length;
       await prompt(restarted, "/answer");
-      const discussion = children.at(-1);
-      assert.equal(discussion.sm.getEntries().findLast((e: any) => e.customType === "ws-pi-fork-context").data.context.kind, "discussion", errors.join("\n"));
-      assert.equal(discussion.requests[0].context.systemPrompt, observed.context.systemPrompt);
-      const discussionContext = discussion.sm.getEntries().findLast((e: any) => e.customType === "ws-pi-fork-context").data.context;
-      assert.equal(discussionContext.parentSessionKey, childContext.parentSessionKey, "the original captured parent key survives lead restart");
-      assert.equal(discussionContext.parentSessionKeys.length, 2, "also retain the restarting lead's current key for refusal");
-      for (const key of discussionContext.parentSessionKeys) await withEnv(discussion.env, () => assert.rejects(() => discussion.session.agent.state.tools.find((t: any) => t.name === "ws__probe").execute("parent", { session_key: key }), /parent session key/));
-      await stop(restarted);
-      const threads = ask.loadThreadRegistryFile(ask.threadRegistryPath(restarted.sm.getSessionFile()));
-      assert.ok(threads[0].forkResume);
-      for (let generation = 0; generation < 2; generation++) {
-        const roundtrip = ask.parseThreadRegistry(ask.serializeThreadRegistry(threads));
-        const record = ask.rehydrateForkRecord("discussion", roundtrip[0].forkResume);
-        const registry = new Map([[record.agentId, record]]);
-        await spawner.sendToAgent(registry, { cwd: directory, extensionPath: join(plugin, "src/index.ts") }, record.agentId, "Continue owner dialogue");
-        const resumed = children.at(-1);
-        assert.equal(resumed.requests[0].context.systemPrompt, observed.context.systemPrompt);
-        threads[0].forkResume = ask.captureForkResume(record);
-        if (generation === 0) await stop(resumed);
-      }
+      assert.equal(children.length, childrenBeforeAnswer, "a lead-raised question opens fork-less — /answer spawns no process");
+      assert.equal(restarted.requests.length, 0, "opening a queued question is a local command, never a paid model turn");
+      const openedThreads = ask.loadThreadRegistryFile(ask.threadRegistryPath(restarted.sm.getSessionFile()));
+      assert.equal(openedThreads[0].status, "open", "the thread opens in place on the lead session, with no respondent to attach");
+      assert.equal(openedThreads[0].respondentAgentId, undefined, "no respondent is ever assigned on the fork-less lead-ask path");
+      assert.equal(openedThreads[0].forkResume, undefined, "no fork exists yet to capture a resume snapshot for");
+      // The removed discussion-fork-rehydration-across-generations loop used
+      // to also hand the drift/cache-override checks below a fresh live
+      // child to exercise; a plain task fork off the (still-live) restarted
+      // lead fills that same generic role now — none of what follows is
+      // specific to a discussion fork.
+      const restartedForkTool = restarted.session.agent.state.tools.find((t: any) => t.name === "ws-fork");
+      assert.ok(restartedForkTool);
+      const restartedForkResult = await restartedForkTool.execute("continuation", { prompt: "Continue after lead restart" });
+      assert.ok(JSON.parse(restartedForkResult.content[0].text).agent_id);
+      // `drifted` stays live (not stopped) here, deliberately: stopping its
+      // lead (`restarted`) cascades into `index.ts`'s shutdown handler
+      // (`persistShutdownAgentSnapshots` -> `stopAll()`), which stops every
+      // non-threadBound child registered under that lead's own registry —
+      // including this one. `restarted` is stopped once we are done using
+      // `drifted`, below.
       const drifted = children.at(-1);
       drifted.retention = "none";
       drifted.oracleSessionId = drifted.sm.getSessionId();
@@ -245,20 +269,25 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
       const driftCount = drifted.requests.length;
       await withEnv(drifted.env, async () => { drifted.api.setActiveTools([...drifted.api.getActiveTools()].reverse()); await drifted.session.prompt("must block drift"); });
       assert.equal(drifted.requests.length, driftCount);
+      await stop(restarted);
+      // Fork-less /answer costs no paid turn even with zero prior lead
+      // turns and under ambient extension auto-discovery (`discovered:
+      // true`) — there is no composed discussion-fork prefix left to test
+      // here (see the note above the restart scenario), only that opening
+      // still spawns nothing and manufactures no turn.
       const noPriorManager = sdk.SessionManager.create(directory, join(directory, "sessions"));
       const noPriorNow = new Date().toISOString();
       ask.saveThreadRegistryFile(ask.threadRegistryPath(noPriorManager.getSessionFile()), [{
-        threadId: "q1", title: "Before first turn", question: "Discuss without prior turn", entryId: noPriorManager.getLeafId(),
+        threadId: "q1", title: "Before first turn", question: "Answer without prior turn", entryId: noPriorManager.getLeafId(),
         status: "pending", origin: "lead-ask", createdAt: noPriorNow, touchedAt: noPriorNow,
       }]);
       const noPrior = await makeSession(noPriorManager, {}, undefined, "Never-paid explicit Ω\r\n  ", true);
+      const childrenBeforeNoPriorAnswer = children.length;
       await prompt(noPrior, "/answer");
-      const composed = children.at(-1);
-      const composedContext = composed.sm.getEntries().findLast((e: any) => e.customType === "ws-pi-fork-context").data.context;
-      assert.equal(composedContext.kind, "discussion");
-      assert.match(composed.requests[0].context.systemPrompt, /Never-paid explicit Ω\r\n  /);
-      assert.match(composed.requests[0].context.systemPrompt, /CHANGED GUIDE/);
-      assert.equal(noPrior.requests.length, 0, "no paid turn manufactured to capture an initial discussion prefix");
+      assert.equal(children.length, childrenBeforeNoPriorAnswer, "fork-less /answer spawns nothing even with no prior lead turn");
+      assert.equal(noPrior.requests.length, 0, "no paid turn manufactured to open a fork-less thread");
+      const noPriorThreads = ask.loadThreadRegistryFile(ask.threadRegistryPath(noPrior.sm.getSessionFile()));
+      assert.equal(noPriorThreads[0].status, "open");
       const legacyEnv = { WS_PI_SPAWN_ROLE: "fork", WS_PI_FORK_CONTEXT: "", WS_PI_FORK_AFFINITY: "", WS_PI_PARENT_SESSION_KEY: "legacy-parent" };
       writeFileSync(join(directory, "fail-key"), "fail");
       const failedLegacy = await makeSession(sdk.SessionManager.create(directory, join(directory, "sessions")), legacyEnv);

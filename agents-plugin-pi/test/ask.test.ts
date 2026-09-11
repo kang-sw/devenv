@@ -58,6 +58,12 @@ import {
   buildDiscussionForkDirectiveText,
   buildDiscussionForkInitialMessage,
   buildInjectionMessage,
+  buildQueuedAnswerInjectionMessage,
+  captureAskCommitHash,
+  buildAskAnchorLine,
+  withdrawQueuedQuestion,
+  deliverQueuedAnswer,
+  type WithdrawOutcome,
   captureForkResume,
   rehydrateForkRecord,
   getLeafEntryId,
@@ -140,9 +146,9 @@ function thread(overrides: Partial<ThreadRecord> = {}): ThreadRecord {
 }
 
 describe("tool names", () => {
-  test("retain identical registered names; fork role handlers refuse execution instead of hiding schemas", () => {
-    assert.equal(ASK_TOOL_NAME, "ws-ask");
-    assert.equal(RESOLVE_TOOL_NAME, "ws-resolve");
+  test("260911: renamed from ws-ask/ws-resolve; fork role handlers refuse execution instead of hiding schemas", () => {
+    assert.equal(ASK_TOOL_NAME, "ws-queue-question");
+    assert.equal(RESOLVE_TOOL_NAME, "ws-withdraw-question");
     assert.equal(FORK_EXCLUDED_TOOL_NAMES.size, 0);
   });
 });
@@ -502,41 +508,20 @@ describe("isEntryLive / extractEntryText / buildVerbatimExcerpt (§7 compaction 
   });
 });
 
-describe("addAskToolsIfLead (role-differentiated, never folded into computeLeadActiveTools)", () => {
-  test("the true top lead (role undefined) hides both owner-question tools and appends neither", () => {
-    assert.deepEqual(addAskToolsIfLead(["bash", ASK_TOOL_NAME, RESOLVE_TOOL_NAME], undefined), ["bash"]);
+describe("addAskToolsIfLead (role-differentiated, never folded into computeLeadActiveTools; 260911 lifts the tool-surface hide from ac998f77/a8cf1183/5f366eff)", () => {
+  test("the true top lead (role undefined) gains both tools", () => {
+    assert.deepEqual(addAskToolsIfLead(["bash"], undefined), ["bash", ASK_TOOL_NAME, RESOLVE_TOOL_NAME]);
   });
 
-  test("removes duplicate exact ws-ask/ws-resolve entries while preserving near matches, order, and input", () => {
-    const activeTools = [
-      "bash",
-      ASK_TOOL_NAME,
-      "ws-ask-extra",
-      RESOLVE_TOOL_NAME,
-      "ws-resolve-extra",
-      ASK_TOOL_NAME,
-      RESOLVE_TOOL_NAME,
-    ];
-    const result = addAskToolsIfLead(activeTools, undefined);
-    assert.deepEqual(result, ["bash", "ws-ask-extra", "ws-resolve-extra"]);
-    assert.deepEqual(activeTools, [
-      "bash",
-      ASK_TOOL_NAME,
-      "ws-ask-extra",
-      RESOLVE_TOOL_NAME,
-      "ws-resolve-extra",
-      ASK_TOOL_NAME,
-      RESOLVE_TOOL_NAME,
-    ]);
+  test("neither is duplicated when already present", () => {
+    const result = addAskToolsIfLead(["bash", ASK_TOOL_NAME], undefined);
+    assert.equal(result.filter((name) => name === ASK_TOOL_NAME).length, 1);
   });
 
-  test('a "fork"/"worker"/"explore" role hides both tools (a fork\'s only question path is ws-report-to-lead)', () => {
+  test('a "fork"/"worker"/"explore" role never gains them (a fork\'s only question path is ws-report-to-lead)', () => {
     for (const role of ["fork", "worker", "explore"] as const) {
-      const result = addAskToolsIfLead(
-        ["bash", ASK_TOOL_NAME, RESOLVE_TOOL_NAME, "ws-ask-extra", "ws-resolve-extra"],
-        role,
-      );
-      assert.deepEqual(result, ["bash", "ws-ask-extra", "ws-resolve-extra"], `role ${role} must not expose the owner-question tools`);
+      const result = addAskToolsIfLead(["bash"], role);
+      assert.deepEqual(result, ["bash"], `role ${role} must not gain the owner-question tools`);
     }
   });
 });
@@ -608,6 +593,58 @@ describe("buildInjectionMessage (§6 payload: context + original question + summ
     assert.ok(!message.includes("Context:"));
     assert.ok(!message.includes("Question:"));
     assert.ok(message.includes("we picked merge"));
+  });
+});
+
+describe("buildQueuedAnswerInjectionMessage (260911 D1/D3 fork-less return-path payload)", () => {
+  test("carries the answer, context, question and anchor, presented as the owner's own answer", () => {
+    const message = buildQueuedAnswerInjectionMessage("the background", "the question", "we picked merge", "Asked at: commit abc123, entry e7");
+    assert.ok(message.includes("the background"));
+    assert.ok(message.includes("the question"));
+    assert.ok(message.includes("we picked merge"));
+    assert.ok(message.includes("Asked at: commit abc123, entry e7"));
+    assert.match(message, /owner's authority/i);
+    assert.match(message, /rather than a new owner turn/i);
+  });
+
+  test("omits absent context/question/anchor/excerpt sections rather than emitting empty labels", () => {
+    const message = buildQueuedAnswerInjectionMessage(undefined, undefined, "we picked merge");
+    assert.ok(!message.includes("Context:"));
+    assert.ok(!message.includes("Question:"));
+    assert.ok(!message.includes("Asked at:"));
+    assert.ok(!message.includes("compacted"));
+    assert.ok(message.includes("we picked merge"));
+  });
+
+  test("includes the verbatim excerpt, framed as no-longer-live context, when given", () => {
+    const message = buildQueuedAnswerInjectionMessage(undefined, "the question", "we picked merge", undefined, "old dialogue verbatim");
+    assert.match(message, /no longer in your live context/i);
+    assert.ok(message.includes("old dialogue verbatim"));
+  });
+});
+
+describe("captureAskCommitHash / buildAskAnchorLine (260911 D3 return-path anchor)", () => {
+  test("captureAskCommitHash returns the short HEAD hash for a real git checkout", () => {
+    const hash = captureAskCommitHash(process.cwd());
+    assert.match(hash ?? "", /^[0-9a-f]{4,}$/);
+  });
+
+  test("captureAskCommitHash never throws — a non-git cwd degrades to undefined", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ws-pi-ask-nogit-"));
+    assert.equal(captureAskCommitHash(dir), undefined);
+  });
+
+  test("buildAskAnchorLine pairs both halves when present", () => {
+    assert.equal(buildAskAnchorLine("abc123", "e7"), "Asked at: commit abc123, entry e7");
+  });
+
+  test("buildAskAnchorLine degrades to whichever half is present", () => {
+    assert.equal(buildAskAnchorLine("abc123", undefined), "Asked at: commit abc123");
+    assert.equal(buildAskAnchorLine(undefined, "e7"), "Asked at: entry e7");
+  });
+
+  test("buildAskAnchorLine is undefined when neither half is present", () => {
+    assert.equal(buildAskAnchorLine(undefined, undefined), undefined);
   });
 });
 
@@ -995,16 +1032,17 @@ describe("registerAsk (fake pi)", () => {
     assert.equal(loadThreadRegistryFile(path)[0]?.status, "pending", "restart survival: pending is on disk before any answer");
 
     const res = await tools.get(RESOLVE_TOOL_NAME)!.execute("call-2", { question_id: "q1" }, undefined, undefined, ui.ctx);
-    assert.deepEqual(JSON.parse(res.content[0].text), { question_id: "q1", status: "closed" });
+    assert.deepEqual(JSON.parse(res.content[0].text), { question_id: "q1", status: "closed", outcome: "removed" });
     assert.equal(handle.threads.get("q1")!.status, "closed");
     assert.equal(loadThreadRegistryFile(path)[0]?.status, "closed");
     assert.equal(calls(), 2, "the merged refresh fires again on ws-resolve's close transition");
   });
 
-  test("I6: ws-resolve releases the respondent's threadBound on a REAL registry, not just the no-op guard", async () => {
+  test("I6: ws-resolve releases the respondent's threadBound on a REAL registry, not just the no-op guard (fork-raised — 260911's withdrawal concurrency contract is lead-ask-only; fork-raised keeps this unconditional-close/release behavior verbatim)", async () => {
     const { tools, handle, rpcRegistry } = setup();
     const ui = uiCtx("tui");
     await callAsk(tools, { title: "t", question: "q" }, ui.ctx);
+    handle.threads.get("q1")!.origin = "fork-raised";
     handle.threads.get("q1")!.respondentAgentId = "agent-7";
     const respondent = {
       agentId: "agent-7",
@@ -1041,6 +1079,62 @@ describe("registerAsk (fake pi)", () => {
       () => tools.get(RESOLVE_TOOL_NAME)!.execute("call-2", { question_id: "nope" }, undefined, undefined, uiCtx("tui").ctx),
       /unknown question_id "nope"/,
     );
+  });
+});
+
+describe("withdrawQueuedQuestion (260911 ws-withdraw-question's concurrency contract)", () => {
+  function handleWith(record: ThreadRecord) {
+    const handle = createThreadRegistryHandle();
+    handle.threads.set(record.threadId, record);
+    return handle;
+  }
+
+  test("a pending (unopened) lead-ask thread is removed immediately", () => {
+    const record = thread({ origin: "lead-ask", status: "pending" });
+    const outcome = withdrawQueuedQuestion(handleWith(record), undefined, record);
+    assert.equal(outcome, "removed");
+    assert.equal(record.status, "closed");
+  });
+
+  test("an open lead-ask thread (the owner has it open) defers the close rather than yanking the in-progress view", () => {
+    const record = thread({ origin: "lead-ask", status: "open" });
+    const outcome = withdrawQueuedQuestion(handleWith(record), undefined, record);
+    assert.equal(outcome, "deferred");
+    assert.equal(record.status, "open", "status stays open — the owner's view is not torn down");
+    assert.equal(record.withdrawnPending, true);
+  });
+
+  test("a dormant (already-answered) lead-ask thread is a no-op", () => {
+    const record = thread({ origin: "lead-ask", status: "dormant" });
+    const outcome = withdrawQueuedQuestion(handleWith(record), undefined, record);
+    assert.equal(outcome, "no-op");
+    assert.equal(record.status, "dormant");
+    assert.equal(record.withdrawnPending, undefined);
+  });
+
+  test("an already-closed (already-withdrawn) lead-ask thread is a no-op", () => {
+    const record = thread({ origin: "lead-ask", status: "closed" });
+    const outcome = withdrawQueuedQuestion(handleWith(record), undefined, record);
+    assert.equal(outcome, "no-op");
+    assert.equal(record.status, "closed");
+  });
+
+  test("a fork-raised thread closes unconditionally and releases the respondent's threadBound (unchanged pre-260911 ws-resolve behavior; the concurrency contract above is lead-ask-only)", () => {
+    const record = thread({ origin: "fork-raised", status: "open", respondentAgentId: "agent-7" });
+    const respondent = { agentId: "agent-7", threadBound: true } as unknown as RpcAgentRecord;
+    const rpcRegistry: RpcAgentRegistry = new Map([["agent-7", respondent]]);
+    const outcome = withdrawQueuedQuestion(handleWith(record), rpcRegistry, record);
+    assert.equal(outcome, "removed");
+    assert.equal(record.status, "closed");
+    assert.equal(respondent.threadBound, false);
+  });
+
+  test("a fork-raised thread with no respondent yet still closes without touching the registry", () => {
+    const record = thread({ origin: "fork-raised", status: "pending" });
+    const rpcRegistry: RpcAgentRegistry = new Map();
+    const outcome = withdrawQueuedQuestion(handleWith(record), rpcRegistry, record);
+    assert.equal(outcome, "removed");
+    assert.equal(rpcRegistry.size, 0);
   });
 });
 
@@ -1360,6 +1454,114 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
         assert.equal(record.status, status);
       }
     });
+  });
+});
+
+describe("deliverQueuedAnswer (260911 D1: the fork-less lead-ask send path — no respondent to stop or summarize)", () => {
+  function setup() {
+    const sent: Array<{ message: unknown; options: unknown }> = [];
+    leadIdleRef.current = () => true;
+    const handlers = new Map<string, () => void>();
+    const pi = {
+      on: (event: string, fn: () => void) => handlers.set(event, fn),
+      sendUserMessage: () => handlers.get("agent_start")?.(),
+      sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }),
+    } as unknown as ExtensionAPI;
+    registerPushFlush(pi, { delayMs: () => 10 });
+    const handle = createThreadRegistryHandle();
+    const dir = mkdtempSync(join(tmpdir(), "ws-pi-ask-test-"));
+    const path = join(dir, "session.jsonl.ws-threads.json");
+    hydrateThreadRegistry(handle, path);
+    const record = thread({ threadId: "q1", question: "Which anchor?", context: "background", origin: "lead-ask" });
+    handle.threads.set(record.threadId, record);
+    return { pi, sent, handle, path, record };
+  }
+
+  test("delivers one custom message carrying the answer, admitted as followUp then released as steering", () => {
+    const { pi, sent, handle, record } = setup();
+    deliverQueuedAnswer(pi, handle, record, "we take the second anchor");
+
+    assert.equal(sent.length, 1);
+    const msg = sent[0].message as { customType: string; content: string; display: boolean; details: { threadId: string; title: string } };
+    assert.equal(msg.customType, "ws-thread-summary");
+    assert.equal(msg.display, true);
+    assert.equal(msg.details.threadId, "q1");
+    assert.equal(msg.details.title, record.title);
+    assert.ok(msg.content.includes("we take the second anchor"));
+    assert.deepEqual(sent[0].options, { deliverAs: "steer", triggerTurn: true });
+  });
+
+  test("the thread goes dormant (retained, not deleted), is persisted, and any deferred withdrawal is cleared", () => {
+    const { pi, handle, path, record } = setup();
+    record.withdrawnPending = true;
+    deliverQueuedAnswer(pi, handle, record, "decided");
+
+    assert.equal(record.status, "dormant");
+    assert.equal(record.withdrawnPending, false, "the answer was delivered — a deferred withdrawal must not also fire");
+    assert.ok(handle.threads.has("q1"), "dormant means retained and reopenable");
+    assert.equal(loadThreadRegistryFile(path)[0]?.status, "dormant");
+  });
+
+  test("carries the D3 anchor (ask-time commit hash + entry_id) when the record has one", () => {
+    const { pi, sent, handle, record } = setup();
+    record.askCommitHash = "abc123";
+    record.entryId = "entry-9";
+    deliverQueuedAnswer(pi, handle, record, "decided");
+    const msg = sent[0].message as { content: string };
+    assert.ok(msg.content.includes("Asked at: commit abc123, entry entry-9"));
+  });
+
+  test("omits the anchor line entirely when neither half is present", () => {
+    const { pi, sent, handle, record } = setup();
+    deliverQueuedAnswer(pi, handle, record, "decided");
+    const msg = sent[0].message as { content: string };
+    assert.ok(!msg.content.includes("Asked at:"));
+  });
+
+  test("no live entries/branch available (headless, no sessionManager) still delivers — the excerpt is simply omitted", () => {
+    const { pi, sent, handle, record } = setup();
+    record.entryId = "entry-9";
+    deliverQueuedAnswer(pi, handle, record, "decided", undefined);
+    assert.equal(sent.length, 1);
+    const msg = sent[0].message as { content: string };
+    assert.ok(!msg.content.includes("no longer in your live context"));
+  });
+
+  test("attaches a verbatim excerpt when the anchored entry has fallen off the live branch (post-compaction)", () => {
+    const { pi, sent, handle, record } = setup();
+    record.entryId = "entry-9";
+    const sessionManager = {
+      buildContextEntries: () => [{ id: "entry-10" }],
+      getBranch: (id: string) => (id === "entry-9" ? [{ id: "entry-9", role: "user", content: [{ type: "text", text: "old question turn" }] } as never] : []),
+    };
+    deliverQueuedAnswer(pi, handle, record, "decided", sessionManager);
+    assert.equal(sent.length, 1);
+    const msg = sent[0].message as { content: string };
+    assert.match(msg.content, /no longer in your live context/i);
+  });
+
+  test("omits the excerpt when the anchored entry is still on the live branch", () => {
+    const { pi, sent, handle, record } = setup();
+    record.entryId = "entry-9";
+    const sessionManager = {
+      buildContextEntries: () => [{ id: "entry-9" }],
+      getBranch: () => [],
+    };
+    deliverQueuedAnswer(pi, handle, record, "decided", sessionManager);
+    const msg = sent[0].message as { content: string };
+    assert.ok(!msg.content.includes("no longer in your live context"));
+  });
+
+  test("a session-tree read failure degrades to no excerpt rather than blocking delivery", () => {
+    const { pi, sent, handle, record } = setup();
+    record.entryId = "entry-9";
+    const sessionManager = {
+      buildContextEntries: () => { throw new Error("boom"); },
+      getBranch: () => [],
+    };
+    deliverQueuedAnswer(pi, handle, record, "decided", sessionManager as never);
+    assert.equal(sent.length, 1, "the answer still arrives");
+    assert.equal(handle.threads.get("q1")!.status, "dormant");
   });
 });
 

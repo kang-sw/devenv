@@ -468,6 +468,18 @@ export class ConversationViewComponent implements Component {
     return this.scrollView.isFollowingEnd;
   }
 
+  /**
+   * `260911` (ws-pi async question queue): the `Editor`'s current unsent
+   * buffer text, `""` outside `"interactive"` mode or before the `Editor`
+   * exists. Read-only — a host needs this to decide whether an in-progress,
+   * unsubmitted answer must still be delivered when the view closes (e.g.
+   * the fork-less lead-ask withdrawal contract in `ask.ts`), without this
+   * component itself knowing anything about that policy.
+   */
+  getEditorText(): string {
+    return this.editor?.getText() ?? "";
+  }
+
   /** Appends one item to the transcript and requests a repaint. */
   appendItem(item: ConversationItem): void {
     this.items.push(item);

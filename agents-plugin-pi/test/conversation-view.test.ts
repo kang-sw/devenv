@@ -1202,3 +1202,24 @@ describe("ConversationViewComponent — working marker location (F2)", () => {
     assert.ok(streaming.some((l) => l.includes("answering now")));
   });
 });
+
+describe("ConversationViewComponent — getEditorText (260911 fork-less lead-ask withdrawal contract)", () => {
+  test("reads the Editor's current unsent draft text", () => {
+    const { channel } = fakeChannel();
+    const editor = new FakeEditor();
+    const view = new ConversationViewComponent(fakeTui(), {
+      channel,
+      primitives: { Editor: class { constructor() { return editor as never; } } as never },
+    });
+    view.setMode("interactive");
+    assert.equal(view.getEditorText(), "", "nothing typed yet");
+    editor.setText("an in-progress answer");
+    assert.equal(view.getEditorText(), "an in-progress answer");
+  });
+
+  test("is empty before the Editor exists — outside interactive mode, or before any mode has been set", () => {
+    const { channel } = fakeChannel();
+    const view = new ConversationViewComponent(fakeTui(), { channel });
+    assert.equal(view.getEditorText(), "", "no Editor has been constructed yet");
+  });
+});

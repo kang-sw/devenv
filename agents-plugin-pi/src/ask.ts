@@ -57,9 +57,39 @@
  * `createApprovalRelay` is tested in). Only the genuinely live glue
  * (`registerThreadCommands`, the lazy discussion-fork spawn, the overlay
  * attach) is left to the plan's tmux/owner-runbook gates.
+ *
+ * `260911-feat-ws-pi-async-question-queue` Phase 1 (fork-less lead-raised
+ * redesign, resolving `260908`'s cost concern by redesign rather than
+ * removal): `ws-ask`/`ws-resolve` are renamed `ws-queue-question`/
+ * `ws-withdraw-question` (D4 — a contract change, not cosmetic: the old name
+ * drove the model toward "ask now"). Entry B above is now genuinely
+ * fork-less end to end — `/answer` on a `"lead-ask"` thread never reaches
+ * `ensureRespondent`'s discussion-fork spawn branch at all (see
+ * `openLeadAskThread`, dispatched from `openThread`); the owner's one prose
+ * reply is delivered straight to the lead via `deliverQueuedAnswer` (the
+ * existing `followUp` custom-message path, `sendToLead`, unchanged), carrying
+ * the D3 return-path anchor (`ThreadRecord.askCommitHash` + the existing
+ * `entryId`, plus a verbatim excerpt when that entry has since fallen behind
+ * a compaction boundary) so the lead can recover where the question came
+ * from. The pre-redesign discussion-fork machinery this bypasses
+ * (`ensureRespondent`'s spawn branch, `buildDiscussionForkDirectiveText`/
+ * `buildDiscussionForkInitialMessage`, `resolveDoneAction`/
+ * `summarizeThenClose`/`runDoneAction`'s "summarize" branch,
+ * `closeThreadOnDone`/`handleRespondentFinalReport`'s `"lead-ask"` branches)
+ * is deliberately left in place rather than deleted: no live code path can
+ * reach it for a `"lead-ask"` thread anymore (fork-raised always already has
+ * a `respondentAgentId` at registration, so those branches were only ever
+ * reachable for `"lead-ask"`), but it is cheap, well-tested insurance against
+ * a persisted pre-redesign registry entry rather than churn worth the risk
+ * of removing. The `ws-withdraw-question` model-side withdrawal/concurrency
+ * contract (`withdrawQueuedQuestion`) is new and `"lead-ask"`-specific;
+ * `"fork-raised"` keeps its original unconditional-close behavior verbatim.
+ * The fork-raised path, its overlay, and `openThread`'s existing tail are
+ * otherwise untouched — this ticket is scoped to the lead-raised path only.
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
@@ -102,11 +132,22 @@ import { parseTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./age
 // filesystem/subprocess/live `pi` session involved.
 // ---------------------------------------------------------------------------
 
-/** Lead-facing verb-table tool name (pi-lead-guide.md): register an owner question. */
-export const ASK_TOOL_NAME = "ws-ask";
+/**
+ * Lead-facing verb-table tool name (pi-lead-guide.md): queue an async owner
+ * question. `260911` renamed this from `ws-ask` — a contract change (async /
+ * non-blocking / "answer when ready"), not a cosmetic one: the old name drove
+ * the model toward "ask now" framing. See this file's header for the
+ * fork-less redesign this rename ships with.
+ */
+export const ASK_TOOL_NAME = "ws-queue-question";
 
-/** Lead-facing verb-table tool name: self-resolve a still-pending owner question. */
-export const RESOLVE_TOOL_NAME = "ws-resolve";
+/**
+ * Lead-facing verb-table tool name: withdraw a still-pending queued question.
+ * `260911` renamed this from `ws-resolve` for the same reason as
+ * `ASK_TOOL_NAME` — "withdraw a queued question" reads correctly against the
+ * new async-queue framing where `ws-resolve` did not.
+ */
+export const RESOLVE_TOOL_NAME = "ws-withdraw-question";
 
 /** `pi.sendMessage` custom-message type for a closed discussion thread's summary (§6). */
 export const THREAD_SUMMARY_CUSTOM_TYPE = "ws-thread-summary";
@@ -231,6 +272,16 @@ export interface ThreadRecord {
    * (§7 / the plan's `spawner.ts#L1695` finding).
    */
   entryId?: string;
+  /**
+   * D3 return-path anchor (`260911`): a best-effort short `git rev-parse
+   * --short HEAD` captured at `ws-queue-question` ask time, paired with
+   * `entryId` on the return-path injection (`deliverQueuedAnswer` /
+   * `buildAskAnchorLine`) so the lead can recover where a queued question
+   * came from even past a compaction boundary. `"lead-ask"`-origin only;
+   * `undefined` outside a git worktree or on any git-command failure — a
+   * missing anchor must never block registering the question.
+   */
+  askCommitHash?: string;
   status: ThreadStatus;
   /**
    * Which of §1's two entries registered this thread. Load-bearing at
@@ -256,6 +307,17 @@ export interface ThreadRecord {
   createdAt: string;
   /** Last open/answer/close touch — orders the "reopen the most recent" shortcut. */
   touchedAt: string;
+  /**
+   * D-model-side-withdrawal (`260911`, `"lead-ask"`-origin only): set when
+   * `ws-withdraw-question` is called while the owner has this thread's
+   * fork-less answer view open (`status === "open"`) — the removal cannot be
+   * applied immediately without yanking an in-progress edit, so it is
+   * deferred to whenever that view closes (`openLeadAskThread`'s
+   * `onEscape`). Always `false`/absent otherwise; normalized back to
+   * `false` on hydrate (see `hydrateThreadRegistry`) since no view can
+   * survive a lead-process restart.
+   */
+  withdrawnPending?: boolean;
 }
 
 /**
@@ -600,18 +662,30 @@ export function buildVerbatimExcerpt(entryId: string, branch: readonly { id: str
 }
 
 /**
- * Role-differentiated `ws-ask`/`ws-resolve` active-tools shaping, identical
- * in shape to `fork.ts`'s `addForkToolIfLead` and kept as its own function
- * for the same reason: `execute-gateway.ts`'s shared
+ * Role-differentiated `ws-queue-question`/`ws-withdraw-question` active-tools
+ * shaping, identical in shape to `fork.ts`'s `addForkToolIfLead` and kept as
+ * its own function for the same reason: `execute-gateway.ts`'s shared
  * `computeLeadActiveTools`/`LEAD_ADDED_TOOL_NAMES` are applied to lead AND
  * fork roles alike, so folding these two in there would hand a fork the very
- * tools `FORK_EXCLUDED_TOOL_NAMES` exists to keep away from it. Both tools
- * are removed from every role's active list; this helper appends neither.
- * The role parameter remains part of the role-differentiated call shape.
+ * tools `FORK_EXCLUDED_TOOL_NAMES` exists to keep away from it.
+ *
+ * `260911`: lifts the temporary hide (`ac998f77`/`a8cf1183`, superseded here
+ * by the fork-less redesign) as part of landing the fork-less lead-raised
+ * path — this is a re-enable of the tool surface, not of the old
+ * fork-spawning behavior it used to drive. The true top lead (`role ===
+ * undefined`) gains both tools (deduped, appended only if missing); every
+ * other role's active list passes through unchanged, since a fork never had
+ * them appended in the first place (its handler-level refusal in
+ * `registerAsk`'s `execute()` is the actual enforcement — see this file's
+ * header's golden-rule comment).
  */
 export function addAskToolsIfLead(activeTools: readonly string[], role: SpawnRole | undefined): string[] {
-  void role;
-  return activeTools.filter((name) => name !== ASK_TOOL_NAME && name !== RESOLVE_TOOL_NAME);
+  if (role !== undefined) return [...activeTools];
+  const result = [...activeTools];
+  for (const name of [ASK_TOOL_NAME, RESOLVE_TOOL_NAME]) {
+    if (!result.includes(name)) result.push(name);
+  }
+  return result;
 }
 
 /**
@@ -688,6 +762,42 @@ export function buildInjectionMessage(context: string | undefined, question: str
     lines.push("", `Question: ${question.trim()}`);
   }
   lines.push("", "Summary of what was decided:", summary.trim());
+  return lines.join("\n");
+}
+
+/**
+ * `260911` D1/D3 fork-less return-path payload: `context + original question
+ * + the owner's own prose answer`, in the same "carries owner authority"
+ * spirit as `buildInjectionMessage` above (which this does not replace — see
+ * this file's header comment), extended with the D3 anchor line (ask-time
+ * short commit hash / `entry_id`) and, when that entry has since fallen
+ * behind a compaction boundary, the verbatim excerpt around it — so the lead
+ * can recover where the question came from even after losing the live
+ * context it was asked in. Delivered the same way, as a Pi CUSTOM message
+ * (`THREAD_SUMMARY_CUSTOM_TYPE`) via `sendToLead`'s `followUp` path.
+ */
+export function buildQueuedAnswerInjectionMessage(
+  context: string | undefined,
+  question: string | undefined,
+  answer: string,
+  anchor?: string,
+  excerpt?: string,
+): string {
+  const lines: string[] = [
+    "The owner answered a queued question. This is their own prose reply — it carries the owner's authority, delivered as a queued-question answer rather than a new owner turn.",
+  ];
+  if (anchor) lines.push("", anchor);
+  if (context && context.trim().length > 0) lines.push("", `Context: ${context.trim()}`);
+  if (question && question.trim().length > 0) lines.push("", `Question: ${question.trim()}`);
+  if (excerpt && excerpt.trim().length > 0) {
+    lines.push(
+      "",
+      "The part of the conversation this refers to is no longer in your live context (it was compacted). Here it is verbatim:",
+      "",
+      excerpt.trim(),
+    );
+  }
+  lines.push("", "Owner's answer:", answer.trim());
   return lines.join("\n");
 }
 
@@ -769,6 +879,38 @@ export function getLeafEntryId(toolCtx: unknown): string | undefined {
   return typeof id === "string" && id.length > 0 ? id : undefined;
 }
 
+/**
+ * D3 return-path anchor (`260911`): a best-effort short HEAD commit hash,
+ * captured at `ws-queue-question` ask time and stored on
+ * `ThreadRecord.askCommitHash`. Never throws — matches this file's
+ * never-hard-fail convention (`loadThreadRegistryFile`/`saveThreadRegistryFile`):
+ * a non-git `cwd` or missing `git` binary simply omits the anchor rather than
+ * failing the tool call that registers the question.
+ */
+export function captureAskCommitHash(cwd: string): string | undefined {
+  try {
+    const raw = execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const trimmed = raw.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * D3 return-path anchor line: pairs the ask-time short commit hash with the
+ * mechanically-recorded `entryId` so the lead can recover where a queued
+ * question came from even past its own compaction boundary. `undefined`
+ * (the line is omitted entirely) when neither half is present.
+ */
+export function buildAskAnchorLine(commitHash: string | undefined, entryId: string | undefined): string | undefined {
+  if (!commitHash && !entryId) return undefined;
+  const parts: string[] = [];
+  if (commitHash) parts.push(`commit ${commitHash}`);
+  if (entryId) parts.push(`entry ${entryId}`);
+  return `Asked at: ${parts.join(", ")}`;
+}
+
 // ---------------------------------------------------------------------------
 // IO glue: the persisted registry file, the widget, tool/command
 // registration, and the lazy discussion-fork spawn/attach path. Not unit
@@ -834,6 +976,16 @@ export function hydrateThreadRegistry(handle: ThreadRegistryHandle, path: string
       // and normalize it at hydration rather than waiting for /answer.
       record.forkResume = captureForkResume(rehydrateForkRecord(record.respondentAgentId, record.forkResume));
     }
+    // `260911`: no fork-less lead-ask answer VIEW can survive a lead-process
+    // restart, so a persisted "open" lead-ask thread reverts to "pending"
+    // (still answerable via a fresh /answer) — unless a model withdrawal was
+    // left deferred behind it, in which case that removal now finalizes
+    // since there is no longer a view whose in-progress edit it must not
+    // yank (see `withdrawQueuedQuestion`/`ThreadRecord.withdrawnPending`).
+    if (record.origin === "lead-ask" && record.status === "open") {
+      record.status = record.withdrawnPending ? "closed" : "pending";
+    }
+    record.withdrawnPending = false;
     handle.threads.set(record.threadId, record);
   }
 }
@@ -949,6 +1101,58 @@ export function handleForkRaisedQuestion(
  * `ws-ask` REGISTERS ONLY — no spawn (§1/§9). The discussion fork is spawned
  * lazily by `/answer`, at the lead's tip at OPEN time.
  */
+/** `withdrawQueuedQuestion`'s result, echoed in the tool's own JSON reply. */
+export type WithdrawOutcome = "removed" | "deferred" | "no-op";
+
+/**
+ * `ws-withdraw-question`'s model-side withdrawal, keyed on the thread's
+ * CURRENT owner-facing state. Both this call and the owner's answer view run
+ * in the same adapter process, so the two are already serialized — no
+ * separate lock is needed.
+ *
+ * - `"fork-raised"`: unchanged from the pre-`260911` `ws-resolve` — an
+ *   unconditional immediate close, releasing the thread-lifetime bind so the
+ *   respondent rejoins the lead's fan-in. This path is out of `260911`'s
+ *   scope.
+ * - `"lead-ask"` `"pending"` (no answer view open): removed immediately —
+ *   the widget's pending count decrements right away.
+ * - `"lead-ask"` `"open"` (the owner has the fork-less answer view open right
+ *   now): the removal cannot be applied without yanking an in-progress edit,
+ *   so it is deferred (`withdrawnPending`) to whenever that view closes
+ *   (`openLeadAskThread`'s `onEscape`) — an already-typed, unsubmitted answer
+ *   is still delivered to the lead at that point, never silently discarded.
+ * - `"lead-ask"` `"dormant"`/`"closed"` (already answered, or already
+ *   withdrawn): a no-op — the answer, if any, was already injected.
+ */
+export function withdrawQueuedQuestion(
+  handle: ThreadRegistryHandle,
+  rpcRegistry: RpcAgentRegistry | undefined,
+  thread: ThreadRecord,
+): WithdrawOutcome {
+  if (thread.origin === "fork-raised") {
+    thread.status = "closed";
+    thread.touchedAt = nowIso();
+    if (thread.respondentAgentId && rpcRegistry) bindThread(rpcRegistry, thread.respondentAgentId, false);
+    persistThreads(handle);
+    refreshAgentWidget();
+    return "removed";
+  }
+  if (thread.status === "dormant" || thread.status === "closed") return "no-op";
+  if (thread.status === "open") {
+    thread.withdrawnPending = true;
+    thread.touchedAt = nowIso();
+    persistThreads(handle);
+    refreshAgentWidget();
+    return "deferred";
+  }
+  // "pending" — never opened.
+  thread.status = "closed";
+  thread.touchedAt = nowIso();
+  persistThreads(handle);
+  refreshAgentWidget();
+  return "removed";
+}
+
 export function registerAsk(
   pi: ExtensionAPI,
   handle: ThreadRegistryHandle,
@@ -959,7 +1163,7 @@ export function registerAsk(
     name: ASK_TOOL_NAME,
     label: ASK_TOOL_NAME,
     description:
-      "Register a question for the owner without blocking or interrupting them. Returns {question_id} immediately and spawns nothing — the owner opens it themselves with /answer <id>, which is when a discussion thread is created. Use it for a decision only the owner can make; keep working on anything that does not depend on the answer. Call ws-resolve if you work the answer out yourself before they open it.",
+      "Queue a question for the owner to answer async, without blocking or interrupting them. Returns {question_id} immediately and spawns nothing. The owner opens it themselves with /answer <id> whenever they're ready and replies in prose; their reply is delivered to you as an injected message once you're idle — no discussion thread, no live back-and-forth. Use it for a decision only the owner can make; keep working on anything that does not depend on the answer. Call ws-withdraw-question if you work the answer out yourself before they open it.",
     parameters: {
       type: "object",
       properties: {
@@ -985,6 +1189,8 @@ export function registerAsk(
         question: p.question,
         context: p.context,
         entryId: getLeafEntryId(toolCtx),
+        // D3 return-path anchor: best-effort, never blocks registration.
+        askCommitHash: captureAskCommitHash(process.cwd()),
         status: "pending",
         origin: "lead-ask",
         createdAt: now,
@@ -1018,11 +1224,11 @@ export function registerAsk(
     name: RESOLVE_TOOL_NAME,
     label: RESOLVE_TOOL_NAME,
     description:
-      "Withdraw a question you registered with ws-ask because you no longer need the owner's answer. Removes it from their pending count. Does not notify them and injects nothing — you already know the answer.",
+      "Withdraw a question you queued with ws-queue-question because you no longer need the owner's answer. A still-pending question is removed from their count immediately; one the owner already has open is only removed once they close it (an in-progress edit is never yanked, and any content they already typed is still delivered to you); one already answered is a no-op. Never notifies the owner and injects nothing on its own — you already know the answer.",
     parameters: {
       type: "object",
       properties: {
-        question_id: { type: "string", description: "The question_id ws-ask returned." },
+        question_id: { type: "string", description: "The question_id ws-queue-question returned." },
       },
       required: ["question_id"],
     } as never,
@@ -1035,15 +1241,8 @@ export function registerAsk(
       if (!record) {
         throw new Error(`ws-pi-agent: ${RESOLVE_TOOL_NAME}: unknown question_id "${p.question_id}"`);
       }
-      record.status = "closed";
-      record.touchedAt = nowIso();
-      // The thread is closed for good, so release the thread-lifetime bind on
-      // its respondent (a fork-raised thread's fork keeps running and rejoins
-      // the lead's fan-in).
-      if (record.respondentAgentId && rpcRegistry) bindThread(rpcRegistry, record.respondentAgentId, false);
-      persistThreads(handle);
-      refreshAgentWidget();
-      return { content: [{ type: "text", text: JSON.stringify({ question_id: record.threadId, status: record.status }) }] };
+      const outcome = withdrawQueuedQuestion(handle, rpcRegistry, record);
+      return { content: [{ type: "text", text: JSON.stringify({ question_id: record.threadId, status: record.status, outcome }) }] };
     },
   }, toolPreviewTuiRef);
 }
@@ -1144,6 +1343,59 @@ export function injectDiscussionSummary(
   }
 
   thread.status = "dormant";
+  thread.touchedAt = nowIso();
+  persistThreads(handle);
+  refreshAgentWidget();
+}
+
+/**
+ * `260911` D1: delivers a `"lead-ask"` thread's owner-authored answer
+ * straight to the lead — fork-less end to end, so there is no respondent to
+ * stop or summarize (contrast `injectDiscussionSummary` above, kept for the
+ * pre-redesign path this bypasses — see this file's header). Sent through
+ * the same `followUp` custom-message path (`sendToLead`, unchanged from
+ * `260904` §6), extended with the D3 return-path anchor (ask-time short
+ * commit hash / `entry_id`) and, when that entry has since fallen behind a
+ * compaction boundary, the verbatim excerpt around it (the same
+ * `isEntryLive`/`buildVerbatimExcerpt` mechanism `ensureRespondent` used to
+ * run at fork-SPAWN time — now run here, at answer-DELIVERY time, since a
+ * fork-less thread never spawns).
+ *
+ * Terminal state is `"dormant"` (delivered, retained) regardless of how
+ * delivery was triggered — a normal submit, or `openLeadAskThread`'s
+ * `onEscape` still-delivering an in-progress, already-typed answer behind a
+ * deferred model withdrawal (`ThreadRecord.withdrawnPending`, cleared here).
+ */
+export function deliverQueuedAnswer(
+  pi: ExtensionAPI,
+  handle: ThreadRegistryHandle,
+  thread: ThreadRecord,
+  answer: string,
+  sessionManager?: { buildContextEntries?: () => { id: string }[]; getBranch?: (id: string) => { id: string }[] },
+): void {
+  let excerpt: string | undefined;
+  if (thread.entryId && sessionManager) {
+    try {
+      const liveEntries = sessionManager.buildContextEntries?.() ?? [];
+      if (!isEntryLive(thread.entryId, liveEntries)) {
+        excerpt = buildVerbatimExcerpt(thread.entryId, sessionManager.getBranch?.(thread.entryId) ?? []);
+      }
+    } catch {
+      // A session-tree read failure must not block delivering the answer —
+      // the lead simply gets it without the excerpt.
+    }
+  }
+  const anchor = buildAskAnchorLine(thread.askCommitHash, thread.entryId);
+  const message = {
+    customType: THREAD_SUMMARY_CUSTOM_TYPE,
+    content: buildQueuedAnswerInjectionMessage(thread.context, thread.question, answer, anchor, excerpt),
+    display: true,
+    details: { threadId: thread.threadId, title: thread.title },
+  };
+  sendToLead(pi, message, "followUp");
+
+  thread.status = "dormant";
+  thread.withdrawnPending = false;
   thread.touchedAt = nowIso();
   persistThreads(handle);
   refreshAgentWidget();
@@ -1599,6 +1851,140 @@ export function buildOverlayHandle(
 }
 
 /**
+ * `260911` D1: opens (or reopens) a `"lead-ask"` thread's fork-less answer
+ * view — dispatched from `openThread` before it ever reaches
+ * `ensureRespondent`'s discussion-fork spawn branch, so nothing is spawned or
+ * reattached here. Reuses `ConversationViewComponent` exactly as `openThread`
+ * does for the fork-raised chat (§5 "reuse, do not rebuild"), with a local,
+ * agent-less `ConversationChannel` in place of `createForkChannel`: there is
+ * no respondent to stream events from or report liveness for, and a `send`
+ * IS the final answer — `deliverQueuedAnswer` fires and the view closes.
+ *
+ * This is an interim single-question presentation only; Phase 2's sequential
+ * prose-modal tier (D3) replaces it as the owner-facing surface for a BATCH
+ * of queued questions, wired onto the same `deliverQueuedAnswer`/
+ * `withdrawQueuedQuestion` contract this phase ships.
+ *
+ * Terminal-state guard: only `"pending"`/`"open"` are answerable — an already
+ * `"dormant"` (delivered) or `"closed"` (withdrawn) thread notifies instead
+ * of reopening, since re-answering it would re-inject a stale reply.
+ */
+async function openLeadAskThread(
+  pi: ExtensionAPI,
+  ctx: AskUiCtx & { ui?: { custom?: unknown }; sessionManager?: unknown },
+  handle: ThreadRegistryHandle,
+  thread: ThreadRecord,
+): Promise<void> {
+  if (thread.status !== "pending" && thread.status !== "open") {
+    notify(ctx, `ws: question ${thread.threadId} was already answered or withdrawn.`, "warning");
+    return;
+  }
+
+  thread.status = "open";
+  thread.touchedAt = nowIso();
+  persistThreads(handle);
+  refreshAgentWidget();
+
+  // One overlay at a time (§5): the previous one is closed first.
+  activeOverlay?.handle.close();
+  activeOverlay = undefined;
+  const token = ++overlayToken;
+
+  const sessionManager = (ctx as { sessionManager?: { buildContextEntries?: () => { id: string }[]; getBranch?: (id: string) => { id: string }[] } })
+    .sessionManager;
+
+  let delivered = false;
+  let closeView: (() => void) | undefined;
+  const channel: ConversationChannel = {
+    onEvent: () => () => {
+      // No respondent ever exists for a fork-less thread — nothing to
+      // subscribe to, so unsubscribe is a no-op.
+    },
+    liveness: () => "settled",
+    async send(text) {
+      delivered = true;
+      deliverQueuedAnswer(pi, handle, thread, text, sessionManager);
+      closeView?.();
+    },
+  };
+
+  const initialItems = buildInitialConversationItems(thread);
+  const headerHint = buildThreadHeaderHint(thread);
+  let markdownTheme: MarkdownTheme | undefined;
+  try {
+    markdownTheme = getMarkdownTheme();
+  } catch {
+    // best effort — see `openThread`'s identical try/catch for why.
+  }
+
+  try {
+    await (ctx as unknown as AskCustomUiCtx).ui.custom<undefined>(
+      async (tui, theme, keybindings, done) => {
+        const hostPiTui = await loadHostPiTui();
+        let overlayHandle: OverlayHandle | undefined;
+        const component: ConversationViewComponent = new ConversationViewComponent(tui, {
+          channel,
+          initialItems,
+          headerHint,
+          markdownTheme,
+          border: true,
+          viewportHeight: () => conversationOverlayHeight(tui),
+          keybindings: keybindings as { matches(data: string, id: string): boolean },
+          userLineBg: (text) => theme?.bg?.("userMessageBg", text) ?? text,
+          toolTextFg: (text) => theme?.fg?.("muted", text) ?? text,
+          workingTextFg: (text) => theme?.fg?.("dim", text) ?? text,
+          primitives: { ScrollView: hostPiTui.ScrollView, Markdown: hostPiTui.Markdown, Text: hostPiTui.Text, Editor: hostPiTui.Editor },
+          onEscape: () => {
+            if (!delivered) {
+              // D-model-side-withdrawal: never yank an in-progress edit. If
+              // the model withdrew this while the view was open, an
+              // already-typed (but unsubmitted) answer is still delivered
+              // now; an empty one means the withdrawal finalizes with
+              // nothing to deliver.
+              const draft = component.getEditorText().trim();
+              if (thread.withdrawnPending) {
+                if (draft.length > 0) {
+                  delivered = true;
+                  deliverQueuedAnswer(pi, handle, thread, draft, sessionManager);
+                } else {
+                  thread.withdrawnPending = false;
+                  thread.status = "closed";
+                  thread.touchedAt = nowIso();
+                  persistThreads(handle);
+                  refreshAgentWidget();
+                }
+              } else {
+                // Nothing answered yet — stays pending for a later /answer.
+                thread.status = "pending";
+                thread.touchedAt = nowIso();
+                persistThreads(handle);
+                refreshAgentWidget();
+              }
+            }
+            overlayHandle?.close();
+          },
+          // No fork to summarize (D1) — /done just exits, same as an Esc
+          // with nothing typed.
+          onDone: () => overlayHandle?.close(),
+          onItemsChange: (items) => {
+            thread.transcript = items.length > THREAD_TRANSCRIPT_CAP ? items.slice(-THREAD_TRANSCRIPT_CAP) : [...items];
+            persistThreads(handle);
+          },
+        });
+        component.setMode("interactive");
+        overlayHandle = { close: () => done(undefined), closeWithSummary: () => done(undefined) };
+        closeView = () => overlayHandle?.close();
+        activeOverlay = { token, threadId: thread.threadId, handle: overlayHandle };
+        return component;
+      },
+      { overlay: true, overlayOptions: { width: "80%", maxHeight: "80%", anchor: "center" } },
+    );
+  } finally {
+    if (activeOverlay?.token === token) activeOverlay = undefined;
+  }
+}
+
+/**
  * Opens (or reopens) one thread's overlay chat. Never auto-popped — only a
  * `/answer`, or the reopen shortcut, reaches here.
  */
@@ -1613,6 +1999,14 @@ async function openThread(
 ): Promise<void> {
   if (ctx.mode !== "tui") {
     notify(ctx, "ws: discussion threads need interactive mode.", "warning");
+    return;
+  }
+
+  // `260911` D1: a `"lead-ask"` thread is fork-less end to end — it never
+  // reaches `ensureRespondent`'s discussion-fork spawn branch below. See
+  // `openLeadAskThread` and this file's header comment.
+  if (thread.origin === "lead-ask") {
+    await openLeadAskThread(pi, ctx, handle, thread);
     return;
   }
 
