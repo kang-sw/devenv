@@ -31,11 +31,11 @@ Passed in the current Pi session:
 - Korean IME input, multiline editing, Esc/reopen draft restoration, and exact answer preservation;
 - multi-question Tab/Shift+Tab navigation, independent drafts, commit-and-advance, partial submission, and blank-question retention;
 - pending-question withdrawal and post-answer withdrawal no-op;
+- active-edit withdrawal deferral without modal or draft loss (`q3` remained open after withdrawal returned `deferred`, then returned `EDITING-IN-PROGRESS` from commit `e0f92cef`, entry `f8dde1e8`);
 - plugin reload persistence and anchored answer recovery (`q1` asked at commit `a7f5d521`, entry `ccb097ae`, returned verbatim as `PERSIST-OK`).
 
 Remaining live coverage for a later session:
 
-- withdrawal while the owner is actively editing an open question;
 - the fork-raised `kind:"question"` path, existing-fork attachment, `/done`, and final `Decisions:` delivery — blocked on 2026-09-11 before fork creation by `fork readiness rejected (expected 79 callable tools, got 78)`; this is tracked by `260908-bug-ws-pi-delegated-tool-surface-unavailable`, not duplicated here;
 - optional post-compaction persistence/anchor recovery; plugin reload persistence is covered above.
 
