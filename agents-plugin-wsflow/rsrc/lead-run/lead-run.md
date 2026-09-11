@@ -94,9 +94,12 @@ One worker in flight per invocation.
 ## Handle the report
 
 The worker ends with a fixed block. `stop: none` means the ticket is closed on
-its branch: advance the note and go to **End the turn**. Otherwise act by stop
-letter. Carry lines from the worker's report to the user verbatim; do not
-re-summarize them.
+its branch: advance the note and go to **End the turn** — but when that closed
+ticket was an epic's last open child, first surface that epic to the user for a
+close decision, since nothing auto-closes an epic and an otherwise-complete board
+floats until you raise it (interim guard until a reliable trigger lands).
+Otherwise act by stop letter. Carry lines from the worker's report to the user
+verbatim; do not re-summarize them.
 
 - **(a) parent merge** — this is the run's terminal; see below.
 - **(b) unresolved decision** — read what the worker points at (the ticket,

@@ -212,12 +212,14 @@ settlement boundary: populate facts first, then run design and completeness
 review against that populated body. Existing completed or skipped stages keep
 their posture and freshness behavior.
 
-Epics settle cross-child design explicitly at `idea/` to `todo/`: populate
-checkable facts, then run design-only Sage review. Later material changes to
-cross-child decisions need explicit re-settlement before a child relies on
-them; ordinary todo edits do not automatically spawn reviewers. Epics and
-research remain in `idea/` or `todo/`. Research requires neither
-stage; `ready/` remains the actionable implementation queue.
+An epic is a living board that is never an execution target, so it never enters
+`ready/` (the move is barred in code); a research ticket is likewise barred and
+ungated. Epic design review is design-only (completeness never applies) and
+lead-judgment-invoked: run it — populating checkable facts first — when the
+epic's cross-child design has drifted materially, not as a status boundary.
+Ordinary epic edits do not automatically spawn reviewers, and a child relying on
+a revised cross-child decision needs that re-review first. `ready/` remains the
+actionable implementation queue.
 
 Posture (per-stage, stored in ticket frontmatter) resolves the gate:
 `pending` falls back to the project's configured default; `skipped` means

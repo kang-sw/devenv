@@ -198,7 +198,13 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 	design, completeness := effectiveSageReviewPostures(frontmatter(ticketAbs))
 
 	if designRequired && !completenessRequired {
-		// epic: design-only. Skip when design posture is already terminal.
+		// epic: design-only. Retained deliberately even though TicketsMove now
+		// bars epics from the ready/ landing: sage_gate is decoupled from
+		// tickets.move, so a direct sage_gate(epic, landing: "ready") stays
+		// reachable and must remain design-only. Deleting this branch would let
+		// such a call fall through to the both-stages path below and run
+		// completeness on an epic, which never applies. Skip when design posture
+		// is already terminal.
 		if design == "completed" || design == "skipped" {
 			if design == "completed" {
 				if result, consumed, err := sageGateFreshnessResult(root, ticketRel, []string{"design"}, answer); err != nil {

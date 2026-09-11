@@ -3436,7 +3436,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.move",
-			"description": "Move a ticket along the idea <-> todo <-> ready axis. Ready promotion and epic todo settlement resolve sage-review posture from config; actionable todo moves are ungated. Stages atomically; does not commit.",
+			"description": "Move a ticket along the idea <-> todo <-> ready axis. Non-implementation categories (epic, research, workset) are board artifacts, never execution targets, and are rejected at the ready/ landing. Ready promotion and epic todo settlement resolve sage-review posture from config; actionable todo moves are ungated. Stages atomically; does not commit.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -3483,12 +3483,12 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.sage_gate",
-			"description": "Resolve the sage-review gate for a ticket landing. Todo is for epic design settlement only: actionable todo calls fail; research and legacy worksets skip. Actionable review runs at ready promotion after fact population. Owns posture resolution (legacy sage-review: migration, config.list fallback), the category×stage matrix, and standalone/combined mode selection. Returns an action (skip | stop_blocked | stop_missing_route_facts | ask | run); for run, the reviewer(s) to spawn and the mode. A ready/ landing is refused with stop_missing_route_facts when the ticket carries no ## Route Facts section. Does not spawn reviewers.",
+			"description": "Resolve the sage-review gate for a ticket landing. The todo landing runs epic design-only review (completeness never applies to an epic), invoked on lead judgment when the epic's cross-child design has drifted materially — not a status boundary; actionable todo calls fail, and research and legacy worksets skip. Actionable design and completeness review runs at ready promotion after fact population. Owns posture resolution (legacy sage-review: migration, config.list fallback), the category×stage matrix, and standalone/combined mode selection. Returns an action (skip | stop_blocked | stop_missing_route_facts | ask | run); for run, the reviewer(s) to spawn and the mode. A ready/ landing is refused with stop_missing_route_facts when the ticket carries no ## Route Facts section. Does not spawn reviewers.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"stem":    stringProperty("Ticket stem (YYMMDD-category-name)."),
-					"landing": enumStringProperty("Settlement boundary: todo for epic design only, ready for actionable design and completeness, idea skips.", []string{"idea", "todo", "ready"}),
+					"landing": enumStringProperty("Landing: todo runs epic design-only review (lead-judgment-invoked, not a boundary), ready runs actionable design and completeness, idea skips.", []string{"idea", "todo", "ready"}),
 					"answer":  enumStringProperty("Optional follow-up answer to a prior ask action.", []string{"yes", "no"}),
 				},
 				"required": []string{"stem", "landing"},

@@ -189,6 +189,20 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 	if curStatus == ".done" || curStatus == ".dropped" {
 		return TicketMutateResult{}, fmt.Errorf("ticket is closed (%s); reopen is out of scope", curStatus)
 	}
+	// Non-implementation categories (epic, research, workset) are board
+	// artifacts, never execution targets, so they never enter ready/ — the
+	// implementation queue lead-run drains. This is the single hard chokepoint
+	// enforcing that rule in code: without it a stray tickets.move(epic, to:
+	// "ready") would succeed against the prose bar and hand a worker an epic.
+	// Placed before any write so the rejection is a genuine no-op. sage_gate is
+	// decoupled from this path (see tickets_sage.go's epic-at-ready branch), so
+	// barring the move here leaves a direct sage_gate(epic, landing: "ready")
+	// reachable and design-only.
+	if to == "ready" {
+		if match := ticketCategoryRE.FindStringSubmatch(stem); len(match) == 2 && nonImplementationCategories[match[1]] {
+			return TicketMutateResult{}, fmt.Errorf("%s tickets never enter ready/: %s is a %s ticket, a board artifact rather than an execution target; ready/ is the implementation queue", match[1], stem, match[1])
+		}
+	}
 	newPath := ticketRelPath(to, stem)
 	// Both scope pre-flights run before prepareSageReviewForUpwardMove, which
 	// persists sage-review frontmatter at settlement boundaries. Refusing after
@@ -296,7 +310,10 @@ var ticketCategoryRE = regexp.MustCompile(`^\d{6}-([a-z]+)-`)
 // nonImplementationCategories are the ticket categories that never carry
 // implementation phases: an epic decomposes into children, and research and
 // legacy workset tickets are board artifacts. Checks that only make sense for a
-// ticket that will actually be routed and implemented skip these.
+// ticket that will actually be routed and implemented skip these. TicketsMove
+// also reads this set as the hard bar that rejects any of these categories at
+// the ready/ landing — the single chokepoint behind "epics and research never
+// enter ready/".
 var nonImplementationCategories = map[string]bool{
 	"epic":     true,
 	"research": true,
