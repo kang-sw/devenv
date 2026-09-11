@@ -797,7 +797,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			if err := resolver.Unset(entry.Key, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
-			resolved, err := resolver.Get("", entry.Key)
+			resolved, err := resolver.Get(sessionKey, entry.Key)
 			if err != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
@@ -1891,7 +1891,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 			FixedArguments: map[string]string{"key": subagentEntry.Key, "reset": "true"},
 		},
 		ValueFields: subagentEntry.ValueFields,
-		Current:     currentWorkflowPreference(resolver, wsconfig.ItemWorkflowPreferSubagent),
+		Current:     currentWorkflowPreference(resolver, sessionKey, wsconfig.ItemWorkflowPreferSubagent),
 	})
 
 	bootstrapEntry := registryEntryByKey(wsconfig.ItemBootstrapAlarm)
@@ -1905,7 +1905,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 			FixedArguments: map[string]string{"key": bootstrapEntry.Key, "reset": "true"},
 		},
 		ValueFields: bootstrapEntry.ValueFields,
-		Current:     currentWorkflowPreference(resolver, wsconfig.ItemBootstrapAlarm),
+		Current:     currentWorkflowPreference(resolver, sessionKey, wsconfig.ItemBootstrapAlarm),
 	})
 
 	sageReviewEntry := registryEntryByKey(wsconfig.ItemSageReview)
@@ -1920,7 +1920,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		},
 		SelectorFields: sageReviewEntry.SelectorFields,
 		ValueFields:    sageReviewEntry.ValueFields,
-		Current:        currentWorkflowPreference(resolver, sageReviewEntry.Key),
+		Current:        currentWorkflowPreference(resolver, sessionKey, sageReviewEntry.Key),
 	})
 
 	agentTiers, err := currentAgentTierMappings()
@@ -1941,8 +1941,8 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	return catalog, nil
 }
 
-func currentWorkflowPreference(resolver *wsconfig.Resolver, itemKey string) tuningScopedValue {
-	rv, _ := resolver.Get("", itemKey)
+func currentWorkflowPreference(resolver *wsconfig.Resolver, sessionKey, itemKey string) tuningScopedValue {
+	rv, _ := resolver.Get(sessionKey, itemKey)
 	return tuningScopedValue{
 		Value: rv.Value,
 		Scope: string(rv.Scope),

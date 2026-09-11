@@ -1310,15 +1310,22 @@ func TestConfigTuneSageReviewScopesAndValidation(t *testing.T) {
 			t.Fatalf("sage_review %s write response = %q", tc.scope, got)
 		}
 	}
+	catalog := parseTuningCatalogResponse(t, callToolOnce(t, s, 19, "config.list", map[string]any{
+		"session_key": key,
+		"format":      "json",
+	}))
+	if current := mustMarshalJSON(t, requireTuningKnob(t, catalog, wsconfig.ItemSageReview).Current); !strings.Contains(current, `"value":"off"`) || !strings.Contains(current, `"scope":"session"`) {
+		t.Fatalf("config.list must report the session-effective sage_review posture: %s", current)
+	}
 
 	for i, tc := range []struct {
 		scope string
 		value string
 		from  string
 	}{
+		{scope: "global", value: "off", from: "session"},
 		{scope: "session", value: "ask", from: "project"},
-		{scope: "project", value: "auto", from: "global"},
-		{scope: "global", value: "auto", from: "builtin"},
+		{scope: "project", value: "auto", from: "builtin"},
 	} {
 		resp := callToolOnce(t, s, 20+i, "config.tune", map[string]any{
 			"session_key": key,
