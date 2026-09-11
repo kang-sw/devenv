@@ -9,6 +9,7 @@ sage-review-completeness: completed
 sage-review-design: completed
 sage-review-design-reviewed: 22d8149774f40e6e
 sage-review-completeness-reviewed: 22d8149774f40e6e
+completed: 2026-09-11
 ---
 
 # Degrade safely when a Pi task fork cannot load a parent extension tool
@@ -40,3 +41,16 @@ A current-worktree live probe on 2026-09-11 narrowed the task-fork failure: the 
 Capture the exact missing names before readiness, install identical-definition unavailable stubs for non-critical absences, and carry the unavailable list in the parent's captured tool order into the existing first task-fork user-message builder. Keep the parent system prompt and inherited prefix untouched. Make the readiness diagnostic name missing, extra, reordered, and changed registrations rather than reporting only counts. Amend `260905-pi-side-thread-fork-task-thread` to replace its blanket no-synthetic-registration rule with this narrow unavailable-stub exception.
 
 Verify a parent-only extension tool reproducer end to end: the task fork passes readiness with the same ordered provider-visible definitions, receives the unavailable-tools notice only in its first user task, gets the deterministic failure when it invokes the stub, and can still finish through `ws-report-to-lead`. Verify that no-mismatch forks produce no notice or stub, that `ws-report-to-lead` absence still rejects before the first model turn, and that extra/order/schema/description drift still rejects. Re-run the fork prefix/cache serialization and fork lifecycle suites. Complete the blocked fork-raised question live acceptance after the fix is loaded.
+
+### Result (0c95be75) - 2026-09-11
+
+Task forks now classify registration drift, install metadata-identical deterministic failure stubs only for missing non-critical tools, keep `ws-report-to-lead` absence fatal, and append the captured-order unavailable list only to the first task input. Readiness diagnostics retain fatal handling for extra, reordered, schema-changed, and description-changed registrations. Review added executable coverage proving the actual child-bootstrap completion-channel rejection occurs before any provider prompt and that a degraded fork can report and settle through `ws-report-to-lead`.
+
+Focused fork suites passed 274/274 and the full adapter suite passed 1625/1625 after both implementation commits (`c96dcd08`, `0c95be75`). The only implementation deviation was a portable Homebrew/Linuxbrew Pi SDK path fallback required for the existing native-transition test fixture on macOS. Correctness, fit, and test reviews had no Critical findings; two test Important findings were fixed, and the duplicate spec Important findings were resolved by updating `{#260905-pi-side-thread-fork-task-thread}` in `cdf179ee`.
+
+After plugin reload, a live fork inherited the parent-only `codex_generate_image` slot through the unavailable stub, received its notice in the initial task, raised owner thread `q4`, resumed after the owner selected `alpha`, and delivered a final report whose `Decisions:` preserved both the choice and notice observation. No unresolved implementation or acceptance blocker remains.
+
+
+## Resolution (2026-09-11)
+
+Implemented cache-prefix-preserving unavailable stubs for absent non-critical task-fork tools, retained fatal completion-channel and structural drift checks, updated the Pi task-fork spec, and passed the live fork-raised question round trip after reload.

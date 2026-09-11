@@ -1277,14 +1277,21 @@ both published through `details` without altering the model-visible result.
   diagnostic. The first new message of each process states the current key and
   the three side-thread refusals; later messages do not repeat that frame.
   Parent and stale own-key calls are refused as described above, not rewritten.
-- **Tool surface = lead's exactly.** Forks preserve the lead's actual callable
-  names, descriptions, schemas and order without adding, deleting or deduplicating
-  tools. Actual registrations are checked before work delivery and again at input
-  after resource merging; missing or changed registrations are visible failures,
-  not synthetic schema replay. `ws-fork`, `ws-queue-question` and
-  `ws-withdraw-question` remain visible
-  with identical metadata but throw fork-role tool errors before allocating a
-  child or mutating a thread. Task questions use `ws-report-to-lead` instead.
+- **Provider-visible tool surface = lead's exactly.** Forks preserve the lead's
+  callable names, descriptions, schemas and order without deleting or
+  deduplicating tools. Registrations are checked before work delivery and again
+  at input after resource merging. A task fork whose child lacks a non-critical
+  parent registration installs a metadata-identical unavailable stub in that
+  captured slot; invoking it fails deterministically and states that its parent
+  extension was not loaded. The first task message names those unavailable tools
+  in captured order. Missing `ws-report-to-lead` remains fatal because the fork
+  cannot complete its reporting protocol; unexpected additions, changed metadata
+  and registration-order drift also remain fatal rather than being normalized.
+  This unavailable stub is the sole synthetic-registration exception: it neither
+  loads nor dispatches the absent extension. `ws-fork`, `ws-queue-question` and
+  `ws-withdraw-question` remain visible with identical metadata but throw
+  fork-role tool errors before allocating a child or mutating a thread. Task
+  questions use `ws-report-to-lead` instead.
 - **Prefix and cache boundary.** Task and discussion forks preserve the captured
   effective prompt and inherited message content under the same effective
   provider/model/API compatibility configuration. Provider-native continuation
@@ -1338,7 +1345,10 @@ both published through `details` without altering the model-visible result.
   explicit "message from the lead", so the fork separates its task from the
   lead's inherited plan without any all-caps identity shouting. This message-level
   frame and the directive both live in the first message, not the system prompt.
-  The frame complements the completion loop rather than replacing it. Historical
+  When unavailable stubs were needed, their captured-order capability notice is
+  appended to that first task message only; it never changes the inherited system
+  prompt or later messages. The frame complements the completion loop rather than
+  replacing it. Historical
   anti-bleed verification predates this combined message; owner-run re-verification
   of the current message-only directive remains pending.
 
