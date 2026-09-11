@@ -19,7 +19,8 @@ ticket path, `ready/ empty`, `every remaining ticket blocked`, or a stop reason.
      carries a `## Blocked (...)` note; a blocked owner stops.
    - `active` with status `idea` or `todo`: stop because the owner is not
      executable.
-   - `missing` or `ambiguous`: stop and return the status nudge verbatim.
+   - `missing` or `ambiguous`: call `{{.McpNamespace}}/git.status()` and stop
+     with its nudge line verbatim.
 3. Without `impl_ticket`, inspect `ready/`. Skip candidates carrying a
    `## Blocked (...)` note, then prefer an in-progress ticket (some phase has a
    `### Result`, at least one does not), one named as a prerequisite by another

@@ -2125,6 +2125,9 @@ func activeImplTicket(root, branch string) (*implTicketStatus, error) {
 	if !ok {
 		return nil, nil
 	}
+	if err := verifyActiveTicketInventory(root); err != nil {
+		return nil, err
+	}
 	candidates, err := wsdoc.TicketsFind(root, wsdoc.TicketFindOptions{
 		Statuses: []string{"idea", "todo", "ready"}, Resolve: true,
 	})
@@ -2146,6 +2149,25 @@ func activeImplTicket(root, branch string) (*implTicketStatus, error) {
 	default:
 		return &implTicketStatus{State: "ambiguous"}, nil
 	}
+}
+
+// verifyActiveTicketInventory closes the gap in wsdoc's discovery-oriented
+// walk, where an unreadable directory can look like an empty one. Missing
+// individual status directories are normal; an absent board or an I/O error is
+// not evidence that an impl branch has no owner.
+func verifyActiveTicketInventory(root string) error {
+	board := filepath.Join(root, "ai-docs", "tickets")
+	if _, err := os.Stat(board); err != nil {
+		return fmt.Errorf("git.status: inspect active ticket inventory: %w", err)
+	}
+	for _, status := range []string{"idea", "todo", "ready"} {
+		_, err := os.ReadDir(filepath.Join(board, status))
+		if err == nil || os.IsNotExist(err) {
+			continue
+		}
+		return fmt.Errorf("git.status: inspect active ticket inventory: %w", err)
+	}
+	return nil
 }
 
 func formatGitLog(result wsgit.LogResult) string {

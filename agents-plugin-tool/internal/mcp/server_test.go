@@ -705,6 +705,34 @@ func TestActiveImplTicketFailsClosedOnUnreadableInventory(t *testing.T) {
 	}
 }
 
+func TestServeStdioGitStatusImplTicketContract(t *testing.T) {
+	useLeadProfile(t)
+	for _, status := range []string{"idea", "todo", "ready"} {
+		t.Run(status, func(t *testing.T) {
+			root := t.TempDir()
+			initGit(t, root)
+			stem := "260911-feat-impl-status-" + status
+			mustWrite(t, root, filepath.Join("ai-docs", "tickets", status, stem+".md"), "---\ntitle: Owner\n---\n")
+			runGit(t, root, "add", ".")
+			runGit(t, root, "commit", "-m", "ticket")
+			runGit(t, root, "checkout", "-b", "impl/base/"+wskey.Derive(stem, 3))
+			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+			server := NewServer(root, "test")
+			key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+			text := callToolWithKey(t, server, 2, key, "git.status", nil)
+			jsonText := callToolWithKey(t, server, 3, key, "git.status", map[string]any{"format": "json"})
+			if !strings.Contains(text, "active ticket: "+stem+" ("+status+")") {
+				t.Fatalf("text status missing active owner: %s", text)
+			}
+			for _, want := range []string{`"impl_ticket"`, `"state":"active"`, `"stem":"` + stem + `"`, `"status":"` + status + `"`} {
+				if !strings.Contains(jsonText, want) {
+					t.Fatalf("JSON status missing %s: %s", want, jsonText)
+				}
+			}
+		})
+	}
+}
+
 func TestServeStdioTicketToolsRejectSpecStemArgument(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
