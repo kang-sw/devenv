@@ -2020,8 +2020,10 @@ export function validateForkReadiness(launch: ReturnType<typeof prepareForkLaunc
     throw new Error(`ws-pi-agent: fork readiness rejected (${ready.error ?? "nonce/key/session mismatch"})`);
   }
   if (record.forkContext) {
-    const mismatch = !Array.isArray(ready.registeredTools) || JSON.stringify(ready.activeTools) !== JSON.stringify(record.forkContext.activeTools)
-      ? "missing or reordered callable tools" : compareForkRegistrations(record.forkContext.registeredTools, ready.registeredTools);
+    const mismatch = !Array.isArray(ready.registeredTools)
+      ? "missing callable tool registrations"
+      : compareForkRegistrations(record.forkContext.registeredTools, ready.registeredTools)
+        ?? (JSON.stringify(ready.activeTools) !== JSON.stringify(record.forkContext.activeTools) ? "reordered callable tools" : undefined);
     if (mismatch) throw new Error(`ws-pi-agent: fork readiness rejected (${mismatch})`);
   }
   if (record.ownership && !containedOwnedPath(record.ownership.home, state.sessionFile)) throw new Error("ws-pi-agent: fork readiness rejected (session escaped owned home)");

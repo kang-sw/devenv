@@ -22,7 +22,9 @@ type RegisteredTool = { name: string; description: string; parameters: unknown }
 type ProviderCase = { name: string; provider: string; api: string; chunk: string };
 
 const LOCAL_SDK = join(process.cwd(), "node_modules/@earendil-works/pi-coding-agent");
-const GLOBAL_SDK = "/home/linuxbrew/.linuxbrew/lib/node_modules/@earendil-works/pi-coding-agent";
+const GLOBAL_SDK = existsSync("/home/linuxbrew/.linuxbrew/lib/node_modules/@earendil-works/pi-coding-agent")
+  ? "/home/linuxbrew/.linuxbrew/lib/node_modules/@earendil-works/pi-coding-agent"
+  : "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent";
 const PROVIDERS: ProviderCase[] = [
   { name: "anthropic", provider: "anthropic", api: "anthropic-messages", chunk: "anthropic-messages-" },
   { name: "codex", provider: "openai-codex", api: "openai-codex-responses", chunk: "openai-codex-responses-" },

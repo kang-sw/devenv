@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { applyForkAffinity, captureForkContext, captureRegisteredTools, compareForkRegistrations, parseForkContext, readForkLaunchContext, restoreForkContext, writePrivateJson } from "../src/fork-context.ts";
+import { applyForkAffinity, captureForkContext, captureRegisteredTools, classifyForkRegistrations, compareForkRegistrations, isCompletionCriticalForkTool, parseForkContext, readForkLaunchContext, restoreForkContext, writePrivateJson } from "../src/fork-context.ts";
 
 describe("ForkContext", () => {
   const context = captureForkContext({
@@ -29,11 +29,19 @@ describe("ForkContext", () => {
     assert.throws(() => parseForkContext(""), /malformed/);
   });
 
-  test("captures actual registrations in active order and exposes drift", () => {
+  test("captures actual registrations in active order and classifies every strict mismatch", () => {
     const actual = captureRegisteredTools(context.activeTools, context.registeredTools);
     assert.equal(compareForkRegistrations(context.registeredTools, actual), undefined);
-    assert.match(compareForkRegistrations(context.registeredTools, [...actual].reverse()) ?? "", /index 0/);
-    assert.match(compareForkRegistrations(context.registeredTools, [{ ...actual[0], description: "changed" }, actual[1]]) ?? "", /index 0/);
+    assert.deepEqual(classifyForkRegistrations(context.registeredTools, [actual[1]]), {
+      missing: [actual[0]], extra: [], reordered: false, changed: [],
+    });
+    assert.deepEqual(classifyForkRegistrations(context.registeredTools, [...actual, { name: "extra", description: "Extra", parameters: {} }]), {
+      missing: [], extra: [{ name: "extra", description: "Extra", parameters: {} }], reordered: false, changed: [],
+    });
+    assert.match(compareForkRegistrations(context.registeredTools, [...actual].reverse()) ?? "", /reordered callable tools/);
+    assert.match(compareForkRegistrations(context.registeredTools, [{ ...actual[0], description: "changed" }, actual[1]]) ?? "", /changed callable tools: read/);
+    assert.equal(isCompletionCriticalForkTool("ws-report-to-lead"), true);
+    assert.equal(isCompletionCriticalForkTool("read"), false);
   });
 
   test("rejects an envelope that omits present context rather than taking the legacy path", () => {
