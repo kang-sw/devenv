@@ -131,6 +131,9 @@ removed.
 - `260909-feat-bootstrap-refoundation-template-migration` - new template
   version and downstream migration item for the reduced layout; dogfood on
   a disposable fixture before release.
+- `260912-feat-sage-design-autonomous-exploration` - keep fact population as
+  bounded factual grounding and let the read-only Sage design reviewer
+  autonomously delegate code-contract exploration with rendered tier bindings.
 - Planned: board reconciliation - drop the opposite-direction tickets named
   in `related:` and close the subsumed diet epics once their remaining phases
   are absorbed or dropped. Inventory stage management stays a user-and-lead
@@ -342,6 +345,18 @@ removed.
     association. New worksets are rejected, the sole open workset is dropped,
     and active or archived workset stems remain readable and closable for
     compatibility. Workset semantics do not transfer to epic.
+25. **Ground facts directly; explore design evidence through native
+    subagents.** The fact populator is a bounded, write-enabled grounder that
+    corrects unambiguous terminology and present-behavior facts in its one
+    ticket without changing decisions. The read-only Sage design reviewer does
+    not independently search or navigate the codebase; it autonomously chooses
+    whether, how widely, and at which rendered `small`, `medium`, or `large`
+    model-and-effort binding to dispatch host-native Explore subagents. Explore
+    usage is taught by examples rather than a routing matrix. The reviewer may
+    open exact artifacts the explorers cite to verify load-bearing claims, then
+    judges those current-contract facts against the ticket's confirmed intent.
+    No MCP-owned spawn surface is introduced, and completeness review remains
+    ticket-only.
 
 ## Completion Criteria
 
@@ -353,5 +368,4 @@ removed.
   re-work more than the current pipeline and no child can bring that below
   parity, in which case the surviving children are re-scoped under a new
   epic and this one records the finding.
-- Deferred: parallelism inside `drain-ready-queue`; merging fact population
-  and design review into one two-tier pass; per-role tier tuning.
+- Deferred: parallelism inside `drain-ready-queue`; per-role tier tuning.
