@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 78bb983420219983
 sage-review-completeness-reviewed: 78bb983420219983
+completed: 2026-09-12
 ---
 
 # Re-sync the Pi track's ws-mcp binding, tool contract, and rsrc onto settled epic/refound
@@ -90,3 +91,35 @@ list reflects the refound surface (`git.merge` present; no `specs.query` /
 absent; `diff -rq agents-plugin/rsrc agents-plugin-pi/rsrc` is empty; the
 `agents-plugin-pi` test suite is green including the mirror identity guard; no
 Pi-authored file retains stale references to the removed runtime entries.
+
+### Result (f33b34e0) - 2026-09-12
+
+The ignored local marker now targets `/Users/kang-sw/devenv`; a live source build
+reported develop commit `a9b0be60` and registered the settled 51-tool contract.
+`agents-plugin/runtime.json` and the complete shared `rsrc/` tree were absorbed
+from develop and copied byte-for-byte to `agents-plugin-pi/`. Pi bridge and
+workflow-manual fixtures were recaptured through that live runtime. The contract
+contains `git.merge`, omits all seven retired discovery tools, and exposes 18
+commands with all 23 retired commands absent. The compat worktree remained
+absent.
+
+Review added one test-only follow-up: bridge tests now compare their exact tool
+and command inventories with bundled runtime metadata and guard the added and
+retired entries, while an opt-in `WS_PI_VERIFY_DEVELOP_MARKER=1` integration test
+rebuilds through the marker and verifies `initialize`, `tools/list`,
+`playbook.read`, and `workflow_manual` fixture equality. This was additional
+hardening rather than a phase-contract deviation. Correctness and fit reviews
+were clean; both Important test findings were fixed in `f33b34e0`, with no
+unresolved findings.
+
+Verification passed: mirror/runtime byte comparisons against both Pi and develop;
+live 51-tool and 18-command checks; focused bridge tests `75/75`; opt-in live
+marker verification `1/1`; and the full suite with 1,648 total tests (1,647 pass,
+1 intentional opt-in skip, 0 failures). No spec or mental-model update was
+needed because the existing version-pin, local-devenv bootstrap, and package
+mirror contracts already describe the restored behavior.
+
+
+## Resolution (2026-09-12)
+
+Phase 1 completed on the implementation branch. Develop-originated runtime/rsrc mirrors, live develop-marker behavior, exact 51-tool/18-command contract, fixture provenance, adapter suite, and retired compat-worktree absence were verified; partitioned reviews are resolved with no remaining findings.
