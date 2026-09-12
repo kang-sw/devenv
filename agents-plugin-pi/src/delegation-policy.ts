@@ -133,7 +133,12 @@ export class RenderRegistry {
   restore(values: readonly unknown[]): void {
     for (const value of values) {
       const e = value as RenderProvenance;
-      if (e && typeof e.path === "string" && typeof e.digest === "string" && ["worker", "reviewer", "delegate", "explore"].includes(e.class) && Object.hasOwn(AUTHORITY, e.authority) && typeof e.readOnly === "boolean" && typeof e.requiresChildren === "boolean") this.entries.set(e.path, e);
+      if (!e || typeof e.path !== "string" || typeof e.digest !== "string" || !["worker", "reviewer", "delegate", "explore"].includes(e.class) || !Object.hasOwn(AUTHORITY, e.authority) || typeof e.readOnly !== "boolean" || typeof e.requiresChildren !== "boolean") continue;
+      try {
+        const canonical = realpathSync(e.path);
+        if (promptDigest(canonical) === e.digest) this.entries.set(canonical, { ...e, path: canonical });
+      } catch { /* stale/missing provenance is not authority */ }
     }
   }
+  values(): RenderProvenance[] { return [...this.entries.values()]; }
 }

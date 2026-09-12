@@ -10,7 +10,7 @@ import {
 } from "../src/delegation-policy.ts";
 import { assertSubtreeFinal, beginSubtreeDispatch, installSubtreePublisher, readSubtreeSnapshot, subtreeWaiting } from "../src/subtree-lifecycle.ts";
 import { applyRpcEvent, attachEventListener, evictForCapacity, flushHeldPushes, flushPendingFinal, hasRunningAgents, heldPushQueue, leadIdleRef, leadWakeStartPendingRef, listAgents, markAgentExited, promptAgent, registerPushFlush, resolveTools, sendToAgent, spawnAdmission, stopAgent, type RpcAgentRecord } from "../src/spawner.ts";
-import { captureOrphans, parseOrphans, rehydrateOrphanRecord, serializeOrphans } from "../src/agent-sidecar.ts";
+import { captureOrphans, parseOrphans, readAndClearSidecar, rehydrateOrphanRecord, reviveOrphans, serializeOrphans, writeSidecar } from "../src/agent-sidecar.ts";
 import { captureForkResume, rehydrateForkRecord } from "../src/ask.ts";
 
 const dirs: string[] = [];
@@ -67,11 +67,17 @@ test("playbook authority comes from shipped manifest and bridge render, not a fi
   writeFileSync(path, "**Your ws session_key: `review-own`**\nreview body");
   const registry = new RenderRegistry();
   assert.equal(registry.get(path), undefined);
-  registry.record(path, playbookProfile(plugin, "code-review-correctness"));
+  const entry = registry.record(path, playbookProfile(plugin, "code-review-correctness"));
   assert.equal(registry.get(path)?.class, "reviewer");
   assert.equal(registry.get(path)?.sessionKey, "review-own");
+  const restored = new RenderRegistry();
+  restored.restore([entry]);
+  assert.equal(restored.values()[0]?.sessionKey, "review-own");
   writeFileSync(path, "replace with privileged instructions");
   assert.throws(() => registry.get(path), /changed since authorization/);
+  const rejected = new RenderRegistry();
+  rejected.restore([entry]);
+  assert.equal(rejected.values().length, 0, "changed persisted provenance restores no descendant-key authority");
 });
 
 test("spawn admission rejects unproven nested prompts and lead forks before allocation", () => {
@@ -165,6 +171,14 @@ test("held and failed terminal delivery preserve the obligation until direct-par
   assert.equal(flushPendingFinal(pi, registry, r, "idle"), true);
   assert.equal(r.expectedReport, true);
   assert.equal(parseOrphans(serializeOrphans(captureOrphans(registry)))[0]?.state, "running");
+  const leadSession = join(home(), "lead.jsonl");
+  writeFileSync(leadSession, "");
+  writeSidecar(leadSession, captureOrphans(registry));
+  const recovered = new Map<string, RpcAgentRecord>();
+  reviveOrphans(recovered, readAndClearSidecar(leadSession));
+  installSubtreePublisher(recovered, undefined, () => 0);
+  assert.equal(recovered.get(r.agentId)?.expectedReport, true);
+  assert.throws(() => assertSubtreeFinal(recovered), /final rejected/, "restart recovery retains the undelivered edge obligation");
   flushHeldPushes(pi, true);
   assert.equal(r.expectedReport, false);
   assert.equal(sent.length, 1);
@@ -242,6 +256,9 @@ test("lead -> worker -> leaf: local settle cannot report or park parent; fresh a
   innerEdge.emit({ type: "agent_settled" }); await drain();
   assert.equal(localReports.length, 1, "reviewer report wakes only its direct worker owner");
   assert.equal(sent.length, 0, "no grandchild result leaks upward before synthesis");
+  await stopAgent(inner, grandchild.agentId, innerEdge.pi);
+  await stopAgent(inner, grandchild.agentId, innerEdge.pi);
+  assert.equal(assertSubtreeFinal(inner), 0, "accepted report plus repeated explicit disposition leaves the worker subtree quiescent");
   h.emit({ type: "agent_start" });
   h.emit({ type: "tool_execution_start", toolName: "ws-report-to-lead", toolCallId: "new", args: { kind: "final", message: "synthesized reviewer findings" } });
   h.emit({ type: "tool_execution_end", toolName: "ws-report-to-lead", toolCallId: "new", result: { details: { subtreeRevision: assertSubtreeFinal(inner) } }, isError: false });
