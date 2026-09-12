@@ -2685,7 +2685,7 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				"obtain explicit acknowledgement when its release-target policy is overrideable",
 				"changed candidate tips need fresh acknowledgement",
 				"All impl integration stays with `" + product + "/git.merge`",
-				"goal-to-PARENT terminal uses raw Git",
+				"on approval call `" + product + "/git.merge` with the goal branch and explicit PARENT target",
 				"do not reset the retry count on resume or reclassify the original risks",
 			} {
 				if !strings.Contains(body, want) {
