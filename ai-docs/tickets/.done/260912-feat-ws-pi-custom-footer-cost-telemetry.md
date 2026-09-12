@@ -9,6 +9,7 @@ sage-review-completeness: completed
 sage-review-design: completed
 sage-review-design-reviewed: 508457798b30f385
 sage-review-completeness-reviewed: 508457798b30f385
+completed: 2026-09-13
 ---
 
 # Pi adapter: replace the default footer with lead and subagent cost telemetry
@@ -70,3 +71,8 @@ Verification:
 - Owner-live TUI observation remains a post-integration acceptance check because this worker runs headlessly.
 
 Independent partitioned review found one Critical and eight Important issues in round one. Commit `270ac98f` fixed known-zero formatting, empty-namespace watcher discovery, legacy eviction, built-in cache-rate fidelity, storage ownership of roll-up I/O, and the initial coverage gaps. Round two correctness and fit were clean; its two remaining Important test-coverage findings were fixed in `c0061e8d` through the exact `index.ts` lifecycle seams and a second real watcher transition. No Critical finding remains.
+
+
+## Resolution (2026-09-13)
+
+Implemented and independently reviewed the Pi custom footer with lead/descendant cost telemetry, durable eviction/retention roll-ups, lifecycle restoration, and broad automated verification. Real owner-visible TUI observation remains a post-integration acceptance check.
