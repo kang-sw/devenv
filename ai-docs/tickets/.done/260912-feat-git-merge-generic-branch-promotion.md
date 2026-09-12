@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: f5078d532341cc78
 sage-review-completeness-reviewed: f5078d532341cc78
+completed: 2026-09-12
 ---
 
 # Generalize ws/git.merge across local branch promotion paths
@@ -81,3 +82,27 @@ Verification covers generic and recognized branch sources, source preservation
 and deletion, impl encoded-target compatibility, release-target refusal and
 acknowledged retry, hard safety failures, conflict retention, structured output,
 and mirrored shipped playbook behavior.
+
+### Result (48d033c1) - 2026-09-12
+
+Extended `git.merge` to accept exact local non-impl sources with an explicit
+target, retaining impl encoded-root derivation and assertion checks. Successful
+merges delete impl and goal sources and preserve epic and ordinary sources.
+The existing exact-ref, containment, worktree, tip-recheck, conflict, and
+OID-bound release-acknowledgement pipeline serves every source kind.
+
+Updated the public schema and lead promotion guidance, regenerated canonical
+resource manifests and the wsflow mirror, and added real-Git promotion,
+refusal, conflict-retention, and MCP release-retry coverage. Existing text and
+JSON fields remain compatible. Internal `implMerge` names were retained to
+avoid unrelated renaming; there were no structural deviations.
+
+Verification: `go test ./...` and `scripts/smoke-ws-mcp.sh ..` passed from
+`agents-plugin-tool`; `python3 -m unittest discover agents-plugin-wsflow/tests`
+passed all 11 tests. Focused merge and rendered lead-policy checks also passed.
+Independent correctness/security, fit, and test reviews were clean; fit review
+included a fresh-reader audit and ws/wsflow rendering and mirror checks.
+
+Unresolved findings: none. Deferred scope: none. Installed-cache verification
+was not required because launcher and plugin-managed startup configuration
+were unchanged.
