@@ -90,6 +90,8 @@ describe("bounded direct-agent estimates", () => {
     assert.match(component.render(100)[1], /Direct agents ~\$1\.00/);
     child.telemetry = undefined; controller.refreshAgents();
     assert.match(component.render(100)[1], /Direct agents ~\$1\.00 \+ \?/);
+    child.telemetry = telemetry("child-session", child.sessionPath, "partial"); controller.refreshAgents();
+    assert.match(component.render(100)[1], /Direct agents ~\$1\.00 \+ \?/);
     child.telemetry = telemetry("child-session", child.sessionPath, .5); controller.refreshAgents();
     assert.match(component.render(100)[1], /Direct agents ~\$1\.00 \+ \?/);
     child.telemetry = telemetry("child-session", child.sessionPath, 1.5); controller.refreshAgents();
@@ -114,6 +116,28 @@ describe("bounded direct-agent estimates", () => {
     assert.equal(saved.evictedBaseline.knownUsd, .6);
     assert.deepEqual(saved.agents.map((entry: any) => entry.agentId), ["kept"]);
     assert.ok(saved.agents.length <= registry.size, "checkpoint identity count is bounded by the registry");
+    const restoredRegistry: RpcAgentRegistry = new Map([[kept.agentId, kept]]), restoredUi = context();
+    const restored = createAgentFooterController(restoredUi.ctx, restoredRegistry, storage, { truncateToWidth, visibleWidth });
+    assert.match(restoredUi.mount().render(100)[1], /Direct agents ~\$0\.80/, "reload adds the evicted baseline and restored live identity exactly once");
+    restored.stop();
+  });
+
+  test("many unique evictions remain one scalar baseline plus live registry identities", () => {
+    const dir = root(), storage = createAgentStorageContext("lead", dir), kept = record("kept", storage, .2);
+    kept.client = {} as any;
+    const registry: RpcAgentRegistry = new Map([[kept.agentId, kept]]), ui = context();
+    const controller = createAgentFooterController(ui.ctx, registry, storage, { truncateToWidth, visibleWidth });
+    for (let index = 0; index < 64; index++) {
+      const old = record(`old-${index}`, storage, .01);
+      updateOwnership(old.ownership!.home, { liveness: { lifecycle: "stopped", running: false } });
+      registry.set(old.agentId, old);
+      assert.deepEqual(evictForCapacity(registry, 2), { ok: true, evictedLabel: old.agentId });
+    }
+    controller.stop();
+    const saved = checkpoint(storage);
+    assert.equal(saved.evictedBaseline.knownUsd.toFixed(2), "0.64");
+    assert.deepEqual(saved.agents.map((entry: any) => entry.agentId), ["kept"]);
+    assert.ok(saved.agents.length <= registry.size, "historical eviction identities never accumulate in the checkpoint");
   });
 
   test("reload reads one checkpoint, preserves totals, and does not double count restored records", () => {
