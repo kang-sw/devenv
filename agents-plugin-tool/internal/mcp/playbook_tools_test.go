@@ -320,11 +320,10 @@ func TestPlaybookPrintPiHarnessSelectsOverlay(t *testing.T) {
 	}
 }
 
-// TestPlaybookPrintPiHarnessUsesNeutralTerminology guards the Non-goal that
-// this phase does not author Pi-specific terminology: terminologyForHarness
-// must still fall back to the host-neutral row for a detected "pi" harness,
-// even though structural overlay selection now works for pi.
-func TestPlaybookPrintPiHarnessUsesNeutralTerminology(t *testing.T) {
+// TestPlaybookPrintPiHarnessUsesPiTerminology pins the exact Pi idioms that
+// delegate playbooks receive. Structural overlays remain independently tested;
+// terminology substitution must not rely on one.
+func TestPlaybookPrintPiHarnessUsesPiTerminology(t *testing.T) {
 	rsrcRoot := buildTestRsrcTree(t, map[string]string{
 		"delegate-pb/delegate-pb.md": delegatePlaybookContent,
 	})
@@ -335,15 +334,47 @@ func TestPlaybookPrintPiHarnessUsesNeutralTerminology(t *testing.T) {
 		t.Fatalf("printPlaybook: %v", err)
 	}
 
-	neutral := terminologyForHarness("")
+	want := map[string]string{
+		"ExploreAgent":  "the `explore` researcher",
+		"SpawnIdiom":    "ws-agent-spawn",
+		"ContinueIdiom": "ws-agent-send to the same alias or agent id",
+	}
 	piTerm := terminologyForHarness("pi")
-	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
-		if piTerm[varName] != neutral[varName] {
-			t.Errorf("terminologyForHarness(pi)[%s] = %q, want host-neutral %q", varName, piTerm[varName], neutral[varName])
+	for varName, term := range want {
+		if piTerm[varName] != term {
+			t.Errorf("terminologyForHarness(pi)[%s] = %q, want %q", varName, piTerm[varName], term)
 		}
-		if !strings.Contains(body, neutral[varName]) {
-			t.Errorf("body %q: expected neutral %s %q for pi harness", body, varName, neutral[varName])
+		if !strings.Contains(body, term) {
+			t.Errorf("body %q: expected Pi %s %q", body, varName, term)
 		}
+	}
+}
+
+// TestPlaybookPrintPiDelegationFlowPlaybooks exercises the shared sources that
+// dogfood relies on: their Pi render must need terminology substitution only,
+// without a structural .pi.md overlay.
+func TestPlaybookPrintPiDelegationFlowPlaybooks(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "pi")
+	piTerm := terminologyForHarness("pi")
+
+	cases := map[string][]string{
+		"lead-discuss":  {"ExploreAgent", "ContinueIdiom"},
+		"lead-run":      {"SpawnIdiom"},
+		"ticket-worker": {"ExploreAgent", "SpawnIdiom", "ContinueIdiom"},
+	}
+	for name, variableNames := range cases {
+		t.Run(name, func(t *testing.T) {
+			body, _, err := printPlaybook(s, rsrcRoot, name, nil, isolatedPlaybookConfigOptions(t), "", nil)
+			if err != nil {
+				t.Fatalf("printPlaybook: %v", err)
+			}
+			for _, variableName := range variableNames {
+				if !strings.Contains(body, piTerm[variableName]) {
+					t.Errorf("body missing Pi %s %q:\n%s", variableName, piTerm[variableName], body)
+				}
+			}
+		})
 	}
 }
 
@@ -2062,7 +2093,7 @@ func TestPlaybookPrintGoldenExploreJunkHarness(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTerminologyTableCoverage(t *testing.T) {
-	for _, harness := range []string{"claude", "codex", ""} {
+	for _, harness := range []string{"claude", "codex", "pi", ""} {
 		tbl, ok := playbookTerminologyTable[harness]
 		if !ok {
 			t.Errorf("terminology table missing harness entry %q", harness)
