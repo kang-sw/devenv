@@ -2328,22 +2328,63 @@ func TestPlaybookPrintGoldenLeadShip(t *testing.T) {
 	}
 }
 
-// TestPlaybookPrintGoldenLeadAddRule verifies lead-add-rule resolves from the
-// real rsrc tree and contains procedure body text. delegates:false — no tip.
-func TestPlaybookPrintGoldenLeadAddRule(t *testing.T) {
-	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	s := newTestServerWithHarness(t, "claude")
-
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-add-rule", nil, wsconfig.Options{}, "", nil)
-	if err != nil {
-		t.Fatalf("printPlaybook: %v", err)
-	}
-	if !strings.Contains(body, "classification accuracy at capture time") {
-		t.Errorf("body %q: expected doctrine text 'classification accuracy at capture time'", body)
-	}
-	// delegates:false — continuity tip must NOT appear.
-	if strings.Contains(body, "Continuity tip") {
-		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+func TestPlaybookDocumentAuditProducts(t *testing.T) {
+	for _, product := range []string{"ws", "wsflow"} {
+		t.Run(product, func(t *testing.T) {
+			t.Setenv(envNoAgent, map[string]string{"ws": "", "wsflow": "1"}[product])
+			t.Setenv(envNamespace, product)
+			packageDir := map[string]string{"ws": "agents-plugin", "wsflow": "agents-plugin-wsflow"}[product]
+			rsrcRoot := filepath.Join("..", "..", "..", packageDir, "rsrc")
+			s := newTestServerWithHarness(t, "codex")
+			opts := isolatedPlaybookConfigOptions(t)
+			body, _, err := printPlaybook(s, rsrcRoot, "lead-audit-doc", nil, opts, "", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{
+				"Draft or revise the requested project document under its existing instructions.",
+				"if the user did not already request an independent audit, ask",
+				"On acceptance, render `fresh-read-doc-auditor`",
+				product + "/playbook.render",
+				"Give it no conversation context.",
+				"Return any finding that would change policy\nor intent to the user.",
+			} {
+				if !strings.Contains(body, want) {
+					t.Errorf("lead body missing %q", want)
+				}
+			}
+			if _, _, err := printPlaybook(s, rsrcRoot, "lead-add-rule", nil, opts, "", nil); err == nil {
+				t.Fatal("retired playbook still resolves")
+			}
+			// A downstream target needs only its document and the installed bundle.
+			worktreeRoot := initGitRepo(t)
+			target := filepath.Join(worktreeRoot, "AGENTS.md")
+			if err := os.WriteFile(target, []byte("# Project\n\nUse the existing conventions.\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "fresh-read-doc-auditor", map[string]string{"TargetFiles": target}, opts, "", "", "", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tier != "large" {
+				t.Errorf("auditor tier = %q, want large", tier)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			audit := string(data)
+			for _, want := range []string{"Read only " + target, "Your entire scope is:", "Preserve the intended meaning and existing project-specific instructions.", "No findings."} {
+				if !strings.Contains(audit, want) {
+					t.Errorf("auditor missing %q", want)
+				}
+			}
+			for _, forbidden := range []string{"{{.", "skill-authoring", "ai-docs/manuals/", "Continuity tip", "AuditScope"} {
+				if strings.Contains(audit, forbidden) {
+					t.Errorf("auditor contains %q", forbidden)
+				}
+			}
+		})
 	}
 }
 

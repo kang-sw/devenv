@@ -336,8 +336,8 @@ ai-docs/tickets/.dropped/
      path and its body is one sentence after the bold name. A rule whose
      body takes more, or that applies to some paths only, goes in
      `ai-docs/manuals/<name>.md` and is declared under `## Workflow` ->
-     `### Implementation Conventions` with the paths it covers, via
-     `ws:lead-add-rule`. A rule a test can check becomes a test. A trap
+     `### Implementation Conventions` with the paths it covers.
+     A rule a test can check becomes a test. A trap
      tied to one site becomes a code comment at that site. A fact about an
      external system goes in `ai-docs/ref/`. Context goes in this file's
      `## Project Orientation` section or the `repo` note layer; a procedure

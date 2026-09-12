@@ -14,7 +14,7 @@ SKILLS_DIR = PLUGIN_DIR / "skills"
 
 
 EXPECTED_SKILLS = {
-    "lead-add-rule",
+    "lead-audit-doc",
     "lead-bootstrap",
     "lead-discuss",
     "lead-check-blockers",
@@ -61,7 +61,7 @@ PARALLEL_INIT_TITLES = {
 # the generic "stop and report that blocker" un-pointed form.
 POINTER_TAIL_TITLES = {
     "lead-ticket": "Ticket",
-    "lead-add-rule": "Add Rule",
+    "lead-audit-doc": "Audit Doc",
     "lead-bootstrap": "Bootstrap",
     "lead-review": "Review",
     "lead-ship": "Ship",
@@ -72,6 +72,7 @@ POINTER_TAIL_TITLES = {
 }
 
 FORBIDDEN_PATTERNS = {
+    "retired add-rule skill": re.compile(r"\blead-add-rule\b"),
     "retired posture skill": re.compile(r"\blead-prefer-subagent\b"),
     "full ws MCP notation": re.compile(r"\bws/"),
     "full ws skill namespace": re.compile(r"\bws:"),
@@ -162,7 +163,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_skill_files_are_thin_playbook_shims(self):
-        # lead-ticket, lead-add-rule, lead-bootstrap, lead-review,
+        # lead-ticket, lead-audit-doc, lead-bootstrap, lead-review,
         # lead-ship, lead-tune, lead-check-blockers, and
         # lead-workflow-manual all
         # carry the mcp-server-repair pointer in place of the generic "stop
