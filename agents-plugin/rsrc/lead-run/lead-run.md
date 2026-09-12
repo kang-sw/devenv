@@ -16,9 +16,13 @@ source; the worker owns implementation and verification.
 
 Unless the invocation already names a ticket, render `ticket-selector`, spawn
 it at its recommended tier, and use its one `selection:` result. Do not list
-`ready/` or read ticket files yourself. Its empty and all-blocked results end
-the turn with no worker spawn; on a `goal/*` branch each has its own terminal
-below. Its implementation-branch stop is terminal for this invocation.
+`ready/` or read ticket files yourself. When this is not a goal run and the
+selector returns `selection: ready/ empty`, end the turn: tell the user no
+implementation-ready ticket exists, relay its `backlog:` and
+`backlog_omitted:` fields, and propose preparing one through
+`{{.SkillNamespace}}:lead-ticket`. Goal-run empty and all-blocked results use
+their terminals below. An implementation-branch stop is terminal for this
+invocation.
 
 ## Spawn
 
@@ -166,6 +170,7 @@ Whatever re-invokes this skill judges from the transcript's last line, so make
 it exactly one of:
 
 - `Ready queue still has advanceable tickets — next cycle: {{.SkillNamespace}}:lead-run.`
+- `Ready queue is empty — prepare a todo or idea ticket with {{.SkillNamespace}}:lead-ticket before re-invoking {{.SkillNamespace}}:lead-run.`
 - `Goal run finished — <reason>. Do not re-invoke {{.SkillNamespace}}:lead-run.`
 
 Write nothing after it, and keep `finished`, `complete`, and `done` out of a

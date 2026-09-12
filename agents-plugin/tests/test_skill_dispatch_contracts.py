@@ -173,6 +173,8 @@ class SkillDispatchContractsTest(unittest.TestCase):
         selector = (RSRC_DIR / "ticket-selector" / "ticket-selector.md").read_text(encoding="utf-8")
         self.assertIn("prerequisite", selector)
         self.assertIn("impl_ticket", selector)
+        self.assertIn('statuses: ["todo", "idea"]', selector)
+        self.assertIn("backlog_omitted", selector)
         self.assertIn("Do not list\n`ready/` or read", text)
         self.assertIn(
             "A goal run is the current branch `goal/*` or an active goal reminder.",
@@ -185,6 +187,10 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertNotIn("/goal", text)
         self.assertIn(
             "next cycle: {{.SkillNamespace}}:lead-run.",
+            text,
+        )
+        self.assertIn(
+            "Ready queue is empty — prepare a todo or idea ticket with",
             text,
         )
         self.assertNotIn("[design-review:", text)
