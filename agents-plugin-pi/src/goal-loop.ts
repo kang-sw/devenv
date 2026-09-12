@@ -100,6 +100,8 @@ export interface GoalLoopConfig {
    * arm, mirroring `runaway_threshold`'s never-hard-fail shape.
    */
   settle_delay_ms?: number;
+  /** Age-based child-home retention in days. A finite positive number may be fractional; literal false disables age pruning. */
+  child_retention_ttl_days?: number | false;
 }
 
 /** Literal `false` opts out of animation. Malformed, missing, and every other value retain the enabled default. */
@@ -115,6 +117,9 @@ export const DEFAULT_COMPACTION_ADVISORY_PERCENT = 50;
 
 /** Default settle-timer delay in milliseconds, absent (or overridden by) a config file (260906 Phase 1). */
 export const DEFAULT_SETTLE_DELAY_MS = 5000;
+
+/** Default age since last real child activity before an owned home becomes prune-eligible. */
+export const DEFAULT_CHILD_RETENTION_TTL_DAYS = 30;
 
 /**
  * Reads and parses the goal-loop config data file. Returns `undefined` —
@@ -181,6 +186,13 @@ export function resolveContextWindowOverride(config: GoalLoopConfig | undefined)
 export function resolveSettleDelayMs(config: GoalLoopConfig | undefined): number {
   const value = config?.settle_delay_ms;
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : DEFAULT_SETTLE_DELAY_MS;
+}
+
+/** Resolves the adapter-local child retention policy without ever hard-failing startup. */
+export function resolveChildRetentionTtlDays(config: GoalLoopConfig | undefined): number | false {
+  const value = config?.child_retention_ttl_days;
+  if (value === false) return false;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : DEFAULT_CHILD_RETENTION_TTL_DAYS;
 }
 
 // ---------------------------------------------------------------------------

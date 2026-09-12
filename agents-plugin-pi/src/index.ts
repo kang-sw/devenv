@@ -190,9 +190,9 @@ import {
 } from "./spawner.ts";
 import { createAgentWidgetController, shouldArmAgentWidget, type AgentWidgetController } from "./agent-widget.ts";
 import { registerPushMessageRenderers } from "./push-render.ts";
-import { buildOrphanPush, captureOrphans, noSessionSidecarPath, readAndClearSidecarAt, reviveOrphans, sidecarPath, writeSidecarAt } from "./agent-sidecar.ts";
+import { buildOrphanPush, captureOrphans, noSessionSidecarPath, readAndClearSidecarAt, reviveOrphans, sidecarPath, writeSidecarAt, type PersistedOrphan } from "./agent-sidecar.ts";
 import { buildDiscussKickoff } from "./discuss.ts";
-import { registerGoalLoop, readGoalLoopConfig, resolveAgentWaitAnimation, resolveSettleDelayMs } from "./goal-loop.ts";
+import { registerGoalLoop, readGoalLoopConfig, resolveAgentWaitAnimation, resolveChildRetentionTtlDays, resolveSettleDelayMs } from "./goal-loop.ts";
 import { resolveSkillsDir } from "./skills-dir.ts";
 import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
 import { applyForkAffinity, captureRegisteredTools, classifyForkRegistrations, compareForkRegistrations, effectiveForkDescriptor, formatForkRegistrationMismatch, frameForkInput, isCompletionCriticalForkTool, readForkLaunchContext, removeForkTransport, restoreForkContext, restoreForkKeys, writePrivateJson, type ForkContext } from "./fork-context.ts";
@@ -214,7 +214,7 @@ import {
 import { registerAuditCommands } from "./audit.ts";
 import { registerWsSkillTool } from "./lead-skills.ts";
 import { createToolPreviewTuiRef, loadToolResultTuiModules } from "./tool-result-render.ts";
-import { createAgentStorageContext } from "./agent-storage.ts";
+import { createAgentStorageContext, pruneStaleAgentHomes } from "./agent-storage.ts";
 import { addClaudeDelegateIfLead, registerClaudeDelegateSession } from "./claude-delegate.ts";
 import { assertPolicyTool, readDelegationPolicy } from "./delegation-policy.ts";
 import { publishSubtree } from "./subtree-lifecycle.ts";
@@ -233,6 +233,26 @@ const goalLoopConfigPath = join(pluginDir, "goal-loop-config.json");
 const piLeadGuidePath = join(pluginDir, "pi-lead-guide.md");
 const executeWorkerGuidePath = join(pluginDir, "execute-worker-guide.md");
 const exploreGuidePath = join(pluginDir, "explore-guide.md");
+
+/** Controller-session retention seam: child workers never run global disk maintenance. */
+export function applySessionStartAgentRetention(
+  role: SpawnRole | undefined,
+  root: string,
+  configPath: string,
+  recovered: PersistedOrphan[],
+  prune: typeof pruneStaleAgentHomes = pruneStaleAgentHomes,
+): PersistedOrphan[] {
+  if (!isLeadOrFork(role)) return recovered;
+  try {
+    const retention = prune(root, resolveChildRetentionTtlDays(readGoalLoopConfig(configPath)));
+    if (retention.deletedHomes.length === 0) return recovered;
+    const deletedHomes = new Set(retention.deletedHomes);
+    return recovered.filter(orphan => !orphan.ownership || !deletedHomes.has(orphan.ownership.home));
+  } catch (error) {
+    console.error(`ws-pi-agent: child retention failed during session start: ${String(error)}`);
+    return recovered;
+  }
+}
 
 /** Shutdown's durable boundary: preserve pre-stop status, then persist the
  * same snapshots enriched from final child disk reconciliation. */
@@ -602,7 +622,8 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     leadSessionFile = dispatchSessionFile ?? undefined;
     const dispatchStorage = createAgentStorageContext(ctx.sessionManager.getSessionId());
     leadSidecarPath = dispatchSessionFile ? sidecarPath(dispatchSessionFile) : noSessionSidecarPath(dispatchStorage.root, dispatchStorage.ownerSessionId);
-    const recoveredRegistry = readAndClearSidecarAt(leadSidecarPath);
+    let recoveredRegistry = readAndClearSidecarAt(leadSidecarPath);
+    recoveredRegistry = applySessionStartAgentRetention(readSpawnRole(process.env), dispatchStorage.root, goalLoopConfigPath, recoveredRegistry);
     if (recoveredRegistry.length > 0) reviveOrphans(agentTools.rpcRegistry, recoveredRegistry, {
       fork: (record) => armForkRoleWiring(pi, agentTools!.rpcRegistry, record, onForkQuestion),
       executeWorker: (record) => { record.onApprovalPending = onApprovalPending; },

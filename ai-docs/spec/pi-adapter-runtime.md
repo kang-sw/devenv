@@ -706,8 +706,33 @@ directory age alone do not. Before the first session write, an absent file is
 pending, not a failed observation. Actual observation failures and disappearance
 after an observed write retain conservative unknown state and diagnostics.
 Later metadata-write failures are diagnostic and nonfatal to live operations.
-These records prepare safe cleanup; automatic scratch removal, cap-driven disk
-deletion, and age pruning are not implemented by this storage relocation.
+Ownership mutation, activity observation, dormant resume, and deletion share a
+cross-process claim beside the exact home. Deletion holds that claim while it
+revalidates eligibility and atomically detaches the canonical home, so a racing
+activity or protection write either wins and is observed or fails closed before
+a child can be relaunched against a disappearing home.
+
+Registry-cap eviction deletes a candidate's exact owned home only when durable
+metadata still proves it stopped, unprotected, canonical, and safe. Legacy,
+malformed, symlinked, live, unknown, or protected homes are retained. A late
+eligibility change aborts that eviction; a filesystem removal failure is
+reported but does not make registry capacity permanently unavailable.
+
+Controller (`lead` or `fork`) session startup also performs best-effort age
+pruning across all dispatch-session namespaces under the configured Pi agent
+root. `goal-loop-config.json` key `child_retention_ttl_days` defaults to 30;
+any finite positive day value, including a fraction, overrides it, and literal
+`false` disables the scan. Before comparing `lastActivityAt` with the cutoff,
+the scanner samples a recorded session file so an actual later write refreshes
+activity. It then applies the same ownership, liveness, protection, canonical
+path, and final-under-claim checks as cap eviction. Busy or uncertain homes and
+individual scan/removal failures are retained with diagnostics and never block
+startup. Worker and explore child processes do not run this global maintenance.
+Recovered sidecar records whose exact owned homes were deleted are filtered;
+retained owned records and unowned legacy records remain resumable. If a later
+audit encounters a deleted or unreadable transcript, it states that historical
+session data is unavailable rather than presenting an empty history. Automatic
+terminal scratch removal remains intentionally absent.
 
 ### Turn completion is gated on RPC idle {#260903-pi-spawner-completion-gating}
 

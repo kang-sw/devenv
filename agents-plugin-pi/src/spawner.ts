@@ -2389,10 +2389,10 @@ export function recordReport(record: RpcAgentRecord, kind: "question" | "final" 
   if (record.ownership) touchOwnership(record.ownership.home);
 }
 
-/** Writes durable owner/approval protection without treating a poll as activity. */
-export function syncOwnershipProtection(record: RpcAgentRecord): void {
-  if (!record.ownership) return;
-  updateOwnership(record.ownership.home, {
+/** Writes durable protection without treating a poll as activity. A new owner bind must check success before committing local state. */
+export function syncOwnershipProtection(record: RpcAgentRecord): boolean {
+  if (!record.ownership) return true;
+  return updateOwnership(record.ownership.home, {
     liveness: {
       lifecycle: record.client ? (record.running ? "live" : "stopping") : "unknown",
       running: record.running,
@@ -2405,7 +2405,7 @@ export function syncOwnershipProtection(record: RpcAgentRecord): void {
       pendingApprovalCommandId: record.pendingApproval?.cmdId,
       recovery: record.client ? "none" : "revived",
     },
-  });
+  }) !== undefined;
 }
 
 /** Unreferenced persistent-record observer; unchanged polling never renews activity. */
@@ -3307,6 +3307,12 @@ export async function sendToAgent(
     if (admitted.depth !== record.delegation.depth || parentPolicy.maxDepth < record.delegation.maxDepth) throw new Error("ws-pi-agent: recovered child exceeds the current delegation budget");
   }
 
+  // Claim activity before mutating a dormant record. If retention already
+  // owns the cross-process deletion claim, this resume fails closed instead
+  // of launching against a home that can disappear mid-start.
+  const ownershipTouched = !record.ownership || touchOwnership(record.ownership.home);
+  if (!record.client && !ownershipTouched) throw new Error("ws-pi-agent: owned session home is unavailable during resume");
+
   // A real new instruction supersedes an in-memory `/done` operation. Its
   // late settle/park callbacks must not affect this replacement work.
   if (record.forkFinish && ctx.finishToken !== record.forkFinish.token) {
@@ -3318,7 +3324,6 @@ export async function sendToAgent(
   // fork-raised-question path). A coordinator closeout is lead-attributed
   // text, but not an external takeover, so it never takes this branch.
   if (ctx.leadSend && !ctx.finishToken && record.threadBound) record.threadBound = false;
-  if (record.ownership) touchOwnership(record.ownership.home);
 
   if (!record.client) {
     if (record.subtreeChannel) record.subtreeChannel = { ...record.subtreeChannel, nonce: randomUUID() };
@@ -3640,7 +3645,9 @@ export function getAgentTranscriptPath(registry: RpcAgentRegistry, agentId: stri
   if (!record) {
     throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
   }
-  if (record.ownership) touchOwnership(record.ownership.home);
+  if (record.ownership && !touchOwnership(record.ownership.home)) {
+    throw new Error("ws-pi-agent: history unavailable — owned session home is busy, gone, or unreadable; retry the reference");
+  }
   if (record.ownership) observeSessionWrite(record.ownership.home, record.sessionPath);
   return { transcript_path: record.sessionPath };
 }

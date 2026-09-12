@@ -35,6 +35,7 @@ import {
   resolveCompactionAdvisoryPercent,
   resolveContextWindowOverride,
   resolveSettleDelayMs,
+  resolveChildRetentionTtlDays,
   computeContextPercent,
   buildGoalAnnouncement,
   buildCompactionLeverResult,
@@ -50,6 +51,7 @@ import {
   DEFAULT_RUNAWAY_THRESHOLD,
   DEFAULT_COMPACTION_ADVISORY_PERCENT,
   DEFAULT_SETTLE_DELAY_MS,
+  DEFAULT_CHILD_RETENTION_TTL_DAYS,
   type GoalLoopConfig,
 } from "../src/goal-loop.ts";
 import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
@@ -136,6 +138,22 @@ describe("resolveRunawayThreshold", () => {
   test("NaN/Infinity fall back to the default", () => {
     assert.equal(resolveRunawayThreshold({ runaway_threshold: Number.NaN }), DEFAULT_RUNAWAY_THRESHOLD);
     assert.equal(resolveRunawayThreshold({ runaway_threshold: Number.POSITIVE_INFINITY }), DEFAULT_RUNAWAY_THRESHOLD);
+  });
+});
+
+describe("resolveChildRetentionTtlDays", () => {
+  test("defaults invalid or missing values to 30 days", () => {
+    assert.equal(resolveChildRetentionTtlDays(undefined), DEFAULT_CHILD_RETENTION_TTL_DAYS);
+    assert.equal(resolveChildRetentionTtlDays({}), DEFAULT_CHILD_RETENTION_TTL_DAYS);
+    for (const value of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, "30", true, null]) {
+      assert.equal(resolveChildRetentionTtlDays({ child_retention_ttl_days: value as never }), DEFAULT_CHILD_RETENTION_TTL_DAYS);
+    }
+  });
+
+  test("accepts finite positive fractional days and only literal false disables pruning", () => {
+    assert.equal(resolveChildRetentionTtlDays({ child_retention_ttl_days: 0.25 }), 0.25);
+    assert.equal(resolveChildRetentionTtlDays({ child_retention_ttl_days: 45 }), 45);
+    assert.equal(resolveChildRetentionTtlDays({ child_retention_ttl_days: false }), false);
   });
 });
 
