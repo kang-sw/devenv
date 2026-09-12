@@ -38,32 +38,39 @@ topology to downstream repositories whose ordinary integration branch may be
 ### Confirmed Decisions
 <!-- Normative choices explicitly confirmed by the user. -->
 
+- Replace the unconditional name-based refusal with a structured
+  `policy_blocked` result that reports every current refusal reason and a
+  resolution for each.
+- Classify each diagnostic as `must_resolve` or `overrideable`. An override
+  acknowledges only `overrideable` policy findings; ref validity, target
+  identity, worktree state, an existing merge, containment, and changed
+  inspected tips remain `must_resolve`.
+- Use `release_target_override: false` as the default retry input. A true value
+  requires the source and target OIDs returned by the refusal, and the tool
+  rechecks them immediately before mutation.
+- Include the available review frontier and candidate range in diagnostics.
+  Describe an uncovered range as review evidence, not as proof that no review
+  occurred or that findings remain unresolved.
+- When a Git result cannot be parsed reliably into a structured diagnostic,
+  include the command and bounded raw output on that diagnostic entry.
+- Return actionable next steps: resolve every `must_resolve` item, satisfy an
+  `overrideable` item through the indicated review or release procedure, or
+  retry with the release-target acknowledgement and inspected OIDs.
+
 ### Proposals
 <!-- Unconfirmed candidates. Never treat these as actionable authority. -->
-
-- Replace the unconditional name-based refusal with a structured diagnostic
-  that reports the current policy reasons, review evidence available to the
-  tool, and the actions that can resolve each reason.
-- Add an explicit retry input, defaulting to refusal, that acknowledges the
-  release-class target after the caller has seen those diagnostics.
-- Keep Git integrity and worktree safety failures non-waivable; scope any
-  acknowledgement to the release-target policy only.
-- Bind an acknowledgement to the inspected source and target tips, and
-  optionally the review-policy snapshot, so a changed merge candidate requires
-  fresh diagnostics.
 
 ### Open Questions
 <!-- Unresolved choices that require further investigation or user input. -->
 
-- Should the retry surface be a boolean such as `override: true`, a narrowly
-  named release-target acknowledgement plus expected OIDs, or an opaque token
-  returned by the refusal?
-- Which review facts are blocking reasons versus advisory context when the MCP
-  cannot infer whether a downstream `main` or `master` merge is an ordinary
-  integration or a release?
 - Can declared `review-track` and `release-boundary` posture distinguish a
   trunk-only integration target from a release target without importing a
   project-specific branch topology?
 
 ### Rejected Alternatives
 <!-- Alternatives explicitly rejected, with the reason when useful. -->
+
+- A generic bare `override: true` is not bound to the candidate the caller
+  inspected and has no stable meaning as more refusal classes are added.
+- An opaque server-issued acknowledgement token adds state and machinery that
+  source and target OID assertions provide without another lifecycle.
