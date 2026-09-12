@@ -1,7 +1,8 @@
 /** Private, one-edge lifecycle transport. Pi's raw agent_settled is not vetoable. */
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import type { RpcAgentRegistry } from "./spawner.ts";
 import { SUBTREE_ENV } from "./delegation-policy.ts";
+import { writePrivateJson } from "./fork-context.ts";
 
 export interface SubtreeChannel { path: string; nonce: string }
 export interface SubtreeSnapshot { nonce: string; outstanding: number; active: number; deliveries: number; delegated: boolean; revision: number }
@@ -23,9 +24,7 @@ export function subtreeWaiting(snapshot: SubtreeSnapshot | undefined): boolean {
   return !snapshot || snapshot.outstanding > 0 || snapshot.active > 0 || snapshot.deliveries > 0;
 }
 export function writeSubtreeSnapshot(channel: SubtreeChannel, snapshot: Omit<SubtreeSnapshot, "nonce">): void {
-  const tmp = `${channel.path}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify({ ...snapshot, nonce: channel.nonce }), { mode: 0o600 });
-  renameSync(tmp, channel.path);
+  writePrivateJson(channel.path, { ...snapshot, nonce: channel.nonce });
 }
 interface Publisher { revision: number; delegated: boolean; dispatching: number; channel?: SubtreeChannel; deliveries: () => number }
 const publishers = new WeakMap<RpcAgentRegistry, Publisher>();

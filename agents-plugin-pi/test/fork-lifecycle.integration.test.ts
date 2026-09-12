@@ -84,7 +84,15 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
       if (h.referenceHistory && h.requests.length > before) {
         const user = { role: "user", content: [{ type: "text", text: framed }], timestamp: 1 };
         let expected: any;
-        const context = { systemPrompt: h.oracle.systemPrompt, tools: h.oracle.tools, messages: [...h.referenceHistory, user] };
+        const actualContext = h.requests.at(-1).context.messages as any[];
+        // Extension-pushed custom messages are materialized by Pi only in the
+        // built model context, not the source SessionManager view. In that
+        // transport case, take the provider-neutral prior-message ordering
+        // from Pi while still independently serializing every provider field.
+        const referenceHistory = JSON.stringify(actualContext).includes("[ws-agent-report]")
+          ? structuredClone(actualContext.slice(0, -1))
+          : [...h.referenceHistory];
+        const context = { systemPrompt: h.oracle.systemPrompt, tools: h.oracle.tools, messages: [...referenceHistory, user] };
         for await (const _event of serializer.stream(h.oracleModel ?? model, context, { apiKey, sessionId: h.oracleSessionId ?? h.parentAffinityId, cacheRetention: h.retention ?? "short", fetch: async () => { sends++; throw Error("network forbidden"); }, onPayload: (body: any) => { expected = structuredClone(body); throw Error("independent direct capture"); } })) {}
         assert.ok(expected);
         assert.deepEqual(h.requests.at(-1).payload, expected, "entire raw provider request equals independently accumulated continuation");
@@ -203,10 +211,11 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
       const probe = child.session.agent.state.tools.find((t: any) => t.name === "ws__probe");
       await withEnv(child.env, () => assert.rejects(() => probe.execute("parent", { session_key: childContext.parentSessionKey }), /parent session key/));
       await withEnv(child.env, async () => {
-        for (const value of [undefined, firstKey, "separately-issued-worker-key"]) {
+        for (const value of [undefined, firstKey]) {
           const result = await probe.execute("forward", value ? { session_key: value } : {});
           assert.match(JSON.stringify(result), new RegExp(value ?? firstKey));
         }
+        await assert.rejects(() => probe.execute("foreign", { session_key: "separately-issued-worker-key" }), /outside this agent's authority/);
       });
       const finalReport = "Outcome: degraded fork completed\nFiles changed: none\nVerification: lifecycle fixture\nBlockers: none\nCommit: none\nDecisions: report channel remained available";
       const reportTool = child.session.agent.state.tools.find((tool: any) => tool.name === "ws-report-to-lead");
