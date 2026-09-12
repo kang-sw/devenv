@@ -110,8 +110,3 @@ Round-one implementation review proved that owned-home containment exists but au
 - Retain the current implementation branch and its round-one evidence while the prerequisite runs. When resumed, integrate the prerequisite, fix the remaining round-one findings (ordinary leading-bracket queries, native DNS/socket pinning coverage, free-provider startup plus dormant/restarted readiness, result-page-request observation, and packed-artifact dependency/peer/license regression), then perform bounded round-two verification and review.
 
 This edition does not defer or weaken automatic pruning. If the shared retention phases cannot own these files without a web-specific cleanup mechanism, stop again with evidence rather than closing this ticket on containment alone.
-
-## Blocked (2026-09-12)
-
-- Completion is blocked on `260908-feat-ws-pi-agent-session-disk-retention` Phase 2 and Phase 3. Those phases must provide real cap-eviction and stale-child cleanup before fixture-home containment can count as lifecycle acceptance.
-- Preserve implementation branch `impl/goal/track/pi-agent/cedar-lantern-moss/evict-frame-coke` at `4faac2c2`. After the prerequisite lands, integrate the goal branch, resolve the retained round-one findings, run round-two verification/review, then remove this blocker through the worker's normal Result and closure flow.
