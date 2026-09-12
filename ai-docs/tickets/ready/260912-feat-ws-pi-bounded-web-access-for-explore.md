@@ -6,7 +6,7 @@ related:
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 4e8171eab77b1020
-sage-review-design-reviewed: 6ea181035d33db54
+sage-review-design-reviewed: b0cbdfc1083ccd20
 ---
 
 # Pi Explore: bounded fetch plus bundled web-search extension
@@ -72,3 +72,16 @@ Replace direct model exposure of the upstream registration with a Pi-owned fail-
 - Audit the captured execute path and provider routes for implicit page fetches or content writes under the forced arguments. Test hostile/unknown arguments, config defaults that request curator/content mode, caller proxy/provider attempts, suppression of all non-search registrations, exact capture cardinality, normal bounded search metadata, absence of content-cache writes, owner-configured provider/proxy behavior, and fail-closed startup when the boundary cannot be proved.
 
 A different dependency or a broader search/content capability is not authorized by this edition. If the isolated capture-and-facade boundary cannot be implemented against the exact pinned package without upstream side effects, stop again with evidence rather than weakening the search-only contract.
+
+#### Edition (c9eed7f8) - 2026-09-12
+
+A second exact-package audit showed that `pi-web-access@0.29.0` unconditionally installs a process-global `fetch` wrapper during extension initialization, before `registerTool`. A registration proxy cannot intercept this effect, and loading it in the Explore RPC process could alter the ws-owned bounded fetch path as well as other sibling tools. Supersede the prior same-process capture mechanism with process isolation while preserving its query-only contract:
+
+- Do not load the upstream extension into the Explore agent process. Register the Pi-owned model-facing `web_search` facade from the ws extension itself; the Explore `--tools` allowlist names that facade, not a directly registered upstream tool.
+- For each search call, launch one short-lived, non-agent helper process from a package-owned script. Send exactly one validated non-empty query as framed JSON over stdin; never interpolate it into a shell command. The helper loads the exact pinned upstream extension through the isolated registration proxy, captures exactly one `web_search`, suppresses other tools and commands, invokes it with `includeContent: false` and `workflow: "none"`, emits one normalized JSON result, and exits. It is execution isolation, not a new worker/orchestrator role, and is never kept resident.
+- Confine the dependency's audited global-fetch wrapper and any provider-configured proxy behavior to that helper process. The helper may read the owner's existing provider/auth/proxy configuration required by the dependency, but receives no model-supplied provider, proxy, workflow, content, header, or environment override. The Explore process's global fetch identity and `ws_web_fetch` transport must remain unchanged before and after searches.
+- Use direct process spawning with fixed executable/argv, a 30-second wall deadline, bounded stdout/stderr, cancellation propagation, forced termination on timeout or parent exit, and a clean one-result IPC protocol. Treat malformed, duplicate, over-limit, post-result, or nonzero-exit output as a redacted `web-search-tool-unavailable` diagnostic; never pass helper stderr, credentials, tokens, or raw environment values to the model.
+- Give the helper only the minimal ExtensionAPI/context surface the captured implementation actually requires. Unexpected registration or API use fails closed. Keep upstream search metadata in helper memory only; return bounded normalized result metadata to the parent and do not expose or persist upstream session-custom entries, raw provider responses, fetched bodies, content-cache entries, or hidden references.
+- Spawn-time composition validation now checks the pinned package path, helper script, facade registration, and an isolated capture probe. Provider readiness remains call-time best effort. Tests must prove helper cleanup, timeout/cancellation, IPC and output bounds, secret redaction, exact-package capture cardinality, no parent-process global mutation, no non-search registration, owner-configured provider/proxy operation inside the helper, and identical direct-lead and nested-worker facade behavior.
+
+This edition authorizes only the one-shot helper boundary for the exact pinned package. If its minimal isolated API cannot execute ordinary search without broader filesystem writes, page fetches, or registration effects, stop again with evidence; do not load it in-process, broaden the facade, keep a helper resident, or switch dependencies without another settled amendment.
