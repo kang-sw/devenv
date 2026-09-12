@@ -30,12 +30,17 @@
  * instead of queueing behind an unfinished wait turn.
  *
  * A `followUp` push raised while the owning session is mid-turn is HELD
- * (`heldPushQueue`) and released on that turn's `agent_settled`, so its status
- * line is fresh as of delivery rather than as of arrival; `steer` pushes are
- * sent immediately, since interrupting is their purpose. Symmetrically, a
- * child's `kind:"final"` report is held on the CHILD's side of the same
- * boundary (`pendingFinal`) and pushed when that child's own turn ends, so
- * "done" is never announced while its author is still working.
+ * (`heldPushQueue`) and released at that turn's `agent_end` as one versioned
+ * `ws-push-batch` follow-up. The batch retains FIFO model content and separate
+ * structured TUI items, so Pi steering mode cannot stretch one boundary
+ * snapshot across multiple assistant turns. `agent_settled` plus a counted
+ * wake remains the fallback for compaction, late arrival, or rejected sends;
+ * confirmed wake starts release one batch as steering before their first
+ * response. `steer` pushes that were never held remain immediate, since
+ * interrupting is their purpose. Symmetrically, a child's `kind:"final"`
+ * report is held on the CHILD's side of the same boundary (`pendingFinal`)
+ * and pushed when that child's own turn ends, so "done" is never announced
+ * while its author is still working.
  *
  * The spawn tool's `model_name` param names one of the four fixed tiers
  * (`small`/`medium`/`large`/`xlarge`); the caller (the lead) passes an
@@ -100,6 +105,7 @@ import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, SUBTRE
 import { createWebSearch } from "./web-search.ts";
 import { clearWebReadiness, verifyWebReadiness, WEB_HOME_ENV, WEB_NONCE_ENV } from "./web-readiness.ts";
 import { assertSubtreeFinal, beginSubtreeDispatch, installSubtreePublisher, publishSubtree, readSubtreeChannel, readSubtreeSnapshot, subtreeWaiting, type SubtreeChannel } from "./subtree-lifecycle.ts";
+import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers: tool-group resolution, terminal-stopReason classification,
@@ -1460,7 +1466,7 @@ function requestPushWake(pi: ExtensionAPI): void {
 /** Admit raw summaries through the very same FIFO as family-shaped reports. */
 export function sendToLead(pi: ExtensionAPI, message: Parameters<ExtensionAPI["sendMessage"]>[0], deliverAs: PushDeliverAs): void {
   if (!shouldPushToLead() || !leadIdleRef.current) return;
-  admitPush(pi, { kind: "raw", deliverAs, send: (p, deliveryOverride) => p.sendMessage(message, { deliverAs: deliveryOverride ?? deliverAs, triggerTurn: true }) });
+  admitPush(pi, { kind: "raw", deliverAs, message });
 }
 
 function admitPush(pi: ExtensionAPI, held: HeldPush | HeldRawSend): void {
@@ -1469,12 +1475,16 @@ function admitPush(pi: ExtensionAPI, held: HeldPush | HeldRawSend): void {
   } catch {
     return; // stale session accessor
   }
-  if (leadCompactingRef.current || leadWakeStartPendingRef.current || isOwningAgentIdle() || held.deliverAs === "followUp") {
-    if (held.kind === "push" && held.terminal) held.terminal.state = "held";
+  if (leadCompactingRef.current || leadWakeStartPendingRef.current || isOwningAgentIdle() || held.deliverAs === "followUp" || heldPushQueue.length > 0) {
+    if (held.kind === "push") {
+      if (held.terminal) held.terminal.state = "held";
+      held.actionGeneration = held.record?.workGeneration;
+      if (held.family === "ws-agent-question") held.questionReport = held.record?.reportLog.at(-1);
+    }
     heldPushQueue.push(held);
     requestPushWake(pi);
   } else if (held.kind === "raw") {
-    held.send(pi);
+    pi.sendMessage(held.message, { deliverAs: held.deliverAs, triggerTurn: true });
   } else {
     sendPush(pi, held.registry, held.record, held.family, held.payload, held.deliverAs, held.terminal);
   }
@@ -1566,14 +1576,17 @@ interface HeldPush {
   terminal?: TerminalDelivery;
   /** Admission mode: governs whether busy delivery holds or interrupts. Confirmed-start delivery always overrides it to `steer`. */
   deliverAs: PushDeliverAs;
+  /** Work generation at admission, used to reject controls superseded before the snapshot. */
+  actionGeneration?: number;
+  /** Exact report-log entry created for a queued headless question. */
+  questionReport?: AgentReportLogEntry;
 }
 
-/** Pre-built summaries share the family-push FIFO and record their admission mode. */
+/** Pre-built summaries share the family-push FIFO and retain their original structured custom message. */
 interface HeldRawSend {
   kind: "raw";
   deliverAs: PushDeliverAs;
-  /** The optional override lets confirmed start release summaries as steering without changing admission. */
-  send: (pi: ExtensionAPI, deliveryOverride?: PushDeliverAs) => void;
+  message: Parameters<ExtensionAPI["sendMessage"]>[0];
 }
 
 /**
@@ -1603,6 +1616,102 @@ interface HeldRawSend {
  * mechanism instead of maintaining a parallel one.
  */
 export const heldPushQueue: Array<HeldPush | HeldRawSend> = [];
+
+function xmlEscape(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+function customContentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return String(content ?? "");
+  return content.map((part) => {
+    const candidate = part as { type?: unknown; text?: unknown };
+    return candidate?.type === "text" && typeof candidate.text === "string"
+      ? candidate.text
+      : JSON.stringify(part);
+  }).join("\n");
+}
+
+function batchItemIdentity(item: PushBatchItem): { agentId?: string; commandId?: string } {
+  const details = item.details as { agent_id?: unknown; cmd_id?: unknown } | undefined;
+  return {
+    agentId: typeof details?.agent_id === "string" ? details.agent_id : undefined,
+    commandId: typeof details?.cmd_id === "string" ? details.cmd_id : undefined,
+  };
+}
+
+/** Serialize a FIFO snapshot without truncation; actionable summaries follow every ordered message. */
+function buildPushBatchContent(items: readonly PushBatchItem[]): string {
+  const lines = [`<${PUSH_BATCH_CUSTOM_TYPE} version="${PUSH_BATCH_VERSION}">`];
+  for (const item of items) {
+    const { agentId, commandId } = batchItemIdentity(item);
+    const attrs = [
+      `type="${xmlEscape(item.customType)}"`,
+      `state="${item.state}"`,
+      ...(agentId ? [`agent-id="${xmlEscape(agentId)}"`] : []),
+      ...(commandId ? [`command-id="${xmlEscape(commandId)}"`] : []),
+    ];
+    lines.push(`  <message ${attrs.join(" ")}>${xmlEscape(customContentText(item.content))}</message>`);
+  }
+  const actions = items.flatMap((item) => {
+    if (item.state !== "actionable") return [];
+    const { agentId, commandId } = batchItemIdentity(item);
+    if (item.customType === "ws-agent-approval" && agentId && commandId) {
+      return [`    <action type="approval" agent-id="${xmlEscape(agentId)}" command-id="${xmlEscape(commandId)}">Call ws-approve with agent_id=&quot;${xmlEscape(agentId)}&quot; and cmd_id=&quot;${xmlEscape(commandId)}&quot;.</action>`];
+    }
+    if (item.customType === "ws-agent-question" && agentId) {
+      return [`    <action type="question" agent-id="${xmlEscape(agentId)}">Call ws-agent-send with agent_id=&quot;${xmlEscape(agentId)}&quot; and the answer.</action>`];
+    }
+    return [];
+  });
+  lines.push("  <action-summary>", ...(actions.length ? actions : ["    none"]), "  </action-summary>", `</${PUSH_BATCH_CUSTOM_TYPE}>`);
+  return lines.join("\n");
+}
+
+function heldActionState(held: HeldPush): PushBatchItemState {
+  if (held.family === "ws-agent-approval") {
+    const cmdId = typeof held.payload.cmd_id === "string" ? held.payload.cmd_id : undefined;
+    const pending = held.record?.pendingApproval;
+    return cmdId && held.record?.workGeneration === held.actionGeneration && pending?.cmdId === cmdId && pending.decisionWritten !== true
+      ? "actionable"
+      : "superseded";
+  }
+  if (held.family === "ws-agent-question") {
+    const latest = held.record?.reportLog.at(-1);
+    return held.record?.workGeneration === held.actionGeneration && held.record?.terminalThisTurn === true && latest === held.questionReport && latest?.kind === "question"
+      ? "actionable"
+      : "superseded";
+  }
+  return "informational";
+}
+
+function materializeHeldPush(held: HeldPush | HeldRawSend): PushBatchItem {
+  if (held.kind === "raw") {
+    return {
+      customType: held.message.customType,
+      content: held.message.content as string | unknown[],
+      display: held.message.display,
+      details: held.message.details,
+      state: "informational",
+    };
+  }
+  const status = computeRunningStatusLine(held.registry);
+  const base: Record<string, unknown> = held.record ? { agent_id: held.record.agentId, ...held.payload } : { ...held.payload };
+  const details = status ? { ...base, status } : base;
+  const displayId = held.record?.alias ? `${held.record.alias} (${held.record.agentId})` : held.record?.agentId;
+  return {
+    customType: held.family,
+    content: buildPushContent(held.family, displayId, held.payload, status),
+    display: true,
+    details,
+    state: heldActionState(held),
+  };
+}
 
 /** Build current family status and send into a confirmed streaming run with the requested delivery mode. */
 function sendPush(
@@ -1647,28 +1756,51 @@ function sendPush(
   }
 }
 
-/** Idle release requests one counted user wake without draining. Only confirmed agent_start releases the batch, preserving FIFO and rebuilding family status at release time. Compaction and pending-start holds dominate every release. */
-export function flushHeldPushes(pi: ExtensionAPI | undefined, confirmedStart = false): number {
+/**
+ * Release one immutable prefix snapshot as one custom message. The prefix stays
+ * queued until `sendMessage` returns synchronously; rejection restores every
+ * terminal obligation and lets the ordinary settle/wake path retry it.
+ */
+function submitHeldPushBatch(pi: ExtensionAPI, deliverAs: "steer" | "followUp"): number {
+  if (heldPushQueue.length === 0) return 0;
+  const snapshot = heldPushQueue.slice();
+  const terminalStates = snapshot.flatMap((held) => held.kind === "push" && held.terminal
+    ? [{ terminal: held.terminal, wasHeld: held.terminal.state === "held" }]
+    : []);
+  for (const { terminal } of terminalStates) terminal.releaseObligation?.();
+  const items = snapshot.map(materializeHeldPush);
+  try {
+    pi.sendMessage(
+      {
+        customType: PUSH_BATCH_CUSTOM_TYPE,
+        content: buildPushBatchContent(items),
+        display: true,
+        details: { version: PUSH_BATCH_VERSION, items } as never,
+      },
+      { deliverAs, triggerTurn: true },
+    );
+  } catch {
+    for (const { terminal } of terminalStates) terminal.restoreObligation?.();
+    requestPushWake(pi);
+    return 0;
+  }
+  heldPushQueue.splice(0, snapshot.length);
+  for (const { terminal, wasHeld } of terminalStates) {
+    terminal.state = "enqueued";
+    if (wasHeld) terminal.afterEnqueue?.();
+  }
+  return snapshot.length;
+}
+
+/** Idle release requests one counted user wake without draining. Confirmed starts and lead turn boundaries each release one FIFO batch. */
+export function flushHeldPushes(pi: ExtensionAPI | undefined, confirmedStart = false, agentEndBoundary = false): number {
   if (!pi || !shouldPushToLead() || !leadIdleRef.current || leadCompactingRef.current || leadWakeStartPendingRef.current) return 0;
+  if (agentEndBoundary) return submitHeldPushBatch(pi, "followUp");
   if (!confirmedStart) {
     requestPushWake(pi);
     return 0;
   }
-  const pending = heldPushQueue.splice(0, heldPushQueue.length);
-  for (const held of pending) {
-    if (held.kind === "raw") {
-      try {
-        held.send(pi, "steer");
-      } catch {
-        // Best effort, like family pushes; keep delivering the remaining batch.
-      }
-      continue;
-    }
-    // Admission mode decides busy-time holding or interruption only. A confirmed
-    // start releases every held message as steering before its first response.
-    sendPush(pi, held.registry, held.record, held.family, held.payload, "steer", held.terminal);
-  }
-  return pending.length;
+  return submitHeldPushBatch(pi, "steer");
 }
 
 /** Factory-scope wake lifecycle, also active in fork owners. Registration allocates no timers; only a reserved user wake does. Worker/explore roles never reserve wakes. */
@@ -1677,6 +1809,9 @@ export function registerPushFlush(pi: ExtensionAPI, options: WakeStartOptions): 
   pi.on("agent_start", () => {
     clearWakeStart();
     flushHeldPushes(pi, true);
+  });
+  pi.on("agent_end", () => {
+    flushHeldPushes(pi, false, true);
   });
   pi.on("agent_settled", () => {
     clearWakeStart();

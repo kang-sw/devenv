@@ -121,6 +121,7 @@ import {
   type RpcAgentRegistry,
   leadIdleRef, registerPushFlush, clearWakeStart,
 } from "../src/spawner.ts";
+import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { allocateAgentHome, createAgentStorageContext } from "../src/agent-storage.ts";
 import { rmSync } from "node:fs";
@@ -143,6 +144,16 @@ afterEach(() => {
   heldPushQueue.length = 0;
   leadWakeStartPendingRef.current = false;
 });
+
+/** Keep item-level lifecycle assertions while the transport delivers a batch envelope. */
+function capturePush(sent: Array<{ message: unknown; options: unknown }>, message: unknown, options: unknown): void {
+  const batch = message as { customType?: string; details?: { items?: unknown[] } };
+  if (batch.customType === PUSH_BATCH_CUSTOM_TYPE && Array.isArray(batch.details?.items)) {
+    for (const item of batch.details.items) sent.push({ message: item, options });
+  } else {
+    sent.push({ message, options });
+  }
+}
 
 function thread(overrides: Partial<ThreadRecord> = {}): ThreadRecord {
   return {
@@ -1206,7 +1217,7 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     const pi = {
       on: (event: string, fn: () => void) => handlers.set(event, fn),
       sendUserMessage: () => handlers.get("agent_start")?.(),
-      sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }),
+      sendMessage: (message: unknown, options: unknown) => capturePush(sent, message, options),
     } as unknown as ExtensionAPI;
     registerPushFlush(pi, { delayMs: () => 10 });
     const handle = createThreadRegistryHandle();
@@ -1538,7 +1549,7 @@ describe("deliverQueuedAnswer (260911 D1: the fork-less lead-ask send path — n
     const pi = {
       on: (event: string, fn: () => void) => handlers.set(event, fn),
       sendUserMessage: () => handlers.get("agent_start")?.(),
-      sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }),
+      sendMessage: (message: unknown, options: unknown) => capturePush(sent, message, options),
     } as unknown as ExtensionAPI;
     registerPushFlush(pi, { delayMs: () => 10 });
     const handle = createThreadRegistryHandle();
@@ -1662,7 +1673,7 @@ describe("resolveLeadAskEscapeAction / runLeadAskEscapeAction (260911 D-model-si
     const pi = {
       on: (event: string, fn: () => void) => handlers.set(event, fn),
       sendUserMessage: () => handlers.get("agent_start")?.(),
-      sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }),
+      sendMessage: (message: unknown, options: unknown) => capturePush(sent, message, options),
     } as unknown as ExtensionAPI;
     registerPushFlush(pi, { delayMs: () => 10 });
     const handle = createThreadRegistryHandle();
@@ -2430,7 +2441,7 @@ describe("buildOverlayHandle (wraps a live component + the ctx.ui.custom done ca
     const pi = {
       on: (event: string, fn: () => void) => handlers.set(event, fn),
       sendUserMessage: () => handlers.get("agent_start")?.(),
-      sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }),
+      sendMessage: (message: unknown, options: unknown) => capturePush(sent, message, options),
     } as unknown as ExtensionAPI;
     registerPushFlush(pi, { delayMs: () => 10 });
     const handle = createThreadRegistryHandle();
@@ -2561,7 +2572,7 @@ describe("runDoneAction (openThread's /done dispatch — F1 regression guard + s
     const pi = {
       on: (event: string, fn: () => void) => handlers.set(event, fn),
       sendUserMessage: () => handlers.get("agent_start")?.(),
-      sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }),
+      sendMessage: (message: unknown, options: unknown) => capturePush(sent, message, options),
     } as unknown as ExtensionAPI;
     registerPushFlush(pi, { delayMs: () => 10 });
     const handle = createThreadRegistryHandle();
@@ -2714,7 +2725,7 @@ describe("summarizeThenClose + buildOverlayHandle + ConversationViewComponent wi
     const pi = {
       on: (event: string, fn: () => void) => handlers.set(event, fn),
       sendUserMessage: () => handlers.get("agent_start")?.(),
-      sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }),
+      sendMessage: (message: unknown, options: unknown) => capturePush(sent, message, options),
     } as unknown as ExtensionAPI;
     registerPushFlush(pi, { delayMs: () => 10 });
     const handle = createThreadRegistryHandle();

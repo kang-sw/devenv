@@ -75,6 +75,7 @@ import {
   type WorkingContext,
 } from "../src/execute-gateway.ts";
 import { leadIdleRef, registerPushFlush, GATED_EXEC_TOOL_NAME, TOOL_GROUPS, resolveTools, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -472,7 +473,12 @@ describe("createApprovalRelay (260905: unconditional ws-agent-approval push)", (
       on: (event: string, handler: () => void) => handlers.set(event, handler),
       sendMessage: (message: unknown, options?: unknown) => {
         assert.equal(idle, false, "approval custom message cannot start an idle run");
-        sent.push({ message: message as never, options: options as never });
+        const batch = message as { customType?: string; details?: { items?: unknown[] } };
+        if (batch.customType === PUSH_BATCH_CUSTOM_TYPE && Array.isArray(batch.details?.items)) {
+          for (const item of batch.details.items) sent.push({ message: item as never, options: options as never });
+        } else {
+          sent.push({ message: message as never, options: options as never });
+        }
       },
       sendUserMessage: (content: unknown, options: unknown) => {
         assert.match(String(content), /^\d+ ws messages waiting;[^\n]+$/);

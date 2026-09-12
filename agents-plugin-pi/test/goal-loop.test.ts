@@ -56,6 +56,7 @@ import {
 } from "../src/goal-loop.ts";
 import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 import { flushHeldPushes, leadIdleRef, clearWakeStart, leadCompactingRef, leadWakeStartPendingRef, heldPushQueue, isOwningAgentIdle, type RpcAgentRegistry } from "../src/spawner.ts";
+import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 
 const tmpDir = mkdtempSync(join(tmpdir(), "ws-goal-loop-test-"));
 after(() => {
@@ -1166,13 +1167,16 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     pi.handlers.get("session_before_compact")!({ reason: "manual" }, ctx);
     assert.equal(leadCompactingRef.current, true);
 
-    let flushed = false;
-    heldPushQueue.push({ kind: "raw", deliverAs: "followUp", send: () => { flushed = true; } });
+    heldPushQueue.push({
+      kind: "raw",
+      deliverAs: "followUp",
+      message: { customType: "ws-agent-advisory", content: "held fixture", display: true, details: { advisory: "held-fixture" } },
+    });
 
     pi.handlers.get("agent_start")!({}, ctx);
     assert.equal(leadCompactingRef.current, true, "start cannot clear an independent compaction hold");
     assert.equal(pi.sentUserMessages.length, 0, "no reminder during compaction");
-    assert.equal(flushed, false, "no queue touch either — that is releaseAfterCompaction's job, not this backstop's");
+    assert.equal(pi.sentMessages.length, 0, "no queue touch either — that is releaseAfterCompaction's job, not this backstop's");
     assert.equal(heldPushQueue.length, 1, "left untouched for that turn's own settle/flush handler");
   });
 
@@ -1188,16 +1192,19 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     pi.handlers.get("session_before_compact")!({ reason: "manual" }, ctx);
     assert.equal(leadCompactingRef.current, true);
 
-    let flushed = false;
-    heldPushQueue.push({ kind: "raw", deliverAs: "followUp", send: () => { flushed = true; } });
+    heldPushQueue.push({
+      kind: "raw",
+      deliverAs: "followUp",
+      message: { customType: "ws-agent-advisory", content: "held fixture", display: true, details: { advisory: "held-fixture" } },
+    });
 
     pi.handlers.get("session_compact")!({ reason: "manual" }, ctx);
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(leadCompactingRef.current, false);
-    assert.equal(flushed, false, "idle release cannot directly send custom messages");
+    assert.equal(pi.sentMessages.length, 0, "idle release cannot directly send custom messages");
     assert.equal(flushHeldPushes(pi.api, true), 1, "confirmed start releases the held push");
-    assert.equal(flushed, true);
+    assert.equal(pi.sentMessages.length, 1);
     assert.equal(pi.sentUserMessages.length, 1, "still just the armed announcement — no synthesized reminder for a non-lever compaction");
   });
 
@@ -1216,8 +1223,11 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     assert.ok(compactCall, "ctx.compact was called");
     assert.equal(leadCompactingRef.current, true);
 
-    let flushed = false;
-    heldPushQueue.push({ kind: "raw", deliverAs: "followUp", send: () => { flushed = true; } });
+    heldPushQueue.push({
+      kind: "raw",
+      deliverAs: "followUp",
+      message: { customType: "ws-agent-advisory", content: "held fixture", display: true, details: { advisory: "held-fixture" } },
+    });
 
     // The release-time ctx reports NOT idle — e.g. agent_start's own backstop
     // raced this call and a fresh turn is already underway.
@@ -1227,7 +1237,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
 
     assert.equal(leadCompactingRef.current, false, "the flag is still cleared even when nothing else fires");
     assert.equal(pi.sentUserMessages.length, 1, "nothing sent while the agent already looks busy again");
-    assert.equal(flushed, false, "the held queue is left for that turn's own settle, not drained here");
+    assert.equal(pi.sentMessages.length, 0, "the held queue is left for that turn's own settle, not drained here");
     assert.equal(clock.pendingCount(), 0, "the not-idle branch clears pendingRearm rather than arming a timer");
 
     // A subsequent settle re-evaluates normally: leadCompactingRef is false
@@ -1278,7 +1288,16 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     assert.equal(leadCompactingRef.current, true);
 
     const order: string[] = [];
-    heldPushQueue.push({ kind: "raw", deliverAs: "followUp", send: () => order.push("flush") });
+    heldPushQueue.push({
+      kind: "raw",
+      deliverAs: "followUp",
+      message: { customType: "ws-agent-advisory", content: "held fixture", display: true, details: { advisory: "held-fixture" } },
+    });
+    const originalPush = pi.api.sendMessage;
+    pi.api.sendMessage = (content, options) => {
+      order.push("flush");
+      originalPush(content, options);
+    };
     const originalSend = (pi.api as unknown as { sendUserMessage: (content: unknown, options?: unknown) => void }).sendUserMessage;
     (pi.api as unknown as { sendUserMessage: (content: unknown, options?: unknown) => void }).sendUserMessage = (content, options) => {
       order.push("reminder");
@@ -1406,12 +1425,12 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     pi.handlers.get("agent_settled")!({}, fakeCtx().ctx);
     assert.equal(pi.sentUserMessages.length, 1, "swallowed, not sent yet");
 
-    // A push held during the compaction window — flushing it starts a turn
-    // SYNCHRONOUSLY, exactly like a real `HeldPush`/`HeldRawSend` calling
-    // `pi.sendMessage(..., { triggerTurn: true })` (`spawner.ts`'s `sendPush`).
+    // A held raw item is batched with every other pending push at the next
+    // confirmed start; the fixture is the original item, not a send callback.
     heldPushQueue.push({
-      kind: "raw", deliverAs: "followUp",
-      send: (p, deliveryOverride) => p.sendMessage({ customType: "ws-agent-report" }, { deliverAs: deliveryOverride, triggerTurn: true }),
+      kind: "raw",
+      deliverAs: "followUp",
+      message: { customType: "ws-agent-report", content: "held report", display: true, details: { report: "held report" } },
     });
 
     await new Promise((resolve) => setImmediate(resolve));
@@ -1419,7 +1438,8 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     assert.equal(pi.streaming.current, false, "idle release cannot start a custom run");
     flushHeldPushes(pi.api, true);
     assert.equal(pi.streaming.current, true, "confirmed-start flush delivers the batch");
-    assert.deepEqual(pi.sentMessages[0]!.options, { deliverAs: "steer", triggerTurn: true }, "the raw fixture honors confirmed-start steering");
+    assert.equal((pi.sentMessages[0]!.content as { customType?: string }).customType, PUSH_BATCH_CUSTOM_TYPE, "the confirmed start transports the held item in one batch envelope");
+    assert.deepEqual(pi.sentMessages[0]!.options, { deliverAs: "steer", triggerTurn: true }, "the batch honors confirmed-start steering");
     assert.equal(pi.sentUserMessages.length, 1, "the deferred release only armed the settle timer");
     assert.equal(clock.pendingCount(), 1);
 
