@@ -23,8 +23,9 @@ Owner ask (2026-09-08): a subagent that has not been referenced for a long
 time, or that falls off the registry cap, should be deleted from disk as
 well, not only forgotten in memory.
 
-What the adapter does today (`agents-plugin-pi/src/spawner.ts`,
-`agent-sidecar.ts`, verified on the 2026-09-08 tree):
+Before Phase 1, the adapter did the following (`agents-plugin-pi/src/spawner.ts`,
+`agent-sidecar.ts`, verified on the 2026-09-08 tree; Phase 1 now allocates
+owned homes in `agents-plugin-pi/src/agent-storage.ts#L37-L51`):
 
 - **The registry is an in-memory `Map`.** The cap (`WS_PI_AGENT_REGISTRY_CAP`,
   default 256) bounds only that map, and only lazily: `evictForCapacity`
@@ -64,9 +65,10 @@ What the adapter does today (`agents-plugin-pi/src/spawner.ts`,
   Fork session files (`--fork` copies) sit in `~/.pi/agent/sessions/<cwd>/`
   interleaved with lead session files, indistinguishable by name.
 
-So the current bound is whatever the OS applies to `tmpdir()`, which is
-accidental (WSL `/tmp` survives restarts of the shell; a long-lived host
-keeps everything).
+Before Phase 1, the disk bound was whatever the OS applied to `tmpdir()`,
+which was accidental (WSL `/tmp` survives restarts of the shell; a long-lived
+host keeps everything; owned homes now derive from the configured Pi agent
+root in `agents-plugin-pi/src/agent-storage.ts#L37-L51`).
 
 ## Decisions
 
@@ -101,6 +103,7 @@ Owner confirmed the full proposed policy on 2026-09-09:
 
 ## Constraints
 
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
 - Never delete the lead session, unrelated Pi sessions, or arbitrary directories.
   Canonical path containment and symlink handling must prevent deletion outside
   an authorized owned home. Recheck eligibility immediately before removal.
@@ -118,6 +121,22 @@ Update `pi-adapter-runtime` session lifecycle coverage with the durable root,
 legacy compatibility, 30-day configurable retention, shared exclusion rules,
 cap eviction deletion and unavailable-history behavior. No live spec behavior
 is claimed implemented by this ticket preparation.
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-pi/src/spawner.ts, agents-plugin-pi/src/agent-storage.ts, agents-plugin-pi/src/agent-sidecar.ts, and existing agents-plugin-pi/test/ coverage |
+| scope.surface | public-interface | retention policy changes ws-agent-spawn lifecycle, resume, and audit-history behavior |
+| scope.new_public_symbol | no | no new exported tool or code symbol is named |
+| scope.new_type_contract | no | Phase 1 already persists the owned-home and liveness metadata in agents-plugin-pi/src/agent-storage.ts#L16-L18 |
+| scope.test_surface | existing | agents-plugin-pi/test/agent-storage.test.ts and agents-plugin-pi/test/spawner.test.ts cover durable homes and cap eviction; Phases 2–3 add cases there or adjacent existing tests |
+| complexity.reuse_points | confirmed | AgentOwnership allocation, ownership metadata, and eligibility state are present in agents-plugin-pi/src/agent-storage.ts#L37-L100 and agents-plugin-pi/src/spawner.ts#L2395-L2419 |
+| complexity.side_effect_risk | high | recursive disk deletion must preserve owned-home containment and protected children |
+| risk.correctness | high | a stale or live child must never be deleted incorrectly |
+| risk.fit | high | retention, cap eviction, and unavailable audit history must share one lifecycle policy |
+| risk.test | high | time, concurrent liveness, filesystem failures, and symlink containment require integration coverage |
+| risk.security_or_contract | high | deletion authorization and path containment are a safety boundary |
 
 ## Phases
 
@@ -198,9 +217,7 @@ unrelated files untouched, and deletion failure without spawn failure.
 
 ### Phase 3: Prune stale children across lead sessions
 
-Apply the 30-day last-activity default at session start over recorded owned homes,
-with a documented adapter configuration to change or disable TTL. Safely handle
-concurrent live leads, recent activity, missing metadata and partial deletion.
+Apply the 30-day last-activity default at session start over recorded owned homes. Configure it through the existing adapter-local `agents-plugin-pi/goal-loop-config.json` key `child_retention_ttl_days`: a finite positive JSON number expresses days and may be fractional; literal JSON `false` disables age pruning while cap eviction remains active; a missing or malformed file and every other invalid value fall back to 30 without throwing. Do not add an environment override. Safely handle concurrent live leads, recent activity, missing metadata and partial deletion.
 
 Verification: fake-clock boundary tests, disabled/overridden TTL, activity refresh,
 protected children in another live lead, mixed-age subtrees, unknown legacy homes,
