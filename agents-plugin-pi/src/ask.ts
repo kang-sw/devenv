@@ -1447,13 +1447,12 @@ export function injectDiscussionSummary(
  * still-delivering an in-progress, already-typed answer behind a deferred
  * model withdrawal (`ThreadRecord.withdrawnPending`, cleared here).
  */
-export function deliverQueuedAnswer(
-  pi: ExtensionAPI,
-  handle: ThreadRegistryHandle,
-  thread: ThreadRecord,
-  answer: string,
-  sessionManager?: { buildContextEntries?: () => { id: string }[]; getBranch?: (id: string) => { id: string }[] },
-): void {
+type LeadAskSessionManager = {
+  buildContextEntries?: () => { id: string }[];
+  getBranch?: (id: string) => { id: string }[];
+};
+
+function queuedAnswerContent(thread: ThreadRecord, answer: string, sessionManager?: LeadAskSessionManager): string {
   let excerpt: string | undefined;
   if (thread.entryId && sessionManager) {
     try {
@@ -1467,22 +1466,49 @@ export function deliverQueuedAnswer(
     }
   }
   const anchor = buildAskAnchorLine(thread.askCommitHash, thread.entryId);
-  const message = {
-    customType: THREAD_SUMMARY_CUSTOM_TYPE,
-    content: buildQueuedAnswerInjectionMessage(thread.context, thread.question, answer, anchor, excerpt),
-    display: true,
-    details: { threadId: thread.threadId, title: thread.title },
-  };
-  sendToLead(pi, message, "followUp");
+  return buildQueuedAnswerInjectionMessage(thread.context, thread.question, answer, anchor, excerpt);
+}
 
-  thread.status = "dormant";
-  thread.withdrawnPending = false;
-  // Phase 2 (260911): the draft is delivered, not merely persisted — clear it
-  // so a later hand-edited/inspected registry never shows a stale one.
-  thread.draftAnswer = undefined;
-  thread.touchedAt = nowIso();
+/**
+ * Deliver one modal submission as one lead follow-up. Entries must already be
+ * in deterministic queue order; blank questions are excluded by the caller.
+ * The single-answer shape retains the original details contract, while a
+ * multi-answer submission carries ordered ids/titles beside one combined
+ * model payload.
+ */
+export function deliverQueuedAnswers(
+  pi: ExtensionAPI,
+  handle: ThreadRegistryHandle,
+  entries: readonly { thread: ThreadRecord; answer: string }[],
+  sessionManager?: LeadAskSessionManager,
+): void {
+  const deliverable = entries.filter(({ answer }) => answer.trim().length > 0);
+  if (deliverable.length === 0) return;
+  const content = deliverable.map(({ thread, answer }) => queuedAnswerContent(thread, answer, sessionManager)).join("\n\n---\n\n");
+  const details = deliverable.length === 1
+    ? { threadId: deliverable[0].thread.threadId, title: deliverable[0].thread.title }
+    : { threadIds: deliverable.map(({ thread }) => thread.threadId), titles: deliverable.map(({ thread }) => thread.title) };
+  sendToLead(pi, { customType: THREAD_SUMMARY_CUSTOM_TYPE, content, display: true, details }, "followUp");
+
+  const touchedAt = nowIso();
+  for (const { thread } of deliverable) {
+    thread.status = "dormant";
+    thread.withdrawnPending = false;
+    thread.draftAnswer = undefined;
+    thread.touchedAt = touchedAt;
+  }
   persistThreads(handle);
   refreshAgentWidget();
+}
+
+export function deliverQueuedAnswer(
+  pi: ExtensionAPI,
+  handle: ThreadRegistryHandle,
+  thread: ThreadRecord,
+  answer: string,
+  sessionManager?: LeadAskSessionManager,
+): void {
+  deliverQueuedAnswers(pi, handle, [{ thread, answer }], sessionManager);
 }
 
 /**
@@ -1685,8 +1711,7 @@ export async function ensureRespondent(
 
   // §7: anchor a compacted entry with a verbatim excerpt of its own window.
   let excerpt: string | undefined;
-  const sessionManager = (ctx as { sessionManager?: { buildContextEntries?: () => { id: string }[]; getBranch?: (id: string) => { id: string }[] } })
-    .sessionManager;
+  const sessionManager = (ctx as { sessionManager?: LeadAskSessionManager }).sessionManager;
   if (thread.entryId && sessionManager) {
     try {
       const liveEntries = sessionManager.buildContextEntries?.() ?? [];
@@ -2007,7 +2032,7 @@ export function runLeadAskEscapeAction(
   handle: ThreadRegistryHandle,
   thread: ThreadRecord,
   draft: string,
-  sessionManager?: { buildContextEntries?: () => { id: string }[]; getBranch?: (id: string) => { id: string }[] },
+  sessionManager?: LeadAskSessionManager,
 ): void {
   if (action === "deliver") {
     deliverQueuedAnswer(pi, handle, thread, draft, sessionManager);
@@ -2028,6 +2053,27 @@ export function runLeadAskEscapeAction(
   thread.touchedAt = nowIso();
   persistThreads(handle);
   refreshAgentWidget();
+}
+
+/** The production modal-close callback, extracted so its one-follow-up batch boundary is directly testable. */
+export function buildLeadAskQueueOnClose(
+  pi: ExtensionAPI,
+  handle: ThreadRegistryHandle,
+  threads: readonly ThreadRecord[],
+  sessionManager?: LeadAskSessionManager,
+  onDone?: () => void,
+): (mode: "submit" | "preserve", drafts: ReadonlyMap<string, string>) => void {
+  return (mode, drafts) => {
+    const deliveries: Array<{ thread: ThreadRecord; answer: string }> = [];
+    for (const thread of threads) {
+      const draft = drafts.get(thread.threadId) ?? "";
+      const action = resolveLeadAskQueueEntryAction(mode, thread.withdrawnPending === true, draft);
+      if (action === "deliver") deliveries.push({ thread, answer: draft });
+      else runLeadAskEscapeAction(action, pi, handle, thread, draft, sessionManager);
+    }
+    deliverQueuedAnswers(pi, handle, deliveries, sessionManager);
+    onDone?.();
+  };
 }
 
 /**
@@ -2104,10 +2150,17 @@ export interface LeadAskQueueOptions {
   initialFocusIndex: number;
   /** Constructs one fresh `Editor` bound to the live host TUI — injectable for tests. */
   editorFactory: () => FocusableEditorLike;
-  /** The live host's `matchesKey` (resolved through `loadHostPiTui()` by the caller — never the static import; see `pi-tui.ts`'s dual-package-instance note) for confirm-screen arrow/enter detection across raw and Kitty-protocol encodings. */
+  /** The live host's `matchesKey` (resolved through `loadHostPiTui()` by the caller — never the static import; see `pi-tui.ts`'s dual-package-instance note) for terminal-key detection across raw and Kitty-protocol encodings. */
   matchesKey: (data: string, keyId: string) => boolean;
+  /** Pi's configured alternate-screen bindings, used for PageUp/PageDown question scrolling. */
+  keybindings?: { matches(data: string, id: string): boolean };
   /** Word-wraps one line of plain text (the live host's `wrapTextWithAnsi`, or an injected fake in tests). */
   wrapText: (text: string, width: number) => string[];
+  /** Semantic theme painters supplied by the live `ui.custom` callback. Identity defaults keep tests/headless use plain. */
+  headerText?: (text: string) => string;
+  separatorText?: (text: string) => string;
+  helpText?: (text: string) => string;
+  overflowText?: (text: string) => string;
   /** Draws the single-line box border, matching every other overlay tier. */
   border?: boolean;
   /** Fires exactly once, with the owner's final decision and every question's live draft text keyed by `threadId`. */
@@ -2157,6 +2210,9 @@ export class LeadAskQueueComponent implements Component {
   private readonly options: LeadAskQueueOptions;
   private readonly threads: readonly ThreadRecord[];
   private readonly editors: FocusableEditorLike[];
+  private readonly questionScrollOffsets: number[];
+  private readonly questionViewportRows: number[];
+  private readonly questionMaxScroll: number[];
   private index: number;
   private confirm: LeadAskQueueConfirmState | undefined;
   private finished = false;
@@ -2166,6 +2222,9 @@ export class LeadAskQueueComponent implements Component {
     this.options = options;
     this.threads = options.threads;
     this.index = Math.min(Math.max(0, options.initialFocusIndex), this.threads.length - 1);
+    this.questionScrollOffsets = this.threads.map(() => 0);
+    this.questionViewportRows = this.threads.map(() => 1);
+    this.questionMaxScroll = this.threads.map(() => 0);
     this.editors = this.threads.map((thread, i) => {
       const editor = options.editorFactory();
       editor.setText(thread.draftAnswer ?? "");
@@ -2185,6 +2244,7 @@ export class LeadAskQueueComponent implements Component {
       this.handleConfirmInput(data);
       return;
     }
+    if (this.handleQuestionScrollInput(data)) return;
     if (isEscapeKey(data)) {
       this.handleEscape();
       return;
@@ -2273,17 +2333,36 @@ export class LeadAskQueueComponent implements Component {
       this.resolveConfirm(confirm.kind, "no");
       return;
     }
-    if (matches(data, "left") || matches(data, "up")) {
-      confirm.choice = "no";
-      this.tui.requestRender();
+    if (matches(data, "left")) {
+      if (confirm.choice === "no") {
+        confirm.choice = "yes";
+        this.tui.requestRender();
+      }
       return;
     }
-    if (matches(data, "right") || matches(data, "down")) {
-      confirm.choice = "yes";
-      this.tui.requestRender();
+    if (matches(data, "right")) {
+      if (confirm.choice === "yes") {
+        confirm.choice = "no";
+        this.tui.requestRender();
+      }
       return;
     }
     if (matches(data, "enter")) this.resolveConfirm(confirm.kind, confirm.choice);
+  }
+
+  private handleQuestionScrollInput(data: string): boolean {
+    const pageUp = this.options.matchesKey(data, "pageUp") || this.options.keybindings?.matches(data, "tui.altScreen.pageUp") === true;
+    const pageDown = this.options.matchesKey(data, "pageDown") || this.options.keybindings?.matches(data, "tui.altScreen.pageDown") === true;
+    if (!pageUp && !pageDown) return false;
+    const index = this.index;
+    const page = Math.max(1, this.questionViewportRows[index] - 1);
+    const current = this.questionScrollOffsets[index];
+    const next = Math.min(this.questionMaxScroll[index], Math.max(0, current + (pageUp ? -page : page)));
+    if (next !== current) {
+      this.questionScrollOffsets[index] = next;
+      this.tui.requestRender();
+    }
+    return true;
   }
 
   private resolveConfirm(kind: "final" | "esc", choice: "yes" | "no"): void {
@@ -2312,49 +2391,66 @@ export class LeadAskQueueComponent implements Component {
   private renderInner(w: number): string[] {
     const total = this.threads.length;
     const answered = countQueueAnswered(this.liveDrafts());
-    const header = [this.line(buildQueueCoverageLine(this.index, total, answered), w), ""];
+    const header = [this.line(this.paint(this.options.headerText, buildQueueCoverageLine(this.index, total, answered)), w), ""];
     if (this.confirm) {
       return [...header, ...this.renderConfirm(w, answered, total)];
     }
     const thread = this.threads[this.index];
     const banner = thread.withdrawnPending
-      ? [this.line("⚠ the agent withdrew this question — your answer, if any, is still delivered when you close.", w), ""]
+      ? [this.line(this.paint(this.options.overflowText, "⚠ the agent withdrew this question — your answer, if any, is still delivered when you close."), w), ""]
       : [];
-    // Full multi-line wrap, not `this.line`'s single-line truncation (review-
-    // round-1 correctness Minor fix): at a narrow width this hint — the
-    // modal's only exit, since Ctrl+C is swallowed — wraps past one line,
-    // and `this.line` silently drops everything after the first.
     const hint = this.options.wrapText(
-      "Enter: answer & next · Shift+Enter/Ctrl+J: newline · Tab/Shift+Tab: switch question · Esc: exit",
+      this.paint(this.options.helpText, "Enter: answer & next · Shift+Enter/Ctrl+J: newline · Tab/Shift+Tab: switch question · PgUp/PgDn: scroll question · Esc: exit"),
       w,
     );
     const editorLines = this.editors[this.index].render(w);
+    const separatorPlain = `─ Answer ${"─".repeat(Math.max(0, w - 9))}`;
+    const separator = [this.line(this.paint(this.options.separatorText, separatorPlain), w)];
     let questionLines = this.options.wrapText(thread.question ?? thread.title, w);
     if (thread.context && thread.context.trim().length > 0) {
       questionLines = [...questionLines, "", ...this.options.wrapText(thread.context, w)];
     }
-    // Height budget (review-round-1 correctness Important fix): the host
-    // overlay hard-truncates from the BOTTOM past `overlayOptions.maxHeight`
-    // — with no budget here, a long lead-authored question/context can push
-    // the answer Editor and the Esc hint above off screen entirely, with no
-    // way back to either (↑/↓/pgUp/pgDn scroll the Editor's own ANSWER text
-    // per the ticket, not the question). Cap the question/context block
-    // instead, so the editor and the hint always render.
     const viewportRows = conversationOverlayHeight(this.tui);
     if (Number.isFinite(viewportRows)) {
       const borderOverhead = this.options.border === true ? QUEUE_BORDER_OVERHEAD : 0;
-      const fixedRows =
-        borderOverhead + header.length + banner.length + 1 /* blank before editor */ + editorLines.length + 1 /* blank after editor */ + hint.length;
-      const budget = Math.max(1, viewportRows - fixedRows);
-      if (questionLines.length > budget) {
-        const shown = Math.max(1, budget - 1);
-        questionLines = [
-          ...questionLines.slice(0, shown),
-          this.line(`… question truncated — see /thread ${thread.threadId} for the full text`, w),
-        ];
-      }
+      const fixedRows = borderOverhead + header.length + banner.length + separator.length + editorLines.length + 1 /* blank after editor */ + hint.length;
+      questionLines = this.renderQuestionRegion(questionLines, Math.max(1, viewportRows - fixedRows), w);
+    } else {
+      this.questionScrollOffsets[this.index] = 0;
+      this.questionViewportRows[this.index] = Math.max(1, questionLines.length);
+      this.questionMaxScroll[this.index] = 0;
     }
-    return [...header, ...banner, ...questionLines, "", ...editorLines, "", ...hint];
+    return [...header, ...banner, ...questionLines, ...separator, ...editorLines, "", ...hint];
+  }
+
+  private renderQuestionRegion(lines: string[], budget: number, width: number): string[] {
+    const index = this.index;
+    if (lines.length <= budget) {
+      this.questionScrollOffsets[index] = 0;
+      this.questionViewportRows[index] = Math.max(1, lines.length);
+      this.questionMaxScroll[index] = 0;
+      return lines;
+    }
+    const singleRow = budget === 1;
+    const cuePrefix = singleRow && width >= 3 ? "↕ " : "";
+    // At a one-row height, reserve the cue's columns before wrapping. Prefixing
+    // an already width-filled line and then taking only the first wrapped row
+    // would make its tail permanently unreachable.
+    const scrollLines = singleRow
+      ? lines.flatMap((line) => this.options.wrapText(line, Math.max(1, width - cuePrefix.length)))
+      : lines;
+    const contentRows = Math.max(1, budget - 1);
+    const maxScroll = Math.max(0, scrollLines.length - contentRows);
+    const offset = Math.min(maxScroll, this.questionScrollOffsets[index]);
+    this.questionScrollOffsets[index] = offset;
+    this.questionViewportRows[index] = contentRows;
+    this.questionMaxScroll[index] = maxScroll;
+    const visible = scrollLines.slice(offset, offset + contentRows);
+    if (singleRow) return [this.line(this.paint(this.options.overflowText, `${cuePrefix}${visible[0] ?? ""}`), width)];
+    const above = offset > 0 ? "↑ more above · " : "";
+    const below = offset < maxScroll ? " · more below ↓" : "";
+    const cue = this.line(this.paint(this.options.overflowText, `${above}question lines ${offset + 1}-${offset + visible.length}/${scrollLines.length} · PgUp/PgDn${below}`), width);
+    return [...visible, cue];
   }
 
   private renderConfirm(w: number, answered: number, total: number): string[] {
@@ -2366,8 +2462,12 @@ export class LeadAskQueueComponent implements Component {
       "",
       this.line(`  ${yes}   ${no}`, w),
       "",
-      ...this.options.wrapText("←/→ select · Enter confirm · Esc cancel", w),
+      ...this.options.wrapText(this.paint(this.options.helpText, "←/→ select · Enter confirm · Esc cancel"), w),
     ];
+  }
+
+  private paint(painter: ((text: string) => string) | undefined, text: string): string {
+    return painter?.(text) ?? text;
   }
 
   private line(text: string, width: number): string {
@@ -2436,28 +2536,25 @@ async function openLeadAskQueue(
   activeOverlay = undefined;
   const token = ++overlayToken;
 
-  const sessionManager = (ctx as { sessionManager?: { buildContextEntries?: () => { id: string }[]; getBranch?: (id: string) => { id: string }[] } })
-    .sessionManager;
+  const sessionManager = (ctx as { sessionManager?: LeadAskSessionManager }).sessionManager;
 
   try {
     await (ctx as unknown as { ui: AskCustomUiCtx["ui"] }).ui.custom<undefined>(
-      async (tui, _theme, _keybindings, done) => {
+      async (tui, theme, keybindings, done) => {
         const hostPiTui = await loadHostPiTui();
         const component = new LeadAskQueueComponent(tui, {
           threads,
           initialFocusIndex,
           border: true,
           matchesKey: hostPiTui.matchesKey as (data: string, keyId: string) => boolean,
+          keybindings: keybindings as { matches(data: string, id: string): boolean },
           wrapText: (text, width) => hostPiTui.wrapTextWithAnsi(text, width),
+          headerText: (text) => theme.fg("accent", theme.bold(text)),
+          separatorText: (text) => theme.fg("borderAccent", text),
+          helpText: (text) => theme.fg("dim", text),
+          overflowText: (text) => theme.fg("warning", text),
           editorFactory: () => new hostPiTui.Editor(tui as never, QUEUE_IDENTITY_EDITOR_THEME) as unknown as FocusableEditorLike,
-          onClose: (mode, drafts) => {
-            for (const thread of threads) {
-              const draft = drafts.get(thread.threadId) ?? "";
-              const action = resolveLeadAskQueueEntryAction(mode, thread.withdrawnPending === true, draft);
-              runLeadAskEscapeAction(action, pi, handle, thread, draft, sessionManager);
-            }
-            done(undefined);
-          },
+          onClose: buildLeadAskQueueOnClose(pi, handle, threads, sessionManager, () => done(undefined)),
         });
         activeOverlay = {
           token,
@@ -2636,7 +2733,9 @@ export function registerThreadCommands(
   rpcRegistry: RpcAgentRegistry,
   handle: ThreadRegistryHandle,
   sessionCtx: AskSessionCtx,
+  openAnswerThread?: (thread: ThreadRecord, ctx: unknown) => Promise<void>,
 ): void {
+  const openSelected = openAnswerThread ?? ((thread: ThreadRecord, ctx: unknown) => openThread(pi, ctx as never, bridge, rpcRegistry, handle, thread, sessionCtx));
   pi.registerCommand("thread", {
     description: "List ws discussion threads (pending, open, and dormant-but-reopenable).",
     handler: async (_args, ctx) => {
@@ -2645,15 +2744,29 @@ export function registerThreadCommands(
   });
 
   pi.registerCommand("answer", {
-    description: "Open a ws question thread in a chat overlay (usage: /answer <id>; no id opens the most recent).",
+    description: "Answer queued ws questions (usage: /answer <id>; no id opens the oldest queued lead question).",
     handler: async (args, ctx) => {
       const id = args.trim();
-      const thread = id ? handle.threads.get(id) : mostRecentReopenable([...handle.threads.values()]);
-      if (!thread) {
-        notify(ctx as AskUiCtx, id ? `ws: no thread "${id}" — /thread lists them.` : "ws: no thread to open.", "warning");
+      if (!id) {
+        const oldest = collectLeadAskQueue([...handle.threads.values()])[0];
+        if (!oldest) {
+          notify(ctx as AskUiCtx, "ws: no queued lead questions to answer.", "info");
+          return;
+        }
+        await openSelected(oldest, ctx);
         return;
       }
-      await openThread(pi, ctx as never, bridge, rpcRegistry, handle, thread, sessionCtx);
+
+      const thread = handle.threads.get(id);
+      if (!thread) {
+        notify(ctx as AskUiCtx, `ws: no thread "${id}" — /thread lists them.`, "error");
+        return;
+      }
+      if (thread.origin === "lead-ask" && thread.status !== "pending" && thread.status !== "open") {
+        notify(ctx as AskUiCtx, `ws: question ${id} was ${thread.status === "dormant" ? "already answered" : "withdrawn"}.`, "warning");
+        return;
+      }
+      await openSelected(thread, ctx);
     },
   });
 

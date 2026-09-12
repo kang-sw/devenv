@@ -22,11 +22,10 @@
  * stop, and the headless paths (the fork's own final on a never-opened thread,
  * and the lead answering through `ws-agent-send`).
  *
- * NOT covered here — genuinely live-gate only, mirroring test/fork.test.ts's
- * own pure/IO split: `registerThreadCommands`'s handlers, the lazy
- * discussion-fork spawn and the overlay attach (all need a live `pi` session
- * or a real `RpcClient`). Those are the plan's tmux-probe and owner-runbook
- * tiers.
+ * The `/answer` command's target-selection/refusal branches are covered with
+ * a fake command registry. The genuinely live-only remainder is the lazy
+ * discussion-fork spawn and overlay attachment, which need a live Pi session
+ * or a real `RpcClient`.
  *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
@@ -63,6 +62,7 @@ import {
   buildAskAnchorLine,
   withdrawQueuedQuestion,
   deliverQueuedAnswer,
+  deliverQueuedAnswers,
   resolveLeadAskEscapeAction,
   runLeadAskEscapeAction,
   type LeadAskEscapeAction,
@@ -73,6 +73,7 @@ import {
   handleForkRaisedQuestion,
   ensureRespondent,
   registerAsk,
+  registerThreadCommands,
   injectDiscussionSummary,
   closeThreadOnDone,
   handleRespondentFinalReport,
@@ -97,6 +98,7 @@ import {
   buildQueueCoverageLine,
   buildQueueSubmitConfirmMessage,
   resolveLeadAskQueueEntryAction,
+  buildLeadAskQueueOnClose,
   LeadAskQueueComponent,
   type ThreadRecord,
   type OverlayHandle,
@@ -1647,6 +1649,52 @@ describe("deliverQueuedAnswer (260911 D1: the fork-less lead-ask send path — n
     assert.equal(sent.length, 1, "the answer still arrives");
     assert.equal(handle.threads.get("q1")!.status, "dormant");
   });
+
+  test("one modal batch becomes one injected follow-up with every answer and provenance in queue order", () => {
+    const rawSent: Array<{ message: unknown; options: unknown }> = [];
+    const handlers = new Map<string, () => void>();
+    leadIdleRef.current = () => false; // the lead is mid-turn; no eager wake can split the submission
+    const pi = {
+      on: (event: string, fn: () => void) => handlers.set(event, fn),
+      sendUserMessage: () => assert.fail("a busy lead is not woken before its turn boundary"),
+      sendMessage: (message: unknown, options: unknown) => rawSent.push({ message, options }),
+    } as unknown as ExtensionAPI;
+    registerPushFlush(pi, { delayMs: () => 10 });
+    const handle = createThreadRegistryHandle();
+    const dir = mkdtempSync(join(tmpdir(), "ws-pi-ask-test-"));
+    hydrateThreadRegistry(handle, join(dir, "session.jsonl.ws-threads.json"));
+    const q1 = thread({ threadId: "q1", origin: "lead-ask", status: "open", question: "First?", context: "first context", askCommitHash: "aaa111", entryId: "entry-1" });
+    const q2 = thread({ threadId: "q2", origin: "lead-ask", status: "open", question: "Second?", context: "second context", askCommitHash: "bbb222", entryId: "entry-2" });
+    const q3 = thread({ threadId: "q3", origin: "lead-ask", status: "pending", question: "Blank stays pending?" });
+    handle.threads.set(q1.threadId, q1);
+    handle.threads.set(q2.threadId, q2);
+    handle.threads.set(q3.threadId, q3);
+
+    deliverQueuedAnswers(pi, handle, [
+      { thread: q1, answer: "alpha" },
+      { thread: q2, answer: "beta" },
+      { thread: q3, answer: "   " },
+    ]);
+
+    assert.equal(heldPushQueue.length, 1, "the modal submission admits one raw follow-up, not one per answer");
+    handlers.get("agent_end")?.();
+    assert.equal(rawSent.length, 1, "one lead turn boundary receives one batch envelope");
+    const envelope = rawSent[0].message as { customType: string; details: { items: Array<{ content: string; details: { threadIds: string[] } }> } };
+    assert.equal(envelope.customType, PUSH_BATCH_CUSTOM_TYPE);
+    assert.equal(envelope.details.items.length, 1, "the envelope contains one aggregated queued-answer item");
+    const item = envelope.details.items[0];
+    assert.deepEqual(item.details.threadIds, ["q1", "q2"]);
+    assert.ok(item.content.indexOf("Question: First?") < item.content.indexOf("Question: Second?"), "payload order follows the deterministic queue snapshot");
+    assert.match(item.content, /first context/);
+    assert.match(item.content, /alpha/);
+    assert.match(item.content, /Asked at: commit aaa111, entry entry-1/);
+    assert.match(item.content, /second context/);
+    assert.match(item.content, /beta/);
+    assert.match(item.content, /Asked at: commit bbb222, entry entry-2/);
+    assert.equal(q1.status, "dormant");
+    assert.equal(q2.status, "dormant");
+    assert.equal(q3.status, "pending", "a blank entry is excluded from delivery and remains pending");
+  });
 });
 
 describe("resolveLeadAskEscapeAction / runLeadAskEscapeAction (260911 D-model-side-withdrawal: the queue modal's exit decision, extracted per review relay #1/#2)", () => {
@@ -1769,6 +1817,53 @@ describe("resolveLeadAskQueueEntryAction (260911 Phase 2 D3: the queue modal's p
   });
 });
 
+describe("registerThreadCommands /answer target selection", () => {
+  function setup() {
+    const commands = new Map<string, { description?: string; handler: (args: string, ctx: unknown) => Promise<void> }>();
+    const pi = {
+      registerCommand: (name: string, command: { description?: string; handler: (args: string, ctx: unknown) => Promise<void> }) => commands.set(name, command),
+      registerShortcut: () => {},
+    } as unknown as ExtensionAPI;
+    const handle = createThreadRegistryHandle();
+    const answered = thread({ threadId: "q6", origin: "lead-ask", status: "dormant" });
+    const withdrawn = thread({ threadId: "q7", origin: "lead-ask", status: "closed" });
+    const pending = thread({ threadId: "q8", origin: "lead-ask", status: "pending", createdAt: "2026-09-05T12:00:00.000Z" });
+    const oldest = thread({ threadId: "q5", origin: "lead-ask", status: "pending", createdAt: "2026-09-05T09:00:00.000Z" });
+    for (const record of [answered, withdrawn, pending, oldest]) handle.threads.set(record.threadId, record);
+    const opened: string[] = [];
+    registerThreadCommands(pi, {} as never, new Map(), handle, {} as never, async (record) => { opened.push(record.threadId); });
+    const notices: Array<{ message: string; level: string }> = [];
+    const ctx = { mode: "tui", ui: { notify: (message: string, level: string) => notices.push({ message, level }) } };
+    return { commands, handle, pending, notices, opened, ctx };
+  }
+
+  test("explicit answered or withdrawn ids report their exact terminal state and never fall through to another modal", async () => {
+    const { commands, pending, notices, ctx } = setup();
+    await commands.get("answer")!.handler("q6", ctx);
+    await commands.get("answer")!.handler("q7", ctx);
+    assert.deepEqual(notices.map((notice) => notice.message), [
+      "ws: question q6 was already answered.",
+      "ws: question q7 was withdrawn.",
+    ]);
+    assert.equal(pending.status, "pending", "a terminal explicit target never opens the rest of the queue");
+  });
+
+  test("an unknown explicit id reports an error and returns without opening the queue", async () => {
+    const { commands, pending, notices, ctx } = setup();
+    await commands.get("answer")!.handler("q404", ctx);
+    assert.deepEqual(notices, [{ message: 'ws: no thread "q404" — /thread lists them.', level: "error" }]);
+    assert.equal(pending.status, "pending");
+  });
+
+  test("bare /answer opens the oldest answerable item, while an explicit answerable id opens exactly that item", async () => {
+    const { commands, opened, ctx } = setup();
+    assert.match(commands.get("answer")!.description ?? "", /oldest queued/i);
+    await commands.get("answer")!.handler("", ctx);
+    await commands.get("answer")!.handler("q8", ctx);
+    assert.deepEqual(opened, ["q5", "q8"]);
+  });
+});
+
 describe("collectLeadAskQueue (260911 Phase 2 D3: batch queue order)", () => {
   test("keeps only lead-ask origin, pending/open status, oldest-asked first", () => {
     const records = [
@@ -1869,6 +1964,8 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
     if (keyId === "right") return data === "\x1b[C";
     if (keyId === "up") return data === "\x1b[A";
     if (keyId === "down") return data === "\x1b[B";
+    if (keyId === "pageUp") return data === "\x1b[5~";
+    if (keyId === "pageDown") return data === "\x1b[6~";
     return false;
   }
 
@@ -1951,13 +2048,50 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
     editors[0].handleInput("first answer");
     editors[2].handleInput("last answer");
     editors[2].handleInput("\r"); // raises the confirm on the last question
-    component.handleInput("\x1b[C"); // -> right/Yes
+    component.handleInput("\x1b[D"); // left from the right-hand No -> Yes
     component.handleInput("\r"); // confirm
     assert.equal(closes.length, 1);
     assert.equal(closes[0].mode, "submit");
     assert.equal(closes[0].drafts.get("q1"), "first answer");
     assert.equal(closes[0].drafts.get("q2"), "");
     assert.equal(closes[0].drafts.get("q3"), "last answer");
+  });
+
+  test("the production modal-close callback batches multiple component answers into one follow-up and leaves blanks pending", () => {
+    const rawSent: Array<{ message: unknown; options: unknown }> = [];
+    const handlers = new Map<string, () => void>();
+    leadIdleRef.current = () => false;
+    const pi = {
+      on: (event: string, fn: () => void) => handlers.set(event, fn),
+      sendUserMessage: () => assert.fail("a busy lead is not woken before its boundary"),
+      sendMessage: (message: unknown, options: unknown) => rawSent.push({ message, options }),
+    } as unknown as ExtensionAPI;
+    registerPushFlush(pi, { delayMs: () => 10 });
+    const handle = createThreadRegistryHandle();
+    const dir = mkdtempSync(join(tmpdir(), "ws-pi-ask-test-"));
+    hydrateThreadRegistry(handle, join(dir, "session.jsonl.ws-threads.json"));
+    const threads = threeThreads();
+    for (const record of threads) handle.threads.set(record.threadId, record);
+    const { component } = buildQueue(threads, {
+      onClose: buildLeadAskQueueOnClose(pi, handle, threads),
+    });
+
+    component.handleInput("alpha");
+    component.handleInput("\r"); // commit q1, advance q2
+    component.handleInput("beta");
+    component.handleInput("\r"); // commit q2, advance q3
+    component.handleInput("\r"); // blank q3 raises final confirmation
+    component.handleInput("\x1b[D"); // Yes
+    component.handleInput("\r");
+
+    assert.equal(heldPushQueue.length, 1, "the actual modal close callback admits one combined follow-up");
+    handlers.get("agent_end")?.();
+    assert.equal(rawSent.length, 1);
+    const envelope = rawSent[0].message as { details: { items: Array<{ details: { threadIds: string[] } }> } };
+    assert.deepEqual(envelope.details.items[0].details.threadIds, ["q1", "q2"]);
+    assert.equal(threads[0].status, "dormant");
+    assert.equal(threads[1].status, "dormant");
+    assert.equal(threads[2].status, "pending");
   });
 
   test("Esc with nothing answered anywhere closes immediately, preserving, with no confirm screen", () => {
@@ -1991,7 +2125,7 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
     const { component, editors, closes } = buildQueue(threeThreads());
     editors[0].handleInput("first answer");
     component.handleInput("\x1b");
-    component.handleInput("\x1b[B"); // down -> Yes
+    component.handleInput("\x1b[D"); // left from the right-hand No -> Yes
     component.handleInput("\r");
     assert.equal(closes.length, 1);
     assert.equal(closes[0].mode, "submit");
@@ -2002,7 +2136,7 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
     const { component, editors, closes } = buildQueue(threeThreads());
     editors[0].handleInput("first answer");
     component.handleInput("\x1b"); // esc confirm raised, default No
-    component.handleInput("\x1b[C"); // move to Yes
+    component.handleInput("\x1b[D"); // move left to Yes
     component.handleInput("\x1b"); // Esc inside the confirm -> No branch (exit, no submit)
     assert.equal(closes.length, 1);
     assert.equal(closes[0].mode, "preserve");
@@ -2038,6 +2172,16 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
     threads[1].draftAnswer = "resumed draft text";
     const { component } = buildQueue(threads);
     assert.equal(component.getDraft(1), "resumed draft text");
+  });
+
+  test("Korean multiline drafts remain exact and isolated while switching questions", () => {
+    const { component, editors } = buildQueue(threeThreads());
+    editors[0].setText("첫째 줄\n둘째 줄");
+    component.handleInput("\t");
+    editors[1].setText("다른 답변");
+    component.handleInput("\x1b[Z");
+    assert.equal(component.getDraft(0), "첫째 줄\n둘째 줄");
+    assert.equal(component.getDraft(1), "다른 답변");
   });
 
   test("initialFocusIndex positions the focused question (e.g. from /answer <id> or the reopen shortcut)", () => {
@@ -2091,7 +2235,7 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
     const { component, editors, closes } = buildQueue(threads, { initialFocusIndex: 2 });
     editors[2].handleInput("answered despite the withdrawal");
     editors[2].handleInput("\r"); // raises the final confirm (last question)
-    component.handleInput("\x1b[C"); // -> Yes
+    component.handleInput("\x1b[D"); // left -> Yes
     component.handleInput("\r");
     assert.equal(closes.length, 1);
     assert.equal(closes[0].mode, "submit");
@@ -2115,13 +2259,13 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
     assert.equal(closes.length, 0, "the confirm intercepts first, even with only one question in the batch");
     const lines = component.render(80);
     assert.ok(lines.some((l) => l.includes("Q1/1")), lines.join("\n"));
-    component.handleInput("\x1b[C");
+    component.handleInput("\x1b[D");
     component.handleInput("\r");
     assert.equal(closes.length, 1);
     assert.equal(closes[0].drafts.get("q1"), "the only answer");
   });
 
-  test("review-round-1 correctness Important fix: a very long question never pushes the answer Editor or the Esc hint off a short viewport", () => {
+  test("a very long question scrolls from first through final line while the answer editor and footer stay fixed", () => {
     const threads = threeThreads();
     threads[0].question = Array.from({ length: 200 }, (_, i) => `line ${i}`).join("\n");
     const tui: ConversationViewTui & { renderCount: number } = { requestRender: () => {}, renderCount: 0, terminal: { rows: 20 } };
@@ -2137,13 +2281,56 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
       matchesKey: fakeMatchesKey,
       wrapText: fakeWrapText,
       border: true,
+      overflowText: (text) => `[overflow:${text}]`,
       onClose: () => {},
     });
-    const lines = component.render(80);
+
+    let lines = component.render(80);
     assert.ok(lines.length <= 20, `rendered ${lines.length} lines against a 20-row viewport`);
-    assert.ok(lines.some((l) => l.includes("Esc: exit")), "the exit hint (the modal's only way out — Ctrl+C is swallowed) must survive even behind a very long question");
-    assert.ok(lines.some((l) => l.includes("[e:")), "the answer editor itself must still render");
-    assert.ok(lines.some((l) => l.includes("truncated")), "the dropped question tail is flagged, not silently vanished");
+    assert.ok(lines.some((l) => l.includes("line 0")), "the question starts at its first line");
+    assert.ok(lines.some((l) => l.includes("[overflow:")), "the inaccessible boundary cue is semantically distinct");
+    assert.ok(!lines.some((l) => l.includes("truncated")), "scrolling replaces destructive truncation");
+
+    for (let i = 0; i < 100; i += 1) component.handleInput("\x1b[6~");
+    lines = component.render(80);
+    assert.ok(lines.some((l) => l.includes("line 199")), "repeated PageDown reaches the complete original question");
+    assert.ok(lines.some((l) => l.includes("Esc: exit")), "the fixed footer survives at the bottom of the question");
+    assert.ok(lines.some((l) => l.includes("[e:")), "the fixed answer editor survives at the bottom of the question");
+
+    for (let i = 0; i < 100; i += 1) component.handleInput("\x1b[5~");
+    lines = component.render(80);
+    assert.ok(lines.some((l) => l.includes("line 0")), "repeated PageUp returns to the first line");
+    assert.equal(editors[0].getText(), "", "question scrolling is not forwarded into the answer editor");
+  });
+
+  test("a one-row question viewport reserves cue width so every character remains reachable", () => {
+    const threads = [thread({
+      threadId: "q1",
+      question: `${"A".repeat(72)}TAIL\nsecond row`,
+      origin: "lead-ask",
+      status: "open",
+    })];
+    const wrapByWidth = (text: string, width: number): string[] => {
+      if (text.length === 0) return [""];
+      const chunks: string[] = [];
+      for (let i = 0; i < text.length; i += Math.max(1, width)) chunks.push(text.slice(i, i + Math.max(1, width)));
+      return chunks;
+    };
+    const tui: ConversationViewTui = { requestRender: () => {}, terminal: { rows: 14 } };
+    const component = new LeadAskQueueComponent(tui, {
+      threads,
+      initialFocusIndex: 0,
+      editorFactory: () => new FakeQueueEditor(),
+      matchesKey: fakeMatchesKey,
+      wrapText: wrapByWidth,
+      border: true,
+      onClose: () => {},
+    });
+    let lines = component.render(80);
+    assert.ok(lines.some((line) => line.includes("↕")), "the only row still exposes the overflow cue");
+    component.handleInput("\x1b[6~");
+    lines = component.render(80);
+    assert.ok(lines.some((line) => line.includes("IL")), "the characters displaced by the cue are reachable on a later page");
   });
 
   test("a short question well within the viewport is never truncated", () => {
@@ -2165,6 +2352,37 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
     const lines = component.render(80);
     assert.ok(lines.some((l) => l.includes("First?")));
     assert.ok(!lines.some((l) => l.includes("truncated")));
+  });
+
+  test("confirmation navigation follows bounded horizontal positions without wrapping", () => {
+    const { component, editors } = buildQueue(threeThreads(), { initialFocusIndex: 2 });
+    editors[2].handleInput("answer");
+    editors[2].handleInput("\r");
+
+    component.handleInput("\x1b[C"); // already on the right-hand No: edge no-op
+    let lines = component.render(80);
+    assert.ok(lines.some((l) => l.includes("[No]")), "Right at the right edge stays on No");
+
+    component.handleInput("\x1b[D"); // left -> Yes
+    component.handleInput("\x1b[D"); // already at left edge: no wrap
+    lines = component.render(80);
+    assert.ok(lines.some((l) => l.includes("[Yes]")), "Left moves to and stays on the visually left Yes");
+
+    component.handleInput("\x1b[C"); // right -> No
+    lines = component.render(80);
+    assert.ok(lines.some((l) => l.includes("[No]")), "Right moves to the visually right No");
+  });
+
+  test("semantic painters distinguish queue hierarchy while keeping shortcut help dimmable", () => {
+    const { component } = buildQueue(threeThreads(), {
+      headerText: (text) => `[header:${text}]`,
+      separatorText: (text) => `[separator:${text}]`,
+      helpText: (text) => `[help:${text}]`,
+    });
+    const lines = component.render(80);
+    assert.ok(lines.some((line) => line.includes("[header:Q1/3")), lines.join("\n"));
+    assert.ok(lines.some((line) => line.includes("[separator:")), lines.join("\n"));
+    assert.ok(lines.some((line) => line.includes("[help:Enter: answer")), lines.join("\n"));
   });
 });
 

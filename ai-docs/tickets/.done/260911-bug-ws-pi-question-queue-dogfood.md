@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 9b50a59d15f3d8ab
 sage-review-completeness-reviewed: 9b50a59d15f3d8ab
+completed: 2026-09-13
 ---
 
 # Resolve ws-queue-question live dogfood findings
@@ -85,3 +86,16 @@ Resolve the accepted findings while preserving the behaviors that passed live ac
 
 Verify confirmation positions and both arrow keys, including edge no-ops; long questions at constrained viewport heights with complete scroll reach and fixed editor/footer visibility; oldest-first bare `/answer`, exact explicit-ID targeting, and terminal/unknown explicit-ID refusal without fallback; semantic hierarchy in a live Pi theme; and single-turn delivery of multiple answers submitted together while the lead is busy. Retest the already-passing single answer, Korean multiline draft, partial multi-question submission, blank retention, and per-question provenance paths for regression.
 
+### Result (64c7588) - 2026-09-13
+
+Closed the accepted dogfood gaps in the lead-ask modal and command path. Confirmation now keeps `No` as the initial right-hand safe default with bounded spatial Left/Right movement; question/context prose uses a bounded PageUp/PageDown viewport that keeps every original character reachable while the answer editor and dimmed shortcut footer remain fixed; Pi's semantic accent, border-accent, dim, and warning theme roles establish the header, answer separator, help, and overflow hierarchy. Bare `/answer` selects the oldest answerable lead question, explicit IDs are exact and terminal/unknown IDs return without fallback, and the existing `Ctrl+Shift+A` fallback behavior remains unchanged.
+
+One modal submission now aggregates every nonblank answer into one ordered lead follow-up while preserving each question's context, original question, answer, ask-time commit, and entry anchor; blank entries remain pending. Focused queue regression coverage passed 65/65, including Korean multiline draft isolation, partial submission, target selection, fixed viewport reach, one-row overflow reach, spatial edge no-ops, semantic painters, and the production modal-close batch callback. `git diff --check` passed. The full Pi suite passed 1,756 tests with 2 expected skips and retained 6 fork-lifecycle allowlist failures that reproduce from an archive of the unchanged base commit; they are unrelated to this phase. A standalone TypeScript compile check was unavailable because this package does not install the TypeScript compiler.
+
+Partitioned round-one review found one Important one-row reachability defect, two Important coverage gaps, and one Minor duplicate type alias. Commit `64c7588` fixed all four; round-two correctness and test verification reported no remaining findings.
+
+
+
+## Resolution (2026-09-13)
+
+Implemented the accepted Pi question-queue dogfood fixes in `a31fd0a` and closed round-one review findings in `64c7588`. Focused queue coverage passes; the remaining full-suite fork-lifecycle allowlist failures reproduce from the unchanged base.
