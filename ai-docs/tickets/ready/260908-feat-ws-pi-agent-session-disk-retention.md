@@ -219,6 +219,31 @@ Verification: eligible worker/fork deletion, explore cleanup after approval use,
 protected-state exclusion, canonical-path/symlink escapes, known legacy paths,
 unrelated files untouched, and deletion failure without spawn failure.
 
+### Result (e312aae3) - 2026-09-12
+
+Phase 2 landed through `8d8586e9`. A shared eligibility gate now authorizes
+removal only for exact, canonical, symlink-free owned homes whose durable
+liveness is confirmed stopped and carries no protection flag. Capacity eviction,
+terminal Explore harvest, and discarded duplicate sidecar entries use that gate;
+legacy records without ownership remain registry-evictable but their disk paths
+are untouched.
+
+Removal atomically detaches the checked home before recursive deletion so a
+racing replacement path is not traversed. A late retained eligibility result
+keeps the registry record and rejects cap admission, while a filesystem failure
+after eligibility remains diagnostic-only and preserves or restores ownership
+for retry. Spawn launch errors are recorded as confirmed stopped so one-shot
+Explore scratch homes can self-reap. Sidecar revival preserves confirmed-stopped
+liveness and never clears a durable protection bit merely because the sidecar
+omits it.
+
+Verification: the focused storage/sidecar/spawner suite passed 383 tests. The
+full `agents-plugin-pi` suite passed 1,676 tests with 0 failures and 1 existing
+skip; `git diff --check` passed. Partitioned round-1 correctness and test
+findings were fixed in `8d8586e9`; round-2 correctness, fit, and test reviews
+were clean with no unresolved observations. TTL configuration, cross-lead
+pruning, and missing-history audit behavior remain deferred to Phase 3.
+
 ### Phase 3: Prune stale children across lead sessions
 
 Apply the 30-day last-activity default at session start over recorded owned homes. Configure it through the existing adapter-local `agents-plugin-pi/goal-loop-config.json` key `child_retention_ttl_days`: a finite positive JSON number expresses days and may be fractional; literal JSON `false` disables age pruning while cap eviction remains active; a missing or malformed file and every other invalid value fall back to 30 without throwing. Do not add an environment override. Safely handle concurrent live leads, recent activity, missing metadata and partial deletion.
