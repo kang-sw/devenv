@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 605d288bde056022
 sage-review-completeness-reviewed: 605d288bde056022
+completed: 2026-09-12
 ---
 
 # agents-plugin-pi/rsrc/ has drifted from its declared byte-identical source agents-plugin/rsrc/
@@ -154,3 +155,8 @@ mirror drift reproduced, and no source changed. These checks establish the
 workspace copies only, not which package or runtime the owner's Pi session
 loaded. Keep the ticket open until that evidence and the existing live
 `lead-review` acceptance check are supplied.
+
+
+## Resolution (2026-09-12)
+
+Accepted the owner-live gate in the current Pi session. `runtime.read` reported ws-mcp `0.45.2` at source commit `26ae4cad`, and `playbook.read(name: "lead-review")` rendered successfully with the required range-scenario procedure. Together with the existing byte-identical mirror checks and adapter test evidence, this resolves the stale-runtime concern; the earlier unspecified error report did not reproduce. Remaining package-distribution questions stay with `260903-research-ws-pi-adapter-npm-distribution`.

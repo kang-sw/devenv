@@ -4,6 +4,7 @@ related:
   260906-workset-ws-pi-dogfood-ux: UX collection board whose included tickets are reconciled here without creating parentage
   260908-research-ws-pi-lifecycle-race-monitoring: recurrence ledger that remains reference material rather than ready-queue work
   260911-bug-ws-pi-question-queue-dogfood: rolling actionable dogfood report whose accepted defects remain independent implementation work
+completed: 2026-09-12
 ---
 
 # Reconcile the Pi ready-ticket dogfood and closure backlog
@@ -134,3 +135,8 @@ Advance `260911-bug-ws-pi-question-queue-dogfood` from `idea/` through the requi
 ## Current next action
 
 Complete the final action gate for `260911-chore-ws-pi-track-sync-to-refound` and merge its implementation branch only with owner confirmation. After it lands, reconcile `260906-bug-ws-pi-rsrc-mirror-drift` through the normal released-runtime identity rather than the local marker.
+
+
+## Resolution (2026-09-12)
+
+The coordination run achieved its purpose: the stale and owner-live-only backlog was reconciled, consolidated TUI and Explore acceptance evidence was recorded, the refoundation runtime/rsrc sync landed, and the final mirror-drift live gate passed against an identified Pi runtime. Remaining multi-phase Pi work, shared develop-owned fixes, goal controls, question-queue findings, distribution research, and the UX workset retain independent owning tickets and no longer require this rolling ledger.
