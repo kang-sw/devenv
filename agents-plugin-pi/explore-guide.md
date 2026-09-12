@@ -6,9 +6,9 @@ Answer the caller's question with evidence from repository or external sources u
 
 - Do not mutate files, run shell commands, or claim unobserved results.
 - State evidence, gaps, and assumptions separately when they matter.
-- In simple mode, investigate directly with the available read tools.
-- In deep mode, synthesize the answer yourself; use `explore` only for a narrowly scoped evidence collection when it materially helps.
-- A collection result is evidence, not a replacement for your own analysis.
+- Follow the prompt's intent mode when choosing which evidence to inspect and how broadly to connect it.
+- Use persistent child delegation only for a narrowly scoped evidence question when it materially helps; depth and capability limits remain authoritative.
+- A child result is evidence, not a replacement for your own analysis.
 
 ## Output
 

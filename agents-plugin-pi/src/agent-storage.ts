@@ -5,6 +5,7 @@ import { basename, dirname, join, resolve, relative, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { parseDelegationPolicy, type DelegationPolicy } from "./delegation-policy.ts";
 import { parseTelemetry, type AgentTelemetry } from "./agent-telemetry.ts";
+import { normalizeStoredExploreMode, type ExploreMode } from "./process-role.ts";
 
 export const OWNERSHIP_VERSION = 1;
 const SAFE_COMPONENT = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
@@ -12,7 +13,7 @@ const SAFE_COMPONENT = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
 export interface AgentStorageContext { root: string; ownerSessionId: string; }
 export interface AgentOwnership {
   version: number; ownerSessionId: string; agentId: string; home: string; delegation?: DelegationPolicy;
-  role: "worker" | "execute-worker" | "fork" | "explore"; exploreMode?: "simple" | "deep"; sessionPath?: string;
+  role: "worker" | "execute-worker" | "fork" | "explore"; exploreMode?: ExploreMode; sessionPath?: string;
 }
 export interface OwnershipMetadata extends AgentOwnership {
   createdAt: number; lastActivityAt: number; updatedAt: number;
@@ -93,14 +94,14 @@ export function writeOwnerArtifact(ctx: AgentStorageContext, bucket: string, nam
 }
 
 export function ownershipPath(home: string): string { return join(home, "ownership.json"); }
-export function allocateAgentHome(ctx: AgentStorageContext, agentId: string, role: AgentOwnership["role"], exploreMode?: "simple" | "deep", noSession = false): AgentOwnership {
+export function allocateAgentHome(ctx: AgentStorageContext, agentId: string, role: AgentOwnership["role"], exploreMode?: ExploreMode): AgentOwnership {
   safe(agentId, "agent id");
   const namespace = checkedDirectory(join(ctx.root, "ws-agents"), ctx.root);
   const ownerRoot = checkedDirectory(join(namespace, safe(ctx.ownerSessionId, "Pi session id")), ctx.root);
   const home = resolve(ownerRoot, agentId);
   if (!contained(ownerRoot, home)) throw new Error("ws-pi-agent: agent home escapes configured Pi directory");
   checkedDirectory(home, ownerRoot);
-  const sessionPath = noSession ? undefined : join(home, "session.jsonl");
+  const sessionPath = join(home, "session.jsonl");
   const now = Date.now();
   const ownership: AgentOwnership = { version: OWNERSHIP_VERSION, ownerSessionId: ctx.ownerSessionId, agentId, home, role, ...(exploreMode ? { exploreMode } : {}), ...(sessionPath ? { sessionPath } : {}) };
   writeOwnership({ ...ownership, createdAt: now, lastActivityAt: now, updatedAt: now, liveness: { lifecycle: "starting", observedAt: now, pid: process.pid, instanceNonce: randomUUID(), recovery: "none" } });
@@ -157,7 +158,10 @@ function writeOwnershipUnlocked(metadata: OwnershipMetadata, home: string): void
 
 function readOwnershipUnlocked(home: string): OwnershipMetadata | undefined {
   try {
-    const value = JSON.parse(readFileSync(ownershipPath(home), "utf8")) as OwnershipMetadata;
+    const raw = JSON.parse(readFileSync(ownershipPath(home), "utf8")) as OwnershipMetadata;
+    const mode = normalizeStoredExploreMode(raw.exploreMode);
+    if (raw.exploreMode !== undefined && !mode) return undefined;
+    const value = raw.exploreMode === undefined ? raw : { ...raw, exploreMode: mode };
     return validOwnership(value) && value.home === home && (!value.sessionPath || (checkedSessionPath(home, value.sessionPath), true)) ? value : undefined;
   } catch { return undefined; }
 }
@@ -184,7 +188,7 @@ export function validOwnership(value: unknown): value is OwnershipMetadata {
     (l.recovery === undefined || ["none","sidecar","thread","revived"].includes(l.recovery)) &&
     (signature === undefined || (Number.isFinite(signature.mtimeMs) && Number.isFinite(signature.size) && signature.size >= 0));
 }
-export function validDescriptor(value: unknown): value is AgentOwnership { const o = value as Partial<AgentOwnership> | null; return !!o && o.version === OWNERSHIP_VERSION && typeof o.ownerSessionId === "string" && SAFE_COMPONENT.test(o.ownerSessionId) && typeof o.agentId === "string" && SAFE_COMPONENT.test(o.agentId) && typeof o.home === "string" && ["worker","execute-worker","fork","explore"].includes(o.role as string) && (o.sessionPath === undefined || typeof o.sessionPath === "string") && validDelegationDescriptor(o.delegation); }
+export function validDescriptor(value: unknown): value is AgentOwnership { const o = value as Partial<AgentOwnership> | null; return !!o && o.version === OWNERSHIP_VERSION && typeof o.ownerSessionId === "string" && SAFE_COMPONENT.test(o.ownerSessionId) && typeof o.agentId === "string" && SAFE_COMPONENT.test(o.agentId) && typeof o.home === "string" && ["worker","execute-worker","fork","explore"].includes(o.role as string) && (o.exploreMode === undefined || normalizeStoredExploreMode(o.exploreMode) === o.exploreMode) && (o.sessionPath === undefined || typeof o.sessionPath === "string") && validDelegationDescriptor(o.delegation); }
 function validDelegationDescriptor(value: unknown): boolean {
   if (value === undefined) return true;
   try { parseDelegationPolicy(value); return true; } catch { return false; }

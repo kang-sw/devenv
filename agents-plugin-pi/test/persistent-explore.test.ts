@@ -1,30 +1,35 @@
 import { afterEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DELEGATION_ENV } from "../src/delegation-policy.ts";
-import { WEB_HOME_ENV, WEB_NONCE_ENV } from "../src/web-readiness.ts";
-import { createAgentStorageContext } from "../src/agent-storage.ts";
 import { RpcClient, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import {
-  registerAgentTools as registerAgentToolsBase,
-  resolveTools,
-  sendToAgent,
-  type RpcAgentRecord,
-  type RpcAgentRegistry,
-} from "../src/spawner.ts";
-import { WS_PI_EXPLORE_MODE_ENV, WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
+import { CHILD_MANAGEMENT_TOOLS, DELEGATION_ENV, terminalTools } from "../src/delegation-policy.ts";
+import { createAgentStorageContext } from "../src/agent-storage.ts";
 import { captureOrphans, parseOrphans, reviveOrphans, serializeOrphans } from "../src/agent-sidecar.ts";
+import { WS_PI_EXPLORE_MODE_ENV, WS_PI_SPAWN_ROLE_ENV, type ExploreMode } from "../src/process-role.ts";
+import { WEB_HOME_ENV, WEB_NONCE_ENV } from "../src/web-readiness.ts";
+import { registerAgentTools, resolveTools, sendToAgent, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import type { McpToolCallResult } from "../src/mcp-stdio-client.ts";
 
-const TEST_EXTENSION_ENTRY = fileURLToPath(new URL("../src/index.ts", import.meta.url));
-function registerAgentTools(pi: any, bridge: any, sessionCtx: any, ...rest: any[]) {
-  return registerAgentToolsBase(pi, bridge, { ...sessionCtx, extensionPath: sessionCtx.extensionPath ?? TEST_EXTENSION_ENTRY }, ...rest);
-}
-
+const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const EXTENSION_ENTRY = join(PACKAGE_ROOT, "src", "index.ts");
+const EXPLORE_GUIDE = join(PACKAGE_ROOT, "explore-guide.md");
+const MODE_CONTRACT = [
+  ["lookup", "small"],
+  ["code-search", "small"],
+  ["history-search", "small"],
+  ["docs-search", "medium"],
+  ["web-search", "medium"],
+  ["diagnosis", "medium"],
+  ["comparison", "medium"],
+  ["synthesis", "large"],
+] as const satisfies ReadonlyArray<readonly [ExploreMode, "small" | "medium" | "large"]>;
+const MODES = MODE_CONTRACT.map(([mode]) => mode);
+const TIER_BY_MODE = Object.fromEntries(MODE_CONTRACT) as Record<ExploreMode, "small" | "medium" | "large">;
 const storageRoots = new Set<string>();
+
 afterEach(() => {
   for (const root of storageRoots) rmSync(root, { recursive: true, force: true });
   storageRoots.clear();
@@ -33,270 +38,263 @@ afterEach(() => {
 interface CapturedTool {
   name: string;
   description: string;
-  parameters: { properties?: Record<string, unknown> };
-  execute: (id: string, params: unknown, signal?: AbortSignal, update?: unknown, ctx?: unknown) => Promise<{ content: Array<{ text: string }> }>;
+  parameters: { properties?: Record<string, { enum?: string[]; description?: string }>; additionalProperties?: boolean };
+  execute: (id: string, params: unknown, signal?: AbortSignal, update?: (partial: unknown) => void, ctx?: unknown) => Promise<{ content: Array<{ text: string }>; details?: unknown }>;
 }
 
-function record(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
+function withRole<T>(role: string | undefined, mode: string | undefined, policy: Record<string, unknown> | undefined, fn: () => T | Promise<T>): Promise<T> {
+  const previous = { role: process.env[WS_PI_SPAWN_ROLE_ENV], mode: process.env[WS_PI_EXPLORE_MODE_ENV], policy: process.env[DELEGATION_ENV] };
+  if (role === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV]; else process.env[WS_PI_SPAWN_ROLE_ENV] = role;
+  if (mode === undefined) delete process.env[WS_PI_EXPLORE_MODE_ENV]; else process.env[WS_PI_EXPLORE_MODE_ENV] = mode;
+  if (policy === undefined) delete process.env[DELEGATION_ENV]; else process.env[DELEGATION_ENV] = JSON.stringify(policy);
+  return Promise.resolve(fn()).finally(() => {
+    for (const [key, value] of [[WS_PI_SPAWN_ROLE_ENV, previous.role], [WS_PI_EXPLORE_MODE_ENV, previous.mode], [DELEGATION_ENV, previous.policy]] as const) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  });
+}
+
+function parentPolicy(depth = 0, maxDepth = 2) {
   return {
-    agentId: "retained", alias: "explore-1", sessionPath: "/tmp/research.jsonl", systemPromptPath: "/tmp/research.md",
-    wsToolNames: [], toolGroup: "read-only", spawnRole: "explore", exploreMode: "simple", modelBase: "pi/small", modelEffort: "medium",
-    streaming: false, running: false, reportLog: [], ...overrides,
+    version: 1, depth, maxDepth, authority: "lead",
+    tools: resolveTools("full-worker").split(","),
+    network: { search: true, fetch: true },
   };
 }
 
-async function withRole<T>(role: string | undefined, mode: string | undefined, fn: () => Promise<T> | T): Promise<T> {
-  const oldRole = process.env[WS_PI_SPAWN_ROLE_ENV];
-  const oldMode = process.env[WS_PI_EXPLORE_MODE_ENV];
-  const oldPolicy = process.env[DELEGATION_ENV];
-  if (role) process.env[DELEGATION_ENV] = JSON.stringify({ version: 1, depth: 1, maxDepth: 2, authority: "lead", tools: resolveTools("full-worker").split(","), network: { search: true, fetch: true } });
-  else delete process.env[DELEGATION_ENV];
-  if (role === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV]; else process.env[WS_PI_SPAWN_ROLE_ENV] = role;
-  if (mode === undefined) delete process.env[WS_PI_EXPLORE_MODE_ENV]; else process.env[WS_PI_EXPLORE_MODE_ENV] = mode;
-  try { return await fn(); } finally {
-    if (oldPolicy === undefined) delete process.env[DELEGATION_ENV]; else process.env[DELEGATION_ENV] = oldPolicy;
-    if (oldRole === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV]; else process.env[WS_PI_SPAWN_ROLE_ENV] = oldRole;
-    if (oldMode === undefined) delete process.env[WS_PI_EXPLORE_MODE_ENV]; else process.env[WS_PI_EXPLORE_MODE_ENV] = oldMode;
-  }
-}
-
-function modelResult(model = "pi/small", effort?: string, resolvedFrom = "pi"): McpToolCallResult {
-  return { isError: false, content: [{ type: "text", text: JSON.stringify({ model, ...(effort === undefined ? {} : { effort }), resolved_from: resolvedFrom }) }] };
-}
-
-function installRpcHarness(state: { model: string; thinking: string; clamp?: string }) {
+function installRpcHarness() {
   const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
-  const calls: string[] = [];
+  const prompts: Array<{ client: unknown; message: string }> = [];
+  const clients: Array<{ options?: { args?: string[]; env?: Record<string, string> } }> = [];
+  const effort = new WeakMap<object, string>();
   Object.assign(RpcClient.prototype, {
     start: async function(this: { options?: { args?: string[]; env?: Record<string, string> } }) {
-      calls.push("start");
+      clients.push(this);
       const args = this.options?.args ?? [];
+      const sessionIndex = args.indexOf("--session");
+      if (sessionIndex >= 0) writeFileSync(args[sessionIndex + 1]!, "mock session\n");
       const env = this.options?.env ?? {};
       if (env[WEB_HOME_ENV]) writeFileSync(join(env[WEB_HOME_ENV], "web-tools-ready.json"), JSON.stringify({ nonce: env[WEB_NONCE_ENV], tools: ["web_search", "ws_web_fetch"] }));
-      const sessionIndex = args.indexOf("--session");
-      const sessionDirIndex = args.indexOf("--session-dir");
-      const session = sessionIndex >= 0 ? args[sessionIndex + 1] : undefined;
-      const sessionDir = sessionDirIndex >= 0 ? args[sessionDirIndex + 1] : undefined;
-      if (session) writeFileSync(session, "mock session\n");
-      else if (sessionDir) writeFileSync(join(sessionDir, "session.jsonl"), "mock session\n");
-    }, stop: async () => { calls.push("stop"); }, abort: async () => { calls.push("abort"); },
-    onEvent: () => () => {}, prompt: async (message: string) => { calls.push(`prompt:${message}`); },
-    setThinkingLevel: async (level: string) => { calls.push(`thinking:${level}`); state.thinking = state.clamp ?? level; },
-    getState: async () => {
-      const [provider, id] = state.model.split("/");
-      return { model: { provider, id }, thinkingLevel: state.thinking, sessionFile: "/tmp/research.jsonl" };
+    },
+    stop: async () => {},
+    abort: async () => {},
+    onEvent: () => () => {},
+    prompt: async function(this: object, message: string) { prompts.push({ client: this, message }); },
+    setThinkingLevel: async function(this: object, level: string) { effort.set(this, level); },
+    getState: async function(this: { options?: { model?: string } }) {
+      const [provider, ...id] = (this.options?.model ?? "pi/default").split("/");
+      return { model: { provider, id: id.join("/") }, thinkingLevel: effort.get(this as object) ?? "medium" };
     },
   });
-  return { calls, restore: () => Object.assign(RpcClient.prototype, original) };
+  return { clients, prompts, restore: () => Object.assign(RpcClient.prototype, original) };
 }
 
-function registerHarness(options: {
-  result?: McpToolCallResult;
-  auth?: boolean;
-  leaf?: (ctx: unknown, opts: unknown) => Promise<unknown>;
-  throwLookup?: boolean;
-} = {}) {
+function tierResult(tier: string, effort = "high"): McpToolCallResult {
+  return { isError: false, content: [{ type: "text", text: JSON.stringify({ resolved_from: "pi", model: `pi/${tier}`, effort }) }] };
+}
+
+function harness(options: { auth?: boolean; result?: (tier: string) => McpToolCallResult } = {}) {
   const tools = new Map<string, CapturedTool>();
-  let lookups = 0;
+  const lookups: string[] = [];
   const pi = { registerTool: (tool: CapturedTool) => tools.set(tool.name, tool), sendMessage() {}, sendUserMessage() {} } as unknown as ExtensionAPI;
   const bridge = {
-    client: { callTool: async (name: string): Promise<McpToolCallResult> => {
+    client: { callTool: async (name: string, args: Record<string, unknown>) => {
       assert.equal(name, "config.resolve_agent");
-      lookups += 1;
-      if (options.throwLookup) throw new Error("transport down");
-      return options.result ?? modelResult("pi/small");
+      const tier = String(args.tier);
+      lookups.push(tier);
+      return options.result?.(tier) ?? tierResult(tier);
     } },
     wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" },
   } as never;
-  const leafCalls: Array<{ ctx: unknown; opts: unknown }> = [];
-  const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+  const root = mkdtempSync(join(tmpdir(), "ws-pi-explore-test-"));
   storageRoots.add(root);
-  const handle = registerAgentTools(pi, bridge, { cwd: "/tmp", storage: createAgentStorageContext("test-lead", root) }, undefined, async (_client, _registry, ctx, _params, opts) => {
-    leafCalls.push({ ctx, opts });
-    return options.leaf?.(ctx, opts) ?? { agentId: "leaf", state: "done", output: "evidence" };
-  });
-  return { tools, handle, root, lookups: () => lookups, leafCalls };
+  const handle = registerAgentTools(
+    pi,
+    bridge,
+    { cwd: PACKAGE_ROOT, storage: createAgentStorageContext("owner", root), extensionPath: EXTENSION_ENTRY },
+    undefined,
+    EXPLORE_GUIDE,
+  );
+  const catalog = MODE_CONTRACT.map(([, tier]) => ({ provider: "pi", id: tier })).filter((entry, index, all) => all.findIndex(other => other.id === entry.id) === index);
+  const ctx = {
+    model: { provider: "pi", id: "parent" }, thinkingLevel: "xhigh",
+    modelRegistry: { getAll: () => catalog, hasConfiguredAuth: () => options.auth ?? true },
+  };
+  return { tools, lookups, handle, root, ctx };
 }
 
-function activeDynamicTools(tools: Map<string, CapturedTool>, allowlist: string): string[] {
-  const allowed = new Set(allowlist.split(","));
+function activeDynamicTools(tools: Map<string, CapturedTool>, allowlist: readonly string[]): string[] {
+  const allowed = new Set(allowlist);
   return [...tools.keys()].filter(name => allowed.has(name));
 }
 
-// These execute real registered tool wrappers and real spawn/resume code. Only
-// RpcClient's process transport is replaced, so no provider call is possible.
-describe("persistent explore registration, dispatch, and frozen selection", () => {
-  test("role/mode registration and Pi-style dynamic allowlisting permit exactly the intended explore surface", async () => {
-    await withRole(undefined, undefined, () => {
-      const h = registerHarness();
-      const tool = h.tools.get("explore")!;
-      assert.deepEqual(Object.keys(tool.parameters.properties ?? {}).sort(), ["deep_research", "query"]);
-      assert.deepEqual(activeDynamicTools(h.tools, "read,grep,find,ls"), [], "simple child cannot reach dynamically registered explore");
-      return h.handle.stopAll();
-    });
-    await withRole("fork", undefined, () => {
-      const h = registerHarness();
-      assert.ok(h.tools.has("explore"));
-      return h.handle.stopAll();
-    });
-    await withRole("worker", undefined, () => {
-      const h = registerHarness();
-      const tool = h.tools.get("explore")!;
-      assert.deepEqual(Object.keys(tool.parameters.properties ?? {}), ["query", "deep_research"]);
-      assert.deepEqual(activeDynamicTools(h.tools, resolveTools("full-worker")), ["ws-agent-spawn", "ws-agent-send", "ws-agent-list", "ws-agent-stop", "ws-agent-transcript", "ws-report-to-lead", "explore"]);
-      return h.handle.stopAll();
-    });
-    await withRole("explore", "deep", () => {
-      const h = registerHarness();
-      assert.deepEqual(activeDynamicTools(h.tools, resolveTools("read-only-explore")), ["ws-agent-spawn", "ws-agent-send", "ws-agent-list", "ws-agent-stop", "ws-agent-transcript", "ws-report-to-lead", "explore"]);
-      return h.handle.stopAll();
-    });
-    for (const mode of ["simple", undefined, "bad"]) {
-      await withRole("explore", mode, () => {
-        const h = registerHarness();
-        assert.equal(h.tools.has("explore"), false, `explore role/${mode ?? "missing"} must not gain collection`);
-        return h.handle.stopAll();
+function legacyResearch(agentId: string, exploreMode: "simple" | "deep", toolGroup: "read-only" | "read-only-explore") {
+  return {
+    agentId, sessionPath: `/tmp/${agentId}.jsonl`, systemPromptPath: "/tmp/explore.md",
+    wsToolNames: [], toolGroup, spawnRole: "explore", exploreMode,
+    modelBase: "pi/model", modelEffort: "high", state: "idle",
+  };
+}
+
+describe("persistent Explore intent modes", () => {
+  test("lead, fork, worker, and researcher register one identical closed schema while terminal depth omits it from the active surface", async () => {
+    const schemas: string[] = [];
+    for (const [role, mode, policy] of [
+      [undefined, undefined, undefined],
+      ["fork", undefined, parentPolicy(0)],
+      ["worker", undefined, parentPolicy(1)],
+      ["explore", "diagnosis", parentPolicy(1)],
+    ] as const) {
+      await withRole(role, mode, policy, async () => {
+        const h = harness();
+        const tool = h.tools.get("explore")!;
+        schemas.push(JSON.stringify({ description: tool.description, parameters: tool.parameters }));
+        assert.deepEqual(Object.keys(tool.parameters.properties ?? {}), ["query", "mode"]);
+        assert.deepEqual(tool.parameters.properties?.mode?.enum, MODES);
+        assert.equal(tool.parameters.additionalProperties, false);
+        assert.match(tool.description, /code-search.*diagnosis.*comparison.*synthesis/);
+        await h.handle.stopAll();
       });
     }
+    assert.equal(new Set(schemas).size, 1, "all eligible dispatcher roles expose the same Explore contract");
+
+    await withRole("explore", "synthesis", parentPolicy(2), async () => {
+      const h = harness();
+      assert.ok(h.tools.has("explore"), "registration stays role-independent");
+      const terminal = terminalTools(resolveTools("read-only-explore").split(","), 2, 2);
+      assert.equal(activeDynamicTools(h.tools, terminal).includes("explore"), false);
+      await h.handle.stopAll();
+    });
   });
 
-  test("lead simple dispatch returns only id/alias and freezes Pi's actual default and clamped effort across resume", async () => {
-    const rpc = installRpcHarness({ model: "pi/small", thinking: "medium", clamp: "high" });
+  test("omission and every intent mode resolve exactly the settled tier and share one persistent read/web profile", async () => {
+    const rpc = installRpcHarness();
     try {
-      await withRole(undefined, undefined, async () => {
-        const h = registerHarness({ result: modelResult("pi/small", "xhigh") });
+      await withRole(undefined, undefined, undefined, async () => {
+        const h = harness();
         const tool = h.tools.get("explore")!;
-        const toolCtx = { model: { provider: "lead", id: "large" }, thinkingLevel: "low", modelRegistry: { getAll: () => [{ provider: "pi", id: "small" }], hasConfiguredAuth: () => true } };
-        const result = JSON.parse((await tool.execute("call", { query: "find the contract" }, undefined, undefined, toolCtx)).content[0]!.text);
-        assert.deepEqual(Object.keys(result).sort(), ["agent_id", "alias"]);
-        const researcher = h.handle.rpcRegistry.get(result.agent_id)!;
-        assert.equal(researcher.ownership?.home, join(realpathSync(h.root), "ws-agents", "test-lead", result.agent_id));
-        assert.equal(researcher.ownership?.sessionPath, researcher.sessionPath);
-        assert.equal(researcher.toolGroup, "read-only");
-        assert.deepEqual(researcher.delegation?.network, { search: true, fetch: true });
-        assert(researcher.delegation?.tools.includes("web_search"));
-        assert(researcher.delegation?.tools.includes("ws_web_fetch"));
-        assert.equal(researcher.modelBase, "pi/small");
-        assert.equal(researcher.modelEffort, "high", "Pi's actual clamp replaces requested xhigh before persistence");
-        assert.equal(h.lookups(), 1);
+        const cases: Array<[ExploreMode | undefined, ExploreMode]> = [[undefined, "code-search"], ...MODES.map(mode => [mode, mode] as [ExploreMode, ExploreMode])];
+        for (const [requested, expectedMode] of cases) {
+          const raw = await tool.execute("call", { query: `inspect ${expectedMode}`, ...(requested ? { mode: requested } : {}) }, undefined, undefined, h.ctx);
+          const result = JSON.parse(raw.content[0]!.text);
+          assert.deepEqual(Object.keys(result).sort(), ["agent_id", "alias"]);
+          const record = h.handle.rpcRegistry.get(result.agent_id)!;
+          assert.equal(record.exploreMode, expectedMode);
+          assert.equal(record.modelTier, TIER_BY_MODE[expectedMode]);
+          assert.equal(record.modelBase, `pi/${TIER_BY_MODE[expectedMode]}`);
+          assert.equal(record.toolGroup, "read-only-explore");
+          assert.deepEqual(record.delegation?.network, { search: true, fetch: true });
+          assert(record.delegation?.tools.includes("web_search"));
+          assert(record.delegation?.tools.includes("ws_web_fetch"));
+          assert(!record.delegation?.tools.includes("bash"));
+          assert(!record.delegation?.tools.includes("write"));
+        }
+        assert.deepEqual(h.lookups, cases.map(([, mode]) => TIER_BY_MODE[mode]));
+        await h.handle.stopAll();
+      });
+    } finally { rpc.restore(); }
+  });
+
+  test("removed and unknown arguments reject without tier lookup or allocation", async () => {
+    await withRole(undefined, undefined, undefined, async () => {
+      const h = harness();
+      const tool = h.tools.get("explore")!;
+      await assert.rejects(() => tool.execute("old", { query: "x", deep_research: true }, undefined, undefined, h.ctx), /invalid explore arguments/);
+      await assert.rejects(() => tool.execute("unknown", { query: "x", mode: "important" }, undefined, undefined, h.ctx), /unknown explore mode/);
+      assert.deepEqual(h.lookups, []);
+      assert.equal(h.handle.rpcRegistry.size, 0);
+      assert.equal(existsSync(join(h.root, "ws-agents", "owner")), false);
+      await h.handle.stopAll();
+    });
+  });
+
+  test("mapped-tier authentication refusal happens before alias, registry, or storage allocation", async () => {
+    await withRole(undefined, undefined, undefined, async () => {
+      const h = harness({ auth: false });
+      await assert.rejects(() => h.tools.get("explore")!.execute("call", { query: "diagnose", mode: "diagnosis" }, undefined, undefined, h.ctx), /explore refused: tier medium/);
+      assert.deepEqual(h.lookups, ["medium"]);
+      assert.equal(h.handle.rpcRegistry.size, 0);
+      assert.equal(existsSync(join(h.root, "ws-agents", "owner")), false);
+      await h.handle.stopAll();
+    });
+  });
+
+  test("follow-up and restart recovery retain the original mode, model, effort, prompt, session, and authority", async () => {
+    const rpc = installRpcHarness();
+    try {
+      await withRole(undefined, undefined, undefined, async () => {
+        const h = harness();
+        const result = JSON.parse((await h.tools.get("explore")!.execute("call", { query: "compare", mode: "comparison" }, undefined, undefined, h.ctx)).content[0]!.text);
+        const original = h.handle.rpcRegistry.get(result.agent_id)!;
+        const sessionPath = original.sessionPath;
+        const systemPromptPath = original.systemPromptPath;
+        const delegation = original.delegation;
+        const firstClient = rpc.prompts[0]?.client;
+        assert.ok(firstClient, "the initial query reaches the persistent RPC client");
+        assert.match(rpc.prompts[0]!.message, /Intent mode: comparison[\s\S]*Question:\ncompare/);
+        await sendToAgent(h.handle.rpcRegistry, { cwd: PACKAGE_ROOT, extensionPath: EXTENSION_ENTRY }, original.agentId, "follow up");
+        assert.deepEqual(rpc.prompts.at(-1), { client: firstClient, message: "follow up" });
+        assert.equal(original.sessionPath, sessionPath);
+        assert.equal(original.systemPromptPath, systemPromptPath);
+        assert.equal(original.exploreMode, "comparison");
+        assert.equal(h.lookups.length, 1, "same-process continuation never re-resolves the tier");
+
+        original.client = undefined;
         const restored: RpcAgentRegistry = new Map();
         reviveOrphans(restored, parseOrphans(serializeOrphans(captureOrphans(h.handle.rpcRegistry))));
-        const revived = restored.get(result.agent_id)!;
-        assert.deepEqual(revived.delegation?.network, researcher.delegation?.network);
-        assert.deepEqual([revived.spawnRole, revived.exploreMode, revived.toolGroup, revived.modelBase, revived.modelEffort], ["explore", "simple", "read-only", "pi/small", "high"]);
-        rpc.calls.length = 0;
-        await sendToAgent(restored, { cwd: "/tmp", extensionPath: TEST_EXTENSION_ENTRY }, revived.agentId, "follow up");
-        assert.deepEqual(rpc.calls.filter(c => c.startsWith("thinking:")), ["thinking:high"], "sidecar-restored resume uses the frozen effective effort");
-        revived.client = undefined;
-        const restoredTwice: RpcAgentRegistry = new Map();
-        reviveOrphans(restoredTwice, parseOrphans(serializeOrphans(captureOrphans(restored))));
-        rpc.calls.length = 0;
-        await sendToAgent(restoredTwice, { cwd: "/tmp", extensionPath: TEST_EXTENSION_ENTRY }, revived.agentId, "second resume");
-        assert.deepEqual(rpc.calls.filter(c => c.startsWith("thinking:")), ["thinking:high"], "second sidecar cycle keeps the actual effective effort");
-        assert.equal(h.lookups(), 1, "resume never re-resolves small");
+        const revived = restored.get(original.agentId)!;
+        await sendToAgent(restored, { cwd: PACKAGE_ROOT, extensionPath: EXTENSION_ENTRY }, revived.agentId, "after restart");
+        const resumedPrompt = rpc.prompts.at(-1)!;
+        assert.equal(resumedPrompt.message, "after restart");
+        assert.notEqual(resumedPrompt.client, firstClient, "restart allocates a fresh client over the saved session");
+        const resumedArgs = (resumedPrompt.client as { options?: { args?: string[] } }).options?.args ?? [];
+        const sessionIndex = resumedArgs.indexOf("--session");
+        assert.ok(sessionIndex >= 0, "the resumed client explicitly selects a persistent session");
+        assert.equal(resumedArgs[sessionIndex + 1], sessionPath);
+        assert.equal(revived.sessionPath, sessionPath);
+        assert.equal(revived.systemPromptPath, systemPromptPath);
+        assert.equal(revived.exploreMode, "comparison");
+        assert.equal(revived.modelBase, "pi/medium");
+        assert.equal(revived.modelEffort, "high");
+        assert.deepEqual(revived.delegation, delegation);
+        assert.equal(h.lookups.length, 1, "restart continuation uses the persisted selection");
         await h.handle.stopAll();
+        await revived.client?.stop();
       });
     } finally { rpc.restore(); }
   });
 
-  test("simple tier with no effort captures Pi's real startup default before its first prompt", async () => {
-    const rpc = installRpcHarness({ model: "pi/small", thinking: "minimal" });
+  test("legacy sidecar modes normalize once at the read boundary and are never serialized again", () => {
+    const raw = JSON.stringify({ version: 1, writtenAt: new Date(0).toISOString(), orphans: [
+      legacyResearch("simple", "simple", "read-only"),
+      legacyResearch("deep", "deep", "read-only-explore"),
+    ] });
+    const parsed = parseOrphans(raw);
+    assert.deepEqual(parsed.map(({ exploreMode, toolGroup }) => ({ exploreMode, toolGroup })), [
+      { exploreMode: "code-search", toolGroup: "read-only-explore" },
+      { exploreMode: "synthesis", toolGroup: "read-only-explore" },
+    ]);
+    const persisted = serializeOrphans(parsed);
+    assert.equal(persisted.includes('"exploreMode": "simple"'), false);
+    assert.equal(persisted.includes('"exploreMode": "deep"'), false);
+  });
+
+  test("a depth-one worker dispatches the same persistent path and its terminal child cannot delegate", async () => {
+    const rpc = installRpcHarness();
     try {
-      await withRole(undefined, undefined, async () => {
-        const h = registerHarness({ result: modelResult("pi/small") });
-        const ctx = { model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "pi", id: "small" }], hasConfiguredAuth: () => true } };
-        const result = JSON.parse((await h.tools.get("explore")!.execute("call", { query: "default effort" }, undefined, undefined, ctx)).content[0]!.text);
-        assert.equal(h.handle.rpcRegistry.get(result.agent_id)?.modelEffort, "minimal");
-        assert.deepEqual(rpc.calls.filter(c => c.startsWith("thinking:")), [], "unset small effort does not invent off or a request");
-        await h.handle.stopAll();
-      });
-    } finally { rpc.restore(); }
-  });
-
-  test("deep creation never looks up small, freezes the dispatch snapshot, and refuses an effective-effort mismatch before prompt", async () => {
-    const rpc = installRpcHarness({ model: "lead/current", thinking: "medium", clamp: "medium" });
-    try {
-      await withRole(undefined, undefined, async () => {
-        const h = registerHarness({ result: { isError: true, content: [] } });
-        const tool = h.tools.get("explore")!;
-        const ctx = { model: { provider: "lead", id: "current" }, thinkingLevel: "high", modelRegistry: { getAll: () => { throw new Error("deep must not read catalog"); }, hasConfiguredAuth: () => false } };
-        await assert.rejects(() => tool.execute("call", { query: "deep question", deep_research: true }, undefined, undefined, ctx), /research thinking mismatch/);
-        assert.equal(h.lookups(), 0, "deep parent creation does not resolve small");
-        assert.deepEqual(rpc.calls.filter(c => c.startsWith("prompt:")), [], "mismatched effective deep effort never prompts");
-        assert.equal(h.handle.rpcRegistry.size, 1, "ordinary persistent failure identity remains retained");
-        await h.handle.stopAll();
-      });
-    } finally { rpc.restore(); }
-  });
-
-  test("bad small refuses before registry guard/allocation effects and deep collection refuses before its leaf", async () => {
-    const before = readdirSync(tmpdir()).filter(name => name.startsWith("ws-pi-agent-")).length;
-    await withRole(undefined, undefined, async () => {
-      const h = registerHarness({ result: { isError: true, content: [] } });
-      h.handle.rpcRegistry.set("holder", record({ agentId: "holder", alias: "explore-1", running: false }));
-      const tool = h.tools.get("explore")!;
-      const ctx = { model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "pi", id: "small" }], hasConfiguredAuth: () => true } };
-      await assert.rejects(() => tool.execute("call", { query: "simple" }, undefined, undefined, ctx), /explore refused/);
-      assert.equal(h.handle.rpcRegistry.size, 1);
-      assert.equal(h.handle.rpcRegistry.get("holder")?.alias, "explore-1", "refusal cannot transfer an alias or evict a holder");
-      assert.equal(h.lookups(), 1, "one shared resolution, not a preflight plus re-resolution");
-      await h.handle.stopAll();
-    });
-    assert.equal(readdirSync(tmpdir()).filter(name => name.startsWith("ws-pi-agent-")).length, before, "refusal allocated no session directory");
-
-    await withRole("explore", "deep", async () => {
-      const h = registerHarness({ result: { isError: true, content: [] } });
-      const tool = h.tools.get("explore")!;
-      const ctx = { model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "pi", id: "small" }], hasConfiguredAuth: () => true } };
-      await assert.rejects(() => tool.execute("call", { query: "collect" }, undefined, undefined, ctx), /explore refused/);
-      assert.equal(h.leafCalls.length, 0, "collection refusal happens before render/leaf launch");
-      await h.handle.stopAll();
-    });
-  });
-
-  test("every simple-resolution failure rejects before records, alias transfers, process starts, or session allocation", async () => {
-    const cases: Array<{ name: string; result?: McpToolCallResult; throwLookup?: boolean; models?: unknown; auth?: boolean; throwCatalog?: boolean }> = [
-      { name: "transport error", throwLookup: true },
-      { name: "MCP error", result: { isError: true, content: [] } },
-      { name: "missing text", result: { isError: false, content: [] } },
-      { name: "invalid JSON", result: { isError: false, content: [{ type: "text", text: "not-json" }] } },
-      { name: "non-Pi resolution", result: modelResult("other/model", undefined, "codex") },
-      { name: "unknown model", result: modelResult("pi/missing") },
-      { name: "unauthenticated model", result: modelResult("pi/small"), auth: false },
-      { name: "empty catalog", result: modelResult("pi/small"), models: [] },
-      { name: "malformed catalog", result: modelResult("pi/small"), models: {} },
-      { name: "throwing catalog", result: modelResult("pi/small"), throwCatalog: true },
-    ];
-    for (const failure of cases) {
-      await withRole(undefined, undefined, async () => {
-        const h = registerHarness({ result: failure.result, throwLookup: failure.throwLookup });
-        h.handle.rpcRegistry.set("holder", record({ agentId: "holder", alias: "explore-1", running: false }));
-        const ctx = {
-          model: { provider: "lead", id: "large" }, thinkingLevel: "high",
-          modelRegistry: { getAll: () => { if (failure.throwCatalog) throw new Error("catalog down"); return failure.models ?? [{ provider: "pi", id: "small" }]; }, hasConfiguredAuth: () => failure.auth ?? true },
-        };
-        await assert.rejects(() => h.tools.get("explore")!.execute("call", { query: failure.name }, undefined, undefined, ctx), /explore refused/, failure.name);
-        assert.equal(h.handle.rpcRegistry.size, 1, `${failure.name}: no registry insertion/eviction`);
-        assert.equal(h.handle.rpcRegistry.get("holder")?.alias, "explore-1", `${failure.name}: no alias transfer`);
-        assert.equal(h.lookups(), 1, `${failure.name}: exactly one resolution`);
-        await h.handle.stopAll();
-      });
-    }
-  });
-
-  test("worker and deep researcher use persistent read-only children with frozen effort", async () => {
-    const rpc = installRpcHarness({ model: "pi/small", thinking: "low" });
-    try {
-      const context = { model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "pi", id: "small" }], hasConfiguredAuth: () => true } };
-      for (const [role, mode] of [["worker", undefined], ["explore", "deep"]] as const) await withRole(role, mode, async () => {
-        const h = registerHarness({ result: modelResult("pi/small", "low") });
-        const result = JSON.parse((await h.tools.get("explore")!.execute("call", { query: "evidence" }, undefined, undefined, context)).content[0]!.text);
+      await withRole("worker", undefined, parentPolicy(1), async () => {
+        const h = harness();
+        const result = JSON.parse((await h.tools.get("explore")!.execute("call", { query: "locate", mode: "lookup" }, undefined, undefined, h.ctx)).content[0]!.text);
         const child = h.handle.rpcRegistry.get(result.agent_id)!;
-        assert.equal(h.leafCalls.length, 0);
+        assert.equal(child.exploreMode, "lookup");
         assert.equal(child.delegation?.depth, 2);
-        assert.equal(child.delegation?.tools.includes("bash"), false);
-        assert.equal(child.delegation?.tools.includes("explore"), false);
-        assert.equal(child.modelEffort, "low");
+        for (const tool of CHILD_MANAGEMENT_TOOLS) assert.equal(child.delegation?.tools.includes(tool), false, `${tool} is stripped at terminal depth`);
+        const args = (child.client as unknown as { options?: { args?: string[] } }).options?.args ?? [];
+        const toolsIndex = args.indexOf("--tools");
+        assert.ok(toolsIndex >= 0, "the terminal child receives an explicit --tools allowlist");
+        const activeTools = (args[toolsIndex + 1] ?? "").split(",");
+        for (const tool of CHILD_MANAGEMENT_TOOLS) assert.equal(activeTools.includes(tool), false, `${tool} is absent from the actual terminal --tools allowlist`);
+        assert.deepEqual(child.delegation?.network, { search: true, fetch: true });
         await h.handle.stopAll();
       });
     } finally { rpc.restore(); }

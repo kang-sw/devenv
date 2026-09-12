@@ -40,7 +40,7 @@ test("runtime invocation enforces explicit authority, unknown args, owned cache,
   await assert.rejects(() => registered.get("ws_web_fetch").execute("id", { url: "https://example.com" }), /owned Explore cache unavailable/);
   const root = mkdtempSync(join(tmpdir(), "ws-web-tools-"));
   try {
-    const owner = allocateAgentHome(createAgentStorageContext("owner", root), "researcher", "explore", "simple");
+    const owner = allocateAgentHome(createAgentStorageContext("owner", root), "researcher", "explore", "web-search");
     const fetch = tools("explore", authority, owner.home).get("ws_web_fetch");
     await assert.rejects(() => fetch.execute("id", { url: "http://127.0.0.1/" }), /public|private|destination|address/i);
     // Fetch artifacts share the ownership unit, not a global or repository cache.

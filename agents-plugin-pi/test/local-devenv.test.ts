@@ -26,7 +26,7 @@ import { readLocalDevenvMarker, buildLocalDevenvBootstrap, type LocalDevenvBuild
 import { wrapLaunchErrorWithLocalDevenvContext } from "../src/bridge.ts";
 import { buildStdioSpawnOptions, spawnWsMcpClient } from "../src/mcp-stdio-client.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
-import { buildChildProcessEnv } from "../src/spawner.ts";
+import { buildRpcClientOptions } from "../src/spawner.ts";
 
 function tempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -415,9 +415,10 @@ describe("child bootstrap overrides: real launcher fixture", () => {
         /bootstrap binary not found/,
         "the stale parent override would force replacement instead of reusing the compatible runtime",
       );
-      const childEnv = buildChildProcessEnv(parent);
-      assert.equal(childEnv.WS_MCP_BOOTSTRAP_BINARY, undefined);
-      assert.equal(childEnv.WS_MCP_BOOTSTRAP_URL, undefined);
+      const options = buildRpcClientOptions("/repo", undefined, "/tmp/session.jsonl", "/tmp/prompt.md", "read", undefined, undefined, "worker", undefined, undefined, "/tmp/index.ts");
+      const childEnv = { ...parent, ...options.env };
+      assert.equal(childEnv.WS_MCP_BOOTSTRAP_BINARY, "");
+      assert.equal(childEnv.WS_MCP_BOOTSTRAP_URL, "");
       assert.equal(childEnv.CHILD_SENTINEL, "preserved");
 
       const output = execFileSync("python3", [launcherPath, "serve", "--stdio"], { env: childEnv, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });

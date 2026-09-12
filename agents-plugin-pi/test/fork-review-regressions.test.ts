@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { dirname } from "node:path";
 import { applyForkAffinity, captureForkContext, effectiveForkDescriptor, frameForkInput, restoreForkKeys, writePrivateJson } from "../src/fork-context.ts";
-import { buildChildProcessEnv, buildRpcClientOptions as buildRpcClientOptionsBase, prepareForkLaunch, validateForkReadiness } from "../src/spawner.ts";
+import { buildRpcClientOptions as buildRpcClientOptionsBase, prepareForkLaunch, validateForkReadiness } from "../src/spawner.ts";
 import * as role from "../src/process-role.ts";
 import * as context from "../src/fork-context.ts";
 import { registerLeadBootstrap, type LeadPromptRef } from "../src/lead-bootstrap.ts";
@@ -130,9 +130,7 @@ test("C6/I1/I2: source adapter argv and canonical markers isolate every descenda
   assert.equal(context.FORK_AFFINITY_ENV, role.WS_PI_FORK_AFFINITY_ENV);
   const markers = [role.WS_PI_FORK_CONTEXT_ENV, role.WS_PI_FORK_READY_PATH_ENV, role.WS_PI_FORK_READY_NONCE_ENV, role.WS_PI_FORK_AFFINITY_ENV, role.WS_PI_PARENT_SESSION_KEY_ENV];
   const poison = Object.fromEntries(markers.map(key => [key, "poison"]));
-  const terminal = buildChildProcessEnv(poison);
-  for (const key of markers) assert.equal(key in terminal, false);
-  for (const spawnRole of ["worker", "execute-worker", "explore"] as const) for (const mode of ["simple", "deep"] as const) {
+  for (const spawnRole of ["worker", "execute-worker", "explore"] as const) for (const mode of Object.keys(role.EXPLORE_MODE_TIERS) as role.ExploreMode[]) {
     const options = buildRpcClientOptions("/repo", undefined, "/child", "/worker-prompt", "read", undefined, undefined, spawnRole, mode);
     const merged = { ...poison, ...options.env };
     for (const key of markers) assert.equal(merged[key], "");

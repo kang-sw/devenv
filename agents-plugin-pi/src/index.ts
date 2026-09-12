@@ -32,7 +32,7 @@
  * Phase 4 ships the `/ws-discuss` proof-of-concept command (kickoff built by
  * src/discuss.ts): a single `pi.sendUserMessage` that loads the lead-discuss
  * skill (skills-load), whose body drives the bridged `ws__*` tools (bridge),
- * and instructs the model to dispatch one `explore` recon leaf (spawner) —
+ * and instructs the model to dispatch one persistent `explore` researcher (spawner) —
  * proving skills-load + bridge + spawner compose end-to-end on Pi.
  *
  * The 260903 ticket's Phase 1 adds the goal-mode arming + `agent_settled`
@@ -315,10 +315,8 @@ export async function persistShutdownAgentSnapshots(
  * the user's own interactive terminal.
  *
  * Kept dependency-free of any per-`session_start` closure state (no refs, no
- * `pi` beyond what `bootstrap()` itself captures) — mirrors
- * `registerAgentTools`'s injectable `runExploreLeaf` parameter
- * (spawner.ts), which is what makes this testable without a full fake
- * `ExtensionAPI`/`ExtensionContext`.
+ * `pi` beyond what `bootstrap()` itself captures), which makes this testable
+ * without a full fake `ExtensionAPI`/`ExtensionContext`.
  */
 export async function bootstrapOrFailLoud<T>(
   ui: Pick<ExtensionUIContext, "notify">,
@@ -464,7 +462,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
 
   // Phase 4 proof-of-concept command: one message that loads the lead-discuss
   // skill (skills-load), whose body calls the bridged ws__* tools (bridge), and
-  // instructs the model to dispatch one `explore` recon leaf (spawner) — proving
+  // instructs the model to dispatch one persistent `explore` researcher (spawner) — proving
   // all three MVP surfaces compose. expandPromptTemplates:true expands the
   // leading `/skill:lead-discuss <topic>` (docs/extensions.md#L1439-1467); the
   // idle guard mirrors examples/extensions/send-user-message.ts so the plain
@@ -592,7 +590,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
         sessionEntries: ctx.sessionManager.getEntries(),
       });
       const approval = createApprovalRelay(pi, { cwd: ctx.cwd }, rpcRegistryRef);
-      const tools = registerAgentTools(pi, h, { cwd: ctx.cwd, storage: createAgentStorageContext(ctx.sessionManager.getSessionId()), extensionPath: extensionEntryPath }, approval, undefined, exploreGuidePath, toolPreviewTuiRef);
+      const tools = registerAgentTools(pi, h, { cwd: ctx.cwd, storage: createAgentStorageContext(ctx.sessionManager.getSessionId()), extensionPath: extensionEntryPath }, approval, exploreGuidePath, toolPreviewTuiRef);
       return { handle: h, agentTools: tools, onApprovalPending: approval };
     });
     if (!sessionBootstrap) return; // notified (and, for a spawned child, already exited) inside bootstrapOrFailLoud — never fall through to a partial/toolless registration.

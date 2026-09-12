@@ -23,7 +23,7 @@ test('real Explore extension startup and dormant restart prove fresh facade read
   const registry: any = new Map();
   const context: any = {
     cwd: packageRoot, storage: createAgentStorageContext('startup-lead', root), wsToolNames: [], inheritModel: 'openrouter/openai/gpt-4o',
-    extensionPath: join(packageRoot, 'src', 'index.ts'), toolGroup: 'read-only', spawnRole: 'explore', exploreMode: 'simple',
+    extensionPath: join(packageRoot, 'src', 'index.ts'), toolGroup: 'read-only-explore', spawnRole: 'explore', exploreMode: 'code-search',
   };
   try {
     const result = await spawnAgent(registry, context, {

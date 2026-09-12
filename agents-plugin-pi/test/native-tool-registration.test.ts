@@ -44,7 +44,7 @@ function harness() {
 test("actual native registrations retain schemas/executors while sharing cold and late-filled preview refs", () => {
   const { tools, pi, bridge } = harness();
   const ref = createToolPreviewTuiRef();
-  const agents = registerAgentTools(pi, bridge, { cwd: "/tmp" }, undefined, async () => ({ agentId: "leaf", state: "done", output: "ok" }), "/tmp/explore.md", ref);
+  const agents = registerAgentTools(pi, bridge, { cwd: "/tmp" }, undefined, "/tmp/explore.md", ref);
   registerExecuteGateway(pi, bridge, agents.rpcRegistry, { cwd: "/tmp", executeWorkerPromptPath: "/tmp/execute.md" }, ref);
   registerFork(pi, bridge, agents.rpcRegistry, { cwd: "/tmp" }, undefined, ref);
 
@@ -81,7 +81,7 @@ test("actual native registrations retain schemas/executors while sharing cold an
 test("260906 Phase 1: the two direct tools cap their real registered OUTPUT preview at ten logical lines, not ten physical rows", () => {
   const { tools, pi, bridge } = harness();
   const ref = createToolPreviewTuiRef();
-  const agents = registerAgentTools(pi, bridge, { cwd: "/tmp" }, undefined, async () => ({ agentId: "leaf", state: "done", output: "ok" }), "/tmp/explore.md", ref);
+  const agents = registerAgentTools(pi, bridge, { cwd: "/tmp" }, undefined, "/tmp/explore.md", ref);
   registerExecuteGateway(pi, bridge, agents.rpcRegistry, { cwd: "/tmp", executeWorkerPromptPath: "/tmp/execute.md" }, ref);
   ref.current = tui;
 

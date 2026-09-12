@@ -42,7 +42,7 @@
  * The `agent_settled` handler no-ops when the running process is itself a
  * spawned child (any `WS_PI_SPAWN_ROLE_ENV` role set — see
  * `process-role.ts`'s `readSpawnRole`, and spawner.ts's
- * `buildRpcClientOptions`/`buildChildProcessEnv`, both of which carry that
+ * `buildRpcClientOptions`, which carries that
  * marker on every spawned child) — defense-in-depth against a message that
  * happens to start with `/goal …` reaching a child's input pipeline (e.g. a
  * lead-authored `ws-agent-send` message), even though each spawned child
