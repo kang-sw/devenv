@@ -6,7 +6,7 @@ related:
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 4e8171eab77b1020
-sage-review-design-reviewed: 4e8171eab77b1020
+sage-review-design-reviewed: 6ea181035d33db54
 ---
 
 # Pi Explore: bounded fetch plus bundled web-search extension
@@ -58,3 +58,17 @@ Provide Pi-local bounded URL fetching directly in `agents-plugin-pi`, and compos
 Implement and test the ws-owned bounded fetch tool, package and resolve the pinned `pi-web-access` extension, and pass both the ws extension and dependency extension explicitly to Explore RPC children. Extend the common Explore tool allowlist and descendant capability envelope with only `ws_web_fetch` and external `web_search`, keeping all other dependency tools unavailable.
 
 Verify public fetch success; every accepted content type; article/main and body fallback; malformed HTML and JSON handling; removed active content; passive links; nonce-marker spoof neutralization; matching top/bottom untrusted warnings; exact 8 KiB inline boundary; spill paths and metadata; 128 KiB extracted truncation; 2 MiB decoded-body, 20-second deadline, and 5-redirect caps; caller lowering but not raising limits; DNS rebinding and private-network refusal; malformed URLs; unsupported content; cancellation; and cache retention cleanup. Verify package install/update, peer dependency resolution, exact extension ordering, duplicate separately configured copies, the two stable composition failures, redacted provider failure with readable package-doc pointers, ad-hoc setup explanation, all-mode tool-profile identity, depth monotonicity, dormant/restarted child composition, and real direct-lead and nested-worker Explore searches. Confirm Codex/Claude/shared ws-mcp manifests and behavior remain unchanged.
+
+#### Edition (aa97b1bc) - 2026-09-12
+
+Exact inspection of `pi-web-access@0.29.0` after dispatch showed that its exported `web_search` is not itself a search-only boundary: model arguments `includeContent`, `proxy`, and `workflow` can activate arbitrary page fetching, persistent content storage, caller-selected routing, or browser-curator behavior even when the other dependency tools are absent from `--tools`.
+
+Replace direct model exposure of the upstream registration with a Pi-owned fail-closed facade:
+
+- Load the pinned upstream extension through an isolated registration proxy, capture exactly one upstream `web_search` implementation, suppress every other upstream tool and command registration, and expose only the ws-owned facade as model-facing `web_search`. Missing, duplicate, renamed, or side-effectful registration is `web-search-tool-unavailable`; do not fall back to direct upstream exposure.
+- Give the model-facing schema exactly one required, non-empty `query` string and reject unknown properties at both schema and runtime boundaries. Do not expose `queries`, `includeContent`, `provider`, `workflow`, `proxy`, or other upstream parameters.
+- Invoke the captured implementation with `includeContent: false` and `workflow: "none"` forced after validation so dependency config/defaults cannot re-enable page-content fetching or browser-curator behavior. The model cannot supply or override a proxy or provider. An owner-configured provider and proxy may still be honored by the dependency as an out-of-band trust boundary and must be called out in diagnostics without leaking secrets.
+- Permit only retrieval intrinsic to querying the selected search provider and receiving normalized result metadata. Permit the dependency's ordinary in-memory and session-custom `type: "search"` metadata needed for the search result and session continuity. Do not persist raw provider responses, arbitrary fetched page bodies, content-cache entries, or references to hidden fetched content. Provider-side retention remains the selected provider's policy rather than a ws guarantee; preserve the upstream OpenAI `store: false` request where applicable.
+- Audit the captured execute path and provider routes for implicit page fetches or content writes under the forced arguments. Test hostile/unknown arguments, config defaults that request curator/content mode, caller proxy/provider attempts, suppression of all non-search registrations, exact capture cardinality, normal bounded search metadata, absence of content-cache writes, owner-configured provider/proxy behavior, and fail-closed startup when the boundary cannot be proved.
+
+A different dependency or a broader search/content capability is not authorized by this edition. If the isolated capture-and-facade boundary cannot be implemented against the exact pinned package without upstream side effects, stop again with evidence rather than weakening the search-only contract.
