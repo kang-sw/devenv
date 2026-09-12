@@ -198,7 +198,7 @@ func TestTicketDesignReviewContradictionAnchors(t *testing.T) {
 				"even when no `related:` edge names them",
 				"ticket_stem: <parent>, include_done: true, include_dropped: true",
 				"`related:` is not an independent contradiction anchor",
-				"Do not scan `todo/`, `idea/`, or the whole ticket tree",
+				"do not scan those directories or the whole ticket tree",
 				"report the incomplete check",
 			} {
 				if !strings.Contains(text, want) {

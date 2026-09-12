@@ -112,21 +112,69 @@ promotion is a batch of one.
    in `ready/`, `.done/`, or the same batch, recorded as `related: <stem>:
    prerequisite` or a prerequisite `parent:`. Otherwise name the blocking
    stem and stop before any move.
-2. Per actionable ticket in order: run **Ground: fact population**, then `{{.McpNamespace}}/tickets.move(stem, to: "ready")`,
-   then `{{.McpNamespace}}/tickets.sage_gate(stem, landing: "ready")` and its
-   returned action. For `run`: `playbook.render` the named reviewer, spawn it
-   with the ticket path and the populator's `relations:` table when
-   population ran, and pass each `verdict:` to
-   `{{.McpNamespace}}/tickets.sage_stamp`. A `block` moves that
-   ticket back and ends the batch there; report the promoted prefix and the
-   blocker.
-3. Stamps leave files uncommitted. One `{{.McpNamespace}}/git.commit` carries
+2. For every actionable member, run **Ground: fact population** before any
+   reviewer reads the batch. Resolve each
+   `{{.McpNamespace}}/tickets.sage_gate(stem, landing: "ready")` while tickets
+   remain at their original paths, including configured recommendations,
+   freshness decisions, and existing blocks. Retain the stage selections.
+3. A single-ticket promotion uses the existing single-ticket reviewer path:
+   render the selected reviewers, pass its path and `relations:` table, and
+   record their verdicts. For multiple actionable tickets, use **Batch design
+   review** below in place of isolated design dispatches. Completeness review
+   remains per ticket, only for stages the gate selected.
+4. The lead maps results into `{{.McpNamespace}}/tickets.sage_stamp` per ticket.
+   Use the reviewed stage (`combined` when both reviewers ran); preserve
+   skipped stages by excluding their verdicts and stamps. A batch coherence
+   block pauses the whole batch, but only its `affected_stems` receive that
+   blocked design verdict. Keep cross-ticket issue titles prefixed with
+   `Cross-ticket [<affected_stems>]:` under the design verdict; completeness
+   issues remain in the completeness verdict so blocked diagnostics distinguish
+   them. Retain the individual reviewer outcomes as the next round's baseline,
+   even when combined stamping marks both stages blocked.
+5. Move with `{{.McpNamespace}}/tickets.move(stem, to: "ready")` in dependency
+   order only after all reviews settle. Any unresolved block leaves the whole
+   batch at its original statuses; report the blocker and affected stems.
+   If a move fails after earlier moves succeeded, restore those members to
+   their original statuses before reporting the failure.
+6. Stamps leave files uncommitted. One `{{.McpNamespace}}/git.commit` carries
    the batch, its `## AI Context` naming the order.
 
 The stamp digests the body, so any `## Route Facts` the populator wrote are
-covered: an edit after the stamp invalidates it. Re-stamp with the same
-verdicts to cover the edited body; re-run the gate only when the edit changes
-what the reviewers judged.
+covered. Stamp only the reviewed body; review substantive edits before stamping
+them. Stamp-generated diagnostics and their archival headings may be carried
+forward without a new design sweep. After fixes, use the delta boundary below
+for design and re-review changed completeness premises per ticket.
+
+### Batch design review
+
+Render `ticket-reviewer-design` once for the batch. Pass all member paths and
+their populated `relations:` tables, plus explicit `review_eligible_stems` and
+`context_only_stems`. Members whose effective design posture is `skipped` are
+context only: they receive no design verdict or stamp. Resolve recommendations
+before dispatch; previously completed, current design reviews are eligible
+baseline context whose cross-ticket compatibility still participates in the
+first batch review. If every design stage is skipped, omit design dispatch.
+Batch design verdicts also replace eligible members' prior completed design
+stamps; combine them with completeness only when that stage was reviewed.
+
+On the first review pass `review_round: initial` and the complete batch. Require
+one verdict per eligible stem and a separate coherence verdict; validate exact
+stem coverage and that every coherence issue's nonempty `affected_stems` is a
+subset of eligible stems before stamping. Combine each ticket's own design
+issues with only the coherence issues naming it, using the reviewer's verdict
+thresholds. A malformed or incomplete result pauses promotion for correction.
+
+On follow-up pass `review_round: delta`, `changed_stems`,
+`previously_passed_stems`, and the prior report alongside the current paths.
+Include changed context-only members in `changed_stems`. Review changed tickets
+and their dependency or collision edges; previously passed tickets are accepted
+baseline context. A reversal must name the changed ticket or relation, cite the
+passed ticket's concrete premise, and explain its invalidation. Reject a
+reversal lacking that evidence; unrelated newly noticed concerns go into
+`follow_up_findings` without changing this batch's verdict. Retain prior passes
+and carry still-unresolved findings forward so a retry neither starts a fresh
+sweep nor drops a blocker. Settle cross-ticket findings separately from
+completeness findings before moving any member.
 
 ## Drop and close
 
