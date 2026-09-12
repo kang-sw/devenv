@@ -274,13 +274,18 @@ no plugin). Findings that supersede the 0.128.0 notes above:
   with `reason` as an instruction (the model ran the injected command), then
   concludes. The re-entry `Stop` fires with `stop_hook_active: true` (loop
   guard). This is the load-bearing turn-boundary wake/drain mechanism.
-- **`PostToolUse` no longer steers the model.** The hook still *fires* (it can
-  observe and produce side effects), but neither `exit 2` + stderr NOR JSON
-  `decision: block` + `hookSpecificOutput.additionalContext` produced any model
-  action on 0.154.0 — the model continued its planned tool sequence unchanged.
-  Mid-turn (between-tools) model steering via hooks therefore appears
-  unsupported on 0.154.0; only the `Stop` boundary steers. This reverses the
-  2026-05-04 `exit 2` finding.
+- **`PostToolUse` output never reaches the model.** The hook still *fires* (it
+  can observe and produce side effects), but nothing it emits reaches the model
+  on 0.154.0: not `exit 2` + stderr, not JSON `decision: block` + `reason`, not
+  `hookSpecificOutput.additionalContext`. Verified even with a *passive* note
+  (exit 0, `additionalContext` asking the model to append a codeword to its
+  final message) — the codeword never surfaced, so the content did not reach the
+  model at all. Asymmetry: `Stop`'s `reason` reaches the model, `PostToolUse`'s
+  does not. A Codex `PostToolUse` hook is therefore side-effect-only (write a
+  marker, check state); it cannot notify or steer the model mid-turn. This
+  reverses the 2026-05-04 `exit 2` finding. Anything that must reach the model
+  mid-turn has to travel through a channel the model reads (e.g. an MCP tool
+  response), not a `PostToolUse` hook.
 - **Hook payload carries no agent classifier.** `Stop` stdin is
   `{session_id, turn_id, transcript_path, cwd, hook_event_name, model,
   permission_mode, stop_hook_active, last_assistant_message}`; `PostToolUse`

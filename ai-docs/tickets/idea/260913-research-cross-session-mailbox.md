@@ -154,15 +154,22 @@ running executor untouched) and confirmed the Claude payload from docs.
   reason as an instruction (verified: the model ran the injected command), then
   concludes; the re-entry `Stop` carries `stop_hook_active: true` as a loop
   guard. This is the turn-boundary wake mechanism (Decision 6).
-- **(1b) `PostToolUse` model steering — does NOT work on 0.154.0.** The hook
-  fires, but neither `exit 2` + stderr NOR JSON `decision:block` +
-  `additionalContext` made the model act on injected content; it continued its
-  planned tool sequence. Mid-turn (between-tools) injection that *steers the
-  model* is unsupported on current Codex — only the `Stop` boundary steers.
-  (This reverses the codex-integration manual's dated 2026-05-04 `exit 2` claim,
-  now corrected there.) Mid-turn *delivery/detection* still works — the hook
-  process runs and can check mail / write markers — it just cannot make the
-  model act until the turn ends.
+- **(1b) `PostToolUse` output never reaches the Codex model on 0.154.0.** The
+  hook fires (side effects work), but nothing it emits reaches the model: not
+  `exit 2` + stderr, not JSON `decision:block` + `reason`, not
+  `hookSpecificOutput.additionalContext`. Tested even as a *passive* note
+  (exit 0, `additionalContext` asking the model to append a codeword to its
+  final message) — the codeword never surfaced, so the context did not reach the
+  model at all, not merely "reached but ignored." Note the asymmetry: `Stop`'s
+  `reason` does reach the model (see (1)), `PostToolUse`'s does not. So a Codex
+  `PostToolUse` hook cannot notify or soft-steer the model mid-turn at all — it
+  is side-effect-only (write a marker, check mail). (This reverses the
+  codex-integration manual's dated 2026-05-04 `exit 2` claim, corrected there.)
+  **Design consequence: mid-turn awareness on Codex must ride the
+  response-piggyback spine — the unread-badge appended to ws MCP tool responses,
+  which the model always reads — not hooks. Hooks contribute only the `Stop`
+  boundary wake; `PostToolUse` is demoted to side-effect (marker) use on Codex.**
+  This probe independently validates the piggyback layer's necessity.
 - **(2) Codex main-vs-subagent classifier — no payload signal.** The `Stop`
   payload has no `agent_id`/`agent_type`/agent-name field, so a Codex hook
   cannot structurally distinguish a main turn from a subagent turn from the
