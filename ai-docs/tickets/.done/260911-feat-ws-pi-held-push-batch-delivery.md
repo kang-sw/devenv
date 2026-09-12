@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 5ca251937373b77f
 sage-review-completeness-reviewed: 5ca251937373b77f
+completed: 2026-09-13
 ---
 
 # Batch accumulated Pi adapter push messages per wake
@@ -62,3 +63,8 @@ Round-1 review identified and fixed one FIFO defect: an actionable steer arrivin
 Verification: the focused affected suite passed 852/852 tests, and the full package command (`npm test`, which unsets all four `WS_PI_*` role/policy/channel variables) passed 1769 tests with 2 intentional skips and no failures. The automated transport harness covers both Pi steering modes and the long-turn mixed actionable/report case; interactive owner-live acceptance was not available in the worker session.
 
 Decisions: retained immediate individual custom messages only when no older held prefix exists; made the batch protocol shared within the adapter without exposing it as a package API; preserved visual-only TUI collapse while leaving model content uncapped. Captured the review findings-path authority mismatch separately as `260913-bug-ws-reviewer-cannot-write-findings-path`.
+
+
+## Resolution (2026-09-13)
+
+Implemented and reviewed one FIFO `ws-push-batch` per held lead-turn snapshot, including XML-safe model content, structured TUI cards, snapshot-time actionability validation, atomic retry behavior, and fallback delivery. Full `agents-plugin-pi` test suite passed (1769 pass, 2 skipped, 0 fail).
