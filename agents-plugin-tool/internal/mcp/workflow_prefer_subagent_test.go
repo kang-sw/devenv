@@ -118,7 +118,7 @@ func TestWorkflowPreferSubagentWorkflowManualPrintProductionPath(t *testing.T) {
 	offText := toolText(t, callToolOnce(t, s, 1, "playbook.read", map[string]any{
 		"name": "lead-workflow-manual",
 	}))
-	if strings.Contains(offText, "Prefer delegation for eligible general work") {
+	if strings.Contains(offText, "Use `ws:lead-delegate` for bounded investigation") {
 		t.Fatalf("builtin/off workflow.prefer_subagent must not append lead-prefer-subagent:\n%s", offText)
 	}
 
@@ -135,9 +135,9 @@ func TestWorkflowPreferSubagentWorkflowManualPrintProductionPath(t *testing.T) {
 		"name": "lead-workflow-manual",
 	}))
 	for _, want := range []string{
-		"Prefer delegation for eligible general work",
+		"Use `ws:lead-delegate` for bounded investigation",
 		"ws:lead-delegate",
-		"apply its routing gate before dispatch",
+		"low-impact operational work",
 	} {
 		if !strings.Contains(onText, want) {
 			t.Fatalf("prefer-subagent manual render missing %q:\n%s", want, onText)
@@ -163,7 +163,7 @@ func TestWorkflowPreferSubagentWorkflowManualPrintProductionPath(t *testing.T) {
 	offAgainText := toolText(t, callToolOnce(t, s, 5, "playbook.read", map[string]any{
 		"name": "lead-workflow-manual",
 	}))
-	if strings.Contains(offAgainText, "Prefer delegation for eligible general work") {
+	if strings.Contains(offAgainText, "Use `ws:lead-delegate` for bounded investigation") {
 		t.Fatalf("global off workflow.prefer_subagent must remove appended lead-prefer-subagent:\n%s", offAgainText)
 	}
 }
@@ -196,7 +196,7 @@ func TestWorkflowPreferSubagentWorkflowManualClaudeGetsInvocationHint(t *testing
 	text := toolText(t, callToolOnce(t, s, 2, "playbook.read", map[string]any{
 		"name": "lead-workflow-manual",
 	}))
-	if !strings.Contains(text, "Prefer delegation for eligible general work") {
+	if !strings.Contains(text, "Use `ws:lead-delegate` for bounded investigation") {
 		t.Fatalf("prefer-subagent manual render must add invocation hint for Claude:\n%s", text)
 	}
 	for _, want := range []string{

@@ -596,11 +596,9 @@ func TestWorkflowLangInjectionIntoUserPreferenceSection(t *testing.T) {
 }
 
 // TestShippedManualSessionSetupAndUserPreferenceSectionsAreNotThin verifies the
-// 260702 fix: the shipped Session setup section states the ferrule
-// redundant-mint consequence (a second call for the same root mints a new
-// session identity with empty state, stranding prior agenda/todo state), and
-// the User preferences section is never fully empty in the default render
-// (no override, no workflow.lang configured).
+// shipped Session setup states that ferrule creates a new empty session and
+// limits another call to an independent track, while User preferences remains
+// non-empty in the default render.
 func TestShippedManualSessionSetupAndUserPreferenceSectionsAreNotThin(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
@@ -613,11 +611,11 @@ func TestShippedManualSessionSetupAndUserPreferenceSectionsAreNotThin(t *testing
 	if !strings.Contains(body, "### Session setup") {
 		t.Fatalf("workflow manual must keep the Session setup heading:\n%s", body)
 	}
-	if !strings.Contains(body, "mints a brand-new session key with empty state") {
+	if !strings.Contains(body, "creates a new empty session") {
 		t.Errorf("Session setup must state the redundant-mint consequence:\n%s", body)
 	}
-	if !strings.Contains(body, "stranding any agenda, todo, or session-tree state") {
-		t.Errorf("Session setup must name the stranded state kinds:\n%s", body)
+	if !strings.Contains(body, "only to start an\nindependent track") {
+		t.Errorf("Session setup must limit redundant minting to an independent track:\n%s", body)
 	}
 
 	// Extract the User preferences section body (between its heading and the
@@ -643,7 +641,7 @@ func TestShippedManualSessionSetupAndUserPreferenceSectionsAreNotThin(t *testing
 // A mis-scoped marker that swallowed adjacent sections would fail here.
 func assertManualStructureIntact(t *testing.T, label, body string) {
 	t.Helper()
-	for _, want := range []string{"WS Workflow Primitives", "### User preferences", "Scoped Exploration"} {
+	for _, want := range []string{"Available workflow primitives", "### User preferences", "Scoped Exploration"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("%s: manual structure must remain intact, missing %q:\n%s", label, want, body)
 		}

@@ -134,7 +134,7 @@ class SkillDispatchContractsTest(unittest.TestCase):
     def test_workflow_manual_requires_english_agent_prompts(self):
         text = (RSRC_DIR / "lead-workflow-manual" / "lead-workflow-manual.md").read_text(encoding="utf-8")
 
-        self.assertIn("Write prompts sent to delegated subagents in English.", text)
+        self.assertIn("Give it an English\nprompt", text)
 
     def test_workers_report_and_lead_owns_impl_merge(self):
         for name in ("ticket-worker", "ticket-worker-elevated", "ticket-worker-escalated"):
@@ -150,7 +150,8 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn("`merge_confirm: skip` auto-calls", text)
         self.assertIn("`ask` (including absent)", text)
         self.assertIn("{{.McpNamespace}}/git.merge", text)
-        self.assertIn("goal-to-PARENT terminal uses raw Git", text)
+        self.assertIn("call `{{.McpNamespace}}/git.merge` with the goal branch", text)
+        self.assertNotIn("goal-to-PARENT terminal uses raw Git", text)
         self.assertIn("`completion: phase`, leave the ticket active", text)
         self.assertIn("With `completion: ticket`", text)
         self.assertIn("incompatible values are a protocol mismatch", text)

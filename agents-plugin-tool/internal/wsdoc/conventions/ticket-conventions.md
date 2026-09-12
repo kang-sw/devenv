@@ -1,9 +1,6 @@
 # Ticket Conventions
 
-Canonical reference for ticket structure, naming, and lifecycle. For the
-rationale and meaning behind these rules, see the workflow manual's
-**Ticket System Concepts** section; this document states the operational
-rules and hard invariants only.
+Canonical reference for ticket structure, meaning, naming, and lifecycle.
 
 ## Path & Naming
 
@@ -11,10 +8,22 @@ rules and hard invariants only.
 - Categories: `bug`, `feat`, `refactor`, `chore`, `research`, `epic`.
 - Reference tickets by **stem only** (e.g., `260115-feat-foo-bar`), never by full path.
 
+## Actionable Categories
+
+`feat`, `bug`, `refactor`, and `chore` share the same workflow requirements;
+the prefix categorizes the work for human and agent scanning. Choose by
+plain-language fit: `feat` introduces capability or behavior, `bug` corrects
+behavior that deviates from intent, `refactor` restructures internals without
+intended external behavior change, and `chore` covers maintenance, tooling, or
+housekeeping outside product behavior.
+
 ## Status Flow
 
 - Status is directory-based only: `idea/` → `todo/` → `ready/` → `.done/` (or `.dropped/`). Never duplicate status in frontmatter.
-- See the workflow manual's **Ticket System Concepts** section for what each status directory means.
+- `idea/` captures underspecified or exploratory work. `todo/` is accepted
+  backlog with recoverable intent. `ready/` contains actionable work whose
+  prerequisites are themselves ready or done. `.done/` and `.dropped/` contain
+  completed and abandoned work.
 - Active attention is discovered from the status directories via `tickets.query`/`project_tree`, not a cached index section; only `ready/` entries are direct implementation targets.
 - Move tickets with `tickets.close(stem, status)` (to done/dropped) or
   `tickets.move(stem, to)` (idea/todo/ready) MCP tools; use native `git mv`
@@ -24,10 +33,23 @@ rules and hard invariants only.
 - Epic design review is design-only (completeness never applies) and lead-judgment-invoked, not boundary-gated: run it when the epic's cross-child design has drifted materially, populating checkable facts first. Ordinary epic edits do not auto-review.
 - Add `completed:` date on move to `.done/`.
 
+## Sage Review
+
+Actionable tickets are drafted and revised in `todo/` without fact population
+or Sage review. Before moving one to `ready/`, populate checkable facts and
+complete its design and completeness reviews against that populated body.
+
+Review posture is stored per stage in frontmatter: `pending` uses the configured
+default, `skipped` omits the stage, `blocked` records unresolved findings,
+`recommended` asks before running, `required` runs, and `completed` records a
+passing review.
+
 ## Epic Tickets
 
 An epic decomposes one outcome into child tickets and owns their cross-child invariants.
 
+- Use `parent:` for the epic hierarchy and `related:` for non-hierarchical
+  relationships. A scoped `ready/` queue may mix parents.
 - Epic tickets do not use implementation phases; child tickets carry phases when needed.
 - A single child ticket may carry multiple phases when they form sequential complete implementation units.
 - Move implementation detail out of the epic body into an implementation child ticket; the epic body carries scope, cross-child invariants, and closure conditions only.
@@ -66,7 +88,12 @@ the Open Decision Queue.
 
 ## Phases
 
-See the workflow manual's **Ticket System Concepts** section for what a phase is and how to size one.
+A phase is a bounded, reviewable behavior slice with enough context for a fresh
+worker to implement and verify safely. Combine supporting work into the slice
+when practical; give it a separate phase when it is independently reviewable or
+reduces delivery risk. Before implementation, state the intended behavior,
+deferred scope, and verification boundary. After implementation, record the
+actual result under `### Result`.
 
 - Phase numbers are sequential and **stable** — mark dropped phases `[dropped]`, never renumber.
 - Structure as `### Phase N: <title>` sections. Note inter-phase dependencies explicitly.

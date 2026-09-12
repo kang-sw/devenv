@@ -3520,8 +3520,8 @@ func TestWorkflowManualFreshMode(t *testing.T) {
 	if !strings.Contains(resp, "mint your lead key") {
 		t.Errorf("fresh mode: self-bootstrap fragment absent from response:\n%s", resp)
 	}
-	// Per-root rule fragment must be present (always shown).
-	if !strings.Contains(resp, "once per working root") {
+	// Worktree-and-track scope fragment must be present (always shown).
+	if !strings.Contains(resp, "one Git worktree") || !strings.Contains(resp, "independently managed work stream") {
 		t.Errorf("fresh mode: per-root rule fragment absent from response:\n%s", resp)
 	}
 	// No "Session State" section in fresh mode.
@@ -3672,8 +3672,8 @@ func TestWorkflowManualContinueMode(t *testing.T) {
 	if strings.Contains(resp, "mint your lead key") {
 		t.Errorf("continue mode: self-bootstrap fragment should be absent:\n%s", resp)
 	}
-	// Per-root rule fragment must be present (always shown).
-	if !strings.Contains(resp, "once per working root") {
+	// Worktree-and-track scope fragment must be present (always shown).
+	if !strings.Contains(resp, "one Git worktree") || !strings.Contains(resp, "independently managed work stream") {
 		t.Errorf("continue mode: per-root rule fragment absent:\n%s", resp)
 	}
 	// Session State section must be present.
@@ -3750,7 +3750,7 @@ func TestWorkflowManualUnknownKey(t *testing.T) {
 	// Fail-loud renders NO manual body, so the always-shown per-root rule and the
 	// ws.ferrule mention it carries must be absent — a non-lead caller reaching
 	// fail-loud (any unregistered key) must not learn the lead self-bootstrap call.
-	if strings.Contains(resp, "once per working root") || strings.Contains(resp, "ferrule") {
+	if strings.Contains(resp, "one Git worktree") || strings.Contains(resp, "ferrule") {
 		t.Errorf("unknown key: manual body / ferrule mention must be absent in fail-loud:\n%s", resp)
 	}
 	// The recovery pointer names only the lead-revive skill (no ferrule/sentinel).
@@ -3927,7 +3927,7 @@ func TestWorkflowStateReturnsSessionStateOnly(t *testing.T) {
 	if len(stateResp) >= len(manualResp) {
 		t.Fatalf("workflow_state (%d bytes) not shorter than workflow_manual (%d bytes)", len(stateResp), len(manualResp))
 	}
-	if strings.Contains(stateResp, "once per working root") || strings.Contains(stateResp, "ferrule") {
+	if strings.Contains(stateResp, "one Git worktree") || strings.Contains(stateResp, "ferrule") {
 		t.Errorf("workflow_state leaked manual body content:\n%s", stateResp)
 	}
 
@@ -4082,7 +4082,7 @@ func TestWorkflowStateUnknownKeySameFailLoudAsWorkflowManual(t *testing.T) {
 	if !strings.Contains(stateResp, "lead-revive") {
 		t.Errorf("unknown key: workflow_state fail-loud notice should point to lead-revive recovery:\n%s", stateResp)
 	}
-	if strings.Contains(stateResp, "ferrule") || strings.Contains(stateResp, "once per working root") {
+	if strings.Contains(stateResp, "ferrule") || strings.Contains(stateResp, "one Git worktree") {
 		t.Errorf("unknown key: workflow_state must not leak manual body / ferrule mention:\n%s", stateResp)
 	}
 
