@@ -18,6 +18,7 @@ import {
 } from "../src/agent-footer.ts";
 import { evictForCapacity, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { truncateToWidth, visibleWidth } from "../src/pi-tui.ts";
+import { applySessionShutdownAgentFooter, applySessionStartAgentFooter } from "../src/index.ts";
 
 const roots = new Set<string>();
 afterEach(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); roots.clear(); });
@@ -71,17 +72,24 @@ describe("descendant cost aggregation", () => {
     assert.equal(formatCumulativeCost(cost), "~$0.75 + ?");
   });
 
-  test("a watcher armed before ws-agents exists observes the first descendant and later telemetry writes", async () => {
+  test("a watcher armed before ws-agents exists observes creation and a later telemetry write", async () => {
     const dir = root();
     const storage = createAgentStorageContext("lead-session", dir);
     const registry: RpcAgentRegistry = new Map();
-    const changed = new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("descendant watcher did not refresh")), 1_000);
-      const stop = watchDescendantCosts(storage, registry, () => { clearTimeout(timeout); stop(); resolve(); });
-      const child = record("first", allocateAgentHome(storage, "first", "worker"), .2);
-      persist(child);
-    });
-    await changed;
+    let count = 0, first!: () => void, second!: () => void;
+    const firstChange = new Promise<void>(resolve => { first = resolve; });
+    const secondChange = new Promise<void>(resolve => { second = resolve; });
+    const timeout = setTimeout(() => second(), 1_500);
+    const stop = watchDescendantCosts(storage, registry, () => { count += 1; if (count === 1) first(); if (count === 2) second(); });
+    const child = record("first", allocateAgentHome(storage, "first", "worker"), .2);
+    persist(child);
+    await firstChange;
+    child.telemetry = telemetry("first-session", child.sessionPath, .4);
+    updateOwnership(child.ownership!.home, { telemetry: child.telemetry });
+    await secondChange;
+    clearTimeout(timeout); stop();
+    assert.equal(count, 2, "the same real watcher repaints for later ownership telemetry, not only namespace creation");
+    assert.equal(aggregateDescendantCosts(storage, registry).knownUsd, .4);
   });
 
   test("a storage-bound registry can still evict a legacy unowned record into a fresh durable namespace", () => {
@@ -206,6 +214,31 @@ describe("custom footer controller", () => {
     assert.ok(component.render(80).some(line => line.includes("new:")), "rendering uses the host theme injected for the replacement");
     first.stop(); second.stop();
   });
+});
+
+test("index session seams mount the real footer beside an existing widget and restore it on reload/shutdown", async () => {
+  const storage = createAgentStorageContext("lead", root());
+  const registry: RpcAgentRegistry = new Map();
+  let factory: any, component: AgentFooterComponent | undefined, restores = 0;
+  const widgets = new Map<string, unknown>();
+  const ctx = {
+    mode: "tui", cwd: "/", sessionManager: { getEntries: () => [], getSessionName: () => undefined, getCwd: () => "/" }, getContextUsage: () => ({ percent: 0, contextWindow: 1000 }),
+    ui: {
+      setFooter(next: any) { component?.dispose?.(); component = undefined; factory = next; if (!next) restores++; },
+      setWidget(key: string, value: unknown) { widgets.set(key, value); },
+    },
+  };
+  ctx.ui.setWidget("ws-agents", ["agent card"]);
+  const lifecycle = createAgentFooterSessionLifecycle(async () => ({ truncateToWidth, visibleWidth }));
+  await applySessionStartAgentFooter(lifecycle, undefined, ctx, registry, storage);
+  component = factory({ requestRender() {} }, { fg: (_c: string, text: string) => text }, { getGitBranch: () => null, getExtensionStatuses: () => new Map(), onBranchChange: () => () => {} });
+  assert.ok(component.render(80)[1].includes("Lead ~$0.00 Subagents ~$0.00"));
+  assert.deepEqual(widgets.get("ws-agents"), ["agent card"], "footer mounting leaves the existing belowEditor widget intact");
+  await applySessionStartAgentFooter(lifecycle, undefined, ctx, registry, storage);
+  assert.equal(restores, 1, "reload restores the prior component before replacement");
+  applySessionShutdownAgentFooter(lifecycle);
+  assert.equal(restores, 2, "the production shutdown seam restores Pi's default footer");
+  assert.deepEqual(widgets.get("ws-agents"), ["agent card"]);
 });
 
 test("production session lifecycle replaces on reload, disarms on mode change, refreshes, and restores on shutdown", async () => {

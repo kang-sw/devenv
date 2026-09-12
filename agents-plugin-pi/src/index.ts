@@ -215,8 +215,8 @@ import {
 import { registerAuditCommands } from "./audit.ts";
 import { registerWsSkillTool } from "./lead-skills.ts";
 import { createToolPreviewTuiRef, loadToolResultTuiModules } from "./tool-result-render.ts";
-import { createAgentStorageContext, pruneStaleAgentHomes } from "./agent-storage.ts";
-import { createAgentFooterSessionLifecycle, persistOwnedTelemetryRollup } from "./agent-footer.ts";
+import { createAgentStorageContext, pruneStaleAgentHomes, type AgentStorageContext } from "./agent-storage.ts";
+import { createAgentFooterSessionLifecycle, persistOwnedTelemetryRollup, type AgentFooterContext, type AgentFooterSessionLifecycle } from "./agent-footer.ts";
 import { loadHostPiTui } from "./pi-tui.ts";
 import { addClaudeDelegateIfLead, registerClaudeDelegateSession } from "./claude-delegate.ts";
 import { assertPolicyTool, readDelegationPolicy } from "./delegation-policy.ts";
@@ -238,6 +238,20 @@ const executeWorkerGuidePath = join(pluginDir, "execute-worker-guide.md");
 const exploreGuidePath = join(pluginDir, "explore-guide.md");
 
 /** Controller-session retention seam: child workers never run global disk maintenance. */
+export async function applySessionStartAgentFooter(
+  lifecycle: AgentFooterSessionLifecycle,
+  role: SpawnRole | undefined,
+  ctx: AgentFooterContext & { mode?: string },
+  registry: RpcAgentRegistry,
+  storage: AgentStorageContext,
+): Promise<void> {
+  await lifecycle.start(role, ctx, registry, storage);
+}
+
+export function applySessionShutdownAgentFooter(lifecycle: AgentFooterSessionLifecycle): void {
+  lifecycle.stop();
+}
+
 export function applySessionStartAgentRetention(
   role: SpawnRole | undefined,
   root: string,
@@ -695,7 +709,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       // must not. A prior controller (a `/reload`) is stopped first so its
       // timer never outlives the registry/threads it closed over.
       const spawnRole = readSpawnRole(process.env);
-      await agentFooterLifecycle.start(spawnRole, ctx, agentTools.rpcRegistry, dispatchStorage);
+      await applySessionStartAgentFooter(agentFooterLifecycle, spawnRole, ctx, agentTools.rpcRegistry, dispatchStorage);
       if (shouldArmAgentWidget(spawnRole, ctx.mode)) {
         agentWidgetHandle?.stop();
         agentWidgetHandle = createAgentWidgetController(ctx, agentTools.rpcRegistry, threadHandle.threads, {
@@ -848,7 +862,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // — the registries the controller closed over are about to be discarded.
     agentWidgetHandle?.stop();
     agentWidgetHandle = undefined;
-    agentFooterLifecycle.stop();
+    applySessionShutdownAgentFooter(agentFooterLifecycle);
     agentWidgetRefreshRef.current = undefined;
     handle?.shutdown();
     handle = undefined;
