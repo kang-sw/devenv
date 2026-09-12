@@ -11,12 +11,11 @@
  *     (`/` -> `__`, `.` -> `_`, e.g. `ws__playbook_read`) — SKILL.md prose
  *     stays untouched as literal `ws/playbook.read(...)` calls; the model
  *     maps that prose to the sanitized registered name itself.
- *   - Exposes ws skills through resources_discover via a package-local-first
- *     resolver (src/skills-dir.ts): prefers a pack-time-copied
- *     `agents-plugin-pi/skills/` (baked into the published/installed tarball,
- *     gitignored, never committed — see scripts/copy-skills.mjs) and falls
- *     back to the monorepo canonical `agents-plugin/skills/` for dev `-e`
- *     runs from the source tree.
+ *   - Exposes ws skills through resources_discover via src/skills-dir.ts.
+ *     Every startup/reload from the monorepo cleanly regenerates the ignored
+ *     `agents-plugin-pi/skills/` tree from canonical `agents-plugin/skills/`;
+ *     installed tarballs validate their already-generated tree against the
+ *     current package-local rsrc manifest before Pi exposes it.
  *
  * Phase 2 adds the self-built delegation spawner (`ws-agent-spawn` /
  * `ws-agent-continue` / `explore`, see src/spawner.ts) on
@@ -168,9 +167,11 @@
  * "render playbook: rsrc manifest missing".
  *
  * `skills/` is a separate, fourth carried copy with a different sync model:
- * it is generated at pack time by scripts/copy-skills.mjs (prepack/prepare),
- * gitignored, and never hand-synced — see src/skills-dir.ts's
- * package-local-first resolver above.
+ * scripts/copy-skills.mjs generates it for prepack/prepare, and
+ * resources_discover regenerates it on local startup/reload when the canonical
+ * sibling tree exists. Both paths remove stale entries and validate shim
+ * playbook targets against the package-local rsrc manifest. The copy stays
+ * gitignored and is never hand-synced.
  */
 
 import { readFileSync } from "node:fs";
@@ -193,7 +194,7 @@ import { registerPushMessageRenderers } from "./push-render.ts";
 import { buildOrphanPush, captureOrphans, noSessionSidecarPath, readAndClearSidecarAt, reviveOrphans, sidecarPath, writeSidecarAt, type PersistedOrphan } from "./agent-sidecar.ts";
 import { buildDiscussKickoff } from "./discuss.ts";
 import { registerGoalLoop, readGoalLoopConfig, resolveAgentWaitAnimation, resolveChildRetentionTtlDays, resolveSettleDelayMs } from "./goal-loop.ts";
-import { resolveSkillsDir } from "./skills-dir.ts";
+import { prepareSkillsDir } from "./skills-dir.ts";
 import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
 import { applyForkAffinity, captureRegisteredTools, classifyForkRegistrations, compareForkRegistrations, effectiveForkDescriptor, formatForkRegistrationMismatch, frameForkInput, isCompletionCriticalForkTool, readForkLaunchContext, removeForkTransport, restoreForkContext, restoreForkKeys, writePrivateJson, type ForkContext } from "./fork-context.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, type SpawnRole } from "./process-role.ts";
@@ -227,7 +228,6 @@ const extensionEntryPath = fileURLToPath(import.meta.url);
 const srcDir = dirname(extensionEntryPath);
 const pluginDir = dirname(srcDir); // agents-plugin-pi/
 const repoRoot = dirname(pluginDir);
-const skillsDir = resolveSkillsDir(pluginDir, repoRoot);
 const launcherPath = join(pluginDir, "bin", "ws-mcp-launcher.py");
 const runtimeJsonPath = join(pluginDir, "runtime.json");
 const goalLoopConfigPath = join(pluginDir, "goal-loop-config.json");
@@ -420,7 +420,9 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   // which is also what keeps `agentWidgetRefreshRef.current` unset there.
   let agentWidgetHandle: AgentWidgetController | undefined;
   pi.on("resources_discover", () => ({
-    skillPaths: [skillsDir],
+    // This event fires for both startup and /reload, so local workflow syncs
+    // replace the ignored generated tree before Pi rebuilds its skill list.
+    skillPaths: [prepareSkillsDir(pluginDir, repoRoot)],
   }));
 
   // Read-only: lists Pi's currently scoped (or, if unscoped, all available)
