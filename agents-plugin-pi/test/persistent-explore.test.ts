@@ -248,7 +248,9 @@ describe("persistent Explore intent modes", () => {
         assert.equal(resumedPrompt.message, "after restart");
         assert.notEqual(resumedPrompt.client, firstClient, "restart allocates a fresh client over the saved session");
         const resumedArgs = (resumedPrompt.client as { options?: { args?: string[] } }).options?.args ?? [];
-        assert.equal(resumedArgs[resumedArgs.indexOf("--session") + 1], sessionPath);
+        const sessionIndex = resumedArgs.indexOf("--session");
+        assert.ok(sessionIndex >= 0, "the resumed client explicitly selects a persistent session");
+        assert.equal(resumedArgs[sessionIndex + 1], sessionPath);
         assert.equal(revived.sessionPath, sessionPath);
         assert.equal(revived.systemPromptPath, systemPromptPath);
         assert.equal(revived.exploreMode, "comparison");
@@ -288,7 +290,9 @@ describe("persistent Explore intent modes", () => {
         assert.equal(child.delegation?.depth, 2);
         for (const tool of CHILD_MANAGEMENT_TOOLS) assert.equal(child.delegation?.tools.includes(tool), false, `${tool} is stripped at terminal depth`);
         const args = (child.client as unknown as { options?: { args?: string[] } }).options?.args ?? [];
-        const activeTools = (args[args.indexOf("--tools") + 1] ?? "").split(",");
+        const toolsIndex = args.indexOf("--tools");
+        assert.ok(toolsIndex >= 0, "the terminal child receives an explicit --tools allowlist");
+        const activeTools = (args[toolsIndex + 1] ?? "").split(",");
         for (const tool of CHILD_MANAGEMENT_TOOLS) assert.equal(activeTools.includes(tool), false, `${tool} is absent from the actual terminal --tools allowlist`);
         assert.deepEqual(child.delegation?.network, { search: true, fetch: true });
         await h.handle.stopAll();
