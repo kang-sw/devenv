@@ -80,7 +80,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const TEST_EXTENSION_ENTRY = "/tmp/loaded ws adapter/index copy.ts";
 function registerExecuteGateway(pi: any, bridge: any, registry: any, sessionCtx: any, ...rest: any[]) {
-  return registerExecuteGatewayBase(pi, bridge, registry, { ...sessionCtx, extensionPath: sessionCtx.extensionPath ?? TEST_EXTENSION_ENTRY }, ...rest);
+  return registerExecuteGatewayBase(pi, bridge, registry, { ...sessionCtx, executeWorkerPromptPath: join(process.cwd(), "execute-worker-guide.md"), extensionPath: sessionCtx.extensionPath ?? TEST_EXTENSION_ENTRY }, ...rest);
 }
 
 describe("buildExecuteWorkerPrompt", () => {

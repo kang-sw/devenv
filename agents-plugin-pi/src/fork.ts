@@ -488,7 +488,7 @@ export function wireAntiBleedLoop(
     // thread's normal shape, so neither the nudge nor the fail-loud path
     // applies. Reset the counter so a later, unbound stall is still judged
     // from zero.
-    if (record.threadBound) {
+    if (record.threadBound || record.ownerHeld || record.waitingOnChildren) {
       nudgeCount = 0;
       return;
     }

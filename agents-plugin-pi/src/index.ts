@@ -216,6 +216,8 @@ import { registerWsSkillTool } from "./lead-skills.ts";
 import { createToolPreviewTuiRef, loadToolResultTuiModules } from "./tool-result-render.ts";
 import { createAgentStorageContext } from "./agent-storage.ts";
 import { addClaudeDelegateIfLead, registerClaudeDelegateSession } from "./claude-delegate.ts";
+import { assertPolicyTool, readDelegationPolicy } from "./delegation-policy.ts";
+import { publishSubtree } from "./subtree-lifecycle.ts";
 
 // This is the exact physical entry module Pi loaded (whether from `-e`, an
 // installed package, or a cache). Every RPC child receives this path verbatim
@@ -328,6 +330,16 @@ function installMissingTaskForkTools(
 }
 
 export default function wsPiBridgeExtension(pi: ExtensionAPI) {
+  const delegation = readDelegationPolicy();
+  // CLI visibility alone is not authority: deferred activation may expose a
+  // name later. Enforce the immutable ceiling at every actual tool call.
+  pi.on("tool_call", event => {
+    try { assertPolicyTool(delegation, event.toolName); }
+    catch (error) { return { block: true, reason: String(error) }; }
+  });
+  pi.on("before_agent_start", () => {
+    if (delegation && readSpawnRole(process.env) !== "fork") pi.setActiveTools(pi.getActiveTools().filter(name => delegation.tools.includes(name)));
+  });
   // Filled before the bridge starts so native tool renderers are available
   // independently of async MCP startup; absent helpers retain Pi fallback.
   const toolPreviewTuiRef = createToolPreviewTuiRef();
@@ -457,6 +469,9 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   // scope (like registerGoalLoop above, never inside session_start) so a
   // /reload cannot stack duplicate agent_settled handlers.
   registerPushFlush(pi, { delayMs: () => resolveSettleDelayMs(readGoalLoopConfig(goalLoopConfigPath)) });
+  for (const event of ["agent_start", "agent_settled", "tool_execution_end"] as const) {
+    pi.on(event, () => { publishSubtree(rpcRegistryRef.current); });
+  }
   // Whether the compact push renderers have been registered in THIS process.
   // Registration is per-process and idempotent (Pi keys renderers by
   // customType), but it costs a dynamic import, so a second session_start
@@ -527,6 +542,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
         ui: ctx.ui,
         forkContext: durableForkContextRef.current,
         previousOwnKeys,
+        sessionEntries: ctx.sessionManager.getEntries(),
       });
       const approval = createApprovalRelay(pi, { cwd: ctx.cwd }, rpcRegistryRef);
       const tools = registerAgentTools(pi, h, { cwd: ctx.cwd, storage: createAgentStorageContext(ctx.sessionManager.getSessionId()), extensionPath: extensionEntryPath }, approval, undefined, exploreGuidePath, toolPreviewTuiRef);
@@ -591,6 +607,11 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       fork: (record) => armForkRoleWiring(pi, agentTools!.rpcRegistry, record, onForkQuestion),
       executeWorker: (record) => { record.onApprovalPending = onApprovalPending; },
     });
+    publishSubtree(agentTools.rpcRegistry);
+    if (readSpawnRole(process.env) === "worker" || readSpawnRole(process.env) === "explore") {
+      const orphanPush = buildOrphanPush(recoveredRegistry);
+      if (orphanPush) pi.sendMessage({ customType: "ws-agent-orphaned", content: JSON.stringify(orphanPush), display: true, details: orphanPush }, { deliverAs: "nextTurn" });
+    }
     if (isLeadOrFork(readSpawnRole(process.env))) {
       const sessionFile = dispatchSessionFile;
       if (sessionFile) {
@@ -722,6 +743,8 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // path at all.
     if (isLeadOrFork(bootstrapRole)) {
       pi.setActiveTools(addClaudeDelegateIfLead(bootstrap.activeTools, bootstrapRole));
+    } else if (delegation) {
+      pi.setActiveTools(delegation.tools.filter(name => pi.getAllTools().some(tool => tool.name === name)));
     }
 
     if (bootstrapRole === "fork") {

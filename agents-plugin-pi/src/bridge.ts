@@ -40,8 +40,10 @@ import { registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts"
 import { dedupeRead, playbookReadKey } from "./playbook-read-dedupe.ts";
 
 import type { ForkContext } from "./fork-context.ts";
+import { RenderRegistry, assertPolicyTool, assertSessionAuthority, childPolicy, playbookProfile, readDelegationPolicy, readOnlyWsTools, READ_TOOLS, CHILD_MANAGEMENT_TOOLS, type PlaybookProfile } from "./delegation-policy.ts";
 
 export interface BridgeOptions {
+  sessionEntries?: readonly unknown[];
   forkContext?: ForkContext;
   previousOwnKeys?: readonly string[];
   launcherPath: string;
@@ -55,6 +57,7 @@ export interface BridgeOptions {
 }
 
 export interface BridgeHandle {
+  renderRegistry?: RenderRegistry;
   /** Idempotent — safe to call more than once (e.g. a duplicate session_shutdown). */
   shutdown(): void;
   /**
@@ -678,6 +681,13 @@ export function resolveSessionKey(
 
 export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promise<BridgeHandle> {
   const runtime = readRuntimeContract(opts.runtimeJsonPath);
+  const policy = readDelegationPolicy();
+  const knownKeys = new Set<string>();
+  const renderRegistry = new RenderRegistry();
+  renderRegistry.restore((opts.sessionEntries ?? []).flatMap(value => {
+    const entry = value as { type?: string; customType?: string; data?: unknown };
+    return entry.type === "custom" && entry.customType === "ws-pi-render-provenance" ? [entry.data] : [];
+  }));
 
   // Lead/fork-only: a worker/explore child never consults the local-devenv
   // marker or builds ws-mcp itself — it reuses whatever the launcher already
@@ -788,6 +798,28 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
             parentLeadKey: process.env[WS_PI_PARENT_SESSION_KEY_ENV],
           });
           const args = resolveSessionKey(normalized, defaultKeyRef);
+          assertPolicyTool(policy, registeredName);
+          assertSessionAuthority(policy, args, knownKeys);
+          if (policy && rawName === "ferrule") {
+            // Omitted capability defaults to lead in ws-mcp; never let that
+            // default become an escalation through a restricted bridge.
+            args.capability ??= policy.authority;
+            if (args.parent_session_key && args.parent_session_key !== defaultKeyRef.current) throw new Error("ws-pi-agent: foreign parent session key");
+            args.parent_session_key = defaultKeyRef.current;
+          }
+          let renderProfile: PlaybookProfile | undefined;
+          if (rawName === "playbook.render") {
+            // Root callers keep arbitrary render workflows. Below the root,
+            // reject admission before ws-mcp can mint a key or prompt file.
+            try { renderProfile = playbookProfile(opts.pluginDir, args.name); }
+            catch (error) { if (policy) throw error; }
+            if (policy && renderProfile) {
+              const requested = renderProfile.readOnly
+                ? [...READ_TOOLS, "ws-report-to-lead", ...CHILD_MANAGEMENT_TOOLS, ...readOnlyWsTools(tools.map(t => sanitizeToolName(t.name)))]
+                : ["read", "bash", "edit", "write", "grep", "find", "ls", "ws-report-to-lead", ...CHILD_MANAGEMENT_TOOLS, ...tools.map(t => sanitizeToolName(t.name))];
+              childPolicy(policy, requested, renderProfile.authority, renderProfile.requiresChildren);
+            }
+          }
           const catalog = rawName === "workflow_manual" ? modelCatalogFromToolCtx(toolCtx) : [];
           const inheritModel = inheritModelFromToolCtx(toolCtx);
 
@@ -831,6 +863,16 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
             // returning a value never sets it (docs/extensions.md#L1953-2011).
             throw new Error(firstText(result) ?? `${registeredName} failed with no error text`);
           }
+          if (rawName === "playbook.render" && renderProfile) {
+            const path = firstText(result)?.split("\n")[0]?.trim();
+            if (!path) throw new Error("ws-pi-agent: render returned no provenance path");
+            const entry = renderRegistry.record(path, renderProfile);
+            if (entry.sessionKey) knownKeys.add(entry.sessionKey);
+            pi.appendEntry("ws-pi-render-provenance", entry);
+          }
+          if (rawName === "ferrule") {
+            try { const key = JSON.parse(firstText(result) ?? "{}").session_key; if (typeof key === "string") knownKeys.add(key); } catch { /* text ferrule response is not authorized as a new key */ }
+          }
           // The extra config.resolve_agent round-trips this needs are gated
           // on rawName === "workflow_manual" first, so no other bridged tool
           // call pays for an unrelated MCP round-trip — see
@@ -856,7 +898,9 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     // Default-fill key bootstrap: mint a session_key via ferrule so that
     // omitted-session_key calls resolve instead of failing outright.
     try {
-      const ferruleResult = await client.callTool("ferrule", { root: opts.cwd, format: "json" });
+      const ferruleResult = policy?.sessionKey
+        ? { content: [{ type: "text", text: JSON.stringify({ session_key: policy.sessionKey }) }] }
+        : await client.callTool("ferrule", { root: opts.cwd, format: "json", ...(policy ? { capability: policy.authority, ...(policy.parentSessionKey ? { parent_session_key: policy.parentSessionKey } : {}) } : {}) });
       if (ferruleResult.isError) {
         notify(opts.ui, `ws-pi-bridge: ferrule bootstrap failed: ${firstText(ferruleResult)}`, "warning");
       } else {
@@ -865,6 +909,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
           const parsed = JSON.parse(text) as { session_key?: string };
           if (parsed.session_key) {
             defaultKeyRef.current = parsed.session_key;
+            knownKeys.add(parsed.session_key);
           } else {
             notify(opts.ui, "ws-pi-bridge: ferrule response carried no session_key", "warning");
           }
@@ -921,6 +966,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
   return {
     shutdown,
     client,
+    renderRegistry,
     defaultSessionKeyRef: defaultKeyRef,
     wsToolNames: tools.map((tool) => sanitizeToolName(tool.name)),
     manualSnapshotRef,

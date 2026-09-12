@@ -44,6 +44,8 @@ import { parseForkContext, type ForkContext } from "./fork-context.ts";
 import type { ExploreMode } from "./process-role.ts";
 import { readOwnership, updateOwnership, validDescriptor, type AgentOwnership } from "./agent-storage.ts";
 import { parseTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
+import { parseDelegationPolicy, type DelegationPolicy } from "./delegation-policy.ts";
+import type { SubtreeChannel } from "./subtree-lifecycle.ts";
 
 /** Sidecar file version. Bumped only on a breaking shape change; a mismatch is treated as "no sidecar". */
 export const SIDECAR_VERSION = 1;
@@ -73,6 +75,11 @@ export interface PersistedOrphan {
   wsToolNames: string[];
   toolGroup: ToolGroup;
   explicitTools?: string;
+  delegation?: DelegationPolicy;
+  subtreeChannel?: SubtreeChannel;
+  expectedReport?: boolean;
+  waitingOnChildren?: boolean;
+  requiresFreshFinal?: boolean;
   spawnRole?: SpawnAgentRole;
   /** Persistent explore identity; only valid with the coherent explore tuple. */
   exploreMode?: ExploreMode;
@@ -152,9 +159,14 @@ export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
       wsToolNames: [...record.wsToolNames],
       toolGroup: record.toolGroup,
       explicitTools: record.explicitTools,
+      ...(record.delegation ? { delegation: record.delegation } : {}),
+      ...(record.subtreeChannel ? { subtreeChannel: record.subtreeChannel } : {}),
+      ...(record.expectedReport !== undefined ? { expectedReport: record.expectedReport } : {}),
+      ...(record.waitingOnChildren !== undefined ? { waitingOnChildren: record.waitingOnChildren } : {}),
+      ...(record.requiresFreshFinal !== undefined ? { requiresFreshFinal: record.requiresFreshFinal } : {}),
       spawnRole: record.spawnRole,
       ...(record.exploreMode ? { exploreMode: record.exploreMode } : {}),
-      state: record.running ? "running" : "idle",
+      state: record.running || record.expectedReport || record.waitingOnChildren ? "running" : "idle",
       // `undefined` (never reported) rather than an omitted key, matching every
       // other optional field above — `JSON.stringify` drops it on the way out
       // and `parseOrphans` reads it back the same way.
@@ -210,6 +222,10 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
     if (typeof o.agentId !== "string" || !o.agentId) continue;
     if (typeof o.sessionPath !== "string" || !o.sessionPath) continue;
     if (o.systemPromptPath !== undefined && typeof o.systemPromptPath !== "string") continue;
+    let delegation: DelegationPolicy | undefined;
+    try { if (o.delegation !== undefined) delegation = parseDelegationPolicy(o.delegation); } catch { continue; }
+    if ([o.expectedReport, o.waitingOnChildren, o.requiresFreshFinal].some(v => v !== undefined && typeof v !== "boolean")) continue;
+    if (o.subtreeChannel !== undefined && (!o.subtreeChannel || typeof o.subtreeChannel.path !== "string" || typeof o.subtreeChannel.nonce !== "string")) continue;
     let forkContext: ForkContext | undefined;
     try { forkContext = parseForkContext(o.forkContext); } catch { continue; }
     if (!o.systemPromptPath && !forkContext) continue;
@@ -246,6 +262,11 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
       wsToolNames: Array.isArray(o.wsToolNames) ? o.wsToolNames.filter((n): n is string => typeof n === "string") : [],
       toolGroup: (o.toolGroup ?? "full-worker") as ToolGroup,
       explicitTools: typeof o.explicitTools === "string" ? o.explicitTools : undefined,
+      ...(delegation ? { delegation } : {}),
+      ...(o.subtreeChannel ? { subtreeChannel: o.subtreeChannel } : {}),
+      ...(o.expectedReport !== undefined ? { expectedReport: o.expectedReport } : {}),
+      ...(o.waitingOnChildren !== undefined ? { waitingOnChildren: o.waitingOnChildren } : {}),
+      ...(o.requiresFreshFinal !== undefined ? { requiresFreshFinal: o.requiresFreshFinal } : {}),
       spawnRole: o.spawnRole,
       ...(exploreMode ? { exploreMode } : {}),
       // An older sidecar (or a corrupt value) has no state to trust; "idle" is
@@ -300,6 +321,11 @@ export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
     wsToolNames: [...orphan.wsToolNames],
     toolGroup: orphan.toolGroup,
     explicitTools: orphan.explicitTools,
+    delegation: orphan.delegation,
+    subtreeChannel: orphan.subtreeChannel,
+    expectedReport: orphan.expectedReport,
+    waitingOnChildren: orphan.waitingOnChildren,
+    requiresFreshFinal: orphan.requiresFreshFinal,
     spawnRole: orphan.spawnRole,
     exploreMode: orphan.exploreMode,
     streaming: false,
@@ -348,7 +374,7 @@ export function reviveOrphans(registry: RpcAgentRegistry, orphans: PersistedOrph
     if (registry.has(orphan.agentId)) continue;
     const record = rehydrateOrphanRecord(orphan);
     startOwnedSessionObserver(record);
-    if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "unknown", running: false, observedAt: Date.now(), recovery: "sidecar", threadBound: record.threadBound, pendingApprovalCommandId: record.pendingApproval?.cmdId } });
+    if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "unknown", running: false, observedAt: Date.now(), recovery: "sidecar", threadBound: record.threadBound, waitingOnChildren: record.waitingOnChildren, expectedReport: record.expectedReport, pendingApprovalCommandId: record.pendingApproval?.cmdId } });
     registry.set(orphan.agentId, record);
     const arm = orphan.spawnRole === "fork" ? wiring.fork : orphan.spawnRole === "execute-worker" ? wiring.executeWorker : orphan.spawnRole === "explore" ? undefined : wiring.worker;
     try {

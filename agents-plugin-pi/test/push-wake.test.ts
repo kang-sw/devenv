@@ -189,9 +189,9 @@ for (const role of ['fork', 'worker', 'explore']) test(`${role} wake role contai
   process.env.WS_PI_SPAWN_ROLE = role;
   try {
     const h = harness(); h.push('followUp');
-    assert.equal(h.users.length, role === 'fork' ? 1 : 0);
-    assert.equal(h.timers.size, role === 'fork' ? 1 : 0);
-    if (role === 'fork') { h.tick(); assert.equal(h.users.length, 2); h.start(); }
+    assert.equal(h.users.length, role !== 'explore' ? 1 : 0);
+    assert.equal(h.timers.size, role !== 'explore' ? 1 : 0);
+    if (role !== 'explore') { h.tick(); assert.equal(h.users.length, 2); h.start(); }
     h.emit('session_shutdown');
   } finally { if (previous === undefined) delete process.env.WS_PI_SPAWN_ROLE; else process.env.WS_PI_SPAWN_ROLE = previous; }
 });

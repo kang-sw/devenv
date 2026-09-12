@@ -210,9 +210,11 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
       });
       const finalReport = "Outcome: degraded fork completed\nFiles changed: none\nVerification: lifecycle fixture\nBlockers: none\nCommit: none\nDecisions: report channel remained available";
       const reportTool = child.session.agent.state.tools.find((tool: any) => tool.name === "ws-report-to-lead");
-      assert.deepEqual(await withEnv(child.env, () => reportTool.execute("final", { kind: "final", message: finalReport })), { content: [{ type: "text", text: "reported" }] });
+      const reportResult = await withEnv(child.env, () => reportTool.execute("final", { kind: "final", message: finalReport }));
+      assert.deepEqual(reportResult, { content: [{ type: "text", text: "reported" }], details: { subtreeRevision: 0 } });
       assert.ok(child.parentClient.wsPiTestEventListeners.size > 0, "the parent client owns the fork report relay");
-      for (const listener of child.parentClient.wsPiTestEventListeners) listener({ type: "tool_execution_start", toolName: "ws-report-to-lead", args: { kind: "final", message: finalReport } });
+      for (const listener of child.parentClient.wsPiTestEventListeners) listener({ type: "tool_execution_start", toolName: "ws-report-to-lead", toolCallId: "final", args: { kind: "final", message: finalReport } });
+      for (const listener of child.parentClient.wsPiTestEventListeners) listener({ type: "tool_execution_end", toolName: "ws-report-to-lead", toolCallId: "final", isError: false, result: reportResult });
       for (const listener of child.parentClient.wsPiTestEventListeners) listener({ type: "agent_settled" });
       await new Promise((resolve) => setTimeout(resolve, 0));
       const leadListTool = lead.session.agent.state.tools.find((tool: any) => tool.name === "ws-agent-list");

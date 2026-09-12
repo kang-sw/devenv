@@ -133,13 +133,13 @@ describe("persistent explore registration, dispatch, and frozen selection", () =
     await withRole("worker", undefined, () => {
       const h = registerHarness();
       const tool = h.tools.get("explore")!;
-      assert.deepEqual(Object.keys(tool.parameters.properties ?? {}), ["query"]);
-      assert.deepEqual(activeDynamicTools(h.tools, resolveTools("full-worker")), ["ws-report-to-lead", "explore"], "the actual worker allowlist admits its registered leaf alongside its established report tool");
+      assert.deepEqual(Object.keys(tool.parameters.properties ?? {}), ["query", "deep_research"]);
+      assert.deepEqual(activeDynamicTools(h.tools, resolveTools("full-worker")), ["ws-agent-spawn", "ws-agent-send", "ws-agent-list", "ws-agent-stop", "ws-agent-transcript", "ws-report-to-lead", "explore"]);
       return h.handle.stopAll();
     });
     await withRole("explore", "deep", () => {
       const h = registerHarness();
-      assert.deepEqual(activeDynamicTools(h.tools, resolveTools("read-only-explore")), ["explore"]);
+      assert.deepEqual(activeDynamicTools(h.tools, resolveTools("read-only-explore")), ["ws-agent-spawn", "ws-agent-send", "ws-agent-list", "ws-agent-stop", "ws-agent-transcript", "ws-report-to-lead", "explore"]);
       return h.handle.stopAll();
     });
     for (const mode of ["simple", undefined, "bad"]) {
@@ -271,19 +271,21 @@ describe("persistent explore registration, dispatch, and frozen selection", () =
     }
   });
 
-  test("worker keeps recon while a deep researcher collection is read-only and receives resolved effort", async () => {
-    const context = { model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "pi", id: "small" }], hasConfiguredAuth: () => true } };
-    await withRole("worker", undefined, async () => {
-      const h = registerHarness({ result: modelResult("pi/small", "low") });
-      await h.tools.get("explore")!.execute("call", { query: "worker evidence" }, undefined, undefined, context);
-      assert.deepEqual(h.leafCalls[0]?.opts, { profile: "recon", effort: "low" });
-      await h.handle.stopAll();
-    });
-    await withRole("explore", "deep", async () => {
-      const h = registerHarness({ result: modelResult("pi/small", "low") });
-      await h.tools.get("explore")!.execute("call", { query: "deep evidence" }, undefined, undefined, context);
-      assert.deepEqual(h.leafCalls[0]?.opts, { profile: "read-only", effort: "low" });
-      await h.handle.stopAll();
-    });
+  test("worker and deep researcher use persistent read-only children with frozen effort", async () => {
+    const rpc = installRpcHarness({ model: "pi/small", thinking: "low" });
+    try {
+      const context = { model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "pi", id: "small" }], hasConfiguredAuth: () => true } };
+      for (const [role, mode] of [["worker", undefined], ["explore", "deep"]] as const) await withRole(role, mode, async () => {
+        const h = registerHarness({ result: modelResult("pi/small", "low") });
+        const result = JSON.parse((await h.tools.get("explore")!.execute("call", { query: "evidence" }, undefined, undefined, context)).content[0]!.text);
+        const child = h.handle.rpcRegistry.get(result.agent_id)!;
+        assert.equal(h.leafCalls.length, 0);
+        assert.equal(child.delegation?.depth, 2);
+        assert.equal(child.delegation?.tools.includes("bash"), false);
+        assert.equal(child.delegation?.tools.includes("explore"), false);
+        assert.equal(child.modelEffort, "low");
+        await h.handle.stopAll();
+      });
+    } finally { rpc.restore(); }
   });
 });

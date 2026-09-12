@@ -12,6 +12,7 @@ import { captureOrphans, parseOrphans, rehydrateOrphanRecord, serializeOrphans }
 
 const TEST_EXTENSION_ENTRY = "/tmp/loaded ws adapter/index copy.ts";
 function registerAgentTools(pi: any, bridge: any, sessionCtx: any, ...rest: any[]) {
+  writeFileSync(join(sessionCtx.cwd, "p.md"), "Offline worker prompt");
   return registerAgentToolsBase(pi, bridge, { ...sessionCtx, extensionPath: sessionCtx.extensionPath ?? TEST_EXTENSION_ENTRY }, ...rest);
 }
 import { captureForkResume, createThreadRegistryHandle, hydrateThreadRegistry, rehydrateForkRecord, saveThreadRegistryFile } from "../src/ask.ts";

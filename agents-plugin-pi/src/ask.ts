@@ -132,6 +132,7 @@ import { captureForkContext, captureRegisteredTools, captureUnflushedForkSource,
 import type { LeadPromptRef } from "./lead-bootstrap.ts";
 import { readOwnership, validDescriptor } from "./agent-storage.ts";
 import { parseTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
+import { parseDelegationPolicy } from "./delegation-policy.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers. Unit-tested directly (test/ask.test.ts) with no
@@ -482,7 +483,7 @@ export function buildThreadHeaderHint(thread: Pick<ThreadRecord, "threadId" | "c
  * field (see the plan's `spawner.ts#L647-706` finding) — this is a copy, not
  * a new contract.
  */
-export interface PersistedForkResume {
+export interface PersistedForkResume extends Pick<RpcAgentRecord, "delegation" | "subtreeChannel" | "expectedReport" | "waitingOnChildren" | "requiresFreshFinal"> {
   sessionPath: string;
   systemPromptPath?: string;
   forkContext?: ForkContext;
@@ -827,6 +828,7 @@ export function captureForkResume(record: RpcAgentRecord): PersistedForkResume {
     systemPromptPath: record.systemPromptPath,
     ...(record.forkContext ? { forkContext: record.forkContext } : {}),
     explicitTools: record.explicitTools,
+    ...(record.delegation ? { delegation: record.delegation, subtreeChannel: record.subtreeChannel, expectedReport: record.expectedReport, waitingOnChildren: record.waitingOnChildren, requiresFreshFinal: record.requiresFreshFinal } : {}),
     wsToolNames: [...record.wsToolNames],
     toolGroup: record.toolGroup,
     modelBase: record.modelBase,
@@ -867,6 +869,7 @@ export function rehydrateForkRecord(agentId: string, resume: PersistedForkResume
     wsToolNames: [...resume.wsToolNames],
     toolGroup: resume.toolGroup,
     explicitTools: resume.explicitTools,
+    ...(resume.delegation ? { delegation: parseDelegationPolicy(resume.delegation), subtreeChannel: resume.subtreeChannel, expectedReport: resume.expectedReport, waitingOnChildren: resume.waitingOnChildren, requiresFreshFinal: resume.requiresFreshFinal } : {}),
     spawnRole: "fork",
     streaming: false,
     running: false,

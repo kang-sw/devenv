@@ -157,6 +157,15 @@ function buildRpcClientOptions(...args: any[]) {
   );
 }
 function registerAgentTools(pi: any, bridge: any, sessionCtx: any, ...rest: any[]) {
+  const register = pi.registerTool.bind(pi);
+  pi.registerTool = (tool: any) => register({ ...tool, execute: (...args: any[]) => {
+    if (args[1]?.system_prompt_path) {
+      const path = join(storageRoot(), "prompt.md");
+      writeFileSync(path, "Offline worker prompt");
+      args[1] = { ...args[1], system_prompt_path: path };
+    }
+    return tool.execute(...args);
+  } });
   return registerAgentToolsBase(pi, bridge, { ...sessionCtx, extensionPath: sessionCtx.extensionPath ?? TEST_EXTENSION_ENTRY }, ...rest);
 }
 
@@ -187,8 +196,8 @@ function freshRunningRecord(): AgentRecord {
 
 describe("TOOL_GROUPS / resolveTools", () => {
   test("read-only carries no bash and no ws__* tools", () => {
-    assert.deepEqual([...TOOL_GROUPS["read-only"]], ["read", "grep", "find", "ls"]);
-    assert.equal(resolveTools("read-only", ["ws__playbook_render"]), "read,grep,find,ls");
+    assert.deepEqual([...TOOL_GROUPS["read-only"]], ["read", "grep", "find", "ls", REPORT_TO_LEAD_TOOL_NAME]);
+    assert.equal(resolveTools("read-only", ["ws__playbook_render"]), `read,grep,find,ls,${REPORT_TO_LEAD_TOOL_NAME}`);
   });
 
   test("recon adds bash but still never appends ws__* tools", () => {
@@ -203,17 +212,17 @@ describe("TOOL_GROUPS / resolveTools", () => {
   test("full-worker includes built-ins plus the literal explore and ws-report-to-lead tools plus every passed ws__* name, in order", () => {
     assert.equal(
       resolveTools("full-worker", ["ws__playbook_render", "ws__ferrule"]),
-      "read,bash,edit,write,grep,find,ls,explore,ws-report-to-lead,ws__playbook_render,ws__ferrule",
+      "read,bash,edit,write,grep,find,ls,ws-report-to-lead,ws-agent-spawn,ws-agent-send,ws-agent-list,ws-agent-stop,ws-agent-transcript,explore,ws__playbook_render,ws__ferrule",
     );
   });
 
   test("full-worker with an empty ws tool list still includes explore and ws-report-to-lead (D-B: a worker can spawn explore and report)", () => {
-    assert.equal(resolveTools("full-worker", []), "read,bash,edit,write,grep,find,ls,explore,ws-report-to-lead");
+    assert.equal(resolveTools("full-worker", []), "read,bash,edit,write,grep,find,ls,ws-report-to-lead,ws-agent-spawn,ws-agent-send,ws-agent-list,ws-agent-stop,ws-agent-transcript,explore");
   });
 
-  test("full-worker never includes any ws-agent-* driving/spawn tool name (D-B: depth stays lead -> worker -> explore-leaf)", () => {
-    const resolved = resolveTools("full-worker", ["ws__playbook_render"]);
-    assert.ok(!resolved.includes("ws-agent-"), `full-worker tools must never include a ws-agent-* name: ${resolved}`);
+  test("full-worker offers persistent direct-child management; depth admission derives the terminal profile", () => {
+    const resolved = resolveTools("full-worker", ["ws__playbook_render"]).split(",");
+    for (const name of ["ws-agent-spawn", "ws-agent-send", "ws-agent-list", "ws-agent-stop", "ws-agent-transcript"]) assert.ok(resolved.includes(name));
   });
 
   test("execute-worker equals read-only plus the gated-exec, report, and explore tools, in order (260904 Phase 1)", () => {
@@ -882,7 +891,7 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
  * function, so `spawnPiProcess` is never reached at all. This describe block
  * exercises exactly that seam.
  */
-describe("registerAgentTools 'explore' tool (worker role): effort forwarding into runExploreLeaf", () => {
+describe("registerAgentTools worker exploration retains a persistent researcher and effective effort", () => {
   interface CapturedTool {
     name: string;
     execute: (id: string, params: unknown, signal?: AbortSignal, update?: unknown, ctx?: unknown) => Promise<{ content: Array<{ text: string }> }>;
@@ -913,13 +922,18 @@ describe("registerAgentTools 'explore' tool (worker role): effort forwarding int
       wsToolNames: [],
       defaultSessionKeyRef: { current: "lead-key" },
     } as never;
+    const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
+    const effort = (payload as { effort?: string }).effort || "medium";
+    Object.assign(RpcClient.prototype, { start: async () => {}, stop: async () => {}, abort: async () => {}, onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {}, getState: async () => ({ model: { provider: "provider", id: "id" }, thinkingLevel: effort }) });
     const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" }, undefined, fakeRunExploreLeaf);
+    const stop = handle.stopAll.bind(handle);
+    handle.stopAll = async () => { await stop(); Object.assign(RpcClient.prototype, original); };
     return { tool: tools.get("explore")!, handle };
   }
 
-  const modelCtx = { modelRegistry: { getAll: () => [{ provider: "provider", id: "id" }], hasConfiguredAuth: () => true } };
+  const modelCtx = () => ({ sessionManager: { getSessionId: () => "worker" }, agentStorageRoot: storageRoot(), modelRegistry: { getAll: () => [{ provider: "provider", id: "id" }], hasConfiguredAuth: () => true } });
 
-  test("a tier resolution carrying an effort forwards it as ExploreLeafOptions.effort", async () => {
+  test("a worker tier resolution persists the effective researcher effort", async () => {
     let captured: { profile?: string; effort?: string } | undefined;
     const fakeRunExploreLeaf = (async (_client, _registry, _ctx, _params, options) => {
       captured = options;
@@ -927,15 +941,16 @@ describe("registerAgentTools 'explore' tool (worker role): effort forwarding int
     }) as unknown as typeof exploreLeaf;
     const { tool, handle } = withWorkerRole(() => harness(resolvePayload("high"), fakeRunExploreLeaf));
     try {
-      const result = await tool.execute("call", { query: "why does this fail" }, undefined, undefined, modelCtx);
-      assert.deepEqual(JSON.parse(result.content[0]!.text), { agentId: "x", state: "done", output: "ok" });
-      assert.equal(captured?.effort, "high");
+      const result = await tool.execute("call", { query: "why does this fail" }, undefined, undefined, modelCtx());
+      const id = JSON.parse(result.content[0]!.text).agent_id;
+      assert.equal(handle.rpcRegistry.get(id)?.modelEffort, "high");
+      assert.equal(captured, undefined);
     } finally {
       await handle.stopAll();
     }
   });
 
-  test("a tier resolution with no effort (empty resolved effort) forwards nothing — matches an inherit's no-level behavior", async () => {
+  test("an empty tier effort adopts the researcher's observed default", async () => {
     let captured: { profile?: string; effort?: string } | undefined;
     const fakeRunExploreLeaf = (async (_client, _registry, _ctx, _params, options) => {
       captured = options;
@@ -943,8 +958,9 @@ describe("registerAgentTools 'explore' tool (worker role): effort forwarding int
     }) as unknown as typeof exploreLeaf;
     const { tool, handle } = withWorkerRole(() => harness(resolvePayload(""), fakeRunExploreLeaf));
     try {
-      await tool.execute("call", { query: "why does this fail" }, undefined, undefined, modelCtx);
-      assert.equal(captured?.effort, undefined);
+      const result = await tool.execute("call", { query: "why does this fail" }, undefined, undefined, modelCtx());
+      assert.equal(handle.rpcRegistry.get(JSON.parse(result.content[0]!.text).agent_id)?.modelEffort, "medium");
+      assert.equal(captured, undefined);
     } finally {
       await handle.stopAll();
     }
@@ -1140,7 +1156,8 @@ describe("explore tool: onModelResolved / resolved-line publishing (260906 Phase
     } finally { rpc.restore(); }
   });
 
-  test("worker-leaf explore publishes its own always-non-inherited \"small\" line, independent of the spawnAgent-based plumbing", async () => {
+  test("worker persistent explore publishes the same resolved line as lead exploration", async () => {
+    const rpc = installRpcHarness();
     const previousRole = process.env[WS_PI_SPAWN_ROLE_ENV];
     process.env[WS_PI_SPAWN_ROLE_ENV] = "worker";
     try {
@@ -1150,9 +1167,10 @@ describe("explore tool: onModelResolved / resolved-line publishing (260906 Phase
         client: { callTool: async () => ({ content: [{ type: "text", text: JSON.stringify({ resolved_from: "pi", model: "provider/id", effort: "high" }) }] }) },
         wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" },
       } as never;
-      const fakeRunExploreLeaf = (async () => ({ agentId: "x", state: "done" as const, output: "ok" })) as unknown as typeof exploreLeaf;
+      const fakeRunExploreLeaf = (async () => { throw new Error("one-shot leaf must not run"); }) as unknown as typeof exploreLeaf;
       const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" }, undefined, fakeRunExploreLeaf);
-      const ctx = { modelRegistry: { getAll: () => [{ provider: "provider", id: "id" }], hasConfiguredAuth: () => true } };
+      const ctx = { sessionManager: { getSessionId: () => "test-worker" }, agentStorageRoot: storageRoot(), modelRegistry: { getAll: () => [{ provider: "provider", id: "id" }], hasConfiguredAuth: () => true } };
+      RpcClient.prototype.getState = async () => ({ model: { provider: "provider", id: "id" }, thinkingLevel: "high" }) as any;
       const tool = tools.get("explore")!;
       const updates: Array<{ content: unknown[]; details?: unknown }> = [];
       const raw = await tool.execute("call", { query: "why does this fail" }, undefined, (partial) => updates.push(partial), ctx);
@@ -1160,8 +1178,10 @@ describe("explore tool: onModelResolved / resolved-line publishing (260906 Phase
       assert.equal(updates.length, 1);
       assert.deepEqual((updates[0]!.details as { resolved: unknown }).resolved, expected);
       assert.deepEqual((raw.details as { resolved?: unknown } | undefined)?.resolved, expected);
+      assert.equal(handle.rpcRegistry.size, 1);
       await handle.stopAll();
     } finally {
+      rpc.restore();
       if (previousRole === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV]; else process.env[WS_PI_SPAWN_ROLE_ENV] = previousRole;
     }
   });
@@ -1555,10 +1575,10 @@ function fakeRpcClient(overrides: {
 }
 
 describe("shouldPushToLead (the push gate)", () => {
-  test("the host lead (no role marker) and a fork push; a worker and an explore leaf do not", () => {
+  test("lead, fork and worker owners push; a terminal explore leaf does not", () => {
     assert.equal(shouldPushToLead({}), true, "no marker = host lead");
     assert.equal(shouldPushToLead({ [WS_PI_SPAWN_ROLE_ENV]: "fork" }), true);
-    assert.equal(shouldPushToLead({ [WS_PI_SPAWN_ROLE_ENV]: "worker" }), false, "a worker's reports travel to ITS parent over RPC, not into its own transcript");
+    assert.equal(shouldPushToLead({ [WS_PI_SPAWN_ROLE_ENV]: "worker" }), true, "child reports wake their immediate worker parent");
     assert.equal(shouldPushToLead({ [WS_PI_SPAWN_ROLE_ENV]: "explore" }), false);
   });
 
@@ -1838,7 +1858,7 @@ describe("pushToLead", () => {
     assert.doesNotThrow(() => pushToLead(pi.api, new Map(), undefined, "ws-agent-report", { report: "x" }, "followUp"));
   });
 
-  test("review relay #1 (I7): a worker-role process pushes NOTHING through the real call path, not just through the predicate", () => {
+  test("a worker process receives child reports through the real push path", () => {
     const pi = fakePi();
     const record = liveRpcRecord({ agentId: "a", running: true });
     const previous = process.env[WS_PI_SPAWN_ROLE_ENV];
@@ -1849,7 +1869,8 @@ describe("pushToLead", () => {
       if (previous === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV];
       else process.env[WS_PI_SPAWN_ROLE_ENV] = previous;
     }
-    assert.deepEqual(pi.sent, [], "a worker's reports travel to ITS parent over RPC, never into its own transcript");
+    assert.equal(pi.sent.length, 1);
+    assert.equal(pi.sent[0].message.details?.report, "halfway");
   });
 
   test("the same call from the host lead (no role marker) does push — the gate is the role, not the arguments", () => {
@@ -2152,11 +2173,11 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     assert.equal(heldPushQueue.length, 1, "the re-entrant push waits for the next settle rather than joining this drain");
   });
 
-  test("a worker-role process neither holds nor sends — it has no lead session of its own", () => {
+  test("a terminal explore process neither holds nor sends", () => {
     idle = false;
     const pi = fakePi();
     const previous = process.env[WS_PI_SPAWN_ROLE_ENV];
-    process.env[WS_PI_SPAWN_ROLE_ENV] = "worker";
+    process.env[WS_PI_SPAWN_ROLE_ENV] = "explore";
     try {
       pushToLead(pi.api, new Map(), undefined, "ws-agent-report", { report: "x" }, "followUp");
       assert.deepEqual(heldPushQueue, [], "holding a push a worker will never flush would leak it");
@@ -3755,6 +3776,8 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
       WS_PI_FORK_READY_NONCE: "",
       WS_PI_FORK_AFFINITY: "",
       [WS_PI_PARENT_SESSION_KEY_ENV]: "",
+      WS_PI_DELEGATION_POLICY: "",
+      WS_PI_SUBTREE_CHANNEL: "",
       WS_MCP_BOOTSTRAP_BINARY: "",
       WS_MCP_BOOTSTRAP_URL: "",
     });
@@ -3762,7 +3785,7 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
 
   test("env overrides an inherited exploration mode while preserving role and approvals markers", () => {
     const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-y/session.jsonl", "/tmp/system.md", "read");
-    assert.deepEqual(new Set(Object.keys(options.env ?? {})), new Set([WS_PI_SPAWN_ROLE_ENV, WS_PI_APPROVAL_DIR_ENV, "WS_PI_EXPLORE_MODE", "WS_PI_FORK_CONTEXT", "WS_PI_FORK_READY_PATH", "WS_PI_FORK_READY_NONCE", "WS_PI_FORK_AFFINITY", WS_PI_PARENT_SESSION_KEY_ENV, "WS_MCP_BOOTSTRAP_BINARY", "WS_MCP_BOOTSTRAP_URL"]));
+    assert.deepEqual(new Set(Object.keys(options.env ?? {})), new Set([WS_PI_SPAWN_ROLE_ENV, WS_PI_APPROVAL_DIR_ENV, "WS_PI_EXPLORE_MODE", "WS_PI_FORK_CONTEXT", "WS_PI_FORK_READY_PATH", "WS_PI_FORK_READY_NONCE", "WS_PI_FORK_AFFINITY", WS_PI_PARENT_SESSION_KEY_ENV, "WS_PI_DELEGATION_POLICY", "WS_PI_SUBTREE_CHANNEL", "WS_MCP_BOOTSTRAP_BINARY", "WS_MCP_BOOTSTRAP_URL"]));
     assert.equal(options.env?.WS_PI_EXPLORE_MODE, "");
   });
 
