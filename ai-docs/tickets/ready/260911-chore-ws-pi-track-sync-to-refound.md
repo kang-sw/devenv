@@ -8,8 +8,8 @@ spec:
   - 260907-pi-local-devenv-build-bootstrap
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: 7bcf986f8285d001
-sage-review-completeness-reviewed: 7bcf986f8285d001
+sage-review-design-reviewed: 78bb983420219983
+sage-review-completeness-reviewed: 78bb983420219983
 ---
 
 # Re-sync the Pi track's ws-mcp binding, tool contract, and rsrc onto settled epic/refound
@@ -61,8 +61,9 @@ retired.
   `agents-plugin-pi/rsrc` mirror) and absorbs develop content; it authors no
   shared ws-mcp source.
 - **Ready gate satisfied:** `epic/refound` merged to `develop` as `77409c56`
-  (epic Cross-Child Decision 1); `/Users/kang-sw/devenv` currently resolves to
-  `develop` at `90a9ef2e`.
+  (epic Cross-Child Decision 1). At execution time, verify
+  `/Users/kang-sw/devenv` still resolves to `develop`; do not record or pin its
+  moving HEAD in the marker or implementation contract.
 - Runtime-contract references in Pi-authored surfaces (adapter guides, bridge
   tests) not fixed by the rsrc absorb must be reconciled by hand. References to
   the seven removed tools are deleted or adopt refound's replacement pattern
