@@ -142,6 +142,54 @@ design becomes actionable, empirically re-verify on the current CLIs:
 4. That a harness background task's completion re-invokes the agent (Claude
    `run_in_background` → task notification confirmed; Codex TBD).
 
+## Probe results (2026-09-13, Codex 0.154.0 + Claude docs)
+
+Ran the probe plan in an isolated `codex exec`
+(`--ignore-user-config --ephemeral`, inline `-c` hooks, no ws plugin; the
+running executor untouched) and confirmed the Claude payload from docs.
+
+- **(1) Codex hooks fire + `Stop` `decision:block` keep-alive — confirmed.**
+  Both `Stop` and `PostToolUse` fire on 0.154.0. A `Stop` hook returning
+  `{"decision":"block","reason":"<instruction>"}` re-invokes the model with the
+  reason as an instruction (verified: the model ran the injected command), then
+  concludes; the re-entry `Stop` carries `stop_hook_active: true` as a loop
+  guard. This is the turn-boundary wake mechanism (Decision 6).
+- **(1b) `PostToolUse` model steering — does NOT work on 0.154.0.** The hook
+  fires, but neither `exit 2` + stderr NOR JSON `decision:block` +
+  `additionalContext` made the model act on injected content; it continued its
+  planned tool sequence. Mid-turn (between-tools) injection that *steers the
+  model* is unsupported on current Codex — only the `Stop` boundary steers.
+  (This reverses the codex-integration manual's dated 2026-05-04 `exit 2` claim,
+  now corrected there.) Mid-turn *delivery/detection* still works — the hook
+  process runs and can check mail / write markers — it just cannot make the
+  model act until the turn ends.
+- **(2) Codex main-vs-subagent classifier — no payload signal.** The `Stop`
+  payload has no `agent_id`/`agent_type`/agent-name field, so a Codex hook
+  cannot structurally distinguish a main turn from a subagent turn from the
+  payload (contrast Claude). Subagent spawn in `--ephemeral` `codex exec` fails
+  (needs the shared app-server daemon), so whether Codex subagent turns fire
+  hooks at all is still open (needs a daemon-backed probe). Mitigation stands:
+  the server-layer `caller == owner` gate (Decision 3) is the real misfire
+  guard; the Codex hook-layer guard (Decision 9) is best-effort and must bake
+  owner identity into the hook command args.
+- **(3) Claude `Stop` vs `SubagentStop` — confirmed structurally separable.**
+  Docs (code.claude.com/docs/en/hooks.md): `Stop` carries
+  `agent_id`/`agent_type` only in a subagent context, `SubagentStop` always; so
+  a single Claude `Stop` hook can gate on `hook_event_name == "Stop"` &&
+  `agent_id` absent → root lead turn. Decision 9's mechanism holds on Claude.
+- **(4) Background-task wake:** Claude `run_in_background` → task-notification
+  re-invoke confirmed (observed live this session). Codex `exec` is one-shot
+  headless with no equivalent re-invoke; its wake equivalent is the `Stop`
+  `decision:block` drain-loop from (1), so this collapses into (1) for Codex.
+- **New: Codex 0.154.0 gates hooks behind persisted trust**
+  (`--dangerously-bypass-hook-trust` bypasses for automation). A real adapter
+  must persist hook trust; a deployment step the design must account for.
+
+Net: the turn-boundary wake path (Decision 6) is empirically solid on both
+harnesses; mid-turn preemption of a busy Codex executor is not achievable via
+hooks on 0.154.0 and is out of scope (the primary "idle executor waits for
+'run ticket X'" scenario only needs turn-boundary wake).
+
 ## Outcome Ledger
 
 ### Verified Findings
@@ -218,11 +266,19 @@ design becomes actionable, empirically re-verify on the current CLIs:
 
 ### Open Questions
 
-- All four probe-plan items above (Codex hook re-verification; Codex
-  subagent-stop firing and classifier; Claude hook payload / `Stop` vs
-  `SubagentStop`; background-task-completion wake on Codex).
-- How a hook process learns enough to gate on owner context on harnesses that
-  do not natively separate main from subagent hook events.
+- **Resolved by the 2026-09-13 probe:** Codex hook re-verification (item 1),
+  Claude `Stop` vs `SubagentStop` payload (item 3), and background-task wake
+  (item 4) — see `## Probe results`. Item 1 also produced a new finding:
+  `PostToolUse` no longer steers the model on 0.154.0, so wake is turn-boundary
+  (`Stop`) only and mid-turn preemption of a busy Codex executor is dropped.
+- **Still open:** whether Codex subagent turns fire hooks at all, and under what
+  event name — the isolated `exec` probe could not spawn a subagent (needs the
+  shared app-server daemon). Resolve with a daemon-backed probe before relying
+  on any Codex hook-layer subagent guard.
+- Codex has no main-vs-subagent signal in the hook payload, so owner-context
+  gating on Codex must bake identity into the hook command args (the server-layer
+  `caller == owner` gate remains the real guard). Direction confirmed; adapter
+  wiring unspecified.
 
 ### Rejected Alternatives
 

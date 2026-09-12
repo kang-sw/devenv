@@ -213,6 +213,8 @@ Update from 2026-05-04 on Codex CLI 0.128.0 / WSL2 Linux: the inline
 host difference from the Claude prior art is semantic rather than configurational:
 `PostToolUse` `exit 2` injects hook feedback into the next model step instead
 of stopping the Codex subprocess and returning control to the wrapper.
+**Superseded on Codex 0.154.0 — see the 2026-09-13 re-probe below; on 0.154.0
+`PostToolUse` no longer steers the model at all.**
 
 ### Injecting Hooks via `-c`
 
@@ -255,6 +257,47 @@ path unless a structured hook result is needed.
 Codex hook commands receive hook metadata as JSON on stdin. The ws Codex
 adapter passes the repository root and agent name in the configured hook command
 instead of relying on a Claude-style `WS_AGENT_OUTBOX` environment variable.
+
+### Re-probe 2026-09-13 (Codex CLI 0.154.0, macOS)
+
+Re-verified the hook path on a current CLI in an isolated `codex exec`
+(`--ignore-user-config --ephemeral --skip-git-repo-check`, inline `-c` hooks,
+no plugin). Findings that supersede the 0.128.0 notes above:
+
+- **Hook trust is now gated.** 0.154.0 requires *persisted hook trust*; enabled
+  hooks do not run non-interactively without it. Ad-hoc/inline hooks need
+  `--dangerously-bypass-hook-trust` for automation, or the hook source must be
+  persisted as trusted. A real adapter deployment persists trust rather than
+  passing the dangerous flag.
+- **`Stop` + `decision: block` steers the model — confirmed.** A `Stop` hook
+  returning `{"decision":"block","reason":"<instruction>"}` re-invokes the model
+  with `reason` as an instruction (the model ran the injected command), then
+  concludes. The re-entry `Stop` fires with `stop_hook_active: true` (loop
+  guard). This is the load-bearing turn-boundary wake/drain mechanism.
+- **`PostToolUse` no longer steers the model.** The hook still *fires* (it can
+  observe and produce side effects), but neither `exit 2` + stderr NOR JSON
+  `decision: block` + `hookSpecificOutput.additionalContext` produced any model
+  action on 0.154.0 — the model continued its planned tool sequence unchanged.
+  Mid-turn (between-tools) model steering via hooks therefore appears
+  unsupported on 0.154.0; only the `Stop` boundary steers. This reverses the
+  2026-05-04 `exit 2` finding.
+- **Hook payload carries no agent classifier.** `Stop` stdin is
+  `{session_id, turn_id, transcript_path, cwd, hook_event_name, model,
+  permission_mode, stop_hook_active, last_assistant_message}`; `PostToolUse`
+  adds `{tool_name, tool_input, tool_response, tool_use_id}`. There is no
+  `agent_id`/`agent_type`/agent-name field, so a Codex hook cannot structurally
+  tell a main turn from a subagent turn from the payload alone (contrast Claude,
+  whose `Stop`/`SubagentStop` split plus optional `agent_id`/`agent_type`
+  does). Owner/main-turn context must be baked into the hook command args by the
+  adapter, per the note above. Payload is delivered on **stdin**, not argv.
+- **Subagent spawn needs the app-server daemon.** In `--ephemeral` `codex exec`
+  the base agent has a subagent-spawn tool but the spawn fails
+  (`no thread with id ...`); subagent turns (and thus any `SubagentStart`/
+  `SubagentStop` firing) could not be observed without the shared local
+  app-server daemon (`codex agents`). Whether Codex subagents fire hooks at all
+  remains open and needs a daemon-backed probe.
+- Useful isolation flags on `codex exec`: `-C/--cd`, `--ignore-user-config`
+  (auth still uses `CODEX_HOME`), `--ephemeral`, `--skip-git-repo-check`.
 
 ## Model Flag Behavior
 
