@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: cbbfd7fce8370800
 sage-review-completeness-reviewed: cbbfd7fce8370800
+completed: 2026-09-13
 ---
 
 # Pi reload can retain generated skill shims for removed playbook names
@@ -51,3 +52,8 @@ Regression coverage executes the registered resource-discovery callback, the rea
 Correctness and fit reviews were clean. Round-one test review found that helper-only tests did not prove the production reload and pack entrypoints remained wired and omitted the valid installed-package path; `ef6316e` added those seams, and round two verified both Important findings fixed with no remaining observations.
 
 Validation intentionally covers only static literal playbook names that can be proven from generated text; dynamic names continue through runtime playbook resolution.
+
+
+## Resolution (2026-09-13)
+
+Completed Phase 1: Pi startup/reload and package lifecycle paths now cleanly regenerate and validate generated skill shims against the current rsrc manifest, with independent review and regression coverage.
