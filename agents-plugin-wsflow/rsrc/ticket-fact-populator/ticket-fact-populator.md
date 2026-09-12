@@ -32,13 +32,22 @@ not settle. You edit exactly one file: the ticket at the path you were given.
      reported as unverified.
    - Write the `## Route Facts` section (below), replacing it whole if
      present.
-   - Under `## Constraints`, write one line
-     `- Convention: <manual path> (declared for <paths>)` per row of
-     `AGENTS.md` `## Workflow` → `### Implementation Conventions` whose
-     `paths` match a path the ticket names. Replace the `- Convention:` lines
-     already there rather than appending, and leave the section's other lines
-     alone. Write nothing when `AGENTS.md` declares no such section or no row
-     matches; add a `## Constraints` heading only when there is a line for it.
+   - Under `## Constraints`, keep every existing `- Convention:` line that
+     exactly matches a current row of `AGENTS.md` `## Workflow` →
+     `### Implementation Conventions`, then add one line
+     `- Convention: <manual path> (declared for <paths>)` for every declared
+     row whose `paths` match a path the ticket names. The resulting convention
+     lines are the union of those retained valid lines and the path-matched
+     lines; remove only a `- Convention:` line that matches no current declared
+     row, and leave the section's other lines alone. Count every added, removed,
+     or changed convention line as a correction. Write nothing when `AGENTS.md`
+     declares no such section or no resulting line exists; add a `## Constraints`
+     heading only when there is a line for it.
+
+     For example, a ticket that names both an `agents-plugin/rsrc/` path and an
+     `agents-plugin-tool/internal/mcp/` path keeps a valid existing MCP-manual
+     convention line, adds any missing matching rsrc convention lines, and
+     reports `corrections: 1` or more when that union changes the section.
 4. Return the report.
 
 ## Route Facts
