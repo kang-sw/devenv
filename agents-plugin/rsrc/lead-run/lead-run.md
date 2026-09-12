@@ -121,10 +121,12 @@ until a reliable trigger lands).
   worker with the answer and where you found it. If not, put the one question
   to the user and resume with the answer.
 - **(c) contract broken** — do not go to the user first. Route the worker's
-  `proposed_resolution:` through `{{.SkillNamespace}}:lead-ticket` as an
-  `#### Edition` on the executed phase, under the design-review gate at a
-  raised tier. A `pass` commits the edition and resumes the worker; a `block`
-  goes to the user with the reviewer's verdict.
+  `proposed_resolution:` through `{{.SkillNamespace}}:lead-ticket` under the
+  design-review gate at a raised tier. When the executed phase has no
+  `### Result`, revise that unimplemented phase directly; when it already has
+  a Result, append an `#### Edition` under its Result area. A `pass` commits
+  the phase update and resumes the worker; a `block` goes to the user with the
+  reviewer's verdict.
 - **(d) irreversible action** — put the report's lines to the user; resume
   with the answer.
 - **(e) Critical still open after the fix round** — use the recorded worker
