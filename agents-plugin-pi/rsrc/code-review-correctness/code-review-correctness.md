@@ -27,7 +27,7 @@ to the Fit or Test partitions.
 3. Contract compliance: changed functions satisfy documented invariants and coupling rules.
 4. Security surface: injection, XSS, authentication bypass, insecure deserialization, exposed secrets.
 5. Edge cases: empty, zero, max, concurrent access, unexpected input shapes.
-6. Spec drift: note a potentially stale spec entry when claimed existing behavior is absent.
+6. Unrecorded behavior change: observable behavior changes but no test changes with it — tests are the behavioral contract, so the diff leaves no executable record of the contract it just changed. Assertion quality and coverage depth stay with the Test partition.
 
 ## Out of scope
 

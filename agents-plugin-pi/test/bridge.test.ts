@@ -56,30 +56,26 @@ const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const REAL_STATIC_BODY_SNAPSHOT = readFileSync(join(FIXTURES_DIR, "workflow-manual-static-body.txt"), "utf8");
 const REAL_WORKFLOW_MANUAL_RESPONSE = readFileSync(join(FIXTURES_DIR, "workflow-manual-response.txt"), "utf8");
 
-// Live snapshot of ws-mcp's tools/list response (60 tools), captured via a
-// direct spawnWsMcpClient() probe against this repo's ws-mcp launcher. Not
+// Live snapshot of ws-mcp's tools/list response (51 tools), captured via a
+// direct spawnWsMcpClient() probe against the develop-root ws-mcp launcher. Not
 // re-fetched on every test run (that would make this a subprocess-spawning
 // integration test, not a unit test) — if ws-mcp's tool set changes, the
 // live gate re-verification step (run separately, see the implementation
 // report) is what catches drift; this fixture only locks in the naming
 // invariants against the set known at review-fix time.
 const LIVE_TOOL_NAMES = [
-  "agenda.clear", "agenda.list", "agenda.set", "api.list", "config.list",
-  "config.tune", "convention.read", "enter.implement", "enter.proceed",
-  "ferrule", "git.commit", "git.diff", "git.log", "git.merge_base",
-  "git.status", "infra.read", "mental_models.find", "mental_models.list",
-  "mental_models.status", "note.erase", "note.mute", "note.search",
-  "note.unmute", "note.write", "path.generate", "playbook.print",
-  "playbook.render", "project_tree", "references.trace",
-  "runtime.debug_events", "runtime.info", "session.children",
-  "session.note", "spec_index.verify", "spec_stem.generate", "specs.find",
-  "specs.list", "specs.status", "tickets.checklist", "tickets.close",
-  "tickets.create_empty", "tickets.find", "tickets.list", "tickets.move",
-  "tickets.sage_gate", "tickets.sage_stamp", "tickets.status",
-  "tickets.template", "tickets.verify", "todo.append", "todo.check",
-  "todo.clear", "todo.erase", "todo.insert_after", "todo.insert_before",
-  "todo.list", "todo.read", "todo.reorder", "workflow_manual",
-  "workflow_state",
+  "runtime.read", "runtime.debug_events", "session.children", "session.note",
+  "ferrule", "agenda.set", "agenda.clear", "agenda.list",
+  "route.resolve_implement", "route.resolve_proceed", "todo.add", "todo.check",
+  "todo.erase", "todo.clear", "todo.list", "todo.read", "todo.reorder",
+  "api.list", "config.list", "config.tune", "config.resolve_agent",
+  "git.status", "git.diff", "git.log", "git.merge_base", "git.merge",
+  "git.commit", "project_tree", "infra.read", "convention.read", "note.write",
+  "note.erase", "note.mute", "note.unmute", "note.query", "tickets.query",
+  "tickets.close", "review.marker", "review.stamp", "tickets.move",
+  "tickets.create_empty", "tickets.template", "tickets.checklist", "tickets.sage_gate",
+  "tickets.sage_stamp", "tickets.verify", "path.generate", "workflow_manual",
+  "workflow_state", "playbook.read", "playbook.render",
 ];
 
 describe("sanitizeToolName", () => {
@@ -90,8 +86,8 @@ describe("sanitizeToolName", () => {
     assert.equal(sanitizeToolName("ferrule"), "ws__ferrule");
   });
 
-  test("live tool set: exactly 60 names", () => {
-    assert.equal(LIVE_TOOL_NAMES.length, 60);
+  test("live tool set: exactly 51 names", () => {
+    assert.equal(LIVE_TOOL_NAMES.length, 51);
   });
 
   test("live tool set: every sanitized name matches provider-legal charset ^[a-zA-Z0-9_-]+$", () => {
@@ -338,7 +334,7 @@ describe("cutStaticBody", () => {
     assert.equal(result.text, expected);
     assert.ok(!result.text.includes(REAL_START_LINE), "the manual body's start heading must be cut out");
     assert.ok(result.text.startsWith("review watermark"), "the prepended advisory block ahead of the manual body must survive");
-    assert.ok(result.text.includes("## Session Key\nwooing-lunchbox-parsnip"), "the ## Session Key tail must survive, end-anchor line included");
+    assert.ok(result.text.includes("## Session Key\ncork-crease-renewable"), "the ## Session Key tail must survive, end-anchor line included");
   });
 
   test("reason: end-anchor when the response's ## Session Key heading is missing", () => {
