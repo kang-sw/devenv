@@ -147,6 +147,10 @@ removed.
   topology-specific `main` and `master` dead end with structured refusal
   diagnostics and an OID-bound release-target acknowledgement. This child must
   land before `epic/refound` merges into `develop`.
+- `260912-feat-git-merge-generic-branch-promotion` - generalize the lead-owned
+  merge primitive across exact local branch pairs while retaining impl and goal
+  lifecycle cleanup plus release-target safety. This post-landing child closes
+  the epic-to-develop dogfood gap before release promotion.
 - Planned: board reconciliation - drop the opposite-direction tickets named
   in `related:` and close the subsumed diet epics once their remaining phases
   are absorbed or dropped. Inventory stage management stays a user-and-lead
