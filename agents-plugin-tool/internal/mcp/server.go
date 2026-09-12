@@ -3390,12 +3390,12 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "git.merge",
-			"description": "Lead-only. Merge a local impl branch into its encoded root using --no-ff, then delete the merged branch. Main/master return policy_blocked diagnostics by default; explicit release-target acknowledgement bound to inspected source_oid and target_oid permits retry. Must-resolve safety findings cannot be waived. Conflicts remain on the target for lead-delegate to resolve. Defaults to text; use format=json for structured output.",
+			"description": "Lead-only. Merge an exact local source branch into an exact local target using --no-ff. Delete merged impl/* and goal/* sources; preserve other sources. Main/master return policy_blocked diagnostics by default; explicit release-target acknowledgement bound to inspected source_oid and target_oid permits retry. Must-resolve safety findings cannot be waived. Conflicts remain on the target for lead-delegate to resolve. Defaults to text; use format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"branch":                  stringProperty("Optional local impl/<root>/<stem> branch; defaults to the current branch. May be supplied while checked out on another branch."),
-					"target":                  stringProperty("Optional target assertion; must equal the impl branch's encoded root."),
+					"branch":                  stringProperty("Optional exact local source branch; defaults to the current branch. May be supplied while checked out on another branch. impl/* sources must have impl/<root>/<stem> shape."),
+					"target":                  stringProperty("Exact local target branch. Required for non-impl sources; for impl/<root>/<stem>, defaults to the encoded root and must match it when supplied."),
 					"release_target_override": map[string]any{"type": "boolean", "default": false, "description": "Explicit acknowledgement of the main/master release-target policy only. Never waives must_resolve diagnostics; requires both expected OIDs."},
 					"expected_source_oid":     stringProperty("Full inspected source_oid from the refusal; required when release_target_override is true."),
 					"expected_target_oid":     stringProperty("Full inspected target_oid from the refusal; required when release_target_override is true."),

@@ -150,10 +150,9 @@ PARENT is everything between `goal/` and the last `/`; a single-segment
 `goal/<slug>` falls back to `main`. Assemble the merge-stop report from this
 run's worker reports: every `decisions:` and `unresolved:` line, by ticket,
 verbatim. Put it to the user and ask for explicit approval to merge into
-PARENT; on approval merge yourself with plain `git merge --no-ff` under the
-repository's commit rules. This goal-to-PARENT terminal uses raw Git because
-`{{.McpNamespace}}/git.merge` accepts only impl branches and derives their
-encoded root; it does not serve goal-branch promotion. Never push.
+PARENT; on approval call `{{.McpNamespace}}/git.merge` with the goal branch
+and explicit PARENT target under the repository's commit rules. Apply the same
+release-target acknowledgement gate used for worker integration. Never push.
 
 ## Terminal: every remaining ticket blocked on a goal branch
 

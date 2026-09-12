@@ -100,8 +100,15 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 		}
 	}
 	mergeRoot, stem, ok := parseImplBranchRoot(branch)
-	if !ok || mergeRoot == "" || stem == "" {
+	isImpl := strings.HasPrefix(branch, "impl/")
+	if isImpl && (!ok || mergeRoot == "" || stem == "") {
 		return result, fmt.Errorf("git.merge requires impl/<root>/<stem>, got %q", branch)
+	}
+	if !isImpl {
+		mergeRoot = target
+		if mergeRoot == "" {
+			return result, fmt.Errorf("git.merge requires an explicit target for source %q", branch)
+		}
 	}
 	// A refs/heads/- ref is valid, but switch interprets "-" as the previous
 	// checkout even after "--". Never let branch shorthand select the target.
@@ -124,11 +131,11 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 		d := &result.Diagnostics[len(result.Diagnostics)-1]
 		d.Command, d.RawOutput = args, output
 	}
-	if target != "" && target != mergeRoot {
+	if isImpl && target != "" && target != mergeRoot {
 		add("target_mismatch", fmt.Sprintf("target %q does not match encoded root %q", target, mergeRoot), "Use the encoded root as the target assertion, or select the intended impl branch.")
 	}
 	if releaseTarget && !acknowledgement.ReleaseTargetOverride {
-		result.Diagnostics = append(result.Diagnostics, implMergeDiagnostic{Code: "release_target", Classification: "overrideable", Reason: "The encoded target is a release-class branch; inferred repository topology does not authorize this merge.", Resolution: "After explicit acknowledgement, retry the same git.merge call with release_target_override: true, expected_source_oid: source_oid, and expected_target_oid: target_oid returned here. Resolve all must_resolve findings first."})
+		result.Diagnostics = append(result.Diagnostics, implMergeDiagnostic{Code: "release_target", Classification: "overrideable", Reason: "The target is a release-class branch; inferred repository topology does not authorize this merge.", Resolution: "After explicit acknowledgement, retry the same git.merge call with release_target_override: true, expected_source_oid: source_oid, and expected_target_oid: target_oid returned here. Resolve all must_resolve findings first."})
 	}
 	if acknowledgement.ReleaseTargetOverride && !releaseTarget {
 		add("override_scope", "release_target_override applies only to main or master", "Remove release_target_override for this non-release target.")
@@ -207,7 +214,7 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 		if err != nil || parseErr != nil {
 			gitFailure("containment_inspection", "Cannot parse candidate containment", out, err, args...)
 		} else if count == 0 {
-			add("already_contained", "impl branch is already contained in target; no merge performed", "Inspect the existing integration; no new merge is needed for this candidate.")
+			add("already_contained", "source branch is already contained in target; no merge performed", "Inspect the existing integration; no new merge is needed for this candidate.")
 		}
 		if releaseTarget {
 			result.Review = &implMergeReviewEvidence{CandidateRange: result.TargetOID + ".." + result.SourceOID, Note: "Frontier reachability is evidence only; it does not establish review quality or absence of unresolved findings."}
@@ -283,7 +290,7 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 		unmerged, checkErr := run("diff", "--name-only", "--diff-filter=U")
 		if checkErr == nil && unmerged != "" {
 			result.Status = "conflict"
-			result.Advisory = "Merge left in progress on target; use lead-delegate to resolve conflicts and complete the merge record. The impl branch is retained."
+			result.Advisory = "Merge left in progress on target; use lead-delegate to resolve conflicts and complete the merge record. The source branch is retained."
 			return result, nil
 		}
 		return result, err
@@ -293,6 +300,9 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 		return result, err
 	}
 	result.Status = "merged"
+	if !isImpl && !strings.HasPrefix(branch, "goal/") {
+		return result, nil
+	}
 	if _, err := run("branch", "-d", "--", branch); err != nil {
 		result.Advisory = "Merge succeeded but branch cleanup failed: " + err.Error()
 	} else {
