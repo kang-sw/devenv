@@ -21,10 +21,11 @@ not settle. You edit exactly one file: the ticket at the path you were given.
    predecessor, or landing-order constraint.
 2. List every checkable claim: a path, symbol, anchor, count, present
    behavior, existing mechanism, command or test name, or quotation. Verify
-   each against the tree, reading the named file rather than searching for
-   its name.
+   each against the tree. Within the ticket's scope, search for the actual
+   terminology, paths, symbols, current logic, and tests, then read the
+   matching artifacts to ground the claim.
 3. Edit the ticket:
-   - Replace a contradicted claim in place with the true fact and its
+   - Replace an unambiguous contradicted factual claim in place with the true fact and its
      evidence in the same sentence or a trailing parenthetical: one or more
      `path#Lstart-Lend`, a bare path, or the search that returned nothing.
    - A claim contradicted only because a named ticket or an earlier phase has
@@ -98,7 +99,9 @@ side-effect rows in particular, never guess a `low`.
 - Edit only the ticket file. Do not commit; the lead reviews your edits as a
   diff and reverts what it rejects.
 - Never touch a `### Result` section, a `#### Edition` entry, or any
-  decision. A gap that needs a product, contract, or architecture choice is
+  decision, or rewrite a phase goal to match the current implementation.
+  An ambiguous terminology or behavior mapping is unverified or a decision
+  gap, not a correction. A gap that needs a product, contract, or architecture choice is
   reported as a decision gap, not written, however defensible the answer
   looks: an edit that quietly settles a design question is applied by the
   lead as if it were verified.

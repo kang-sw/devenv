@@ -53,14 +53,13 @@ type LoadedPlaybook struct {
 // playbook bodies and includes without being declared in frontmatter. The MCP
 // playbook layer owns their runtime values.
 //
-// SmallTierModel/MediumTierModel/LargeTierModel/XLargeTierModel are the four
-// fixed-tier, config-resolved model vars (see resolveTierModelVars in the MCP
-// playbook layer): unlike RoleModel (frontmatter-declared, playbook's own
-// tier), any playbook body may reference these four unconditionally, mirroring
-// the McpNamespace/SkillNamespace precedent exactly.
+// Fixed-tier model and reasoning-effort vars are config-resolved (see
+// resolveTierModelVars in the MCP playbook layer). Unlike RoleModel, which
+// refers to the playbook's own declared tier, these are available unconditionally.
 var ImplicitVariableNames = []string{
 	"McpNamespace", "SkillNamespace",
 	"SmallTierModel", "MediumTierModel", "LargeTierModel", "XLargeTierModel",
+	"SmallTierReasoningEffort", "MediumTierReasoningEffort", "LargeTierReasoningEffort", "XLargeTierReasoningEffort",
 }
 
 // Manifest is the on-disk manifest.json structure.

@@ -1,12 +1,125 @@
 package mcp
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 )
+
+func TestTicketDesignReviewExplorationBindings(t *testing.T) {
+	for _, product := range []struct{ pkg, namespace string }{
+		{"agents-plugin", "ws"}, {"agents-plugin-wsflow", "wsflow"},
+	} {
+		for _, tc := range []struct {
+			harness, explorer string
+			rows              []string
+		}{
+			{"codex", "an explorer subagent", []string{
+				"| small | gpt-5.6-luna | medium |", "| medium | gpt-5.6-terra | high |", "| large | gpt-5.6-sol | high |",
+			}},
+			{"claude", "the Explore agent", []string{
+				"| small | haiku | |", "| medium | sonnet | |", "| large | opus | |",
+			}},
+			{"unknown-host", "an exploration agent", []string{
+				"| small | gpt-5.6-luna | medium |", "| medium | gpt-5.6-terra | high |", "| large | gpt-5.6-sol | high |",
+			}},
+		} {
+			for _, config := range []string{"default", "custom", "unset", "invalid"} {
+				t.Run(product.namespace+"/"+tc.harness+"/"+config, func(t *testing.T) {
+					t.Setenv("WS_MCP_NAMESPACE", product.namespace)
+					t.Setenv("WS_MCP_NO_AGENT", map[bool]string{true: "1", false: "0"}[product.namespace == "wsflow"])
+					opts := wsconfig.Options{CacheHome: t.TempDir()}
+					rows := tc.rows
+					if config == "custom" || config == "unset" {
+						rows = nil
+						for i, tier := range []string{"small", "medium", "large"} {
+							effort := []string{"low", "medium", "xhigh"}[i]
+							if config == "unset" {
+								effort = ""
+							}
+							harness := tc.harness
+							if harness == "unknown-host" {
+								harness = ""
+							}
+							backend := "codex"
+							if harness == "claude" {
+								backend = "claude"
+							}
+							if _, err := wsconfig.SetAgentsTierForHarness(opts, tier, backend, "custom-"+tier, harness, effort); err != nil {
+								t.Fatal(err)
+							}
+							rows = append(rows, "| "+tier+" | custom-"+tier+" | "+effort+" |")
+						}
+					}
+					if config == "invalid" {
+						if err := os.WriteFile(filepath.Join(opts.CacheHome, "config.json"), []byte("{invalid"), 0o644); err != nil {
+							t.Fatal(err)
+						}
+						rows = []string{"| small | the small-tier model | |", "| medium | the medium-tier model | |", "| large | the large-tier model | |"}
+					}
+					root := filepath.Join("..", "..", "..", product.pkg, "rsrc")
+					body, _, err := renderPlaybookBody(newTestServerWithHarness(t, tc.harness), root, "ticket-reviewer-design", nil, opts, "", "", "", nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					text := strings.Join(strings.Fields(body), " ")
+					for _, want := range append(rows,
+						"Dispatch "+tc.explorer+" through the host-native spawn mechanism",
+						"Decide whether exploration is useful, how many explorers to dispatch",
+						"There are no required triggers, tier thresholds, or fan-out counts",
+						"Do not directly search or navigate the codebase",
+						"You may open exact artifacts cited by the ticket or returned by an explorer",
+						"following uncited references is discovery and belongs to an explorer",
+						"read-only boundary: no file writes, commits, or mutation tools",
+						"the cross-ticket read boundary above",
+						"exact file, test, or symbol citations with locations",
+						"a subagent summary is never sole authority",
+						"do not override a confirmed ticket decision intentionally changing it",
+						"an unexplained contract conflict as a missing decision",
+						"`spawn_agent.model` and `spawn_agent.reasoning_effort`",
+						"An unset effort means omit that field",
+						"unavailable, unsupported, or rejected, report the gap",
+						"omitted: <checks or evidence not obtained and why> | none",
+					) {
+						if !strings.Contains(text, strings.Join(strings.Fields(want), " ")) {
+							t.Errorf("missing %q", want)
+						}
+					}
+					if strings.Contains(body, "{{") || strings.Contains(body, "<no value>") {
+						t.Fatal("unresolved template binding in reviewer")
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestTicketFactPopulatorGroundingBoundary(t *testing.T) {
+	for _, pkg := range []string{"agents-plugin", "agents-plugin-wsflow"} {
+		root := filepath.Join("..", "..", "..", pkg, "rsrc")
+		body, _, err := renderPlaybookBody(&Server{}, root, "ticket-fact-populator", nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := strings.Join(strings.Fields(body), " ")
+		for _, want := range []string{
+			"You edit exactly one file: the ticket at the path you were given",
+			"Within the ticket's scope, search for the actual terminology, paths, symbols, current logic, and tests",
+			"Replace an unambiguous contradicted factual claim",
+			"or rewrite a phase goal to match the current implementation",
+			"An ambiguous terminology or behavior mapping is unverified or a decision gap, not a correction",
+			"do not survey for strategy, reuse, or a plan",
+			"Edit only the ticket file. Do not commit",
+		} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s missing %q", pkg, want)
+			}
+		}
+	}
+}
 
 // The rendered prompt is the contract boundary for this model-executed check;
 // these assertions do not claim to execute a model's contradiction judgment.
