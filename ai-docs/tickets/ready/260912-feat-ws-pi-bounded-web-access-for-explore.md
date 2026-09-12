@@ -6,7 +6,7 @@ related:
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 4e8171eab77b1020
-sage-review-design-reviewed: b0cbdfc1083ccd20
+sage-review-design-reviewed: fd2bc42bedfe80a7
 ---
 
 # Pi Explore: bounded fetch plus bundled web-search extension
@@ -85,3 +85,16 @@ A second exact-package audit showed that `pi-web-access@0.29.0` unconditionally 
 - Spawn-time composition validation now checks the pinned package path, helper script, facade registration, and an isolated capture probe. Provider readiness remains call-time best effort. Tests must prove helper cleanup, timeout/cancellation, IPC and output bounds, secret redaction, exact-package capture cardinality, no parent-process global mutation, no non-search registration, owner-configured provider/proxy operation inside the helper, and identical direct-lead and nested-worker facade behavior.
 
 This edition authorizes only the one-shot helper boundary for the exact pinned package. If its minimal isolated API cannot execute ordinary search without broader filesystem writes, page fetches, or registration effects, stop again with evidence; do not load it in-process, broaden the facade, keep a helper resident, or switch dependencies without another settled amendment.
+
+#### Edition (2e80e9ad) - 2026-09-12
+
+Exact-package execution proved that upstream proxy mode invokes `curl` with OS-temporary request, header, and response files even for ordinary search; abnormal helper termination can bypass cleanup and leave those raw artifacts or the child `curl` process behind. The initial release will not implement a second proxy transport stack. Supersede the prior allowance for owner-configured transport proxies with a direct-transport-only boundary:
+
+- Before helper extension initialization, construct its environment by copying the parent environment except `HTTP_PROXY`, `http_proxy`, `HTTPS_PROXY`, `https_proxy`, `ALL_PROXY`, `all_proxy`, `NO_PROXY`, and `no_proxy`. Preserve provider credential variables and ordinary auth/config discovery; never echo removed values.
+- Detect non-empty transport-proxy configuration before executing search: the HTTP/HTTPS/ALL proxy environment sources above or the resolved `web-search.json` `proxy` field. Refuse the call with a redacted stable `web-search-proxy-unsupported` diagnostic explaining that this ws Explore boundary currently requires direct provider transport. `NO_PROXY`/`no_proxy` alone is stripped but does not trigger refusal. Do not silently ignore an owner proxy on a search that appears successful.
+- After the refusal check, force the captured upstream call's `proxy` argument to the empty string so `web-search.json` fallback cannot reactivate proxy mode. Force it together with `includeContent: false` and `workflow: "none"`; the model-facing schema still cannot supply any of them.
+- The sanitized helper environment plus the empty per-call override must prevent all audited upstream proxy paths: the global-fetch wrapper, `runWithProxy`/`curl` temporary-file path, and Gemini Web's independent `EnvHttpProxyAgent`. Tests must instrument process spawning and temporary-file creation to prove that ordinary and abruptly cancelled searches launch no `curl`, create no `pi-web-access-proxy-*` directory, and leave no proxy response/request artifacts.
+- Owner-configured provider credentials, provider selection, SearXNG/provider services, and provider/gateway base URLs remain an explicit out-of-band trust boundary and may be honored because the model cannot select or alter them. Provider services and host/OS networking may have their own routing or retention policies; diagnostics must distinguish those from unsupported transport-proxy configuration without claiming a system-wide no-proxy guarantee.
+- Include the proxy refusal and the package-local configuration/README locations in the ad-hoc setup evidence returned to the researcher, so it can explain the limitation and applicable provider registration without keeping provider-specific instructions resident.
+
+This edition authorizes no HTTP, HTTPS, SOCKS, environment, or package-config transport proxy for the initial ws Explore integration. Proxy support requires a later independently bounded transport design; failure to keep the exact pinned package on audited direct transport is another stop condition, not permission to fall back to upstream proxy mode.
