@@ -137,12 +137,16 @@ export function updateOwnership(home: string, update: Partial<Pick<OwnershipMeta
   let lock: OwnershipLock | undefined;
   try {
     lock = acquireOwnershipLock(home);
-    const current = readOwnershipUnlocked(lock.home); if (!current) return undefined;
+    const current = readOwnershipUnlocked(lock.home);
+    if (!current) throw new Error("ownership metadata is missing or unreadable");
     const now = Date.now();
     const next = { ...current, ...update, liveness: { ...current.liveness, ...update.liveness }, lastActivityAt: Math.max(current.lastActivityAt, update.lastActivityAt ?? current.lastActivityAt), updatedAt: now };
     writeOwnershipUnlocked(next, lock.home);
     return next;
-  } catch { return undefined; } finally { lock?.release(); }
+  } catch (error) {
+    console.error(`ws-pi-agent: could not update owned agent home ${home}: ${String(error)}`);
+    return undefined;
+  } finally { lock?.release(); }
 }
 export function touchOwnership(home: string): boolean { return updateOwnership(home, { lastActivityAt: Date.now() }) !== undefined; }
 

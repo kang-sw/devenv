@@ -2389,10 +2389,10 @@ export function recordReport(record: RpcAgentRecord, kind: "question" | "final" 
   if (record.ownership) touchOwnership(record.ownership.home);
 }
 
-/** Writes durable owner/approval protection without treating a poll as activity. */
-export function syncOwnershipProtection(record: RpcAgentRecord): void {
-  if (!record.ownership) return;
-  updateOwnership(record.ownership.home, {
+/** Writes durable protection without treating a poll as activity. A new owner bind must check success before committing local state. */
+export function syncOwnershipProtection(record: RpcAgentRecord): boolean {
+  if (!record.ownership) return true;
+  return updateOwnership(record.ownership.home, {
     liveness: {
       lifecycle: record.client ? (record.running ? "live" : "stopping") : "unknown",
       running: record.running,
@@ -2405,7 +2405,7 @@ export function syncOwnershipProtection(record: RpcAgentRecord): void {
       pendingApprovalCommandId: record.pendingApproval?.cmdId,
       recovery: record.client ? "none" : "revived",
     },
-  });
+  }) !== undefined;
 }
 
 /** Unreferenced persistent-record observer; unchanged polling never renews activity. */
@@ -3645,7 +3645,9 @@ export function getAgentTranscriptPath(registry: RpcAgentRegistry, agentId: stri
   if (!record) {
     throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
   }
-  if (record.ownership) touchOwnership(record.ownership.home);
+  if (record.ownership && !touchOwnership(record.ownership.home)) {
+    throw new Error("ws-pi-agent: history unavailable — owned session home is busy, gone, or unreadable; retry the reference");
+  }
   if (record.ownership) observeSessionWrite(record.ownership.home, record.sessionPath);
   return { transcript_path: record.sessionPath };
 }

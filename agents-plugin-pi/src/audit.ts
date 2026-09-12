@@ -543,7 +543,10 @@ export async function openViewer(ctx: AuditUiCtx & { ui?: { custom?: unknown } }
     notify(ctx, `ws: no agent "${agentId}" to audit.`, "warning");
     return;
   }
-  if (record.ownership) touchOwnership(record.ownership.home);
+  if (record.ownership && !touchOwnership(record.ownership.home)) {
+    notify(ctx, "ws: history unavailable — owned session home is busy, gone, or unreadable; retry /audit.", "warning");
+    return;
+  }
 
   activeAuditOverlay?.close();
   activeAuditOverlay = undefined;

@@ -1112,8 +1112,7 @@ export function handleForkRaisedQuestion(
     // so the lead must not be pushed this fork's settles/advisories (nor
     // count it as one of its own outstanding children) even before the owner
     // gets around to `/answer`.
-    live.threadBound = true;
-    syncOwnershipProtection(live);
+    bindThread(rpcRegistry, agentId, true);
   }
   handle.threads.set(record.threadId, record);
   // Review relay #1 (I2): arm the final-report hook HERE, not only from
@@ -1336,12 +1335,11 @@ function finishForkRaisedThread(pi: ExtensionAPI, handle: ThreadRegistryHandle, 
   if (thread.status === "dormant" && !record.threadBound) return;
   if (record.forkFinish) return;
 
+  bindThread(rpcRegistry, record.agentId, true);
   record.overlayAttached = false;
-  record.threadBound = true;
   thread.status = "dormant";
   thread.touchedAt = nowIso();
   thread.forkResume = captureForkResume(record);
-  syncOwnershipProtection(record);
   persistThreads(handle);
   refreshAgentWidget();
 
@@ -1674,8 +1672,8 @@ export async function ensureRespondent(
     }
     // Idempotent: a live or rehydrated respondent (either origin) reports its
     // own final into this thread — see `handleRespondentFinalReport`.
-    armFinalReportHook(pi, handle, rpcRegistry, thread.threadId, agentId);
     bindThread(rpcRegistry, agentId, true);
+    armFinalReportHook(pi, handle, rpcRegistry, thread.threadId, agentId);
     return agentId;
   }
 
@@ -1746,11 +1744,11 @@ export async function ensureRespondent(
     },
   );
 
+  bindThread(rpcRegistry, result.agent_id, true);
   thread.respondentAgentId = result.agent_id;
   const record = rpcRegistry.get(result.agent_id);
   if (record) thread.forkResume = captureForkResume(record);
   armFinalReportHook(pi, handle, rpcRegistry, thread.threadId, result.agent_id);
-  bindThread(rpcRegistry, result.agent_id, true);
   return result.agent_id;
 }
 
@@ -1766,7 +1764,13 @@ export async function ensureRespondent(
  */
 function bindThread(rpcRegistry: RpcAgentRegistry, agentId: string, bound: boolean): void {
   const record = rpcRegistry.get(agentId);
-  if (record) { record.threadBound = bound; syncOwnershipProtection(record); }
+  if (!record) return;
+  // Publish protection before the local bind: a busy maintenance claim must
+  // refuse this transition, not silently leave an accepted owner thread prunable.
+  // Releases may remain durably protected on failure; that only retains data.
+  const persisted = syncOwnershipProtection({ ...record, threadBound: bound });
+  if (bound && !persisted) throw new Error("ws-pi-agent: cannot bind owner thread — owned session home is busy, gone, or unreadable; retry the question");
+  record.threadBound = bound;
 }
 
 /**

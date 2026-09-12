@@ -308,7 +308,8 @@ describe("agent storage", () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test("the deletion claim blocks a racing activity write and stale eligibility is rechecked under that claim", () => {
+  test("the deletion claim blocks a racing activity write and stale eligibility is rechecked under that claim", (t) => {
+    const diagnostics = t.mock.method(console, "error", () => {});
     const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
     try {
       const owned = allocateAgentHome(createAgentStorageContext("lead-race", root), "agent-race-lock", "worker");
@@ -326,10 +327,13 @@ describe("agent storage", () => {
       }, current => current.lastActivityAt <= cutoff);
       assert.deepEqual(removed, { status: "deleted" });
       assert.equal(existsSync(owned.home), false);
+      assert.equal(diagnostics.mock.callCount(), 1);
+      assert.match(String(diagnostics.mock.calls[0].arguments[0]), /could not update owned agent home/);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test("a claim abandoned by a dead process is recovered without weakening malformed/live claim retention", () => {
+  test("a claim abandoned by a dead process is recovered without weakening malformed/live claim retention", (t) => {
+    const diagnostics = t.mock.method(console, "error", () => {});
     const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
     try {
       const owned = allocateAgentHome(createAgentStorageContext("lead-abandoned", root), "agent-abandoned", "worker");
@@ -346,6 +350,7 @@ describe("agent storage", () => {
       mkdirSync(lock);
       writeFileSync(join(lock, "owner.json"), "{}");
       assert.equal(touchOwnership(owned.home), false, "malformed holder facts fail closed");
+      assert.equal(diagnostics.mock.callCount(), 2, "live and unreadable claims remain diagnostic");
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
