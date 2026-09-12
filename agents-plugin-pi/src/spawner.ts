@@ -1536,6 +1536,9 @@ export interface ForkFinishOperation {
   /** `agent_start` observed for the closeout's own run. It fences a duplicate
    * settle from the pre-closeout run. */
   closeoutRunStarted: boolean;
+  /** The observed settle that ended the work before closeout. Exact repeated
+   * delivery of that event is not evidence that the closeout has settled. */
+  preCloseoutSettleEvent?: object;
   candidate?: { message: string; toolCallId?: string; accepted?: boolean };
   sawQuestion?: boolean;
   terminal?: TerminalDelivery;
@@ -1865,10 +1868,15 @@ function observeForkFinishEvent(record: RpcAgentRecord, evt: { type?: string; to
     return;
   }
   if (evt.type === "agent_settled") {
-    // Before closeout this is the original run's one settle. After closeout,
-    // require a positive start observation for the new run so a duplicate
-    // original settle cannot abort the dispatched closeout.
-    if (!operation.closeoutIssued || operation.closeoutRunStarted) operation.settled = true;
+    // The original settle begins closeout. Once closeout starts, both its own
+    // start AND a different settle event are required: RPC listeners can
+    // replay the exact old object after the new run has begun.
+    if (!operation.closeoutIssued) {
+      operation.preCloseoutSettleEvent = evt;
+      operation.settled = true;
+    } else if (operation.closeoutRunStarted && evt !== operation.preCloseoutSettleEvent) {
+      operation.settled = true;
+    }
     return;
   }
   if (evt.type === "tool_execution_start" && evt.toolName === REPORT_TO_LEAD_TOOL_NAME) {
@@ -3195,6 +3203,13 @@ export async function sendToAgent(
     );
     record.client = client;
     record.launchGeneration = (record.launchGeneration ?? 0) + 1;
+    // This launch belongs to the coordinator only when its exact in-memory
+    // token requested the dormant resume. A later ordinary send clears that
+    // coordinator instead, retaining the generation fence for replacement
+    // work and stale callbacks.
+    if (ctx.finishToken !== undefined && record.forkFinish?.token === ctx.finishToken) {
+      record.forkFinish.generation = record.launchGeneration;
+    }
     try {
       await client.start();
       if (forkLaunch) validateForkReadiness(forkLaunch, record, await client.getState());

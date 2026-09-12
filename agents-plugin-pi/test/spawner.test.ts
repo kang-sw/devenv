@@ -144,7 +144,7 @@ import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, type SpawnRole } fr
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { McpStdioClient, McpToolCallResult } from "../src/mcp-stdio-client.ts";
-import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -2659,6 +2659,88 @@ describe("same-process fork /done finish coordinator", () => {
     await drain();
     await drain();
     assert.deepEqual(pi.sent.map((entry) => entry.message.customType), ["ws-agent-advisory"]);
+  });
+
+  test("a dormant coordinator transfers to its own resumed launch before processing closeout events", async () => {
+    const pi = fakePi();
+    let listener: ((event: unknown) => void) | undefined;
+    const prompts: string[] = [];
+    const stops: string[] = [];
+    const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
+    Object.assign(RpcClient.prototype, {
+      start: async function(this: RpcClient) {
+        const env = (this as unknown as { options: { env?: Record<string, string> } }).options.env;
+        writeFileSync(env?.WS_PI_FORK_READY_PATH ?? "", JSON.stringify({
+          nonce: env?.WS_PI_FORK_READY_NONCE,
+          ownSessionKey: "dormant-child",
+          sessionPath: "/tmp/dormant-fork.jsonl",
+          sessionId: "dormant-child-session",
+        }));
+      },
+      stop: async () => void stops.push("stop"),
+      abort: async () => void stops.push("abort"),
+      onEvent: (callback: (event: unknown) => void) => { listener = callback; return () => {}; },
+      prompt: async (message: string) => void prompts.push(message),
+      getState: async () => ({ model: { provider: "pi", id: "small" }, thinkingLevel: "medium", sessionFile: "/tmp/dormant-fork.jsonl" }),
+      setThinkingLevel: async () => {},
+    });
+    try {
+      const record = freshRpcRecord({ agentId: "dormant-finish", spawnRole: "fork", threadBound: true, validateForkFinal: () => true });
+      const registry: RpcAgentRegistry = new Map([[record.agentId, record]]);
+      const operation = startForkFinish(record, registry, pi.api!, { cwd: "/tmp", extensionPath: "/tmp/extension.ts" });
+      await drain();
+      assert.equal(prompts.length, 1);
+      assert.equal(operation.generation, record.launchGeneration, "the finish moves to its coordinator-owned dormant resume");
+
+      listener?.({ type: "agent_start" });
+      listener?.({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, toolCallId: "resumed-final", args: { kind: "final", message: "Outcome: done" } });
+      listener?.({ type: "tool_execution_end", toolCallId: "resumed-final", isError: false });
+      listener?.({ type: "agent_settled" });
+      await drain();
+      await drain();
+
+      assert.deepEqual(pi.sent.map((entry) => entry.message.customType), ["ws-agent-report"]);
+      assert.deepEqual(stops, ["abort", "stop"]);
+    } finally {
+      Object.assign(RpcClient.prototype, original);
+    }
+  });
+
+  test("a duplicate original settle after closeout start cannot settle the closeout run", async () => {
+    const pi = fakePi();
+    let listener: ((event: unknown) => void) | undefined;
+    const prompts: string[] = [];
+    const stops: string[] = [];
+    const client = {
+      onEvent(callback: (event: unknown) => void) { listener = callback; return () => {}; },
+      getState: async () => ({}),
+      prompt: async (message: string) => void prompts.push(message),
+      abort: async () => void stops.push("abort"),
+      stop: async () => void stops.push("stop"),
+    } as unknown as RpcClient;
+    const record = liveRpcRecord({ agentId: "late-duplicate", client, running: true, streaming: true, threadBound: true, validateForkFinal: () => true });
+    const registry: RpcAgentRegistry = new Map([[record.agentId, record]]);
+    attachEventListener(pi.api, registry, record, client);
+    startForkFinish(record, registry, pi.api!, { cwd: "/tmp", extensionPath: "/tmp/extension.ts" });
+    await drain();
+
+    const originalSettle = { type: "agent_settled" };
+    listener?.(originalSettle);
+    await drain();
+    assert.equal(prompts.length, 1);
+    listener?.({ type: "agent_start" });
+    listener?.(originalSettle);
+    await drain();
+    assert.deepEqual(pi.sent, [], "the repeated original event is not closeout completion");
+    assert.deepEqual(stops, []);
+
+    listener?.({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, toolCallId: "closeout-final", args: { kind: "final", message: "Outcome: done" } });
+    listener?.({ type: "tool_execution_end", toolCallId: "closeout-final", isError: false });
+    listener?.({ type: "agent_settled" });
+    await drain();
+    await drain();
+    assert.deepEqual(pi.sent.map((entry) => entry.message.customType), ["ws-agent-report"]);
+    assert.deepEqual(stops, ["abort", "stop"]);
   });
 
   test("a closeout question overrides an earlier valid final without reopening owner routing", async () => {
