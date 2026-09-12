@@ -12,7 +12,7 @@ related:
   260716-feat-mental-model-comment-placement-rule: built on a retired layer; drop candidate
   260716-feat-mental-model-openup-injection: built on a retired layer; drop candidate
   260716-feat-sage-related-mental-model-curation: built on a retired layer; drop candidate
-sage-review-design-reviewed: 9c0a0950256a0d78
+sage-review-design-reviewed: 0c6f903d85f40883
 ---
 
 # ws refoundation: worker as workflow interpreter, lead as escalation handler
@@ -143,6 +143,10 @@ removed.
   bounded factual grounding and let the read-only Sage design reviewer
   autonomously delegate code-contract exploration with rendered tier bindings.
   This child must land before `epic/refound` merges into `develop`.
+- `260912-bug-git-merge-release-target-diagnostics` - replace the
+  topology-specific `main` and `master` dead end with structured refusal
+  diagnostics and an OID-bound release-target acknowledgement. This child must
+  land before `epic/refound` merges into `develop`.
 - Planned: board reconciliation - drop the opposite-direction tickets named
   in `related:` and close the subsumed diet epics once their remaining phases
   are absorbed or dropped. Inventory stage management stays a user-and-lead

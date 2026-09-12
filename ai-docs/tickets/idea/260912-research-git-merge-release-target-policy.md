@@ -56,16 +56,18 @@ topology to downstream repositories whose ordinary integration branch may be
 - Return actionable next steps: resolve every `must_resolve` item, satisfy an
   `overrideable` item through the indicated review or release procedure, or
   retry with the release-target acknowledgement and inspected OIDs.
+- Treat `main` and `master` as default-deny release targets on the first call.
+  Review posture may enrich the diagnostics but does not auto-authorize a
+  topology inferred from configuration.
+- After explicit acknowledgement, instruct the caller to retry the same
+  `git.merge` operation with `release_target_override: true` and the inspected
+  OIDs. Native Git is not an alternative impl-integration path.
 
 ### Proposals
 <!-- Unconfirmed candidates. Never treat these as actionable authority. -->
 
 ### Open Questions
 <!-- Unresolved choices that require further investigation or user input. -->
-
-- Can declared `review-track` and `release-boundary` posture distinguish a
-  trunk-only integration target from a release target without importing a
-  project-specific branch topology?
 
 ### Rejected Alternatives
 <!-- Alternatives explicitly rejected, with the reason when useful. -->
@@ -74,3 +76,7 @@ topology to downstream repositories whose ordinary integration branch may be
   inspected and has no stable meaning as more refusal classes are added.
 - An opaque server-issued acknowledgement token adds state and machinery that
   source and target OID assertions provide without another lifecycle.
+- Automatically authorizing a `main` or `master` target from inferred review
+  topology lets missing or malformed configuration disable the fail-safe.
+- Falling back to native Git bypasses the lead-owned merge contract and its
+  diagnostics instead of resolving or acknowledging the reported policy.
