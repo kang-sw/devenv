@@ -1,7 +1,7 @@
 ---
 title: "Pi Explore: bounded fetch plus bundled web-search extension"
 related:
-  260912-feat-ws-explore-explicit-search-modes: consumes the common web capability through its web-search intent alias
+  260912-refactor-ws-pi-unify-persistent-explore-modes: consumes the common web capability through its web-search intent alias
   260912-feat-ws-pi-recursive-worker-subtree-lifecycle: network-read authority must obey descendant capability ceilings
 ---
 

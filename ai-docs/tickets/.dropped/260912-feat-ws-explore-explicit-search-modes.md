@@ -3,6 +3,7 @@ title: "Pi Explore: replace deep-research attention bias with intent modes and t
 related:
   260912-feat-ws-pi-bounded-web-access-for-explore: prerequisite for an honest web-search intent mode
   260912-feat-ws-pi-recursive-worker-subtree-lifecycle: persistent worker-owned Explore continuation and inherited capability ceilings
+dropped: 2026-09-12
 ---
 
 # Pi Explore: replace deep-research attention bias with intent modes and tier mapping
@@ -48,3 +49,8 @@ Replace the boolean intensity switch with intent names that help the lead select
 Replace the boolean schema with the settled mode vocabulary, defaulting to `code-search`, and resolve each mode through its mapped tier. Persist and report the selected mode with the child record and recovery sidecar while preserving the exact `{agent_id, alias}` asynchronous result and same-session continuation behavior. Update Pi-only guidance, runtime types, validation, telemetry, and tests without branching the researcher prompt or tool profile.
 
 Verify every mode-to-tier mapping, config override resolution, authentication refusal before allocation, default behavior, unknown-mode rejection, continuation/restart stability, and the contrastive tool description. Resolve the migration decision before ready promotion and remove stale simple/deep role validation without conflating Explore modes with legacy one-shot spawn-operation names.
+
+
+## Resolution (2026-09-12)
+
+Superseded before implementation by `260912-refactor-ws-pi-unify-persistent-explore-modes`. The recursive-worker bootstrap already made the blocking Explore fallback unreachable, so the remaining work is a refactor: delete the dead one-shot path, immediately remove the public `deep_research` boolean, and unify eligible lead/worker callers on persistent intent-to-tier routing.
