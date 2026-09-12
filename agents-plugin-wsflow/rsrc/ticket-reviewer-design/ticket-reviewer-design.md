@@ -179,9 +179,9 @@ For a batch, replace the single-ticket output with these fields:
 - `omitted`: checks or evidence not obtained and why, or `none`.
 
 Completeness findings belong to the per-ticket completeness reviewer. A missing
-batch member, prior report, or required delta boundary is incomplete evidence:
-report it in `omitted` and return a blocking coherence verdict so promotion
-cannot treat an incomplete review as a pass.
+batch member—or, on delta reviews, a missing prior report or required delta
+boundary—is incomplete evidence: report it in `omitted` and return a blocking
+coherence verdict so promotion cannot treat an incomplete review as a pass.
 
 ## Doctrine
 

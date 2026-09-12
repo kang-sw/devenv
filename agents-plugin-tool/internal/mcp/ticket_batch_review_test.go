@@ -35,13 +35,14 @@ func TestBatchPromotionRenderedContract(t *testing.T) {
 				body  string
 				wants []string
 			}{
-				"single ticket":     {lead, []string{"A single-ticket promotion uses the existing single-ticket reviewer path"}},
-				"complete batch":    {lead, []string{"before any reviewer reads the batch", "Render `ticket-reviewer-design` once for the batch", "Completeness review remains per ticket", "only after all reviews settle"}},
-				"coherence mapping": {lead, []string{"validate exact stem coverage", "subset of eligible stems before stamping", "only the coherence issues naming it", "Cross-ticket [<affected_stems>]:", "whole batch at its original statuses"}},
-				"skip posture":      {lead, []string{"Resolve recommendations before dispatch", "they receive no design verdict or stamp", "If every design stage is skipped, omit design dispatch", "preserve skipped stages by excluding their verdicts and stamps"}},
-				"delta dispatch":    {lead, []string{"`changed_stems`", "`previously_passed_stems`", "prior report alongside the current paths", "Include changed context-only members", "Reject a reversal lacking that evidence", "carry still-unresolved findings forward"}},
-				"batch findings":    {design, []string{"contradictions, duplicated scope, dependency mistakes, and overlapping implementation surfaces", "one row per `review_eligible_stems` entry", "`coherence`", "nonempty `affected_stems` naming only eligible members", "Completeness findings belong to the per-ticket completeness reviewer"}},
-				"pass preservation": {design, []string{"previously passed tickets are accepted baseline context, not fresh targets", "Carry unresolved prior findings forward and check fixes", "changed ticket or relation", "citing a concrete premise", "explaining how the change invalidates it", "`follow_up_findings` and do not alter the current verdict", "This boundary also applies to comparisons with ready inventory and parent epics"}},
+				"single ticket":        {lead, []string{"A single-ticket promotion uses the existing single-ticket reviewer path"}},
+				"complete batch":       {lead, []string{"before any reviewer reads the batch", "Render `ticket-reviewer-design` once for the batch", "Completeness review remains per ticket", "only after all reviews settle"}},
+				"coherence mapping":    {lead, []string{"validate exact stem coverage", "subset of eligible stems before stamping", "only the coherence issues naming it", "Cross-ticket [<affected_stems>]:", "whole batch at its original statuses"}},
+				"skip posture":         {lead, []string{"Resolve recommendations before dispatch", "they receive no design verdict or stamp", "If every design stage is skipped, omit design dispatch", "Preserve skipped stages by excluding their verdicts and stamps"}},
+				"delta dispatch":       {lead, []string{"`changed_stems`", "`previously_passed_stems`", "prior report alongside the current paths", "Include changed context-only members", "Reject a reversal lacking that evidence", "carry still-unresolved findings forward"}},
+				"delta stamp recovery": {lead, []string{"including a retained completeness verdict whose premises are unchanged on a design-only retry", "clears both postures after a combined block without another completeness review"}},
+				"batch findings":       {design, []string{"contradictions, duplicated scope, dependency mistakes, and overlapping implementation surfaces", "one row per `review_eligible_stems` entry", "`coherence`", "nonempty `affected_stems` naming only eligible members", "Completeness findings belong to the per-ticket completeness reviewer"}},
+				"pass preservation":    {design, []string{"previously passed tickets are accepted baseline context, not fresh targets", "Carry unresolved prior findings forward and check fixes", "changed ticket or relation", "citing a concrete premise", "explaining how the change invalidates it", "`follow_up_findings` and do not alter the current verdict", "This boundary also applies to comparisons with ready inventory and parent epics"}},
 			} {
 				t.Run(name, func(t *testing.T) {
 					body := strings.Join(strings.Fields(tc.body), " ")

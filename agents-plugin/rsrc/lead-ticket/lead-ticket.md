@@ -123,7 +123,10 @@ promotion is a batch of one.
    review** below in place of isolated design dispatches. Completeness review
    remains per ticket, only for stages the gate selected.
 4. The lead maps results into `{{.McpNamespace}}/tickets.sage_stamp` per ticket.
-   Use the reviewed stage (`combined` when both reviewers ran); preserve
+   Use `combined` when both stages have current verdicts, including a retained
+   completeness verdict whose premises are unchanged on a design-only retry;
+   this clears both postures after a combined block without another completeness
+   review. Otherwise stamp the reviewed stage alone. Preserve
    skipped stages by excluding their verdicts and stamps. A batch coherence
    block pauses the whole batch, but only its `affected_stems` receive that
    blocked design verdict. Keep cross-ticket issue titles prefixed with
@@ -155,7 +158,8 @@ before dispatch; previously completed, current design reviews are eligible
 baseline context whose cross-ticket compatibility still participates in the
 first batch review. If every design stage is skipped, omit design dispatch.
 Batch design verdicts also replace eligible members' prior completed design
-stamps; combine them with completeness only when that stage was reviewed.
+stamps; combine them with completeness when that stage has fresh or retained,
+still-valid review evidence.
 
 On the first review pass `review_round: initial` and the complete batch. Require
 one verdict per eligible stem and a separate coherence verdict; validate exact

@@ -10,14 +10,15 @@ import (
 // that boundary with already-mapped outcomes; no batch API or policy is added.
 func TestSageMappedBatchOutcomes(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		blocked []string
-		skipped bool
+		name        string
+		blocked     []string
+		skipped     bool
+		crossTicket bool
 	}{
-		{"clean batch", nil, false},
-		{"one ticket failure", []string{"260101-feat-alpha"}, false},
-		{"cross conflict affects two", []string{"260101-feat-alpha", "260101-feat-beta"}, false},
-		{"skipped member is context only", []string{"260101-feat-alpha"}, true},
+		{"clean batch", nil, false, false},
+		{"one ticket failure", []string{"260101-feat-alpha"}, false, false},
+		{"cross conflict affects two", []string{"260101-feat-alpha", "260101-feat-beta"}, false, true},
+		{"skipped member is context only", []string{"260101-feat-alpha"}, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -39,7 +40,11 @@ func TestSageMappedBatchOutcomes(t *testing.T) {
 					blocked = blocked || affected == stem
 				}
 				if blocked {
-					verdicts[0] = SageVerdict{Reviewer: "design", Verdict: "block", Issues: []SageIssue{{Title: "Cross-ticket [" + strings.Join(tc.blocked, ", ") + "]: incompatible ownership", Severity: "critical", Resolution: "autonomous"}}}
+					title := "Ticket-local: contradictory fallback behavior"
+					if tc.crossTicket {
+						title = "Cross-ticket [" + strings.Join(tc.blocked, ", ") + "]: incompatible ownership"
+					}
+					verdicts[0] = SageVerdict{Reviewer: "design", Verdict: "block", Issues: []SageIssue{{Title: title, Severity: "critical", Resolution: "autonomous"}}}
 				}
 				if skipped {
 					stage, verdicts = "completeness", verdicts[1:]
@@ -58,8 +63,11 @@ func TestSageMappedBatchOutcomes(t *testing.T) {
 						t.Fatalf("context-only design stamp mutated: %+v", fm)
 					}
 				} else if blocked {
-					if fm["sage-review-design"] != "blocked" || !strings.Contains(result.BlockedSection, "Cross-ticket [") || !strings.Contains(result.BlockedSection, "### Completeness Reviewer — pass") {
+					if fm["sage-review-design"] != "blocked" || !strings.Contains(result.BlockedSection, verdicts[0].Issues[0].Title) || !strings.Contains(result.BlockedSection, "### Completeness Reviewer — pass") {
 						t.Fatalf("mapped conflict diagnostics lost: %+v", result)
+					}
+					if strings.Contains(result.BlockedSection, "Cross-ticket [") != tc.crossTicket {
+						t.Fatalf("ticket-local and coherence findings conflated: %s", result.BlockedSection)
 					}
 				} else {
 					digest, err := sageReviewCurrentBodyDigest(path)
@@ -72,5 +80,45 @@ func TestSageMappedBatchOutcomes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSageBatchDeltaReusesCompletenessPass(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-feat-alpha"
+	path := writeSageTicket(t, root, stem, nil)
+	retainedCompleteness := SageVerdict{Reviewer: "completeness", Verdict: "pass"}
+	_, err := SageRecord(root, SageRecordOptions{
+		TicketStem: stem, Stage: "combined", Today: "2026-01-01",
+		Verdicts: []SageVerdict{{Reviewer: "design", Verdict: "block", Issues: []SageIssue{{Title: "Cross-ticket [260101-feat-alpha]: ownership collision", Severity: "critical", Resolution: "autonomous"}}}, retainedCompleteness},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frontmatter(path)["sage-review-completeness"] != "blocked" {
+		t.Fatal("fixture must exercise the combined block's completeness posture")
+	}
+	// The delta reviewer has cleared the design conflict; completeness premises
+	// are unchanged, so its prior verdict is valid evidence for the final stamp.
+	_, err = SageRecord(root, SageRecordOptions{
+		TicketStem: stem, Stage: "combined", Today: "2026-01-02",
+		Verdicts: []SageVerdict{{Reviewer: "design", Verdict: "pass"}, retainedCompleteness},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := sageReviewCurrentBodyDigest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fm := frontmatter(path)
+	for _, stage := range []string{"design", "completeness"} {
+		if fm["sage-review-"+stage] != "completed" || fm["sage-review-"+stage+"-reviewed"] != digest {
+			t.Fatalf("delta did not restore %s with current digest: %+v", stage, fm)
+		}
+	}
+	gate, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, "required")
+	if err != nil || gate.Action != "skip" {
+		t.Fatalf("settled delta did not converge: %+v, %v", gate, err)
 	}
 }
