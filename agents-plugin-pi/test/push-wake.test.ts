@@ -59,10 +59,15 @@ function harness(withGoal = false) {
     }
   };
   leadIdleRef.current = () => idle;
-  const goal = withGoal ? registerGoalLoop(pi, { goalLoopConfigPath: '/nonexistent/push-wake.json', ...clock }) : undefined;
+  const registry = new Map();
+  const goal = withGoal ? registerGoalLoop(pi, {
+    goalLoopConfigPath: '/nonexistent/push-wake.json',
+    rpcRegistryRef: {current: registry},
+    ...clock,
+  }) : undefined;
   registerPushFlush(pi, { delayMs: () => 10, ...clock });
   const emit = (event: string, payload: any = {}) => { let result; for (const fn of handlers.get(event) ?? []) result = fn(payload, ctx) ?? result; return result; };
-  return {pi, users, custom, timers, emit, commands, tools, ctx, goal, notices, modelTimeline,
+  return {pi, users, custom, timers, emit, commands, tools, ctx, goal, notices, modelTimeline, registry,
     modelCall: () => systemPrompt,
     start() {
       idle = false;
@@ -120,18 +125,33 @@ test('an independent user start clears the pending wake reservation and releases
   h.emit('session_shutdown');
 });
 
-test('/goal stop preserves an independently reserved child-report wake and its held payload', async () => {
+test('/goal stop leaves a running child untouched and preserves its eventual report wake', async () => {
   const h = harness(true);
+  const childStops: string[] = [];
+  const child = {
+    client: {
+      abort: async () => { childStops.push('abort'); },
+      stop: async () => { childStops.push('stop'); },
+    },
+    running: true,
+    streaming: true,
+    terminalThisTurn: false,
+    threadBound: false,
+    reportLog: [],
+  };
+  h.registry.set('child-1', child);
   await h.commands.get('goal').handler('ship', h.ctx);
-  h.push('followUp', 'child finished');
-  assert.equal(heldPushQueue.length, 1);
-  assert.equal(leadWakeStartPendingRef.current, true);
-  assert.equal(h.timers.size, 1, 'child-report wake recovery is pending');
 
   await h.commands.get('goal').handler('stop', h.ctx);
-  assert.equal(heldPushQueue.length, 1, 'goal stopping does not discard the child report');
-  assert.equal(leadWakeStartPendingRef.current, true, 'goal stopping does not clear the shared wake reservation');
-  assert.equal(h.timers.size, 1, 'child-report wake recovery remains armed');
+  assert.deepEqual(childStops, [], 'goal stopping never aborts or stops a running child');
+  assert.equal(h.registry.get('child-1'), child, 'the live child remains registered unchanged');
+
+  child.running = false;
+  child.streaming = false;
+  h.push('followUp', 'child finished');
+  assert.equal(heldPushQueue.length, 1, 'the eventual child report remains queued for delivery');
+  assert.equal(leadWakeStartPendingRef.current, true, 'child-report wake ownership is independent of goal state');
+  assert.equal(h.timers.size, 1, 'child-report wake recovery is pending');
 
   h.start();
   assert.equal(h.custom.length, 1);

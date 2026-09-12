@@ -895,7 +895,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.doesNotMatch(pi.sentUserMessages.at(-1)!.content as string, /old carry/);
     });
 
-    test("shutdown invalidates even a captured timer callback", async () => {
+    test("shutdown invalidates stale callbacks and a recovered session starts disarmed", async () => {
       const clock = fakeClock();
       const pi = fakePi();
       const handle = registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
@@ -906,6 +906,14 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       handle.resetCompactionStateForShutdown();
       stale();
       assert.deepEqual(pi.sentUserMessages.map((message) => message.content), ["Goal armed: ship"]);
+
+      const recoveredClock = fakeClock();
+      const recoveredPi = fakePi();
+      registerGoalLoop(recoveredPi.api, { goalLoopConfigPath: configPath, ...recoveredClock });
+      const { ctx: recoveredCtx } = fakeCtx();
+      recoveredPi.handlers.get("agent_settled")!({}, recoveredCtx);
+      assert.equal(recoveredClock.pendingCount(), 0, "session recovery does not restore the stopped goal or its timer");
+      assert.deepEqual(recoveredPi.sentUserMessages, [], "the first recovered settle cannot create an automatic turn");
     });
   });
 
