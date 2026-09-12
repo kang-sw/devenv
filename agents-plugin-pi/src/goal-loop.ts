@@ -2,7 +2,9 @@
  * Goal-mode arming + `agent_settled` re-injection loop (260903 Phase 1).
  *
  * Design: a user-invoked `/goal <goal>` command arms an in-memory state
- * machine and announces the goal via `pi.sendUserMessage`. While armed, every
+ * machine and announces the goal via `pi.sendUserMessage`; the exact
+ * `/goal stop|clear|reset` aliases disarm future automatic continuation
+ * without interrupting current work. While armed, every
  * `agent_settled` event (fired after a run has fully settled with no
  * automatic retry/compaction/continuation queued — see
  * `AgentSettledEvent`'s doc comment in the installed Pi type defs) re-injects
@@ -54,8 +56,8 @@
  * Following the bridge.ts/spawner.ts convention (not discuss.ts's
  * single-call-site convention): this one file mixes pure, unit-tested
  * state-machine/config-reader functions with the `registerGoalLoop` IO glue,
- * since the goal-loop's IO surface (1 command + 3 tools + 3 event listeners)
- * is closer in shape to spawner.ts than to discuss.ts.
+ * since the goal-loop's command, tools, and lifecycle listeners are closer in
+ * shape to spawner.ts than to discuss.ts.
  *
  * Phase 2 (260903) adds a third, non-terminal lever: `goal-compact-and-continue`
  * compacts context with model-supplied carry-forward prose via `ctx.compact()`
@@ -445,7 +447,8 @@ export interface RegisterGoalLoopOptions {
  */
 export interface GoalLoopShutdownHandle {
   /**
-   * Clears `leadCompactingRef` and both compaction markers (`pendingRearm`,
+   * Invalidates the goal generation and outstanding reminder correlation,
+   * clears `leadCompactingRef` and both compaction markers (`pendingRearm`,
    * `settleSwallowedWhileCompacting`), cancels a pending settle timer and
    * boundary-guard fallback timer (260906 Phase 1), and clears
    * `leadWakeStartPendingRef`. Without this, a `session_shutdown`/
@@ -473,6 +476,27 @@ export function registerGoalLoop(
   toolPreviewTuiRef: ToolPreviewTuiRef = createToolPreviewTuiRef(),
 ): GoalLoopShutdownHandle {
   let state: GoalLoopState = initialGoalLoopState();
+  /**
+   * Monotonic identity for the currently armed goal. Every explicit arm and
+   * every disarm advances it, so callbacks captured by an older timer or
+   * compaction completion can still release shared lifecycle holds without
+   * submitting or mutating a replacement goal.
+   */
+  let goalGeneration = 0;
+  let shuttingDown = false;
+
+  /**
+   * Pi's user-message admission is void-returning: after sendUserMessage
+   * returns, the adapter cannot tell whether the reminder is still in
+   * asynchronous preflight, queued behind an existing run, or executing.
+   * Keep one adapter-owned correlation until the public user message_start
+   * event exposes that exact payload. This is deliberately independent of
+   * the shared push wake reservation, which may clear on agent_start before a
+   * queued follow-up reminder is consumed.
+   */
+  let reminderHandoffSequence = 0;
+  let outstandingReminderHandoff: { id: string; generation: number } | undefined;
+
   // 260906 (compaction push-hold ticket, Phase 1): true only between the
   // `goal-compact-and-continue` lever setting `leadCompactingRef` and the
   // settle timer's fire callback consuming it — marks a compaction as
@@ -499,6 +523,7 @@ export function registerGoalLoop(
    * two existing booleans above stay simple flags.
    */
   let pendingRearmFailureReason: string | undefined;
+  let pendingRearmGeneration: number | undefined;
 
   /**
    * 260906 review relay #1 (Critical): true when an `agent_settled` fired
@@ -520,6 +545,11 @@ export function registerGoalLoop(
    * handoff, and by deferred busy release — see each site below.
    */
   let settleSwallowedWhileCompacting = false;
+  let settleSwallowedGeneration: number | undefined;
+
+  /** One host compaction operation; its id prevents a late duplicate callback from releasing a newer hold. */
+  let compactionSequence = 0;
+  let activeCompaction: { id: number; generation: number | undefined } | undefined;
 
   const scheduleTimer =
     opts.scheduleTimer ??
@@ -539,12 +569,36 @@ export function registerGoalLoop(
    * and the cancel points below need to check before clearing it.
    */
   let settleTimer: NodeJS.Timeout | undefined;
+  let settleTimerSequence = 0;
+  let activeSettleTimerId: number | undefined;
 
   function cancelSettleTimer(): void {
-    if (settleTimer !== undefined) {
-      clearTimer(settleTimer);
-      settleTimer = undefined;
-    }
+    if (settleTimer !== undefined) clearTimer(settleTimer);
+    settleTimer = undefined;
+    activeSettleTimerId = undefined;
+  }
+
+  function isCurrentArmedGeneration(generation: number): boolean {
+    return !shuttingDown && state.active && goalGeneration === generation;
+  }
+
+  /** Invalidate goal-owned work without touching compaction or child-report wake ownership. */
+  function invalidateGoal(): void {
+    goalGeneration += 1;
+    cancelSettleTimer();
+    pendingRearm = false;
+    pendingRearmFailureReason = undefined;
+    pendingRearmGeneration = undefined;
+    settleSwallowedWhileCompacting = false;
+    settleSwallowedGeneration = undefined;
+    state = disarmGoal();
+  }
+
+  function beginCompaction(generation: number | undefined): { id: number; generation: number | undefined } {
+    const operation = { id: ++compactionSequence, generation };
+    activeCompaction = operation;
+    leadCompactingRef.current = true;
+    return operation;
   }
 
   /**
@@ -578,18 +632,24 @@ export function registerGoalLoop(
    * (the live `agent_settled` listener and `releaseAfterCompaction`'s idle
    * branch alike) wants this status the instant a re-evaluation is pending.
    */
-  function armSettleTimer(ctx: ExtensionContext): void {
+  function armSettleTimer(ctx: ExtensionContext, generation = goalGeneration): void {
+    if (!isCurrentArmedGeneration(generation)) return;
     cancelSettleTimer();
     // Settle evaluation must not cancel recovery for a held-push wake.
     const config = readGoalLoopConfig(opts.goalLoopConfigPath);
     const delayMs = resolveSettleDelayMs(config);
-    settleTimer = scheduleTimer(() => runTimerCallback(ctx, "settle timer", () => onSettleTimerFire(ctx)), delayMs);
+    const timerId = ++settleTimerSequence;
+    activeSettleTimerId = timerId;
+    settleTimer = scheduleTimer(
+      () => runTimerCallback(ctx, "settle timer", () => onSettleTimerFire(ctx, generation, timerId)),
+      delayMs,
+    );
     ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: settling");
   }
 
   /**
-   * Sends the reinject reminder as a `followUp` turn and arms the
-   * boundary-guard fallback timer (260906 Phase 1) — the single call site
+   * Sends one correlation-marked reinject reminder as a `followUp` turn and
+   * arms the boundary-guard fallback timer (260906 Phase 1) — the single call site
    * for actually dispatching a reminder, used by both `onSettleTimerFire`'s
    * `pendingRearm` branch and its ordinary/replayed-settle `"reinject"`
    * branch, so the boundary-guard bookkeeping can never drift between them.
@@ -597,23 +657,48 @@ export function registerGoalLoop(
    * pre-timer code distinguished): the timer only ever fires this once
    * `ctx.isIdle()` is confirmed fresh, so a bare send would also work, but
    * `followUp` additionally survives a push that raced in and started a
-   * turn between the fire-condition check and this call.
+   * turn between the fire-condition check and this call. The correlation is
+   * cleared only by a matching public user `message_start`; timeout recovery
+   * never resubmits while that handoff is unconfirmed.
    */
-  function fireReminder(ctx: ExtensionContext, config: GoalLoopConfig | undefined, reminder: string): void {
+  function fireReminder(
+    ctx: ExtensionContext,
+    config: GoalLoopConfig | undefined,
+    reminder: string,
+    generation: number,
+  ): void {
+    if (!isCurrentArmedGeneration(generation) || outstandingReminderHandoff) return;
+
     // Shared reservation and recovery precede dispatch, including a throwing send.
     if (!reserveWakeStart({ delayMs: () => resolveSettleDelayMs(config), scheduleTimer, clearTimer }, () => {
       runTimerCallback(ctx, "wake fallback timer", () => {
-        if (heldPushQueue.length) flushHeldPushes(pi);
-        else if (state.active) {
-          armSettleTimer(ctx);
-          ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: reminder did not start a turn, retrying");
+        if (heldPushQueue.length) {
+          flushHeldPushes(pi);
+        } else if (isCurrentArmedGeneration(generation)) {
+          if (outstandingReminderHandoff) {
+            // Pi accepted this exact marked user message, but has not exposed
+            // its consumption yet. Retrying here would hand off a duplicate.
+            ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: awaiting reminder handoff");
+          } else {
+            armSettleTimer(ctx, generation);
+            ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: reminder did not start a turn, retrying");
+          }
         }
       });
     })) return;
+
+    const handoff = { id: `${generation}-${++reminderHandoffSequence}`, generation };
+    outstandingReminderHandoff = handoff;
+    reminder += `\n\n<!-- ws-pi-goal-reminder:${handoff.id} -->`;
     if (state.pendingCarryForward !== undefined) {
       reminder += `\n\nCarried forward verbatim from before compaction:\n${state.pendingCarryForward}`;
     }
-    pi.sendUserMessage(reminder, { deliverAs: "followUp" });
+    try {
+      pi.sendUserMessage(reminder, { deliverAs: "followUp" });
+    } catch (error) {
+      if (outstandingReminderHandoff?.id === handoff.id) outstandingReminderHandoff = undefined;
+      throw error;
+    }
     // Consume only after dispatch returns: a synchronous send throw retains
     // the payload for the next eligible reminder, regardless of its origin.
     state.pendingCarryForward = undefined;
@@ -645,6 +730,7 @@ export function registerGoalLoop(
       return;
     }
     if (decision.action === "force-stop") {
+      invalidateGoal();
       ctx.ui.notify(`Goal loop force-stopped: ${decision.reason}`, "warning");
       ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, undefined);
       return;
@@ -653,7 +739,7 @@ export function registerGoalLoop(
     const contextWindowOverride = resolveContextWindowOverride(config);
     const percent = computeContextPercent(ctx.getContextUsage(), contextWindowOverride);
     const reminder = buildGoalReminder(decision.goal, { percent, advisoryPercent });
-    fireReminder(ctx, config, reminder);
+    fireReminder(ctx, config, reminder, goalGeneration);
   }
 
   /**
@@ -682,8 +768,11 @@ export function registerGoalLoop(
    * `decideOnSettle`/`dispatchSettleDecision` path since both need nothing
    * more than the pure reducer against the current `state`.
    */
-  function onSettleTimerFire(ctx: ExtensionContext): void {
+  function onSettleTimerFire(ctx: ExtensionContext, generation: number, timerId: number): void {
+    if (activeSettleTimerId !== timerId) return;
     settleTimer = undefined;
+    activeSettleTimerId = undefined;
+    if (!isCurrentArmedGeneration(generation)) return;
 
     // 260906 Phase 1 review relay #1 (Important #1): a compaction that starts
     // DURING the settle delay dominates, mirroring `decideOnSettle`'s own
@@ -697,6 +786,7 @@ export function registerGoalLoop(
     // a settle that arrived while compacting was already true.
     if (leadCompactingRef.current) {
       settleSwallowedWhileCompacting = true;
+      settleSwallowedGeneration = generation;
       return;
     }
 
@@ -708,12 +798,18 @@ export function registerGoalLoop(
       flushHeldPushes(pi);
       return;
     }
+    if (outstandingReminderHandoff) {
+      ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: awaiting reminder handoff");
+      return;
+    }
 
     const config = readGoalLoopConfig(opts.goalLoopConfigPath);
 
-    if (pendingRearm) {
+    if (pendingRearm && pendingRearmGeneration === generation) {
       pendingRearm = false;
+      pendingRearmGeneration = undefined;
       settleSwallowedWhileCompacting = false; // exactly one reminder for this settle
+      settleSwallowedGeneration = undefined;
       const failureReason = pendingRearmFailureReason;
       pendingRearmFailureReason = undefined;
       if (!state.active || !state.goal) return; // nothing lever-originated to say
@@ -729,11 +825,13 @@ export function registerGoalLoop(
         // prefix on top of it.
         reminder = `${failureReason} Do not retry goal-compact-and-continue — call goal-achieved or goal-blocked instead.\n${reminder}`;
       }
-      fireReminder(ctx, config, reminder);
+      fireReminder(ctx, config, reminder, generation);
       return;
     }
 
+    if (settleSwallowedWhileCompacting && settleSwallowedGeneration !== generation) return;
     settleSwallowedWhileCompacting = false; // no-op if it was already false
+    settleSwallowedGeneration = undefined;
     const threshold = resolveRunawayThreshold(config);
     const { next, decision } = decideOnSettle(state, threshold, false, false);
     state = next;
@@ -746,34 +844,75 @@ export function registerGoalLoop(
    * evaluation. Busy release leaves pushes to the run's settle and clears only
    * reminder origins; verbatim carry remains until an eligible reminder.
    */
-  function releaseAfterCompaction(ctx: ExtensionContext, failureReason?: string): void {
+  function releaseAfterCompaction(
+    ctx: ExtensionContext,
+    failureReason?: string,
+    operation: { id: number; generation: number | undefined } | undefined = activeCompaction,
+  ): void {
     if (!leadCompactingRef.current) return; // idempotent: already released
+    if (activeCompaction && operation?.id !== activeCompaction.id) return; // stale callback for an older operation
     leadCompactingRef.current = false;
+    if (!activeCompaction || operation?.id === activeCompaction.id) activeCompaction = undefined;
+
+    const generation = operation?.generation;
+    const rearmIsCurrent = generation !== undefined && isCurrentArmedGeneration(generation);
+    const pendingBelongsToOperation = pendingRearm && pendingRearmGeneration === generation;
+    const swallowedBelongsToOperation = settleSwallowedWhileCompacting && settleSwallowedGeneration === generation;
+
     if (!ctx.isIdle()) {
       // Preserve settle-time delivery rather than racing an already-busy run.
-      pendingRearm = false;
-      settleSwallowedWhileCompacting = false;
-      pendingRearmFailureReason = undefined;
+      if (pendingBelongsToOperation) {
+        pendingRearm = false;
+        pendingRearmGeneration = undefined;
+        pendingRearmFailureReason = undefined;
+      }
+      if (swallowedBelongsToOperation) {
+        settleSwallowedWhileCompacting = false;
+        settleSwallowedGeneration = undefined;
+      }
       return;
     }
     flushHeldPushes(pi);
-    if (pendingRearm) pendingRearmFailureReason = failureReason;
-    if (pendingRearm || settleSwallowedWhileCompacting) armSettleTimer(ctx);
+    if (!rearmIsCurrent) {
+      if (pendingBelongsToOperation) {
+        pendingRearm = false;
+        pendingRearmGeneration = undefined;
+        pendingRearmFailureReason = undefined;
+      }
+      if (swallowedBelongsToOperation) {
+        settleSwallowedWhileCompacting = false;
+        settleSwallowedGeneration = undefined;
+      }
+      return;
+    }
+    if (pendingBelongsToOperation) pendingRearmFailureReason = failureReason;
+    if (pendingBelongsToOperation || swallowedBelongsToOperation) armSettleTimer(ctx, generation);
   }
 
+  const goalStopAliases = ["stop", "clear", "reset"] as const;
   pi.registerCommand("goal", {
-    description: "Arm goal mode: announce <goal> and re-inject a reminder on every settle until goal-achieved/goal-blocked is called.",
+    description: "Arm goal mode with <goal>, or stop automatic continuation with the exact aliases stop, clear, or reset.",
+    getArgumentCompletions: (prefix) => {
+      const matches = goalStopAliases.filter((alias) => alias.startsWith(prefix));
+      return matches.length ? matches.map((alias) => ({ value: alias, label: alias })) : null;
+    },
     handler: async (args, ctx) => {
       const goal = args.trim();
       if (!goal) {
-        ctx.ui.notify("Usage: /goal <goal>", "warning");
+        ctx.ui.notify("Usage: /goal <goal> | /goal stop | /goal clear | /goal reset", "warning");
+        return;
+      }
+      if ((goalStopAliases as readonly string[]).includes(goal)) {
+        invalidateGoal();
+        ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, undefined);
+        ctx.ui.notify("Automatic goal continuation stopped.", "info");
         return;
       }
       if (!ctx.isIdle()) {
         ctx.ui.notify("Agent is busy — try again when idle.", "warning");
         return;
       }
-      cancelSettleTimer(); // re-arm cancel point (260906 Phase 1)
+      invalidateGoal();
       state = armGoal(goal);
       pi.sendUserMessage(buildGoalAnnouncement(goal));
     },
@@ -810,6 +949,7 @@ export function registerGoalLoop(
       // is required (Pi's own threshold/overflow auto-compaction can end the
       // turn outright with nothing else left to re-evaluate the loop).
       settleSwallowedWhileCompacting = true;
+      settleSwallowedGeneration = goalGeneration;
       ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: waiting for compaction");
       return;
     }
@@ -840,6 +980,16 @@ export function registerGoalLoop(
   // PREVIOUS turn's settle, and a yield never flips `active` — only a
   // terminal lever or force-stop does, both of which run inside a turn whose
   // own `agent_start` already cleared the key on entry.
+  pi.on("message_start", (event) => {
+    if (event.message.role !== "user" || !outstandingReminderHandoff) return;
+    const content = event.message.content;
+    const text = typeof content === "string"
+      ? content
+      : content.filter((part) => part.type === "text").map((part) => part.text).join("");
+    const marker = `<!-- ws-pi-goal-reminder:${outstandingReminderHandoff.id} -->`;
+    if (text.includes(marker)) outstandingReminderHandoff = undefined;
+  });
+
   pi.on("agent_start", (_event, ctx) => {
     // 260906 Phase 1 (settle-timer reminder race ticket): cancel points
     // "on agent_start" for the settle timer, the boundary-guard fallback
@@ -871,7 +1021,8 @@ export function registerGoalLoop(
   // lever). The advisory `ctx.ui.notify` stays gated on goal mode being
   // active, unchanged.
   pi.on("session_before_compact", (event, ctx) => {
-    leadCompactingRef.current = true;
+    if (!activeCompaction) beginCompaction(state.active ? goalGeneration : undefined);
+    else leadCompactingRef.current = true;
     if (isChildProcess(process.env)) return;
     if (!state.active || !state.goal) return;
     ctx.ui.notify(buildCompactionObservation(state.goal, event.reason), "info");
@@ -885,14 +1036,16 @@ export function registerGoalLoop(
   // state Pi has not finished unwinding yet.
   pi.on("session_compact", (_event, ctx) => {
     // Defer beyond Pi's own compaction flag; start alone never clears our hold.
-    setImmediate(() => releaseAfterCompaction(ctx));
+    const operation = activeCompaction;
+    setImmediate(() => releaseAfterCompaction(ctx, undefined, operation));
   });
   pi.on("session_compact_failed", (event, ctx) => {
     // `event.errorMessage` is passed through as-is: Pi already formats it
     // as `"Compaction failed: …"` / `"Auto-compaction failed: …"` / `"Context
     // overflow recovery failed: …"`, so `releaseAfterCompaction` must not
     // add its own prefix on top (Review relay #1, Minor).
-    setImmediate(() => releaseAfterCompaction(ctx, event.errorMessage));
+    const operation = activeCompaction;
+    setImmediate(() => releaseAfterCompaction(ctx, event.errorMessage, operation));
   });
 
   registerWsTool(pi, {
@@ -908,8 +1061,7 @@ export function registerGoalLoop(
     } as never,
     async execute(_toolCallId, params) {
       const p = params as { summary: string };
-      cancelSettleTimer(); // cancel point (260906 Phase 1): terminal lever
-      state = disarmGoal();
+      invalidateGoal();
       return { content: [{ type: "text", text: `Goal achieved: ${p.summary}` }] };
     },
   }, toolPreviewTuiRef);
@@ -927,8 +1079,7 @@ export function registerGoalLoop(
     } as never,
     async execute(_toolCallId, params) {
       const p = params as { reason: string };
-      cancelSettleTimer(); // cancel point (260906 Phase 1): terminal lever
-      state = disarmGoal();
+      invalidateGoal();
       return { content: [{ type: "text", text: `Goal blocked: ${p.reason}` }] };
     },
   }, toolPreviewTuiRef);
@@ -963,8 +1114,9 @@ export function registerGoalLoop(
       // `releaseAfterCompaction` knows to synthesize a re-armed reminder once
       // it finishes — set BEFORE the call since `ctx.compact()`'s own internal
       // abort can settle the invoking turn synchronously within this call.
-      leadCompactingRef.current = true;
+      const operation = beginCompaction(state.active ? goalGeneration : undefined);
       pendingRearm = true;
+      pendingRearmGeneration = operation.generation;
       // Goal-scoped, not rearm-marker-scoped: busy release and agent_start
       // may clear those markers before an ordinary reminder can carry this.
       state.pendingCarryForward = p.carry_forward;
@@ -972,7 +1124,7 @@ export function registerGoalLoop(
         customInstructions: p.carry_forward,
         onComplete: () => {
           ctx.ui.notify("Compaction completed", "info");
-          releaseAfterCompaction(ctx);
+          releaseAfterCompaction(ctx, undefined, operation);
         },
         onError: (error) => {
           // Review relay #1 (Minor): the "Compaction failed: " prefix is
@@ -983,7 +1135,7 @@ export function registerGoalLoop(
           // own or a non-lever failure would double it.
           const failureReason = `Compaction failed: ${error.message}`;
           ctx.ui.notify(failureReason, "error");
-          releaseAfterCompaction(ctx, failureReason);
+          releaseAfterCompaction(ctx, failureReason, operation);
         },
       });
       return { content: [{ type: "text", text: buildCompactionLeverResult(p.carry_forward) }] };
@@ -992,15 +1144,14 @@ export function registerGoalLoop(
 
   return {
     resetCompactionStateForShutdown() {
-      state.pendingCarryForward = undefined;
+      shuttingDown = true;
+      invalidateGoal();
+      outstandingReminderHandoff = undefined;
+      activeCompaction = undefined;
       leadCompactingRef.current = false;
-      pendingRearm = false;
-      settleSwallowedWhileCompacting = false;
-      pendingRearmFailureReason = undefined;
       // 260906 Phase 1 (settle-timer reminder race ticket): cancel point
       // "session shutdown" — a replacement session must not inherit a
       // pending settle/boundary-guard timer from the torn-down one.
-      cancelSettleTimer();
       clearWakeStart();
     },
   };

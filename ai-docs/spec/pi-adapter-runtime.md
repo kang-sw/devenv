@@ -1853,11 +1853,19 @@ working toward the goal, and the model ends the run only by an explicit terminal
 call. State lives in memory for the session; there is no on-disk goal substrate in
 this surface.
 
-- **Arming.** `/goal <goal>` (a `pi.registerCommand`) enters goal mode: it injects
-  a `Goal armed: <goal>` announcement turn and sets an active-goal marker. A
-  settle outside goal mode is an ordinary stop — the `agent_settled` handler is
-  armed **only** while a goal is active, which is what keeps an ordinary Pi session
-  from looping.
+- **Arming and explicit stop.** `/goal <goal>` (a `pi.registerCommand`) enters
+  goal mode: it injects a `Goal armed: <goal>` announcement turn and sets an
+  active-goal marker. The three exact, case-sensitive arguments `/goal stop`,
+  `/goal clear`, and `/goal reset` are aliases for one idempotent stop operation;
+  whitespace around the argument is ignored, while `stopping`, `reset plan`, and
+  other text still arm or replace a goal. Stop is accepted while Pi is busy. It
+  cancels adapter-owned timers/rearm state, clears the goal footer, and reports
+  that automatic continuation stopped without aborting the current response,
+  stopping children, clearing history, releasing an in-progress compaction, or
+  disturbing child-report delivery and its independent wake recovery. A settle
+  outside goal mode is an ordinary stop — the `agent_settled` handler is armed
+  **only** while a goal is active, which is what keeps an ordinary Pi session
+  from looping. A later explicit non-reserved goal arms a fresh generation.
 - **Re-fire reminder is delayed past settle by a settle timer (260906 Phase
   1).** An `agent_settled` that would otherwise re-inject no longer sends
   immediately: it arms a single settle timer (`scheduleTimer`, real
@@ -1882,12 +1890,21 @@ this surface.
   (falls back to the yield outcome). Held pushes and a pending wake take
   priority over a reminder. Only when
   eligible does it reserve the shared wake start and arm recovery before
-  sending the reminder as an explicit `deliverAs: "followUp"` user turn.
-  The short fallback clears the boundary guard, prioritizes held pushes, or
-  retries an active goal (`Goal loop: reminder did not start a turn, retrying`, followed by
-  re-arming the settle timer) if `agent_start`/`agent_settled` never observed
-  the resulting turn. `agent_start` and `agent_settled` both clear the
-  boundary guard unconditionally as their first action.
+  sending the reminder as an explicit `deliverAs: "followUp"` user turn. Each
+  submitted reminder carries an adapter-owned correlation marker, and the
+  session tracks at most one unconfirmed reminder handoff. Only a public user
+  `message_start` whose text contains that exact marker confirms consumption;
+  an unrelated owner message, assistant/custom message, child-report wake, or
+  `agent_start` alone does not. This also covers a follow-up consumed inside an
+  existing run, where no additional `agent_start` occurs. The short fallback
+  still clears the shared boundary guard and prioritizes held pushes, but it
+  does not submit another reminder while the marked handoff remains
+  unconfirmed. Once the matching message starts, a later settle may submit the
+  next reminder normally. `/goal stop` does not clear Pi's host queues: a
+  reminder already handed to Pi may therefore execute once after stop, but its
+  settle cannot rearm the disarmed generation. The shared wake reservation
+  remains independently cleared by `agent_start` and `agent_settled`, so goal correlation never owns
+  or suppresses child-report recovery.
   - **`settle_delay_ms` config knob.** Joins the other goal-loop knobs in
     `agents-plugin-pi/goal-loop-config.json`, read fresh per arm with the
     same never-throw fallback (`DEFAULT_SETTLE_DELAY_MS`, 5000ms); a missing,
@@ -2010,7 +2027,13 @@ auto-compaction remains the last-resort backstop.
   path as an ordinary delayed settle, against a freshly-read context percent.
   Both reminder origins use explicit `deliverAs: "followUp"` delivery to
   survive a push that starts a turn between the fire-time check and the send.
-  This is what lets an armed goal recover from an
+  Goal arms/disarms advance a generation token, and settle timers, compaction
+  origins, deferred completion callbacks, and wake recovery compare their
+  captured generation before submitting or mutating goal-owned state. A stale
+  callback still releases the independent compaction hold and child pushes it
+  owns, but cannot resurrect a stopped goal, attach old carry/failure text to a
+  replacement goal, or clear a newer compaction operation. This is what lets an
+  armed goal recover from an
   auto-compaction that would otherwise have left nothing to ever re-evaluate
   the loop again. When a settle's outcome qualifies for both (the lever's own
   `ctx.compact()` call produces a swallowed settle for its own invoking

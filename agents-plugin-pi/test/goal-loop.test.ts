@@ -610,15 +610,18 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     fire: () => void;
     cancelled: NodeJS.Timeout[];
     scheduledDelays: number[];
+    scheduledCallbacks: Array<() => void>;
   } {
     let nextId = 1;
     const pending = new Map<number, () => void>();
     const cancelled: NodeJS.Timeout[] = [];
     const scheduledDelays: number[] = [];
+    const scheduledCallbacks: Array<() => void> = [];
     const scheduleTimer = (cb: () => void, ms: number): NodeJS.Timeout => {
       const id = nextId++;
       pending.set(id, cb);
       scheduledDelays.push(ms);
+      scheduledCallbacks.push(cb);
       return id as unknown as NodeJS.Timeout;
     };
     const clearTimer = (handle: NodeJS.Timeout): void => {
@@ -635,7 +638,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       pending.delete(id);
       cb();
     };
-    return { scheduleTimer, clearTimer, pendingCount: () => pending.size, fire, cancelled, scheduledDelays };
+    return { scheduleTimer, clearTimer, pendingCount: () => pending.size, fire, cancelled, scheduledDelays, scheduledCallbacks };
   }
 
   /**
@@ -651,6 +654,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     api: ExtensionAPI;
     handlers: Map<string, (event: unknown, ctx: ExtensionContext) => void>;
     commands: Map<string, (args: string, ctx: ExtensionContext) => Promise<void> | void>;
+    commandDefs: Map<string, { description?: string; getArgumentCompletions?: (prefix: string) => Array<{ value: string; label: string }> | null }>;
     tools: Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>;
     sentUserMessages: Array<{ content: unknown; options?: unknown }>;
     sentMessages: Array<{ content: unknown; options?: unknown }>;
@@ -658,6 +662,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
   } {
     const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => void>();
     const commands = new Map<string, (args: string, ctx: ExtensionContext) => Promise<void> | void>();
+    const commandDefs = new Map<string, { description?: string; getArgumentCompletions?: (prefix: string) => Array<{ value: string; label: string }> | null }>();
     const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
     const sentUserMessages: Array<{ content: unknown; options?: unknown }> = [];
     const sentMessages: Array<{ content: unknown; options?: unknown }> = [];
@@ -666,8 +671,9 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       on: (event: string, handler: (event: unknown, ctx: ExtensionContext) => void) => {
         handlers.set(event, handler);
       },
-      registerCommand: (name: string, def: { handler: (args: string, ctx: ExtensionContext) => Promise<void> | void }) => {
+      registerCommand: (name: string, def: { description?: string; getArgumentCompletions?: (prefix: string) => Array<{ value: string; label: string }> | null; handler: (args: string, ctx: ExtensionContext) => Promise<void> | void }) => {
         commands.set(name, def.handler);
+        commandDefs.set(name, def);
       },
       registerTool: (def: { name: string; execute: (...args: unknown[]) => Promise<unknown> }) => {
         tools.set(def.name, def);
@@ -686,7 +692,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
         }
       },
     };
-    return { api: api as unknown as ExtensionAPI, handlers, commands, tools, sentUserMessages, sentMessages, streaming };
+    return { api: api as unknown as ExtensionAPI, handlers, commands, commandDefs, tools, sentUserMessages, sentMessages, streaming };
   }
 
   /**
@@ -725,6 +731,184 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     assert.equal(parts[1], payload, "raw suffix preserves every character");
   }
 
+  function reminderMarker(content: unknown): string {
+    assert.equal(typeof content, "string");
+    const match = (content as string).match(/<!-- ws-pi-goal-reminder:[^ ]+ -->/);
+    assert.ok(match, "reminder carries an adapter-owned correlation marker");
+    return match[0];
+  }
+
+  function acknowledgeLatestReminder(pi: ReturnType<typeof fakePi>, ctx: ExtensionContext): void {
+    const content = pi.sentUserMessages.at(-1)!.content;
+    reminderMarker(content);
+    pi.handlers.get("message_start")!({ message: { role: "user", content } }, ctx);
+  }
+
+  describe("explicit /goal stop controls (260909)", () => {
+    test("help and completion reserve only stop, clear, and reset while ordinary goal text still arms", async () => {
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath });
+      const { ctx, notifications } = fakeCtx();
+      const def = pi.commandDefs.get("goal")!;
+
+      assert.match(def.description!, /stop.*clear.*reset/i);
+      assert.deepEqual(def.getArgumentCompletions!(""), [
+        { value: "stop", label: "stop" },
+        { value: "clear", label: "clear" },
+        { value: "reset", label: "reset" },
+      ]);
+      assert.deepEqual(def.getArgumentCompletions!("cl"), [{ value: "clear", label: "clear" }]);
+      assert.equal(def.getArgumentCompletions!("ship"), null);
+
+      await pi.commands.get("goal")!("", ctx);
+      assert.match(notifications.at(-1)!.message, /\/goal <goal>.*stop.*clear.*reset/i);
+
+      for (const text of ["stopping", "reset plan", "STOP"]) {
+        await pi.commands.get("goal")!(text, ctx);
+        assert.equal(pi.sentUserMessages.at(-1)!.content, `Goal armed: ${text}`);
+      }
+    });
+
+    for (const alias of ["stop", "clear", "reset"] as const) {
+      test(`${alias} disarms while busy without interrupting work and repeated use is harmless`, async () => {
+        const clock = fakeClock();
+        const pi = fakePi();
+        registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+        let idle = true;
+        const { ctx, notifications, statusCalls } = fakeCtx(() => idle);
+        await pi.commands.get("goal")!("ship", ctx);
+        pi.handlers.get("agent_settled")!({}, ctx);
+        assert.equal(clock.pendingCount(), 1);
+
+        idle = false;
+        await pi.commands.get("goal")!(`  ${alias}  `, ctx);
+        assert.equal(clock.pendingCount(), 0, "stop cancels local goal scheduling even during an active response");
+        assert.equal(pi.sentUserMessages.length, 1, "stop does not inject, abort, compact, or replace the current response");
+        assert.match(notifications.at(-1)!.message, /automatic goal continuation stopped/i);
+        assert.deepEqual(statusCalls.at(-1), { key: "ws-goal-loop-yield", value: undefined });
+
+        await pi.commands.get("goal")!(alias, ctx);
+        assert.equal(pi.sentUserMessages.length, 1, "repeated stop remains inert");
+        assert.match(notifications.at(-1)!.message, /automatic goal continuation stopped/i);
+      });
+    }
+
+    test("a cancelled timer callback cannot submit after stop or replace a newly armed goal", async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      const { ctx } = fakeCtx();
+      await pi.commands.get("goal")!("old", ctx);
+      pi.handlers.get("agent_settled")!({}, ctx);
+      const stale = clock.scheduledCallbacks.at(-1)!;
+
+      await pi.commands.get("goal")!("stop", ctx);
+      await pi.commands.get("goal")!("new", ctx);
+      stale();
+      assert.deepEqual(pi.sentUserMessages.map((message) => message.content), ["Goal armed: old", "Goal armed: new"]);
+
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire();
+      assert.match(pi.sentUserMessages.at(-1)!.content as string, /Goal yet running: "new"/);
+      assert.doesNotMatch(pi.sentUserMessages.at(-1)!.content as string, /Goal yet running: "old"/);
+    });
+
+    test("one reminder handoff remains outstanding until its matching public user message_start", async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      const { ctx } = fakeCtx();
+      await pi.commands.get("goal")!("ship", ctx);
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire();
+      assert.equal(pi.sentUserMessages.length, 2);
+      const marker = reminderMarker(pi.sentUserMessages[1]!.content);
+
+      pi.handlers.get("message_start")!({ message: { role: "assistant", content: marker } }, ctx);
+      pi.handlers.get("message_start")!({ message: { role: "user", content: "unrelated owner message" } }, ctx);
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire();
+      assert.equal(pi.sentUserMessages.length, 2, "unrelated messages do not clear or duplicate the outstanding handoff");
+
+      pi.handlers.get("message_start")!({ message: { role: "user", content: [{ type: "text", text: `queued ${marker}` }] } }, ctx);
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire();
+      assert.equal(pi.sentUserMessages.length, 3, "matching queued-consumption message_start clears the handoff without requiring agent_start");
+      reminderMarker(pi.sentUserMessages[2]!.content);
+    });
+
+    test("wake timeout does not resubmit an unconfirmed reminder handoff", async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      const { ctx, statusCalls } = fakeCtx();
+      await pi.commands.get("goal")!("ship", ctx);
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire(); // reminder handoff; wake timeout is now pending
+      assert.equal(pi.sentUserMessages.length, 2);
+
+      clock.fire(); // wake timeout expires before message_start
+      assert.equal(pi.sentUserMessages.length, 2, "no duplicate reminder is handed to Pi");
+      assert.equal(clock.pendingCount(), 0, "unconfirmed handoff suppresses recovery rearm");
+      assert.match(statusCalls.at(-1)!.value!, /awaiting reminder handoff/i);
+    });
+
+    test("stop preserves one already-handed reminder but prevents its settle from rearming", async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      const { ctx } = fakeCtx();
+      await pi.commands.get("goal")!("ship", ctx);
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire();
+      const marker = reminderMarker(pi.sentUserMessages[1]!.content);
+      assert.equal(clock.pendingCount(), 1, "handoff recovery is active before stop");
+
+      await pi.commands.get("goal")!("stop", ctx);
+      assert.equal(clock.pendingCount(), 1, "stop does not clear the shared wake reservation after host handoff");
+      pi.handlers.get("message_start")!({ message: { role: "user", content: marker } }, ctx);
+      pi.handlers.get("agent_settled")!({}, ctx);
+      assert.equal(clock.pendingCount(), 0);
+      assert.equal(pi.sentUserMessages.length, 2, "the accepted reminder may execute once, but cannot rearm a stopped goal");
+    });
+
+    test("stale compaction completion releases the shared hold but cannot revive old rearm or carry state", async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      const { ctx } = fakeCtx();
+      await pi.commands.get("goal")!("old", ctx);
+      let compactCall!: Parameters<ExtensionContext["compact"]>[0];
+      ctx.compact = (opts) => { compactCall = opts; };
+      await pi.tools.get("goal-compact-and-continue")!.execute("carry", { carry_forward: "old carry" }, undefined, undefined, ctx);
+      assert.equal(leadCompactingRef.current, true);
+
+      await pi.commands.get("goal")!("stop", ctx);
+      await pi.commands.get("goal")!("new", ctx);
+      compactCall!.onComplete!({} as never);
+      assert.equal(leadCompactingRef.current, false, "old completion still releases the independent compaction hold");
+      assert.equal(clock.pendingCount(), 0, "old completion cannot schedule against the new generation");
+
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire();
+      assert.match(pi.sentUserMessages.at(-1)!.content as string, /Goal yet running: "new"/);
+      assert.doesNotMatch(pi.sentUserMessages.at(-1)!.content as string, /old carry/);
+    });
+
+    test("shutdown invalidates even a captured timer callback", async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      const handle = registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      const { ctx } = fakeCtx();
+      await pi.commands.get("goal")!("ship", ctx);
+      pi.handlers.get("agent_settled")!({}, ctx);
+      const stale = clock.scheduledCallbacks.at(-1)!;
+      handle.resetCompactionStateForShutdown();
+      stale();
+      assert.deepEqual(pi.sentUserMessages.map((message) => message.content), ["Goal armed: ship"]);
+    });
+  });
+
   for (const completion of ["event", "callback", "both", "error", "failed-event"] as const) {
     test(`verbatim carry is sent once after ${completion} release`, async () => {
       const clock = fakeClock();
@@ -753,6 +937,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
         assert.match(pi.sentUserMessages[1]!.content as string, /^Compaction failed: boom Do not retry/);
       }
       pi.handlers.get("agent_start")!({}, ctx);
+      acknowledgeLatestReminder(pi, ctx);
       pi.handlers.get("agent_settled")!({}, ctx);
       clock.fire();
       assert.equal(pi.sentUserMessages.length, 3);
@@ -832,7 +1017,8 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
         pi.handlers.get("agent_settled")!({}, ctx);
         clock.fire();
       }
-      assert.match(pi.sentUserMessages.at(-1)!.content as string, /Goal yet running/);
+      if (cleanup === "shutdown") assert.equal(pi.sentUserMessages.length, 1, "shutdown leaves the old loop inert");
+      else assert.match(pi.sentUserMessages.at(-1)!.content as string, /Goal yet running/);
       for (const message of pi.sentUserMessages) assert.ok(!(message.content as string).includes(carryHeading));
     });
   }
@@ -1133,6 +1319,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     assert.equal(pi.sentUserMessages.length, 2, "the settle timer fired, replaying the swallowed settle as one ordinary reminder");
     const reminder = pi.sentUserMessages[1]!.content as string;
     assert.doesNotMatch(reminder, /Compaction failed/, "an ordinary reinject, not a lever failure reminder");
+    acknowledgeLatestReminder(pi, ctx);
 
     // Streak advanced: a second replayed settle force-stops at threshold 2.
     pi.handlers.get("session_before_compact")!({ reason: "threshold" }, ctx);
@@ -1236,6 +1423,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       "followUp",
       "queues behind the flush's turn instead of throwing — a bare call would hit the streaming guard above",
     );
+    acknowledgeLatestReminder(pi, ctx);
 
     // The reminder's own boundary-guard fallback timer is now pending; a real
     // settle proves its turn started, clearing that guard (agent_settled's
@@ -1562,7 +1750,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.match(reminder, /Goal yet running/, "the ordinary reinject wording, proving the loop is not stuck");
     });
 
-    test("the boundary guard's flag clears on agent_start, on agent_settled, and by its own fallback timeout (which retries via a fresh settle timer)", () => {
+    test("the shared wake guard clears on start/settle while an unconfirmed reminder suppresses timeout retry", () => {
       const clock = fakeClock();
       const pi = fakePi();
       registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
@@ -1578,12 +1766,14 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       pi.handlers.get("agent_start")!({}, ctx);
       assert.equal(leadWakeStartPendingRef.current, false);
       assert.equal(clock.pendingCount(), 0, "agent_start cancelled the fallback timer too");
+      acknowledgeLatestReminder(pi, ctx);
 
       // Re-drive to the same point to test clear point 2: agent_settled.
       pi.handlers.get("agent_settled")!({}, ctx);
       assert.equal(clock.pendingCount(), 1);
       clock.fire();
       assert.equal(leadWakeStartPendingRef.current, true);
+      acknowledgeLatestReminder(pi, ctx);
       pi.handlers.get("agent_settled")!({}, ctx);
       assert.equal(leadWakeStartPendingRef.current, false, "a real settle is proof the reminder's run at least started");
       assert.equal(
@@ -1592,24 +1782,18 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
         "the fallback timer was cancelled, but this same settle (state still active, not compacting) immediately arms a fresh settle timer",
       );
 
-      // Re-drive once more to test clear point 3: the fallback timeout itself.
-      pi.handlers.get("agent_settled")!({}, ctx);
+      // Re-drive once more to test the fallback timeout itself. Without a
+      // matching message_start, the adapter must not hand Pi a duplicate.
       clock.fire(); // sends the reminder, arms the fallback timer
       assert.equal(leadWakeStartPendingRef.current, true);
       const statusCallsBeforeTimeout = statusCalls.length;
-      clock.fire(); // no agent_start/agent_settled ever arrived — the fallback fires
-      assert.equal(leadWakeStartPendingRef.current, false, "cleared by its own timeout");
-      // 260906 Phase 1 review relay #1 (Minor): the fallback timeout re-arms
-      // the settle timer FIRST, then sets the retry status LAST — so the
-      // retry text is the observable status after this fire, not immediately
-      // overwritten by armSettleTimer's own "Goal loop: settling" set.
-      const newStatusCalls = statusCalls.slice(statusCallsBeforeTimeout);
+      clock.fire(); // no matching message_start ever arrived
+      assert.equal(leadWakeStartPendingRef.current, false, "shared reservation cleared by its own timeout");
       assert.deepEqual(
-        newStatusCalls.map((c) => c.value),
-        ["Goal loop: settling", "Goal loop: reminder did not start a turn, retrying"],
-        "the re-armed settle timer's own status, then the retry status text — observable, not immediately clobbered",
+        statusCalls.slice(statusCallsBeforeTimeout).map((c) => c.value),
+        ["Goal loop: awaiting reminder handoff"],
       );
-      assert.equal(clock.pendingCount(), 1, "the timeout re-arms the settle timer");
+      assert.equal(clock.pendingCount(), 0, "unconfirmed reminder handoff is not resubmitted");
     });
 
     test("the streak advances only on fired reminders — a yielded tick leaves noToolCallStreak untouched", () => {
@@ -1638,6 +1822,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       // reaches streak 2 — still below threshold 3.
       pi.handlers.get("agent_settled")!({}, ctx);
       clock.fire();
+      acknowledgeLatestReminder(pi, ctx);
       pi.handlers.get("agent_settled")!({}, ctx);
       clock.fire();
       assert.equal(pi.sentUserMessages.length, 3, "two ordinary reinjects — no force-stop yet, since the yields never advanced the streak");
