@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
-import { allocateAgentHome, createAgentStorageContext, isOwnedSessionPath, observeSessionWrite, readOwnership, touchOwnership, writeOwnership, updateOwnership } from "../src/agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, readOwnership, removeOwnedAgentHome, touchOwnership, writeOwnership, updateOwnership } from "../src/agent-storage.ts";
 import { writePrivateJson } from "../src/fork-context.ts";
 import { exploreLeaf, prepareForkLaunch, validateForkReadiness } from "../src/spawner.ts";
 
@@ -145,6 +145,64 @@ describe("agent storage", () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
+  test("removes only an exactly-owned, confirmed-stopped home and drops its empty lead directory", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+    try {
+      const context = createAgentStorageContext("lead-1", root);
+      const owned = allocateAgentHome(context, "agent-delete", "worker");
+      writeFileSync(owned.sessionPath!, "history");
+      const unrelated = join(context.root, "unrelated.txt");
+      writeFileSync(unrelated, "keep");
+      updateOwnership(owned.home, { liveness: { lifecycle: "stopped", running: false, observedAt: Date.now() } });
+      assert.equal(inspectOwnedHomeRemoval(owned).status, "eligible");
+      assert.deepEqual(removeOwnedAgentHome(owned), { status: "deleted" });
+      assert.equal(readOwnership(owned.home), undefined);
+      assert.equal(readFileSync(unrelated, "utf8"), "keep");
+      assert.equal(existsSync(join(context.root, "ws-agents", "lead-1")), false, "empty lead subtree is gone");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("retains unknown and protected children, mismatched descriptors, and homes containing symlinks", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+    try {
+      const context = createAgentStorageContext("lead-1", root);
+      const unknown = allocateAgentHome(context, "agent-unknown", "worker");
+      assert.equal(inspectOwnedHomeRemoval(unknown).status, "retained");
+
+      const protectedChild = allocateAgentHome(context, "agent-protected", "execute-worker");
+      updateOwnership(protectedChild.home, { liveness: { lifecycle: "stopped", running: false, pendingApprovalCommandId: "call-1" } });
+      assert.match((inspectOwnedHomeRemoval(protectedChild) as { reason: string }).reason, /protected/);
+
+      const mismatched = allocateAgentHome(context, "agent-mismatch", "worker");
+      updateOwnership(mismatched.home, { liveness: { lifecycle: "stopped", running: false } });
+      assert.equal(inspectOwnedHomeRemoval({ ...mismatched, role: "fork" }).status, "retained");
+
+      const symlinked = allocateAgentHome(context, "agent-symlink", "worker");
+      updateOwnership(symlinked.home, { liveness: { lifecycle: "stopped", running: false } });
+      const outside = join(context.root, "outside.txt");
+      writeFileSync(outside, "outside");
+      symlinkSync(outside, join(symlinked.home, "link"));
+      assert.match((inspectOwnedHomeRemoval(symlinked) as { reason: string }).reason, /symlink/);
+      assert.equal(readFileSync(outside, "utf8"), "outside");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("surfaces deletion failure without throwing and retains ownership for a safe retry", (t) => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+    const diagnostics = t.mock.method(console, "error", () => {});
+    try {
+      const owned = allocateAgentHome(createAgentStorageContext("lead-1", root), "agent-failure", "worker");
+      updateOwnership(owned.home, { liveness: { lifecycle: "stopped", running: false } });
+      const result = removeOwnedAgentHome(owned, (home) => {
+        rmSync(join(home, "ownership.json"));
+        throw new Error("permission denied after partial removal");
+      });
+      assert.equal(result.status, "failed");
+      assert.equal(diagnostics.mock.callCount(), 1);
+      assert.ok(readOwnership(owned.home), "metadata remains available for retry");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   test("dispatches a terminal explore leaf through the real child-process seam into its owned scratch home", async () => {
     const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
     const bin = join(root, "bin");
@@ -175,7 +233,7 @@ describe("agent storage", () => {
       assert.equal(result.output, "offline evidence");
       assert.equal(registry.size, 0, "terminal leaves self-reap after harvest");
       assert.ok(approvalDir!.startsWith(join(realpathSync(root), "ws-agents", "lead-1")));
-      assert.equal(readOwnership(home)?.sessionPath, undefined, "terminal leaf owns scratch only");
+      assert.equal(readOwnership(home), undefined, "terminal leaf scratch is removed after process close and harvest");
       assert.match(argv!, /--no-session/);
       assert.ok(!argv!.includes("ws-pi-agent-"));
     } finally {

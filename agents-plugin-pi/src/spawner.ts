@@ -94,7 +94,7 @@ import { buildAgentSendSummary, buildAgentSpawnSummary, buildExploreSummary, cre
 import { suggestModels, formatExploreTierRefusal, formatTierWarning, modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx, type ModelCatalogEntry, type TierFailure, type TierRejection } from "./model-catalog.ts";
 import { WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readExploreMode, readSpawnRole, type ExploreMode, type SpawnRole } from "./process-role.ts";
 import { captureForkContext, compareForkRegistrations, removeForkTransport, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
-import { allocateAgentHome, createAgentStorageContext, isOwnedSessionPath, observeSessionWrite, readOwnership, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, readOwnership, removeOwnedAgentHome, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
 import { readSessionEntries, reduceTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
 import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, SUBTREE_ENV, READ_TOOLS, childPolicy, readDelegationPolicy, readOnlyWsTools, type DelegationPolicy, type PlaybookProfile, type RenderProvenance } from "./delegation-policy.ts";
 import { assertSubtreeFinal, beginSubtreeDispatch, installSubtreePublisher, publishSubtree, readSubtreeChannel, readSubtreeSnapshot, subtreeWaiting, type SubtreeChannel } from "./subtree-lifecycle.ts";
@@ -732,6 +732,7 @@ function harvestExplore(id: string, record: AgentRecord, registry: AgentRegistry
   // harvest instead of lingering in the registry forever.
   if (record.selfReap) {
     registry.delete(id);
+    if (record.ownership) removeOwnedAgentHome(record.ownership);
   }
   return entry;
 }
@@ -2397,6 +2398,7 @@ export function syncOwnershipProtection(record: RpcAgentRecord): void {
       running: record.running,
       observedAt: Date.now(),
       threadBound: record.threadBound,
+      ownerHeld: record.ownerHeld,
       waitingOnChildren: record.waitingOnChildren,
       expectedReport: record.expectedReport,
       pendingQuestion: record.threadBound,
@@ -2915,19 +2917,24 @@ export function lastActivityAt(record: RpcAgentRecord): number {
  * guard clauses. While the registry is at or over `cap`, evicts the dormant
  * (`!record.client`), non-`running`, non-`threadBound` record with the
  * oldest last-activity stamp (`lastActivityAt`, above) until the new spawn
- * fits. Never evicts a `running`/`threadBound` record — when none remain to
- * evict, the spawn fails outright rather than silently exceeding the cap.
- * Only forgets the registry entry (never touches the evicted agent's
- * on-disk session file). Exported for direct unit coverage without a real
- * `RpcClient`.
+ * fits. Never evicts a live or protected record. An owned record is also
+ * eligible only when durable metadata independently confirms it stopped;
+ * missing or ambiguous metadata blocks both memory and disk eviction. Legacy
+ * records retain registry-only eviction because their paths do not authorize
+ * disk deletion. Deletion failure is diagnostic and does not fail the spawn.
  */
-export function evictForCapacity(registry: RpcAgentRegistry, cap: number): { ok: true; evictedLabel?: string } | { ok: false; error: string } {
+export function evictForCapacity(
+  registry: RpcAgentRegistry,
+  cap: number,
+  removeOwned: typeof removeOwnedAgentHome = removeOwnedAgentHome,
+): { ok: true; evictedLabel?: string } | { ok: false; error: string } {
   const evictedLabels: string[] = [];
   while (registry.size >= cap) {
     let candidate: RpcAgentRecord | undefined;
     let candidateActivity = Number.POSITIVE_INFINITY;
     for (const record of registry.values()) {
-      if (record.client || record.running || record.threadBound || record.ownerHeld || record.expectedReport || record.waitingOnChildren) continue;
+      if (record.client || record.running || record.threadBound || record.ownerHeld || record.pendingApproval || record.expectedReport || record.waitingOnChildren) continue;
+      if (record.ownership && inspectOwnedHomeRemoval(record.ownership).status !== "eligible") continue;
       const activity = lastActivityAt(record);
       if (activity < candidateActivity) {
         candidate = record;
@@ -2937,10 +2944,11 @@ export function evictForCapacity(registry: RpcAgentRegistry, cap: number): { ok:
     if (!candidate) {
       return {
         ok: false,
-        error: `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) reached and every remaining record is running/threadBound — nothing can be evicted to fit`,
+        error: `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) reached and every remaining record is live, protected, or durably unknown — nothing can be evicted to fit`,
       };
     }
     candidate.ownershipObserverStop?.();
+    if (candidate.ownership) removeOwned(candidate.ownership);
     registry.delete(candidate.agentId);
     evictedLabels.push(candidate.alias ?? candidate.agentId);
   }
@@ -3575,7 +3583,6 @@ export async function stopAgent(
     // record is already synchronously dormant, so this final disk-only read
     // cannot revive a stale client or delay the stop race protection.
     refreshAgentTelemetry(record);
-    if (record.ownership && record.launchGeneration === generation && !record.client) updateOwnership(record.ownership.home, { liveness: { lifecycle: stopped ? "stopped" : "unknown", running: false, observedAt: Date.now() } });
     if (record.ownership && record.launchGeneration === generation && !record.client) observeSessionWrite(record.ownership.home, record.sessionPath);
     // Review relay #1 (I2): a stop is a thread-close path too — the ticket
     // names "lead stop" alongside `/done`/fork final/`ws-withdraw-question`
@@ -3584,6 +3591,14 @@ export async function stopAgent(
     // later `ws-agent-send` revival, where it would silently suppress every
     // settle push for the rest of the session.
     record.threadBound = false;
+    if (record.ownership && record.launchGeneration === generation && !record.client) {
+      updateOwnership(record.ownership.home, { liveness: {
+        lifecycle: stopped ? "stopped" : "unknown", running: false, observedAt: Date.now(),
+        threadBound: false, ownerHeld: record.ownerHeld, pendingQuestion: false,
+        waitingOnChildren: record.waitingOnChildren, expectedReport: record.expectedReport,
+        pendingApprovalCommandId: record.pendingApproval?.cmdId,
+      } });
+    }
     try { opts?.onStopped?.(stopped); } catch { /* internal observer only */ }
     if (opts?.silent) {
       // An adapter-internal stop (a thread close, session shutdown) is not a

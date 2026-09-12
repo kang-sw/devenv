@@ -42,7 +42,7 @@ import { dirname, join } from "node:path";
 import { refreshAgentTelemetry, startOwnedSessionObserver, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole, type ToolGroup } from "./spawner.ts";
 import { parseForkContext, type ForkContext } from "./fork-context.ts";
 import type { ExploreMode } from "./process-role.ts";
-import { readOwnership, updateOwnership, validDescriptor, type AgentOwnership } from "./agent-storage.ts";
+import { readOwnership, removeOwnedAgentHome, updateOwnership, validDescriptor, type AgentOwnership } from "./agent-storage.ts";
 import { parseTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
 import { parseDelegationPolicy, type DelegationPolicy } from "./delegation-policy.ts";
 import type { SubtreeChannel } from "./subtree-lifecycle.ts";
@@ -371,7 +371,14 @@ export interface OrphanRoleWiring {
 export function reviveOrphans(registry: RpcAgentRegistry, orphans: PersistedOrphan[], wiring: OrphanRoleWiring = {}): RpcAgentRecord[] {
   const revived: RpcAgentRecord[] = [];
   for (const orphan of orphans) {
-    if (registry.has(orphan.agentId)) continue;
+    const existing = registry.get(orphan.agentId);
+    if (existing) {
+      // A live/current registration wins. A different, confirmed-stopped owned
+      // home from a stale sidecar is deliberately discarded through the same
+      // conservative deletion gate used by capacity eviction.
+      if (orphan.ownership && existing.ownership?.home !== orphan.ownership.home) removeOwnedAgentHome(orphan.ownership);
+      continue;
+    }
     const record = rehydrateOrphanRecord(orphan);
     startOwnedSessionObserver(record);
     if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "unknown", running: false, observedAt: Date.now(), recovery: "sidecar", threadBound: record.threadBound, waitingOnChildren: record.waitingOnChildren, expectedReport: record.expectedReport, pendingApprovalCommandId: record.pendingApproval?.cmdId } });

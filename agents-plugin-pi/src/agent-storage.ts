@@ -1,7 +1,7 @@
 /** Durable, Pi-local storage for delegated-agent material. */
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { mkdirSync, lstatSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve, relative, sep } from "node:path";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve, relative, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { parseDelegationPolicy, type DelegationPolicy } from "./delegation-policy.ts";
 
@@ -15,7 +15,7 @@ export interface AgentOwnership {
 }
 export interface OwnershipMetadata extends AgentOwnership {
   createdAt: number; lastActivityAt: number; updatedAt: number;
-  liveness: { lifecycle: "starting" | "live" | "stopping" | "stopped" | "unknown"; running?: boolean; observedAt?: number; pid?: number; instanceNonce?: string; threadBound?: boolean; pendingQuestion?: boolean; waitingOnChildren?: boolean; expectedReport?: boolean; pendingApprovalCommandId?: string; recovery?: "none" | "sidecar" | "thread" | "revived" };
+  liveness: { lifecycle: "starting" | "live" | "stopping" | "stopped" | "unknown"; running?: boolean; observedAt?: number; pid?: number; instanceNonce?: string; threadBound?: boolean; ownerHeld?: boolean; pendingQuestion?: boolean; waitingOnChildren?: boolean; expectedReport?: boolean; pendingApprovalCommandId?: string; recovery?: "none" | "sidecar" | "thread" | "revived" };
   sessionSignature?: { mtimeMs: number; size: number };
 }
 
@@ -66,7 +66,8 @@ export function validOwnership(value: unknown): value is OwnershipMetadata {
   return validDescriptor(value) && Number.isFinite(o.createdAt) && Number.isFinite(o.lastActivityAt) && Number.isFinite(o.updatedAt) && !!l && ["starting","live","stopping","stopped","unknown"].includes(l.lifecycle as string) &&
     (l.running === undefined || typeof l.running === "boolean") && (l.observedAt === undefined || Number.isFinite(l.observedAt)) &&
     (l.pid === undefined || (Number.isInteger(l.pid) && l.pid > 0)) && (l.instanceNonce === undefined || SAFE_COMPONENT.test(l.instanceNonce)) &&
-    (l.threadBound === undefined || typeof l.threadBound === "boolean") && (l.pendingQuestion === undefined || typeof l.pendingQuestion === "boolean") &&
+    (l.threadBound === undefined || typeof l.threadBound === "boolean") && (l.ownerHeld === undefined || typeof l.ownerHeld === "boolean") &&
+    (l.pendingQuestion === undefined || typeof l.pendingQuestion === "boolean") &&
     (l.waitingOnChildren === undefined || typeof l.waitingOnChildren === "boolean") && (l.expectedReport === undefined || typeof l.expectedReport === "boolean") &&
     (l.pendingApprovalCommandId === undefined || SAFE_COMPONENT.test(l.pendingApprovalCommandId)) &&
     (l.recovery === undefined || ["none","sidecar","thread","revived"].includes(l.recovery)) &&
@@ -83,6 +84,105 @@ export function updateOwnership(home: string, update: Partial<Pick<OwnershipMeta
   try { writeOwnership(next); return next; } catch { return undefined; }
 }
 export function touchOwnership(home: string): void { updateOwnership(home, { lastActivityAt: Date.now() }); }
+
+export type OwnedHomeRemovalResult =
+  | { status: "eligible"; metadata: OwnershipMetadata }
+  | { status: "retained"; reason: string }
+  | { status: "deleted" }
+  | { status: "failed"; error: string };
+
+function sameOwnershipIdentity(expected: AgentOwnership, actual: OwnershipMetadata): boolean {
+  return expected.version === actual.version && expected.ownerSessionId === actual.ownerSessionId &&
+    expected.agentId === actual.agentId && expected.home === actual.home && expected.role === actual.role &&
+    expected.exploreMode === actual.exploreMode && expected.sessionPath === actual.sessionPath;
+}
+
+function hasOnlyContainedRegularEntries(path: string, home: string): boolean {
+  for (const entry of readdirSync(path, { withFileTypes: true })) {
+    const child = join(path, entry.name);
+    const stat = lstatSync(child);
+    if (stat.isSymbolicLink()) return false;
+    const real = realpathSync(child);
+    if (!contained(home, real) || real !== child) return false;
+    if (stat.isDirectory()) {
+      if (!hasOnlyContainedRegularEntries(child, home)) return false;
+    } else if (!stat.isFile()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Rechecks durable ownership and protection without treating uncertainty as eligibility. */
+export function inspectOwnedHomeRemoval(ownership: AgentOwnership): OwnedHomeRemovalResult {
+  try {
+    const home = canonicalHome(ownership.home);
+    const ownerRoot = dirname(home);
+    const namespace = dirname(ownerRoot);
+    if (home !== ownership.home || basename(home) !== ownership.agentId || basename(ownerRoot) !== ownership.ownerSessionId || basename(namespace) !== "ws-agents") {
+      return { status: "retained", reason: "owned-home identity does not match its canonical locator" };
+    }
+    if ([ownerRoot, namespace].some(path => lstatSync(path).isSymbolicLink() || realpathSync(path) !== path)) {
+      return { status: "retained", reason: "owned-home ancestry is symlinked" };
+    }
+    const metadata = readOwnership(home);
+    if (!metadata || !sameOwnershipIdentity(ownership, metadata)) return { status: "retained", reason: "ownership metadata is missing, unreadable, or mismatched" };
+    const liveness = metadata.liveness;
+    if (liveness.lifecycle !== "stopped" || liveness.running !== false) return { status: "retained", reason: "child liveness is not confirmed stopped" };
+    if (liveness.threadBound || liveness.ownerHeld || liveness.pendingQuestion || liveness.waitingOnChildren || liveness.expectedReport || liveness.pendingApprovalCommandId) {
+      return { status: "retained", reason: "child has a protected owner, question, approval, or report wait" };
+    }
+    if (!hasOnlyContainedRegularEntries(home, home)) return { status: "retained", reason: "owned home contains a symlink or non-regular entry" };
+    return { status: "eligible", metadata };
+  } catch {
+    return { status: "retained", reason: "owned-home eligibility could not be established" };
+  }
+}
+
+function removeTreeEntry(path: string): void {
+  const stat = lstatSync(path);
+  if (!stat.isDirectory()) { rmSync(path, { force: false }); return; }
+  for (const entry of readdirSync(path)) removeTreeEntry(join(path, entry));
+  rmdirSync(path);
+}
+
+function removeOwnedHomeTree(home: string): void {
+  const metadataPath = ownershipPath(home);
+  // Ownership is the retry authorization. Remove it only after every payload
+  // entry succeeds, then remove the now-empty home itself.
+  for (const entry of readdirSync(home)) {
+    const path = join(home, entry);
+    if (path !== metadataPath) removeTreeEntry(path);
+  }
+  rmSync(metadataPath, { force: false });
+  rmdirSync(home);
+}
+
+/** Best-effort exact-home removal. Eligibility is checked again immediately before deletion. */
+export function removeOwnedAgentHome(
+  ownership: AgentOwnership,
+  remove: (path: string) => void = removeOwnedHomeTree,
+): OwnedHomeRemovalResult {
+  const first = inspectOwnedHomeRemoval(ownership);
+  if (first.status !== "eligible") return first;
+  const final = inspectOwnedHomeRemoval(ownership);
+  if (final.status !== "eligible") return final;
+  try {
+    remove(ownership.home);
+    try { rmdirSync(dirname(ownership.home)); } catch { /* another child or sidecar still owns the lead subtree */ }
+    return { status: "deleted" };
+  } catch (error) {
+    // A late failure after metadata removal (for example a concurrent writer
+    // racing the final rmdir) gets one best-effort authorization restore.
+    if (existsSync(ownership.home) && !readOwnership(ownership.home)) {
+      try { writeOwnership(final.metadata); } catch { /* original failure remains the diagnostic */ }
+    }
+    const message = String(error);
+    console.error(`ws-pi-agent: could not remove owned agent home: ${message}`);
+    return { status: "failed", error: message };
+  }
+}
+
 /** Samples the actual session file. A stat failure records no invented write/activity. */
 export function observeSessionWrite(home: string, sessionPath: string): void {
   const current = readOwnership(home); if (!current) return;

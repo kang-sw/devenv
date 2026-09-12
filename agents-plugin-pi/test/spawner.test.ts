@@ -144,9 +144,10 @@ import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, type SpawnRole } fr
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { McpStdioClient, McpToolCallResult } from "../src/mcp-stdio-client.ts";
-import { mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { allocateAgentHome, createAgentStorageContext, updateOwnership } from "../src/agent-storage.ts";
 
 // Deliberately contains spaces: argv is passed as an array, so this exact
 // loaded-entry identity must reach the child without shell escaping/rebuilds.
@@ -4101,10 +4102,48 @@ describe("evictForCapacity", () => {
     assert.equal(registry.size, 0);
   });
 
-  test("eviction only forgets the registry entry — it never touches anything on disk (no side effect to assert here, by construction: evictForCapacity takes no filesystem argument)", () => {
-    const registry: RpcAgentRegistry = new Map([["a", freshRpcRecord({ agentId: "a" })]]);
-    evictForCapacity(registry, 1);
-    assert.equal(registry.size, 0);
+  test("eviction removes a confirmed-stopped owned home as well as its registry entry", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-cap-test-"));
+    try {
+      const ownership = allocateAgentHome(createAgentStorageContext("lead-1", root), "owned-a", "worker");
+      updateOwnership(ownership.home, { liveness: { lifecycle: "stopped", running: false } });
+      const registry: RpcAgentRegistry = new Map([["owned-a", freshRpcRecord({ agentId: "owned-a", ownership, sessionPath: ownership.sessionPath })]]);
+      assert.deepEqual(evictForCapacity(registry, 1), { ok: true, evictedLabel: "owned-a" });
+      assert.equal(registry.size, 0);
+      assert.equal(readdirSync(join(realpathSync(root), "ws-agents")).length, 0);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("durably unknown or protected owned records and in-memory approval waits are not cap candidates", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-cap-test-"));
+    try {
+      const unknown = allocateAgentHome(createAgentStorageContext("lead-1", root), "unknown-a", "worker");
+      const protectedOwnership = allocateAgentHome(createAgentStorageContext("lead-1", root), "protected-a", "execute-worker");
+      updateOwnership(protectedOwnership.home, { liveness: { lifecycle: "stopped", running: false, pendingApprovalCommandId: "call-1" } });
+      for (const record of [
+        freshRpcRecord({ agentId: "unknown-a", ownership: unknown, sessionPath: unknown.sessionPath }),
+        freshRpcRecord({ agentId: "protected-a", ownership: protectedOwnership, sessionPath: protectedOwnership.sessionPath }),
+        freshRpcRecord({ agentId: "legacy-approval", pendingApproval: { cmdId: "call-2", command: "echo hi" } }),
+      ]) {
+        const registry: RpcAgentRegistry = new Map([[record.agentId, record]]);
+        const result = evictForCapacity(registry, 1);
+        assert.equal(result.ok, false, record.agentId);
+        assert.equal(registry.size, 1, record.agentId);
+      }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("an owned-home deletion failure remains diagnostic-only after eligibility and does not reject capacity eviction", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-cap-test-"));
+    try {
+      const ownership = allocateAgentHome(createAgentStorageContext("lead-1", root), "owned-failure", "worker");
+      updateOwnership(ownership.home, { liveness: { lifecycle: "stopped", running: false } });
+      const registry: RpcAgentRegistry = new Map([["owned-failure", freshRpcRecord({ agentId: "owned-failure", ownership, sessionPath: ownership.sessionPath })]]);
+      const result = evictForCapacity(registry, 1, () => ({ status: "failed", error: "permission denied" }));
+      assert.deepEqual(result, { ok: true, evictedLabel: "owned-failure" });
+      assert.equal(registry.size, 0);
+      assert.ok(readFileSync(join(ownership.home, "ownership.json"), "utf8"), "metadata remains for a later retry");
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
   test("260905 (list-model/last-report-fidelity): prefers to drop a never-active record over a revived orphan whose lastReportAtOverride is newer", () => {
