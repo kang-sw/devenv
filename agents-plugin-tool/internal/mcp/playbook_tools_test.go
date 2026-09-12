@@ -2103,6 +2103,7 @@ func TestReservedToolVarNamesContainsRequiredNames(t *testing.T) {
 	for _, name := range []string{
 		"ExploreAgent", "SpawnIdiom", "ContinueIdiom", "RoleModel", "McpNamespace", "SkillNamespace",
 		"SmallTierModel", "MediumTierModel", "LargeTierModel", "XLargeTierModel",
+		"SmallTierReasoningEffort", "MediumTierReasoningEffort", "LargeTierReasoningEffort", "XLargeTierReasoningEffort",
 	} {
 		if !reservedToolVarNames[name] {
 			t.Errorf("reservedToolVarNames missing %q", name)

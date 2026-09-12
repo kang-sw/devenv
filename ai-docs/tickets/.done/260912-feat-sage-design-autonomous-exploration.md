@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 78612a145d41ff79
 sage-review-design-reviewed: 78612a145d41ff79
+completed: 2026-09-12
 ---
 
 # Let Sage design review autonomously explore code contracts
@@ -106,3 +107,29 @@ autonomous tier and fan-out choice without hard routing criteria; prohibition
 of direct search with permission to verify explorer citations; and preservation
 of the populator's factual-only write boundary. Run the focused renderer,
 session-role, resource-mirror, and plugin contract suites.
+
+### Result (1d6a8ef2) - 2026-09-12
+
+Separated direct factual grounding from design exploration. The populator can
+find actual terminology and code evidence within the ticket's scope while
+preserving decisions and phase goals. The design reviewer may choose native
+explorers and tier bindings autonomously, verify cited artifacts without direct
+search, and report missing decisions and evidence omissions.
+
+Fixed-tier rendering now exposes reasoning effort through the existing
+harness-aware configuration resolver. The existing four-tier variable family
+includes xlarge for consistency; the reviewer offers only small, medium, and
+large. Empty effort stays blank and means omit the native binding; descriptive
+model fallbacks are explicitly unavailable for dispatch. Canonical manifests
+and the wsflow resource mirror were regenerated.
+
+Verification: focused renderer and session-role tests passed; `go test ./...`
+passed; `scripts/smoke-ws-mcp.sh ..` passed; full ws and wsflow Python plugin
+suites passed (58 and 11 tests). The rendering matrix covers both products,
+Claude, Codex, unknown-host fallback, custom model/effort configuration, cleared
+effort, and invalid configuration. Independent correctness, fit, and test
+reviews were clean; fit included fresh-reader audits of both playbooks.
+
+No unresolved findings. Completeness review and MCP session/spawning APIs are
+unchanged. Live host-native spawning was not exercised; the tests verify the
+rendered contract, not model compliance with its instructions.

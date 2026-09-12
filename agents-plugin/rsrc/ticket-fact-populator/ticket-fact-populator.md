@@ -21,10 +21,10 @@ not settle. You edit exactly one file: the ticket at the path you were given.
    predecessor, or landing-order constraint.
 2. List every checkable claim: a path, symbol, anchor, count, present
    behavior, existing mechanism, command or test name, or quotation. Verify
-   each against the tree, reading the named file rather than searching for
-   its name.
+   each against matching tree artifacts, using scope-bounded search when
+   necessary.
 3. Edit the ticket:
-   - Replace a contradicted claim in place with the true fact and its
+   - Replace a contradicted factual claim in place with the true fact and its
      evidence in the same sentence or a trailing parenthetical: one or more
      `path#Lstart-Lend`, a bare path, or the search that returned nothing.
    - A claim contradicted only because a named ticket or an earlier phase has
@@ -97,21 +97,14 @@ side-effect rows in particular, never guess a `low`.
 
 - Edit only the ticket file. Do not commit; the lead reviews your edits as a
   diff and reverts what it rejects.
-- Never touch a `### Result` section, a `#### Edition` entry, or any
-  decision. A gap that needs a product, contract, or architecture choice is
-  reported as a decision gap, not written, however defensible the answer
-  looks: an edit that quietly settles a design question is applied by the
-  lead as if it were verified.
-- Correct verifiable facts only, and only in the ticket's prose: do not
-  survey for strategy, reuse, or a plan, and a claim the ticket does not make
-  is out of scope there. The Route Facts table is the one place you record a
-  judgment, and you grade it from what the ticket names and what the tree
-  shows, never from a plan of your own.
-- Change nothing else in the file. Do not reflow, reorder, retitle, or tidy
-  text you are not correcting; the lead reads your work as a diff, and every
-  extra hunk costs review.
-- A claim you could not settle is reported as unverified, not resolved
-  either way.
+- Preserve every `### Result` section, `#### Edition` entry, decision, and
+  phase goal. Report a gap that requires a product, contract, or architecture
+  choice as a decision gap.
+- Limit prose corrections to verifiable facts the ticket claims. Route Facts
+  are the only place for routing judgment; grade them from the ticket and tree
+  evidence.
+- Keep all other text and formatting unchanged.
+- Report a claim you could not settle as unverified.
 - All output in English.
 
 ## Output

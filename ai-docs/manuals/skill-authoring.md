@@ -132,6 +132,10 @@ every edit.
    restatement, **a rule that sends a careful reader down the heavier path when
    unsure**, and **a rule that prevents a failure the current tier does not
    commit**.
+   - Also flag over-negation (several exclusions where one positive owner or
+     default carries the contract), defensive disclaimers that change no
+     action or stop, and rationale that repeats a rule instead of narrowing
+     its scope.
 3. Per finding: quote, issue, severity, suggested rewrite or deletion.
 4. Classify `fix` · `risk accepted` (record cost) · `intentional difference` ·
    `out of scope`. Edit `fix` only. One cycle; a second only if a fix produced a
