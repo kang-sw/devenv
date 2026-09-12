@@ -4,6 +4,10 @@ related:
   260912-feat-ws-pi-bounded-web-access-for-explore: prerequisite for an honest web-search intent mode
   260912-feat-ws-pi-recursive-worker-subtree-lifecycle: established worker-owned persistent children, subtree waiting, and depth ceilings
   260912-feat-ws-explore-explicit-search-modes: superseded initial feature framing
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-completeness-reviewed: fc33228416be2bf9
+sage-review-design-reviewed: fc33228416be2bf9
 ---
 
 # Refactor Pi Explore onto one persistent spawn path and intent-tier modes
@@ -40,6 +44,22 @@ At the same time, the public `deep_research?: boolean` schema biases leads towar
 - **Continuation is immutable.** Follow-ups retain the child's original mode, resolved model/effort, prompt, session, and authority envelope. Changing mode on a retained child is out of scope.
 - **Contrastive descriptions replace salience.** The schema explains neighboring boundaries, especially `code-search` versus `diagnosis` and `comparison` versus `synthesis`. `synthesis` is selected because evidence must be reconciled, not because a task sounds important.
 - **Update authoritative behavior text.** Remove stale one-shot/blocking claims from Pi guides, runtime spec anchors, comments, and tests. Keep caller-visible behavior and the test suite aligned with the refounded persistent-worker contract.
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-pi/src/spawner.ts, agents-plugin-pi/src/process-role.ts, agents-plugin-pi/src/agent-sidecar.ts, agents-plugin-pi/src/agent-storage.ts, and Pi guides/tests |
+| scope.surface | public-interface | the existing public explore tool schema changes from deep_research to intent modes in agents-plugin-pi/src/spawner.ts |
+| scope.new_public_symbol | no | no new tool name or exported caller symbol; explore remains the existing public tool |
+| scope.new_type_contract | yes | ExploreMode and the persisted exploreMode/sidecar tuple change in agents-plugin-pi/src/process-role.ts and agents-plugin-pi/src/agent-sidecar.ts |
+| scope.test_surface | existing | agents-plugin-pi/test/persistent-explore.test.ts, agents-plugin-pi/test/agent-sidecar.test.ts, and agents-plugin-pi/test/spawner.test.ts |
+| complexity.reuse_points | confirmed | reuse the existing RPC-backed spawnAgent, RpcAgentRegistry, sidecar recovery, and delegation envelope in agents-plugin-pi/src/spawner.ts |
+| complexity.side_effect_risk | high | deleting the unreachable leaf changes process lifecycle, shutdown, persistence, and nested child dispatch paths |
+| risk.correctness | high | incorrect role or mode routing can lose continuation, select the wrong tier, or re-enable a blocking path |
+| risk.fit | high | public guidance, schema, persisted records, and worker depth/capability behavior must remain aligned |
+| risk.test | high | role registration, tier resolution, rejection-before-allocation, recovery, and subtree completion require existing integration coverage |
+| risk.security_or_contract | high | the public argument removal and child capability/profile unification must not widen authority or strand persisted conversations |
 
 ## Phases
 
