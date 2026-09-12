@@ -707,7 +707,9 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       // must not. A prior controller (a `/reload`) is stopped first so its
       // timer never outlives the registry/threads it closed over.
       const spawnRole = readSpawnRole(process.env);
-      await applySessionStartAgentFooter(agentFooterLifecycle, spawnRole, ctx, agentTools.rpcRegistry, dispatchStorage);
+      // Temporary mitigation: the custom footer saturates the Pi main thread after /reload.
+      // Re-enable only after 260913-bug-ws-pi-cost-footer-cpu-saturation is resolved.
+      // await applySessionStartAgentFooter(agentFooterLifecycle, spawnRole, ctx, agentTools.rpcRegistry, dispatchStorage);
       if (shouldArmAgentWidget(spawnRole, ctx.mode)) {
         agentWidgetHandle?.stop();
         agentWidgetHandle = createAgentWidgetController(ctx, agentTools.rpcRegistry, threadHandle.threads, {
