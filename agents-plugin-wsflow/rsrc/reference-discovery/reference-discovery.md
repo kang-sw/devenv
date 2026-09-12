@@ -25,9 +25,9 @@ code: the caller maps source itself.
 0. Read project context: `AGENTS.md`'s `## Project Orientation` section (or `ai-docs/_index.md` if the project has not migrated off it). Do not rank these; use them for relevance judgments.
 1. Discover candidates through:
    - `{{.McpNamespace}}/project_tree()` — take its `ai-docs/manuals/` and `ai-docs/ref/` entries as the reference-document surface.
-   - `{{.McpNamespace}}/tickets.query(status: "ready")`
-   - `{{.McpNamespace}}/tickets.query(status: "todo")`
-   - `{{.McpNamespace}}/tickets.query(status: "idea")`
+   - `{{.McpNamespace}}/tickets.query(statuses: ["ready"])`
+   - `{{.McpNamespace}}/tickets.query(statuses: ["todo"])`
+   - `{{.McpNamespace}}/tickets.query(statuses: ["idea"])`
 2. Shortlist candidates by path and title against the brief, then read the shortlisted paths.
 3. Judge each file's relevance:
    - **`[Must]`** — directly covers behavior, patterns, or constraints the implementer needs before starting.

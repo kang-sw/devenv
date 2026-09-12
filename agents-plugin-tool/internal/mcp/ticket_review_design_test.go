@@ -96,6 +96,31 @@ func TestTicketDesignReviewExplorationBindings(t *testing.T) {
 	}
 }
 
+func TestReferenceDiscoveryTicketQuerySchema(t *testing.T) {
+	for _, product := range []struct{ pkg, namespace string }{
+		{"agents-plugin", "ws"}, {"agents-plugin-wsflow", "wsflow"},
+	} {
+		t.Run(product.namespace, func(t *testing.T) {
+			t.Setenv("WS_MCP_NAMESPACE", product.namespace)
+			t.Setenv("WS_MCP_NO_AGENT", map[bool]string{true: "1", false: "0"}[product.namespace == "wsflow"])
+			root := filepath.Join("..", "..", "..", product.pkg, "rsrc")
+			body, _, err := renderPlaybookBody(&Server{}, root, "reference-discovery", nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, status := range []string{"ready", "todo", "idea"} {
+				want := product.namespace + `/tickets.query(statuses: ["` + status + `"])`
+				if !strings.Contains(body, want) {
+					t.Errorf("rendered reference discovery is missing %q", want)
+				}
+			}
+			if strings.Contains(body, product.namespace+`/tickets.query(status:`) {
+				t.Errorf("rendered reference discovery uses unsupported status argument:\n%s", body)
+			}
+		})
+	}
+}
+
 func TestTicketFactPopulatorGroundingBoundary(t *testing.T) {
 	for _, pkg := range []string{"agents-plugin", "agents-plugin-wsflow"} {
 		root := filepath.Join("..", "..", "..", pkg, "rsrc")
