@@ -26,14 +26,18 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 		return TicketCreateResult{}, fmt.Errorf("stem must not be empty")
 	}
 
-	// Retired authoring must not disable historical stem recognition.
 	category, _, _ := strings.Cut(stem, "-")
+	state := strings.TrimSpace(opts.InitialState)
+	if state == "ready" && nonImplementationCategories[category] {
+		return TicketCreateResult{}, fmt.Errorf("%s tickets never enter ready/: they are board artifacts rather than execution targets", category)
+	}
+
+	// Retired authoring must not disable historical stem recognition.
 	if category == "workset" {
 		_, err := TicketTemplate(category)
 		return TicketCreateResult{}, err
 	}
 
-	state := strings.TrimSpace(opts.InitialState)
 	switch state {
 	case "idea", "todo", "ready":
 	default:
