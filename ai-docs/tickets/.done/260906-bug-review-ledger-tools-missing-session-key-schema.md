@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 94f5970df44846a9
 sage-review-completeness-reviewed: 94f5970df44846a9
+completed: 2026-09-12
 ---
 
 # Review marker requires a session key absent from its advertised schema
@@ -54,3 +55,17 @@ whose currently advertised fields also omit `session_key`; its failure was
 not reproduced at capture time. Reuse the shared root-aware session-key schema
 injection and cover both tools with schema assertions plus keyed marker and
 stamp calls. Preserve existing ledger semantics.
+
+### Result (be27d78e) - 2026-09-12
+
+- Added both review tools to the shared session-key schema injection, exposing
+  a required string `session_key` while preserving their other arguments and
+  runtime ledger behavior.
+- Added advertised-schema assertions for both tools and extended the stamp/marker
+  round trip to cover missing-key rejection and explicit keyed JSON marker reads.
+- Verification: focused MCP regression tests, `go test ./...`, and
+  `scripts/smoke-ws-mcp.sh ..` all passed; `git diff --check` was clean.
+- Independent correctness, fit, and test reviews were clean in round one.
+- Decisions: reused existing schema injection and existing integration tests;
+  no ledger handler changes or scope deviations were needed.
+- Unresolved findings: none.
