@@ -12,6 +12,7 @@ plans:
 sage-review-completeness: completed
 sage-review-design-reviewed: 09aabf4023b4e8be
 sage-review-completeness-reviewed: 09aabf4023b4e8be
+completed: 2026-09-12
 ---
 
 # Show agent model, effort, latest input tokens, and estimated cost in widget rows
@@ -148,10 +149,19 @@ Deviations and closeout:
   inputs changed after the final suite evidence; documentation checks cover
   closeout. The unrelated untracked `06-1203` plan remains untouched.
 
-## Blocked (2026-09-10)
+#### Edition (f1627cee) - 2026-09-12
 
-Owner-live acceptance remains outstanding: observe one worker and one fork
+Owner-live acceptance passed through paced, state-local q8 and q16 answer-modal checks. Live worker and fork rows showed actual provider/model/effort, refreshed latest input and cumulative estimated-or-unknown usage across worker turns, honest `—` values, and bounded answer-cue priority at narrow widths. A fresh fork inheriting the large lead conversation displayed only child-attributable latest/cumulative telemetry rather than charging inherited history. Acceptance uses only the owner's direct modal responses, not the fork's later lifecycle narration.
+
+## Prior Blocked (2026-09-10; resolved 2026-09-12)
+
+At that checkpoint, owner-live acceptance remained outstanding: observe one worker and one fork
 showing actual model/effort, changing latest input, and estimated USD or honest
 unknown values while work proceeds; confirm the waiting answer cue at narrow
 width. Automated fixtures do not replace this gate. Keep this ticket in
 `ready/` and skip it in unattended queue selection until that evidence arrives.
+
+
+## Resolution (2026-09-12)
+
+Closed after state-local owner-live checks passed for actual provider/model/effort, changing latest and cumulative telemetry, honest unknowns, narrow answer-cue priority, and child-only fork cost attribution excluding inherited lead history.
