@@ -696,8 +696,8 @@ func TestPlaybookPrintGoldenLeadWorkflowManualScopedExplorationTierModels(t *tes
 				t.Fatalf("printPlaybook: %v", err)
 			}
 			exploreAgent := terminologyForHarness(tc.harness)["ExploreAgent"]
-			wantSentence := "dispatch\n" + exploreAgent + " as " + tc.smallModel +
-				" by default; escalate to\n" + tc.mediumModel
+			wantSentence := "Use " + exploreAgent + " when bounded evidence gathering materially benefits from\n" +
+				"an independent read. Choose " + tc.smallModel + " by default and\n" + tc.mediumModel
 			if !strings.Contains(body, wantSentence) {
 				t.Errorf("body %q: expected Scoped Exploration sentence to contain %q", body, wantSentence)
 			}
@@ -706,7 +706,7 @@ func TestPlaybookPrintGoldenLeadWorkflowManualScopedExplorationTierModels(t *tes
 			}
 			if tc.harness == "claude" {
 				for _, forbidden := range []string{
-					"### Native delegate spawn",
+					"## Native delegate spawn",
 					"spawn_agent.model",
 					"spawn_agent.reasoning_effort",
 					`fork_turns: "none"`,
@@ -718,19 +718,17 @@ func TestPlaybookPrintGoldenLeadWorkflowManualScopedExplorationTierModels(t *tes
 			}
 			if tc.harness == "codex" {
 				for _, want := range []string{
-					"### Native delegate spawn",
-					"pass a returned `recommended-model` as\n`spawn_agent.model`",
-					"a returned `recommended-reasoning-effort` as\n`spawn_agent.reasoning_effort`",
-					"Omit either field when its binding line is\nabsent",
+					"## Native delegate spawn",
+					"map returned `recommended-model` and\n`recommended-reasoning-effort` values to the matching `spawn_agent` fields",
+					"Pass only returned bindings",
 					`fork_turns: "none"`,
-					"never use `effort` as a spawn parameter.",
-					"report the rejected field and\nvalue and do not claim that binding was applied",
+					"report its field and value",
 				} {
 					if !strings.Contains(body, want) {
 						t.Errorf("Codex workflow manual missing %q:\n%s", want, body)
 					}
 				}
-				if got := strings.Count(body, "### Native delegate spawn"); got != 1 {
+				if got := strings.Count(body, "## Native delegate spawn"); got != 1 {
 					t.Errorf("Codex workflow manual rendered delegated-binding section %d times, want 1:\n%s", got, body)
 				}
 			}
@@ -929,7 +927,7 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 		if strings.Contains(body, "{{.") {
 			t.Fatalf("%s: wsflow playbook output contains unsubstituted placeholder:\n%s", label, body)
 		}
-		for _, want := range []string{"wsflow/", "wsflow:", "wsflow runtime"} {
+		for _, want := range []string{"wsflow/", "wsflow:"} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("%s: wsflow playbook output missing %q:\n%s", label, want, body)
 			}
@@ -944,7 +942,7 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 		t.Fatalf("printPlaybook: %v", err)
 	}
 	assertCleanWsflowManual("prefer-subagent off", body)
-	if strings.Contains(body, "Prefer delegation for eligible general work") {
+	if strings.Contains(body, "Use `wsflow:lead-delegate` for bounded investigation") {
 		t.Fatalf("wsflow workflow manual must not append lead-prefer-subagent while preference is off:\n%s", body)
 	}
 
@@ -958,7 +956,7 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 	}
 	assertCleanWsflowManual("prefer-subagent on", bodyOn)
 	for _, want := range []string{
-		"Prefer delegation for eligible general work",
+		"Use `wsflow:lead-delegate` for bounded investigation",
 		"wsflow:lead-delegate",
 	} {
 		if !strings.Contains(bodyOn, want) {
@@ -2154,7 +2152,7 @@ func TestPlaybookPrintRetiredSpecStemsGone(t *testing.T) {
 }
 
 // TestPlaybookPrintGoldenLeadWorkflowManual verifies lead-workflow-manual resolves
-// and contains the updated self-reinvoke instruction.
+// and points compaction recovery at the state-restoring lead-revive entry.
 func TestPlaybookPrintGoldenLeadWorkflowManual(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
@@ -2163,12 +2161,11 @@ func TestPlaybookPrintGoldenLeadWorkflowManual(t *testing.T) {
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	if !strings.Contains(body, "WS Workflow Primitives") {
-		t.Errorf("body %q: expected heading 'WS Workflow Primitives'", body)
+	if !strings.Contains(body, "Available workflow primitives") {
+		t.Errorf("body %q: expected heading 'Available workflow primitives'", body)
 	}
-	// Verify the dead-path fix: self-reinvoke uses playbook.read, not ws:lead-workflow-manual.
-	if !strings.Contains(body, `ws/playbook.read(name: "lead-workflow-manual")`) {
-		t.Errorf("body %q: expected updated self-reinvoke instruction using playbook.read", body)
+	if !strings.Contains(body, `ws:lead-revive`) {
+		t.Errorf("body %q: expected compaction recovery instruction using lead-revive", body)
 	}
 	if strings.Contains(body, "{{.") {
 		t.Errorf("body %q: unsubstituted placeholder remains", body)
@@ -2494,8 +2491,8 @@ func TestPhase3bSkillRepoint(t *testing.T) {
 		t.Fatalf("read rsrc root: %v", err)
 	}
 	for _, entry := range entries {
-		// lead-workflow-manual is the manual itself: it states its own reload
-		// invariant, so the call it names is documentation, not a self-load.
+		// lead-workflow-manual is checked separately for its lead-revive recovery
+		// pointer; this loop guards self-load calls in the other playbooks.
 		if !entry.IsDir() || entry.Name() == "lead-workflow-manual" {
 			continue
 		}

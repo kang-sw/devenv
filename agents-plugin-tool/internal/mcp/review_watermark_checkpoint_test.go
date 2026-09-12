@@ -324,16 +324,31 @@ func TestServeStdioReviewStampRoundTripsThroughMarker(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
 
-	stampResp := callToolWithKey(t, server, 2, key, "review.stamp", map[string]any{
-		"base": base, "head": head, "verdict": "pass",
+	for _, name := range []string{"review.marker", "review.stamp"} {
+		resp := callToolOnce(t, server, 2, name, map[string]any{
+			"base": base, "head": head, "verdict": "pass",
+		})
+		if !strings.Contains(resp, `"isError":true`) || !strings.Contains(toolText(t, resp), "mandatory_session_key") {
+			t.Fatalf("%s without session_key should fail root resolution: %s", name, resp)
+		}
+	}
+
+	stampResp := callToolOnce(t, server, 3, "review.stamp", map[string]any{
+		"session_key": key, "base": base, "head": head, "verdict": "pass",
 	})
 	if !strings.Contains(stampResp, "stamped") {
 		t.Fatalf("review.stamp should confirm the append: %s", stampResp)
 	}
 
-	marker := callToolWithKey(t, server, 3, key, "review.marker", nil)
-	if !strings.Contains(marker, base) || !strings.Contains(marker, head) || !strings.Contains(marker, "pass") {
-		t.Fatalf("review.marker should round-trip the stamped entry: %s", marker)
+	marker := callToolOnce(t, server, 4, "review.marker", map[string]any{
+		"session_key": key, "format": "json",
+	})
+	var got reviewMarkerJSON
+	if err := json.Unmarshal([]byte(toolText(t, marker)), &got); err != nil {
+		t.Fatalf("review.marker should return JSON: %v\n%s", err, marker)
+	}
+	if !got.Found || got.Base != base || got.Head != head || got.Verdict != "pass" {
+		t.Fatalf("review.marker should round-trip the stamped entry: %+v", got)
 	}
 }
 

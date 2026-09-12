@@ -118,16 +118,13 @@ func renderSessionState(rec sessionRecord) string {
 // so context-compaction summaries — which prioritise document beginnings —
 // are far more likely to carry the key across compaction boundaries than the
 // bottom-of-document "## Session Key" section alone.
-// skepticalPostureBlock is the standing instruction block injected at the top
-// of every workflow_manual output when workflow.skeptical_posture is "on"
-// (the builtin default). It counteracts the tendency to accept user-stated
-// facts (names, design decisions, remembered behavior) as ground truth without
-// independent verification.
-const skepticalPostureBlock = `> **Skeptical posture is active.**
-> - Do not accept user claims about code, names, or behavior without independent verification.
-> - Assume user memory is stale: if the user says something "was defined as X", check the source.
-> - When a user's casual example or description conflicts with what you observe in source, the source wins.
-> - Ask for evidence before acting on a user assertion that would change architecture, naming, or convention.
+// skepticalPostureBlock is the standing evidence instruction injected at the
+// top of every workflow_manual output when workflow.skeptical_posture is "on"
+// (the builtin default). It asks the lead to verify current-state claims while
+// preserving the distinction between source state and user intent.
+const skepticalPostureBlock = `> **Evidence posture is active.**
+> Verify claims about current code, names, and behavior against repository evidence.
+> Report discrepancies between source state and user intent before changing architecture, naming, or conventions.
 
 `
 

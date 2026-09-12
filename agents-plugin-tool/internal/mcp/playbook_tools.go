@@ -843,7 +843,7 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 			return "", "", fmt.Errorf("resolve %s: %w", wsconfig.ItemWorkflowPreferSubagent, err)
 		}
 		if enabled {
-			body += "\n\nPrefer delegation for eligible general work: invoke `" + RuntimeNamespace() + ":lead-delegate` and apply its routing gate before dispatch. This preference does not change workflow ownership or authorize broader permissions."
+			body += "\n\nUse `" + RuntimeNamespace() + ":lead-delegate` for bounded investigation, diagnosis, drafting, and low-impact operational work."
 		}
 	}
 	return body, recommendedTier, nil

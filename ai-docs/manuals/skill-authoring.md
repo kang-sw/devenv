@@ -99,6 +99,16 @@ they are not rules.
 - Skills reference other skills only as invocation targets
   (`{{.SkillNamespace}}:<skill>`); handoffs share the conversation and need no
   carry block; name the target and its entry, never its internal judgments.
+- Shared skill text names MCP tools as `{{.McpNamespace}}/tool.name` and plugin
+  skills as `{{.SkillNamespace}}:<skill>`. Name only runtime primitives; state
+  a planned surface as a required MCP contract. Show an optional argument only
+  when the step needs its non-default value, and omit `root` for the current
+  repository.
+- Use `prompt: <block below>` or `question: <block below>` for a large literal
+  payload. Keep common primitive guidance in the workflow manual; individual
+  skills name the primitive and only local non-default arguments.
+- In shared text, `user` means the human and worker-facing escalation names
+  `the lead`. Write delegated prompts in English.
 - User-approval gates apply on direct user invocation only. Chained invocations
   re-ask only for the Approval Protocol's always-ask category.
 
