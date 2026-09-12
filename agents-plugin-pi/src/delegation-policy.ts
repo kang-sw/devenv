@@ -9,12 +9,17 @@ export const DELEGATION_ENV = "WS_PI_DELEGATION_POLICY";
 export const SUBTREE_ENV = "WS_PI_SUBTREE_CHANNEL";
 export const CHILD_MANAGEMENT_TOOLS = ["ws-agent-spawn", "ws-agent-send", "ws-agent-list", "ws-agent-stop", "ws-agent-transcript", "explore"] as const;
 export type SessionAuthority = "leaf" | "delegate" | "lead";
+export const NETWORK_TOOLS = ["web_search", "ws_web_fetch"] as const;
+export interface NetworkAuthority { search: boolean; fetch: boolean }
+const NO_NETWORK: NetworkAuthority = { search: false, fetch: false };
 export interface DelegationPolicy {
   version: 1;
   depth: number;
   maxDepth: number;
   tools: string[];
   authority: SessionAuthority;
+  /** Separate from active tools: workers can delegate network reads without exposing a web tool themselves. */
+  network?: NetworkAuthority;
   sessionKey?: string;
   parentSessionKey?: string;
 }
@@ -46,8 +51,9 @@ export function parseDelegationPolicy(value: unknown): DelegationPolicy {
   if (!p || p.version !== 1 || !Number.isSafeInteger(p.depth) || !Number.isSafeInteger(p.maxDepth) ||
       p.depth < 0 || p.maxDepth < p.depth || !Array.isArray(p.tools) || p.tools.some(t => typeof t !== "string" || !t) ||
       !Object.hasOwn(AUTHORITY, p.authority) || (p.sessionKey !== undefined && typeof p.sessionKey !== "string") ||
-      (p.parentSessionKey !== undefined && typeof p.parentSessionKey !== "string")) throw new Error("ws-pi-agent: malformed delegation policy");
-  return { ...p, tools: [...new Set(p.tools)] };
+      (p.parentSessionKey !== undefined && typeof p.parentSessionKey !== "string") ||
+      (p.network !== undefined && (!p.network || typeof p.network.search !== "boolean" || typeof p.network.fetch !== "boolean"))) throw new Error("ws-pi-agent: malformed delegation policy");
+  return { ...p, tools: [...new Set(p.tools)], ...(p.network ? { network: { ...p.network } } : {}) };
 }
 export function readDelegationPolicy(env: NodeJS.ProcessEnv = process.env): DelegationPolicy | undefined {
   const raw = env[DELEGATION_ENV];
@@ -56,21 +62,29 @@ export function readDelegationPolicy(env: NodeJS.ProcessEnv = process.env): Dele
 export function terminalTools(tools: readonly string[], depth: number, maxDepth: number): string[] {
   return [...new Set(tools)].filter(tool => depth < maxDepth || !CHILD_MANAGEMENT_TOOLS.includes(tool as never));
 }
-export function childPolicy(parent: DelegationPolicy, tools: readonly string[], authority: SessionAuthority, requiresChildren = false, sessionKey?: string): DelegationPolicy {
+export function childPolicy(parent: DelegationPolicy, tools: readonly string[], authority: SessionAuthority, requiresChildren = false, sessionKey?: string, network?: NetworkAuthority): DelegationPolicy {
   const depth = parent.depth + 1;
   if (depth > parent.maxDepth) throw new Error(`ws-pi-agent: maximum delegation depth ${parent.maxDepth} reached`);
   if (requiresChildren && depth === parent.maxDepth) throw new Error("ws-pi-agent: playbook requires children but delegation budget is exhausted");
   const effective = terminalTools(tools, depth, parent.maxDepth);
+  const requested = network ?? { search: effective.includes("web_search"), fetch: effective.includes("ws_web_fetch") };
+  const ceiling = parent.network ?? NO_NETWORK;
+  if (parent.depth > 0 && ((requested.search && !ceiling.search) || (requested.fetch && !ceiling.fetch))) {
+    throw new Error("ws-pi-agent: child network capability exceeds parent ceiling");
+  }
+  if ((effective.includes("web_search") && !requested.search) || (effective.includes("ws_web_fetch") && !requested.fetch)) {
+    throw new Error("ws-pi-agent: network tool lacks explicit authority");
+  }
   if (parent.depth > 0) {
-    const excess = effective.filter(tool => !parent.tools.includes(tool));
+    const excess = effective.filter(tool => !NETWORK_TOOLS.includes(tool as never) && !parent.tools.includes(tool));
     if (excess.length || AUTHORITY[authority] > AUTHORITY[parent.authority]) {
       throw new Error(`ws-pi-agent: child capability exceeds parent ceiling (${excess.join(", ") || `${parent.authority} -> ${authority}`})`);
     }
   }
-  return { version: 1, depth, maxDepth: parent.maxDepth, tools: effective, authority, ...(sessionKey ? { sessionKey } : {}), ...(parent.sessionKey ? { parentSessionKey: parent.sessionKey } : {}) };
+  return { version: 1, depth, maxDepth: parent.maxDepth, tools: effective, authority, ...(network || requested.search || requested.fetch ? { network: requested } : {}), ...(sessionKey ? { sessionKey } : {}), ...(parent.sessionKey ? { parentSessionKey: parent.sessionKey } : {}) };
 }
 export function assertPolicyTool(policy: DelegationPolicy | undefined, name: string): void {
-  if (policy && !policy.tools.includes(name)) throw new Error(`ws-pi-agent: ${name} exceeds this agent's capability ceiling`);
+  if (policy && (!policy.tools.includes(name) || (name === "web_search" && !policy.network?.search) || (name === "ws_web_fetch" && !policy.network?.fetch))) throw new Error(`ws-pi-agent: ${name} exceeds this agent's capability ceiling`);
 }
 export function assertSessionAuthority(policy: DelegationPolicy | undefined, args: Record<string, unknown>, knownKeys: ReadonlySet<string>): void {
   if (!policy) return;

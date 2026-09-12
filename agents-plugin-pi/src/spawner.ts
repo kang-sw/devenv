@@ -96,7 +96,9 @@ import { WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV
 import { captureForkContext, compareForkRegistrations, removeForkTransport, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
 import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, readOwnership, removeOwnedAgentHome, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
 import { readSessionEntries, reduceTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
-import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, SUBTREE_ENV, READ_TOOLS, childPolicy, readDelegationPolicy, readOnlyWsTools, type DelegationPolicy, type PlaybookProfile, type RenderProvenance } from "./delegation-policy.ts";
+import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, SUBTREE_ENV, READ_TOOLS, NETWORK_TOOLS, childPolicy, readDelegationPolicy, readOnlyWsTools, type DelegationPolicy, type PlaybookProfile, type RenderProvenance } from "./delegation-policy.ts";
+import { createWebSearch } from "./web-search.ts";
+import { clearWebReadiness, verifyWebReadiness, WEB_HOME_ENV, WEB_NONCE_ENV } from "./web-readiness.ts";
 import { assertSubtreeFinal, beginSubtreeDispatch, installSubtreePublisher, publishSubtree, readSubtreeChannel, readSubtreeSnapshot, subtreeWaiting, type SubtreeChannel } from "./subtree-lifecycle.ts";
 
 // ---------------------------------------------------------------------------
@@ -2357,6 +2359,8 @@ export function buildRpcClientOptions(
   env[WS_PI_PARENT_SESSION_KEY_ENV] = role === "fork" ? parentSessionKey ?? "" : "";
   env[DELEGATION_ENV] = delegation ? JSON.stringify(delegation) : "";
   env[SUBTREE_ENV] = subtreeChannel ? JSON.stringify(subtreeChannel) : "";
+  env[WEB_HOME_ENV] = role === "explore" ? dirname(sessionPath) : "";
+  env[WEB_NONCE_ENV] = role === "explore" ? subtreeChannel?.nonce ?? "" : "";
   // RpcClient overlays env onto process.env, so deletion here would preserve a
   // stale parent value. Empty values neutralize forced bootstrap selection.
   for (const override of CHILD_BOOTSTRAP_OVERRIDE_ENVS) env[override] = "";
@@ -3062,8 +3066,13 @@ export function spawnAdmission(ctx: RpcSpawnCtx): DelegationPolicy {
   const tools = profile?.readOnly
     ? [...READ_TOOLS, REPORT_TO_LEAD_TOOL_NAME, ...CHILD_MANAGEMENT_TOOLS, ...readOnlyWsTools(ctx.wsToolNames)]
     : (ctx.explicitTools ?? resolveTools(group, ctx.wsToolNames)).split(",");
+  if (ctx.spawnRole === "explore") tools.push(...NETWORK_TOOLS);
+  const network = ctx.spawnRole === "explore" ? { search: true, fetch: true }
+    : !profile?.readOnly && (group === "full-worker" || group === "execute-worker")
+      ? parent.depth === 0 ? { search: true, fetch: true } : parent.network
+      : undefined;
   const authority = profile?.authority ?? (ctx.spawnRole === "explore" || group === "execute-worker" ? "leaf" : "lead");
-  const policy = childPolicy(parent, tools, authority, profile?.requiresChildren, ctx.provenance?.sessionKey);
+  const policy = childPolicy(parent, tools, authority, profile?.requiresChildren, ctx.provenance?.sessionKey, network);
   // A lateral fork's curated active names are not its execution ceiling: the
   // lead shell fallback and worker bash have equivalent native authority.
   if (fork) policy.tools = [...new Set([...policy.tools, GATED_EXEC_TOOL_NAME, ...resolveTools("full-worker", ctx.wsToolNames).split(",")])];
@@ -3113,6 +3122,7 @@ export async function spawnAgent(
     inherited: resolution.source === "inherit",
   });
 
+  if (ctx.spawnRole === "explore") await createWebSearch({ packageRoot: dirname(dirname(ctx.extensionPath)) }).probe();
   const promptBody = params.systemPromptPath ? readFileSync(params.systemPromptPath, "utf8") : undefined;
   const alias = params.alias ?? (ctx.aliasPrefix ? nextGeneratedAlias(registry, ctx.aliasPrefix) : undefined);
   const eviction = runSpawnGuards(registry, alias, resolveAgentRegistryCap());
@@ -3176,6 +3186,7 @@ export async function spawnAgent(
   };
   registry.set(agentId, record);
   startOwnedSessionObserver(record);
+  if (role === "explore") clearWebReadiness(ownership.home);
 
   const client = new RpcClient(
     buildRpcClientOptions(
@@ -3223,6 +3234,7 @@ export async function spawnAgent(
     // field).
     if (record.spawnRole === "explore") {
       await verifyResearchSelection(client, record, true);
+      verifyWebReadiness(ownership.home, subtreeChannel.nonce);
     } else {
       await applyModelEffort(client, record.modelEffort);
     }
@@ -3303,7 +3315,7 @@ export async function sendToAgent(
   const parentPolicy = readDelegationPolicy();
   if (parentPolicy) {
     if (!record.delegation) throw new Error("ws-pi-agent: legacy child lacks a resumable capability envelope");
-    const admitted = childPolicy(parentPolicy, record.delegation.tools, record.delegation.authority);
+    const admitted = childPolicy(parentPolicy, record.delegation.tools, record.delegation.authority, false, undefined, record.delegation.network);
     if (admitted.depth !== record.delegation.depth || parentPolicy.maxDepth < record.delegation.maxDepth) throw new Error("ws-pi-agent: recovered child exceeds the current delegation budget");
   }
 
@@ -3326,6 +3338,11 @@ export async function sendToAgent(
   if (ctx.leadSend && !ctx.finishToken && record.threadBound) record.threadBound = false;
 
   if (!record.client) {
+    if (record.spawnRole === "explore") {
+      if (!record.delegation?.network?.search || !record.delegation.network.fetch || !record.subtreeChannel) throw new Error("web-search-tool-unavailable: legacy Explore lacks network authority; start a new researcher");
+      await createWebSearch({ packageRoot: dirname(dirname(ctx.extensionPath)) }).probe();
+      clearWebReadiness(dirname(record.sessionPath));
+    }
     if (record.subtreeChannel) record.subtreeChannel = { ...record.subtreeChannel, nonce: randomUUID() };
     const forkLaunch = record.spawnRole === "fork" ? prepareForkLaunch(record.forkContext) : undefined;
     // 260904 Phase 1 (side-thread fork): `forkFrom` is deliberately never
@@ -3372,6 +3389,7 @@ export async function sendToAgent(
       if (forkLaunch) validateForkReadiness(forkLaunch, record, await client.getState());
       if (record.spawnRole === "explore") {
         await verifyResearchSelection(client, record, false);
+        verifyWebReadiness(dirname(record.sessionPath), record.subtreeChannel?.nonce ?? "");
       } else {
         await applyModelEffort(client, record.modelEffort);
       }

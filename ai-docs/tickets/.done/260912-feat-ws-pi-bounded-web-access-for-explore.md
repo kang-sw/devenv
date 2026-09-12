@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 4e8171eab77b1020
 sage-review-design-reviewed: fd2bc42bedfe80a7
+completed: 2026-09-13
 ---
 
 # Pi Explore: bounded fetch plus bundled web-search extension
@@ -110,3 +111,31 @@ Round-one implementation review proved that owned-home containment exists but au
 - Retain the current implementation branch and its round-one evidence while the prerequisite runs. When resumed, integrate the prerequisite, fix the remaining round-one findings (ordinary leading-bracket queries, native DNS/socket pinning coverage, free-provider startup plus dormant/restarted readiness, result-page-request observation, and packed-artifact dependency/peer/license regression), then perform bounded round-two verification and review.
 
 This edition does not defer or weaken automatic pruning. If the shared retention phases cannot own these files without a web-specific cleanup mechanism, stop again with evidence rather than closing this ticket on containment alone.
+
+#### Round-one review evidence (4faac2c2) - 2026-09-12
+
+Implementation checkpoints `e741bc04` and `32687830` are retained on `impl/goal/track/pi-agent/cedar-lantern-moss/evict-frame-coke`. Full Pi tests, real public fetch, real RPC Explore search at depths one and two, and packed install/update with host-peer capture passed. This is not a Phase 1 Result: independent round-1 review remains non-clean. The completed retention prerequisite clears the lifecycle gate, but its real cap-eviction and stale-child prune paths still require this ticket's resumed verification.
+
+At the round-one checkpoint, `260908-feat-ws-pi-agent-session-disk-retention` Phase 1 explicitly excluded disk deletion, TTL configuration, and cross-session scanning, so fixture-home deletion proved containment rather than lifecycle cleanup. The completed Phase 2 and Phase 3 lifecycle now owns that cleanup; do not introduce a separate web-cache retention policy.
+
+Before the bounded round-two check, address the retained round-one findings:
+
+- Correctness Important: query validation rejects all leading-bracket strings, including ordinary queries such as `[RFC 9110] redirect handling`; limit refusal to actual upstream multi-query expansion.
+- Test Important: exercise native socket creation and DNS pinning together rather than only a request-options helper.
+- Test Important: add non-paid real child-extension readiness coverage across initial and dormant/restarted launch.
+- Test Important: verify the settled retention lifecycle rather than tautological fixture deletion acceptance.
+- Test Important: make exact-package search fixtures observe or forbid requests to result-page URLs under hostile content/curator configuration.
+- Test Important: automate packed-artifact dependency, peer-isolation, and license checks currently verified only by manual commands.
+
+Fit review and the guide fresh-reader audit are clean. The fit review's initial inference that lockfile `inBundle` annotations proved physical Pi-core bundling was withdrawn against actual artifact evidence. No Critical findings were raised; no round-2 review has run.
+
+The read-only reviewer/artifact-writing contract mismatch was captured separately as `260912-bug-ws-pi-readonly-reviewer-artifact-contract`; the parent preserved all returned review reports without granting source-write authority.
+
+### Result (c229895d) - 2026-09-13
+
+- Landed explicit descendant network authority, native public-only DNS-pinned bounded fetch, nonce-fenced inline/owned-home spills, and the query-only facade over the exact bundled `pi-web-access@0.29.0` one-shot helper. The settled process-isolation/direct-only Editions govern: unsupported proxies fail redacted, provider configuration remains owner-controlled, and upstream content/curator modes are forced off. Pi core packages remain host peers; shared ws-mcp/Codex/Claude surfaces are unchanged.
+- Integrated completed shared retention through lead merge `0b2519a4`. Real cap eviction and controller stale pruning now remove actual fetched spills; interrupted sessions with uncertain liveness remain protected until termination is confirmed. No web-specific TTL or deletion mechanism was added.
+- Remediation `c229895d` fixes ordinary leading-bracket query rejection while still refusing upstream-expandable string arrays. Tests now exercise real native socket lookup across redirects, real no-inference RPC startup/dormant restart with fresh readiness, observable absence of result-page requests, and offline packed install/reinstall with archive/license/host-peer checks and installed-helper capture.
+- Verification: `cd agents-plugin-pi && npm test -- --test-reporter=dot` passed on the integrated/remediated source. The opt-in `test/web-explore-live.test.ts` was rerun at this checkpoint with the installed Pi CLI and `openai-codex/gpt-6-astra`; real direct-lead and nested-worker searches both passed at depths one and two. Prior real public HTTPS fetch acceptance is retained. No separate build script exists in the Pi package. Startup-fixture failures were diagnosed as ESM resolution, missing frozen model selection, and an ambiguous catalog identifier; the fixture was corrected without changing production guards or making paid requests in the default suite.
+- Independent review: round-one fit and guide fresh-reader audit were clean; bounded round-two correctness and test reviewers resolved all six retained Important findings and confirmed the retention stop was resolved rather than waived. No Critical or unresolved findings remain; no third round or fresh round-two sweep was performed.
+- Decisions: native-socket coverage translates only the final test destination after observing the production pin; startup coverage suppresses only model prompting; package installation uses the existing npm cache and explicit host peers. These are test isolation choices, not production exceptions. The related Explore mode-alias refactor and future proxy support remain outside this ticket. Omitted: none within the settled phase contract.

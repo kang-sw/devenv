@@ -1,0 +1,18 @@
+function frame(value) {
+  const body = Buffer.from(JSON.stringify(value));
+  const header = Buffer.alloc(4); header.writeUInt32BE(body.length);
+  return Buffer.concat([header, body]);
+}
+let input = '';
+for await (const chunk of process.stdin) input += chunk;
+const good = frame({ ready: true });
+switch (process.env.WEB_SEARCH_FIXTURE_MODE) {
+  case 'duplicate': process.stdout.write(Buffer.concat([good, good])); break;
+  case 'trailing': process.stdout.write(Buffer.concat([good, Buffer.from('secret')])); break;
+  case 'malformed': process.stdout.write('raw-secret'); break;
+  case 'over-limit': process.stdout.write(Buffer.alloc(65541)); break;
+  case 'stderr-limit': process.stderr.write('secret'.repeat(2000)); process.stdout.write(good); break;
+  case 'nonzero': process.stdout.write(good); process.exitCode = 1; break;
+  case 'timeout': setInterval(() => {}, 1000); break;
+  default: process.stdout.write(good);
+}
