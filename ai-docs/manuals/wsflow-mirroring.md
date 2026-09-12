@@ -39,7 +39,7 @@ Included:
 - `lead-ticket`
 - `lead-check-blockers`
 - `lead-bootstrap`
-- `lead-add-rule`
+- `lead-audit-doc`
 - `lead-ship`
 - `lead-review`
 - `lead-tune`

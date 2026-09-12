@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: c736ff9759cea328
 sage-review-completeness-reviewed: c736ff9759cea328
+completed: 2026-09-12
 ---
 
 # Reconcile lead-review fix handoff with ticket-only lead-run
@@ -56,3 +57,24 @@ Replace the invalid local artifact-to-`lead-run` handoff with the settled
 `lead-delegate` route and its escalation to `lead-ticket`. Preserve contributor
 handoff behavior and add contract coverage for bounded local repair, material
 repair escalation, and re-review after the repair.
+
+### Result (648de81b) - 2026-09-12
+
+Local review findings now enter lead-delegate's eligibility gate. Material
+repairs enter lead-ticket and then ticket-only lead-run. Both repair routes
+return to lead-review; range reviews preserve the original base and include
+repair commits in the new head. Contributor handoff remains unchanged.
+
+Verification: 59 full-package and 11 wsflow Python tests passed; Go wsrsrc and
+MCP suites passed, including product-mode rendering. Regenerated the resource
+manifest and byte-identical wsflow resource mirror. Git diff whitespace check
+passed. Independent correctness and test reviews found no issues.
+
+The fresh-reader fit review raised one Important ambiguity: whether the
+ordinary self-verifying eligibility condition conflicts with independent
+follow-up review. Classified as intentional difference: executor verification
+and independent review are cumulative, and the exception changes only the
+independent-review trigger. Waiving executor verification would broaden the
+ticket's retained gate. Accepted cost: a cautious reader may still need to
+distinguish the two verification responsibilities. No other deviations or
+omitted scope.

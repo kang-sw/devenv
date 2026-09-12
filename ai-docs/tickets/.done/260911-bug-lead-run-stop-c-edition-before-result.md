@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 5970418bf9bb0980
 sage-review-completeness-reviewed: 5970418bf9bb0980
+completed: 2026-09-12
 ---
 
 # lead-run stop (c) requires an Edition even when the executed phase has no Result
@@ -52,3 +53,21 @@ recovery procedure.
 
 Implement the settled Result-sensitive recovery branches and add coverage for
 stops raised both before the first Result and after a Result exists.
+
+### Result (2f573b7e) - 2026-09-12
+
+The shipped lead-run policy now revises an unimplemented executed phase directly
+when stop (c) occurs before its first Result, while preserving the Edition-under-
+Result path for a completed phase. Both paths retain the raised design-review
+gate and resume the worker after a passing review. Rendered-policy coverage pins
+the distinction for ws and wsflow; canonical manifests and the byte-identical
+wsflow rsrc mirror were regenerated.
+
+Verification: focused lead-run renderer policy test, wsflow rsrc mirror drift
+guard, and `go test ./...` passed. Correctness and test partition reviews, plus
+the second-round verification, found no issues.
+
+
+## Resolution (2026-09-12)
+
+Phase 1 completed: stop-(c) recovery now preserves the valid no-Result and existing-Result ticket lifecycle branches.

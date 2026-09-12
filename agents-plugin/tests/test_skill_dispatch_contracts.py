@@ -23,9 +23,9 @@ EXPECTED_LEAD_SKILLS = {
     "lead-tune",
     "lead-revive",
     "mcp-server-repair",
+    "lead-audit-doc",
     # undecided disposition; survive unchanged
     "lead-scope-worktree",
-    "lead-add-rule",
 }
 
 # Names that must not reappear on this flagship package's shipped skill or
@@ -36,6 +36,7 @@ EXPECTED_LEAD_SKILLS = {
 # test_wsflow_only_aliases_route_to_target. Do not extend this sweep to the
 # wsflow surface — that would break the intended one-package carve-out.
 RETIRED_SKILL_NAMES = (
+    "lead-add-rule",
     "lead-prefer-subagent",
     "lead-proceed",
     "lead-implement",
@@ -53,6 +54,21 @@ RETIRED_SKILL_NAMES = (
 
 
 class SkillDispatchContractsTest(unittest.TestCase):
+    def test_document_audit_preserves_approved_prose_and_dispatch_boundary(self):
+        contract = json.loads((Path(__file__).parent / "fixtures" / "lead_audit_doc_contract.json").read_text())
+        for package in (SKILLS_DIR.parent, SKILLS_DIR.parent.parent / "agents-plugin-wsflow"):
+            shim = (package / "skills" / "lead-audit-doc" / "SKILL.md").read_text()
+            self.assertEqual(re.search(r"^description: (.*)$", shim, re.M).group(1), contract["description"])
+            self.assertNotIn("allow_implicit_invocation: false", shim)
+            for name, key in (("lead-audit-doc", "lead"), ("fresh-read-doc-auditor", "auditor")):
+                body = (package / "rsrc" / name / f"{name}.md").read_text().split("---", 2)[2].strip()
+                self.assertEqual(body, contract[key])
+            for root in (package / "skills", package / "rsrc"):
+                self.assertFalse((root / "lead-add-rule").exists())
+                for path in root.rglob("*.md"):
+                    self.assertNotIn("lead-add-rule", path.read_text(), str(path))
+            self.assertFalse((package / "skills" / "fresh-read-doc-auditor").exists())
+
     def test_delegate_and_sibling_exact_prose(self):
         contract = json.loads((Path(__file__).parent / "fixtures" / "lead_delegate_contract.json").read_text())
         for package in (SKILLS_DIR.parent, SKILLS_DIR.parent.parent / "agents-plugin-wsflow"):
@@ -75,6 +91,27 @@ class SkillDispatchContractsTest(unittest.TestCase):
         shim = (SKILLS_DIR / "lead-delegate" / "SKILL.md").read_text()
         self.assertIn('ws/playbook.read(name: "lead-delegate", session_key:', shim)
         self.assertIn("ws/workflow_manual", shim)
+
+    def test_review_local_fix_uses_delegate_gate_and_returns_to_review(self):
+        for package in (RSRC_DIR, SKILLS_DIR.parent.parent / "agents-plugin-wsflow" / "rsrc"):
+            review = (package / "lead-review" / "lead-review.md").read_text()
+            handoff = review.split("- **NEEDS FIX**:")[1].split("- **OPEN**:")[0]
+            self.assertIn("{{.SkillNamespace}}:lead-delegate` with the findings path", handoff)
+            self.assertIn("If its routing gate requires a ticket", handoff)
+            self.assertIn("{{.SkillNamespace}}:lead-ticket` with those inputs, then", handoff)
+            self.assertIn("{{.SkillNamespace}}:lead-run` with the ready ticket", handoff)
+            self.assertIn("After either local\n  repair route completes", handoff)
+            self.assertIn("{{.SkillNamespace}}:lead-review` again", handoff)
+            self.assertIn("retain the original base and include the\n  repair commits", handoff)
+            self.assertIn("Contributor → the config's Comment Method, else hand over the path", handoff)
+            self.assertNotIn("with that path as the contract", handoff)
+            delegate = (package / "lead-delegate" / "lead-delegate.md").read_text()
+            gate = delegate.split("## Routing")[1].split("## Assignment")[0]
+            self.assertIn("public behavior, an API, protocol, schema, template", gate)
+            self.assertIn("canonical flow, or architecture", gate)
+            self.assertIn("unresolved product or workflow decision", gate)
+            self.assertIn("independent review is needed, unless the task is a local NEEDS FIX repair", gate)
+            self.assertIn("whose follow-up review supplies\n  that verification", gate)
 
     def test_delegate_implementer_is_a_tier_unaware_reviewer_free_floor(self):
         # The delegate-side implementer floor is a render-only rsrc playbook with
