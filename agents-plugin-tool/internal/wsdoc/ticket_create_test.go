@@ -167,23 +167,29 @@ func TestTicketCreateExemptCategoryStampsNoSageReviewField(t *testing.T) {
 	}
 }
 
-// TestTicketCreateExemptCategoryAtReadyStampsNoSageReviewField exercises the
-// exempt-category branch at direct-to-ready creation (ticket_create.go:60):
-// designRequired must be false for research so the never-skippable
-// design-invariant check on that line does not fire even though state ==
-// "ready", and creation succeeds with no sage-review-* field stamped despite
-// SageReview resolving to a non-terminal posture.
-func TestTicketCreateExemptCategoryAtReadyStampsNoSageReviewField(t *testing.T) {
-	for _, category := range []string{"research"} {
+func TestTicketCreateBoardCategoryAtReadyRejectsWithoutWrites(t *testing.T) {
+	for _, category := range []string{"epic", "research", "workset"} {
 		t.Run(category, func(t *testing.T) {
 			root := t.TempDir()
-			res, err := TicketCreate(root, TicketCreateOptions{Stem: category + "-foo", InitialState: "ready", SageReview: "auto", Today: "260101"})
-			if err != nil {
-				t.Fatalf("TicketCreate ready: %v", err)
+			opts := TicketCreateOptions{Stem: category + "-foo", InitialState: "ready", SageReview: "auto", Today: "260101"}
+			res, err := TicketCreate(root, opts)
+			if err == nil || res != (TicketCreateResult{}) {
+				t.Fatalf("TicketCreate ready = %+v, %v; want rejection", res, err)
 			}
-			body := readCreatedTicket(t, root, res)
-			if strings.Contains(body, "sage-review") {
-				t.Fatalf("exempt category stub must not contain sage-review: %q", body)
+			if !strings.Contains(err.Error(), category+" tickets never enter ready/") {
+				t.Fatalf("expected ready-category rejection, got %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(root, "ai-docs")); !os.IsNotExist(err) {
+				t.Fatalf("rejected creation changed the filesystem: %v", err)
+			}
+			path := "ai-docs/tickets/ready/260101-" + category + "-foo.md"
+			const original = "existing ticket content\n"
+			mustWrite(t, root, path, original)
+			if _, err := TicketCreate(root, opts); err == nil {
+				t.Fatal("expected rejection with an existing ticket")
+			}
+			if got := readFileString(t, filepath.Join(root, path)); got != original {
+				t.Fatalf("rejected creation changed existing ticket: %q", got)
 			}
 		})
 	}

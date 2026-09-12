@@ -25,7 +25,13 @@ func TestWorksetAuthoringRetired(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			root := t.TempDir()
 			_, err := TicketCreate(root, TicketCreateOptions{Stem: "workset-board", InitialState: state, Today: "260101"})
-			check(t, err)
+			if state == "ready" {
+				if err == nil || !strings.Contains(err.Error(), "workset tickets never enter ready/") {
+					t.Fatalf("ready category error = %v", err)
+				}
+			} else {
+				check(t, err)
+			}
 			if _, err := os.Stat(filepath.Join(root, "ai-docs")); !os.IsNotExist(err) {
 				t.Fatalf("rejected creation changed the filesystem: %v", err)
 			}

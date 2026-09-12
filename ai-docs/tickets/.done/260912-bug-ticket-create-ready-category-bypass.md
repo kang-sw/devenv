@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 136c067fd8c72513
 sage-review-completeness-reviewed: 136c067fd8c72513
+completed: 2026-09-12
 ---
 
 # Close the release-sweep ready-category bypass and stale Landing Lens findings
@@ -63,3 +64,27 @@ spec and mental-model layers, contradicting the current repository authority.
 Close both Important findings with focused regression coverage, run the full Go
 suite and the existing plugin verification suites, and independently review the
 result against the decisions above.
+
+### Result (fd38f30c) - 2026-09-12
+
+Direct ready creation now rejects epic, research, and legacy workset categories
+through the shared board-artifact category set before filesystem access. Tests
+assert the ready-specific error, absence of new directories/files, and preservation
+of existing ticket content. Workset ready rejection precedes its retired-authoring
+check; idea/todo retirement behavior remains unchanged. Updated stale comments
+that described the move guard as the only ready boundary.
+
+The ignored local Landing Lens now requires meaningful caller-visible behavior
+tests and compliance with applicable prescriptive conventions. It remains outside
+Git as requested.
+
+Verification: `TMPDIR=/private/tmp go test ./...` passed after the final source
+change; `scripts/smoke-ws-mcp.sh ..` passed; Python unittest discovery passed
+58 ws tests and 11 wsflow tests. `git diff --check` passed. Canonical TMPDIR
+avoids the known macOS temporary-directory alias issue. No dedicated ticket-doc
+test exists; closure uses the ticket lifecycle tool and diff checks.
+
+Independent correctness and fit reviews were clean. Test review found that the
+initial workset assertion exercised only its prior retirement guard; the shared
+ready guard was moved earlier and error assertions were strengthened. The focused
+second review confirmed the Important finding resolved. No unresolved findings.
