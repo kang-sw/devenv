@@ -116,6 +116,7 @@ Advance `260911-bug-ws-pi-question-queue-dogfood` from `idea/` through the requi
 
 | Date | Ticket | Evidence or action | Disposition |
 | --- | --- | --- | --- |
+| 2026-09-12 | `260908-research-ws-pi-ws-ask-removal` | The redesign decision was implemented by done ticket `260911-feat-ws-pi-async-question-queue`; q1/q3/q4/q5 supplied live queue and attachment evidence. | Closed as resolved research; remaining actionable findings stay in the question-queue dogfood ticket. |
 | 2026-09-12 | `260908-feat-ws-pi-subagent-audit-window-and-owner-steering` | Live `q5` `/done` produced one final with `Decisions: alpha` and parked the fork dormant. | Same-process `/done` slice accepted; broader Phase 2 remains open. |
 | 2026-09-12 | `260910-bug-ws-execute-worker-missing-exec-tool` | A guarded merge produced an approval request, accepted `approve`, executed the command, and returned a final report. | Approve path accepted; deny, run-instead, and stale-ID checks remain. |
 | 2026-09-12 | `260907-feat-ws-pi-persistent-explore-deep-research` | Multiple simple Explore children settled; a settled child accepted a follow-up. A deep-research discovery also returned. | Partial evidence only; exact deep-child profile and stop/restart matrix remain. |
@@ -123,4 +124,4 @@ Advance `260911-bug-ws-pi-question-queue-dogfood` from `idea/` through the requi
 
 ## Current next action
 
-Complete sequence step 1. Record each ticket's evidence and status transition here before proceeding to the consolidated visual TUI session.
+Complete the remaining sequence-step-1 `ws-execute` approval matrix. Reconcile `260910-bug-ws-execute-worker-missing-exec-tool`, then reuse the result for the tool/push approval-control gate before proceeding to the consolidated visual TUI session.

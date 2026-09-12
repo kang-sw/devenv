@@ -1,5 +1,6 @@
 ---
 title: Consider removing ws-ask after costly discussion-fork dogfooding
+completed: 2026-09-12
 ---
 
 # Consider removing ws-ask after costly discussion-fork dogfooding
@@ -61,3 +62,8 @@ This ticket stays as the cost/decision anchor and is not promoted; the redesign
 is carried by `260911-feat-ws-pi-async-question-queue`. The current
 tool-surface hide (`ac998f77` / `a8cf1183`) is lifted as part of landing the
 fork-less path there, not by re-enabling the old fork behavior.
+
+
+## Resolution (2026-09-12)
+
+Closed as resolved research. The owner selected redesign rather than removal; `260911-feat-ws-pi-async-question-queue` implemented and closed the fork-less lead-raised path, while the separate fork-raised attachment path remains. Live q1/q3/q4/q5 acceptance in the 2026-09-11 through 2026-09-12 Pi session confirmed the resulting queue, persistence, withdrawal, attachment, and same-process `/done` slices. Remaining actionable dogfood findings stay in `260911-bug-ws-pi-question-queue-dogfood`.
