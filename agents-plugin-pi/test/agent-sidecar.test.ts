@@ -273,6 +273,7 @@ describe("serializeOrphans / parseOrphans", () => {
       { ...base, spawnRole: "explore", exploreMode: "bogus", toolGroup: "read-only-explore" },
       { ...base, spawnRole: "explore", exploreMode: "synthesis", toolGroup: "read-only-explore", explicitTools: "bash" },
       { ...base, spawnRole: "fork", toolGroup: "read-only" },
+      { ...base, spawnRole: "worker", toolGroup: "recon" },
     ];
     for (const orphan of invalid) {
       assert.deepEqual(parseOrphans(JSON.stringify({ version: SIDECAR_VERSION, orphans: [orphan] })), [], JSON.stringify(orphan));

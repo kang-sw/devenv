@@ -119,12 +119,13 @@ export const MODEL_CATALOG_ADVISORY =
   "> [!note]\n" +
   "> **Pi's model tier table has no entries.** ws-agent-spawn (and ws-fork/" +
   "ws-execute) now refuse a named tier that has no genuine pi entry instead " +
-  "of silently inheriting the parent session's model; simple explore refuses " +
-  "the same way. Configure at " +
-  "least a `small` tier for harness `pi` via `config.tune agents.tier " +
-  "harness:pi` (see lead-tune) to route explore/recon to a cheaper model; " +
-  "the other three fixed tiers (`medium`/`large`/`xlarge`) are yours to " +
-  "curate too. Changes apply immediately — no restart needed.";
+  "of silently inheriting the parent session's model; Explore intent modes " +
+  "refuse the same way. Configure the `small`, `medium`, and `large` tiers " +
+  "for harness `pi` via `config.tune agents.tier harness:pi` (see lead-tune): " +
+  "lookup/code-search/history-search use `small`; docs-search/web-search/" +
+  "diagnosis/comparison use `medium`; synthesis uses `large`. The `xlarge` " +
+  "tier remains available for ordinary agent dispatch. Changes apply " +
+  "immediately — no restart needed.";
 
 /**
  * The four fixed tiers `config.resolve_agent` understands — used by

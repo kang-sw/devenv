@@ -8,7 +8,7 @@ import { RpcClient, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CHILD_MANAGEMENT_TOOLS, DELEGATION_ENV, terminalTools } from "../src/delegation-policy.ts";
 import { createAgentStorageContext } from "../src/agent-storage.ts";
 import { captureOrphans, parseOrphans, reviveOrphans, serializeOrphans } from "../src/agent-sidecar.ts";
-import { EXPLORE_MODE_TIERS, WS_PI_EXPLORE_MODE_ENV, WS_PI_SPAWN_ROLE_ENV, type ExploreMode } from "../src/process-role.ts";
+import { WS_PI_EXPLORE_MODE_ENV, WS_PI_SPAWN_ROLE_ENV, type ExploreMode } from "../src/process-role.ts";
 import { WEB_HOME_ENV, WEB_NONCE_ENV } from "../src/web-readiness.ts";
 import { registerAgentTools, resolveTools, sendToAgent, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import type { McpToolCallResult } from "../src/mcp-stdio-client.ts";
@@ -16,7 +16,18 @@ import type { McpToolCallResult } from "../src/mcp-stdio-client.ts";
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const EXTENSION_ENTRY = join(PACKAGE_ROOT, "src", "index.ts");
 const EXPLORE_GUIDE = join(PACKAGE_ROOT, "explore-guide.md");
-const MODES = Object.keys(EXPLORE_MODE_TIERS) as ExploreMode[];
+const MODE_CONTRACT = [
+  ["lookup", "small"],
+  ["code-search", "small"],
+  ["history-search", "small"],
+  ["docs-search", "medium"],
+  ["web-search", "medium"],
+  ["diagnosis", "medium"],
+  ["comparison", "medium"],
+  ["synthesis", "large"],
+] as const satisfies ReadonlyArray<readonly [ExploreMode, "small" | "medium" | "large"]>;
+const MODES = MODE_CONTRACT.map(([mode]) => mode);
+const TIER_BY_MODE = Object.fromEntries(MODE_CONTRACT) as Record<ExploreMode, "small" | "medium" | "large">;
 const storageRoots = new Set<string>();
 
 afterEach(() => {
@@ -54,9 +65,11 @@ function parentPolicy(depth = 0, maxDepth = 2) {
 function installRpcHarness() {
   const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
   const prompts: Array<{ client: unknown; message: string }> = [];
+  const clients: Array<{ options?: { args?: string[]; env?: Record<string, string> } }> = [];
   const effort = new WeakMap<object, string>();
   Object.assign(RpcClient.prototype, {
     start: async function(this: { options?: { args?: string[]; env?: Record<string, string> } }) {
+      clients.push(this);
       const args = this.options?.args ?? [];
       const sessionIndex = args.indexOf("--session");
       if (sessionIndex >= 0) writeFileSync(args[sessionIndex + 1]!, "mock session\n");
@@ -73,7 +86,7 @@ function installRpcHarness() {
       return { model: { provider, id: id.join("/") }, thinkingLevel: effort.get(this as object) ?? "medium" };
     },
   });
-  return { prompts, restore: () => Object.assign(RpcClient.prototype, original) };
+  return { clients, prompts, restore: () => Object.assign(RpcClient.prototype, original) };
 }
 
 function tierResult(tier: string, effort = "high"): McpToolCallResult {
@@ -102,7 +115,7 @@ function harness(options: { auth?: boolean; result?: (tier: string) => McpToolCa
     undefined,
     EXPLORE_GUIDE,
   );
-  const catalog = MODES.map(mode => ({ provider: "pi", id: EXPLORE_MODE_TIERS[mode] })).filter((entry, index, all) => all.findIndex(other => other.id === entry.id) === index);
+  const catalog = MODE_CONTRACT.map(([, tier]) => ({ provider: "pi", id: tier })).filter((entry, index, all) => all.findIndex(other => other.id === entry.id) === index);
   const ctx = {
     model: { provider: "pi", id: "parent" }, thinkingLevel: "xhigh",
     modelRegistry: { getAll: () => catalog, hasConfiguredAuth: () => options.auth ?? true },
@@ -167,8 +180,8 @@ describe("persistent Explore intent modes", () => {
           assert.deepEqual(Object.keys(result).sort(), ["agent_id", "alias"]);
           const record = h.handle.rpcRegistry.get(result.agent_id)!;
           assert.equal(record.exploreMode, expectedMode);
-          assert.equal(record.modelTier, EXPLORE_MODE_TIERS[expectedMode]);
-          assert.equal(record.modelBase, `pi/${EXPLORE_MODE_TIERS[expectedMode]}`);
+          assert.equal(record.modelTier, TIER_BY_MODE[expectedMode]);
+          assert.equal(record.modelBase, `pi/${TIER_BY_MODE[expectedMode]}`);
           assert.equal(record.toolGroup, "read-only-explore");
           assert.deepEqual(record.delegation?.network, { search: true, fetch: true });
           assert(record.delegation?.tools.includes("web_search"));
@@ -176,7 +189,7 @@ describe("persistent Explore intent modes", () => {
           assert(!record.delegation?.tools.includes("bash"));
           assert(!record.delegation?.tools.includes("write"));
         }
-        assert.deepEqual(h.lookups, cases.map(([, mode]) => EXPLORE_MODE_TIERS[mode]));
+        assert.deepEqual(h.lookups, cases.map(([, mode]) => TIER_BY_MODE[mode]));
         await h.handle.stopAll();
       });
     } finally { rpc.restore(); }
@@ -216,7 +229,11 @@ describe("persistent Explore intent modes", () => {
         const sessionPath = original.sessionPath;
         const systemPromptPath = original.systemPromptPath;
         const delegation = original.delegation;
+        const firstClient = rpc.prompts[0]?.client;
+        assert.ok(firstClient, "the initial query reaches the persistent RPC client");
+        assert.match(rpc.prompts[0]!.message, /Intent mode: comparison[\s\S]*Question:\ncompare/);
         await sendToAgent(h.handle.rpcRegistry, { cwd: PACKAGE_ROOT, extensionPath: EXTENSION_ENTRY }, original.agentId, "follow up");
+        assert.deepEqual(rpc.prompts.at(-1), { client: firstClient, message: "follow up" });
         assert.equal(original.sessionPath, sessionPath);
         assert.equal(original.systemPromptPath, systemPromptPath);
         assert.equal(original.exploreMode, "comparison");
@@ -227,6 +244,11 @@ describe("persistent Explore intent modes", () => {
         reviveOrphans(restored, parseOrphans(serializeOrphans(captureOrphans(h.handle.rpcRegistry))));
         const revived = restored.get(original.agentId)!;
         await sendToAgent(restored, { cwd: PACKAGE_ROOT, extensionPath: EXTENSION_ENTRY }, revived.agentId, "after restart");
+        const resumedPrompt = rpc.prompts.at(-1)!;
+        assert.equal(resumedPrompt.message, "after restart");
+        assert.notEqual(resumedPrompt.client, firstClient, "restart allocates a fresh client over the saved session");
+        const resumedArgs = (resumedPrompt.client as { options?: { args?: string[] } }).options?.args ?? [];
+        assert.equal(resumedArgs[resumedArgs.indexOf("--session") + 1], sessionPath);
         assert.equal(revived.sessionPath, sessionPath);
         assert.equal(revived.systemPromptPath, systemPromptPath);
         assert.equal(revived.exploreMode, "comparison");
@@ -265,6 +287,9 @@ describe("persistent Explore intent modes", () => {
         assert.equal(child.exploreMode, "lookup");
         assert.equal(child.delegation?.depth, 2);
         for (const tool of CHILD_MANAGEMENT_TOOLS) assert.equal(child.delegation?.tools.includes(tool), false, `${tool} is stripped at terminal depth`);
+        const args = (child.client as unknown as { options?: { args?: string[] } }).options?.args ?? [];
+        const activeTools = (args[args.indexOf("--tools") + 1] ?? "").split(",");
+        for (const tool of CHILD_MANAGEMENT_TOOLS) assert.equal(activeTools.includes(tool), false, `${tool} is absent from the actual terminal --tools allowlist`);
         assert.deepEqual(child.delegation?.network, { search: true, fetch: true });
         await h.handle.stopAll();
       });
