@@ -3,6 +3,7 @@ title: "Pi Explore: bounded fetch plus bundled web-search extension"
 related:
   260912-refactor-ws-pi-unify-persistent-explore-modes: consumes the common web capability through its web-search intent alias
   260912-feat-ws-pi-recursive-worker-subtree-lifecycle: network-read authority must obey descendant capability ceilings
+  260908-feat-ws-pi-agent-session-disk-retention: prerequisite; its Phase 2 and Phase 3 lifecycle must own cache cleanup before this ticket can complete
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 4e8171eab77b1020
@@ -98,3 +99,14 @@ Exact-package execution proved that upstream proxy mode invokes `curl` with OS-t
 - Include the proxy refusal and the package-local configuration/README locations in the ad-hoc setup evidence returned to the researcher, so it can explain the limitation and applicable provider registration without keeping provider-specific instructions resident.
 
 This edition authorizes no HTTP, HTTPS, SOCKS, environment, or package-config transport proxy for the initial ws Explore integration. Proxy support requires a later independently bounded transport design; failure to keep the exact pinned package on audited direct transport is another stop condition, not permission to fall back to upstream proxy mode.
+
+#### Edition (4faac2c2) - 2026-09-12
+
+Round-one implementation review proved that owned-home containment exists but automatic cleanup does not: `260908-feat-ws-pi-agent-session-disk-retention` completed only durable-home relocation, while its Phase 2 scratch/cap-eviction cleanup and Phase 3 stale-child pruning remain unfinished. Preserve the agreed lifecycle contract rather than treating fixture-home deletion as acceptance:
+
+- Make `260908-feat-ws-pi-agent-session-disk-retention` an explicit prerequisite. Its Phase 2 and Phase 3 lifecycle must land before this ticket records Phase 1 completion or merges its implementation branch.
+- Keep fetched spill files only under the existing owned child/session home. Do not invent a web-specific TTL, scanner, sweeper, retention registry, or deletion policy.
+- After the prerequisite lands, verify cleanup through the real cap-eviction and stale-child prune paths, including spilled web content and interrupted/abandoned child sessions. Fixture teardown proves containment only and does not satisfy lifecycle acceptance.
+- Retain the current implementation branch and its round-one evidence while the prerequisite runs. When resumed, integrate the prerequisite, fix the remaining round-one findings (ordinary leading-bracket queries, native DNS/socket pinning coverage, free-provider startup plus dormant/restarted readiness, result-page-request observation, and packed-artifact dependency/peer/license regression), then perform bounded round-two verification and review.
+
+This edition does not defer or weaken automatic pruning. If the shared retention phases cannot own these files without a web-specific cleanup mechanism, stop again with evidence rather than closing this ticket on containment alone.
