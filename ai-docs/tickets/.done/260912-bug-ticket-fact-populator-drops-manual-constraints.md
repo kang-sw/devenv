@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 8105785d2d93898f
 sage-review-completeness-reviewed: 8105785d2d93898f
+completed: 2026-09-12
 ---
 
 # Ticket fact population drops path-scoped manual constraints
@@ -57,3 +58,15 @@ constraint mutation instead of reporting zero corrections after removing one.
 Verification reproduces the behavior with a ticket spanning MCP and shipped
 playbook paths and asserts both the resulting Constraints section and the
 reported correction summary.
+
+### Result (bc5bdfc) - 2026-09-12
+
+The ticket-fact-populator now retains every existing convention line backed by
+a current Implementation Conventions row, unions those lines with missing
+path-matched rows, and counts every convention mutation as a correction. The
+canonical rsrc manifest and byte-identical wsflow mirror were regenerated.
+
+Verification: `go test ./internal/mcp ./internal/wsrsrc -count=1` passed.
+Correctness and fit reviews were clean; the test review requested a concrete
+MCP-and-rsrc regression fixture, which landed and passed a second verification
+review.
