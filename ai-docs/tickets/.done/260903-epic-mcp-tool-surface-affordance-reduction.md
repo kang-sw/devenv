@@ -8,6 +8,7 @@ related:
   260901-bug-enter-proceed-misplaced-facts-silent-unknown-status: explicitly OUT of scope — diagnosability hardening, not surface reduction
   260901-bug-ticket-scanner-silently-skips-noncanonical-status-dir: explicitly OUT of scope — scanner robustness, not surface reduction
 sage-review-design-reviewed: e632ab15bc085a1a
+completed: 2026-09-12
 ---
 
 # Epic: MCP tool-surface affordance reduction & surface sanitize
@@ -212,3 +213,8 @@ playbooks (`lead-proceed`/`lead-implement`) up to 3× — organize on
 - Over-split families are merged to composed operations, or explicitly kept (②
   resolved either way).
 - The mirror keeps wsflow in sync with no hand-authored wsflow drift introduced.
+
+
+## Resolution (2026-09-12)
+
+All four owned implementation children are complete, their integration landed on develop in a4288b73, and every stated closure condition is satisfied. Residual idea tickets remain independent follow-ups rather than blockers for this epic.

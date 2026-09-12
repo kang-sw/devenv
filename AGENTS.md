@@ -33,9 +33,9 @@ Read at every session start, before other action:
 3. **Binding anchor** - read this project's declared binding anchor
    (`## Workflow` -> `### Binding Anchor`) when the task touches one of its
    declared topics. The declared anchor sits under epic
-   `260605-epic-ws-playbook-factory-pivot`; the prior anchor
-   `260429-research-host-neutral-ws-plugin` is absorbed into this epic and
-   archived under `.done/`.
+   `260909-epic-ws-worker-interpreter-refoundation`; the prior anchor
+   `260605-research-ws-native-subagent-pivot` remains the harness-infrastructure
+   reference under the prior epic.
 
 ## Response Discipline
 
@@ -126,8 +126,8 @@ single-maintainer-serial posture.
 ### Binding Anchor
 
 ```text
-anchor: ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md
-topics: plugin architecture, host-neutral migration, spawn-removal, adapter boundaries
+anchor: ai-docs/tickets/idea/260909-research-ws-refoundation-evidence-audit.md
+topics: lead surface, worker interpreter, document-layer retirement, stop conditions
 ```
 
 `anchor` names the ticket a lead must read before answering or editing when a
@@ -323,9 +323,10 @@ ai-docs/tickets/.dropped/
   MCP parser behavior.
 - Current priority is making the project and ticket system usable from
   Agents/Codex while retiring the legacy Claude tree behind explicit tickets.
-- Research anchor: `260605-research-ws-native-subagent-pivot` (direction detail),
-  coordinated by epic `260605-epic-ws-playbook-factory-pivot`. The earlier
-  `260429-research-host-neutral-ws-plugin` anchor is absorbed and archived.
+- Research anchor: `260909-research-ws-refoundation-evidence-audit`, coordinated
+  by epic `260909-epic-ws-worker-interpreter-refoundation`. The prior
+  `260605-research-ws-native-subagent-pivot` remains the harness-infrastructure
+  reference under the prior epic.
 - Existing historical Claude workflow notes may mention `ws-*` on `PATH`; new
   shared guidance should use MCP tools and bundled runtime documents.
 - Claude plugin source artifacts were retired from the live tree; do not add a

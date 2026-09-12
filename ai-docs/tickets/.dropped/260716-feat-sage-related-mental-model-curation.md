@@ -6,6 +6,7 @@ related:
   260716-feat-mental-model-openup-injection: consumer — injection reads the curated related-mental-model associations
 related-mental-model:
   - workflow-skills
+dropped: 2026-09-12
 ---
 
 # Sage design review curates related-mental-model — prose recommendation, lead-owned frontmatter edit
@@ -77,3 +78,8 @@ Verification: run a design review on a ticket with a deliberately incomplete
 `related-mental-model` list and confirm the reviewer recommends the missing
 domain with justification and the lead commit carries the corrected
 frontmatter; confirm reviewer output contains no file mutations.
+
+
+## Resolution (2026-09-12)
+
+The refoundation retired related-mental-model metadata and replaced precomputed document curation with Sage-controlled native exploration of code contracts. This ticket's curation surface is obsolete.

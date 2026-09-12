@@ -4,6 +4,7 @@ sage-review-design: completed
 related:
   260716-feat-ws-doc-condition-diagnostics: prerequisite — injection telemetry must exist before injection becomes the primary delivery path
   260716-feat-sage-related-mental-model-curation: association source — consumes the sage-curated related-mental-model frontmatter
+dropped: 2026-09-12
 ---
 
 # Deterministic mental-model pointer-injection at delegation open-up
@@ -73,3 +74,8 @@ consumption-counter substrate. Verification: an implement run on a ticket
 with populated frontmatter shows the pointer list in the generated
 instruction and matching counter increments; a ticket with a dangling stem
 produces the warning path without blocking.
+
+
+## Resolution (2026-09-12)
+
+The refoundation retired the mental-model document layer and its injection path. With no surviving document consumer, this ticket's pointer-injection contract is obsolete.
