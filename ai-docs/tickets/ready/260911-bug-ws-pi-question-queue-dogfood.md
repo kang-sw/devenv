@@ -85,6 +85,3 @@ Resolve the accepted findings while preserving the behaviors that passed live ac
 
 Verify confirmation positions and both arrow keys, including edge no-ops; long questions at constrained viewport heights with complete scroll reach and fixed editor/footer visibility; oldest-first bare `/answer`, exact explicit-ID targeting, and terminal/unknown explicit-ID refusal without fallback; semantic hierarchy in a live Pi theme; and single-turn delivery of multiple answers submitted together while the lead is busy. Retest the already-passing single answer, Korean multiline draft, partial multi-question submission, blank retention, and per-question provenance paths for regression.
 
-## Blocked (2026-09-12)
-
-The goal-run worker stopped before edits because its mandatory `ticket-worker-elevated` protocol requires independent reviewer dispatch through `ws-agent-spawn` / `ws-agent-send`, while the current Pi `full-worker` tool surface exposes neither tool. Resume after `260912-feat-ws-pi-recursive-worker-subtree-lifecycle` restores bounded worker-owned delegation or another explicitly supported independent-review dispatch path lands.
