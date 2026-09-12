@@ -30,7 +30,7 @@ Route a task to the right primitive by what you actually need done:
 
 | You want to... | Call |
 | --- | --- |
-| Delegate a task to a persistent subagent | `ws-agent-spawn` (pass an already-rendered `system_prompt_path`, e.g. via `ws__playbook_render`; also pass `alias` and `title` — a short slug and a one-line description — so you and `ws-agent-list` can refer to it by name instead of by uuid; optional `model_name` is one of the fixed tiers `small`/`medium`/`large`/`xlarge` configured for harness `pi` via `lead-tune`/`config.list` — omit to inherit your own model) |
+| Delegate a task to a persistent subagent | `ws-agent-spawn` (pass an already-rendered `system_prompt_path`, e.g. via `ws__playbook_render`; also pass `alias` and `title` — a short slug and a one-line description — so you and `ws-agent-list` can refer to it by name instead of by uuid; optional per-dispatch model and effort selection is defined by the tool schema) |
 | Send a follow-up or steer a subagent, running or parked | `ws-agent-send <alias-or-agent_id>` — a parked (dormant) subagent is transparently resumed from its own session file, so there is no separate "wake it up" step |
 | Wait for a subagent to finish or report progress | **Nothing — end your turn.** There is no wait verb. Every child signal is pushed into your session as a message that starts a turn on arrival. |
 | See every subagent's status (running/idle/dormant), alias and title | `ws-agent-list` (pass `include_prompt:true` to also see each one's original prompt, head-truncated; off by default to keep the listing short) |

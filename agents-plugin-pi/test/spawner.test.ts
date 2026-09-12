@@ -829,11 +829,12 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
     execute: (id: string, params: unknown, signal?: AbortSignal, update?: unknown, ctx?: unknown) => Promise<{ content: Array<{ text: string }> }>;
   }
 
-  function installRpcHarness() {
+  function installRpcHarness(onThinking?: (level: string) => void) {
     const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
     Object.assign(RpcClient.prototype, {
       start: async () => {}, stop: async () => {}, abort: async () => {},
-      onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {},
+      onEvent: () => () => {}, prompt: async () => {},
+      setThinkingLevel: async (level: string) => { onThinking?.(level); },
       getState: async () => ({ model: { provider: "pi", id: "small" }, thinkingLevel: "medium", sessionFile: "/tmp/ws-pi-agent-test/session.jsonl" }),
     });
     return { restore: () => Object.assign(RpcClient.prototype, original) };
@@ -894,18 +895,24 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
     try {
       let calls = 0;
       const unknown = harness(async () => { calls++; return jsonResult({}); });
+      const unknownHomes = join(realpathSync(unknown.ctx.agentStorageRoot), "ws-agents", "test-lead");
+      assert.equal(existsSync(unknownHomes), false);
       await assert.rejects(
         () => unknown.tool.execute("call", { system_prompt_path: "/tmp/p.md", prompt: "hi", model_name: "openrouter/missing" }, undefined, undefined, unknown.ctx),
         /concrete model.*not a provider\/id entry/,
       );
       assert.equal(unknown.handle.rpcRegistry.size, 0);
+      assert.equal(existsSync(unknownHomes), false, "unknown concrete selection allocates no owned home");
 
       const locked = harness(async () => { calls++; return jsonResult({}); }, [{ provider: "openrouter", id: "locked", hasAuth: false }]);
+      const lockedHomes = join(realpathSync(locked.ctx.agentStorageRoot), "ws-agents", "test-lead");
+      assert.equal(existsSync(lockedHomes), false);
       await assert.rejects(
         () => locked.tool.execute("call", { system_prompt_path: "/tmp/p.md", prompt: "hi", model_name: "openrouter/locked" }, undefined, undefined, locked.ctx),
         /provider openrouter has no configured auth/,
       );
       assert.equal(locked.handle.rpcRegistry.size, 0);
+      assert.equal(existsSync(lockedHomes), false, "unauthenticated concrete selection allocates no owned home");
       assert.equal(calls, 0, "concrete selection is catalog-local and never calls config.resolve_agent");
     } finally { rpc.restore(); }
   });
@@ -941,6 +948,22 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
       assert.equal(tierCalls, 1, "only the tier dispatch reads shared tier configuration");
       assert.deepEqual({ model: concrete.modelBase, effort: concrete.modelEffort, source: concrete.modelSource }, { model: "openrouter/one-off", effort: undefined, source: "concrete" });
       assert.deepEqual({ model: tier.modelBase, effort: tier.modelEffort, source: tier.modelSource }, { model: "openai-codex/gpt-5.6-high", effort: "low", source: "tier" });
+      await handle.stopAll();
+    } finally { rpc.restore(); }
+  });
+
+  test("concrete default makes no thinking override while an explicit supported effort is sent", async () => {
+    const thinkingCalls: string[] = [];
+    const rpc = installRpcHarness(level => thinkingCalls.push(level));
+    try {
+      const { tool, handle, ctx } = harness(
+        async () => { assert.fail("concrete selection must not consult tier config"); },
+        [{ provider: "openrouter", id: "one-off", hasAuth: true }],
+      );
+      await tool.execute("default", { system_prompt_path: "/tmp/p.md", prompt: "default", model_name: "openrouter/one-off", model_effort: "default" }, undefined, undefined, ctx);
+      assert.deepEqual(thinkingCalls, [], "default leaves concrete model effort to Pi");
+      await tool.execute("explicit", { system_prompt_path: "/tmp/p.md", prompt: "explicit", model_name: "openrouter/one-off", model_effort: "high" }, undefined, undefined, ctx);
+      assert.deepEqual(thinkingCalls, ["high"], "explicit supported effort reaches setThinkingLevel");
       await handle.stopAll();
     } finally { rpc.restore(); }
   });

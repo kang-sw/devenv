@@ -100,8 +100,8 @@ import {
   formatExploreTierRefusal,
   formatTierWarning,
   modelCatalogFromToolCtx,
-  suggestModels,
   tierWarningNotifierFromToolCtx,
+  validateCatalogModel,
   validateConcreteModel,
   type ConcreteModelRejection,
   type ModelCatalogEntry,
@@ -492,16 +492,16 @@ export async function resolveModelForAliasViaWsMcp(
   const provider = parsed.model.includes("/") ? undefined : BACKEND_TO_PROVIDER[parsed.backend ?? ""];
   const checkedModel = provider ? `${provider}/${parsed.model}` : parsed.model;
   const stored = provider ? parsed.model : undefined;
-  const entry = catalog.find(entry => `${entry.provider}/${entry.id}` === checkedModel);
-  if (!entry) {
-    const rejected: TierRejection = { model: checkedModel, resolvedFrom: parsed.resolved_from, why: "unknown", suggestions: suggestModels(checkedModel, catalog), ...(stored !== undefined ? { stored } : {}) };
+  const catalogResult = validateCatalogModel(checkedModel, catalog);
+  if (catalogResult.rejected?.why === "unknown") {
+    const rejected: TierRejection = { ...catalogResult.rejected, resolvedFrom: parsed.resolved_from, ...(stored !== undefined ? { stored } : {}) };
     return tierResolution({ model: inheritModel, rejected }, "inherit", { kind: "unknown", model: checkedModel, resolvedFrom: parsed.resolved_from, catalogEmpty: catalog.length === 0 });
   }
-  if (!entry.hasAuth) {
-    const rejected: TierRejection = { model: checkedModel, resolvedFrom: parsed.resolved_from, why: "no-auth", ...(stored !== undefined ? { stored } : {}) };
+  if (catalogResult.rejected?.why === "no-auth") {
+    const rejected: TierRejection = { ...catalogResult.rejected, resolvedFrom: parsed.resolved_from, ...(stored !== undefined ? { stored } : {}) };
     return tierResolution({ model: inheritModel, rejected }, "inherit", { kind: "no-auth", model: checkedModel, resolvedFrom: parsed.resolved_from });
   }
-  return tierResolution({ model: checkedModel, effort: parsed.effort || undefined }, "tier");
+  return tierResolution({ model: catalogResult.model, effort: parsed.effort || undefined }, "tier");
 }
 
 async function resolveSpawnModel(

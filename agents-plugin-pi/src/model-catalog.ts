@@ -20,19 +20,29 @@ export type TierFailure = {
   catalogEmpty?: boolean;
 };
 
-export type ConcreteModelRejection =
+export type CatalogModelRejection =
   | { model: string; why: "unknown"; suggestions: string[] }
   | { model: string; why: "no-auth" };
 
-/** Validate a caller-selected provider/id against the same live catalog/auth facts used for configured tiers. */
-export function validateConcreteModel(
+export type ConcreteModelRejection = CatalogModelRejection;
+
+/** One exact-membership/auth primitive shared by configured tiers and caller-selected provider/id values. */
+export function validateCatalogModel(
   model: string,
   catalog: readonly ModelCatalogEntry[],
-): { model: string; rejected?: undefined } | { model?: undefined; rejected: ConcreteModelRejection } {
+): { model: string; rejected?: undefined } | { model?: undefined; rejected: CatalogModelRejection } {
   const entry = catalog.find(candidate => `${candidate.provider}/${candidate.id}` === model);
   if (!entry) return { rejected: { model, why: "unknown", suggestions: suggestModels(model, catalog) } };
   if (!entry.hasAuth) return { rejected: { model, why: "no-auth" } };
   return { model };
+}
+
+/** Concrete selections use the common catalog validator without tier-specific configuration metadata. */
+export function validateConcreteModel(
+  model: string,
+  catalog: readonly ModelCatalogEntry[],
+): ReturnType<typeof validateCatalogModel> {
+  return validateCatalogModel(model, catalog);
 }
 
 /** Read current runtime membership and configured-auth presence, never cached availability or scoped models. */
