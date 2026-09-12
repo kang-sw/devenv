@@ -36,7 +36,7 @@ Passed in the current Pi session:
 - plugin reload persistence and anchored answer recovery (`q1` asked at commit `a7f5d521`, entry `ccb097ae`, returned verbatim as `PERSIST-OK`);
 - fork-raised question registration and existing-fork overlay attachment (`q4`), owner answer continuation, and final `Decisions:` delivery preserving the owner's `alpha` choice; the same fork's first task also confirmed the `codex_generate_image` unavailable-tool notice after `260908-bug-ws-pi-delegated-tool-surface-unavailable` was loaded.
 
-Residual from that acceptance: `/done` detached the fork-raised thread after its owner-held settle path, but agent `9481f7d3-b589-43f3-bf38-770c213e1744` remained registry-idle and rendered as running for more than 28 minutes instead of being parked. The same-process idempotent `/done` reconciliation fix is owned by `260908-feat-ws-pi-subagent-audit-window-and-owner-steering` Phase 2 rather than duplicated in this rolling ticket; crash/reload recovery is explicitly best-effort.
+The residual `/done` cleanup failure from that acceptance was retested after the same-process reconciliation fix and plugin reload on 2026-09-12. Fork `e7529581-35d5-4b1c-b676-ede04d20334f` raised owner thread `q5`, retained the owner's `alpha` answer through exactly one closeout final, emitted no duplicate advisory or settle, and parked dormant. This closes the observed normal-runtime stranded-idle gap owned by `260908-feat-ws-pi-subagent-audit-window-and-owner-steering` Phase 2 without claiming its broader owner-steering/modal scope complete; crash/reload recovery remains explicitly best-effort.
 
 Remaining live coverage for a later session:
 
