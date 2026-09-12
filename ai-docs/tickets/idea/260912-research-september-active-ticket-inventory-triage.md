@@ -3,6 +3,7 @@ title: "Triage the September active-ticket inventory after the refoundation rele
 related:
   260909-research-ws-refoundation-evidence-audit: retained binding anchor and context for the refoundation-era subset
   260911-research-batch-promotion-cross-ticket-coherence-gap: one open item selected for actionable derivation before this inventory was recorded
+  260912-feat-lead-audit-doc: replacement of lead-add-rule selected after the initial inventory survey
 ---
 
 # Triage the September active-ticket inventory after the refoundation release sweep
@@ -36,7 +37,7 @@ It records a read-only comparison against `develop` at `717b1086`.
 | idea | `260910-feat-lead-run-worktree-parallel-route` | Live candidate with open decisions | Resource/worktree root separation landed, but worktree acquire/release and the gated parallel route do not exist; dispatch and reporting choices remain unsettled. |
 | idea | `260911-bug-implement-route-reuses-prior-phase-branch` | Live implementation candidate | The captured prior-phase branch selection defect has no closing implementation or superseding ticket. |
 | idea | `260911-bug-lead-run-stop-c-edition-before-result` | Live implementation candidate | `lead-run` still requires an Edition for stop-(c) recovery without distinguishing a phase that has no Result. |
-| idea | `260911-research-batch-promotion-cross-ticket-coherence-gap` | Actionable derivation selected | Its single batch-design-review direction was confirmed on 2026-09-12 and is being derived separately. |
+| idea | `260911-research-batch-promotion-cross-ticket-coherence-gap` | Cleanup candidate | Its confirmed direction was implemented by `260912-feat-batch-promotion-design-review`; only lifecycle disposition remains. |
 | idea | `260911-research-epic-close-on-last-child-prompt` | Open research | The current lead-run nudge is explicitly interim; trigger and predicate choices remain open. |
 | idea | `260911-research-golden-fixture-verification-gap` | Open research | The observed fixture was repaired, but no general discovery or verification mechanism was selected. |
 | idea | `260911-research-lead-commit-guard-during-worker-run` | Open research | Shared-worktree lead mutation remains unguarded; prose, MCP, liveness, and override choices remain open. |
@@ -46,6 +47,7 @@ It records a read-only comparison against `develop` at `717b1086`.
 | idea | `260912-research-git-merge-epic-develop-boundary` | Cleanup candidate | `260912-feat-git-merge-generic-branch-promotion` implemented the confirmed generic-merge direction. |
 | idea | `260912-research-git-merge-release-target-policy` | Cleanup candidate | `260912-bug-git-merge-release-target-diagnostics` implemented diagnostics and OID-bound acknowledgement. |
 | todo | `260911-research-impl-lifecycle-merge-authority-goal-loop-rehoming` | Cleanup candidate with residual question | Its merge, selector, and goal-trigger children landed; only an explicitly deferred host-loop concern remains and should become fresh scope if pursued. |
+| todo | `260912-feat-lead-audit-doc` | Live implementation candidate | The owner confirmed replacing `lead-add-rule` with a concise write-capable document prose audit that offers an independent fresh read after recurring project-document edits. |
 
 ## Immediate Disposition
 
@@ -59,10 +61,9 @@ part of the active inventory above.
 
 ### Verified Findings
 
-- The active-inventory survey contains 24 tickets: 23 in `idea/` and one in
-  `todo/`.
-- The resulting ledger classifies seven as open research, six as live
-  implementation candidates, ten as cleanup candidates, and one as an
+- The active inventory contains 25 tickets: 23 in `idea/` and two in `todo/`.
+- The resulting ledger classifies six as open research, seven as live
+  implementation candidates, eleven as cleanup candidates, and one as an
   intentionally retained binding anchor.
 - Ten active tickets have strong evidence of implementation, supersession, or
   loss of their target surface, but remain active pending explicit lifecycle
@@ -76,6 +77,9 @@ part of the active inventory above.
   inventory triage.
 - Derive the batch-promotion cross-ticket design review as a separate actionable
   implementation ticket.
+- Replace `lead-add-rule` with the separately captured `lead-audit-doc`
+  implementation ticket; the replacement targets recurring project-document
+  prose quality rather than durable-rule classification.
 - Treat the Explore failure as transient harness capacity; direct inspection is
   acceptable when Explore is unavailable, so the captured fallback bug is
   dropped.
