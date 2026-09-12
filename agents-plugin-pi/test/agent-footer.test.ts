@@ -7,13 +7,16 @@ import { allocateAgentHome, createAgentStorageContext, updateOwnership } from ".
 import {
   aggregateDescendantCosts,
   createAgentFooterController,
+  createAgentFooterSessionLifecycle,
   formatCumulativeCost,
   persistEvictedAgentCost,
+  registerAgentCostOwner,
   shouldArmAgentFooter,
   summarizeLeadUsage,
+  watchDescendantCosts,
   type AgentFooterComponent,
 } from "../src/agent-footer.ts";
-import type { RpcAgentRecord, RpcAgentRegistry } from "../src/spawner.ts";
+import { evictForCapacity, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { truncateToWidth, visibleWidth } from "../src/pi-tui.ts";
 
 const roots = new Set<string>();
@@ -68,6 +71,29 @@ describe("descendant cost aggregation", () => {
     assert.equal(formatCumulativeCost(cost), "~$0.75 + ?");
   });
 
+  test("a watcher armed before ws-agents exists observes the first descendant and later telemetry writes", async () => {
+    const dir = root();
+    const storage = createAgentStorageContext("lead-session", dir);
+    const registry: RpcAgentRegistry = new Map();
+    const changed = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("descendant watcher did not refresh")), 1_000);
+      const stop = watchDescendantCosts(storage, registry, () => { clearTimeout(timeout); stop(); resolve(); });
+      const child = record("first", allocateAgentHome(storage, "first", "worker"), .2);
+      persist(child);
+    });
+    await changed;
+  });
+
+  test("a storage-bound registry can still evict a legacy unowned record into a fresh durable namespace", () => {
+    const dir = root();
+    const storage = createAgentStorageContext("lead-session", dir);
+    const legacy = { agentId: "legacy", sessionPath: join(dir, "legacy.jsonl"), wsToolNames: [], toolGroup: "full-worker", streaming: false, running: false, reportLog: [] } as RpcAgentRecord;
+    const registry: RpcAgentRegistry = new Map([[legacy.agentId, legacy]]);
+    registerAgentCostOwner(registry, storage);
+    assert.deepEqual(evictForCapacity(registry, 1), { ok: true, evictedLabel: "legacy" });
+    assert.equal(formatCumulativeCost(aggregateDescendantCosts(storage, registry)), "—");
+  });
+
   test("capacity eviction rolls the whole child subtree up durably without reload duplication or decrease", () => {
     const dir = root();
     const lead = createAgentStorageContext("lead-session", dir);
@@ -76,9 +102,8 @@ describe("descendant cost aggregation", () => {
     const nested = record("nested", allocateAgentHome(childOwner, "nested", "explore", "deep"), 0.3); persist(nested);
     const registry: RpcAgentRegistry = new Map([[parent.agentId, parent]]);
 
-    assert.equal(persistEvictedAgentCost(registry, parent), true);
-    registry.delete(parent.agentId);
-    rmSync(parent.ownership!.home, { recursive: true, force: true });
+    updateOwnership(parent.ownership!.home, { liveness: { lifecycle: "stopped", running: false } });
+    assert.deepEqual(evictForCapacity(registry, 1), { ok: true, evictedLabel: "parent" }, "the production capacity path writes the roll-up before eviction");
     const after = aggregateDescendantCosts(lead, registry);
     assert.deepEqual(after, { knownUsd: 0.8, knownContributors: 2, unknownContributors: 0, descendants: 2 });
     assert.equal(persistEvictedAgentCost(registry, parent), true, "replaying the same eviction upserts by identity");
@@ -94,6 +119,14 @@ describe("lead usage and cost forms", () => {
     assert.equal(formatCumulativeCost(summarizeLeadUsage([assistant("a", 1), assistant("b", undefined)]).cost), "~$1.00 + ?");
     assert.equal(formatCumulativeCost(summarizeLeadUsage([assistant("a", undefined)]).cost), "—");
     assert.equal(formatCumulativeCost(summarizeLeadUsage([assistant("a", 0)]).cost), "~$0.00");
+    assert.equal(formatCumulativeCost(summarizeLeadUsage([]).cost), "~$0.00", "no calls or descendants is known zero, not unknown");
+  });
+
+  test("cache hit rate follows the latest assistant call, not later tool or compaction usage", () => {
+    const assistantCall = assistant("a", .1, 10);
+    const tool = { type: "message", message: { role: "toolResult", usage: { input: 100, cacheRead: 0, cacheWrite: 0, cost: { total: .1 } } } };
+    const compaction = { type: "compaction", usage: { input: 100, cacheRead: 0, cacheWrite: 0, cost: { total: .1 } } };
+    assert.equal(summarizeLeadUsage([assistantCall, tool, compaction]).latestCacheHitRate, 3 / 17 * 100);
   });
 });
 
@@ -133,14 +166,21 @@ describe("custom footer controller", () => {
       onBranchChange(callback: () => void) { branchListener = callback; return () => { branchListener = undefined; }; },
     };
     const semantic: Array<[string, string]> = [];
-    const theme = { fg(color: string, text: string) { semantic.push([color, text]); return text; } };
+    let palette: "dark" | "light" = "dark";
+    const theme = { fg(color: string, text: string) { semantic.push([color, text]); const code = palette === "dark" ? 36 : 35; return `\u001b[${code}m${text}\u001b[0m`; } };
+    const plain = (text: string) => text.replace(/\u001b\[[0-9;]*m/g, "");
     current = footerFactory({ requestRender() { renders++; } }, theme, footerData);
     for (const width of [120, 80, 40]) {
       const lines = current.render(width);
-      assert.ok(lines.every(line => visibleWidth(line) <= width), `all lines fit ${width}`);
+      assert.ok(lines.every(line => visibleWidth(line) <= width), `ANSI-styled lines fit ${width}`);
     }
+    const dark = current.render(120).join("\n");
+    palette = "light";
+    current.invalidate();
+    const light = current.render(120).join("\n");
+    assert.notEqual(dark, light, "theme invalidation rerenders through the current light/dark semantic palette");
     semantic.length = 0;
-    const wide = current.render(120).join("\n");
+    const wide = plain(current.render(120).join("\n"));
     assert.match(wide, /\/work\/project \(feature\/footer\) • named session/);
     assert.match(wide, /↑1\.2k/); assert.match(wide, /25\.0%\/200k/); assert.match(wide, /provider.*model.*high/);
     assert.match(wide, /Lead ~\$0\.50 \+ \?/); assert.match(wide, /Subagents ~\$0\.25 \+ \?/);
@@ -149,7 +189,6 @@ describe("custom footer controller", () => {
     assert.equal(widgetCalls, 0, "the belowEditor agent widget is not replaced or changed");
     branchListener?.(); watched?.(); controller.refresh();
     assert.equal(renders, 3, "git, descendant telemetry, and direct telemetry refreshes request rendering");
-    current.invalidate();
     controller.stop();
     assert.equal(defaultRestores, 1); assert.equal(branchListener, undefined); assert.equal(watched, undefined);
   });
@@ -167,6 +206,28 @@ describe("custom footer controller", () => {
     assert.ok(component.render(80).some(line => line.includes("new:")), "rendering uses the host theme injected for the replacement");
     first.stop(); second.stop();
   });
+});
+
+test("production session lifecycle replaces on reload, disarms on mode change, refreshes, and restores on shutdown", async () => {
+  const storage = createAgentStorageContext("lead", root());
+  const registry: RpcAgentRegistry = new Map();
+  const calls: string[] = [];
+  let serial = 0;
+  const lifecycle = createAgentFooterSessionLifecycle(
+    async () => ({ truncateToWidth, visibleWidth }),
+    () => {
+      const id = ++serial;
+      calls.push(`start:${id}`);
+      return { refresh: () => calls.push(`refresh:${id}`), stop: () => calls.push(`stop:${id}`) };
+    },
+  );
+  const ctx = { mode: "tui", cwd: "/", sessionManager: { getEntries: () => [] }, ui: { setFooter() {} } };
+  await lifecycle.start(undefined, ctx, registry, storage);
+  lifecycle.refresh();
+  await lifecycle.start("fork", ctx, registry, storage);
+  await lifecycle.start(undefined, { ...ctx, mode: "rpc" }, registry, storage);
+  lifecycle.stop();
+  assert.deepEqual(calls, ["start:1", "refresh:1", "stop:1", "start:2", "stop:2"]);
 });
 
 test("footer arming is limited to TUI lead/fork sessions", () => {

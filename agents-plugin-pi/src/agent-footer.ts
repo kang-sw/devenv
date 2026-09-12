@@ -1,10 +1,9 @@
 /** Theme-aware replacement for Pi's built-in footer with descendant cost telemetry. */
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
+import { existsSync, lstatSync, readdirSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { randomUUID } from "node:crypto";
 import { readSessionEntries, refreshTelemetry, type AgentTelemetry } from "./agent-telemetry.ts";
-import { readOwnership, type AgentStorageContext, type OwnershipMetadata } from "./agent-storage.ts";
+import { readOwnerArtifacts, readOwnership, writeOwnerArtifact, type AgentStorageContext, type OwnershipMetadata } from "./agent-storage.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "./spawner.ts";
 
@@ -32,7 +31,7 @@ function telemetryCost(value: AgentTelemetry | undefined): CumulativeCost {
 }
 
 export function formatCumulativeCost(cost: CumulativeCost): string {
-  if (cost.knownContributors === 0) return "—";
+  if (cost.knownContributors === 0 && cost.unknownContributors > 0) return "—";
   const known = `~$${cost.knownUsd.toFixed(2)}`;
   return cost.unknownContributors > 0 ? `${known} + ?` : known;
 }
@@ -52,34 +51,13 @@ function parseRollup(value: unknown): RollupEntry | undefined {
   if (![entry.knownContributors, entry.unknownContributors, entry.descendants].every(Number.isSafeInteger)) return undefined;
   return entry as RollupEntry;
 }
-function contained(parent: string, child: string): boolean { const r = relative(parent, child); return r === "" || (!!r && r !== ".." && !r.startsWith(`..${sep}`)); }
-function checkedDirectory(path: string, storage: AgentStorageContext): string | undefined {
-  try {
-    const lexical = resolve(path), real = realpathSync(lexical);
-    if (!contained(storage.root, real) || real !== lexical || lstatSync(lexical).isSymbolicLink() || !statSync(lexical).isDirectory()) return undefined;
-    return lexical;
-  } catch { return undefined; }
-}
-function ensureRollupDirectory(storage: AgentStorageContext): string | undefined {
-  const namespace = checkedDirectory(join(storage.root, "ws-agents"), storage);
-  if (!namespace || !checkedDirectory(ownerRoot(storage), storage)) return undefined;
-  const directory = rollupDirectory(storage);
-  try { if (!existsSync(directory)) mkdirSync(directory, { mode: 0o700 }); } catch { return undefined; }
-  return checkedDirectory(directory, storage);
-}
 function readRollups(storage: AgentStorageContext, ownerSessionId: string): Map<string, RollupEntry> {
   const entries = new Map<string, RollupEntry>();
-  const directory = checkedDirectory(rollupDirectory(storage, ownerSessionId), storage);
-  if (!directory) return entries;
-  let names: string[];
-  try { names = readdirSync(directory); } catch { return entries; }
-  for (const name of names) {
+  const scoped = { ...storage, ownerSessionId };
+  for (const { name, content } of readOwnerArtifacts(scoped, ROLLUP_DIR)) {
     if (!name.endsWith(".json")) continue;
     try {
-      const path = join(directory, name);
-      if (!lstatSync(path).isFile() || realpathSync(path) !== path) continue;
-      const raw = JSON.parse(readFileSync(path, "utf8")) as unknown;
-      const parsed = parseRollup(raw);
+      const parsed = parseRollup(JSON.parse(content) as unknown);
       if (parsed && name === `${parsed.agentId}.json`) entries.set(parsed.agentId, parsed);
     } catch { /* one corrupt roll-up never hides its siblings */ }
   }
@@ -106,6 +84,7 @@ function aggregateOwner(storage: AgentStorageContext, ownerSessionId: string, op
   if (!safePart(ownerSessionId) || visited.has(ownerSessionId)) return result;
   visited.add(ownerSessionId);
   const root = ownerRoot(storage, ownerSessionId);
+  options.watchPaths?.add(storage.root);
   options.watchPaths?.add(join(storage.root, "ws-agents"));
   options.watchPaths?.add(root);
   const rollups = readRollups(storage, ownerSessionId);
@@ -178,18 +157,7 @@ export function persistEvictedAgentCost(registry: RpcAgentRegistry, record: RpcA
     total.descendants = Math.max(total.descendants, prior.descendants);
   }
   const entry: RollupEntry = { version: ROLLUP_VERSION, agentId: record.agentId, ...total };
-  const directory = ensureRollupDirectory(storage);
-  if (!directory) return false;
-  const target = join(directory, `${record.agentId}.json`);
-  const temporary = join(directory, `.${record.agentId}-${process.pid}-${randomUUID()}.tmp`);
-  try {
-    writeFileSync(temporary, `${JSON.stringify(entry, null, 2)}\n`, { mode: 0o600 });
-    renameSync(temporary, target);
-    return true;
-  } catch {
-    try { rmSync(temporary, { force: true }); } catch { /* original failure wins */ }
-    return false;
-  }
+  return writeOwnerArtifact(storage, ROLLUP_DIR, `${record.agentId}.json`, `${JSON.stringify(entry, null, 2)}\n`);
 }
 
 /** Retention uses the same identity-keyed roll-up before detaching an owned home. */
@@ -207,7 +175,7 @@ function aggregateWithWatchPaths(storage: AgentStorageContext, registry: RpcAgen
 function existingDirectories(paths: Iterable<string>): string[] {
   const out: string[] = [];
   for (const path of paths) {
-    try { if (existsSync(path) && statSync(path).isDirectory()) out.push(path); } catch { /* raced with retention */ }
+    try { if (existsSync(path) && statSync(path).isDirectory() && !lstatSync(path).isSymbolicLink() && realpathSync(path) === resolve(path)) out.push(path); } catch { /* raced with retention */ }
   }
   return out;
 }
@@ -233,8 +201,13 @@ export function watchDescendantCosts(storage: AgentStorageContext, registry: Rpc
     scheduled.unref?.();
   };
   reconcile();
+  // `fs.watch` cannot observe through a directory that did not exist when it
+  // was armed on every host; a cheap unref'd reconciliation closes that gap.
+  const fallback = setInterval(reconcile, 250);
+  fallback.unref?.();
   return () => {
     stopped = true;
+    clearInterval(fallback);
     if (scheduled) clearTimeout(scheduled);
     for (const watcher of watchers.values()) watcher.close();
     watchers.clear();
@@ -268,13 +241,15 @@ export function summarizeLeadUsage(entries: readonly unknown[]): LeadUsageSummar
     const usage = relevant as { input?: unknown; output?: unknown; cacheRead?: unknown; cacheWrite?: unknown; cost?: { total?: unknown } };
     const input = nonnegative(usage.input) ?? 0, output = nonnegative(usage.output) ?? 0, cacheRead = nonnegative(usage.cacheRead) ?? 0, cacheWrite = nonnegative(usage.cacheWrite) ?? 0;
     summary.input += input; summary.output += output; summary.cacheRead += cacheRead; summary.cacheWrite += cacheWrite;
-    const prompt = input + cacheRead + cacheWrite;
-    summary.latestCacheHitRate = prompt > 0 ? cacheRead / prompt * 100 : undefined;
+    if (entry.type === "message" && entry.message?.role === "assistant") {
+      const prompt = input + cacheRead + cacheWrite;
+      summary.latestCacheHitRate = prompt > 0 ? cacheRead / prompt * 100 : undefined;
+    }
     const cost = nonnegative(usage.cost?.total);
     if (cost === undefined) unknownCost = true; else { sawCost = true; summary.cost.knownUsd += cost; }
   }
   summary.cost.knownContributors = sawCost ? 1 : 0;
-  summary.cost.unknownContributors = unknownCost || !sawCost ? 1 : 0;
+  summary.cost.unknownContributors = unknownCost ? 1 : 0;
   summary.cost.descendants = sawCost || unknownCost ? 1 : 0;
   return summary;
 }
@@ -301,7 +276,30 @@ export interface AgentFooterContext {
   ui: { setFooter(factory: ((tui: FooterTui, theme: FooterTheme, data: FooterData) => AgentFooterComponent) | undefined): void };
 }
 export interface AgentFooterController { refresh(): void; stop(): void }
+export interface AgentFooterSessionLifecycle {
+  start(role: SpawnRole | undefined, ctx: AgentFooterContext & { mode?: string }, registry: RpcAgentRegistry, storage: AgentStorageContext): Promise<void>;
+  refresh(): void;
+  stop(): void;
+}
 interface ControllerOptions { watchCosts?: typeof watchDescendantCosts }
+
+/** Owns replacement/reload/mode-transition/shutdown semantics for index.ts. */
+export function createAgentFooterSessionLifecycle(
+  loadPrimitives: () => Promise<FooterPrimitives>,
+  createController: typeof createAgentFooterController = createAgentFooterController,
+): AgentFooterSessionLifecycle {
+  let current: AgentFooterController | undefined;
+  return {
+    async start(role, ctx, registry, storage) {
+      current?.stop();
+      current = undefined;
+      if (!shouldArmAgentFooter(role, ctx.mode)) return;
+      current = createController(ctx, registry, storage, await loadPrimitives());
+    },
+    refresh() { current?.refresh(); },
+    stop() { current?.stop(); current = undefined; },
+  };
+}
 
 export function shouldArmAgentFooter(role: SpawnRole | undefined, mode: string | undefined): boolean {
   return isLeadOrFork(role) && mode === "tui";

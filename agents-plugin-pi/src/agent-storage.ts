@@ -26,6 +26,25 @@ function safe(value: string, label: string): string { if (!SAFE_COMPONENT.test(v
 function contained(parent: string, child: string): boolean { const r = relative(parent, child); return r === "" || (!!r && !r.startsWith(`..${sep}`) && r !== ".."); }
 function canonicalRoot(root: string): string { mkdirSync(root, { recursive: true, mode: 0o700 }); return realpathSync(root); }
 function checkedDirectory(path: string, root: string): string { mkdirSync(path, { recursive: true, mode: 0o700 }); const real = realpathSync(path); if (!contained(root, real) || lstatSync(path).isSymbolicLink()) throw new Error("ws-pi-agent: owned path contains a symlink escape"); return real; }
+function existingCheckedDirectory(path: string, root: string): string | undefined {
+  try {
+    const resolved = resolve(path), real = realpathSync(resolved);
+    return real === resolved && contained(root, real) && !lstatSync(resolved).isSymbolicLink() && statSync(resolved).isDirectory() ? resolved : undefined;
+  } catch { return undefined; }
+}
+function ownerArtifactDirectory(ctx: AgentStorageContext, bucket: string, create: boolean): string | undefined {
+  if (!/^\.[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(bucket)) return undefined;
+  try {
+    const namespacePath = join(ctx.root, "ws-agents");
+    const namespace = create ? checkedDirectory(namespacePath, ctx.root) : existingCheckedDirectory(namespacePath, ctx.root);
+    if (!namespace) return undefined;
+    const ownerPath = join(namespace, safe(ctx.ownerSessionId, "Pi session id"));
+    const owner = create ? checkedDirectory(ownerPath, namespace) : existingCheckedDirectory(ownerPath, namespace);
+    if (!owner) return undefined;
+    const bucketPath = join(owner, bucket);
+    return create ? checkedDirectory(bucketPath, owner) : existingCheckedDirectory(bucketPath, owner);
+  } catch { return undefined; }
+}
 function canonicalHome(home: string): string { const resolved = resolve(home); if (lstatSync(resolved).isSymbolicLink()) throw new Error("ws-pi-agent: owned home is symlinked"); const real = realpathSync(resolved); if (real !== resolved) throw new Error("ws-pi-agent: owned home escapes through symlink"); return real; }
 function checkedSessionPath(home: string, sessionPath: string): void {
   const candidate = resolve(sessionPath);
@@ -40,6 +59,39 @@ export function isOwnedSessionPath(home: string, sessionPath: string): boolean {
 export function createAgentStorageContext(sessionId: string, agentDir = getAgentDir()): AgentStorageContext {
   return { root: canonicalRoot(agentDir), ownerSessionId: safe(sessionId, "Pi session id") };
 }
+
+/** Reads contained regular files from a hidden owner-scoped adapter bucket. */
+export function readOwnerArtifacts(ctx: AgentStorageContext, bucket: string): Array<{ name: string; content: string }> {
+  const directory = ownerArtifactDirectory(ctx, bucket, false);
+  if (!directory) return [];
+  const out: Array<{ name: string; content: string }> = [];
+  try {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (!entry.isFile() || !SAFE_COMPONENT.test(entry.name)) continue;
+      const path = join(directory, entry.name);
+      if (lstatSync(path).isSymbolicLink() || realpathSync(path) !== path) continue;
+      out.push({ name: entry.name, content: readFileSync(path, "utf8") });
+    }
+  } catch { return []; }
+  return out;
+}
+
+/** Atomically writes one contained regular file in an owner-scoped adapter bucket. */
+export function writeOwnerArtifact(ctx: AgentStorageContext, bucket: string, name: string, content: string): boolean {
+  if (!SAFE_COMPONENT.test(name)) return false;
+  const directory = ownerArtifactDirectory(ctx, bucket, true);
+  if (!directory) return false;
+  const target = join(directory, name), temporary = join(directory, `.${name}-${process.pid}-${randomUUID()}.tmp`);
+  try {
+    writeFileSync(temporary, content, { mode: 0o600 });
+    renameSync(temporary, target);
+    return true;
+  } catch {
+    try { rmSync(temporary, { force: true }); } catch { /* original failure wins */ }
+    return false;
+  }
+}
+
 export function ownershipPath(home: string): string { return join(home, "ownership.json"); }
 export function allocateAgentHome(ctx: AgentStorageContext, agentId: string, role: AgentOwnership["role"], exploreMode?: "simple" | "deep", noSession = false): AgentOwnership {
   safe(agentId, "agent id");

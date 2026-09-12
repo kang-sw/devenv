@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
-import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, pruneStaleAgentHomes, readOwnership, removeOwnedAgentHome, touchOwnership, writeOwnership, updateOwnership } from "../src/agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, pruneStaleAgentHomes, readOwnerArtifacts, readOwnership, removeOwnedAgentHome, touchOwnership, writeOwnerArtifact, writeOwnership, updateOwnership } from "../src/agent-storage.ts";
 import { writePrivateJson } from "../src/fork-context.ts";
 import { exploreLeaf, prepareForkLaunch, validateForkReadiness } from "../src/spawner.ts";
 
@@ -22,6 +22,22 @@ describe("agent storage", () => {
       observeSessionWrite(owned.home, owned.sessionPath!);
       assert.equal(readOwnership(owned.home)!.sessionSignature?.size, 14);
     } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("owner artifacts use the storage boundary and refuse a symlinked bucket", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+    const outside = mkdtempSync(join(tmpdir(), "ws-pi-storage-outside-"));
+    try {
+      const context = createAgentStorageContext("lead", root);
+      assert.equal(writeOwnerArtifact(context, ".cost-rollup", "agent.json", "safe"), true, "the storage layer creates a fresh owner namespace safely");
+      assert.deepEqual(readOwnerArtifacts(context, ".cost-rollup"), [{ name: "agent.json", content: "safe" }]);
+      const bucket = join(context.root, "ws-agents", "lead", ".cost-rollup");
+      rmSync(bucket, { recursive: true, force: true });
+      symlinkSync(outside, bucket);
+      assert.equal(writeOwnerArtifact(context, ".cost-rollup", "escape.json", "no"), false);
+      assert.equal(existsSync(join(outside, "escape.json")), false);
+      assert.deepEqual(readOwnerArtifacts(context, ".cost-rollup"), []);
+    } finally { rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); }
   });
 
   test("keeps terminal no-session leaves out of ordinary session files and rejects traversal", () => {
