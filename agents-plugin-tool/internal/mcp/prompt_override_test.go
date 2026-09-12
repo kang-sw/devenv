@@ -10,8 +10,7 @@ package mcp
 //   3. "all" override: applies when no harness-specific override is stored.
 //   4. Empty-seed slot: renders stored override or nothing when none is set.
 //   5. Production-path case: override stored via the real resolver/session store
-//      is honored at playbook.render time (mirrors
-//      TestPreferMercenaryOnOffRenderGuidanceProductionPath).
+//      is honored at playbook.render time.
 //   6. Phase 2 shipped manual: DelegationSection is absent, while the
 //      UserPreferenceSection marker remains the shipped freeform slot.
 //
@@ -85,7 +84,7 @@ func TestOverrideNoOverrideSeedRenders(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// nil lookup: every override-point falls back to its seed.
-	body, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", nil)
+	body, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -129,7 +128,7 @@ func TestOverridePerHarnessReplacement(t *testing.T) {
 
 	// Claude harness: should get the per-harness override.
 	sClaude := newTestServerWithHarness(t, "claude")
-	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookup)
+	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (claude): %v", err)
 	}
@@ -142,7 +141,7 @@ func TestOverridePerHarnessReplacement(t *testing.T) {
 
 	// Codex harness: no codex-specific or "all" override → must fall back to seed.
 	sCodex := newTestServerWithHarness(t, "codex")
-	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookup)
+	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (codex): %v", err)
 	}
@@ -174,7 +173,7 @@ func TestOverrideAllBucketFallback(t *testing.T) {
 
 	// Claude harness: no claude-specific override → "all" applies.
 	sClaude := newTestServerWithHarness(t, "claude")
-	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookup)
+	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (claude): %v", err)
 	}
@@ -187,7 +186,7 @@ func TestOverrideAllBucketFallback(t *testing.T) {
 
 	// Codex harness: same expectation.
 	sCodex := newTestServerWithHarness(t, "codex")
-	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookup)
+	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (codex): %v", err)
 	}
@@ -200,7 +199,7 @@ func TestOverrideAllBucketFallback(t *testing.T) {
 		"SeedSection/claude": "claude wins",
 		"SeedSection/all":    "all-bucket",
 	})
-	bodyBoth, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookupBoth)
+	bodyBoth, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookupBoth)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (both): %v", err)
 	}
@@ -221,7 +220,7 @@ func TestOverrideEmptySeedSlot(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// No override stored: extension slot must render nothing (empty body).
-	bodyNoOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", nil)
+	bodyNoOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (no override): %v", err)
 	}
@@ -234,7 +233,7 @@ func TestOverrideEmptySeedSlot(t *testing.T) {
 	lookup := staticLookup(map[string]string{
 		"ExtSlot/claude": "injected extension text",
 	})
-	bodyWithOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookup)
+	bodyWithOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (with override): %v", err)
 	}
@@ -376,8 +375,7 @@ func TestApplyOverrideMarkersUnclosedMarkerPreservesContent(t *testing.T) {
 // wsconfig resolver/session store is resolved by playbook.render at render time
 // and that marker syntax never appears in the output file.
 //
-// This mirrors TestPreferMercenaryOnOffRenderGuidanceProductionPath in structure:
-// sequential callToolOnce calls on the same *Server guarantee session-write
+// Sequential callToolOnce calls on the same *Server guarantee session-write
 // visibility, and the override is seeded directly via the resolver (not via
 // config.prompt.set which belongs to the sibling ticket).
 func TestOverrideProductionPath(t *testing.T) {
@@ -1254,16 +1252,26 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 		t.Fatalf("workflow.prefer_subagent default should be cataloged as off: %+v", subagentKnob.Current)
 	}
 
-	mercenaryKnob := requireTuningKnob(t, catalog, "workflow.prefer_mercenary")
-	if mercenaryKnob.Writer.Tool != "config.tune" || mercenaryKnob.Writer.FixedArguments["key"] != "workflow.prefer_mercenary" {
-		t.Fatalf("workflow.prefer_mercenary writer tool mismatch: %+v", mercenaryKnob.Writer)
+	bootstrapKnob := requireTuningKnob(t, catalog, "bootstrap_alarm")
+	if bootstrapKnob.Writer.Tool != "config.tune" || bootstrapKnob.Writer.FixedArguments["key"] != "bootstrap_alarm" {
+		t.Fatalf("bootstrap_alarm writer tool mismatch: %+v", bootstrapKnob.Writer)
 	}
-	assertFieldEnum(t, mercenaryKnob.ValueFields, "value", []string{"on", "off", "hide"})
-	if findTuningField(mercenaryKnob.ValueFields, "enabled") != nil {
-		t.Fatalf("workflow.prefer_mercenary catalog must not expose legacy enabled field: %+v", mercenaryKnob.ValueFields)
+	assertFieldEnum(t, bootstrapKnob.ValueFields, "value", []string{"on", "off"})
+	if !strings.Contains(mustMarshalJSON(t, bootstrapKnob.Current), `"value":"on"`) {
+		t.Fatalf("bootstrap_alarm default should be cataloged as on: %+v", bootstrapKnob.Current)
 	}
-	if !strings.Contains(mustMarshalJSON(t, mercenaryKnob.Current), `"value":"hide"`) {
-		t.Fatalf("workflow.prefer_mercenary default should be cataloged as hide: %+v", mercenaryKnob.Current)
+
+	sageReviewKnob := requireTuningKnob(t, catalog, wsconfig.ItemSageReview)
+	if sageReviewKnob.Writer.Tool != "config.tune" || sageReviewKnob.Writer.FixedArguments["key"] != wsconfig.ItemSageReview {
+		t.Fatalf("sage_review writer tool mismatch: %+v", sageReviewKnob.Writer)
+	}
+	if sageReviewKnob.Reset == nil || sageReviewKnob.Reset.Tool != "config.tune" || sageReviewKnob.Reset.FixedArguments["key"] != wsconfig.ItemSageReview || sageReviewKnob.Reset.FixedArguments["reset"] != "true" {
+		t.Fatalf("sage_review reset mismatch: %+v", sageReviewKnob.Reset)
+	}
+	assertFieldEnum(t, sageReviewKnob.SelectorFields, "scope", []string{"session", "project", "global"})
+	assertFieldEnum(t, sageReviewKnob.ValueFields, "value", []string{"off", "ask", "auto"})
+	if !strings.Contains(mustMarshalJSON(t, sageReviewKnob.Current), `"value":"auto"`) || !strings.Contains(mustMarshalJSON(t, sageReviewKnob.Current), `"scope":"builtin"`) {
+		t.Fatalf("sage_review builtin default should be cataloged as auto/builtin: %+v", sageReviewKnob.Current)
 	}
 
 	agentsKnob := requireTuningKnob(t, catalog, "agents.tier")
@@ -1272,7 +1280,78 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 	assertFieldEnum(t, agentsKnob.SelectorFields, "harness", []string{"claude", "codex", "pi", "default"})
 }
 
-func TestConfigTuningCatalogNoAgentOmitsFullWsKnobs(t *testing.T) {
+func TestConfigTuneSageReviewScopesAndValidation(t *testing.T) {
+	useLeadProfile(t)
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	s := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, s, 900450, root, nil))
+
+	for i, tc := range []struct {
+		scope string
+		value string
+	}{
+		{scope: "session", value: "off"},
+		{scope: "project", value: "ask"},
+		{scope: "global", value: "auto"},
+	} {
+		resp := callToolOnce(t, s, 10+i, "config.tune", map[string]any{
+			"session_key": key,
+			"key":         wsconfig.ItemSageReview,
+			"scope":       tc.scope,
+			"value":       tc.value,
+		})
+		if got := toolText(t, resp); !strings.Contains(got, "sage_review: "+tc.value+" [scope:"+tc.scope+"]") {
+			t.Fatalf("sage_review %s write response = %q", tc.scope, got)
+		}
+	}
+	catalog := parseTuningCatalogResponse(t, callToolOnce(t, s, 19, "config.list", map[string]any{
+		"session_key": key,
+		"format":      "json",
+	}))
+	if current := mustMarshalJSON(t, requireTuningKnob(t, catalog, wsconfig.ItemSageReview).Current); !strings.Contains(current, `"value":"off"`) || !strings.Contains(current, `"scope":"session"`) {
+		t.Fatalf("config.list must report the session-effective sage_review posture: %s", current)
+	}
+
+	for i, tc := range []struct {
+		scope string
+		value string
+		from  string
+	}{
+		{scope: "global", value: "off", from: "session"},
+		{scope: "session", value: "ask", from: "project"},
+		{scope: "project", value: "auto", from: "builtin"},
+	} {
+		resp := callToolOnce(t, s, 20+i, "config.tune", map[string]any{
+			"session_key": key,
+			"key":         wsconfig.ItemSageReview,
+			"scope":       tc.scope,
+			"reset":       true,
+		})
+		if got := toolText(t, resp); !strings.Contains(got, "sage_review: "+tc.value+" [scope:"+tc.from+"]") {
+			t.Fatalf("sage_review %s reset response = %q", tc.scope, got)
+		}
+	}
+
+	for i, tc := range []map[string]any{
+		{"key": wsconfig.ItemSageReview, "value": "required"},
+		{"key": wsconfig.ItemSageReview, "scope": "builtin", "value": "auto"},
+		{"key": wsconfig.ItemSageReview, "reset": true, "value": "auto"},
+	} {
+		tc["session_key"] = key
+		resp := callToolOnce(t, s, 30+i, "config.tune", tc)
+		if !strings.Contains(resp, `"isError":true`) {
+			t.Fatalf("invalid sage_review config.tune call succeeded: %s", resp)
+		}
+	}
+}
+
+func TestConfigTuningCatalogNoAgentShape(t *testing.T) {
 	useLeadProfile(t)
 
 	rsrcRoot := buildOverrideTestTree(t)
@@ -1295,20 +1374,92 @@ func TestConfigTuningCatalogNoAgentOmitsFullWsKnobs(t *testing.T) {
 	catalog := parseTuningCatalogResponse(t, resp)
 
 	requireTuningKnob(t, catalog, "prompt.SeedSection")
+	requireTuningKnob(t, catalog, wsconfig.ItemSageReview)
+	for i, args := range []map[string]any{
+		{
+			"key":         wsconfig.ItemSageReview,
+			"scope":       "session",
+			"value":       "off",
+			"session_key": key,
+		},
+		{
+			"key":         wsconfig.ItemSageReview,
+			"scope":       "session",
+			"reset":       true,
+			"session_key": key,
+		},
+	} {
+		result := callToolOnce(t, s, 10+i, "config.tune", args)
+		if strings.Contains(result, `"isError":true`) {
+			t.Fatalf("no-agent config.tune sage_review request failed: %s", result)
+		}
+	}
 	subagentKnob := requireTuningKnob(t, catalog, "workflow.prefer_subagent")
 	if subagentKnob.Writer.Tool != "config.tune" || subagentKnob.Writer.FixedArguments["key"] != "workflow.prefer_subagent" {
 		t.Fatalf("workflow.prefer_subagent writer tool mismatch in no-agent catalog: %+v", subagentKnob.Writer)
 	}
-	for _, hidden := range []string{"workflow.prefer_mercenary", "delegation.prefer_mercenary"} {
-		if knob := findTuningKnob(catalog, hidden); knob != nil {
-			t.Fatalf("no-agent config.tuning exposed full-ws-only knob %s: %+v", hidden, knob)
-		}
-	}
-
 	agentsKnob := requireTuningKnob(t, catalog, "agents.tier")
 	assertFieldEnum(t, agentsKnob.ValueFields, "tier", []string{"small", "medium", "large", "xlarge"})
 	assertFieldEnum(t, agentsKnob.ValueFields, "effort", []string{"", "none", "low", "medium", "high", "xhigh"})
 	assertFieldEnum(t, agentsKnob.SelectorFields, "harness", []string{"claude", "codex", "pi", "default"})
+}
+
+// TestConfigTuningCatalogNoAgentCutHonorsNoAgentVisible exercises the agentless
+// catalog cut itself. Every live registry entry declares NoAgentVisible true, so
+// no fixed key can demonstrate the cut; the test flips one live entry for its
+// duration instead. Without this, buildTuningCatalog's `noAgentMode &&
+// !entry.NoAgentVisible` filter could be deleted or inverted and every test in
+// the package would still pass.
+func TestConfigTuningCatalogNoAgentCutHonorsNoAgentVisible(t *testing.T) {
+	useLeadProfile(t)
+
+	const hidden = "bootstrap_alarm"
+	idx := -1
+	for i, entry := range configRegistry {
+		if entry.Key == hidden {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		t.Fatalf("config registry no longer declares %q; repoint this test at a live no-agent-visible knob", hidden)
+	}
+	if !configRegistry[idx].NoAgentVisible {
+		t.Fatalf("%q already declares NoAgentVisible false; the cut is no longer demonstrated by flipping it", hidden)
+	}
+
+	rsrcRoot := buildOverrideTestTree(t)
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	t.Setenv("WS_MCP_NO_AGENT", "1")
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	s := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, s, 900501, root, nil))
+
+	// Visible while the entry declares NoAgentVisible true.
+	before := parseTuningCatalogResponse(t, callToolOnce(t, s, 1, "config.list", map[string]any{
+		"session_key": key,
+		"format":      "json",
+	}))
+	requireTuningKnob(t, before, hidden)
+
+	configRegistry[idx].NoAgentVisible = false
+	t.Cleanup(func() { configRegistry[idx].NoAgentVisible = true })
+
+	after := parseTuningCatalogResponse(t, callToolOnce(t, s, 2, "config.list", map[string]any{
+		"session_key": key,
+		"format":      "json",
+	}))
+	if knob := findTuningKnob(after, hidden); knob != nil {
+		t.Fatalf("no-agent config.list exposed %q after it declared NoAgentVisible false: %+v", hidden, *knob)
+	}
+	// The cut is per entry, not a wholesale agentless suppression.
+	requireTuningKnob(t, after, "workflow.prefer_subagent")
 }
 
 func parseTuningCatalogResponse(t *testing.T, line string) tuningCatalog {

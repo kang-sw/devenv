@@ -277,7 +277,7 @@ func TestDefaultScopeFallbackToProject(t *testing.T) {
 }
 
 func TestWorkflowPreferenceDefaultScopesAreGlobalOnly(t *testing.T) {
-	for _, key := range []string{ItemWorkflowPreferSubagent, ItemWorkflowPreferMercenary} {
+	for _, key := range []string{ItemWorkflowPreferSubagent, ItemWorkflowSkepticalPosture, ItemBootstrapAlarm} {
 		if got := DefaultScope(key); got != ScopeGlobal {
 			t.Fatalf("DefaultScope(%q) = %s, want global", key, got)
 		}
@@ -645,6 +645,26 @@ func TestZeroMigrationProjectWinsOverGlobal(t *testing.T) {
 	}
 	if rv.Value != "pre-existing-project" || rv.Scope != ScopeProject {
 		t.Fatalf("expected pre-existing-project/project, got %q/%q", rv.Value, rv.Scope)
+	}
+}
+
+func TestScopedShowOmitsRetiredSageCompletenessSetting(t *testing.T) {
+	r, opts := newTestResolver(t, nil, nil)
+	view, err := ScopedShow(&r, opts, "")
+	if err != nil {
+		t.Fatalf("ScopedShow: %v", err)
+	}
+	keys := map[string]bool{}
+	for _, item := range view.ResolvedOverrides {
+		keys[item.Key] = true
+	}
+	if keys["sage_review_completeness"] {
+		t.Fatal("config list advertises the retired completeness setting")
+	}
+	for _, key := range []string{ItemSageReview, ItemSageReviewDesignTier, ItemSageReviewCompletenessTier} {
+		if !keys[key] {
+			t.Errorf("config list missing active Sage setting %q", key)
+		}
 	}
 }
 

@@ -321,11 +321,6 @@ func TestRuntimeMetadataInventoryClassifiesKnownStateFiles(t *testing.T) {
 		field  string
 		want   RuntimeFieldStorage
 	}{
-		{RuntimeSourceAgentJSON, "backend", RuntimeFieldSQLiteMetadata},
-		{RuntimeSourceAgentJSON, "system_prompt_path", RuntimeFieldSQLiteMetadata},
-		{RuntimeSourceAgentJSON, "agent_json_compatibility", RuntimeFieldTemporaryCompatOnly},
-		{RuntimeSourceAgentCurrentJSON, "execution_id", RuntimeFieldSQLiteMetadata},
-		{RuntimeSourceAgentCurrentJSON, "stdout_path", RuntimeFieldSQLiteMetadata},
 		{RuntimeSourceExecJobJSON, "exec_key", RuntimeFieldSQLiteMetadata},
 		{RuntimeSourceExecJobJSON, "stdout", RuntimeFieldFileBackedPayload},
 		{RuntimeSourceExecJobJSON, "combined_bytes", RuntimeFieldSQLiteMetadata},
@@ -343,9 +338,7 @@ func TestRuntimeMetadataInventoryClassifiesKnownStateFiles(t *testing.T) {
 
 func TestRuntimeMetadataInventoryCoversCurrentJSONFields(t *testing.T) {
 	expected := map[RuntimeStateSource]map[string]bool{
-		RuntimeSourceAgentJSON:        jsonFieldSetFromSource(t, "../wsagent/agent.go", "Agent", "agent_json_compatibility"),
-		RuntimeSourceAgentCurrentJSON: jsonFieldSetFromSource(t, "../wsagent/agent.go", "CurrentCall"),
-		RuntimeSourceExecJobJSON:      jsonFieldSetFromSource(t, "../execjob/execjob.go", "Record", "stdout", "stderr", "combined"),
+		RuntimeSourceExecJobJSON: jsonFieldSetFromSource(t, "../execjob/execjob.go", "Record", "stdout", "stderr", "combined"),
 	}
 	for _, item := range RuntimeMetadataInventory() {
 		fields := expected[item.Source]
@@ -364,27 +357,7 @@ func TestRuntimeMetadataInventoryCoversCurrentJSONFields(t *testing.T) {
 	}
 }
 
-func TestRuntimeMetadataInventoryKeepsPathsInSQLiteAndPayloadsFileBacked(t *testing.T) {
-	paths := []struct {
-		source RuntimeStateSource
-		field  string
-	}{
-		{RuntimeSourceAgentJSON, "system_prompt_path"},
-		{RuntimeSourceAgentJSON, "last_output_path"},
-		{RuntimeSourceAgentCurrentJSON, "prompt_path"},
-		{RuntimeSourceAgentCurrentJSON, "stdout_path"},
-		{RuntimeSourceAgentCurrentJSON, "stderr_path"},
-	}
-	for _, path := range paths {
-		got, ok := RuntimeField(path.source, path.field)
-		if !ok {
-			t.Fatalf("missing path classification for %s %s", path.source, path.field)
-		}
-		if got.Storage != RuntimeFieldSQLiteMetadata || got.WriteAuthority != RuntimeAuthoritySQLite {
-			t.Fatalf("%s %s = %#v, want sqlite path metadata", path.source, path.field, got)
-		}
-	}
-
+func TestRuntimeMetadataInventoryKeepsPayloadsFileBacked(t *testing.T) {
 	payloads := []struct {
 		source RuntimeStateSource
 		field  string
@@ -474,237 +447,6 @@ func TestMissingFileBackedPayloadIsRecoverableConsistencyState(t *testing.T) {
 	present := writeArtifactFile(t, "present-output")
 	if got := ClassifyFileBackedPayload(present); got != PayloadConsistencyPresent {
 		t.Fatalf("present payload consistency = %s, want %s", got, PayloadConsistencyPresent)
-	}
-}
-
-func TestAgentJSONCompatibilityIsNotWriteAuthority(t *testing.T) {
-	compat, ok := RuntimeField(RuntimeSourceAgentJSON, "agent_json_compatibility")
-	if !ok {
-		t.Fatal("missing agent.json compatibility classification")
-	}
-	if compat.Storage != RuntimeFieldTemporaryCompatOnly || compat.WriteAuthority != RuntimeAuthorityNone {
-		t.Fatalf("compatibility classification = %#v, want temporary read-only", compat)
-	}
-	for _, item := range RuntimeMetadataInventory() {
-		if item.Source == RuntimeSourceAgentJSON && item.Storage == RuntimeFieldSQLiteMetadata && item.WriteAuthority != RuntimeAuthoritySQLite {
-			t.Fatalf("agent.json metadata field %s authority = %s, want sqlite", item.Field, item.WriteAuthority)
-		}
-	}
-}
-
-func TestAgentDefinitionsPersistSQLiteMetadata(t *testing.T) {
-	root := initRepo(t)
-	cache := filepath.Join(t.TempDir(), "cache")
-	store, err := NewManager(Options{CacheHome: cache}).Open(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	key, err := AgentInternalKey("implementer")
-	if err != nil {
-		t.Fatal(err)
-	}
-	def := AgentDefinition{AgentKey: key, PublicName: "implementer", StatePath: "actor-dir", SchemaVersion: 1, Backend: "codex", Tier: "core", Model: "gpt-test", Status: "idle", CreatedAt: "2026-05-25T00:00:00Z", LastSeenAt: "2026-05-25T00:00:00Z", LastOutputPath: "output.md", PromptRefs: []string{"delegate-orientation"}, SystemPromptPath: "system.md", Capabilities: map[string]bool{"resume": true}, Ephemeral: true}
-	if err := store.UpsertAgentDefinition(context.Background(), def); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Close(); err != nil {
-		t.Fatal(err)
-	}
-	reopened, err := NewManager(Options{CacheHome: cache}).Open(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.Close()
-	got, ok, err := reopened.AgentDefinition(context.Background(), key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok || got.PublicName != "implementer" || got.SystemPromptPath != "system.md" || !got.Capabilities["resume"] || !got.Ephemeral {
-		t.Fatalf("persisted agent definition mismatch: ok=%t def=%+v", ok, got)
-	}
-}
-
-func TestAgentInternalKeyScopesPublicNamesByWorktreeStore(t *testing.T) {
-	ctx := context.Background()
-	rootA := initRepo(t)
-	rootB := initRepo(t)
-	cache := filepath.Join(t.TempDir(), "cache")
-	storeA, err := NewManager(Options{CacheHome: cache}).Open(rootA)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer storeA.Close()
-	storeB, err := NewManager(Options{CacheHome: cache}).Open(rootB)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer storeB.Close()
-	key, err := AgentInternalKey("same")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := storeA.UpsertAgentDefinition(ctx, AgentDefinition{AgentKey: key, PublicName: "same", StatePath: "root-a", SchemaVersion: 1, Status: "idle"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := storeB.UpsertAgentDefinition(ctx, AgentDefinition{AgentKey: key, PublicName: "same", StatePath: "root-b", SchemaVersion: 1, Status: "idle"}); err != nil {
-		t.Fatal(err)
-	}
-	gotA, ok, err := storeA.AgentDefinition(ctx, key)
-	if err != nil || !ok {
-		t.Fatalf("root A definition ok=%t err=%v", ok, err)
-	}
-	gotB, ok, err := storeB.AgentDefinition(ctx, key)
-	if err != nil || !ok {
-		t.Fatalf("root B definition ok=%t err=%v", ok, err)
-	}
-	if gotA.StatePath != "root-a" || gotB.StatePath != "root-b" {
-		t.Fatalf("same public name should stay distinct by worktree store: A=%+v B=%+v", gotA, gotB)
-	}
-}
-
-func TestPruneAgentInstancesUsesRecordedSQLiteCandidates(t *testing.T) {
-	ctx := context.Background()
-	root := initRepo(t)
-	store := openStore(t, root)
-	defer store.Close()
-	key, err := AgentInternalKey("impl")
-	if err != nil {
-		t.Fatal(err)
-	}
-	dueDir := filepath.Join(store.Layout().AgentsDir, "due")
-	currentDir := filepath.Join(store.Layout().AgentsDir, "current")
-	activeDir := filepath.Join(store.Layout().AgentsDir, "active")
-	recoveryDir := filepath.Join(store.Layout().AgentsDir, "recovery")
-	backoffDir := filepath.Join(store.Layout().AgentsDir, "backoff")
-	unrelatedDir := filepath.Join(store.Layout().AgentsDir, "unrelated")
-	for _, dir := range []string{dueDir, currentDir, activeDir, recoveryDir, backoffDir, unrelatedDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	old := testNow.Add(-8 * 24 * time.Hour).Format(time.RFC3339Nano)
-	due := AgentDefinition{AgentKey: key, PublicName: "impl", StatePath: "due", SchemaVersion: 1, Status: "idle", CreatedAt: old, RetentionEligibleAt: testNow.Add(-time.Hour).Format(time.RFC3339Nano), RetentionNextCheckAt: testNow.Add(-time.Hour).Format(time.RFC3339Nano), CleanupState: "retired"}
-	if err := store.UpsertAgentDefinition(ctx, due); err != nil {
-		t.Fatal(err)
-	}
-	current := due
-	current.StatePath = "current"
-	current.CleanupState = "current"
-	if err := store.UpsertAgentDefinition(ctx, current); err != nil {
-		t.Fatal(err)
-	}
-	pinned := due
-	pinned.StatePath = "pinned"
-	pinned.CleanupState = "retired"
-	pinned.Pinned = true
-	if err := store.UpsertAgentDefinition(ctx, pinned); err != nil {
-		t.Fatal(err)
-	}
-	activeKey, err := AgentInternalKey("active")
-	if err != nil {
-		t.Fatal(err)
-	}
-	active := due
-	active.AgentKey = activeKey
-	active.PublicName = "active"
-	active.StatePath = "active"
-	active.Status = "idle"
-	if err := store.UpsertAgentDefinition(ctx, active); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(activeDir, "current"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(activeDir, "current", "state.json"), []byte(`{"status":"running"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	recoveryKey, err := AgentInternalKey("recovery")
-	if err != nil {
-		t.Fatal(err)
-	}
-	recovery := due
-	recovery.AgentKey = recoveryKey
-	recovery.PublicName = "recovery"
-	recovery.StatePath = "recovery"
-	recovery.CleanupState = "recovery"
-	if err := store.UpsertAgentDefinition(ctx, recovery); err != nil {
-		t.Fatal(err)
-	}
-	backoffKey, err := AgentInternalKey("backoff")
-	if err != nil {
-		t.Fatal(err)
-	}
-	backoff := due
-	backoff.AgentKey = backoffKey
-	backoff.PublicName = "backoff"
-	backoff.StatePath = "backoff"
-	backoff.RetentionNextCheckAt = testNow.Add(time.Hour).Format(time.RFC3339Nano)
-	if err := store.UpsertAgentDefinition(ctx, backoff); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.DeleteAgentDefinition(ctx, key); err != nil {
-		t.Fatal(err)
-	}
-	for _, retireKey := range []string{activeKey, recoveryKey, backoffKey} {
-		if err := store.DeleteAgentDefinition(ctx, retireKey); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := store.db.ExecContext(ctx, `UPDATE agent_instances SET cleanup_state = 'recovery' WHERE agent_key = ?`, recoveryKey); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.db.ExecContext(ctx, `UPDATE agent_instances SET retention_next_check_at = ? WHERE agent_key = ?`, testNow.Add(time.Hour).Format(time.RFC3339Nano), backoffKey); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.UpsertAgentDefinition(ctx, current); err != nil {
-		t.Fatal(err)
-	}
-	res, err := store.PruneAgentInstances(ctx, PruneOptions{Limit: 10})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Deleted != 1 || res.Scanned != 2 || res.Skipped != 1 {
-		t.Fatalf("cleanup result = %+v, want one deletion and one active-state skip", res)
-	}
-	if _, err := os.Stat(dueDir); !os.IsNotExist(err) {
-		t.Fatalf("due dir still present/stat err=%v", err)
-	}
-	for _, dir := range []string{currentDir, activeDir, recoveryDir, backoffDir, unrelatedDir} {
-		if _, err := os.Stat(dir); err != nil {
-			t.Fatalf("dir %s should remain: %v", dir, err)
-		}
-	}
-}
-
-func TestPruneAgentInstancesRecordsRetryFence(t *testing.T) {
-	ctx := context.Background()
-	root := initRepo(t)
-	store := openStore(t, root)
-	defer store.Close()
-	key, err := AgentInternalKey("broken")
-	if err != nil {
-		t.Fatal(err)
-	}
-	def := AgentDefinition{AgentKey: key, PublicName: "broken", StatePath: string([]byte{'b', 'a', 'd', 0, 'p', 'a', 't', 'h'}), SchemaVersion: 1, Status: "idle", CreatedAt: testNow.Add(-8 * 24 * time.Hour).Format(time.RFC3339Nano), RetentionEligibleAt: testNow.Add(-time.Hour).Format(time.RFC3339Nano), RetentionNextCheckAt: testNow.Add(-time.Hour).Format(time.RFC3339Nano), CleanupState: "retired"}
-	if err := store.UpsertAgentDefinition(ctx, def); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.DeleteAgentDefinition(ctx, key); err != nil {
-		t.Fatal(err)
-	}
-	res, err := store.PruneAgentInstances(ctx, PruneOptions{Limit: 10})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Failed != 1 {
-		t.Fatalf("cleanup result = %+v, want failed retry fence", res)
-	}
-	var state, nextCheck, cleanupErr string
-	if err := store.db.QueryRowContext(ctx, `SELECT cleanup_state, retention_next_check_at, cleanup_error FROM agent_instances WHERE agent_key = ?`, key).Scan(&state, &nextCheck, &cleanupErr); err != nil {
-		t.Fatal(err)
-	}
-	if state != "cleanup_failed" || nextCheck == "" || cleanupErr == "" {
-		t.Fatalf("retry fence state=%q next=%q err=%q", state, nextCheck, cleanupErr)
 	}
 }
 
@@ -862,7 +604,7 @@ func TestIndependentHandleContentionRetriesShortWrite(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- store.UpsertAgentDefinition(ctx, AgentDefinition{AgentKey: "contended", PublicName: "contended", StatePath: "contended", SchemaVersion: 1, Status: "idle"})
+		errCh <- store.UpsertExecJob(ctx, ExecJob{ExecKey: "contended", Status: "running", SchemaVersion: 1})
 	}()
 	select {
 	case <-busySeen:
@@ -882,8 +624,8 @@ func TestIndependentHandleContentionRetriesShortWrite(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("contended write timed out")
 	}
-	if _, ok, err := store.AgentDefinition(ctx, "contended"); err != nil || !ok {
-		t.Fatalf("agent definition after contended write ok=%t err=%v", ok, err)
+	if _, ok, err := store.ExecJob(ctx, "contended"); err != nil || !ok {
+		t.Fatalf("exec job after contended write ok=%t err=%v", ok, err)
 	}
 }
 
@@ -899,7 +641,7 @@ func TestIndependentHandleContentionRetriesShortWrite(t *testing.T) {
 // file, which does force a genuine SQLITE_BUSY on the reader's very first
 // statement; releasing it by closing the holder (the reliable way to
 // downgrade out of exclusive locking mode) lets the contended read recover.
-// This proves AgentDefinition's new retry wrap (store.go) is actually
+// This proves ExecJob's point-read retry wrap (store.go) is actually
 // exercised for a real SQLITE_BUSY condition, not just compiled.
 func TestIndependentHandleContentionRetriesPointRead(t *testing.T) {
 	root := initRepo(t)
@@ -910,7 +652,7 @@ func TestIndependentHandleContentionRetriesPointRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := seed.UpsertAgentDefinition(ctx, AgentDefinition{AgentKey: "contended-read", PublicName: "contended-read", StatePath: "contended-read", SchemaVersion: 1, Status: "idle"}); err != nil {
+	if err := seed.UpsertExecJob(ctx, ExecJob{ExecKey: "contended-read", Status: "running", SchemaVersion: 1}); err != nil {
 		t.Fatal(err)
 	}
 	path := seed.Path()
@@ -932,7 +674,7 @@ func TestIndependentHandleContentionRetriesPointRead(t *testing.T) {
 	if _, err := holder.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := holder.ExecContext(ctx, `UPDATE agent_defs SET updated_at = updated_at WHERE agent_key = 'contended-read'`); err != nil {
+	if _, err := holder.ExecContext(ctx, `UPDATE exec_jobs SET updated_at = updated_at WHERE exec_key = 'contended-read'`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -958,14 +700,14 @@ func TestIndependentHandleContentionRetriesPointRead(t *testing.T) {
 	defer func() { sqliteRetryBusyHook = previousHook }()
 
 	type readResult struct {
-		def   AgentDefinition
+		job   ExecJob
 		found bool
 		err   error
 	}
 	resCh := make(chan readResult, 1)
 	go func() {
-		def, found, err := freshStore.AgentDefinition(ctx, "contended-read")
-		resCh <- readResult{def, found, err}
+		job, found, err := freshStore.ExecJob(ctx, "contended-read")
+		resCh <- readResult{job, found, err}
 	}()
 
 	select {
@@ -988,8 +730,8 @@ func TestIndependentHandleContentionRetriesPointRead(t *testing.T) {
 		if res.err != nil || !res.found {
 			t.Fatalf("contended read did not recover: found=%t err=%v", res.found, res.err)
 		}
-		if res.def.AgentKey != "contended-read" {
-			t.Fatalf("contended read returned wrong def: %+v", res.def)
+		if res.job.ExecKey != "contended-read" {
+			t.Fatalf("contended read returned wrong job: %+v", res.job)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("contended read timed out")
@@ -1000,9 +742,9 @@ func TestIndependentHandleContentionRetriesPointRead(t *testing.T) {
 // counterpart, exercising retryTombstones's QueryContext+drain wrap using
 // the same prior-exclusive-holder technique as
 // TestIndependentHandleContentionRetriesPointRead. retryTombstones is used
-// (rather than PruneExpired/PruneAgentInstances) because it has no
-// preceding write step: PruneExpired/PruneAgentInstances each start with a
-// beginPruneRun INSERT, which would itself already absorb the write-vs-write
+// (rather than PruneExpired) because it has no preceding write step:
+// PruneExpired starts with a beginPruneRun INSERT, which would itself
+// already absorb the write-vs-write
 // contention (an existing, already-tested retry path) before ever reaching
 // the new read wrap, making it impossible to isolate the read-specific
 // retry with this technique.
@@ -1090,62 +832,6 @@ func TestIndependentHandleContentionRetriesMultiRowRead(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("contended multi-row read timed out")
-	}
-}
-
-func TestAgentRolePointerHistoryAndCollision(t *testing.T) {
-	ctx := context.Background()
-	rootA := initRepo(t)
-	rootB := initRepo(t)
-	cache := filepath.Join(t.TempDir(), "cache")
-	storeA, err := NewManager(Options{CacheHome: cache}).Open(rootA)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer storeA.Close()
-	storeB, err := NewManager(Options{CacheHome: cache}).Open(rootB)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer storeB.Close()
-	key, err := AgentInternalKey("impl")
-	if err != nil {
-		t.Fatal(err)
-	}
-	first := AgentDefinition{AgentKey: key, PublicName: "impl", StatePath: "first", SchemaVersion: 1, Backend: "codex", Tier: "core", Model: "old", Status: "idle", CreatedAt: testNow.Format(time.RFC3339Nano), LastSeenAt: testNow.Format(time.RFC3339Nano), LastOutputPath: "output.md"}
-	if err := storeA.UpsertAgentDefinition(ctx, first); err != nil {
-		t.Fatal(err)
-	}
-	second := first
-	second.StatePath = "second"
-	second.Model = "new"
-	if err := storeA.UpsertAgentDefinition(ctx, second); err != nil {
-		t.Fatal(err)
-	}
-	other := AgentDefinition{AgentKey: key, PublicName: "impl", StatePath: "other-root", SchemaVersion: 1, Backend: "codex", Tier: "core", Model: "other", Status: "idle", CreatedAt: testNow.Format(time.RFC3339Nano), LastSeenAt: testNow.Format(time.RFC3339Nano), LastOutputPath: "output.md"}
-	if err := storeB.UpsertAgentDefinition(ctx, other); err != nil {
-		t.Fatal(err)
-	}
-	gotA, ok, err := storeA.AgentDefinition(ctx, key)
-	if err != nil || !ok {
-		t.Fatalf("root A role ok=%t err=%v", ok, err)
-	}
-	gotB, ok, err := storeB.AgentDefinition(ctx, key)
-	if err != nil || !ok {
-		t.Fatalf("root B role ok=%t err=%v", ok, err)
-	}
-	if gotA.StatePath != "second" || gotA.Model != "new" {
-		t.Fatalf("root A pointer = %+v", gotA)
-	}
-	if gotB.StatePath != "other-root" || gotB.Model != "other" {
-		t.Fatalf("root B pointer = %+v", gotB)
-	}
-	count, err := storeA.Count(ctx, "agent_instances")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if count != 2 {
-		t.Fatalf("root A agent instance count = %d, want 2", count)
 	}
 }
 

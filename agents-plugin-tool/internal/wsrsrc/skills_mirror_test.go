@@ -13,9 +13,6 @@ import (
 // deliberately migrated out of playbook.read. This is not a blanket
 // auto-mirror mechanism — see ai-docs/manuals/wsflow-mirroring.md.
 var substitutionMirroredSkills = []string{
-	"lead-drain-ready-queue",
-	"lead-prefer-subagent",
-	"lead-verify-discussion",
 	"mcp-server-repair",
 }
 
@@ -124,11 +121,6 @@ func TestSubstitutionGuardRejectsDisqualifyingContent(t *testing.T) {
 		name   string
 		source string
 	}{
-		{
-			name: "mercenary word anywhere",
-			source: "---\nname: fixture\n---\n\n" +
-				"A ws-managed external subprocess agent (mercenary) is reachable.\n",
-		},
 		{
 			name: "ws:full-only marker",
 			source: "---\nname: fixture\n---\n\n" +

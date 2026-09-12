@@ -11,14 +11,14 @@ import (
 // splices. Like substitutionMirroredSkills this is not a blanket mechanism —
 // adding an entry requires updating ai-docs/manuals/wsflow-mirroring.md in the
 // same change.
-var composedSkills = []SkillSplice{
-	{
-		Target:        "lead-drain-ready-queue",
-		Source:        "lead-prefer-subagent",
-		Title:         "Prefer Subagent",
-		AnchorHeading: "## Select",
-	},
-}
+// Currently empty: the sole entry (lead-prefer-subagent spliced into
+// lead-drain-ready-queue) died with that skill, so the on-disk drift guard and
+// regen entrypoint below are vacuous until the mapping gains an entry again.
+// ComposeSkillBody's own behavior is therefore covered by the synthetic
+// fixtures in TestComposeSkillBodyInsertsThenReplacesRegion and
+// TestComposeSkillBodyRejectsMissingAnchor, which do not depend on the
+// mapping.
+var composedSkills = []SkillSplice{}
 
 // composeSplice reads the on-disk source body for splice and returns the
 // composed form of the given target text.
@@ -55,49 +55,56 @@ func TestComposedSkillsUpToDate(t *testing.T) {
 	}
 }
 
-// TestComposeSkillBodyIsIdempotent proves the region is located and replaced by
-// its delimiter pair rather than appended again: composing an already-composed
-// target must be a byte-for-byte no-op. Without this, every regeneration would
-// stack another copy of the source body into the target.
-func TestComposeSkillBodyIsIdempotent(t *testing.T) {
-	for _, splice := range composedSkills {
-		targetPath := filepath.Join(fullSkillsRoot(), splice.Target, "SKILL.md")
-		raw, err := os.ReadFile(targetPath)
-		if err != nil {
-			t.Fatalf("read splice target %s: %v", targetPath, err)
-		}
-		once := composeSplice(t, splice, string(raw))
-		twice := composeSplice(t, splice, once)
-		if once != twice {
-			t.Fatalf("composing %s twice is not a no-op; region replacement is not idempotent", splice.Target)
-		}
+// TestComposeSkillBodyInsertsThenReplacesRegion covers the whole happy path on
+// a synthetic target, independent of the curated mapping: first generation
+// inserts the region before the anchor heading, and a second generation locates
+// it by its delimiter pair and replaces it in place rather than stacking
+// another copy. Without the second half, every regeneration would append one
+// more body to the target.
+func TestComposeSkillBodyInsertsThenReplacesRegion(t *testing.T) {
+	const target = "---\nname: fixture-target\n---\n\n# Fixture Target\n\n## Posture\n\nPosture body.\n\n## Select\n\nSelect body.\n"
+	splice := SkillSplice{
+		Target:        "fixture-target",
+		Source:        "fixture-source",
+		Title:         "Fixture Source",
+		AnchorHeading: "## Select",
 	}
-}
 
-// TestComposedTargetKeepsTurnEndingLast pins the placement decision: the
-// spliced region is anchored inside the body, never appended at the bottom, so
-// the target's turn-ending contract stays the last thing the reader sees. A
-// bottom-append would put lead-prefer-subagent's own "Require this exact return
-// format" contract after it.
-func TestComposedTargetKeepsTurnEndingLast(t *testing.T) {
-	const turnEndingHeading = "\n## Ending the turn\n"
-	for _, splice := range composedSkills {
-		if splice.Target != "lead-drain-ready-queue" {
-			continue
-		}
-		targetPath := filepath.Join(fullSkillsRoot(), splice.Target, "SKILL.md")
-		raw, err := os.ReadFile(targetPath)
-		if err != nil {
-			t.Fatalf("read splice target %s: %v", targetPath, err)
-		}
-		body := string(raw)
-		headingIdx := strings.LastIndex(body, turnEndingHeading)
-		if headingIdx < 0 {
-			t.Fatalf("%s: no %q section found", splice.Target, strings.TrimSpace(turnEndingHeading))
-		}
-		if next := strings.Index(body[headingIdx+len(turnEndingHeading):], "\n## "); next >= 0 {
-			t.Fatalf("%s: %q is no longer the last section", splice.Target, strings.TrimSpace(turnEndingHeading))
-		}
+	once, err := ComposeSkillBody(target, splice, "Source body.")
+	if err != nil {
+		t.Fatalf("first compose: %v", err)
+	}
+	if n := strings.Count(once, `<playbook name="fixture-source"`); n != 1 {
+		t.Fatalf("expected exactly 1 spliced region after first compose, got %d:\n%s", n, once)
+	}
+	if !strings.Contains(once, "Source body.") {
+		t.Fatalf("spliced region is missing the source body:\n%s", once)
+	}
+	regionIdx := strings.Index(once, `<playbook name="fixture-source"`)
+	if anchorIdx := strings.Index(once, "\n## Select\n"); regionIdx < 0 || anchorIdx < 0 || regionIdx >= anchorIdx {
+		t.Fatalf("region (index %d) must be inserted before the anchor heading (index %d):\n%s", regionIdx, anchorIdx, once)
+	}
+	if !strings.HasPrefix(once, "---\nname: fixture-target\n---\n") {
+		t.Fatalf("frontmatter must be untouched:\n%s", once)
+	}
+
+	twice, err := ComposeSkillBody(once, splice, "Source body.")
+	if err != nil {
+		t.Fatalf("second compose: %v", err)
+	}
+	if once != twice {
+		t.Fatalf("composing twice is not a no-op; region replacement is not idempotent")
+	}
+
+	updated, err := ComposeSkillBody(once, splice, "Replaced body.")
+	if err != nil {
+		t.Fatalf("compose with changed source: %v", err)
+	}
+	if n := strings.Count(updated, `<playbook name="fixture-source"`); n != 1 {
+		t.Fatalf("expected the region to be replaced in place, got %d regions:\n%s", n, updated)
+	}
+	if strings.Contains(updated, "Source body.") || !strings.Contains(updated, "Replaced body.") {
+		t.Fatalf("region was not replaced with the new source body:\n%s", updated)
 	}
 }
 

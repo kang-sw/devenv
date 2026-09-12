@@ -26,18 +26,6 @@ func FormatGitCommit(result wsgit.CommitResult) string {
 	return formatGitCommit(result)
 }
 
-func FormatSpecs(specs []wsdoc.SpecInfo) string {
-	return formatSpecs(specs)
-}
-
-func FormatSpecStatus(status *wsdoc.SpecAnchorStatus) string {
-	return formatSpecStatus(status)
-}
-
-func FormatSpecFind(query string, specs []wsdoc.SpecInfo) string {
-	return formatSpecFind(query, specs)
-}
-
 func FormatTickets(tickets []wsdoc.TicketInfo) string {
 	return formatTickets(tickets)
 }
@@ -61,16 +49,4 @@ func VerifyAdapter(root string, paths []string) ([]string, error) {
 
 func FormatTicketCreate(res wsdoc.TicketCreateResult) string {
 	return formatTicketCreate(res)
-}
-
-func FormatMentalModels(models []wsdoc.MentalModelInfo) string {
-	return formatMentalModels(models)
-}
-
-func FormatMentalModelFind(query string, models []wsdoc.MentalModelInfo) string {
-	return formatMentalModelFind(query, models)
-}
-
-func FormatReferenceTrace(trace *wsdoc.ReferenceTrace) string {
-	return formatReferenceTrace(trace)
 }

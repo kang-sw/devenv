@@ -59,8 +59,8 @@ func TestScopeAnnouncementFiresOnWorkflowManual(t *testing.T) {
 	if !strings.Contains(freshResp, "hidden-one") || !strings.Contains(freshResp, "hidden-two") || !strings.Contains(freshResp, "hidden-three") {
 		t.Fatalf("workflow_manual FRESH-with-root must name the hidden stems, including a hidden idea/ stem: %s", freshResp)
 	}
-	if !strings.Contains(freshResp, "worktree-ticket-scope.md") {
-		t.Fatalf("workflow_manual FRESH-with-root scope announcement must point to the reference manual: %s", freshResp)
+	if !strings.Contains(freshResp, "hide-too-much") {
+		t.Fatalf("workflow_manual FRESH-with-root scope announcement must state the hide-too-much hazard inline: %s", freshResp)
 	}
 	if !strings.Contains(freshResp, "git sparse-checkout list") {
 		t.Fatalf("workflow_manual FRESH-with-root scope announcement must point to `git sparse-checkout list`: %s", freshResp)

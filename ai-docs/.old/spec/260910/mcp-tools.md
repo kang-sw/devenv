@@ -1,0 +1,2678 @@
+---
+title: MCP Tools
+summary: Host-neutral ws MCP tool contracts for project context, workflow state, Git, documentation, and named-agent orchestration.
+---
+
+# MCP Tools
+
+The ws MCP server exposes workflow capabilities through named MCP tools rather
+than host-specific shell commands or repository-local paths. Tool outputs are
+plain MCP text content that callers can use from Codex, Claude, or another
+MCP-capable host.
+
+This spec owns stable caller-visible behavior, not a copied tool schema
+inventory. The runtime-owned MCP registry and `tools/list` response own input
+schemas, and `runtime capabilities` owns the launcher-facing surface inventory.
+When those runtime-discoverable fields change without changing caller-visible
+behavior, update code and tests rather than copying field lists into this spec.
+
+## MCP Server Protocol Surface {#260505-mcp-server-protocol-surface}
+
+The `ws-mcp serve --stdio` process implements a stdio JSON-RPC MCP server. It
+responds to `initialize`, `ping`, `tools/list`, and `tools/call`, advertises MCP
+protocol version `2025-03-26`, and declares tool capability. A `ping` request
+preserves its JSON-RPC id and returns an empty result object; it is a base-
+protocol method and is not advertised as a tool.
+
+Unknown methods and profile-rejected tools return JSON-RPC errors. Tool-level
+runtime failures return MCP text content with `isError: true`, preserving a
+normal MCP response envelope while still making the failure visible to callers.
+
+An unexpected panic while handling a request does not terminate the serve
+process. {#260724-serve-request-panic-resilience} The per-request handler
+recovers the panic, returns a JSON-RPC error (reserved server-error code
+`-32000`, message `internal error: request handler panicked (<method>)`) for
+that one request, and keeps serving subsequent requests on the same process and
+stdio connection. The client-visible error names only the failed method; the
+panic value and stack never appear in the response. Because a recovered panic is
+a JSON-RPC error rather than a tool-level failure, it is not an `isError: true`
+result. The panic value and full stack are persisted to an always-on crash file
+at `<cache-root>/crash/mcp-panic.log` (cache root honoring `WS_CACHE_HOME`),
+appended as one JSON line per panic with no rotation; if that file cannot be
+resolved or written, the trace falls back to process stderr so it is never
+silently dropped. The crash file is always written regardless of environment;
+when `WS_MCP_DEBUG_LOG` is set the same event is additionally mirrored there.
+This closes the failure mode where a single request-handler panic crashed the
+whole server mid-session with no persisted trace.
+
+Setup calls are request-order fences. When `ws.setup` or the advertised setup
+alias appears in the stdio stream, the server completes earlier in-flight
+requests, applies setup synchronously, writes that setup response, and only then
+accepts later requests from the same stream. This preserves batch-safe
+setup-then-call behavior for session and actor state.
+
+Read-only tools whose primary consumer is an LLM prefer compact readable text
+defaults over JSON serialized into text content. Tools that need stable machine
+parsing, launcher compatibility, or structured protocol metadata preserve an
+explicit JSON or full-detail escape hatch. {#260512-mcp-llm-readable-output-defaults}
+
+The MCP server detects the host harness from observable MCP payloads before
+relying on environment variables. On `initialize`, it first parses
+`params.clientInfo.name` as structured JSON: an exact match on
+`ws-pi-bridge` identifies the Pi harness, checked before any substring
+inspection runs. Only when that structured check does not match does it fall
+back to inspecting `initialize.params` and request metadata for
+high-confidence Codex or Claude markers. It treats
+`tools/call.params._meta.x-codex-turn-metadata` as a Codex signal, and records
+conflicting signals in diagnostics instead of silently changing the session
+harness. The detected harness is exposed through session inspection output.
+{#260508-mcp-payload-harness-detection}
+
+## Runtime And Debug Metadata Tools {#260505-runtime-debug-metadata-tools}
+
+`runtime.read` returns runtime compatibility metadata: the runtime version and
+source commit. (Prompt bundle metadata was removed when the embedded prompt
+bundle was retired in favor of the rsrc tree.) Launchers and workflow checks use
+this output to detect stale or incompatible runtime binaries.
+The default response is compact labeled text; callers that need stable fields
+can request structured JSON.
+
+`runtime.debug_events` returns recent in-process MCP debug events as JSONL. The
+tool is bounded by an optional limit parameter and is intended for diagnosing MCP
+server behavior without reading process-local files directly.
+
+## MCP Session Root Defaults {#260505-mcp-session-default-root}
+
+Root-aware MCP tools resolve their repository root exclusively from a mandatory
+`session_key` argument; root resolution is the ephemeral session-auth model
+(`#260610-ephemeral-session-auth-model`). There is no fallback chain. A root-aware
+call without a `session_key` is rejected with `mandatory_session_key` guidance
+that routes the lead to `ws:workflow-manual` (the recovery message names no tool,
+per the bootstrap-name obscurity scrub); a call whose key has no record in the
+session store is
+rejected with the `unknown_session` recovery contract. Public schemas for
+root-aware tools advertise `session_key` and do not advertise `root`;
+`ferrule(root)` is the sole bootstrap verb and the only tool that accepts
+a `root` argument.
+
+The former resolution sources are removed: the explicit per-tool `root` argument,
+the volatile session default root, host-workspace metadata, the explicit server
+startup root, `WS_MCP_PROJECT_ROOT` as a resolution source, the `ws.setup` public
+setup surface (both the bare root-session form and the
+`lead-workflow-bootstrap` actor form), and the persistent actor / authority /
+child-actor bootstrap. With root carried by a per-call key rather than a
+process-global default field, concurrent distinct worktree roots resolve without
+clobber and without the former request-order setup fence.
+
+## Ephemeral Session-Auth Model {#260610-ephemeral-session-auth-model}
+
+The former persistent actor / authority / child-actor model has been replaced by
+an ephemeral, in-memory session-auth model. This is the caller-visible
+authentication contract for ws tool calls.
+
+A lead-centric bootstrap verb mints a session:
+`ferrule(root) -> session_key`. The returned key is an LLM-friendly
+word-chain string (for example `amber-tide-fox`), not a UUID. Only the lead logs
+in; subagents and mercenaries never call login — they receive a render-minted key
+(`#260610-mercenary-delegation-surface`).
+
+Every ws tool call carries a session key (REST-bearer style). There is no keyless
+fallback to a foreign root: a call without a valid key does not silently operate
+on a server-default or lead root. This closes the wrong-tree footgun in which a
+worktree delegate doing root-omitted calls silently mutated the lead's main
+repository.
+
+The server resolves `{session_key -> root context}` from a flat, filesystem-backed
+store: one JSON record per key at `<cache-root>/keys/<session_key>.json`. It
+replaces the process-global default-root field and the request-order setup fence,
+so parallel requests each resolve their own root with no serialization and no
+shared-field clobber. The file is the source of truth, not the process: keys are
+minted with an `O_EXCL` create (atomic cross-process uniqueness) and updated with
+temp-write + rename (no partial reads), and per-key sharding removes write
+contention without a single shared file or SQLite. A fresh MCP server instance —
+a subagent that did not inherit the lead's process, or a lead that restarted
+mid-delegation — resolves a key by reading its file, so session continuity does
+not depend on a shared in-memory registry.
+
+`login` is a bootstrap verb only: there is no logout, but records do age out.
+Every successful keyed resolution — root-aware calls, lead-only keyed tools,
+and the session-state read seams (`agenda`/`todo`/`note` reads, including the
+seams that bypass `lookup` and read the record directly) — refreshes the
+record file's mtime, throttled to at most once per hour so a burst of calls
+against the same session issues one `Chtimes`, not one per call. `ferrule`
+piggybacks a best-effort prune scan on its own bootstrap call, gated to at most
+once per 24h by a marker file in `keys/`: the scan deletes any `keys/*.json`
+record whose mtime is older than 30 days. Pruning is mtime-only (record
+contents are never parsed), so a malformed record cannot crash the scan and is
+pruned/kept purely on file age like any other record; a record touched by
+recent activity survives regardless of how old the session itself is.
+
+Every keyed call honors an `unknown_session` recovery contract: when a key has no
+record file (a genuinely unknown or path-unsafe key, or state cleared by deleting
+the cache), the call is rejected with an `unknown_session` signal and the caller
+re-logins with its own known root and retries. Because the caller-visible contract
+(`login(root) -> key`; `<tool>(key, …)`; re-login-on-reject) hides the backend,
+the move from the original in-memory map to this filesystem-backed store was a
+pure implementation swap with no contract migration.
+
+Key issuance accepts an optional capability/role-scope parameter
+(`#260505-tool-profile-gating`), so the lead can mint capability-scoped keys for
+delegates; the keyed `tools/call` handler enforces that scope (see Tool Profile
+Gating).
+
+> [!note] Constraints
+> - The session key is mandatory on every ws call; there is no keyless lead
+>   default. A delegate that drops its key gets `unknown_session`, not a silent
+>   foreign-root operation.
+> - The bootstrap tool (`ferrule`) is lead-only. It lives outside the
+>   `lead.*` namespace, so the keyed-call handler blocks non-lead keys from it
+>   by explicit name in addition to the `lead.*` prefix block
+>   (`#260610-mercenary-delegation-surface`); a delegate cannot self-bootstrap or
+>   escalate from a contained context. Re-bootstrap for recovery uses the caller's
+>   own already-known root.
+> - The bootstrap tool name is deliberately obscure: semantically disconnected
+>   from "session start" and taught only in
+>   `ws:workflow-manual`. The three subagent-reachable surfaces must not leak it —
+>   the `tools/list` description is inert, error-guidance strings name no tool and
+>   route the lead to the manual, and the rendered delegate prompt carries a
+>   capability-level instruction with no tool name. This lowers accidental/curious
+>   invocation by subagents that share the lead's MCP connection; it is not a hard
+>   barrier (a name-aware caller can still keyless-bootstrap).
+> - The store is filesystem-backed (one record file per key under a flat `keys/`
+>   directory) and survives a server restart. There is still no logout, but
+>   eviction is no longer deferred: activity touches a record's mtime (1h
+>   guard) and `ferrule` prunes records idle past 30 days (≤ once per 24h
+>   scan cadence) — see the touch/prune lifecycle described above.
+
+### Session-Key Lineage And Child Enumeration {#260619-session-key-lineage-children}
+
+Session keys form a parent→child lineage so a lead can re-discover the keys it
+minted after they fall out of its own (compacted or restarted) context.
+
+- Each session record carries an optional `parent` — the session key that minted
+  it. It is absent for a lead's first bootstrap key. Recording a parent is
+  metadata only and never widens the child's capability scope.
+- `ferrule` accepts an optional `parent_session_key`. A lead coordinating
+  several repository roots in one conversation (for example multiple git
+  worktrees, or a superproject and a git submodule checked out inside it —
+  each a distinct root) records each additional control key's parent
+  as its primary control key. Because `ferrule` is lead-only, control-key
+  lineage stays within one lead — it does not create a tree of independent
+  control agents.
+- A render-minted delegate child key (`playbook.render`, including a
+  worktree-bound leaf produced via `root_override`) records the dispatching lead
+  key as its `parent`.
+- `session.children(session_key, depth?, format?, include_dead?)` returns,
+  read-only, the subtree of keys whose `parent` chain roots at the presented
+  key. Each entry is labeled by its capability scope (control coordination key
+  vs delegate leaf) and includes the child key string so the lead can re-thread
+  it. A caller only ever sees the subtree under a key it presents. It lives in
+  the `session.*` tool family, so the existing keyed-gate `session.` prefix block
+  already restricts it to lead-scoped keys (a delegate/leaf key is rejected;
+  those scopes mint no children anyway).
+  - `depth`: integer, default `1` (immediate children); a higher value returns
+    that many levels; `0` returns the full subtree.
+  - Liveness is whether the child's bound `root` path still exists. Dead keys
+    (such as a removed worktree's key) are filtered by default;
+    `include_dead: true` returns them flagged `live: no`, preserving a
+    prune/debug path.
+  - Output defaults to compact labeled text per
+    `#260512-mcp-llm-readable-output-defaults`; `format: "json"` is the
+    structured escape hatch.
+- `session.note(session_key, child_session_key, text)` lets a lead attach a
+  free-form one-line annotation to a child session key. `session_key` only
+  authorizes the call — it is not looked up beyond the existing keyed-gate
+  `session.` prefix block, so this tool is lead-only for the same reason
+  `session.children` is. The note text is written onto
+  `child_session_key`'s **own** per-session record, not the caller's, as an
+  additive `note` field alongside `overrides`/`agenda`/`todos`; it persists
+  across restart and compaction the same way those fields do. `session.note`
+  performs no lineage check that `child_session_key` actually descends from
+  `session_key` — holding a valid `session_key` is the entire authorization,
+  mirroring `session.children`'s trust model. An empty `text` clears the note
+  (the field's `omitempty` JSON tag is what makes an empty write disappear,
+  not a separate clear verb). Once set, the note is surfaced as an additional
+  `note` field on the corresponding entry in `session.children` output (both
+  compact text and `format: "json"`), letting a lead re-discover what a child
+  was doing without holding it in its own context.
+
+## Session State Tools {#260625-session-state-tools}
+
+The session state machine persists routing and implementation context across
+context compaction. After compaction the session key is the only stable anchor
+that survives, so the state is stored as additive fields on the existing
+per-session record file (`<cache-root>/keys/<session-key>.json`, the same file
+`ferrule` mints) rather than in a separate store. Writes reuse the record's
+atomic temp-write+rename path, so a concurrent reader never observes a partial
+record; fields are omitted when empty and unknown fields are ignored, preserving
+backward and forward compatibility.
+
+Two namespaces share the record:
+
+- **agenda** — named blobs recording session-level mode context ("what are we
+  doing and why"). Reminded at workflow-manual load only, not at intermediate
+  checkpoints.
+- **todos** — an ordered step-level checklist. Injected at every restoration
+  point (workflow-manual load and major checkpoints).
+
+All session-state tools require a `session_key` and are reachable by any role
+that holds one — they carry no `session.`/`config.`/`lead.` prefix, so the
+keyed capability gate does not restrict them to the lead. This lets a lead
+populate state and hand its key to a delegate that reads or extends it; a child
+that mints its own key via `ferrule` has independent state.
+
+**Agenda (freeform).** `agenda.set(key, value)` upserts an arbitrary JSON
+object blob; `agenda.clear(key)` removes one (a missing key is a no-op), or
+`agenda.clear(all: true)` removes every agenda blob for the session in one
+call (`key` is ignored when `all` is set). `agenda.list(session_key)`
+enumerates the session's current agenda keys, each with a short one-line
+summary (an object blob's top-level keys, or a truncated raw preview for
+non-object JSON), sorted alphabetically; an empty agenda reports `no agenda
+blobs` rather than an empty list. These are the fallback primitives for modes
+not covered by a typed enter tool, and let a caller discover or clear
+orphaned blobs without guessing key names from tool descriptions.
+
+**Enter (typed mode switches).** `route.resolve_implement` and `route.resolve_proceed` each
+perform one atomic write that both stores the typed payload as an agenda blob (keyed by the mode name) and
+**replaces** the entire todo list with items derived from the mode. Because the
+list is replaced, calling any enter tool is always a mode switch; a prior mode's
+derived list is discarded. Derivation logic lives in Go, so no skill-side
+`todo.add` loop is needed for a covered mode:
+
+Both route tools accept the canonical envelope
+`{session_key, params: {target, facts, ...}}`. The outer `session_key` binds
+the session; routing fields, including optional `policy` and `format` where
+supported, belong inside `params`. When present, `params` must be an object,
+the outer envelope may contain only `session_key` and `params`, and an inner
+`session_key` is rejected. Malformed or mixed envelopes fail before agenda or
+todo mutation. Wrapped calls always use typed routing, so a wrapped implement
+call without a valid target cannot fall back to legacy mode entry. Calls
+without `params` retain the existing top-level typed and legacy implement
+behavior for compatibility.
+
+- `implement`: `route.resolve_implement` is the public mode-switch call for the
+  implementation-facts-complete boundary. Its published `inputSchema` is
+  opaque (`session_key` plus a `params: object` and a pointer to
+  `ws:lead-implement`); the real field contract — a required `target` object,
+  optional grouped `facts.scope` / `facts.complexity` / `facts.risk` objects, a
+  small `policy` object, and optional `format: text|json` — is documented in
+  `ws:lead-implement`'s `Fact Contract` section, not in the published schema.
+  The resolver validates `target`/`facts`/`policy`/`format` inside `params`
+  and derives the same typed verdict, agenda, and todos as an equivalent
+  top-level compatibility call. MCP observes Git branch state from the session root, including the
+  current branch, HEAD/start commit, target branch existence, and
+  upstream/tracking ambiguity; callers provide only policy that cannot be
+  observed mechanically, such as a merge target while already on an
+  implementation branch (`impl/*`, or legacy `implement/*`) and whether safe
+  branch rename is allowed; branch rename defaults to allowed only when the
+  current implementation branch carries no unmerged commits ahead of its merge
+  root — when it does and the caller's target scope differs from the branch's,
+  the resolver stops with a safety block (routing branch-identity resolution to
+  the lead) regardless of `allow_rename`, which cannot override it; otherwise
+  rename defaults to allowed unless the caller explicitly withholds consent
+  (`policy.branch.allow_rename: no`); and
+  whether the caller's own merge-approval ask may be skipped for a merge that
+  is explicitly chosen. The per-phase final action defaults to continuing on the
+  branch and reporting its retained commit range **without merging**, for every
+  phase (the resolver carries no phase-index field, so the default is uniform);
+  an explicit merge stays available as a caller-chosen option — at the
+  final-action gate or later at `tickets.close` review — and
+  `policy.branch.merge_confirm` governs approval for that chosen merge only
+  (`skip` drops the ask, asking otherwise), never a default merge trigger. The
+  resolver derives
+  `delegation`, `branch_plan`, `plan_depth`, `review_alloc`, `need_review`, and
+  `doc_mode`, stores the implement agenda, and replaces the todo list with the
+  derived lead-implement checklist. `plan_depth` is `none` for direct edit and
+  `survey` for reachable delegated preparation, with one exception: a delegated
+  **ticket** target also resolves to `none` when all four complexity facts hold
+  at their strongest value (`change_points: clear`, `reuse_points: confirmed` or
+  `not-applicable`, `strategy_shape: single-obvious`, `side_effect_risk: low`),
+  in which case the lead writes the stub plan itself and no planner is
+  dispatched; any weaker value (including `unknown`) on any one fact, or an
+  inline target, keeps `survey`. Delegated survey preparation creates a
+  plan path, renders `plan-populator-survey` to write the light implementation
+  plan, and renders `plan-populator-research` on the same authority and plan
+  path only when
+  the survey returns `[escalate-to-research]` for low confidence or strategic
+  uncertainty. Planner instructions identify ticket or inline authority and
+  pass every declared render variable, using explicit empty values for the
+  inactive authority. The derived todos carry focused `instruction` prose from
+  those
+  resolved verdict labels, so branch, prep, edit, review, doc, final-gate, and
+  merge todos describe only the path reachable under the current verdict;
+  branch-stop todos describe the blocker instead of telling the caller to
+  continue source edits. Non-stop prep instructions carry required
+  runbook-loading guardrails, including mental-model lookup, ancestor reads,
+  conditional binding-anchor loading when the project declares one, and
+  implementation-runbook loading before edits or delegate dispatch. Text output
+  is the canonical raw verdict
+  beginning `Implementation Verdict`, with `Mode`, `Branch Action`, `Plan Depth`,
+  `Review Allocation`, `Doc Mode`, and a concrete `Next:` instruction; JSON
+  output returns the structured result plus `next_instruction` and the identical
+  `raw` string. A `Branch Action: stop` verdict is a safety blocker and must say
+  what policy or branch condition needs correction before source edits continue
+  without naming unreachable planner or implementer actions. When a caller
+  supplies `policy.branch.merge_target` outside its applicability window (the
+  observed current branch is not already an implementation branch, i.e. not
+  prefixed `impl/` or legacy `implement/`, so the branch action is `create`),
+  the verdict adds a one-line warning naming the supplied value and the branch
+  it was derived from instead, e.g. `policy.branch.merge_target "master"
+  ignored (not on an implementation branch: impl/*, or legacy implement/*);
+  derived from current branch "test/wsflow-smoke"`, so a caller unfamiliar with
+  the applicability rule sees that the field was read and deliberately not
+  applied. Fresh implementation branches are created under the
+  `impl/<merge-root>/<stem>` convention: `<merge-root>` is the current branch
+  at creation time (may itself contain `/`) or, on re-entry onto an already
+  name-rooted `impl/<merge-root>/<stem>` branch, the root parsed from the
+  branch name itself (name-authoritative — a diverging caller
+  `policy.branch.merge_target` is reconciled to the name-root with a warning,
+  never silently honored); `<stem>` is derived by target kind. {#260827-ticket-stem-word-key-branch}
+  For a **ticket target** (the call carries a `target.ticket_stem`), `<stem>` is
+  a deterministic three-word key derived from the ticket stem alone — a stable
+  hash indexed into a fixed short-word sub-pool, joined by hyphens (e.g.
+  `jot-pug-mossy`). It is identical on every re-entry for the same ticket, so
+  successive phases of one ticket resolve to `continue` on the one branch; it is
+  authoritative over any caller-supplied `target.scope_slug`, which is ignored
+  (with a warning) for ticket targets rather than allowed to drift the stem per
+  phase. For an **inline target** (no `ticket_stem`), `<stem>` keeps the prior
+  behavior: the caller-supplied or label-derived slug, held to the <=15 characters
+  recommendation (trailing `-` trimmed) and single-segment (any `/` sanitized
+  away). The word-key is bounded to roughly 17 characters, a deliberate overshoot
+  of the soft <=15 recommendation. A rootless
+  `impl/<stem>` branch or any legacy `implement/<scope-slug>` branch already
+  in progress keeps the original stop-and-ask behavior unchanged — merge
+  target comes solely from `policy.branch.merge_target` — and both are still
+  recognized as implementation branches for continue/rename purposes.
+  Automatic review allocation derives independent correctness, fit, and test
+  partitions only from positive risk signals: material (moderate/high) risk, a
+  new type contract or public symbol, cross-module surface, unconfirmed reuse
+  points, or new-file test surfaces. Unknown or un-derived facts are treated as
+  non-signals and add no partition; public-interface surface and existing-test
+  surface alone likewise add none. Zero or one automatic partition resolves to
+  `single`; `single` dispatches the delegate-grade generic `reviewer` over the
+  shared full-scope `code-reviewer` contract, while two or more resolve to
+  `partitioned`. Explicit review overrides remain authoritative.
+  Final-action todo guidance may reuse
+  passing full-suite evidence only while code, tests, dependencies, build
+  configuration, and generated inputs remain unchanged; documentation-only
+  commits run only affected checks. Documentation pre-pass guidance dispatches
+  mental-model work only for new non-obvious invariants, reusable domain rules,
+  or modification guidelines not already covered by the authoritative spec.
+  `policy.low_ceremony_if_safe` accepts `yes|no|unknown` and defaults to
+  `unknown`. It is a preference-only input: `yes` is necessary but not
+  sufficient for `Branch Action: current`, while missing, `no`, and `unknown`
+  retain the standard branch result. `current` is the no-merge result for an
+  inline target on a named non-implementation branch only when the policy is
+  `yes`, raw unoverridden facts satisfy the automatic direct-edit and automatic
+  lead-only predicates, review override is `auto`, and documentation is skipped
+  with a non-empty reason. Explicit direct-edit or lead-only overrides, unknown
+  or failed predicates, detached HEAD, or a missing/`(initial)` start commit,
+  ticket targets,
+  and existing implementation branches cannot authorize the result. When a
+  supplied `yes` is inapplicable, the resolver emits a concise warning and
+  preserves independently derived delegation, review, documentation, standard
+  branch, final-action, and merge behavior. A successful `current` result
+  carries no merge target, renders merge confirmation as `n/a`, and installs
+  route, prep, edit, lead-only-review, and completion todos. Completion requires
+  focused verification, one logical explicit-path commit with `## AI Context`,
+  retained branch and commit-range reporting, and no push; final-action and
+  merge todos are absent only for this result.
+- `proceed`: `route.resolve_proceed` is the public mode-switch call for the
+  routing-facts-complete boundary. Its published `inputSchema` is opaque
+  (`session_key` plus a `params: object` and a pointer to `ws:lead-proceed`);
+  the real field contract — a required `target` object, optional grouped
+  `facts.ticket` / `facts.gates` / `facts.work` objects, and optional `format:
+  text|json` — is documented in `ws:lead-proceed`'s `Fact Contract` section,
+  not in the published schema. The resolver validates `target`/`facts`/`format`
+  inside `params` and derives the same typed verdict, agenda, and todos as an
+  equivalent top-level compatibility call. It normalizes the
+  current proceed route vocabulary (`target-kind`, `ticket-missing`,
+  `has-ticket`, `status`, `binding-anchor`, `actionable`,
+  `discussion-needed`, `needs-ticket`, `freshness`, `category`, `slice`, and
+  `scope-blocked`), resolves one deterministic route, emits non-blocking
+  warnings for contradictory or inapplicable facts, stores the selected route
+  agenda, and replaces the todo list with Build route context and Resolve MCP
+  verdict. Text output is the canonical raw verdict
+  beginning `Proceed Verdict`, `Route: ...`, `NEXT: ...`, and `Next: ...`; JSON
+  output returns the structured result plus `next_instruction` and the identical
+  `raw` string.
+
+**Todo.** Item identity is a caller-provided `key`, unique within the active
+list after normalization; keys are lowercased, may contain only lowercase
+letters, digits, `.`, `_`, and `-`, and are rejected when they include leading or
+trailing whitespace. Todo items persist `key`, `title`, `status`, and an
+optional nullable `instruction` field for full execution prose. Existing session
+records without `instruction` remain valid and read as `null`. A duplicate key is
+rejected after normalization, and an erased key is reusable. The single creation
+mutation `todo.add(position: end|before|after = "end", ref_key?)` adds a new
+item; `ref_key` is required when `position` is `before` or `after`, and
+rejected when `position` is `end` (including the implicit default). It accepts
+optional nullable `instruction` and rejects non-string non-null values, and
+returns the unified confirmation `todo added: <key>`. Status and order
+mutations do not rewrite untouched item payloads, so existing `instruction`
+values are preserved through status and order changes. `todo.check` returns a
+compact confirmation followed by a checkpoint todo rendering. Other status/order
+mutations (`erase`, `clear`, `reorder`) return a compact confirmation.
+`todo.read(key)` returns one item's full JSON payload, including
+`instruction`. `todo.list` returns rendered text. `clear(done_only=false)`
+removes all items; `done_only=true` removes only `done` items.
+`reorder(span:{from_key,to_key}, position:{before|after: ref_key})` moves a
+contiguous span as a block; the ref_key must lie outside the span.
+
+Rendering lines include the visible key after the marker: `- [ ] {key} Title`,
+`- [~] {key} Title`, `- [x] {key} Title`, or `- [>] {key} Title`. Summary mode
+(the default list mode) shows every pending/wip item plus one adjacent context
+item on each side of each contiguous active block, collapsing every other run to
+a single `...` line with no synthetic key or checkbox marker; `defer` collapses
+the same as `done`. When an item has a non-empty instruction, summary rendering
+adds an indented second line containing at most the first 60 runes of that
+instruction; absent, null, or empty instructions render no second line. Full
+mode shows every item in order and renders each non-empty instruction in full on
+the indented second line. Workflow manual restoration uses the same summary
+rendering, so restored todos show the same 60-rune instruction previews.
+Checkpoint rendering from `todo.check` shows the full ordered list without
+ellipsis collapse after the status update. It renders full instruction lines only
+for the checked item's immediate previous and next items when those items are
+actionable (`pending` or `wip`) and have non-empty instructions; the checked item,
+non-adjacent items, `done` items, `defer` items, and instruction-less items stay
+compact. Compact checkpoint rows with a non-empty instruction that is not rendered
+add an indented `...+` marker line to distinguish hidden instruction payloads from
+instruction-less rows. `ws.commit` does not auto-mark todos; status transitions
+are always explicit via `todo.check`.
+
+## Note Tools {#260810-note-tools}
+
+`note.write`, `note.erase`, `note.mute`, `note.unmute`, and `note.query`
+implement four note-memory layers: the two non-tracked layers from 260807
+Phase 1 — **machine**
+(PC-global, project-agnostic — lives beside the global ws config file, e.g.
+`~/.ws/notes.json`) and **worktree** (worktree-local, ephemeral — lives under
+the existing per-worktree ws cache directory, so it does not survive worktree
+deletion and is invisible to any other worktree of the same repository) —
+the git-tracked **repo** layer from 260810 Phase 1, and the non-tracked
+**clone** layer from 260814 Phase 1 (project-scoped, worktree-agnostic —
+lives under the existing per-project ws cache directory, so it is shared by
+every worktree of the same project but invisible to any other project on the
+same machine, and — like `machine`/`worktree` — is never staged by git). All
+four layers share the same record shape. The `machine`/`worktree`/`clone`
+layers share one storage mechanism (one JSON file per whole layer; only the
+resolved file changes between them); the `repo` layer instead stores **one
+JSON file per key** under the tracked `ai-docs/ws-notes/` directory, so merge
+conflicts
+resolve on the filesystem with normal git tooling instead of any
+merge/conflict logic inside MCP — writing/erasing a key writes/removes
+exactly that key's file, and staging/committing it rides the caller's
+ordinary `git.commit` flow; no new git-mutation MCP verb is added anywhere in
+this family. A note key can contain arbitrary
+characters (including `/` and `.`), so the repo layer encodes each key into
+its filename as hex of the key's raw UTF-8 bytes plus a `.json` suffix (e.g.
+key `a/b.c` becomes `612f622e63.json`) — deterministic across every
+clone/OS/locale, collision-free, and immune to the slash/dot-as-path hazard,
+since hex output only ever contains `[0-9a-f]`. The filename is purely a
+storage detail: `note.query`/`workflow_manual` always report the record's
+real `key` field, never the encoded filename. This is a fresh surface,
+sharing no code or store with `session.note`
+(`#260619-session-key-lineage-children`), which is a distinct one-line
+per-child annotation on the session-key store, not a note-memory layer.
+
+All five tools require `session_key`. `note.write`/`note.erase`/`note.mute`/
+`note.unmute` additionally require a single-string `layer` argument
+(`"machine"`, `"worktree"`, `"clone"`, or `"repo"`) — this asymmetry with
+`note.query` below is by design (read-vs-mutation asymmetry, not an
+inconsistency to "fix" later): a mutation always targets exactly one layer,
+while a search may reasonably span several. None of the five tools carry a
+`session.`/`config.`/`lead.` prefix, so — like `todo.*`/`agenda.*` — they are
+reachable by any scope (lead, delegate, leaf) that holds a session key. The
+`worktree`, `clone`, and `repo` layers all resolve their store location
+through the same `session_key`-authoritative root resolution every other
+root-aware tool uses. The `machine` layer needs no root, but still requires a
+`session_key` that resolves to a known session — an unrecognized key is
+rejected with the same `unknown_session` error shape root-aware tools use,
+even though no root is consumed.
+
+**Wire shape.** A record is `{key, value, priority, written_at, visible}`:
+`key` and `value` are strings, `priority` is an integer (higher = higher
+priority, default `0`), `written_at` is an RFC3339 timestamp stamped
+server-side at write time (never caller-supplied), and `visible` is a boolean
+gating inclusion in the injected `# Notes` block (`#260810-note-injection`) —
+default `true`, mutated only by `note.mute`/`note.unmute`. A record stored
+before `visible` existed has no such key in its on-disk JSON at all; that
+absence decodes as `true` (visible), a migration-safe default handled by a
+custom unmarshaler rather than plain `encoding/json` zero-value decoding
+(which would default an absent bool to `false` — the opposite of the required
+contract). `note.write`'s `notes` argument is an **array of `{"key", "value",
+"priority"}` objects** — not an array of positional `[key, value, priority]`
+tuples, and never `visible` — matching the universal named-JSON-object
+convention every other MCP tool argument in this codebase uses; there is no
+positional-array precedent anywhere in the tool surface.
+
+- **`note.write(session_key, layer, notes)`** performs a full overwrite per
+  key: writing an existing key replaces its `value` and `priority` in one
+  step (there is no separate priority-update verb). Multiple notes may be
+  written in one call. `note.write` never accepts or mutates `visible`: an
+  overwrite of an existing key preserves that key's current `visible` value
+  exactly (a muted note stays muted across a content-only overwrite), and a
+  brand new key always initializes `visible: true`. When any note written in a
+  call has a `value` of at least a fixed oversize threshold (a named tunable
+  constant, `300` bytes — mirroring the injection cap's named-constant
+  style, `#260810-note-injection`), the **text-format** response additionally
+  carries a one-time discipline challenge appended after the write summary.
+  The challenge text is **layer-branched**, selected by the resolved
+  `layer` the write targeted, since the right place to move oversize detail
+  differs per layer:
+  - **repo**: `Large note (≥300 bytes; saved). Prefer: move the detail into
+    a ticket/spec/mental-model and keep a <300-byte relative pointer here,
+    or erase. Not mute.`
+  - **worktree**: `Large note (≥300 bytes; saved). Prefer: move the detail
+    into a gitignored local doc (e.g. a sibling *.local.md) and keep a
+    <300-byte relative pointer here, or erase. Not mute.`
+  - **clone**: `Large note (≥300 bytes; saved). Prefer: allocate a doc via
+    path.generate(kind: "clone", stem: ...), write the detail there, and
+    keep the returned absolute path (never relative, never a gitignored
+    in-worktree file) as a <300-byte pointer here, or erase. Not mute.`
+  - **machine**: `Large note (≥300 bytes; saved). Prefer: move the detail
+    into an excluded doc referenced by an absolute path and keep a
+    <300-byte pointer here, or erase. Not mute.` (machine has no dedicated
+    allocator — it stays prose-only.)
+
+  Every variant is intentionally trimmed of any "keep the full text if it's
+  volatile AND homeless AND must-always-stay-in-context" carve-out: notes are
+  always-injected, so an irreducible sub-300-byte pointer passes the
+  threshold naturally, and a keep-the-full-text escape hatch is unnecessary.
+  The challenge fires once per call regardless of how many notes cross the
+  threshold (a batch with several oversized notes still appends it exactly
+  once), and the write itself is unconditional — the note is stored either
+  way, and `note.write` never auto-relocates or repoints content itself; the
+  challenge is advice for the calling agent to allocate → write → repoint on
+  its own. The remediation it names is relocate or erase, never mute; a mute
+  would only leave the content neither in context nor in its proper home. The
+  JSON-format response is unaffected: it returns the written records only and
+  never the challenge, matching the text-only-nudge convention `git.commit`
+  uses for its own reminders.
+- **`note.erase(session_key, layer, keys)`** removes each listed key from that
+  layer's store. A missing key is a no-op, matching `todo.erase`'s erase-by-key
+  precedent.
+- **`note.mute(session_key, layer, keys)`** / **`note.unmute(session_key,
+  layer, keys)`** set `visible` to `false`/`true` for each listed key,
+  reusing the same flock-serialized read-modify-write as `note.write`/
+  `note.erase`. Both are idempotent set-state operations (muting an
+  already-muted key, or unmuting an already-visible one, is a no-op) and
+  never touch `written_at` or any other field. A missing key is a no-op,
+  matching `note.erase`'s precedent. Muting excludes a note from the injected
+  `# Notes` block and its priority cap (`#260810-note-injection`) without
+  erasing it — `note.query` continues to return muted records unchanged.
+- **`note.query(session_key, layer?, glob?, from?, then?)`** returns every
+  matching record whose `key` matches `glob` (shell-glob syntax, e.g.
+  `"ticket.*"`; omitted or `"*"` matches every key) and whose `written_at`
+  falls within the inclusive `[from, then]` bound when those are supplied.
+  Bounds accept either a full RFC3339 timestamp or a bare date prefix (e.g.
+  `"2026-08-01"`), compared as strings. `note.query` applies no `visible`
+  filtering — muted records are returned unchanged alongside visible ones.
+  This is the retrieval path for notes elided from the ambient `# Notes`
+  block (`#260810-note-injection`), muted or not — a caller that sees the
+  elision or muted-count line uses `note.query` with a narrower glob to read
+  a specific elided or muted note.
+  - Unlike the other four tools, `layer` is **optional** here and accepts
+    either a single layer string or an array of layer names. Omitting
+    `layer` searches all four layers, parallel to `#260810-note-injection`'s
+    `Compute` aggregation. A single-string `layer` call (e.g. `layer:
+    "clone"`) keeps today's exact result shape: a plain `wsnote.Record[]`
+    with no layer tag on each record. An array `layer` (e.g. `layer:
+    ["clone", "repo"]`), or an omitted `layer`, tags each returned record
+    with a `layer` field naming the layer it came from — even for a
+    one-element array — mirroring the ambient block's `[<layer>]` line
+    prefix.
+  - Every `note.query` call, single-layer or multi-layer, orders results by
+    the same comparator: priority descending, then `written_at` descending,
+    then `key` ascending — the exact order `#260810-note-injection`'s
+    `Compute` uses for the ambient block. This is one shared comparator, not
+    two independently-maintained ones, so `layer: "clone"` and `layer:
+    ["clone"]` against identical data can never diverge in order — only in
+    whether the tag is present.
+
+Storage is an flock-serialized read-modify-write (temp-file + atomic rename),
+reusing the same concurrent-safe-write pattern `wsconfig`'s project/global
+config writers use. The `machine`/`worktree`/`clone` layers RMW one JSON file
+per layer, each with its own sibling `.lock` file beside the store (never
+shared with the `wsconfig` config lock, even though the machine-layer store
+lives in the same directory as the global config file). The `repo` layer
+instead performs one such flock+temp-file+atomic-rename write per key,
+scoped to that key's own file under `ai-docs/ws-notes/` — each key file is
+independently owned, which is the point of one-key-per-file filesystem-level
+conflict resolution. Its per-key lock file lives **outside** the tracked
+tree (in a machine-local temp location keyed by a hash of the target path),
+never as a sibling in `ai-docs/ws-notes/`, so the tracked directory only
+ever contains the `.json` key files — no lock or temp residue is
+committable, which is what keeps the layer cleanly git-tracked.
+
+There is no CLI mirror for `note.*`: like every other session-keyed tool
+(`todo.*`, `agenda.*`, `enter.*`), its authority model is
+`session_key`-only, and the CLI takes `--root`, not `--session_key`.
+
+### Workflow Manual Entry And Restoration {#260626-workflow-manual-restoration-entry}
+
+`workflow_manual(session_key)` is the canonical workflow-manual entry tool. A
+valid `session_key` is **required**, and the tool is **lead-only**
+(`isLeadOnlyTool`): a `session_key` resolving to a delegate/leaf scope is rejected
+at the keyed capability gate before the handler runs (mirroring `ferrule`). It
+renders the `lead-workflow-manual` playbook through the same variable substitution
+as `playbook.read` — the rsrc playbook stays the single prompt source of truth —
+and branches on `session_key`:
+
+- **fresh** (`session_key` equals the reserved fresh-bootstrap sentinel — a
+  deliberately non-descriptive token taught only in lead skill prose such as
+  `lead-revive`): two sub-cases based on whether the optional `root` parameter
+  is supplied:
+  - **fresh with root** (`root` is a non-empty absolute Git worktree path): the
+    handler validates and canonicalizes the path via `canonicalSetupRoot` (same
+    as `ferrule`), mints a new lead session key, strips the fresh-only
+    self-bootstrap block from the manual body, and appends a `## Session Key`
+    section containing the minted key followed by an empty `## Session State`
+    section. A separate `ferrule` call is not needed; the caller can proceed
+    directly to `project_tree`, `git.status`, and other keyed tools using the
+    returned key.
+  - **fresh without root** (sentinel, no `root`): the primitives reference plus
+    the always-shown per-root rule (call `ferrule` once per working root and
+    thread its key) and the self-bootstrap line ("you have no key yet; mint one
+    with `ferrule`").
+- **continue** (`session_key` present and its record resolves to a lead scope): the
+  primitives plus the per-root rule, with the self-bootstrap line omitted, followed
+  by a restored **Session State** section — agenda blobs as a remind list and the
+  todo list in summary mode, rendered server-side from the session record.
+- **keyless** (`session_key` omitted or empty): a hard error requiring a valid
+  `session_key`. The error names neither the sentinel nor `ferrule`, so a
+  keyless caller gets no bootstrap hint.
+- **fail-loud** (`session_key` present, non-sentinel, but no record resolves): a
+  minimal "no restorable state for this key" notice pointing to the `lead-revive`
+  skill for recovery. **No manual body is rendered** — the always-shown per-root
+  rule names `ferrule`, and any unregistered key bypasses the lead-only gate via
+  lookup-miss, so rendering it would leak the lead self-bootstrap call to a non-lead
+  caller. The tool never mints a key in this mode.
+
+The fresh-only self-bootstrap line is delimited in the rsrc by a dedicated
+mode-gating marker that only this tool's handler consumes; it is independent of the
+prompt override-marker engine and the product-mode markers. The handler owns mode
+branching and the Session State scaffolding only; all manual prose lives in the
+rsrc.
+
+When `core.sparseCheckout` is set for the working root, both **fresh with
+root** and **continue** additionally render a sparse-checkout scope
+announcement — a short block naming the hidden ticket count and stems under
+`ai-docs/tickets/ready/`, `ai-docs/tickets/todo/`, and `ai-docs/tickets/idea/`,
+the `git sparse-checkout
+disable` restore path, and a `git sparse-checkout list` pointer to the
+worktree's active re-include patterns — using the same
+`injectBootstrapStalenessWarning` no-op-when-empty injector already used for
+the bootstrap-staleness and doc-coverage warnings. With `core.sparseCheckout`
+unset, or in **fresh without root**, this block does not render and output is
+unchanged from before this addition.
+{#260810-scope-announcement-idea-inclusion}
+
+The rendered manual body carries a **Ticket System Concepts** grounding section
+(status-directory meaning, type-prefix categorization, sage-review rationale and
+posture semantics, spec addressing, the phase model, and epic-vs-workset), so a
+lead session receives ticket-system concepts once per session rather than through
+per-invocation glosses in convention and playbook documents. The layering that
+keeps this section concept-only (guardrails stay in enforcement, mechanical
+content stays in Go) is specified in the documentation-system spec under
+Ticket-System Concept Grounding (`260723-ticket-system-concept-grounding`).
+
+> Known residual: `playbook.read(name: "lead-workflow-manual")` — and printing the
+> repointed lead skills — is not role-gated and re-exposes the gated bootstrap line
+> and the fresh-bootstrap sentinel to any caller that knows the stem; the defense
+> there is obscurity. Tracked in idea ticket
+> `260626-research-playbook-print-lead-surface-leak`.
+
+### Session-State-Only View {#260702-workflow-state-tool}
+
+`workflow_state(session_key)` is a cheaper sibling of `workflow_manual`: it
+returns **only** the `## Session State` section (agenda blobs and the todo
+summary) for the caller's session, with no manual reference/primitives text.
+It exists so a lead that only needs "what's my key and current state" —
+notably right after compaction or during `lead-revive`, when context budget is
+tightest — does not have to re-dump the full ~150-line manual body.
+`workflow_manual` itself is unchanged: same always-full-dump behavior, same
+schema.
+
+- **Lead-only, same gating as `workflow_manual`** (`isLeadOnlyTool`): a
+  `session_key` resolving to a delegate/leaf scope is rejected at the keyed
+  capability gate before the handler runs. This tool is a cheaper view of the
+  same lead-bootstrap/recovery surface `workflow_manual` serves, not a general
+  `todo.*`/`agenda.*` accessor, so it stays in the same tool family and gating
+  as its sibling even though the underlying todo/agenda data is itself
+  scope-open to non-lead callers via the dedicated `todo.*`/`agenda.*` tools.
+- **Key validation is reused verbatim from `workflow_manual`**, not a separate
+  state machine:
+  - **keyless** (`session_key` omitted or empty): the same hard
+    required-`session_key` error shape as `workflow_manual`.
+  - **resolved** (`session_key` present and its record resolves): renders only
+    `renderSessionState` for that record — identical content to the
+    `## Session State` suffix `workflow_manual` would render for the same
+    session at the same point in time. An empty session (no agenda, no todos)
+    renders an empty-but-valid Session State payload (`(no todos)`), not an
+    error.
+  - **fail-loud** (`session_key` present but unresolvable, including the
+    fresh-bootstrap sentinel, which is never a stored record): the identical
+    "no restorable state for this key" notice `workflow_manual` renders in its
+    own fail-loud path, pointing to `lead-revive` for recovery. The tool never
+    mints a key. Unlike `workflow_manual`, `workflow_state` has no FRESH mode —
+    the sentinel simply falls through to this same fail-loud path.
+
+### Bootstrap Staleness Warning {#260703-bootstrap-staleness-warning}
+
+`ferrule` and `workflow_manual` (FRESH-with-root and CONTINUE branches only)
+each surface a one-line staleness banner when the downstream project's root
+`AGENTS.md` carries a `<!-- Template Version: vNNNN -->` tag behind the
+version shipped in the running package's own `lead-bootstrap` skill template
+(`agents-plugin/skills/lead-bootstrap/AGENTS.template.md` for ws,
+`agents-plugin-wsflow/skills/lead-bootstrap/AGENTS.template.md` for wsflow).
+The comparison is package-local: whichever package's MCP binary is running
+resolves its own shipped template via `wsrsrc.ResolveSkillsRoot()`, so there is
+no cross-package (ws vs wsflow) comparison and no separate version manifest to
+hand-maintain. The `workflow_manual` FRESH-without-root branch (no established
+root yet) never checks or warns.
+
+The check is silent by design in three cases: the `bootstrap_alarm` config
+item (see Config Tools) resolves to `off`; the downstream root has no
+`AGENTS.md` or the file has no Template Version tag at all (an untagged
+project never opted into the ws bootstrap contract, so absence is not treated
+as maximal staleness); or the shipped template's own tag is unreadable or
+malformed (fail-safe — the tool never warns off of an unreadable "latest").
+When the warning does fire, its text names both the installed and latest
+version numbers and instructs the caller to run
+`config.tune(key: "bootstrap_alarm", value: "off")` to silence it permanently.
+The warning
+fires on every `ferrule`/`workflow_manual` call while stale — there is no
+once-per-session suppression state, matching the existing precedent of
+per-call injection (e.g. the mercenary agentId tip) rather than the
+per-`project_tree`-call anti-pattern this repo's Decisions section warns
+against.
+
+The warning also fires fail-loud in two ahead-of-head directions: when the
+downstream tag is strictly ahead of the running package's own template head
+("Bootstrap template tag is ahead of this package's own template head",
+naming both the installed and this package's head version numbers), or when
+the downstream tag does not parse as `vNNNN` ("Bootstrap template tag is
+unrecognized", naming the parse failure and this package's head version
+number). Both fire directions point at
+`config.tune(key: "bootstrap_alarm", value: "off")` to silence permanently and
+state the same honest-enforcement limit: this is a code-level detector only,
+backed by a skill-level refuse instruction in `lead-bootstrap` (its
+`## On: refuse` step), not a mechanical hard-block on reconcile/restamp.
+
+Changing `lead-bootstrap`'s own upgrade/migration procedure is out of scope for
+this warning; it only detects and reports staleness.
+
+### Doc Coverage Warning {#260707-doc-coverage-warning}
+
+`ferrule` and `workflow_manual` (FRESH-with-root and CONTINUE branches only)
+each surface a one-line warning when the project's `ai-docs/spec/` or
+`ai-docs/mental-model/` directory has no `.md` file carrying a parsed YAML
+frontmatter block. The check is live and stateless: it re-scans both
+directories on every call rather than reading a stored coverage flag. The
+`workflow_manual` FRESH-without-root branch (no established root yet) never
+checks or warns, matching the bootstrap-staleness precedent
+(`#260703-bootstrap-staleness-warning`).
+
+The check is silent by design in two cases: the `doc_coverage_alarm` config
+item (see Config Tools) resolves to `off`; or both `ai-docs/spec/` and
+`ai-docs/mental-model/` already contain at least one frontmatter-bearing `.md`
+file. A missing directory counts as uncovered, not an error — fresh projects
+legitimately lack these directories before `lead-forge-spec`/
+`lead-forge-mental-model` has run. When the warning does fire, its text names
+which area(s) are missing coverage and instructs the caller to run
+`config.tune(key: "doc_coverage_alarm", value: "off")` to silence it
+permanently. The
+warning fires on every `ferrule`/`workflow_manual` call while uncovered —
+there is no once-per-session suppression state, mirroring
+`#260703-bootstrap-staleness-warning`.
+
+Whether a project's spec/mental-model authoring is otherwise complete is out
+of scope for this warning; it only detects the presence-of-any-frontmatter-file
+floor.
+
+### Manuals Ambient Injection {#260807-manuals-ambient-injection}
+
+`workflow_manual` (FRESH-with-root and CONTINUE branches only, mirroring the
+Bootstrap Staleness and Doc Coverage warnings above) injects an always-on
+`# Manuals` block: the `# Manuals` header, a fixed authoring-guidance
+paragraph, then one line per tracked manual under `ai-docs/manuals/`
+(`<path> — <summary>`). Unlike the presence-gated `# Notes` block, this block
+is an ever-present authoring anchor: it renders even when no manual exists yet,
+with a `- (none yet)` placeholder in place of the list. The guidance paragraph
+teaches where shared project procedures live (tracked, one file per procedure
+with a one-line `summary:` frontmatter) and the local/tracked split (write
+machine-local details — credentials, IPs, hostnames — to a gitignored
+`*.local.md` sibling, not into a tracked manual). There is no applicability
+predicate — every tracked manual's path and summary is injected
+unconditionally; selection/relevance filtering is out of scope for this block
+(see Manuals Document System in the documentation-system spec).
+
+The block returns nothing only on a genuine resolution error (a non-NotExist
+`ai-docs/manuals/` read failure), preserving the scopeAnnouncement-style
+"silent, never blocks `workflow_manual`" doctrine for the error path; a
+missing or empty `ai-docs/manuals/` directory is the common steady state and
+still renders the anchor with the `- (none yet)` placeholder. The
+`workflow_manual` FRESH-without-root branch never renders this block (it has no
+root to resolve manuals from), matching the bootstrap-staleness precedent
+(`#260703-bootstrap-staleness-warning`).
+
+A **tracked** manual with no `summary:` frontmatter line is still listed, with
+an explicit no-summary marker in place of a bare or blank line, so the gap is
+visible in the ambient block rather than silently omitted. A `*.local.md`
+manual is instead listed as a bare `- <path>` line — no summary rendered and no
+no-summary marker — because the `.local.md` suffix already marks it
+machine-local and a gitignored creds/IP file must not be nagged to add
+frontmatter.
+
+### Note Injection {#260810-note-injection}
+
+`workflow_manual` (FRESH-with-root and CONTINUE branches only, matching the
+Bootstrap Staleness/Doc Coverage/Manuals Ambient precedents above) injects a
+`# Notes` block: the highest-priority **visible** notes across the
+`machine`, `worktree`, `clone`, and `repo` layers (`#260810-note-tools`), up to a
+fixed cap (20), one line per note as `- [<layer>] <key> (priority <n>,
+<written_at>): <value>`. Muted (`visible: false`) notes are excluded from
+both the block and the cap budget itself — a muted note never consumes one
+of the 20 slots, so muting a note can free a slot for a previously elided
+visible one.
+
+**Placement is the one deliberate divergence from its Manuals/scope/staleness
+siblings**: those three are all *prepended* ahead of the manual body as
+top-of-body banners. The `# Notes` block is instead **appended immediately
+after `## Session State`**, using a plain string append rather than the
+`injectBootstrapStalenessWarning` prepend helper — notes are session-context,
+not a standing warning, so they render alongside the restored agenda/todo
+state a lead just asked to see, not as a banner above the reference material.
+Unlike every sibling injection, the `# Notes` block is **never skipped when
+empty** — it is a user-facing affordance modeled on the always-rendered
+`# Manuals` block, not a machine-computed warning, so it renders in all three
+states within the injecting branches (a deliberate divergence from the
+silent-when-empty contract). The reader is the agent, whose working memory
+resets each turn, so the block and its post-it framing must stay continuously
+visible:
+
+- **No notes on any layer** (the former empty-skip condition, keyed on notes
+  present anywhere — muted or visible — not on zero *visible* notes): the block
+  renders the heading and a single empty-state post-it hint, `No notes. Notes
+  are your short, always-in-context post-it reminders — note.write to pin one,
+  note.erase when it's no longer needed.`, and no bullet lines.
+- **Has visible notes**: the highest-priority visible notes as before, followed
+  by a one-line standing post-it hint, `Post-it reminders: note.write to pin,
+  note.erase when done.`
+- **All-muted** (notes exist but zero visible): heading plus the muted-count
+  line and the same one-line standing hint (see below) — never the "No notes."
+  empty-state hint, since the empty-state text keys off the no-notes-on-any-layer
+  condition, not off zero-visible.
+
+When more visible notes exist than the cap, the block ends with a visible `(N
+lower-priority notes elided — use note.query to retrieve.)` line; the elided
+notes are never dropped, only deferred to an explicit `note.query` call
+(`#260810-note-tools`). Independently, whenever any note across any layer is
+muted, the block ends with a `(N muted — use note.query to view.)` line
+naming the total muted count; both lines render together when both
+conditions apply, in that order (elision line first, muted line second), and
+either can appear alone. In the all-muted edge case — every note on a layer
+is muted, leaving zero visible notes — the block still renders (heading plus
+the muted-count line and the one-line standing post-it hint, zero bullet lines)
+rather than being skipped, since the layer is not empty, only fully muted. The
+`workflow_manual` FRESH-without-root branch never renders this block at all
+(empty-state hint included), matching the bootstrap-staleness precedent
+(`#260703-bootstrap-staleness-warning`); the always-render contract applies only
+within the branches that inject the block (`workflow_manual` FRESH-with-root and
+CONTINUE, and the standalone `workflow_state` output, which stays byte-identical
+to `workflow_manual`'s `## Session State` suffix).
+
+## Config Tools {#260505-config-tools}
+
+The config surface is two generic tools: `config.list` (read) and
+`config.tune(key, value, scope?, harness?, reset?, session_key?)` (write).
+`config.list` subsumes the former `config.show` and `config.tuning`: it returns
+the resolved ws user-local configuration path and current configuration without
+modifying it, plus the tuning-knob catalog (see Tuning Catalog). The default
+response is compact labeled text, and structured JSON remains available for
+callers that need stable fields. `config.tune` subsumes the eight former
+per-knob writers, selecting the target knob by its `key`; `config.list`
+surfaces the exact per-key write contract (value domain, required/optional
+fields, allowed/default scope, harness applicability). Both tools stay lead-only
+via the `config.*` capability-gate prefix; per-key lead-authority and
+session-key requirements are enforced at dispatch rather than in the schema.
+
+`config.tune(key: "agents.tier", value: {tier, backend, model, effort}, harness?)`
+is the surface for updating the backend/model/effort mapping for a capability
+tier. Unlike the scalar knobs, `agents.tier`'s value is a compound object: `tier`
+travels **inside** the value object alongside `backend`/`model`/`effort`, while
+`harness` stays the outer selector argument. Callers provide `tier` as the
+capability tier name (`small`/`medium`/`large`/`xlarge`); the `light`/`core`/`deep`
+aliases and `haiku`/`sonnet`/`opus` provider names are accepted as read-compat
+synonyms on input. A caller may also provide a backend, a concrete model, a
+portable effort, a harness selector, or any combination of those fields. When
+backend is omitted, ws infers it from the model family where possible. Empty
+effort, omitted effort, and `none` store the no-override state; supported
+non-empty effort values are visible through configuration output. The update
+applies to the explicit harness when provided, otherwise the detected MCP session
+harness when available, and otherwise the default tier mapping. The `harness`
+selector is a closed set, `claude`, `codex`, `pi`, and `default`, which
+`config.list` reports as the selector's options; a value is matched
+case-insensitively, an unknown value is rejected with a message naming that
+key's full option set, and an empty selector with no detected harness lands in
+`default`. This makes
+`backend` mean the execution backend rather than the tier-table key. `agents.tier`
+is not resolver-backed and only writes project scope (an explicit non-project
+`scope:` is rejected). Available in both full and agentless product modes.
+{#260513-harness-local-agent-tier-config}
+
+`config.resolve_agent(tier, harness?)` is a read-only tool that resolves one
+fixed capability tier (`small`/`medium`/`large`/`xlarge`) to its
+`{backend, model, effort, resolved_from}` for a harness, applying the exact
+same fallback chain `agents.tier` and `playbook.render` use (harness bucket,
+then `default`, then `codex`) rather than re-deriving it — see
+`#260513-harness-local-agent-tier-config` for that chain. `harness` is
+optional and defaults to the detected MCP session harness, or `default` when
+none is known; unlike `agents.tier`'s harness selector, it is not validated
+against a closed enum here, since an unrecognized value degrades gracefully to
+the `default` bucket rather than needing a hard rejection on a read. `tier` is
+required and validated against the same fixed four-tier set `agents.tier`
+accepts (plus its read-compat synonyms); an unrecognized tier is rejected.
+`resolved_from` names the bucket that actually answered (e.g. `pi`, `default`,
+`codex`), letting a caller distinguish a harness-local hit from a
+cross-harness fallback without re-deriving the chain; a caller that switches
+on the value should treat anything other than a harness bucket name (the
+legacy per-tier table answers as `tiers`) as "not harness-local". `backend`
+is the stored value or, when absent, the family inferred from the model name,
+and stays empty when neither is available (this read does not apply the
+`codex` backstop the render path uses). No `session_key` is required.
+Available in both full and agentless product modes.
+{#260905-tier-resolution-read-tool}
+
+`config.tune(key: "workflow.prefer_subagent", value: "on"|"off", session_key)`
+sets the global `"workflow.prefer_subagent"` item, whose builtin default is
+`off`. `config.tune(key: "workflow.prefer_mercenary", value: "on"|"off"|"hide",
+session_key)` sets the global `"workflow.prefer_mercenary"` item, whose builtin
+default is `hide`. Both keys require a lead session key for authority but always
+write the global config scope. The former unprefixed `"prefer_mercenary"` entry
+is not migrated; it remains orphaned local state unless a later ticket introduces
+migration. `prompt.DelegationSection.*` prompt override keys are likewise not
+migrated.
+
+`config.tune(key: "workflow.prefer_subagent", ...)` additionally accepts
+`reset: true` as an alternative to `value`; the two are mutually exclusive.
+`reset: true` removes the global override entirely (rather than writing an
+explicit value, even the builtin's current value) so resolution falls back to
+`global > builtin` and tracks any future change to the builtin default. This
+mirrors the general unset-vs-set distinction in
+`#260702-unset-means-reset-to-builtin`.
+{#260702-config-unset-reset-to-builtin}
+
+`config.tune(key: "bootstrap_alarm", value: "on"|"off", session_key)` sets the
+global `"bootstrap_alarm"` item, whose builtin default is `on`; it gates the
+bootstrap staleness warning (`#260703-bootstrap-staleness-warning`). It
+requires a lead session key for authority, always writes the global config
+scope (global-only, mirroring `workflow.prefer_subagent`), and accepts
+the same mutually-exclusive `reset: true` alternative to `value` with
+identical unset-to-builtin semantics.
+
+`config.tune(key: "doc_coverage_alarm", value: "on"|"off", session_key)` sets
+the global `"doc_coverage_alarm"` item, whose builtin default is `on`; it gates
+the doc coverage warning (`#260707-doc-coverage-warning`). It requires a lead
+session key for authority, always writes the global config scope (global-only,
+mirroring `bootstrap_alarm`), and accepts the same mutually-exclusive
+`reset: true` alternative to `value` with identical unset-to-builtin
+semantics.
+
+## Tuning Catalog {#260625-tuning-catalog}
+
+The tuning-knob catalog is part of `config.list`'s output (it subsumes the
+former standalone `config.tuning` read tool) and is the discovery surface for
+workflow-tuning knobs used by `ws:lead-tune`. It is a compact catalog whose
+entries describe user-facing knobs, their current resolved values when
+available, the selector fields a caller must choose, the value fields a caller
+may set, and the writer that performs the actual mutation — now uniformly
+`config.tune`, with the knob's id carried as the writer's fixed `key` argument.
+
+The catalog is a projection, not a second setter schema. Each entry names a
+small semantic knob id and derives field names, enum values, required fields, and
+descriptions from the per-key config registry. Prompt override entries derive
+their point ids from the shipped override-marker scan; model-tier entries derive
+their fields from the `agents.tier` registry entry (with `tier` in the value
+fields and `harness` the sole selector); workflow-preference entries derive their
+values from the `workflow.prefer_subagent`, `workflow.prefer_mercenary`,
+`bootstrap_alarm`, and `doc_coverage_alarm` registry entries.
+The shipped `DelegationSection` override marker is removed, so
+`prompt.DelegationSection` is absent from the catalog and from prompt-override
+discovery; orphaned stored prompt keys remain ignored.
+
+Catalog output defaults to LLM-readable text. `format: "json"` returns a stable
+structured shape for callers that need to build a proposal or compare runtime
+support: each `knobs[]` entry carries `id`, `kind`, `description`, `writer`
+(always `config.tune` with a `key` fixed argument), optional `reset`,
+`selector_fields`, `value_fields`, and `current`. Compatibility-only writer
+arguments may be omitted from the catalog even when they remain accepted; the
+catalog exposes the canonical tuning syntax, not every legacy call shape.
+Product mode is honored: full-ws-only knobs are absent when the runtime is in
+wsflow/no-agent mode.
+
+> [!note] Constraints
+> - `config.list` does not mutate config; it exposes each knob's `config.tune`
+>   write contract rather than replacing it.
+> - Adding a new lead-tune knob requires registering its semantic id in the
+>   per-key config registry, but must not copy enum/property schema by hand when
+>   that schema already belongs to the registry entry.
+> - Prompt override discovery remains marker-driven; the tuning catalog must not
+>   invent or expose prompt `pointId` values absent from the shipped rsrc tree.
+
+Configuration exposes harness-aware capability-tier mappings. The capability
+tiers `small`/`medium`/`large`/`xlarge` map to backend/model defaults per harness;
+the historical `light`/`core`/`deep` aliases (this entry's original keys) and the
+`haiku`/`sonnet`/`opus` provider names are folded to capability tiers as
+read-compat synonyms, so existing tier-shaped and alias-shaped config still
+resolves without migration. {#260508-model-alias-config-tools}
+
+The delegation tier abstraction is the capability vocabulary
+`small`/`medium`/`large`/`xlarge`, which names task-intrinsic reasoning depth
+independent of host or subscription plan, and is the single tier vocabulary across
+every surface. `light`/`core`/`deep` (and the `haiku`/`sonnet`/`opus` provider
+names) are accepted as read-compat synonyms on input, folded to the capability
+tiers `light↦small`, `core↦medium`, `deep↦large`; `xlarge` (fable-class) has no
+legacy alias and is independently configurable. Playbook frontmatter declares
+`role:` and `tier:` in the capability vocabulary; a tier resolves directly to a
+concrete backend/model through `config.tune(key: "agents.tier")`
+(`#260513-harness-local-agent-tier-config`), which is keyed by the capability tier
+(the earlier "remains keyed by `light`/`core`/`deep`" framing is superseded by
+`#260620-tier-vocabulary-collapse-direct-model-map`).
+{#260612-first-class-tier-vocabulary}
+
+The two-vocabulary split is collapsed to a single tier vocabulary. The capability
+vocabulary `small`/`medium`/`large`/`xlarge` is the only tier vocabulary across
+every surface — playbook frontmatter, `playbook.render`, `mercenary.register`,
+and the model-config tool (the `config.tune(key: "agents.tier")` surface,
+re-homed by this change rather than by the previously pending
+`config.model_alias` rename, which this supersedes). Config is keyed directly by
+the capability tier: a tier resolves
+to its per-harness `(backend, model, effort)` with no intervening
+`light`/`core`/`deep` alias step, and the `firstClassTierToAlias` bridge is
+retired. `xlarge` has an independently configurable mapping instead of folding
+onto `deep`. The `light`/`core`/`deep` aliases and the `haiku`/`sonnet`/`opus`
+provider names remain accepted as read-compatibility synonyms on input — and for
+existing on-disk config and persisted agent records — so no stored configuration
+breaks and no schema migration is required. Per-harness mapping, portable effort,
+and backend-affinity resolution are unchanged; only the key vocabulary changed.
+Delegate playbooks declare a single tier-derived model hint variable
+(`{{.RoleModel}}`) resolved from the playbook's own `tier:`, replacing the
+alias-named `{{.LightModel}}`/`{{.CoreModel}}`/`{{.DeepModel}}` set; the rendered
+native model hint is preserved. Beyond that per-role hint, any playbook body may
+reference the four generic fixed-tier vars
+(`{{.SmallTierModel}}`/`{{.MediumTierModel}}`/`{{.LargeTierModel}}`/`{{.XLargeTierModel}}`)
+to name a specific tier's model in prose; these resolve through the same
+per-harness config seam and are injected as reserved implicit variables (see
+`#260609-playbook-harness-rendering`), not as terminology-table entries.
+{#260620-tier-vocabulary-collapse-direct-model-map}
+
+### Layered Config Scope Model {#260619-layered-config-scope-model}
+
+Most config items resolve across four ordered scopes, highest precedence first:
+`session > project > global > builtin`. `builtin` is the code default (for
+example the `wsconfig` tier/alias defaults and
+`"workflow.prefer_mercenary"="hide"`). A read returns the value from the
+highest-precedence scope that holds one.
+
+Some config items are **global-only** because callers may need them before a
+session key, root, or project scope exists. `"workflow.prefer_subagent"` and
+`"workflow.prefer_mercenary"` skip session and project overlays, resolve only
+from `global > builtin`, and reject non-global writes. The old unprefixed
+`"prefer_mercenary"` key remains orphaned local state unless a later ticket
+introduces migration.
+
+Each config item declares a natural **default write scope** in code; items that
+declare nothing fall back to `project`. A write without an explicit scope lands
+in the item's declared default scope. An explicit `scope:` argument on a set
+always wins over the declared default. `config.list` reports *which scope* a
+value resolved from, so a caller can see whether a value is session-, project-,
+global-, or builtin-sourced.
+
+Scope storage map:
+
+- `session` — the per-key session store (`keys/<key>.json`,
+  `#260617-stateless-subagent-context`); tied to the session key's lifetime.
+- `project` — the existing project-scoped `config.json` under `${WS_CACHE_HOME}`
+  (`~/.ws@<project-id>/`).
+- `global` — a project-agnostic `~/.ws/config.json`, with a `WS_CONFIG_HOME`
+  environment override mirroring the `WS_CACHE_HOME → ~/.ws@<id>/` convention.
+
+Adding the `global` layer is non-breaking: because `project` outranks `global`,
+existing project-stored values keep winning, so no data migration is required;
+only the *write default* for future sets follows each item's declared scope.
+Read-modify-write on the project and global files is serialized so concurrent
+writers cannot corrupt the file (atomic replace under a file lock). The scope
+resolution rule and the `scope` argument shape are a single shared contract that
+every scope-aware config tool consumes, rather than per-tool re-implementations.
+
+> [!note] Constraints
+> - Scope-awareness is opt-in per config item; this contract does not retrofit
+>   the existing `agents.tier` surface (`config.tune(key: "agents.tier")`), which
+>   is re-homed under the same
+>   model by the capability-tier collapse
+>   (`#260620-tier-vocabulary-collapse-direct-model-map`) rather than here.
+> - Item-level write gating still applies: a scope-aware setter honors an item's
+>   existing role/capability restrictions (not every item is freely settable at
+>   every scope).
+> - The substrate (resolver, default-scope registry, file-lock RMW, global store,
+>   shared `scope` schema fragment) and scope-reporting on `config.list` are the
+>   caller-visible surface today. Per-item scope-aware *set* surfaces arrive as
+>   individual items adopt the model (`"workflow.prefer_mercenary"`
+>   (`#260619-prefer-mercenary-session-scope-item`), prompt overrides); the set
+>   capability otherwise lives at the internal `wsconfig` API.
+
+### Prompt Override Tuning Tools {#260620-config-prompt-override-tuning-tools}
+
+The prompt-override surface (`#260619-prompt-override-marker-engine`) is tunable
+from inside the MCP through the generic `config.tune`/`config.list` tools, keyed
+by `prompt.<point id>` config keys.
+
+`config.tune(key: "prompt.<point id>", value: <text>, harness?, scope?,
+session_key)` stores a prompt override keyed by `(point id, harness)`, where
+`harness` is `claude`, `codex`, `pi`, or `*` (the cross-harness `all` bucket; `*` is
+stored under the `all` key). The value is matched case-insensitively; an unknown
+value, or an omitted one when no session harness was detected, is rejected with
+a message naming that key's full option set (this key has no `default`
+member, so an unresolved harness is never silently widened to the cross-harness
+bucket). The override text travels in the generic `value`
+argument. The value is written through the layered config scope model
+(`#260619-layered-config-scope-model`) under the key `prompt.<point id>.<harness>`:
+with no `scope`, the write lands in the item's declared default scope (`project`
+for these unregistered `prompt.*` keys); an explicit `scope:` argument wins. A
+`prompt.*` write requires the caller's `session_key` (any scope; not lead-scoped),
+which also serves as the target session for a `session`-scope write. The writer is
+lead-only — delegate and leaf keys are blocked by the `config.*` capability-gate
+prefix — and is visible in both full-ws and agentless wsflow modes, since prompt
+overrides are a mode-neutral rendering concern. Once stored, the override is
+honored at render time by the marker engine for the matching `(point id, harness)`
+and resolved scope.
+
+`config.tune(key: "prompt.<point id>", reset: true, harness?, scope?, session_key)`
+resets a stored prompt override back to whatever the next-broader scope (or the
+inline seed default) resolves to; it never writes an empty-string value in place
+of the removed override — an explicit empty override is a distinct intent covered
+by a `config.tune` write with an empty `value`. `scope` accepts `session`,
+`project`, or `global`; a `session`-scope reset requires the caller's
+`session_key`, matching the setter's session-scope write requirement. With no
+`scope`, the item's declared default scope is used (`project` for unregistered
+`prompt.*` keys). {#260702-unset-means-reset-to-builtin}
+
+`config.list` returns the declared override-points as `prompt_override` catalog
+knobs (`kind: "prompt_override"`), replacing the former standalone `config.prompt`
+listing: a scan of the shipped playbook resource tree for declared override
+markers (the marker grammar from `#260619-prompt-override-marker-engine`) reports
+each override-point's id and short `desc` together with any current override
+values per harness bucket and the scope each resolved from. The `ws:lead-tune`
+skill owns the how-to manual and the proactive-proposal trigger. Like the rest of
+`config.list`, it takes an optional `session_key` — session-scope overrides are
+listed and annotated only when it is supplied — and is lead-only via the same
+`config.*` prefix gate (a keyless caller passes; delegate and leaf keys are
+blocked). The listing is keyed on the declared markers (orphan `prompt.*` values
+without a marker are not surfaced), and each value's scope is resolved through the
+layered config scope model.
+
+> [!note] Constraints
+> - The writer does not introduce its own storage; it writes through the layered
+>   config primitive and inline into the single config file, so the override
+>   surface inherits that file's lock/atomicity story.
+
+## Project Context And Convention Tools {#260505-project-context-convention-tools}
+
+`project_tree` renders the project document map, spec inventory, and active
+ticket inventory for the current repository. The document map omits entries
+ignored by the repository's Git ignore rules so generated or vendored
+directories do not dominate the readable project context. The spec inventory
+also flags any spec file that still carries a legacy planned marker with the
+same advisory the spec discovery tools emit; the flag is advisory and never
+fails the call. The ticket inventory renders the whole `idea`/`todo`/`ready`
+backlog as a single parent-nested tree, each node labeled `status/stem` (e.g.
+`ready/feat-blah`) and nested under its `parent:` like a filesystem — no
+ticket is hidden or folded. `related:` edges are not rendered here; they stay
+reachable on demand via `tickets_query`. A `.done`/`.dropped` ticket appears
+only as a dead-parent anchor when it has a live (`idea`/`todo`/`ready`)
+descendant, transitively; a fully-dead subtree renders nothing. A `parent:`
+pointing at a stem with no ticket renders as a single shared placeholder root
+(`?/<stem>`) for every ticket naming it, and a `parent:` cycle degrades the
+cycle's nodes to flat roots instead of hanging or erroring.
+
+`infra.read` reads ws infra documents shipped in the rsrc tree by bare stem or
+filename (path-escaping names are rejected). The backing source is the rsrc
+loader; the embedded prompt bundle that previously served these documents was
+retired.
+`convention.read` reads bundled convention documents shipped with the runtime,
+such as ticket, spec, or mental-model conventions. Shared workflow skills use
+these tools instead of hard-coded repository-local convention paths.
+
+## Spec Discovery Tools {#260505-spec-discovery-tools}
+
+`spec_stem.generate` returns a collision-free spec anchor stem for a descriptive
+slug.
+
+`spec_index.verify` checks the spec corpus for anchor-index health problems such
+as duplicate stems.
+
+`specs.query` is the single read-only spec discovery tool, serving three call
+shapes. Called with no arguments (no `query`, `spec_stem`, or `ticket_stem`) it
+enumerates the spec tree — the former `specs.list` shape. Called with
+`spec_stem` alone (no `query`, no `ticket_stem`) it point-resolves that one
+anchor stem and returns its locations and file metadata as a single JSON
+object — the former `specs.status` shape — erroring when the stem is not found
+rather than returning an empty result. Any other combination — a `query` text
+search, or a `ticket_stem` filter alongside or instead of `spec_stem` — is a
+discovery search returning a JSON array of matching files. All three shapes
+expose spec file metadata, anchors, ticket references, query matches, and
+exact-stem status without requiring callers to scan the spec tree manually.
+
+Every shape, including the point-resolve and query-text paths, additionally emits a
+compatibility advisory for each spec file that still carries a legacy planned
+marker — the contract-first planned-entry mechanism being retired by
+`260726-refactor-retire-spec-planned-marker-mechanism`. Detection keys on the
+marker's shape at the start of a line and follows CommonMark block rules in the
+document body, so prose that merely describes the mechanism is not flagged: a
+marker named mid-sentence, quoted inside a fenced code block, placed inside an
+HTML comment, or indented four or more columns as an indented code block is
+documentation, not a marker. YAML frontmatter is not CommonMark and is exempt
+from those block rules, so a marker nested under `features:` is still detected
+however deeply it is indented. The advisory names the marker's line numbers. Resolution runs ticket to spec: when a live
+ticket (`idea`, `todo`, or `ready`) names the exact spec file path or one of the
+marker's own anchor stems, the advisory names those tickets with their statuses
+and directs the caller to move the marker text into the ticket's `## Spec
+Impact` and then strip the marker; when no live ticket does, the advisory
+reports the marker as orphaned and directs the caller to strip it, keeping the
+described behavior as an ordinary implemented entry if it shipped or as an
+Implementation Gap callout if it did not. When the live-ticket scan cannot be
+completed, the advisory reports that ownership could not be determined and must
+be resolved manually rather than reporting the marker as orphaned. The advisory
+is informational only and never fails a call or blocks a commit.
+
+Spec, ticket, and mental-model discovery tools default to compact line-oriented
+summaries. Broad list/find calls avoid expanding every nested anchor, phase,
+related map, snippet, source, or spec-reference array unless callers request
+JSON output. {#260512-documentation-discovery-readable-output-defaults}
+
+Documentation lookup tools treat broad human `query` inputs as tolerant
+candidate discovery while preserving exact structured selectors such as
+`spec_stem`, `ticket_stem`, and `domain`. Default text output for broad
+documentation queries groups evidence by document, renders document metadata as
+`<path>\tscore=<score>\thits=<count>`, and lists selected line-number snippets
+under each document. JSON output keeps document-centered metadata and adds
+line-level match evidence. Convention lookup accepts common aliases such as
+`spec`, `ticket`, and `mental-model`.
+{#260519-tolerant-documentation-lookup-query-evidence}
+
+## Ticket Discovery Tools {#260505-ticket-discovery-tools}
+
+`tickets.query` is the single read-only ticket discovery tool, serving three
+call shapes. Called with no `ticket_stem` (optionally with `statuses` and the
+`include_done`/`include_dropped` flags) it returns ticket paths and structured
+status metadata across ticket status directories — the former `tickets.list`
+shape. Active discovery includes `ready/`, `todo/`, and `idea/` by default;
+archived `.done/` and `.dropped/` tickets are omitted unless explicitly
+requested. `ready/` identifies spec-addressed implementation work, while
+`todo/` remains accepted backlog.
+
+Called with `ticket_stem` alone (no `query`, no `mentions_ticket_stem`, no
+`statuses`) it point-resolves that one stem and returns its structured status
+metadata as a single JSON object — the former `tickets.status` shape —
+erroring when the stem is not found rather than returning an empty result; it
+can optionally include archived done or dropped tickets via the same
+`include_done`/`include_dropped` flags. Any other combination — a `query` text
+search, a `mentions_ticket_stem` filter, or `statuses` given alongside
+`ticket_stem` — locates tickets by text query, exact ticket stem, mentioned
+ticket stem, and optional status filters, returning a JSON array of matches.
+All three shapes enumerate from the git index as well as the working tree, so
+a worktree-local sparse-checkout narrows what is *marked*, never what is found
+(`#260806-worktree-sparse-checkout-ticket-scope`).
+
+`tickets.close` moves a ticket to `.done/` (status=done) or `.dropped/`
+(status=dropped), writing the appropriate `completed:` or `dropped:` date into
+frontmatter and optionally appending a `## Resolution (YYYY-MM-DD)` body section.
+The operation is atomic: the frontmatter write, `git add`, and `git mv` happen as
+one staged change set, and the tool never commits. It is free-edit on phase
+completeness: closing with an unresolved `### Phase N: <title>` heading (one
+with no `### Result` heading before the next Phase heading or EOF, and not
+marked `[dropped]`) returns a soft, non-blocking tip naming the unresolved
+phase(s) — never a hard block, mirroring `tickets.move`'s ready-gate spec-
+address tip. Closing while the current branch is an `impl/<root>/<stem>` branch
+that still carries unmerged commits ahead of its merge root additionally returns
+a second, independent soft `next_instruction` nudging the lead to review and
+merge that branch into `<root>` after the close-move commit lands; this reuses
+the `route.resolve_implement` ahead-of-merge-root observation, is advisory only, and the
+tool itself performs no merge (consistent with never committing). The nudge is
+absent on a merged or clean impl branch and on any non-`impl/*` branch. Under an
+active worktree sparse-checkout the scope pre-flight runs
+before the frontmatter and `## Resolution` writes
+(`#260806-worktree-sparse-checkout-ticket-scope`).
+{#260620-ticket-close-tool}
+
+`tickets.move` moves a ticket along the `idea ↔ todo ↔ ready` axis. Downward
+moves from `ready/` return a tip to clear spec frontmatter before re-promoting.
+Upward moves stamp or validate the ticket's per-stage sage-review posture from
+the resolved `sage_review` config: `skipped` for `off`, empty, or unset;
+`recommended` for `ask`; and `required` for `auto` (see the Sage Review Gate
+section below for the two-field, per-category contract). A move
+into `todo/` may leave `recommended` or `required` as the visible unresolved
+posture on the fields the ticket's category requires.
+
+A move into `ready/` does **not** require a resolved terminal posture. It
+succeeds whatever the posture is and returns a warning on the same tip channel,
+because `tickets.verify` / `ws/git.commit`
+(`#260723-git-commit-ticket-verify-gate`) is the single hard enforcement point
+for ready sage posture. The warning names the first non-terminal required field
+— `sage-review-design` is examined before `sage-review-completeness`, so a
+ticket that reaches `ready/` without a terminal design posture is always named
+on the design field first, regardless of entry path — states the commit-time
+consequence (`ws/git.commit` will fail on guardrail `ready-sage-posture` until
+it resolves), and names a reachable resolving call. There are two variants,
+distinguished because they imply different next actions:
+
+- **Unreviewed** (`recommended` or `required`): review has not run yet. Resolve
+  with `ws/tickets.sage_gate(stem, landing: "ready")`.
+- **`blocked`**: a prior review already found unresolved issues. `sage_gate`
+  cannot clear this state — it returns `stop_blocked` before any resolution — so
+  the warning instead directs the caller to address the blocker, re-run the
+  review, and record a non-block verdict through
+  `ws/tickets.sage_stamp(stem, stage, verdicts)`.
+
+Both variants also carry the shared non-waivable statement and review-scope
+line described under the sage gate tools below
+(`#260720-sage-gate-record-tools`).
+
+One sage rejection is still hard at `tickets.move`: an upward move whose
+destination is **not** `ready/` (for example `idea/` → `todo/`) fails when a
+required stage holds `blocked`, design checked before completeness.
+`tickets.verify`'s `ready-sage-posture` guardrail runs only for
+`status == "ready"`, so a non-`ready` landing has no downstream chokepoint to
+relocate enforcement to.
+
+A move into `ready/` for a non-`epic`/`research`/`workset` ticket with no
+detected spec addressing (no
+confirmed `spec:`/`spec-remove:` frontmatter entry and no `## Spec Impact`
+section) additionally returns a soft, non-blocking tip noting that the ready
+gate is normally enforced by `lead-write-ticket`; the move still succeeds. The
+move stages atomically and never commits.
+
+The posture reported above is computed after a self-healing frontmatter write:
+a legacy single `sage-review:` field, or an unresolved posture on a required
+field, is migrated/stamped to the resolved two-field form, and both required
+fields are persisted in a single write. The response carries no
+`partial-mutation:` notice. The one remaining rejection path (a blocked
+non-`ready` upward move) can still run after that write, but the write is
+idempotent — the ticket is left in the migrated two-field form and a retry
+behaves identically — so a rejected move needs no special retry handling.
+
+A worktree sparse-checkout adds one further rejection, evaluated before that
+self-healing write and after the status preconditions: a source or destination
+outside the scope refuses the move as a true no-op
+(`#260806-worktree-sparse-checkout-ticket-scope`).
+{#260620-ticket-move-tool}
+
+`tickets.create_empty` (renamed from `tickets.create`, 260723 Phase 2) creates
+a dated ticket stub at a caller-specified initial state (`idea`, `todo`, or
+`ready`). It auto-prefixes today's date to form the full ticket stem, writes a
+minimal frontmatter stub (`title: ""` placeholder; resolved
+`sage-review-design:` posture for `todo/+` states when the ticket's category
+requires design review, plus a resolved `sage-review-completeness:` posture for
+`ready` when the category requires completeness review), and returns the
+created path and a caller-facing tip that names the posture or, at a `ready`
+landing with an unresolved posture, the warning below. The attention-salient
+rename and the tool's own return prose both state the caveat this name exists
+to enforce: it yields only a valid empty skeleton + initial posture, not a full
+mutation orchestrator — `tickets.template` remains the separate tool that supplies the
+body skeleton. Creating directly at `ready/` stamps both fields the ticket's
+category requires, so a ready-landing create and a ready-landing
+`tickets.move` leave the same posture shape on the file.
+
+Creating directly at `ready/` is not rejected on sage posture. Like
+`tickets.move`, it succeeds and returns the same ready-landing warning
+(`#260620-ticket-move-tool`) when a required stage resolves to a non-terminal
+posture, computed over both required stages so the warning names exactly what
+`tickets.verify` will fail on. `tickets.verify` / `ws/git.commit` remains the
+single hard enforcement point for the never-skippable design invariant: the
+stub is created with its non-terminal posture visible, and the commit that
+would land it fails on guardrail `ready-sage-posture` until review resolves.
+A fresh ticket has no prior posture, so `create_empty` never produces the
+`blocked` warning variant.
+
+Terminal states (`done`, `dropped`) and an empty stem are rejected with errors. The tool is not idempotent: a duplicate path returns an
+error — including when the colliding ticket is in the index but hidden by this
+worktree's sparse-checkout, which is reported as such rather than as a plain
+duplicate (`#260806-worktree-sparse-checkout-ticket-scope`). The `idea/` tip
+directs the caller to promote through `todo/` so the resolved posture can be
+stamped. {#260622-create-ticket-tool}
+
+`tickets.template` returns the typed body skeleton for a given ticket type.
+`type` is required; accepted values are `feat`, `bug`, `refactor`, `chore`,
+`research`, `workset`, and `epic`. `feat`/`bug`/`refactor`/`chore` share a
+single actionable skeleton (phases-driven structure); `research`, `workset`, and
+`epic` each return a distinct skeleton reflecting their section shapes. The
+returned markdown is a ready-to-fill stub — section headers and inline fill-in
+prompts with no surrounding convention prose, so callers can paste it directly
+into a new ticket body. An unknown or empty `type` is rejected with an error
+listing valid types. Capability range: `>=0.30.6-dev <0.31.0`.
+{#260624-tickets-template-tool}
+
+`tickets.checklist` returns the verification checklist for one `lead-write-ticket`
+phase as data, so the playbook can install it as a single todo instead of
+carrying the item list as static prose. `type` and `phase` are both required:
+`type` accepts the same set as `tickets.template`
+(`feat`/`bug`/`refactor`/`chore`/`research`/`workset`/`epic`), and `phase` is
+`content` (the ticket-content capture checklist) or `intent` (the intent-review
+checklist). The returned markdown is the full multi-item text for that phase,
+numbered and ready to paste verbatim into one todo `instruction`; the `intent`
+phase emits one extra category-scoped item for `epic` and `workset` and
+renumbers the trailing items accordingly. Like `tickets.template` it is a pure
+lookup — no `session_key`/root, no gate. An unknown or empty `type`, or a `phase`
+other than `content`/`intent`, is rejected with an error listing valid values.
+{#260720-tickets-checklist-tool}
+
+`tickets.verify(paths)` runs the deterministic mechanical guardrail set over one
+or more ticket files and returns a structured verdict — overall `OK`, plus each
+finding's guardrail, file, and a fix-oriented message — without judging prose
+quality or design soundness. It is the single home for the file-state-
+deterministic checks that were otherwise scattered across the ticket mutation
+tools: stem-format regex, status/directory consistency against the canonical
+five status directories (`idea`/`todo`/`ready`/`.done`/`.dropped`, not the
+looser legacy set), file existence, frontmatter fence integrity, ready-landing
+sage-review posture presence and terminal value, close-date field presence for
+`.done`/`.dropped`, and phase/Result heading structural well-formedness. Those
+are hard findings that fail the verdict (`OK: false`). Missing spec addressing on
+a ready-landing non-exempt ticket is a soft **warning** only — surfaced but never
+failing the verdict, matching the `tickets.move` ready-gate tip; promoting it to
+a hard block is separate deferred scope. A ready ticket whose completed
+sage-review stage is stale also emits a soft `sage-review-freshness`
+**warning**; the warning names the affected stage(s), the review baseline,
+and the instruction to inspect the ticket diff and decide whether to rerun
+that Sage stage. Freshness is decided primarily by comparing a
+`sage-review-<stage>-reviewed` digest recorded at stamp time (sha256 of the
+body-only normalized ticket, truncated to a 16-hex-character prefix) against
+the current body's digest — no Git walk when a digest is recorded. A legacy
+ticket with no recorded digest falls back to the Git commit that most
+recently recorded that stage's completed posture — the latest
+completed-transition, not the first, so a reset-then-re-stamped ticket
+resolves against its newest stamp. Both paths compare the same body-only
+normalization: the markdown below the frontmatter fence, trimmed, so the
+whole frontmatter block — including the new `-reviewed` field itself — is
+excluded, and a frontmatter-only edit (`title:`, `related:`, any
+`sage-review*` posture) never trips staleness. An unresolved `### Phase N:` heading
+(no `### Result` before the next Phase heading or EOF, not marked `[dropped]`)
+on a `.done`/`.dropped` ticket is likewise a soft **warning** only, matching
+`tickets.close`'s own tip — the SOFT seed of the 260723 Phase 2 must-not-forget
+filter, deliberately never promoted to a hard block. verify performs no prose or design
+judgment and does not attempt the append-only phase-Result convention, which is a
+diff-level property a single-file snapshot cannot see. It is callable standalone
+for mid-edit red-green feedback, and the identical check runs as the `git.commit`
+ticket-verify gate (`#260723-git-commit-ticket-verify-gate`), so a standalone
+call and the commit gate return the same verdict for identical input. The
+ready-landing sage-posture rule has no second enforcement point: the mutation
+tools (`tickets.move`, `tickets.create_empty`) evaluate the same underlying
+predicate only to build a soft, non-blocking warning, so `tickets.verify` —
+through the `git.commit` gate — is where a non-terminal ready posture is
+actually refused.
+
+Beyond those intra-file checks, verify also runs a cross-file ticket-graph pass
+over the whole board and returns its results as **advisories** — a carrier
+distinct from findings and warnings. Every advisory is non-blocking: advisories
+never affect `OK`, never become a commit veto, and never fire the warning-level
+"should be addressed or explicitly accepted" instruction, since an
+ancestor-already-closed note is explicitly no-action-needed. Four integrity
+checks resolve the verified ticket's **own** frontmatter (never an ancestor's)
+against the rest of the board: an unresolvable `parent:`, and a `related:` key
+resolving into neither namespace, are `FIX:` advisories (unambiguous defect,
+mechanical remedy); a `parent:` cycle, and a `parent:` whose target category is
+not `epic`, are `CHECK:` advisories (resolution needs judgment, so the message
+observes and asks rather than prescribing). Resolution is two-namespace and
+deliberately asymmetric: `related:` resolves against ticket stems **union** spec
+anchor stems (`{#YYMMDD-slug}` under `ai-docs/spec/`), because pointing a
+`related:` at a spec anchor is an intended reference form rather than a
+tolerated one; `parent:` resolves against ticket stems only, since the ancestor
+walk needs a status and a child set that a spec anchor has no equivalent of.
+Integrity advisories are capped at five per verified ticket, followed by a
+`... +N more` line — per subject, like the sibling-listing cap, so one ticket's
+advisories can never crowd out another's on a multi-ticket call.
+
+Alongside them, verify walks `parent:` upward at unbounded depth and emits one
+`## Parent Board` block describing each ancestor: a closure ACTION line when
+every child is closed, a second-tier ACTION line when every `ready`/`todo`
+child is closed and only `idea/` children remain, and a path-neutral NOTE when
+the ancestor is itself already closed. Ancestors are deduplicated by stem per
+call and labelled `Parent [N]:` by depth; a verified ticket with no `parent:`
+produces no section at all rather than an empty one, and a cyclic chain
+produces the `CHECK:` advisory and no block. The sibling listing (the
+`N of M child tickets still open` header and its rows) is the one output gated
+by path: it renders only when a verified path sits under `.done/` or
+`.dropped/`, because verify runs on every ticket-touching commit and an ungated
+listing would attach rows to all of them. Gating reads the path's status
+directory, not staged-rename detection. Every check reads frontmatter and
+status directories only — no ticket body is read, so an epic body naming a
+child stem in prose has no effect on the child edge set, which `parent:` alone
+authorizes.
+
+A graph-load failure degrades to silence, never to a veto: when the whole-board
+scan or the spec-anchor scan fails on a file unrelated to the call, the
+advisories are dropped and verify returns its ordinary verdict. Verify never
+fails the call because of an advisory; a call-level error stays reserved for
+malformed caller input.
+Both callers render the same advisory set; the commit gate appends the amend
+recipe sentence to `FIX:` advisories only, and that single appended sentence is
+the only difference the identical-verdict guarantee above permits.
+{#260727-tickets-verify-graph-advisories}
+
+Capability range: `>=0.35.1-dev <0.36.0`. {#260723-tickets-verify-tool}
+
+The Sage Review Gate is split into two sequential, non-looping stage gates
+keyed to ticket lifecycle, both running before `lead-write-ticket` commits a
+ticket — the gate leaves the posture it writes uncommitted and the playbook's
+single following commit step carries that posture together with the ticket
+edits already held on the file: a design-sketch review at `todo/` landing
+(tolerant of missing detail; catches wrong direction) and a completeness
+review at `ready/` promotion
+(checks implementation-readiness, undecided user-policy points, and capture
+gaps). Frontmatter carries two independent stage-scoped fields —
+`sage-review-design:` and `sage-review-completeness:` — each using the same
+five-value vocabulary as before: `skipped`, `recommended`, `required`,
+`completed`, `blocked`. Both fields resolve independently from the same
+`sage_review` config value via the same posture-resolution rule (`skipped` for
+`off`/empty/unset, `recommended` for `ask`, `required` for `auto`); the config
+axis itself is not split, only which stage(s) a given ticket category stamps.
+
+Category exemptions (mirroring the existing spec-address-gate category
+detection): `feat`/`bug`/`refactor`/`chore` (default/actionable categories)
+require both stages; `epic` requires only `sage-review-design` (epics never
+reach `lead-implement`, so completeness never applies); `research` and
+`workset` are exempt from both stages, matching their existing blanket
+spec-address-gate exemption.
+
+Hard invariant: design review is never skippable regardless of entry path. A
+ticket that reaches `ready/` without ever passing `todo/` design review must
+still pass design review before or as part of completeness review. Concretely:
+`tickets.verify` / `ws/git.commit`'s `ready-sage-posture` guardrail — the single
+hard enforcement point — checks `sage-review-design` before
+`sage-review-completeness` and fails on the design field first if it is not
+terminal, and `tickets.move`/`tickets.create_empty` warn (without blocking) on
+the same field ordering at mutation time; the `lead-write-ticket` playbook, when
+landing at `ready/`, checks
+`sage-review-design` before dispatching the completeness reviewer and runs
+`ticket-reviewer-design` inline first if the design field is not yet terminal.
+This covers `idea/` → `ready/` direct promotion and tickets authored directly
+at `ready/`, since both layers check the same field rather than traversal
+history.
+
+At `todo/` landing (category requires design), the gate dispatches only
+`ticket-reviewer-design` (tier: large) and writes the result to
+`sage-review-design:` only. At `ready/` landing (category requires
+completeness), after the design-invariant check above passes, the gate
+dispatches only `ticket-reviewer-completeness` (tier: medium) and writes the
+result to `sage-review-completeness:` only. Each reviewer emits a structured
+verdict (`pass`, `concern`, or `block`) with an issues list; since each landing
+dispatches at most one reviewer, that reviewer's own verdict directly becomes
+the stage's result (no cross-reviewer aggregation), except the
+inline-design-then-completeness ready-promotion case, which applies the
+existing pairwise aggregation across the two sequential results. A `block`
+result appends a `## Blocked (YYYY-MM-DD)` summary section to the ticket body
+and writes `blocked` to the corresponding stage field. `idea/` tickets and
+`research`/`workset` tickets bypass the gate at every landing; `epic` tickets
+bypass only the completeness stage.
+
+The completeness reviewer's checklist includes a scope-boundary check that
+distinguishes a genuine completeness/readiness gap (`resolution: autonomous`,
+fill it) from a design-shaped gap in disguise — a new public interface,
+cross-module interaction change, or architecture reshaping — which must be
+raised as `resolution: missing` and left unfilled rather than patched under
+cover of a completeness fix.
+
+Legacy migration: a ticket carrying only the old single `sage-review:` field
+(no new fields) is read lazily at the first `tickets.move` or
+`lead-write-ticket` gate touch. A legacy `completed` migrates to both new
+fields as `completed`; legacy `skipped` migrates to both as `skipped`; legacy
+`blocked` migrates to both as `blocked` (still must be addressed); any other
+legacy value (`recommended`, `required`, missing, or `pending`) is treated as
+absent for both new fields and each is resolved fresh, the same as new-ticket
+stamping. The migration write persists both new fields on that first touch
+(self-healing, no bulk-rewrite script) and leaves the old `sage-review:` field
+in place.
+{#260624-sage-review-gate}
+
+`tickets.sage_gate` and `tickets.sage_stamp` are the two root-aware tools the
+`lead-write-ticket` playbook calls to run the gate above; both require
+`session_key`. `tickets.sage_gate(stem, landing[, answer])` resolves the gate
+decision for a ticket and returns
+`{ action, ask_prompt?, reviewers?, mode?, advisory?, freshness_stages?, review_baseline?, review_instruction? }`
+where `action` is one of `skip`, `stop_blocked`, `ask`, `run`, or
+`check_review_required`. It owns posture resolution, the
+legacy single-field `sage-review:` migration, the
+`sage_review` config fallback, the category×stage matrix, and
+standalone-versus-combined mode selection. For `ask` it returns the exact
+question to relay; the caller re-invokes with `answer` (`yes`/`no`), and each
+still-pending `recommended` stage is asked separately (design first) so one
+answer never resolves another stage. A declined `ask` persists `skipped` for
+that stage; a config-fallback resolution likewise persists the resolved
+posture. The tool never spawns reviewers — for `run` it names the reviewer(s)
+to dispatch and leaves spawning to the lead.
+
+For a completed design or completeness stage, `tickets.sage_gate` performs an
+additive freshness check before returning a terminal skip.
+`tickets.sage_stamp` records a `sage-review-<stage>-reviewed` digest (sha256
+of the body-only normalized ticket, truncated to a 16-hex-character prefix)
+alongside every `completed` posture it writes; when that digest is present,
+freshness compares it directly against the current body's digest with no Git
+walk at all — equal is fresh, differing returns `check_review_required` with
+`review_baseline` set to a non-commit sentinel (`the last recorded digest`)
+since no commit was inspected on this path. A legacy ticket with no recorded
+digest falls back to the Git commit that most recently recorded that stage's
+`completed` posture — the latest completed-transition, not the first, so a
+ticket that was reset to a non-terminal posture and later re-stamped resolves
+against its newest stamp rather than a stale earlier one — and compares body
+content the same way. Both paths use the identical body-only normalization:
+the markdown below the frontmatter fence, trimmed, so the whole frontmatter
+block (the new `-reviewed` field, `sage-review`/`sage-review-design`/
+`sage-review-completeness`, `title`, `related`, and everything else in it) is
+excluded from the comparison — a frontmatter-only edit never trips
+staleness, and the new field can never perturb posture parsing or its own
+digest. The result names the affected completed stage(s), the review
+baseline (a digest sentinel or a commit), and an instruction to inspect the
+diff and decide whether to rerun those stage(s). The freshness question is
+answered on re-invocation the same way a `recommended` ask is: `answer: yes`
+returns `run` with `reviewers` set to the listed stale stage(s), `mode` =
+`combined` when two are listed and `standalone` when one is, carrying the same
+non-waivable `advisory` every other run does. `answer: no` writes nothing — the
+`completed` posture and its `-reviewed` digest stay as they are, so
+`tickets.verify` keeps warning until a fresh `tickets.sage_stamp` — and the gate
+then resolves any remaining pending stage normally, so a still-pending
+`required` or `recommended` stage is never swallowed by the decline. Missing Git history or an
+unreadable historical blob on the fallback path degrades to the prior
+no-warning path. Backward compatibility is by construction: a ticket stamped
+before this change has no recorded digest, so it resolves through the
+fallback until its next `tickets.sage_stamp` call records one — no migration
+pass touches existing tickets.
+
+`tickets.sage_gate` **commits nothing and returns no commit metadata**. This is
+a caller-visible contract change: the ask-decline path previously produced a
+standalone `chore(sage): skip <stage> review` commit, and the result previously
+carried commit title/paths/`ai_context`. Both are gone, mirroring what 260725
+did to `tickets.sage_stamp` and for the same reason — a canonically-titled
+commit over a ticket file swallows the co-located real edits under a message
+that describes only the posture flip. Every recognized gate action instead
+states that any posture the call wrote is left uncommitted, rides the caller's
+next ordinary commit of the ticket path, and must not be committed separately.
+The note is worded to stay true on the branches that wrote nothing, so it is
+attached unconditionally rather than only on the writing branches.
+
+Ordinary gate results also carry an `advisory`: the non-waivable statement and
+the review-scope line. It says sage review is not waivable per ticket (pointing
+at `ws/config.list` for the `sage_review` config that governs it), that design
+review checks coherence, right-problem framing, and executability, that
+completeness review checks structure, fields, and clarity, and that neither
+judges whether the underlying research itself is settled. It rides every `run`
+result — `required`'s direct run, a `recommended` stage's accepted run, and a
+stale completed stage's accepted freshness rerun alike
+— and every `recommended` `ask` prompt, so it reaches the path an agent actually
+takes: posture `required` never asks, so a decline-only placement would be dead
+text. `skip` and `stop_blocked` carry no advisory. The identical text rides the
+ready-landing warnings from `tickets.move` and `tickets.create_empty`, from a
+single shared source so the surfaces cannot drift.
+
+`tickets.sage_stamp(stem, stage, verdicts)` (renamed from
+`tickets.sage_record`, 260723 Phase 2) aggregates the supplied stage verdicts
+into the final posture, writes the frontmatter field(s), and renders any
+`## Blocked` section from a Go-owned template whose output is byte-identical
+to the prior playbook templates, returning the applied posture only. It does
+**not** stage or commit (260725): the caller commits the posture change,
+together with any other uncommitted edits it holds, via its own
+`ws/git.commit` under caller-supplied `## AI Context`. A `stage` whose
+expected reviewer verdict is absent from `verdicts` is rejected with an error
+rather than recording a passing posture for a review that did not run.
+`tickets.sage_stamp` is **lead-only** (`isLeadOnlyTool`): it is the sole
+terminal writer of sage-review posture and the `## Blocked` companion, and a
+delegate/leaf-scoped session key is rejected at the keyed capability gate
+before dispatch — reviewers never write frontmatter directly, preserving the
+lead-single-writer property this spec anchor already established. This is
+new, code-enforced gating as of 260723 Phase 2: the pre-rename
+`tickets.sage_record` carried no `isLeadOnlyTool` entry, so a delegate-scoped
+key could reach it even though no reviewer playbook ever called it.
+Capability range: `>=0.33.15-dev <0.34.0`. {#260720-sage-gate-record-tools}
+
+`tickets.sage_stamp` also counts the recorded issues by their `resolution`
+field and routes them in its `next_instruction`: `autonomous` issues are fixed
+by the caller in the ticket, `missing` issues are taken through the caller's
+Open Decision Queue because they need a user decision the caller cannot supply.
+The routing clause leads the instruction, ahead of any commit direction, and is
+omitted entirely when a stage records no issues. An absent or unrecognized
+`resolution` counts as `autonomous`, so no issue falls out of both buckets. The
+counts surface as `autonomous_issues` / `missing_issues`. Before this, the only
+reader of `resolution` was the aggregation's `pass`-to-`concern` escalation on a
+combined stage; the caller's own procedure never branched on the field, so the
+split reached the caller and was discarded. The `concern` text that weighs a
+missing decision's criticality is gated on a missing issue actually being
+present, because a standalone stage records `concern` straight from the reviewer
+verdict with no missing issue required.
+
+A `block` verdict returns a stop rather than the pass text it previously shared:
+a blocked sage review is reported as a blocker instead of proceeding to commit or
+handoff. It prescribes no recovery loop, because `SageGate` returns
+`stop_blocked` for a blocked posture and never names a reviewer again — no fresh
+verdict can be produced from inside the calling procedure, so only a later
+`tickets.sage_stamp` clears the posture. It is also silent on committing or
+reverting, which is landing-dependent and the caller's. Before this, a `block` at
+a `todo/` landing received "commit, then proceed to handoff" and was recorded and
+then dropped, since the caller's only block branch covers the `ready/` landing.
+{#260729-sage-stamp-resolution-routing}
+
+### Worktree Sparse-Checkout Ticket Scope
+
+A worktree may narrow which ticket files are checked out by a `--no-cone`
+sparse-checkout, so that a topic-focused worktree sees only its own tickets. The
+ticket tools treat that as a **display filter over a whole board**, never as a
+smaller board: a ticket the scope hides is still in the index, still enumerated,
+still resolvable by stem, and still blocks a colliding stem. The alternative —
+walking the filesystem — would let a session create a stem that collides with a
+hidden ticket, or edit a board listing while blind to entries it is about to
+drop. Enumeration is therefore driven by the union of the git index and the
+working tree, and hidden bodies are read out of the index in one
+`git cat-file --batch` rather than off disk.
+
+The scope is detected by a filesystem-first gate: `<GIT_DIR>/info/sparse-checkout`
+must exist, and `core.sparseCheckout` must resolve true. `git sparse-checkout
+disable` leaves the pattern file behind, so a stat alone is not conclusive; the
+gate reads the git config files directly and treats an explicit `false` as
+terminal **only** when no config file carries a competing `true`. Anything
+ambiguous defers to `git config`. Ranking the files by git's own precedence was
+rejected because that precedence is switched on by `extensions.worktreeConfig`,
+and honouring a stale worktree-local `false` while git itself filters the
+worktree inverts the gate — the exact partial-board blindness this whole entry
+exists to prevent. Requiring agreement instead needs no extension lookup.
+
+The consequence a caller can rely on: with `core.sparseCheckout` unset, every
+behavior below is unchanged and the ticket tools spawn **zero** additional git
+subprocesses. The scope path is additive, never a new cost on the ordinary path.
+
+Under an active scope:
+
+- `tickets.query` enumerates hidden tickets alongside checked-out ones, in every
+  call shape (enumerate, point-resolve by `ticket_stem`, and text/mentions
+  search). Each hidden entry carries `hidden` in its bracketed flag list in text
+  mode and `hidden: true` in JSON, so the caller reports "filtered", not
+  "absent".
+- The enumerate and search shapes (no `ticket_stem` given) append one trailing
+  `scope:` line naming how many tickets this worktree's scope hides and stating
+  that they remain in the index and resolvable by stem. It is text-mode only; a
+  JSON listing gets the per-ticket `hidden` mark but no aggregate count, because
+  adding one would turn the response from an array into an object. The line is
+  suppressed when the caller's status filters select nothing at all — an empty
+  listing then has a cause unrelated to the scope — and when the hidden count is
+  zero. The point-resolve shape (`ticket_stem` given) never appends this line:
+  a single resolved ticket already carries its own `hidden` flag instead.
+- `tickets.move` and `tickets.close` pre-flight both the resolved source and the
+  destination against the scope **before the first write to the source file**,
+  and refuse with a message naming the path, the governing config
+  (`core.sparseCheckout`), and a widen-or-disable remedy. Ordering matters
+  because a refusal after a frontmatter or `## Resolution` write is not a no-op:
+  following the message's own retry advice would then append a second
+  `## Resolution` section. Status preconditions are still evaluated first, so a
+  caller with a genuinely invalid transition gets the transition error rather
+  than a scope error. Destination inclusion is decided by `git sparse-checkout
+  check-rules`, which answers exactly for paths that do not exist yet; stderr is
+  never parsed, since git's sparse advice is gettext-localized.
+- A hidden source is distinguished from a stem that does not exist at all, so a
+  caller is never told to create a ticket that is already in the index.
+- `tickets.create_empty` refuses a stem whose ticket exists in the index but is
+  not checked out here, and says so explicitly rather than reporting a plain
+  duplicate-path error.
+- `tickets.verify` propagates a post-gate scope failure into its existing
+  silent branch and emits **no** ticket-graph advisories. Emitting `FIX:`
+  advisories computed over a board known to be partial would be worse than
+  emitting none.
+
+Two residual limits are stated rather than hidden. `check-rules` requires git
+≥ 2.42; on older git the destination pre-flight fails open and the refusal
+arrives from `git mv` after the source write, so that path returns a
+`partial-mutation:` notice naming exactly what was already written and what a
+retry would duplicate. The notice is gated on an active scope **and** on a byte
+comparison against a pre-write snapshot, so it can never fire on the
+sparse-off path or claim a write that a content-identical re-persist did not
+make. {#260806-worktree-sparse-checkout-ticket-scope}
+
+## Mental-Model Discovery Tools {#260505-mental-model-discovery-tools}
+
+`mental_models.list` returns available mental-model documents with domain,
+description, and source metadata.
+
+`mental_models.query` locates mental-model paths by text query, domain, or spec
+stem reference. `mental_models.status` returns path-first metadata for documents
+selected by domain or path.
+
+**Noted exception.** The `260903-refactor-mcp-read-surface-collapse` list/query/
+status collapse deliberately does not touch `mental_models`: its audit found
+the triple is not a clean superset the way `tickets`/`specs` were —
+`mental_models.list` is a divergent legacy implementation with its own struct
+and formatter (no JSON path through `MentalModelsList`), and `mental_models.query`
+lacks the `path` argument that `mental_models.status` carries, so `query`
+cannot absorb `status` without behavior loss. `mental_models.list`,
+`mental_models.query` (verb-aligned by the earlier find-to-query rename), and
+`mental_models.status` therefore remain three separate tools here. Whether and
+how to reconcile this surface is tracked separately at
+`260904-research-mental-models-query-reconciliation`.
+
+## Reference Trace Tool {#260505-reference-trace-tool}
+
+`references.trace` returns the reference graph reachable from exactly one ticket
+stem or spec stem. The result connects tickets, specs, and mental-model
+documents so callers can inspect traceability without manually searching each
+document system.
+
+Small metadata and trace tools such as `api.list`, `ws.setup`, selected
+runtime/config inspection views, and `references.trace` default to compact
+labeled text where no caller needs stable structured fields.
+Launcher-facing compatibility data remains available where required.
+{#260512-metadata-trace-readable-output-defaults}
+
+Interactive workflow command surfaces default to compact readable text when the
+caller has not explicitly requested structured JSON. Write-capable workflow
+tools summarize the completed action, affected paths or entities, and detected
+workflow annotations without forcing callers to parse JSON. CLI mirrors follow
+the same default where they are workflow-oriented wrappers, while Git command
+mirrors preserve the original Git command output shape rather than reserializing
+it into a ws-specific JSON envelope. Explicit JSON modes remain available for
+structured consumers. {#260519-workflow-command-readable-output-defaults}
+
+## Git Workflow Tools {#260505-git-workflow-tools}
+
+`git.status` returns the current branch and worktree status.
+
+`git.diff` returns read-only diff output. It defaults to stat mode for context
+control and supports explicit `mode: "full"` for patch content or
+`mode: "name_only"` for path listings. Range-less diffs include untracked files
+where applicable.
+
+`git.log` returns a bounded commit log with an optional body flag. `git.merge_base`
+returns the merge base for two revisions.
+
+Git read tools default to direct, LLM-readable text: `git.status` as a
+branch/worktree summary with changed-file codes, `git.diff` as the selected
+diff text, `git.log` as bounded commit blocks without JSON-escaped bodies, and
+`git.merge_base` as a labeled hash line. JSON output remains available when a
+caller explicitly asks for structured compatibility output.
+{#260512-git-readable-output-defaults}
+
+`git.commit` creates a workflow-aware commit from explicit paths and structured
+message fields. It stages only the requested paths and formats commit messages
+with required AI Context and optional ticket, spec, or mental-model update
+sections. Ticket update detection recognizes added `### Result` headings and
+added `#### Edition` headings so commit summaries can report first completion
+records and later append-only tweak records. The default response is a compact
+readable commit summary; callers can request structured JSON explicitly.
+`git.commit` also accepts structured Mental Model Notes input and renders it as
+a `### Mental Model Notes` sub-section under `## AI Context`, while preserving
+the existing `ai_context` bullet path and deterministic commit body shape.
+{#260519-git-commit-mental-model-notes}
+When an explicit commit path names an old root from a rename or a deleted root,
+`git.commit` stages the concrete removed paths reported by Git status rather
+than passing the missing root to `git add`; requested roots with live changes
+still stage through the explicit add path.
+{#260513-git-commit-result-edition-detection}
+Under an active worktree sparse-checkout scope, `git.commit` stages its
+additions with `git add -A --sparse --` instead of the plain `git add -A --`
+form, so an explicitly requested path that sits outside the current
+sparse-checkout pattern (for example, a newly captured `idea/` ticket in a
+worktree scoped away from `idea/`) can still be staged and committed; the
+path returns to skip-worktree and disappears from the worktree only on the
+next `git sparse-checkout reapply`, while remaining resolvable from the index
+and other worktrees throughout. Scope activity is detected once per call via
+a cheap filesystem-first gate, so the unscoped path (`core.sparseCheckout`
+unset) is unaffected and stages exactly as before. `--sparse` is added to the
+`add` command only; the `rm --cached --ignore-unmatch` branch used for
+genuine deletions never gains it, since a merely-hidden (skip-worktree,
+on-disk-absent, unmodified) path never appears in the pre-staging `git
+status` this branch reads, so it can never be misrouted into a staged
+deletion. `tickets.create_empty` is unaffected by this change — it still only
+writes the ticket file and never stages or commits.
+{#260810-git-commit-sparse-staging}
+`git.commit` ticket-change summaries conservatively reconstruct an unambiguous
+same-stem ticket status move even when native Git reports the staged change as
+separate add/delete records instead of a rename. Ambiguous add/delete sets remain
+non-move ticket changes rather than inventing a destination status.
+{#260519-git-commit-add-delete-ticket-move-summary}
+After a successful commit, `git.commit` re-injects the calling session's todo list
+as a summary-mode block appended to the text-mode commit response, so a checkpoint
+commit doubles as a todo restoration point. The injection is text-mode only and is
+skipped when the session holds no todos or when structured JSON output is requested;
+it does not change todo status — `git.commit` never auto-marks items done.
+{#260626-git-commit-todo-reinjection}
+After the todo re-injection (if any), `git.commit`'s text-mode response appends a
+trailer line — `tip: preserve this session key: <key> during compaction` — naming
+the calling session's key. The trailer repeats the reminder `workflow_manual`
+already places near the top of a manual reload, on a high-frequency, lead-scoped
+call that tends to land near the end of a working turn, so the key stays recent in
+the transcript at the point context compaction is likely to trigger. The trailer
+is omitted only when no session key is present; structured JSON output is
+unaffected.
+{#260708-git-commit-session-key-tip}
+
+Before the commit is written, `git.commit` runs the `tickets.verify`
+(`#260723-tickets-verify-tool`) mechanical guardrail set over the staged ticket
+files as a commit-time gate. When a staged ticket file fails a hard guardrail,
+the commit is refused and the failing guardrail, file, and fix message are
+returned instead; no commit is written and `HEAD` does not move. This makes the
+verify floor non-bypassable for ticket-touching commits — a hand-edited ticket
+that never went through a mutation tool is still caught at commit — closing the
+direct-file-edit bypass that prose-only guardrails left open. A soft warning
+(missing spec addressing, stale completed Sage review, unresolved phases) does
+not block the commit; it lands with the warning surfaced as an advisory line in
+the commit response, and the commit result is otherwise unchanged. Advisories
+are text-mode only, following the todo re-injection precedent
+(`#260626-git-commit-todo-reinjection`):
+structured JSON output carries no advisory field. Both `git.commit` entry points
+— the MCP tool and the `ws-mcp git commit` CLI mirror — surface the same
+advisories, since they share one gate. The cross-file ticket-graph advisories
+(`#260727-tickets-verify-graph-advisories`) ride this same channel, with one
+commit-path-only addition: an advisory carrying a mechanical remedy gains the
+sentence `Then git commit --amend --no-edit.`, which the standalone
+`tickets.verify` output omits because nothing has been committed there.
+{#260727-git-commit-verify-advisories}
+The gate is non-overridable: there is no flag that lets a hard-failing
+ticket commit through. A commit that stages no ticket files is unaffected. For
+the `ready-sage-posture` guardrail specifically, this gate is the **sole** hard
+enforcement point — the ticket mutation tools only warn
+(`#260620-ticket-move-tool`), so an unreviewed ticket can sit in `ready/` in the
+working tree, but it cannot be committed there.
+Capability range: `>=0.35.1-dev <0.36.0`. {#260723-git-commit-ticket-verify-gate}
+
+The verify step excludes index-delete-side paths from the staged path set it
+checks: for a staged rename the pre-rename path is dropped and the destination
+path is verified, and for an outright staged deletion the deleted path is
+dropped with nothing to verify in its place. This makes a status transition
+staged by `tickets.move` or `tickets.close`, and an outright staged ticket
+deletion, committable through `git.commit`; when a commit's ticket paths are
+entirely deletion-side after this exclusion, the verify step is skipped for
+that commit. {#260725-git-commit-verify-excludes-delete-side-paths}
+
+`ai_context` has no size limit in `git.commit` itself: the tool's input schema
+carries no `maxLength`/size constraint, and a large valid array (many long
+entries) commits normally. `ai_context` still requires at least one non-blank
+entry, but the resulting error now names which of three distinct conditions
+occurred instead of collapsing them into one generic message: the field was
+absent (or explicitly `null`) from the call, the field was present as an empty
+array, or the field was present with entries that were all blank after
+trimming — an entry counts as blank whenever it is empty or whitespace-only
+after trimming leading/trailing whitespace, so `[""]` and `["  "]` report the
+same all-blank condition, distinct from a truly empty `[]` and from an absent
+field. Every `git.commit` invocation also unconditionally records the
+received `ai_context` argument's presence, raw entry count, raw byte size, and
+post-trim entry count as a `git.commit.ai_context_received` event via
+`runtime.debug_events`, independent of whether the call succeeds or is
+rejected, so a caller-side report of an unexpected `ai_context` rejection can
+be diagnosed against what the server actually received. The post-trim entry
+count uses the same whitespace-trim blankness rule as the error condition
+above, not a raw non-empty-string count, so it accurately reads zero for an
+all-whitespace array instead of miscounting blank entries as content.
+{#260725-git-commit-ai-context-condition-reporting}
+
+## Review Watermark Ledger Tools {#260830-review-watermark-ledger-tools}
+
+The review-watermark ledger is a single tracked, append-only text file
+(`ai-docs/.review-ledger.md`) recording review verdicts per reviewed commit
+range, so "what has already been reviewed" resolves by reading the ledger's
+last entry rather than by graph-walking or asking Git which commit last
+touched a file. Each entry is one line, `<base>..<head>: <verdict>[ ->
+<ref>]`, with `verdict` one of `pass`, `concern`, `block`, `routed`, or
+`bootstrap`. A freshly created ledger file begins with a `#`-prefixed
+self-documenting banner — a canary advisory addressed to whoever resolves a
+merge conflict on the ledger's tail (two branches that reviewed and appended
+independently), telling them to integrate both branches' reviewed ranges rather
+than blindly discard one side; the banner and every other `#`-comment line are
+skipped when resolving the latest entry, so they never shift the marker. Two
+tools are the sole caller-visible way to grow the ledger; neither has a CLI
+mirror (`#260505-cli-mirror-coverage`).
+
+`review.marker` reads the ledger's **frontier** entry — the last *clearing*
+entry (verdict `pass`, `concern`, or the `bootstrap` floor), skipping any
+trailing `block` or `routed` entry rather than reporting the raw latest
+line — and returns it as `review ledger latest entry:
+<base>..<head>: <verdict>[ -> <ref>]`. A `block` or `routed` tail therefore
+never advances what `review.marker` reports; the frontier holds at whatever
+clearing entry preceded it until a later sweep stamps a `pass` or `concern`
+covering the range. An empty ledger (missing file, or a file with zero
+parseable entries, or one whose only entries are `block`/`routed`) returns
+`review ledger has no entry yet; call review.marker(bootstrap: true) to
+establish a baseline` instead. The optional `bootstrap` boolean is the
+**sole caller-opted-in trigger** that may grow the ledger from this tool: when
+`true` and the ledger has zero parseable entries, it resolves the working
+root's current `HEAD` and appends a `<HEAD>..<HEAD>: bootstrap` entry,
+returning `bootstrapped review ledger baseline: <base>..<head>: bootstrap`.
+When `bootstrap: true` is passed but the ledger already has a resolvable
+frontier entry, the call is a no-op — it returns the existing frontier entry
+exactly as a bare read would, never a second bootstrap line and never an
+error.
+
+An optional `format: "json"` argument switches the response to a structured
+`{base, head, verdict, ref, found}` object built from the same frontier
+entry, mirroring `tickets.query`'s point-resolve `format=json` convention
+(`wantsJSON`/`toolJSONResponse`). This is the bare-SHA, no-string-scraping
+output a caller like the `lead-ship` release gate consumes to resolve
+`<frontier-head>..HEAD` without parsing the text-mode sentence.
+
+`review.stamp` appends one verdict entry, recording a completed sweep over an
+explicit `base`/`head` range. `base`, `head`, and `verdict` are required;
+`ref` (a routed ticket stem) is required only when `verdict` is `block`, and
+optional for every other verdict. The ledger file is append-only at the
+storage layer, not just by convention — an append opens the file
+`O_APPEND|O_CREATE|O_WRONLY` and never reads or rewrites an existing line, so
+no call to this tool can alter or drop a prior entry. `base` and `head` are
+validated as SHA-shaped (7-40 lowercase hex characters); an out-of-shape
+value, an unknown `verdict` token, or a `block` verdict with an empty `ref`
+is rejected before any write, surfaced verbatim as a tool error. On success
+the tool returns `stamped review ledger: <base>..<head>: <verdict>[ ->
+<ref>]`.
+
+Ledger-honesty guard: `review.marker` and `review.stamp` are the **only**
+tools that mutate the ledger. The checkpoint nudge described below reads the
+ledger only — it never bootstraps and never appends — so a caller can trust
+that the ledger only grows through an explicit, caller-opted-in
+`review.marker(bootstrap: true)` or `review.stamp` call, never as a side
+effect of routine session activity.
+
+### Review Watermark Checkpoint Nudge {#260830-review-watermark-checkpoint-nudge}
+
+Four tools each surface a cheap, read-only advisory when the review-watermark
+ledger looks stale relative to the project's review track (the resolved
+default branch — `origin/HEAD`'s target, else local `main`, else local
+`master`): `tickets.close`, `workflow_manual` (FRESH-with-root and CONTINUE
+branches only), `route.resolve_implement` (both direct and delegated branches), and
+`route.resolve_proceed`. The nudge is fail-open and purely advisory: it never blocks
+the call it rides on, and a resolution failure (no review track, no
+readable ledger) silently produces no text rather than an error.
+
+The check reads the ledger's frontier entry (`wsreview.Frontier`, never
+`wsreview.Bootstrap` or `wsreview.Append` — this is the read-only half of the
+ledger-honesty guard above) — the same last-clearing-entry resolution
+`review.marker` uses, so a tail `block` or `routed` entry shifts the nudge's
+origin back to the last `pass`/`concern`/`bootstrap` entry rather than the
+raw latest line — and, when found, counts commits between the entry's `head`
+(the marker — the ledger's own resumption point, not its `base`) and the
+review track's tip. Three states:
+
+- **No ledger entry at all**: `no review ledger yet for this project; run a
+  sweep (lead-review range: <base>..<head>) to establish a baseline`.
+- **Behind the size threshold** (>= 20 commits ahead of the marker): a
+  "large-accumulation" nudge naming the count and recommending a sweep soon.
+  20 is a commit-count analog of `lead-review`'s Deep Review/is-large-diff
+  file-and-line magnitude — a deliberate unit reinterpretation, not a shared
+  constant, since this check must stay a `git rev-list --count` call and
+  never compute a diff stat.
+- **Behind the staleness threshold** (>= a configurable commit count, default
+  10, and below the size threshold): a gentler nudge that a sweep "would
+  refresh it." The staleness count is read from a `## Checkpoint Nudge` /
+  `staleness: <N> commits` line in the machine-local, gitignored
+  `ai-docs/_review.local.md`; a missing file, section, or malformed value
+  fails open to the default of 10. Because the size threshold is checked
+  first, raising the staleness knob above 20 cannot suppress the
+  large-accumulation nudge — the knob only tunes the sub-20 band.
+- **Fresh** (below the staleness threshold): no text.
+
+Each of the four call sites injects the same advisory text, differing only in
+presentation. `tickets.close`, `route.resolve_implement`, and `route.resolve_proceed` prefix
+it `review-watermark: ` and append it to their own response text (the
+text-mode raw verdict, for the latter two). The two `workflow_manual`
+branches instead prepend it unprefixed as a top-of-body banner block, using
+the same no-op-when-empty injector used for the Bootstrap Staleness, Doc
+Coverage, Manuals Ambient, and scope-announcement blocks
+(`#260703-bootstrap-staleness-warning`) — so an empty advisory renders
+nothing, matching those siblings' silent-when-quiet contract.
+
+## Workflow State And Delegation Tools {#260505-workflow-state-delegation-tools}
+
+`path.generate` allocates writable workflow artifact paths so workflow agents can
+exchange file paths without inventing cache locations. `kind: "review"` and
+`kind: "prompt"` allocate worktree-scoped cache artifacts. `kind: "plan"`
+allocates repo-local implementation plan files under
+`ai-docs/.plans/YYYY-MM/DD-hhmm-<stem>.md`; collisions append a numeric suffix
+while preserving the sanitized logical stem. `kind: "clone"` allocates a
+worktree-agnostic shared doc under the clone's `SharedDir` (a
+`docs/` subdirectory), targeted directly since `SharedDir` is already
+clone-shared and stable across every linked worktree of the same clone — no
+new cross-worktree resolution logic is needed. Unlike `review`/`prompt`'s
+opaque `<runID>-<NN>-<stem>.md` scheme, `clone` filenames are readable
+(`<sanitized-stem>-<6-char-suffix>.md`, where the suffix is a fresh random
+`[a-z0-9]` string); a suffix collision retries with a new random suffix
+rather than truncating a colliding sibling file. This is the allocator the
+`note.write` clone-layer oversize nudge (`#260810-note-tools`) points a
+calling agent at for relocating oversize note content.
+
+## wsflow Agentless Runtime Mode {#260513-wsflow-agentless-runtime-mode}
+
+The MCP server supports an environment-selected agentless product mode for the
+internal `wsflow` distribution. With `WS_MCP_NO_AGENT=1`, advertised tools
+omit named-agent delegation surfaces: `mercenary.*`. `api.list` remains
+available as read-only cache discovery; the agent-backed API documentation ask
+tools are removed from the full ws surface rather than hidden only in wsflow
+mode.
+
+Explicit calls to hidden agent-backed tools fail with a clear disabled error and
+do not start named-agent workers. Runtime capability output and CLI command
+surfaces match the selected mode, so no-agent mode omits the hidden MCP tools
+and matching CLI groups such as `agents` and
+`config agents-tier`.
+
+`WS_MCP_NAMESPACE=wsflow` changes ordinary user-facing namespace text to
+`wsflow` without renaming generic MCP tool names. If `WS_MCP_NAMESPACE` is
+unset or empty, the server keeps the default `ws` namespace and existing full
+plugin behavior. `WS_MCP_SETUP_TOOL=setup` advertises `setup` instead of
+`ws.setup`; when unset or empty, the canonical setup name remains `ws.setup`.
+`ws.setup` may remain available only as hidden compatibility dispatch when a
+different setup name is advertised.
+
+The playbook surface also follows product mode. In no-agent mode,
+`playbook.read` and `playbook.render` serve the shared rsrc playbook bodies
+through product-aware selection: `<!-- ws:full-only:start/end -->` regions are
+omitted, `<!-- ws:wsflow-only:start/end -->` regions are included, marker
+comments are never emitted, and the remaining user-facing namespace notation is
+rendered through reserved namespace variables such as `McpNamespace` and
+`SkillNamespace`. In wsflow these variables render as `wsflow`; in full ws they
+render as `ws`. The variables do not rename literal generic MCP tool
+identifiers such as `ferrule`.
+
+## Playbook Tools {#260609-playbook-tools}
+
+The playbook tools are the ws-distribution surface for serving workflow procedure
+text and subagent-injection prompts from a plain-text resource tree, with content
+selected for the detected host harness. `prompt.render` was the retired
+wsflow-only predecessor for delegate prompt materialization; it is no longer
+advertised or callable in either product mode. Legacy wsflow delegate context
+materialization is preserved through `playbook.render`.
+
+`playbook.read(name, context?)` returns the named playbook's procedure text
+inline in the tool result, with `context` values substituted and declared
+includes resolved. It is the lead-facing successor of internal workflow-skill
+bodies.
+
+`playbook.render(session_key, name, context?, root_override?)` materializes the
+named playbook as a context-injected, harness-rendered prompt, writes it to a
+worktree-scoped temporary file, and returns its metadata as ordered lines. The
+first line is always the prompt path. If the playbook declares a first-class
+frontmatter tier, the next line is `recommended-tier`, optionally followed by
+`recommended-model` when the tier resolves to a model for the active harness and
+`recommended-reasoning-effort` when it also resolves an effort. Harness-local
+configuration, including user overrides, is authoritative for this resolution. A
+resolution failure or empty value omits only that optional line; the path and
+`recommended-tier` are unaffected.
+
+The caller hands the path to a host-native subagent or a mercenary. Native
+dispatch uses the resolved binding metadata supported by its harness; Codex maps
+`recommended-model` to `spawn_agent.model` and the optional
+`recommended-reasoning-effort` to `spawn_agent.reasoning_effort`. Mercenary
+dispatch continues to pass `recommended-tier` as `mercenary.register`'s `tier`.
+`playbook.read` remains tier-only: it may surface `recommended-tier`, but never
+the render-only model or reasoning-effort lines. Neither tool carries a routing
+or strategy decision — the caller selects `name`, and the tool only returns or
+materializes the requested playbook. `root_override`, when set, rebinds both the
+auto-include resolution root and the child-key binding root for a delegate
+running in a different worktree. When the calling `session_key` is lead-scoped
+and the playbook frontmatter declares a delegate-eligible role, the render mints
+a fresh child session key and splices it into the rendered prompt, so both native
+and mercenary delegates receive a prompt with their key already embedded
+(`#260610-mercenary-delegation-surface`).
+
+In no-agent/wsflow mode only, `playbook.render` has a compatibility bridge for
+the five legacy render-eligible stems. When `name` is one of those stems,
+declared caller `context` keys are rendered as normal template variables and any
+remaining undeclared keys are appended as prompt data in a `## Render Context`
+block after normal playbook rendering. The bridge does not apply to
+`implementer`, to arbitrary playbooks, or to full ws mode.
+
+A playbook is selected by `name`; the tool does not decide which playbook to use.
+A load or render failure for a requested `name` is a loud error, not a silent
+empty result.
+
+Harness-aware content selection uses the harness the MCP session has already
+detected (`#260508-mcp-payload-harness-detection`). Harness differences are
+served as data, not as separate code paths: a shared playbook body plus a
+per-harness terminology table (exploration agent name, spawn idiom, continuation
+idiom, model aliases), with structural divergence expressed only through
+per-harness overlay files. The detected-harness set for structural
+`<name>.<harness>.md` overlay selection is `claude`, `codex`, and `pi`
+(`#260508-mcp-payload-harness-detection`); the bundled terminology table
+covers Claude and Codex only, and any other
+detected harness — `pi` included — falls back to the host-neutral
+terminology row rather than getting a dedicated row. Structural overlay
+selection and terminology-table coverage are independent: a harness can
+select its own overlay file while still rendering host-neutral terminology.
+An unrecognized harness in either sense renders host-neutral text rather
+than failing. Concrete
+per-provider model names are resolved from configuration
+(`#260513-harness-local-agent-tier-config`), never baked into the resource tree
+or the binary, so model-name churn is a config update rather than a
+redistribution. {#260609-playbook-harness-rendering}
+
+Product-mode content selection is separate from harness selection. Shared rsrc
+playbooks may mark full-ws-only or wsflow-only sections with the product markers
+documented in `#260513-wsflow-agentless-runtime-mode`; `playbook.read` and
+`playbook.render` select those sections after harness rendering and before
+returning text or writing a prompt file. User-facing namespace notation in
+shared playbooks is authored with reserved implicit variables (`McpNamespace`
+for `ws/<tool>` notation and `SkillNamespace` for `ws:<skill>` notation). The
+same reserved-implicit-variable mechanism also carries the four generic
+tier-model vars (`SmallTierModel`, `MediumTierModel`, `LargeTierModel`,
+`XLargeTierModel`), which resolve at render time from config through the same
+per-harness `(backend, model, effort)` seam as `RoleModel` and fall back to a
+stable `the <tier>-tier model` label when resolution fails, so they never render
+empty mid-sentence. These vars are injected by the playbook tool layer, are
+available without frontmatter declarations, and override caller-supplied
+`context` keys. Literal MCP tool identifiers remain literal unless a dedicated
+semantic variable is introduced.
+
+A playbook may declare text dependencies in its frontmatter; the renderer
+auto-includes that text at print/render time, so a single `playbook.read(name)`
+call returns the procedure together with its required conventions. The include
+set is fixed at authoring time, not chosen by the caller per call. This does not
+replace `convention.read` / `infra.read`, which remain standalone discovery tools
+for raw access.
+
+Code-side pragmatic playbook concatenation is renderer-owned behavior, not a
+source-template syntax. When global `"workflow.prefer_subagent"` resolves to
+`on`, `playbook.read(name: "lead-workflow-manual")` renders
+`lead-prefer-subagent` through the same harness-aware renderer, prompt override
+resolver, and product-mode pass, then appends it to the manual. The appended
+body is wrapped as `<playbook name="lead-prefer-subagent" title="Prefer Subagent">...</playbook>`.
+Standalone `playbook.read` and `playbook.render` output remains Markdown, and
+no duplicate-insertion guard is applied.
+
+A playbook marked as delegating carries a compact continuation tip in its
+rendered output, reminding the caller to reuse the host-returned subagent agent
+id for continuation instead of respawning. The tip is the only continuity
+mechanism: the playbook surface keeps no agent registry and mandates no
+continuity-recording file.
+Delegate-eligible `role:` metadata is independent of the `delegates` tip flag.
+A rendered playbook can mint a role-scoped child key and expose its recommended
+tier while setting `delegates: false` to suppress the generic continuation tip
+when the prompt is meant for direct execution, such as the initial implementer
+prompt or review-fix relay implementer prompt.
+
+> [!note] Constraints
+> - Gemini is out of scope; only Claude and Codex have terminology tables. Any
+>   other harness, including none detected, gets host-neutral text.
+> - The continuation tip is advisory text, not an enforced or tracked binding.
+
+### Resource Tree Distribution {#260609-rsrc-playbook-distribution}
+
+Playbook and prompt text ships as a plain-text resource tree distributed with the
+plugin and loaded at call time, rather than compiled into the binary. Text-only
+changes to playbooks are therefore deployable without a binary version change.
+
+The tree carries a manifest recording per-file integrity data and a playbook
+schema version. The runtime gates loading on **schema-version compatibility**,
+not on exact content-hash equality, so compatible text edits load without a
+binary bump while an incompatible schema version is refused.
+
+A manifest mismatch or load failure is a loud, partial failure of the playbook
+surface: the playbook tools report the failure and do not serve playbook content,
+and there is no embedded fallback copy. A session whose playbook surface has
+failed still serves the discovery, Git, and other tools that do not depend on the
+resource tree.
+
+When a caller requests a playbook stem that is absent from both the resource
+manifest and the resource tree, the playbook surface reports a no-such-playbook
+diagnostic. Manifest integrity diagnostics are reserved for corrupted or stale
+resource trees, such as a manifest-listed file missing from disk or a listed
+file whose hash no longer matches.
+
+`WS_RSRC_ROOT` overrides the resource-tree load root. When set, the runtime loads
+the tree from that path instead of the distributed plugin copy, so a development
+checkout can edit playbook text and see it live without waiting on plugin cache
+refresh.
+
+> [!note] Constraints
+> - Compatibility is defined by schema version, not file-hash equality; the
+>   manifest's hashes are integrity data, not a load gate.
+> - There is no embedded fallback text. When the resource tree is unavailable or
+>   incompatible, the playbook surface fails loudly rather than degrading to a
+>   stale built-in copy.
+
+### Prompt Override Marker Engine {#260619-prompt-override-marker-engine}
+
+A playbook body may declare named **override-points** with block markers so a
+user can replace or extend a named section of the rendered text without editing
+the shipped resource tree. An override-point is a pair of single-line markers,
+each on its own line, wrapping inline seed text:
+
+```
+<!-- ws:override:ExampleSection desc="human-readable summary" -->
+<seed default text — the shipped wording for this point>
+<!-- ws:/override:ExampleSection -->
+```
+
+The identifier after `ws:override:` is the **point id**. The text between the
+open and close markers is the **inline seed default** — there is no separate
+default field, so the shipped wording stays in the `.md` body and is readable in
+review. `desc` is a short human-readable summary of the point.
+
+The override pass runs during both `playbook.read` and `playbook.render`,
+alongside product-mode marker selection (`#260513-wsflow-agentless-runtime-mode`)
+and after harness rendering. For each override-point it resolves a value along
+two orthogonal axes:
+
+- **What** is selected by `(point id, harness)`: a stored override whose harness
+  matches the rendered harness wins; otherwise an override stored for the
+  cross-harness `all` bucket applies; otherwise the inline seed default is used.
+  The harness axis values are `claude`, `codex`, `pi`, and `all` (the `all`
+  bucket is the cross-harness / `*` setting).
+- **Where** the override is stored is selected by scope through the layered
+  config scope model (`#260619-layered-config-scope-model`); resolution reads the
+  highest-precedence scope that holds a value, including code-owned builtin
+  defaults when a shipped harness binding must stay out of the shared seed text.
+
+The resolved text replaces the block body and the marker lines themselves are
+stripped, so the rendered output contains only resolved content and never the
+marker syntax. An **empty seed body** is a pure extension slot: it renders the
+stored override if one exists, or nothing when none is set. `UserPreferenceSection`
+uses this empty-slot shape for standing preferences.
+
+Override values resolve through the layered config scope model under the key
+`prompt.<point id>.<harness>`, so a write at any scope through the config layer
+is honored by the resolver's precedence; the point id is the user-facing handle
+even though the body carries it as a marker rather than a template variable. The
+generic `config.tune(key: "prompt.<point id>", value, harness?, scope?)` writer
+makes the override surface tunable from inside the MCP without external docs; the
+`config.list` catalog's `prompt_override` knobs make that surface discoverable
+from inside the MCP as well (`#260620-config-prompt-override-tuning-tools`).
+
+Shipped lead workflow-manual override-points include `UserPreferenceSection`, an
+empty extension slot for standing communication, terminology, and workflow
+preferences. A user adds standing preferences by storing an override under
+`prompt.UserPreferenceSection.<harness>` without editing the shipped resource
+tree. Delegation posture is controlled by `"workflow.prefer_subagent"` rather
+than a freeform prompt override.
+
+The former `PreferSubagentInvocationGuidance` extension point is retired:
+`lead-prefer-subagent`'s body moved to a static inlined SKILL.md (see
+`#260505-workflow-primitive-reference`), read directly via `LoadSkillBody`
+with no override-marker pass, so there is no per-harness invocation-guidance
+slot for it anymore. `builtinPromptOverrideDefaults()` returns an empty map.
+{#260619-delegation-section-override-point}
+
+> [!note] Constraints
+> - The marker grammar is a ws-private schema (ws is the sole reader); it is not
+>   an external comment-processing standard and carries no meaning outside the
+>   playbook surface.
+> - Override-points do not use the `{{.Var}}` template-variable mechanism. The
+>   point id lives only as the marker id and the `prompt.<point id>` config key
+>   (written via `config.tune`); the seed default is the inline block body, not a
+>   frontmatter default.
+> - Critical-path render mechanics are intentionally NOT exposed as
+>   override-points: the harness-aware continuation tip, the delegate child-key
+>   credential splice, and the `prefer_mercenary` guidance block
+>   (`#260619-prefer-mercenary-session-scope-item`) stay fixed because they are
+>   correctness, security, and continuity machinery, not user-tunable style.
+
+## Named-Agent MCP Tools {#260505-named-agent-mcp-tools}
+
+The `mercenary.*` tool family exposes durable named-agent orchestration.
+
+The `mercenary.*` family is the reshaped scoped **mercenary** delegation surface
+(`#260610-mercenary-delegation-surface`): codex and claude runners retained,
+scoped to implementer/reviewer roles, invoked with a single self-contained prompt
+from `playbook.render`.
+
+`mercenary.register` registers a mercenary agent with an optional `backend` (codex
+or claude) and a self-contained `system_prompt_text` produced by
+`playbook.render`. The former `prompts: [stems]`/`prompt_refs` and `model`
+registration fields are removed. The `tier` field is a *pass-through* of the
+first-class recommended tier that `playbook.render` returns — its origin is the
+playbook frontmatter, not a caller-chosen workload tier: `mercenary.register` maps it
+to the alias layer and resolves the per-mercenary backend/model from harness config
+(`#260513-harness-local-agent-tier-config`), so a mercenary's model follows its
+playbook frontmatter `tier:` rather than defaulting to core. `mercenary.call` starts an asynchronous
+call, returns immediately, and yields a native-shaped continuation handle
+(`agentId=<name>`) so the lead reuses one continuation idiom across the native
+and mercenary paths. Named-agent calls resolve their root from the mandatory
+`session_key` like every other root-aware tool
+(`#260610-ephemeral-session-auth-model`): no `mercenary.*` schema advertises a
+`root` argument, and there is no actor scope, hidden explicit-root dispatch, or
+persistent child-actor credential injection. The named-agent registry namespaces
+role pointers by the resolved worktree root, so the same public agent name stays
+distinct across distinct worktree roots without an actor dimension.
+
+`mercenary.wait` waits for one or more agents to become ready and returns readiness
+metadata, not final output. `mercenary.result` is the result-consumption surface and
+may optionally wait for completion; successful ephemeral agents are erased after
+their result is consumed.
+
+`mercenary.status`, `mercenary.tail`, and `mercenary.cancel` inspect or control current
+agent work. Cancelled status text points callers toward retrying `mercenary.call`
+on the same registered agent when no result is available, so timeout-driven
+cancellation does not look like a final erase-only state.
+{#260512-agent-cancel-resume-guidance}
+
+`mercenary.recall` is hidden from the advertised MCP tool surface and workflow
+guidance. The implementation may remain as a manual or compatibility path, but
+ordinary model-visible recovery uses `mercenary.call` on the same registered agent.
+{#260512-agent-recall-hidden-surface}
+
+Normal `mercenary.tail` is context-bounded. Raw diagnostic inspection is available
+through `mercenary.debug.tail`, `mercenary.debug.stdout`, `mercenary.debug.stderr`,
+`mercenary.debug.runtime_log`, and `mercenary.debug.events`.
+
+`mercenary.interrupt` queues a redirect message for a running agent. `mercenary.print`
+remains a deprecated compatibility reader over the resolved current instance.
+`mercenary.erase` removes or hides the resolved role pointer for the current
+worktree and actor scope; historical instance payloads are removed later by the
+named-agent retention cleanup policy rather than synchronously during erase.
+
+## Mercenary Delegation Surface {#260610-mercenary-delegation-surface}
+
+The reshaped delegation surface. A **mercenary** is a ws-spawned external
+subprocess agent — a deliberately distinct term from a harness-native
+**subagent**, so callers never confuse the two delegation paths. This section is
+the caller-visible contract for the reshaped `mercenary.*` family.
+
+**Default is hidden; native is the ordinary delegation path.** The global
+`"workflow.prefer_mercenary"` item controls whether the public mercenary surface
+is visible and whether implementer/reviewer playbook renders prefer mercenary
+guidance. Its builtin value is `hide`, which suppresses `mercenary.*` from
+tool discovery, runtime capabilities, and explicit calls. `off` exposes the
+mercenary surface but keeps host-native subagents as the default guidance. `on`
+exposes the surface and makes implementer/reviewer renders prefer the
+mercenary-call path. The lead writes this item through
+`config.tune(key: "workflow.prefer_mercenary", value, session_key)`; the writer
+requires a lead session key for authority but writes the global config item
+because keyless tool visibility cannot read session or project state.
+
+`ws.lead.prefer_mercenary` is removed with no alias. The old unprefixed
+`"prefer_mercenary"` key remains orphaned local state and is not migrated.
+{#260619-prefer-mercenary-session-scope-item}
+
+**Scope: implementer and reviewer roles only.** Mercenaries cover implementer and
+reviewer delegation. Exploration, survey (reference-discovery, plan-populator),
+and mental-model update route to host-native subagents
+(`#260609-playbook-harness-rendering`), not mercenaries.
+
+**Live, pluggable backends.** The codex and claude runner backends are retained
+and live. The runner-backend interface is harness-neutral and pluggable: the
+gemini backend implementation is unshipped (model-compat cost), but the plug
+point is preserved so gemini, antigravity, or a custom harness can re-attach as a
+deferred plug, not a structural exclusion.
+
+**Single self-contained prompt; native-shaped handle.** A mercenary is invoked
+with one self-contained prompt produced by `playbook.render`
+(`#260609-playbook-tools`); there is no `register(prompts: [stems])` step. The
+playbook's first-class frontmatter `tier:` is surfaced by `playbook.render` as a
+recommended tier and passed through to `mercenary.register`'s `tier` arg, which
+selects the mercenary's model via config — the caller never hand-picks a workload
+tier. A
+mercenary call returns a continuation handle of the same shape as a native
+subagent id, so the lead reuses one continuation idiom across both paths.
+
+**Render-minted child keys.** `playbook.render(session_key, name, context?,
+root_override?)` is the mint-and-inject point for both native and mercenary
+delegates: when `session_key.role == lead` it mints a fresh child key (role taken
+from the playbook frontmatter) and splices it into the rendered prompt, so the
+delegate receives a prompt with its key already embedded. `root_override` rebinds
+both the auto-include resolution root and the child-key binding root when the
+child runs in a different worktree; render does not infer worktree shape — the
+caller passes the path.
+
+**Containment is server-side on the keyed call handler.** The keyed `tools/call`
+handler rejects `lead.*` calls from non-lead keys. A child key (native or
+mercenary) is therefore unable to login or spawn, so spawn depth is strictly 1
+(lead → mercenary leaf); no recursion-depth counter is needed. Schema and
+`tools/list` filtering remain a harness-owned soft-guard for LLM-confusion
+reduction only — they are not the enforcement boundary.
+
+> [!note] Constraints
+> - `workflow.prefer_mercenary` (via `config.tune`) controls both public
+>   mercenary surface visibility and default render guidance. The on-request path
+>   is reachable
+>   only when the value is `off` or `on`; `hide` suppresses the public surface.
+> - Mercenary scope is implementer/reviewer only. Exploration and mental-model
+>   work are native-subagent only and never mint a mercenary.
+> - Gemini is a preserved plug point, not a shipped backend.
+> - Containment is the server-side keyed-handler role check, not schema hiding.
+
+## API Documentation MCP Tools {#260505-api-documentation-mcp-tools}
+
+`api.list` returns sorted API documentation cache domain names under
+`ai-docs/.deps`. The default response is one domain per line, with structured
+JSON available on request.
+
+The retired agent-backed API documentation tools are not exposed by full ws:
+`api.ask`, `api.ask_async`, `api.status`, `api.result`, and `api.cancel` are
+unknown tools and absent from runtime capability metadata.
+{#260508-api-documentation-async-mcp-tools}
+
+The remaining `api.list` behavior is limited to deterministic read-only local
+cache discovery. Workflow guidance routes external dependency/API documentation
+questions through scoped native exploration or direct official documentation
+lookup until a future pure-tooling `api.*` namespace is designed.
+
+## Exec Job MCP Tools {#260524-exec-job-mcp-tools}
+
+The `exec.*` tool family exposes durable command execution jobs for trusted lead
+workflows. `exec.spawn` runs structured argv commands with `cmd`, optional
+`args`, optional `working_dir`, optional environment overlays, and optional
+textual stdin. `exec.shell` runs an explicit shell command string with optional
+`working_dir`, environment overlays, textual stdin, and shell selection. Omitted
+`working_dir` resolves to the current ws worktree root. Relative values resolve
+beneath that root rather than the plugin cache process cwd, and resolved working
+directories must stay inside the worktree root.
+
+Launch tools create an `exec_key`, start the process, persist stdout and stderr
+under job-owned files, and wait up to a fixed short foreground window before
+returning. That foreground wait is not a caller-configurable timeout. When a job
+finishes during the window and combined stdout plus stderr is within the fixed
+4096-byte inline budget, the launch response may include the output, exit
+status, `exec_key`, and metadata. Running jobs or larger outputs return compact
+metadata, stream sizes, and follow-up guidance without inline raw output.
+
+The `exec.*` MCP tools return MCP text content formatted for direct model
+reading; they do not expose a public `format: json` response mode. Lifecycle
+responses use compact labeled metadata such as `exec_key`, `status`,
+`result_ready`, timestamps, exit state, and stream byte counts. When inline
+stdout or stderr is present, metadata appears first and raw stream text appears
+below obvious separator lines such as `========== stdout ==========` and
+`========== stderr ==========`. JSON-shaped command output remains raw text in
+that output area rather than being escaped inside a serialized JSON response.
+If output exceeds the fixed 4096-byte inline budget, lifecycle responses keep
+the raw body out of the result and include guidance to use the raw fallback
+readers.
+
+Exec lifecycle metadata is SQLite-backed while stream payload bytes remain in
+job-owned files. SQLite stores job identity, command and working-directory
+metadata, lifecycle state, process or lost-worker state, timestamps, exit
+status, stream paths, stream byte counts, and retention/prune metadata. Existing
+file-backed exec state is imported when possible; corrupt or unimportable legacy
+state returns bounded recovery metadata rather than silently disappearing.
+
+`exec.status` reports job lifecycle state and stream metadata. `exec.result`
+returns job metadata and at most the fixed 4096-byte inline output budget for a
+terminal job. When `timeout_seconds` is omitted or zero, `exec.result` is
+non-blocking; a running job returns readable running metadata and guidance
+without an MCP error. When `timeout_seconds` is positive, `exec.result` waits up
+to that many seconds for the job to become terminal, then returns either the
+terminal result or the same readable running guidance if the timeout expires.
+Larger results guide callers to the future `exec.ask` path first and the raw
+fallback readers second. `exec.abort` best-effort terminates a running job while
+preserving partial output and terminal state metadata.
+
+If a process-local worker is lost while a persisted job still appears running,
+later status/result calls reconcile the record from process liveness and mark a
+missing worker terminal rather than leaving the job indefinitely running.
+
+Raw fallback readers are named under `exec.raw.*`. `exec.raw.tail` returns a
+bounded tail from a selected stream. `exec.raw.read` reads by byte offset and
+returns `next_offset`. `exec.raw.grep` searches selected streams, defaults to
+literal matching, and uses regular expressions only when the caller explicitly
+sets `regex: true`. If a stored stream path is missing, raw readers report a
+recoverable file-backed payload consistency state instead of treating the stream
+as empty.
+
+Raw-reader MCP responses are also readable text rather than JSON payload text.
+They identify the selected `exec_key` and `stream` with labels. Tail and read
+responses place returned bytes below a `========== text ==========` separator;
+read responses additionally expose `offset`, `next_offset`, `limit`, `size`,
+and `eof` metadata above the separator. Grep responses expose match count and
+truncation metadata above `========== matches ==========` and render each match
+as readable line blocks with any requested context.
+
+## Runtime Metadata Migration Gate {#260525-runtime-metadata-migration-gate}
+
+The ws runtime has a SQLite metadata migration gate for moving named-agent and
+exec runtime metadata into SQLite authority. The gate keeps public `mercenary.*`
+and `exec.*` MCP APIs stable while separating lifecycle metadata from
+file-backed payload bodies. Named-agent registry metadata and exec job metadata
+are SQLite-backed. SQLite metadata may track identities, lifecycle state,
+session binding, path indexes, byte counts, retention visibility, leases,
+tombstones, and prune bookkeeping. Prompts, streams, runtime logs, event JSONL,
+transcripts, backend raw output, and final output bodies remain file-backed.
+
+SQLite state-store configure, migration, point-read, and short write paths use
+bounded retry for `SQLITE_BUSY` and `SQLITE_LOCKED` conditions while retaining
+process-local write serialization. `journal_mode=WAL` is re-asserted on every
+store open, not only at database creation, so a pre-existing non-WAL database is
+migrated to WAL on next open. Runtime migrations must keep transactions
+short and must not hold a transaction across subprocess or model execution.
+
+## Tool Profile Gating {#260505-tool-profile-gating}
+
+The MCP server defaults to the `lead` tool surface, and `tools/list` advertises
+the full lead surface regardless of any caller environment. Schema visibility is
+advisory, not an authority boundary, because plugin-managed hosts can start the
+server from cache directories and can fail to propagate environment variables
+consistently.
+
+Tool-permission enforcement is the server-side capability check in the keyed
+`tools/call` handler. A session key carries `{root + capability scope}` —
+`lead`, `delegate`, or `leaf` — minted by `ferrule(capability)` or as a
+render-minted child key. When a call presents a known non-lead key, the handler
+rejects any tool that scope disallows (`delegate` cannot call `mercenary.*`,
+`config.*`, or `session.*`; `leaf` additionally cannot call `git.commit`) and
+rejects any lead-only tool from any non-lead key — the `lead.*` prefix plus
+the bootstrap tool `ferrule` matched by explicit name (self-bootstrap
+escalation block). The retained `api.list` cache-domain discovery tool is read-only and
+leaf-callable; the retired agent-backed API ask tools are absent from the
+surface rather than blocked by scope. Keyless callers and lead keys are not
+restricted by this gate,
+so the keyless `ferrule` bootstrap stays open; a delegate can therefore
+keyless-re-`login` to re-escalate. The scope is a soft defense-in-depth guard
+layered on the host's own subagent tool restriction, not a hard sandbox.
+
+`WS_MCP_TOOL_PROFILE` no longer gates the served tool surface and is not
+propagated to spawned mercenary subprocesses; the env-profile role mechanism is
+retired in favor of the keyed capability gate, having been verified
+non-functional for containment (it was lost whenever the host failed to propagate
+the env var). Delegate tool scope now travels in-band through the render-minted
+child key rather than the environment. `WS_MCP_ALLOWED_TOOLS` is retained as an
+optional visibility allowlist for tests and debugging, independent of capability
+scope: it can narrow the visible surface but cannot expand access beyond what the
+keyed gate permits.
+
+## CLI Mirror Coverage {#260505-cli-mirror-coverage}
+
+The `ws-mcp` binary mirrors selected MCP behavior as CLI commands for smoke
+tests, compatibility probes, and fallback usage.
+
+CLI mirrors exist for runtime info, single-process smoke checks, config, path
+generation, named agents, Git, tickets, specs, selected mental-model
+discovery, and reference tracing. Not every MCP tool has a CLI mirror; the MCP
+surface is the canonical host-neutral interface, and CLI coverage is limited to
+the surfaces needed for runtime checks and workflow fallback use.

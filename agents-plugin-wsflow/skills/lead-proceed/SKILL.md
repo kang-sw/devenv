@@ -1,9 +1,13 @@
 ---
 name: lead-proceed
-description: Required first step for implementation tasks. Use when starting from a ticket path or task description so existing specs, tickets, plans, and session context are routed before code is touched.
+description: Retired former name of lead-run; invoking it runs the current lead-run workflow. Prefer lead-run directly for new work. lead-proceed is kept so the old name routes to the run workflow instead of failing.
 ---
 
-# Proceed
+# Run
 
-Call `wsflow/playbook.read(name: "lead-proceed")` and execute the returned procedure
-inline against the current user request. If this call fails to connect, run `/wsflow:mcp-server-repair`.
+Call in parallel:
+- `wsflow/playbook.read(name: "lead-run", session_key: <your key, omit if fresh>)`
+- `wsflow/workflow_manual(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>)`
+
+After both return, execute the procedure returned by `wsflow/playbook.read`.
+If this call fails to connect, run `/wsflow:mcp-server-repair`.

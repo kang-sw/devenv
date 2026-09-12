@@ -5,7 +5,7 @@ import "testing"
 func TestTicketsListDefaultsToActiveStatuses(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/tickets/idea/260504-idea-demo.md", "---\ntitle: Idea demo\n---\n# Idea\n")
-	mustWrite(t, root, "ai-docs/tickets/ready/260504-ready-demo.md", "---\ntitle: Todo demo\nparent: 260504-epic-demo\nrelated:\n  260504-idea-demo: source\nspec:\n  - 260504-spec-demo\nspec-remove: 260504-old-spec\nplans:\n  - ai-docs/.plans/demo.md\nskeletons:\n  - agents-plugin-tool/internal/demo.go\n---\n# Todo\n\n## Phases\n\n### Phase 1: First\n\n### Result (abc123) - 2026-05-04\n\nDone.\n\n### Phase 2: Second\n")
+	mustWrite(t, root, "ai-docs/tickets/ready/260504-ready-demo.md", "---\ntitle: Todo demo\nparent: 260504-epic-demo\nrelated:\n  260504-idea-demo: source\nplans:\n  - ai-docs/.plans/demo.md\nskeletons:\n  - agents-plugin-tool/internal/demo.go\n---\n# Todo\n\n## Phases\n\n### Phase 1: First\n\n### Result (abc123) - 2026-05-04\n\nDone.\n\n### Phase 2: Second\n")
 	mustWrite(t, root, "ai-docs/tickets/todo/260504-todo-demo.md", "---\ntitle: Todo backlog\n---\n# Todo backlog\n")
 	mustWrite(t, root, "ai-docs/tickets/.done/260504-done-demo.md", "---\ntitle: Done demo\ncompleted: 2026-05-04\n---\n# Done\n")
 	mustWrite(t, root, "ai-docs/tickets/.dropped/260504-dropped-demo.md", "---\ntitle: Dropped demo\n---\n# Dropped\n")
@@ -24,9 +24,6 @@ func TestTicketsListDefaultsToActiveStatuses(t *testing.T) {
 	}
 	if ready.Parent != "260504-epic-demo" || ready.Related["260504-idea-demo"] != "source" {
 		t.Fatalf("ready relationships = %#v", ready)
-	}
-	if joined(ready.Specs) != "260504-spec-demo" || joined(ready.SpecRemoves) != "260504-old-spec" {
-		t.Fatalf("todo specs = %#v %#v", ready.Specs, ready.SpecRemoves)
 	}
 	if joined(ready.Plans) != "ai-docs/.plans/demo.md" || joined(ready.Skeletons) != "agents-plugin-tool/internal/demo.go" {
 		t.Fatalf("todo artifacts = %#v %#v", ready.Plans, ready.Skeletons)

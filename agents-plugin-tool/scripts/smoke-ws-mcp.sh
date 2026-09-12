@@ -86,4 +86,3 @@ PY
 
 go run ./cmd/ws-mcp path generate --root "$ROOT" --kind review smoke-cli
 go run ./cmd/ws-mcp runtime info
-go run ./cmd/ws-mcp mercenary register --root "$ROOT" --name smoke-reviewer

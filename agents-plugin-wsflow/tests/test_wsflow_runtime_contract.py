@@ -10,21 +10,6 @@ REPO_ROOT = PLUGIN_DIR.parent
 TOOL_DIR = REPO_ROOT / "agents-plugin-tool"
 
 HIDDEN_TOOLS = {
-    "ws.mercenary.register",
-    "ws.mercenary.call",
-    "ws.mercenary.wait",
-    "ws.mercenary.result",
-    "ws.mercenary.status",
-    "ws.mercenary.interrupt",
-    "ws.mercenary.tail",
-    "ws.mercenary.debug.tail",
-    "ws.mercenary.debug.stdout",
-    "ws.mercenary.debug.stderr",
-    "ws.mercenary.debug.runtime_log",
-    "ws.mercenary.debug.events",
-    "ws.mercenary.cancel",
-    "ws.mercenary.print",
-    "ws.mercenary.erase",
     "api.ask",
     "api.ask_async",
     "api.status",
@@ -41,23 +26,6 @@ HIDDEN_TOOLS = {
 }
 
 HIDDEN_COMMANDS = {
-    "mercenary.register",
-    "mercenary.call",
-    "mercenary.run-current",
-    "mercenary.wait",
-    "mercenary.result",
-    "mercenary.status",
-    "mercenary.interrupt",
-    "mercenary.check-inbox",
-    "mercenary.tail",
-    "mercenary.debug.tail",
-    "mercenary.debug.stdout",
-    "mercenary.debug.stderr",
-    "mercenary.debug.runtime-log",
-    "mercenary.debug.events",
-    "mercenary.cancel",
-    "mercenary.print",
-    "mercenary.erase",
     "config.tune",
 }
 

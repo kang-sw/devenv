@@ -57,10 +57,9 @@ type verifiedTicket struct {
 // pass: the ancestor walk needs each ancestor's frontmatter and child set,
 // which is the same input the integrity checks resolve against.
 type ticketGraph struct {
-	byStem      map[string]TicketInfo // one entry per stem; the most-open copy wins
-	byPath      map[string]TicketInfo // every scanned file, keyed by board-relative path
-	children    map[string][]string   // parent stem -> child stems
-	specAnchors map[string]bool       // {#YYMMDD-slug} anchors under ai-docs/spec/
+	byStem   map[string]TicketInfo // one entry per stem; the most-open copy wins
+	byPath   map[string]TicketInfo // every scanned file, keyed by board-relative path
+	children map[string][]string   // parent stem -> child stems
 }
 
 // verifiedInfo resolves the graph entry for a verified path. It prefers the
@@ -86,15 +85,10 @@ func loadTicketGraph(root string) (*ticketGraph, error) {
 	if err != nil {
 		return nil, err
 	}
-	specs, err := scanSpecs(root)
-	if err != nil {
-		return nil, err
-	}
 	graph := &ticketGraph{
-		byStem:      make(map[string]TicketInfo, len(tickets)),
-		byPath:      make(map[string]TicketInfo, len(tickets)),
-		children:    map[string][]string{},
-		specAnchors: map[string]bool{},
+		byStem:   make(map[string]TicketInfo, len(tickets)),
+		byPath:   make(map[string]TicketInfo, len(tickets)),
+		children: map[string][]string{},
 	}
 	for _, ticket := range tickets {
 		graph.byPath[ticket.Path] = ticket
@@ -120,13 +114,6 @@ func loadTicketGraph(root string) (*ticketGraph, error) {
 		}
 		if parent := strings.TrimSpace(ticket.Parent); parent != "" {
 			graph.children[parent] = append(graph.children[parent], ticket.Stem)
-		}
-	}
-	for _, spec := range specs {
-		for _, anchor := range spec.Anchors {
-			if anchor.SpecStem != "" {
-				graph.specAnchors[anchor.SpecStem] = true
-			}
 		}
 	}
 	return graph, nil
@@ -260,10 +247,8 @@ func integrityAdvisories(graph *ticketGraph, info TicketInfo, cycle []string) []
 		})
 	}
 
-	// `related:` resolves against ticket stems UNION spec anchor stems;
-	// pointing a related: at a spec anchor is an established pattern, so a
-	// ticket-only resolver would flag deliberate references. Map iteration is
-	// random, so the keys are sorted for a deterministic advisory order.
+	// `related:` resolves against ticket stems. Map iteration is random, so the
+	// keys are sorted for a deterministic advisory order.
 	stems := make([]string, 0, len(info.Related))
 	for stem := range info.Related {
 		stems = append(stems, stem)
@@ -273,12 +258,9 @@ func integrityAdvisories(graph *ticketGraph, info TicketInfo, cycle []string) []
 		if _, ok := graph.byStem[stem]; ok {
 			continue
 		}
-		if graph.specAnchors[stem] {
-			continue
-		}
 		out = append(out, VerifyAdvisory{
 			Kind: AdvisoryKindFix,
-			Text: wrapAdvisory("FIX:   ", fmt.Sprintf("related: `%s` resolves to no ticket stem and no spec anchor. Correct or remove the entry.", stem)),
+			Text: wrapAdvisory("FIX:   ", fmt.Sprintf("related: `%s` resolves to no ticket stem. Correct or remove the entry.", stem)),
 		})
 	}
 

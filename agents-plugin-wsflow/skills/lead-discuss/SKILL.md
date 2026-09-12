@@ -1,6 +1,6 @@
 ---
 name: lead-discuss
-description: Use before code changes when the user wants to explore workflow design, migration direction, ticket scope, risks, or implementation approach.
+description: Use when the user wants to reason with the lead about direction, scope, risk, or trade-offs before capture or execution. The lead owns the conversation and decision-making; subagents may gather evidence only. Conversation only.
 ---
 
 # Discuss

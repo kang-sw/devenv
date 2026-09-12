@@ -99,11 +99,11 @@ func TestTicketsVerifyGitCommitCallSiteParityAllowsValidTicket(t *testing.T) {
 	}
 }
 
-// TestTicketsVerifySpecAddressWarningDoesNotBlockCommit confirms the
-// ticket's spec-address soft-warn posture end to end: a ready/ ticket with a
-// terminal sage-review posture but no spec addressing must be reported only
-// as a tickets.verify warning, and git.commit must still succeed.
-func TestTicketsVerifySpecAddressWarningDoesNotBlockCommit(t *testing.T) {
+// TestTicketsVerifyNoSpecAddressingIsClean confirms the retired spec-address
+// gate end to end: a ready/ ticket with a terminal sage-review posture and no
+// spec addressing at all verifies clean — no finding and no warning — and
+// git.commit still succeeds.
+func TestTicketsVerifyNoSpecAddressingIsClean(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
@@ -119,7 +119,7 @@ func TestTicketsVerifySpecAddressWarningDoesNotBlockCommit(t *testing.T) {
 	server := NewServer(root, "test")
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tickets.verify","arguments":{"paths":["` + path + `"]}}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["` + path + `"],"title":"test: spec-address warns only","ai_context":["User intent: prove spec-address never blocks a commit."]}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["` + path + `"],"title":"test: no spec addressing verifies clean","ai_context":["User intent: prove the retired spec-address gate never blocks a commit."]}}}`,
 	}, "\n") + "\n"
 
 	var out bytes.Buffer
@@ -130,17 +130,14 @@ func TestTicketsVerifySpecAddressWarningDoesNotBlockCommit(t *testing.T) {
 
 	verifyText := toolText(t, byID["1"])
 	if !strings.Contains(verifyText, "verify: PASS") {
-		t.Fatalf("tickets.verify text = %q, want PASS (spec-address is a warning, not a finding)", verifyText)
+		t.Fatalf("tickets.verify text = %q, want PASS", verifyText)
 	}
-	if !strings.Contains(verifyText, "WARN [spec-address]") {
-		t.Fatalf("tickets.verify text = %q, want a spec-address warning line", verifyText)
-	}
-	if !strings.Contains(verifyText, "next_instruction: PASS with warnings above") {
-		t.Fatalf("tickets.verify text = %q, want the PASS-with-warnings next_instruction", verifyText)
+	if strings.Contains(verifyText, "spec-address") {
+		t.Fatalf("tickets.verify text = %q, the spec-address gate is retired", verifyText)
 	}
 
 	if toolIsError(t, byID["2"]) {
-		t.Fatalf("git.commit blocked a ticket whose only problem is the soft-warn spec-address guardrail: %s", byID["2"])
+		t.Fatalf("git.commit blocked a ready ticket that only lacks spec addressing: %s", byID["2"])
 	}
 }
 
@@ -154,10 +151,7 @@ func TestTicketsVerifySageFreshnessWarningDoesNotBlockCommit(t *testing.T) {
 		"title: Stale review\n" +
 		"sage-review-design: completed\n" +
 		"sage-review-completeness: completed\n" +
-		"spec:\n" +
-		"  260101-demo: covered\n" +
 		"---\n\nBody.\n"
-	mustWrite(t, root, "ai-docs/spec/demo.md", "# Demo\n\n## Demo {#260101-demo}\n")
 	mustWrite(t, root, path, body)
 	runGit(t, root, "add", "ai-docs")
 	runGit(t, root, "commit", "-m", "stamp review")
@@ -182,6 +176,12 @@ func TestTicketsVerifySageFreshnessWarningDoesNotBlockCommit(t *testing.T) {
 	if !strings.Contains(verifyText, "WARN [sage-review-freshness]") || !strings.Contains(verifyText, "review baseline:") {
 		t.Fatalf("tickets.verify text = %q, want sage freshness warning", verifyText)
 	}
+	// Sage freshness is the surviving warning producer, so it is what keeps the
+	// PASS-with-warnings next_instruction branch pinned now that the
+	// spec-address warning is gone.
+	if !strings.Contains(verifyText, "next_instruction: PASS with warnings above") {
+		t.Fatalf("tickets.verify text = %q, want the PASS-with-warnings next_instruction", verifyText)
+	}
 
 	if toolIsError(t, byID["2"]) {
 		t.Fatalf("git.commit blocked a sage freshness soft warning: %s", byID["2"])
@@ -202,10 +202,7 @@ func TestGitCommitIgnoresStaleSageReviewOnUntouchedTicket(t *testing.T) {
 		"title: Stale review\n" +
 		"sage-review-design: completed\n" +
 		"sage-review-completeness: completed\n" +
-		"spec:\n" +
-		"  260101-demo: covered\n" +
 		"---\n\nBody.\n"
-	mustWrite(t, root, "ai-docs/spec/demo.md", "# Demo\n\n## Demo {#260101-demo}\n")
 	mustWrite(t, root, path, body)
 	runGit(t, root, "add", "ai-docs")
 	runGit(t, root, "commit", "-m", "stamp review")

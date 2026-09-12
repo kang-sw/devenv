@@ -8,7 +8,7 @@ rules and hard invariants only.
 ## Path & Naming
 
 - Path: `ai-docs/tickets/<status>/YYMMDD-<category>-<name>.md` — `YYMMDD` is creation date, never changes on move.
-- Categories: `bug`, `feat`, `refactor`, `chore`, `research`, `epic`, `workset`.
+- Categories: `bug`, `feat`, `refactor`, `chore`, `research`, `epic`.
 - Reference tickets by **stem only** (e.g., `260115-feat-foo-bar`), never by full path.
 
 ## Status Flow
@@ -19,32 +19,50 @@ rules and hard invariants only.
 - Move tickets with `tickets.close(stem, status)` (to done/dropped) or
   `tickets.move(stem, to)` (idea/todo/ready) MCP tools; use native `git mv`
   as fallback when MCP tools are unavailable. No cross-link updates needed.
+- Actionable `todo/` creation and editing are ungated. Populate facts, then run design and completeness Sage review at `ready/` promotion against the populated body.
+- An epic is a living board that is never an execution target, so it never enters `ready/` (the move is barred); a research ticket is likewise barred and ungated. Only actionable tickets enter `ready/`.
+- Epic design review is design-only (completeness never applies) and lead-judgment-invoked, not boundary-gated: run it when the epic's cross-child design has drifted materially, populating checkable facts first. Ordinary epic edits do not auto-review.
 - Add `completed:` date on move to `.done/`.
-- `idea/` tickets may omit `spec:` entries.
-- `todo/` tickets may include optional `spec:` entries as recovery hints and promotion candidates.
-- Non-`epic`, non-`research`, non-`workset` tickets entering `ready/` require spec addressing through `spec:`, `spec-remove:`, or a body `## Spec Impact` section.
-- Epic tickets are lightweight milestone boards and remain exempt from the ready spec-address gate.
-- Workset tickets are non-hierarchical operating-context boards, remain exempt from the ready spec-address gate, and normally stay in `idea/` or `todo/` rather than `ready/`.
-- Promoting `idea/` → `todo/` is triage and does not require spec creation.
-- Promoting or creating a non-`epic`, non-`research`, non-`workset` ticket in `ready/`: `lead-write-ticket` verifies spec addressing before the move or commit and never invokes `lead-write-spec`; spec addressing runs through `spec:`, `spec-remove:`, or `## Spec Impact`.
-- Dropping a ticket with linked spec entries: route through `lead-discuss` before moving the ticket. The ticket's unimplemented spec text is ticket-local (`## Spec Impact`), so the drop orphans nothing in the spec corpus; only spec text the ticket already landed needs review.
 
 ## Epic Tickets
 
-See the workflow manual's **Ticket System Concepts** section for epic-vs-workset rationale.
+An epic decomposes one outcome into child tickets and owns their cross-child invariants.
 
 - Epic tickets do not use implementation phases; child tickets carry phases when needed.
 - A single child ticket may carry multiple phases when they form sequential complete implementation units.
 - Move implementation detail out of the epic body into an implementation child ticket; the epic body carries scope, cross-child invariants, and closure conditions only.
 - Move deliberation that outgrows a settled decision line out of the epic body into a `research` ticket and reference it; the epic body carries settled decisions only.
 
-## Workset Tickets
+## Research Tickets
 
-See the workflow manual's **Ticket System Concepts** section for epic-vs-workset rationale.
+Research tickets remain ungated and have no phases. Topic sections are freeform;
+the standard Outcome Ledger lives in the ticket and separates investigation
+output from implementation authority:
 
-- Worksets list included tickets without making them children; do not add, remove, or change `parent:` based on workset inclusion.
-- Worksets do not own decomposition, cross-child invariants, implementation phases, or spec-ready behavior.
-- If the grouping starts owning scope decomposition or invariant decisions, create or use an `epic` instead.
+```markdown
+## Outcome Ledger
+
+### Verified Findings
+<!-- Evidence-backed observations. These may support later tickets but do not choose behavior. -->
+
+### Confirmed Decisions
+<!-- Normative choices explicitly confirmed by the user. -->
+
+### Proposals
+<!-- Unconfirmed candidates. Never treat these as actionable authority. -->
+
+### Open Questions
+<!-- Unresolved choices that require further investigation or user input. -->
+
+### Rejected Alternatives
+<!-- Alternatives explicitly rejected, with the reason when useful. -->
+```
+
+For actionable derivation, only Verified Findings supply evidence and Confirmed
+Decisions supply contract. Narrative is supporting context; Proposals, Open
+Questions, and unlisted narrative never become child authority. When the ledger
+is absent, ask whether to add it or settle the child's decisions directly through
+the Open Decision Queue.
 
 ## Phases
 
@@ -66,8 +84,8 @@ See the workflow manual's **Ticket System Concepts** section for what a phase is
 ## General
 
 - Phase plan text before the first `### Result` is frozen after that Result is written. Unimplemented phases remain editable.
-- `### Result (<short-hash>)` uses the commit that first made the completed phase reviewable on its current branch. If the phase was already merged before the ticket update, use the merge commit.
-- Result and Edition text record behavioral deltas, deviations, verification evidence, unresolved findings, and deferred follow-up findings without restating the phase plan or linked spec.
+- `### Result (<short-hash>) - YYYY-MM-DD` uses the commit that first made the completed phase reviewable on its current branch. If the phase was already merged before the ticket update, use the merge commit.
+- Result and Edition text record behavioral deltas, deviations, verification evidence, unresolved findings, and deferred follow-up findings without restating the phase plan.
 - Later implementation passes for an already completed phase append `#### Edition (<short-hash>) - YYYY-MM-DD` under that phase's Result area.
 - Existing Result and Edition entries are frozen once written; append a new Edition instead of editing prior result text.
 - All ticket content must be in English regardless of conversation language.

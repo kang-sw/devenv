@@ -14,12 +14,10 @@ import (
 	"testing"
 
 	"github.com/kang-sw/devenv/internal/mcp"
-	"github.com/kang-sw/devenv/internal/wsagent"
 )
 
-// TestMain defaults WS_RSRC_ROOT to the shipped rsrc tree so `mercenary register`
-// can load delegate-orientation (260611 Phase 6b moved it off the wsprompt
-// go:embed bundle).
+// TestMain defaults WS_RSRC_ROOT to the shipped rsrc tree so CLI paths that
+// resolve bundled resources find them without a per-test override.
 func TestMain(m *testing.M) {
 	if os.Getenv("WS_RSRC_ROOT") == "" {
 		_ = os.Setenv("WS_RSRC_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "rsrc"))
@@ -91,11 +89,6 @@ func TestRuntimeCapabilitiesCommandReportsLauncherContractSurface(t *testing.T) 
 	if !slices.Equal(got.Tools, wantTools) {
 		t.Fatalf("tools = %v, want full lead runtime contract tools %v", got.Tools, wantTools)
 	}
-	for _, hidden := range []string{"ws.lead.prefer_mercenary", "ws.mercenary.call", "ws.mercenary.register"} {
-		if slices.Contains(got.Tools, hidden) {
-			t.Fatalf("runtime capabilities exposed hidden mercenary tool %s in %v", hidden, got.Tools)
-		}
-	}
 	wantCommands := sortedMapKeys(contract.Commands)
 	slices.Sort(got.Commands)
 	if !slices.Equal(got.Commands, wantCommands) {
@@ -121,7 +114,7 @@ func TestRuntimeCapabilitiesCommandReportsNoAgentSurface(t *testing.T) {
 		Commands []string `json:"commands"`
 	}
 	mustUnmarshalCLIJSON(t, out, &got)
-	for _, hidden := range []string{"ws.lead.prefer_mercenary", "ws.mercenary.call", "ws.mercenary.register", "ws.mercenary.debug.tail", "subquery", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel", "ws.setup", "exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep"} {
+	for _, hidden := range []string{"subquery", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel", "ws.setup", "exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep"} {
 		if slices.Contains(got.Tools, hidden) {
 			t.Fatalf("no-agent capabilities exposed hidden tool %s in %v", hidden, got.Tools)
 		}
@@ -131,7 +124,7 @@ func TestRuntimeCapabilitiesCommandReportsNoAgentSurface(t *testing.T) {
 			t.Fatalf("no-agent capabilities missing visible tool %s in %v", visible, got.Tools)
 		}
 	}
-	for _, hidden := range []string{"mercenary.call", "mercenary.cancel", "mercenary.run-current", "subquery", "config.tune"} {
+	for _, hidden := range []string{"subquery", "config.tune"} {
 		if slices.Contains(got.Commands, hidden) {
 			t.Fatalf("no-agent capabilities exposed hidden command %s in %v", hidden, got.Commands)
 		}
@@ -185,6 +178,41 @@ func TestRuntimeCapabilitiesCommandReportsWsflowContractSurface(t *testing.T) {
 	}
 }
 
+// TestTopLevelUsageListsTheWholeSubcommandSet pins the advertised verb set as
+// a contract in both product modes. A retired subcommand's dispatch case and
+// its usage token have to disappear together: dropping the case alone leaves
+// the verb advertised and failing, dropping the token alone leaves a hidden
+// verb still dispatching. Asserting the exact line catches either half, and
+// the equality across modes pins that the verb set no longer varies by mode.
+func TestTopLevelUsageListsTheWholeSubcommandSet(t *testing.T) {
+	bin := wsMCPTestBin(t)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	const wantUsage = "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|git|tickets>"
+	for _, tc := range []struct {
+		name string
+		env  []string
+	}{
+		{name: "full", env: nil},
+		{name: "agentless", env: []string{"WS_MCP_NO_AGENT=1", "WS_MCP_NAMESPACE=wsflow"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(bin)
+			cmd.Env = append(os.Environ(), tc.env...)
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("ws-mcp with no subcommand unexpectedly succeeded: %s", string(out))
+			}
+			if got := strings.TrimSpace(string(out)); got != wantUsage {
+				t.Fatalf("usage = %q, want %q", got, wantUsage)
+			}
+		})
+	}
+}
+
 func TestNoAgentCLICommandsReturnDisabledErrors(t *testing.T) {
 	bin := wsMCPTestBin(t)
 	build := exec.Command("go", "build", "-o", bin, ".")
@@ -197,7 +225,6 @@ func TestNoAgentCLICommandsReturnDisabledErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: "mercenary", args: []string{"mercenary", "status", "--name", "impl"}, want: "wsflow agentless mode disables agent-backed command: mercenary"},
 		{name: "config tune", args: []string{"config", "tune", "--tier", "core"}, want: "wsflow agentless mode disables agent-backed command: config tune"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -348,7 +375,10 @@ func TestGitCLICommandsDefaultToTextAndKeepJSONFormat(t *testing.T) {
 	}
 }
 
-func TestGitCommitCLIRendersMentalModelNotes(t *testing.T) {
+// The CLI's structured commit flags are `--ai-context` and `--updated-ticket`.
+// The spec and mental-model trailer flags retired with their layer; this pins
+// that they are gone rather than silently accepted and dropped.
+func TestGitCommitCLIRejectsRetiredDocTrailerFlags(t *testing.T) {
 	bin := wsMCPTestBin(t)
 	build := exec.Command("go", "build", "-o", bin, ".")
 	if out, err := build.CombinedOutput(); err != nil {
@@ -364,25 +394,44 @@ func TestGitCommitCLIRendersMentalModelNotes(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	for _, flag := range []string{"--mental-model-note", "--updated-spec", "--updated-mental-model"} {
+		cmd := exec.Command(bin,
+			"git", "commit",
+			"--root", root,
+			"--path", "file.txt",
+			"--title", "test: retired trailer flag",
+			"--ai-context", "User intent: verify the flag is gone.",
+			flag, "value",
+		)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("%s was still accepted:\n%s", flag, string(out))
+		}
+		// The flag package echoes the name in its single-dash form.
+		if !strings.Contains(string(out), "flag provided but not defined: "+strings.TrimPrefix(flag, "-")) {
+			t.Fatalf("%s rejection = %q", flag, string(out))
+		}
+	}
+
 	cmd := exec.Command(bin,
 		"git", "commit",
 		"--root", root,
 		"--path", "file.txt",
-		"--title", "test: cli mental model notes",
-		"--ai-context", "User intent: verify CLI commit notes.",
-		"--mental-model-note", "CLI forwards structured Mental Model Notes.",
+		"--title", "test: cli commit sections",
+		"--ai-context", "User intent: verify CLI commit sections.",
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("ws-mcp git commit failed: %v\n%s", err, string(out))
 	}
-	if text := string(out); !strings.Contains(text, "commit: ") || !strings.Contains(text, "title: test: cli mental model notes") {
-		t.Fatalf("git commit text response = %q", text)
-	}
-
 	commitBody := string(runGitOutput(t, root, "log", "-1", "--format=%B"))
-	if !strings.Contains(commitBody, "## AI Context\n- User intent: verify CLI commit notes.\n\n### Mental Model Notes\n- CLI forwards structured Mental Model Notes.") {
-		t.Fatalf("commit body missing CLI Mental Model Notes subsection:\n%s", commitBody)
+	if !strings.Contains(commitBody, "## AI Context\n- User intent: verify CLI commit sections.") {
+		t.Fatalf("commit body missing AI Context:\n%s", commitBody)
+	}
+	for _, absent := range []string{"### Mental Model Notes", "## Updated Specs", "## Updated Mental Models"} {
+		if strings.Contains(commitBody, absent) {
+			t.Fatalf("commit body still renders %q:\n%s", absent, commitBody)
+		}
 	}
 }
 
@@ -394,9 +443,7 @@ func TestDocumentationCLICommandsDefaultToTextAndKeepJSONFormat(t *testing.T) {
 	}
 
 	root := t.TempDir()
-	mustWriteCLITest(t, filepath.Join(root, "ai-docs/tickets/todo/260504-demo-ticket.md"), "---\ntitle: Demo Ticket\nspec:\n  - 260504-demo-spec\n---\n# Demo Ticket\n")
-	mustWriteCLITest(t, filepath.Join(root, "ai-docs/spec/demo.md"), "---\ntitle: Demo Spec\nsummary: Demo summary\n---\n# Demo\n\n## Feature {#260504-demo-spec}\n\nDemo installer marketplace release packaging behavior.\n")
-	mustWriteCLITest(t, filepath.Join(root, "ai-docs/mental-model/demo.md"), "---\ndomain: demo\ndescription: Demo model\nsources:\n  - ai-docs/spec/demo.md#260504-demo-spec\n---\n# Demo\n\nRuntime readable CLI mirror behavior.\n")
+	mustWriteCLITest(t, filepath.Join(root, "ai-docs/tickets/todo/260504-demo-ticket.md"), "---\ntitle: Demo Ticket\n---\n# Demo Ticket\n")
 	runGit(t, root, "init")
 	runGit(t, root, "config", "core.autocrlf", "false")
 
@@ -407,9 +454,6 @@ func TestDocumentationCLICommandsDefaultToTextAndKeepJSONFormat(t *testing.T) {
 		wantText string
 	}{
 		{name: "tickets list", textArgs: []string{"tickets", "list", "--root", root}, jsonArgs: []string{"tickets", "list", "--root", root, "--format", "json"}, wantText: "[todo] 260504-demo-ticket"},
-		{name: "specs status", textArgs: []string{"specs", "status", "--root", root, "260504-demo-spec"}, jsonArgs: []string{"specs", "status", "--root", root, "--format", "json", "260504-demo-spec"}, wantText: "spec_stem: 260504-demo-spec"},
-		{name: "mental-models find", textArgs: []string{"mental-models", "find", "--root", root, "--domain", "demo"}, jsonArgs: []string{"mental-models", "find", "--root", root, "--domain", "demo", "--format", "json"}, wantText: "ai-docs/mental-model/demo.md"},
-		{name: "references trace", textArgs: []string{"references", "trace", "--root", root, "--ticket-stem", "260504-demo-ticket"}, jsonArgs: []string{"references", "trace", "--root", root, "--ticket-stem", "260504-demo-ticket", "--format", "json"}, wantText: "input: ticket 260504-demo-ticket"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := exec.Command(bin, tc.textArgs...)
@@ -418,7 +462,7 @@ func TestDocumentationCLICommandsDefaultToTextAndKeepJSONFormat(t *testing.T) {
 				t.Fatalf("ws-mcp %v failed: %v\n%s", tc.textArgs, err, string(out))
 			}
 			text := string(out)
-			if !strings.Contains(text, tc.wantText) || strings.HasPrefix(strings.TrimSpace(text), "{") || strings.HasPrefix(strings.TrimSpace(text), "[") && !strings.HasPrefix(tc.wantText, "[") {
+			if !strings.Contains(text, tc.wantText) || strings.HasPrefix(strings.TrimSpace(text), "{") {
 				t.Fatalf("%s text = %q", tc.name, text)
 			}
 
@@ -432,90 +476,21 @@ func TestDocumentationCLICommandsDefaultToTextAndKeepJSONFormat(t *testing.T) {
 		})
 	}
 
-	cmd := exec.Command(bin, "specs", "find", "--root", root, "--query", "installer marketplace release packaging")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("ws-mcp specs query failed: %v\n%s", err, string(out))
-	}
-	if text := string(out); !strings.Contains(text, "candidate spec for query=\"installer marketplace release packaging\"") || !strings.Contains(text, "ai-docs/spec/demo.md\tscore=") || !strings.Contains(text, "  ") || strings.Contains(text, "matched:") {
-		t.Fatalf("specs query text = %q", text)
-	}
-	cmd = exec.Command(bin, "specs", "find", "--root", root, "--query", "installer marketplace release packaging", "--format", "json")
-	out, err = cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("ws-mcp specs query json failed: %v\n%s", err, string(out))
-	}
-	if !strings.Contains(string(out), "\"matches\"") || !strings.Contains(string(out), "\"matched_terms\"") {
-		t.Fatalf("specs query json missing evidence: %s", string(out))
-	}
-
-	cmd = exec.Command(bin, "mental-models", "find", "--root", root, "--query", "runtime readable CLI mirror")
-	out, err = cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("ws-mcp mental-models query failed: %v\n%s", err, string(out))
-	}
-	if text := string(out); !strings.Contains(text, "candidate mental model for query=\"runtime readable CLI mirror\"") || !strings.Contains(text, "ai-docs/mental-model/demo.md\tscore=") || strings.Contains(text, "matched:") {
-		t.Fatalf("mental-models query text = %q", text)
-	}
-	cmd = exec.Command(bin, "mental-models", "find", "--root", root, "--query", "runtime readable CLI mirror", "--format", "json")
-	out, err = cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("ws-mcp mental-models query json failed: %v\n%s", err, string(out))
-	}
-	if !strings.Contains(string(out), "\"matches\"") || !strings.Contains(string(out), "\"matched_terms\"") {
-		t.Fatalf("mental-models query json missing evidence: %s", string(out))
-	}
-}
-
-func TestAgentsDebugCLICommandsReturnDiagnostics(t *testing.T) {
-	bin := wsMCPTestBin(t)
-	build := exec.Command("go", "build", "-o", bin, ".")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("go build failed: %v\n%s", err, string(out))
-	}
-
-	root := t.TempDir()
-	runGit(t, root, "init")
-	cache := filepath.Join(t.TempDir(), "cache")
-	t.Setenv("WS_CACHE_HOME", cache)
-	_, layout, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{Root: root, Name: "impl"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	mustWriteCLITest(t, layout.CurrentStdout, "stdout old\nstdout new\n")
-	mustWriteCLITest(t, layout.CurrentStderr, "stderr old\nstderr new\n")
-	mustWriteCLITest(t, layout.CurrentRuntimeLog, "runtime old\nruntime new\n")
-	mustWriteCLITest(t, layout.EventsFile, "event old\nevent new\n")
-
-	for _, tc := range []struct {
-		name string
-		args []string
-		want string
-	}{
-		{name: "stdout", args: []string{"mercenary", "debug", "stdout", "--root", root, "--name", "impl", "--lines", "1"}, want: "stdout new\n"},
-		{name: "stderr", args: []string{"mercenary", "debug", "stderr", "--root", root, "--name", "impl", "--lines", "1"}, want: "stderr new\n"},
-		{name: "runtime-log", args: []string{"mercenary", "debug", "runtime-log", "--root", root, "--name", "impl", "--lines", "1"}, want: "runtime new\n"},
-		{name: "events", args: []string{"mercenary", "debug", "events", "--root", root, "--name", "impl", "--lines", "1"}, want: "event new\n"},
+	// The spec, mental-model, and references CLI subcommands retired with
+	// their layer: each must be an unknown subcommand, not a silent no-op.
+	for _, args := range [][]string{
+		{"specs", "list", "--root", root},
+		{"mental-models", "find", "--root", root},
+		{"references", "trace", "--root", root},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cmd := exec.Command(bin, tc.args...)
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				t.Fatalf("ws-mcp %v failed: %v\n%s", tc.args, err, string(out))
-			}
-			if string(out) != tc.want {
-				t.Fatalf("ws-mcp %v = %q, want %q", tc.args, out, tc.want)
-			}
-		})
-	}
-
-	cmd := exec.Command(bin, "mercenary", "debug", "tail", "--root", root, "--name", "impl", "--lines", "1")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("ws-mcp mercenary debug tail failed: %v\n%s", err, string(out))
-	}
-	if text := string(out); !strings.Contains(text, "== events ==") || !strings.Contains(text, "event new") || !strings.Contains(text, "== stdout ==") {
-		t.Fatalf("debug tail output mismatch: %q", text)
+		cmd := exec.Command(bin, args...)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("ws-mcp %v still runs:\n%s", args, string(out))
+		}
+		if !strings.Contains(string(out), "usage: ws-mcp") {
+			t.Fatalf("ws-mcp %v = %q", args, string(out))
+		}
 	}
 }
 
@@ -825,11 +800,6 @@ func TestToolsCommandBareListMatchesToolsList(t *testing.T) {
 			}
 
 			if tc.name == "agentless" {
-				for _, hidden := range []string{"mercenary.call", "mercenary.register", "mercenary.debug.tail"} {
-					if slices.Contains(gotNames, hidden) {
-						t.Fatalf("agentless tools output exposed hidden tool %s in %v", hidden, gotNames)
-					}
-				}
 				if !slices.Contains(gotNames, "config.tune") {
 					t.Fatalf("agentless tools output missing shared tool config.tune in %v", gotNames)
 				}

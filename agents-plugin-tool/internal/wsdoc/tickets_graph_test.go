@@ -19,17 +19,10 @@ type graphFixture struct {
 	root string
 }
 
-// newGraphFixture builds an empty board with an ai-docs/spec/ directory
-// present. The directory is not optional scaffolding: scanSpecs errors on a
-// missing ai-docs/spec, and the degrade-to-silence path would swallow that
-// error along with every advisory, so a fixture without it silently asserts
-// nothing. TestTicketGraphMissingSpecDirDegradesToSilence pins that behavior
-// deliberately instead.
+// newGraphFixture builds an empty board.
 func newGraphFixture(t *testing.T) *graphFixture {
 	t.Helper()
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/spec/demo.md", "# Demo spec\n\n## Something {#260101-demo-anchor}\n")
-	return &graphFixture{t: t, root: root}
+	return &graphFixture{t: t, root: t.TempDir()}
 }
 
 func (f *graphFixture) ticket(status, stem string, fields ...string) string {
@@ -164,7 +157,7 @@ func TestTicketGraphFlagsUnresolvableRelated(t *testing.T) {
 
 	result := f.verify(child)
 	advisory := onlyAdvisory(t, result, AdvisoryKindFix)
-	requireContainsFlat(t, advisory.Text, "related: `260726-nope-not-a-thing` resolves to no ticket stem and no spec anchor. Correct or remove the entry.")
+	requireContainsFlat(t, advisory.Text, "related: `260726-nope-not-a-thing` resolves to no ticket stem. Correct or remove the entry.")
 }
 
 func TestTicketGraphParentCycleSuppressesBoard(t *testing.T) {
@@ -299,19 +292,22 @@ func TestTicketGraphBoardAncestorAlreadyClosed(t *testing.T) {
 
 // --- Rules ------------------------------------------------------------------
 
-func TestTicketGraphRelatedResolvesSpecAnchorButParentDoesNot(t *testing.T) {
+// `related:` and `parent:` both resolve against ticket stems only. The
+// spec-anchor half of `related:` resolution retired with the spec layer, so a
+// non-ticket target is now a FIX from either key — pinned here so a
+// reintroduced anchor set fails.
+func TestTicketGraphRelatedAndParentResolveTicketStemsOnly(t *testing.T) {
 	f := newGraphFixture(t)
-	mustWrite(t, f.root, "ai-docs/spec/harness.md",
-		"# Harness\n\n## Local agent tier config {#260513-harness-local-agent-tier-config}\n\nText.\n")
 
-	related := f.ticket("todo", "260726-feat-points-at-spec",
+	related := f.ticket("todo", "260726-feat-points-at-nonticket",
 		"related:",
-		"  260513-harness-local-agent-tier-config: deliberate spec reference")
-	requireNoAdvisories(t, f.verify(related))
+		"  260513-harness-local-agent-tier-config: former spec reference")
+	advisory := onlyAdvisory(t, f.verify(related), AdvisoryKindFix)
+	requireContainsFlat(t, advisory.Text, "related: `260513-harness-local-agent-tier-config` resolves to no ticket stem.")
 
-	parented := f.ticket("todo", "260726-feat-parents-at-spec",
+	parented := f.ticket("todo", "260726-feat-parents-at-nonticket",
 		"parent: 260513-harness-local-agent-tier-config")
-	advisory := onlyAdvisory(t, f.verify(parented), AdvisoryKindFix)
+	advisory = onlyAdvisory(t, f.verify(parented), AdvisoryKindFix)
 	requireContainsFlat(t, advisory.Text, "parent: `260513-harness-local-agent-tier-config` resolves to no ticket stem.")
 }
 
@@ -735,30 +731,10 @@ func TestTicketGraphChecksListFormRelated(t *testing.T) {
 
 	result := f.verify(child)
 	advisory := onlyAdvisory(t, result, AdvisoryKindFix)
-	requireContainsFlat(t, advisory.Text, "related: `260726-nope-list-form` resolves to no ticket stem and no spec anchor.")
+	requireContainsFlat(t, advisory.Text, "related: `260726-nope-list-form` resolves to no ticket stem.")
 }
 
 // --- Degrade to silence -----------------------------------------------------
-
-func TestTicketGraphMissingSpecDirDegradesToSilence(t *testing.T) {
-	root := t.TempDir()
-	// No ai-docs/spec at all, so scanSpecs errors. The ticket carries a
-	// dangling related: that would otherwise produce a FIX:, which makes the
-	// silence assertion non-vacuous.
-	mustWrite(t, root, "ai-docs/tickets/.done/260726-feat-no-specs.md",
-		"---\ntitle: No specs\ncompleted: 2026-07-27\nrelated:\n  260726-nope-dangling: n\n---\n\n# No specs\n")
-
-	result, err := TicketVerify(root, []string{"ai-docs/tickets/.done/260726-feat-no-specs.md"})
-	if err != nil {
-		t.Fatalf("a graph-load failure became an error return: %v", err)
-	}
-	if !result.OK {
-		t.Fatalf("result.OK = false, want true; findings = %#v", result.Findings)
-	}
-	if len(result.Advisories) != 0 {
-		t.Fatalf("Advisories = %#v, want none after a graph-load failure", result.Advisories)
-	}
-}
 
 func TestTicketGraphUnreadableTicketDegradesToSilence(t *testing.T) {
 	if runtime.GOOS == "windows" {
@@ -792,17 +768,6 @@ func TestTicketGraphUnreadableTicketDegradesToSilence(t *testing.T) {
 }
 
 // --- Deliberate negative cases ----------------------------------------------
-
-func TestTicketGraphRelatedSpecAnchorEmitsNothing(t *testing.T) {
-	f := newGraphFixture(t)
-	mustWrite(t, f.root, "ai-docs/spec/namespace.md",
-		"# Namespace\n\n## Lead skill namespace surface {#260505-lead-skill-namespace-surface}\n")
-	ticket := f.ticket("todo", "260726-feat-spec-related",
-		"related:",
-		"  260505-lead-skill-namespace-surface: deliberate reference")
-
-	requireNoAdvisories(t, f.verify(ticket))
-}
 
 // TestTicketGraphEpicWithoutChildrenEmitsNothing guards a regression, not a
 // branch. Childlessness is structurally unreachable by this pass: a verified

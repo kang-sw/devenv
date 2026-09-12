@@ -17,17 +17,50 @@ type sageReviewFreshness struct {
 	Instruction string
 }
 
-func sageGateFreshnessResult(root, ticketRel string, stages []string) (SageGateResult, error) {
+// sageGateFreshnessResult reports whether the completed stage(s) are stale and,
+// when they are, resolves the freshness question with the supplied answer. The
+// second return value ("consumed") is true whenever the freshness question was
+// posed at all (i.e. at least one stage is stale); the caller uses it to know
+// the answer was spent on the freshness question and must be reset before any
+// remaining pending stage is resolved. The three post-check states are:
+//   - not stale: consumed=false, zero result — caller proceeds with the answer.
+//   - stale + answer "yes": consumed=true, a non-waivable `run` result over the
+//     stale stages (combined when two are listed, standalone when one) — caller
+//     returns it immediately.
+//   - stale + answer "no": consumed=true, zero-action result and nothing written
+//     — caller resets the answer and proceeds to resolve remaining stages.
+//   - stale + answer "" (unanswered): consumed=true, the `check_review_required`
+//     result — caller returns it immediately.
+func sageGateFreshnessResult(root, ticketRel string, stages []string, answer string) (SageGateResult, bool, error) {
 	freshness, err := sageReviewFreshnessCheck(root, ticketRel, stages)
 	if err != nil || len(freshness.Stages) == 0 {
-		return SageGateResult{}, err
+		return SageGateResult{}, false, err
 	}
-	return SageGateResult{
-		Action:            "check_review_required",
-		FreshnessStages:   freshness.Stages,
-		ReviewBaseline:    freshness.Baseline,
-		ReviewInstruction: freshness.Instruction,
-	}, nil
+	switch answer {
+	case "yes":
+		// Accepted: the stale stage(s) rerun, carrying the non-waivable
+		// advisory like every other run. Mode follows the stage count.
+		mode := "standalone"
+		if len(freshness.Stages) == 2 {
+			mode = "combined"
+		}
+		out := stageOutcome{action: "run", advisory: sageReviewNonWaivableAdvisory}
+		return gateResultFromStageReviewers(out, freshness.Stages, mode), true, nil
+	case "no":
+		// Declined: write nothing — posture stays completed and the recorded
+		// digest stays stale, so tickets.verify keeps warning until a fresh
+		// sage_stamp. Return a zero-action result so the caller falls through
+		// to resolve any remaining pending stage (with the answer reset).
+		return SageGateResult{}, true, nil
+	default:
+		// Unanswered: surface the freshness question for the caller to relay.
+		return SageGateResult{
+			Action:            "check_review_required",
+			FreshnessStages:   freshness.Stages,
+			ReviewBaseline:    freshness.Baseline,
+			ReviewInstruction: freshness.Instruction,
+		}, true, nil
+	}
 }
 
 func sageReviewFreshnessCheck(root, ticketRel string, stages []string) (sageReviewFreshness, error) {

@@ -8,7 +8,7 @@ import (
 
 // SkillSplice declares one build-time skill-body composition: Source's
 // SKILL.md body is spliced into Target's committed SKILL.md, wrapped in the
-// same <playbook> boundary the serve-time concatenation hooks emit, anchored
+// same <playbook> boundary the serve-time concatenation hook emits, anchored
 // immediately before AnchorHeading.
 //
 // This is composition, not the namespace substitution GenerateWsflowSkillBody

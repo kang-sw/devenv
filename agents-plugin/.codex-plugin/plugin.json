@@ -26,7 +26,7 @@
     ],
     "defaultPrompt": [
       "Use $ws:lead-discuss to explore a workflow or migration decision.",
-      "Use $ws:lead-proceed to route an accepted change into implementation."
+      "Use $ws:lead-run to route an accepted change into implementation."
     ]
   }
 }

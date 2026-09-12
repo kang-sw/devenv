@@ -1,13 +1,12 @@
 # Worktree Ticket Scope (sparse-checkout)
 
 This file is reference material for `ws:lead-scope-worktree`, not the
-caller-visible contract itself. The MCP behavior contract lives in
-`ai-docs/spec/mcp-tools.md`:
+caller-visible contract itself. That contract is the code and its tests:
 
-- Scope mechanism and board resolution:
-  `#260806-worktree-sparse-checkout-ticket-scope`
+- scope mechanism and board resolution:
+  `agents-plugin-tool/internal/wsdoc/tickets_scope.go`
 - `workflow_manual` scope-announcement rendering:
-  `#260626-workflow-manual-restoration-entry`
+  `agents-plugin-tool/internal/mcp/scope_announcement.go`
 
 ## What This Covers
 

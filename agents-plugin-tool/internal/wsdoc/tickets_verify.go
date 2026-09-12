@@ -44,7 +44,7 @@ type VerifyAdvisory struct {
 
 // VerifyResult aggregates every guardrail outcome across the paths passed to
 // TicketVerify. OK is true only when Findings is empty; Warnings never affect
-// OK (spec-address is soft-warn only, per the ticket's stated posture), and
+// OK (they report suspicions and open loops, not guardrail violations), and
 // neither do Advisories.
 type VerifyResult struct {
 	OK         bool
@@ -87,8 +87,8 @@ func TicketVerify(root string, paths []string) (VerifyResult, error) {
 		})
 		verifyTicketFile(root, path, status, stem, &result)
 	}
-	// A whole-board graph load or spec-anchor scan can fail on a malformed file
-	// unrelated to this commit. Such a failure drops the advisories and lets the
+	// A whole-board graph load can fail on a malformed file unrelated to this
+	// commit. Such a failure drops the advisories and lets the
 	// commit proceed; it must never become an error return, or the non-blocking
 	// invariant would be violated by the very code meant to honor it.
 	if advisories, err := ticketGraphAdvisories(root, verified); err == nil {
@@ -187,12 +187,6 @@ func verifyTicketFile(root, path, status, stem string, result *VerifyResult) {
 
 	for _, problem := range ticketPhaseHeadingProblems(text) {
 		addFinding("phase-result-heading", problem)
-	}
-
-	if status == "ready" {
-		if warning := readyGateWarning(absPath, stem); warning != "" {
-			addWarning("spec-address", warning)
-		}
 	}
 }
 

@@ -33,7 +33,6 @@ var (
 // the pre-substitution text is a hard failure — there is no marker-exception
 // path. Eligible sources must contain nothing beyond ws:/ws/ namespace tokens.
 var disqualifyingTokens = []string{
-	"mercenary",
 	"<!-- ws:full-only:",
 	"<!-- ws:wsflow-only:",
 	"ws.",
