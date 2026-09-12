@@ -189,9 +189,23 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 	if curStatus == ".done" || curStatus == ".dropped" {
 		return TicketMutateResult{}, fmt.Errorf("ticket is closed (%s); reopen is out of scope", curStatus)
 	}
+	// Non-implementation categories (epic, research, workset) are board
+	// artifacts, never execution targets, so they never enter ready/ — the
+	// implementation queue lead-run drains. This is the single hard chokepoint
+	// enforcing that rule in code: without it a stray tickets.move(epic, to:
+	// "ready") would succeed against the prose bar and hand a worker an epic.
+	// Placed before any write so the rejection is a genuine no-op. sage_gate is
+	// decoupled from this path (see tickets_sage.go's epic-at-ready branch), so
+	// barring the move here leaves a direct sage_gate(epic, landing: "ready")
+	// reachable and design-only.
+	if to == "ready" {
+		if match := ticketCategoryRE.FindStringSubmatch(stem); len(match) == 2 && nonImplementationCategories[match[1]] {
+			return TicketMutateResult{}, fmt.Errorf("%s tickets never enter ready/: %s is a %s ticket, a board artifact rather than an execution target; ready/ is the implementation queue", match[1], stem, match[1])
+		}
+	}
 	newPath := ticketRelPath(to, stem)
 	// Both scope pre-flights run before prepareSageReviewForUpwardMove, which
-	// persists sage-review frontmatter on every upward move. Refusing after
+	// persists sage-review frontmatter at settlement boundaries. Refusing after
 	// that write would leave the working tree dirty while the caller was told
 	// the call was a no-op.
 	if hidden {
@@ -208,9 +222,11 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 	// and its git-move failure returns exactly today's empty result.
 	before := captureTicketBytes(scope, absOld)
 
+	designRequired, completenessRequired := sageReviewStageRequirement(stem)
+	settlesReview := isUpwardMove(curStatus, to) && (to == "ready" || (designRequired && !completenessRequired))
 	var readySageWarning string
 	var written sageReviewPostures
-	if isUpwardMove(curStatus, to) {
+	if settlesReview {
 		postures, err := prepareSageReviewForUpwardMove(absOld, stem, opts.SageReview)
 		if err != nil {
 			return TicketMutateResult{}, err
@@ -229,15 +245,7 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 			designRequired, completenessRequired := sageReviewStageRequirement(stem)
 			readySageWarning = readySagePostureWarning(readyPostureProblems(designRequired, postures.Design, completenessRequired, postures.Completeness))
 		} else if err := blockedUpwardMoveError(postures); err != nil {
-			// Non-ready upward moves (idea -> todo, or a demote/re-promote
-			// round trip re-entering todo) have no ready-sage-posture
-			// guardrail downstream to relocate enforcement to —
-			// tickets_verify.go's guardrail only runs for status == "ready".
-			// Removing this rejection would move enforcement to nowhere, so
-			// the pre-existing hard block for a blocked required stage stays
-			// here, unlike the ready-landing case (de-blocked, soft warning
-			// only, per the single-chokepoint decision).
-			//
+			// Epic idea -> todo settlement keeps its blocked-design guard.
 			// prepareSageReviewForUpwardMove already wrote the resolved
 			// postures to disk above (self-healing legacy migration or
 			// posture-normalization write), so this rejection is a
@@ -263,18 +271,15 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 	}
 
 	result := TicketMutateResult{OldPath: oldPath, NewPath: newPath}
-	if isUpwardMove(curStatus, to) {
+	if settlesReview {
 		postures := currentSageReviewPostures(filepath.Join(root, filepath.FromSlash(newPath)), stem)
 		if tip := sageReviewPostureTip(postures); tip != "" {
 			result.Tip = appendTip(result.Tip, tip)
 		}
 	}
-	if curStatus == "ready" && (to == "todo" || to == "idea") {
-		result.Tip = appendTip(result.Tip, "This ticket had spec entries; clear spec:, spec-remove:, and review ## Spec Impact before re-promoting.")
-	}
 	if to == "ready" {
-		if warning := readyGateWarning(filepath.Join(root, filepath.FromSlash(newPath)), stem); warning != "" {
-			result.Tip = appendTip(result.Tip, warning)
+		if missingRouteFacts(filepath.Join(root, filepath.FromSlash(newPath)), stem) {
+			result.Tip = appendTip(result.Tip, routeFactsMoveTip)
 		}
 		// Soft warning only: ws/tickets.verify / ws/git.commit's
 		// ready-sage-posture guardrail is the sole HARD enforcement point
@@ -299,45 +304,48 @@ func appendTip(existing, addition string) string {
 }
 
 // ticketCategoryRE extracts the category token from a ticket stem
-// (YYMMDD-<category>-<slug>), mirroring the lead-write-ticket convention.
+// (YYMMDD-<category>-<slug>), mirroring the ticket-authoring convention.
 var ticketCategoryRE = regexp.MustCompile(`^\d{6}-([a-z]+)-`)
 
-// exemptReadyGateCategories are ticket categories exempt from the spec-address
-// gate enforced by the lead-write-ticket playbook when promoting to ready/.
-var exemptReadyGateCategories = map[string]bool{
+// nonImplementationCategories are the ticket categories that never carry
+// implementation phases: an epic decomposes into children, and research and
+// legacy workset tickets are board artifacts. Checks that only make sense for a
+// ticket that will actually be routed and implemented skip these. TicketsMove
+// also reads this set as the hard bar that rejects any of these categories at
+// the ready/ landing — the single chokepoint behind "epics and research never
+// enter ready/".
+var nonImplementationCategories = map[string]bool{
 	"epic":     true,
 	"research": true,
 	"workset":  true,
 }
 
-// readyGateWarning returns a soft, non-blocking warning when a non-exempt
-// ticket is moved to ready/ without detected spec addressing (a confirmed
-// spec:/spec-remove: frontmatter entry or a ## Spec Impact section). The
-// spec-address gate itself is documented and enforced only at the
-// lead-write-ticket playbook layer; this primitive-layer warning exists so a
-// lead calling tickets_move directly still gets a signal.
-func readyGateWarning(ticketAbsPath, stem string) string {
+// missingRouteFacts reports whether a ticket landing in ready/ owes a
+// `## Route Facts` section and does not have one. It is presence-only by
+// design: the section's values are the completeness reviewer's subject, and a
+// mechanical value check here would duplicate the resolver's own enum
+// validation in a place that cannot report it usefully. A ticket with no
+// implementation phases is never routed, so it has no facts to carry.
+func missingRouteFacts(ticketAbsPath, stem string) bool {
 	match := ticketCategoryRE.FindStringSubmatch(stem)
-	if len(match) == 2 && exemptReadyGateCategories[match[1]] {
-		return ""
+	if len(match) == 2 && nonImplementationCategories[match[1]] {
+		return false
 	}
-
-	fm := frontmatter(ticketAbsPath)
-	if len(scalarList(fm["spec"])) > 0 || len(scalarList(fm["spec-remove"])) > 0 {
-		return ""
-	}
-
 	raw, err := os.ReadFile(ticketAbsPath)
-	if err == nil {
-		for _, line := range strings.Split(string(raw), "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), "## Spec Impact") {
-				return ""
-			}
-		}
+	if err != nil {
+		// Unreadable is not "missing": the callers that reach here already
+		// surface a file-level failure of their own, and refusing a promotion
+		// on an I/O error would misname the problem.
+		return false
 	}
-
-	return "ready gate is normally enforced by lead-write-ticket; no spec addressing detected."
+	present, _ := ticketRouteFacts(string(raw))
+	return !present
 }
+
+// routeFactsMoveTip is the soft counterpart to the SageGate refusal, attached
+// to a ready/ move so a lead calling tickets.move directly still learns the
+// ticket cannot be routed yet.
+const routeFactsMoveTip = "No ## Route Facts section; the implementation route reads its facts from that section, so populate it before dispatching a worker."
 
 // statusRank orders the active status axis idea < todo < ready so a move toward
 // a higher rank counts as upward (promotion).
@@ -374,13 +382,13 @@ func ResolvedSageReviewPosture(sageReview string) string {
 }
 
 // sageReviewStageRequirement reports whether a ticket category requires the
-// design and/or completeness sage-review stage. It reuses the same
-// ticketCategoryRE category-detection mechanism as exemptReadyGateCategories
-// rather than inventing a new one: `research`/`workset` are exempt from both
-// stages (mirroring their blanket spec-address-gate exemption), `epic` needs
-// only design (epics never reach lead-implement so completeness never
-// applies), and every other category (the default/actionable categories)
-// needs both.
+// design and/or completeness sage-review stage. The per-stage rule is stated
+// here in full and owned here, so that changing any other category-keyed check
+// cannot move this gate: `research`/`workset` need neither stage (there is
+// nothing decompositional to review), `epic` needs only design (epics never
+// reach implementation so completeness never applies), and every other
+// category (the default/actionable categories) needs both. Only the shared
+// ticketCategoryRE stem parser is reused; the category set is not.
 func sageReviewStageRequirement(stem string) (design, completeness bool) {
 	category := ""
 	if match := ticketCategoryRE.FindStringSubmatch(stem); len(match) == 2 {
@@ -452,15 +460,8 @@ func sageReviewBlockedError(field string) error {
 	return fmt.Errorf("%s: blocked; address blocked review before promoting", field)
 }
 
-// blockedUpwardMoveError restores the hard rejection for a non-ready upward
-// move (e.g. idea -> todo) that leaves a required sage-review stage blocked,
-// design checked before completeness. ready/ landings are exempt from this
-// call site: their blocked case is a soft warning instead
-// (readySagePostureWarning), because ws/git.commit's ready-sage-posture
-// guardrail is the sole HARD enforcement point there. Outside a ready
-// landing, tickets_verify.go's guardrail never runs (it is gated on
-// status == "ready"), so there is no chokepoint downstream to catch a
-// blocked non-ready move; this call site remains the only enforcement.
+// blockedUpwardMoveError keeps unresolved epic design from being re-settled
+// by a status move alone. Actionable todo moves never call it.
 func blockedUpwardMoveError(postures sageReviewPostures) error {
 	if postures.Design == "blocked" {
 		return sageReviewBlockedError("sage-review-design")

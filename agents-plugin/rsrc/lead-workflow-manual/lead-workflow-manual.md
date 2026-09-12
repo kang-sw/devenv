@@ -29,10 +29,7 @@ Write MCP calls as `{{.McpNamespace}}/tool.name(arg: value)`.
 Show optional arguments only when the skill needs a non-default value.
 Omit `root` when the current repository root is intended.
 Use `prompt: <block below>` or `question: <block below>` for large text payloads.
-Write prompts sent to native Explore-style subagents in English.
-<!-- ws:full-only:start -->
-Write prompts sent to `mercenary.call` in English.
-<!-- ws:full-only:end -->
+Write prompts sent to delegated subagents in English.
 
 When writing shared skill text, name only primitives that exist in the {{.McpNamespace}} runtime.
 If a workflow needs a surface that is still planned, state the required MCP
@@ -97,29 +94,16 @@ English prompt and require cited evidence, gaps, and follow-up needs. For
 parallel dispatch, spawn multiple in one turn; collect all before
 synthesizing.
 
-<!-- ws:full-only:start -->
-### Persistent agents
+### Delegate prompts
 
-Register a stable task name with a self-contained system prompt. Registration
-takes `name`, optional `backend`, `system_prompt_text`, and `tier`; the removed
-`prompts`/`prompt_refs`/`model` fields are gone. Omit `system_prompt_text` for a
-general-purpose named agent; registration applies delegate orientation and the
-default tier mapping. Call the agent for each continuity turn.
-Bundled delegate prompts are not registered by stem — render them. Obtain a
-delegate's self-contained prompt with `{{.McpNamespace}}/playbook.render(name: "<delegate>")`
-(a lead key splices a child-key credential block). Hand the rendered prompt to a native
-subagent (default), or pass it as `system_prompt_text` with `tier:
-<recommended-tier>` to a mercenary `mercenary.register` + `mercenary.call`, then
-collect through `mercenary.result`. `reference-discovery` is such a delegate
-playbook, not a workflow skill.
-`mercenary.call` starts async and returns promptly. Use
-`wait(timeout_seconds: 600)` for readiness metadata, `result(timeout_seconds:
-600)` or a longer bound for final output, `status` before waiting,
-`tail(lines: 3)` for small diagnostics, `print` only as a compatibility output
-alias, `cancel` to stop active work, retry `call` on the same registered agent
-with a recovery prompt when cancellation followed a no-result timeout, and
-`erase` when task-scoped state should be removed.
-<!-- ws:full-only:end -->
+Bundled delegate prompts are rendered, not named by stem: call
+`{{.McpNamespace}}/playbook.render(name: "<delegate>", session_key: <your key>)`
+and hand the returned path to a native subagent, spawned at the tier the render
+recommends. Pass the session_key: with a lead key the render splices the
+delegate's own session credential into the prompt file, so the subagent starts
+already authenticated; without one it does not, and the delegate arrives
+unkeyed. Hand over the path, not the file's contents.
+`reference-discovery` is such a delegate playbook, not a workflow skill.
 
 ### Artifact paths
 
@@ -133,22 +117,15 @@ Use `{{.McpNamespace}}/runtime.read` for runtime compatibility checks and featur
 
 ### Reference discovery
 
-Use the {{.McpNamespace}}-owned ticket, spec, and mental-model discovery tools for
-path/status/reference lookup before shell search. Use native file reads after a
-discovery tool returns the path to inspect or edit.
+Use the {{.McpNamespace}}-owned ticket discovery tools for path/status lookup
+before shell search. Use native file reads after a discovery tool returns the
+path to inspect or edit.
 
 Prefer:
 - `{{.McpNamespace}}/tickets.query(status: "ready")` for implementation-ready discovery; use `status: "todo"` for accepted backlog.
 - `{{.McpNamespace}}/tickets.query(ticket_stem: "<stem>")` for ticket lookup by stem.
 - `{{.McpNamespace}}/tickets.query(mentions_ticket_stem: "<stem>")` for parent/related scans.
 - `{{.McpNamespace}}/tickets.query(ticket_stem: "<stem>", include_done: true)` for status checks.
-- `{{.McpNamespace}}/specs.query(spec_stem: "<stem>")` for anchor lookup.
-- `{{.McpNamespace}}/specs.query(ticket_stem: "<stem>")` for ticket-linked specs.
-- `{{.McpNamespace}}/specs.query(spec_stem: "<stem>")` for duplicate-safe anchor location.
-- `{{.McpNamespace}}/mental_models.query(query: "<topic>")` for domain discovery.
-- `{{.McpNamespace}}/mental_models.status(domain: "<domain>")` for known-domain docs.
-- `{{.McpNamespace}}/references.trace(ticket_stem: "<stem>")` for ticket/spec/model links.
-- `{{.McpNamespace}}/references.trace(spec_stem: "<stem>")` for spec/ticket/model links.
 
 ### Notes / durable memory
 
@@ -180,12 +157,11 @@ Prefer:
 - `{{.McpNamespace}}/git.commit(paths: ["<path>"], title: "<title>", ai_context: ["<bullet>"])` for workflow commits.
 
 Use native Git only for operations without an exposed ws primitive, such as
-branch creation, tag push, merge execution, or path-filtered file history.
+branch creation, tag push, goal-branch promotion, or path-filtered file history.
 
-`impl/*` and `goal/*` are workflow-owned branches carrying plan, review, and
-doc-closeout history: merge them with `git merge --no-ff` by default, and
-squash instead only when the branch is one logical change with noisy or
-dependent commits.
+`impl/*` integration is lead-owned through `{{.McpNamespace}}/git.merge`,
+which preserves the branch boundary. For `goal/*` promotion, the lead uses
+`git merge --no-ff` under the goal terminal's approval gate.
 
 ### API documentation
 
@@ -207,10 +183,9 @@ exists so those rules read as intentional rather than arbitrary.
 A ticket's status is its directory, not a frontmatter field. `idea/` is a
 rough capture surface for underspecified or exploratory topics — nothing yet
 needs to be actionable. `todo/` is accepted backlog: the intent is
-recoverable and worth doing, but implementation has not started and a spec
-contract may not exist yet. `ready/` is the implementation-ready status: the
-ticket's caller-visible behavior is addressed by a spec (existing or newly
-declared), and the dependencies blocking its earliest unfinished phase are
+recoverable and worth doing, but implementation has not started. `ready/` is
+the implementation-ready status: the ticket has passed its completeness sage
+review, and the dependencies blocking its earliest unfinished phase are
 themselves in `ready/` or `.done/` — so the `ready/` set is a closed work front
 that drains in dependency order, and a dependent reaches `ready/` only alongside
 or after its prerequisites (recorded as `related:`/`parent:` edges). `.done/` and
@@ -219,8 +194,8 @@ or after its prerequisites (recorded as `related:`/`parent:` edges). `.done/` an
 ### Type prefix: feat / bug / refactor / chore
 
 `feat`, `bug`, `refactor`, and `chore` are **mechanically identical** in the
-workflow — same phase model, same spec-address gate, same sage-review stage
-requirements (see `judge: ticket-category`). The prefix is a categorization
+workflow — same phase model, same sage-review stage requirements (see
+`judge: ticket-category`). The prefix is a categorization
 label for human and agent scanning, not a behavioral switch. Pick by
 plain-word fit: `feat` introduces a new capability or behavior; `bug`
 corrects behavior that deviates from intent; `refactor` restructures
@@ -231,16 +206,20 @@ choice.
 
 ### Sage review
 
-Sage review is an independent-reviewer gate a ticket passes through before a
-stage boundary is treated as settled: a **design** review gates the `todo/`
-stage (does the approach still make sense), and a **completeness** review
-gates the `ready/` stage (is the ticket's contract and verification story
-actually complete). A ticket that reaches `ready/` without a prior `todo/`
-design pass runs both stages together. Stage applicability follows category:
-`research`/`workset` need neither stage (nothing decompositional to review),
-`epic` needs design only (epics never reach implementation, so completeness
-never applies), and actionable categories (`bug`/`feat`/`refactor`/`chore`)
-need both.
+Actionable tickets (`bug`/`feat`/`refactor`/`chore`) are authored and edited in
+`todo/` without fact population or Sage review. Promotion to `ready/` is their
+settlement boundary: populate facts first, then run design and completeness
+review against that populated body. Existing completed or skipped stages keep
+their posture and freshness behavior.
+
+An epic is a living board that is never an execution target, so it never enters
+`ready/` (the move is barred in code); a research ticket is likewise barred and
+ungated. Epic design review is design-only (completeness never applies) and
+lead-judgment-invoked: run it — populating checkable facts first — when the
+epic's cross-child design has drifted materially, not as a status boundary.
+Ordinary epic edits do not automatically spawn reviewers, and a child relying on
+a revised cross-child decision needs that re-review first. `ready/` remains the
+actionable implementation queue.
 
 Posture (per-stage, stored in ticket frontmatter) resolves the gate:
 `pending` falls back to the project's configured default; `skipped` means
@@ -248,18 +227,6 @@ the stage will not run; `blocked` means a prior review found unresolved
 issues and the gate stops until they are addressed; `recommended` asks
 before running; `required` always runs; `completed` means the stage already
 ran and passed.
-
-### Spec addressing
-
-Entering `ready/` (for non-`epic`, non-`research`, non-`workset` tickets)
-requires each phase's caller-visible behavior to be addressed by a spec: an
-existing confirmed `spec:` stem, a `spec-remove:` entry, or a `## Spec
-Impact` section describing what a spec will need to cover. The purpose is to
-stop implementation from starting against an undocumented or unstable
-contract — either point at an already-addressed spec area, or explicitly
-declare the ticket only needs post-implementation closeout documentation.
-`idea/` and `todo/` tickets may hold `spec:` links as optional recovery
-hints; the check only applies at the `ready/` boundary.
 
 ### Phases
 
@@ -271,25 +238,20 @@ is itself the reviewable deliverable. A phase write-up states its completed
 behavior, deferred scope, and verification boundary. Phases accumulate
 `### Result` (and later `#### Edition`) entries as work lands, giving the
 ticket a durable record of what actually happened per phase versus what was
-planned. Epics and worksets do not carry implementation phases; phase-level
-detail belongs in the child or included tickets they reference.
+planned. Epics do not carry implementation phases; phase-level detail belongs in
+their child tickets.
 
-### Epic vs. workset
+### Epics and execution scope
 
-Both are board artifacts, not implementation targets, and both skip the
-ready spec-address gate — but they organize differently. An `epic` is
-hierarchical: child tickets collectively deliver one parent outcome, and
-cross-child invariant decisions live in the epic body. A `workset` is
-non-hierarchical: it groups independent or cross-cutting tickets for
-coordination, sequencing, or focus without owning decomposition — included
-tickets are listed, never made children. Choose `epic` when the request is a
-parent-outcome breakdown; choose `workset` when it is a coordination/focus
-grouping with no decomposition ownership.
+An `epic` is hierarchical: child tickets collectively deliver one parent
+outcome, and cross-child invariant decisions live in the epic body. Use
+`epic` for single-outcome decomposition. The goal loop over the scoped
+`ready/` queue handles mixed-parent execution; frontmatter `related:` records
+non-hierarchical relationships between tickets.
 
-<!-- ws:full-only:start -->
 ## Planned Or Specialized
 
 Check `{{.McpNamespace}}/runtime.read` before assuming richer interrupt or
-active-agent/message-queue behavior than the runtime exposes; basic async
-cancellation exists through `mercenary.cancel`, with retry via `mercenary.call`.
-<!-- ws:full-only:end -->
+active-agent/message-queue behavior than the runtime exposes. Interrupting a
+dispatched subagent, or retrying one, is the harness's affordance rather than a
+workflow tool.

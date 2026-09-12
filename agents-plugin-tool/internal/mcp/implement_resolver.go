@@ -3,10 +3,14 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wskey"
 )
@@ -34,21 +38,16 @@ type implementFactsInput struct {
 }
 
 type implementScopeFactsInput struct {
-	Span                      factString `json:"span,omitempty"`
-	Surface                   factString `json:"surface,omitempty"`
-	NewPublicSymbol           factString `json:"new_public_symbol,omitempty"`
-	NewTypeContract           factString `json:"new_type_contract,omitempty"`
-	TestSurface               factString `json:"test_surface,omitempty"`
-	ExplicitDelegationRequest factString `json:"explicit_delegation_request,omitempty"`
-	ExplicitDirectEditRequest factString `json:"explicit_direct_edit_request,omitempty"`
+	Span            factString `json:"span,omitempty"`
+	Surface         factString `json:"surface,omitempty"`
+	NewPublicSymbol factString `json:"new_public_symbol,omitempty"`
+	NewTypeContract factString `json:"new_type_contract,omitempty"`
+	TestSurface     factString `json:"test_surface,omitempty"`
 }
 
 type implementComplexityFactsInput struct {
-	ChangePoints   factString `json:"change_points,omitempty"`
 	ReusePoints    factString `json:"reuse_points,omitempty"`
-	StrategyShape  factString `json:"strategy_shape,omitempty"`
 	SideEffectRisk factString `json:"side_effect_risk,omitempty"`
-	ColdContext    factString `json:"cold_context,omitempty"`
 }
 
 type implementRiskFactsInput struct {
@@ -59,10 +58,9 @@ type implementRiskFactsInput struct {
 }
 
 type implementPolicyInput struct {
-	LowCeremonyIfSafe factString                 `json:"low_ceremony_if_safe,omitempty"`
-	Branch            implementBranchPolicyInput `json:"branch,omitempty"`
-	Review            implementReviewPolicyInput `json:"review,omitempty"`
-	Docs              implementDocsPolicyInput   `json:"docs,omitempty"`
+	Branch implementBranchPolicyInput `json:"branch,omitempty"`
+	Review implementReviewPolicyInput `json:"review,omitempty"`
+	Docs   implementDocsPolicyInput   `json:"docs,omitempty"`
 }
 
 type implementBranchPolicyInput struct {
@@ -85,6 +83,7 @@ type implementResult struct {
 	NextInstruction string                `json:"next_instruction"`
 	Target          implementResultTarget `json:"target"`
 	Scope           string                `json:"scope"`
+	RouteFacts      string                `json:"route_facts"`
 	Reason          string                `json:"reason"`
 	Conditions      []string              `json:"conditions"`
 	Warnings        []string              `json:"warnings"`
@@ -105,7 +104,6 @@ type implementResultTarget struct {
 type implementVerdict struct {
 	Delegation  string              `json:"delegation"`
 	BranchPlan  implementBranchPlan `json:"branch_plan"`
-	PlanDepth   string              `json:"plan_depth"`
 	ReviewAlloc string              `json:"review_alloc"`
 	NeedReview  bool                `json:"need_review"`
 	DocMode     string              `json:"doc_mode"`
@@ -126,7 +124,6 @@ type implementBranchPlan struct {
 type implementAgenda struct {
 	Delegation  string                `json:"delegation"`
 	BranchPlan  implementBranchPlan   `json:"branch_plan"`
-	PlanDepth   string                `json:"plan_depth"`
 	ReviewAlloc string                `json:"review_alloc"`
 	NeedReview  bool                  `json:"need_review"`
 	DocMode     string                `json:"doc_mode"`
@@ -134,6 +131,7 @@ type implementAgenda struct {
 	NeedDoc     bool                  `json:"need_doc"`
 	Target      implementResultTarget `json:"target"`
 	Scope       string                `json:"scope"`
+	RouteFacts  string                `json:"route_facts"`
 	Conditions  []string              `json:"conditions"`
 	Warnings    []string              `json:"warnings"`
 }
@@ -150,31 +148,25 @@ type implementBranchObservation struct {
 }
 
 type normalizedImplementFacts struct {
-	Span                      string
-	Surface                   string
-	NewPublicSymbol           string
-	NewTypeContract           string
-	TestSurface               string
-	ExplicitDelegationRequest string
-	ExplicitDirectEditRequest string
-	ChangePoints              string
-	ReusePoints               string
-	StrategyShape             string
-	SideEffectRisk            string
-	ColdContext               string
-	CorrectnessRisk           string
-	FitRisk                   string
-	TestRisk                  string
-	SecurityOrContractRisk    string
-	LowCeremonyIfSafe         string
-	ReviewOverride            string
-	DocModePolicy             string
-	DocReason                 string
-	MergeTargetPolicy         string
-	AllowRename               string
-	MergeConfirmPolicy        string
-	ScopeSlug                 string
-	TicketStem                string
+	Span                   string
+	Surface                string
+	NewPublicSymbol        string
+	NewTypeContract        string
+	TestSurface            string
+	ReusePoints            string
+	SideEffectRisk         string
+	CorrectnessRisk        string
+	FitRisk                string
+	TestRisk               string
+	SecurityOrContractRisk string
+	ReviewOverride         string
+	DocModePolicy          string
+	DocReason              string
+	MergeTargetPolicy      string
+	AllowRename            string
+	MergeConfirmPolicy     string
+	ScopeSlug              string
+	TicketStem             string
 }
 
 func parseImplementInput(args map[string]any) (implementInput, error) {
@@ -193,15 +185,18 @@ func parseImplementInput(args map[string]any) (implementInput, error) {
 	if err != nil {
 		return implementInput{}, err
 	}
-	facts, err := parseImplementFacts(args["facts"])
-	if err != nil {
-		return implementInput{}, err
+	// Route facts are the ticket's, not the caller's: they are populated and
+	// design-reviewed once at authoring and read here from the ticket body. A
+	// caller that still sends them is not defaulted or merged — that would
+	// leave two sources for one judgment — it is told where they now live.
+	if _, sent := args["facts"]; sent {
+		return implementInput{}, fmt.Errorf("facts are not a caller argument: route facts are read from the ticket's %q section", wsdoc.RouteFactsHeading)
 	}
 	policy, err := parseImplementPolicy(args["policy"])
 	if err != nil {
 		return implementInput{}, err
 	}
-	return implementInput{Target: target, Facts: facts, Policy: policy, Format: format}, nil
+	return implementInput{Target: target, Policy: policy, Format: format}, nil
 }
 
 func parseImplementTarget(m map[string]any) (implementTargetInput, error) {
@@ -249,6 +244,154 @@ func parseImplementTarget(m map[string]any) (implementTargetInput, error) {
 		out.Label = firstNonEmpty(out.TicketPath, out.TicketStem, out.Kind)
 	}
 	return out, nil
+}
+
+// implementRouteFactsSource is the resolved provenance of a run's route facts.
+// Status is the named outcome the verdict reports: a missing or unreadable
+// block is stated, never silently replaced by a conservative default verdict,
+// because a capable caller obeys a conservative default without noticing that
+// the facts it was derived from do not exist.
+type implementRouteFactsSource struct {
+	Facts  implementFactsInput
+	Status string // "ticket" | "absent" | "unreadable" | "ad-hoc"
+	Detail string
+}
+
+// routeFactGroups maps each accepted `## Route Facts` row key to the fact group
+// it belongs to. A key outside this set makes the block unreadable rather than
+// being ignored: a populator that drifts from the resolver must be visible at
+// the first run, not silently downgrade the whole ticket to unknown facts.
+var routeFactGroups = map[string]string{
+	"scope.span":                  "scope",
+	"scope.surface":               "scope",
+	"scope.new_public_symbol":     "scope",
+	"scope.new_type_contract":     "scope",
+	"scope.test_surface":          "scope",
+	"complexity.reuse_points":     "complexity",
+	"complexity.side_effect_risk": "complexity",
+	"risk.correctness":            "risk",
+	"risk.fit":                    "risk",
+	"risk.test":                   "risk",
+	"risk.security_or_contract":   "risk",
+}
+
+// loadImplementRouteFacts resolves the run's facts from the target. A ticket
+// target reads them through the wsdoc ticket projection; an ad-hoc target has
+// no ticket to read, and its description in the caller's task block is the
+// contract instead. Every failure resolves to a named status with unknown
+// facts rather than an error, so a fact problem is reported in the verdict the
+// caller reads rather than swallowing the branch plan the caller also needs.
+func loadImplementRouteFacts(root string, target implementTargetInput) implementRouteFactsSource {
+	if target.Kind != "ticket" {
+		return implementRouteFactsSource{Status: "ad-hoc"}
+	}
+	info, label, err := implementTicketInfo(root, target)
+	if label == "" {
+		return implementRouteFactsSource{Status: "absent", Detail: "ticket target carries no ticket_path or ticket_stem to read facts from"}
+	}
+	if err != nil {
+		// A ticket file that is not there is the same condition as a ticket
+		// with no facts in it — nothing was populated — and reads better as
+		// such than as a malformed block. Any other read failure is genuinely
+		// unreadable. Neither detail repeats the absolute path the error
+		// carries: the caller was handed the board-relative one.
+		if errors.Is(err, fs.ErrNotExist) {
+			return implementRouteFactsSource{Status: "absent", Detail: fmt.Sprintf("%s does not exist", label)}
+		}
+		return implementRouteFactsSource{Status: "unreadable", Detail: fmt.Sprintf("cannot read %s", label)}
+	}
+	if !info.RouteFactsPresent {
+		return implementRouteFactsSource{Status: "absent", Detail: fmt.Sprintf("%s has no %s section", label, wsdoc.RouteFactsHeading)}
+	}
+	if len(info.RouteFacts) == 0 {
+		return implementRouteFactsSource{Status: "unreadable", Detail: fmt.Sprintf("%s in %s has no fact rows", wsdoc.RouteFactsHeading, label)}
+	}
+	grouped := map[string]any{}
+	// Sorted so a table with several unrecognized rows always names the same
+	// one: a verdict that reports a different key per run is not reproducible
+	// evidence for the caller acting on it.
+	keys := make([]string, 0, len(info.RouteFacts))
+	for key := range info.RouteFacts {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		value := info.RouteFacts[key]
+		group, ok := routeFactGroups[key]
+		if !ok {
+			return implementRouteFactsSource{Status: "unreadable", Detail: fmt.Sprintf("unrecognized route fact %q in %s", key, label)}
+		}
+		bucket, ok := grouped[group].(map[string]any)
+		if !ok {
+			bucket = map[string]any{}
+			grouped[group] = bucket
+		}
+		bucket[strings.TrimPrefix(key, group+".")] = value
+	}
+	facts, err := parseImplementFacts(grouped)
+	if err != nil {
+		return implementRouteFactsSource{Status: "unreadable", Detail: fmt.Sprintf("%s in %s: %v", wsdoc.RouteFactsHeading, label, err)}
+	}
+	// A value the table did not supply is checked last, so a row that is
+	// present but wrong is named as wrong rather than as absent. Completeness
+	// is checked at all because an omitted row, or one with an empty value
+	// cell, otherwise parses to the same `unknown` an author can write
+	// deliberately — and an all-unknown risk set allocates the *smallest*
+	// review, so the silent direction of that drift is toward less scrutiny.
+	if missing := missingRouteFactKeys(info.RouteFacts); len(missing) > 0 {
+		return implementRouteFactsSource{Status: "unreadable", Detail: fmt.Sprintf("%s in %s is missing %s", wsdoc.RouteFactsHeading, label, strings.Join(missing, ", "))}
+	}
+	return implementRouteFactsSource{Facts: facts, Status: "ticket"}
+}
+
+// implementTicketInfo reads the target's ticket projection and the label the
+// verdict names it by. A path is authoritative when the caller gives one;
+// otherwise the stem is resolved against the board, since the tool accepts a
+// target carrying only a stem and such a target is no less routable.
+func implementTicketInfo(root string, target implementTargetInput) (wsdoc.TicketInfo, string, error) {
+	if path := strings.TrimSpace(target.TicketPath); path != "" {
+		info, err := wsdoc.TicketAt(root, path)
+		return info, path, err
+	}
+	stem := strings.TrimSpace(target.TicketStem)
+	if stem == "" {
+		return wsdoc.TicketInfo{}, "", fs.ErrNotExist
+	}
+	info, err := wsdoc.TicketsStatus(root, wsdoc.TicketStatusOptions{TicketStem: stem, Resolve: true})
+	if err != nil {
+		return wsdoc.TicketInfo{}, stem, fs.ErrNotExist
+	}
+	return *info, info.Path, nil
+}
+
+// missingRouteFactKeys names the accepted facts the table did not supply,
+// sorted so the same table always reports the same list.
+func missingRouteFactKeys(facts map[string]string) []string {
+	missing := []string{}
+	for key := range routeFactGroups {
+		if strings.TrimSpace(facts[key]) == "" {
+			missing = append(missing, key)
+		}
+	}
+	sort.Strings(missing)
+	return missing
+}
+
+// routeFactsMissing reports whether the run has no facts to route from. An
+// ad-hoc target is not missing facts; it has none by design.
+func routeFactsMissing(status string) bool {
+	return status == "absent" || status == "unreadable"
+}
+
+func implementRouteFactsLine(source implementRouteFactsSource) string {
+	switch source.Status {
+	case "ticket":
+		return "read from the ticket"
+	case "ad-hoc":
+		return "n/a (ad-hoc target; the description in your task block is the contract)"
+	default:
+		return fmt.Sprintf("missing (%s) - %s", source.Status, source.Detail)
+	}
 }
 
 func parseImplementFacts(raw any) (implementFactsInput, error) {
@@ -314,31 +457,16 @@ func parseImplementScopeFacts(m map[string]any) (implementScopeFactsInput, error
 	if out.TestSurface, err = parseEnumFact(m, "test_surface", []string{"none", "existing", "new-files", "unknown"}); err != nil {
 		return out, fmt.Errorf("facts.scope.%w", err)
 	}
-	if out.ExplicitDelegationRequest, err = parseEnumFact(m, "explicit_delegation_request", []string{"yes", "no", "unknown"}); err != nil {
-		return out, fmt.Errorf("facts.scope.%w", err)
-	}
-	if out.ExplicitDirectEditRequest, err = parseEnumFact(m, "explicit_direct_edit_request", []string{"yes", "no", "unknown"}); err != nil {
-		return out, fmt.Errorf("facts.scope.%w", err)
-	}
 	return out, nil
 }
 
 func parseImplementComplexityFacts(m map[string]any) (implementComplexityFactsInput, error) {
 	var out implementComplexityFactsInput
 	var err error
-	if out.ChangePoints, err = parseEnumFact(m, "change_points", []string{"clear", "partially-known", "unknown"}); err != nil {
-		return out, fmt.Errorf("facts.complexity.%w", err)
-	}
 	if out.ReusePoints, err = parseEnumFact(m, "reuse_points", []string{"confirmed", "unconfirmed", "not-applicable", "unknown"}); err != nil {
 		return out, fmt.Errorf("facts.complexity.%w", err)
 	}
-	if out.StrategyShape, err = parseEnumFact(m, "strategy_shape", []string{"single-obvious", "multiple-viable", "unknown"}); err != nil {
-		return out, fmt.Errorf("facts.complexity.%w", err)
-	}
 	if out.SideEffectRisk, err = parseEnumFact(m, "side_effect_risk", []string{"low", "moderate", "high", "unknown"}); err != nil {
-		return out, fmt.Errorf("facts.complexity.%w", err)
-	}
-	if out.ColdContext, err = parseEnumFact(m, "cold_context", []string{"yes", "no", "unknown"}); err != nil {
 		return out, fmt.Errorf("facts.complexity.%w", err)
 	}
 	return out, nil
@@ -373,9 +501,6 @@ func parseImplementPolicy(raw any) (implementPolicyInput, error) {
 	}
 	var out implementPolicyInput
 	var err error
-	if out.LowCeremonyIfSafe, err = parseEnumFact(m, "low_ceremony_if_safe", []string{"yes", "no", "unknown"}); err != nil {
-		return out, fmt.Errorf("policy.%w", err)
-	}
 	if group, ok := m["branch"]; ok && group != nil {
 		gm, ok := group.(map[string]any)
 		if !ok {
@@ -397,7 +522,11 @@ func parseImplementPolicy(raw any) (implementPolicyInput, error) {
 			return out, fmt.Errorf("policy.review must be an object")
 		}
 		var err error
-		if out.Review.Override, err = parseEnumFact(gm, "override", []string{"auto", "lead-only", "single", "partitioned"}); err != nil {
+		// "lead-only" is gone from this enum with the allocation it named: the
+		// caller executes the change, so an allocation that made the caller its
+		// own reviewer can no longer resolve. A caller that still sends it gets
+		// the enum error rather than a silent promotion to independent review.
+		if out.Review.Override, err = parseEnumFact(gm, "override", []string{"auto", "single", "partitioned"}); err != nil {
 			return out, fmt.Errorf("policy.review.%w", err)
 		}
 	}
@@ -418,51 +547,37 @@ func parseImplementPolicy(raw any) (implementPolicyInput, error) {
 }
 
 // aheadOfMergeRootCount returns the number of commits currentBranch carries
-// ahead of mergeRoot's merge-base with currentBranch. It fails open to 0 on
-// any git error (unresolvable ref, unrelated histories): an infra failure
-// here is out of the ticket's test matrix, not a normal false-negative risk
-// case, consistent with the existing err == nil truthy pattern this file
-// already uses for TargetExists/MergeRootRefConflict.
-func aheadOfMergeRootCount(root, mergeRoot, currentBranch string) int {
+// ahead of mergeRoot's merge-base with currentBranch. Callers must surface an
+// error: treating an unverifiable branch as clean would let unrelated ticket
+// work be mixed precisely when the safety check cannot run.
+func aheadOfMergeRootCount(root, mergeRoot, currentBranch string) (int, error) {
 	result, err := wsgit.NewClient().MergeBase(context.Background(), root, mergeRoot, currentBranch)
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	out, err := (wsgit.ExecRunner{}).RunGit(context.Background(), root, "rev-list", "--count", result.MergeBase+".."+currentBranch)
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	count, err := strconv.Atoi(strings.TrimSpace(string(out)))
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("parse ahead count: %w", err)
 	}
-	return count
+	return count, nil
 }
 
-// implementCloseMergeReviewNudge computes the tickets.close merge-review
-// advisory: closing a ticket while the current branch is an unmerged
-// impl/<root>/<stem> branch leaves that branch's work unreviewed-and-merged,
-// so the close response nudges the lead to review-and-merge it into <root>
-// after the close-move commit lands. tickets.close itself never merges or
-// commits (see {#260620-ticket-close-tool}), so this is advisory text only,
-// computed from the pre-close-commit git state via observeImplementBranch's
-// existing AheadOfMergeRoot observation (Phase 1) — no new git-observation
-// code, and no marker/schema/code path for the ticket-declared stop-gate
-// exception, which stays ordinary lead judgment outside this hook. Failing
-// open to "" on any git error, a non-impl branch, or a merged/clean impl
-// branch keeps this from ever blocking or erroring the close call, and
-// leaves room for epic 260824's later review-watermark hook to compose
-// without rework.
+// Closure never merges. Warn without blocking closure when integration is
+// outstanding or cannot be verified, so Git errors cannot silently hide it.
 func implementCloseMergeReviewNudge(root string) string {
 	obs, err := observeImplementBranch(root, "")
 	if err != nil {
-		return ""
+		return fmt.Sprintf("Warning: could not verify implementation merge state: %v. After committing closure, report the retained branch to the lead for integration review; do not merge from the worker.", err)
 	}
 	mergeRoot, stem, ok := parseImplBranchRoot(obs.CurrentBranch)
 	if !ok || obs.AheadOfMergeRoot <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("This tool performed no merge. After the close-move commit for this ticket lands, review and merge %s into %s.", "impl/"+mergeRoot+"/"+stem, mergeRoot)
+	return fmt.Sprintf("Warning: %s remains unmerged into %s. This tool performed no merge. After the close-move commit lands, the worker reports the branch; the lead integrates it with git.merge under merge_confirm. Do not merge from the worker.", "impl/"+mergeRoot+"/"+stem, mergeRoot)
 }
 
 func observeImplementBranch(root string, targetBranch string) (implementBranchObservation, error) {
@@ -481,7 +596,11 @@ func observeImplementBranch(root string, targetBranch string) (implementBranchOb
 	if validObservedBranch(obs.CurrentBranch) {
 		mergeRoot := implementMergeRootFor(obs.CurrentBranch)
 		if mergeRoot != "" && mergeRoot != obs.CurrentBranch {
-			obs.AheadOfMergeRoot = aheadOfMergeRootCount(root, mergeRoot, obs.CurrentBranch)
+			count, err := aheadOfMergeRootCount(root, mergeRoot, obs.CurrentBranch)
+			if err != nil {
+				return implementBranchObservation{}, fmt.Errorf("verify implementation branch ahead state: %w", err)
+			}
+			obs.AheadOfMergeRoot = count
 		}
 	}
 	if targetBranch != "" {
@@ -500,7 +619,21 @@ func observeImplementBranch(root string, targetBranch string) (implementBranchOb
 	return obs, nil
 }
 
-func resolveImplement(input implementInput, obs implementBranchObservation) implementResult {
+// implementDelegationMode is the single execution mode this resolver emits. The
+// caller of route.resolve_implement is the worker that executes the unit of
+// work, so there is no second axis to derive: the previous direct-edit mode
+// existed only for a caller that edited source inline instead of delegating,
+// and the review allocation it enabled would have had that caller review its
+// own edits. Independent review is now unconditional.
+//
+// The value names how the caller was reached — the work was delegated to it —
+// not what the caller does with it: the caller edits source itself. Nothing
+// downstream branches on the value; it stays a stable field so a stored agenda
+// keeps its shape, and no emitted todo title repeats it.
+const implementDelegationMode = "delegated"
+
+func resolveImplement(input implementInput, source implementRouteFactsSource, obs implementBranchObservation) implementResult {
+	input.Facts = source.Facts
 	n, warnings := normalizeImplementFacts(input)
 	target := implementResultTarget{
 		Kind:       input.Target.Kind,
@@ -510,48 +643,45 @@ func resolveImplement(input implementInput, obs implementBranchObservation) impl
 		ScopeLabel: input.Target.ScopeLabel,
 		ScopeSlug:  n.ScopeSlug,
 	}
-	delegation := deriveImplementDelegation(n)
-	planDepth := deriveImplementPlanDepth(n, delegation, input.Target.Kind)
-	reviewAlloc := deriveImplementReviewAlloc(n, delegation)
+	reviewAlloc := deriveImplementReviewAlloc(n)
 	docMode := deriveImplementDocMode(n)
-	branchPlan := deriveResolvedImplementBranchPlan(input.Target.Kind, n, obs)
+	branchPlan := deriveImplementBranchPlan(n, obs)
 	warnings = append(warnings, branchPlan.Warnings...)
-	if n.LowCeremonyIfSafe == "yes" && branchPlan.Action != "current" {
-		warnings = append(warnings, "policy.low_ceremony_if_safe=yes not applicable; continuing with standard branch path")
-	}
 	if branchPlan.Action == "create" && n.MergeTargetPolicy != "" {
 		warnings = append(warnings, fmt.Sprintf("policy.branch.merge_target %q ignored (not on an implementation branch: impl/*, or legacy implement/*); derived from current branch %q", n.MergeTargetPolicy, branchPlan.MergeTarget))
 	}
-	needReview := reviewAlloc != "lead-only"
-	conditions := implementConditions(n, branchPlan.Action)
-	reason := implementReason(n, delegation, planDepth, reviewAlloc)
+	if routeFactsMissing(source.Status) {
+		warnings = append(warnings, "route facts "+implementRouteFactsLine(source)+"; every fact resolved to unknown")
+	}
+	conditions := implementConditions(n, source)
+	reason := implementReason(n, reviewAlloc)
 	verdict := implementVerdict{
-		Delegation:  delegation,
+		Delegation:  implementDelegationMode,
 		BranchPlan:  branchPlan,
-		PlanDepth:   planDepth,
 		ReviewAlloc: reviewAlloc,
-		NeedReview:  needReview,
+		NeedReview:  true,
 		DocMode:     docMode,
 	}
 	agenda := implementAgenda{
-		Delegation:  delegation,
+		Delegation:  implementDelegationMode,
 		BranchPlan:  branchPlan,
-		PlanDepth:   planDepth,
 		ReviewAlloc: reviewAlloc,
-		NeedReview:  needReview,
+		NeedReview:  true,
 		DocMode:     docMode,
 		DocReason:   n.DocReason,
 		NeedDoc:     docMode == "standard",
 		Target:      target,
 		Scope:       firstNonEmpty(input.Target.ScopeLabel, "unknown"),
+		RouteFacts:  implementRouteFactsLine(source),
 		Conditions:  conditions,
 		Warnings:    warnings,
 	}
 	result := implementResult{
 		Verdict:         verdict,
-		NextInstruction: implementNextInstruction(verdict),
+		NextInstruction: implementNextInstruction(verdict, source),
 		Target:          target,
 		Scope:           agenda.Scope,
+		RouteFacts:      agenda.RouteFacts,
 		Reason:          reason,
 		Conditions:      conditions,
 		Warnings:        warnings,
@@ -569,31 +699,25 @@ func normalizeImplementFacts(input implementInput) (normalizedImplementFacts, []
 	risk := input.Facts.Risk
 	policy := input.Policy
 	n := normalizedImplementFacts{
-		Span:                      factOr(scope.Span, "unknown"),
-		Surface:                   factOr(scope.Surface, "unknown"),
-		NewPublicSymbol:           factOr(scope.NewPublicSymbol, "unknown"),
-		NewTypeContract:           factOr(scope.NewTypeContract, "unknown"),
-		TestSurface:               factOr(scope.TestSurface, "unknown"),
-		ExplicitDelegationRequest: factOr(scope.ExplicitDelegationRequest, "unknown"),
-		ExplicitDirectEditRequest: factOr(scope.ExplicitDirectEditRequest, "unknown"),
-		ChangePoints:              factOr(complexity.ChangePoints, "unknown"),
-		ReusePoints:               factOr(complexity.ReusePoints, "unknown"),
-		StrategyShape:             factOr(complexity.StrategyShape, "unknown"),
-		SideEffectRisk:            factOr(complexity.SideEffectRisk, "unknown"),
-		ColdContext:               factOr(complexity.ColdContext, "unknown"),
-		CorrectnessRisk:           factOr(risk.Correctness, "unknown"),
-		FitRisk:                   factOr(risk.Fit, "unknown"),
-		TestRisk:                  factOr(risk.Test, "unknown"),
-		SecurityOrContractRisk:    factOr(risk.SecurityOrContract, "unknown"),
-		LowCeremonyIfSafe:         factOr(policy.LowCeremonyIfSafe, "unknown"),
-		ReviewOverride:            factOr(policy.Review.Override, "auto"),
-		DocModePolicy:             factOr(policy.Docs.Mode, "standard"),
-		DocReason:                 strings.TrimSpace(policy.Docs.Reason.Value),
-		MergeTargetPolicy:         strings.TrimSpace(policy.Branch.MergeTarget.Value),
-		AllowRename:               factOr(policy.Branch.AllowRename, "yes"),
-		MergeConfirmPolicy:        factOr(policy.Branch.MergeConfirm, "ask"),
-		ScopeSlug:                 strings.TrimSpace(input.Target.ScopeSlug),
-		TicketStem:                strings.TrimSpace(input.Target.TicketStem),
+		Span:                   factOr(scope.Span, "unknown"),
+		Surface:                factOr(scope.Surface, "unknown"),
+		NewPublicSymbol:        factOr(scope.NewPublicSymbol, "unknown"),
+		NewTypeContract:        factOr(scope.NewTypeContract, "unknown"),
+		TestSurface:            factOr(scope.TestSurface, "unknown"),
+		ReusePoints:            factOr(complexity.ReusePoints, "unknown"),
+		SideEffectRisk:         factOr(complexity.SideEffectRisk, "unknown"),
+		CorrectnessRisk:        factOr(risk.Correctness, "unknown"),
+		FitRisk:                factOr(risk.Fit, "unknown"),
+		TestRisk:               factOr(risk.Test, "unknown"),
+		SecurityOrContractRisk: factOr(risk.SecurityOrContract, "unknown"),
+		ReviewOverride:         factOr(policy.Review.Override, "auto"),
+		DocModePolicy:          factOr(policy.Docs.Mode, "standard"),
+		DocReason:              strings.TrimSpace(policy.Docs.Reason.Value),
+		MergeTargetPolicy:      strings.TrimSpace(policy.Branch.MergeTarget.Value),
+		AllowRename:            factOr(policy.Branch.AllowRename, "yes"),
+		MergeConfirmPolicy:     factOr(policy.Branch.MergeConfirm, "ask"),
+		ScopeSlug:              strings.TrimSpace(input.Target.ScopeSlug),
+		TicketStem:             strings.TrimSpace(input.Target.TicketStem),
 	}
 	if n.TicketStem != "" {
 		if n.ScopeSlug != "" {
@@ -614,94 +738,16 @@ func normalizeImplementFacts(input implementInput) (normalizedImplementFacts, []
 	return n, warnings
 }
 
-func deriveImplementDelegation(n normalizedImplementFacts) string {
-	if n.ExplicitDirectEditRequest == "yes" {
-		return "direct-edit"
-	}
-	if n.ExplicitDelegationRequest == "yes" {
-		return "delegated"
-	}
-	if automaticDirectEditEligible(n) {
-		return "direct-edit"
-	}
-	return "delegated"
-}
-
-func automaticDirectEditEligible(n normalizedImplementFacts) bool {
-	return n.Span == "single-file" &&
-		n.Surface == "internal" &&
-		n.NewPublicSymbol == "no" &&
-		n.NewTypeContract == "no" &&
-		n.TestSurface != "new-files"
-}
-
-func automaticLeadOnlyReviewEligible(n normalizedImplementFacts, delegation string) bool {
-	return delegation == "direct-edit" &&
-		n.CorrectnessRisk == "low" &&
-		n.FitRisk == "low" &&
-		n.TestRisk == "low" &&
-		n.SecurityOrContractRisk == "low"
-}
-
-func currentBranchImplementEligible(targetKind string, n normalizedImplementFacts, obs implementBranchObservation) bool {
-	return targetKind == "inline" &&
-		n.LowCeremonyIfSafe == "yes" &&
-		validObservedBranch(obs.CurrentBranch) &&
-		validObservedStartCommit(obs.StartCommit) &&
-		!strings.HasPrefix(obs.CurrentBranch, "impl/") &&
-		!strings.HasPrefix(obs.CurrentBranch, "implement/") &&
-		n.ExplicitDelegationRequest != "yes" &&
-		automaticDirectEditEligible(n) &&
-		n.TestSurface != "unknown" &&
-		n.ReviewOverride == "auto" &&
-		automaticLeadOnlyReviewEligible(n, "direct-edit") &&
-		n.DocModePolicy == "skip-with-reason" &&
-		n.DocReason != ""
-}
-
-func validObservedStartCommit(commit string) bool {
-	commit = strings.TrimSpace(commit)
-	return commit != "" && commit != "(initial)"
-}
-
 func validObservedBranch(branch string) bool {
 	branch = strings.TrimSpace(branch)
 	return branch != "" && branch != "(detached)"
 }
 
-func deriveResolvedImplementBranchPlan(targetKind string, n normalizedImplementFacts, obs implementBranchObservation) implementBranchPlan {
-	if !currentBranchImplementEligible(targetKind, n, obs) {
-		return deriveImplementBranchPlan(n, obs)
-	}
-	return implementBranchPlan{
-		Action:        "current",
-		CurrentBranch: obs.CurrentBranch,
-		StartCommit:   obs.StartCommit,
-		Reason:        "inline target independently qualifies for current-branch completion",
-	}
-}
-
-func deriveImplementPlanDepth(n normalizedImplementFacts, delegation, targetKind string) string {
-	if delegation != "delegated" {
-		return "none"
-	}
-	// Delegated preparation defaults to a survey plan. A delegated ticket
-	// target skips the survey planner (plan_depth: none, lead-written stub)
-	// only when all four complexity facts hold at their strongest value; any
-	// weaker value (including unknown) on any one keeps survey. Inline targets
-	// always keep survey — an inline contract has no file for a stub to point
-	// at (Decision 3).
-	if targetKind == "ticket" &&
-		n.ChangePoints == "clear" &&
-		(n.ReusePoints == "confirmed" || n.ReusePoints == "not-applicable") &&
-		n.StrategyShape == "single-obvious" &&
-		n.SideEffectRisk == "low" {
-		return "none"
-	}
-	return "survey"
-}
-
-func deriveImplementReviewAlloc(n normalizedImplementFacts, delegation string) string {
+// deriveImplementReviewAlloc allocates independent review. Review is always
+// dispatched: the caller executes the change, so no allocation may resolve to
+// the caller reviewing its own work. Only the breadth varies — one full-scope
+// reviewer, or a risk-keyed partition.
+func deriveImplementReviewAlloc(n normalizedImplementFacts) string {
 	if n.ReviewOverride != "" && n.ReviewOverride != "auto" {
 		switch n.ReviewOverride {
 		case "partitioned":
@@ -709,9 +755,6 @@ func deriveImplementReviewAlloc(n normalizedImplementFacts, delegation string) s
 		default:
 			return n.ReviewOverride
 		}
-	}
-	if automaticLeadOnlyReviewEligible(n, delegation) {
-		return "lead-only"
 	}
 	parts := implementReviewPartitions(n)
 	if len(parts) <= 1 {
@@ -927,7 +970,27 @@ func finishImplementBranchPlanTail(plan implementBranchPlan, n normalizedImpleme
 	return plan
 }
 
-func implementNextInstruction(verdict implementVerdict) string {
+// implementNextInstruction leads with the route-facts outcome when there is
+// one to report, because it is the sentence that decides whether the run
+// proceeds at all: a worker's stop protocol keys off "missing route facts",
+// and an ad-hoc run needs to be told that its contract is the description it
+// was handed rather than a plan it should go looking for.
+func implementNextInstruction(verdict implementVerdict, source implementRouteFactsSource) string {
+	return implementRouteFactsPreamble(source) + implementBranchNextInstruction(verdict)
+}
+
+func implementRouteFactsPreamble(source implementRouteFactsSource) string {
+	switch {
+	case routeFactsMissing(source.Status):
+		return fmt.Sprintf("Stop and report missing route facts: %s. They are populated once at ticket authoring, so a run that reaches this point was handed over out of order; do not re-derive them here. If you continue anyway, note that every fact below resolved to unknown. ", source.Detail)
+	case source.Status == "ad-hoc":
+		return "Ad-hoc target: the description in your task block is the contract, and no ticket is read. Proceed from it and stop only on your stop protocol's closed list. "
+	default:
+		return ""
+	}
+}
+
+func implementBranchNextInstruction(verdict implementVerdict) string {
 	nextAfterBranch := implementNextAfterBranch(verdict)
 	switch verdict.BranchPlan.Action {
 	case "stop":
@@ -943,61 +1006,40 @@ func implementNextInstruction(verdict implementVerdict) string {
 		return fmt.Sprintf("Rename the current branch to %s before source edits, then %s", verdict.BranchPlan.TargetBranch, nextAfterBranch)
 	case "continue":
 		return fmt.Sprintf("Continue on %s, then %s", verdict.BranchPlan.CurrentBranch, nextAfterBranch)
-	case "current":
-		return fmt.Sprintf("Keep the current branch %s, omit merge work, then %s", verdict.BranchPlan.CurrentBranch, nextAfterBranch)
 	default:
 		return "Stop before source edits. Report that the branch action is unrecognized."
 	}
 }
 
 func implementNextAfterBranch(verdict implementVerdict) string {
-	if verdict.Delegation == "direct-edit" {
-		return fmt.Sprintf("run prep guardrails, apply direct edits in the lead context, run %s review, and complete %s documentation gates.", verdict.ReviewAlloc, verdict.DocMode)
-	}
-	return fmt.Sprintf("execute the installed delegated Prep and Edit todos, %s review, and %s documentation gates in order.", verdict.ReviewAlloc, verdict.DocMode)
+	return fmt.Sprintf("execute the installed Prep and Edit todos, %s review, and the final action gate in order.", verdict.ReviewAlloc)
 }
 
-func plannerAuthorityInputs(targetKind string) string {
-	if strings.EqualFold(strings.TrimSpace(targetKind), "inline") {
-		return `target_kind=inline, ticket_path="", selected_phase="", inline_contract, and plan_path`
-	}
-	return `target_kind=ticket, ticket_path, selected_phase, inline_contract="", and plan_path`
-}
-
-func implementConditions(n normalizedImplementFacts, branchAction string) []string {
+func implementConditions(n normalizedImplementFacts, source implementRouteFactsSource) []string {
 	conditions := []string{
 		"span=" + n.Span,
 		"surface=" + n.Surface,
 		"new-public-symbol=" + n.NewPublicSymbol,
 		"new-type-contract=" + n.NewTypeContract,
 		"test-surface=" + n.TestSurface,
-		"explicit-delegation-request=" + n.ExplicitDelegationRequest,
-		"explicit-direct-edit-request=" + n.ExplicitDirectEditRequest,
-		"change-points=" + n.ChangePoints,
 		"reuse-points=" + n.ReusePoints,
-		"strategy-shape=" + n.StrategyShape,
 		"side-effect-risk=" + n.SideEffectRisk,
 		"correctness-risk=" + n.CorrectnessRisk,
 		"fit-risk=" + n.FitRisk,
 		"test-risk=" + n.TestRisk,
 		"security-or-contract-risk=" + n.SecurityOrContractRisk,
-		"low-ceremony-if-safe=" + n.LowCeremonyIfSafe,
 		"review-override=" + n.ReviewOverride,
 		"doc-mode-policy=" + n.DocModePolicy,
 	}
-	if branchAction == "current" {
-		conditions = append(conditions, "merge-confirm=n/a")
-	} else {
-		conditions = append(conditions, "merge-confirm="+n.MergeConfirmPolicy)
-	}
+	conditions = append(conditions, "route-facts="+source.Status, "merge-confirm="+n.MergeConfirmPolicy)
 	if n.DocModePolicy == "skip-with-reason" {
 		conditions = append(conditions, "doc-reason="+n.DocReason)
 	}
 	return conditions
 }
 
-func implementReason(n normalizedImplementFacts, delegation, planDepth, reviewAlloc string) string {
-	return fmt.Sprintf("delegation=%s; plan-depth=%s; review=%s; surface=%s; span=%s; side-effect-risk=%s", delegation, planDepth, reviewAlloc, n.Surface, n.Span, n.SideEffectRisk)
+func implementReason(n normalizedImplementFacts, reviewAlloc string) string {
+	return fmt.Sprintf("delegation=%s; review=%s; surface=%s; span=%s; side-effect-risk=%s", implementDelegationMode, reviewAlloc, n.Surface, n.Span, n.SideEffectRisk)
 }
 
 func renderImplementRaw(result implementResult) string {
@@ -1012,12 +1054,12 @@ func renderImplementRaw(result implementResult) string {
 	}
 	fmt.Fprintf(&b, "Merge Target: %s\n", firstNonEmpty(v.BranchPlan.MergeTarget, "n/a"))
 	fmt.Fprintf(&b, "Merge Confirm: %s\n", implementMergeConfirmText(v.BranchPlan))
-	fmt.Fprintf(&b, "Plan Depth: %s\n", v.PlanDepth)
 	fmt.Fprintf(&b, "Review Allocation: %s\n", v.ReviewAlloc)
 	fmt.Fprintf(&b, "Doc Mode: %s\n\n", v.DocMode)
 	fmt.Fprintf(&b, "Next: %s\n\n", result.NextInstruction)
 	fmt.Fprintf(&b, "Target: %s\n", firstNonEmpty(result.Target.Label, result.Target.TicketStem, result.Target.TicketPath, "n/a"))
 	fmt.Fprintf(&b, "Scope: %s\n", result.Scope)
+	fmt.Fprintf(&b, "Route Facts: %s\n", result.RouteFacts)
 	fmt.Fprintf(&b, "Reason: %s\n\n", result.Reason)
 	b.WriteString("Conditions:\n")
 	for _, condition := range result.Conditions {
@@ -1037,10 +1079,10 @@ func renderImplementRaw(result implementResult) string {
 	fmt.Fprintf(&b, "- branch_plan.target_branch: %s\n", firstNonEmpty(result.Agenda.BranchPlan.TargetBranch, "n/a"))
 	fmt.Fprintf(&b, "- merge_target: %s\n", firstNonEmpty(result.Agenda.BranchPlan.MergeTarget, "n/a"))
 	fmt.Fprintf(&b, "- merge_confirm: %s\n", implementMergeConfirmText(result.Agenda.BranchPlan))
-	fmt.Fprintf(&b, "- plan_depth: %s\n", result.Agenda.PlanDepth)
 	fmt.Fprintf(&b, "- review_alloc: %s\n", result.Agenda.ReviewAlloc)
 	fmt.Fprintf(&b, "- need_review: %t\n", result.Agenda.NeedReview)
 	fmt.Fprintf(&b, "- doc_mode: %s\n", result.Agenda.DocMode)
+	fmt.Fprintf(&b, "- route_facts: %s\n", result.Agenda.RouteFacts)
 	if result.Agenda.DocMode == "skipped" {
 		fmt.Fprintf(&b, "- doc_reason: %s\n", result.Agenda.DocReason)
 	}
@@ -1048,9 +1090,6 @@ func renderImplementRaw(result implementResult) string {
 }
 
 func implementMergeConfirmText(plan implementBranchPlan) string {
-	if plan.Action == "current" {
-		return "n/a"
-	}
 	return firstNonEmpty(plan.MergeConfirm, "ask")
 }
 

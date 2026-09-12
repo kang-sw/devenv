@@ -15,7 +15,7 @@ import (
 // changes, only where these enum values live.
 var (
 	onOffEnum             = []string{"on", "off"}
-	preferMercenaryEnum   = []string{"on", "off", "hide"}
+	sageReviewEnum        = []string{"off", "ask", "auto"}
 	agentsTierEnum        = []string{"small", "medium", "large", "xlarge"}
 	agentsEffortEnum      = []string{"", "none", "low", "medium", "high", "xhigh"}
 	promptHarnessEnum     = []string{"claude", "codex", "pi", "*"}
@@ -93,7 +93,7 @@ func (e configKeyEntry) DefaultScope() wsconfig.Scope {
 	return wsconfig.DefaultScope(e.Key)
 }
 
-// configRegistry holds the 5 static per-key entries. The dynamic prompt.*
+// configRegistry holds the static per-key entries. The dynamic prompt.*
 // family is not represented here — it is generated per discovered override
 // point by promptKnobEntry at catalog-build time (see buildTuningCatalog).
 var configRegistry = []configKeyEntry{
@@ -111,19 +111,6 @@ var configRegistry = []configKeyEntry{
 		ResolverBacked:        true,
 	},
 	{
-		Key:        wsconfig.ItemWorkflowPreferMercenary,
-		WriterTool: "config.tune",
-		ValueFields: []tuningField{{
-			Name:        "value",
-			Description: "Desired mode: on, off, or hide.",
-			Enum:        preferMercenaryEnum,
-			Required:    true,
-		}},
-		NoAgentVisible:        false,
-		RequiresLeadAuthority: wsconfig.GlobalOnly(wsconfig.ItemWorkflowPreferMercenary),
-		ResolverBacked:        true,
-	},
-	{
 		Key:        wsconfig.ItemBootstrapAlarm,
 		WriterTool: "config.tune",
 		ResetTool:  "config.tune",
@@ -137,17 +124,21 @@ var configRegistry = []configKeyEntry{
 		ResolverBacked:        true,
 	},
 	{
-		Key:        wsconfig.ItemDocCoverageAlarm,
+		Key:        wsconfig.ItemSageReview,
 		WriterTool: "config.tune",
 		ResetTool:  "config.tune",
+		SelectorFields: []tuningField{{
+			Name:        "scope",
+			Description: "Storage scope. When omitted the write lands in the item's declared default scope (project).",
+			Enum:        wsconfig.ScopeSchemaEnum(),
+		}},
 		ValueFields: []tuningField{{
 			Name:        "value",
-			Description: "Desired mode: on or off. Omit when reset is true.",
-			Enum:        onOffEnum,
+			Description: "Review posture: off skips review, ask recommends it, auto requires it. Omit when reset is true.",
+			Enum:        sageReviewEnum,
 		}},
-		NoAgentVisible:        true,
-		RequiresLeadAuthority: wsconfig.GlobalOnly(wsconfig.ItemDocCoverageAlarm),
-		ResolverBacked:        true,
+		NoAgentVisible: true,
+		ResolverBacked: true,
 	},
 	{
 		// agents.tier has no wsconfig item key — it bypasses the resolver

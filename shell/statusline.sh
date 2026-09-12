@@ -93,6 +93,11 @@ fi
 
 # Single jq call to extract all fields (13 → 1 subprocess). Fed by here-string
 # rather than `echo "$input" |` so the pipeline does not add a second process.
+#
+# Adding a path-valued field here? Normalize its backslashes at its own point of
+# use. The `DIR`/`PROJECT_DIR` normalization far below covers only those two
+# names, so under Git Bash / WSL a new path field extracted here reaches every
+# consumer above that block still carrying Windows separators.
 IFS=$'\x1f' read -r MODEL DIR PROJECT_DIR COST TOKENS_USED CTX_MAX \
   _RATE_5HR RATE_5HR_RESETS RATE_7D_RAW RATE_7D_RESETS \
   CACHE_CREATE CACHE_READ EFFORT_LEVEL \
@@ -253,7 +258,8 @@ _DC_7D=$FG_DIMMER
 [[ "$DELTA_7D" == -* ]] && _DC_7D=114
 
 # Normalize Windows-style separators so basename/relative-path splitting
-# below (which only recognizes "/") works on backslash paths too.
+# below (which only recognizes "/") works on backslash paths too. This covers
+# DIR and PROJECT_DIR only; any other path field needs its own normalization.
 DIR="${DIR//\\//}"
 PROJECT_DIR="${PROJECT_DIR//\\//}"
 

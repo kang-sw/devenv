@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
-// tickets_sage.go relocates the lead-write-ticket "On: Sage Review Gate" /
+// tickets_sage.go relocates the ticket skill's "On: Sage Review Gate" /
 // "Design Review Stage" / "Completeness Review Stage" / "Ready-promotion
 // Aggregation" prose state-machine and its three Blocked Section Templates into
 // two Go tools: SageGate (posture resolution + gate decision) and SageRecord
@@ -42,7 +43,7 @@ type SageGateOptions struct {
 // SageGateResult is the gate decision. Action is the primary control value the
 // caller follows; the remaining fields are populated per action.
 type SageGateResult struct {
-	Action    string   // "skip" | "stop_blocked" | "ask" | "run" | "check_review_required"
+	Action    string   // "skip" | "stop_blocked" | "stop_missing_route_facts" | "ask" | "run" | "check_review_required"
 	AskPrompt string   // populated when Action == "ask"
 	Reviewers []string // populated when Action == "run"; subset of {"design","completeness"}
 	Mode      string   // "standalone" | "combined"; populated when Action == "run"
@@ -120,7 +121,7 @@ type stageOutcome struct {
 }
 
 // SageGate resolves the sage-review gate for a landing, porting the
-// lead-write-ticket gate + per-stage posture prose. resolvedSageReviewConfig is
+// ticket-skill gate + per-stage posture prose. resolvedSageReviewConfig is
 // the config.list sage_review value resolved by the caller (used only for the
 // missing/pending config-fallback branch).
 func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string) (SageGateResult, error) {
@@ -158,6 +159,9 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 	ticketAbs := filepath.Join(root, filepath.FromSlash(ticketRel))
 
 	if landing == "todo" {
+		if completenessRequired {
+			return SageGateResult{}, fmt.Errorf("landing todo is only for epic design settlement; actionable tickets run sage review at ready promotion")
+		}
 		// Design-stage-exempt categories (research/workset) skip entirely.
 		if !designRequired {
 			return SageGateResult{Action: "skip"}, nil
@@ -177,13 +181,30 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 	}
 
 	// landing == "ready" (including a requested todo/ -> ready/ promotion).
+	//
+	// Route facts gate the promotion ahead of every posture question: the
+	// implementation route resolver reads them off the ticket, so a ticket
+	// that reaches ready/ without them cannot be routed at all, and spending a
+	// completeness reviewer on it first would review a ticket that is
+	// structurally incomplete. Presence only — the reviewer judges the values.
+	// nonImplementationCategories are exempt here because they carry no phases
+	// and never reach an implementation run, so they have no facts to carry.
+	if missingRouteFacts(ticketAbs, stem) {
+		return SageGateResult{Action: "stop_missing_route_facts"}, nil
+	}
 	if !designRequired && !completenessRequired {
 		return SageGateResult{Action: "skip"}, nil
 	}
 	design, completeness := effectiveSageReviewPostures(frontmatter(ticketAbs))
 
 	if designRequired && !completenessRequired {
-		// epic: design-only. Skip when design posture is already terminal.
+		// epic: design-only. Retained deliberately even though TicketsMove now
+		// bars epics from the ready/ landing: sage_gate is decoupled from
+		// tickets.move, so a direct sage_gate(epic, landing: "ready") stays
+		// reachable and must remain design-only. Deleting this branch would let
+		// such a call fall through to the both-stages path below and run
+		// completeness on an epic, which never applies. Skip when design posture
+		// is already terminal.
 		if design == "completed" || design == "skipped" {
 			if design == "completed" {
 				if result, consumed, err := sageGateFreshnessResult(root, ticketRel, []string{"design"}, answer); err != nil {
@@ -227,7 +248,7 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 		return sageGateStandalone(ticketAbs, "completeness", "sage-review-completeness", completeness, resolvedSageReviewConfig, answer)
 	}
 	// Design not yet terminal: the never-skippable design invariant fires for a
-	// ticket that reached ready without a prior todo design pass. Run design +
+	// ticket entering its actionable ready-promotion boundary. Run design +
 	// completeness in combined mode.
 	return sageGateCombined(ticketAbs, design, completeness, resolvedSageReviewConfig, answer)
 }
@@ -462,6 +483,9 @@ func sageRecordSingle(ticketAbs, ticketRel, today, reviewer, field, heading stri
 
 	// pass or concern resolved to pass.
 	res.Posture[field] = "completed"
+	if err := retitleBlockedSectionsAsRounds(ticketAbs); err != nil {
+		return SageRecordResult{}, err
+	}
 	digest, err := sageReviewCurrentBodyDigest(ticketAbs)
 	if err != nil {
 		return SageRecordResult{}, err
@@ -518,6 +542,9 @@ func sageRecordCombined(ticketAbs, ticketRel, today string, verdicts []SageVerdi
 
 	res.Posture["sage-review-design"] = "completed"
 	res.Posture["sage-review-completeness"] = "completed"
+	if err := retitleBlockedSectionsAsRounds(ticketAbs); err != nil {
+		return SageRecordResult{}, err
+	}
 	digest, err := sageReviewCurrentBodyDigest(ticketAbs)
 	if err != nil {
 		return SageRecordResult{}, err
@@ -643,4 +670,45 @@ func appendOrReplaceBlockedSection(path, section string) error {
 	}
 	body := strings.TrimRight(strings.Join(kept, "\n"), "\n")
 	return os.WriteFile(path, []byte(body+"\n\n"+section+"\n"), 0o644)
+}
+
+// sageRoundHeadingPrefix is the heading a resolved Blocked section is retitled
+// to, so the round's finding-to-resolution tables survive as history.
+const sageRoundHeadingPrefix = "## Sage Review Round"
+
+// retitleBlockedSectionsAsRounds rewrites every "## Blocked (<date>)" heading
+// in the ticket as "## Sage Review Round N (<date>)", leaving each section body
+// verbatim. The pass-resolving write path calls it so a ticket stamped
+// completed no longer carries a heading that says it is blocked; the tables
+// below the heading are the round's finding-to-resolution record and are kept
+// rather than deleted. N continues the existing round numbering in the file, so
+// a third round lands below rounds 1 and 2. Callers must invoke it before
+// computing the body digest: the heading is part of the body the digest covers,
+// so retitling afterwards would leave the stamped digest stale and make
+// tickets_sage_freshness.go warn on an untouched ticket.
+func retitleBlockedSectionsAsRounds(path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(raw), "\n")
+	next := 1
+	for _, line := range lines {
+		if strings.HasPrefix(line, sageRoundHeadingPrefix) {
+			next++
+		}
+	}
+	changed := false
+	for i, line := range lines {
+		if !strings.HasPrefix(line, "## Blocked (") {
+			continue
+		}
+		lines[i] = sageRoundHeadingPrefix + " " + strconv.Itoa(next) + " " + strings.TrimPrefix(line, "## Blocked ")
+		next++
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
 }

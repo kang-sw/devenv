@@ -10,7 +10,7 @@ import (
 )
 
 // Literal Blocked Section Templates captured verbatim from
-// agents-plugin/rsrc/lead-write-ticket/lead-write-ticket.md (the three "Blocked
+// agents-plugin/rsrc/lead-ticket/lead-ticket.md (the three "Blocked
 // Section Template" fences) BEFORE they were deleted from the playbook. These
 // are the byte-identical regression fixtures for renderBlockedSection: the tool
 // must reproduce them exactly when rendered with the templates' placeholder
@@ -75,6 +75,12 @@ func TestRenderBlockedSectionByteIdentical(t *testing.T) {
 
 // writeSageTicket writes a ticket fixture into todo/ with the given sage
 // frontmatter fields and returns its absolute path.
+// sageRouteFactsSection is the minimal `## Route Facts` block every sage-gate
+// fixture carries. The gate refuses a ready/ landing without one, and these
+// tests' subject is posture resolution, not fact population — presence is all
+// they need.
+const sageRouteFactsSection = "## Route Facts\n\n| fact | value |\n|---|---|\n| scope.span | single-file |\n\n"
+
 func writeSageTicket(t *testing.T, root, stem string, fields map[string]string) string {
 	t.Helper()
 	var b strings.Builder
@@ -82,7 +88,7 @@ func writeSageTicket(t *testing.T, root, stem string, fields map[string]string) 
 	for k, v := range fields {
 		b.WriteString(k + ": " + v + "\n")
 	}
-	b.WriteString("---\n\n# Sample\n\nBody text.\n")
+	b.WriteString("---\n\n# Sample\n\n" + sageRouteFactsSection + "Body text.\n")
 	rel := filepath.Join("ai-docs", "tickets", "todo", stem+".md")
 	mustWrite(t, root, rel, b.String())
 	return filepath.Join(root, rel)
@@ -101,7 +107,7 @@ func TestSageGateIdeaSkips(t *testing.T) {
 }
 
 func TestSageGateTodoPostures(t *testing.T) {
-	stem := "260101-feat-sample"
+	stem := "260101-epic-sample"
 	cases := []struct {
 		name       string
 		field      string
@@ -157,6 +163,7 @@ func TestSageGateRequiredAndRecommendedCarryNonWaivableAdvisory(t *testing.T) {
 	stem := "260101-feat-sample"
 
 	t.Run("required-run-standalone", func(t *testing.T) {
+		stem := "260101-epic-sample"
 		root := t.TempDir()
 		writeSageTicket(t, root, stem, map[string]string{"sage-review-design": "required"})
 		res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "todo"}, "auto")
@@ -178,6 +185,7 @@ func TestSageGateRequiredAndRecommendedCarryNonWaivableAdvisory(t *testing.T) {
 	})
 
 	t.Run("recommended-ask-standalone", func(t *testing.T) {
+		stem := "260101-epic-sample"
 		root := t.TempDir()
 		writeSageTicket(t, root, stem, map[string]string{"sage-review-design": "recommended"})
 		res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "todo"}, "ask")
@@ -197,6 +205,7 @@ func TestSageGateRequiredAndRecommendedCarryNonWaivableAdvisory(t *testing.T) {
 	// accepted-recommended-design branch (which already attached it) — a
 	// "run" result is a run result regardless of which posture produced it.
 	t.Run("recommended-accept-run-standalone", func(t *testing.T) {
+		stem := "260101-epic-sample"
 		root := t.TempDir()
 		writeSageTicket(t, root, stem, map[string]string{"sage-review-design": "recommended"})
 		res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "todo", Answer: "yes"}, "ask")
@@ -268,6 +277,49 @@ func TestSageGateCategoryMatrix(t *testing.T) {
 	}
 }
 
+// TestSageGateReadyNonImplementationCategoriesSkipMissingRouteFacts pins
+// missingRouteFacts's category early-return: a non-implementation category
+// carries no ## Route Facts section, so the ready-landing route-facts gate must
+// not refuse it with stop_missing_route_facts. This is the branch the removed
+// "exempt category" case in tickets_route_facts_test.go once covered via
+// TicketsMove; that move path is now barred for these categories, so the direct
+// sage_gate path is where the exemption is exercised. writeSageTicket always
+// embeds a Route Facts section, so these fixtures are written without one on
+// purpose — that absence is the whole point of the test.
+func TestSageGateReadyNonImplementationCategoriesSkipMissingRouteFacts(t *testing.T) {
+	// research and workset need no stage at all, so they skip and never stop on
+	// route facts.
+	for _, category := range []string{"research", "workset"} {
+		t.Run(category, func(t *testing.T) {
+			root := t.TempDir()
+			stem := "260101-" + category + "-nofacts"
+			mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
+				"---\ntitle: Sample\n---\n\n# Sample\n\nBody text.\n")
+			res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, "auto")
+			if err != nil {
+				t.Fatalf("SageGate: %v", err)
+			}
+			if res.Action != "skip" {
+				t.Fatalf("%s ready (no route facts) action = %q, want skip (never stop_missing_route_facts)", category, res.Action)
+			}
+		})
+	}
+
+	// epic: design-only; a missing Route Facts section must not stop it either —
+	// it runs design standalone rather than refusing on route facts.
+	root := t.TempDir()
+	stem := "260101-epic-nofacts"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
+		"---\ntitle: Sample\nsage-review-design: required\n---\n\n# Sample\n\nBody text.\n")
+	res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, "auto")
+	if err != nil {
+		t.Fatalf("SageGate epic: %v", err)
+	}
+	if res.Action != "run" || res.Mode != "standalone" || len(res.Reviewers) != 1 || res.Reviewers[0] != "design" {
+		t.Fatalf("epic ready (no route facts) = %+v, want run/standalone/[design], never stop_missing_route_facts", res)
+	}
+}
+
 func TestSageGateReadyBothStages(t *testing.T) {
 	// Design terminal -> completeness stands alone.
 	root := t.TempDir()
@@ -329,8 +381,8 @@ func TestSageGateLegacyMigration(t *testing.T) {
 
 	// Legacy blocked -> stop_blocked at todo design gate.
 	root2 := t.TempDir()
-	writeSageTicket(t, root2, "260101-feat-legb", map[string]string{"sage-review": "blocked"})
-	res2, err := SageGate(root2, SageGateOptions{TicketStem: "260101-feat-legb", Landing: "todo"}, "auto")
+	writeSageTicket(t, root2, "260101-epic-legb", map[string]string{"sage-review": "blocked"})
+	res2, err := SageGate(root2, SageGateOptions{TicketStem: "260101-epic-legb", Landing: "todo"}, "auto")
 	if err != nil {
 		t.Fatalf("SageGate legacy blocked: %v", err)
 	}
@@ -341,8 +393,8 @@ func TestSageGateLegacyMigration(t *testing.T) {
 
 func TestSageGateDeclinePersistsSkipped(t *testing.T) {
 	root := t.TempDir()
-	path := writeSageTicket(t, root, "260101-feat-decl", map[string]string{"sage-review-design": "recommended"})
-	res, err := SageGate(root, SageGateOptions{TicketStem: "260101-feat-decl", Landing: "todo", Answer: "no"}, "ask")
+	path := writeSageTicket(t, root, "260101-epic-decl", map[string]string{"sage-review-design": "recommended"})
+	res, err := SageGate(root, SageGateOptions{TicketStem: "260101-epic-decl", Landing: "todo", Answer: "no"}, "ask")
 	if err != nil {
 		t.Fatalf("SageGate decline: %v", err)
 	}
@@ -357,8 +409,8 @@ func TestSageGateDeclinePersistsSkipped(t *testing.T) {
 
 func TestSageGateMissingPersistsResolvedPosture(t *testing.T) {
 	root := t.TempDir()
-	path := writeSageTicket(t, root, "260101-feat-miss", nil)
-	if _, err := SageGate(root, SageGateOptions{TicketStem: "260101-feat-miss", Landing: "todo"}, "auto"); err != nil {
+	path := writeSageTicket(t, root, "260101-epic-miss", nil)
+	if _, err := SageGate(root, SageGateOptions{TicketStem: "260101-epic-miss", Landing: "todo"}, "auto"); err != nil {
 		t.Fatalf("SageGate: %v", err)
 	}
 	body := readFileString(t, path)
@@ -401,7 +453,7 @@ func TestSageGateWarnsWhenCompletedReviewIsStale(t *testing.T) {
 	})
 	initSageFreshnessRepo(t, root)
 	baseline := commitSageFreshnessRepo(t, root, "stamp review")
-	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\n# Sample\n\nBody text changed.\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Body text changed.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	commitSageFreshnessRepo(t, root, "edit after review")
@@ -433,7 +485,7 @@ func TestSageGateStaleAnswerYesRerunsStaleStages(t *testing.T) {
 	})
 	initSageFreshnessRepo(t, root)
 	commitSageFreshnessRepo(t, root, "stamp review")
-	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\n# Sample\n\nBody text changed.\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Body text changed.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	commitSageFreshnessRepo(t, root, "edit after review")
@@ -465,7 +517,7 @@ func TestSageGateStaleAnswerNoWritesNothingAndResolvesRemaining(t *testing.T) {
 	})
 	initSageFreshnessRepo(t, root)
 	commitSageFreshnessRepo(t, root, "design completed")
-	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: required\n---\n\n# Sample\n\nChanged before completeness.\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: required\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Changed before completeness.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -510,7 +562,7 @@ func TestSageGateStaleAnswerYesSingleStageRerunsStandalone(t *testing.T) {
 	})
 	initSageFreshnessRepo(t, root)
 	commitSageFreshnessRepo(t, root, "design completed")
-	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: required\n---\n\n# Sample\n\nChanged before completeness.\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: required\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Changed before completeness.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -547,7 +599,7 @@ func TestSageGateStaleAnswerNoDoesNotSwallowRecommendedStage(t *testing.T) {
 	})
 	initSageFreshnessRepo(t, root)
 	commitSageFreshnessRepo(t, root, "design completed")
-	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: recommended\n---\n\n# Sample\n\nChanged before completeness.\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: recommended\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Changed before completeness.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -562,11 +614,11 @@ func TestSageGateStaleAnswerNoDoesNotSwallowRecommendedStage(t *testing.T) {
 
 func TestSageGateWarnsOnUncommittedPostStampEdit(t *testing.T) {
 	root := t.TempDir()
-	stem := "260101-feat-uncommitted"
+	stem := "260101-epic-uncommitted"
 	path := writeSageTicket(t, root, stem, map[string]string{"sage-review-design": "completed"})
 	initSageFreshnessRepo(t, root)
 	commitSageFreshnessRepo(t, root, "stamp review")
-	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\nUncommitted change.\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Uncommitted change.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -581,12 +633,12 @@ func TestSageGateWarnsOnUncommittedPostStampEdit(t *testing.T) {
 
 func TestSageGateWarnsOnStagedOnlyPostStampEdit(t *testing.T) {
 	root := t.TempDir()
-	stem := "260101-feat-staged"
+	stem := "260101-epic-staged"
 	rel := filepath.Join("ai-docs", "tickets", "todo", stem+".md")
 	path := writeSageTicket(t, root, stem, map[string]string{"sage-review-design": "completed"})
 	initSageFreshnessRepo(t, root)
 	commitSageFreshnessRepo(t, root, "stamp review")
-	staged := "---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\nStaged change.\n"
+	staged := "---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\n" + sageRouteFactsSection + "Staged change.\n"
 	if err := os.WriteFile(path, []byte(staged), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -611,7 +663,7 @@ func TestSageGateFreshnessIsStageSpecific(t *testing.T) {
 	})
 	initSageFreshnessRepo(t, root)
 	commitSageFreshnessRepo(t, root, "design completed")
-	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: required\n---\n\n# Sample\n\nChanged before completeness.\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: required\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Changed before completeness.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -627,11 +679,11 @@ func TestSageGateFreshnessIsStageSpecific(t *testing.T) {
 func TestSageGateFreshnessIgnoresSageOnlyAndStatusOnlyChanges(t *testing.T) {
 	t.Run("sage-posture-only", func(t *testing.T) {
 		root := t.TempDir()
-		stem := "260101-feat-sageonly"
+		stem := "260101-epic-sageonly"
 		path := writeSageTicket(t, root, stem, map[string]string{"sage-review-design": "required"})
 		initSageFreshnessRepo(t, root)
 		commitSageFreshnessRepo(t, root, "ticket before review")
-		if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\nBody text.\n"), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Body text.\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		commitSageFreshnessRepo(t, root, "stamp review")
@@ -687,7 +739,7 @@ func TestSageGateFreshnessFollowsStatusMoveThenContentEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 	runGit(t, root, "mv", oldRel, newRel)
-	if err := os.WriteFile(filepath.Join(root, newRel), []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\n# Sample\n\nBody changed in move.\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, newRel), []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Body changed in move.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	commitSageFreshnessRepo(t, root, "move and edit")
@@ -714,7 +766,7 @@ func TestSageGateFreshnessFollowsStatusMoveThenContentEdit(t *testing.T) {
 // re-stamp goes stale again.
 func TestSageGateDigestRestampClearsFreshness(t *testing.T) {
 	root := t.TempDir()
-	stem := "260101-feat-digest"
+	stem := "260101-epic-digest"
 	path := writeSageTicket(t, root, stem, nil)
 	initSageFreshnessRepo(t, root)
 	commitSageFreshnessRepo(t, root, "initial")
@@ -790,24 +842,24 @@ func TestSageGateDigestRestampClearsFreshness(t *testing.T) {
 // after that latest stamp reads stale.
 func TestSageGateLegacyFallbackFollowsLatestTransition(t *testing.T) {
 	root := t.TempDir()
-	stem := "260101-feat-legacy-latest"
+	stem := "260101-epic-legacy-latest"
 	rel := filepath.Join("ai-docs", "tickets", "todo", stem+".md")
 
 	// c1: initial non-completed state.
-	mustWrite(t, root, rel, "---\ntitle: Sample\nsage-review-design: required\n---\n\n# Sample\n\nBody v1.\n")
+	mustWrite(t, root, rel, "---\ntitle: Sample\nsage-review-design: required\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Body v1.\n")
 	initSageFreshnessRepo(t, root)
 	commitSageFreshnessRepo(t, root, "initial")
 
 	// c2: first completed stamp (transition A), on body v1.
-	mustWrite(t, root, rel, "---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\nBody v1.\n")
+	mustWrite(t, root, rel, "---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Body v1.\n")
 	commitSageFreshnessRepo(t, root, "stamp A")
 
 	// c3: reset to a non-terminal posture with a body change.
-	mustWrite(t, root, rel, "---\ntitle: Sample\nsage-review-design: required\n---\n\n# Sample\n\nBody v2.\n")
+	mustWrite(t, root, rel, "---\ntitle: Sample\nsage-review-design: required\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Body v2.\n")
 	commitSageFreshnessRepo(t, root, "reset")
 
 	// c4: second completed stamp (transition B, latest), on the new body.
-	mustWrite(t, root, rel, "---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\nBody v2.\n")
+	mustWrite(t, root, rel, "---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Body v2.\n")
 	commitSageFreshnessRepo(t, root, "stamp B")
 
 	// Current body (v2) matches transition B, not transition A (v1). Under
@@ -822,7 +874,7 @@ func TestSageGateLegacyFallbackFollowsLatestTransition(t *testing.T) {
 	}
 
 	// A later edit after transition B without a further stamp must go stale.
-	mustWrite(t, root, rel, "---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\nBody v3.\n")
+	mustWrite(t, root, rel, "---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\n"+sageRouteFactsSection+"Body v3.\n")
 	commitSageFreshnessRepo(t, root, "edit after B")
 
 	res, err = SageGate(root, SageGateOptions{TicketStem: stem, Landing: "todo"}, "auto")
@@ -841,7 +893,7 @@ func TestSageGateLegacyFallbackFollowsLatestTransition(t *testing.T) {
 // body-only comparison.
 func TestSageGateFrontmatterOnlyEditStaysFresh(t *testing.T) {
 	root := t.TempDir()
-	stem := "260101-feat-fmonly"
+	stem := "260101-epic-fmonly"
 	path := writeSageTicket(t, root, stem, nil)
 	initSageFreshnessRepo(t, root)
 	commitSageFreshnessRepo(t, root, "initial")
@@ -1119,7 +1171,7 @@ func TestSageRecordBlockedSectionReplacedOnSecondCycle(t *testing.T) {
 // where a lead recorded two "## " sections after the Blocked section.
 func TestAppendOrReplaceBlockedSectionExcisesOnlyItsOwnSection(t *testing.T) {
 	const section = "## Blocked (2026-07-29)\n\n### Design Reviewer — block\n\n| # | Title | Severity |\n|---|-------|----------|\n| 1 | fresh | high |"
-	const header = "---\ntitle: Sample\n---\n\n# Sample\n\nBody text.\n"
+	const header = "---\ntitle: Sample\n---\n\n# Sample\n\n" + sageRouteFactsSection + "Body text.\n"
 	const prior = "## Blocked (2026-07-27)\n\n### Design Reviewer — block\n\n| # | Title | Severity |\n|---|-------|----------|\n| 1 | stale | high |\n"
 	const later = "## Landing-order inversion (2026-07-28)\n\nLater note one.\n\n## Category C dissolved (2026-07-28)\n\nLater note two.\n"
 
@@ -1344,12 +1396,12 @@ func TestSageGateCombinedDegradesToDesignStandalone(t *testing.T) {
 // hits the findTicketPath not-found branch for both tools.
 func TestSageMissingTicketErrors(t *testing.T) {
 	root := t.TempDir()
-	writeSageTicket(t, root, "260101-feat-present", nil)
-	if _, err := SageGate(root, SageGateOptions{TicketStem: "260101-feat-ghost", Landing: "todo"}, "auto"); err == nil {
+	writeSageTicket(t, root, "260101-epic-present", nil)
+	if _, err := SageGate(root, SageGateOptions{TicketStem: "260101-epic-ghost", Landing: "todo"}, "auto"); err == nil {
 		t.Error("SageGate: expected not-found error for nonexistent stem")
 	}
 	if _, err := SageRecord(root, SageRecordOptions{
-		TicketStem: "260101-feat-ghost", Stage: "design",
+		TicketStem: "260101-epic-ghost", Stage: "design",
 		Verdicts: []SageVerdict{{Reviewer: "design", Verdict: "pass"}},
 	}); err == nil {
 		t.Error("SageRecord: expected not-found error for nonexistent stem")
@@ -1393,17 +1445,150 @@ func TestSageRecordValidationAndEmptyVerdicts(t *testing.T) {
 
 func TestSageGateInvalidInputs(t *testing.T) {
 	root := t.TempDir()
-	writeSageTicket(t, root, "260101-feat-x", nil)
+	writeSageTicket(t, root, "260101-epic-x", nil)
 	if _, err := SageGate(root, SageGateOptions{TicketStem: "not-a-stem", Landing: "todo"}, "auto"); err == nil {
 		t.Error("expected error for bad stem")
 	}
-	if _, err := SageGate(root, SageGateOptions{TicketStem: "260101-feat-x", Landing: "bogus"}, "auto"); err == nil {
+	if _, err := SageGate(root, SageGateOptions{TicketStem: "260101-epic-x", Landing: "bogus"}, "auto"); err == nil {
 		t.Error("expected error for bad landing")
 	}
-	if _, err := SageGate(root, SageGateOptions{TicketStem: "260101-feat-x", Landing: "todo", Answer: "maybe"}, "auto"); err == nil {
+	if _, err := SageGate(root, SageGateOptions{TicketStem: "260101-epic-x", Landing: "todo", Answer: "maybe"}, "auto"); err == nil {
 		t.Error("expected error for bad answer")
 	}
-	if _, err := SageRecord(root, SageRecordOptions{TicketStem: "260101-feat-x", Stage: "bogus"}); err == nil {
+	if _, err := SageRecord(root, SageRecordOptions{TicketStem: "260101-epic-x", Stage: "bogus"}); err == nil {
 		t.Error("expected error for bad stage")
+	}
+}
+
+// TestSageRecordPassRetitlesBlockedSection covers the round-2 pass after a
+// round-1 block: the pass write path retitles the stale "## Blocked (<date>)"
+// heading as "## Sage Review Round N (<date>)" instead of leaving a heading
+// that says "blocked" beside a `completed` posture. The round's tables are
+// kept verbatim (they carry the finding-to-resolution record), the retitle
+// happens before the digest is stamped so freshness stays clean, and round
+// numbering continues across a later block/pass cycle.
+func TestSageRecordPassRetitlesBlockedSection(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-epic-round"
+	path := writeSageTicket(t, root, stem, map[string]string{"sage-review-design": "required"})
+	initSageFreshnessRepo(t, root)
+	commitSageFreshnessRepo(t, root, "initial")
+
+	blockRound := func(today, title string) {
+		t.Helper()
+		if _, err := SageRecord(root, SageRecordOptions{
+			TicketStem: stem,
+			Stage:      "design",
+			Today:      today,
+			Verdicts:   []SageVerdict{{Reviewer: "design", Verdict: "block", Issues: []SageIssue{{Title: title, Severity: "high", Resolution: "missing"}}}},
+		}); err != nil {
+			t.Fatalf("SageRecord block (%s): %v", today, err)
+		}
+	}
+	passRound := func(today string) SageRecordResult {
+		t.Helper()
+		res, err := SageRecord(root, SageRecordOptions{
+			TicketStem: stem,
+			Stage:      "design",
+			Today:      today,
+			Verdicts:   []SageVerdict{{Reviewer: "design", Verdict: "pass"}},
+		})
+		if err != nil {
+			t.Fatalf("SageRecord pass (%s): %v", today, err)
+		}
+		return res
+	}
+
+	blockRound("2026-09-09", "first finding")
+	if !strings.Contains(readFileString(t, path), "## Blocked (2026-09-09)") {
+		t.Fatalf("round-1 block did not write a Blocked section:\n%s", readFileString(t, path))
+	}
+
+	res := passRound("2026-09-10")
+	if res.Posture["sage-review-design"] != "completed" {
+		t.Fatalf("posture = %v, want completed", res.Posture)
+	}
+	body := readFileString(t, path)
+	if strings.Contains(body, "## Blocked (") {
+		t.Fatalf("pass left a Blocked heading in the body:\n%s", body)
+	}
+	if !strings.Contains(body, "## Sage Review Round 1 (2026-09-09)") {
+		t.Fatalf("pass did not retitle the Blocked heading as round 1:\n%s", body)
+	}
+	const round1Body = "### Design Reviewer — block\n\n| # | Title | Severity | Resolution |\n|---|-------|----------|------------|\n| 1 | first finding | high | missing |"
+	if !strings.Contains(body, round1Body) {
+		t.Fatalf("round-1 body not preserved verbatim:\n%s", body)
+	}
+	if !strings.Contains(body, "sage-review-design: completed") {
+		t.Fatalf("frontmatter not updated to completed:\n%s", body)
+	}
+
+	// The digest stamped on the pass covers the retitled body, so the
+	// freshness check must not ask for a re-review of an untouched ticket.
+	commitSageFreshnessRepo(t, root, "round 1 resolved")
+	gate, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "todo"}, "auto")
+	if err != nil {
+		t.Fatalf("SageGate: %v", err)
+	}
+	if gate.Action == "check_review_required" {
+		t.Fatalf("retitled body left the recorded digest stale: %+v", gate)
+	}
+
+	// A second block/pass cycle numbers the next round 2 and keeps round 1.
+	blockRound("2026-09-11", "second finding")
+	passRound("2026-09-12")
+	body = readFileString(t, path)
+	if !strings.Contains(body, "## Sage Review Round 1 (2026-09-09)") || !strings.Contains(body, "## Sage Review Round 2 (2026-09-11)") {
+		t.Fatalf("second cycle did not continue round numbering:\n%s", body)
+	}
+	if strings.Index(body, "## Sage Review Round 1 (") > strings.Index(body, "## Sage Review Round 2 (") {
+		t.Fatalf("round 2 must follow round 1:\n%s", body)
+	}
+}
+
+func TestSageGateActionableTodoRejectsWithoutMutation(t *testing.T) {
+	for _, category := range []string{"feat", "bug", "refactor", "chore"} {
+		for _, posture := range []string{"", "required", "completed", "blocked", "skipped"} {
+			root := t.TempDir()
+			stem := "260101-" + category + "-backlog"
+			path := writeSageTicket(t, root, stem, map[string]string{"sage-review-design": posture})
+			before := readFileString(t, path)
+			result, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "todo"}, "auto")
+			if err == nil || !strings.Contains(err.Error(), "actionable tickets run sage review at ready promotion") {
+				t.Fatalf("result=%+v error=%v, want actionable todo rejection", result, err)
+			}
+			if got := readFileString(t, path); got != before {
+				t.Fatalf("rejected call mutated ticket: %s", got)
+			}
+		}
+	}
+}
+
+func TestSageGateReadyReviewsPopulatedBodyOnce(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-feat-promote"
+	path := writeSageTicket(t, root, stem, nil)
+	initSageFreshnessRepo(t, root)
+	result, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, "auto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Action != "run" || strings.Join(result.Reviewers, ",") != "design,completeness" {
+		t.Fatalf("want both stages once: %+v", result)
+	}
+	if _, err := SageRecord(root, SageRecordOptions{TicketStem: stem, Stage: "combined", Verdicts: []SageVerdict{{Reviewer: "design", Verdict: "pass"}, {Reviewer: "completeness", Verdict: "pass"}}}); err != nil {
+		t.Fatal(err)
+	}
+	result, err = SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, "auto")
+	if err != nil || result.Action != "skip" {
+		t.Fatalf("review repeated after stamp: %+v %v", result, err)
+	}
+	body := strings.Replace(readFileString(t, path), "single-file", "multi-file", 1)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err = SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, "auto")
+	if err != nil || result.Action != "check_review_required" {
+		t.Fatalf("post-stamp facts edit was not stale: %+v %v", result, err)
 	}
 }

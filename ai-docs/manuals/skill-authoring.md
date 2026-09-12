@@ -19,9 +19,8 @@ and the worker's context window; the lead's context is not the constraint.
 - Therefore every rule says when it applies and what the default is when it
   does not. A one-clause rationale is content, not overhead: the reader uses it
   to decide non-application.
-- Reader tiers differ. A **worker** (current-mainstream or previous-generation
-  flagship class, holding a whole ticket) gets outcome, constraints, and a
-  closed stop list. A **cheap-tier delegate** (fact population, survey, review
+- Reader tiers differ. A **worker** (at the risk-selected render tier, holding a
+  whole ticket) gets outcome, constraints, and a closed stop list. A **cheap-tier delegate** (fact population, survey, review
   scouting) gets a bounded task, pointer inputs, and a fixed output shape.
   Text written for one tier is wrong for the other.
 
@@ -76,8 +75,9 @@ not apply, or names its cheap default) · **Non-derivable** (a reader with the
 code, the tests, and the tool schemas could not infer it) · **Failure-cited**
 (names the failure it prevents, reproducible on the current tier) ·
 **Non-redundant** (no other line covers it) · **Resolvable downstream**
-(resolves in a project holding only what bootstrap installs; see `AGENTS.md`
-Architecture Rule 4 for what shipped text may not name).
+(resolves in a project holding only what bootstrap installs; see
+`ai-docs/manuals/shipped-surface-boundary.md` for what shipped text may not
+name).
 
 Grouped rules are allowed: `Group Name` / `- <rule>`. Group names classify;
 they are not rules.
@@ -132,6 +132,10 @@ every edit.
    restatement, **a rule that sends a careful reader down the heavier path when
    unsure**, and **a rule that prevents a failure the current tier does not
    commit**.
+   - Also flag over-negation (several exclusions where one positive owner or
+     default carries the contract), defensive disclaimers that change no
+     action or stop, and rationale that repeats a rule instead of narrowing
+     its scope.
 3. Per finding: quote, issue, severity, suggested rewrite or deletion.
 4. Classify `fix` · `risk accepted` (record cost) · `intentional difference` ·
    `out of scope`. Edit `fix` only. One cycle; a second only if a fix produced a

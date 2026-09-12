@@ -2,8 +2,9 @@
 what bootstrap installs.
 
 This test is the mechanical form of AGENTS.md Architecture Rule 4 ("Shipped
-surfaces are downstream-first"). The rule itself lives only in AGENTS.md; this
-file does not restate it. It scans the shipped trees for tokens that would fail
+surfaces are downstream-first"), whose enumeration lives in
+ai-docs/manuals/shipped-surface-boundary.md. This file does not restate it.
+It scans the shipped trees for tokens that would fail
 to resolve for a reader in a project that has never heard of this repository:
 real ticket stems, ai-docs file paths bootstrap does not install, bare
 ticket-number citations, commit hashes, and this repository's own layout /
@@ -106,10 +107,18 @@ def iter_ticket_stems(tracked):
     return stems
 
 
+# The spec layer was retired; its corpus lives under the tracked archive, and
+# closed tickets still cite its anchors. Rule 1 resolves stem-shaped tokens
+# against those anchors, so it reads them where they now are - scanning only the
+# retired live path would leave that half of the rule matching nothing and
+# silently stop catching anchor citations in shipped text.
+SPEC_ANCHOR_SOURCES = ("ai-docs/spec/", "ai-docs/.old/spec/")
+
+
 def iter_spec_anchors(tracked, repo_root: Path):
     anchors = set()
     for path in tracked:
-        if path.startswith("ai-docs/spec/") and path.endswith(".md"):
+        if path.startswith(SPEC_ANCHOR_SOURCES) and path.endswith(".md"):
             try:
                 text = (repo_root / path).read_text(encoding="utf-8")
             except (UnicodeDecodeError, OSError):
@@ -401,12 +410,11 @@ class ShippedSurfacesDownstreamNeutralTest(unittest.TestCase):
 
     def test_bootstrap_installed_set_is_current(self):
         # Derived from the migration scaffold block; asserted so a template edit
-        # that silently changes the set is caught. Both ai-docs/WORKFLOW.md and
-        # ai-docs/mental-model.md are listed there as concrete filenames.
-        self.assertEqual(
-            self.installed,
-            {"ai-docs/WORKFLOW.md", "ai-docs/mental-model.md"},
-        )
+        # that silently changes the set is caught. ai-docs/WORKFLOW.md is the
+        # only concrete filename the scaffold lists; everything else there is a
+        # directory. ai-docs/mental-model.md was the second entry until the
+        # template stopped scaffolding the spec and mental-model layers.
+        self.assertEqual(self.installed, {"ai-docs/WORKFLOW.md"})
 
     def test_go_string_extractor_excludes_comments(self):
         # Comment-exclusion is load-bearing: real comments naming ticket stems

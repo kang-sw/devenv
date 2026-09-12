@@ -126,7 +126,7 @@ func TestTicketGraphResolvesHiddenRelatedTargetUnderScope(t *testing.T) {
 	// Live control: "no FIX for the hidden stem" alone cannot distinguish a
 	// correctly resolved hidden stem from an integrity check that silently
 	// stopped running over a partial board.
-	requireContainsFlat(t, text, "related: `260199-feat-absent` resolves to no ticket stem and no spec anchor.")
+	requireContainsFlat(t, text, "related: `260199-feat-absent` resolves to no ticket stem.")
 }
 
 // --- F2: epic with a hidden open child -------------------------------------
@@ -497,7 +497,7 @@ func TestGateDefersWhenWorktreeConfigDisagreesWithRepositoryConfig(t *testing.T)
 func TestTicketsStatusAndFindResolveHiddenTickets(t *testing.T) {
 	f := newGraphFixture(t)
 	f.ticket("todo", "260101-feat-visible")
-	f.ticketWithBody("todo", "260102-feat-hidden", "Body mentioning 260505-spec-sasquatch.\n")
+	f.ticketWithBody("todo", "260102-feat-hidden", "Body mentioning 260505-feat-sasquatch.\n")
 	f.scope([]string{"todo"}, "ai-docs/tickets/todo/260101-feat-visible.md")
 
 	t.Run("status resolves", func(t *testing.T) {
@@ -522,10 +522,10 @@ func TestTicketsStatusAndFindResolveHiddenTickets(t *testing.T) {
 		}
 	})
 
-	// The index-body branch is what references.trace's spec branch depends on:
-	// the query matches text that exists only inside the hidden ticket's body.
+	// The index-body branch: the query matches text that exists only inside
+	// the hidden ticket's body, which no filesystem read would ever see.
 	t.Run("find resolves bodies", func(t *testing.T) {
-		tickets, err := TicketsFind(f.root, TicketFindOptions{Query: "260505-spec-sasquatch", Resolve: true})
+		tickets, err := TicketsFind(f.root, TicketFindOptions{Query: "260505-feat-sasquatch", Resolve: true})
 		if err != nil {
 			t.Fatalf("TicketsFind returned error: %v", err)
 		}
@@ -535,7 +535,7 @@ func TestTicketsStatusAndFindResolveHiddenTickets(t *testing.T) {
 	})
 
 	t.Run("find without resolve stays discovery", func(t *testing.T) {
-		tickets, err := TicketsFind(f.root, TicketFindOptions{Query: "260505-spec-sasquatch"})
+		tickets, err := TicketsFind(f.root, TicketFindOptions{Query: "260505-feat-sasquatch"})
 		if err != nil {
 			t.Fatalf("TicketsFind returned error: %v", err)
 		}

@@ -18,15 +18,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
+	"github.com/kang-sw/devenv/internal/wsgit"
+	"github.com/kang-sw/devenv/internal/wskey"
 )
 
-// TestMain defaults WS_RSRC_ROOT to the shipped rsrc tree so agent registration
-// can load delegate-orientation (260611 Phase 6b moved it off the wsprompt
-// go:embed bundle). Tests that exercise a custom rsrc tree override it per-test
-// with t.Setenv.
+// TestMain defaults WS_RSRC_ROOT to the shipped rsrc tree so playbook and
+// convention loads resolve bundled resources. Tests that exercise a custom
+// rsrc tree override it per-test with t.Setenv.
 //
 // It also defaults WS_CACHE_HOME to a throwaway temp dir so the file-backed
 // session store (keys/<key>.json under the cache root) never reads or writes the
@@ -50,40 +50,6 @@ func runTestMain(m *testing.M) int {
 		_ = os.Setenv("WS_CACHE_HOME", dir)
 	}
 	return m.Run()
-}
-
-func TestFormatBroadDocumentationFindGroupsEvidence(t *testing.T) {
-	specs := []wsdoc.SpecInfo{{Path: "ai-docs/spec/plugin-runtime.md", MatchScore: 18, Matches: []wsdoc.MatchEvidence{{Line: 18, MatchedTerms: []string{"marketplace"}, Snippet: "marketplace release packaging"}}}}
-	text := formatSpecFind("wsflow installer marketplace release packaging", specs)
-	if !strings.Contains(text, `1 candidate spec for query="wsflow installer marketplace release packaging"`) || !strings.Contains(text, "ai-docs/spec/plugin-runtime.md	score=18	hits=1") || !strings.Contains(text, "  18: marketplace release packaging") {
-		t.Fatalf("spec find text = %q", text)
-	}
-	if strings.Contains(text, "matched:") {
-		t.Fatalf("spec find text included matched line: %q", text)
-	}
-
-	models := []wsdoc.MentalModelInfo{{Path: "ai-docs/mental-model/runtime.md", MatchScore: 9, Matches: []wsdoc.MatchEvidence{{Line: 7, MatchedTerms: []string{"runtime", "cli"}, Snippet: "runtime CLI mirror"}}}}
-	text = formatMentalModelFind("runtime readable CLI mirror", models)
-	if !strings.Contains(text, `1 candidate mental model for query="runtime readable CLI mirror"`) || !strings.Contains(text, "ai-docs/mental-model/runtime.md	score=9	hits=1") || !strings.Contains(text, "  7: runtime CLI mirror") {
-		t.Fatalf("mental model find text = %q", text)
-	}
-}
-
-func TestFormatBroadDocumentationFindBoundsEvidenceAndGuidesZeroResults(t *testing.T) {
-	matches := []wsdoc.MatchEvidence{}
-	for i := 1; i <= 5; i++ {
-		matches = append(matches, wsdoc.MatchEvidence{Line: i, MatchedTerms: []string{"workflow"}, Snippet: fmt.Sprintf("workflow line %d", i)})
-	}
-	specs := []wsdoc.SpecInfo{{Path: "ai-docs/spec/a.md", MatchScore: 5, Matches: matches}}
-	text := formatSpecFind("workflow", specs)
-	if !strings.Contains(text, "showing subset") || strings.Count(text, "workflow line") != maxFindTextEvidencePerDoc {
-		t.Fatalf("bounded spec find text = %q", text)
-	}
-
-	text = formatSpecFind("absent phrase", nil)
-	if !strings.Contains(text, "0 candidate specs") || !strings.Contains(text, "retry with shorter noun phrases") {
-		t.Fatalf("zero-result text = %q", text)
-	}
 }
 
 func toolPropertiesByName(t *testing.T, listLine, toolName string) map[string]any {
@@ -286,7 +252,6 @@ func TestServeStdioDefaultsToLeadToolsWithoutRootAuthorityDetection(t *testing.T
 	useLeadProfile(t)
 	root := t.TempDir()
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	mustEnableMercenary(t)
 
 	var out bytes.Buffer
 	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(
@@ -295,8 +260,10 @@ func TestServeStdioDefaultsToLeadToolsWithoutRootAuthorityDetection(t *testing.T
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	if !strings.Contains(byID["1"], "mercenary.register") || !strings.Contains(byID["1"], "mercenary.call") || !strings.Contains(byID["1"], "config.list") {
-		t.Fatalf("default profile hid lead tools: %s", byID["1"])
+	for _, name := range []string{"playbook.render", "git.commit", "config.list"} {
+		if !strings.Contains(byID["1"], name) {
+			t.Fatalf("default profile hid lead tool %s: %s", name, byID["1"])
+		}
 	}
 }
 
@@ -357,8 +324,8 @@ func TestNamespaceTermsSubstitution(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"use ws/specs.query here", "use wsflow/specs.query here"},
-		{"call ws:lead-implement skill", "call wsflow:lead-implement skill"},
+		{"use ws/tickets.query here", "use wsflow/tickets.query here"},
+		{"call ws:lead-run skill", "call wsflow:lead-run skill"},
 		{"rows: many items", "rows: many items"},
 		{"news/feed here", "news/feed here"},
 		{"workflows/steps", "workflows/steps"},
@@ -391,17 +358,11 @@ func TestWsflowPlaybookRenderAllLegacyStemsFromRsrc(t *testing.T) {
 	s := NewServer(root, "test")
 
 	for _, stem := range []string{
-		"reference-discovery", "plan-populator-survey",
-		"plan-populator-research", "code-reviewer", "mental-model-updater",
+		"reference-discovery", "code-reviewer",
 	} {
 		t.Run(stem, func(t *testing.T) {
 			context := map[string]string{"bridge_probe": "context for " + stem}
-			if stem == "plan-populator-survey" || stem == "plan-populator-research" {
-				for key, value := range shippedPlanPopulatorContext() {
-					context[key] = value
-				}
-			}
-			path, _, err := renderPlaybook(s, shippedRsrcRootForTest(), root, stem, context, wsconfig.Options{}, "", "", false, "", nil)
+			path, _, err := renderPlaybook(s, shippedRsrcRootForTest(), root, stem, context, wsconfig.Options{}, "", "", "", nil)
 			if err != nil {
 				t.Fatalf("renderPlaybook(%s): %v", stem, err)
 			}
@@ -419,7 +380,7 @@ func TestWsflowPlaybookRenderAllLegacyStemsFromRsrc(t *testing.T) {
 			if !strings.Contains(text, "## Render Context") || !strings.Contains(text, "- bridge_probe: context for "+stem) {
 				t.Errorf("rendered %s did not append legacy context block:\n%s", stem, text)
 			}
-			if strings.Contains(text, "ws.mercenary.") || strings.Contains(text, "exec.") {
+			if strings.Contains(text, "exec.") {
 				t.Errorf("rendered %s exposed hidden full-ws guidance:\n%s", stem, text)
 			}
 		})
@@ -497,7 +458,6 @@ func TestKeyedScopeGatesRestrictedTools(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	mustEnableMercenary(t)
 
 	server := NewServer(root, "test")
 	leafKey, err := server.sessions.mint(root, roleLeaf, "")
@@ -508,7 +468,7 @@ func TestKeyedScopeGatesRestrictedTools(t *testing.T) {
 	// tools/list advertises the full lead surface (schema visibility is advisory;
 	// the keyed call gate is the enforcement). Restricted tools remain visible.
 	listResp := callToolsList(t, server)
-	for _, name := range []string{"mercenary.status", "config.tune", "config.list", "runtime.read"} {
+	for _, name := range []string{"config.tune", "config.list", "runtime.read"} {
 		if !strings.Contains(listResp, name) {
 			t.Fatalf("tools/list must advertise full lead surface, missing %s: %s", name, listResp)
 		}
@@ -518,13 +478,6 @@ func TestKeyedScopeGatesRestrictedTools(t *testing.T) {
 	}
 
 	// A leaf-scoped key is rejected by the keyed gate for restricted tools.
-	deniedStatus := callToolOnce(t, server, 2, "mercenary.status", map[string]any{
-		"session_key": leafKey,
-		"name":        "impl",
-	})
-	if !strings.Contains(deniedStatus, "tool not available") {
-		t.Fatalf("leaf key not rejected for ws.mercenary.status: %s", deniedStatus)
-	}
 	deniedTier := callToolOnce(t, server, 3, "config.tune", map[string]any{
 		"session_key": leafKey,
 		"key":         "agents.tier",
@@ -563,7 +516,7 @@ func TestKeyedScopeGatesRestrictedTools(t *testing.T) {
 func TestExplicitAllowedToolsCannotBypassEffectiveRole(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
-	t.Setenv("WS_MCP_ALLOWED_TOOLS", "runtime.read,ws.mercenary.status,config.list")
+	t.Setenv("WS_MCP_ALLOWED_TOOLS", "runtime.read,config.list")
 
 	server := NewServer(root, "test")
 	leafKey, err := server.sessions.mint(root, roleLeaf, "")
@@ -585,15 +538,8 @@ func TestExplicitAllowedToolsCannotBypassEffectiveRole(t *testing.T) {
 		t.Fatalf("allowlist+leaf wrongly rejected runtime.read: %s", allowedInfo)
 	}
 
-	// ws.mercenary.status and config.list are allowlisted but DENIED by the leaf scope.
-	// The keyed gate must still reject them — the allowlist cannot regain them.
-	deniedStatus := callToolOnce(t, server, 3, "mercenary.status", map[string]any{
-		"session_key": leafKey,
-		"name":        "impl",
-	})
-	if !strings.Contains(deniedStatus, "tool not available") {
-		t.Fatalf("allowlist let leaf-denied ws.mercenary.status through: %s", deniedStatus)
-	}
+	// config.list is allowlisted but DENIED by the leaf scope. The keyed gate
+	// must still reject it — the allowlist cannot regain it.
 	deniedShow := callToolOnce(t, server, 4, "config.list", map[string]any{
 		"session_key": leafKey,
 	})
@@ -616,15 +562,6 @@ func mustWrite(t *testing.T, root, rel, text string) {
 	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func mustMarshalForTest(t *testing.T, value any) []byte {
-	t.Helper()
-	raw, err := json.Marshal(value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return raw
 }
 
 func assertStringAbsentFromTree(t *testing.T, root, needle string) {
@@ -715,6 +652,87 @@ func initTicketRepo(t *testing.T, stem string) string {
 	return root
 }
 
+func TestActiveImplTicketAndGitStatusFormatting(t *testing.T) {
+	root := t.TempDir()
+	initGit(t, root)
+	stem := "260911-feat-active-impl-owner"
+	suffix := wskey.Derive(stem, 3)
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "ready", stem+".md"), "---\ntitle: Active owner\n---\n")
+
+	active, err := activeImplTicket(root, "impl/feature/base/"+suffix)
+	if err != nil {
+		t.Fatalf("activeImplTicket active: %v", err)
+	}
+	if active == nil || active.State != "active" || active.Stem != stem || active.Status != "ready" {
+		t.Fatalf("activeImplTicket = %#v, want ready %q", active, stem)
+	}
+	status := wsgit.StatusResult{Branch: wsgit.BranchStatus{Head: "impl/feature/base/" + suffix}, Clean: true}
+	if got := formatGitStatusWithImplTicket(status, active); !strings.Contains(got, "active ticket: "+stem+" (ready)\n") {
+		t.Fatalf("active text = %q", got)
+	}
+
+	missing, err := activeImplTicket(root, "impl/feature/base/no-match")
+	if err != nil || missing == nil || missing.State != "missing" {
+		t.Fatalf("missing = %#v, %v", missing, err)
+	}
+	if got := formatGitStatusWithImplTicket(status, missing); !strings.Contains(got, "no active ticket matches") {
+		t.Fatalf("missing text = %q", got)
+	}
+
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"), "---\ntitle: Duplicate owner\n---\n")
+	ambiguous, err := activeImplTicket(root, "impl/feature/base/"+suffix)
+	if err != nil || ambiguous == nil || ambiguous.State != "ambiguous" {
+		t.Fatalf("ambiguous = %#v, %v", ambiguous, err)
+	}
+	if got := formatGitStatusWithImplTicket(status, ambiguous); !strings.Contains(got, "multiple active tickets match") {
+		t.Fatalf("ambiguous text = %q", got)
+	}
+
+	nonImpl, err := activeImplTicket(root, "feature/base")
+	if err != nil || nonImpl != nil {
+		t.Fatalf("non-impl = %#v, %v", nonImpl, err)
+	}
+	if got := formatGitStatusWithImplTicket(status, nil); strings.Contains(got, "ticket:") || strings.Contains(got, "nudge:") {
+		t.Fatalf("non-impl format changed: %q", got)
+	}
+}
+
+func TestActiveImplTicketFailsClosedOnUnreadableInventory(t *testing.T) {
+	root := t.TempDir()
+	initGit(t, root)
+	if _, err := activeImplTicket(root, "impl/feature/base/no-match"); err == nil {
+		t.Fatal("activeImplTicket unexpectedly treated a missing ticket inventory as missing ownership")
+	}
+}
+
+func TestServeStdioGitStatusImplTicketContract(t *testing.T) {
+	useLeadProfile(t)
+	for _, status := range []string{"idea", "todo", "ready"} {
+		t.Run(status, func(t *testing.T) {
+			root := t.TempDir()
+			initGit(t, root)
+			stem := "260911-feat-impl-status-" + status
+			mustWrite(t, root, filepath.Join("ai-docs", "tickets", status, stem+".md"), "---\ntitle: Owner\n---\n")
+			runGit(t, root, "add", ".")
+			runGit(t, root, "commit", "-m", "ticket")
+			runGit(t, root, "checkout", "-b", "impl/base/"+wskey.Derive(stem, 3))
+			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+			server := NewServer(root, "test")
+			key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+			text := callToolWithKey(t, server, 2, key, "git.status", nil)
+			jsonText := callToolWithKey(t, server, 3, key, "git.status", map[string]any{"format": "json"})
+			if !strings.Contains(text, "active ticket: "+stem+" ("+status+")") {
+				t.Fatalf("text status missing active owner: %s", text)
+			}
+			for _, want := range []string{`"impl_ticket"`, `"state":"active"`, `"stem":"` + stem + `"`, `"status":"` + status + `"`} {
+				if !strings.Contains(jsonText, want) {
+					t.Fatalf("JSON status missing %s: %s", want, jsonText)
+				}
+			}
+		})
+	}
+}
+
 func TestServeStdioTicketToolsRejectSpecStemArgument(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -773,74 +791,6 @@ func TestServeStdioTicketsQueryPointResolveMatchesRemovedStatusShape(t *testing.
 	}
 }
 
-// TestServeStdioSpecsQueryPointResolveMatchesRemovedStatusShape is the specs
-// counterpart of TestServeStdioTicketsQueryPointResolveMatchesRemovedStatusShape:
-// specs.query(spec_stem: X) alone (no query, no ticket_stem) must error on a
-// not-found anchor exactly like the removed specs.status did, and a found
-// anchor's text/JSON must use SpecAnchorStatus's spec_stem/locations/files
-// shape (formatSpecStatus), not SpecsFind's per-file formatSpecs listing.
-func TestServeStdioSpecsQueryPointResolveMatchesRemovedStatusShape(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/spec/demo.md", "# Demo\n\n## Feature {#260504-spec-demo}\n")
-	initGit(t, root)
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-
-	notFoundInput := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"specs.query","arguments":{"spec_stem":"260504-missing"}}}` + "\n"
-	var out bytes.Buffer
-	server := NewServer(root, "test")
-	if err := serveStdioWithSession(t, server, root, notFoundInput, &out); err != nil {
-		t.Fatalf("ServeStdio returned error: %v", err)
-	}
-	if !strings.Contains(out.String(), `"isError":true`) || !strings.Contains(out.String(), "spec anchor not found: 260504-missing") {
-		t.Fatalf("specs.query(spec_stem:) not-found case did not error like the removed specs.status: %s", out.String())
-	}
-
-	textInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"specs.query","arguments":{"spec_stem":"260504-spec-demo"}}}` + "\n"
-	out.Reset()
-	if err := serveStdioWithSession(t, server, root, textInput, &out); err != nil {
-		t.Fatalf("ServeStdio returned error: %v", err)
-	}
-	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["2"])
-	if !strings.Contains(text, "spec_stem:") || !strings.Contains(text, "locations:") || !strings.Contains(text, "files:") {
-		t.Fatalf("specs.query(spec_stem:) text did not use the removed specs.status's spec_stem/locations/files shape: %s", text)
-	}
-
-	jsonInput := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"specs.query","arguments":{"spec_stem":"260504-spec-demo","format":"json"}}}` + "\n"
-	out.Reset()
-	if err := serveStdioWithSession(t, server, root, jsonInput, &out); err != nil {
-		t.Fatalf("ServeStdio returned error: %v", err)
-	}
-	jsonText := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["3"])
-	var obj map[string]any
-	if err := json.Unmarshal([]byte(jsonText), &obj); err != nil {
-		t.Fatalf("specs.query(spec_stem:) json mode is not a bare object like the removed specs.status: %v\n%s", err, jsonText)
-	}
-	if obj["spec_stem"] != "260504-spec-demo" {
-		t.Fatalf("specs.query(spec_stem:) json object missing expected spec_stem: %s", jsonText)
-	}
-}
-
-func TestServeStdioMentalModelToolsRejectSpecStemOnStatus(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/mental-model/workflow.md", "---\ndomain: workflow\n---\n# Workflow\n")
-	initGit(t, root)
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"mental_models.status","arguments":{"spec_stem":"260504-spec-demo"}}}` + "\n"
-
-	var out bytes.Buffer
-	server := NewServer(root, "test")
-	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
-		t.Fatalf("ServeStdio returned error: %v", err)
-	}
-	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"])
-	if !strings.Contains(text, "domain or path") || !strings.Contains(out.String(), `"isError":true`) {
-		t.Fatalf("mental_models.status accepted spec_stem argument: %s", out.String())
-	}
-}
-
 // callToolsList issues a single tools/list request and returns the raw response
 // line. Used by capability-scope tests to assert advertised schema visibility.
 func callToolsList(t *testing.T, server *Server) string {
@@ -896,25 +846,6 @@ func TestPathGenerateAdvertisesAndAllocatesPlanPaths(t *testing.T) {
 	}
 	if info, err := os.Stat(text); err != nil || info.IsDir() {
 		t.Fatalf("reserved plan path %q stat=%v err=%v", text, info, err)
-	}
-}
-
-// mustEnableMercenary writes the global WS_CONFIG_HOME/config.json override
-// {"workflow.prefer_mercenary":"on"}. Tests that call ws.mercenary.* tools need
-// this because the builtin default is hide.
-func mustEnableMercenary(t *testing.T) {
-	t.Helper()
-	configHome := os.Getenv("WS_CONFIG_HOME")
-	if configHome == "" {
-		configHome = t.TempDir()
-		t.Setenv("WS_CONFIG_HOME", configHome)
-	}
-	if err := os.MkdirAll(configHome, 0755); err != nil {
-		t.Fatalf("mustEnableMercenary: mkdir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(configHome, "config.json"),
-		[]byte(`{"schema_version":1,"overrides":{"workflow.prefer_mercenary":"on"}}`), 0644); err != nil {
-		t.Fatalf("mustEnableMercenary: write config: %v", err)
 	}
 }
 
@@ -1044,12 +975,9 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
-	mustWrite(t, root, "ai-docs/spec/demo.md", "---\ntitle: Demo\nfeatures:\n  - planned [260503-feat-demo/p1]\n---\n# Demo\n\n## Feature {#260503-spec-demo}\n\nSpec discovery text.\n")
-	mustWrite(t, root, "ai-docs/mental-model/workflow.md", "---\ndomain: workflow\ndescription: Workflow model\nsources:\n  - ai-docs/spec/demo.md#260503-spec-demo\n---\n# Workflow\n\nReferences {#260503-spec-demo} with discovery text.\n")
 	mustWrite(t, root, "ai-docs/tickets/todo/260503-feat-demo.md", "---\ntitle: Demo ticket\n---\n# Demo\n\nMentions 260503-epic-demo.\n")
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	mustEnableMercenary(t)
 
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
@@ -1063,11 +991,6 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 		`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"runtime.debug_events","arguments":{"limit":10}}}`,
 		`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"config.list","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"tickets.query","arguments":{"mentions_ticket_stem":"260503-epic-demo"}}}`,
-		`{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"specs.query","arguments":{"spec_stem":"260503-spec-demo","ticket_stem":"260503-feat-demo","query":"discovery"}}}`,
-		`{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"mental_models.query","arguments":{"spec_stem":"260503-spec-demo","domain":"workflow","query":"discovery"}}}`,
-		`{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"specs.query","arguments":{"query":"discovery","format":"json"}}}`,
-		`{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"mental_models.query","arguments":{"query":"discovery","format":"json"}}}`,
-		`{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"references.trace","arguments":{"spec_stem":"260503-spec-demo"}}}`,
 	}, "\n")
 
 	var out bytes.Buffer
@@ -1077,8 +1000,8 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 15 {
-		t.Fatalf("expected 15 responses, got %d\n%s", len(lines), out.String())
+	if len(lines) != 10 {
+		t.Fatalf("expected 10 responses, got %d\n%s", len(lines), out.String())
 	}
 	byID := responseLinesByID(t, lines)
 
@@ -1088,15 +1011,6 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 	if !strings.Contains(byID["2"], "project_tree") {
 		t.Fatalf("tools/list missing project_tree: %s", byID["2"])
-	}
-	if !strings.Contains(byID["2"], "mercenary.call") {
-		t.Fatalf("tools/list missing ws.mercenary.call: %s", byID["2"])
-	}
-	if strings.Contains(byID["2"], "ws.mercenary.call_async") {
-		t.Fatalf("tools/list still includes ws.mercenary.call_async: %s", byID["2"])
-	}
-	if strings.Contains(byID["2"], "ws.mercenary.oneshot") {
-		t.Fatalf("tools/list still includes ws.mercenary.oneshot: %s", byID["2"])
 	}
 	if strings.Contains(byID["2"], "subquery") {
 		t.Fatalf("tools/list still advertises removed subquery tool: %s", byID["2"])
@@ -1129,13 +1043,8 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	rootAwareTools := []string{
 		"api.list",
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
-		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.query",
-		"mental_models.list", "mental_models.query", "mental_models.status", "references.trace",
+		"project_tree",
 		"tickets.query", "path.generate", "playbook.render",
-		"mercenary.register", "mercenary.call", "mercenary.wait", "mercenary.result", "mercenary.status",
-		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
-		"mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events",
-		"mercenary.cancel", "mercenary.print", "mercenary.erase",
 	}
 	for _, name := range rootAwareTools {
 		properties := toolPropertiesByName(t, byID["2"], name)
@@ -1168,24 +1077,18 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["2"], "config.list") {
 		t.Fatalf("tools/list missing config.list: %s", byID["2"])
 	}
-	// Unit 4: ws.mercenary.register prompts/tier/model fields removed from schema.
-	// Verify system_prompt_text is still present and prompts is absent.
-	if strings.Contains(byID["2"], "\"prompts\"") {
-		t.Fatalf("tools/list ws.mercenary.register schema still has removed 'prompts' field: %s", byID["2"])
-	}
-	if !strings.Contains(byID["2"], "\"system_prompt_text\"") {
-		t.Fatalf("tools/list ws.mercenary.register schema missing system_prompt_text: %s", byID["2"])
-	}
-	for _, tool := range []string{"mercenary.wait", "mercenary.result", "mercenary.status", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout", "mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events", "mercenary.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.query", "specs.query", "mental_models.query", "mental_models.status", "references.trace"} {
+	for _, tool := range []string{"git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.query"} {
 		if !strings.Contains(byID["2"], tool) {
 			t.Fatalf("tools/list missing %s: %s", tool, byID["2"])
 		}
 	}
-	if !strings.Contains(byID["2"], `"mental_model_notes"`) {
-		t.Fatalf("tools/list missing git.commit mental_model_notes schema: %s", byID["2"])
-	}
-	if strings.Contains(byID["2"], "ws.mercenary.recall") {
-		t.Fatalf("tools/list should not advertise ws.mercenary.recall: %s", byID["2"])
+	// The spec and mental-model tool surface retired with its layer, and
+	// git.commit's doc trailers went with it. tools/list must advertise none
+	// of them, or an agent calls a tool that no longer dispatches.
+	for _, gone := range []string{"spec_stem.generate", "spec_index.verify", "specs.query", "mental_models.list", "mental_models.query", "mental_models.status", "references.trace", `"mental_model_notes"`, `"updated_specs"`, `"updated_mental_models"`} {
+		if strings.Contains(byID["2"], gone) {
+			t.Fatalf("tools/list still advertises retired surface %s: %s", gone, byID["2"])
+		}
 	}
 	// exec.* tools are permanently hidden from the public MCP surface in all modes.
 	for _, execTool := range []string{"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep"} {
@@ -1219,114 +1122,14 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(ticketsText, "260503-feat-demo") || !strings.Contains(ticketsText, "mentions_ticket_stem") {
 		t.Fatalf("tickets.query response missing mention result: %s", byID["10"])
 	}
-	specsText := toolText(t, byID["11"])
-	if !strings.Contains(specsText, "1 candidate spec for query=\"discovery\"") || !strings.Contains(specsText, "ai-docs/spec/demo.md\tscore=") || strings.Contains(specsText, "matched:") {
-		t.Fatalf("specs.query response missing spec result: %s", byID["11"])
-	}
-	mentalModelsText := toolText(t, byID["12"])
-	if !strings.Contains(mentalModelsText, "1 candidate mental model for query=\"discovery\"") || !strings.Contains(mentalModelsText, "ai-docs/mental-model/workflow.md\tscore=") || strings.Contains(mentalModelsText, "matched:") {
-		t.Fatalf("mental_models.query response missing result: %s", byID["12"])
-	}
-	if !strings.Contains(byID["13"], "matches") || !strings.Contains(byID["13"], "matched_terms") {
-		t.Fatalf("specs.query json missing evidence: %s", byID["13"])
-	}
-	if !strings.Contains(byID["14"], "matches") || !strings.Contains(byID["14"], "matched_terms") {
-		t.Fatalf("mental_models.query json missing evidence: %s", byID["14"])
-	}
-	referencesText := toolText(t, byID["15"])
-	if !strings.Contains(referencesText, "input: spec") || !strings.Contains(referencesText, "tickets:") || !strings.Contains(referencesText, "mental_models:") {
-		t.Fatalf("references.trace response missing graph result: %s", byID["15"])
-	}
-}
-
-func TestServeStdioAgentDebugToolCalls(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	initGit(t, root)
-	cache := filepath.Join(t.TempDir(), "cache")
-	t.Setenv("WS_CACHE_HOME", cache)
-	mustEnableMercenary(t)
-	_, layout, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{Root: root, Name: "impl"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	mustWrite(t, filepath.Dir(layout.CurrentStdout), filepath.Base(layout.CurrentStdout), "stdout old\nstdout new\n")
-	mustWrite(t, filepath.Dir(layout.CurrentRuntimeLog), filepath.Base(layout.CurrentRuntimeLog), "runtime old\nruntime new\n")
-
-	input := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"mercenary.debug.stdout","arguments":{"name":"impl","lines":1}}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"mercenary.debug.runtime_log","arguments":{"name":"impl","lines":1}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mercenary.debug.tail","arguments":{"name":"impl","lines":1}}}`,
-	}, "\n")
-
-	var out bytes.Buffer
-	server := NewServer(root, "test")
-	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
-		t.Fatalf("ServeStdio returned error: %v", err)
-	}
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 responses, got %d\n%s", len(lines), out.String())
-	}
-	byID := responseLinesByID(t, lines)
-	if got := toolText(t, byID["1"]); got != "stdout new\n" {
-		t.Fatalf("stdout debug response = %q", got)
-	}
-	if got := toolText(t, byID["2"]); got != "runtime new\n" {
-		t.Fatalf("runtime debug response = %q", got)
-	}
-	if got := toolText(t, byID["3"]); !strings.Contains(got, "== stdout ==") || !strings.Contains(got, "stdout new") || !strings.Contains(got, "== runtime ==") {
-		t.Fatalf("debug tail response mismatch: %q", got)
-	}
-}
-
-func TestServeStdioAgentTailIsBoundedButDebugTailIsRaw(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	initGit(t, root)
-	cache := filepath.Join(t.TempDir(), "cache")
-	t.Setenv("WS_CACHE_HOME", cache)
-	mustEnableMercenary(t)
-	_, layout, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{Root: root, Name: "impl"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	largeOutput := strings.Repeat("x", 5000)
-	line := `{"type":"event","aggregated_output":"` + largeOutput + `"}`
-	mustWrite(t, filepath.Dir(layout.CurrentStdout), filepath.Base(layout.CurrentStdout), line+"\n")
-
-	input := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"mercenary.tail","arguments":{"name":"impl","lines":1}}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"mercenary.debug.tail","arguments":{"name":"impl","lines":1}}}`,
-	}, "\n")
-
-	var out bytes.Buffer
-	server := NewServer(root, "test")
-	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
-		t.Fatalf("ServeStdio returned error: %v", err)
-	}
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("expected 2 responses, got %d\n%s", len(lines), out.String())
-	}
-	byID := responseLinesByID(t, lines)
-	normal := toolText(t, byID["1"])
-	if !strings.Contains(normal, "ws-tail truncated field aggregated_output") || strings.Contains(normal, largeOutput) {
-		t.Fatalf("normal tail was not bounded: %q", normal)
-	}
-	debug := toolText(t, byID["2"])
-	if !strings.Contains(debug, largeOutput) || strings.Contains(debug, "ws-tail truncated") {
-		t.Fatalf("debug tail was not raw: %q", debug)
-	}
 }
 
 func TestServeStdioConfigAgentsTierUsesDetectedHarness(t *testing.T) {
 	useLeadProfile(t)
 	root := initTicketRepo(t, "260513-feat-harness-local-agent-tier-config")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	mustEnableMercenary(t)
 
-	server := NewServer(t.TempDir(), "test")
+	server := NewServer(root, "test")
 	var out bytes.Buffer
 	initializeInput := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"Claude Code","version":"test"}}}`
 	if err := server.ServeStdio(context.Background(), strings.NewReader(initializeInput), &out); err != nil {
@@ -1344,17 +1147,20 @@ func TestServeStdioConfigAgentsTierUsesDetectedHarness(t *testing.T) {
 		t.Fatalf("config response missing claude harness mapping: %s", byID["2"])
 	}
 
+	// The write landed in the detected harness bucket, so tier resolution under
+	// that same detected harness reads it back.
 	out.Reset()
-	registerInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mercenary.register","arguments":{"root":%q,"name":"reviewer","model":"medium"}}}`, root)
-	if err := serveStdioWithSession(t, server, root, registerInput, &out); err != nil {
-		t.Fatalf("ServeStdio register returned error: %v", err)
+	resolveInput := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"config.resolve_agent","arguments":{"tier":"medium","format":"json"}}}`
+	if err := server.ServeStdio(context.Background(), strings.NewReader(resolveInput), &out); err != nil {
+		t.Fatalf("ServeStdio config.resolve_agent returned error: %v", err)
 	}
-	status, err := wsagent.NewManager(wsagent.Options{}).Status(root, "reviewer")
-	if err != nil {
-		t.Fatal(err)
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	var resolved resolveAgentTierResponse
+	if err := json.Unmarshal([]byte(toolText(t, byID["3"])), &resolved); err != nil {
+		t.Fatalf("decode config.resolve_agent response: %v", err)
 	}
-	if !strings.Contains(status, "harness: claude") || !strings.Contains(status, "backend: codex") || !strings.Contains(status, "model: gpt-5.4") || !strings.Contains(status, "effort: medium") {
-		t.Fatalf("registered status missing configured claude harness mapping:\n%s", status)
+	if resolved.ResolvedFrom != "claude" || resolved.Backend != "codex" || resolved.Model != "gpt-5.4" || resolved.Effort != "medium" {
+		t.Fatalf("resolved = %#v, want resolved_from=claude backend=codex model=gpt-5.4 effort=medium", resolved)
 	}
 }
 
@@ -1363,9 +1169,7 @@ func TestServeStdioConfigAgentsTierUsesDetectedHarness(t *testing.T) {
 // `initialize` request whose clientInfo.name is exactly "ws-pi-bridge" must
 // be detected via the structured clientInfo check
 // (detectHarnessFromInitializeParams) and used as the config.tune harness
-// default. Unlike the Claude-detection sibling test, this does not exercise
-// mercenary.register: Open Decision #3 keeps mercenary untouched and
-// unreachable from Pi in this phase.
+// default.
 func TestServeStdioConfigAgentsTierUsesDetectedPiHarness(t *testing.T) {
 	useLeadProfile(t)
 	root := initTicketRepo(t, "260513-feat-harness-local-agent-tier-config")
@@ -1405,9 +1209,7 @@ type resolveAgentTierResponse struct {
 // call config.resolve_agent with no explicit harness and assert it reports
 // resolved_from == "pi" and the exact backend/model/effort that was set
 // (260905 Phase 3). Mirrors
-// TestServeStdioConfigAgentsTierUsesDetectedPiHarness and, like it, skips
-// mercenary.register (Open Decision #3: mercenary untouched/unreachable from
-// Pi in this phase).
+// TestServeStdioConfigAgentsTierUsesDetectedPiHarness.
 func TestServeStdioConfigResolveAgentUsesDetectedPiHarness(t *testing.T) {
 	for _, tier := range []string{"small", "medium", "large", "xlarge"} {
 		t.Run(tier, func(t *testing.T) {
@@ -1684,14 +1486,13 @@ func TestServeStdioConfigAgentsTierOmittedEffortClearsExistingEffort(t *testing.
 	useLeadProfile(t)
 	root := initTicketRepo(t, "260513-feat-agent-tier-effort-config")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	mustEnableMercenary(t)
 
 	var out bytes.Buffer
 	server := NewServer(root, "test")
 	inputs := []string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.tune","arguments":{"key":"agents.tier","harness":"codex","value":{"tier":"medium","model":"gpt-5.5","effort":"medium"}}}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.tune","arguments":{"key":"agents.tier","harness":"codex","value":{"tier":"medium","model":"gpt-5.4"}}}}`,
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mercenary.register","arguments":{"root":%q,"name":"reviewer","model":"medium"},"_meta":{"x-codex-turn-metadata":{"workspaces":{%q:{}}}}}}`, root, root),
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"config.resolve_agent","arguments":{"tier":"medium","harness":"codex","format":"json"}}}`,
 	}
 	for _, input := range inputs {
 		out.Reset()
@@ -1699,12 +1500,13 @@ func TestServeStdioConfigAgentsTierOmittedEffortClearsExistingEffort(t *testing.
 			t.Fatalf("ServeStdio returned error: %v", err)
 		}
 	}
-	status, err := wsagent.NewManager(wsagent.Options{}).Status(root, "reviewer")
-	if err != nil {
-		t.Fatal(err)
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	var resolved resolveAgentTierResponse
+	if err := json.Unmarshal([]byte(toolText(t, byID["3"])), &resolved); err != nil {
+		t.Fatalf("decode config.resolve_agent response: %v", err)
 	}
-	if !strings.Contains(status, "model: gpt-5.4") || strings.Contains(status, "effort: medium") {
-		t.Fatalf("registered status did not clear effort after model update:\n%s", status)
+	if resolved.Model != "gpt-5.4" || resolved.Effort != "" {
+		t.Fatalf("resolved = %#v, want model=gpt-5.4 and cleared effort", resolved)
 	}
 }
 
@@ -1720,7 +1522,7 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"api.list","arguments":{}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mercenary.call","arguments":{"name":"impl","prompt":"work"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"exec.spawn","arguments":{"cmd":"true"}}}`,
 	}, "\n") + "\n"
 
 	var out bytes.Buffer
@@ -1731,10 +1533,9 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	list := byID["1"]
 	// config.tune/config.list are generic and always visible; the no-agent cut
-	// for full-ws-only knobs (workflow.prefer_mercenary) now lives per-key inside
-	// config.tune's dispatch and config.list's catalog, not in a hidden per-knob
-	// tool (260814 Phase 2 collapse). See TestPreferMercenaryHiddenInNoAgentMode.
-	for _, hidden := range []string{"mercenary.call", "mercenary.register", "mercenary.debug.tail"} {
+	// for a full-ws-only knob lives per-key inside config.tune's dispatch and
+	// config.list's catalog, not in a hidden per-knob tool.
+	for _, hidden := range []string{"exec.spawn", "subquery"} {
 		if strings.Contains(list, hidden) {
 			t.Fatalf("tools/list exposed hidden no-agent tool %s: %s", hidden, list)
 		}
@@ -1753,7 +1554,7 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 	if toolIsError(t, byID["2"]) {
 		t.Fatalf("api.list should remain callable in no-agent mode: %s", byID["2"])
 	}
-	if !strings.Contains(byID["3"], "wsflow agentless mode disables agent-backed tool: mercenary.call") {
+	if !strings.Contains(byID["3"], "wsflow agentless mode disables agent-backed tool: exec.spawn") {
 		t.Fatalf("hidden tool did not return clear no-agent error: %s", byID["3"])
 	}
 }
@@ -1770,8 +1571,7 @@ func TestWsflowModePlaybookRenderAbsorbsPromptRenderContext(t *testing.T) {
 
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"code-reviewer","context":{"reviewer_scope":"correctness only","note":"see ws/specs.query for details"}}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"plan-populator-survey","context":{"target_kind":"ticket","ticket_path":"ai-docs/tickets/ready/260628-feat-demo.md","selected_phase":"Phase 2: Rework planner playbooks around ticket-to-plan","inline_contract":"","plan_path":"ai-docs/.plans/2026-06/28-1200-demo.md","note":"legacy extra context"}}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"code-reviewer","context":{"reviewer_scope":"correctness only","note":"see ws/tickets.query for details"}}}}`,
 	}, "\n") + "\n"
 
 	var out bytes.Buffer
@@ -1795,47 +1595,13 @@ func TestWsflowModePlaybookRenderAbsorbsPromptRenderContext(t *testing.T) {
 		t.Fatalf("read code-reviewer render: %v", err)
 	}
 	codeReviewerText := string(codeReviewerData)
-	for _, want := range []string{"wsflow/", "## Render Context", "- note: see ws/specs.query for details", "- reviewer_scope: correctness only"} {
+	for _, want := range []string{"wsflow/", "## Render Context", "- note: see ws/tickets.query for details", "- reviewer_scope: correctness only"} {
 		if !strings.Contains(codeReviewerText, want) {
 			t.Fatalf("code-reviewer playbook render missing %q:\n%s", want, codeReviewerText)
 		}
 	}
-	if strings.Contains(codeReviewerText, "ws.mercenary.") || strings.Contains(codeReviewerText, "exec.") {
+	if strings.Contains(codeReviewerText, "exec.") {
 		t.Fatalf("code-reviewer playbook render exposed hidden full-ws guidance:\n%s", codeReviewerText)
-	}
-
-	if toolIsError(t, byID["3"]) {
-		t.Fatalf("playbook.render plan-populator-survey returned error: %s", byID["3"])
-	}
-	planPath := strings.SplitN(strings.TrimSpace(toolText(t, byID["3"])), "\n", 2)[0]
-	planData, err := os.ReadFile(planPath)
-	if err != nil {
-		t.Fatalf("read plan-populator-survey render: %v", err)
-	}
-	planText := string(planData)
-	for _, want := range []string{
-		"recommended-tier: medium",
-		"## Render Context",
-		"- note: legacy extra context",
-		"- Ticket path: `ai-docs/tickets/ready/260628-feat-demo.md`",
-		"- Selected phase: `Phase 2: Rework planner playbooks around ticket-to-plan`",
-		"- Plan path: `ai-docs/.plans/2026-06/28-1200-demo.md`",
-		"## Relevant Ticket Contract",
-		"## Implementation Plan",
-		"[escalate-to-research]",
-	} {
-		if want == "recommended-tier: medium" {
-			if !strings.Contains(toolText(t, byID["3"]), want) {
-				t.Fatalf("playbook.render response missing %q: %s", want, toolText(t, byID["3"]))
-			}
-			continue
-		}
-		if !strings.Contains(planText, want) {
-			t.Fatalf("plan-populator-survey playbook render missing %q:\n%s", want, planText)
-		}
-	}
-	if strings.Contains(planText, "- brief_path:") || strings.Contains(planText, "brief path") {
-		t.Fatalf("plan-populator-survey playbook render retained brief-path dependency:\n%s", planText)
 	}
 }
 
@@ -1920,29 +1686,26 @@ func TestServeStdioInitializeDetectsClaudeHarnessForAgentAlias(t *testing.T) {
 	useLeadProfile(t)
 	root := initTicketRepo(t, "260508-feat-claude-harness")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	mustEnableMercenary(t)
 
 	initializeInput := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"Claude Code","version":"test"}}}`
-	registerInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"mercenary.register","arguments":{"root":%q,"name":"reviewer","model":"medium"}}}`, root)
-	checkInput := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mercenary.status","arguments":{"name":"reviewer"}}}`
+	resolveInput := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"config.resolve_agent","arguments":{"tier":"medium","format":"json"}}}`
 
 	var out bytes.Buffer
-	server := NewServer(t.TempDir(), "test")
+	server := NewServer(root, "test")
 	if err := server.ServeStdio(context.Background(), strings.NewReader(initializeInput), &out); err != nil {
 		t.Fatalf("ServeStdio initialize returned error: %v", err)
 	}
 	out.Reset()
-	if err := serveStdioWithSession(t, server, root, registerInput, &out); err != nil {
-		t.Fatalf("ServeStdio register returned error: %v", err)
-	}
-	out.Reset()
-	if err := serveStdioWithSession(t, server, root, checkInput, &out); err != nil {
+	if err := serveStdioWithSession(t, server, root, resolveInput, &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	status := toolText(t, byID["3"])
-	if !strings.Contains(status, "harness: claude") || !strings.Contains(status, "backend: claude") || !strings.Contains(status, "model: sonnet") {
-		t.Fatalf("status missing claude alias resolution:\n%s", status)
+	var resolved resolveAgentTierResponse
+	if err := json.Unmarshal([]byte(toolText(t, byID["3"])), &resolved); err != nil {
+		t.Fatalf("decode config.resolve_agent response: %v", err)
+	}
+	if resolved.ResolvedFrom != "claude" || resolved.Backend != "claude" || resolved.Model != "sonnet" {
+		t.Fatalf("resolved = %#v, want resolved_from/backend claude and model sonnet", resolved)
 	}
 }
 
@@ -1950,23 +1713,25 @@ func TestServeStdioCodexMetadataDetectsHarnessForAgentAlias(t *testing.T) {
 	useLeadProfile(t)
 	root := initTicketRepo(t, "260508-feat-codex-harness")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	mustEnableMercenary(t)
 
-	setupInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"mercenary.register","arguments":{"root":%q,"name":"reviewer","model":"medium"},"_meta":{"x-codex-turn-metadata":{"workspaces":{%q:{}}}}}}`, root, root)
-	checkInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"mercenary.status","arguments":{"root":%q,"name":"reviewer"}}}`, root)
+	setupInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"project_tree","arguments":{"root":%q},"_meta":{"x-codex-turn-metadata":{"workspaces":{%q:{}}}}}}`, root, root)
+	resolveInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.resolve_agent","arguments":{"tier":"medium","format":"json"}}}`
 	var out bytes.Buffer
-	server := NewServer(t.TempDir(), "test")
+	server := NewServer(root, "test")
 	if err := serveStdioWithSession(t, server, root, setupInput, &out); err != nil {
 		t.Fatalf("ServeStdio setup returned error: %v", err)
 	}
 	out.Reset()
-	if err := serveStdioWithSession(t, server, root, checkInput, &out); err != nil {
+	if err := serveStdioWithSession(t, server, root, resolveInput, &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	status := toolText(t, byID["2"])
-	if !strings.Contains(status, "harness: codex") || !strings.Contains(status, "backend: codex") || !strings.Contains(status, "model: gpt-5.6-terra") {
-		t.Fatalf("status missing codex alias resolution:\n%s", status)
+	var resolved resolveAgentTierResponse
+	if err := json.Unmarshal([]byte(toolText(t, byID["2"])), &resolved); err != nil {
+		t.Fatalf("decode config.resolve_agent response: %v", err)
+	}
+	if resolved.ResolvedFrom != "codex" || resolved.Backend != "codex" || resolved.Model != "gpt-5.6-terra" {
+		t.Fatalf("resolved = %#v, want resolved_from/backend codex and model gpt-5.6-terra", resolved)
 	}
 }
 
@@ -2002,25 +1767,22 @@ func TestDetectHarnessFromInitializeParamsPrecedence(t *testing.T) {
 	}
 }
 
-func TestServeStdioDoesNotBlockToolsListBehindWait(t *testing.T) {
+// TestServeStdioDoesNotBlockToolsListBehindLongCall pins that ServeStdio
+// dispatches concurrently: a tools/call that blocks (here exec.result waiting
+// on a still-running job) must not delay a tools/list that arrives after it.
+// A serialized dispatch loop would answer id 1 first and stall the client.
+func TestServeStdioDoesNotBlockToolsListBehindLongCall(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	mustEnableMercenary(t)
-	agent, layout, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{Root: root, Name: "impl"})
-	if err != nil {
+
+	var spawnOut bytes.Buffer
+	spawnServer := NewServer(root, "test")
+	if err := serveStdioWithSession(t, spawnServer, root, toolCallLine(t, 1, "exec.shell", mcpLongShellArgs())+"\n", &spawnOut); err != nil {
 		t.Fatal(err)
 	}
-	call, err := wsagent.NewManager(wsagent.Options{}).BeginCurrentCall(layout, agent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	call.Status = wsagent.CallStatusRunning
-	call.PID = os.Getpid()
-	if err := os.WriteFile(layout.CurrentStateFile, mustMarshalForTest(t, call), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	running := execKeyFromText(t, toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(spawnOut.String()), "\n"))["1"]))
 
 	reader, writer := io.Pipe()
 	outReader, outWriter := io.Pipe()
@@ -2032,7 +1794,7 @@ func TestServeStdioDoesNotBlockToolsListBehindWait(t *testing.T) {
 	}()
 
 	key, _ := parseLoginResponse(t, callLogin(t, streamServer, 900002, root, nil))
-	fmt.Fprintln(writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"mercenary.wait","arguments":{"name":"impl","timeout_seconds":2,"session_key":%q}}}`, key))
+	fmt.Fprintln(writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"exec.result","arguments":{"exec_key":%q,"timeout_seconds":2,"session_key":%q}}}`, running, key))
 	fmt.Fprintln(writer, `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`)
 
 	lineCh := make(chan string, 1)
@@ -2048,10 +1810,10 @@ func TestServeStdioDoesNotBlockToolsListBehindWait(t *testing.T) {
 	select {
 	case line := <-lineCh:
 		if !strings.Contains(line, `"id":2`) || !strings.Contains(line, "tools") {
-			t.Fatalf("first response was not tools/list while wait was running: %s", line)
+			t.Fatalf("first response was not tools/list while the long call was running: %s", line)
 		}
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("tools/list was blocked behind ws.mercenary.wait")
+		t.Fatal("tools/list was blocked behind a long-running tools/call")
 	}
 	_ = writer.Close()
 	_ = reader.Close()
@@ -2059,43 +1821,6 @@ func TestServeStdioDoesNotBlockToolsListBehindWait(t *testing.T) {
 	case <-done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("ServeStdio did not exit after input close")
-	}
-}
-
-func TestServeStdioAgentsResultConsumesEphemeralAgent(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	initGit(t, root)
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	mustEnableMercenary(t)
-	manager := wsagent.NewManager(wsagent.Options{})
-	agent, layout, err := manager.Register(wsagent.RegisterOptions{Root: root, Name: "ephemeral-tmp-test", Ephemeral: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	call, err := manager.BeginCurrentCall(layout, agent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	call.Status = wsagent.CallStatusCompleted
-	if err := os.WriteFile(layout.CurrentStateFile, mustMarshalForTest(t, call), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(layout.OutputFile, []byte("ephemeral answer\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"mercenary.result","arguments":{"name":"ephemeral-tmp-test"}}}` + "\n"
-	var out bytes.Buffer
-	if err := serveStdioWithSession(t, NewServer(root, "test"), root, input, &out); err != nil {
-		t.Fatalf("ServeStdio returned error: %v", err)
-	}
-	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	if !strings.Contains(toolText(t, byID["1"]), "ephemeral answer") {
-		t.Fatalf("ws.mercenary.result response mismatch: %s", byID["1"])
-	}
-	if _, err := os.Stat(layout.AgentDir); err != nil {
-		t.Fatalf("ephemeral agent dir should remain after MCP result for retention cleanup: %v", err)
 	}
 }
 
@@ -2202,7 +1927,7 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 	}
 
 	out.Reset()
-	commitInput := `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt","ai-docs/tickets/todo/260503-feat-demo.md"],"title":"test: mcp commit","ai_context":["User intent: verify git.commit.","Verification: server test."],"mental_model_notes":["git.commit accepts structured Mental Model Notes."]}}}`
+	commitInput := `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt","ai-docs/tickets/todo/260503-feat-demo.md"],"title":"test: mcp commit","ai_context":["User intent: verify git.commit.","Verification: server test."]}}}`
 	if err := serveStdioWithSession(t, server, root, commitInput, &out); err != nil {
 		t.Fatalf("ServeStdio commit returned error: %v", err)
 	}
@@ -2221,8 +1946,8 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 		t.Fatalf("git.commit text response = %q", commitText)
 	}
 	commitBody := string(runGitOutput(t, root, "log", "-1", "--format=%B"))
-	if !strings.Contains(commitBody, "## AI Context\n- User intent: verify git.commit.\n- Verification: server test.\n\n### Mental Model Notes\n- git.commit accepts structured Mental Model Notes.") {
-		t.Fatalf("git.commit message missing Mental Model Notes subsection:\n%s", commitBody)
+	if !strings.Contains(commitBody, "## AI Context\n- User intent: verify git.commit.\n- Verification: server test.\n\n## Ticket Updates\n") {
+		t.Fatalf("git.commit message is not AI Context followed directly by Ticket Updates:\n%s", commitBody)
 	}
 
 	mustWrite(t, root, "file.txt", "one\ntwo\nthree\n")
@@ -2348,7 +2073,6 @@ func TestServeStdioGitCommitSurfacesTicketVerifyWarningsAsAdvisories(t *testing.
 func ticketGraphAdvisoryFixture(t *testing.T) (string, []string) {
 	t.Helper()
 	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/spec/demo.md", "# Demo\n\n## Anchor {#260101-demo-anchor}\n")
 	mustWrite(t, root, "ai-docs/tickets/todo/260726-refactor-graph-parent.md",
 		"---\ntitle: Graph parent\n---\n\n# Graph parent\n")
 	child := "ai-docs/tickets/.done/260726-feat-graph-child.md"
@@ -2439,12 +2163,25 @@ func TestFormatTicketVerifyRendersAdvisoriesWithoutAmendRecipe(t *testing.T) {
 // are produced; this proves the commit still lands, since wsgit.Commit vetoes
 // on a non-nil verifier error and nothing else.
 func TestVerifyAdapterDegradesToSilenceOnGraphLoadFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX mode bits do not make a file unreadable on Windows")
+	}
 	root := t.TempDir()
-	// No ai-docs/spec, so the spec-anchor scan fails. The dangling related:
-	// would otherwise produce a FIX:, which makes the silence non-vacuous.
+	// The dangling related: would otherwise produce a FIX:, which makes the
+	// silence non-vacuous; the unreadable sibling is what fails the board scan.
 	path := "ai-docs/tickets/.done/260726-feat-graph-load-failure.md"
 	mustWrite(t, root, path,
 		"---\ntitle: Load failure\ncompleted: 2026-07-27\nrelated:\n  260726-nope-dangling: no such stem\n---\n\n# Load failure\n")
+	broken := "ai-docs/tickets/todo/260726-feat-unreadable.md"
+	mustWrite(t, root, broken, "---\ntitle: Unreadable\n---\n\n# Unreadable\n")
+	brokenAbs := filepath.Join(root, filepath.FromSlash(broken))
+	if err := os.Chmod(brokenAbs, 0o000); err != nil {
+		t.Skipf("cannot make a file unreadable here: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(brokenAbs, 0o644) })
+	if _, err := os.ReadFile(brokenAbs); err == nil {
+		t.Skip("mode 000 is still readable (running as root?)")
+	}
 
 	advisories, err := verifyAdapter(root, []string{path})
 	if err != nil {
@@ -2468,7 +2205,6 @@ func TestServeStdioGitCommitSurfacesTicketGraphParentBoard(t *testing.T) {
 	runGit(t, root, "add", "file.txt")
 	runGit(t, root, "commit", "-m", "initial")
 
-	mustWrite(t, root, "ai-docs/spec/demo.md", "# Demo\n\n## Anchor {#260101-demo-anchor}\n")
 	mustWrite(t, root, "ai-docs/tickets/todo/260726-epic-graph-e2e.md",
 		"---\ntitle: E2E epic\n---\n\n# E2E epic\n")
 
@@ -2701,28 +2437,6 @@ func TestServeStdioGitCommitAIContextConditionsAndDebugEvent(t *testing.T) {
 	}
 	if rawBytes, _ := largeArrayEvent["raw_bytes"].(float64); rawBytes < 5000 {
 		t.Fatalf("large-array debug event raw_bytes too small: %v", rawBytes)
-	}
-}
-
-func TestServeStdioReferencesTraceRejectsAmbiguousSelectors(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/tickets/todo/260504-ticket-demo.md", "---\ntitle: Demo\n---\n# Demo\n")
-	mustWrite(t, root, "ai-docs/spec/demo.md", "# Demo\n\n## Feature {#260504-spec-demo}\n")
-	mustWrite(t, root, "ai-docs/mental-model/demo.md", "---\ndomain: demo\n---\n# Demo\n")
-	initGit(t, root)
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"references.trace","arguments":{"ticket_stem":"260504-ticket-demo","spec_stem":"260504-spec-demo"}}}` + "\n"
-
-	var out bytes.Buffer
-	server := NewServer(root, "test")
-	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
-		t.Fatalf("ServeStdio returned error: %v", err)
-	}
-	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"])
-	if !strings.Contains(text, "exactly one") || !strings.Contains(out.String(), `"isError":true`) {
-		t.Fatalf("references.trace accepted ambiguous selectors: %s", out.String())
 	}
 }
 
@@ -3074,48 +2788,6 @@ func containsResolvedPath(haystack, p string) bool {
 		return strings.Contains(haystack, resolved)
 	}
 	return false
-}
-
-// TestMercenaryDefaultHideAndOnVisibility verifies that:
-//   - ws.mercenary.* tools are hidden from tools/list by default (no config),
-//   - the generic config.tune writer remains visible so the lead can still
-//     toggle workflow.prefer_mercenary (the per-knob config.workflow_prefer_mercenary
-//     tool was collapsed into config.tune in 260814 Phase 2), and
-//   - after writing workflow.prefer_mercenary=on to global config, ws.mercenary.*
-//     tools appear in tools/list.
-func TestMercenaryDefaultHideAndOnVisibility(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	initGit(t, root)
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
-
-	server := NewServer(root, "test")
-
-	// Default (unset): ws.mercenary.* must be hidden.
-	listResp := callToolsList(t, server)
-	if strings.Contains(listResp, `"name":"mercenary.call"`) {
-		t.Fatalf("ws.mercenary.call must be hidden by default: %s", listResp)
-	}
-	if strings.Contains(listResp, `"name":"mercenary.register"`) {
-		t.Fatalf("ws.mercenary.register must be hidden by default: %s", listResp)
-	}
-	if strings.Contains(listResp, `"name":"ws.lead.prefer_mercenary"`) {
-		t.Fatalf("removed ws.lead.prefer_mercenary must not be visible: %s", listResp)
-	}
-	if !strings.Contains(listResp, `"name":"config.tune"`) {
-		t.Fatalf("config.tune must be visible even when mercenary hidden (lead toggles workflow.prefer_mercenary through it): %s", listResp)
-	}
-
-	// After enabling: ws.mercenary.* must appear in tools/list.
-	mustEnableMercenary(t)
-	listRespOn := callToolsList(t, server)
-	if !strings.Contains(listRespOn, `"name":"mercenary.call"`) {
-		t.Fatalf("ws.mercenary.call must be visible when prefer_mercenary=on: %s", listRespOn)
-	}
-	if !strings.Contains(listRespOn, `"name":"mercenary.register"`) {
-		t.Fatalf("ws.mercenary.register must be visible when prefer_mercenary=on: %s", listRespOn)
-	}
 }
 
 func TestMCPExecHelperProcess(t *testing.T) {

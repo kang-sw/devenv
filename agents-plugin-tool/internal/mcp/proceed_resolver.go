@@ -355,10 +355,10 @@ func resolveProceed(input proceedInput) proceedResult {
 func proceedNextInstruction(next string) string {
 	namespace := RuntimeNamespace()
 	switch next {
-	case "lead-implement":
-		return fmt.Sprintf(`Routing to next action: lead-implement. Call %s/playbook.read(name: "lead-implement"), then execute the returned playbook inline for this target and phase before inspecting source, planning, editing, or calling implementation tools. Verify the invoked stage result from stage output and committed artifacts when applicable. Stop on failure or user interruption.`, namespace)
-	case "lead-write-ticket":
-		return fmt.Sprintf(`Routing to next action: lead-write-ticket. Call %s/playbook.read(name: "lead-write-ticket"), then execute the returned playbook inline. After it returns, capture the Ticket path; if it is under ai-docs/tickets/ready/, rebuild route context and rerun %s/route.resolve_proceed for that ticket. Otherwise stop and report the remaining readiness blocker. Verify the invoked stage result from stage output and committed artifacts when applicable. Stop on failure or user interruption.`, namespace, namespace)
+	case "lead-run":
+		return fmt.Sprintf(`Routing to next action: lead-run. Call %s/playbook.read(name: "lead-run"), then execute the returned playbook inline for this target and phase before inspecting source, planning, editing, or calling implementation tools. Verify the invoked stage result from stage output and committed artifacts when applicable. Stop on failure or user interruption.`, namespace)
+	case "lead-ticket":
+		return fmt.Sprintf(`Routing to next action: lead-ticket. Call %s/playbook.read(name: "lead-ticket"), then execute the returned playbook inline. After it returns, capture the Ticket path; if it is under ai-docs/tickets/ready/, rebuild route context and rerun %s/route.resolve_proceed for that ticket. Otherwise stop and report the remaining readiness blocker. Verify the invoked stage result from stage output and committed artifacts when applicable. Stop on failure or user interruption.`, namespace, namespace)
 	case "lead-discuss":
 		return fmt.Sprintf("Routing to next action: lead-discuss. Continue through %s:lead-discuss with the blocker in Reason. Verify the invoked stage result from stage output when applicable. Stop on failure or user interruption.", namespace)
 	case "stop":
@@ -507,22 +507,22 @@ func selectProceedRoute(n normalizedProceedFacts) (route, next, reason string) {
 		return "anchor-discussion.discussion-needed", "lead-discuss", "discussion-needed=yes"
 	}
 	if n.Status == "idea" || n.Status == "todo" {
-		return "ticket-readiness.status-refresh", "lead-write-ticket", "status=" + n.Status
+		return "ticket-readiness.status-refresh", "lead-ticket", "status=" + n.Status
 	}
 	if n.Freshness == "missing-settled-decisions" {
-		return "ticket-readiness.freshness-refresh", "lead-write-ticket", "freshness=missing-settled-decisions"
+		return "ticket-readiness.freshness-refresh", "lead-ticket", "freshness=missing-settled-decisions"
 	}
 	if n.ScopeBlocked != "none" && n.ScopeBlocked != "unknown" {
 		return "scope-gate." + n.ScopeBlocked, "stop", "scope-blocked=" + n.ScopeBlocked
 	}
 	if n.TargetKind == "ticket-path" && n.HasTicket == "yes" && n.Status == "ready" && n.Category == "other" && n.Freshness == "current" && n.ScopeBlocked == "none" {
-		return "implementation-dispatch.ready-actionable", "lead-implement", "status=ready and category=other and freshness=current and scope-blocked=none"
+		return "implementation-dispatch.ready-actionable", "lead-run", "status=ready and category=other and freshness=current and scope-blocked=none"
 	}
 	if n.TargetKind == "inline" && n.HasTicket == "no" && n.NeedsTicket == "yes" {
-		return "ticket-readiness.inline-needs-ticket", "lead-write-ticket", "has-ticket=no and needs-ticket=yes"
+		return "ticket-readiness.inline-needs-ticket", "lead-ticket", "has-ticket=no and needs-ticket=yes"
 	}
 	if n.TargetKind == "inline" && n.HasTicket == "no" && n.NeedsTicket == "no" && n.Actionable == "yes" {
-		return "implementation-dispatch.inline-direct", "lead-implement", "has-ticket=no and needs-ticket=no"
+		return "implementation-dispatch.inline-direct", "lead-run", "has-ticket=no and needs-ticket=no"
 	}
 	return "fallback.insufficient-route-facts", "stop", "route facts are insufficient or inconsistent"
 }

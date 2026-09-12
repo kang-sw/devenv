@@ -15,66 +15,64 @@ SKILLS_DIR = PLUGIN_DIR / "skills"
 
 EXPECTED_SKILLS = {
     "lead-add-rule",
-    "lead-backfill-docs",
     "lead-bootstrap",
     "lead-discuss",
-    "lead-drain-ready-queue",
-    "lead-goal-fan-out-step",
-    "lead-forge-mental-model",
-    "lead-forge-spec",
-    "lead-implement",
     "lead-check-blockers",
     "lead-proceed",
     "lead-review",
+    "lead-run",
     "lead-ship",
     "lead-tune",
-    "lead-update-spec",
-    "lead-verify-discussion",
     "lead-workflow-manual",
-    "lead-write-spec",
-    "lead-write-ticket",
-    "lead-prefer-subagent",
+    "lead-ticket",
+    "lead-delegate",
     "lead-revive",
     "lead-scope-worktree",
     "mcp-server-repair",
 }
 
-EXPECTED_WSFLOW_ONLY_SKILLS: set = set()
+# wsflow-only backward-compat aliases mapped to the shared playbook they route
+# to. lead-proceed is a deprecation tombstone for the retired lead-proceed name:
+# it has no full-ws counterpart (the flagship surface keeps that name
+# unresolvable) and no rsrc body of its own — its body is lead-run's
+# parallel-init shim pointing at the lead-run playbook. Each alias is therefore
+# excused from the full-ws-counterpart, name-keyed shim-shape, and
+# shared-playbook checks and asserted directly by
+# test_wsflow_only_aliases_route_to_target.
+WSFLOW_ALIAS_TARGET = {"lead-proceed": "lead-run"}
+
+EXPECTED_WSFLOW_ONLY_SKILLS: set = set(WSFLOW_ALIAS_TARGET)
 EXPECTED_INLINE_SKILLS = {
     "lead-revive",
-    "lead-prefer-subagent",
-    "lead-verify-discussion",
-    "lead-drain-ready-queue",
     "mcp-server-repair",
 }
-EXPECTED_PARALLEL_INIT_SKILLS = {"lead-backfill-docs", "lead-discuss", "lead-goal-fan-out-step"}
+EXPECTED_PARALLEL_INIT_SKILLS = {
+    "lead-delegate",
+    "lead-discuss",
+    "lead-run",
+}
 PARALLEL_INIT_TITLES = {
-    "lead-backfill-docs": "Backfill Docs",
+    "lead-delegate": "Delegate",
     "lead-discuss": "Discuss",
-    "lead-goal-fan-out-step": "Goal Fan-Out Step",
+    "lead-run": "Run",
 }
 
 # Single-call shims that carry the mcp-server-repair pointer tail instead of
 # the generic "stop and report that blocker" un-pointed form.
 POINTER_TAIL_TITLES = {
-    "lead-proceed": "Proceed",
-    "lead-write-ticket": "Write Ticket",
-    "lead-write-spec": "Write Spec",
+    "lead-ticket": "Ticket",
     "lead-add-rule": "Add Rule",
     "lead-bootstrap": "Bootstrap",
-    "lead-forge-mental-model": "Forge Mental Model",
-    "lead-forge-spec": "Forge Spec",
     "lead-review": "Review",
     "lead-ship": "Ship",
     "lead-tune": "Workflow Tuning",
-    "lead-implement": "Implement",
     "lead-check-blockers": "Check Blockers",
-    "lead-update-spec": "Update Spec",
     "lead-workflow-manual": "Workflow Manual",
     "lead-scope-worktree": "Scope Worktree",
 }
 
 FORBIDDEN_PATTERNS = {
+    "retired posture skill": re.compile(r"\blead-prefer-subagent\b"),
     "full ws MCP notation": re.compile(r"\bws/"),
     "full ws skill namespace": re.compile(r"\bws:"),
     "full ws dotted namespace": re.compile(r"\bws\."),
@@ -82,11 +80,19 @@ FORBIDDEN_PATTERNS = {
     "full ws agent dotted tool": re.compile(r"\bagents\."),
     "excluded write-code skill": re.compile(r"\blead-write-code\b"),
     "excluded write-skeleton skill": re.compile(r"\blead-write-skeleton\b"),
-    # lead-sprint and lead-salvage were retired outright rather than merely
-    # excluded from wsflow, so these guard against a reintroduced reference to
-    # a skill that no longer exists in either lineage.
+    # lead-sprint, lead-salvage, lead-drain-ready-queue, lead-goal-fan-out-step,
+    # lead-proceed, lead-implement and lead-verify-discussion were retired
+    # outright rather than merely excluded from wsflow, and lead-write-ticket
+    # was renamed to lead-ticket, so these guard against a reintroduced
+    # reference to a skill that no longer exists in either lineage.
     "retired sprint skill": re.compile(r"\blead-sprint\b"),
     "retired salvage skill": re.compile(r"\blead-salvage\b"),
+    "retired drain skill": re.compile(r"\blead-drain-ready-queue\b"),
+    "retired fan-out skill": re.compile(r"\blead-goal-fan-out-step\b"),
+    "retired proceed skill": re.compile(r"\blead-proceed\b"),
+    "retired implement skill": re.compile(r"\blead-implement\b"),
+    "retired verify-discussion skill": re.compile(r"\blead-verify-discussion\b"),
+    "retired write-ticket skill": re.compile(r"\blead-write-ticket\b"),
     "excluded authoring skill": re.compile(r"\blead-skill-authoring\b"),
 }
 
@@ -127,7 +133,9 @@ class WsflowSkillBundleTest(unittest.TestCase):
         )
 
         self.assertEqual(missing_full_counterparts, [])
-        self.assertEqual(sorted(EXPECTED_WSFLOW_ONLY_SKILLS), [])
+        # Exactly the declared wsflow-only aliases carry no full-ws counterpart;
+        # a new divergence must be added to WSFLOW_ALIAS_TARGET deliberately.
+        self.assertEqual(sorted(EXPECTED_WSFLOW_ONLY_SKILLS), sorted(WSFLOW_ALIAS_TARGET))
         self.assertEqual(unexpected_wsflow_skills, [])
 
     def test_skill_files_do_not_reference_full_ws_agent_surface(self):
@@ -135,17 +143,28 @@ class WsflowSkillBundleTest(unittest.TestCase):
         for path in sorted(SKILLS_DIR.rglob("*")):
             if not path.is_file():
                 continue
+            # A wsflow-only alias legitimately names itself; its own directory
+            # is exempt from the guard for its own retired name (and only that
+            # guard) so the tombstone carve-out does not trip the full-ws sweep.
+            # Every other forbidden pattern still applies to it.
+            skill_dir = path.relative_to(SKILLS_DIR).parts[0]
+            exempt = (
+                {f"retired {skill_dir.removeprefix('lead-')} skill"}
+                if skill_dir in WSFLOW_ALIAS_TARGET
+                else set()
+            )
             text = path.read_text(encoding="utf-8")
             for label, pattern in FORBIDDEN_PATTERNS.items():
+                if label in exempt:
+                    continue
                 if pattern.search(text):
                     offenders.append(f"{path.relative_to(PLUGIN_DIR)}: {label}")
         self.assertEqual(offenders, [])
 
     def test_skill_files_are_thin_playbook_shims(self):
-        # lead-proceed, lead-write-ticket, lead-write-spec, lead-add-rule,
-        # lead-bootstrap, lead-forge-mental-model, lead-forge-spec,
-        # lead-review, lead-ship, lead-tune, lead-implement,
-        # lead-check-blockers, lead-update-spec, and lead-workflow-manual all
+        # lead-ticket, lead-add-rule, lead-bootstrap, lead-review,
+        # lead-ship, lead-tune, lead-check-blockers, and
+        # lead-workflow-manual all
         # carry the mcp-server-repair pointer in place of the generic "stop
         # and report that blocker" tail, so they are checked separately below
         # (see POINTER_TAIL_TITLES) with their own exact tail. That accounts
@@ -157,6 +176,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
             - EXPECTED_INLINE_SKILLS
             - EXPECTED_PARALLEL_INIT_SKILLS
             - set(POINTER_TAIL_TITLES)
+            - set(WSFLOW_ALIAS_TARGET)
         ):
             path = SKILLS_DIR / skill / "SKILL.md"
             text = path.read_text(encoding="utf-8")
@@ -205,9 +225,9 @@ class WsflowSkillBundleTest(unittest.TestCase):
         # optional regex group) so a missing pointer on any of them fails
         # loudly instead of silently passing.
         pointer_tail = {
-            "lead-backfill-docs": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
+            "lead-delegate": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
             "lead-discuss": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
-            "lead-goal-fan-out-step": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
+            "lead-run": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
         }
         offenders = []
         for skill in sorted(EXPECTED_PARALLEL_INIT_SKILLS):
@@ -233,13 +253,56 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_skill_shims_point_to_shared_playbooks(self):
+        # wsflow-only aliases point at a shared playbook under a different stem
+        # than their own name (D5: no rsrc body of their own), so they are
+        # covered by test_wsflow_only_aliases_route_to_target, which asserts the
+        # target playbook exists.
         missing = []
-        for skill in sorted(EXPECTED_SKILLS - EXPECTED_INLINE_SKILLS):
+        for skill in sorted(EXPECTED_SKILLS - EXPECTED_INLINE_SKILLS - set(WSFLOW_ALIAS_TARGET)):
             subdir_playbook = FULL_PLUGIN_RSRC_DIR / skill / f"{skill}.md"
             flat_playbook = FULL_PLUGIN_RSRC_DIR / f"{skill}.md"
             if not subdir_playbook.exists() and not flat_playbook.exists():
                 missing.append(skill)
         self.assertEqual(missing, [])
+
+    def test_wsflow_only_aliases_route_to_target(self):
+        # A wsflow-only backward-compat alias (e.g. the retired lead-proceed
+        # name) is a thin shim whose body is the target's parallel-init shim
+        # pointing at the target playbook, so a by-name caller runs the current
+        # target procedure. Its description does double duty as the tombstone:
+        # it names both the retired alias and the canonical target so an
+        # auto-selector is steered to the target while a by-name call still
+        # runs. The alias has no rsrc body of its own; the target's shared
+        # playbook must exist.
+        offenders = []
+        for alias, target in sorted(WSFLOW_ALIAS_TARGET.items()):
+            path = SKILLS_DIR / alias / "SKILL.md"
+            text = path.read_text(encoding="utf-8")
+            description = re.search(r"^description: (.*)$", text, re.M)
+            if description is None or alias not in description.group(1) or target not in description.group(1):
+                offenders.append(f"{path.relative_to(PLUGIN_DIR)}: description must name both {alias} and {target}")
+                continue
+            subdir_playbook = FULL_PLUGIN_RSRC_DIR / target / f"{target}.md"
+            flat_playbook = FULL_PLUGIN_RSRC_DIR / f"{target}.md"
+            if not subdir_playbook.exists() and not flat_playbook.exists():
+                offenders.append(f"{path.relative_to(PLUGIN_DIR)}: target playbook {target} missing")
+                continue
+            match = re.fullmatch(
+                r"---\n"
+                rf"name: {re.escape(alias)}\n"
+                r"description: .+\n"
+                r"---\n\n"
+                r"# .+\n\n"
+                r"Call in parallel:\n"
+                rf'- `wsflow/playbook\.read\(name: "{re.escape(target)}", session_key: <your key, omit if fresh>\)`\n'
+                r'- `wsflow/workflow_manual\(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>\)`\n\n'
+                r"After both return, execute the procedure returned by `wsflow/playbook\.read`\."
+                r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.\n",
+                text,
+            )
+            if match is None:
+                offenders.append(f"{path.relative_to(PLUGIN_DIR)}: body is not the {target} parallel-init shim")
+        self.assertEqual(offenders, [])
 
     def test_bootstrap_scaffolds_emit_converged_output_across_packages(self):
         # Ticket 260825 Phase 4: assert positive convergence. Both packages'

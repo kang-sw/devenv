@@ -8,7 +8,7 @@ import (
 )
 
 func TestTicketChecklist(t *testing.T) {
-	accepted := []string{"feat", "bug", "refactor", "chore", "research", "workset", "epic"}
+	accepted := []string{"feat", "bug", "refactor", "chore", "research", "epic"}
 	phases := []string{"content", "intent"}
 
 	// Every accepted (type, phase) combination returns non-empty text and no error.
@@ -24,7 +24,7 @@ func TestTicketChecklist(t *testing.T) {
 		}
 	}
 
-	// phase:"content" is category-invariant; assert every item's text travels
+	// Non-research content stays unchanged; assert every item's text travels
 	// verbatim (a truncated/dropped item would otherwise still pass).
 	contentFragments := []string{
 		"forward-compatibility guardrail, and verification expectation; include suggested implementation strategy only when it was agreed, constrains implementation, or is needed to recover the intended contract",
@@ -38,70 +38,53 @@ func TestTicketChecklist(t *testing.T) {
 		}
 	}
 	for _, tt := range accepted[1:] {
+		if tt == "research" {
+			continue
+		}
 		got, _ := wsdoc.TicketChecklist(tt, "content")
 		if got != first {
 			t.Errorf("TicketChecklist(%q, \"content\") differs from TicketChecklist(%q, \"content\"); expected identical content", tt, accepted[0])
 		}
 	}
 
-	// phase:"intent", non-epic/workset category (e.g. "feat"): 6 items, no
-	// epic/workset-conditional branch, closing items numbered 5/6. Assert
-	// every item's text travels verbatim.
+	// phase:"intent" is the three-item conversation-fidelity check and is
+	// shared by non-research categories: the capture enumeration, the epic shape rules,
+	// and the fix-then-summarize procedure moved out. Assert every surviving
+	// item's text travels verbatim, and that the dropped items stay dropped.
 	featIntent, _ := wsdoc.TicketChecklist("feat", "intent")
-	featFragments := []string{
-		"checking every settled decision, contract, agreed API/type/event/UI sketch, rejected alternative, constraint, forward-compatibility guardrail, and verification expectation, and confirming nothing unconfirmed was written",
-		"fresh implementer",
-		"materially different caller-visible, workflow, API, or verification result",
-		"preserved literally, not prose-flattened",
-		"Result Forward note",
-		"5. Fix confirmed gaps in-place",
-		"6. Present a brief correction summary",
+	intentFragments := []string{
+		"1. Test: could a fresh implementer build a materially different caller-visible, workflow, API, or verification result from the settled discussion without contradicting the ticket? If yes, capture the missing settled decision.",
+		"2. Check that API/type/event/UI sketches were preserved literally, not prose-flattened.",
+		"3. Check that no unconfirmed mechanism choice, future-scope hint, Result Forward note, or focus \"Next\" line was written.",
 	}
-	for _, frag := range featFragments {
+	for _, frag := range intentFragments {
 		if !strings.Contains(featIntent, frag) {
 			t.Errorf("TicketChecklist(\"feat\", \"intent\") missing expected fragment %q", frag)
 		}
 	}
-	if strings.Contains(featIntent, "stayed out of the epic") || strings.Contains(featIntent, "parent-child semantics") {
-		t.Error(`TicketChecklist("feat", "intent") unexpectedly contains an epic/workset-conditional branch`)
+	if got := len(strings.Split(strings.TrimSpace(featIntent), "\n")); got != 3 {
+		t.Errorf("TicketChecklist(\"feat\", \"intent\") has %d items, want exactly 3:\n%s", got, featIntent)
 	}
-
-	// epic/workset-conditional branch text appears only for its own category,
-	// with closing items renumbered to 6/7 (item 5 inserted ahead of them).
-	epicIntent, _ := wsdoc.TicketChecklist("epic", "intent")
-	epicFragments := []string{
-		"5. For `epic`, check that detailed implementation material stayed out of the epic and moved to a child-ticket invocation",
-		"6. Fix confirmed gaps in-place",
-		"7. Present a brief correction summary",
+	dropped := []string{
+		"Re-read the written/edited ticket against the conversation",
+		"stayed out of the epic",
+		"parent-child semantics",
+		"Fix confirmed gaps in-place",
+		"Present a brief correction summary",
 	}
-	for _, frag := range epicFragments {
-		if !strings.Contains(epicIntent, frag) {
-			t.Errorf("TicketChecklist(\"epic\", \"intent\") missing expected fragment %q", frag)
+	for _, frag := range dropped {
+		if strings.Contains(featIntent, frag) {
+			t.Errorf("TicketChecklist(\"feat\", \"intent\") still carries retired item text %q", frag)
 		}
 	}
-	if strings.Contains(epicIntent, "parent-child semantics") {
-		t.Error(`TicketChecklist("epic", "intent") unexpectedly contains the workset-specific branch text`)
-	}
-	if strings.Contains(epicIntent, "5. Fix confirmed gaps in-place") || strings.Contains(epicIntent, "6. Present a brief correction summary") {
-		t.Error(`TicketChecklist("epic", "intent") miscounted renumbering; closing items must be 6/7, not 5/6`)
-	}
-
-	worksetIntent, _ := wsdoc.TicketChecklist("workset", "intent")
-	worksetFragments := []string{
-		"5. For `workset`, check that it did not create parent-child semantics, decomposition ownership, or implementation phases",
-		"6. Fix confirmed gaps in-place",
-		"7. Present a brief correction summary",
-	}
-	for _, frag := range worksetFragments {
-		if !strings.Contains(worksetIntent, frag) {
-			t.Errorf("TicketChecklist(\"workset\", \"intent\") missing expected fragment %q", frag)
+	for _, tt := range accepted[1:] {
+		if tt == "research" {
+			continue
 		}
-	}
-	if strings.Contains(worksetIntent, "stayed out of the epic") {
-		t.Error(`TicketChecklist("workset", "intent") unexpectedly contains the epic-specific branch text`)
-	}
-	if strings.Contains(worksetIntent, "5. Fix confirmed gaps in-place") || strings.Contains(worksetIntent, "6. Present a brief correction summary") {
-		t.Error(`TicketChecklist("workset", "intent") miscounted renumbering; closing items must be 6/7, not 5/6`)
+		got, _ := wsdoc.TicketChecklist(tt, "intent")
+		if got != featIntent {
+			t.Errorf("TicketChecklist(%q, \"intent\") differs from TicketChecklist(\"feat\", \"intent\"); the intent checklist is category-invariant", tt)
+		}
 	}
 
 	// Unknown phase returns an error mentioning the accepted set.

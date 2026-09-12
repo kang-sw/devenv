@@ -176,7 +176,7 @@ func TestFormatSageRecordRoundTrip(t *testing.T) {
 // TestFormatSageGateBlockedRecovery pins that the gate's stop_blocked branch
 // names its recovery route rather than reading as a dead end. Without it, a
 // re-entry whose edits address the blocker got a bare "stop" from the gate while
-// lead-write-ticket's On: Reviewer Spawn told it to review the blocked stage —
+// the ticket skill's reviewer-spawn step told it to review the blocked stage —
 // one condition described two ways, which is what forced a judgement call
 // mid-procedure during dogfooding.
 func TestFormatSageGateBlockedRecovery(t *testing.T) {
@@ -301,11 +301,53 @@ func TestFormatSageRecordIssueRouting(t *testing.T) {
 	}
 }
 
+// TestFormatSageRecordAutonomousOrdersRestamp pins the digest rule the routing
+// clause has to respect: an autonomous fix edits the body after this stamp took
+// its digest, so every branch that orders such a fix also orders a re-stamp
+// with the same verdicts, before the commit direction. Without it the recorded
+// digest is stale as soon as the fixes land, and the next sage_gate asks to
+// rerun the reviewers whose findings were just applied.
+func TestFormatSageRecordAutonomousOrdersRestamp(t *testing.T) {
+	const restamp = "call ws/tickets.sage_stamp again with the same verdicts"
+
+	for name, result := range map[string]wsdoc.SageRecordResult{
+		"autonomous-only": {
+			Verdict:    "pass",
+			Posture:    map[string]string{"sage-review-design": "completed"},
+			Autonomous: 3,
+		},
+		"autonomous-and-missing": {
+			Verdict:    "concern",
+			Posture:    map[string]string{"sage-review-design": "completed"},
+			Autonomous: 2,
+			Missing:    1,
+		},
+	} {
+		out := formatSageRecord(result)
+		restampIdx := strings.Index(out, restamp)
+		if restampIdx == -1 {
+			t.Fatalf("%s routing must order a re-stamp so the digest covers the fixed body:\n%s", name, out)
+		}
+		commitIdx := strings.Index(out, "ws/git.commit")
+		if commitIdx != -1 && restampIdx > commitIdx {
+			t.Fatalf("%s: re-stamp (offset %d) must precede the commit direction (offset %d):\n%s", name, restampIdx, commitIdx, out)
+		}
+	}
+
+	clean := formatSageRecord(wsdoc.SageRecordResult{
+		Verdict: "pass",
+		Posture: map[string]string{"sage-review-design": "completed"},
+	})
+	if strings.Contains(clean, restamp) {
+		t.Fatalf("a stage with no issues edits nothing and must stay terse:\n%s", clean)
+	}
+}
+
 func TestServeStdioSageGateDispatch(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
-	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", "260101-feat-sg.md"),
-		"---\ntitle: Sage\nsage-review-design: required\n---\n\nBody.\n")
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", "260101-epic-sg.md"),
+		"---\ntitle: Sage\nsage-review-design: required\n---\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| scope.span | single-file |\n\nBody.\n")
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
@@ -314,7 +356,7 @@ func TestServeStdioSageGateDispatch(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 9701, root, nil))
 
 	resp := callToolWithKey(t, server, 9702, key, "tickets.sage_gate", map[string]any{
-		"stem":    "260101-feat-sg",
+		"stem":    "260101-epic-sg",
 		"landing": "todo",
 	})
 	if !strings.Contains(resp, "action: run") || !strings.Contains(resp, "reviewers: design") || !strings.Contains(resp, "mode: standalone") {
@@ -333,12 +375,12 @@ func TestServeStdioSageGateDetectsStaleCompletedReview(t *testing.T) {
 	root := t.TempDir()
 	ticketRel := filepath.Join("ai-docs", "tickets", "ready", "260101-feat-stale.md")
 	mustWrite(t, root, ticketRel,
-		"---\ntitle: Sage\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\nBody.\n")
+		"---\ntitle: Sage\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| scope.span | single-file |\n\nBody.\n")
 	initGit(t, root)
 	runGit(t, root, "add", ticketRel)
 	runGit(t, root, "commit", "-m", "stamp review")
 	mustWrite(t, root, ticketRel,
-		"---\ntitle: Sage\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\nChanged body.\n")
+		"---\ntitle: Sage\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| scope.span | single-file |\n\nChanged body.\n")
 	runGit(t, root, "add", ticketRel)
 	runGit(t, root, "commit", "-m", "edit after review")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
@@ -374,9 +416,9 @@ func TestServeStdioSageGateDetectsStaleCompletedReview(t *testing.T) {
 func TestServeStdioSageGateDeclineDoesNotAutoCommit(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
-	ticketRel := filepath.Join("ai-docs", "tickets", "todo", "260101-feat-decline.md")
+	ticketRel := filepath.Join("ai-docs", "tickets", "todo", "260101-epic-decline.md")
 	mustWrite(t, root, ticketRel,
-		"---\ntitle: Sage\nsage-review-design: recommended\n---\n\nBody.\n")
+		"---\ntitle: Sage\nsage-review-design: recommended\n---\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| scope.span | single-file |\n\nBody.\n")
 	initGit(t, root)
 	runGit(t, root, "add", ticketRel)
 	runGit(t, root, "commit", "-m", "initial ticket")
@@ -388,7 +430,7 @@ func TestServeStdioSageGateDeclineDoesNotAutoCommit(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 9705, root, nil))
 
 	resp := callToolWithKey(t, server, 9706, key, "tickets.sage_gate", map[string]any{
-		"stem":    "260101-feat-decline",
+		"stem":    "260101-epic-decline",
 		"landing": "todo",
 		"answer":  "no",
 	})
@@ -430,7 +472,7 @@ func TestServeStdioSageStampDispatch(t *testing.T) {
 	root := t.TempDir()
 	ticketRel := filepath.Join("ai-docs", "tickets", "todo", "260101-feat-sr.md")
 	mustWrite(t, root, ticketRel,
-		"---\ntitle: Sage\nsage-review-design: required\n---\n\nBody.\n")
+		"---\ntitle: Sage\nsage-review-design: required\n---\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| scope.span | single-file |\n\nBody.\n")
 	initGit(t, root)
 	// Commit the ticket file first so the subsequent posture write can be
 	// distinguished as modified-but-unstaged rather than merely untracked —
@@ -488,7 +530,7 @@ func TestServeStdioSageStampDelegateKeyBlocked(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", "260101-feat-blocked.md"),
-		"---\ntitle: Sage\nsage-review-design: required\n---\n\nBody.\n")
+		"---\ntitle: Sage\nsage-review-design: required\n---\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| scope.span | single-file |\n\nBody.\n")
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
@@ -520,5 +562,29 @@ func TestServeStdioSageStampDelegateKeyBlocked(t *testing.T) {
 	}
 	if strings.Contains(string(body), "sage-review-design: completed") {
 		t.Errorf("delegate key: rejected call must not have written frontmatter:\n%s", body)
+	}
+}
+
+func TestServeStdioActionableTodoGateRejects(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 9800, root, nil))
+	for _, category := range []string{"feat", "bug", "refactor", "chore"} {
+		stem := "260101-" + category + "-todo"
+		rel := filepath.Join("ai-docs", "tickets", "todo", stem+".md")
+		before := "---\ntitle: Backlog\n---\n\nBody.\n"
+		mustWrite(t, root, rel, before)
+		resp := callToolWithKey(t, server, 9801, key, "tickets.sage_gate", map[string]any{"stem": stem, "landing": "todo"})
+		if !strings.Contains(resp, "actionable tickets run sage review at ready promotion") || strings.Contains(resp, "action: run") {
+			t.Fatalf("todo did not fail loudly: %s", resp)
+		}
+		raw, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil || string(raw) != before {
+			t.Fatalf("rejected call mutated body: %s %v", raw, err)
+		}
 	}
 }

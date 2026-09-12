@@ -14,7 +14,7 @@ import (
 
 // freshOnlyStart and freshOnlyEnd are the dedicated mode-gating marker tokens
 // for the ws.workflow_manual tool. They are distinct from the product-mode
-// markers (ws:full-only, ws:wsflow-only, ws:mercenary-on) and the override
+// markers (ws:full-only, ws:wsflow-only) and the override
 // markers (ws:override:) so none of those passes consume or choke on them.
 //
 // Under playbook.read the markers surface verbatim as inert HTML comments
@@ -194,8 +194,9 @@ func (s *Server) handleWorkflowState(id json.RawMessage, args map[string]any) re
 	//    (its CONTINUE branch appends "\n\n"+computeNotes(rec.Root) after
 	//    renderSessionState, then a final "\n") so workflow_state's output
 	//    stays byte-identical to workflow_manual's "## Session State" suffix
-	//    for every resolved session, per the standing invariant documented at
-	//    ai-docs/mental-model/mcp-runtime.md {#260702-workflow-state-tool}.
+	//    for every resolved session. That byte-identity is the invariant: a
+	//    change to either renderer must be made in both, or workflow_state
+	//    silently diverges from the manual it mirrors.
 	return toolTextResponse(id, renderSessionState(rec)+"\n\n"+computeNotes(rec.Root)+"\n", nil)
 }
 
@@ -281,12 +282,6 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				warning := bootstrapStalenessWarning(canonical, skillsRoot, &warningResolver, mintedKey)
 				body = injectBootstrapStalenessWarning(body, warning)
 			}
-			{
-				warningAdapter := sessionConfigAdapter{s: s.sessions}
-				warningResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), warningAdapter, warningAdapter)
-				warning := docCoverageWarning(canonical, &warningResolver, mintedKey)
-				body = injectDocCoverageWarning(body, warning)
-			}
 			body = injectBootstrapStalenessWarning(body, scopeAnnouncement(canonical))
 			body = injectBootstrapStalenessWarning(body, computeManuals(canonical))
 			body = injectBootstrapStalenessWarning(body, wsreview.CheckpointNudge(context.Background(), canonical))
@@ -317,12 +312,6 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				warningResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), warningAdapter, warningAdapter)
 				warning := bootstrapStalenessWarning(rec.Root, skillsRoot, &warningResolver, key)
 				body = injectBootstrapStalenessWarning(body, warning)
-			}
-			{
-				warningAdapter := sessionConfigAdapter{s: s.sessions}
-				warningResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), warningAdapter, warningAdapter)
-				warning := docCoverageWarning(rec.Root, &warningResolver, key)
-				body = injectDocCoverageWarning(body, warning)
 			}
 			body = injectBootstrapStalenessWarning(body, scopeAnnouncement(rec.Root))
 			body = injectBootstrapStalenessWarning(body, computeManuals(rec.Root))

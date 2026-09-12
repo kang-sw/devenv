@@ -8,8 +8,8 @@ import (
 )
 
 func TestTicketTemplate(t *testing.T) {
-	// Each of the 7 accepted type values returns non-empty text and no error.
-	accepted := []string{"feat", "bug", "refactor", "chore", "research", "workset", "epic"}
+	// Each of the 6 accepted type values returns non-empty text and no error.
+	accepted := []string{"feat", "bug", "refactor", "chore", "research", "epic"}
 	for _, tt := range accepted {
 		text, err := wsdoc.TicketTemplate(tt)
 		if err != nil {
@@ -39,12 +39,6 @@ func TestTicketTemplate(t *testing.T) {
 		t.Error("TicketTemplate(\"research\") unexpectedly contains \"## Phases\"")
 	}
 
-	// workset return includes ## Tickets heading.
-	worksetText, _ := wsdoc.TicketTemplate("workset")
-	if !strings.Contains(worksetText, "## Tickets") {
-		t.Error("TicketTemplate(\"workset\") does not contain \"## Tickets\"")
-	}
-
 	// epic return includes ## Child Tickets heading.
 	epicText, _ := wsdoc.TicketTemplate("epic")
 	if !strings.Contains(epicText, "## Child Tickets") {
@@ -57,16 +51,17 @@ func TestTicketTemplate(t *testing.T) {
 		t.Error("TicketTemplate(\"feat\") does not contain \"## Phases\"")
 	}
 
-	// The actionable template still offers the `## Spec Impact` optional section
-	// and no longer instructs the author to write a `Contract-first spec` field,
-	// retired with the planned-marker mechanism by
-	// 260726-refactor-retire-spec-planned-marker-mechanism. Both directions are
-	// asserted: the negative alone would also pass if the bullet vanished.
-	if !strings.Contains(first, "`## Spec Impact`") {
-		t.Error("actionable TicketTemplate does not offer the \"## Spec Impact\" optional section")
+	// The actionable template still offers its optional sections, and none of
+	// them is a spec or mental-model section: those retired with their layer.
+	// Both directions are asserted — the negatives alone would also pass if the
+	// whole optional-section list vanished.
+	if !strings.Contains(first, "`## Decisions`") || !strings.Contains(first, "`## Prior Art`") {
+		t.Error("actionable TicketTemplate lost its optional-section list")
 	}
-	if strings.Contains(first, "Contract-first spec") {
-		t.Error("actionable TicketTemplate reintroduced the retired \"Contract-first spec\" field")
+	for _, gone := range []string{"## Spec Impact", "spec:", "spec-remove:", "related-mental-model:"} {
+		if strings.Contains(first, gone) {
+			t.Errorf("actionable TicketTemplate reintroduced the retired %q key or section", gone)
+		}
 	}
 
 	// Unknown type returns an error with "unknown ticket type".

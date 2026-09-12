@@ -892,76 +892,58 @@ func TestValidateRealTree(t *testing.T) {
 	}
 }
 
-// TestLeadWriteTicketSageGatePrecedesCommit pins the step order established
-// by 260726-bug-sage-ready-enforcement-single-chokepoint: "Sage Review Gate"
-// must render before "Commit" in lead-write-ticket's "## On: invoke" section.
-// Headings resolve by name, not by step number — 260729 inserted a Ground stage
-// ahead of the gate and renumbered both.
-// tickets.sage_stamp writes the posture uncommitted
-// and relies on the Commit step to commit it together with the rest of the ticket
-// edit; a silent re-inversion (or reintroducing a conditional instead of the
-// required unconditional order) reproduces the "no staged changes in
-// requested paths" bug the reorder fixed, and no other test in this repo
+// TestLeadTicketSageGatePrecedesCommit pins the step order established by
+// 260726-bug-sage-ready-enforcement-single-chokepoint: inside the ticket
+// skill's ready-promotion section, the sage gate must run before the single
+// commit, and no commit instruction may sit between them. The defect that
+// reorder fixed was a second commit performed inside the gate step, which
+// left the later commit with "no staged changes in requested paths"; a body
+// rewrite can reintroduce it while still looking correct, and no other test
 // asserts on the semantic step order (only mechanical regen/mirror
-// byte-consistency). Content-level, not presence-only: it fails on a
-// re-inversion, not merely a missing heading, and it additionally fails if a
-// commit instruction reappears anywhere inside the gate section or if the
-// section stops overriding the stamping tools' own commit direction.
-func TestLeadWriteTicketSageGatePrecedesCommit(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "agents-plugin", "rsrc", "lead-write-ticket", "lead-write-ticket.md")
+// byte-consistency). Content-level, not presence-only.
+func TestLeadTicketSageGatePrecedesCommit(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "agents-plugin", "rsrc", "lead-ticket", "lead-ticket.md")
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read lead-write-ticket.md: %v", err)
+		t.Fatalf("read lead-ticket.md: %v", err)
 	}
 	text := string(raw)
 
-	// Match the headings by name, not by step number: inserting a stage ahead of
-	// the gate renumbers both and would fail this test for a reason that has
-	// nothing to do with the ordering invariant it exists to protect.
-	gateHeading := headingByName(t, text, "Sage Review Gate")
-	commitHeading := headingByName(t, text, "Commit")
-	gateIdx := strings.Index(text, gateHeading)
-	commitIdx := strings.Index(text, commitHeading)
+	section := sectionByHeading(t, text, "## Promote to `ready/`")
+	gateIdx := strings.Index(section, "tickets.sage_gate")
+	commitIdx := strings.Index(section, "git.commit")
+	if gateIdx < 0 {
+		t.Fatalf("the ready-promotion section must call tickets.sage_gate:\n%s", section)
+	}
+	if commitIdx < 0 {
+		t.Fatalf("the ready-promotion section must name the single git.commit:\n%s", section)
+	}
 	if gateIdx > commitIdx {
-		t.Fatalf("Sage Review Gate (offset %d) must precede Commit (offset %d) in ## On: invoke; re-inversion detected", gateIdx, commitIdx)
+		t.Fatalf("tickets.sage_gate (offset %d) must precede git.commit (offset %d); re-inversion detected:\n%s", gateIdx, commitIdx, section)
 	}
-
-	// Order alone is not the whole contract. The defect this reorder fixed was
-	// a second commit performed inside the gate section; a future edit could
-	// keep the headings in the right order and still reintroduce a commit
-	// instruction there, reproducing "no staged changes in requested paths" at
-	// the Commit step. Pin the gate section's content too.
-	section := text[gateIdx:commitIdx]
-	for _, forbidden := range []string{"git.commit", "chore(sage)"} {
-		if strings.Contains(section, forbidden) {
-			t.Fatalf("the Sage Review Gate section must not instruct a commit (found %q); %q owns the single commit:\n%s", forbidden, commitHeading, section)
-		}
+	if strings.Count(section, "git.commit") != 1 {
+		t.Fatalf("the ready-promotion section must name exactly one git.commit; a second commit reproduces the empty-staging bug:\n%s", section)
 	}
-	// And it must positively state that the stamping tools' own commit
-	// direction does not apply here, so the gate-vs-commit conflict that made
-	// the fix depend on the agent preferring the later line cannot come back.
-	commitStep := strings.TrimSuffix(strings.TrimPrefix(commitHeading, "### "), ". Commit")
-	for _, required := range []string{
-		"leave it uncommitted",
-		"does not apply inside this procedure",
-		"step " + commitStep + " performs the single commit",
-	} {
-		if !strings.Contains(section, required) {
-			t.Fatalf("the Sage Review Gate section must state %q:\n%s", required, section)
-		}
+	// And it must positively state that the stamping tools leave their write
+	// uncommitted, so the gate-vs-commit conflict cannot come back.
+	if !strings.Contains(section, "Stamps leave files uncommitted") {
+		t.Fatalf("the ready-promotion section must state that stamps leave files uncommitted:\n%s", section)
 	}
 }
 
-// headingByName returns the full `### <N>. <name>` heading line for a named
-// numbered step, so ordering assertions survive renumbering.
-func headingByName(t *testing.T, text, name string) string {
+// sectionByHeading returns the body of a markdown section, from its heading to
+// the next heading of the same or higher level.
+func sectionByHeading(t *testing.T, text, heading string) string {
 	t.Helper()
-	re := regexp.MustCompile(`(?m)^### \d+\. ` + regexp.QuoteMeta(name) + `$`)
-	found := re.FindString(text)
-	if found == "" {
-		t.Fatalf("lead-write-ticket.md has no numbered step heading named %q", name)
+	idx := strings.Index(text, heading+"\n")
+	if idx < 0 {
+		t.Fatalf("lead-ticket.md has no section headed %q", heading)
 	}
-	return found
+	rest := text[idx+len(heading):]
+	if next := regexp.MustCompile(`(?m)^## `).FindStringIndex(rest); next != nil {
+		rest = rest[:next[0]]
+	}
+	return rest
 }
 
 // TestGenerateRealManifest regenerates agents-plugin/rsrc/manifest.json from
@@ -1060,4 +1042,35 @@ func asError[T error](err error, target *T) bool {
 		return false
 	}
 	return errors.As(err, target)
+}
+
+// These ordering checks cover the prompt's dispatch boundary; native model
+// dispatch itself is not executed by Go tests.
+func TestLeadTicketSettlementBoundaries(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "agents-plugin", "rsrc", "lead-ticket", "lead-ticket.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	ground := strings.Join(strings.Fields(sectionByHeading(t, text, "## Ground: fact population")), " ")
+	for _, want := range []string{"before you run epic design review", "creation and repeated editing run neither fact population nor Sage", "research remains ungated", "Ordinary epic `todo/` edits do not spawn reviewers"} {
+		if !strings.Contains(ground, want) {
+			t.Fatalf("missing boundary %q: %s", want, ground)
+		}
+	}
+	for _, heading := range []string{"## Promote to `ready/`", "## Review epic design"} {
+		section := strings.Join(strings.Fields(sectionByHeading(t, text, heading)), " ")
+		facts := strings.Index(section, "run **Ground: fact population**")
+		gate := strings.Index(section, "tickets.sage_gate")
+		if facts < 0 || gate <= facts {
+			t.Fatalf("facts must precede gate in %s: %s", heading, section)
+		}
+		if strings.Count(section, "tickets.sage_gate") != 1 {
+			t.Fatalf("duplicate gate in %s", heading)
+		}
+	}
+	ready := sectionByHeading(t, text, "## Promote to `ready/`")
+	if strings.Index(ready, "run **Ground: fact population**") > strings.Index(ready, "tickets.move") {
+		t.Fatal("ready move precedes fact population")
+	}
 }

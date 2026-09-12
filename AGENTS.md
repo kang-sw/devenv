@@ -24,10 +24,11 @@ workflow semantics.
 Read at every session start, before other action:
 
 1. **Preamble** - repo identity, plugin topology, and canonical flows live in
-   this file's `## Project Orientation` section below; read repo-tracked notes
-   (`ws/note.search(layer: "repo")`) for volatile session context,
-   `ai-docs/manuals/` for procedures, and generated ticket/spec inventories for
-   current status. Keep only context a session must not re-derive.
+   this file's `## Project Orientation` section below; read the `repo` note
+   layer at `ai-docs/ws-notes/` (one file per key) for volatile session
+   context, `ai-docs/manuals/` for procedures, and the ticket status
+   directories for current work. Keep only context a session must not
+   re-derive.
 2. **Project arc** - run `git log --oneline --graph -50`.
 3. **Binding anchor** - read this project's declared binding anchor
    (`## Workflow` -> `### Binding Anchor`) when the task touches one of its
@@ -54,8 +55,8 @@ Read at every session start, before other action:
 ## Project Scope
 
 This is a meta-workflow repo: workflow docs, skills, agents, plugin packaging,
-helper commands, MCP tooling, and dev-environment templates. Specs, tickets, and
-mental models here describe the workflow system itself; do not add downstream
+helper commands, MCP tooling, and dev-environment templates. Tickets and
+manuals here describe the workflow system itself; do not add downstream
 application-domain material.
 
 Root migration artifacts stay grouped by deliverable:
@@ -69,7 +70,7 @@ files for this migration unless a ticket changes the layout.
 ## Code Standards
 
 1. **Simplicity.** Write the simplest complete implementation that satisfies the
-   spec.
+   ticket's contract.
 2. **Surgical changes.** Change only what the task requires; follow existing
    style.
 3. **Responsibility check.** Keep module roles clean; split when responsibility
@@ -115,8 +116,7 @@ rendezvous-backend: canary
 `review-track` is the branch the review sweep tracks (work lands and is
 reviewed on `develop`; shipping is `develop` -> `main`). `release-boundary:
 present` declares that this project has a real `develop` -> `main` release
-step, gated by the `lead-ship` release gate (`ai-docs/spec/workflow-skills.md`
-`{#260830-review-policy-config-surface}`): before promoting `develop` to
+step, gated by the `lead-ship` release gate: before promoting `develop` to
 `main`, ship reads the review-watermark frontier head and requires the range
 since it to be clear. `rendezvous-backend: canary` uses the append-only
 review-ledger canary (no GitHub branch-protection config needed) rather than
@@ -131,13 +131,31 @@ topics: plugin architecture, host-neutral migration, spawn-removal, adapter boun
 ```
 
 `anchor` names the ticket a lead must read before answering or editing when a
-target touches one of the `topics`. `lead-discuss`, `lead-proceed`, and
-`lead-implement` read this declaration through the generic binding-anchor hook
-(`ai-docs/spec/workflow-skills.md`
-`{#260908-project-binding-anchor-declaration}`) rather than naming this
-repository's anchor in shipped text. Both keys are required: a project that
-declares no such section (or only one key) has no binding-anchor gate, and the
+target touches one of the `topics`. `lead-discuss` reads it directly, and the
+routed run path injects it through the generic binding-anchor hook rather than
+naming this repository's anchor in shipped text. Both keys are required: a
+project that declares no such section (or only one key) has no binding-anchor
+gate, and the
 proceed fact normalizes to `n/a`.
+
+### Implementation Conventions
+
+| paths | manual |
+|---|---|
+| `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/` | `ai-docs/manuals/shipped-surface-boundary.md` |
+| `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin-wsflow/rsrc/`, `agents-plugin-wsflow/skills/`, `agents-plugin-tool/internal/wsdoc/conventions/` | `ai-docs/manuals/skill-authoring.md` |
+| `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin-wsflow/` | `ai-docs/manuals/wsflow-mirroring.md` |
+| `agents-plugin-tool/internal/mcp/` | `ai-docs/manuals/ws-mcp.md` |
+
+Each row's manual is read before editing a file its `paths` cover. This is a
+live obligation, not a pointer list: the worker playbook reads every matching
+row's manual before editing, and ticket fact population copies matching rows
+into a ticket's `## Constraints`. `skill-authoring.md` and
+`wsflow-mirroring.md` were already required - the first by `## Code Standards`
+above, the second by its own `summary:` - and declaring them here is what
+makes that requirement reach a path-scoped reader. Adding a row binds every
+future edit under its `paths`, so add one only for a manual whose rules a
+change to those paths must not contradict.
 
 ### Commit Rules
 
@@ -155,13 +173,7 @@ Include `## AI Context` explaining why the approach was chosen.
 ## Ticket Updates                          # optional - ticket-driven only
 - <ticket-stem>[: <optional-label>]
   > Forward: <future-phase finding>
-
-## Spec                                    # optional - omit when none
-- <spec-stem>
 ```
-
-When a spec heading `{#slug}` changes, include
-`renamed-spec: <old-stem> -> <new-stem>`.
 
 Keep unrelated untracked files out of commits. `.codex` may exist locally; do
 not stage it unless explicitly requested.
@@ -173,67 +185,42 @@ not stage it unless explicitly requested.
 
 ## Architecture Rules
 
-1. **Workflow repo scope.** Specs, tickets, and mental models describe the ws
-   workflow system itself; downstream application rules belong in downstream
-   projects.
+1. **Workflow repo scope.** Tickets and manuals describe the ws workflow system
+   itself; downstream application rules belong in downstream projects.
 2. **Grouped migration layout.** `agents-plugin/` and `agents-plugin-tool/` own
-   the Codex/plugin-runtime migration surface. Do not introduce new root module
-   directories without a ticket.
-3. **Host-neutral first.** Shared skill text should prefer canonical MCP tool
-   names and host-neutral behavior. Treat Claude-specific commands and paths as
+   the Codex/plugin-runtime migration surface; do not introduce new root
+   module directories without a ticket.
+3. **Host-neutral first.** Shared skill text prefers canonical MCP tool names
+   and host-neutral behavior, treating Claude-specific commands and paths as
    adapter or fallback behavior.
-4. **Shipped surfaces are downstream-first. This is not negotiable.**
-   Every playbook, skill, convention, and template under `agents-plugin/`
-   and `agents-plugin-wsflow/`, every embedded convention, and every string
-   `agents-plugin-tool/` emits to an agent (todo instructions, advisories,
-   banners, doctor checks, tool descriptions) runs inside projects that are
-   not this one and that hold only what bootstrap installs. The test for every sentence of such
-   text: **does it depend on something a downstream project does not
-   have?** If yes, it is a leak. Concretely, shipped text MUST NOT name:
-   - a ticket of this repository: a real `26xxxx-...` stem, an
-     `ai-docs/tickets/...` path to one, an epic name, or a bare ticket
-     number used as a citation (example stems that resolve to nothing are
-     fine; ticket-directory names and `<status>/<stem>` placeholders are
-     ws conventions and fine);
-   - a commit hash;
-   - a specific file of this repository that bootstrap does not install
-     (`ai-docs/ref/worktree-ticket-scope.md`, the `skill-authoring` manual),
-     or this repository's own layout and tooling: `agents-plugin/`,
-     `agents-plugin-tool/`, `agents-plugin-wsflow/`, `claude-plugin/`,
-     `install.sh`, `wsflow-mirroring`;
-   - this repository's migration vocabulary as a rule: migration anchor,
-     native-subagent pivot, spawn-removal, host-neutral migration, adapter
-     boundaries, retired Claude tree, Codex-first.
-   A rule this file imposes on sessions in this repository is a rule for this
-   repository, not a rule the shipped playbooks impose on every project. When
-   shipped text needs project-specific input it reads it through a generic
-   hook (mental-model lookup, `infra.read`, `convention.read`, a declared
-   `AGENTS.md` section, a `config.list` key) and this repository declares its
-   own value behind that hook. A ticket that asks shipped playbooks to
-   "honor" or "enforce" a rule from this file is asking for a leak; push
-   back and redirect it to a hook. A test that pins shipped text pins the
-   leak too: a pinned devenv-only string is a bug in the test as well as in
-   the text. Before committing any change under the shipped surfaces,
-   re-read the changed text as a lead in a project that has never heard of
-   devenv.
-5. **Shell state is ephemeral.** Shell state does not persist between tool calls;
+4. **Shipped surfaces are downstream-first, non-negotiably.** Text that ships
+   to a downstream project must not depend on anything this repository alone
+   has; `ai-docs/manuals/shipped-surface-boundary.md` states what that
+   excludes and which generic hook to use instead.
+5. **A ticket may not ask a shipped playbook to enforce a rule from this
+   file.** Such a ticket is asking for a leak; push back and redirect it to a
+   generic hook the playbook already reads.
+6. **Shell state is ephemeral.** Shell state does not persist between tool calls;
    values needed later must be captured from output and passed explicitly.
-6. **Retired Claude tree.** Do not reintroduce `claude-plugin/`; preserve
+7. **Retired Claude tree.** Do not reintroduce `claude-plugin/`; preserve
    historical Claude material under `ai-docs/ref/` when needed.
+
 ## Documentation System
 
 - Project orientation: this file's `## Project Orientation` section.
 - Volatile or tracked session notes: the `repo` note layer
   (`ai-docs/ws-notes/`, written via `ws/note.write(layer: "repo", ...)`).
 - Tickets: `ai-docs/tickets/`
-- Specs: `ai-docs/spec/`
-- Mental models: `ai-docs/mental-model/`
 - Static references: `ai-docs/ref/`
+- Shipped-surface boundary: `ai-docs/manuals/shipped-surface-boundary.md`
 - Skill/agent authoring: `ai-docs/manuals/skill-authoring.md`
 - Codex behavior notes: `ai-docs/manuals/codex-integration.md`
-- MCP behavior contracts: `ai-docs/spec/mcp-tools.md` and
-  `ai-docs/spec/plugin-runtime.md`
 - MCP operational runbook: `ai-docs/manuals/ws-mcp.md`
+- Tracked archive of retired material: `ai-docs/.old/`
+
+There is no spec or mental-model layer. Caller-visible behavior is the test
+suite; the code is the structure; a non-derivable trap is a comment at the site
+that bites.
 
 Before editing:
 
@@ -241,10 +228,6 @@ Before editing:
   `ai-docs/manuals/skill-authoring.md`.
 - Tickets: read ticket conventions through `ws/convention.read` or the
   bundled convention fallback.
-- Specs: read spec conventions through `ws/convention.read` or the compatibility
-  bundled convention fallback.
-- Mental models: read mental-model conventions through `ws/convention.read` or
-  the bundled convention fallback.
 
 ## Ticket System
 
@@ -261,7 +244,7 @@ ai-docs/tickets/.dropped/
 - Reference tickets by stem, not path: `260429-research-host-neutral-ws-plugin`.
 - Creation-date prefixes are stable; never rename to change the date.
 - Move status with `git mv` when possible.
-- `todo/` is accepted backlog; `ready/` is the spec-addressed implementation-ready status.
+- `todo/` is accepted backlog; `ready/` is the implementation-ready status.
 - Research tickets use freeform topic sections and no phases.
 - Actionable tickets use `## Phases` and stable `### Phase N: <title>`.
 - Do not edit phase plan text after it has a `### Result` section; append
@@ -273,14 +256,13 @@ ai-docs/tickets/.dropped/
 ## Project Orientation
 
 <!-- Every-session orientation: repo identity, project map/topology, and
-     canonical flows. Keep compact; route deep detail to specs, mental
-     models, or manuals. -->
+     canonical flows. Keep compact; route deep detail to manuals. -->
 
 - **Repo identity.** Meta-workflow repository for workflow documents, skills,
   agents, plugin packaging, helper commands, MCP tooling, and dev-environment
-  templates. Specs, tickets, and mental models here describe the workflow
-  system itself; downstream application material belongs in downstream
-  projects. Active plugin package: `agents-plugin/` (`ws@0.45.2`). Agentless
+  templates. Tickets and manuals here describe the workflow system itself;
+  downstream application material belongs in downstream projects. Active plugin
+  package: `agents-plugin/` (`ws@0.45.2`). Agentless
   derivative package: `agents-plugin-wsflow/` (`wsflow@0.45.2`). Native
   MCP/tooling source: `agents-plugin-tool/`. Retired Claude source material:
   `ai-docs/ref/claude-home-legacy.md` and git history.
@@ -293,7 +275,8 @@ ai-docs/tickets/.dropped/
     installs when Claude Code is available; it intentionally does not install
     wsflow into Claude.
   - `agents-plugin/` is registered through `.agents/plugins/marketplace.json`;
-    Codex UI install has verified `ws:lead-write-ticket` and `ws:lead-discuss`.
+    Codex UI install has verified the ticket-authoring and discussion skills
+    (`ws:lead-ticket` since its rename from `ws:lead-write-ticket`).
   - `agents-plugin-wsflow/` is an agentless derivative package with
     Codex/Claude manifests, package-local no-agent MCP env, shared launcher
     copies, a reduced `runtime.json`, thin wsflow skill shims over shared
@@ -321,15 +304,15 @@ ai-docs/tickets/.dropped/
     tree and plugin manifest/tests; not duplicated here.
 - **Canonical flows.**
   ```text
-  Full ceremony:  discuss -> proceed -> implement -> review/docs/final gate
-  Direct:         implement <description>
-  Auto-route:     proceed <ticket-path>
-  Sprint:         sprint -> discuss/explore -> sprint-edit episode? -> episode closure or normal handoff
-  Review:         review [branch] -> verdict -> (discuss -> fix | comment | merge)
-  Recovery:       salvage -> research report -> recovery epic? -> child tickets
+  Full ceremony:  discuss -> ticket -> run -> review
+  Delegate:       delegate <bounded task> -> follow-up on the same native agent
+  Direct:         run <ticket-path>
+  Queue:          run (no argument) -> next ready/ ticket, one worker per cycle
+  Review:         review [branch|range] -> verdict -> (fix via run | comment | discuss | merge)
+  Release:        ship <project> -> release gate -> execute
   ```
-  User decides next step at each handoff. `proceed` is the explicit opt-in for
-  auto-chaining through the pipeline.
+  The user decides the next step at each handoff. `run` spawns one worker per
+  invocation; the worker, not the lead, executes the ticket.
 
 ## Project Knowledge
 
@@ -348,10 +331,15 @@ ai-docs/tickets/.dropped/
 - Claude plugin source artifacts were retired from the live tree; do not add a
   new `claude-plugin/` mirror for Codex behavior.
 
-<!-- Inclusion test: if breaking this rule makes a skill produce wrong results
-     AND it applies everywhere, keep it here. Domain-scoped rules belong in
-     `ai-docs/mental-model/<domain>.md ## Domain Rules` via `ws:lead-add-rule`.
-     Context goes in this file's `## Project Orientation` section or the
-     `repo` note layer; process goes in skills. -->
+<!-- Inclusion test: keep a rule in this file only if it applies to every
+     path and its body is one sentence after the bold name. A rule whose
+     body takes more, or that applies to some paths only, goes in
+     `ai-docs/manuals/<name>.md` and is declared under `## Workflow` ->
+     `### Implementation Conventions` with the paths it covers, via
+     `ws:lead-add-rule`. A rule a test can check becomes a test. A trap
+     tied to one site becomes a code comment at that site. A fact about an
+     external system goes in `ai-docs/ref/`. Context goes in this file's
+     `## Project Orientation` section or the `repo` note layer; a procedure
+     goes in `ai-docs/manuals/`; process goes in skills. -->
 
-<!-- Template Version: v0047 -->
+<!-- Template Version: v0048 -->

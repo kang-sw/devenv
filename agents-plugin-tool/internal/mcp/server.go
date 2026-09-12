@@ -18,10 +18,10 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/execjob"
-	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
+	"github.com/kang-sw/devenv/internal/wskey"
 	"github.com/kang-sw/devenv/internal/wsreview"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 	"github.com/kang-sw/devenv/internal/wsstate"
@@ -34,6 +34,21 @@ type Server struct {
 	rootMu         sync.RWMutex
 	sessionHarness string
 	sessions       *sessionStore
+}
+
+// gitStatusResult keeps the generic git observation intact while allowing the
+// MCP layer to attach workflow context. wsgit deliberately has no wsdoc
+// dependency, so ticket ownership is resolved here rather than in wsgit.
+type gitStatusResult struct {
+	wsgit.StatusResult
+	ImplTicket *implTicketStatus `json:"impl_ticket,omitempty"`
+}
+
+type implTicketStatus struct {
+	State  string `json:"state"`
+	Stem   string `json:"stem,omitempty"`
+	Path   string `json:"path,omitempty"`
+	Status string `json:"status,omitempty"`
 }
 
 type toolRole string
@@ -73,7 +88,7 @@ const bootstrapToolName = "ferrule"
 // preserved no-op, since the pre-rename tickets.sage_record was reachable by
 // a delegate-scoped key.
 func isLeadOnlyTool(name string) bool {
-	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
+	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || name == "git.merge" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
 }
 
 func workflowPreferenceWriterTool(name string) bool {
@@ -458,11 +473,9 @@ func RuntimeNamespace() string {
 
 func builtinConfigDefaults() map[string]string {
 	return map[string]string{
-		wsconfig.ItemWorkflowPreferSubagent:  "off",
-		wsconfig.ItemWorkflowPreferMercenary: "hide",
-		wsconfig.ItemSageReview:              "auto",
-		wsconfig.ItemBootstrapAlarm:          "on",
-		wsconfig.ItemDocCoverageAlarm:        "on",
+		wsconfig.ItemWorkflowPreferSubagent: "off",
+		wsconfig.ItemSageReview:             "auto",
+		wsconfig.ItemBootstrapAlarm:         "on",
 	}
 }
 
@@ -495,7 +508,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	if NoAgentMode() && noAgentHiddenTool(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("%s agentless mode disables agent-backed tool: %s", RuntimeNamespace(), params.Name))
 	}
-	if !s.toolAllowed(params.Name, s.mercenaryHiddenFromConfig()) {
+	if !s.toolAllowed(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
 	}
 	// Keyed capability gate: when a session_key is present and maps to a known
@@ -678,7 +691,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		// config.tuning path: project the per-key writer schema + current values,
-		// with the no-agent full-ws-only cut (today: workflow.prefer_mercenary).
+		// with the no-agent full-ws-only cut applied per entry.
 		catalogAdapter := sessionConfigAdapter{s: s.sessions}
 		catalogResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigAndPromptDefaults(), catalogAdapter, catalogAdapter)
 		catalog, err := buildTuningCatalog(rsrcRoot, &catalogResolver, sessionKey, NoAgentMode())
@@ -797,10 +810,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			// Reset means "drop the override and fall back to the builtin default" —
 			// distinct from explicitly writing the builtin's current value.
 			resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-			if err := resolver.Unset(entry.Key, wsconfig.SetOptions{}); err != nil {
+			if err := resolver.Unset(entry.Key, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
-			resolved, err := resolver.Get("", entry.Key)
+			resolved, err := resolver.Get(sessionKey, entry.Key)
 			if err != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
@@ -857,8 +870,8 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			}
 			return toolTextResponse(req.ID, fmt.Sprintf("prompt override set: %s/%s (scope: %s)\n", pointID, storedHarness, resolvedScope), nil)
 		default:
-			// scalar resolver-backed knob (subagent / mercenary / bootstrap_alarm /
-			// doc_coverage_alarm). Resolver.Set enforces global-only + session-key.
+			// scalar resolver-backed knob (subagent / bootstrap_alarm).
+			// Resolver.Set enforces global-only + session-key.
 			value, _ := params.Arguments["value"].(string)
 			value = strings.ToLower(strings.TrimSpace(value))
 			if err := validateEnumValue("config.tune", entry.ValueFields, "value", value); err != nil {
@@ -905,10 +918,18 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		result, err := wsgit.NewClient().Status(context.Background(), root)
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, result, err)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
-		return toolTextResponse(req.ID, formatGitStatus(result), err)
+		implTicket, err := activeImplTicket(root, result.Branch.Head)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		status := gitStatusResult{StatusResult: result, ImplTicket: implTicket}
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, status, nil)
+		}
+		return toolTextResponse(req.ID, formatGitStatusWithImplTicket(result, implTicket), nil)
 	case "git.diff":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -945,6 +966,25 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolJSONResponse(req.ID, result, err)
 		}
 		return toolTextResponse(req.ID, formatMergeBase(result), err)
+	case "git.merge":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		branch, _ := params.Arguments["branch"].(string)
+		target, _ := params.Arguments["target"].(string)
+		releaseOverride, _ := params.Arguments["release_target_override"].(bool)
+		expectedSource, _ := params.Arguments["expected_source_oid"].(string)
+		expectedTarget, _ := params.Arguments["expected_target_oid"].(string)
+		title, _ := params.Arguments["title"].(string)
+		description, _ := params.Arguments["description"].(string)
+		result, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, target, wsgit.CommitOptions{
+			Title: title, Description: description, AIContext: stringList(params.Arguments["ai_context"]), UpdatedTickets: stringList(params.Arguments["updated_tickets"]),
+		}, implMergeAcknowledgement{ReleaseTargetOverride: releaseOverride, ExpectedSourceOID: expectedSource, ExpectedTargetOID: expectedTarget})
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, result.text(), err)
 	case "git.commit":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -993,15 +1033,12 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		// enumeration), matching #260810's guardrail that the unscoped path
 		// (the common case) pays no extra cost.
 		result, err := wsgit.Client{Runner: wsgit.ExecRunner{}, Verifier: verifyAdapter}.Commit(context.Background(), root, wsgit.CommitOptions{
-			Paths:               stringList(params.Arguments["paths"]),
-			Title:               title,
-			Description:         description,
-			AIContext:           aiContext,
-			MentalModelNotes:    stringList(params.Arguments["mental_model_notes"]),
-			UpdatedTickets:      stringList(params.Arguments["updated_tickets"]),
-			UpdatedSpecs:        stringList(params.Arguments["updated_specs"]),
-			UpdatedMentalModels: stringList(params.Arguments["updated_mental_models"]),
-			SparseScopeActive:   wsdoc.SparseCheckoutActive(root),
+			Paths:             stringList(params.Arguments["paths"]),
+			Title:             title,
+			Description:       description,
+			AIContext:         aiContext,
+			UpdatedTickets:    stringList(params.Arguments["updated_tickets"]),
+			SparseScopeActive: wsdoc.SparseCheckoutActive(root),
 		})
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
@@ -1041,93 +1078,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsdoc.ReadConvention(name)
 		return toolTextResponse(req.ID, text, err)
-	case "spec_stem.generate":
-		slug, _ := params.Arguments["slug"].(string)
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		stem, err := wsdoc.GenerateSpecStem(root, slug, time.Now())
-		return toolTextResponse(req.ID, stem+"\n", err)
-	case "spec_index.verify":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		text, err := wsdoc.VerifySpecIndex(root)
-		return toolTextResponse(req.ID, text, err)
-	case "specs.query":
-		if _, ok := params.Arguments["mentions_ticket_stem"]; ok {
-			return toolTextResponse(req.ID, "", fmt.Errorf("specs.query uses ticket_stem, not mentions_ticket_stem"))
-		}
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		query, _ := params.Arguments["query"].(string)
-		specStem, _ := params.Arguments["spec_stem"].(string)
-		ticketStem, _ := params.Arguments["ticket_stem"].(string)
-		// A pure point-resolve call - spec_stem set, no query text and no
-		// ticket_stem filter - is exactly the old specs.status shape: reuse its
-		// logic (SpecsStatus + formatSpecStatus) so the object-shaped JSON and
-		// not-found error survive the collapse byte-identically instead of
-		// falling through to SpecsFind's array/empty-on-miss discovery shape.
-		if strings.TrimSpace(specStem) != "" && strings.TrimSpace(query) == "" && strings.TrimSpace(ticketStem) == "" {
-			result, err := wsdoc.SpecsStatus(root, wsdoc.SpecStatusOptions{SpecStem: specStem})
-			if wantsJSON(params.Arguments) {
-				return toolJSONResponse(req.ID, result, err)
-			}
-			return toolTextResponse(req.ID, formatSpecStatus(result), err)
-		}
-		result, err := wsdoc.SpecsFind(root, wsdoc.SpecFindOptions{Query: query, SpecStem: specStem, TicketStem: ticketStem})
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, result, err)
-		}
-		if strings.TrimSpace(query) != "" {
-			return toolTextResponse(req.ID, formatSpecFind(query, result), err)
-		}
-		return toolTextResponse(req.ID, formatSpecs(result), err)
-	case "mental_models.list":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		text, err := wsdoc.MentalModelsList(root)
-		return toolTextResponse(req.ID, text, err)
-	case "mental_models.query":
-		if hasTicketStemArgument(params.Arguments) {
-			return toolTextResponse(req.ID, "", fmt.Errorf("mental_models.query uses spec_stem, not ticket_stem"))
-		}
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		query, _ := params.Arguments["query"].(string)
-		specStem, _ := params.Arguments["spec_stem"].(string)
-		domain, _ := params.Arguments["domain"].(string)
-		result, err := wsdoc.MentalModelsFind(root, wsdoc.MentalModelFindOptions{Query: query, SpecStem: specStem, Domain: domain})
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, result, err)
-		}
-		if strings.TrimSpace(query) != "" {
-			return toolTextResponse(req.ID, formatMentalModelFind(query, result), err)
-		}
-		return toolTextResponse(req.ID, formatMentalModels(result), err)
-	case "mental_models.status":
-		if hasSpecStemArgument(params.Arguments) {
-			return toolTextResponse(req.ID, "", fmt.Errorf("mental_models.status uses domain or path"))
-		}
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		domain, _ := params.Arguments["domain"].(string)
-		path, _ := params.Arguments["path"].(string)
-		result, err := wsdoc.MentalModelsStatus(root, wsdoc.MentalModelStatusOptions{Domain: domain, Path: path})
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, result, err)
-		}
-		return toolTextResponse(req.ID, formatMentalModels(result), err)
 	case "note.write":
 		return s.handleNoteWrite(req.ID, params.Arguments, params.Meta)
 	case "note.erase":
@@ -1138,18 +1088,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return s.handleNoteUnmute(req.ID, params.Arguments, params.Meta)
 	case "note.query":
 		return s.handleNoteSearch(req.ID, params.Arguments, params.Meta)
-	case "references.trace":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		ticketStem, _ := params.Arguments["ticket_stem"].(string)
-		specStem, _ := params.Arguments["spec_stem"].(string)
-		result, err := wsdoc.ReferencesTrace(root, wsdoc.ReferenceTraceOptions{TicketStem: ticketStem, SpecStem: specStem})
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, result, err)
-		}
-		return toolTextResponse(req.ID, formatReferenceTrace(result), err)
 	case "tickets.query":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -1498,7 +1436,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		// mintRoot is empty when caller is not a lead (no mint).
 		var mintRoot string
 		var parentKey string
-		var preferMercenary bool
 		// Override lookup is built for any present session_key (shared helper with
 		// the playbook.read path); it is independent of the lead-gate.
 		renderSessionKey, _ := params.Arguments["session_key"].(string)
@@ -1513,12 +1450,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 					mintRoot = entry.root
 				}
 				parentKey = capturedKey
-				// Mercenary preference is a global workflow setting because it
-				// also controls keyless tool-surface visibility.
-				adapter := sessionConfigAdapter{s: s.sessions}
-				resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-				rv, _ := resolver.Get("", wsconfig.ItemWorkflowPreferMercenary)
-				preferMercenary = canonicalPreferMercenaryValue(rv.Value) == "on"
 			}
 		}
 
@@ -1526,186 +1457,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		renderLangAdapter := sessionConfigAdapter{s: s.sessions}
 		renderLangResolver := wsconfig.NewResolver(wsconfig.Options{}, nil, renderLangAdapter, renderLangAdapter)
 		renderWorkflowLangRV, _ := renderLangResolver.Get(renderSessionKey, wsconfig.ItemWorkflowLang)
-		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, preferMercenary, renderWorkflowLangRV.Value, renderOverrideLookup)
+		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, renderWorkflowLangRV.Value, renderOverrideLookup)
 		return toolTextResponse(req.ID, withRecommendedRenderBinding(path, s.currentHarness(), recommendedTier, wsconfig.Options{})+"\n", err)
 
-	case "mercenary.register":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		backend, _ := params.Arguments["backend"].(string)
-		systemPromptText, _ := params.Arguments["system_prompt_text"].(string)
-		// Phase 1 (260620): `tier` is a PASS-THROUGH of the recommended tier that
-		// playbook.render returns (origin = playbook frontmatter). The tier flows
-		// directly as a capability word to RegisterOptions.Tier; downstream
-		// ResolveAgentForHarnessConfig normalizes via normalizedTier. Empty/unknown
-		// tier leaves RegisterOptions.Tier empty so Register applies its built-in
-		// default instead of pinning to medium when a tier WAS declared. The other
-		// former fields (prompts/prompt_refs/model) stay removed from the MCP
-		// schema; RegisterOptions struct fields remain for internal callers (api_docs).
-		tier, _ := params.Arguments["tier"].(string)
-		agent, _, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{
-			Root:             root,
-			Name:             name,
-			Backend:          backend,
-			Harness:          s.currentHarness(),
-			SystemPromptText: systemPromptText,
-			Tier:             tier,
-		})
-		return toolTextResponse(req.ID, agent.Name+"\n", err)
-	case "mercenary.call":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		prompt, _ := params.Arguments["prompt"].(string)
-		result, err := wsagent.NewManager(wsagent.Options{}).Call(wsagent.CallOptions{
-			Root:   root,
-			Name:   name,
-			Prompt: prompt,
-		})
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		// Unit 5: native-shaped continuation handle — same shape as a host-native
-		// subagent id so the lead reuses one continuation idiom across both paths.
-		// Handle format: agentId=<name> matches the native agentId shape referenced
-		// by terminologyForHarness ContinueIdiom (e.g. SendMessage(to: <agentId>)).
-		return toolTextResponse(req.ID, agentCallHandleText(result.AgentName, result.Status, result.PID), nil)
-	case "mercenary.wait":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		names := stringList(params.Arguments["names"])
-		text, err := wsagent.NewManager(wsagent.Options{}).Wait(wsagent.WaitOptions{
-			Root:    root,
-			Name:    name,
-			Names:   names,
-			Timeout: durationFromSeconds(params.Arguments["timeout_seconds"]),
-			Context: ctx,
-		})
-		return toolTextResponse(req.ID, text, err)
-	case "mercenary.result":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		text, err := wsagent.NewManager(wsagent.Options{}).Result(wsagent.ResultOptions{
-			Root:    root,
-			Name:    name,
-			Timeout: durationFromSeconds(params.Arguments["timeout_seconds"]),
-			Context: ctx,
-		})
-		return toolTextResponse(req.ID, text, err)
-	case "mercenary.status":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		text, err := wsagent.NewManager(wsagent.Options{}).Status(root, name)
-		return toolTextResponse(req.ID, text, err)
-	case "mercenary.interrupt":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		message, _ := params.Arguments["message"].(string)
-		result, err := wsagent.NewManager(wsagent.Options{}).Interrupt(wsagent.InterruptOptions{
-			Root:    root,
-			Name:    name,
-			Message: message,
-		})
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		return toolTextResponse(req.ID, fmt.Sprintf("%s\tqueued\tmessage=%s\n", result.AgentName, result.MessageID), nil)
-	case "mercenary.tail":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		lines := intFromArgument(params.Arguments["lines"], 40)
-		text, err := wsagent.NewManager(wsagent.Options{}).Tail(wsagent.TailOptions{
-			Root:  root,
-			Name:  name,
-			Lines: lines,
-		})
-		return toolTextResponse(req.ID, text, err)
-	case "mercenary.debug.tail":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		lines := intFromArgument(params.Arguments["lines"], 40)
-		text, err := wsagent.NewManager(wsagent.Options{}).Tail(wsagent.TailOptions{
-			Root:  root,
-			Name:  name,
-			Lines: lines,
-			Raw:   true,
-		})
-		return toolTextResponse(req.ID, text, err)
-	case "mercenary.debug.stdout", "mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		lines := intFromArgument(params.Arguments["lines"], 40)
-		stream := strings.TrimPrefix(params.Name, "mercenary.debug.")
-		text, err := wsagent.NewManager(wsagent.Options{}).DiagnosticStream(wsagent.DiagnosticStreamOptions{
-			Root:   root,
-			Name:   name,
-			Stream: stream,
-			Lines:  lines,
-		})
-		return toolTextResponse(req.ID, text, err)
-	case "mercenary.cancel":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		text, err := wsagent.NewManager(wsagent.Options{}).Cancel(root, name)
-		return toolTextResponse(req.ID, text, err)
-	case "mercenary.recall":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		prompt, _ := params.Arguments["prompt"].(string)
-		text, err := wsagent.NewManager(wsagent.Options{}).Recall(wsagent.RecallOptions{
-			Root:   root,
-			Name:   name,
-			Prompt: prompt,
-		})
-		return toolTextResponse(req.ID, text, err)
-	case "mercenary.print":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		text, err := wsagent.NewManager(wsagent.Options{}).Print(root, name)
-		return toolTextResponse(req.ID, text, err)
-	case "mercenary.erase":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		name, _ := params.Arguments["name"].(string)
-		err = wsagent.NewManager(wsagent.Options{}).Erase(root, name)
-		return toolTextResponse(req.ID, "erased\n", err)
 	default:
 		return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
 	}
@@ -1786,15 +1540,6 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 			text += "\n" + warning + "\n"
 		}
 	}
-	{
-		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-		warning := docCoverageWarning(canonical, &resolver, "")
-		if warning != "" {
-			result["doc_coverage_alarm"] = warning
-			text += "\n" + warning + "\n"
-		}
-	}
 	if wantsJSON(arguments) {
 		return toolJSONResponse(id, result, nil)
 	}
@@ -1826,15 +1571,39 @@ func (s *Server) handleSessionChildren(id json.RawMessage, arguments map[string]
 	}
 	includeDead, _ := arguments["include_dead"].(bool)
 
+	scope := "any"
+	if raw, exists := arguments["scope"]; exists {
+		value, ok := raw.(string)
+		if !ok || (value != "any" && value != "control" && value != "delegate") {
+			return toolTextResponse(id, "", fmt.Errorf("session.children: scope must be control, delegate, or any"))
+		}
+		scope = value
+	}
+	unnotedOnly := false
+	if raw, exists := arguments["unnoted_only"]; exists {
+		value, ok := raw.(bool)
+		if !ok {
+			return toolTextResponse(id, "", fmt.Errorf("session.children: unnoted_only must be a boolean"))
+		}
+		unnotedOnly = value
+	}
+
 	children, err := s.sessions.children(sessionKey, depth)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
 	filtered := make([]sessionChild, 0, len(children))
 	for _, child := range children {
-		if child.live || includeDead {
-			filtered = append(filtered, child)
+		if !child.live && !includeDead {
+			continue
 		}
+		if scope != "any" && sessionChildScopeLabel(child.scope) != scope {
+			continue
+		}
+		if unnotedOnly && child.note != "" {
+			continue
+		}
+		filtered = append(filtered, child)
 	}
 
 	out := make([]sessionChildOutput, 0, len(filtered))
@@ -2125,9 +1894,8 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 
 	catalog := tuningCatalog{Knobs: make([]tuningKnob, 0, len(promptListing)+5)}
 	// appendKnob drives the noAgentMode cut off each entry's NoAgentVisible
-	// flag rather than a positional early-return, so the invariant (today:
-	// only workflow.prefer_mercenary is hidden in no-agent mode) is explicit
-	// per-entry instead of depending on append order.
+	// flag rather than a positional early-return, so a knob's agentless
+	// visibility is declared per-entry instead of depending on append order.
 	appendKnob := func(entry configKeyEntry, knob tuningKnob) {
 		if noAgentMode && !entry.NoAgentVisible {
 			return
@@ -2159,14 +1927,14 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	appendKnob(subagentEntry, tuningKnob{
 		ID:          "workflow.prefer_subagent",
 		Kind:        "workflow_preference",
-		Description: "Select whether the workflow manual loads strict subagent posture.",
+		Description: "Default eligible general work to lead-delegate, subject to its routing gate.",
 		Writer:      tuningWriter{Tool: subagentEntry.WriterTool, FixedArguments: map[string]string{"key": subagentEntry.Key}},
 		Reset: &tuningWriter{
 			Tool:           subagentEntry.ResetTool,
 			FixedArguments: map[string]string{"key": subagentEntry.Key, "reset": "true"},
 		},
 		ValueFields: subagentEntry.ValueFields,
-		Current:     currentWorkflowPreference(resolver, wsconfig.ItemWorkflowPreferSubagent),
+		Current:     currentWorkflowPreference(resolver, sessionKey, wsconfig.ItemWorkflowPreferSubagent),
 	})
 
 	bootstrapEntry := registryEntryByKey(wsconfig.ItemBootstrapAlarm)
@@ -2180,21 +1948,22 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 			FixedArguments: map[string]string{"key": bootstrapEntry.Key, "reset": "true"},
 		},
 		ValueFields: bootstrapEntry.ValueFields,
-		Current:     currentWorkflowPreference(resolver, wsconfig.ItemBootstrapAlarm),
+		Current:     currentWorkflowPreference(resolver, sessionKey, wsconfig.ItemBootstrapAlarm),
 	})
 
-	docCoverageEntry := registryEntryByKey(wsconfig.ItemDocCoverageAlarm)
-	appendKnob(docCoverageEntry, tuningKnob{
-		ID:          "doc_coverage_alarm",
-		Kind:        "workflow_preference",
-		Description: "Select whether the session-bootstrap doc-coverage warning fires when ai-docs/spec/ or ai-docs/mental-model/ has no frontmatter-bearing .md file.",
-		Writer:      tuningWriter{Tool: docCoverageEntry.WriterTool, FixedArguments: map[string]string{"key": docCoverageEntry.Key}},
+	sageReviewEntry := registryEntryByKey(wsconfig.ItemSageReview)
+	appendKnob(sageReviewEntry, tuningKnob{
+		ID:          sageReviewEntry.Key,
+		Kind:        "sage_review",
+		Description: "Set the default ticket-boundary Sage review posture.",
+		Writer:      tuningWriter{Tool: sageReviewEntry.WriterTool, FixedArguments: map[string]string{"key": sageReviewEntry.Key}},
 		Reset: &tuningWriter{
-			Tool:           docCoverageEntry.ResetTool,
-			FixedArguments: map[string]string{"key": docCoverageEntry.Key, "reset": "true"},
+			Tool:           sageReviewEntry.ResetTool,
+			FixedArguments: map[string]string{"key": sageReviewEntry.Key, "reset": "true"},
 		},
-		ValueFields: docCoverageEntry.ValueFields,
-		Current:     currentWorkflowPreference(resolver, wsconfig.ItemDocCoverageAlarm),
+		SelectorFields: sageReviewEntry.SelectorFields,
+		ValueFields:    sageReviewEntry.ValueFields,
+		Current:        currentWorkflowPreference(resolver, sessionKey, sageReviewEntry.Key),
 	})
 
 	agentTiers, err := currentAgentTierMappings()
@@ -2212,39 +1981,14 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		Current:        agentTiers,
 	})
 
-	mercenaryEntry := registryEntryByKey(wsconfig.ItemWorkflowPreferMercenary)
-	appendKnob(mercenaryEntry, tuningKnob{
-		ID:          "workflow.prefer_mercenary",
-		Kind:        "workflow_preference",
-		Description: "Select whether lead renders prefer native subagents, prefer ws.mercenary, or hide ws.mercenary surfaces.",
-		Writer:      tuningWriter{Tool: mercenaryEntry.WriterTool, FixedArguments: map[string]string{"key": mercenaryEntry.Key}},
-		ValueFields: mercenaryEntry.ValueFields,
-		Current:     currentWorkflowPreference(resolver, wsconfig.ItemWorkflowPreferMercenary),
-	})
-
 	return catalog, nil
 }
 
-func currentWorkflowPreference(resolver *wsconfig.Resolver, itemKey string) tuningScopedValue {
-	rv, _ := resolver.Get("", itemKey)
-	value := rv.Value
-	if itemKey == wsconfig.ItemWorkflowPreferMercenary {
-		value = canonicalPreferMercenaryValue(value)
-	}
+func currentWorkflowPreference(resolver *wsconfig.Resolver, sessionKey, itemKey string) tuningScopedValue {
+	rv, _ := resolver.Get(sessionKey, itemKey)
 	return tuningScopedValue{
-		Value: value,
+		Value: rv.Value,
 		Scope: string(rv.Scope),
-	}
-}
-
-func canonicalPreferMercenaryValue(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "true", "on":
-		return "on"
-	case "false", "off":
-		return "off"
-	default:
-		return "hide"
 	}
 }
 
@@ -2375,6 +2119,76 @@ func formatGitStatus(result wsgit.StatusResult) string {
 	return b.String()
 }
 
+func formatGitStatusWithImplTicket(result wsgit.StatusResult, implTicket *implTicketStatus) string {
+	text := formatGitStatus(result)
+	if implTicket == nil {
+		return text
+	}
+	switch implTicket.State {
+	case "active":
+		return text + fmt.Sprintf("active ticket: %s (%s)\n", implTicket.Stem, implTicket.Status)
+	case "missing":
+		return text + "nudge: current branch is impl/* but no active ticket matches; inspect before selecting another ticket\n"
+	case "ambiguous":
+		return text + "nudge: current branch is impl/* but multiple active tickets match; inspect before selecting another ticket\n"
+	default:
+		return text
+	}
+}
+
+// activeImplTicket finds an active ticket only for a name-rooted implementation
+// branch. Resolve mode includes active tickets hidden by a sparse checkout; an
+// unreadable inventory is unsafe to label missing and therefore returns error.
+func activeImplTicket(root, branch string) (*implTicketStatus, error) {
+	_, suffix, ok := parseImplBranchRoot(branch)
+	if !ok {
+		return nil, nil
+	}
+	if err := verifyActiveTicketInventory(root); err != nil {
+		return nil, err
+	}
+	candidates, err := wsdoc.TicketsFind(root, wsdoc.TicketFindOptions{
+		Statuses: []string{"idea", "todo", "ready"}, Resolve: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("git.status: inspect active ticket inventory: %w", err)
+	}
+	matches := make([]wsdoc.TicketInfo, 0, 1)
+	for _, candidate := range candidates {
+		if wskey.Derive(candidate.Stem, 3) == suffix {
+			matches = append(matches, candidate)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return &implTicketStatus{State: "missing"}, nil
+	case 1:
+		match := matches[0]
+		return &implTicketStatus{State: "active", Stem: match.Stem, Path: match.Path, Status: match.Status}, nil
+	default:
+		return &implTicketStatus{State: "ambiguous"}, nil
+	}
+}
+
+// verifyActiveTicketInventory closes the gap in wsdoc's discovery-oriented
+// walk, where an unreadable directory can look like an empty one. Missing
+// individual status directories are normal; an absent board or an I/O error is
+// not evidence that an impl branch has no owner.
+func verifyActiveTicketInventory(root string) error {
+	board := filepath.Join(root, "ai-docs", "tickets")
+	if _, err := os.Stat(board); err != nil {
+		return fmt.Errorf("git.status: inspect active ticket inventory: %w", err)
+	}
+	for _, status := range []string{"idea", "todo", "ready"} {
+		_, err := os.ReadDir(filepath.Join(board, status))
+		if err == nil || os.IsNotExist(err) {
+			continue
+		}
+		return fmt.Errorf("git.status: inspect active ticket inventory: %w", err)
+	}
+	return nil
+}
+
 func formatGitLog(result wsgit.LogResult) string {
 	var b strings.Builder
 	if result.Range != "" {
@@ -2461,189 +2275,15 @@ func formatGitCommit(result wsgit.CommitResult) string {
 	return b.String()
 }
 
-func formatSpecs(specs []wsdoc.SpecInfo) string {
-	var b strings.Builder
-	for _, spec := range specs {
-		fmt.Fprintf(&b, "%s", spec.Path)
-		if spec.Title != "" {
-			fmt.Fprintf(&b, " - %s", spec.Title)
-		}
-		if spec.Summary != "" {
-			fmt.Fprintf(&b, " # %s", spec.Summary)
-		}
-		flags := []string{}
-		if spec.MatchesSpecStem {
-			flags = append(flags, "matches_spec_stem")
-		}
-		if spec.MatchesTicketRef {
-			flags = append(flags, "matches_ticket_ref")
-		}
-		if len(spec.Anchors) > 0 {
-			flags = append(flags, fmt.Sprintf("anchors=%d", len(spec.Anchors)))
-		}
-		if len(spec.TicketRefs) > 0 {
-			flags = append(flags, "tickets="+strings.Join(spec.TicketRefs, ","))
-		}
-		if len(flags) > 0 {
-			fmt.Fprintf(&b, " [%s]", strings.Join(flags, " "))
-		}
-		b.WriteString("\n")
-		writeIndentedLines(&b, "  snippet: ", spec.MatchingSnippets)
-		writeIndentedLines(&b, "  legacy-marker: ", []string{spec.LegacyMarkerAdvisory})
-	}
-	return b.String()
-}
-
-// formatSpecFind inherits nothing from formatSpecs: it delegates wholly to
-// formatDocumentFind, which knows nothing of SpecInfo. The legacy-marker
-// advisory therefore has to be appended here explicitly, or the specs.query
-// query path silently loses it while the no-query fallback keeps it. Each line
-// is prefixed with the spec path so the note stays attributable.
-//
-// The advisory loop is bounded by the same maxFindTextDocuments cut the
-// delegated body applies, so the note can never name a spec that was truncated
-// out of the response above it.
-func formatSpecFind(query string, specs []wsdoc.SpecInfo) string {
-	var b strings.Builder
-	b.WriteString(formatDocumentFind(query, "spec", "specs", len(specs), func(writeDoc func(path string, score, hits int, matches []wsdoc.MatchEvidence)) {
-		for _, spec := range specs {
-			writeDoc(spec.Path, spec.MatchScore, len(spec.Matches), spec.Matches)
-		}
-	}))
-	rendered := specs
-	if len(rendered) > maxFindTextDocuments {
-		rendered = rendered[:maxFindTextDocuments]
-	}
-	separated := false
-	for _, spec := range rendered {
-		if strings.TrimSpace(spec.LegacyMarkerAdvisory) == "" {
-			continue
-		}
-		if !separated {
-			// Each document block is emitted with a leading "\n", so without
-			// this the first advisory runs flush against the last hit line.
-			b.WriteString("\n")
-			separated = true
-		}
-		fmt.Fprintf(&b, "legacy-marker: %s: %s\n", spec.Path, strings.TrimSpace(spec.LegacyMarkerAdvisory))
-	}
-	return b.String()
-}
-
-func formatMentalModelFind(query string, models []wsdoc.MentalModelInfo) string {
-	return formatDocumentFind(query, "mental model", "mental models", len(models), func(writeDoc func(path string, score, hits int, matches []wsdoc.MatchEvidence)) {
-		for _, model := range models {
-			writeDoc(model.Path, model.MatchScore, len(model.Matches), model.Matches)
-		}
-	})
-}
-
-const (
-	maxFindTextDocuments      = 10
-	maxFindTextEvidencePerDoc = 3
-)
-
-func formatDocumentFind(query, singular, plural string, count int, each func(func(string, int, int, []wsdoc.MatchEvidence))) string {
-	type doc struct {
-		path    string
-		score   int
-		hits    int
-		matches []wsdoc.MatchEvidence
-	}
-	docs := []doc{}
-	each(func(path string, score, hits int, matches []wsdoc.MatchEvidence) {
-		docs = append(docs, doc{path: path, score: score, hits: hits, matches: matches})
-	})
-
-	var b strings.Builder
-	label := plural
-	if count == 1 {
-		label = singular
-	}
-	truncatedDocs := len(docs) > maxFindTextDocuments
-	truncatedHits := false
-	for _, d := range docs {
-		if len(d.matches) > maxFindTextEvidencePerDoc {
-			truncatedHits = true
-			break
-		}
-	}
-	fmt.Fprintf(&b, "%d candidate %s for query=%q", count, label, query)
-	if truncatedDocs || truncatedHits {
-		fmt.Fprintf(&b, " (showing subset: first %d documents, up to %d hits each)", maxFindTextDocuments, maxFindTextEvidencePerDoc)
-	}
-	b.WriteString("\n")
-	if count == 0 {
-		fmt.Fprintf(&b, "No candidates met the query threshold; retry with shorter noun phrases.\n")
-		return b.String()
-	}
-	if len(docs) > maxFindTextDocuments {
-		docs = docs[:maxFindTextDocuments]
-	}
-	for _, d := range docs {
-		matches := selectFindTextEvidence(d.matches)
-		fmt.Fprintf(&b, "\n%s\tscore=%d\thits=%d\n", d.path, d.score, d.hits)
-		for _, match := range matches {
-			fmt.Fprintf(&b, "  %d: %s\n", match.Line, match.Snippet)
-		}
-	}
-	return b.String()
-}
-
-func selectFindTextEvidence(matches []wsdoc.MatchEvidence) []wsdoc.MatchEvidence {
-	selected := append([]wsdoc.MatchEvidence(nil), matches...)
-	if len(selected) > maxFindTextEvidencePerDoc {
-		sort.SliceStable(selected, func(i, j int) bool {
-			if len(selected[i].MatchedTerms) != len(selected[j].MatchedTerms) {
-				return len(selected[i].MatchedTerms) > len(selected[j].MatchedTerms)
-			}
-			return selected[i].Line < selected[j].Line
-		})
-		selected = selected[:maxFindTextEvidencePerDoc]
-	}
-	sort.SliceStable(selected, func(i, j int) bool { return selected[i].Line < selected[j].Line })
-	return selected
-}
-
-func formatSpecStatus(status *wsdoc.SpecAnchorStatus) string {
-	if status == nil {
-		return ""
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "spec_stem: %s\n", status.SpecStem)
-	if len(status.Locations) > 0 {
-		b.WriteString("locations:\n")
-		for _, loc := range status.Locations {
-			fmt.Fprintf(&b, "  - line %d", loc.Line)
-			if loc.Heading != "" {
-				fmt.Fprintf(&b, " %s", loc.Heading)
-			}
-			b.WriteString("\n")
-		}
-	}
-	if len(status.Files) > 0 {
-		b.WriteString("files:\n")
-		for _, spec := range status.Files {
-			fmt.Fprintf(&b, "  - %s", spec.Path)
-			if spec.Title != "" {
-				fmt.Fprintf(&b, " - %s", spec.Title)
-			}
-			b.WriteString("\n")
-		}
-	}
-	writeIndentedLines(&b, "legacy-marker: ", strings.Split(status.LegacyMarkerAdvisory, "\n"))
-	return b.String()
-}
-
 // formatTicketCreate's next_instruction line carries the acceptance-check
-// caveat verbatim ("valid empty skeleton + initial posture") so a caller
+// caveat verbatim ("valid empty skeleton + applicable initial posture") so a caller
 // never mistakes tickets.create_empty for a full mutation orchestrator —
 // tickets.template owns the body skeleton, and this tool never renders one.
 func formatTicketCreate(res wsdoc.TicketCreateResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Created %s\n", res.Path)
 	fmt.Fprintf(&b, "Tip: %s\n", res.Tip)
-	b.WriteString("next_instruction: This is a valid empty skeleton + initial posture only, not a full mutation orchestrator; call tickets.template for the body skeleton before treating this ticket as populated.\n")
+	b.WriteString("next_instruction: This is a valid empty skeleton + applicable initial posture only, not a full mutation orchestrator; call tickets.template for the body skeleton before treating this ticket as populated.\n")
 	return b.String()
 }
 
@@ -2821,7 +2461,7 @@ func sageGateNextInstruction(result wsdoc.SageGateResult) string {
 		return "next_instruction: Sage review gate resolved with no further review required; proceed to handoff." + sageGatePostureUncommittedNote
 	case "stop_blocked":
 		// The recovery sentence exists because the bare "stop" read as a dead
-		// end while lead-write-ticket's On: Reviewer Spawn covers "each stage
+		// end while the ticket skill's reviewer-spawn step covers "each stage
 		// the gate reports blocked whose blocker this invocation's edits
 		// address" — a clause that looks unreachable if the gate is the only
 		// path to a reviewer. It is not: resolveStage returns stop_blocked
@@ -2836,6 +2476,8 @@ func sageGateNextInstruction(result wsdoc.SageGateResult) string {
 		// posture this call wrote" stays true on the branches that wrote
 		// nothing, which is why it can be attached unconditionally.
 		return "next_instruction: A blocked sage review must be addressed before promotion; stop and report the blocker. This gate returns stop_blocked while the posture is blocked and never names a reviewer again, so a later invocation whose edits address the blocker spawns that stage's reviewer via On: Reviewer Spawn and clears the posture with ws/tickets.sage_stamp carrying fresh verdicts; read which stage is blocked from the ticket's sage-review-* frontmatter, which this result does not carry." + sageGatePostureUncommittedNote
+	case "stop_missing_route_facts":
+		return "next_instruction: This ticket has no ## Route Facts section, and the implementation route reads its facts from there, so it cannot be routed as promoted. Render the `ticket-fact-populator` playbook on this ticket, apply what it returns, then call tickets.sage_gate again with the same stem/landing; the section's values are the completeness reviewer's subject, so no review runs until it exists." + sageGatePostureUncommittedNote
 	case "ask":
 		return "next_instruction: Relay ask_prompt to the user, then call tickets.sage_gate again with the same stem/landing plus answer=yes|no." + sageGatePostureUncommittedNote
 	case "run":
@@ -2904,17 +2546,27 @@ func formatSageRecord(result wsdoc.SageRecordResult) string {
 	return b.String()
 }
 
+// sageRestampAfterFixes closes every autonomous-issue routing clause: apply the
+// fixes, re-stamp with the same verdicts so the recorded digest covers the fixed
+// body, and only then commit.
+const sageRestampAfterFixes = " Once those edits are in the ticket, call ws/tickets.sage_stamp again with the same verdicts: the digest recorded now covers the body as it stands at this stamp, and only the re-stamp makes it cover the fixed body. Commit after that second stamp, not before it."
+
 // sageRecordIssueRouting renders the per-resolution routing clause that leads
 // every next_instruction carrying issues. Both reviewer playbooks classify each
 // issue as `autonomous` (planning or implementation can settle it) or `missing`
 // (a policy choice those stages cannot make); this is the consumer of that
 // split. Empty when the stage recorded no issues, so a clean pass stays terse.
+//
+// An autonomous fix edits the ticket body after this stamp took its digest, so
+// every autonomous branch also orders a re-stamp: without it the digest this
+// call recorded is stale the moment the fixes land, tickets.verify warns, and
+// the next sage_gate asks to rerun the reviewers whose findings were applied.
 func sageRecordIssueRouting(result wsdoc.SageRecordResult) string {
 	switch {
 	case result.Autonomous > 0 && result.Missing > 0:
-		return fmt.Sprintf(" Route the recorded issues first: fix the %d autonomous issue(s) in the ticket yourself, and take the %d missing issue(s) through the Open Decision Queue — they need a user decision you cannot supply.", result.Autonomous, result.Missing)
+		return fmt.Sprintf(" Route the recorded issues first: fix the %d autonomous issue(s) in the ticket yourself, and take the %d missing issue(s) through the Open Decision Queue — they need a user decision you cannot supply.%s", result.Autonomous, result.Missing, sageRestampAfterFixes)
 	case result.Autonomous > 0:
-		return fmt.Sprintf(" Fix the %d autonomous issue(s) in the ticket yourself first; none of them need a user decision.", result.Autonomous)
+		return fmt.Sprintf(" Fix the %d autonomous issue(s) in the ticket yourself first; none of them need a user decision.%s", result.Autonomous, sageRestampAfterFixes)
 	case result.Missing > 0:
 		return fmt.Sprintf(" Take the %d missing issue(s) through the Open Decision Queue first — they need a user decision you cannot supply.", result.Missing)
 	}
@@ -3021,85 +2673,12 @@ func formatTickets(tickets []wsdoc.TicketInfo) string {
 		if ticket.Parent != "" {
 			flags = append(flags, "parent="+ticket.Parent)
 		}
-		if len(ticket.Specs) > 0 {
-			flags = append(flags, "spec="+strings.Join(ticket.Specs, ","))
-		}
 		if len(flags) > 0 {
 			fmt.Fprintf(&b, " [%s]", strings.Join(flags, " "))
 		}
 		b.WriteString("\n")
 		writeIndentedLines(&b, "  unresolved: ", ticket.UnresolvedPhases)
 		writeIndentedLines(&b, "  snippet: ", ticket.MatchingSnippets)
-	}
-	return b.String()
-}
-
-func formatMentalModels(models []wsdoc.MentalModelInfo) string {
-	var b strings.Builder
-	for _, model := range models {
-		fmt.Fprintf(&b, "%s - %s", model.Path, displayOrDash(model.Domain))
-		if model.Description != "" {
-			fmt.Fprintf(&b, " # %s", model.Description)
-		}
-		flags := []string{}
-		if model.MatchesDomain {
-			flags = append(flags, "matches_domain")
-		}
-		if model.MatchesSpecStem {
-			flags = append(flags, "matches_spec_stem")
-		}
-		if len(model.SpecRefs) > 0 {
-			flags = append(flags, fmt.Sprintf("spec_refs=%d", len(model.SpecRefs)))
-		}
-		if len(flags) > 0 {
-			fmt.Fprintf(&b, " [%s]", strings.Join(flags, " "))
-		}
-		b.WriteString("\n")
-		writeIndentedLines(&b, "  source: ", model.Sources)
-		writeIndentedLines(&b, "  ancestor: ", model.AncestorHints)
-		writeIndentedLines(&b, "  index: ", model.IndexHints)
-		writeIndentedLines(&b, "  snippet: ", model.MatchingSnippets)
-	}
-	return b.String()
-}
-
-func formatReferenceTrace(trace *wsdoc.ReferenceTrace) string {
-	if trace == nil {
-		return ""
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "input: %s %s\n", trace.InputType, trace.Input)
-	if len(trace.Tickets) > 0 {
-		b.WriteString("tickets:\n")
-		for _, ticket := range trace.Tickets {
-			fmt.Fprintf(&b, "  [%s] %s", ticket.Status, ticket.Stem)
-			if ticket.Title != "" {
-				fmt.Fprintf(&b, " - %s", ticket.Title)
-			}
-			if ticket.Path != "" {
-				fmt.Fprintf(&b, " (%s)", ticket.Path)
-			}
-			b.WriteString("\n")
-		}
-	}
-	if len(trace.Specs) > 0 {
-		b.WriteString("specs:\n")
-		for _, spec := range trace.Specs {
-			fmt.Fprintf(&b, "  %s", spec.Path)
-			if spec.Title != "" {
-				fmt.Fprintf(&b, " - %s", spec.Title)
-			}
-			if len(spec.Anchors) > 0 {
-				fmt.Fprintf(&b, " [anchors=%d]", len(spec.Anchors))
-			}
-			b.WriteString("\n")
-		}
-	}
-	if len(trace.MentalModels) > 0 {
-		b.WriteString("mental_models:\n")
-		for _, model := range trace.MentalModels {
-			fmt.Fprintf(&b, "  %s - %s\n", model.Path, displayOrDash(model.Domain))
-		}
 	}
 	return b.String()
 }
@@ -3463,6 +3042,8 @@ func tools() []map[string]any {
 					"session_key":  stringProperty("Caller's lead session key whose descendants should be enumerated."),
 					"depth":        integerProperty("Maximum descendant depth to return. Defaults to 1; 0 returns the full subtree."),
 					"include_dead": boolProperty("Include keys whose bound root path no longer exists. Defaults to false."),
+					"scope":        enumStringProperty("Filter descendants by scope. Defaults to any (all scopes).", []string{"control", "delegate", "any"}),
+					"unnoted_only": boolProperty("Return only descendants carrying no note. Defaults to false."),
 					"format":       stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
 				"required": []string{"session_key"},
@@ -3534,14 +3115,14 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "route.resolve_implement",
-			"description": "Inner step of ws:lead-implement; not a direct entry point — params are constructed by that skill. Resolves normalized implementation facts and observed Git branch state into one deterministic implementation verdict, stores the 'implement' agenda blob, and replaces the todo list with the derived implement checklist.",
+			"description": "Inner step of the ticket-worker playbook; not a direct entry point — params are constructed by that playbook. Resolves normalized implementation facts and observed Git branch state into one deterministic implementation verdict, stores the 'implement' agenda blob, and replaces the todo list with the derived implement checklist.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
 					"params": map[string]any{
 						"type":        "object",
-						"description": "Opaque implementation-routing input, constructed by ws:lead-implement. Inner step of that skill; not a direct entry point — see ws:lead-implement's Fact Contract for the full field set.",
+						"description": "Opaque implementation-routing input, constructed by the ticket-worker playbook. Inner step of that playbook; not a direct entry point — see its route step for the full field set.",
 					},
 				},
 				"required": []string{"session_key"},
@@ -3549,14 +3130,14 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "route.resolve_proceed",
-			"description": "Inner step of ws:lead-proceed; not a direct entry point — params are constructed by that skill. Resolves deterministic proceed facts into one route verdict, stores the 'proceed' agenda blob, and replaces the todo list with the lead-proceed checklist.",
+			"description": "Inner routing step; not a direct entry point — params are constructed by the calling skill. Resolves deterministic proceed facts into one route verdict, stores the 'proceed' agenda blob, and replaces the todo list with the derived proceed checklist.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
 					"params": map[string]any{
 						"type":        "object",
-						"description": "Opaque routing input, constructed by ws:lead-proceed. Inner step of that skill; not a direct entry point — see ws:lead-proceed's Fact Contract for the full field set.",
+						"description": "Opaque routing input, constructed by the calling skill. Inner step of that skill; not a direct entry point — see its Fact Contract for the full field set.",
 					},
 				},
 				"required": []string{"session_key"},
@@ -3731,11 +3312,11 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "config.tune",
-			"description": "Write one ws config knob, selected by its key (e.g. workflow.prefer_subagent, bootstrap_alarm, doc_coverage_alarm, workflow.prefer_mercenary, agents.tier, prompt.<pointId>). Call config.list first for each key's exact value domain, scope rules, and harness applicability. value is a string for scalar knobs and an object ({tier, backend, model, effort}) for agents.tier. scope is optional and backstops to the key's declared default; harness is load-bearing for prompt.* and agents.tier and warning-only (ignored) for keys that do not vary by harness. reset: true drops a knob's override back to its builtin/inherited default (only for keys that support reset). session_key is required at dispatch for lead-authority keys and prompt.* keys. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
+			"description": "Write one ws config knob, selected by its key (e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>). Call config.list first for each key's exact value domain, scope rules, and harness applicability. value is a string for scalar knobs and an object ({tier, backend, model, effort}) for agents.tier. scope is optional and backstops to the key's declared default; harness is load-bearing for prompt.* and agents.tier and warning-only (ignored) for keys that do not vary by harness. reset: true drops a knob's override back to its builtin/inherited default (only for keys that support reset). session_key is required at dispatch for lead-authority keys and prompt.* keys. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"key":         stringProperty("Config knob key to write, e.g. workflow.prefer_subagent, bootstrap_alarm, doc_coverage_alarm, workflow.prefer_mercenary, agents.tier, or prompt.<pointId>. See config.list for the supported set."),
+					"key":         stringProperty("Config knob key to write, e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, or prompt.<pointId>. See config.list for the supported set."),
 					"value":       anyProperty("New value. A string for scalar knobs (e.g. on/off), or an object {tier, backend, model, effort} for agents.tier. Omit when reset is true."),
 					"scope":       enumStringProperty("Optional storage scope. When omitted the write lands in the key's declared default scope. Global-only keys reject non-global scopes; agents.tier only supports project scope.", wsconfig.ScopeSchemaEnum()),
 					"harness":     stringProperty("Optional harness selector. Load-bearing for prompt.* (claude, codex, pi, or * for all) and agents.tier (alias key); ignored for keys that do not vary by harness. When omitted for a harness-applicable key, defaults to the current session's detected harness."),
@@ -3808,27 +3389,44 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "git.merge",
+			"description": "Lead-only. Merge a local impl branch into its encoded root using --no-ff, then delete the merged branch. Main/master return policy_blocked diagnostics by default; explicit release-target acknowledgement bound to inspected source_oid and target_oid permits retry. Must-resolve safety findings cannot be waived. Conflicts remain on the target for lead-delegate to resolve. Defaults to text; use format=json for structured output.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"branch":                  stringProperty("Optional local impl/<root>/<stem> branch; defaults to the current branch. May be supplied while checked out on another branch."),
+					"target":                  stringProperty("Optional target assertion; must equal the impl branch's encoded root."),
+					"release_target_override": map[string]any{"type": "boolean", "default": false, "description": "Explicit acknowledgement of the main/master release-target policy only. Never waives must_resolve diagnostics; requires both expected OIDs."},
+					"expected_source_oid":     stringProperty("Full inspected source_oid from the refusal; required when release_target_override is true."),
+					"expected_target_oid":     stringProperty("Full inspected target_oid from the refusal; required when release_target_override is true."),
+					"title":                   stringProperty("Single-line merge commit title."),
+					"description":             stringProperty("Optional merge commit description."),
+					"ai_context":              stringArrayProperty("Required AI Context bullets for the merge record."),
+					"updated_tickets":         stringArrayProperty("Optional ticket update summaries."),
+					"format":                  stringProperty("Use json for structured output."),
+				},
+				"required": []string{"title", "ai_context"},
+			},
+		},
+		{
 			"name":        "git.commit",
 			"description": "Create a workflow-aware Git commit from explicit paths and structured message fields. Defaults to compact text; use format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"paths":                 stringArrayProperty("Explicit paths to stage and commit. Only these paths are staged."),
-					"title":                 stringProperty("Single-line commit title."),
-					"description":           stringProperty("Optional commit message body before AI Context."),
-					"ai_context":            stringArrayProperty("Required AI Context bullets for the commit message."),
-					"mental_model_notes":    stringArrayProperty("Optional Mental Model Notes bullets rendered as an H3 subsection under AI Context."),
-					"updated_tickets":       stringArrayProperty("Optional ticket update summaries. If omitted, staged ticket moves and Result/Edition headings are detected."),
-					"updated_specs":         stringArrayProperty("Optional spec update summaries."),
-					"updated_mental_models": stringArrayProperty("Optional mental-model update summaries."),
-					"format":                stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+					"paths":           stringArrayProperty("Explicit paths to stage and commit. Only these paths are staged."),
+					"title":           stringProperty("Single-line commit title."),
+					"description":     stringProperty("Optional commit message body before AI Context."),
+					"ai_context":      stringArrayProperty("Required AI Context bullets for the commit message."),
+					"updated_tickets": stringArrayProperty("Optional ticket update summaries. If omitted, staged ticket moves and Result/Edition headings are detected."),
+					"format":          stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 				"required": []string{"paths", "title", "ai_context"},
 			},
 		},
 		{
 			"name":        "project_tree",
-			"description": "Render the ws project document map, spec inventory, and active ticket inventory.",
+			"description": "Render the ws project document map and active ticket inventory.",
 			"inputSchema": map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -3860,74 +3458,6 @@ func tools() []map[string]any {
 					},
 				},
 				"required": []string{"name"},
-			},
-		},
-		{
-			"name":        "spec_stem.generate",
-			"description": "Generate a collision-free spec anchor stem for a slug.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"slug": map[string]string{
-						"type":        "string",
-						"description": "Descriptive slug seed.",
-					},
-				},
-				"required": []string{"slug"},
-			},
-		},
-		{
-			"name":        "spec_index.verify",
-			"description": "Verify basic spec anchor index health.",
-			"inputSchema": map[string]any{
-				"type":       "object",
-				"properties": map[string]any{},
-			},
-		},
-		{
-			"name":        "specs.query",
-			"description": "Query spec files by text query, spec anchor stem, or ticket stem reference. A spec_stem given alone (no query, no ticket_stem) point-resolves that anchor and returns its locations and file metadata, erroring if the stem is not found; otherwise this is a discovery search. Defaults to compact text; use format=json for structured metadata.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"query":       stringProperty("Optional case-insensitive text query."),
-					"spec_stem":   stringProperty("Optional exact spec anchor stem. Given alone, point-resolves that anchor."),
-					"ticket_stem": stringProperty("Optional ticket stem referenced by spec frontmatter or feature entries."),
-					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
-				},
-			},
-		},
-		{
-			"name":        "mental_models.list",
-			"description": "List mental-model documents with domains, descriptions, and sources.",
-			"inputSchema": map[string]any{
-				"type":       "object",
-				"properties": map[string]any{},
-			},
-		},
-		{
-			"name":        "mental_models.query",
-			"description": "Query mental-model paths by text query, spec stem reference, or domain. Defaults to compact text; use format=json for structured metadata.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"query":     stringProperty("Optional case-insensitive text query."),
-					"spec_stem": stringProperty("Optional spec anchor stem referenced by the mental model."),
-					"domain":    stringProperty("Optional mental-model domain."),
-					"format":    stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
-				},
-			},
-		},
-		{
-			"name":        "mental_models.status",
-			"description": "Return path-first metadata for mental-model documents selected by domain or path. Defaults to compact text; use format=json for structured metadata.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"domain": stringProperty("Optional mental-model domain."),
-					"path":   stringProperty("Optional relative path under ai-docs/mental-model."),
-					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
-				},
 			},
 		},
 		{
@@ -3999,18 +3529,6 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "references.trace",
-			"description": "Trace ticket/spec/mental-model references from exactly one ticket_stem or spec_stem. Defaults to compact text; use format=json for structured output.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"ticket_stem": stringProperty("Optional ticket stem to trace."),
-					"spec_stem":   stringProperty("Optional spec anchor stem to trace."),
-					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
-				},
-			},
-		},
-		{
 			"name":        "tickets.query",
 			"description": "Query ticket paths by text query, ticket stem, or mentions of another ticket stem. A ticket_stem given alone (no query, no mentions_ticket_stem, no statuses) point-resolves that ticket and returns its status metadata, erroring if the stem is not found; otherwise this is a discovery search. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": map[string]any{
@@ -4066,7 +3584,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.move",
-			"description": "Move a ticket along the idea <-> todo <-> ready axis. Upward moves stamp or validate a resolved sage-review posture from config. Downward moves from ready/ return a spec-cleanup tip. Stages atomically; does not commit.",
+			"description": "Move a ticket along the idea <-> todo <-> ready axis. Non-implementation categories (epic, research, workset) are board artifacts, never execution targets, and are rejected at the ready/ landing. Ready promotion and epic todo settlement resolve sage-review posture from config; actionable todo moves are ungated. Stages atomically; does not commit.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4078,11 +3596,11 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.create_empty",
-			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus resolved sage-review posture for todo/ready). Yields only a valid empty skeleton + initial posture, not a full mutation orchestrator — populate the body via tickets.template. Returns the path and a promotion tip; does not stage or commit.",
+			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus resolved sage-review posture for ready or epic todo). Yields only a valid empty skeleton + applicable initial posture, not a full mutation orchestrator — populate the body via tickets.template. Returns the path and a promotion tip; does not stage or commit.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"stem":          stringProperty("Semantic ticket stem without date prefix (e.g. feat-foo-bar)."),
+					"stem":          stringProperty("Semantic ticket stem without date prefix (e.g. feat-foo-bar). Authoring categories: feat, bug, refactor, chore, research, epic."),
 					"initial_state": stringProperty("Ticket status: idea, todo, or ready."),
 				},
 				"required": []string{"stem", "initial_state"},
@@ -4094,7 +3612,7 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"type": stringProperty("Ticket category: feat, bug, refactor, chore, research, workset, or epic."),
+					"type": stringProperty("Ticket category: feat, bug, refactor, chore, research, or epic."),
 				},
 				"required": []string{"type"},
 			},
@@ -4105,7 +3623,7 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"type":  stringProperty("Ticket category: feat, bug, refactor, chore, research, workset, or epic."),
+					"type":  stringProperty("Ticket category: feat, bug, refactor, chore, research, or epic."),
 					"phase": enumStringProperty("Ticket-authoring phase.", []string{"content", "intent"}),
 				},
 				"required": []string{"type", "phase"},
@@ -4113,12 +3631,12 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.sage_gate",
-			"description": "Resolve the sage-review gate for a ticket landing. Owns posture resolution (legacy sage-review: migration, config.list fallback), the category×stage matrix, and standalone/combined mode selection. Returns an action (skip | stop_blocked | ask | run); for run, the reviewer(s) to spawn and the mode. Does not spawn reviewers.",
+			"description": "Resolve the sage-review gate for a ticket landing. The todo landing runs epic design-only review (completeness never applies to an epic), invoked on lead judgment when the epic's cross-child design has drifted materially — not a status boundary; actionable todo calls fail, and research and legacy worksets skip. Actionable design and completeness review runs at ready promotion after fact population. Owns posture resolution (legacy sage-review: migration, config.list fallback), the category×stage matrix, and standalone/combined mode selection. Returns an action (skip | stop_blocked | stop_missing_route_facts | ask | run); for run, the reviewer(s) to spawn and the mode. A ready/ landing is refused with stop_missing_route_facts when the ticket carries no ## Route Facts section. Does not spawn reviewers.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"stem":    stringProperty("Ticket stem (YYMMDD-category-name)."),
-					"landing": enumStringProperty("Landing status the gate is resolving for.", []string{"idea", "todo", "ready"}),
+					"landing": enumStringProperty("Landing: todo runs epic design-only review (lead-judgment-invoked, not a boundary), ready runs actionable design and completeness, idea skips.", []string{"idea", "todo", "ready"}),
 					"answer":  enumStringProperty("Optional follow-up answer to a prior ask action.", []string{"yes", "no"}),
 				},
 				"required": []string{"stem", "landing"},
@@ -4139,7 +3657,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.verify",
-			"description": "Run the ticket-write guardrails (stem/status-dir, frontmatter fence integrity, ready-landing sage-review posture, phase/Result heading well-formedness, close date-field presence) against ticket-shaped paths without staging or committing. These are the same hard guardrails git.commit enforces before it will commit a ticket-touching change; spec-address is reported as a warning only, never a block. Non-ticket paths are silently skipped. Use standalone for mid-edit red/green feedback before staging.",
+			"description": "Run the ticket-write guardrails (stem/status-dir, frontmatter fence integrity, ready-landing sage-review posture, phase/Result heading well-formedness, close date-field presence) against ticket-shaped paths without staging or committing. These are the same hard guardrails git.commit enforces before it will commit a ticket-touching change; soft warnings are reported but never block. Non-ticket paths are silently skipped. Use standalone for mid-edit red/green feedback before staging.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4211,149 +3729,6 @@ func tools() []map[string]any {
 				"required": []string{"name"},
 			},
 		},
-		{
-			"name":        "mercenary.register",
-			"description": "Register a durable ws mercenary agent for the current worktree. Use a self-contained prompt from playbook.render as system_prompt_text, and pass playbook.render's returned recommended-tier through as tier; the former prompts/model registration fields are removed.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name":               stringProperty("Agent name."),
-					"backend":            stringProperty("Optional backend name (codex or claude). Uses harness default when omitted."),
-					"system_prompt_text": stringProperty("Self-contained system prompt text (from playbook.render). Replaces the former prompts/model registration fields."),
-					"tier":               stringProperty("Optional first-class capability tier (small/medium/large/xlarge) to pass through from playbook.render's recommended-tier. Selects the mercenary's model via config.tune(key: agents.tier); omit to use the default."),
-				},
-				"required": []string{"name"},
-			},
-		},
-		{
-			"name":        "mercenary.call",
-			"description": "Start an asynchronous call for a registered ws agent and return immediately.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name":   stringProperty("Agent name."),
-					"prompt": stringProperty("Prompt to send to the agent."),
-				},
-				"required": []string{"name", "prompt"},
-			},
-		},
-		{
-			"name":        "mercenary.wait",
-			"description": "Wait for one or more registered ws agents to become ready; returns status metadata, not final output.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name":            stringProperty("Agent name. Compatibility alias for a single name."),
-					"names":           stringArrayProperty("Agent names to wait for."),
-					"timeout_seconds": numberProperty("Maximum seconds to wait. Defaults to 600."),
-				},
-			},
-		},
-		{
-			"name":        "mercenary.result",
-			"description": "Return a completed agent result, optionally waiting; successful ephemeral results are consumed and erased.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name":            stringProperty("Agent name."),
-					"timeout_seconds": numberProperty("Maximum seconds to wait. Omit or set 0 for a non-blocking read."),
-				},
-				"required": []string{"name"},
-			},
-		},
-		{
-			"name":        "mercenary.status",
-			"description": "Return current status for a registered ws agent.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name": stringProperty("Agent name."),
-				},
-				"required": []string{"name"},
-			},
-		},
-		{
-			"name":        "mercenary.interrupt",
-			"description": "Queue an interrupt or redirect message for a registered ws agent.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name":    stringProperty("Agent name."),
-					"message": stringProperty("Interrupt or redirect message to deliver to the agent."),
-				},
-				"required": []string{"name", "message"},
-			},
-		},
-		{
-			"name":        "mercenary.tail",
-			"description": "Return context-bounded recent event, stream, and output lines for a registered ws agent.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name":  stringProperty("Agent name."),
-					"lines": integerProperty("Number of lines per section. Defaults to 40."),
-				},
-				"required": []string{"name"},
-			},
-		},
-		{
-			"name":        "mercenary.debug.tail",
-			"description": "Debug only: return raw diagnostic tail sections for a registered ws agent.",
-			"inputSchema": agentDebugSchema("Number of lines per section. Defaults to 40."),
-		},
-		{
-			"name":        "mercenary.debug.stdout",
-			"description": "Debug only: return recent raw stdout lines for the current agent call.",
-			"inputSchema": agentDebugSchema("Number of stdout lines. Defaults to 40."),
-		},
-		{
-			"name":        "mercenary.debug.stderr",
-			"description": "Debug only: return recent raw stderr lines for the current agent call.",
-			"inputSchema": agentDebugSchema("Number of stderr lines. Defaults to 40."),
-		},
-		{
-			"name":        "mercenary.debug.runtime_log",
-			"description": "Debug only: return recent raw runtime log lines for the current agent call.",
-			"inputSchema": agentDebugSchema("Number of runtime log lines. Defaults to 40."),
-		},
-		{
-			"name":        "mercenary.debug.events",
-			"description": "Debug only: return recent raw agent events log lines.",
-			"inputSchema": agentDebugSchema("Number of event log lines. Defaults to 40."),
-		},
-		{
-			"name":        "mercenary.cancel",
-			"description": "Best-effort cancel the current async call for a registered ws agent.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name": stringProperty("Agent name."),
-				},
-				"required": []string{"name"},
-			},
-		},
-		{
-			"name":        "mercenary.print",
-			"description": "Deprecated compatibility alias: return the last plain-text output without consuming ephemeral agents.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name": stringProperty("Agent name."),
-				},
-				"required": []string{"name"},
-			},
-		},
-		{
-			"name":        "mercenary.erase",
-			"description": "Erase a registered ws agent directory for the current worktree.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name": stringProperty("Agent name."),
-				},
-				"required": []string{"name"},
-			},
-		},
 	}
 	return withSessionKeyToolSchemas(toolList)
 }
@@ -4386,14 +3761,9 @@ func toolSchemaRequiresSessionKey(name string) bool {
 	switch name {
 	case "api.list",
 		"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep",
-		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
-		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.query",
-		"mental_models.list", "mental_models.query", "mental_models.status", "references.trace",
-		"tickets.query", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify", "path.generate", "playbook.render",
-		"mercenary.register", "mercenary.call", "mercenary.wait", "mercenary.result", "mercenary.status",
-		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
-		"mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events",
-		"mercenary.cancel", "mercenary.print", "mercenary.erase":
+		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "git.merge",
+		"project_tree",
+		"tickets.query", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify", "path.generate", "playbook.render":
 		return true
 	default:
 		if entry, ok := configKeyEntryForTool(name); ok {
@@ -4414,7 +3784,6 @@ func appendRequiredString(raw any, value string) []string {
 }
 
 func LeadToolNames() []string {
-	mercenaryHidden := mercenaryHiddenFromGlobalConfig()
 	names := make([]string, 0, len(tools()))
 	for _, tool := range tools() {
 		name, _ := tool["name"].(string)
@@ -4423,9 +3792,6 @@ func LeadToolNames() []string {
 			continue
 		}
 		if NoAgentMode() && noAgentHiddenTool(name) {
-			continue
-		}
-		if mercenaryHidden && strings.HasPrefix(name, "mercenary.") {
 			continue
 		}
 		if name != "" {
@@ -4439,17 +3805,13 @@ func LeadToolNames() []string {
 func (s *Server) filteredTools() []map[string]any {
 	base := tools()
 	filtered := make([]map[string]any, 0, len(base))
-	mercenaryHidden := s.mercenaryHiddenFromConfig()
 	for _, tool := range base {
 		name, _ := tool["name"].(string)
 		name = advertisedToolName(name)
 		if permanentlyHiddenTool(name) {
 			continue
 		}
-		if mercenaryHidden && strings.HasPrefix(name, "mercenary.") {
-			continue
-		}
-		if s.toolAllowed(name, mercenaryHidden) {
+		if s.toolAllowed(name) {
 			filtered = append(filtered, publicToolDefinition(tool, name))
 		}
 	}
@@ -4457,7 +3819,6 @@ func (s *Server) filteredTools() []map[string]any {
 }
 
 func publicToolDefinition(tool map[string]any, advertisedName string) map[string]any {
-	name, _ := tool["name"].(string)
 	clone := make(map[string]any, len(tool))
 	for key, value := range tool {
 		clone[key] = value
@@ -4471,33 +3832,11 @@ func publicToolDefinition(tool map[string]any, advertisedName string) map[string
 	if schema, ok := clone["inputSchema"].(map[string]any); ok {
 		clone["inputSchema"] = namespaceValue(schema)
 	}
-	if !strings.HasPrefix(name, "mercenary.") {
-		return clone
-	}
-	schema, ok := clone["inputSchema"].(map[string]any)
-	if !ok {
-		return clone
-	}
-	schemaClone := make(map[string]any, len(schema))
-	for key, value := range schema {
-		schemaClone[key] = value
-	}
-	if properties, ok := schema["properties"].(map[string]any); ok {
-		propertiesClone := make(map[string]any, len(properties))
-		for key, value := range properties {
-			propertiesClone[key] = value
-		}
-		schemaClone["properties"] = propertiesClone
-	}
-	clone["inputSchema"] = schemaClone
 	return clone
 }
 
-func (s *Server) toolAllowed(name string, mercenaryHidden bool) bool {
+func (s *Server) toolAllowed(name string) bool {
 	if NoAgentMode() && noAgentHiddenTool(name) {
-		return false
-	}
-	if strings.HasPrefix(name, "mercenary.") && mercenaryHidden {
 		return false
 	}
 	if allowed := explicitAllowedTools(); len(allowed) > 0 {
@@ -4514,9 +3853,9 @@ func roleAllowsTool(role toolRole, name string) bool {
 		if strings.HasPrefix(name, "session.") {
 			return false
 		}
-		return !strings.HasPrefix(name, "mercenary.") && !strings.HasPrefix(name, "config.")
+		return !strings.HasPrefix(name, "config.")
 	case roleLeaf:
-		return !strings.HasPrefix(name, "mercenary.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && name != "git.commit"
+		return !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && name != "git.commit"
 	default:
 		return false
 	}
@@ -4580,35 +3919,12 @@ func namespaceValue(value any) any {
 	}
 }
 
-// agentCallHandleText formats the ws.mercenary.call response. The handle is shaped as
-// agentId=<name> so the lead reuses one native-shaped continuation idiom across
-// the native-subagent and mercenary paths (Phase 2c interface parity).
-func agentCallHandleText(name, status string, pid int) string {
-	return fmt.Sprintf("agentId=%s\tstatus=%s\tpid=%d\ncontinue: use the agentId above with the host continuation idiom (e.g. SendMessage(to: agentId) or resume by task id)\nfollow_up: ws.mercenary.result --timeout 10m | ws.mercenary.wait --timeout 10m | ws.mercenary.status | ws.mercenary.tail | ws.mercenary.cancel\n", name, status, pid)
-}
-
 // permanentlyHiddenTool returns true for tools that must never appear on the
 // public MCP surface regardless of mode. exec.* tools are under active
 // development (epic 260524) and not yet documented in lead-workflow-manual;
 // they are hidden until the surface stabilizes.
 func permanentlyHiddenTool(name string) bool {
 	return strings.HasPrefix(name, "exec.")
-}
-
-// mercenaryHiddenFromConfig returns true when workflow.prefer_mercenary resolves
-// to "hide" from global/builtin state. The item is global-only because
-// filteredTools and toolAllowed are request-level, not session/root keyed.
-func (s *Server) mercenaryHiddenFromConfig() bool {
-	return mercenaryHiddenFromGlobalConfig()
-}
-
-func mercenaryHiddenFromGlobalConfig() bool {
-	resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), nil, nil)
-	rv, err := resolver.Get("", wsconfig.ItemWorkflowPreferMercenary)
-	if err != nil {
-		return false
-	}
-	return canonicalPreferMercenaryValue(rv.Value) == "hide"
 }
 
 func (s *Server) requireLeadSessionKey(toolName string, arguments map[string]any) (string, error) {
@@ -4631,14 +3947,9 @@ func noAgentHiddenTool(name string) bool {
 	if permanentlyHiddenTool(name) {
 		return true
 	}
-	if strings.HasPrefix(name, "mercenary.") {
-		return true
-	}
-	// Mercenary render-mode control is ws-only; the agentless wsflow surface
-	// has no mercenary path, so config.workflow_prefer_mercenary (the only
-	// config.* entry with NoAgentVisible: false) is hidden there. Every other
-	// config.* knob, including the bootstrap tool, stays visible (wsflow
-	// still needs session-key bootstrap).
+	// A config.* knob declaring NoAgentVisible: false is hidden on the
+	// agentless surface. Every other config.* knob, including the bootstrap
+	// tool, stays visible (wsflow still needs session-key bootstrap).
 	if strings.HasPrefix(name, "config.") {
 		if entry, ok := configKeyEntryForTool(name); ok {
 			return !entry.NoAgentVisible
@@ -4651,11 +3962,8 @@ func noAgentHiddenTool(name string) bool {
 // eligible for the wsflow playbook.render legacy context bridge.
 // Add entries here as the spec expands the set.
 var wsflowRenderEligibleStems = map[string]bool{
-	"reference-discovery":     true,
-	"plan-populator-survey":   true,
-	"plan-populator-research": true,
-	"code-reviewer":           true,
-	"mental-model-updater":    true,
+	"reference-discovery": true,
+	"code-reviewer":       true,
 }
 
 func appendRenderContext(body string, context map[string]string) string {
@@ -4692,17 +4000,6 @@ func explicitAllowedTools() map[string]bool {
 		}
 	}
 	return allowed
-}
-
-func agentDebugSchema(linesDescription string) map[string]any {
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"name":  stringProperty("Agent name."),
-			"lines": integerProperty(linesDescription),
-		},
-		"required": []string{"name"},
-	}
 }
 
 func execLaunchSchema(shell bool) map[string]any {
@@ -4864,13 +4161,6 @@ func hasSpecStemArgument(arguments map[string]any) bool {
 func hasTicketOnlyArgument(arguments map[string]any) bool {
 	_, ok := arguments["mentions_ticket_stem"]
 	return ok
-}
-
-func hasTicketStemArgument(arguments map[string]any) bool {
-	if _, ok := arguments["ticket_stem"]; ok {
-		return true
-	}
-	return hasTicketOnlyArgument(arguments)
 }
 
 func stringProperty(description string) map[string]string {

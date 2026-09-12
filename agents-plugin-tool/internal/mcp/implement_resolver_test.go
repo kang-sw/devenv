@@ -7,24 +7,27 @@ import (
 	"github.com/kang-sw/devenv/internal/wskey"
 )
 
-func TestResolveImplementStrategyRules(t *testing.T) {
+// TestResolveImplementSmallestSafeChangeStillGetsIndependentReview pins the
+// collapse: the fact set that used to select the caller-edits/caller-reviews
+// fast path — single-file, internal, no new public symbol or type contract, and
+// all four risk axes genuinely low — now resolves to the one execution mode with
+// an independent reviewer allocated. No fact combination reaching this resolver
+// may drop review; the legacy top-level enter path still honors an explicit
+// need_review=false from its caller and is out of this test's scope.
+func TestResolveImplementSmallestSafeChangeStillGetsIndependentReview(t *testing.T) {
 	input := implementInput{
 		Target: implementTargetInput{Kind: "inline", Label: "tiny edit", ScopeLabel: "tiny edit", ScopeSlug: "tiny-edit"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "single-file", Present: true},
-				Surface:                   factString{Value: "internal", Present: true},
-				NewPublicSymbol:           factString{Value: "no", Present: true},
-				NewTypeContract:           factString{Value: "no", Present: true},
-				TestSurface:               factString{Value: "none", Present: true},
-				ExplicitDelegationRequest: factString{Value: "no", Present: true},
+				Span:            factString{Value: "single-file", Present: true},
+				Surface:         factString{Value: "internal", Present: true},
+				NewPublicSymbol: factString{Value: "no", Present: true},
+				NewTypeContract: factString{Value: "no", Present: true},
+				TestSurface:     factString{Value: "none", Present: true},
 			},
 			Complexity: implementComplexityFactsInput{
-				ChangePoints:   factString{Value: "clear", Present: true},
 				ReusePoints:    factString{Value: "not-applicable", Present: true},
-				StrategyShape:  factString{Value: "single-obvious", Present: true},
 				SideEffectRisk: factString{Value: "low", Present: true},
-				ColdContext:    factString{Value: "no", Present: true},
 			},
 			Risk: implementRiskFactsInput{
 				Correctness:        factString{Value: "low", Present: true},
@@ -34,332 +37,41 @@ func TestResolveImplementStrategyRules(t *testing.T) {
 			},
 		},
 	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "feature/demo", StartCommit: "abc123"})
-	if result.Verdict.Delegation != "direct-edit" {
-		t.Fatalf("delegation = %q, want direct-edit", result.Verdict.Delegation)
-	}
-	if result.Verdict.PlanDepth != "none" {
-		t.Fatalf("plan depth = %q, want none", result.Verdict.PlanDepth)
-	}
-	if result.Verdict.ReviewAlloc != "lead-only" || result.Verdict.NeedReview {
-		t.Fatalf("review = %q need=%v, want lead-only false", result.Verdict.ReviewAlloc, result.Verdict.NeedReview)
-	}
-	if strings.Contains(result.NextInstruction, "plan-populator") || strings.Contains(result.NextInstruction, "path.generate") {
-		t.Fatalf("direct-edit next instruction mentioned planner actions: %q", result.NextInstruction)
-	}
-	if strings.Contains(result.Raw, "Plan Depth: brief") {
-		t.Fatalf("direct-edit raw exposed brief plan depth:\n%s", result.Raw)
-	}
-}
-
-func TestResolveImplementCurrentBranchCompletion(t *testing.T) {
-	input := lowCeremonyImplementInput()
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "feature/demo", StartCommit: "abc123"})
-	plan := result.Verdict.BranchPlan
-	if plan.Action != "current" || plan.CurrentBranch != "feature/demo" {
-		t.Fatalf("branch plan = %+v, want retained feature/demo", plan)
-	}
-	if plan.TargetBranch != "" || plan.MergeTarget != "" {
-		t.Fatalf("current-branch plan retained merge metadata: %+v", plan)
-	}
-	if !strings.Contains(result.NextInstruction, "Keep the current branch feature/demo") || !strings.Contains(result.NextInstruction, "omit merge work") {
-		t.Fatalf("next instruction missing current-branch completion: %q", result.NextInstruction)
-	}
-	if !strings.Contains(result.Raw, "Merge Confirm: n/a") || !strings.Contains(result.Raw, "- merge_confirm: n/a") {
-		t.Fatalf("current-branch text did not mark merge confirmation inapplicable:\n%s", result.Raw)
-	}
-	if !containsString(result.Conditions, "merge-confirm=n/a") || containsString(result.Conditions, "merge-confirm=ask") {
-		t.Fatalf("current-branch conditions retained applicable merge confirmation: %v", result.Conditions)
-	}
-	if !containsString(result.Conditions, "low-ceremony-if-safe=yes") {
-		t.Fatalf("current-branch conditions omitted normalized low-ceremony preference: %v", result.Conditions)
-	}
-}
-
-func TestResolveImplementCurrentBranchPreferenceGate(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		policy  factString
-		wantVal string
-	}{
-		{name: "no", policy: factString{Value: "no", Present: true}, wantVal: "no"},
-		{name: "unknown", policy: factString{Value: "unknown", Present: true}, wantVal: "unknown"},
-		{name: "missing", wantVal: "unknown"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			input := lowCeremonyImplementInput()
-			input.Policy.LowCeremonyIfSafe = tc.policy
-			result := resolveImplement(input, implementBranchObservation{CurrentBranch: "feature/demo", StartCommit: "abc123"})
-			if result.Verdict.BranchPlan.Action != "create" {
-				t.Fatalf("branch action = %q, want standard create", result.Verdict.BranchPlan.Action)
-			}
-			if !containsString(result.Conditions, "low-ceremony-if-safe="+tc.wantVal) {
-				t.Fatalf("conditions omitted normalized preference %q: %v", tc.wantVal, result.Conditions)
-			}
-			if containsString(result.Warnings, "policy.low_ceremony_if_safe=yes not applicable; continuing with standard branch path") {
-				t.Fatalf("non-yes preference emitted rejected-request warning: %v", result.Warnings)
-			}
-		})
-	}
-}
-
-func TestResolveImplementRejectedLowCeremonyPreferenceWarnsWithoutChangingVerdicts(t *testing.T) {
-	input := lowCeremonyImplementInput()
-	input.Facts.Scope.Span = factString{Value: "multi-file", Present: true}
-	input.Facts.Scope.Surface = factString{Value: "cross-module", Present: true}
-	input.Facts.Scope.TestSurface = factString{Value: "existing", Present: true}
-	input.Facts.Risk.Correctness = factString{Value: "moderate", Present: true}
-	input.Facts.Risk.Fit = factString{Value: "moderate", Present: true}
-	input.Facts.Risk.Test = factString{Value: "moderate", Present: true}
-
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "feature/demo", StartCommit: "abc123"})
-	if result.Verdict.BranchPlan.Action != "create" || result.Verdict.Delegation != "delegated" || result.Verdict.ReviewAlloc != "partitioned: correctness, fit, test" || result.Verdict.DocMode != "skipped" {
-		t.Fatalf("rejected preference changed independent verdicts: %+v", result.Verdict)
-	}
-	warning := "policy.low_ceremony_if_safe=yes not applicable; continuing with standard branch path"
-	if !containsString(result.Warnings, warning) || !containsString(result.Agenda.Warnings, warning) || !strings.Contains(result.Raw, warning) {
-		t.Fatalf("rejected preference warning missing from result, agenda, or raw output: %+v", result)
-	}
-}
-
-func TestResolveImplementCurrentBranchCompletionNearMisses(t *testing.T) {
-	base := normalizedImplementFacts{
-		Span: "single-file", Surface: "internal", NewPublicSymbol: "no", NewTypeContract: "no", TestSurface: "none",
-		ExplicitDelegationRequest: "no", CorrectnessRisk: "low", FitRisk: "low", TestRisk: "low", SecurityOrContractRisk: "low",
-		LowCeremonyIfSafe: "yes", ReviewOverride: "auto", DocModePolicy: "skip-with-reason", DocReason: "docs unaffected",
-	}
-	baseObs := implementBranchObservation{CurrentBranch: "feature/demo", StartCommit: "abc123"}
-	cases := []struct {
-		name       string
-		kind       string
-		facts      normalizedImplementFacts
-		obs        implementBranchObservation
-		wantAction string
-	}{
-		{name: "ticket target", kind: "ticket", facts: base, obs: baseObs, wantAction: "create"},
-		{name: "impl branch", kind: "inline", facts: base, obs: implementBranchObservation{CurrentBranch: "impl/demo"}, wantAction: "stop"},
-		{name: "legacy implement branch", kind: "inline", facts: base, obs: implementBranchObservation{CurrentBranch: "implement/demo"}, wantAction: "stop"},
-		{name: "detached head", kind: "inline", facts: base, obs: implementBranchObservation{CurrentBranch: "(detached)"}, wantAction: "stop"},
-		{name: "empty head", kind: "inline", facts: base, obs: implementBranchObservation{}, wantAction: "stop"},
-		{name: "empty start commit", kind: "inline", facts: base, obs: implementBranchObservation{CurrentBranch: "feature/demo"}, wantAction: "create"},
-		{name: "git unborn marker", kind: "inline", facts: base, obs: implementBranchObservation{CurrentBranch: "feature/demo", StartCommit: "(initial)"}, wantAction: "create"},
-		{name: "explicit delegation", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.ExplicitDelegationRequest = "yes" }), obs: baseObs},
-		{name: "lead-only override", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.ReviewOverride = "lead-only" }), obs: baseObs},
-		{name: "missing docs reason", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.DocReason = "" }), obs: baseObs},
-		{name: "standard docs", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.DocModePolicy = "standard" }), obs: baseObs},
-		{name: "span unknown", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.Span = "unknown" }), obs: baseObs},
-		{name: "span failed", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.Span = "multi-file" }), obs: baseObs},
-		{name: "surface unknown", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.Surface = "unknown" }), obs: baseObs},
-		{name: "surface failed", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.Surface = "cross-module" }), obs: baseObs},
-		{name: "public symbol unknown", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.NewPublicSymbol = "unknown" }), obs: baseObs},
-		{name: "public symbol failed", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.NewPublicSymbol = "yes" }), obs: baseObs},
-		{name: "type contract unknown", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.NewTypeContract = "unknown" }), obs: baseObs},
-		{name: "type contract failed", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.NewTypeContract = "yes" }), obs: baseObs},
-		{name: "test surface unknown", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.TestSurface = "unknown" }), obs: baseObs},
-		{name: "test surface failed", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.TestSurface = "new-files" }), obs: baseObs},
-		{name: "correctness unknown", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.CorrectnessRisk = "unknown" }), obs: baseObs},
-		{name: "correctness failed", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.CorrectnessRisk = "moderate" }), obs: baseObs},
-		{name: "fit unknown", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.FitRisk = "unknown" }), obs: baseObs},
-		{name: "fit failed", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.FitRisk = "moderate" }), obs: baseObs},
-		{name: "test risk unknown", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.TestRisk = "unknown" }), obs: baseObs},
-		{name: "test risk failed", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.TestRisk = "moderate" }), obs: baseObs},
-		{name: "contract risk unknown", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.SecurityOrContractRisk = "unknown" }), obs: baseObs},
-		{name: "contract risk failed", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.SecurityOrContractRisk = "moderate" }), obs: baseObs},
-		{name: "explicit direct override cannot rescue unsafe scope", kind: "inline", facts: mutateLowCeremonyFacts(base, func(n *normalizedImplementFacts) { n.ExplicitDirectEditRequest = "yes"; n.Span = "multi-file" }), obs: baseObs},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := deriveResolvedImplementBranchPlan(tc.kind, tc.facts, tc.obs)
-			wantAction := tc.wantAction
-			if wantAction == "" {
-				wantAction = "create"
-			}
-			if got.Action != wantAction {
-				t.Fatalf("near miss branch action = %q, want unchanged standard action %q; plan=%+v", got.Action, wantAction, got)
-			}
-		})
-	}
-}
-
-func lowCeremonyImplementInput() implementInput {
-	return implementInput{
-		Target: implementTargetInput{Kind: "inline", Label: "tiny edit", ScopeLabel: "tiny edit", ScopeSlug: "tiny-edit"},
-		Facts: implementFactsInput{
-			Scope: implementScopeFactsInput{
-				Span: factString{Value: "single-file", Present: true}, Surface: factString{Value: "internal", Present: true},
-				NewPublicSymbol: factString{Value: "no", Present: true}, NewTypeContract: factString{Value: "no", Present: true},
-				TestSurface: factString{Value: "none", Present: true}, ExplicitDelegationRequest: factString{Value: "no", Present: true},
-			},
-			Risk: implementRiskFactsInput{
-				Correctness: factString{Value: "low", Present: true}, Fit: factString{Value: "low", Present: true},
-				Test: factString{Value: "low", Present: true}, SecurityOrContract: factString{Value: "low", Present: true},
-			},
-		},
-		Policy: implementPolicyInput{
-			LowCeremonyIfSafe: factString{Value: "yes", Present: true},
-			Review:            implementReviewPolicyInput{Override: factString{Value: "auto", Present: true}},
-			Docs:              implementDocsPolicyInput{Mode: factString{Value: "skip-with-reason", Present: true}, Reason: factString{Value: "docs unaffected", Present: true}},
-		},
-	}
-}
-
-func mutateLowCeremonyFacts(base normalizedImplementFacts, mutate func(*normalizedImplementFacts)) normalizedImplementFacts {
-	mutate(&base)
-	return base
-}
-
-func TestResolveImplementDelegatedDefaultsToSurveyPlan(t *testing.T) {
-	input := implementInput{
-		Target: implementTargetInput{Kind: "ticket", Label: "feature", TicketPath: "ai-docs/tickets/ready/feature.md", ScopeLabel: "Phase 1", ScopeSlug: "feature"},
-		Facts: implementFactsInput{
-			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
-				NewPublicSymbol:           factString{Value: "no", Present: true},
-				NewTypeContract:           factString{Value: "no", Present: true},
-				TestSurface:               factString{Value: "existing", Present: true},
-				ExplicitDelegationRequest: factString{Value: "no", Present: true},
-			},
-			Complexity: implementComplexityFactsInput{
-				ChangePoints:   factString{Value: "clear", Present: true},
-				ReusePoints:    factString{Value: "confirmed", Present: true},
-				StrategyShape:  factString{Value: "single-obvious", Present: true},
-				SideEffectRisk: factString{Value: "moderate", Present: true},
-				ColdContext:    factString{Value: "no", Present: true},
-			},
-			Risk: implementRiskFactsInput{
-				Correctness:        factString{Value: "moderate", Present: true},
-				Fit:                factString{Value: "moderate", Present: true},
-				Test:               factString{Value: "moderate", Present: true},
-				SecurityOrContract: factString{Value: "moderate", Present: true},
-			},
-		},
-	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
+	result := resolveImplement(input, factsFromTicket(input), implementBranchObservation{CurrentBranch: "feature/demo", StartCommit: "abc123"})
 	if result.Verdict.Delegation != "delegated" {
 		t.Fatalf("delegation = %q, want delegated", result.Verdict.Delegation)
 	}
-	if result.Verdict.PlanDepth != "survey" {
-		t.Fatalf("plan depth = %q, want survey", result.Verdict.PlanDepth)
+	if result.Verdict.ReviewAlloc != "single" || !result.Verdict.NeedReview {
+		t.Fatalf("review = %q need=%v, want single true", result.Verdict.ReviewAlloc, result.Verdict.NeedReview)
 	}
-	for _, want := range []string{"installed delegated Prep and Edit todos", "partitioned: correctness, fit, test review", "standard documentation gates"} {
-		if !strings.Contains(result.NextInstruction, want) {
-			t.Fatalf("delegated next instruction missing %q: %q", want, result.NextInstruction)
+	for _, forbidden := range []string{"plan-populator", "path.generate", "Plan Depth", "direct-edit", "lead-only"} {
+		if strings.Contains(result.Raw, forbidden) {
+			t.Fatalf("verdict retained removed stage or fast path %q:\n%s", forbidden, result.Raw)
 		}
 	}
-	if strings.Contains(result.Raw, "brief") {
-		t.Fatalf("delegated raw exposed old brief path:\n%s", result.Raw)
+	for _, gone := range []string{"explicit-delegation-request", "explicit-direct-edit-request", "low-ceremony-if-safe", "change-points", "strategy-shape", "cold-context"} {
+		if containsPrefixed(result.Conditions, gone) {
+			t.Fatalf("conditions retained removed fact %q: %v", gone, result.Conditions)
+		}
 	}
 }
 
-func delegatedLocalizedTicketInput(kind string, mutate func(*implementComplexityFactsInput)) implementInput {
-	complexity := implementComplexityFactsInput{
-		ChangePoints:   factString{Value: "clear", Present: true},
-		ReusePoints:    factString{Value: "confirmed", Present: true},
-		StrategyShape:  factString{Value: "single-obvious", Present: true},
-		SideEffectRisk: factString{Value: "low", Present: true},
-		ColdContext:    factString{Value: "no", Present: true},
-	}
-	if mutate != nil {
-		mutate(&complexity)
-	}
-	return implementInput{
-		Target: implementTargetInput{Kind: kind, Label: "feature", TicketPath: "ai-docs/tickets/ready/feature.md", ScopeLabel: "Phase 1", ScopeSlug: "feature"},
-		Facts: implementFactsInput{
-			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
-				NewPublicSymbol:           factString{Value: "no", Present: true},
-				NewTypeContract:           factString{Value: "no", Present: true},
-				TestSurface:               factString{Value: "existing", Present: true},
-				ExplicitDelegationRequest: factString{Value: "no", Present: true},
-			},
-			Complexity: complexity,
-			Risk: implementRiskFactsInput{
-				Correctness:        factString{Value: "moderate", Present: true},
-				Fit:                factString{Value: "moderate", Present: true},
-				Test:               factString{Value: "moderate", Present: true},
-				SecurityOrContract: factString{Value: "moderate", Present: true},
-			},
-		},
-	}
+// factsFromTicket is the test stand-in for the ticket read handleEnterImplement
+// performs: it presents a fixture's facts to the resolver exactly as a
+// populated `## Route Facts` section would. Tests about the read itself build
+// their own implementRouteFactsSource.
+func factsFromTicket(input implementInput) implementRouteFactsSource {
+	return implementRouteFactsSource{Facts: input.Facts, Status: "ticket"}
 }
 
-func TestResolveImplementDelegatedLocalizedTicketSkipsSurveyPlan(t *testing.T) {
-	obs := implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"}
-
-	base := resolveImplement(delegatedLocalizedTicketInput("ticket", nil), obs)
-	if base.Verdict.Delegation != "delegated" {
-		t.Fatalf("delegation = %q, want delegated", base.Verdict.Delegation)
-	}
-	if base.Verdict.PlanDepth != "none" {
-		t.Fatalf("all-four-strongest plan depth = %q, want none", base.Verdict.PlanDepth)
-	}
-
-	// Weakening any single fact (including to unknown) keeps survey.
-	for _, tc := range []struct {
-		name   string
-		mutate func(*implementComplexityFactsInput)
-	}{
-		{"change-points unknown", func(c *implementComplexityFactsInput) { c.ChangePoints = factString{} }},
-		{"reuse-points unconfirmed", func(c *implementComplexityFactsInput) {
-			c.ReusePoints = factString{Value: "unconfirmed", Present: true}
-		}},
-		{"strategy-shape multiple-viable", func(c *implementComplexityFactsInput) {
-			c.StrategyShape = factString{Value: "multiple-viable", Present: true}
-		}},
-		{"side-effect-risk moderate", func(c *implementComplexityFactsInput) {
-			c.SideEffectRisk = factString{Value: "moderate", Present: true}
-		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got := resolveImplement(delegatedLocalizedTicketInput("ticket", tc.mutate), obs)
-			if got.Verdict.Delegation != "delegated" {
-				t.Fatalf("delegation = %q, want delegated", got.Verdict.Delegation)
-			}
-			if got.Verdict.PlanDepth != "survey" {
-				t.Fatalf("plan depth = %q, want survey when %s", got.Verdict.PlanDepth, tc.name)
-			}
-		})
-	}
-
-	// not-applicable is the second accepted strongest reuse_points value.
-	notApplicable := resolveImplement(delegatedLocalizedTicketInput("ticket", func(c *implementComplexityFactsInput) {
-		c.ReusePoints = factString{Value: "not-applicable", Present: true}
-	}), obs)
-	if notApplicable.Verdict.PlanDepth != "none" {
-		t.Fatalf("reuse_points=not-applicable plan depth = %q, want none", notApplicable.Verdict.PlanDepth)
-	}
-
-	// Inline target keeps survey even with all four facts at strongest (Decision 3).
-	inline := resolveImplement(delegatedLocalizedTicketInput("inline", nil), obs)
-	if inline.Verdict.Delegation != "delegated" {
-		t.Fatalf("inline delegation = %q, want delegated", inline.Verdict.Delegation)
-	}
-	if inline.Verdict.PlanDepth != "survey" {
-		t.Fatalf("inline plan depth = %q, want survey (ticket targets only)", inline.Verdict.PlanDepth)
-	}
-}
-
-func TestResolveImplementInlineDelegatedNextDefersPlannerAuthorityToPrep(t *testing.T) {
-	input := implementInput{
-		Target: implementTargetInput{Kind: "inline", Label: "bounded multi-file edit", ScopeLabel: "bounded edit", ScopeSlug: "bounded-edit"},
-		Facts: implementFactsInput{Scope: implementScopeFactsInput{
-			Span: factString{Value: "multi-file", Present: true}, Surface: factString{Value: "internal", Present: true},
-			TestSurface: factString{Value: "existing", Present: true}, ExplicitDelegationRequest: factString{Value: "no", Present: true},
-		}},
-	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
-	for _, want := range []string{"installed delegated Prep and Edit todos", result.Verdict.ReviewAlloc + " review", "standard documentation gates"} {
-		if !strings.Contains(result.NextInstruction, want) {
-			t.Fatalf("inline delegated next instruction missing %q: %q", want, result.NextInstruction)
+// containsPrefixed reports whether any condition line starts with prefix+"=".
+func containsPrefixed(conditions []string, prefix string) bool {
+	for _, c := range conditions {
+		if strings.HasPrefix(c, prefix+"=") {
+			return true
 		}
 	}
-	for _, forbidden := range []string{"target_kind", "ticket_path", "selected_phase", "inline_contract", "plan-populator"} {
-		if strings.Contains(result.NextInstruction, forbidden) {
-			t.Fatalf("inline delegated next instruction duplicates Prep detail %q: %q", forbidden, result.NextInstruction)
-		}
-	}
+	return false
 }
 
 func TestDeriveImplementReviewAllocProportionalPartitions(t *testing.T) {
@@ -410,7 +122,7 @@ func TestDeriveImplementReviewAllocProportionalPartitions(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := deriveImplementReviewAlloc(tc.facts, "delegated"); got != tc.want {
+			if got := deriveImplementReviewAlloc(tc.facts); got != tc.want {
 				t.Fatalf("review allocation = %q, want %q", got, tc.want)
 			}
 		})
@@ -504,105 +216,20 @@ func TestImplementReviewPartitionsTreatUnknownAsNonSignal(t *testing.T) {
 	}
 }
 
-func TestAutomaticLeadOnlyReviewEligibleRequiresGenuineLow(t *testing.T) {
-	genuineLow := normalizedImplementFacts{
-		CorrectnessRisk: "low", FitRisk: "low", TestRisk: "low", SecurityOrContractRisk: "low",
-	}
-	if !automaticLeadOnlyReviewEligible(genuineLow, "direct-edit") {
-		t.Fatalf("genuine all-low fact set should qualify for lead-only review")
-	}
-
-	allUnknown := normalizedImplementFacts{
-		CorrectnessRisk: "unknown", FitRisk: "unknown", TestRisk: "unknown", SecurityOrContractRisk: "unknown",
-	}
-	if automaticLeadOnlyReviewEligible(allUnknown, "direct-edit") {
-		t.Fatalf("all-unknown fact set must not qualify for lead-only review")
-	}
-	if got := deriveImplementReviewAlloc(allUnknown, "direct-edit"); got != "single" {
-		t.Fatalf("all-unknown review alloc = %q, want single (not lead-only, not partitioned)", got)
-	}
-}
-
-func TestResolveImplementExplicitDirectEditOverridesMultiFileScope(t *testing.T) {
-	// explicit_direct_edit_request=yes overrides all other scope facts to direct-edit.
-	input := implementInput{
-		Target: implementTargetInput{Kind: "inline", Label: "force direct", ScopeLabel: "force direct", ScopeSlug: "force-direct"},
-		Facts: implementFactsInput{
-			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "cross-module", Present: true},
-				NewPublicSymbol:           factString{Value: "yes", Present: true},
-				ExplicitDirectEditRequest: factString{Value: "yes", Present: true},
-			},
-		},
-	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "feature/demo", StartCommit: "abc123"})
-	if result.Verdict.Delegation != "direct-edit" {
-		t.Fatalf("delegation = %q, want direct-edit when explicit_direct_edit_request=yes overrides scope", result.Verdict.Delegation)
-	}
-	if !containsString(result.Conditions, "explicit-direct-edit-request=yes") {
-		t.Fatalf("conditions missing explicit-direct-edit-request=yes: %v", result.Conditions)
-	}
-}
-
-func TestResolveImplementSurveyEscalatesResearchFromSurveySignal(t *testing.T) {
-	input := implementInput{
-		Target: implementTargetInput{Kind: "ticket", Label: "risky feature", ScopeLabel: "Phase 2", ScopeSlug: "risky-feature"},
-		Facts: implementFactsInput{
-			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "cross-module", Present: true},
-				TestSurface:               factString{Value: "new-files", Present: true},
-				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
-			},
-			Complexity: implementComplexityFactsInput{
-				StrategyShape:  factString{Value: "multiple-viable", Present: true},
-				SideEffectRisk: factString{Value: "high", Present: true},
-				ReusePoints:    factString{Value: "unconfirmed", Present: true},
-				ColdContext:    factString{Value: "yes", Present: true},
-			},
-		},
-	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
-	if result.Verdict.PlanDepth != "survey" {
-		t.Fatalf("plan depth = %q, want survey even for risky delegated prep", result.Verdict.PlanDepth)
-	}
-	if !strings.Contains(result.NextInstruction, "installed delegated Prep and Edit todos") {
-		t.Fatalf("delegated next instruction does not route to installed todos: %q", result.NextInstruction)
-	}
-	prep := implementPrepInstruction(implementTodoVerdict{
-		TargetKind:  "ticket",
-		Delegation:  result.Verdict.Delegation,
-		BranchPlan:  result.Verdict.BranchPlan,
-		PlanDepth:   result.Verdict.PlanDepth,
-		ReviewAlloc: result.Verdict.ReviewAlloc,
-		DocMode:     result.Verdict.DocMode,
-	})
-	for _, want := range []string{"[escalate-to-research]", "low confidence", "strategic uncertainty", "plan-populator-research"} {
-		if !strings.Contains(prep, want) {
-			t.Fatalf("survey escalation Prep instruction missing %q: %q", want, prep)
-		}
-	}
-	if strings.Contains(result.Raw, "Plan Depth: research") {
-		t.Fatalf("resolver preselected research instead of survey escalation:\n%s", result.Raw)
-	}
-}
-
 func TestResolveImplementBranchStopOmitsPlannerInstructions(t *testing.T) {
 	input := implementInput{
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "feature"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
-				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
 			Branch: implementBranchPolicyInput{MergeTarget: factString{Value: "main", Present: true}, AllowRename: factString{Value: "no", Present: true}},
 		},
 	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "implement/old", StartCommit: "abc123"})
+	result := resolveImplement(input, factsFromTicket(input), implementBranchObservation{CurrentBranch: "implement/old", StartCommit: "abc123"})
 	if result.Verdict.BranchPlan.Action != "stop" {
 		t.Fatalf("branch action = %q, want stop", result.Verdict.BranchPlan.Action)
 	}
@@ -618,16 +245,15 @@ func TestResolveImplementBranchRenameDefaultsToAllowedWhenUnset(t *testing.T) {
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "feature"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
-				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
 			Branch: implementBranchPolicyInput{MergeTarget: factString{Value: "main", Present: true}},
 		},
 	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
+	result := resolveImplement(input, factsFromTicket(input), implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
 	if result.Verdict.BranchPlan.Action != "rename" {
 		t.Fatalf("branch action = %q, want rename (allow_rename absent should default to yes)", result.Verdict.BranchPlan.Action)
 	}
@@ -638,9 +264,8 @@ func TestResolveImplementAheadOfMergeRootBlocksRenameRegardlessOfAllowRename(t *
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 2", ScopeSlug: "new", TicketStem: "260900-feat-new-thing"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
-				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
@@ -648,7 +273,7 @@ func TestResolveImplementAheadOfMergeRootBlocksRenameRegardlessOfAllowRename(t *
 		},
 	}
 	obs := implementBranchObservation{CurrentBranch: "impl/root-branch/old", StartCommit: "abc123", AheadOfMergeRoot: 2}
-	result := resolveImplement(input, obs)
+	result := resolveImplement(input, factsFromTicket(input), obs)
 	if result.Verdict.BranchPlan.Action != "stop" {
 		t.Fatalf("branch action = %q, want stop even with allow_rename=yes; plan=%+v", result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)
 	}
@@ -666,14 +291,22 @@ func TestResolveImplementAheadOfMergeRootBlocksRenameRegardlessOfAllowRename(t *
 	}
 }
 
+func TestObserveImplementBranchFailsClosedWhenAheadStateCannotBeVerified(t *testing.T) {
+	root := t.TempDir()
+	initGit(t, root)
+	runGit(t, root, "checkout", "-b", "impl/missing-root/owner")
+	if _, err := observeImplementBranch(root, ""); err == nil {
+		t.Fatal("observeImplementBranch unexpectedly treated an unresolvable merge root as zero commits ahead")
+	}
+}
+
 func TestResolveImplementNoAheadOfMergeRootAllowsRename(t *testing.T) {
 	input := implementInput{
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 2", ScopeSlug: "new"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
-				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
@@ -681,7 +314,7 @@ func TestResolveImplementNoAheadOfMergeRootAllowsRename(t *testing.T) {
 		},
 	}
 	obs := implementBranchObservation{CurrentBranch: "impl/root-branch/old", StartCommit: "abc123", AheadOfMergeRoot: 0}
-	result := resolveImplement(input, obs)
+	result := resolveImplement(input, factsFromTicket(input), obs)
 	if result.Verdict.BranchPlan.Action != "rename" {
 		t.Fatalf("branch action = %q, want rename when AheadOfMergeRoot is 0; plan=%+v", result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)
 	}
@@ -692,9 +325,8 @@ func TestResolveImplementSameScopeContinuesRegardlessOfAheadOfMergeRoot(t *testi
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "old"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
-				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
@@ -702,7 +334,7 @@ func TestResolveImplementSameScopeContinuesRegardlessOfAheadOfMergeRoot(t *testi
 		},
 	}
 	obs := implementBranchObservation{CurrentBranch: "impl/root-branch/old", StartCommit: "abc123", AheadOfMergeRoot: 5}
-	result := resolveImplement(input, obs)
+	result := resolveImplement(input, factsFromTicket(input), obs)
 	if result.Verdict.BranchPlan.Action != "continue" {
 		t.Fatalf("branch action = %q, want continue when target scope matches current, regardless of AheadOfMergeRoot; plan=%+v", result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)
 	}
@@ -713,14 +345,13 @@ func TestResolveImplementAheadOfMergeRootInertOnCreatePath(t *testing.T) {
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "new"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
-				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
 			},
 		},
 	}
 	obs := implementBranchObservation{CurrentBranch: "goal/some-slug", StartCommit: "abc123", AheadOfMergeRoot: 7}
-	result := resolveImplement(input, obs)
+	result := resolveImplement(input, factsFromTicket(input), obs)
 	if result.Verdict.BranchPlan.Action != "create" {
 		t.Fatalf("branch action = %q, want create on non-impl/-prefixed branch regardless of AheadOfMergeRoot; plan=%+v", result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)
 	}
@@ -731,16 +362,15 @@ func TestResolveImplementMergeConfirmDefaultsToAskWhenUnset(t *testing.T) {
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "feature"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
-				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
 			Branch: implementBranchPolicyInput{MergeTarget: factString{Value: "main", Present: true}},
 		},
 	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
+	result := resolveImplement(input, factsFromTicket(input), implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
 	if result.Verdict.BranchPlan.MergeConfirm != "ask" {
 		t.Fatalf("merge confirm = %q, want ask (absent should default to ask)", result.Verdict.BranchPlan.MergeConfirm)
 	}
@@ -751,9 +381,8 @@ func TestResolveImplementMergeConfirmSkipHonored(t *testing.T) {
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "feature"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
-				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
@@ -763,7 +392,7 @@ func TestResolveImplementMergeConfirmSkipHonored(t *testing.T) {
 			},
 		},
 	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
+	result := resolveImplement(input, factsFromTicket(input), implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
 	if result.Verdict.BranchPlan.MergeConfirm != "skip" {
 		t.Fatalf("merge confirm = %q, want skip (explicit skip should be honored)", result.Verdict.BranchPlan.MergeConfirm)
 	}
@@ -774,9 +403,8 @@ func TestResolveImplementMergeConfirmNonSkipStillAsks(t *testing.T) {
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "feature"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
-				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
@@ -786,7 +414,7 @@ func TestResolveImplementMergeConfirmNonSkipStillAsks(t *testing.T) {
 			},
 		},
 	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
+	result := resolveImplement(input, factsFromTicket(input), implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
 	if result.Verdict.BranchPlan.MergeConfirm != "ask" {
 		t.Fatalf("merge confirm = %q, want ask (explicit non-skip value should still ask)", result.Verdict.BranchPlan.MergeConfirm)
 	}
@@ -797,19 +425,18 @@ func TestResolveImplementMergeTargetPolicyIgnoredOutsideImplementBranchWarns(t *
 		Target: implementTargetInput{Kind: "inline", Label: "tiny edit", ScopeLabel: "tiny edit", ScopeSlug: "tiny-edit"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "single-file", Present: true},
-				Surface:                   factString{Value: "internal", Present: true},
-				NewPublicSymbol:           factString{Value: "no", Present: true},
-				NewTypeContract:           factString{Value: "no", Present: true},
-				TestSurface:               factString{Value: "none", Present: true},
-				ExplicitDelegationRequest: factString{Value: "no", Present: true},
+				Span:            factString{Value: "single-file", Present: true},
+				Surface:         factString{Value: "internal", Present: true},
+				NewPublicSymbol: factString{Value: "no", Present: true},
+				NewTypeContract: factString{Value: "no", Present: true},
+				TestSurface:     factString{Value: "none", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
 			Branch: implementBranchPolicyInput{MergeTarget: factString{Value: "master", Present: true}},
 		},
 	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "test/wsflow-smoke", StartCommit: "abc123"})
+	result := resolveImplement(input, factsFromTicket(input), implementBranchObservation{CurrentBranch: "test/wsflow-smoke", StartCommit: "abc123"})
 	if result.Verdict.BranchPlan.Action != "create" {
 		t.Fatalf("branch action = %q, want create", result.Verdict.BranchPlan.Action)
 	}
@@ -830,19 +457,18 @@ func TestResolveImplementMergeTargetPolicyHonoredOnImplementBranchNoWarning(t *t
 		Target: implementTargetInput{Kind: "inline", Label: "tiny edit", ScopeLabel: "tiny edit", ScopeSlug: "tiny-edit"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "single-file", Present: true},
-				Surface:                   factString{Value: "internal", Present: true},
-				NewPublicSymbol:           factString{Value: "no", Present: true},
-				NewTypeContract:           factString{Value: "no", Present: true},
-				TestSurface:               factString{Value: "none", Present: true},
-				ExplicitDelegationRequest: factString{Value: "no", Present: true},
+				Span:            factString{Value: "single-file", Present: true},
+				Surface:         factString{Value: "internal", Present: true},
+				NewPublicSymbol: factString{Value: "no", Present: true},
+				NewTypeContract: factString{Value: "no", Present: true},
+				TestSurface:     factString{Value: "none", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
 			Branch: implementBranchPolicyInput{MergeTarget: factString{Value: "master", Present: true}},
 		},
 	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "impl/tiny-edit", StartCommit: "abc123"})
+	result := resolveImplement(input, factsFromTicket(input), implementBranchObservation{CurrentBranch: "impl/tiny-edit", StartCommit: "abc123"})
 	if result.Verdict.BranchPlan.Action != "continue" {
 		t.Fatalf("branch action = %q, want continue", result.Verdict.BranchPlan.Action)
 	}
@@ -1070,12 +696,11 @@ func TestResolveImplementDocSkipAndWarnings(t *testing.T) {
 		},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "internal", Present: true},
-				NewPublicSymbol:           factString{Value: "no", Present: true},
-				NewTypeContract:           factString{Value: "no", Present: true},
-				TestSurface:               factString{Value: "existing", Present: true},
-				ExplicitDelegationRequest: factString{Value: "no", Present: true},
+				Span:            factString{Value: "multi-file", Present: true},
+				Surface:         factString{Value: "internal", Present: true},
+				NewPublicSymbol: factString{Value: "no", Present: true},
+				NewTypeContract: factString{Value: "no", Present: true},
+				TestSurface:     factString{Value: "existing", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
@@ -1085,7 +710,7 @@ func TestResolveImplementDocSkipAndWarnings(t *testing.T) {
 			},
 		},
 	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
+	result := resolveImplement(input, factsFromTicket(input), implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
 	if result.Verdict.DocMode != "skipped" || result.Agenda.NeedDoc {
 		t.Fatalf("doc mode = %q need_doc=%v, want skipped false", result.Verdict.DocMode, result.Agenda.NeedDoc)
 	}
@@ -1100,7 +725,7 @@ func TestResolveImplementDocSkipAndWarnings(t *testing.T) {
 	}
 
 	input.Policy.Docs.Reason = factString{}
-	result = resolveImplement(input, implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
+	result = resolveImplement(input, factsFromTicket(input), implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
 	if !containsString(result.Warnings, "docs skip requested without reason; normalized to standard") {
 		t.Fatalf("warnings missing doc fallback: %v", result.Warnings)
 	}
@@ -1118,9 +743,8 @@ func ticketPhaseInput(ticketStem, scopeLabel string) implementInput {
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: scopeLabel, TicketStem: ticketStem},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
-				Span:                      factString{Value: "multi-file", Present: true},
-				Surface:                   factString{Value: "public-interface", Present: true},
-				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
 			},
 		},
 		Policy: implementPolicyInput{
@@ -1138,7 +762,7 @@ func TestResolveImplementSameTicketStemAcrossPhasesContinues(t *testing.T) {
 	const stem = "260900-feat-x"
 
 	phase1 := ticketPhaseInput(stem, "Phase 1")
-	result1 := resolveImplement(phase1, implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
+	result1 := resolveImplement(phase1, factsFromTicket(phase1), implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
 	if result1.Verdict.BranchPlan.Action != "create" {
 		t.Fatalf("phase 1 action = %q, want create; plan=%+v", result1.Verdict.BranchPlan.Action, result1.Verdict.BranchPlan)
 	}
@@ -1149,7 +773,7 @@ func TestResolveImplementSameTicketStemAcrossPhasesContinues(t *testing.T) {
 
 	phase2 := ticketPhaseInput(stem, "Phase 2")
 	obs2 := implementBranchObservation{CurrentBranch: targetBranch, StartCommit: "abc123", AheadOfMergeRoot: 3}
-	result2 := resolveImplement(phase2, obs2)
+	result2 := resolveImplement(phase2, factsFromTicket(phase2), obs2)
 	if result2.Verdict.BranchPlan.Action != "continue" {
 		t.Fatalf("phase 2 action = %q, want continue (same ticket_stem must resolve the same target branch %q); plan=%+v",
 			result2.Verdict.BranchPlan.Action, targetBranch, result2.Verdict.BranchPlan)
@@ -1162,7 +786,7 @@ func TestResolveImplementSameTicketStemAcrossPhasesContinues(t *testing.T) {
 // share the derivation mechanism.
 func TestResolveImplementDifferentTicketStemStillStops(t *testing.T) {
 	phase1 := ticketPhaseInput("260900-feat-x", "Phase 1")
-	result1 := resolveImplement(phase1, implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
+	result1 := resolveImplement(phase1, factsFromTicket(phase1), implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
 	if result1.Verdict.BranchPlan.Action != "create" {
 		t.Fatalf("setup action = %q, want create; plan=%+v", result1.Verdict.BranchPlan.Action, result1.Verdict.BranchPlan)
 	}
@@ -1170,7 +794,7 @@ func TestResolveImplementDifferentTicketStemStillStops(t *testing.T) {
 
 	other := ticketPhaseInput("260900-feat-y", "Phase 1")
 	obs := implementBranchObservation{CurrentBranch: occupiedBranch, StartCommit: "abc123", AheadOfMergeRoot: 2}
-	result := resolveImplement(other, obs)
+	result := resolveImplement(other, factsFromTicket(other), obs)
 	if result.Verdict.BranchPlan.Action != "stop" {
 		t.Fatalf("different ticket_stem action = %q, want stop even with allow_rename=yes; plan=%+v",
 			result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)
