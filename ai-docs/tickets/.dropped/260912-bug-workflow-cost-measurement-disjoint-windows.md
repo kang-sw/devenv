@@ -3,6 +3,7 @@ title: "Workflow-cost comparison cannot handle disjoint unrepresentative windows
 parent: 260909-epic-ws-worker-interpreter-refoundation
 related:
   260909-bug-workflow-cost-measurement-manual-round-three-findings: corrected before baseline and measurement contract
+dropped: 2026-09-12
 ---
 
 # Workflow-cost comparison cannot handle disjoint unrepresentative windows
@@ -32,3 +33,8 @@ windows are unrepresentative and have no shared calendar period. The resulting
 contract must preserve explicit limitations, keep both halves on the same
 declared window shape, and either produce the comparison needed by the epic or
 state a revised completion condition that does not imply unmeasured parity.
+
+
+## Resolution (2026-09-12)
+
+No measurement-contract change was needed. The existing manual permits changing SIZE when both halves use the same value. Recomputing both pinned records at SIZE=51 produced full representative windows with a shared closure period and a complete comparison, recorded in ai-docs/ref/refoundation-workflow-cost-measurement-260912.md.
