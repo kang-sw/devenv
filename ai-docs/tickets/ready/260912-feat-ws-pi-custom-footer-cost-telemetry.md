@@ -56,3 +56,17 @@ Implement a theme-aware custom footer for TUI lead sessions using `ctx.ui.setFoo
 Aggregate all descendants owned by the current lead session, including retained dormant records and an eviction roll-up, without charging inherited context or double-counting after reload. Apply the confirmed known, partial, unknown, and zero display forms. Reconstruct state on session start, subscribe to branch and telemetry changes, invalidate theme-derived rendering correctly, bound every line to the supplied width, and dispose/restore cleanly.
 
 Verification covers: known/partial/unknown/zero lead and descendant costs; direct, fork, Explore, execute-worker, nested, dormant, and capacity-evicted children; reload and session-switch reconstruction without decreases or duplication; exclusion of unrelated lead sessions; preservation of Git branch, model, context, session name, and extension statuses; coexistence with the existing `belowEditor` agent widget; light/dark theme rerender; 120/80/40-column layouts; last-writer replacement behavior; and default-footer restoration on shutdown. Owner-live acceptance confirms the colored lead cost, separate cumulative `Subagents` value, unchanged agent cards, and retained goal/status messages in a real Pi TUI session.
+
+### Result (e62ae22e) - 2026-09-13
+
+Installed a host-TUI-resolved custom footer for lead and fork TUI sessions. It retains path, branch, session, token/cache, context, model/thinking, and extension-status information while rendering separate accented `Lead` and `Subagents` monetary values with explicit known, partial, unknown, and zero forms. The existing `belowEditor` agent cards remain independently mounted.
+
+Child-attributable telemetry now persists in ownership metadata. Recursive aggregation follows exact ownership/session lineage through worker, execute-worker, fork, and Explore descendants, excludes unrelated leads, and uses owner-scoped identity-keyed roll-ups before capacity or retention deletion so reloads and retries neither lose nor double-count cost. Owner-artifact I/O shares the storage module's canonical containment and symlink-refusal boundary.
+
+Verification:
+- Final package suite excluding the independently failing `test/fork-lifecycle.integration.test.ts`: 1,792 passed, 0 failed, 2 skipped. The excluded matrix's six cases already failed in the earlier full `npm test` run because its inherited-tool fixture expected `ws-queue-question`; this change does not modify that tool-registration surface.
+- Focused footer, telemetry, storage, retention, and spawner suites passed, including real watcher updates, production lifecycle seams, ANSI-aware 120/80/40-column bounds, real capacity eviction, nested descendants, and durable reload/non-duplication.
+- `npm pack --dry-run --ignore-scripts` passed and includes `src/agent-footer.ts`.
+- Owner-live TUI observation remains a post-integration acceptance check because this worker runs headlessly.
+
+Independent partitioned review found one Critical and eight Important issues in round one. Commit `270ac98f` fixed known-zero formatting, empty-namespace watcher discovery, legacy eviction, built-in cache-rate fidelity, storage ownership of roll-up I/O, and the initial coverage gaps. Round two correctness and fit were clean; its two remaining Important test-coverage findings were fixed in `c0061e8d` through the exact `index.ts` lifecycle seams and a second real watcher transition. No Critical finding remains.
