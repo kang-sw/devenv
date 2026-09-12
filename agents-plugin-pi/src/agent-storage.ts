@@ -180,6 +180,75 @@ export function removeOwnedAgentHome(
   }
 }
 
+export interface StaleAgentPruneResult {
+  scanned: number;
+  retained: number;
+  failed: number;
+  deletedHomes: string[];
+}
+
+interface StaleAgentPruneOptions {
+  now?: () => number;
+  observeSession?: (home: string, sessionPath: string) => void;
+  removeOwned?: (ownership: AgentOwnership) => OwnedHomeRemovalResult;
+}
+
+/**
+ * Scans only the adapter-owned `<agentDir>/ws-agents/<owner>/<child>` shape.
+ * Unknown entries and uncertain metadata are retained; the ordinary Pi session
+ * tree and legacy paths are never scanned. Session-file writes are sampled
+ * before age is decided so an unobserved final write can renew activity.
+ */
+export function pruneStaleAgentHomes(root: string, ttlDays: number | false, options: StaleAgentPruneOptions = {}): StaleAgentPruneResult {
+  const result: StaleAgentPruneResult = { scanned: 0, retained: 0, failed: 0, deletedHomes: [] };
+  if (ttlDays === false || !Number.isFinite(ttlDays) || ttlDays <= 0) return result;
+  const now = options.now?.() ?? Date.now();
+  const cutoff = now - ttlDays * 86_400_000;
+  const observe = options.observeSession ?? observeSessionWrite;
+  const remove = options.removeOwned ?? removeOwnedAgentHome;
+  try {
+    const canonical = realpathSync(resolve(root));
+    const namespace = join(canonical, "ws-agents");
+    const namespaceEntry = lstatSync(namespace, { throwIfNoEntry: false });
+    if (!namespaceEntry) return result;
+    if (!namespaceEntry.isDirectory() || namespaceEntry.isSymbolicLink() || realpathSync(namespace) !== namespace) {
+      result.retained += 1;
+      return result;
+    }
+    for (const ownerEntry of readdirSync(namespace, { withFileTypes: true })) {
+      const ownerRoot = join(namespace, ownerEntry.name);
+      if (!ownerEntry.isDirectory() || ownerEntry.isSymbolicLink()) continue;
+      try {
+        if (realpathSync(ownerRoot) !== ownerRoot) { result.retained += 1; continue; }
+        for (const childEntry of readdirSync(ownerRoot, { withFileTypes: true })) {
+          if (!childEntry.isDirectory() || childEntry.isSymbolicLink()) continue;
+          result.scanned += 1;
+          const home = join(ownerRoot, childEntry.name);
+          let metadata = readOwnership(home);
+          if (!metadata) { result.retained += 1; continue; }
+          if (metadata.sessionPath) observe(home, metadata.sessionPath);
+          metadata = readOwnership(home);
+          if (!metadata || metadata.lastActivityAt > cutoff) { result.retained += 1; continue; }
+          const removal = remove(metadata);
+          if (removal.status === "deleted") result.deletedHomes.push(home);
+          else if (removal.status === "failed") result.failed += 1;
+          else result.retained += 1;
+        }
+      } catch (error) {
+        result.failed += 1;
+        console.error(`ws-pi-agent: could not scan owned lead subtree for retention: ${String(error)}`);
+      }
+    }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      result.failed += 1;
+      console.error(`ws-pi-agent: could not scan owned agent homes for retention: ${String(error)}`);
+    }
+  }
+  return result;
+}
+
 /** Samples the actual session file. A stat failure records no invented write/activity. */
 export function observeSessionWrite(home: string, sessionPath: string): void {
   const current = readOwnership(home); if (!current) return;

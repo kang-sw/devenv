@@ -192,7 +192,7 @@ import { createAgentWidgetController, shouldArmAgentWidget, type AgentWidgetCont
 import { registerPushMessageRenderers } from "./push-render.ts";
 import { buildOrphanPush, captureOrphans, noSessionSidecarPath, readAndClearSidecarAt, reviveOrphans, sidecarPath, writeSidecarAt } from "./agent-sidecar.ts";
 import { buildDiscussKickoff } from "./discuss.ts";
-import { registerGoalLoop, readGoalLoopConfig, resolveAgentWaitAnimation, resolveSettleDelayMs } from "./goal-loop.ts";
+import { registerGoalLoop, readGoalLoopConfig, resolveAgentWaitAnimation, resolveChildRetentionTtlDays, resolveSettleDelayMs } from "./goal-loop.ts";
 import { resolveSkillsDir } from "./skills-dir.ts";
 import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
 import { applyForkAffinity, captureRegisteredTools, classifyForkRegistrations, compareForkRegistrations, effectiveForkDescriptor, formatForkRegistrationMismatch, frameForkInput, isCompletionCriticalForkTool, readForkLaunchContext, removeForkTransport, restoreForkContext, restoreForkKeys, writePrivateJson, type ForkContext } from "./fork-context.ts";
@@ -214,7 +214,7 @@ import {
 import { registerAuditCommands } from "./audit.ts";
 import { registerWsSkillTool } from "./lead-skills.ts";
 import { createToolPreviewTuiRef, loadToolResultTuiModules } from "./tool-result-render.ts";
-import { createAgentStorageContext } from "./agent-storage.ts";
+import { createAgentStorageContext, pruneStaleAgentHomes } from "./agent-storage.ts";
 import { addClaudeDelegateIfLead, registerClaudeDelegateSession } from "./claude-delegate.ts";
 import { assertPolicyTool, readDelegationPolicy } from "./delegation-policy.ts";
 import { publishSubtree } from "./subtree-lifecycle.ts";
@@ -602,7 +602,12 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     leadSessionFile = dispatchSessionFile ?? undefined;
     const dispatchStorage = createAgentStorageContext(ctx.sessionManager.getSessionId());
     leadSidecarPath = dispatchSessionFile ? sidecarPath(dispatchSessionFile) : noSessionSidecarPath(dispatchStorage.root, dispatchStorage.ownerSessionId);
-    const recoveredRegistry = readAndClearSidecarAt(leadSidecarPath);
+    let recoveredRegistry = readAndClearSidecarAt(leadSidecarPath);
+    const retention = pruneStaleAgentHomes(dispatchStorage.root, resolveChildRetentionTtlDays(readGoalLoopConfig(goalLoopConfigPath)));
+    if (retention.deletedHomes.length > 0) {
+      const deletedHomes = new Set(retention.deletedHomes);
+      recoveredRegistry = recoveredRegistry.filter(orphan => !orphan.ownership || !deletedHomes.has(orphan.ownership.home));
+    }
     if (recoveredRegistry.length > 0) reviveOrphans(agentTools.rpcRegistry, recoveredRegistry, {
       fork: (record) => armForkRoleWiring(pi, agentTools!.rpcRegistry, record, onForkQuestion),
       executeWorker: (record) => { record.onApprovalPending = onApprovalPending; },

@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
-import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, readOwnership, removeOwnedAgentHome, touchOwnership, writeOwnership, updateOwnership } from "../src/agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, pruneStaleAgentHomes, readOwnership, removeOwnedAgentHome, touchOwnership, writeOwnership, updateOwnership } from "../src/agent-storage.ts";
 import { writePrivateJson } from "../src/fork-context.ts";
 import { exploreLeaf, prepareForkLaunch, validateForkReadiness } from "../src/spawner.ts";
 
@@ -253,6 +253,82 @@ describe("agent storage", () => {
       assert.equal(result.status, "failed");
       assert.equal(diagnostics.mock.callCount(), 1);
       assert.ok(readOwnership(owned.home), "metadata remains available for retry");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("prunes stopped children at the TTL boundary across lead subtrees while retaining recent, protected, live, and unknown homes", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+    const day = 24 * 60 * 60 * 1000;
+    const now = Date.parse("2026-10-10T00:00:00.000Z");
+    try {
+      const old = allocateAgentHome(createAgentStorageContext("lead-old", root), "agent-old", "worker");
+      const boundary = allocateAgentHome(createAgentStorageContext("lead-boundary", root), "agent-boundary", "fork");
+      const recent = allocateAgentHome(createAgentStorageContext("lead-mixed", root), "agent-recent", "worker");
+      const protectedChild = allocateAgentHome(createAgentStorageContext("lead-mixed", root), "agent-protected", "worker");
+      const live = allocateAgentHome(createAgentStorageContext("lead-live", root), "agent-live", "worker");
+      const unknown = allocateAgentHome(createAgentStorageContext("lead-unknown", root), "agent-unknown", "worker");
+      const legacyHome = join(realpathSync(root), "ws-agents", "legacy-lead", "legacy-child");
+      mkdirSync(legacyHome, { recursive: true });
+      for (const [owned, lastActivityAt] of [[old, now - 31 * day], [boundary, now - 30 * day], [recent, now - 29 * day]] as const) {
+        const metadata = readOwnership(owned.home)!;
+        writeOwnership({ ...metadata, lastActivityAt, liveness: { ...metadata.liveness, lifecycle: "stopped", running: false } });
+      }
+      for (const [owned, liveness] of [
+        [protectedChild, { lifecycle: "stopped", running: false, ownerHeld: true }],
+        [live, { lifecycle: "live", running: true }],
+      ] as const) {
+        const metadata = readOwnership(owned.home)!;
+        writeOwnership({ ...metadata, lastActivityAt: now - 40 * day, liveness: { ...metadata.liveness, ...liveness } });
+      }
+      const unknownMetadata = readOwnership(unknown.home)!;
+      writeOwnership({ ...unknownMetadata, lastActivityAt: now - 40 * day, liveness: { ...unknownMetadata.liveness, lifecycle: "unknown" } });
+
+      const result = pruneStaleAgentHomes(realpathSync(root), 30, { now: () => now });
+      assert.deepEqual(new Set(result.deletedHomes), new Set([old.home, boundary.home]));
+      assert.equal(existsSync(old.home), false);
+      assert.equal(existsSync(boundary.home), false, "age equal to the TTL is stale");
+      for (const home of [recent.home, protectedChild.home, live.home, unknown.home, legacyHome]) assert.equal(existsSync(home), true, home);
+      assert.equal(existsSync(dirname(recent.home)), true, "a mixed-age lead subtree survives with its retained children");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("a newly observed session write refreshes activity before the stale decision", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+    const now = Date.parse("2026-10-10T00:00:00.000Z");
+    try {
+      const owned = allocateAgentHome(createAgentStorageContext("lead-write", root), "agent-write", "worker");
+      const metadata = readOwnership(owned.home)!;
+      writeOwnership({ ...metadata, lastActivityAt: now - 31 * 86_400_000, liveness: { ...metadata.liveness, lifecycle: "stopped", running: false } });
+      writeFileSync(owned.sessionPath!, "new history");
+      const result = pruneStaleAgentHomes(realpathSync(root), 30, {
+        now: () => now,
+        observeSession: home => { updateOwnership(home, { lastActivityAt: now }); },
+      });
+      assert.deepEqual(result.deletedHomes, []);
+      assert.equal(existsSync(owned.home), true);
+      assert.equal(readOwnership(owned.home)!.lastActivityAt, now);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("disabled pruning does not scan, and one deletion failure does not stop later homes", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+    const now = Date.parse("2026-10-10T00:00:00.000Z");
+    try {
+      const first = allocateAgentHome(createAgentStorageContext("lead-a", root), "agent-a", "worker");
+      const second = allocateAgentHome(createAgentStorageContext("lead-b", root), "agent-b", "worker");
+      for (const owned of [first, second]) {
+        const metadata = readOwnership(owned.home)!;
+        writeOwnership({ ...metadata, lastActivityAt: 1, liveness: { ...metadata.liveness, lifecycle: "stopped", running: false } });
+      }
+      assert.equal(pruneStaleAgentHomes(realpathSync(root), false, { now: () => now }).scanned, 0);
+      const result = pruneStaleAgentHomes(realpathSync(root), 30, {
+        now: () => now,
+        removeOwned: owned => owned.home === first.home ? { status: "failed", error: "permission denied" } : removeOwnedAgentHome(owned),
+      });
+      assert.equal(result.failed, 1);
+      assert.deepEqual(result.deletedHomes, [second.home]);
+      assert.equal(existsSync(first.home), true);
+      assert.equal(existsSync(second.home), false);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 

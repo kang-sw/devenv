@@ -107,12 +107,17 @@ function joinTextContent(content: unknown): string {
  * `compactionSummary`) is skipped — not part of the ticket's Phase 1
  * mapping contract.
  */
-export function parseSessionFile(path: string): ConversationItem[] {
+export interface SessionHistoryRead {
+  status: "available" | "unavailable";
+  items: ConversationItem[];
+}
+
+export function readSessionHistory(path: string): SessionHistoryRead {
   let raw: string;
   try {
     raw = readFileSync(path, "utf8");
   } catch {
-    return [];
+    return { status: "unavailable", items: [] };
   }
 
   const items: ConversationItem[] = [];
@@ -161,7 +166,12 @@ export function parseSessionFile(path: string): ConversationItem[] {
     // Every other role (`bashExecution`, `custom`, `branchSummary`,
     // `compactionSummary`) is skipped — see this function's doc comment.
   }
-  return items;
+  return { status: "available", items };
+}
+
+/** Compatibility parser for callers that need only available transcript items. */
+export function parseSessionFile(path: string): ConversationItem[] {
+  return readSessionHistory(path).items;
 }
 
 // ---------------------------------------------------------------------------
@@ -540,7 +550,10 @@ export async function openViewer(ctx: AuditUiCtx & { ui?: { custom?: unknown } }
   const token = ++auditOverlayToken;
 
   const channel = createAuditChannel(rpcRegistry, agentId);
-  const initialItems = parseSessionFile(record.sessionPath);
+  const history = readSessionHistory(record.sessionPath);
+  const initialItems = history.status === "available"
+    ? history.items
+    : [{ kind: "note" as const, text: "History unavailable: the child session file is gone or unreadable." }];
   const headerHint = `ws audit: ${rowName(record)} · Esc: close · Enter: interact (view-only in Phase 1 — nothing typed here is delivered yet)`;
 
   let markdownTheme: MarkdownTheme | undefined;
