@@ -35,6 +35,7 @@ import {
   resolveCompactionAdvisoryPercent,
   resolveContextWindowOverride,
   resolveSettleDelayMs,
+  resolveChildRetentionTtlDays,
   computeContextPercent,
   buildGoalAnnouncement,
   buildCompactionLeverResult,
@@ -50,6 +51,7 @@ import {
   DEFAULT_RUNAWAY_THRESHOLD,
   DEFAULT_COMPACTION_ADVISORY_PERCENT,
   DEFAULT_SETTLE_DELAY_MS,
+  DEFAULT_CHILD_RETENTION_TTL_DAYS,
   type GoalLoopConfig,
 } from "../src/goal-loop.ts";
 import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
@@ -136,6 +138,22 @@ describe("resolveRunawayThreshold", () => {
   test("NaN/Infinity fall back to the default", () => {
     assert.equal(resolveRunawayThreshold({ runaway_threshold: Number.NaN }), DEFAULT_RUNAWAY_THRESHOLD);
     assert.equal(resolveRunawayThreshold({ runaway_threshold: Number.POSITIVE_INFINITY }), DEFAULT_RUNAWAY_THRESHOLD);
+  });
+});
+
+describe("resolveChildRetentionTtlDays", () => {
+  test("defaults invalid or missing values to 30 days", () => {
+    assert.equal(resolveChildRetentionTtlDays(undefined), DEFAULT_CHILD_RETENTION_TTL_DAYS);
+    assert.equal(resolveChildRetentionTtlDays({}), DEFAULT_CHILD_RETENTION_TTL_DAYS);
+    for (const value of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, "30", true, null]) {
+      assert.equal(resolveChildRetentionTtlDays({ child_retention_ttl_days: value as never }), DEFAULT_CHILD_RETENTION_TTL_DAYS);
+    }
+  });
+
+  test("accepts finite positive fractional days and only literal false disables pruning", () => {
+    assert.equal(resolveChildRetentionTtlDays({ child_retention_ttl_days: 0.25 }), 0.25);
+    assert.equal(resolveChildRetentionTtlDays({ child_retention_ttl_days: 45 }), 45);
+    assert.equal(resolveChildRetentionTtlDays({ child_retention_ttl_days: false }), false);
   });
 });
 
@@ -287,7 +305,7 @@ describe("buildCompactionLeverResult", () => {
 });
 
 describe("buildGoalReminder", () => {
-  const info = { percent: 42, advisoryPercent: 70 };
+  const info = { percent: 42, advisoryPercent: 50 };
 
   test("names the goal and all three lever tool names (two terminal, one compact-and-continue)", () => {
     const reminder = buildGoalReminder("ship the widget", info);
@@ -309,22 +327,23 @@ describe("buildGoalReminder", () => {
   });
 
   test("percent below the advisory point explicitly tells the model not to compact", () => {
-    const reminder = buildGoalReminder("a goal", { percent: 42, advisoryPercent: 70 });
-    assert.match(reminder, /Context usage: 42% of window — below the compaction advisory point \(70%\); do not call goal-compact-and-continue\.$/m);
+    const reminder = buildGoalReminder("a goal", { percent: 42, advisoryPercent: 50 });
+    assert.match(reminder, /Context usage: 42% of window — below the compaction advisory point \(50%\); do not call goal-compact-and-continue\.$/m);
   });
 
-  test("percent at the advisory point renders the stronger nudge phrase", () => {
-    const reminder = buildGoalReminder("a goal", { percent: 70, advisoryPercent: 70 });
-    assert.match(reminder, /Context usage: 70% of window — at or above the advisory point/);
+  test("percent at the advisory point prioritizes compact-and-continue for weakly related next work", () => {
+    const reminder = buildGoalReminder("a goal", { percent: 50, advisoryPercent: 50 });
+    assert.match(reminder, /Context usage: 50% of window — at or above the advisory point/);
+    assert.match(reminder, /prioritize goal-compact-and-continue when the next work is weakly related to the current context/);
   });
 
   test("percent above the advisory point renders the stronger nudge phrase", () => {
-    const reminder = buildGoalReminder("a goal", { percent: 85, advisoryPercent: 70 });
+    const reminder = buildGoalReminder("a goal", { percent: 85, advisoryPercent: 50 });
     assert.match(reminder, /Context usage: 85% of window — at or above the advisory point/);
   });
 
   test("null percent renders as unknown, not a crash", () => {
-    const reminder = buildGoalReminder("a goal", { percent: null, advisoryPercent: 70 });
+    const reminder = buildGoalReminder("a goal", { percent: null, advisoryPercent: 50 });
     assert.match(reminder, /Context usage: unknown\./);
   });
 });

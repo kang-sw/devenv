@@ -3,6 +3,7 @@ title: "Pi Explore: bounded fetch plus bundled web-search extension"
 related:
   260912-refactor-ws-pi-unify-persistent-explore-modes: consumes the common web capability through its web-search intent alias
   260912-feat-ws-pi-recursive-worker-subtree-lifecycle: network-read authority must obey descendant capability ceilings
+  260908-feat-ws-pi-agent-session-disk-retention: prerequisite; its Phase 2 and Phase 3 lifecycle must own cache cleanup before this ticket can complete
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 4e8171eab77b1020
@@ -99,20 +100,29 @@ Exact-package execution proved that upstream proxy mode invokes `curl` with OS-t
 
 This edition authorizes no HTTP, HTTPS, SOCKS, environment, or package-config transport proxy for the initial ws Explore integration. Proxy support requires a later independently bounded transport design; failure to keep the exact pinned package on audited direct transport is another stop condition, not permission to fall back to upstream proxy mode.
 
-## Blocked (2026-09-12)
+#### Edition (4faac2c2) - 2026-09-12
 
-Implementation checkpoints `e741bc04` and `32687830` are retained on `impl/goal/track/pi-agent/cedar-lantern-moss/evict-frame-coke`. Full Pi tests, real public fetch, real RPC Explore search at depths one and two, and packed install/update with host-peer capture passed. This is not a Phase 1 Result: independent round-1 review remains non-clean and the retention acceptance prerequisite is absent.
+Round-one implementation review proved that owned-home containment exists but automatic cleanup does not: `260908-feat-ws-pi-agent-session-disk-retention` completed only durable-home relocation, while its Phase 2 scratch/cap-eviction cleanup and Phase 3 stale-child pruning remain unfinished. Preserve the agreed lifecycle contract rather than treating fixture-home deletion as acceptance:
 
-Stop (c): `260908-feat-ws-pi-agent-session-disk-retention` Phase 1 Result explicitly excludes disk deletion, TTL configuration, and cross-session scanning. Its cleanup and pruning Phases 2 and 3 remain unimplemented, behind its recorded live-acceptance gate. Consequently this ticket cannot verify pruning through the owning retention lifecycle. Current fetch spills are contained beneath owned homes; manually deleting a fixture home proves containment, not lifecycle cleanup.
+- Make `260908-feat-ws-pi-agent-session-disk-retention` an explicit prerequisite. Its Phase 2 and Phase 3 lifecycle must land before this ticket records Phase 1 completion or merges its implementation branch.
+- Keep fetched spill files only under the existing owned child/session home. Do not invent a web-specific TTL, scanner, sweeper, retention registry, or deletion policy.
+- After the prerequisite lands, verify cleanup through the real cap-eviction and stale-child prune paths, including spilled web content and interrupted/abandoned child sessions. Fixture teardown proves containment only and does not satisfy lifecycle acceptance.
+- Retain the current implementation branch and its round-one evidence while the prerequisite runs. When resumed, integrate the prerequisite, fix the remaining round-one findings (ordinary leading-bracket queries, native DNS/socket pinning coverage, free-provider startup plus dormant/restarted readiness, result-page-request observation, and packed-artifact dependency/peer/license regression), then perform bounded round-two verification and review.
 
-The lead must either arrange the prerequisite lifecycle implementation or explicitly defer automatic pruning while accepting only owned-home containment. Do not introduce a separate web-cache retention policy implicitly.
+This edition does not defer or weaken automatic pruning. If the shared retention phases cannot own these files without a web-specific cleanup mechanism, stop again with evidence rather than closing this ticket on containment alone.
 
-After resolution, address the retained round-1 findings before the bounded round-2 check:
+#### Round-one review evidence (4faac2c2) - 2026-09-12
+
+Implementation checkpoints `e741bc04` and `32687830` are retained on `impl/goal/track/pi-agent/cedar-lantern-moss/evict-frame-coke`. Full Pi tests, real public fetch, real RPC Explore search at depths one and two, and packed install/update with host-peer capture passed. This is not a Phase 1 Result: independent round-1 review remains non-clean. The completed retention prerequisite clears the lifecycle gate, but its real cap-eviction and stale-child prune paths still require this ticket's resumed verification.
+
+At the round-one checkpoint, `260908-feat-ws-pi-agent-session-disk-retention` Phase 1 explicitly excluded disk deletion, TTL configuration, and cross-session scanning, so fixture-home deletion proved containment rather than lifecycle cleanup. The completed Phase 2 and Phase 3 lifecycle now owns that cleanup; do not introduce a separate web-cache retention policy.
+
+Before the bounded round-two check, address the retained round-one findings:
 
 - Correctness Important: query validation rejects all leading-bracket strings, including ordinary queries such as `[RFC 9110] redirect handling`; limit refusal to actual upstream multi-query expansion.
 - Test Important: exercise native socket creation and DNS pinning together rather than only a request-options helper.
 - Test Important: add non-paid real child-extension readiness coverage across initial and dormant/restarted launch.
-- Test Important: resolve the retention prerequisite and replace tautological fixture-deletion acceptance with the settled lifecycle/containment contract.
+- Test Important: verify the settled retention lifecycle rather than tautological fixture deletion acceptance.
 - Test Important: make exact-package search fixtures observe or forbid requests to result-page URLs under hostile content/curator configuration.
 - Test Important: automate packed-artifact dependency, peer-isolation, and license checks currently verified only by manual commands.
 

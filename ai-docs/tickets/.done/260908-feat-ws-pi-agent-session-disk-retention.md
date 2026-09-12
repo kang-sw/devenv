@@ -13,6 +13,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: ca46ef187b7d1bd7
 sage-review-completeness-reviewed: ca46ef187b7d1bd7
+completed: 2026-09-13
 ---
 
 # Pi adapter: bound subagent session files on disk (evict to disk, prune by age, drop empty spawn dirs)
@@ -23,8 +24,9 @@ Owner ask (2026-09-08): a subagent that has not been referenced for a long
 time, or that falls off the registry cap, should be deleted from disk as
 well, not only forgotten in memory.
 
-What the adapter does today (`agents-plugin-pi/src/spawner.ts`,
-`agent-sidecar.ts`, verified on the 2026-09-08 tree):
+Before Phase 1, the adapter did the following (`agents-plugin-pi/src/spawner.ts`,
+`agent-sidecar.ts`, verified on the 2026-09-08 tree; Phase 1 now allocates
+owned homes in `agents-plugin-pi/src/agent-storage.ts#L37-L51`):
 
 - **The registry is an in-memory `Map`.** The cap (`WS_PI_AGENT_REGISTRY_CAP`,
   default 256) bounds only that map, and only lazily: `evictForCapacity`
@@ -64,9 +66,10 @@ What the adapter does today (`agents-plugin-pi/src/spawner.ts`,
   Fork session files (`--fork` copies) sit in `~/.pi/agent/sessions/<cwd>/`
   interleaved with lead session files, indistinguishable by name.
 
-So the current bound is whatever the OS applies to `tmpdir()`, which is
-accidental (WSL `/tmp` survives restarts of the shell; a long-lived host
-keeps everything).
+Before Phase 1, the disk bound was whatever the OS applied to `tmpdir()`,
+which was accidental (WSL `/tmp` survives restarts of the shell; a long-lived
+host keeps everything; owned homes now derive from the configured Pi agent
+root in `agents-plugin-pi/src/agent-storage.ts#L37-L51`).
 
 ## Decisions
 
@@ -101,6 +104,7 @@ Owner confirmed the full proposed policy on 2026-09-09:
 
 ## Constraints
 
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
 - Never delete the lead session, unrelated Pi sessions, or arbitrary directories.
   Canonical path containment and symlink handling must prevent deletion outside
   an authorized owned home. Recheck eligibility immediately before removal.
@@ -118,6 +122,22 @@ Update `pi-adapter-runtime` session lifecycle coverage with the durable root,
 legacy compatibility, 30-day configurable retention, shared exclusion rules,
 cap eviction deletion and unavailable-history behavior. No live spec behavior
 is claimed implemented by this ticket preparation.
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-pi/src/spawner.ts, agents-plugin-pi/src/agent-storage.ts, agents-plugin-pi/src/agent-sidecar.ts, and existing agents-plugin-pi/test/ coverage |
+| scope.surface | public-interface | retention policy changes ws-agent-spawn lifecycle, resume, and audit-history behavior |
+| scope.new_public_symbol | no | no new exported tool or code symbol is named |
+| scope.new_type_contract | no | Phase 1 already persists the owned-home and liveness metadata in agents-plugin-pi/src/agent-storage.ts#L16-L18 |
+| scope.test_surface | existing | agents-plugin-pi/test/agent-storage.test.ts and agents-plugin-pi/test/spawner.test.ts cover durable homes and cap eviction; Phases 2–3 add cases there or adjacent existing tests |
+| complexity.reuse_points | confirmed | AgentOwnership allocation, ownership metadata, and eligibility state are present in agents-plugin-pi/src/agent-storage.ts#L37-L100 and agents-plugin-pi/src/spawner.ts#L2395-L2419 |
+| complexity.side_effect_risk | high | recursive disk deletion must preserve owned-home containment and protected children |
+| risk.correctness | high | a stale or live child must never be deleted incorrectly |
+| risk.fit | high | retention, cap eviction, and unavailable audit history must share one lifecycle policy |
+| risk.test | high | time, concurrent liveness, filesystem failures, and symlink containment require integration coverage |
+| risk.security_or_contract | high | deletion authorization and path containment are a safety boundary |
 
 ## Phases
 
@@ -186,6 +206,10 @@ Probe roots and processes were removed. An initial SDK signature probe created
 one synthetic file in the owner's default session directory; that exact new
 file was immediately removed, without changing pre-existing history.
 
+#### Edition (d08e0dc1) - 2026-09-13
+
+The actual Pi extension live acceptance passed for fresh fork, ordinary-worker, and Explore samples. The fork and both child types used ownership-recorded homes under the configured `~/.pi/agent/ws-agents` root; the fork transcript preserved its lead `parentSession` ancestry; none of their identifiers appeared under Pi's ordinary resume-session directory; and the acceptance window created no legacy `ws-pi-agent-*` temporary home. The ordinary sample settled cleanly with zero active/outstanding descendants. A fork-owned Explore request was correctly refused because network authority exceeded that fork's ceiling, so a fresh root-owned Explore supplied the Explore storage sample. Retain these owned homes as audit evidence for the real Phase 2/3 cleanup paths rather than deleting them manually. This satisfies the Phase 1 owner live adapter gate.
+
 ### Phase 2: Clean up scratch homes and cap-evicted sessions
 
 Build on Phase 1 metadata to remove unused scratch homes and safely remove
@@ -196,11 +220,34 @@ Verification: eligible worker/fork deletion, explore cleanup after approval use,
 protected-state exclusion, canonical-path/symlink escapes, known legacy paths,
 unrelated files untouched, and deletion failure without spawn failure.
 
+### Result (e312aae3) - 2026-09-12
+
+Phase 2 landed through `8d8586e9`. A shared eligibility gate now authorizes
+removal only for exact, canonical, symlink-free owned homes whose durable
+liveness is confirmed stopped and carries no protection flag. Capacity eviction,
+terminal Explore harvest, and discarded duplicate sidecar entries use that gate;
+legacy records without ownership remain registry-evictable but their disk paths
+are untouched.
+
+Removal atomically detaches the checked home before recursive deletion so a
+racing replacement path is not traversed. A late retained eligibility result
+keeps the registry record and rejects cap admission, while a filesystem failure
+after eligibility remains diagnostic-only and preserves or restores ownership
+for retry. Spawn launch errors are recorded as confirmed stopped so one-shot
+Explore scratch homes can self-reap. Sidecar revival preserves confirmed-stopped
+liveness and never clears a durable protection bit merely because the sidecar
+omits it.
+
+Verification: the focused storage/sidecar/spawner suite passed 383 tests. The
+full `agents-plugin-pi` suite passed 1,676 tests with 0 failures and 1 existing
+skip; `git diff --check` passed. Partitioned round-1 correctness and test
+findings were fixed in `8d8586e9`; round-2 correctness, fit, and test reviews
+were clean with no unresolved observations. TTL configuration, cross-lead
+pruning, and missing-history audit behavior remain deferred to Phase 3.
+
 ### Phase 3: Prune stale children across lead sessions
 
-Apply the 30-day last-activity default at session start over recorded owned homes,
-with a documented adapter configuration to change or disable TTL. Safely handle
-concurrent live leads, recent activity, missing metadata and partial deletion.
+Apply the 30-day last-activity default at session start over recorded owned homes. Configure it through the existing adapter-local `agents-plugin-pi/goal-loop-config.json` key `child_retention_ttl_days`: a finite positive JSON number expresses days and may be fractional; literal JSON `false` disables age pruning while cap eviction remains active; a missing or malformed file and every other invalid value fall back to 30 without throwing. Do not add an environment override. Safely handle concurrent live leads, recent activity, missing metadata and partial deletion.
 
 Verification: fake-clock boundary tests, disabled/overridden TTL, activity refresh,
 protected children in another live lead, mixed-age subtrees, unknown legacy homes,
@@ -208,12 +255,48 @@ missing lead files, missing audit history, and permission failures. Owner live
 check uses disposable owned fixtures with a short TTL; production history is not
 needed to verify deletion.
 
-## Blocked (2026-09-09)
+### Result (3cfa8c45) - 2026-09-13
 
-Awaiting the Phase 1 owner live adapter check: launch fresh worker, fork, and
-explore children through the actual extension, confirm their configured owned
-homes and fork ancestry, and confirm they neither enter Pi's ordinary resume
-list nor allocate legacy `ws-pi-agent-*` homes. The extension-disabled CLI probe
-does not satisfy this gate. Record acceptance before advancing to Phase 2;
-the ticket stays open in `ready/` and autonomous selection should skip it while
-this condition remains outstanding. No production-history deletion is needed.
+Phase 3 landed through `9996e6b4`. Controller session starts now prune eligible
+owned homes across lead namespaces using `child_retention_ttl_days`: 30 days
+by default, finite positive fractional-day overrides, or literal `false` to
+disable age pruning without disabling cap eviction. Unknown ownership,
+activity, liveness, or containment remains retained. Session-write observation
+renews activity, and pruned owned entries are filtered from sidecar revival.
+Audit distinguishes unavailable history from an available empty transcript.
+
+The cross-process sibling claim serializes metadata writes with final age and
+protection checks through atomic home detachment. The elevated Critical fix
+makes protection-write success observable: owner-thread binding persists
+protection before committing local state, and failed audit/transcript activity
+writes refuse the reference with an explicit unavailable/retry result. A failed
+owner-question bind falls back to the lead question relay rather than creating
+a phantom owner thread. Failed protection releases remain best effort because
+retaining durable protection only retains data; rejected retry timers and
+blocking lock waits avoid accepting an unprotected operation or stalling the UI.
+
+Review: the prior round-2 Critical was “The prior cross-session deletion race
+remains for protection/activity establishment because failed non-blocking
+ownership updates are ignored.” The lead authorized one bounded stop-(e) fix
+round. Independent fix-only correctness verification of `32b01532..9996e6b4`
+cleared that Critical with no remaining findings in its authorized scope; no
+third broad sweep was run. The reviewer inspected source and regressions but
+could not execute tests or write artifacts with its read-only tool surface.
+The implementation worker materialized the returned review report separately.
+
+Verification by the implementation worker at `9996e6b4`:
+
+- `cd agents-plugin-pi && npm test -- --test-reporter=spec test/ownership-contention.test.ts`:
+  6 passed. Separate real-process writer/deleter claims cover rejected binds,
+  no phantom thread/hook, lead-question fallback, rejected audit/transcript
+  references, successful retry protection, and unreadable metadata.
+- `cd agents-plugin-pi && npm test -- --test-reporter=dot`: full suite passed.
+- `git diff --check`: passed.
+- The initial contention-fixture run failed because macOS child-process stdin
+  is nonblocking; replacing that fixture barrier with an explicit release file
+  fixed the test environment without changing implementation expectations.
+
+No owner-driven live smoke or production-history cleanup was performed in this
+continuation. Automated disposable fixtures cover short-TTL startup pruning and
+real cross-process contention. All implementation phases are complete; closure
+follows the lead's explicit instruction to finalize when the Critical is clear.

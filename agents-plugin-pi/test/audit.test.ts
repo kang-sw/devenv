@@ -28,6 +28,7 @@ import {
   createAuditChannel,
   openPicker,
   openViewer,
+  readSessionHistory,
   parseSessionFile,
   registerAuditCommands,
   shouldRegisterAudit,
@@ -150,8 +151,10 @@ describe("parseSessionFile", () => {
     ]);
   });
 
-  test("a missing/unreadable session file yields [] — never throws", () => {
-    assert.deepEqual(parseSessionFile(join(tmpdir(), "ws-pi-audit-definitely-missing-", `${Date.now()}.jsonl`)), []);
+  test("a missing/unreadable session file is an explicit unavailable state while the compatibility parser stays empty", () => {
+    const missing = join(tmpdir(), "ws-pi-audit-definitely-missing-", `${Date.now()}.jsonl`);
+    assert.deepEqual(readSessionHistory(missing), { status: "unavailable", items: [] });
+    assert.deepEqual(parseSessionFile(missing), []);
   });
 
   test("an empty file yields []", () => {
@@ -399,6 +402,16 @@ describe("openViewer (the read-only overlay: Esc/Enter contract and the one-over
     assert.ok(calls.some((call) => call.color === "muted" && call.text.includes("bash")), "tool use is painted with the host's muted semantic");
     assert.ok(calls.some((call) => call.color === "dim" && call.text === "working…"), "the activity marker is painted with the host's dim semantic");
 
+    opened.close();
+    await promise;
+  });
+
+  test("renders missing pruned history as explicitly unavailable rather than an empty or parse-failed transcript", async () => {
+    const registry = registryOf(record({ agentId: "gone", sessionPath: join(tmpdir(), `ws-pi-pruned-${Date.now()}.jsonl`) }));
+    const opened = fakeViewerCtx();
+    const promise = openViewer(opened.ctx as never, registry, "gone");
+    const component = await opened.componentReady;
+    assert.match(component.render(120).join("\n"), /history unavailable.*gone/i);
     opened.close();
     await promise;
   });

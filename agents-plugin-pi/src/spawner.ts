@@ -94,7 +94,7 @@ import { buildAgentSendSummary, buildAgentSpawnSummary, buildExploreSummary, cre
 import { suggestModels, formatExploreTierRefusal, formatTierWarning, modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx, type ModelCatalogEntry, type TierFailure, type TierRejection } from "./model-catalog.ts";
 import { WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readExploreMode, readSpawnRole, type ExploreMode, type SpawnRole } from "./process-role.ts";
 import { captureForkContext, compareForkRegistrations, removeForkTransport, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
-import { allocateAgentHome, createAgentStorageContext, isOwnedSessionPath, observeSessionWrite, readOwnership, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, readOwnership, removeOwnedAgentHome, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
 import { readSessionEntries, reduceTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
 import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, SUBTREE_ENV, READ_TOOLS, NETWORK_TOOLS, childPolicy, readDelegationPolicy, readOnlyWsTools, type DelegationPolicy, type PlaybookProfile, type RenderProvenance } from "./delegation-policy.ts";
 import { createWebSearch } from "./web-search.ts";
@@ -687,7 +687,7 @@ function spawnPiProcess(record: AgentRecord, args: string[], cwd: string): void 
     record.errorMessage = `pi process failed to start: ${err.message}`;
     record.state = "done";
     settleWaiters(record);
-    if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "unknown", observedAt: Date.now() } });
+    if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "stopped", running: false, observedAt: Date.now() } });
   });
 
   proc.on("close", (code, signal) => {
@@ -734,6 +734,7 @@ function harvestExplore(id: string, record: AgentRecord, registry: AgentRegistry
   // harvest instead of lingering in the registry forever.
   if (record.selfReap) {
     registry.delete(id);
+    if (record.ownership) removeOwnedAgentHome(record.ownership);
   }
   return entry;
 }
@@ -2392,22 +2393,23 @@ export function recordReport(record: RpcAgentRecord, kind: "question" | "final" 
   if (record.ownership) touchOwnership(record.ownership.home);
 }
 
-/** Writes durable owner/approval protection without treating a poll as activity. */
-export function syncOwnershipProtection(record: RpcAgentRecord): void {
-  if (!record.ownership) return;
-  updateOwnership(record.ownership.home, {
+/** Writes durable protection without treating a poll as activity. A new owner bind must check success before committing local state. */
+export function syncOwnershipProtection(record: RpcAgentRecord): boolean {
+  if (!record.ownership) return true;
+  return updateOwnership(record.ownership.home, {
     liveness: {
       lifecycle: record.client ? (record.running ? "live" : "stopping") : "unknown",
       running: record.running,
       observedAt: Date.now(),
       threadBound: record.threadBound,
+      ownerHeld: record.ownerHeld,
       waitingOnChildren: record.waitingOnChildren,
       expectedReport: record.expectedReport,
       pendingQuestion: record.threadBound,
       pendingApprovalCommandId: record.pendingApproval?.cmdId,
       recovery: record.client ? "none" : "revived",
     },
-  });
+  }) !== undefined;
 }
 
 /** Unreferenced persistent-record observer; unchanged polling never renews activity. */
@@ -2919,19 +2921,24 @@ export function lastActivityAt(record: RpcAgentRecord): number {
  * guard clauses. While the registry is at or over `cap`, evicts the dormant
  * (`!record.client`), non-`running`, non-`threadBound` record with the
  * oldest last-activity stamp (`lastActivityAt`, above) until the new spawn
- * fits. Never evicts a `running`/`threadBound` record — when none remain to
- * evict, the spawn fails outright rather than silently exceeding the cap.
- * Only forgets the registry entry (never touches the evicted agent's
- * on-disk session file). Exported for direct unit coverage without a real
- * `RpcClient`.
+ * fits. Never evicts a live or protected record. An owned record is also
+ * eligible only when durable metadata independently confirms it stopped;
+ * missing or ambiguous metadata blocks both memory and disk eviction. Legacy
+ * records retain registry-only eviction because their paths do not authorize
+ * disk deletion. Deletion failure is diagnostic and does not fail the spawn.
  */
-export function evictForCapacity(registry: RpcAgentRegistry, cap: number): { ok: true; evictedLabel?: string } | { ok: false; error: string } {
+export function evictForCapacity(
+  registry: RpcAgentRegistry,
+  cap: number,
+  removeOwned: typeof removeOwnedAgentHome = removeOwnedAgentHome,
+): { ok: true; evictedLabel?: string } | { ok: false; error: string } {
   const evictedLabels: string[] = [];
   while (registry.size >= cap) {
     let candidate: RpcAgentRecord | undefined;
     let candidateActivity = Number.POSITIVE_INFINITY;
     for (const record of registry.values()) {
-      if (record.client || record.running || record.threadBound || record.ownerHeld || record.expectedReport || record.waitingOnChildren) continue;
+      if (record.client || record.running || record.threadBound || record.ownerHeld || record.pendingApproval || record.expectedReport || record.waitingOnChildren) continue;
+      if (record.ownership && inspectOwnedHomeRemoval(record.ownership).status !== "eligible") continue;
       const activity = lastActivityAt(record);
       if (activity < candidateActivity) {
         candidate = record;
@@ -2941,8 +2948,17 @@ export function evictForCapacity(registry: RpcAgentRegistry, cap: number): { ok:
     if (!candidate) {
       return {
         ok: false,
-        error: `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) reached and every remaining record is running/threadBound — nothing can be evicted to fit`,
+        error: `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) reached and every remaining record is live, protected, or durably unknown — nothing can be evicted to fit`,
       };
+    }
+    if (candidate.ownership) {
+      const removal = removeOwned(candidate.ownership);
+      if (removal.status !== "deleted" && removal.status !== "failed") {
+        return {
+          ok: false,
+          error: `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) candidate became protected or durably unknown before eviction`,
+        };
+      }
     }
     candidate.ownershipObserverStop?.();
     registry.delete(candidate.agentId);
@@ -3303,6 +3319,12 @@ export async function sendToAgent(
     if (admitted.depth !== record.delegation.depth || parentPolicy.maxDepth < record.delegation.maxDepth) throw new Error("ws-pi-agent: recovered child exceeds the current delegation budget");
   }
 
+  // Claim activity before mutating a dormant record. If retention already
+  // owns the cross-process deletion claim, this resume fails closed instead
+  // of launching against a home that can disappear mid-start.
+  const ownershipTouched = !record.ownership || touchOwnership(record.ownership.home);
+  if (!record.client && !ownershipTouched) throw new Error("ws-pi-agent: owned session home is unavailable during resume");
+
   // A real new instruction supersedes an in-memory `/done` operation. Its
   // late settle/park callbacks must not affect this replacement work.
   if (record.forkFinish && ctx.finishToken !== record.forkFinish.token) {
@@ -3314,7 +3336,6 @@ export async function sendToAgent(
   // fork-raised-question path). A coordinator closeout is lead-attributed
   // text, but not an external takeover, so it never takes this branch.
   if (ctx.leadSend && !ctx.finishToken && record.threadBound) record.threadBound = false;
-  if (record.ownership) touchOwnership(record.ownership.home);
 
   if (!record.client) {
     if (record.spawnRole === "explore") {
@@ -3593,7 +3614,6 @@ export async function stopAgent(
     // record is already synchronously dormant, so this final disk-only read
     // cannot revive a stale client or delay the stop race protection.
     refreshAgentTelemetry(record);
-    if (record.ownership && record.launchGeneration === generation && !record.client) updateOwnership(record.ownership.home, { liveness: { lifecycle: stopped ? "stopped" : "unknown", running: false, observedAt: Date.now() } });
     if (record.ownership && record.launchGeneration === generation && !record.client) observeSessionWrite(record.ownership.home, record.sessionPath);
     // Review relay #1 (I2): a stop is a thread-close path too — the ticket
     // names "lead stop" alongside `/done`/fork final/`ws-withdraw-question`
@@ -3602,6 +3622,14 @@ export async function stopAgent(
     // later `ws-agent-send` revival, where it would silently suppress every
     // settle push for the rest of the session.
     record.threadBound = false;
+    if (record.ownership && record.launchGeneration === generation && !record.client) {
+      updateOwnership(record.ownership.home, { liveness: {
+        lifecycle: stopped ? "stopped" : "unknown", running: false, observedAt: Date.now(),
+        threadBound: false, ownerHeld: record.ownerHeld, pendingQuestion: false,
+        waitingOnChildren: record.waitingOnChildren, expectedReport: record.expectedReport,
+        pendingApprovalCommandId: record.pendingApproval?.cmdId,
+      } });
+    }
     try { opts?.onStopped?.(stopped); } catch { /* internal observer only */ }
     if (opts?.silent) {
       // An adapter-internal stop (a thread close, session shutdown) is not a
@@ -3635,7 +3663,9 @@ export function getAgentTranscriptPath(registry: RpcAgentRegistry, agentId: stri
   if (!record) {
     throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
   }
-  if (record.ownership) touchOwnership(record.ownership.home);
+  if (record.ownership && !touchOwnership(record.ownership.home)) {
+    throw new Error("ws-pi-agent: history unavailable — owned session home is busy, gone, or unreadable; retry the reference");
+  }
   if (record.ownership) observeSessionWrite(record.ownership.home, record.sessionPath);
   return { transcript_path: record.sessionPath };
 }

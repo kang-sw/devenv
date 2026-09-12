@@ -100,6 +100,8 @@ export interface GoalLoopConfig {
    * arm, mirroring `runaway_threshold`'s never-hard-fail shape.
    */
   settle_delay_ms?: number;
+  /** Age-based child-home retention in days. A finite positive number may be fractional; literal false disables age pruning. */
+  child_retention_ttl_days?: number | false;
 }
 
 /** Literal `false` opts out of animation. Malformed, missing, and every other value retain the enabled default. */
@@ -111,10 +113,13 @@ export function resolveAgentWaitAnimation(config: GoalLoopConfig | undefined): b
 export const DEFAULT_RUNAWAY_THRESHOLD = 10;
 
 /** Default advisory context-usage percent (adapter-chosen, no ticket-pinned value; config-tunable) surfaced in the reinject reminder. */
-export const DEFAULT_COMPACTION_ADVISORY_PERCENT = 70;
+export const DEFAULT_COMPACTION_ADVISORY_PERCENT = 50;
 
 /** Default settle-timer delay in milliseconds, absent (or overridden by) a config file (260906 Phase 1). */
 export const DEFAULT_SETTLE_DELAY_MS = 5000;
+
+/** Default age since last real child activity before an owned home becomes prune-eligible. */
+export const DEFAULT_CHILD_RETENTION_TTL_DAYS = 30;
 
 /**
  * Reads and parses the goal-loop config data file. Returns `undefined` —
@@ -183,6 +188,13 @@ export function resolveSettleDelayMs(config: GoalLoopConfig | undefined): number
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : DEFAULT_SETTLE_DELAY_MS;
 }
 
+/** Resolves the adapter-local child retention policy without ever hard-failing startup. */
+export function resolveChildRetentionTtlDays(config: GoalLoopConfig | undefined): number | false {
+  const value = config?.child_retention_ttl_days;
+  if (value === false) return false;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : DEFAULT_CHILD_RETENTION_TTL_DAYS;
+}
+
 // ---------------------------------------------------------------------------
 // Pure message builders.
 // ---------------------------------------------------------------------------
@@ -246,7 +258,7 @@ export function buildGoalReminder(goal: string, info: { percent: number | null; 
     percent === null
       ? "Context usage: unknown."
       : percent >= advisoryPercent
-        ? `Context usage: ${Math.round(percent)}% of window — at or above the advisory point (${advisoryPercent}%); consider goal-compact-and-continue if you are at a safe compaction point.`
+        ? `Context usage: ${Math.round(percent)}% of window — at or above the advisory point (${advisoryPercent}%); prioritize goal-compact-and-continue when the next work is weakly related to the current context and you are at a safe compaction point.`
         : `Context usage: ${Math.round(percent)}% of window — below the compaction advisory point (${advisoryPercent}%); do not call goal-compact-and-continue.`;
   return (
     `Goal yet running: "${goal}". Call goal-achieved <summary> or goal-blocked <reason> for a state ` +
