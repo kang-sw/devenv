@@ -44,8 +44,8 @@ not settle. You edit exactly one file: the ticket at the path you were given.
      declares no such section or no resulting line exists; add a `## Constraints`
      heading only when there is a line for it.
 
-     For example, a ticket that names both an `agents-plugin/rsrc/` path and an
-     `agents-plugin-tool/internal/mcp/` path keeps a valid existing MCP-manual
+     For example, a ticket that names both a `project/rsrc/` path and a
+     `project-tool/internal/mcp/` path keeps a valid existing MCP-manual
      convention line, adds any missing matching rsrc convention lines, and
      reports `corrections: 1` or more when that union changes the section.
 4. Return the report.

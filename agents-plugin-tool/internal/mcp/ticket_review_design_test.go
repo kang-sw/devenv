@@ -159,7 +159,7 @@ func TestTicketFactPopulatorPreservesConstraintsFixture(t *testing.T) {
 			}
 			text := strings.Join(strings.Fields(body), " ")
 			for _, want := range []string{
-				"a ticket that names both an `agents-plugin/rsrc/` path and an `agents-plugin-tool/internal/mcp/` path",
+				"a ticket that names both a `project/rsrc/` path and a `project-tool/internal/mcp/` path",
 				"keeps a valid existing MCP-manual convention line",
 				"adds any missing matching rsrc convention lines",
 				"reports `corrections: 1` or more when that union changes the section",
