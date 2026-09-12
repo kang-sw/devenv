@@ -8,6 +8,7 @@ related:
   260906-workset-ws-pi-dogfood-ux: inclusion in the owner UX collection
 sage-review-design-reviewed: aea47f4d50abc9ca
 sage-review-completeness-reviewed: aea47f4d50abc9ca
+completed: 2026-09-13
 ---
 
 # Stop Pi goal reinjection without interrupting current work
@@ -107,3 +108,27 @@ The prior admission-race evidence and rejected alternatives remain in
 `ai-docs/.plans/2026-09/10-0237-260909-feat-ws-pi-goal-stop-controls.md` as the
 reason for the explicit best-effort boundary. No source implementation or owner-live
 acceptance is claimed by this scope revision.
+
+### Result (c6a87734) - 2026-09-13
+
+Implemented the three exact stop aliases with idempotent, generation-scoped
+cancellation of goal-owned timers, rearm state and stale compaction callbacks.
+Reminder submission now carries an adapter-owned correlation marker and permits
+only one unconfirmed host handoff, while the shared child-report wake and
+compaction release paths retain their independent ownership. Stop preserves the
+current response, running children, conversation history and eventual child
+reports; an already-handed reminder may still execute once but cannot rearm.
+The runtime spec, command help/completion and regression harnesses were updated.
+
+Verification: `npm test` in `agents-plugin-pi/` passed 1,756 tests with 2
+pre-existing skips; focused goal-loop and push-wake runs passed 132 and 18 tests
+respectively. Partitioned correctness and fit reviews were clean. The test
+review's two Important coverage gaps were fixed in `f3e82560`, and round-two
+fix verification was clean. The owner-live TUI check was not run from the
+headless worker; its running-child/report-delivery boundary is covered by the
+push-wake harness.
+
+
+## Resolution (2026-09-13)
+
+Implemented best-effort `/goal stop`, `/goal clear`, and `/goal reset` controls with generation-scoped stale-callback suppression, one-at-a-time reminder correlation, and preserved child-report wake ownership. Automated tests and partitioned review passed; owner-live TUI confirmation remains an integration check.

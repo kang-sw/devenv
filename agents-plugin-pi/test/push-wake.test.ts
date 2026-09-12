@@ -16,6 +16,7 @@ function harness(withGoal = false) {
   let handledInput = false;
   let systemPrompt: string | undefined;
   const users: any[] = [], custom: any[] = [];
+  let nextUserStart = 0;
   const steering: any[] = [], followUps: any[] = [], modelTimeline: string[] = [];
   const commands = new Map<string, any>(), tools = new Map<string, any>();
   const notices: string[] = [];
@@ -31,6 +32,7 @@ function harness(withGoal = false) {
     getCommands: () => [],
     sendUserMessage(content: unknown, options: unknown) {
       users.push({content, options});
+      if (!(options as {deliverAs?: string} | undefined)?.deliverAs) nextUserStart = users.length;
       if (throws) throw Error('preflight');
       if (handledInput) return; // input hook handled the prompt: no bootstrap or start
       for (const hook of handlers.get('before_agent_start') ?? []) {
@@ -57,12 +59,23 @@ function harness(withGoal = false) {
     }
   };
   leadIdleRef.current = () => idle;
-  const goal = withGoal ? registerGoalLoop(pi, { goalLoopConfigPath: '/nonexistent/push-wake.json', ...clock }) : undefined;
+  const registry = new Map();
+  const goal = withGoal ? registerGoalLoop(pi, {
+    goalLoopConfigPath: '/nonexistent/push-wake.json',
+    rpcRegistryRef: {current: registry},
+    ...clock,
+  }) : undefined;
   registerPushFlush(pi, { delayMs: () => 10, ...clock });
   const emit = (event: string, payload: any = {}) => { let result; for (const fn of handlers.get(event) ?? []) result = fn(payload, ctx) ?? result; return result; };
-  return {pi, users, custom, timers, emit, commands, tools, ctx, goal, notices, modelTimeline,
+  return {pi, users, custom, timers, emit, commands, tools, ctx, goal, notices, modelTimeline, registry,
     modelCall: () => systemPrompt,
-    start() { idle = false; emit('agent_start'); drainPi(); },
+    start() {
+      idle = false;
+      emit('agent_start');
+      const admitted = users[nextUserStart++];
+      if (admitted) emit('message_start', {message: {role: 'user', content: admitted.content, timestamp: Date.now()}});
+      drainPi();
+    },
     settle() { idle = true; emit('agent_settled'); },
     busy() { idle = false; }, fail() { throws = true; }, handleInput() { handledInput = true; },
     tick() { const [key, cb] = [...timers][0]!; timers.delete(key); cb(); },
@@ -110,6 +123,44 @@ test('an independent user start clears the pending wake reservation and releases
   assert.deepEqual(h.custom[0].options, {deliverAs: 'steer', triggerTurn: true});
   assert.equal(h.users.length, 1, 'the pending reservation did not create a second wake');
   h.emit('session_shutdown');
+});
+
+test('/goal stop leaves a running child untouched and preserves its eventual report wake', async () => {
+  const h = harness(true);
+  const childStops: string[] = [];
+  const child = {
+    client: {
+      abort: async () => { childStops.push('abort'); },
+      stop: async () => { childStops.push('stop'); },
+    },
+    running: true,
+    streaming: true,
+    terminalThisTurn: false,
+    threadBound: false,
+    reportLog: [],
+  };
+  h.registry.set('child-1', child);
+  await h.commands.get('goal').handler('ship', h.ctx);
+
+  await h.commands.get('goal').handler('stop', h.ctx);
+  assert.deepEqual(childStops, [], 'goal stopping never aborts or stops a running child');
+  assert.equal(h.registry.get('child-1'), child, 'the live child remains registered unchanged');
+
+  child.running = false;
+  child.streaming = false;
+  h.push('followUp', 'child finished');
+  assert.equal(heldPushQueue.length, 1, 'the eventual child report remains queued for delivery');
+  assert.equal(leadWakeStartPendingRef.current, true, 'child-report wake ownership is independent of goal state');
+  assert.equal(h.timers.size, 1, 'child-report wake recovery is pending');
+
+  h.start();
+  assert.equal(h.custom.length, 1);
+  assert.equal((h.custom[0].message as {details?: {report?: string}}).details?.report, 'child finished');
+  assert.equal(heldPushQueue.length, 0);
+  assert.equal(h.users.length, 2, 'only the goal announcement and child-report wake were submitted');
+  h.settle();
+  assert.equal(h.timers.size, 0, 'stopped goal does not schedule a reminder after child delivery');
+  h.goal!.resetCompactionStateForShutdown(); h.emit('session_shutdown');
 });
 for (const failure of ['handled', 'throw']) test(`no-event ${failure} retries without losing pushes`, () => {
   const h = harness(); if (failure === 'throw') h.fail(); else h.handleInput();
