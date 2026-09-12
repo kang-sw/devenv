@@ -20,6 +20,31 @@ export type TierFailure = {
   catalogEmpty?: boolean;
 };
 
+export type CatalogModelRejection =
+  | { model: string; why: "unknown"; suggestions: string[] }
+  | { model: string; why: "no-auth" };
+
+export type ConcreteModelRejection = CatalogModelRejection;
+
+/** One exact-membership/auth primitive shared by configured tiers and caller-selected provider/id values. */
+export function validateCatalogModel(
+  model: string,
+  catalog: readonly ModelCatalogEntry[],
+): { model: string; rejected?: undefined } | { model?: undefined; rejected: CatalogModelRejection } {
+  const entry = catalog.find(candidate => `${candidate.provider}/${candidate.id}` === model);
+  if (!entry) return { rejected: { model, why: "unknown", suggestions: suggestModels(model, catalog) } };
+  if (!entry.hasAuth) return { rejected: { model, why: "no-auth" } };
+  return { model };
+}
+
+/** Concrete selections use the common catalog validator without tier-specific configuration metadata. */
+export function validateConcreteModel(
+  model: string,
+  catalog: readonly ModelCatalogEntry[],
+): ReturnType<typeof validateCatalogModel> {
+  return validateCatalogModel(model, catalog);
+}
+
 /** Read current runtime membership and configured-auth presence, never cached availability or scoped models. */
 export function modelCatalogFromToolCtx(toolCtx: unknown): ModelCatalogEntry[] {
   const registry = (toolCtx as ExtensionContext | undefined)?.modelRegistry;
@@ -109,6 +134,17 @@ export function formatTierWarning(alias: string, rejected: TierRejection, inheri
   const tail = catalogEmpty ? " Pi's model catalog is empty." : rejected.suggestions.length
     ? ` Did you mean ${rejected.suggestions.map(oneLine).join(", ")}?` : " No close match in Pi's model catalog.";
   return `${base}which is not a provider/id entry in Pi's model catalog.${tail}${hint}`;
+}
+
+/** Concrete selection never suggests mutating shared tier configuration. */
+export function formatConcreteModelWarning(rejected: ConcreteModelRejection, catalogEmpty: boolean): string {
+  const base = `warning: concrete model ${quoted(rejected.model)} `;
+  if (rejected.why === "no-auth") {
+    return `${base}cannot be selected because provider ${oneLine(rejected.model.slice(0, rejected.model.indexOf("/")))} has no configured auth.`;
+  }
+  const tail = catalogEmpty ? " Pi's model catalog is empty." : rejected.suggestions.length
+    ? ` Did you mean ${rejected.suggestions.map(oneLine).join(", ")}?` : " No close match in Pi's model catalog.";
+  return `${base}is not a provider/id entry in Pi's model catalog.${tail}`;
 }
 
 /** Exploration fails closed: unlike ordinary workers it must never replace an

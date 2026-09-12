@@ -518,7 +518,14 @@ describe("AgentEventLineBuffer", () => {
   });
 });
 
-import { suggestModels, formatTierWarning, modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx } from "../src/model-catalog.ts";
+import {
+  formatConcreteModelWarning,
+  formatTierWarning,
+  modelCatalogFromToolCtx,
+  suggestModels,
+  tierWarningNotifierFromToolCtx,
+  validateConcreteModel,
+} from "../src/model-catalog.ts";
 
 const tierCatalog = ["cheap-model", "big-model", "reviewer-model"].map(id => ({ provider: "openrouter", id, hasAuth: true }));
 
@@ -693,6 +700,24 @@ describe("resolveModelForAliasViaWsMcp", () => {
   });
 });
 
+describe("concrete Pi model validation", () => {
+  test("accepts exact authenticated provider/id membership without consulting tier config", () => {
+    assert.deepEqual(validateConcreteModel("openrouter/cheap-model", tierCatalog), { model: "openrouter/cheap-model" });
+  });
+
+  test("rejects unknown and unauthenticated concrete models with catalog-specific diagnostics", () => {
+    const unknown = validateConcreteModel("openrouter/cheap-modl", tierCatalog);
+    assert.deepEqual(unknown, {
+      rejected: { model: "openrouter/cheap-modl", why: "unknown", suggestions: ["openrouter/cheap-model"] },
+    });
+    assert.match(formatConcreteModelWarning(unknown.rejected!, false), /Did you mean openrouter\/cheap-model\?/);
+
+    const noAuth = validateConcreteModel("openrouter/cheap-model", [{ provider: "openrouter", id: "cheap-model", hasAuth: false }]);
+    assert.deepEqual(noAuth, { rejected: { model: "openrouter/cheap-model", why: "no-auth" } });
+    assert.match(formatConcreteModelWarning(noAuth.rejected!, false), /provider openrouter has no configured auth/);
+  });
+});
+
 import { armForkRoleWiring, registerFork } from "../src/fork.ts";
 import { registerExecuteGateway } from "../src/execute-gateway.ts";
 import { ensureRespondent, createThreadRegistryHandle } from "../src/ask.ts";
@@ -799,14 +824,17 @@ describe("catalog validation and warning copy", () => {
 describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses instead of inheriting", () => {
   interface CapturedTool {
     name: string;
+    description: string;
+    parameters: { properties: Record<string, { description?: string }> };
     execute: (id: string, params: unknown, signal?: AbortSignal, update?: unknown, ctx?: unknown) => Promise<{ content: Array<{ text: string }> }>;
   }
 
-  function installRpcHarness() {
+  function installRpcHarness(onThinking?: (level: string) => void) {
     const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
     Object.assign(RpcClient.prototype, {
       start: async () => {}, stop: async () => {}, abort: async () => {},
-      onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {},
+      onEvent: () => () => {}, prompt: async () => {},
+      setThinkingLevel: async (level: string) => { onThinking?.(level); },
       getState: async () => ({ model: { provider: "pi", id: "small" }, thinkingLevel: "medium", sessionFile: "/tmp/ws-pi-agent-test/session.jsonl" }),
     });
     return { restore: () => Object.assign(RpcClient.prototype, original) };
@@ -816,12 +844,24 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
     return { content: [{ type: "text", text: JSON.stringify(payload) }] };
   }
 
-  function harness(callTool: McpStdioClient["callTool"]) {
+  function harness(
+    callTool: McpStdioClient["callTool"],
+    catalog = [{ provider: "openai-codex", id: "gpt-5.6-high", hasAuth: true }],
+  ) {
     const tools = new Map<string, CapturedTool>();
     const pi = { registerTool: (tool: CapturedTool) => tools.set(tool.name, tool), sendMessage() {}, sendUserMessage() {} } as unknown as ExtensionAPI;
     const bridge = { client: { callTool }, wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" } } as never;
     const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" });
-    const ctx = { sessionManager: { getSessionId: () => "test-lead" }, agentStorageRoot: storageRoot(), model: { provider: "lead", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.6-high" }], hasConfiguredAuth: () => true } };
+    const ctx = {
+      sessionManager: { getSessionId: () => "test-lead" },
+      agentStorageRoot: storageRoot(),
+      model: { provider: "lead", id: "large" },
+      thinkingLevel: "high",
+      modelRegistry: {
+        getAll: () => catalog.map(({ provider, id }) => ({ provider, id })),
+        hasConfiguredAuth: (model: { provider: string; id: string }) => catalog.some(entry => entry.provider === model.provider && entry.id === model.id && entry.hasAuth),
+      },
+    };
     return { tool: tools.get("ws-agent-spawn")!, handle, ctx };
   }
 
@@ -847,6 +887,84 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
         /ws-pi-agent: ws-agent-spawn rejected:/,
       );
       assert.equal(handle.rpcRegistry.size, 0);
+    } finally { rpc.restore(); }
+  });
+
+  test("unknown and unauthenticated concrete IDs refuse before allocation and never consult tier config", async () => {
+    const rpc = installRpcHarness();
+    try {
+      let calls = 0;
+      const unknown = harness(async () => { calls++; return jsonResult({}); });
+      const unknownHomes = join(realpathSync(unknown.ctx.agentStorageRoot), "ws-agents", "test-lead");
+      assert.equal(existsSync(unknownHomes), false);
+      await assert.rejects(
+        () => unknown.tool.execute("call", { system_prompt_path: "/tmp/p.md", prompt: "hi", model_name: "openrouter/missing" }, undefined, undefined, unknown.ctx),
+        /concrete model.*not a provider\/id entry/,
+      );
+      assert.equal(unknown.handle.rpcRegistry.size, 0);
+      assert.equal(existsSync(unknownHomes), false, "unknown concrete selection allocates no owned home");
+
+      const locked = harness(async () => { calls++; return jsonResult({}); }, [{ provider: "openrouter", id: "locked", hasAuth: false }]);
+      const lockedHomes = join(realpathSync(locked.ctx.agentStorageRoot), "ws-agents", "test-lead");
+      assert.equal(existsSync(lockedHomes), false);
+      await assert.rejects(
+        () => locked.tool.execute("call", { system_prompt_path: "/tmp/p.md", prompt: "hi", model_name: "openrouter/locked" }, undefined, undefined, locked.ctx),
+        /provider openrouter has no configured auth/,
+      );
+      assert.equal(locked.handle.rpcRegistry.size, 0);
+      assert.equal(existsSync(lockedHomes), false, "unauthenticated concrete selection allocates no owned home");
+      assert.equal(calls, 0, "concrete selection is catalog-local and never calls config.resolve_agent");
+    } finally { rpc.restore(); }
+  });
+
+  test("tool help advertises tier-or-concrete selection and the default effort sentinel", () => {
+    const { tool } = harness(async () => jsonResult({}));
+    assert.match(tool.description, /tier alias or concrete Pi model ID/);
+    assert.match(tool.parameters.properties.model_name!.description!, /concrete Pi model ID/);
+    assert.match(tool.parameters.properties.model_effort!.description!, /default/);
+  });
+
+  test("a concurrent concrete dispatch neither reads nor changes the tier dispatch selection", async () => {
+    const rpc = installRpcHarness();
+    try {
+      let tierCalls = 0;
+      const catalog = [
+        { provider: "openrouter", id: "one-off", hasAuth: true },
+        { provider: "openai-codex", id: "gpt-5.6-high", hasAuth: true },
+      ];
+      const { tool, handle, ctx } = harness(async (name, args) => {
+        tierCalls++;
+        assert.equal(name, "config.resolve_agent");
+        assert.deepEqual(args, { tier: "small", format: "json" });
+        await Promise.resolve();
+        return jsonResult({ resolved_from: "pi", model: "gpt-5.6-high", backend: "codex", effort: "low" });
+      }, catalog);
+      const [concreteRaw, tierRaw] = await Promise.all([
+        tool.execute("concrete", { system_prompt_path: "/tmp/p.md", prompt: "one off", model_name: "openrouter/one-off", model_effort: "default" }, undefined, undefined, ctx),
+        tool.execute("tier", { system_prompt_path: "/tmp/p.md", prompt: "tier", model_name: "small", model_effort: "default" }, undefined, undefined, ctx),
+      ]);
+      const concrete = handle.rpcRegistry.get(JSON.parse(concreteRaw.content[0]!.text).agent_id)!;
+      const tier = handle.rpcRegistry.get(JSON.parse(tierRaw.content[0]!.text).agent_id)!;
+      assert.equal(tierCalls, 1, "only the tier dispatch reads shared tier configuration");
+      assert.deepEqual({ model: concrete.modelBase, effort: concrete.modelEffort, source: concrete.modelSource }, { model: "openrouter/one-off", effort: undefined, source: "concrete" });
+      assert.deepEqual({ model: tier.modelBase, effort: tier.modelEffort, source: tier.modelSource }, { model: "openai-codex/gpt-5.6-high", effort: "low", source: "tier" });
+      await handle.stopAll();
+    } finally { rpc.restore(); }
+  });
+
+  test("concrete default makes no thinking override while an explicit supported effort is sent", async () => {
+    const thinkingCalls: string[] = [];
+    const rpc = installRpcHarness(level => thinkingCalls.push(level));
+    try {
+      const { tool, handle, ctx } = harness(
+        async () => { assert.fail("concrete selection must not consult tier config"); },
+        [{ provider: "openrouter", id: "one-off", hasAuth: true }],
+      );
+      await tool.execute("default", { system_prompt_path: "/tmp/p.md", prompt: "default", model_name: "openrouter/one-off", model_effort: "default" }, undefined, undefined, ctx);
+      assert.deepEqual(thinkingCalls, [], "default leaves concrete model effort to Pi");
+      await tool.execute("explicit", { system_prompt_path: "/tmp/p.md", prompt: "explicit", model_name: "openrouter/one-off", model_effort: "high" }, undefined, undefined, ctx);
+      assert.deepEqual(thinkingCalls, ["high"], "explicit supported effort reaches setThinkingLevel");
+      await handle.stopAll();
     } finally { rpc.restore(); }
   });
 
@@ -1089,6 +1207,19 @@ describe("spawnAgent: onModelResolved (260906 Phase 2 dispatch-row rendering)", 
     } finally { rpc.restore(); }
   });
 
+  test("model_effort:default with inherited-model dispatch keeps the captured parent effort", async () => {
+    const rpc = installRpcHarness();
+    try {
+      const { tool, handle, ctx } = harness(async () => { assert.fail("config.resolve_agent must not be called for inherited dispatch"); });
+      const updates: Array<{ content: unknown[]; details?: unknown }> = [];
+      const raw = await tool.execute("call", { system_prompt_path: "/tmp/p.md", prompt: "hi", model_effort: "default" }, undefined, (partial) => updates.push(partial), ctx);
+      const record = handle.rpcRegistry.get(JSON.parse(raw.content[0]!.text).agent_id)!;
+      assert.equal(record.modelEffort, "high");
+      assert.deepEqual((updates[0]!.details as { resolved: unknown }).resolved, { tier: "inherit", model: "lead/large", effort: "high", inherited: true });
+      await handle.stopAll();
+    } finally { rpc.restore(); }
+  });
+
   test("a transport-failure-forced inherit on a NAMED tier still publishes tier:\"inherit\"/source:\"inherit\" (never the raw requested tier name)", async () => {
     const rpc = installRpcHarness();
     try {
@@ -1269,6 +1400,16 @@ describe("effectiveModelEffort (review relay #1, Critical: the modelEffort merge
 
   test("caller set, nothing resolved -> the caller value", () => {
     assert.equal(effectiveModelEffort("medium", undefined), "medium");
+  });
+
+  test("default preserves each selection source's own effort policy", () => {
+    assert.equal(effectiveModelEffort("default", "low", "tier", "high"), "low", "tier keeps configured effort");
+    assert.equal(effectiveModelEffort("default", undefined, "inherit", "high"), "high", "inherit keeps parent effort");
+    assert.equal(effectiveModelEffort("default", undefined, "concrete", "high"), undefined, "concrete keeps the selected model default");
+  });
+
+  test("omitting effort retains the legacy behavior instead of acting as the explicit default sentinel", () => {
+    assert.equal(effectiveModelEffort(undefined, undefined, "inherit", "high"), undefined);
   });
 });
 

@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: ae63aa4a07f2428b
 sage-review-completeness-reviewed: ae63aa4a07f2428b
+completed: 2026-09-13
 ---
 
 # Pi agent spawn cannot select a concrete model without mutating tier config
@@ -46,3 +47,18 @@ Live dogfood hit this while comparing `openrouter/inception/mercury-2.5` with th
 Extend `ws-agent-spawn` model resolution and its public tool schema/help so callers can choose a tier alias or concrete Pi catalog ID without mutating shared tier configuration. Add the `model_effort: "default"` semantics above while preserving current explicit effort handling, authentication checks, pre-allocation failure, and inherited-model behavior.
 
 Verify tier, concrete, omitted, unknown, unauthenticated, explicit-effort, and default-effort paths. Include a concurrency regression proving a concrete one-off dispatch does not alter the model selected by simultaneous tier-based dispatches.
+
+### Result (41dcbb31) - 2026-09-13
+
+`ws-agent-spawn` now distinguishes configured tier aliases from concrete catalog `provider/id` selections, validates both through one live catalog/auth primitive, and rejects invalid concrete selections before allocating an owned child home. Concrete selection bypasses `config.resolve_agent`, so simultaneous tier dispatch remains isolated from the one-off choice.
+
+`model_effort: "default"` now preserves source-specific behavior: inherited dispatch keeps the captured parent effort, tier dispatch keeps configured effort, and concrete dispatch leaves effort unset for the selected model's default. Omitted effort retains its previous behavior. The tool schema and injected Pi lead guidance now defer to the authoritative tier-or-concrete contract.
+
+Verification: `node --test test/spawner.test.ts` passed 329/329; `npm test -- --test-reporter=dot --test-concurrency=1` passed the full suite; `git diff --check` passed. The default parallel full-suite run had one unrelated launcher-error assertion observe `write EPIPE`; its isolated test passed 5/5, and the serial full suite passed.
+
+Round-one Important findings were fixed and round-two correctness, fit, and test verification was clean. The fit review's Minor terminology note remains recorded: internal `TierResolution`/`tierResolution` names now cover concrete and inherited selection as well as tiers; renaming was not expanded into this behavior fix.
+
+
+## Resolution (2026-09-13)
+
+Implemented per-dispatch concrete Pi model selection with live catalog/auth validation, source-aware `model_effort: "default"` behavior, schema and lead-guide alignment, concurrency coverage, and clean two-round partitioned review.
