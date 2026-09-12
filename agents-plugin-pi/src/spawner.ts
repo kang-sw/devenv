@@ -108,7 +108,7 @@ import { createWebSearch } from "./web-search.ts";
 import { clearWebReadiness, verifyWebReadiness, WEB_HOME_ENV, WEB_NONCE_ENV } from "./web-readiness.ts";
 import { assertSubtreeFinal, beginSubtreeDispatch, installSubtreePublisher, publishSubtree, readSubtreeChannel, readSubtreeSnapshot, subtreeWaiting, type SubtreeChannel } from "./subtree-lifecycle.ts";
 import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
-import { persistEvictedAgentCost, registerAgentCostOwner } from "./agent-footer.ts";
+import { persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-footer.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers shared by persistent RPC-backed child paths.
@@ -3275,7 +3275,7 @@ export async function stopAgent(
   registry: RpcAgentRegistry,
   agentId: string,
   pi?: ExtensionAPI,
-  opts?: { silent?: boolean; onStopped?: (success: boolean) => void },
+  opts?: { silent?: boolean; onStopped?: (success: boolean) => void; skipCostCheckpoint?: boolean },
 ): Promise<{ agent_id: string }> {
   // 260905 (alias/park/cap ticket): resolve alias-or-uuid first — see
   // `sendToAgent`'s identical resolve-then-`.get()` shape.
@@ -3355,9 +3355,10 @@ export async function stopAgent(
       // held delivery that blocks the owner's fresh subtree final.
       pushToLead(pi, registry, record, "ws-agent-settled", { reason: "stopped" }, "followUp");
     }
-    // 260905 (live-agent widget ticket): the record just left the live state
-    // (or lost its thread bind) — either way a widget-relevant transition.
+    // The final disk reconciliation above is the accounting boundary: refresh
+    // the in-memory estimate first, then persist its one bounded checkpoint.
     triggerAgentWidgetRefresh();
+    if (!opts?.skipCostCheckpoint) persistAgentCostCheckpoint(registry);
   }
   publishSubtree(registry);
   return { agent_id: record.agentId };
@@ -3761,7 +3762,7 @@ export function registerAgentTools(
       // stopAgent so shutdown leaves records in the same resting shape every
       // other stop does (the sidecar snapshot, index.ts, is taken BEFORE this
       // runs, while the records are still marked live).
-      const rpcStops = [...rpcRegistry.keys()].map((agentId) => stopAgent(rpcRegistry, agentId, pi, { silent: true }).catch(() => undefined));
+      const rpcStops = [...rpcRegistry.keys()].map((agentId) => stopAgent(rpcRegistry, agentId, pi, { silent: true, skipCostCheckpoint: true }).catch(() => undefined));
       await Promise.allSettled(rpcStops);
     },
   };

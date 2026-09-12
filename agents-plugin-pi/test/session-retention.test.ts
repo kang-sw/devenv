@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import { allocateAgentHome, createAgentStorageContext, readOwnership, writeOwnership } from "../src/agent-storage.ts";
 import type { PersistedOrphan } from "../src/agent-sidecar.ts";
 import { applySessionStartAgentRetention } from "../src/index.ts";
-import { aggregateDescendantCosts } from "../src/agent-footer.ts";
 
 function orphan(agentId: string, sessionPath: string, ownership?: PersistedOrphan["ownership"]): PersistedOrphan {
   return { agentId, sessionPath, systemPromptPath: "/tmp/prompt.md", wsToolNames: [], toolGroup: "full-worker", ...(ownership ? { ownership } : {}) };
@@ -33,9 +32,9 @@ describe("controller session-start child retention", () => {
       assert.equal(existsSync(stale.home), false);
       assert.equal(existsSync(recent.home), true);
       assert.deepEqual(retained.map(entry => entry.agentId), [recent.agentId, "legacy"]);
-      const aggregate = aggregateDescendantCosts(createAgentStorageContext("other-lead", root), new Map());
-      assert.equal(aggregate.knownUsd.toFixed(2), "0.60");
-      assert.deepEqual({ ...aggregate, knownUsd: 0 }, { knownUsd: 0, knownContributors: 2, unknownContributors: 0, descendants: 2 }, "retention roll-up preserves the deleted child beside the retained child");
+      const saved = JSON.parse(readFileSync(join(root, "ws-agents", "other-lead", ".cost-estimate", "checkpoint.json"), "utf8"));
+      assert.deepEqual(saved.evictedBaseline, { knownUsd: .4, knownContributors: 1, unknownContributors: 0, descendants: 1 }, "retention folds only the deleted direct record into the scalar baseline");
+      assert.deepEqual(saved.agents, [], "retention does not discover or retain identities for sibling homes");
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 

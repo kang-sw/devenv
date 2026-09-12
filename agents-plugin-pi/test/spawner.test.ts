@@ -3745,7 +3745,7 @@ describe("evictForCapacity", () => {
       assert.equal(registry.size, 0);
       assert.equal(existsSync(ownership.home), false);
       assert.deepEqual(readdirSync(join(realpathSync(root), "ws-agents")), ["lead-1"]);
-      assert.deepEqual(readdirSync(join(realpathSync(root), "ws-agents", "lead-1")), [".cost-rollup"], "eviction retains only the durable cost roll-up directory");
+      assert.deepEqual(readdirSync(join(realpathSync(root), "ws-agents", "lead-1")), [".cost-estimate"], "eviction retains only the bounded cost checkpoint directory");
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 

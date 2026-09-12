@@ -439,7 +439,10 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     const hostTui = await loadHostPiTui();
     return { truncateToWidth: hostTui.truncateToWidth, visibleWidth: hostTui.visibleWidth };
   });
-  for (const event of ["message_end", "model_select", "thinking_level_select", "session_info_changed", "session_compact"] as const) {
+  pi.on("message_end", (event) => { agentFooterLifecycle.acceptUsage(event.message); });
+  pi.on("session_compact", (event) => { agentFooterLifecycle.acceptUsage(event.compactionEntry); agentFooterLifecycle.checkpoint(); });
+  pi.on("session_tree", (event) => { if (event.summaryEntry) agentFooterLifecycle.acceptUsage(event.summaryEntry); });
+  for (const event of ["model_select", "thinking_level_select", "session_info_changed"] as const) {
     pi.on(event, () => { agentFooterLifecycle.refresh(); });
   }
   // This event fires for both startup and /reload, so local workflow syncs
@@ -707,9 +710,6 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       // must not. A prior controller (a `/reload`) is stopped first so its
       // timer never outlives the registry/threads it closed over.
       const spawnRole = readSpawnRole(process.env);
-      // Temporary mitigation: the custom footer saturates the Pi main thread after /reload.
-      // Re-enable only after 260913-bug-ws-pi-cost-footer-cpu-saturation is resolved.
-      // await applySessionStartAgentFooter(agentFooterLifecycle, spawnRole, ctx, agentTools.rpcRegistry, dispatchStorage);
       if (shouldArmAgentWidget(spawnRole, ctx.mode)) {
         agentWidgetHandle?.stop();
         agentWidgetHandle = createAgentWidgetController(ctx, agentTools.rpcRegistry, threadHandle.threads, {
@@ -718,7 +718,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
         });
         agentWidgetRefreshRef.current = () => {
           agentWidgetHandle?.refresh();
-          agentFooterLifecycle.refresh();
+          agentFooterLifecycle.refreshAgents();
         };
         agentWidgetHandle.refresh();
       }
@@ -822,6 +822,10 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       removeForkTransport(process.env[WS_PI_FORK_CONTEXT_ENV]);
       forkReady = !readinessError;
     }
+    // Mount only after this session's tools and fork readiness are complete:
+    // the host TUI import is asynchronous, and yielding earlier would let Pi
+    // snapshot the active tool set before later question tools were registered.
+    await applySessionStartAgentFooter(agentFooterLifecycle, bootstrapRole, ctx, agentTools.rpcRegistry, dispatchStorage);
   });
 
   pi.on("session_shutdown", async (_event, _ctx) => {
