@@ -14,7 +14,7 @@ import (
 
 // playbookTerminologyTable is the bundled harness-aware terminology table.
 //
-// Keys are harness names ("claude", "codex"); "" is the host-neutral fallback for
+// Keys are harness names ("claude", "codex", "pi"); "" is the host-neutral fallback for
 // any unrecognized or undetected harness.
 // Values map PascalCase variable names (matching playbook frontmatter declarations)
 // to their harness-specific text.
@@ -32,6 +32,11 @@ var playbookTerminologyTable = map[string]map[string]string{
 		"ExploreAgent":  "an explorer subagent",
 		"SpawnIdiom":    "creating a new Codex task",
 		"ContinueIdiom": "resuming the agent using its task id",
+	},
+	"pi": {
+		"ExploreAgent":  "the `explore` researcher",
+		"SpawnIdiom":    "ws-agent-spawn",
+		"ContinueIdiom": "ws-agent-send to the same alias or agent id",
 	},
 	// "" = host-neutral fallback for unknown/undetected harness.
 	"": {
@@ -72,7 +77,7 @@ var reservedToolVarNames = func() map[string]bool {
 }()
 
 // terminologyForHarness returns the terminology table for the given harness.
-// If harness is not recognized ("" or any value other than "claude"/"codex"),
+// If harness is not recognized ("" or any value other than "claude"/"codex"/"pi"),
 // the host-neutral ("") table is returned.
 func terminologyForHarness(harness string) map[string]string {
 	if table, ok := playbookTerminologyTable[harness]; ok {
