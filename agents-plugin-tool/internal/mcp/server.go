@@ -973,11 +973,14 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		branch, _ := params.Arguments["branch"].(string)
 		target, _ := params.Arguments["target"].(string)
+		releaseOverride, _ := params.Arguments["release_target_override"].(bool)
+		expectedSource, _ := params.Arguments["expected_source_oid"].(string)
+		expectedTarget, _ := params.Arguments["expected_target_oid"].(string)
 		title, _ := params.Arguments["title"].(string)
 		description, _ := params.Arguments["description"].(string)
 		result, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, target, wsgit.CommitOptions{
 			Title: title, Description: description, AIContext: stringList(params.Arguments["ai_context"]), UpdatedTickets: stringList(params.Arguments["updated_tickets"]),
-		})
+		}, implMergeAcknowledgement{ReleaseTargetOverride: releaseOverride, ExpectedSourceOID: expectedSource, ExpectedTargetOID: expectedTarget})
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
 		}
@@ -3387,17 +3390,20 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "git.merge",
-			"description": "Lead-only. Merge a local impl branch into its encoded root using --no-ff, then delete the merged branch. Refuses main, master, mismatched targets, and dirty worktrees. Conflicts remain on the target for lead-delegate to resolve. Defaults to text; use format=json for structured output.",
+			"description": "Lead-only. Merge a local impl branch into its encoded root using --no-ff, then delete the merged branch. Main/master return policy_blocked diagnostics by default; explicit release-target acknowledgement bound to inspected source_oid and target_oid permits retry. Must-resolve safety findings cannot be waived. Conflicts remain on the target for lead-delegate to resolve. Defaults to text; use format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"branch":          stringProperty("Optional local impl/<root>/<stem> branch; defaults to the current branch. May be supplied while checked out on another branch."),
-					"target":          stringProperty("Optional target assertion; must equal the impl branch's encoded root."),
-					"title":           stringProperty("Single-line merge commit title."),
-					"description":     stringProperty("Optional merge commit description."),
-					"ai_context":      stringArrayProperty("Required AI Context bullets for the merge record."),
-					"updated_tickets": stringArrayProperty("Optional ticket update summaries."),
-					"format":          stringProperty("Use json for structured output."),
+					"branch":                  stringProperty("Optional local impl/<root>/<stem> branch; defaults to the current branch. May be supplied while checked out on another branch."),
+					"target":                  stringProperty("Optional target assertion; must equal the impl branch's encoded root."),
+					"release_target_override": map[string]any{"type": "boolean", "default": false, "description": "Explicit acknowledgement of the main/master release-target policy only. Never waives must_resolve diagnostics; requires both expected OIDs."},
+					"expected_source_oid":     stringProperty("Full inspected source_oid from the refusal; required when release_target_override is true."),
+					"expected_target_oid":     stringProperty("Full inspected target_oid from the refusal; required when release_target_override is true."),
+					"title":                   stringProperty("Single-line merge commit title."),
+					"description":             stringProperty("Optional merge commit description."),
+					"ai_context":              stringArrayProperty("Required AI Context bullets for the merge record."),
+					"updated_tickets":         stringArrayProperty("Optional ticket update summaries."),
+					"format":                  stringProperty("Use json for structured output."),
 				},
 				"required": []string{"title", "ai_context"},
 			},

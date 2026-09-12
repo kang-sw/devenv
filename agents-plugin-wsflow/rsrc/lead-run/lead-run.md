@@ -97,7 +97,13 @@ branch; `ask` (including absent) surfaces the report for user approval first.
 Use the worker's reported route value, so goal-run skip survives the handoff.
 The explicit branch lets the tool run from your base checkout. A refusal leaves
 the assignment unmerged; a conflict goes to `{{.SkillNamespace}}:lead-delegate`
-as a bounded resolution task. Advance the note to `merged` only after
+as a bounded resolution task. Release-target acknowledgement is a separate
+decision from approval to integrate a worker's result: present the tool's
+diagnostics to the user and obtain explicit acknowledgement when its
+release-target policy is overrideable. Use the tool's inspected retry values
+after that acknowledgement; changed candidate tips need fresh acknowledgement.
+All impl integration stays with `{{.McpNamespace}}/git.merge`.
+Advance the note to `merged` only after
 successful integration. With `completion: phase`, leave the ticket active for a
 later cycle and go to **End the turn**. With `completion: ticket`, then go to
 **End the turn**; when that closed ticket was an epic's last open child, first

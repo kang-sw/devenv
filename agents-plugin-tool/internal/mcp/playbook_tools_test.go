@@ -2681,6 +2681,10 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				"With `completion: phase`, leave the ticket active for a later cycle",
 				"With `completion: ticket`, then go to **End the turn**",
 				"goes to `" + product + ":lead-delegate` as a bounded resolution task",
+				"Release-target acknowledgement is a separate decision from approval to integrate a worker's result",
+				"obtain explicit acknowledgement when its release-target policy is overrideable",
+				"changed candidate tips need fresh acknowledgement",
+				"All impl integration stays with `" + product + "/git.merge`",
 				"goal-to-PARENT terminal uses raw Git",
 				"do not reset the retry count on resume or reclassify the original risks",
 			} {

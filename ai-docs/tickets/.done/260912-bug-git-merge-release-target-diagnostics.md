@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: c853fa3be24f85a0
 sage-review-completeness-reviewed: c853fa3be24f85a0
+completed: 2026-09-12
 ---
 
 # Make git.merge release-target refusals actionable and safely acknowledgeable
@@ -103,3 +104,29 @@ main and master refusals, mixed must-resolve and overrideable diagnostics, OID
 changes between refusal and retry, raw-output fallback, non-release target
 compatibility, non-waivable safety checks, conflicts, and the wsflow mirror and
 package contracts.
+
+### Result (c7c1de4d) - 2026-09-12
+
+- Added structured release-target policy refusals with classified, actionable
+  diagnostics and inspected source/target OIDs. Explicit acknowledgement only
+  waives the main/master policy; all checkable safety failures remain blocking.
+- Bound retries to both OIDs and rechecked local refs before checkout and merge.
+  Correctness review identified Git DWIM tag fallback; `aeefa0f4` restores exact
+  local-ref lookup on every inspection and covers disappearing refs with shadow
+  tags. Non-release success, non-forced cleanup, and retained conflict state
+  remain supported.
+- Included review-frontier reachability and the uncovered candidate revision
+  set as evidence, without interpreting it as review quality or resolved findings.
+  Missing frontier evidence does not authorize or forbid a release merge.
+- Updated the lead handoff to obtain separate release-target acknowledgement;
+  regenerated both package manifests and the byte-identical wsflow playbook.
+- Verification: `go test ./...`, focused `TestImplMerge` tests, rendered lead-run
+  policy tests, and `scripts/smoke-ws-mcp.sh ..` passed. Python package suites
+  passed: 11 wsflow tests and 58 ws tests. Full Go and smoke checks passed again
+  after the exact-ref correction; ticket-only closure uses the ticket guardrails.
+- Independent correctness, fit (including fresh-reader prose audit), and test
+  reviews completed. The one Critical exact-ref finding was fixed and confirmed
+  clean in round two. Remaining findings: none.
+- Decisions: preserve compact text by default with JSON opt-in; retain legacy
+  MCP errors for non-release safety refusals; reject release overrides on
+  non-release targets. No implementation scope was omitted.
