@@ -200,7 +200,7 @@ export function buildChildProcessEnv(baseEnv: NodeJS.ProcessEnv): NodeJS.Process
  *   sub-questions). Deliberately excludes `bash`/`edit`/`write` — those would
  *   let the worker bypass the approval gate entirely.
  */
-const READ_ONLY_BUILTINS: readonly string[] = ["read", "grep", "find", "ls"];
+const READ_ONLY_BUILTINS: readonly string[] = READ_TOOLS;
 
 export const TOOL_GROUPS: Record<ToolGroup, readonly string[]> = {
   "read-only": [...READ_ONLY_BUILTINS, REPORT_TO_LEAD_TOOL_NAME],
@@ -1526,6 +1526,12 @@ export function isOwningAgentIdle(): boolean {
  * call, not that the model consumed it. */
 export interface TerminalDelivery {
   state?: "held" | "enqueued";
+  /** Release a delegated report obligation only when Pi accepts its direct-parent delivery. */
+  releaseObligation?: () => void;
+  /** Restore the obligation when synchronous delivery fails after release for status rendering. */
+  restoreObligation?: () => void;
+  /** Re-evaluate parking after a held terminal finally reaches its parent. */
+  afterEnqueue?: () => void;
 }
 
 /** In-memory finish state for one fork-raised `/done`. It intentionally has
@@ -1608,6 +1614,8 @@ function sendPush(
   deliverAs: PushDeliverAs,
   terminal?: TerminalDelivery,
 ): void {
+  const wasHeld = terminal?.state === "held";
+  terminal?.releaseObligation?.();
   const status = computeRunningStatusLine(registry);
   const base: Record<string, unknown> = record ? { agent_id: record.agentId, ...payload } : { ...payload };
   const details = status ? { ...base, status } : base;
@@ -1627,8 +1635,12 @@ function sendPush(
       },
       { deliverAs, triggerTurn: true },
     );
-    if (terminal) terminal.state = "enqueued";
+    if (terminal) {
+      terminal.state = "enqueued";
+      if (wasHeld) terminal.afterEnqueue?.();
+    }
   } catch {
+    terminal?.restoreObligation?.();
     // Best effort: a push that cannot be delivered (a torn-down session, a
     // host that rejected the message) must never turn a child's routine
     // report into a crashed event listener.
@@ -1678,6 +1690,33 @@ export function registerPushFlush(pi: ExtensionAPI, options: WakeStartOptions): 
   });
 }
 
+function reportObligationDelivery(record: RpcAgentRecord, registry: RpcAgentRegistry | undefined): TerminalDelivery {
+  const workGeneration = record.workGeneration;
+  const expected = record.expectedReport === true;
+  let released = false;
+  return {
+    releaseObligation: () => {
+      if (!expected || released || record.workGeneration !== workGeneration) return;
+      released = true;
+      record.expectedReport = false;
+      syncOwnershipProtection(record);
+      publishSubtree(registry);
+    },
+    restoreObligation: () => {
+      if (!released || record.workGeneration !== workGeneration) return;
+      released = false;
+      record.expectedReport = true;
+      syncOwnershipProtection(record);
+      publishSubtree(registry);
+    },
+    afterEnqueue: () => {
+      if (registry && record.client && !record.running && !record.streaming && !record.threadBound && !record.ownerHeld && !record.waitingOnChildren && !record.expectedReport) {
+        void stopAgent(registry, record.agentId, undefined, { silent: true });
+      }
+    },
+  };
+}
+
 /**
  * Emits the deferred `kind:"final"` report for a child that has just left the
  * running state, and says whether there was one.
@@ -1706,16 +1745,12 @@ export function flushPendingFinal(
     record.terminalThisTurn = false;
     return false;
   }
-  if (record.delegation && report !== undefined) {
-    record.expectedReport = false;
-    syncOwnershipProtection(record);
-  }
   record.pendingFinal = undefined;
   record.pendingFinalToolCallId = undefined;
   record.pendingFinalAccepted = undefined;
   if (report === undefined) return false;
   publishSubtree(registry);
-  const terminal: TerminalDelivery = {};
+  const terminal = record.delegation ? reportObligationDelivery(record, registry) : {};
   record.terminalDelivery = terminal;
   pushToLead(pi, registry, record, "ws-agent-report", { kind: "final", report, settled_reason: settledReason }, "followUp", terminal);
   return true;
@@ -2040,7 +2075,9 @@ export function markAgentExited(
   // A child that filed a final and then died before settling still answered;
   // `settled_reason: "exited"` is what tells the lead the death, not silence.
   if (flushPendingFinal(pi, registry, record, "exited")) return;
-  pushToLead(pi, registry, record, "ws-agent-settled", { reason: "exited" }, "followUp");
+  const terminal = record.delegation ? reportObligationDelivery(record, registry) : undefined;
+  if (terminal) record.terminalDelivery = terminal;
+  pushToLead(pi, registry, record, "ws-agent-settled", { reason: "exited" }, "followUp", terminal);
 }
 
 /** Interval of the background liveness sweep, while at least one agent is outstanding. */
@@ -3636,7 +3673,10 @@ export async function stopAgent(
       // lead-facing event at all, so an un-pushed final dies with it rather
       // than arriving out of nowhere.
       record.pendingFinal = undefined;
-    } else if (!flushPendingFinal(pi, registry, record, "stopped")) {
+    } else if (!flushPendingFinal(pi, registry, record, "stopped") && !(record.delegation && readDelegationPolicy())) {
+      // A delegated owner invoked this stop in its current turn, so the tool
+      // result is the disposition. A self-generated follow-up would create a
+      // held delivery that blocks the owner's fresh subtree final.
       pushToLead(pi, registry, record, "ws-agent-settled", { reason: "stopped" }, "followUp");
     }
     // 260905 (live-agent widget ticket): the record just left the live state

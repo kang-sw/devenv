@@ -81,14 +81,14 @@ export function childPolicy(parent: DelegationPolicy, tools: readonly string[], 
       throw new Error(`ws-pi-agent: child capability exceeds parent ceiling (${excess.join(", ") || `${parent.authority} -> ${authority}`})`);
     }
   }
-  return { version: 1, depth, maxDepth: parent.maxDepth, tools: effective, authority, ...(network || requested.search || requested.fetch ? { network: requested } : {}), ...(sessionKey ? { sessionKey } : {}), ...(parent.sessionKey ? { parentSessionKey: parent.sessionKey } : {}) };
+  return { version: 1, depth, maxDepth: parent.maxDepth, tools: effective, authority, ...(network || requested.search || requested.fetch ? { network: requested } : {}), ...(sessionKey ? { sessionKey } : {}), ...(!sessionKey && parent.sessionKey ? { parentSessionKey: parent.sessionKey } : {}) };
 }
 export function assertPolicyTool(policy: DelegationPolicy | undefined, name: string): void {
   if (policy && (!policy.tools.includes(name) || (name === "web_search" && !policy.network?.search) || (name === "ws_web_fetch" && !policy.network?.fetch))) throw new Error(`ws-pi-agent: ${name} exceeds this agent's capability ceiling`);
 }
 export function assertSessionAuthority(policy: DelegationPolicy | undefined, args: Record<string, unknown>, knownKeys: ReadonlySet<string>): void {
   if (!policy) return;
-  if (policy.authority !== "lead" && typeof args.session_key === "string" && !knownKeys.has(args.session_key)) throw new Error("ws-pi-agent: session key is outside this agent's authority");
+  if (typeof args.session_key === "string" && !knownKeys.has(args.session_key)) throw new Error("ws-pi-agent: session key is outside this agent's authority");
   if (args.capability !== undefined && (!Object.hasOwn(AUTHORITY, String(args.capability)) || AUTHORITY[args.capability as SessionAuthority] > AUTHORITY[policy.authority])) throw new Error("ws-pi-agent: requested session capability exceeds parent ceiling");
 }
 export function promptDigest(path: string): string { return createHash("sha256").update(readFileSync(path)).digest("hex"); }
@@ -133,7 +133,12 @@ export class RenderRegistry {
   restore(values: readonly unknown[]): void {
     for (const value of values) {
       const e = value as RenderProvenance;
-      if (e && typeof e.path === "string" && typeof e.digest === "string" && ["worker", "reviewer", "delegate", "explore"].includes(e.class) && Object.hasOwn(AUTHORITY, e.authority) && typeof e.readOnly === "boolean" && typeof e.requiresChildren === "boolean") this.entries.set(e.path, e);
+      if (!e || typeof e.path !== "string" || typeof e.digest !== "string" || !["worker", "reviewer", "delegate", "explore"].includes(e.class) || !Object.hasOwn(AUTHORITY, e.authority) || typeof e.readOnly !== "boolean" || typeof e.requiresChildren !== "boolean") continue;
+      try {
+        const canonical = realpathSync(e.path);
+        if (promptDigest(canonical) === e.digest) this.entries.set(canonical, { ...e, path: canonical });
+      } catch { /* stale/missing provenance is not authority */ }
     }
   }
+  values(): RenderProvenance[] { return [...this.entries.values()]; }
 }

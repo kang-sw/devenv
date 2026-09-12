@@ -688,6 +688,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     const entry = value as { type?: string; customType?: string; data?: unknown };
     return entry.type === "custom" && entry.customType === "ws-pi-render-provenance" ? [entry.data] : [];
   }));
+  for (const entry of renderRegistry.values()) if (entry.sessionKey) knownKeys.add(entry.sessionKey);
 
   // Lead/fork-only: a worker/explore child never consults the local-devenv
   // marker or builds ws-mcp itself — it reuses whatever the launcher already

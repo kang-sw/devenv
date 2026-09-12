@@ -12,6 +12,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 6609673a859b6719
 sage-review-completeness-reviewed: 6609673a859b6719
+completed: 2026-09-13
 ---
 
 # Pi adapter: recursive worker delegation with monotonic capabilities and subtree-aware completion
@@ -70,3 +71,18 @@ Propagate a default maximum depth of 2 and an adapter-owned capability ceiling t
 Add expected-descendant obligations and aggregate lifecycle state. Suppress upstream semantic settle/final and automatic park while a parent is waiting on children; deliver child events only to the direct parent; reject premature parent finals; require a fresh accepted final after subtree quiescence; and propagate completion one edge at a time. Compose this state with thread-bound, owner-held, compaction, push batching, alias/cap eviction, and restart recovery without overloading any of them.
 
 Verification covers: root privilege expansion; depth-1 worker spawning persistent Explore, reviewer, bounded delegate, and terminal full worker; depth-2 spawn rejection; read-only-to-writer, delegate-to-lead, bridged-tool, lazy-tool, and ws-session escalation rejection before allocation; terminal profile derivation; child follow-up on the same session; worker-local progress/question/final delivery; parent raw settle while waiting without upstream settle or park; plain child settle requiring parent disposition; premature parent final rejection; fresh final after subtree quiescence; exact-once root final; independent owner-held/thread-bound behavior; registry-cap protection; shutdown/restart sidecar recovery with outstanding obligations; and a real `lead → ticket worker → reviewer/Explore → worker final → lead` run. No special blocking Explore implementation or new orchestrator role is introduced.
+
+### Result (f7b3f670) - 2026-09-13
+
+Implemented bounded recursive worker ownership in `19f86bee` and closed the independent review findings in `a28fbc6d` and `f7b3f670`. Depth and capability ceilings, trusted render admission, direct-child management, edge-local obligations, fresh-final gating, aggregate-aware parking, sidecar recovery, and direct-parent push delivery now compose without adding an orchestrator or blocking Explore API.
+
+Round-one review found and fixed foreign session-key access by lead-capability children, premature obligation release before direct-parent enqueue, stopped-child final-gate blockage, stranded exit obligations, and duplicated authority/private-write inventories. Round two cleared correctness and fit; its remaining Important test gaps were dispositioned after the review cap by composing reviewer final delivery with repeated stop and fresh parent final, and by exercising filesystem sidecar recovery of an undelivered obligation. The round-two recovery observation was also fixed by restoring only digest-validated render provenance and repopulating its descendant session keys.
+
+Verification: `cd agents-plugin-pi && npm test -- --test-reporter=dot` passed the full suite after the final source and test inputs; focused recursive-worker and production fork lifecycle suites also passed. This ticket-worker run itself exercised the required real `lead → worker → partitioned reviewers → worker final → lead` path.
+
+Decisions: an explicit nested stop is its synchronous disposition and emits no redundant worker-local stopped follow-up; terminal report/exit obligations clear only when Pi accepts direct-parent enqueue and remain recoverable otherwise; root privilege expansion is represented by no delegation policy, not by a descendant carrying lead authority.
+
+
+## Resolution (2026-09-13)
+
+Implemented bounded recursive worker delegation and subtree-aware completion, closed correctness/fit findings in two review rounds, dispositioned remaining test coverage after the review cap, and verified the full Pi suite plus the live worker-to-reviewer lifecycle.

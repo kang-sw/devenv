@@ -9,8 +9,8 @@ import {
   childPolicy, parseDelegationPolicy, playbookProfile, readDelegationPolicy, readOnlyWsTools, type DelegationPolicy,
 } from "../src/delegation-policy.ts";
 import { assertSubtreeFinal, beginSubtreeDispatch, installSubtreePublisher, readSubtreeSnapshot, subtreeWaiting } from "../src/subtree-lifecycle.ts";
-import { applyRpcEvent, attachEventListener, evictForCapacity, flushPendingFinal, hasRunningAgents, heldPushQueue, leadIdleRef, leadWakeStartPendingRef, listAgents, promptAgent, registerPushFlush, resolveTools, sendToAgent, spawnAdmission, stopAgent, type RpcAgentRecord } from "../src/spawner.ts";
-import { captureOrphans, parseOrphans, rehydrateOrphanRecord, serializeOrphans } from "../src/agent-sidecar.ts";
+import { applyRpcEvent, attachEventListener, evictForCapacity, flushHeldPushes, flushPendingFinal, hasRunningAgents, heldPushQueue, leadIdleRef, leadWakeStartPendingRef, listAgents, markAgentExited, promptAgent, registerPushFlush, resolveTools, sendToAgent, spawnAdmission, stopAgent, type RpcAgentRecord } from "../src/spawner.ts";
+import { captureOrphans, parseOrphans, readAndClearSidecar, rehydrateOrphanRecord, reviveOrphans, serializeOrphans, writeSidecar } from "../src/agent-sidecar.ts";
 import { captureForkResume, rehydrateForkRecord } from "../src/ask.ts";
 
 const dirs: string[] = [];
@@ -44,9 +44,11 @@ test("native, bridged, lazy and session authority never exceed a nonroot ceiling
   assert.throws(() => childPolicy(parent, ["read"], "lead"), /leaf -> lead/);
   assert.throws(() => assertSessionAuthority(parent, { capability: "lead" }, new Set()), /session capability/);
   assert.throws(() => assertSessionAuthority(parent, { session_key: "foreign-lead" }, new Set(["own-leaf"])), /outside/);
+  assert.throws(() => assertSessionAuthority({ ...parent, authority: "lead" }, { session_key: "parent-lead" }, new Set(["own-worker"])), /outside/, "lead-capability workers are still nonroot policy holders");
   assertSessionAuthority(parent, { session_key: "own-leaf", capability: "leaf" }, new Set(["own-leaf"]));
   assert.deepEqual(readOnlyWsTools(["ws__git_diff", "ws__git_commit", "ws__tickets_close", "ws__unknown_read"]), ["ws__git_diff"]);
   assert.equal(childPolicy(parent, ["read"], "leaf").authority, "leaf");
+  assert.equal(childPolicy({ ...parent, sessionKey: "parent-lead" }, ["read"], "leaf", false, "own-leaf").parentSessionKey, undefined, "a rendered child must not receive its parent's key in the environment");
 });
 
 test("malformed persisted policy never falls back to root", () => {
@@ -65,11 +67,17 @@ test("playbook authority comes from shipped manifest and bridge render, not a fi
   writeFileSync(path, "**Your ws session_key: `review-own`**\nreview body");
   const registry = new RenderRegistry();
   assert.equal(registry.get(path), undefined);
-  registry.record(path, playbookProfile(plugin, "code-review-correctness"));
+  const entry = registry.record(path, playbookProfile(plugin, "code-review-correctness"));
   assert.equal(registry.get(path)?.class, "reviewer");
   assert.equal(registry.get(path)?.sessionKey, "review-own");
+  const restored = new RenderRegistry();
+  restored.restore([entry]);
+  assert.equal(restored.values()[0]?.sessionKey, "review-own");
   writeFileSync(path, "replace with privileged instructions");
   assert.throws(() => registry.get(path), /changed since authorization/);
+  const rejected = new RenderRegistry();
+  rejected.restore([entry]);
+  assert.equal(rejected.values().length, 0, "changed persisted provenance restores no descendant-key authority");
 });
 
 test("spawn admission rejects unproven nested prompts and lead forks before allocation", () => {
@@ -127,7 +135,13 @@ test("a late prompt acknowledgement cannot reopen an already completed own turn"
   applyRpcEvent(r, { type: "tool_execution_start", toolName: "ws-report-to-lead", toolCallId: "final", args: { kind: "final", message: "done" } });
   applyRpcEvent(r, { type: "tool_execution_end", toolCallId: "final", isError: false });
   applyRpcEvent(r, { type: "agent_settled" });
-  flushPendingFinal(undefined, new Map([[r.agentId, r]]), r, "idle");
+  const sent: unknown[] = [];
+  const pi = { sendMessage: (message: unknown) => sent.push(message) } as any;
+  leadIdleRef.current = () => false;
+  flushPendingFinal(pi, new Map([[r.agentId, r]]), r, "idle");
+  assert.equal(r.expectedReport, true, "an accepted report stays outstanding until its direct-parent delivery is accepted");
+  flushHeldPushes(pi, true);
+  assert.equal(sent.length, 1);
   accept(); await pending;
   assert.equal(r.expectedReport, false);
 });
@@ -146,6 +160,48 @@ test("expected obligation is created after acceptance, not at prompt issuance", 
   assert.equal(evictForCapacity(registry, 1).ok, false);
   await stopAgent(registry, r.agentId);
   assert.equal(r.expectedReport, false, "explicit disposition releases even a dormant child");
+});
+
+test("held and failed terminal delivery preserve the obligation until direct-parent enqueue", () => {
+  const r = record("child", { delegation: worker(), expectedReport: true, pendingFinal: "done", pendingFinalAccepted: true });
+  const registry = new Map([[r.agentId, r]]);
+  const sent: any[] = [];
+  const pi = { sendMessage: (message: unknown) => sent.push(message) } as any;
+  leadIdleRef.current = () => false;
+  assert.equal(flushPendingFinal(pi, registry, r, "idle"), true);
+  assert.equal(r.expectedReport, true);
+  assert.equal(parseOrphans(serializeOrphans(captureOrphans(registry)))[0]?.state, "running");
+  const leadSession = join(home(), "lead.jsonl");
+  writeFileSync(leadSession, "");
+  writeSidecar(leadSession, captureOrphans(registry));
+  const recovered = new Map<string, RpcAgentRecord>();
+  reviveOrphans(recovered, readAndClearSidecar(leadSession));
+  installSubtreePublisher(recovered, undefined, () => 0);
+  assert.equal(recovered.get(r.agentId)?.expectedReport, true);
+  assert.throws(() => assertSubtreeFinal(recovered), /final rejected/, "restart recovery retains the undelivered edge obligation");
+  flushHeldPushes(pi, true);
+  assert.equal(r.expectedReport, false);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].content, /0 delegated agents still running/);
+
+  const failed = record("failed", { delegation: worker(), expectedReport: true, pendingFinal: "retry", pendingFinalAccepted: true });
+  const failedRegistry = new Map([[failed.agentId, failed]]);
+  assert.equal(flushPendingFinal(pi, failedRegistry, failed, "idle"), true);
+  flushHeldPushes({ sendMessage: () => { throw new Error("session torn down"); } } as any, true);
+  assert.equal(failed.expectedReport, true, "a rejected enqueue stays recoverably outstanding");
+});
+
+test("exited delegated child releases its obligation only with the terminal failure delivery", () => {
+  const r = record("child", { client: {} as RpcClient, delegation: worker(), expectedReport: true, running: true });
+  const registry = new Map([[r.agentId, r]]);
+  const sent: unknown[] = [];
+  const pi = { sendMessage: (message: unknown) => sent.push(message) } as any;
+  leadIdleRef.current = () => false;
+  markAgentExited(pi, registry, r);
+  assert.equal(r.expectedReport, true);
+  flushHeldPushes(pi, true);
+  assert.equal(r.expectedReport, false);
+  assert.equal(sent.length, 1);
 });
 
 test("sidecar round-trips depth, ceiling and outstanding subtree protection", () => {
@@ -200,6 +256,9 @@ test("lead -> worker -> leaf: local settle cannot report or park parent; fresh a
   innerEdge.emit({ type: "agent_settled" }); await drain();
   assert.equal(localReports.length, 1, "reviewer report wakes only its direct worker owner");
   assert.equal(sent.length, 0, "no grandchild result leaks upward before synthesis");
+  await stopAgent(inner, grandchild.agentId, innerEdge.pi);
+  await stopAgent(inner, grandchild.agentId, innerEdge.pi);
+  assert.equal(assertSubtreeFinal(inner), 0, "accepted report plus repeated explicit disposition leaves the worker subtree quiescent");
   h.emit({ type: "agent_start" });
   h.emit({ type: "tool_execution_start", toolName: "ws-report-to-lead", toolCallId: "new", args: { kind: "final", message: "synthesized reviewer findings" } });
   h.emit({ type: "tool_execution_end", toolName: "ws-report-to-lead", toolCallId: "new", result: { details: { subtreeRevision: assertSubtreeFinal(inner) } }, isError: false });
@@ -224,6 +283,33 @@ test("plain managed leaf settle is delivered but keeps the obligation and proces
   await stopAgent(registry, r.agentId, h.pi);
   assert.equal(h.stops(), 1);
   assert.equal(r.expectedReport, false);
+});
+
+test("worker stop disposition is quiescent for a fresh parent final", async () => {
+  const parentPolicy = worker();
+  const previous = process.env[DELEGATION_ENV];
+  process.env[DELEGATION_ENV] = JSON.stringify(parentPolicy);
+  const child = record("reviewer", {
+    client: { abort: async () => {}, stop: async () => {} } as RpcClient,
+    delegation: childPolicy(parentPolicy, ["read", "ws-report-to-lead"], "delegate"),
+    expectedReport: false,
+    running: true,
+  });
+  const registry = new Map([[child.agentId, child]]);
+  installSubtreePublisher(registry, undefined, () => heldPushQueue.length);
+  leadIdleRef.current = () => false;
+  try {
+    await stopAgent(registry, child.agentId, { sendMessage: () => { throw new Error("stop disposition must not push"); } } as any);
+    assert.equal(heldPushQueue.length, 0);
+    assert.equal(assertSubtreeFinal(registry), 0);
+    await stopAgent(registry, child.agentId);
+    assert.equal(assertSubtreeFinal(registry), 0, "repeated dormant stop stays quiescent");
+    const outstanding = record("other", { delegation: child.delegation, expectedReport: true });
+    registry.set(outstanding.agentId, outstanding);
+    assert.throws(() => assertSubtreeFinal(registry), /final rejected/);
+  } finally {
+    if (previous === undefined) delete process.env[DELEGATION_ENV]; else process.env[DELEGATION_ENV] = previous;
+  }
 });
 
 test("dormant continuation keeps the same session and capability envelope", async () => {
