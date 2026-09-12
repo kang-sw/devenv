@@ -32,22 +32,22 @@ It records a read-only comparison against `develop` at `717b1086`.
 | idea | `260904-refactor-mental-model-doc-drift-epic-renames` | Cleanup candidate | `260909-refactor-retire-spec-mental-model-layers` removed the live mental-model layer. |
 | idea | `260904-research-mental-models-query-reconciliation` | Cleanup candidate | The same retirement removed the queried tool surface. |
 | idea | `260907-feat-ws-tickets-query-pagination-and-keyword-ranking` | Open research | It remains demoted with unresolved pagination and ranking decisions and no implementation. |
-| idea | `260908-bug-todo-add-accepts-call-without-required-title` | Live implementation candidate | Current todo creation still accepts an unchecked or empty title. |
+| ready | `260908-bug-todo-add-accepts-call-without-required-title` | Live implementation candidate | Current todo creation still accepts an unchecked or empty title. |
 | idea | `260909-research-ws-refoundation-evidence-audit` | Retained reference | `AGENTS.md` names it as the binding anchor for the refoundation topics. |
 | idea | `260910-feat-lead-run-worktree-parallel-route` | Live candidate with open decisions | Resource/worktree root separation landed, but worktree acquire/release and the gated parallel route do not exist; dispatch and reporting choices remain unsettled. |
 | idea | `260911-bug-implement-route-reuses-prior-phase-branch` | Live implementation candidate | The captured prior-phase branch selection defect has no closing implementation or superseding ticket. |
-| idea | `260911-bug-lead-run-stop-c-edition-before-result` | Live implementation candidate | `lead-run` still requires an Edition for stop-(c) recovery without distinguishing a phase that has no Result. |
+| ready | `260911-bug-lead-run-stop-c-edition-before-result` | Live implementation candidate | `lead-run` still requires an Edition for stop-(c) recovery without distinguishing a phase that has no Result. |
 | idea | `260911-research-batch-promotion-cross-ticket-coherence-gap` | Cleanup candidate | Its confirmed direction was implemented by `260912-feat-batch-promotion-design-review`; only lifecycle disposition remains. |
 | idea | `260911-research-epic-close-on-last-child-prompt` | Open research | The current lead-run nudge is explicitly interim; trigger and predicate choices remain open. |
 | idea | `260911-research-golden-fixture-verification-gap` | Open research | The observed fixture was repaired, but no general discovery or verification mechanism was selected. |
 | idea | `260911-research-lead-commit-guard-during-worker-run` | Open research | Shared-worktree lead mutation remains unguarded; prose, MCP, liveness, and override choices remain open. |
 | idea | `260911-research-ticket-decision-state-convention-gap` | Cleanup candidate | `260911-feat-research-outcome-ledger-derivation-contract` implemented the Outcome Ledger and derivation rules. |
-| idea | `260912-bug-lead-review-fix-relay-ticket-only-run` | Live implementation candidate | `lead-review` still hands a review artifact to ticket-only `lead-run`; the replacement contract remains undecided. |
+| ready | `260912-bug-lead-review-fix-relay-ticket-only-run` | Live implementation candidate | Its settled replacement routes bounded local repairs through `lead-delegate`, escalates material work through `lead-ticket`, and preserves `lead-run` as ticket-only. |
 | idea | `260912-bug-ticket-query-point-resolve-terminal-status` | Cleanup candidate pending runtime check | Current source point-resolves terminal tickets; the observed failure likely came from stale installed runtime and needs one post-reload check. |
 | idea | `260912-research-git-merge-epic-develop-boundary` | Cleanup candidate | `260912-feat-git-merge-generic-branch-promotion` implemented the confirmed generic-merge direction. |
 | idea | `260912-research-git-merge-release-target-policy` | Cleanup candidate | `260912-bug-git-merge-release-target-diagnostics` implemented diagnostics and OID-bound acknowledgement. |
 | todo | `260911-research-impl-lifecycle-merge-authority-goal-loop-rehoming` | Cleanup candidate with residual question | Its merge, selector, and goal-trigger children landed; only an explicitly deferred host-loop concern remains and should become fresh scope if pursued. |
-| todo | `260912-feat-lead-audit-doc` | Live implementation candidate | The owner confirmed replacing `lead-add-rule` with a concise write-capable document prose audit that offers an independent fresh read after recurring project-document edits. |
+| ready | `260912-feat-lead-audit-doc` | Live implementation candidate | The owner confirmed replacing `lead-add-rule` with a concise write-capable document prose audit that offers an independent fresh read after recurring project-document edits. |
 
 ## Immediate Disposition
 
@@ -61,7 +61,8 @@ part of the active inventory above.
 
 ### Verified Findings
 
-- The active inventory contains 25 tickets: 23 in `idea/` and two in `todo/`.
+- The active inventory contains 25 tickets: 20 in `idea/`, one in `todo/`, and
+  four in `ready/`.
 - The resulting ledger classifies six as open research, seven as live
   implementation candidates, eleven as cleanup candidates, and one as an
   intentionally retained binding anchor.

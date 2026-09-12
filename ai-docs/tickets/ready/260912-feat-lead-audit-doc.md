@@ -3,6 +3,10 @@ title: "Replace durable-rule capture with concise project-document prose auditin
 related:
   260909-research-ws-refoundation-evidence-audit: binding context for the reduced lead surface and downstream-first workflow
   260912-research-september-active-ticket-inventory-triage: inventory record for this implementation candidate
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 0bec273329d7af0d
+sage-review-completeness-reviewed: 0bec273329d7af0d
 ---
 
 # Replace durable-rule capture with concise project-document prose auditing
@@ -21,6 +25,11 @@ The repository's `skill-authoring` manual is not installed downstream and
 cannot supply this behavior to shipped skills. The replacement must be
 self-contained in the plugin surface available to an ordinary downstream
 project.
+
+The current `lead-add-rule` description also attracts unrelated requests that
+mention saving, remembering, or persisting workflow context. Removing that
+high-frequency misrouting source makes this replacement release-priority work,
+not optional post-release cleanup.
 
 ## Decisions
 
@@ -112,9 +121,25 @@ propose a direct rewrite or deletion. If there are no findings, say `No findings
   install.
 - Preserve the full and agentless package mirrors, resource manifests, and
   skill-inventory contracts while replacing the public skill name.
-- Apply the shipped-surface, skill-authoring, and wsflow-mirroring manuals to
-  every matching source change in this repository; these are implementation
-  constraints, not downstream dependencies.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/rsrc/, agents-plugin-wsflow/skills/, agents-plugin-tool/internal/wsdoc/conventions/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/)
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin/skills/lead-add-rule/SKILL.md, agents-plugin/rsrc/lead-add-rule/lead-add-rule.md, agents-plugin-wsflow/skills/lead-add-rule/SKILL.md, agents-plugin-wsflow/rsrc/lead-add-rule/lead-add-rule.md |
+| scope.surface | public-interface | agents-plugin/skills/lead-add-rule/SKILL.md#L2-L3 exposes the installed skill name and description |
+| scope.new_public_symbol | yes | lead-audit-doc replaces the public lead-add-rule skill name |
+| scope.new_type_contract | no | no Go type or signature change is named |
+| scope.test_surface | existing | agents-plugin/tests/test_skill_dispatch_contracts.py, agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py, agents-plugin-tool/internal/mcp/playbook_tools_test.go |
+| complexity.reuse_points | confirmed | agents-plugin/rsrc/fresh-reader-audit/fresh-reader-audit.md provides the existing fresh-reader pattern |
+| complexity.side_effect_risk | high | replaces an installed public skill and its delegated-playbook behavior |
+| risk.correctness | high | full and agentless package mirrors, manifests, and inventories must remain aligned |
+| risk.fit | moderate | shipped text must remain downstream-self-contained while preserving project instructions |
+| risk.test | high | dispatch, user-confirmation, mirror, manifest, and retired-name behavior require coverage |
+| risk.security_or_contract | high | removal of the public lead-add-rule contract and introduction of lead-audit-doc changes skill dispatch |
 
 ## Phases
 
