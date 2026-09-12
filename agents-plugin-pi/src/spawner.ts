@@ -984,6 +984,16 @@ export interface RpcAgentRecord {
    * pressing Esc clears the overlay while the thread stays bound).
    */
   threadBound?: boolean;
+  /** Same-process `/done` coordinator for a fork-raised owner thread; never persisted. */
+  forkFinish?: ForkFinishOperation;
+  /** Existing terminal push admission for the current work, if one exists. */
+  terminalDelivery?: TerminalDelivery;
+  /** Fork-owned final policy injected by fork.ts to avoid a reverse import. */
+  validateForkFinal?: (message: string) => boolean;
+  /** Tool outcome for the deferred final; finish reconciliation must not
+   * mistake a report-tool failure for a completed task. */
+  pendingFinalToolCallId?: string;
+  pendingFinalAccepted?: boolean;
   /** Last-seen final assistant text, cached across `getLastAssistantText()` calls. */
   lastText?: string;
   /**
@@ -1079,6 +1089,11 @@ export interface RpcAgentRecord {
    * whose final IS the completion signal the lead is meant to see.
    */
   onFinalReport?: (record: RpcAgentRecord, message: string) => boolean | void;
+  /**
+   * 260908 same-process finish callback, owned by ask.ts. It persists the
+   * ordinary thread snapshot only after this coordinator parks the fork.
+   */
+  onForkFinishComplete?: (record: RpcAgentRecord, failed?: string) => void;
   /**
    * 260905 (review relay #1, I1): fired by `sendToAgent`'s dormant-resume
    * branch right after the fresh client's event listener is attached. It
@@ -1450,12 +1465,13 @@ function admitPush(pi: ExtensionAPI, held: HeldPush | HeldRawSend): void {
     return; // stale session accessor
   }
   if (leadCompactingRef.current || leadWakeStartPendingRef.current || isOwningAgentIdle() || held.deliverAs === "followUp") {
+    if (held.kind === "push" && held.terminal) held.terminal.state = "held";
     heldPushQueue.push(held);
     requestPushWake(pi);
   } else if (held.kind === "raw") {
     held.send(pi);
   } else {
-    sendPush(pi, held.registry, held.record, held.family, held.payload, held.deliverAs);
+    sendPush(pi, held.registry, held.record, held.family, held.payload, held.deliverAs, held.terminal);
   }
 }
 
@@ -1500,13 +1516,37 @@ export function isOwningAgentIdle(): boolean {
   }
 }
 
-/** One `followUp`/`steer` push deferred until the owning session's current turn (or compaction) settles. */
+/** One volatile terminal event's shared-FIFO lifecycle. This is admission
+ * bookkeeping only: `enqueued` means Pi accepted the synchronous sendMessage
+ * call, not that the model consumed it. */
+export interface TerminalDelivery {
+  state?: "held" | "enqueued";
+}
+
+/** In-memory finish state for one fork-raised `/done`. It intentionally has
+ * no persistence representation: reload/death recovery remains best effort. */
+export interface ForkFinishOperation {
+  token: string;
+  cwd: string;
+  extensionPath: string;
+  generation: number | undefined;
+  phase: "waiting" | "evaluating" | "closeout" | "parking" | "complete";
+  settled: boolean;
+  closeoutIssued: boolean;
+  candidate?: { message: string; toolCallId?: string; accepted?: boolean };
+  sawQuestion?: boolean;
+  terminal?: TerminalDelivery;
+  advancing?: Promise<void>;
+}
+
 interface HeldPush {
   kind: "push";
   registry: RpcAgentRegistry | undefined;
   record: RpcAgentRecord | undefined;
   family: PushFamily;
   payload: Record<string, unknown>;
+  /** Optional same-process terminal delivery reference. */
+  terminal?: TerminalDelivery;
   /** Admission mode: governs whether busy delivery holds or interrupts. Confirmed-start delivery always overrides it to `steer`. */
   deliverAs: PushDeliverAs;
 }
@@ -1555,6 +1595,7 @@ function sendPush(
   family: PushFamily,
   payload: Record<string, unknown>,
   deliverAs: PushDeliverAs,
+  terminal?: TerminalDelivery,
 ): void {
   const status = computeRunningStatusLine(registry);
   const base: Record<string, unknown> = record ? { agent_id: record.agentId, ...payload } : { ...payload };
@@ -1575,6 +1616,7 @@ function sendPush(
       },
       { deliverAs, triggerTurn: true },
     );
+    if (terminal) terminal.state = "enqueued";
   } catch {
     // Best effort: a push that cannot be delivered (a torn-down session, a
     // host that rejected the message) must never turn a child's routine
@@ -1601,7 +1643,7 @@ export function flushHeldPushes(pi: ExtensionAPI | undefined, confirmedStart = f
     }
     // Admission mode decides busy-time holding or interruption only. A confirmed
     // start releases every held message as steering before its first response.
-    sendPush(pi, held.registry, held.record, held.family, held.payload, "steer");
+    sendPush(pi, held.registry, held.record, held.family, held.payload, "steer", held.terminal);
   }
   return pending.length;
 }
@@ -1649,9 +1691,173 @@ export function flushPendingFinal(
 ): boolean {
   const report = record.pendingFinal;
   record.pendingFinal = undefined;
+  record.pendingFinalToolCallId = undefined;
+  record.pendingFinalAccepted = undefined;
   if (report === undefined) return false;
-  pushToLead(pi, registry, record, "ws-agent-report", { kind: "final", report, settled_reason: settledReason }, "followUp");
+  const terminal: TerminalDelivery = {};
+  record.terminalDelivery = terminal;
+  pushToLead(pi, registry, record, "ws-agent-report", { kind: "final", report, settled_reason: settledReason }, "followUp", terminal);
   return true;
+}
+
+/** Starts (or joins) one same-process finish operation for a fork-raised
+ * owner `/done`. The operation deliberately has no persisted identity: its
+ * only promise is race-safe coordination while this adapter instance lives. */
+export function startForkFinish(
+  record: RpcAgentRecord,
+  registry: RpcAgentRegistry,
+  pi: ExtensionAPI,
+  resumeCtx: Pick<RpcResumeCtx, "cwd" | "extensionPath">,
+): ForkFinishOperation {
+  if (record.forkFinish) return record.forkFinish;
+  const operation: ForkFinishOperation = {
+    token: randomUUID(),
+    cwd: resumeCtx.cwd,
+    extensionPath: resumeCtx.extensionPath,
+    generation: record.launchGeneration,
+    phase: record.running || record.streaming ? "waiting" : "evaluating",
+    settled: !(record.running || record.streaming),
+    closeoutIssued: false,
+  };
+  // A final that was observed before `/done` is still current work only while
+  // it remains pending. Validate it through the fork-provided policy below.
+  if (record.pendingFinal !== undefined) {
+    operation.candidate = {
+      message: record.pendingFinal,
+      toolCallId: record.pendingFinalToolCallId,
+      accepted: record.pendingFinalAccepted,
+    };
+    record.pendingFinal = undefined;
+    record.pendingFinalToolCallId = undefined;
+    record.pendingFinalAccepted = undefined;
+  }
+  record.forkFinish = operation;
+  void advanceForkFinish(record, registry, pi, resumeCtx, operation);
+  return operation;
+}
+
+/** The single owner of finish advancement. Every call joins `advancing`, so
+ * report/settle/duplicate-callback races cannot issue a second closeout. */
+function advanceForkFinish(
+  record: RpcAgentRecord,
+  registry: RpcAgentRegistry,
+  pi: ExtensionAPI,
+  resumeCtx: Pick<RpcResumeCtx, "cwd" | "extensionPath">,
+  operation: ForkFinishOperation,
+): Promise<void> {
+  if (operation.advancing) return operation.advancing;
+  operation.advancing = (async () => {
+    if (record.forkFinish !== operation || operation.phase === "complete") return;
+    if (record.launchGeneration !== operation.generation) return;
+    // Initial idle evaluation marks `settled` at construction. Every later
+    // closeout decision requires the positive settle observation, rather than
+    // inferring it from mutable running/streaming flags.
+    if (!operation.settled) return;
+    operation.phase = "evaluating";
+
+    const existing = operation.terminal ?? record.terminalDelivery;
+    if (existing?.state === "held" || existing?.state === "enqueued") {
+      operation.terminal = existing;
+      await parkForkFinish(record, registry, pi, operation);
+      return;
+    }
+
+    const candidate = operation.candidate;
+    // A report-tool start is not a completion fact. In particular `/done`
+    // can race the tool's own end event, so wait for that matching outcome
+    // instead of issuing a closeout while the candidate is still in flight.
+    if (candidate && candidate.accepted === undefined) return;
+    if (candidate?.accepted && (record.validateForkFinal?.(candidate.message) ?? false)) {
+      const terminal: TerminalDelivery = {};
+      operation.terminal = terminal;
+      record.terminalDelivery = terminal;
+      pushToLead(pi, registry, record, "ws-agent-report", { kind: "final", report: candidate.message, settled_reason: "idle" }, "followUp", terminal);
+      await parkForkFinish(record, registry, pi, operation, terminal.state ? undefined : "final push was not admitted");
+      return;
+    }
+
+    if (!operation.closeoutIssued) {
+      operation.closeoutIssued = true;
+      operation.phase = "closeout";
+      // The closeout itself begins a new turn; only its next observed settle
+      // may choose final versus missing-final advisory.
+      operation.settled = false;
+      try {
+        await sendToAgent(registry, { ...finishResumeCtx(operation), pi, finishToken: operation.token }, record.agentId,
+          "The owner closed this side thread. Finish the task now and report the normal final report via ws-report-to-lead (kind: final).", false);
+      } catch (err) {
+        await finishWithAdvisory(record, registry, pi, operation, `closeout failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    await finishWithAdvisory(record, registry, pi, operation);
+  })().finally(() => {
+    operation.advancing = undefined;
+    // A settle can arrive while the closeout RPC promise is unresolved. The
+    // listener joined the in-flight advance above; replay exactly once after
+    // it releases rather than stranding an already-idle fork.
+    if (record.forkFinish === operation && operation.phase === "closeout" && operation.settled) {
+      void advanceForkFinish(record, registry, pi, resumeCtx, operation);
+    }
+  });
+  return operation.advancing;
+}
+
+function finishResumeCtx(operation: ForkFinishOperation): Pick<RpcResumeCtx, "cwd" | "extensionPath"> {
+  return { cwd: operation.cwd, extensionPath: operation.extensionPath };
+}
+
+function finishWithAdvisory(record: RpcAgentRecord, registry: RpcAgentRegistry, pi: ExtensionAPI, operation: ForkFinishOperation, detail?: string): Promise<void> {
+  const terminal: TerminalDelivery = {};
+  operation.terminal = terminal;
+  record.terminalDelivery = terminal;
+  pushToLead(pi, registry, record, "ws-agent-advisory", {
+    advisory: "missing-final",
+    detail: detail ?? "This fork settled without a valid final report. Treat the task as incomplete.",
+  }, "followUp", terminal);
+  return parkForkFinish(record, registry, pi, operation, terminal.state ? undefined : "missing-final advisory was not admitted");
+}
+
+async function parkForkFinish(record: RpcAgentRecord, registry: RpcAgentRegistry, pi: ExtensionAPI, operation: ForkFinishOperation, failure?: string): Promise<void> {
+  if (record.forkFinish !== operation || operation.phase === "parking" || operation.phase === "complete") return;
+  operation.phase = "parking";
+  // Preserve the thread bind until this coordinator owns the park; stopAgent
+  // performs the normal silent stop and clears it synchronously.
+  try {
+    let stopped = true;
+    await stopAgent(registry, record.agentId, pi, { silent: true, onStopped: (success) => { stopped = success; } });
+    if (!stopped) failure ??= "park failed: child stop did not complete";
+  } catch (err) {
+    failure ??= `park failed: ${err instanceof Error ? err.message : String(err)}`;
+  }
+  if (record.forkFinish !== operation) return;
+  operation.phase = "complete";
+  record.forkFinish = undefined;
+  try { record.onForkFinishComplete?.(record, failure); } catch { /* ordinary thread persistence is best effort */ }
+}
+
+/** Feed report/settle/tool-result observations into an active coordinator. */
+function observeForkFinishEvent(record: RpcAgentRecord, evt: { type?: string; toolName?: string; args?: unknown; toolCallId?: string; isError?: unknown; result?: unknown }): void {
+  const operation = record.forkFinish;
+  if (!operation || record.launchGeneration !== operation.generation) return;
+  if (evt.type === "agent_settled") {
+    operation.settled = true;
+    return;
+  }
+  if (evt.type === "tool_execution_start" && evt.toolName === REPORT_TO_LEAD_TOOL_NAME) {
+    const args = evt.args as { kind?: unknown; message?: unknown } | undefined;
+    if (args?.kind === "final" && typeof args.message === "string") {
+      operation.candidate = { message: args.message, toolCallId: evt.toolCallId };
+    } else if (args?.kind === "question") {
+      operation.sawQuestion = true;
+    }
+    return;
+  }
+  if (evt.type === "tool_execution_end" && operation.candidate && operation.candidate.toolCallId === evt.toolCallId) {
+    const result = evt.result as { isError?: unknown } | undefined;
+    operation.candidate.accepted = evt.isError !== true && result?.isError !== true;
+  }
 }
 
 /** Admit a family push through the shared FIFO. Idle, compacting, pending-start, and ordinary busy followUps are held; normal busy steers still interrupt. Idle wakes use sendUserMessage so before_agent_start composes the ws block for the run. */
@@ -1662,9 +1868,10 @@ export function pushToLead(
   family: PushFamily,
   payload: Record<string, unknown>,
   deliverAs: PushDeliverAs,
+  terminal?: TerminalDelivery,
 ): void {
   if (!pi || !shouldPushToLead() || !leadIdleRef.current) return;
-  admitPush(pi, { kind: "push", registry, record, family, payload, deliverAs });
+  admitPush(pi, { kind: "push", registry, record, family, payload, deliverAs, terminal });
 }
 
 /**
@@ -1696,6 +1903,9 @@ export async function promptAgent(
   // A final that never reached a settle belongs to the task being replaced,
   // not to the one starting now.
   record.pendingFinal = undefined;
+  record.pendingFinalToolCallId = undefined;
+  record.pendingFinalAccepted = undefined;
+  record.terminalDelivery = undefined;
   record.runStartedAt = Date.now();
   if (record.ownership) observeSessionWrite(record.ownership.home, record.sessionPath);
   if (record.ownership) updateOwnership(record.ownership.home, { lastActivityAt: Date.now(), liveness: { lifecycle: "live", running: true, observedAt: Date.now() } });
@@ -1956,6 +2166,8 @@ export interface RpcResumeCtx {
    * typing into an open thread must leave the bind exactly as it is.
    */
   leadSend?: boolean;
+  /** Internal token carried only by a coordinator-owned closeout send. */
+  finishToken?: string;
 }
 
 /**
@@ -2221,8 +2433,17 @@ export interface RpcEventOutcome {
  */
 export function applyRpcEvent(
   record: RpcAgentRecord,
-  evt: { type?: string; toolName?: string; args?: unknown; toolCallId?: string },
+  evt: { type?: string; toolName?: string; args?: unknown; toolCallId?: string; isError?: unknown; result?: unknown },
 ): RpcEventOutcome {
+  const finishing = record.forkFinish;
+  if (evt.type === "tool_execution_end") {
+    observeForkFinishEvent(record, evt);
+    if (record.pendingFinal !== undefined && record.pendingFinalToolCallId === evt.toolCallId) {
+      const result = evt.result as { isError?: unknown } | undefined;
+      record.pendingFinalAccepted = evt.isError !== true && result?.isError !== true;
+    }
+    return {};
+  }
   if (evt.type === "agent_start") {
     record.streaming = true;
   } else if (evt.type === "agent_settled") {
@@ -2232,6 +2453,7 @@ export function applyRpcEvent(
     record.running = false;
     record.pendingApproval = undefined;
     syncOwnershipProtection(record);
+    observeForkFinishEvent(record, evt);
     return { settled: true };
   } else if (evt.type === "tool_execution_start" && evt.toolName === REPORT_TO_LEAD_TOOL_NAME) {
     const args = evt.args as { message?: unknown; kind?: unknown } | undefined;
@@ -2244,6 +2466,14 @@ export function applyRpcEvent(
         // on (including on its own push), and the `agent_settled` that
         // follows must not emit a redundant idle-settle push.
         record.terminalThisTurn = true;
+      }
+
+      // An active fork-raised `/done` owns terminal report/question handling
+      // exclusively. Do not register a new owner question or let the normal
+      // final hook detach its bind while the coordinator is still deciding.
+      if (finishing && (kind === "question" || kind === "final")) {
+        observeForkFinishEvent(record, evt);
+        return {};
       }
 
       if (kind === "question") {
@@ -2280,7 +2510,11 @@ export function applyRpcEvent(
         // leaves the running state (`flushPendingFinal`), so the lead is told
         // "done" only once the author has stopped working. A consumed report
         // belongs to an owner thread and is not stashed at all.
-        if (!consumed) record.pendingFinal = message;
+        if (!consumed) {
+          record.pendingFinal = message;
+          record.pendingFinalToolCallId = evt.toolCallId;
+          record.pendingFinalAccepted = undefined;
+        }
         return {};
       }
 
@@ -2392,7 +2626,7 @@ export function attachEventListener(
     })();
   };
   record.unsubscribe = client.onEvent((evt) => {
-    const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string };
+    const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string; isError?: unknown; result?: unknown };
     const outcome = applyRpcEvent(record, e);
     if (e.type === "agent_start" || e.type === "agent_settled" || e.type === "message_end" || e.type === "message_update" || e.type === "thinking_level_changed" || e.type === "compaction_end") refresh();
     if (outcome.push) {
@@ -2404,11 +2638,16 @@ export function attachEventListener(
       triggerAgentWidgetRefresh();
     }
     if (outcome.settled) {
-      void (async () => {
+      const finish = record.forkFinish;
+      if (finish) {
+        void advanceForkFinish(record, registry ?? new Map([[record.agentId, record]]), pi as ExtensionAPI, finishResumeCtx(finish), finish);
+      } else void (async () => {
         // The deferred final, if this turn filed one, IS the settle message.
         if (!flushPendingFinal(pi, registry, record, "idle") && !record.threadBound && !record.terminalThisTurn) {
           const lastMessage = await harvestLastMessage(record);
-          pushToLead(pi, registry, record, "ws-agent-settled", { reason: "idle", last_message: lastMessage }, "followUp");
+          const terminal: TerminalDelivery = {};
+          record.terminalDelivery = terminal;
+          pushToLead(pi, registry, record, "ws-agent-settled", { reason: "idle", last_message: lastMessage }, "followUp", terminal);
         }
         await probeAgentLiveness(pi, registry, record);
         // Automatic park: the last step, after the liveness probe and (by
@@ -2427,6 +2666,10 @@ export function attachEventListener(
         // running if a synchronous nudge re-prompted it first).
         triggerAgentWidgetRefresh();
       })();
+    }
+    if (record.forkFinish && e.type === "tool_execution_end") {
+      const finish = record.forkFinish;
+      void advanceForkFinish(record, registry ?? new Map([[record.agentId, record]]), pi as ExtensionAPI, finishResumeCtx(finish), finish);
     }
     if (e.type === "tool_execution_start" && (e.toolName === GATED_EXEC_TOOL_NAME || e.toolName === REPORT_TO_LEAD_TOOL_NAME)) {
       // 260905 (live-agent widget ticket): a gated command just went pending
@@ -2877,10 +3120,17 @@ export async function sendToAgent(
     throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
   }
 
+  // A real new instruction supersedes an in-memory `/done` operation. Its
+  // late settle/park callbacks must not affect this replacement work.
+  if (record.forkFinish && ctx.finishToken !== record.forkFinish.token) {
+    record.forkFinish = undefined;
+    try { record.onForkFinishComplete?.(record, "superseded by new lead work"); } catch { /* best effort */ }
+  }
   // See `RpcResumeCtx.leadSend`: the lead taking over the exchange releases a
   // thread bind the owner surface will never close (the headless
-  // fork-raised-question path).
-  if (ctx.leadSend && record.threadBound) record.threadBound = false;
+  // fork-raised-question path). A coordinator closeout is lead-attributed
+  // text, but not an external takeover, so it never takes this branch.
+  if (ctx.leadSend && !ctx.finishToken && record.threadBound) record.threadBound = false;
   if (record.ownership) touchOwnership(record.ownership.home);
 
   if (!record.client) {
@@ -3067,7 +3317,7 @@ export async function stopAgent(
   registry: RpcAgentRegistry,
   agentId: string,
   pi?: ExtensionAPI,
-  opts?: { silent?: boolean },
+  opts?: { silent?: boolean; onStopped?: (success: boolean) => void },
 ): Promise<{ agent_id: string }> {
   // 260905 (alias/park/cap ticket): resolve alias-or-uuid first — see
   // `sendToAgent`'s identical resolve-then-`.get()` shape.
@@ -3117,6 +3367,7 @@ export async function stopAgent(
     // later `ws-agent-send` revival, where it would silently suppress every
     // settle push for the rest of the session.
     record.threadBound = false;
+    try { opts?.onStopped?.(stopped); } catch { /* internal observer only */ }
     if (opts?.silent) {
       // An adapter-internal stop (a thread close, session shutdown) is not a
       // lead-facing event at all, so an un-pushed final dies with it rather

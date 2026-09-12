@@ -105,6 +105,7 @@ import {
   refreshAgentTelemetry,
   spawnAgent,
   storageContextFromToolCtx,
+  startForkFinish,
   syncOwnershipProtection,
   startOwnedSessionObserver,
   stopAgent,
@@ -1314,14 +1315,48 @@ export function closeThreadOnDone(
     injectDiscussionSummary(pi, handle, rpcRegistry, thread, summary);
     return;
   }
-  detachForkRaisedThread(handle, rpcRegistry, thread);
+  finishForkRaisedThread(pi, handle, rpcRegistry, thread);
+}
+
+/** `/done` on a fork-raised thread: close the view immediately, then let the
+ * shared same-process coordinator wait for/obtain one terminal outcome. */
+function finishForkRaisedThread(pi: ExtensionAPI, handle: ThreadRegistryHandle, rpcRegistry: RpcAgentRegistry, thread: ThreadRecord): void {
+  const record = thread.respondentAgentId ? rpcRegistry.get(thread.respondentAgentId) : undefined;
+  if (!record) {
+    // A missing live record has no in-process lifecycle to reconcile.
+    detachForkRaisedThread(handle, rpcRegistry, thread);
+    return;
+  }
+  if (record.forkFinish) return;
+
+  record.overlayAttached = false;
+  record.threadBound = true;
+  thread.status = "dormant";
+  thread.touchedAt = nowIso();
+  thread.forkResume = captureForkResume(record);
+  syncOwnershipProtection(record);
+  persistThreads(handle);
+  refreshAgentWidget();
+
+  record.onForkFinishComplete = (finished, failure) => {
+    // A replacement send can supersede this operation; only its own callback
+    // may release the temporary bind and refresh this thread snapshot.
+    finished.overlayAttached = false;
+    finished.threadBound = false;
+    syncOwnershipProtection(finished);
+    thread.forkResume = captureForkResume(finished);
+    thread.status = "dormant";
+    thread.touchedAt = nowIso();
+    persistThreads(handle);
+    refreshAgentWidget();
+    if (failure) notify(handle.ctxRef.current, `ws: fork finish for ${thread.threadId} ended without confirmed terminal admission (${failure}).`, "warning");
+  };
+  startForkFinish(record, rpcRegistry, pi, { cwd: process.cwd(), extensionPath: process.argv[1] ?? "" });
 }
 
 /**
- * `/done` on a fork-raised thread: close the overlay, keep the task fork
- * running. No summary was ever requested from it, nothing is injected into
- * the lead (§1 keeps the lead out of this exchange entirely), and the thread
- * stays dormant-and-reopenable for as long as the fork lives.
+ * Ordinary final-report close for a fork-raised thread when no `/done`
+ * coordinator is active. It releases the bind and keeps the old behaviour.
  */
 export function detachForkRaisedThread(handle: ThreadRegistryHandle, rpcRegistry: RpcAgentRegistry, thread: ThreadRecord): void {
   const agentId = thread.respondentAgentId;

@@ -1233,6 +1233,7 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
       overlayAttached: true,
       threadBound: true,
       client: {
+        prompt: async () => {},
         abort: async () => {},
         stop: async () => {
           stops.push("agent-7");
@@ -1369,7 +1370,7 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     assert.deepEqual(stops, ["agent-7"]);
   });
 
-  test("C2: a fork-raised thread only detaches — no summary injected and the live task fork keeps running", async () => {
+  test("/done on an already-idle fork-raised thread closes the view and issues one closeout without injecting a summary", async () => {
     const { pi, sent, handle, path, record } = setup("fork-raised");
     record.respondentAgentId = "agent-7";
     const stops: string[] = [];
@@ -1382,9 +1383,10 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(stops, [], "stopping a live task fork would destroy the in-flight task the lead is still expecting a pushed final from");
     assert.ok(live.client, "the fork's client is untouched");
-    assert.equal(live.overlayAttached, false, "the overlay is detached, so the anti-bleed loop is armed again");
-    assert.equal(live.threadBound, false, "review relay #1 (I5): the fork rejoins the lead's fan-in and its settles are audible again");
-    assert.equal(record.status, "dormant", "dormant means reopenable while the fork lives");
+    assert.equal(live.overlayAttached, false, "the owner view closes immediately");
+    assert.equal(live.threadBound, true, "the temporary bind protects the finish operation until its closeout settles");
+    assert.ok(live.forkFinish, "an already-idle fork is evaluated immediately rather than stranded awaiting another event");
+    assert.equal(record.status, "dormant", "the ordinary thread snapshot is persisted while finish continues in memory");
     assert.ok(handle.threads.has("q1"));
     assert.equal(loadThreadRegistryFile(path)[0]?.status, "dormant", "the detach is persisted like every other transition");
     assert.equal(record.forkResume?.sessionPath, "/tmp/s.jsonl", "the resume snapshot is refreshed on detach");

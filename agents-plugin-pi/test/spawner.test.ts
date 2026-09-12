@@ -112,6 +112,7 @@ import {
   getAgentTranscriptPath,
   listAgents,
   sendToAgent,
+  startForkFinish,
   buildRpcClientOptions as buildRpcClientOptionsBase,
   buildChildProcessEnv,
   inheritModelFromToolCtx,
@@ -2448,6 +2449,132 @@ describe("attachEventListener (the settle-suppression IO gate)", () => {
  * live-gate only (it constructs a real `RpcClient`), so its push half was
  * extracted into `pushSpawnFailed` and is covered here.
  */
+describe("same-process fork /done finish coordinator", () => {
+  const drain = () => new Promise((resolve) => setImmediate(resolve));
+
+  test("an already-idle fork issues one closeout, accepts its successful final once, and silently parks", async () => {
+    const pi = fakePi();
+    const prompts: string[] = [];
+    const stops: string[] = [];
+    let listener: ((event: unknown) => void) | undefined;
+    const client = {
+      onEvent(callback: (event: unknown) => void) { listener = callback; return () => {}; },
+      getState: async () => ({ sessionFile: "/tmp/fork.jsonl" }),
+      prompt: async (message: string) => void prompts.push(message),
+      abort: async () => void stops.push("abort"),
+      stop: async () => void stops.push("stop"),
+    } as unknown as RpcClient;
+    const record = liveRpcRecord({ agentId: "fork", client, spawnRole: "fork", threadBound: true, validateForkFinal: () => true });
+    const registry: RpcAgentRegistry = new Map([[record.agentId, record]]);
+    attachEventListener(pi.api, registry, record, client);
+
+    startForkFinish(record, registry, pi.api!, { cwd: "/tmp", extensionPath: "/tmp/extension.ts" });
+    await drain();
+    assert.equal(prompts.length, 1, "idle /done evaluates immediately instead of waiting for a never-coming settle");
+    assert.equal(record.forkFinish?.closeoutIssued, true);
+
+    listener?.({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, toolCallId: "report-1", args: { kind: "final", message: "Outcome: done" } });
+    listener?.({ type: "tool_execution_end", toolCallId: "report-1", isError: false });
+    listener?.({ type: "agent_settled" });
+    await drain();
+    await drain();
+
+    assert.deepEqual(pi.sent.map((entry) => entry.message.customType), ["ws-agent-report"]);
+    assert.equal((pi.sent[0].message.details as { report?: string }).report, "Outcome: done");
+    assert.deepEqual(stops, ["abort", "stop"], "the coordinator owns one silent park");
+    assert.equal(record.forkFinish, undefined);
+  });
+
+  test("a final racing /done waits for its successful report-tool end and is delivered without a closeout", async () => {
+    const pi = fakePi();
+    const prompts: string[] = [];
+    let listener: ((event: unknown) => void) | undefined;
+    const client = {
+      onEvent(callback: (event: unknown) => void) { listener = callback; return () => {}; },
+      getState: async () => ({}), prompt: async (message: string) => void prompts.push(message),
+      abort: async () => {}, stop: async () => {},
+    } as unknown as RpcClient;
+    const record = liveRpcRecord({ agentId: "racing-final", client, threadBound: true, validateForkFinal: () => true });
+    const registry: RpcAgentRegistry = new Map([[record.agentId, record]]);
+    attachEventListener(pi.api, registry, record, client);
+
+    listener?.({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, toolCallId: "racing-report", args: { kind: "final", message: "Outcome: done" } });
+    startForkFinish(record, registry, pi.api!, { cwd: "/tmp", extensionPath: "/tmp/extension.ts" });
+    await drain();
+    assert.deepEqual(prompts, [], "a report start alone cannot be rejected or trigger a second closeout");
+
+    listener?.({ type: "tool_execution_end", toolCallId: "racing-report", isError: false });
+    await drain();
+    await drain();
+    assert.deepEqual(prompts, []);
+    assert.deepEqual(pi.sent.map((entry) => entry.message.customType), ["ws-agent-report"]);
+  });
+
+  test("a failed closeout final emits one missing-final advisory and never retries", async () => {
+    const pi = fakePi();
+    const prompts: string[] = [];
+    let listener: ((event: unknown) => void) | undefined;
+    const client = {
+      onEvent(callback: (event: unknown) => void) { listener = callback; return () => {}; },
+      getState: async () => ({}), prompt: async (message: string) => void prompts.push(message),
+      abort: async () => {}, stop: async () => {},
+    } as unknown as RpcClient;
+    const record = liveRpcRecord({ agentId: "failed-final", client, threadBound: true, validateForkFinal: () => true });
+    const registry: RpcAgentRegistry = new Map([[record.agentId, record]]);
+    attachEventListener(pi.api, registry, record, client);
+
+    startForkFinish(record, registry, pi.api!, { cwd: "/tmp", extensionPath: "/tmp/extension.ts" });
+    await drain();
+    listener?.({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, toolCallId: "failed-report", args: { kind: "final", message: "Outcome: done" } });
+    listener?.({ type: "tool_execution_end", toolCallId: "failed-report", isError: true });
+    listener?.({ type: "agent_settled" });
+    await drain();
+    await drain();
+
+    assert.deepEqual(prompts.length, 1, "a failed report never causes a resend");
+    assert.deepEqual(pi.sent.map((entry) => entry.message.customType), ["ws-agent-advisory"]);
+    assert.equal((pi.sent[0].message.details as { advisory?: string }).advisory, "missing-final");
+  });
+
+  test("a running fork waits for its actual settle before issuing a single closeout", async () => {
+    const pi = fakePi();
+    const prompts: string[] = [];
+    let listener: ((event: unknown) => void) | undefined;
+    const client = {
+      onEvent(callback: (event: unknown) => void) { listener = callback; return () => {}; },
+      getState: async () => ({}), prompt: async (message: string) => void prompts.push(message),
+      abort: async () => {}, stop: async () => {},
+    } as unknown as RpcClient;
+    const record = liveRpcRecord({ agentId: "running-fork", client, running: true, streaming: true, threadBound: true });
+    const registry: RpcAgentRegistry = new Map([[record.agentId, record]]);
+    attachEventListener(pi.api, registry, record, client);
+    const first = startForkFinish(record, registry, pi.api!, { cwd: "/tmp", extensionPath: "/tmp/extension.ts" });
+    assert.equal(startForkFinish(record, registry, pi.api!, { cwd: "/tmp", extensionPath: "/tmp/extension.ts" }), first, "repeated /done joins the same operation");
+    await drain();
+    assert.deepEqual(prompts, [], "a running child is never interrupted for closeout");
+
+    listener?.({ type: "agent_settled" });
+    await drain();
+    assert.equal(prompts.length, 1);
+  });
+
+  test("a terminal event already held is neither re-admitted nor followed by a closeout", async () => {
+    const pi = fakePi();
+    const prompts: string[] = [];
+    const client = {
+      prompt: async (message: string) => void prompts.push(message),
+      abort: async () => {}, stop: async () => {},
+    } as unknown as RpcClient;
+    const record = liveRpcRecord({ agentId: "fork", client, threadBound: true, terminalDelivery: { state: "held" } });
+    const registry: RpcAgentRegistry = new Map([[record.agentId, record]]);
+    startForkFinish(record, registry, pi.api!, { cwd: "/tmp", extensionPath: "/tmp/extension.ts" });
+    await drain();
+    assert.deepEqual(prompts, []);
+    assert.deepEqual(pi.sent, []);
+    assert.equal(record.forkFinish, undefined, "the already-held event is the sole terminal obligation");
+  });
+});
+
 describe("pushSpawnFailed (spawnAgent's launch-failure branch)", () => {
   test("parks the half-registered record and pushes ws-agent-settled reason:spawn-failed with the error text", () => {
     const pi = fakePi();

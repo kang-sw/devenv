@@ -796,6 +796,7 @@ describe("armForkRoleWiring (fresh spawn and sidecar revival)", () => {
     const dormant = dormantForkRecord();
     armForkRoleWiring(pi, new Map([["fork-1", dormant]]), dormant);
     assert.equal(typeof dormant.onResume, "function", "wireAntiBleedLoop needs a client the dormant record has not got yet");
+    assert.equal(dormant.validateForkFinal?.(REQUIRED_FINAL_REPORT_FIELDS.map((field) => `${field}: ${field === "Commit" ? "abc123" : "ok"}`).join("\n")), true, "the finish coordinator receives the fork's existing final policy without importing fork.ts");
 
     let subscriptions = 0;
     const client = {
