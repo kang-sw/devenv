@@ -98,3 +98,24 @@ Exact-package execution proved that upstream proxy mode invokes `curl` with OS-t
 - Include the proxy refusal and the package-local configuration/README locations in the ad-hoc setup evidence returned to the researcher, so it can explain the limitation and applicable provider registration without keeping provider-specific instructions resident.
 
 This edition authorizes no HTTP, HTTPS, SOCKS, environment, or package-config transport proxy for the initial ws Explore integration. Proxy support requires a later independently bounded transport design; failure to keep the exact pinned package on audited direct transport is another stop condition, not permission to fall back to upstream proxy mode.
+
+## Blocked (2026-09-12)
+
+Implementation checkpoints `e741bc04` and `32687830` are retained on `impl/goal/track/pi-agent/cedar-lantern-moss/evict-frame-coke`. Full Pi tests, real public fetch, real RPC Explore search at depths one and two, and packed install/update with host-peer capture passed. This is not a Phase 1 Result: independent round-1 review remains non-clean and the retention acceptance prerequisite is absent.
+
+Stop (c): `260908-feat-ws-pi-agent-session-disk-retention` Phase 1 Result explicitly excludes disk deletion, TTL configuration, and cross-session scanning. Its cleanup and pruning Phases 2 and 3 remain unimplemented, behind its recorded live-acceptance gate. Consequently this ticket cannot verify pruning through the owning retention lifecycle. Current fetch spills are contained beneath owned homes; manually deleting a fixture home proves containment, not lifecycle cleanup.
+
+The lead must either arrange the prerequisite lifecycle implementation or explicitly defer automatic pruning while accepting only owned-home containment. Do not introduce a separate web-cache retention policy implicitly.
+
+After resolution, address the retained round-1 findings before the bounded round-2 check:
+
+- Correctness Important: query validation rejects all leading-bracket strings, including ordinary queries such as `[RFC 9110] redirect handling`; limit refusal to actual upstream multi-query expansion.
+- Test Important: exercise native socket creation and DNS pinning together rather than only a request-options helper.
+- Test Important: add non-paid real child-extension readiness coverage across initial and dormant/restarted launch.
+- Test Important: resolve the retention prerequisite and replace tautological fixture-deletion acceptance with the settled lifecycle/containment contract.
+- Test Important: make exact-package search fixtures observe or forbid requests to result-page URLs under hostile content/curator configuration.
+- Test Important: automate packed-artifact dependency, peer-isolation, and license checks currently verified only by manual commands.
+
+Fit review and the guide fresh-reader audit are clean. The fit review's initial inference that lockfile `inBundle` annotations proved physical Pi-core bundling was withdrawn against actual artifact evidence. No Critical findings were raised; no round-2 review has run.
+
+The read-only reviewer/artifact-writing contract mismatch was captured separately as `260912-bug-ws-pi-readonly-reviewer-artifact-contract`; the parent preserved all returned review reports without granting source-write authority.
