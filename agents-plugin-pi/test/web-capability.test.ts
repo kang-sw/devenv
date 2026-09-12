@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { assertPolicyTool, childPolicy, parseDelegationPolicy, type DelegationPolicy } from "../src/delegation-policy.ts";
 import { spawnAdmission } from "../src/spawner.ts";
+import { EXPLORE_MODE_TIERS } from "../src/process-role.ts";
 
 const root: DelegationPolicy = { version: 1, depth: 0, maxDepth: 3, authority: "lead", tools: [] };
 const workerTools = ["read", "grep", "find", "ls", "ws-report-to-lead", "explore"];
@@ -40,8 +41,8 @@ test("network schema and actual execution fail closed", () => {
 });
 
 test("all persistent Explore modes receive the identical web authority", () => {
-  for (const exploreMode of ["simple", "deep"] as const) {
-    const policy = spawnAdmission({ parentPolicy: root, wsToolNames: [], toolGroup: exploreMode === "deep" ? "read-only-explore" : "read-only", spawnRole: "explore", exploreMode } as never);
+  for (const exploreMode of Object.keys(EXPLORE_MODE_TIERS)) {
+    const policy = spawnAdmission({ parentPolicy: root, wsToolNames: [], toolGroup: "read-only-explore", spawnRole: "explore", exploreMode } as never);
     assert.deepEqual(policy.tools.filter(name => name === "web_search" || name === "ws_web_fetch"), ["web_search", "ws_web_fetch"]);
     assert.deepEqual(policy.network, { search: true, fetch: true });
     assert(!policy.tools.includes("bash"));

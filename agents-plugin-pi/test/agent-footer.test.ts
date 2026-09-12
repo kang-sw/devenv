@@ -53,7 +53,7 @@ describe("descendant cost aggregation", () => {
       record("worker", allocateAgentHome(lead, "worker", "worker"), 0.4),
       record("execute", allocateAgentHome(lead, "execute", "execute-worker"), 0),
       record("fork", allocateAgentHome(lead, "fork", "fork"), "unknown"),
-      record("explore", allocateAgentHome(lead, "explore", "explore", "simple"), 0.1),
+      record("explore", allocateAgentHome(lead, "explore", "explore", "code-search"), 0.1),
     ];
     for (const item of direct) persist(item);
     const nestedOwner = createAgentStorageContext("worker-session", dir);
@@ -107,7 +107,7 @@ describe("descendant cost aggregation", () => {
     const lead = createAgentStorageContext("lead-session", dir);
     const parent = record("parent", allocateAgentHome(lead, "parent", "worker"), 0.5); persist(parent);
     const childOwner = createAgentStorageContext("parent-session", dir);
-    const nested = record("nested", allocateAgentHome(childOwner, "nested", "explore", "deep"), 0.3); persist(nested);
+    const nested = record("nested", allocateAgentHome(childOwner, "nested", "explore", "synthesis"), 0.3); persist(nested);
     const registry: RpcAgentRegistry = new Map([[parent.agentId, parent]]);
 
     updateOwnership(parent.ownership!.home, { liveness: { lifecycle: "stopped", running: false } });

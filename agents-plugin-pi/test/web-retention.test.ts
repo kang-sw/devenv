@@ -19,7 +19,7 @@ const fetch = createBoundedWebFetcher({
 test('real capacity eviction removes fetched spills from a confirmed-stopped Explore home', async t => {
   const root = mkdtempSync(join(tmpdir(), 'web-cap-retention-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const ownership = allocateAgentHome(createAgentStorageContext('lead', root), 'explore', 'explore', 'simple');
+  const ownership = allocateAgentHome(createAgentStorageContext('lead', root), 'explore', 'explore', 'web-search');
   const spill = await fetch({ url: 'https://example.org/page', cacheHome: ownership.home });
   assert.ok(existsSync(spill.path!));
   const metadata = readOwnership(ownership.home)!;
@@ -40,7 +40,7 @@ test('controller stale pruning owns abandoned spills while retaining interrupted
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const config = join(root, 'goal-loop-config.json');
   writeFileSync(config, JSON.stringify({ child_retention_ttl_days: 1 }));
-  const homes = ['abandoned', 'interrupted'].map(id => allocateAgentHome(createAgentStorageContext('previous-lead', root), id, 'explore', 'simple'));
+  const homes = ['abandoned', 'interrupted'].map(id => allocateAgentHome(createAgentStorageContext('previous-lead', root), id, 'explore', 'web-search'));
   const spills = [];
   for (const ownership of homes) {
     spills.push(await fetch({ url: 'https://example.org/page', cacheHome: ownership.home }));

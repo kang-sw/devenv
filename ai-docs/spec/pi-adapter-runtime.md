@@ -460,16 +460,15 @@ The ws-mcp child process is bound to a Pi session, not to extension load:
   catches a thrown `session_start` handler and keeps the process running, so
   without a guard a spawned child would come up alive but presenting only Pi's
   builtin `--tools` (`read`/`grep`/`find`/`ls` and the parallel wrapper) —
-  indistinguishable from a healthy simple researcher, and in particular a deep
-  researcher silently missing its blocking `explore` collection tool. The
-  adapter guards the whole seam: on any such failure a **spawned child**
+  indistinguishable from a healthy researcher while silently missing its
+  persistent delegation surface. The adapter guards the whole seam: on any such failure a **spawned child**
   (`worker`/`explore`/`fork`) exits its process with a loud error, which its
   RPC parent surfaces as a real spawn/dispatch error to the lead instead of a
   toolless child; the **interactive host lead** (which has no RPC parent to
   signal) raises a loud notification and comes up without the ws bridge or
   custom tools rather than crashing the user's terminal. Either way a
   partial/toolless session is never presented as healthy. This guard changes
-  only failure visibility; a successful session's tool surface per role/mode is
+  only failure visibility; a successful session's depth-bounded tool surface is
   unchanged.
 
 The stdio transport reads the child's stdout as newline-delimited JSON-RPC (one
@@ -771,73 +770,58 @@ adapter issues a prompt to the child (every prompt site goes through one
 just-launched child reads as not running), confirmed by `agent_start`, and
 cleared on settle, stop, exit or spawn failure.
 
-### explore — persistent two-mode research {#260903-pi-explore-recon-leaf}
+### explore — persistent intent-tier research {#260903-pi-explore-recon-leaf}
 
-`explore({ query, deep_research? })` is a persistent research preset. It returns
-exactly `{ agent_id, alias }` after the initial RPC prompt is accepted; the
-record parks, resumes through `ws-agent-send`, persists through the sidecar, and
-its settle `last_message` is an exploration answer. Omitted/false is **simple**:
-configured authenticated `small` and exactly `read, grep, find, ls`; missing,
-unavailable, malformed, or unauthenticated small fails before allocation. True is
-**deep**: the dispatching lead/fork's concrete model and thinking level are
-captured together and frozen; it has those reads plus `explore`, and can use one
-blocking authenticated-small, no-bash collection leaf. Registration branches on
-the calling process role and internal mode:
+`explore({ query, mode? })` is one persistent research preset for every eligible
+lead, fork, and worker. It returns exactly `{ agent_id, alias }` after the
+initial RPC prompt is accepted; the record parks, resumes through
+`ws-agent-send`, persists through the sidecar, and its settle `last_message` is
+an exploration answer. Omission defaults to `code-search`.
 
-- **Lead or fork.** `explore` is a persistent `spawnAgent` preset with an
-  auto-generated alias (`explore-1`, `explore-2`, ...) and a query-derived
-  title. Simple records use `toolGroup: "read-only"`, resolve authenticated
-  `small` exactly once, and refuse before guards/allocation on every bad
-  resolution. Deep records use `"read-only-explore"` and freeze the caller's
-  concrete model and thinking level without looking up `small`. Both return
-  `{ agent_id, alias }` after prompt acceptance. They remain ordinary registry
-  records: a settle delivers `last_message`, then parks; send/stop/resume,
-  transcript, aliases, sidecars, widgets and failure transitions retain the
-  same identity. Their model and effective thinking level are verified with
-  `RpcClient.getState()` before the first prompt and every resumed prompt:
-  simple captures the actual default or clamp once, while deep must match its
-  captured selection.
-- **Worker or execute-worker.** `explore` remains the blocking, self-reaping
-  `recon` leaf (`--no-session`) and therefore retains bash. A deep researcher
-  alone registers the same query-only tool for one terminal collection; it
-  resolves authenticated `small` before rendering/allocation, forwards its
-  resolved effort, and runs the no-bash `read-only` profile. A failed
-  collection throws to the researcher and never launches an inherited leaf.
+Mode selects only an existing harness-`pi` tier alias: `lookup`, `code-search`,
+and `history-search` use `small`; `docs-search`, `web-search`, `diagnosis`, and
+`comparison` use `medium`; `synthesis` uses `large`. Every mode otherwise uses
+the same bundled researcher guide, `read-only-explore` profile, bounded web
+capabilities, persistent RPC/session lifecycle, continuation path, and subtree
+rules. No mode inherits the dispatcher's model/effort or automatically selects
+`xlarge`. Missing, malformed, unknown, or unauthenticated mapped tiers fail
+before guard, alias, registry, or storage allocation.
 
-A simple researcher has no explore tool. A deep researcher alone has the
-internal `read-only-explore` group and may invoke one terminal collection leaf;
-the leaf clears the deep marker and uses the genuinely no-bash `read-only`
-profile. Recon remains the worker leaf profile and retains bash.
+The mode is immutable on the record and in the child role environment. The
+initial launch records the model and actual accepted effort, including Pi
+defaults or clamping; every dormant resume verifies and reuses them without
+re-resolving configuration. Sidecar reads normalize legacy `simple` to
+`code-search` and `deep` to `synthesis`; new sidecars and ownership metadata
+write only current modes. The public schema is closed: legacy `deep_research`
+and unknown modes are rejected.
+
+Depth remains independent of mode. An eligible researcher may use the same
+persistent Explore path for a child while delegation budget remains; terminal
+depth strips all child-management tools, including `explore`, without changing
+the researcher's read or web profile.
 
 ### Per-spawn tool curation {#260903-pi-spawner-tool-groups}
 
 The `--tools` allowlist for each spawn resolves from an adapter-owned tool-group
-table — `read-only`, `read-only-explore`, `recon`, and `full-worker` — mapping each group to a Pi
-tool-name allowlist. Built-in Pi tools are named directly; the `full-worker` group
-additionally includes the bridge's live `ws__*` tool names, taken from the running
-bridge rather than hardcoded so the group tracks the actual ws-mcp tool set. A
-worker's `full-worker` allowlist **excludes every delegation-driving tool**
-(`ws-agent-spawn` / `-send` / `-list` / `-stop`), so a worker cannot
-spawn or drive a further generation of persistent workers, but it **includes the
-literal `explore` tool** — a pi-native custom tool, not a `ws__*` bridge name, so
-it must be named explicitly to survive Pi's `--tools` allowlist — so a worker may
-spawn a read-only recon leaf via the blocking `exploreLeaf` shape. The same
-`explore` name on a lead/fork is the persistent two-mode preset, while a
-worker gets the recon leaf and a deep researcher gets its no-bash collection
-leaf. Role plus internal mode controls registration; Pi's dynamic `--tools`
+table — `read-only`, `read-only-explore`, `full-worker`, and `execute-worker` —
+mapping each group to a Pi tool-name allowlist. Built-in Pi tools are named
+directly; the `full-worker` group additionally includes the bridge's live
+`ws__*` tool names, taken from the running bridge rather than hardcoded so the
+group tracks the actual ws-mcp tool set. Explore always uses
+`read-only-explore`; spawn admission adds its bounded web tools and the depth
+filter removes child management at the terminal edge. Pi's dynamic `--tools`
 allowlist is the enforcement layer. No agent-profile files are written to disk
 (no `.pi/agents/`); all curation is in-memory plus Pi CLI flags.
 
 ### Bounded delegation depth {#260904-pi-spawner-bounded-depth-explore-leaf}
 
-The delegation tree terminates at depth 2: lead/fork → persistent simple
-researcher, lead/fork → deep researcher → terminal collection leaf, or
-lead/fork → worker → recon leaf. Workers admit `explore` but no
-worker-driving tools; simple researchers and terminal leaves admit no
-`explore`; only deep researchers have `read-only-explore`, whose single
-collection leaf clears the deep marker. This is enforced by per-spawn Pi
-`--tools` allowlists; ws-mcp's keyed-handler role check is untouched. A
-side-thread fork is lateral and cannot fork again, so it starts its own tree.
+The default delegation tree terminates at depth 2. Leads, forks, workers, and
+researchers with remaining budget use the same persistent Explore spawn path;
+a child at terminal depth retains its read/web profile but receives no
+child-management or Explore tool. This is enforced by per-spawn Pi `--tools`
+allowlists and the persisted delegation envelope; mode never bypasses the
+ceiling. A side-thread fork is lateral and cannot fork again, so it starts its
+own tree.
 
 ### Model resolution: fixed tier through ws-mcp {#260903-pi-spawner-model-tier-inherit}
 
@@ -887,23 +871,18 @@ non-empty `effort` field (`low`/`medium`/`high`/`xhigh`) is applied as
 leaving the child's own default effort untouched. A non-genuine hit never
 contributes an effort value, even if its raw payload happened to carry one.
 
-`explore` is a **role**, not a caller-facing model choice. Simple persistent
-research and every blocking collection resolve the fixed `small` tier through
-the same path, require an authenticated exact catalog hit, and apply its
-resolved effort. Simple persistent research freezes the actual post-start
-model/effort (including Pi defaults or clamping); collection forwards effort
-as `--thinking`. Deep persistent research does not resolve `small` at
-creation: it freezes and verifies the dispatcher's actual model and thinking
-level, and may later request one separately fail-closed cheap collection. A
-resolved tier effort reaches a **process-spawned** child (the ephemeral
-collection leaf) as the `--thinking <level>` launch flag and a **persistent,
-RPC-backed** child through a post-start `setThinkingLevel` call; an inherit or
-an empty effort passes no level in either path.
+`explore` is a **role**, not an arbitrary caller-facing model choice. Its
+intent mode maps to `small`, `medium`, or `large`, and every mapped tier must
+resolve to an authenticated exact catalog hit. The persistent researcher
+freezes the actual post-start model/effort, including Pi defaults or clamping,
+and verifies the same selection on resume. A resolved tier effort reaches the
+**persistent, RPC-backed** child through a post-start `setThinkingLevel` call;
+an empty effort leaves the child default untouched.
 
 ### Model resolution via ws-mcp config, not an adapter data file {#260903-pi-model-catalog-config-file}
 
 There is no adapter-owned model-catalog file any more. `ws-agent-spawn`,
-`ws-fork` and `explore`'s implicit `small` lookup all resolve `model_name`
+`ws-fork` and Explore's mode-mapped tier lookup all resolve `model_name`
 by calling ws-mcp's `config.resolve_agent` tool at spawn time (see the
 anchor above for the exact accept/reject rule) — the adapter never reads or
 writes model configuration on disk. User config may carry Pi model strings;
@@ -1201,8 +1180,8 @@ Accordingly the gate applies only to the `ws-execute` worker path; ordinary
 ### Gated exec and the mutation-incapable read family {#260905-pi-worker-gated-exec}
 
 The `ws-execute` worker's tool group is **not** the general `full-worker` set. It
-gets structured, mutation-incapable read tools (the same `read-only` family
-`ls`/`read`/`grep`/`find` the recon leaf uses — cannot write by construction),
+gets structured, mutation-incapable read tools (`ls`/`read`/`grep`/`find`,
+which cannot write by construction),
 the report and `explore` tools, and **one** free-form execution tool
 (`ws-worker-exec`) — but **not** native `bash`. "Anything that can write is
 gated" therefore holds by construction, with no command-string parsing:
@@ -2106,7 +2085,7 @@ incidental prose. It has two parts:
   `ws__playbook_print` / `ws__workflow_manual` tools, so skills-load transitively
   drives the bridge with no imperative tool call in the handler.
 - It **appends**, after a blank-line separator, an explicit instruction to
-  dispatch one `explore` recon leaf and report its result. The blank line keeps
+  dispatch one persistent `explore` researcher and report its result. The blank line keeps
   this instruction off the skill-command line (so it does not corrupt the
   `User:` args split). This append is load-bearing: the discuss skill does not
   itself spawn, so the spawn round-trip that the gate requires is not inherent to

@@ -41,7 +41,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, join } from "node:path";
 import { refreshAgentTelemetry, startOwnedSessionObserver, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole, type ToolGroup } from "./spawner.ts";
 import { parseForkContext, type ForkContext } from "./fork-context.ts";
-import type { ExploreMode } from "./process-role.ts";
+import { normalizeStoredExploreMode, type ExploreMode } from "./process-role.ts";
 import { readOwnership, removeOwnedAgentHome, updateOwnership, validDescriptor, type AgentOwnership } from "./agent-storage.ts";
 import { parseTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
 import { parseDelegationPolicy, type DelegationPolicy } from "./delegation-policy.ts";
@@ -133,9 +133,8 @@ export function noSessionSidecarPath(agentDir: string, sessionId: string): strin
  * restart. Dormant records are already resumable; carrying them through the
  * sidecar too costs nothing and keeps the roll-call complete.
  *
- * Persistent simple/deep researchers are captured like every other
- * non-thread-bound record. Terminal collection leaves remain in their separate
- * self-reaping registry and are never sidecar records.
+ * Persistent researchers are captured like every other non-thread-bound
+ * record; intent mode is immutable across restart and continuation.
  */
 export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
   const orphans: PersistedOrphan[] = [];
@@ -229,21 +228,27 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
     let forkContext: ForkContext | undefined;
     try { forkContext = parseForkContext(o.forkContext); } catch { continue; }
     if (!o.systemPromptPath && !forkContext) continue;
-    const ownership = o.ownership && validDescriptor(o.ownership) && o.ownership.agentId === o.agentId && o.ownership.sessionPath === o.sessionPath && (() => { const disk = readOwnership(o.ownership!.home); return !!disk && disk.home === o.ownership!.home && disk.ownerSessionId === o.ownership!.ownerSessionId && disk.agentId === o.ownership!.agentId && disk.sessionPath === o.ownership!.sessionPath && disk.role === o.ownership!.role && disk.exploreMode === o.ownership!.exploreMode; })() ? o.ownership : undefined;
     const toolGroup = o.toolGroup;
     const isKnownToolGroup = toolGroup === undefined || toolGroup === "read-only" || toolGroup === "read-only-explore" || toolGroup === "recon" || toolGroup === "full-worker" || toolGroup === "execute-worker";
     const isKnownRole = o.spawnRole === undefined || o.spawnRole === "worker" || o.spawnRole === "execute-worker" || o.spawnRole === "fork" || o.spawnRole === "explore";
     if (!isKnownToolGroup || !isKnownRole) continue;
     const hasExploreMode = Object.prototype.hasOwnProperty.call(o, "exploreMode");
-    const exploreMode = o.exploreMode === "simple" || o.exploreMode === "deep" ? o.exploreMode : undefined;
+    const exploreMode = normalizeStoredExploreMode(o.exploreMode);
+    const legacySimple = o.exploreMode === "simple";
     // Any research-shaped field makes the entire tuple strict. In particular,
     // do not discard an invalid mode and accidentally revive it as a worker.
     const hasResearchMetadata = o.spawnRole === "explore" || hasExploreMode || toolGroup === "read-only" || toolGroup === "read-only-explore";
     if (hasResearchMetadata && (
       o.spawnRole !== "explore" || !exploreMode || typeof o.modelBase !== "string" || !o.modelBase ||
       typeof o.modelEffort !== "string" || !o.modelEffort || Object.prototype.hasOwnProperty.call(o, "explicitTools") ||
-      (exploreMode === "simple" ? toolGroup !== "read-only" : toolGroup !== "read-only-explore")
+      (legacySimple ? toolGroup !== "read-only" : toolGroup !== "read-only-explore")
     )) continue;
+    const rawOwnership = o.ownership;
+    const ownershipMode = normalizeStoredExploreMode(rawOwnership?.exploreMode);
+    const normalizedOwnership = rawOwnership && rawOwnership.exploreMode !== undefined
+      ? { ...rawOwnership, exploreMode: ownershipMode }
+      : rawOwnership;
+    const ownership = normalizedOwnership && validDescriptor(normalizedOwnership) && normalizedOwnership.agentId === o.agentId && normalizedOwnership.sessionPath === o.sessionPath && (() => { const disk = readOwnership(normalizedOwnership.home); return !!disk && disk.home === normalizedOwnership.home && disk.ownerSessionId === normalizedOwnership.ownerSessionId && disk.agentId === normalizedOwnership.agentId && disk.sessionPath === normalizedOwnership.sessionPath && disk.role === normalizedOwnership.role && disk.exploreMode === normalizedOwnership.exploreMode; })() ? normalizedOwnership : undefined;
     out.push({
       agentId: o.agentId,
       alias: typeof o.alias === "string" ? o.alias : undefined,
@@ -260,7 +265,7 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
       ...(typeof o.observedEffort === "string" && o.observedEffort ? { observedEffort: o.observedEffort } : {}),
       ...(typeof o.observedLatestInput === "number" && Number.isFinite(o.observedLatestInput) && o.observedLatestInput >= 0 ? { observedLatestInput: o.observedLatestInput } : {}),
       wsToolNames: Array.isArray(o.wsToolNames) ? o.wsToolNames.filter((n): n is string => typeof n === "string") : [],
-      toolGroup: (o.toolGroup ?? "full-worker") as ToolGroup,
+      toolGroup: (legacySimple ? "read-only-explore" : o.toolGroup ?? "full-worker") as ToolGroup,
       explicitTools: typeof o.explicitTools === "string" ? o.explicitTools : undefined,
       ...(delegation ? { delegation } : {}),
       ...(o.subtreeChannel ? { subtreeChannel: o.subtreeChannel } : {}),

@@ -147,8 +147,8 @@ export function formatConcreteModelWarning(rejected: ConcreteModelRejection, cat
   return `${base}is not a provider/id entry in Pi's model catalog.${tail}`;
 }
 
-/** Exploration fails closed: unlike ordinary workers it must never replace an
- * unavailable cheap tier with the caller's potentially expensive model. */
+/** Exploration fails closed: an unavailable intent-mapped tier never falls
+ * back to the caller's unrelated model selection. */
 export function formatExploreTierRefusal(alias: string, failure: TierFailure | undefined, rejected: TierRejection | undefined): string {
   const model = rejected?.model ?? failure?.model;
   const detail = failure?.kind === "no-auth" || rejected?.why === "no-auth"
@@ -159,6 +159,6 @@ export function formatExploreTierRefusal(alias: string, failure: TierFailure | u
         ? `configured model ${quoted(model ?? "unknown")} is not in Pi's model catalog`
         : failure?.kind === "unset"
           ? `not configured for harness pi (resolved from ${quoted(failure?.resolvedFrom ?? rejected?.resolvedFrom ?? "unknown")}); set it via config.tune(key: "agents.tier", harness: "pi", value: {tier: ${quoted(alias)}, model: "<provider/id>"})`
-          : "small resolution failed";
-  return `explore refused: tier ${oneLine(alias)} cannot select an authenticated cheap Pi model: ${detail}. Configure agents.tier for harness pi via config.tune or lead-tune.`;
+          : "tier resolution failed";
+  return `explore refused: tier ${oneLine(alias)} cannot select an authenticated Pi model: ${detail}. Configure agents.tier for harness pi via config.tune or lead-tune.`;
 }

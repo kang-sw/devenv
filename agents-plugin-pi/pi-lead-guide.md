@@ -37,7 +37,7 @@ Route a task to the right primitive by what you actually need done:
 | Gracefully stop a subagent (keeps it resumable) | `ws-agent-stop` |
 | Read a subagent's full session transcript | `ws-agent-transcript` |
 | (as a subagent) surface an intermediate finding to your lead | `ws-report-to-lead` |
-| Start persistent exploration (returns `{agent_id, alias}` right away; later sends resume it) | `explore({query, deep_research?})` — simple uses authenticated `small` with read-only tools; deep freezes your current model/thinking and may make one cheap no-bash evidence collection |
+| Start persistent exploration (returns `{agent_id, alias}` right away; later sends resume it) | `explore({query, mode?})` — select the optional evidence-intent mode defined by the tool schema; omission defaults to `code-search` |
 | Arm a persistent goal that survives multiple turns | `/goal <goal>` — when the goal names a skill, start every cycle by calling `ws-skill <name>` for it, not by guessing its content from memory |
 | Declare the active goal achieved (terminal) | `goal-achieved <summary>` |
 | Declare the active goal blocked (terminal) | `goal-blocked <reason>` |

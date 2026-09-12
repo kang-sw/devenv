@@ -49,24 +49,16 @@
  * the parameter retains parent-model inheritance. The caller still passes an
  * already-rendered `system_prompt_path` — this module never renders it.
  *
- * `explore` (260906) is now two different implementations behind one tool
- * name, keyed on the calling process's own role (`registerAgentTools`
- * branches on `isLeadOrFork(readSpawnRole(process.env))`):
- * - Lead or fork: a persistent researcher over `spawnAgent`. It returns
- *   `{ agent_id, alias }` immediately; each settled answer arrives as an
- *   ordinary settle push, then the record parks and remains sendable and
- *   sidecar-restorable. Simple researchers use authenticated `small` with
- *   `read-only`; deep researchers freeze the caller's model/effort and use
- *   `read-only-explore`.
- * - Workers and eligible deep researchers use the same persistent path.
- *   Role-independent depth and capability envelopes bound every new edge.
- *   The old one-shot helpers remain testable but have no registered caller.
+ * `explore` is one persistent researcher preset over `spawnAgent`. Every
+ * eligible lead, fork, or worker receives the same schema and RPC lifecycle;
+ * an intent mode selects a configured tier while the delegation envelope
+ * remains authoritative for child depth and tools.
  *
  * A parent's local settle is not subtree completion. Its private channel
  * publishes outstanding direct-child obligations and queued deliveries; the
  * outer owner keeps it alive until a fresh accepted final covers the subtree.
  *
- * `--tools` curation (`read-only`/`read-only-explore`/`recon`/`full-worker`)
+ * `--tools` curation (`read-only`/`read-only-explore`/`full-worker`)
  * lives only in the in-memory `TOOL_GROUPS` table and Pi CLI flags.
  *
  * Phase 2 adds the per-agent child->lead report channel: `ws-report-to-lead`
@@ -82,8 +74,7 @@
  * already-tracked `sessionPath` with no RPC round-trip.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -108,7 +99,7 @@ import {
   type TierFailure,
   type TierRejection,
 } from "./model-catalog.ts";
-import { WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readExploreMode, readSpawnRole, type ExploreMode, type SpawnRole } from "./process-role.ts";
+import { EXPLORE_MODE_TIERS, WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readSpawnRole, type ExploreMode, type SpawnRole } from "./process-role.ts";
 import { captureForkContext, compareForkRegistrations, removeForkTransport, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
 import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, readOwnership, removeOwnedAgentHome, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
 import { readSessionEntries, reduceTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
@@ -120,13 +111,10 @@ import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type Pu
 import { persistEvictedAgentCost, registerAgentCostOwner } from "./agent-footer.ts";
 
 // ---------------------------------------------------------------------------
-// Pure helpers: tool-group resolution, terminal-stopReason classification,
-// spawn-arg building. Unit-tested directly (test/spawner.test.ts) with no
-// subprocess involved. Shared by both the one-shot `explore` path and the
-// RPC-backed path below.
+// Pure helpers shared by persistent RPC-backed child paths.
 // ---------------------------------------------------------------------------
 
-export type ToolGroup = "read-only" | "read-only-explore" | "recon" | "full-worker" | "execute-worker";
+export type ToolGroup = "read-only" | "read-only-explore" | "full-worker" | "execute-worker";
 
 /** Sole source of truth for the child-side report tool's name, shared by `TOOL_GROUPS`, its registration, and the event-matching branch in `applyRpcEvent`. */
 export const REPORT_TO_LEAD_TOOL_NAME = "ws-report-to-lead";
@@ -159,233 +147,22 @@ export const WS_PI_APPROVAL_DIR_ENV = "WS_PI_APPROVAL_DIR";
  * lead-launch policy, never child-launch policy. */
 const CHILD_BOOTSTRAP_OVERRIDE_ENVS = ["WS_MCP_BOOTSTRAP_BINARY", "WS_MCP_BOOTSTRAP_URL"] as const;
 
-/**
- * Pure env-builder for the one-shot `explore` path's `spawn(...)` call
- * (`spawnPiProcess` below): merges the `explore` process-role marker
- * (`WS_PI_SPAWN_ROLE_ENV`, see `process-role.ts`) over `baseEnv` without
- * dropping any inherited variable. Extracted (review fix, cycle 1) so the
- * marker-placement logic is unit-testable without invoking a real child
- * process — mirrors `buildRpcClientOptions`'s export for the same reason on
- * the RPC path.
- *
- * 260904 Phase 1: `WS_PI_SPAWN_ROLE_ENV` subsumes the old boolean
- * `WS_PI_AGENT_CHILD_ENV` marker (a role value instead of a single "is a
- * child" flag) — goal-loop.ts's `isChildProcess` now reads presence of ANY
- * role via `readSpawnRole`/`process-role.ts` instead of equality to `"1"`,
- * so this rename does not change that consuming contract.
- */
-export function buildChildProcessEnv(baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  // A collection leaf remains explore-role but is terminal: never inherit a
-  // deep marker that would re-enable recursive collection.
-  const env = { ...baseEnv, [WS_PI_SPAWN_ROLE_ENV]: "explore" };
-  for (const override of CHILD_BOOTSTRAP_OVERRIDE_ENVS) delete env[override];
-  delete env[WS_PI_EXPLORE_MODE_ENV];
-  for (const marker of [WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_AFFINITY_ENV]) delete env[marker];
-  return env;
-}
-
-/**
- * Built-in Pi tool names per curated group (docs/usage.md's `### Tool
- * Options`: `read, bash, edit, write, grep, find, ls`).
- *
- * - `read-only`: pure inspection, no shell at all — the tightest group.
- * - `recon`: read-only plus `bash` (git log/grep -r/etc.) for exploration —
- *   still excludes `edit`/`write` per `rsrc/explore/explore.md`'s own
- *   Constraints ("Use read-only exploration; ... write-capable work
- *   requires {{.SpawnIdiom}}"). Deliberately carries **no** `ws__*` bridge
- *   tool names: an explore leaf's rendered prompt (no `role:` frontmatter)
- *   never gets a scoped child session key spliced in, so any `ws__*` call
- *   from a recon worker would silently fall back to the bridge's own
- *   default-filled key instead of a scoped one.
- * - `full-worker`: everything, plus the literal `"explore"` and
- *   `"ws-report-to-lead"` custom tool names and the live `ws__*` bridge tool
- *   names (the latter passed in by the caller, not hardcoded, so this group
- *   tracks ws-mcp's actual registered tool set instead of drifting from it).
- *   `explore` and `ws-report-to-lead` are included as fixed built-ins here
- *   (not sourced from `wsToolNames`) because both are pi-native
- *   `pi.registerTool()` custom tools, not `ws__*` bridge tools — Pi's
- *   `--tools` allowlist filters "built-in, extension, and custom" tools
- *   alike, so omitting a name silently strips it even when registered.
- *   The base worker group includes child management; spawn admission removes
- *   it at the configured terminal depth rather than encoding a fixed role tree.
- * - `execute-worker` (260904 Phase 1): the ticket's §5 "mutation-incapable
- *   read family" worker spawned by `ws-execute` — reuses the exact
- *   `read-only` builtins array (`READ_ONLY_BUILTINS` below), never
- *   re-derived, plus the gated-exec tool (`GATED_EXEC_TOOL_NAME` — every
- *   free-form shell command, including a "read" that mutates via
- *   redirection/`-exec`, must go through it and pause for lead approval),
- *   `ws-report-to-lead` (progress updates), and `explore` (scoped read-only
- *   sub-questions). Deliberately excludes `bash`/`edit`/`write` — those would
- *   let the worker bypass the approval gate entirely.
- */
 const READ_ONLY_BUILTINS: readonly string[] = READ_TOOLS;
 
 export const TOOL_GROUPS: Record<ToolGroup, readonly string[]> = {
   "read-only": [...READ_ONLY_BUILTINS, REPORT_TO_LEAD_TOOL_NAME],
   "read-only-explore": [...READ_ONLY_BUILTINS, REPORT_TO_LEAD_TOOL_NAME, ...CHILD_MANAGEMENT_TOOLS],
-  recon: ["read", "grep", "find", "ls", "bash"],
   "full-worker": ["read", "bash", "edit", "write", "grep", "find", "ls", REPORT_TO_LEAD_TOOL_NAME, ...CHILD_MANAGEMENT_TOOLS],
   "execute-worker": [...READ_ONLY_BUILTINS, GATED_EXEC_TOOL_NAME, REPORT_TO_LEAD_TOOL_NAME, "explore"],
 };
 
-/**
- * Comma-joined `--tools` value for a curated group. `wsToolNames` (the
- * bridge's sanitized `ws__*` registered names) is only appended for
- * `full-worker` — `read-only`, `recon`, and `execute-worker` are
- * built-in/custom-only by design (see `TOOL_GROUPS` doc comment above); an
- * execute-worker never gets a scoped child session key spliced into its
- * prompt (same reasoning as `recon`), so it never calls a `ws__*` bridge tool
- * either.
- */
 export function resolveTools(group: ToolGroup, wsToolNames: readonly string[] = []): string {
   const builtins = TOOL_GROUPS[group];
   const extra = group === "full-worker" ? wsToolNames : [];
   return [...builtins, ...extra].join(",");
 }
 
-/**
- * Terminal `AssistantMessage.stopReason` values
- * (docs/session-format.md#L88): `"stop" | "length" | "toolUse" | "error" |
- * "aborted"`. `"toolUse"` is NOT terminal (the agent is still working);
- * `"pending"` is stream-only and never appears in a persisted message. This
- * classification is metadata only, used by the one-shot `explore` path's
- * event handling — never the completion signal, see `handleAgentEvent`'s
- * doc comment below.
- */
-const TERMINAL_STOP_REASONS: ReadonlySet<string> = new Set(["stop", "length", "error", "aborted"]);
-
-export function isTerminalStopReason(reason: string | undefined): boolean {
-  return reason !== undefined && TERMINAL_STOP_REASONS.has(reason);
-}
-
-export type SpawnMode = "explore";
-
-export interface BuildSpawnArgsOptions {
-  mode: SpawnMode;
-  /** Required unless `noSession` is true. */
-  sessionPath?: string;
-  /** `true` only for `explore` (ephemeral, ticket #L216-218). */
-  noSession: boolean;
-  /** Path to the rendered playbook prompt, passed via `--append-system-prompt`. */
-  promptPath?: string;
-  /** Comma-joined `--tools` allowlist, from `resolveTools()`. */
-  tools?: string;
-  /** `provider/id` pattern, or omitted to inherit pi's own default resolution. */
-  model?: string;
-  /** Pi thinking level forwarded to an ephemeral collection leaf. */
-  thinking?: string;
-  task: string;
-}
-
-/**
- * Builds the `pi` CLI argv for a one-shot `explore` invocation, mirroring
- * the shipped reference example's flag-ordering
- * (`examples/extensions/subagent/index.ts#L300-341`):
- * `--mode json -p [--session <path> | --no-session]
- * [--append-system-prompt <path>] [--tools <list>] [--model <pattern>]
- * "<task>"`.
- *
- * `sessionPath` and `noSession` are mutually exclusive by contract (an
- * `explore` leaf must never persist a session file) — passing both, or
- * neither, is a caller bug and throws rather than silently picking one.
- * Phase 1 narrows `SpawnMode` to `"explore"` only: the RPC-backed
- * spawn/send path builds its `pi` argv directly via `RpcClientOptions.args`
- * (see `buildRpcClientOptions` below), not through this helper.
- */
-export function buildSpawnArgs(opts: BuildSpawnArgsOptions): string[] {
-  if (opts.noSession && opts.sessionPath) {
-    throw new Error("ws-pi-agent: buildSpawnArgs: sessionPath and noSession are mutually exclusive");
-  }
-  if (!opts.noSession && !opts.sessionPath) {
-    throw new Error(`ws-pi-agent: buildSpawnArgs: mode "${opts.mode}" requires a sessionPath when noSession is false`);
-  }
-
-  const args: string[] = ["--mode", "json", "-p"];
-  if (opts.noSession) {
-    args.push("--no-session");
-  } else {
-    args.push("--session", opts.sessionPath as string);
-  }
-  if (opts.promptPath) {
-    args.push("--append-system-prompt", opts.promptPath);
-  }
-  if (opts.tools) {
-    args.push("--tools", opts.tools);
-  }
-  if (opts.model) {
-    args.push("--model", opts.model);
-  }
-  if (opts.thinking) {
-    args.push("--thinking", opts.thinking);
-  }
-  args.push(opts.task);
-  return args;
-}
-
-/**
- * Buffers raw child-process stdout bytes into newline-delimited
- * `AgentSessionEvent` JSON lines. Mirrors `mcp-stdio-client.ts`'s
- * `JsonRpcLineBuffer` StringDecoder-based, multibyte-safe pattern (a small
- * parallel class, not an import — this buffer parses bare NDJSON event
- * objects, not JSON-RPC envelopes) — deliberately NOT the shipped example's
- * naive per-chunk `data.toString()` split, which corrupts a UTF-8 codepoint
- * split across a `'data'` chunk boundary. Used only by the one-shot
- * `explore` path; the RPC-backed path gets its events from `RpcClient`'s
- * own `onEvent()`.
- */
-export class AgentEventLineBuffer {
-  private readonly decoder = new StringDecoder("utf8");
-  private readonly onEvent: (evt: unknown) => void;
-  private readonly onParseError?: (line: string) => void;
-  private carry = "";
-
-  // No TS constructor parameter properties — see mcp-stdio-client.ts's
-  // JsonRpcLineBuffer doc comment: Node's native .ts type-stripping cannot
-  // erase them (they inject an implicit assignment), so explicit field
-  // declarations + explicit assignment are used instead.
-  constructor(onEvent: (evt: unknown) => void, onParseError?: (line: string) => void) {
-    this.onEvent = onEvent;
-    this.onParseError = onParseError;
-  }
-
-  feed(chunk: Buffer): void {
-    this.carry += this.decoder.write(chunk);
-    const lines = this.carry.split("\n");
-    this.carry = lines.pop() ?? "";
-    for (const line of lines) {
-      this.emitLine(line);
-    }
-  }
-
-  /**
-   * Flushes any final partial line left in the decoder/carry buffer once the
-   * source stream has ended (e.g. a last event line with no trailing
-   * newline). Safe to call at most once per buffer lifetime.
-   */
-  end(): void {
-    const rest = this.decoder.end();
-    const remainder = this.carry + rest;
-    this.carry = "";
-    if (remainder.length > 0) {
-      this.emitLine(remainder);
-    }
-  }
-
-  private emitLine(line: string): void {
-    if (!line.trim()) return;
-    let evt: unknown;
-    try {
-      evt = JSON.parse(line);
-    } catch {
-      this.onParseError?.(line);
-      return;
-    }
-    this.onEvent(evt);
-  }
-}
-
-/**
- * Shared tier resolution for spawn, both explore paths, and the manual advisory.
+/** Shared tier resolution for persistent spawn and the manual advisory.
  * Accept only pi-labeled exact catalog membership with configured auth. Unknown
  * or unauthenticated pi values inherit with rejected detail and no tier effort.
  * Non-pi, omitted tiers and transport/parse failures silently inherit. Registry
@@ -552,6 +329,14 @@ export function inheritModelFromToolCtx(toolCtx: unknown): string | undefined {
   return model?.provider && model?.id ? `${model.provider}/${model.id}` : undefined;
 }
 
+/** Extracts the immediate dispatcher's stable Pi identity from a live tool call. */
+export function storageContextFromToolCtx(toolCtx: unknown): AgentStorageContext {
+  const value = toolCtx as { sessionManager?: { getSessionId?: () => string }; agentStorageRoot?: string } | undefined;
+  const id = value?.sessionManager?.getSessionId?.();
+  if (!id) throw new Error("ws-pi-agent: current Pi session identity is unavailable");
+  return createAgentStorageContext(id, value?.agentStorageRoot);
+}
+
 /**
  * Review fix (relay #1, TEST finding #3): pure extraction of `spawnAgent`'s
  * `ctx.toolGroup ?? "full-worker"` default — previously inlined directly in
@@ -567,280 +352,6 @@ export function resolveSpawnToolGroup(explicit: ToolGroup | undefined): ToolGrou
 }
 
 // ---------------------------------------------------------------------------
-// One-shot `explore` machinery (unchanged from Phase 2-3, only its model
-// resolution call switches to the reframed alias lookup).
-// ---------------------------------------------------------------------------
-
-export type AgentState = "running" | "done";
-
-export interface AgentRecord {
-  agentId: string;
-  playbook: string;
-  /** Absolute path to the ws-owned `--session` file; undefined for `noSession` (explore) records. */
-  sessionPath?: string;
-  noSession: boolean;
-  /** Rendered playbook prompt path (cached, reused unchanged across resumes). */
-  systemPromptPath?: string;
-  state: AgentState;
-  /** Last-seen `stopReason` — metadata only, never the completion signal. */
-  stopReason?: string;
-  outputText: string;
-  errorMessage?: string;
-  exitCode: number | null;
-  exitSignal: NodeJS.Signals | null;
-  proc?: ChildProcess;
-  /** Explore leaves self-reap from the registry once harvested by wait/exploreLeaf; workers never do. */
-  selfReap: boolean;
-  waiters: Array<() => void>;
-  ownership?: AgentOwnership;
-  ownershipObserverStop?: () => void;
-  launchGeneration?: number;
-}
-
-export type AgentRegistry = Map<string, AgentRecord>;
-
-function firstText(result: McpToolCallResult): string | undefined {
-  return result.content.find((item) => item.type === "text")?.text;
-}
-
-/**
- * Resolves the `pi` invocation the same way the shipped reference example
- * does (`examples/extensions/subagent/index.ts#L249-263`): prefer
- * re-invoking the currently-running script through the current Node binary
- * (works regardless of whether `pi` is on PATH), falling back to a bare
- * `pi` command otherwise. The Bun-virtual-script branch from the reference
- * is dropped — this package only ever runs under Node (package.json's
- * `"test": "node --test"`), so that branch would be dead code here. Used
- * only by the one-shot `explore` path; the RPC-backed path always passes
- * `cliPath: process.argv[1]` directly with no fallback (see
- * `RPC_CLI_PATH` below) since `RpcClient` itself has no bare-`pi` fallback.
- */
-function getPiInvocation(extraArgs: string[]): { command: string; args: string[] } {
-  const currentScript = process.argv[1];
-  if (currentScript && existsSync(currentScript)) {
-    return { command: process.execPath, args: [currentScript, ...extraArgs] };
-  }
-  return { command: "pi", args: extraArgs };
-}
-
-/**
- * Resolves every pending one-shot waiter on `record` (its `waiters` array is
- * drained and each resolved). Generic over any record shape carrying a
- * `waiters: Array<() => void>` field.
- *
- * 260905: now used ONLY by the one-shot `explore` registry (`AgentRecord`),
- * whose `waitForDone` genuinely blocks on child exit. The RPC-backed
- * registry no longer has waiters at all — under the push model a lead never
- * blocks on a child, so `RpcAgentRecord.waiters` and everything that drained
- * it went away with `ws-agent-wait`.
- */
-function settleWaiters<T extends { waiters: Array<() => void> }>(record: T): number {
-  const waiters = record.waiters;
-  record.waiters = [];
-  for (const resolve of waiters) resolve();
-  return waiters.length;
-}
-
-function waitForDone(record: AgentRecord): Promise<void> {
-  if (record.state === "done") return Promise.resolve();
-  return new Promise((resolve) => record.waiters.push(resolve));
-}
-
-/**
- * Extracts `stopReason`/`errorMessage`/final text from a `message_end`
- * event onto `record`. Deliberately NEVER touches `record.state` — the
- * load-bearing invariant is that `state:"done"` is flipped only by the
- * child's `close` event, never by observing a terminal `stopReason` in the
- * stream (the `--session` file is only flush-guaranteed complete after the
- * process exits). Exported so that invariant has direct unit coverage
- * (test/spawner.test.ts) instead of only being reachable through a live
- * subprocess.
- */
-export function handleAgentEvent(record: AgentRecord, evt: unknown): void {
-  if (!evt || typeof evt !== "object") return;
-  const e = evt as Record<string, unknown>;
-  if (e.type !== "message_end") return;
-  const msg = e.message as Record<string, unknown> | undefined;
-  if (!msg || msg.role !== "assistant") return;
-
-  if (typeof msg.stopReason === "string") {
-    record.stopReason = msg.stopReason;
-  }
-  if (typeof msg.errorMessage === "string") {
-    record.errorMessage = msg.errorMessage;
-  }
-  const content = Array.isArray(msg.content) ? msg.content : [];
-  const text = content
-    .filter((part): part is Record<string, unknown> => !!part && typeof part === "object" && part.type === "text")
-    .map((part) => (typeof part.text === "string" ? part.text : ""))
-    .join("");
-  if (text) {
-    // Last assistant message wins — this is the agent's final answer, not a
-    // transcript accumulator.
-    record.outputText = text;
-  }
-}
-
-/**
- * Spawns the `pi` child process for `record` and wires deadlock-safe
- * stdout/stderr draining (both streams get a `'data'` listener attached
- * immediately at spawn, per `mcp-stdio-client.ts#L187-199`'s precedent).
- *
- * `state:"done"` is flipped ONLY from the child's `close` event — never from
- * an in-stream terminal `stopReason` — because the `--session` file is only
- * flush-guaranteed complete after the process has actually exited. `close`
- * (not `exit`) is used deliberately: it fires after stdio streams have
- * ended, so `record.outputText`/`stopReason` are guaranteed fully drained by
- * the time waiters are settled.
- */
-function spawnPiProcess(record: AgentRecord, args: string[], cwd: string): void {
-  const invocation = getPiInvocation(args);
-  const proc = spawn(invocation.command, invocation.args, {
-    cwd,
-    env: { ...buildChildProcessEnv(process.env), ...(record.ownership ? { [WS_PI_APPROVAL_DIR_ENV]: join(record.ownership.home, "approvals") } : {}) },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  record.proc = proc;
-
-  const lineBuffer = new AgentEventLineBuffer(
-    (evt) => handleAgentEvent(record, evt),
-    (line) => console.error(`[ws-pi-agent:${record.agentId}] failed to parse event line: ${line}`),
-  );
-  proc.stdout.on("data", (chunk: Buffer) => lineBuffer.feed(chunk));
-  proc.stderr.on("data", (chunk: Buffer) => {
-    console.error(`[ws-pi-agent:${record.agentId}] ${chunk.toString().trimEnd()}`);
-  });
-
-  // Spawn-level failure (bad command, missing binary, permissions). Without
-  // a listener this becomes an unhandled exception instead of settling the
-  // record — mirrors mcp-stdio-client.ts's McpStdioClient 'error' handling.
-  // Explicitly flips state:"done" and settles waiters here rather than
-  // relying on Node also emitting 'close' after 'error' (a dual-emit
-  // assumption) — 'close' still fires afterward in the common case and
-  // re-applies the same done/settled state, which is idempotent (settleWaiters
-  // drains an already-empty waiters array; state/exitCode get overwritten
-  // with equivalent values).
-  proc.on("error", (err) => {
-    record.errorMessage = `pi process failed to start: ${err.message}`;
-    record.state = "done";
-    settleWaiters(record);
-    if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "stopped", running: false, observedAt: Date.now() } });
-  });
-
-  proc.on("close", (code, signal) => {
-    lineBuffer.end();
-    record.exitCode = code;
-    record.exitSignal = signal;
-    record.state = "done";
-    settleWaiters(record);
-    if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "stopped", running: false, observedAt: Date.now() } });
-  });
-}
-
-export interface AgentCallCtx {
-  /** The calling (lead) session's session_key, used for `playbook.render`. */
-  sessionKey: string;
-  cwd: string;
-  /** `provider/id`, forwarded from the calling tool-execute ctx.model, or undefined to inherit pi's own default. */
-  model?: string;
-  /** Bridge's sanitized `ws__*` registered tool names, for the `full-worker` group. */
-  wsToolNames: readonly string[];
-  storage?: AgentStorageContext;
-}
-
-/** Extracts the immediate dispatcher's stable Pi identity from a live tool call. */
-export function storageContextFromToolCtx(toolCtx: unknown): AgentStorageContext {
-  const value = toolCtx as { sessionManager?: { getSessionId?: () => string }; agentStorageRoot?: string } | undefined;
-  const id = value?.sessionManager?.getSessionId?.();
-  if (!id) throw new Error("ws-pi-agent: current Pi session identity is unavailable");
-  return createAgentStorageContext(id, value?.agentStorageRoot);
-}
-
-export interface ExploreParams {
-  query: string;
-}
-
-export interface ExploreLeafOptions {
-  profile?: "recon" | "read-only";
-  effort?: string;
-}
-
-function harvestExplore(id: string, record: AgentRecord, registry: AgentRegistry): { output: string; stopReason?: string } {
-  const entry = { output: record.outputText, stopReason: record.stopReason };
-  // Explore leaves have no continue path — reap right after the first
-  // harvest instead of lingering in the registry forever.
-  if (record.selfReap) {
-    registry.delete(id);
-    if (record.ownership) removeOwnedAgentHome(record.ownership);
-  }
-  return entry;
-}
-
-/**
- * Thin one-shot `explore` preset: fixed `playbook: "explore"`,
- * `--tools=recon`, `--no-session`, no continuation. The leaf self-reaps from
- * the registry once its output has been harvested. Always blocks until the
- * child process closes and returns its output directly — the `async` param
- * this used to accept is gone (260906: the lead's own `explore` registration
- * is now a preset over the RPC-backed `spawnAgent` below, which is
- * async-by-nature; this worker/execute-worker-only leaf never needed a
- * non-blocking mode of its own, since its one caller — a worker's own
- * `explore` tool call — was always the sole consumer of `async: true`).
- */
-export async function exploreLeaf(
-  client: McpStdioClient,
-  registry: AgentRegistry,
-  ctx: Omit<AgentCallCtx, "wsToolNames">,
-  params: ExploreParams,
-  options: ExploreLeafOptions = {},
-): Promise<{ agentId: string; state: AgentState; output?: string; stopReason?: string }> {
-  const renderResult = await client.callTool("playbook.render", {
-    session_key: ctx.sessionKey,
-    name: "explore",
-  });
-  const text = firstText(renderResult);
-  if (renderResult.isError || !text) {
-    throw new Error(`ws-pi-agent: playbook.render("explore") failed: ${text ?? "no content returned"}`);
-  }
-  const systemPromptPath = text.split("\n")[0]?.trim();
-  if (!systemPromptPath) {
-    throw new Error('ws-pi-agent: playbook.render("explore") returned no prompt path');
-  }
-
-  const agentId = randomUUID();
-  const ownership = ctx.storage ? allocateAgentHome(ctx.storage, agentId, "explore", undefined, true) : undefined;
-  const record: AgentRecord = {
-    agentId,
-    playbook: "explore",
-    noSession: true,
-    systemPromptPath,
-    state: "running",
-    outputText: "",
-    exitCode: null,
-    exitSignal: null,
-    selfReap: true,
-    waiters: [],
-    ownership,
-  };
-  registry.set(agentId, record);
-
-  const args = buildSpawnArgs({
-    mode: "explore",
-    noSession: true,
-    promptPath: systemPromptPath,
-    tools: resolveTools(options.profile === "read-only" ? "read-only" : "recon"),
-    model: ctx.model,
-    thinking: options.effort,
-    task: params.query,
-  });
-  spawnPiProcess(record, args, ctx.cwd);
-
-  await waitForDone(record);
-  const harvested = harvestExplore(agentId, record, registry);
-  return { agentId, state: "done", output: harvested.output, stopReason: harvested.stopReason };
-}
-
-// ---------------------------------------------------------------------------
 // RPC-backed persistent-child engine (`ws-agent-spawn` / `ws-agent-send` /
 // `ws-agent-list` / `ws-agent-stop` / `ws-agent-transcript`).
 // ---------------------------------------------------------------------------
@@ -852,9 +363,8 @@ export async function exploreLeaf(
  * extension discovery disabled, so a child cannot load a duplicate adapter. `RpcClient.start()` in
  * the installed `@earendil-works/pi-coding-agent` package always does
  * `spawn("node", [cliPath, ...args])` with `cliPath = this.options.cliPath
- * ?? "dist/cli.js"`; there is no bare-`pi` fallback inside `RpcClient`
- * itself (unlike this module's own `getPiInvocation()` used by the one-shot
- * `explore` path above). If `process.argv[1]` is ever missing/non-existent
+ * ?? "dist/cli.js"`; there is no bare-`pi` fallback inside `RpcClient`.
+ * If `process.argv[1]` is ever missing/non-existent
  * there is no client-side fallback path — this is the ticket's settled
  * answer, carried forward as-is, not something to re-derive.
  */
@@ -1252,10 +762,9 @@ export type AgentStatus = "running" | "idle" | "dormant" | "waiting-on-children"
  * `execute-worker` (approval-gated) from a plain worker so the shutdown
  * sidecar can re-arm the right wiring on revival.
  *
- * `"explore"` is the fourth shape: a lead/fork researcher is a persistent
- * RPC record with a simple/deep mode. Its terminal collection leaf remains in
- * the separate self-reaping `AgentRegistry`; the persistent record is
- * sidecar-restored without worker/fork-specific wiring.
+ * `"explore"` is the fourth shape: every eligible dispatcher creates the same
+ * persistent RPC researcher record, sidecar-restored without worker/fork-specific
+ * wiring.
  */
 export type SpawnAgentRole = "worker" | "execute-worker" | "fork" | "explore";
 
@@ -1300,8 +809,7 @@ const PROMPT_TRUNCATION_MARKER = "\n…[truncated for storage]";
  * Byte-safe head-truncation of a prompt for storage: cuts at `capBytes` UTF-8
  * bytes (never mid-codepoint — a naive `Buffer.slice` cut can straddle a
  * multibyte sequence and corrupt the tail) and appends a cut-marker line when
- * truncation actually happened. Mirrors `AgentEventLineBuffer`'s existing
- * `StringDecoder`-based multibyte-safe convention.
+ * truncation actually happened.
  */
 export function truncatePromptForStorage(prompt: string, capBytes: number = PROMPT_STORAGE_CAP_BYTES): string {
   const buf = Buffer.from(prompt, "utf8");
@@ -1350,11 +858,10 @@ export type PushDeliverAs = "steer" | "followUp" | "nextTurn";
 /**
  * Every eligible dispatcher injects its direct children's events into its own
  * session. Its own reports separately travel outward over its parent RPC edge.
- * A terminal simple explorer owns no child registry work and cannot wake itself.
  */
 export function shouldPushToLead(env: NodeJS.ProcessEnv = process.env): boolean {
   const role = readSpawnRole(env);
-  return isLeadOrFork(role) || role === "worker" || (role === "explore" && readExploreMode(env) === "deep");
+  return isLeadOrFork(role) || role === "worker" || role === "explore";
 }
 
 /**
@@ -1385,11 +892,8 @@ function computeFanIn(registry: RpcAgentRegistry | undefined): { present: boolea
  *   `threadBound` — 260905 (alias/park/cap ticket) keys this on registry
  *   membership, not on a live client: a dormant/parked record still counts as
  *   present, since automatic parking (see the settle handler below) now
- *   routinely turns a settled, non-threadBound child dormant. 260906: a
- *   lead/fork `explore` IS a member of this same registry while it runs (a
- *   one-shot `RpcAgentRecord`, deleted rather than parked at settle) — only
- *   the worker/execute-worker leaf's separate one-shot `AgentRegistry` is
- *   never counted here.
+ *   routinely turns a settled, non-threadBound child dormant. Persistent
+ *   researchers are members of this same registry.
  * - N counts the subset of those that is still `running` and has not yet
  *   filed a `final`/`question` this turn (`terminalThisTurn`), so the agent
  *   whose own terminal report triggered this very push has already removed
@@ -2667,8 +2171,7 @@ export interface RpcEventOutcome {
  * onto `record`'s locally-tracked streaming/report state, and returns what the
  * IO layer should push for it. Exported so the streaming/turn bookkeeping and
  * the report-classification branch have direct unit coverage without a real
- * `RpcClient` subprocess — mirrors `handleAgentEvent`'s test-injection pattern
- * for the one-shot `explore` path above.
+ * `RpcClient` subprocess.
  *
  * The report branch matches a raw `tool_execution_start` event (the same
  * event Pi's own extension-hook fan-out emits the instant the LLM dispatches
@@ -3026,19 +2529,10 @@ export function attachEventListener(
 }
 
 /**
- * Best-effort `setThinkingLevel()` after `start()`, for the RPC-backed
- * persistent-child path only. A launch-time `--thinking <level>` CLI flag
- * DOES exist — `buildSpawnArgs`'s `thinking` option, which the ephemeral
- * one-shot `exploreLeaf` collection leaf uses directly (260906 Phase 2) —
- * but this RPC path applies `model_effort` as a live post-start RPC call
- * instead, because a persistent child's effort can change across a
- * later resume/restart (dormant-resume `applyModelEffort` calls below),
- * unlike the one-shot leaf's single fixed launch. Decoupled from whether
- * `model_name` was also given. Never hard-fails — an unsupported/
- * unrecognized level string degrades to a no-op, matching the ticket's own
- * fallback wording (Out of Scope: validating against Pi's exact
- * `ThinkingLevel` enum is not this phase's job; the caller's string is
- * forwarded as-is).
+ * Best-effort `setThinkingLevel()` after `start()` for persistent children.
+ * The same cached effort is reapplied after a dormant resume, independently
+ * of whether a model was selected. Ordinary unsupported values degrade to a
+ * no-op; researchers use strict verification before their prompt.
  */
 async function applyModelEffort(client: RpcClient, modelEffort: string | undefined, strict = false): Promise<void> {
   if (!modelEffort) return;
@@ -3053,8 +2547,8 @@ async function applyModelEffort(client: RpcClient, modelEffort: string | undefin
 /**
  * Pi acknowledges setThinkingLevel even when it clamps to a model-supported
  * level. Researchers therefore read the actual RPC state before their first
- * prompt and on every resume. Simple records adopt the first actual default or
- * clamp; deep records must exactly retain the lead's captured selection.
+ * prompt and on every resume. The initial launch adopts the actual default or
+ * clamp, and every resume requires that frozen selection.
  */
 async function verifyResearchSelection(client: RpcClient, record: RpcAgentRecord, initial: boolean): Promise<void> {
   if (!record.exploreMode || !record.modelBase) {
@@ -3071,8 +2565,8 @@ async function verifyResearchSelection(client: RpcClient, record: RpcAgentRecord
   if (typeof actualEffort !== "string" || !actualEffort) {
     throw new Error("ws-pi-agent: research thinking level is unavailable");
   }
-  if (record.exploreMode === "simple" && initial) {
-    // The small tier may leave effort unset, and Pi may clamp a requested
+  if (initial) {
+    // A selected tier may leave effort unset, and Pi may clamp a requested
     // effort. Persist what the child actually accepted for all later resumes.
     record.modelEffort = actualEffort;
     return;
@@ -3896,15 +3390,14 @@ export function getAgentTranscriptPath(registry: RpcAgentRegistry, agentId: stri
 // Pi tool registration.
 // ---------------------------------------------------------------------------
 
+export interface ExploreParams {
+  query: string;
+  mode?: ExploreMode;
+}
+
 export interface AgentToolsHandle {
-  /**
-   * Graceful teardown for `session_shutdown`: awaits a best-effort
-   * `client.stop()` over every live RPC-backed child (renamed from the old
-   * synchronous `killRunning` — the shutdown semantics changed from a fire-
-   * and-forget SIGTERM to an awaited graceful RPC stop), plus a SIGTERM of
-   * any still-running one-shot `explore` process (that machinery is
-   * untouched, so it keeps the old kill style).
-   */
+  /** Graceful teardown for `session_shutdown`: awaits a best-effort
+   * `client.stop()` over every live RPC-backed child. */
   stopAll(): Promise<void>;
   /**
    * 260904 Phase 1: the same RPC-backed registry `ws-agent-*` already reads
@@ -3919,12 +3412,9 @@ export interface AgentToolsHandle {
 /**
  * Registers the six RPC-backed delegation tools (`ws-agent-spawn`,
  * `ws-agent-send`, `ws-agent-list`, `ws-agent-stop`, `ws-agent-transcript`,
- * `ws-report-to-lead`) plus a role-keyed `explore` tool. A lead or fork gets
- * the persistent simple/deep researcher preset in the shared `rpcRegistry`;
- * workers retain their blocking self-reaping recon leaf, while only a deep
- * researcher gets the terminal no-bash collection leaf in `exploreRegistry`.
- * The registries remain separate because persistent researchers settle over
- * RPC and leaves complete on a child-process close event.
+ * `ws-report-to-lead`) plus the persistent `explore` preset. Every dispatcher
+ * registers the same tool; the persisted delegation allowlist removes child
+ * management, including Explore, at terminal depth.
  *
  * Phase 2 adds a child->lead report channel: `ws-report-to-lead` is the only
  * child-side tool this ticket adds (registered here but reachable only from
@@ -3956,12 +3446,9 @@ export function registerAgentTools(
    * `ws-execute`-spawned `execute-worker` keeps its approval relay wired even
    * if it is later driven through the generic `ws-agent-*` tools (shared
    * registry, §4). A no-op for every other `toolGroup` — `GATED_EXEC_TOOL_NAME`
-   * is unreachable from `full-worker`/`recon`/`read-only`'s `--tools` lists,
-   * so this callback simply never fires for them.
+   * is unreachable from their `--tools` lists, so this callback never fires.
    */
   onApprovalPending?: (record: RpcAgentRecord) => void,
-  /** Narrow runner seam: worker exploration tests must never execute the test file as a child Pi. */
-  runExploreLeaf: typeof exploreLeaf = exploreLeaf,
   /** Adapter-owned persistent-research guide, wired by index.ts. */
   exploreGuidePath = "explore-guide.md",
   /** Shared ws-owned native/MCP presentation seam. */
@@ -3970,39 +3457,7 @@ export function registerAgentTools(
   const rpcRegistry: RpcAgentRegistry = new Map();
   registerAgentCostOwner(rpcRegistry, sessionCtx.storage);
   installSubtreePublisher(rpcRegistry, readSubtreeChannel(), () => heldPushQueue.length);
-  const exploreRegistry: AgentRegistry = new Map();
   const stopLivenessProbe = startLivenessProbe(pi, rpcRegistry);
-
-  /**
-   * 260906 (lead explore as an async RPC child): role is fixed for this
-   * process's whole lifetime, so it is read once at factory time rather than
-   * per tool call. `true` for the host lead and a `fork` child — both get the
-   * new RPC-backed preset; every other role (worker, execute-worker, and,
-   * harmlessly, an explore leaf itself, which can never reach this tool per
-   * the depth cap) keeps the blocking `exploreLeaf` behavior unchanged.
-   */
-  const role = readSpawnRole(process.env);
-  const exploreMode = readExploreMode(process.env);
-  const isLeadRole = isLeadOrFork(role) || role === "worker";
-  const persistentExplore = isLeadRole || (role === "explore" && exploreMode === "deep");
-
-  /**
-   * IO wrapper around `resolveModelForAliasViaWsMcp` for `explore`'s implicit
-   * `"small"` lookup: re-resolves through `config.resolve_agent` fresh on
-   * every call (no caching) so a `config.tune agents.tier harness:pi` edit
-   * applies without restarting Pi, matching bridge.ts's advisory's
-   * no-caching choice.
-   */
-  async function resolveRequiredExploreModel(toolCtx: unknown): Promise<{ model: string; effort?: string }> {
-    const catalog = modelCatalogFromToolCtx(toolCtx);
-    const resolution = await resolveModelForAliasViaWsMcp(bridge.client, "small", inheritModelFromToolCtx(toolCtx), catalog);
-    if (resolution.source !== "tier" || !resolution.model || resolution.failure || resolution.rejected) {
-      const refusal = formatExploreTierRefusal("small", resolution.failure, resolution.rejected);
-      tierWarningNotifierFromToolCtx(toolCtx)?.(refusal);
-      throw new Error(`ws-pi-agent: ${refusal}`);
-    }
-    return { model: resolution.model, effort: resolution.effort };
-  }
 
   /** Cap on the head-truncated query used as a spawned explore's display title. */
   const EXPLORE_TITLE_CAP = 60;
@@ -4014,10 +3469,7 @@ export function registerAgentTools(
   }
 
   function composeExploreTask(query: string, mode: ExploreMode): string {
-    const method = mode === "deep"
-      ? "Use deep research: inspect directly, and delegate one scoped evidence collection only when it adds value; synthesize the result yourself."
-      : "Use simple research: inspect the available evidence directly and return an evidence-backed answer.";
-    return `${method}\n\nQuestion:\n${query}`;
+    return `Intent mode: ${mode}\n\nQuestion:\n${query}`;
   }
 
   registerWsTool(pi, {
@@ -4231,80 +3683,73 @@ export function registerAgentTools(
     },
   }, toolPreviewTuiRef);
 
-  // Tool registration is role/mode gated, while the CLI allowlist remains the
-  // enforcement layer. A simple researcher and a terminal collector get no
-  // explore tool at all; only workers and deep researchers can collect.
-  if (isLeadRole || role === "worker" || (role === "explore" && exploreMode === "deep")) {
-    registerWsTool(pi, {
-      name: "explore",
-      label: "explore",
-      description: persistentExplore
-        ? "Spawn a persistent exploration researcher. explore({query, deep_research?}) returns exactly {agent_id, alias}; simple uses configured small, while deep freezes your current model and thinking level and may request one cheap read-only collection."
-        : "Run one blocking, scoped evidence collection. This terminal leaf cannot delegate or use bash.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "Exploration question." },
-          ...(persistentExplore ? { deep_research: { type: "boolean", description: "Use the dispatcher's current model and thinking level; optional cheap collection is allowed." } } : {}),
+  registerWsTool(pi, {
+    name: "explore",
+    label: "explore",
+    description:
+      "Spawn a persistent exploration researcher. It returns exactly {agent_id, alias}; use ws-agent-send to continue the same child. Select mode by evidence intent, not importance: code-search traces bounded code/tests while diagnosis connects evidence into a cause; comparison evaluates alternatives while synthesis reconciles conflicting or architecture-level evidence.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Exploration question." },
+        mode: {
+          type: "string",
+          enum: Object.keys(EXPLORE_MODE_TIERS),
+          description:
+            "Intent mode; defaults to code-search. lookup locates one known fact; code-search traces bounded repository code/tests; history-search traces Git, tickets, or decisions; docs-search inspects local or installed documentation; web-search collects current external evidence; diagnosis connects code/tests/logs/runtime observations into a cause; comparison evaluates alternatives against evidence; synthesis reconciles conflicting evidence or produces a cross-source architecture conclusion.",
         },
-        required: ["query"],
-      } as never,
-      async execute(_toolCallId, params, _signal, onUpdate, toolCtx) {
-        const p = params as ExploreParams & { deep_research?: boolean };
-        if (persistentExplore) {
-          const mode: ExploreMode = p.deep_research === true ? "deep" : "simple";
-          // Pi's current model/effort are captured as one snapshot before any
-          // await, so later parent retuning cannot affect this researcher.
-          const inherited = inheritModelFromToolCtx(toolCtx);
-          const effort = (toolCtx as { thinkingLevel?: unknown }).thinkingLevel;
-          if (mode === "deep" && (!inherited || typeof effort !== "string")) {
-            throw new Error("ws-pi-agent: deep explore requires a concrete current model and thinking level");
-          }
-          let resolvedInfo: ResolvedModelInfo | undefined;
-          const result = await spawnAgent(
-            rpcRegistry,
-            {
-              pi, cwd: sessionCtx.cwd, storage: sessionCtx.storage ?? storageContextFromToolCtx(toolCtx), inheritModel: mode === "deep" ? inherited : inheritModelFromToolCtx(toolCtx),
-              catalog: mode === "simple" ? modelCatalogFromToolCtx(toolCtx) : [],
-              notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx), wsToolNames: bridge.wsToolNames, extensionPath: sessionCtx.extensionPath, client: bridge.client,
-              toolGroup: mode === "deep" ? "read-only-explore" : "read-only", spawnRole: "explore", exploreMode: mode,
-              parentPolicy: { ...callerDelegationPolicy(bridge.wsToolNames), sessionKey: bridge.defaultSessionKeyRef.current },
-              requireTier: mode === "simple", aliasPrefix: "explore", onApprovalPending,
-              onModelResolved: (resolved) => {
-                resolvedInfo = resolved;
-                onUpdate?.({ content: [], details: { resolved } });
-              },
-            },
-            {
-              systemPromptPath: exploreGuidePath,
-              prompt: composeExploreTask(p.query, mode),
-              modelName: mode === "simple" ? "small" : undefined,
-              modelEffort: mode === "deep" ? effort as string | undefined : undefined,
-              title: deriveExploreTitle(p.query),
-            },
-          );
-          return {
-            content: [{ type: "text", text: JSON.stringify({ agent_id: result.agent_id, alias: result.alias }) }],
-            details: { resolved: resolvedInfo },
-          };
-        }
-        // Worker-leaf branch never calls `spawnAgent` — `resolveRequiredExploreModel`
-        // always succeeds with a genuine tier hit (throws otherwise, `requireTier`
-        // semantics), so this line is always a non-inherited "small" hit. Published
-        // independently of the `spawnAgent`-based `onModelResolved` plumbing above.
-        const resolved = await resolveRequiredExploreModel(toolCtx);
-        const resolvedInfo: ResolvedModelInfo = { tier: "small", model: resolved.model, effort: resolved.effort, inherited: false };
-        onUpdate?.({ content: [], details: { resolved: resolvedInfo } });
-        const result = await runExploreLeaf(
-          bridge.client, exploreRegistry,
-          { sessionKey: bridge.defaultSessionKeyRef.current ?? "", cwd: sessionCtx.cwd, model: resolved.model },
-          { query: p.query }, { profile: role === "explore" && exploreMode === "deep" ? "read-only" : "recon", effort: resolved.effort },
-        );
-        return { content: [{ type: "text", text: JSON.stringify(result) }], details: { resolved: resolvedInfo } };
       },
-      ...createDispatchToolPreview(toolPreviewTuiRef, "explore", buildExploreSummary),
-    }, toolPreviewTuiRef);
-  }
+      required: ["query"],
+      additionalProperties: false,
+    } as never,
+    async execute(_toolCallId, params, _signal, onUpdate, toolCtx) {
+      const raw = params as Record<string, unknown>;
+      if (Object.keys(raw).some((key) => key !== "query" && key !== "mode")) {
+        throw new Error("ws-pi-agent: invalid explore arguments");
+      }
+      const p = params as ExploreParams;
+      const mode = p.mode ?? "code-search";
+      const tier = EXPLORE_MODE_TIERS[mode];
+      if (!tier) throw new Error(`ws-pi-agent: unknown explore mode: ${String(p.mode)}`);
+      let resolvedInfo: ResolvedModelInfo | undefined;
+      const result = await spawnAgent(
+        rpcRegistry,
+        {
+          pi,
+          cwd: sessionCtx.cwd,
+          storage: sessionCtx.storage ?? storageContextFromToolCtx(toolCtx),
+          inheritModel: inheritModelFromToolCtx(toolCtx),
+          catalog: modelCatalogFromToolCtx(toolCtx),
+          notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx),
+          wsToolNames: bridge.wsToolNames,
+          extensionPath: sessionCtx.extensionPath,
+          client: bridge.client,
+          toolGroup: "read-only-explore",
+          spawnRole: "explore",
+          exploreMode: mode,
+          parentPolicy: { ...callerDelegationPolicy(bridge.wsToolNames), sessionKey: bridge.defaultSessionKeyRef.current },
+          requireTier: true,
+          aliasPrefix: "explore",
+          onApprovalPending,
+          onModelResolved: (resolved) => {
+            resolvedInfo = resolved;
+            onUpdate?.({ content: [], details: { resolved } });
+          },
+        },
+        {
+          systemPromptPath: exploreGuidePath,
+          prompt: composeExploreTask(p.query, mode),
+          modelName: tier,
+          title: deriveExploreTitle(p.query),
+        },
+      );
+      return {
+        content: [{ type: "text", text: JSON.stringify({ agent_id: result.agent_id, alias: result.alias }) }],
+        details: { resolved: resolvedInfo },
+      };
+    },
+    ...createDispatchToolPreview(toolPreviewTuiRef, "explore", buildExploreSummary),
+  }, toolPreviewTuiRef);
 
   return {
     rpcRegistry,
@@ -4318,16 +3763,6 @@ export function registerAgentTools(
       // runs, while the records are still marked live).
       const rpcStops = [...rpcRegistry.keys()].map((agentId) => stopAgent(rpcRegistry, agentId, pi, { silent: true }).catch(() => undefined));
       await Promise.allSettled(rpcStops);
-
-      for (const record of exploreRegistry.values()) {
-        if (record.state === "running" && record.proc && !record.proc.killed) {
-          try {
-            record.proc.kill();
-          } catch {
-            // best effort
-          }
-        }
-      }
     },
   };
 }

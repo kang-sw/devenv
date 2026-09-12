@@ -107,23 +107,23 @@ describe("captureOrphans", () => {
   test("persistent explore records are captured for restart alongside workers", () => {
     const registry: RpcAgentRegistry = new Map([
       ["worker", record({ agentId: "worker", client: {} as RpcClient })],
-      ["explore", record({ agentId: "explore", client: {} as RpcClient, spawnRole: "explore", exploreMode: "simple", modelBase: "p/m", modelEffort: "off", toolGroup: "read-only" })],
+      ["explore", record({ agentId: "explore", client: {} as RpcClient, spawnRole: "explore", exploreMode: "code-search", modelBase: "p/m", modelEffort: "off", toolGroup: "read-only-explore" })],
     ]);
     assert.deepEqual(captureOrphans(registry).map((o) => o.agentId).sort(), ["explore", "worker"]);
   });
 
-  test("round-trips simple/deep research selections through two sidecar cycles", () => {
+  test("round-trips intent-mode research selections through two sidecar cycles", () => {
     const source: RpcAgentRegistry = new Map([
-      ["simple", record({ agentId: "simple", spawnRole: "explore", exploreMode: "simple", modelBase: "pi/small", modelEffort: "medium", toolGroup: "read-only" })],
-      ["deep", record({ agentId: "deep", spawnRole: "explore", exploreMode: "deep", modelBase: "pi/lead", modelEffort: "high", toolGroup: "read-only-explore" })],
+      ["code", record({ agentId: "code", spawnRole: "explore", exploreMode: "code-search", modelBase: "pi/small", modelEffort: "medium", toolGroup: "read-only-explore" })],
+      ["synthesis", record({ agentId: "synthesis", spawnRole: "explore", exploreMode: "synthesis", modelBase: "pi/large", modelEffort: "high", toolGroup: "read-only-explore" })],
     ]);
     const first = parseOrphans(serializeOrphans(captureOrphans(source)));
     const revived = new Map<string, RpcAgentRecord>();
     reviveOrphans(revived, first);
     const second = parseOrphans(serializeOrphans(captureOrphans(revived)));
     assert.deepEqual(second.map(({ agentId, spawnRole, exploreMode, toolGroup, modelBase, modelEffort }) => ({ agentId, spawnRole, exploreMode, toolGroup, modelBase, modelEffort })), [
-      { agentId: "simple", spawnRole: "explore", exploreMode: "simple", toolGroup: "read-only", modelBase: "pi/small", modelEffort: "medium" },
-      { agentId: "deep", spawnRole: "explore", exploreMode: "deep", toolGroup: "read-only-explore", modelBase: "pi/lead", modelEffort: "high" },
+      { agentId: "code", spawnRole: "explore", exploreMode: "code-search", toolGroup: "read-only-explore", modelBase: "pi/small", modelEffort: "medium" },
+      { agentId: "synthesis", spawnRole: "explore", exploreMode: "synthesis", toolGroup: "read-only-explore", modelBase: "pi/large", modelEffort: "high" },
     ]);
   });
 
@@ -268,10 +268,10 @@ describe("serializeOrphans / parseOrphans", () => {
   test("rejects contradictory research metadata instead of reviving it with worker/fork wiring", () => {
     const base = { agentId: "research", sessionPath: "/tmp/s.jsonl", systemPromptPath: "/tmp/p.md", wsToolNames: [], modelBase: "pi/model", modelEffort: "high" };
     const invalid = [
-      { ...base, spawnRole: "worker", exploreMode: "deep", toolGroup: "read-only-explore" },
-      { ...base, spawnRole: "explore", exploreMode: "simple", toolGroup: "read-only-explore" },
-      { ...base, spawnRole: "explore", exploreMode: "bogus", toolGroup: "read-only" },
-      { ...base, spawnRole: "explore", exploreMode: "deep", toolGroup: "read-only-explore", explicitTools: "bash" },
+      { ...base, spawnRole: "worker", exploreMode: "synthesis", toolGroup: "read-only-explore" },
+      { ...base, spawnRole: "explore", exploreMode: "code-search", toolGroup: "read-only" },
+      { ...base, spawnRole: "explore", exploreMode: "bogus", toolGroup: "read-only-explore" },
+      { ...base, spawnRole: "explore", exploreMode: "synthesis", toolGroup: "read-only-explore", explicitTools: "bash" },
       { ...base, spawnRole: "fork", toolGroup: "read-only" },
     ];
     for (const orphan of invalid) {

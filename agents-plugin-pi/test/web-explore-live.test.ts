@@ -36,7 +36,7 @@ test("real direct-lead and nested-worker Explore children search through the sam
           pi, cwd: packageRoot, storage: createAgentStorageContext(`live-parent-${depth}`, root),
           wsToolNames: [], extensionPath: join(packageRoot, "src", "index.ts"),
           client: { callTool: async () => { throw Error("unexpected tier resolution"); } } as never,
-          inheritModel: process.env.WS_PI_WEB_LIVE_MODEL, toolGroup: "read-only", spawnRole: "explore", exploreMode: "simple",
+          inheritModel: process.env.WS_PI_WEB_LIVE_MODEL, toolGroup: "read-only-explore", spawnRole: "explore", exploreMode: "web-search",
           parentPolicy: { version: 1, depth, maxDepth: 2, authority: "lead", tools: resolveTools("full-worker").split(","), network: { search: true, fetch: true } },
         }, {
           systemPromptPath: join(packageRoot, "explore-guide.md"),

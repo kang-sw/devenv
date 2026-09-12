@@ -1,8 +1,6 @@
 /**
  * Unit tests for spawner.ts's pure-logic seams: resolveTools,
- * isTerminalStopReason, buildSpawnArgs, AgentEventLineBuffer's
- * multibyte-split safety, handleAgentEvent's state-non-mutation invariant
- * (one-shot `explore` path), resolveModelForAliasViaWsMcp (Phase 4:
+ * resolveModelForAliasViaWsMcp (Phase 4:
  * async, ws-mcp-`config.resolve_agent`-backed tier resolution against a stub
  * `client.callTool`, replacing the old file-catalog-backed
  * `resolveModelForAlias`), applyRpcEvent's streaming/report bookkeeping and its
@@ -39,15 +37,13 @@
  * `shouldPushToLead` predicate.
  *
  * NOT covered here — genuinely live-gate only, because each path
- * constructs a real `RpcClient` and calls `.start()`: `spawnAgent`,
- * `sendToAgent`'s dormant-auto-resume branch, and the one-shot
- * `exploreLeaf`. Exercised only by a lead-scoped Pi session spawning a real
+ * constructs a real `RpcClient` and calls `.start()`: `spawnAgent` and
+ * `sendToAgent`'s dormant-auto-resume branch. Exercised only by a lead-scoped Pi session spawning a real
  * `pi` child process, per the plan's Verification Plan split between unit
  * and live coverage.
  *
  * Review fix (cycle 1, 260903 Phase 1 goal-loop): also covers
- * `buildRpcClientOptions`/`buildChildProcessEnv`'s process-role env marker
- * placement at both spawn call sites — previously left to a manual
+ * `buildRpcClientOptions`'s process-role env marker placement — previously left to a manual
  * spot-check with zero automated coverage. 260904 Phase 1 renamed the
  * marker from the boolean `WS_PI_AGENT_CHILD_ENV` to the role-valued
  * `WS_PI_SPAWN_ROLE_ENV` (`process-role.ts`) — these tests now assert the
@@ -77,11 +73,7 @@ import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   resolveTools,
-  isTerminalStopReason,
-  buildSpawnArgs,
-  AgentEventLineBuffer,
   TOOL_GROUPS,
-  handleAgentEvent,
   resolveModelForAliasViaWsMcp,
   effectiveModelEffort,
   applyRpcEvent,
@@ -114,7 +106,6 @@ import {
   sendToAgent,
   startForkFinish,
   buildRpcClientOptions as buildRpcClientOptionsBase,
-  buildChildProcessEnv,
   inheritModelFromToolCtx,
   resolveSpawnToolGroup,
   resolveAgentId,
@@ -127,8 +118,6 @@ import {
   DEFAULT_AGENT_REGISTRY_CAP,
   PROMPT_STORAGE_CAP_BYTES,
   registerAgentTools as registerAgentToolsBase,
-  exploreLeaf,
-  type AgentRecord,
   type RpcAgentRecord,
   type RpcAgentRegistry,
   type TerminalDelivery,
@@ -190,33 +179,10 @@ function storageRoot(): string {
   return root;
 }
 
-function freshRunningRecord(): AgentRecord {
-  return {
-    agentId: "test-agent",
-    playbook: "implementer",
-    noSession: false,
-    state: "running",
-    outputText: "",
-    exitCode: null,
-    exitSignal: null,
-    selfReap: false,
-    waiters: [],
-  };
-}
-
 describe("TOOL_GROUPS / resolveTools", () => {
   test("read-only carries no bash and no ws__* tools", () => {
     assert.deepEqual([...TOOL_GROUPS["read-only"]], ["read", "grep", "find", "ls", REPORT_TO_LEAD_TOOL_NAME]);
     assert.equal(resolveTools("read-only", ["ws__playbook_render"]), `read,grep,find,ls,${REPORT_TO_LEAD_TOOL_NAME}`);
-  });
-
-  test("recon adds bash but still never appends ws__* tools", () => {
-    assert.deepEqual([...TOOL_GROUPS.recon], ["read", "grep", "find", "ls", "bash"]);
-    assert.equal(resolveTools("recon", ["ws__playbook_render", "ws__ferrule"]), "read,grep,find,ls,bash");
-  });
-
-  test("recon with no wsToolNames argument at all", () => {
-    assert.equal(resolveTools("recon"), "read,grep,find,ls,bash");
   });
 
   test("full-worker includes built-ins plus the literal explore and ws-report-to-lead tools plus every passed ws__* name, in order", () => {
@@ -272,249 +238,10 @@ describe("resolveSpawnToolGroup (review fix, relay #1, TEST finding #3)", () => 
   test("an explicit toolGroup is passed through unchanged, never overridden by the default", () => {
     assert.equal(resolveSpawnToolGroup("execute-worker"), "execute-worker");
     assert.equal(resolveSpawnToolGroup("read-only"), "read-only");
-    assert.equal(resolveSpawnToolGroup("recon"), "recon");
   });
 
   test("an explicit \"full-worker\" is indistinguishable from omission (both resolve to full-worker) — the intended no-op case", () => {
     assert.equal(resolveSpawnToolGroup("full-worker"), resolveSpawnToolGroup(undefined));
-  });
-});
-
-describe("isTerminalStopReason", () => {
-  test("stop/length/error/aborted are terminal", () => {
-    assert.equal(isTerminalStopReason("stop"), true);
-    assert.equal(isTerminalStopReason("length"), true);
-    assert.equal(isTerminalStopReason("error"), true);
-    assert.equal(isTerminalStopReason("aborted"), true);
-  });
-
-  test("toolUse is NOT terminal", () => {
-    assert.equal(isTerminalStopReason("toolUse"), false);
-  });
-
-  test("undefined and unknown values are not terminal", () => {
-    assert.equal(isTerminalStopReason(undefined), false);
-    assert.equal(isTerminalStopReason("pending"), false);
-    assert.equal(isTerminalStopReason(""), false);
-  });
-});
-
-describe("buildSpawnArgs", () => {
-  test("spawn mode: --session, --append-system-prompt, --tools, --model, task, in order", () => {
-    const args = buildSpawnArgs({
-      mode: "spawn",
-      sessionPath: "/tmp/ws-pi-agent-x/session.jsonl",
-      noSession: false,
-      promptPath: "/tmp/ws-pi-agent-x/prompt.md",
-      tools: "read,bash,edit,write,grep,find,ls,ws__playbook_render",
-      model: "openrouter/some-model",
-      task: "implement the thing",
-    });
-    assert.deepEqual(args, [
-      "--mode",
-      "json",
-      "-p",
-      "--session",
-      "/tmp/ws-pi-agent-x/session.jsonl",
-      "--append-system-prompt",
-      "/tmp/ws-pi-agent-x/prompt.md",
-      "--tools",
-      "read,bash,edit,write,grep,find,ls,ws__playbook_render",
-      "--model",
-      "openrouter/some-model",
-      "implement the thing",
-    ]);
-  });
-
-  test("continue mode: same shape as spawn (reuses sessionPath/promptPath, no re-render)", () => {
-    const args = buildSpawnArgs({
-      mode: "continue",
-      sessionPath: "/tmp/ws-pi-agent-x/session.jsonl",
-      noSession: false,
-      promptPath: "/tmp/ws-pi-agent-x/prompt.md",
-      tools: "read,bash,edit,write,grep,find,ls",
-      task: "follow-up task",
-    });
-    assert.ok(args.includes("--session"));
-    assert.equal(args[args.indexOf("--session") + 1], "/tmp/ws-pi-agent-x/session.jsonl");
-    assert.ok(!args.includes("--no-session"));
-  });
-
-  test("explore mode: --no-session, never --session", () => {
-    const args = buildSpawnArgs({
-      mode: "explore",
-      noSession: true,
-      promptPath: "/tmp/ws-pi-agent-y/prompt.md",
-      tools: "read,grep,find,ls,bash",
-      task: "where is X defined?",
-    });
-    assert.ok(args.includes("--no-session"));
-    assert.ok(!args.includes("--session"));
-  });
-
-  test("--session and --no-session are mutually exclusive: passing both throws", () => {
-    assert.throws(() =>
-      buildSpawnArgs({
-        mode: "spawn",
-        sessionPath: "/tmp/x/session.jsonl",
-        noSession: true,
-        task: "x",
-      }),
-    );
-  });
-
-  test("neither sessionPath nor noSession is a caller bug and throws", () => {
-    assert.throws(() =>
-      buildSpawnArgs({
-        mode: "spawn",
-        noSession: false,
-        task: "x",
-      }),
-    );
-  });
-
-  test("--model is omitted entirely when unset (inherit)", () => {
-    const args = buildSpawnArgs({
-      mode: "explore",
-      noSession: true,
-      tools: "read,grep,find,ls,bash",
-      task: "q",
-    });
-    assert.ok(!args.includes("--model"));
-  });
-
-  test("--append-system-prompt is omitted when promptPath is unset", () => {
-    const args = buildSpawnArgs({
-      mode: "explore",
-      noSession: true,
-      tools: "read,grep,find,ls,bash",
-      task: "q",
-    });
-    assert.ok(!args.includes("--append-system-prompt"));
-  });
-
-  test("--tools is omitted when tools is unset", () => {
-    const args = buildSpawnArgs({
-      mode: "explore",
-      noSession: true,
-      task: "q",
-    });
-    assert.ok(!args.includes("--tools"));
-  });
-
-  test("the task positional is always the final argument", () => {
-    const args = buildSpawnArgs({
-      mode: "explore",
-      noSession: true,
-      task: "final positional check",
-    });
-    assert.equal(args[args.length - 1], "final positional check");
-  });
-
-  // 260906 Phase 2 (tier-slug closeout): `thinking` forwards an ephemeral
-  // collection leaf's resolved effort as a launch-time `--thinking` flag
-  // (`exploreLeaf` passes `options.effort` through, see that function's
-  // `buildSpawnArgs` call). Placed before the task positional, matching
-  // `--model`'s own placement immediately above it.
-  test("--thinking <level> is emitted before the task positional when thinking is a non-empty string", () => {
-    const args = buildSpawnArgs({
-      mode: "explore",
-      noSession: true,
-      task: "q",
-      thinking: "high",
-    });
-    assert.ok(args.includes("--thinking"));
-    assert.equal(args[args.indexOf("--thinking") + 1], "high");
-    assert.equal(args[args.length - 1], "q", "--thinking sits before the task positional, not after");
-  });
-
-  test("--thinking is absent when thinking is empty or omitted (an inherited/no effort)", () => {
-    assert.ok(!buildSpawnArgs({ mode: "explore", noSession: true, task: "q", thinking: "" }).includes("--thinking"));
-    assert.ok(!buildSpawnArgs({ mode: "explore", noSession: true, task: "q" }).includes("--thinking"));
-  });
-});
-
-describe("AgentEventLineBuffer", () => {
-  test("parses a single complete NDJSON event in one chunk", () => {
-    const events: unknown[] = [];
-    const buf = new AgentEventLineBuffer((evt) => events.push(evt));
-    buf.feed(Buffer.from('{"type":"agent_start"}\n'));
-    assert.equal(events.length, 1);
-    assert.deepEqual(events[0], { type: "agent_start" });
-  });
-
-  test("parses an event split across two chunks", () => {
-    const events: unknown[] = [];
-    const buf = new AgentEventLineBuffer((evt) => events.push(evt));
-    const full = '{"type":"message_end","message":{"role":"assistant","stopReason":"stop"}}\n';
-    const splitAt = 25;
-    buf.feed(Buffer.from(full.slice(0, splitAt)));
-    assert.equal(events.length, 0, "must not emit until the newline arrives");
-    buf.feed(Buffer.from(full.slice(splitAt)));
-    assert.equal(events.length, 1);
-    assert.deepEqual(events[0], { type: "message_end", message: { role: "assistant", stopReason: "stop" } });
-  });
-
-  test("decodes a multibyte UTF-8 codepoint split exactly across a chunk boundary", () => {
-    const events: unknown[] = [];
-    const buf = new AgentEventLineBuffer((evt) => events.push(evt));
-    // em-dash U+2014 is 3 bytes in UTF-8: 0xE2 0x80 0x94.
-    const payload = JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "before—after" }] } });
-    const fullBuf = Buffer.from(`${payload}\n`, "utf8");
-    const emDashByteOffset = fullBuf.indexOf(Buffer.from([0xe2, 0x80, 0x94]));
-    assert.ok(emDashByteOffset > 0, "test setup: em-dash bytes must be present");
-    const splitPoint = emDashByteOffset + 1;
-    buf.feed(fullBuf.subarray(0, splitPoint));
-    buf.feed(fullBuf.subarray(splitPoint));
-    assert.equal(events.length, 1);
-    assert.deepEqual(
-      (events[0] as { message: { content: { text: string }[] } }).message.content[0].text,
-      "before—after",
-    );
-  });
-
-  test("handles a multibyte split across many single-byte chunks (arrow + box-drawing)", () => {
-    const events: unknown[] = [];
-    const buf = new AgentEventLineBuffer((evt) => events.push(evt));
-    const text = "step → next ─── done";
-    const payload = JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text }] } });
-    const fullBuf = Buffer.from(`${payload}\n`, "utf8");
-    for (let i = 0; i < fullBuf.length; i++) {
-      buf.feed(fullBuf.subarray(i, i + 1));
-    }
-    assert.equal(events.length, 1);
-    assert.deepEqual((events[0] as { message: { content: { text: string }[] } }).message.content[0].text, text);
-  });
-
-  test("reports a parse error for an invalid line without throwing", () => {
-    const errors: string[] = [];
-    const events: unknown[] = [];
-    const buf = new AgentEventLineBuffer(
-      (evt) => events.push(evt),
-      (line) => errors.push(line),
-    );
-    buf.feed(Buffer.from("not json at all\n"));
-    assert.equal(events.length, 0);
-    assert.deepEqual(errors, ["not json at all"]);
-  });
-
-  test("end() flushes a final line with no trailing newline", () => {
-    const events: unknown[] = [];
-    const buf = new AgentEventLineBuffer((evt) => events.push(evt));
-    buf.feed(Buffer.from('{"type":"agent_end","messages":[]}'));
-    assert.equal(events.length, 0, "must not emit before end() without a trailing newline");
-    buf.end();
-    assert.equal(events.length, 1);
-    assert.deepEqual(events[0], { type: "agent_end", messages: [] });
-  });
-
-  test("end() is a no-op when there is no pending partial line", () => {
-    const events: unknown[] = [];
-    const buf = new AgentEventLineBuffer((evt) => events.push(evt));
-    buf.feed(Buffer.from('{"type":"agent_start"}\n'));
-    assert.equal(events.length, 1);
-    buf.end();
-    assert.equal(events.length, 1, "end() must not re-emit or duplicate the already-flushed event");
   });
 });
 
@@ -1028,105 +755,6 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
 });
 
 /**
- * 260906 Phase 2 (tier-slug closeout): the one-shot `exploreLeaf` itself is
- * NOT unit-testable in isolation — it calls the private, non-exported
- * `spawnPiProcess`, which always does a real `node:child_process` `spawn()`
- * with no injectable seam (unlike the RPC-backed path's `RpcClient`, whose
- * prototype methods are monkey-patchable, see `installRpcHarness` above).
- * The plan's own fallback ("cover the behavior through `buildSpawnArgs` +
- * `resolveRequiredExploreModel`, and record why a direct `exploreLeaf` unit
- * test is not added") is exactly this file's split: `buildSpawnArgs`'s
- * `--thinking` cases above, and `resolveModelForAliasViaWsMcp`'s
- * effort-carried-through-only-on-tier-hit cases (this file's "config.resolve_agent
- * (Phase 4)" describe block) already cover the two ends of the pipe.
- *
- * What neither of those two covers is the WIRING between them: does the
- * worker-role `explore` tool's `execute()` actually thread
- * `resolveRequiredExploreModel`'s resolved `effort` into `runExploreLeaf`'s
- * `ExploreLeafOptions.effort`? That IS unit-testable, because
- * `registerAgentTools`'s `runExploreLeaf` parameter (`src/spawner.ts:2966`,
- * defaulted to the real `exploreLeaf`) is a DI seam the real live process
- * never needs to run through — a fake `runExploreLeaf` replaces the whole
- * function, so `spawnPiProcess` is never reached at all. This describe block
- * exercises exactly that seam.
- */
-describe("registerAgentTools worker exploration retains a persistent researcher and effective effort", () => {
-  interface CapturedTool {
-    name: string;
-    execute: (id: string, params: unknown, signal?: AbortSignal, update?: unknown, ctx?: unknown) => Promise<{ content: Array<{ text: string }> }>;
-  }
-
-  /** Runs `fn` with `WS_PI_SPAWN_ROLE=worker` for the duration — `registerAgentTools` reads the role once, at factory time. */
-  function withWorkerRole<T>(fn: () => T): T {
-    const previous = process.env[WS_PI_SPAWN_ROLE_ENV];
-    process.env[WS_PI_SPAWN_ROLE_ENV] = "worker";
-    try {
-      return fn();
-    } finally {
-      if (previous === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV];
-      else process.env[WS_PI_SPAWN_ROLE_ENV] = previous;
-    }
-  }
-
-  /** A minimal successful `config.resolve_agent` catalog hit — `provider/id` must be present in `ctx.modelRegistry` below. */
-  function resolvePayload(effort?: string) {
-    return { resolved_from: "pi", model: "provider/id", ...(effort !== undefined ? { effort } : {}) };
-  }
-
-  function harness(payload: unknown, fakeRunExploreLeaf: typeof exploreLeaf) {
-    const tools = new Map<string, CapturedTool>();
-    const pi = { registerTool: (tool: CapturedTool) => tools.set(tool.name, tool) } as unknown as ExtensionAPI;
-    const bridge = {
-      client: { callTool: async (name: string) => { assert.equal(name, "config.resolve_agent"); return { content: [{ type: "text", text: JSON.stringify(payload) }] }; } },
-      wsToolNames: [],
-      defaultSessionKeyRef: { current: "lead-key" },
-    } as never;
-    const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
-    const effort = (payload as { effort?: string }).effort || "medium";
-    Object.assign(RpcClient.prototype, { start: startRpcWithWebProof, stop: async () => {}, abort: async () => {}, onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {}, getState: async () => ({ model: { provider: "provider", id: "id" }, thinkingLevel: effort }) });
-    const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" }, undefined, fakeRunExploreLeaf);
-    const stop = handle.stopAll.bind(handle);
-    handle.stopAll = async () => { await stop(); Object.assign(RpcClient.prototype, original); };
-    return { tool: tools.get("explore")!, handle };
-  }
-
-  const modelCtx = () => ({ sessionManager: { getSessionId: () => "worker" }, agentStorageRoot: storageRoot(), modelRegistry: { getAll: () => [{ provider: "provider", id: "id" }], hasConfiguredAuth: () => true } });
-
-  test("a worker tier resolution persists the effective researcher effort", async () => {
-    let captured: { profile?: string; effort?: string } | undefined;
-    const fakeRunExploreLeaf = (async (_client, _registry, _ctx, _params, options) => {
-      captured = options;
-      return { agentId: "x", state: "done" as const, output: "ok" };
-    }) as unknown as typeof exploreLeaf;
-    const { tool, handle } = withWorkerRole(() => harness(resolvePayload("high"), fakeRunExploreLeaf));
-    try {
-      const result = await tool.execute("call", { query: "why does this fail" }, undefined, undefined, modelCtx());
-      const id = JSON.parse(result.content[0]!.text).agent_id;
-      assert.equal(handle.rpcRegistry.get(id)?.modelEffort, "high");
-      assert.equal(captured, undefined);
-    } finally {
-      await handle.stopAll();
-    }
-  });
-
-  test("an empty tier effort adopts the researcher's observed default", async () => {
-    let captured: { profile?: string; effort?: string } | undefined;
-    const fakeRunExploreLeaf = (async (_client, _registry, _ctx, _params, options) => {
-      captured = options;
-      return { agentId: "y", state: "done" as const, output: "ok" };
-    }) as unknown as typeof exploreLeaf;
-    const { tool, handle } = withWorkerRole(() => harness(resolvePayload(""), fakeRunExploreLeaf));
-    try {
-      const result = await tool.execute("call", { query: "why does this fail" }, undefined, undefined, modelCtx());
-      assert.equal(handle.rpcRegistry.get(JSON.parse(result.content[0]!.text).agent_id)?.modelEffort, "medium");
-      assert.equal(captured, undefined);
-    } finally {
-      await handle.stopAll();
-    }
-  });
-});
-
-/**
  * 260906 Phase 2 (YAML/TUI dispatch-row rendering): `spawnAgent`'s
  * `ctx.onModelResolved` callback and the two new `RpcAgentRecord` fields it
  * feeds (`modelTier`/`modelSource`). Reuses the same `installRpcHarness`
@@ -1277,10 +905,8 @@ describe("spawnAgent: onModelResolved (260906 Phase 2 dispatch-row rendering)", 
 });
 
 /**
- * 260906 Phase 2: the `explore` tool's two independent resolved-line
- * publishing paths — the lead-role branch (through `spawnAgent`'s
- * `onModelResolved`) and the worker-leaf branch (direct
- * `resolveRequiredExploreModel`, no `spawnAgent` at all).
+ * The persistent `explore` tool publishes model resolution through
+ * `spawnAgent` identically for lead and worker dispatchers.
  */
 describe("explore tool: onModelResolved / resolved-line publishing (260906 Phase 2)", () => {
   interface CapturedTool {
@@ -1304,7 +930,7 @@ describe("explore tool: onModelResolved / resolved-line publishing (260906 Phase
     return { restore: () => Object.assign(RpcClient.prototype, original) };
   }
 
-  test("lead-role (simple) explore publishes the resolved line through spawnAgent's onModelResolved and repeats it in the final details", async () => {
+  test("lead code-search Explore publishes the resolved line through spawnAgent and repeats it in the final details", async () => {
     const rpc = installRpcHarness();
     try {
       const tools = new Map<string, CapturedTool>();
@@ -1341,8 +967,7 @@ describe("explore tool: onModelResolved / resolved-line publishing (260906 Phase
         client: { callTool: async () => ({ content: [{ type: "text", text: JSON.stringify({ resolved_from: "pi", model: "provider/id", effort: "high" }) }] }) },
         wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" },
       } as never;
-      const fakeRunExploreLeaf = (async () => { throw new Error("one-shot leaf must not run"); }) as unknown as typeof exploreLeaf;
-      const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" }, undefined, fakeRunExploreLeaf);
+      const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" });
       const ctx = { sessionManager: { getSessionId: () => "test-worker" }, agentStorageRoot: storageRoot(), modelRegistry: { getAll: () => [{ provider: "provider", id: "id" }], hasConfiguredAuth: () => true } };
       RpcClient.prototype.getState = async () => ({ model: { provider: "provider", id: "id" }, thinkingLevel: "high" }) as any;
       const tool = tools.get("explore")!;
@@ -1763,11 +1388,11 @@ function fakeRpcClient(overrides: {
 }
 
 describe("shouldPushToLead (the push gate)", () => {
-  test("lead, fork and worker owners push; a terminal explore leaf does not", () => {
+  test("lead, fork, worker, and persistent Explore owners push to their direct parent", () => {
     assert.equal(shouldPushToLead({}), true, "no marker = host lead");
     assert.equal(shouldPushToLead({ [WS_PI_SPAWN_ROLE_ENV]: "fork" }), true);
-    assert.equal(shouldPushToLead({ [WS_PI_SPAWN_ROLE_ENV]: "worker" }), true, "child reports wake their immediate worker parent");
-    assert.equal(shouldPushToLead({ [WS_PI_SPAWN_ROLE_ENV]: "explore" }), false);
+    assert.equal(shouldPushToLead({ [WS_PI_SPAWN_ROLE_ENV]: "worker" }), true);
+    assert.equal(shouldPushToLead({ [WS_PI_SPAWN_ROLE_ENV]: "explore" }), true);
   });
 
   test("an unrecognized role value is treated as no marker (host lead), same as readSpawnRole", () => {
@@ -1894,9 +1519,9 @@ describe("hasRunningAgents (goal-loop yield predicate)", () => {
     assert.equal(hasRunningAgents(registry), true);
   });
 
-  test("260906: a lead explore (spawnRole:\"explore\", oneShot:true) counts exactly like any other non-threadBound running record", () => {
+  test("a persistent Explore record counts exactly like any other non-threadBound running record", () => {
     const registry: RpcAgentRegistry = new Map([
-      ["e", liveRpcRecord({ agentId: "e", running: true, spawnRole: "explore", oneShot: true })],
+      ["e", liveRpcRecord({ agentId: "e", running: true, spawnRole: "explore" })],
     ]);
     assert.equal(hasRunningAgents(registry), true);
     assert.equal(computeRunningStatusLine(registry), "1 delegated agent still running");
@@ -2364,30 +1989,6 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     assert.equal(heldPushQueue.length, 1, "the re-entrant push waits for the next settle rather than joining this drain");
   });
 
-  test("a terminal explore process neither holds nor sends", () => {
-    idle = false;
-    const pi = fakePi();
-    const previous = process.env[WS_PI_SPAWN_ROLE_ENV];
-    process.env[WS_PI_SPAWN_ROLE_ENV] = "explore";
-    try {
-      pushToLead(pi.api, new Map(), undefined, "ws-agent-report", { report: "x" }, "followUp");
-      assert.deepEqual(heldPushQueue, [], "holding a push a worker will never flush would leak it");
-      assert.deepEqual(pi.sent, []);
-
-      // And the flush handler itself is a no-op there, even with a stale entry.
-      heldPushQueue.push({ kind: "push", registry: undefined, record: undefined, family: "ws-agent-report", payload: { report: "stale" }, deliverAs: "followUp" });
-      let settled: (() => void) | undefined;
-      const api = { on: (event: string, handler: () => void) => void (event === "agent_settled" && (settled = handler)), sendMessage: () => assert.fail("a worker process must not push") };
-      registerPushFlush(api as unknown as Parameters<typeof registerPushFlush>[0], { delayMs: () => 10 });
-      settled?.();
-      assert.equal(heldPushQueue.length, 1, "left untouched rather than delivered into a worker's own transcript");
-    } finally {
-      heldPushQueue.length = 0;
-      if (previous === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV];
-      else process.env[WS_PI_SPAWN_ROLE_ENV] = previous;
-    }
-  });
-
   test("registerPushFlush requests a wake on settle and releases at confirmed start", () => {
     idle = false;
     const sent: string[] = [];
@@ -2531,7 +2132,7 @@ describe("attachEventListener (the settle-suppression IO gate)", () => {
     assert.equal(h.record.client, undefined, "settled explorer is parked");
   });
 
-  test("260906: a non-oneShot record is only parked (dormant) at settle, not deleted — the D-C invariant for every other spawn shape", async () => {
+  test("a persistent record is parked (dormant) at settle, preserving the D-C invariant", async () => {
     const h = listenerHarness();
     h.emit({ type: "agent_settled" });
     await settleDrain();
@@ -3185,9 +2786,9 @@ describe("pushSpawnFailed (spawnAgent's launch-failure branch)", () => {
     assert.equal(record.client, undefined);
   });
 
-  test("a non-oneShot record's launch failure still parks (dormant), unaffected by the oneShot deletion path", () => {
+  test("a persistent record's launch failure still parks dormant", () => {
     const pi = fakePi();
-    const record = liveRpcRecord({ agentId: "a", oneShot: false });
+    const record = liveRpcRecord({ agentId: "a" });
     const registry: RpcAgentRegistry = new Map([["a", record]]);
 
     pushSpawnFailed(pi.api, registry, record, new Error("client.start() failed"));
@@ -3430,15 +3031,15 @@ describe("stopAgent (260905 push + silent)", () => {
     assert.deepEqual(pi.sent, []);
   });
 
-  test("260906: stopAgent and getAgentTranscriptPath both still succeed against a one-shot explore record — only ws-agent-send refuses it", async () => {
+  test("stopAgent and getAgentTranscriptPath both succeed against a persistent Explore record", async () => {
     const pi = fakePi();
     const { client, calls } = stoppableClient();
-    const record = freshRpcRecord({ agentId: "e", client, running: true, oneShot: true, spawnRole: "explore", sessionPath: "/tmp/ws-pi-agent-e/session.jsonl" });
+    const record = freshRpcRecord({ agentId: "e", client, running: true, spawnRole: "explore", sessionPath: "/tmp/ws-pi-agent-e/session.jsonl" });
     const registry: RpcAgentRegistry = new Map([["e", record]]);
 
-    assert.deepEqual(await stopAgent(registry, "e", pi.api), { agent_id: "e" }, "stopAgent itself carries no oneShot guard");
+    assert.deepEqual(await stopAgent(registry, "e", pi.api), { agent_id: "e" }, "persistent Explore uses ordinary stop semantics");
     assert.deepEqual(calls, ["abort", "stop"]);
-    assert.equal(registry.has("e"), true, "stopAgent's own D-C invariant is untouched — deletion is the CALLER's job (ws-agent-stop tool body/settle IIFE)");
+    assert.equal(registry.has("e"), true, "stop retains the persistent record");
     assert.deepEqual(getAgentTranscriptPath(registry, "e"), { transcript_path: "/tmp/ws-pi-agent-e/session.jsonl" });
   });
 
@@ -3813,103 +3414,6 @@ describe("sendToAgent (live branches only — dormant auto-resume is live-gate o
   });
 });
 
-describe("handleAgentEvent", () => {
-  test("a terminal stopReason updates record.stopReason but NEVER flips record.state (load-bearing: only proc.on('close') may do that)", () => {
-    const record = freshRunningRecord();
-    handleAgentEvent(record, { type: "message_end", message: { role: "assistant", stopReason: "stop" } });
-    assert.equal(record.stopReason, "stop");
-    assert.equal(record.state, "running", "state must stay unchanged by an in-stream terminal stopReason");
-  });
-
-  test("a non-terminal stopReason (toolUse) also updates stopReason without touching state", () => {
-    const record = freshRunningRecord();
-    handleAgentEvent(record, { type: "message_end", message: { role: "assistant", stopReason: "toolUse" } });
-    assert.equal(record.stopReason, "toolUse");
-    assert.equal(record.state, "running");
-  });
-
-  test("captures final assistant text and errorMessage without touching state", () => {
-    const record = freshRunningRecord();
-    handleAgentEvent(record, {
-      type: "message_end",
-      message: { role: "assistant", stopReason: "error", errorMessage: "boom", content: [{ type: "text", text: "partial answer" }] },
-    });
-    assert.equal(record.outputText, "partial answer");
-    assert.equal(record.errorMessage, "boom");
-    assert.equal(record.state, "running");
-  });
-
-  test("ignores non-message_end events and non-assistant roles", () => {
-    const record = freshRunningRecord();
-    handleAgentEvent(record, { type: "agent_start" });
-    handleAgentEvent(record, { type: "message_end", message: { role: "toolResult", stopReason: "stop" } });
-    assert.equal(record.stopReason, undefined);
-    assert.equal(record.state, "running");
-  });
-});
-
-describe("getAgentTranscriptPath", () => {
-  test("known agent id returns { transcript_path: record.sessionPath }", () => {
-    const record = freshRpcRecord({ agentId: "a", sessionPath: "/tmp/ws-pi-agent-x/session.jsonl" });
-    const registry: RpcAgentRegistry = new Map([["a", record]]);
-    assert.deepEqual(getAgentTranscriptPath(registry, "a"), { transcript_path: "/tmp/ws-pi-agent-x/session.jsonl" });
-  });
-
-  test("unknown agent id throws matching /unknown agentId/", () => {
-    const registry: RpcAgentRegistry = new Map();
-    assert.throws(() => getAgentTranscriptPath(registry, "missing"), /unknown agentId/);
-  });
-
-  test("260905 (alias/park/cap): resolves by alias on an already-dormant record", () => {
-    const record = freshRpcRecord({ agentId: "a", alias: "scout", sessionPath: "/tmp/ws-pi-agent-x/session.jsonl" });
-    const registry: RpcAgentRegistry = new Map([["a", record]]);
-    assert.deepEqual(getAgentTranscriptPath(registry, "scout"), { transcript_path: "/tmp/ws-pi-agent-x/session.jsonl" });
-  });
-
-  test("260905 review relay #1 (Important, test case 3): park -> resume -> ws-agent-transcript still resolves the exact same session file, by alias", async () => {
-    // Case 3 of the ticket's Tests bullet. The park half runs the REAL
-    // production `stopAgent`; the resume half simulates only the one thing
-    // `sendToAgent`'s dormant branch does before it becomes live-gate-only
-    // (constructing a real `RpcClient` and calling `client.start()`, see
-    // that describe block's own doc comment) — reassigning `record.client`.
-    // What this proves end-to-end: `record.sessionPath` (the field
-    // `getAgentTranscriptPath` reads) is never touched by park or by the
-    // start of a resume, so the on-disk transcript file a real resume would
-    // `--session` back into is provably the SAME file the parked turn wrote
-    // to — "the parked turn" is not lost or swapped out from under it.
-    const sessionPath = "/tmp/ws-pi-agent-x/session.jsonl";
-    const client = {
-      abort: async () => {},
-      stop: async () => {},
-    } as unknown as RpcClient;
-    const record = freshRpcRecord({ agentId: "a", alias: "scout", client, running: true, sessionPath });
-    const registry: RpcAgentRegistry = new Map([["a", record]]);
-
-    await stopAgent(registry, "a", undefined, { silent: true });
-    assert.equal(record.client, undefined, "parked: dormant");
-    assert.deepEqual(getAgentTranscriptPath(registry, "scout"), { transcript_path: sessionPath }, "readable while parked");
-
-    record.client = {} as RpcClient; // simulates the moment sendToAgent's dormant branch sets record.client, pre-start()
-    assert.deepEqual(
-      getAgentTranscriptPath(registry, "scout"),
-      { transcript_path: sessionPath },
-      "resumed: identical path — park/resume never swaps or truncates the transcript file",
-    );
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Spawned-child process-role env marker (review fix, cycle 1; renamed
-// 260904 Phase 1 from the boolean `WS_PI_AGENT_CHILD_ENV` to the
-// role-valued `WS_PI_SPAWN_ROLE_ENV`, see process-role.ts): placement,
-// previously covered only by a manual spot-check. Each spawn call site's
-// env-building is a pure function (buildRpcClientOptions for the RPC path,
-// buildChildProcessEnv for the one-shot `explore` path via spawnPiProcess),
-// so both are asserted directly without spawning a real process. See
-// goal-loop.test.ts's `isChildProcess` suite and process-role.test.ts for
-// the consuming-side coverage.
-// ---------------------------------------------------------------------------
-
 describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV placement)", () => {
   test("neutralizes stale bootstrap overrides in the effective RPC environment for workers, forks, persistent explores, and dormant resumes", () => {
     const parent = {
@@ -4036,69 +3540,6 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
     assert.equal(withoutFork.env?.[WS_PI_SPAWN_ROLE_ENV], "worker");
     const withFork = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-w7/session.jsonl", "/tmp/system.md", "read", "/lead/session.jsonl");
     assert.equal(withFork.env?.[WS_PI_SPAWN_ROLE_ENV], "fork");
-  });
-});
-
-describe("buildChildProcessEnv (WS_PI_SPAWN_ROLE_ENV placement for spawnPiProcess)", () => {
-  test("sets the spawned-child marker to \"explore\"", () => {
-    const env = buildChildProcessEnv({});
-    assert.equal(env[WS_PI_SPAWN_ROLE_ENV], "explore");
-  });
-
-  test("preserves every inherited variable from the base env (no dropped vars)", () => {
-    const env = buildChildProcessEnv({ PATH: "/usr/bin", HOME: "/home/user" });
-    assert.equal(env.PATH, "/usr/bin");
-    assert.equal(env.HOME, "/home/user");
-    assert.equal(env[WS_PI_SPAWN_ROLE_ENV], "explore");
-  });
-
-  test("removes stale bootstrap overrides but preserves unrelated inherited values without mutating the parent", () => {
-    const parent = {
-      PATH: "/usr/bin",
-      CHILD_SENTINEL: "preserved",
-      WS_MCP_BOOTSTRAP_BINARY: "/stale/ws-mcp",
-      WS_MCP_BOOTSTRAP_URL: "https://example.test/stale-ws-mcp",
-    };
-    const env = buildChildProcessEnv(parent);
-    assert.equal(env.WS_MCP_BOOTSTRAP_BINARY, undefined);
-    assert.equal(env.WS_MCP_BOOTSTRAP_URL, undefined);
-    assert.equal(env.CHILD_SENTINEL, "preserved");
-    assert.deepEqual(parent, {
-      PATH: "/usr/bin",
-      CHILD_SENTINEL: "preserved",
-      WS_MCP_BOOTSTRAP_BINARY: "/stale/ws-mcp",
-      WS_MCP_BOOTSTRAP_URL: "https://example.test/stale-ws-mcp",
-    });
-  });
-
-  test("an existing WS_PI_SPAWN_ROLE value in the base env is overwritten to \"explore\"", () => {
-    const env = buildChildProcessEnv({ [WS_PI_SPAWN_ROLE_ENV]: "stale" });
-    assert.equal(env[WS_PI_SPAWN_ROLE_ENV], "explore");
-  });
-});
-
-/**
- * 260905 (alias/park/cap ticket): the alias-or-uuid resolution helper every
- * `agent_id` param goes through (`sendToAgent`, `stopAgent`,
- * `getAgentTranscriptPath`, `ws-approve`).
- */
-describe("resolveAgentId (alias-or-uuid, single resolution helper)", () => {
-  test("a raw uuid already present resolves to itself, even if some other record happens to share it as an alias", () => {
-    const registry: RpcAgentRegistry = new Map([
-      ["uuid-1", freshRpcRecord({ agentId: "uuid-1" })],
-      ["uuid-2", freshRpcRecord({ agentId: "uuid-2", alias: "uuid-1" })],
-    ]);
-    assert.equal(resolveAgentId(registry, "uuid-1"), "uuid-1", "the direct registry.has() uuid path wins first");
-  });
-
-  test("an alias resolves to its holder's agentId", () => {
-    const registry: RpcAgentRegistry = new Map([["uuid-1", freshRpcRecord({ agentId: "uuid-1", alias: "scout" })]]);
-    assert.equal(resolveAgentId(registry, "scout"), "uuid-1");
-  });
-
-  test("an unresolvable input (neither a known uuid nor a known alias) returns undefined", () => {
-    const registry: RpcAgentRegistry = new Map([["uuid-1", freshRpcRecord({ agentId: "uuid-1" })]]);
-    assert.equal(resolveAgentId(registry, "nope"), undefined);
   });
 });
 

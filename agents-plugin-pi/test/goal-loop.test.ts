@@ -10,7 +10,7 @@
  * tool and `session_before_compact` listener) is covered by the live
  * `pi --mode json` gate (see the 260903 Phase 1/2 plans' Verification Plans),
  * not by this unit suite. The companion env-marker-placement coverage
- * (`buildRpcClientOptions`/`buildChildProcessEnv`) lives in
+ * (`buildRpcClientOptions`) lives in
  * `test/spawner.test.ts`.
  *
  * Phase 2 (260903) note: `decideOnSettle`'s `"reinject"` decision now carries
