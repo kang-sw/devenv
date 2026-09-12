@@ -13,6 +13,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: ca46ef187b7d1bd7
 sage-review-completeness-reviewed: ca46ef187b7d1bd7
+completed: 2026-09-13
 ---
 
 # Pi adapter: bound subagent session files on disk (evict to disk, prune by age, drop empty spawn dirs)
@@ -253,3 +254,49 @@ protected children in another live lead, mixed-age subtrees, unknown legacy home
 missing lead files, missing audit history, and permission failures. Owner live
 check uses disposable owned fixtures with a short TTL; production history is not
 needed to verify deletion.
+
+### Result (3cfa8c45) - 2026-09-13
+
+Phase 3 landed through `9996e6b4`. Controller session starts now prune eligible
+owned homes across lead namespaces using `child_retention_ttl_days`: 30 days
+by default, finite positive fractional-day overrides, or literal `false` to
+disable age pruning without disabling cap eviction. Unknown ownership,
+activity, liveness, or containment remains retained. Session-write observation
+renews activity, and pruned owned entries are filtered from sidecar revival.
+Audit distinguishes unavailable history from an available empty transcript.
+
+The cross-process sibling claim serializes metadata writes with final age and
+protection checks through atomic home detachment. The elevated Critical fix
+makes protection-write success observable: owner-thread binding persists
+protection before committing local state, and failed audit/transcript activity
+writes refuse the reference with an explicit unavailable/retry result. A failed
+owner-question bind falls back to the lead question relay rather than creating
+a phantom owner thread. Failed protection releases remain best effort because
+retaining durable protection only retains data; rejected retry timers and
+blocking lock waits avoid accepting an unprotected operation or stalling the UI.
+
+Review: the prior round-2 Critical was “The prior cross-session deletion race
+remains for protection/activity establishment because failed non-blocking
+ownership updates are ignored.” The lead authorized one bounded stop-(e) fix
+round. Independent fix-only correctness verification of `32b01532..9996e6b4`
+cleared that Critical with no remaining findings in its authorized scope; no
+third broad sweep was run. The reviewer inspected source and regressions but
+could not execute tests or write artifacts with its read-only tool surface.
+The implementation worker materialized the returned review report separately.
+
+Verification by the implementation worker at `9996e6b4`:
+
+- `cd agents-plugin-pi && npm test -- --test-reporter=spec test/ownership-contention.test.ts`:
+  6 passed. Separate real-process writer/deleter claims cover rejected binds,
+  no phantom thread/hook, lead-question fallback, rejected audit/transcript
+  references, successful retry protection, and unreadable metadata.
+- `cd agents-plugin-pi && npm test -- --test-reporter=dot`: full suite passed.
+- `git diff --check`: passed.
+- The initial contention-fixture run failed because macOS child-process stdin
+  is nonblocking; replacing that fixture barrier with an explicit release file
+  fixed the test environment without changing implementation expectations.
+
+No owner-driven live smoke or production-history cleanup was performed in this
+continuation. Automated disposable fixtures cover short-TTL startup pruning and
+real cross-process contention. All implementation phases are complete; closure
+follows the lead's explicit instruction to finalize when the Critical is clear.
