@@ -1039,11 +1039,31 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 		if _, ok := properties["root"]; ok {
 			t.Fatalf("non-login tool %s publicly advertises root in schema: %s", name, byID["2"])
 		}
+		if name == "review.marker" || name == "review.stamp" {
+			key, _ := properties["session_key"].(map[string]any)
+			if key["type"] != "string" {
+				t.Fatalf("%s session_key schema = %v, want string", name, key)
+			}
+			want := []string{"session_key"}
+			if name == "review.stamp" {
+				want = []string{"base", "head", "verdict", "session_key"}
+			}
+			required, _ := schema["required"].([]any)
+			if len(required) != len(want) {
+				t.Fatalf("%s required = %v, want %v", name, required, want)
+			}
+			for i, field := range want {
+				if required[i] != field {
+					t.Fatalf("%s required = %v, want %v", name, required, want)
+				}
+			}
+		}
 	}
 	rootAwareTools := []string{
 		"api.list",
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
 		"project_tree",
+		"review.marker", "review.stamp",
 		"tickets.query", "path.generate", "playbook.render",
 	}
 	for _, name := range rootAwareTools {
