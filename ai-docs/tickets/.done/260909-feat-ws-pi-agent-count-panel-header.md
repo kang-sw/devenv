@@ -13,6 +13,7 @@ plans:
 sage-review-completeness: completed
 sage-review-design-reviewed: 4cc99468a585c8d2
 sage-review-completeness-reviewed: 4cc99468a585c8d2
+completed: 2026-09-12
 ---
 
 # Move the agent count above the agent list
@@ -82,12 +83,21 @@ macOS and one stale `ws-ask` exposure expectation). No new suite failures;
 `ws-ask` remains hidden. The plan, implementation, and spec describe the same
 bounded relocation. No actual TUI session with another usage widget was run.
 
-## Blocked (2026-09-10)
+#### Edition (2754dbe0) - 2026-09-12
 
-Awaiting the required owner visual check with another usage widget installed:
+Owner-live acceptance passed through state-local answer-modal checks with another usage widget present. Exactly one `ws: N agents` heading appeared immediately above the rows, included pending-question counts, and replaced only the old agent footer count. Spawn, settle, question resolution, approval completion, and empty-state transitions refreshed or hid the panel while preserving usage, goal, and unrelated footer state. The heading and rows remained bounded at 120, 80, and 40 columns.
+
+## Prior Blocked (2026-09-10; resolved 2026-09-12)
+
+At that checkpoint, the required owner visual check with another usage widget remained outstanding:
 confirm the count appears immediately above the agent list and refreshes across
 spawn, settle, and close while other footer segments and goal status remain
 unchanged. Automated factory/controller coverage does not establish placement
 in that live extension combination. Record the result before closing this
 ticket; autonomous ready-queue selection should skip it while this acceptance
 is outstanding.
+
+
+## Resolution (2026-09-12)
+
+Closed after state-local owner-live checks passed for one heading above rows, pending-question counts, old-footer removal, preservation of usage/goal/unrelated footer state, lifecycle refresh and empty hiding, and 120/80/40-column bounds.

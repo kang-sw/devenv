@@ -15,6 +15,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 1c4eae80bb6eece6
 sage-review-completeness-reviewed: 1c4eae80bb6eece6
+completed: 2026-09-12
 ---
 
 # Emphasize child waits that need the owner
@@ -136,11 +137,20 @@ compaction is skipped. Source inputs are unchanged after final suite evidence;
 documentation checks cover the subsequent closeout. The unrelated untracked
 `06-1203` plan remains untouched.
 
-## Blocked (2026-09-10)
+#### Edition (2754dbe0) - 2026-09-12
 
-Owner-live acceptance remains outstanding: in a real lead TUI, observe a fork
+Owner-live acceptance passed through state-local answer-modal checks. A simultaneous fork question and execute approval showed valid qN versus approval cues, one synchronized 330ms bold/plain heading and actionable-text cadence, readable phases, and no child-process animation. Resolving both waits cleared their attention and refreshed the panel. Live `agent_wait_animation` false and true toggles produced static bold fallback and resumed animation without reload, duplicate timers, or layout movement.
+
+## Prior Blocked (2026-09-10; resolved 2026-09-12)
+
+At that checkpoint, owner-live acceptance remained outstanding: in a real lead TUI, observe a fork
 question and an approval wait, confirm readable 330ms bold/plain emphasis and
 valid qN hints, resolve waits, then disable/reload and confirm static emphasis
 without duplicate animation. Keep this ticket in `ready/` and skip it during
 unattended queue selection until that evidence arrives. No deprecated
 ws-ask/ws-resolve flow is needed for this check.
+
+
+## Resolution (2026-09-12)
+
+Closed after state-local owner-live checks passed for fork-question and approval attention, valid cues, one 330ms animation cadence, wait resolution cleanup, and live false/true animation configuration without duplicate timers or child-process animation.

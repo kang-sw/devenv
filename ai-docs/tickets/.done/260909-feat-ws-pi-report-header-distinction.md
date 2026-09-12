@@ -9,6 +9,7 @@ spec:
 sage-review-completeness: completed
 sage-review-design-reviewed: 84e0e393abea1586
 sage-review-completeness-reviewed: 84e0e393abea1586
+completed: 2026-09-12
 ---
 
 # Distinguish report headers within compact muted push messages
@@ -80,10 +81,19 @@ environment/stale-expectation failures; the package suite is not globally green.
 `git diff --check` passed and the spawner diff is empty. Owner-live light/dark
 readability acceptance has not been run.
 
-## Blocked (2026-09-10)
+#### Edition (2754dbe0) - 2026-09-12
 
-Await the owner-live check under light and dark themes: compare reports with
+Owner-live acceptance passed through separate state-local dark- and light-theme answer-modal checks against live report, settled, approval, question, and advisory rows. Report headers remained recognizable, bodies remained subordinate and muted on the common background, and live theme change rerendered existing rows without reload. Collapsed and expanded content was preserved and remained bounded at 120, 80, and 40 columns.
+
+## Prior Blocked (2026-09-10; resolved 2026-09-12)
+
+At that checkpoint, the owner-live check under light and dark themes remained outstanding: compare reports with
 other push families and confirm their headers are recognizable while muted
 bodies remain subordinate to owner conversation. Automated rendering evidence
 does not substitute for that visual acceptance. Keep the ticket in `ready/`
 until the check is recorded; no additional implementation phase is proposed.
+
+
+## Resolution (2026-09-12)
+
+Closed after state-local dark- and light-theme checks passed for distinct report headers, subordinate muted bodies, common backgrounds, live theme rerender without reload, collapsed/expanded preservation, and 120/80/40-column bounds.
