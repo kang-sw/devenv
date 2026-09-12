@@ -3,6 +3,10 @@ title: "Let Sage design review autonomously explore code contracts"
 parent: 260909-epic-ws-worker-interpreter-refoundation
 related:
   260909-refactor-retire-spec-mental-model-layers: the retired document layers no longer supply Sage with a precomputed product-contract view
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-completeness-reviewed: 78612a145d41ff79
+sage-review-design-reviewed: 78612a145d41ff79
 ---
 
 # Let Sage design review autonomously explore code contracts
@@ -56,6 +60,10 @@ model judgment instead of encoding another fixed routing matrix.
 
 ## Constraints
 
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/rsrc/, agents-plugin-wsflow/skills/, agents-plugin-tool/internal/wsdoc/conventions/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
 - Preserve the populator's exact-one-ticket write boundary and the design
   reviewer's read-only boundary.
 - The direct-exploration restriction is a playbook contract; it does not attempt
@@ -65,6 +73,22 @@ model judgment instead of encoding another fixed routing matrix.
   rather than treating a subagent summary as sole authority.
 - Keep model mappings config-resolved for the detected harness. Do not hard-code
   provider model names or introduce a second tier configuration source.
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin/rsrc/ticket-fact-populator/ticket-fact-populator.md, agents-plugin/rsrc/ticket-reviewer-design/ticket-reviewer-design.md, agents-plugin-wsflow/rsrc/ticket-reviewer-design/ticket-reviewer-design.md, and agents-plugin-tool/internal/mcp/playbook_tools.go |
+| scope.surface | public-interface | The rendered ticket reviewer and fact-populator playbooks are shipped workflow interfaces; playbook.render is an MCP surface (agents-plugin-tool/internal/mcp/server.go#L3711-L3714). |
+| scope.new_public_symbol | no | No new skill, MCP tool, or named exported symbol is specified; the ticket changes existing rendered playbooks and bindings. |
+| scope.new_type_contract | no | The phase names no new Go type, method, or MCP request/response signature. |
+| scope.test_surface | existing | agents-plugin-tool/internal/mcp/playbook_render_surface_test.go#L419-L500 and agents-plugin-tool/internal/mcp/playbook_tools_test.go cover rendered binding and playbook behavior. |
+| complexity.reuse_points | confirmed | Existing fixed-tier model rendering is implemented by resolveTierModelVars (agents-plugin-tool/internal/mcp/playbook_tools.go#L127-L157), and native spawn consumes recommended bindings (agents-plugin/rsrc/lead-workflow-manual/native-spawn-binding.codex.md#L1-L9). |
+| complexity.side_effect_risk | high | The reviewer's promotion-time behavior gains autonomous host-native delegation and cross-harness model and effort selection. |
+| risk.correctness | high | A wrong direct-exploration or citation-verification boundary can make Sage's design judgment depend on unsupported or unchecked product-contract evidence. |
+| risk.fit | high | Full ws and wsflow reviewer resources must remain mirrored while the renderer gains per-tier effort bindings. |
+| risk.test | high | The phase requires Claude, Codex, fallback, custom configuration, unset effort, mirror, session-role, and plugin-contract coverage. |
+| risk.security_or_contract | moderate | The change expands a read-only reviewer into a host-native Explore dispatcher while retaining the stated no-MCP-spawn boundary. |
 
 ## Phases
 

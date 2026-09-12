@@ -1,6 +1,6 @@
 ---
 title: "ws refoundation: worker as workflow interpreter, lead as escalation handler"
-sage-review-design: required
+sage-review-design: completed
 related:
   260909-research-ws-refoundation-evidence-audit: evidence and rejected alternatives behind the decisions below
   260605-epic-ws-playbook-factory-pivot: prior epic; covered the harness-infrastructure axis only, not reopened
@@ -12,6 +12,7 @@ related:
   260716-feat-mental-model-comment-placement-rule: built on a retired layer; drop candidate
   260716-feat-mental-model-openup-injection: built on a retired layer; drop candidate
   260716-feat-sage-related-mental-model-curation: built on a retired layer; drop candidate
+sage-review-design-reviewed: 9c0a0950256a0d78
 ---
 
 # ws refoundation: worker as workflow interpreter, lead as escalation handler
@@ -79,6 +80,13 @@ faster than they are read. This epic replaces that shape with:
   behavioral contract; whether a downstream project's tests can carry that
   role is that project's property, not something bootstrap can enforce.
 
+## Constraints
+
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/rsrc/, agents-plugin-wsflow/skills/, agents-plugin-tool/internal/wsdoc/conventions/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
+
 ## Child Tickets
 
 Listed in intended execution order; the first must land before any layer is
@@ -134,6 +142,7 @@ removed.
 - `260912-feat-sage-design-autonomous-exploration` - keep fact population as
   bounded factual grounding and let the read-only Sage design reviewer
   autonomously delegate code-contract exploration with rendered tier bindings.
+  This child must land before `epic/refound` merges into `develop`.
 - Planned: board reconciliation - drop the opposite-direction tickets named
   in `related:` and close the subsumed diet epics once their remaining phases
   are absorbed or dropped. Inventory stage management stays a user-and-lead
