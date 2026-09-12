@@ -2706,6 +2706,83 @@ describe("same-process fork /done finish coordinator", () => {
     }
   });
 
+  test("a failed dormant finish launch selects exactly one advisory terminal", async () => {
+    const pi = fakePi();
+    const original = { start: RpcClient.prototype.start, stop: RpcClient.prototype.stop };
+    let stops = 0;
+    Object.assign(RpcClient.prototype, {
+      start: async () => { throw new Error("resume launch rejected"); },
+      stop: async () => { stops += 1; },
+    });
+    try {
+      const record = freshRpcRecord({
+        agentId: "failed-dormant-finish", spawnRole: "fork", threadBound: true,
+        onForkFinishComplete: (finished) => { finished.threadBound = false; },
+      });
+      const registry: RpcAgentRegistry = new Map([[record.agentId, record]]);
+      const operation = startForkFinish(record, registry, pi.api!, { cwd: "/tmp", extensionPath: "/tmp/extension.ts" });
+      await operation.advancing;
+      assert.deepEqual(pi.sent.map((entry) => entry.message.customType), ["ws-agent-advisory"]);
+      assert.equal((pi.sent[0].message.details as { advisory?: string }).advisory, "missing-final");
+      assert.equal(operation.phase, "complete");
+      assert.equal(record.client, undefined);
+      assert.equal(record.threadBound, false);
+      assert.equal(stops, 1);
+    } finally {
+      Object.assign(RpcClient.prototype, original);
+    }
+  });
+
+  test("ordinary dormant resume launch failure retains its spawn-failed terminal", async () => {
+    const pi = fakePi();
+    const original = { start: RpcClient.prototype.start, stop: RpcClient.prototype.stop };
+    Object.assign(RpcClient.prototype, {
+      start: async () => { throw new Error("ordinary launch rejected"); },
+      stop: async () => {},
+    });
+    try {
+      const record = freshRpcRecord({ agentId: "ordinary-failed-resume", spawnRole: "fork", threadBound: true });
+      await assert.rejects(sendToAgent(new Map([[record.agentId, record]]), { pi: pi.api, cwd: "/tmp", extensionPath: "/tmp/extension.ts" }, record.agentId, "new work"), /ordinary launch rejected/);
+      assert.deepEqual(pi.sent.map((entry) => entry.message.customType), ["ws-agent-settled"]);
+      assert.equal((pi.sent[0].message.details as { reason?: string }).reason, "spawn-failed");
+    } finally {
+      Object.assign(RpcClient.prototype, original);
+    }
+  });
+
+  test("superseding a dormant finish during launch failure cleanup prevents stale terminal delivery", async () => {
+    for (const boundary of ["start", "stop"] as const) {
+      const pi = fakePi();
+      const original = { start: RpcClient.prototype.start, stop: RpcClient.prototype.stop };
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      Object.assign(RpcClient.prototype, {
+        start: async () => { if (boundary === "start") await gate; throw new Error("old launch rejected"); },
+        stop: async () => { if (boundary === "stop") await gate; },
+      });
+      try {
+        const record = freshRpcRecord({ agentId: `superseded-dormant-${boundary}`, spawnRole: "fork", threadBound: true });
+        const registry: RpcAgentRegistry = new Map([[record.agentId, record]]);
+        const operation = startForkFinish(record, registry, pi.api!, { cwd: "/tmp", extensionPath: "/tmp/extension.ts" });
+        await drain();
+        const replacement = { prompt: async () => {} } as unknown as RpcClient;
+        record.client = replacement;
+        record.launchGeneration = (record.launchGeneration ?? 0) + 1;
+        await sendToAgent(registry, { pi: pi.api, cwd: "/tmp" }, record.agentId, "replacement work");
+        record.pendingFinal = "replacement final";
+        release();
+        await operation.advancing;
+        assert.deepEqual(pi.sent, [], boundary);
+        assert.equal(record.client, replacement, boundary);
+        assert.equal(record.pendingFinal, "replacement final", boundary);
+        assert.equal(record.running, true, boundary);
+      } finally {
+        release();
+        Object.assign(RpcClient.prototype, original);
+      }
+    }
+  });
+
   test("a duplicate original settle after closeout start cannot settle the closeout run", async () => {
     const pi = fakePi();
     let listener: ((event: unknown) => void) | undefined;

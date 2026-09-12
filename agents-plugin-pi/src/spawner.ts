@@ -3203,6 +3203,12 @@ export async function sendToAgent(
     );
     record.client = client;
     record.launchGeneration = (record.launchGeneration ?? 0) + 1;
+    const generation = record.launchGeneration;
+    const finishOwner = ctx.finishToken !== undefined && record.forkFinish?.token === ctx.finishToken
+      ? record.forkFinish : undefined;
+    const ownsFailure = () => record.launchGeneration === generation
+      && (ctx.finishToken === undefined || (record.forkFinish === finishOwner
+        && finishOwner?.token === ctx.finishToken && finishOwner.generation === generation));
     // This launch belongs to the coordinator only when its exact in-memory
     // token requested the dormant resume. A later ordinary send clears that
     // coordinator instead, retaining the generation fence for replacement
@@ -3222,9 +3228,15 @@ export async function sendToAgent(
       if (forkLaunch) await captureForkSelection(client, record);
       attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     } catch (err) {
-      clearLiveState(record);
+      // Cleanup may await while a new instruction replaces this operation or
+      // launch. Only its owner may clear the record; always stop our own client.
+      if (ownsFailure() && record.client === client) clearLiveState(record);
       try { await client.stop(); } catch { /* best effort */ }
-      pushSpawnFailed(ctx.pi, registry, record, err);
+      // A finish-owned failure is rethrown to the coordinator's sole terminal
+      // selector. Ordinary resumes retain spawn-failed; stale work gets neither.
+      if (ownsFailure() && record.client === undefined && !finishOwner) {
+        pushSpawnFailed(ctx.pi, registry, record, err);
+      }
       throw err;
     } finally {
       if (forkLaunch) rmSync(dirname(forkLaunch.contextPath), { recursive: true, force: true });
