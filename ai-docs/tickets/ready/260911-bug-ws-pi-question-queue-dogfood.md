@@ -5,6 +5,10 @@ related:
   260908-feat-ws-pi-subagent-audit-window-and-owner-steering: Phase 2 owns same-process fork-raised `/done` reconciliation and owner-to-lead handoff
   260906-workset-ws-pi-dogfood-ux: Pi dogfood UX collection
   260908-bug-ws-pi-delegated-tool-surface-unavailable: blocks fork-raised question-path live acceptance before the fork starts
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 9b50a59d15f3d8ab
+sage-review-completeness-reviewed: 9b50a59d15f3d8ab
 ---
 
 # Resolve ws-queue-question live dogfood findings
@@ -19,7 +23,7 @@ Keep the remaining findings from this dogfood run together in this rolling actio
 
 1. **Weak modal hierarchy.** The `Qn/N` and answered-count header, answer editor separator, and shortcut footer do not establish enough visual hierarchy. The header and separator need clearer semantic foreground or background treatment; shortcut help should be dimmed without becoming illegible.
 2. **Counter-spatial confirmation arrows.** In the final `Yes [No]` confirmation, Right from the initial right-hand `No` moves selection left to `Yes`, and Left from `Yes` moves selection right to `No`.
-3. **Inaccessible long-question truncation.** Long question/context content is replaced by `question truncated`; Up/Down and PageUp/PageDown cannot reveal the omitted text. The marker uses the same foreground treatment as ordinary prose and does not clearly communicate the inaccessible boundary.
+3. **Inaccessible long-question truncation.** Long question/context content is replaced by an `… question truncated — see /thread <id> for the full text` marker (`agents-plugin-pi/src/ask.ts#L2329-L2347`); Up/Down and PageUp/PageDown cannot reveal the omitted text. The marker uses the same foreground treatment as ordinary prose and does not clearly communicate the inaccessible boundary.
 4. **Bare `/answer` enters at the newest item.** With `q6`, `q7`, and `q8` pending, bare `/answer` opened on `q8`. A sequential oldest-first queue should begin at the oldest answerable item unless the owner explicitly names an ID.
 5. **One model turn per answer from one modal submission.** The owner submitted `q6` and `q7` together while the lead was working, but the two answers later popped as separate owner messages across separate lead turns. The modal's batch boundary was lost, adding avoidable model-turn cost.
 6. **Explicit terminal target falls through to another question.** `/answer q6` on an already answered question displayed `Warning: ws: question q6 was already answered or withdrawn — showing the rest of the queue instead.` and then opened another pending question. The warning was not visually salient enough to prevent the owner from entering `adf`, which was submitted as the answer to `q10`. The explicit target was not honored, and fallback changed which question received the input.
@@ -56,6 +60,22 @@ Remaining live coverage for a later session:
   `Ctrl+Shift+A` behavior is not decided by this finding.
 - Answers accepted by one lead-ask modal submission return in one injected lead follow-up and consume one lead turn. Preserve every included question's full question, context, verbatim answer, ask-time commit hash, and entry anchor in deterministic queue order; exclude blank questions that remain pending.
 - Preserve fork-less registration, draft and withdrawal semantics, and the separate fork-raised question path. Do not generalize batching to unrelated user input or child-message families without separately deciding their ordering and wake behavior.
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-pi/src/ask.ts and agents-plugin-pi/test/ask.test.ts |
+| scope.surface | public-interface | owner-facing /answer command and ws-queue-question flow in agents-plugin-pi/src/ask.ts#L2619-L2668 |
+| scope.new_public_symbol | no | the phase changes existing commands and modal behavior; no new public symbol is specified |
+| scope.new_type_contract | no | the phase specifies behavioral changes to existing queue records and delivery, not a new type or signature |
+| scope.test_surface | existing | agents-plugin-pi/test/ask.test.ts covers LeadAskQueueComponent, delivery, and queue helpers |
+| complexity.reuse_points | confirmed | LeadAskQueueComponent, collectLeadAskQueue, and deliverQueuedAnswer exist in agents-plugin-pi/src/ask.ts#L2027-L2451 |
+| complexity.side_effect_risk | moderate | changing queue selection and follow-up delivery affects existing owner-command and lead-turn behavior |
+| risk.correctness | high | target-strict selection, directional confirmation, scrolling, and atomic multi-answer delivery must not misroute owner input |
+| risk.fit | moderate | the phase must preserve fork-less registration, draft/withdrawal semantics, and the separate fork-raised path |
+| risk.test | high | existing unit coverage does not settle live theme hierarchy, terminal key handling, or busy-lead batch delivery |
+| risk.security_or_contract | moderate | /answer target selection and the number of injected lead follow-ups are owner-visible queue contracts |
 
 ## Phases
 

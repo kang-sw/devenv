@@ -1,5 +1,9 @@
 ---
 title: Pi agent spawn cannot select a concrete model without mutating tier config
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: ae63aa4a07f2428b
+sage-review-completeness-reviewed: ae63aa4a07f2428b
 ---
 
 # Pi agent spawn cannot select a concrete model without mutating tier config
@@ -8,7 +12,7 @@ title: Pi agent spawn cannot select a concrete model without mutating tier confi
 
 `ws-agent-spawn` currently exposes `model_name`, but accepts only the configured capability aliases `small`, `medium`, `large`, and `xlarge`. A caller that needs a one-off concrete Pi model must temporarily rewrite the project-scoped `agents.tier` mapping, spawn, and restore it. This is global mutable configuration for a per-dispatch choice and can interfere with concurrent dispatches.
 
-Live dogfood hit this while comparing `openrouter/inception/mercury-2.5` with the configured `openai-codex/gpt-5.6-luna`: passing the concrete model directly was rejected, and the benchmark required a temporary small-tier mutation.
+Live dogfood hit this while comparing `openrouter/inception/mercury-2.5` with the configured `openai-codex/gpt-5.6-luna`: the concrete ID made its fixed-tier `config.resolve_agent` lookup fail, and the spawner then inherited the parent model (agents-plugin-tool/internal/wsconfig/config.go#L258-L270; agents-plugin-pi/src/spawner.ts#L441-L454), so the benchmark required a temporary small-tier mutation.
 
 `model_effort` already exists and accepts explicit Pi thinking levels; the missing behavior is concrete model selection and an explicit default-effort value, not an effort field itself.
 
@@ -18,6 +22,22 @@ Live dogfood hit this while comparing `openrouter/inception/mercury-2.5` with th
 - Concrete IDs pass through the same Pi model-catalog and authentication validation as configured tiers and fail before child allocation when unknown or unavailable; no silent fallback to an inherited or tier model.
 - `model_effort` accepts `"default"` in addition to its current explicit values. `"default"` means no caller-level effort override: inherited-model dispatch keeps inherited effort, tier dispatch uses the configured tier effort, and concrete-model dispatch uses Pi/the selected model's default effort. An explicit supported effort value overrides those defaults.
 - Omitting model and effort preserves the existing parent-model inheritance behavior.
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-pi/src/spawner.ts, agents-plugin-pi/src/model-catalog.ts, agents-plugin-pi/test/spawner.test.ts |
+| scope.surface | public-interface | ws-agent-spawn model_name and model_effort tool-schema behavior at agents-plugin-pi/src/spawner.ts#L3612-L3634 |
+| scope.new_public_symbol | no | extends existing ws-agent-spawn parameters and resolver |
+| scope.new_type_contract | yes | model_name accepts a tier alias or concrete Pi model ID; model_effort gains default semantics |
+| scope.test_surface | existing | agents-plugin-pi/test/spawner.test.ts has resolver, spawn-guard, effort, and --thinking coverage |
+| complexity.reuse_points | confirmed | resolveModelForAliasViaWsMcp and modelCatalogFromToolCtx implement existing tier resolution, catalog membership, and auth checks |
+| complexity.side_effect_risk | moderate | model selection occurs before persistent child allocation and RPC startup |
+| risk.correctness | high | a concrete ID must not silently resolve to an unintended inherited or tier model |
+| risk.fit | moderate | the existing fixed-tier resolver, tool schema, and Pi lead guidance all state the tier-only contract |
+| risk.test | moderate | existing unit seams cover resolution and spawn guards; the requested concurrent-dispatch regression needs new coverage |
+| risk.security_or_contract | high | public model selection must preserve catalog and configured-auth validation before child allocation |
 
 ## Phases
 

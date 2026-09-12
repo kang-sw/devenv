@@ -4,6 +4,8 @@ parent: 260908-epic-ws-pi-subagent-conversation-view
 related:
   260908-feat-ws-pi-subagent-audit-window-and-owner-steering: lands the `/audit` picker modal and its keyboard shortcut; this ticket is only the Down-arrow affordance on top of it
   260905-feat-ws-pi-live-agent-widget: the `belowEditor` widget the owner would visually "move into"
+sage-review-design: required
+sage-review-completeness: required
 ---
 
 # Pi adapter: Down arrow at the bottom of the lead editor moves into the agent picker
@@ -17,8 +19,10 @@ is at its bottom, and the key has no other valid action, should move focus
 "down into" the agent list, where Up/Down select a child and Enter opens its
 conversation view. Two keystrokes with no command and no chord.
 
-What the extension API (pi-coding-agent 0.84.4) offers today, as found during
-that design:
+What the locally installed extension API (pi-coding-agent 0.85.1; the adapter
+declares `^0.84.4`) offers today, as found during that design
+(`/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/package.json`,
+`agents-plugin-pi/package.json#L23`):
 
 - `setWidget` components only render; they never receive input. Keys go to
   the focused component — the editor, or a `ctx.ui.custom` overlay.
@@ -32,6 +36,22 @@ So the exact affordance is not reachable as an extension yet. The child
 ticket therefore lands the picker as a separate focused modal
 (`ctx.ui.custom`) reached by `/audit` or a keyboard shortcut; this ticket
 keeps the Down-arrow idea alive.
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-pi/src/audit.ts, agents-plugin-pi/src/agent-widget.ts, and installed Pi extension/editor artifacts |
+| scope.surface | public-interface | a supported Pi extension input-disposition hook is required before the user-visible Down behavior can be implemented |
+| scope.new_public_symbol | unknown | no supported hook exists in the installed 0.85.1 API; the upstream symbol and contract are not specified |
+| scope.new_type_contract | unknown | the required editor-disposition or post-processing callback contract is an unresolved upstream Pi API decision |
+| scope.test_surface | existing | agents-plugin-pi/test/audit.test.ts covers the existing picker and shortcut; no editor-fall-through test surface exists |
+| complexity.reuse_points | confirmed | agents-plugin-pi/src/audit.ts picker and agents-plugin-pi/src/agent-widget.ts belowEditor widget were read |
+| complexity.side_effect_risk | high | intercepting Down can steal autocomplete, history, or wrapped-line navigation |
+| risk.correctness | high | the contract requires opening the picker only after every native Down action is unavailable |
+| risk.fit | high | the installed extension API exposes no supported post-editor disposition boundary |
+| risk.test | high | the decisive editor state is private and the exact no-interference path has no existing automated hook |
+| risk.security_or_contract | moderate | keyboard routing changes the host editor interaction contract but has no separate security boundary |
 
 ## Phases
 
@@ -51,8 +71,9 @@ keeps the Down-arrow idea alive.
 ## Ready-promotion review (2026-09-09)
 
 The owner requested all remaining conversation-view children become ready.
-A read-only survey of the locally installed Pi 0.84.4 public API found a
-specific blocker for this ticket's exact no-interference contract. The public
+A read-only survey of the locally installed Pi 0.85.1 public API found a
+specific blocker for this ticket's exact no-interference contract
+(`/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/package.json`). The public
 `setEditorComponent`/`CustomEditor` extension path can intercept keys and expose
 text/logical lines/cursor, but editor autocomplete state, history position,
 visual-line boundary and layout width remain private. `onTerminalInput` runs
