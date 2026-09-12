@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: b6356fde220ffe6a
 sage-review-completeness-reviewed: b6356fde220ffe6a
+completed: 2026-09-12
 ---
 
 # Render shared ws playbooks Pi-correct: pi terminology entry and selected .pi.md overlays
@@ -106,6 +107,15 @@ delegation-flow playbooks (`ticket-worker`, `lead-run`, ...) substitutes the Pi
 idioms instead of the host-neutral fallback, and that `reservedToolVarNames`
 coverage still holds.
 
+### Result (93b4591a) - 2026-09-12
+
+- Cherry-picked the independently reviewed develop implementation (`ab718fa5`) as
+  `93b4591a`: the shared terminology table now supplies the exact Pi explore,
+  spawn, and continuation idioms while retaining the host-neutral fallback.
+- `TestPlaybookPrintPiHarnessUsesPiTerminology`,
+  `TestPlaybookPrintPiDelegationFlowPlaybooks`, overlay-selection coverage, and
+  terminology-table coverage pass; the full Go suite and MCP smoke test pass.
+
 ### Phase 2: Conditional .pi.md overlay
 
 Depends on Phase 1 and the settled shared `rsrc/` supplied by the completed sync
@@ -115,3 +125,18 @@ for a reproduced delta that terminology vars cannot express, author the one
 needed `.pi.md` overlay under `agents-plugin/rsrc/`; mirror it per `260906`.
 Verify any overlay is selected only for `harness=pi`, the `260906` mirror guard
 stays green, and no overlay is authored in the mirror.
+
+### Result (93b4591a) - 2026-09-12
+
+- Source renders of `lead-discuss`, `lead-run`, and `ticket-worker` need only
+  terminology substitution; no concrete shared-base delta justified a `.pi.md`
+  overlay.
+- The Pi runtime contract and `rsrc/` mirror are byte-identical to their
+  canonical `agents-plugin/` counterparts; no `.pi.md` exists in either tree.
+  `npm test` passes (1647 pass, 1 expected skip), including the 260906 mirror
+  checks.
+
+
+## Resolution (2026-09-12)
+
+Implemented on develop and cherry-picked to the Pi track as 93b4591a. Pi terminology renders through the shared table; no .pi.md overlay was justified, and the canonical runtime and rsrc mirrors remain synchronized.
