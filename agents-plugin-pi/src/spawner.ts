@@ -96,7 +96,7 @@ import { WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV
 import { captureForkContext, compareForkRegistrations, removeForkTransport, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
 import { allocateAgentHome, createAgentStorageContext, isOwnedSessionPath, observeSessionWrite, readOwnership, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
 import { readSessionEntries, reduceTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
-import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, SUBTREE_ENV, READ_TOOLS, childPolicy, readDelegationPolicy, readOnlyWsTools, type DelegationPolicy, type PlaybookProfile, type RenderProvenance } from "./delegation-policy.ts";
+import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, SUBTREE_ENV, READ_TOOLS, NETWORK_TOOLS, childPolicy, readDelegationPolicy, readOnlyWsTools, type DelegationPolicy, type PlaybookProfile, type RenderProvenance } from "./delegation-policy.ts";
 import { assertSubtreeFinal, beginSubtreeDispatch, installSubtreePublisher, publishSubtree, readSubtreeChannel, readSubtreeSnapshot, subtreeWaiting, type SubtreeChannel } from "./subtree-lifecycle.ts";
 
 // ---------------------------------------------------------------------------
@@ -3046,8 +3046,13 @@ export function spawnAdmission(ctx: RpcSpawnCtx): DelegationPolicy {
   const tools = profile?.readOnly
     ? [...READ_TOOLS, REPORT_TO_LEAD_TOOL_NAME, ...CHILD_MANAGEMENT_TOOLS, ...readOnlyWsTools(ctx.wsToolNames)]
     : (ctx.explicitTools ?? resolveTools(group, ctx.wsToolNames)).split(",");
+  if (ctx.spawnRole === "explore") tools.push(...NETWORK_TOOLS);
+  const network = ctx.spawnRole === "explore" ? { search: true, fetch: true }
+    : !profile?.readOnly && (group === "full-worker" || group === "execute-worker")
+      ? parent.depth === 0 ? { search: true, fetch: true } : parent.network
+      : undefined;
   const authority = profile?.authority ?? (ctx.spawnRole === "explore" || group === "execute-worker" ? "leaf" : "lead");
-  const policy = childPolicy(parent, tools, authority, profile?.requiresChildren, ctx.provenance?.sessionKey);
+  const policy = childPolicy(parent, tools, authority, profile?.requiresChildren, ctx.provenance?.sessionKey, network);
   // A lateral fork's curated active names are not its execution ceiling: the
   // lead shell fallback and worker bash have equivalent native authority.
   if (fork) policy.tools = [...new Set([...policy.tools, GATED_EXEC_TOOL_NAME, ...resolveTools("full-worker", ctx.wsToolNames).split(",")])];
