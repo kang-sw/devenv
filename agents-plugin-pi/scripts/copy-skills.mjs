@@ -3,18 +3,22 @@
 // published/installed tarball carries it. Generated dir is gitignored, never
 // committed. Source is the sibling monorepo tree; when packing from outside the
 // monorepo (already-vendored tarball), the source is absent and we no-op.
-import { cpSync, existsSync, rmSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { syncGeneratedSkillsDir, validateGeneratedSkillTargets } from "../src/skills-dir.ts";
 
 const pkgDir = dirname(dirname(fileURLToPath(import.meta.url))); // agents-plugin-pi/
 const src = join(dirname(pkgDir), "agents-plugin", "skills");
 const dest = join(pkgDir, "skills");
 
-if (!existsSync(src)) {
+if (syncGeneratedSkillsDir(src, dest)) {
+  console.log(`[copy-skills] copied ${src} -> ${dest}`);
+} else {
   console.warn(`[copy-skills] source ${src} absent; leaving ${dest} as-is`);
-  process.exit(0);
 }
-rmSync(dest, { recursive: true, force: true });
-cpSync(src, dest, { recursive: true });
-console.log(`[copy-skills] copied ${src} -> ${dest}`);
+
+if (existsSync(dest)) {
+  validateGeneratedSkillTargets(dest, join(pkgDir, "rsrc", "manifest.json"));
+  console.log(`[copy-skills] validated playbook targets against ${join(pkgDir, "rsrc", "manifest.json")}`);
+}

@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: cbbfd7fce8370800
 sage-review-completeness-reviewed: cbbfd7fce8370800
+completed: 2026-09-13
 ---
 
 # Pi reload can retain generated skill shims for removed playbook names
@@ -41,3 +42,18 @@ This indicates that the package-local generated skills visible after reload can 
 ### Phase 1: Keep reloaded Pi skill shims aligned with the shipped playbook inventory
 
 Reproduce the stale shim after a workflow rename or removal and identify whether the source is the ignored pack-time `skills/` copy, installed Pi package cache, or reload lifecycle. Make the supported local sync/reload path replace the generated tree from the current inventory so removed entries disappear, and fail validation when any generated shim targets a playbook absent from the current rsrc manifest. Add regressions for rename/removal, stale extra files, and nonexistent playbook targets. Preserve the package topology in which generated skills are not committed, and do not restore removed playbook aliases merely to hide stale generated state.
+
+### Result (ef6316e) - 2026-09-13
+
+Pi's `resources_discover` lifecycle now cleanly regenerates the ignored package-local skill tree from canonical `agents-plugin/skills/` on startup and reload, removing renamed entries and unrelated stale files before Pi rebuilds its command inventory. Pack-time copying uses the same replacement and validates literal `playbook.read`/`playbook.render` targets against the package-local rsrc manifest; installed packages without a canonical sibling validate and expose their carried generated tree.
+
+Regression coverage executes the registered resource-discovery callback, the real copy-skills entrypoint in an isolated package fixture, source-absent installed-package success and failure paths, stale entry removal, and the canonical skill-to-rsrc target inventory. `npm test -- --test-reporter=dot` passed, and `npm pack --dry-run` regenerated, validated, and listed the skills tree in the tarball.
+
+Correctness and fit reviews were clean. Round-one test review found that helper-only tests did not prove the production reload and pack entrypoints remained wired and omitted the valid installed-package path; `ef6316e` added those seams, and round two verified both Important findings fixed with no remaining observations.
+
+Validation intentionally covers only static literal playbook names that can be proven from generated text; dynamic names continue through runtime playbook resolution.
+
+
+## Resolution (2026-09-13)
+
+Completed Phase 1: Pi startup/reload and package lifecycle paths now cleanly regenerate and validate generated skill shims against the current rsrc manifest, with independent review and regression coverage.
