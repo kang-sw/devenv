@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 9ad31bd58d5a7d10
 sage-review-completeness-reviewed: 9ad31bd58d5a7d10
+completed: 2026-09-12
 ---
 
 # Review a ready-promotion batch with one cross-ticket design reviewer
@@ -93,3 +94,31 @@ contract coverage for single-ticket preservation, clean batches, one-ticket
 design failures, cross-ticket conflicts, mixed configured postures, affected
 stem mapping, skipped members as context-only without stamp mutation, pass
 preservation, premise-invalidating reversals, and delta re-review convergence.
+
+### Result (17d7b8cb) - 2026-09-12
+
+Implemented one design-review dispatch for multi-ticket promotion, explicit
+eligible/context-only membership, per-ticket verdict mapping, cross-ticket
+affected-stem diagnostics, and pass-preserving delta review. Completeness stays
+per ticket. Promotion moves occur only after the entire batch settles, with
+rollback to original statuses if a later move fails.
+
+The existing Sage gate and stamp API needed no runtime changes. The lead keeps
+individual review evidence independently of combined blocked postures and may
+reuse an unchanged completeness pass with a fresh design verdict to clear both
+postures. Skipped design stages receive no verdict or stamp. Canonical resources
+and the generated wsflow mirror carry the same contract.
+
+Verification: `go test ./...`, `go build ./cmd/ws-mcp`,
+`scripts/smoke-ws-mcp.sh ..`, and
+`python3 -m unittest discover agents-plugin-wsflow/tests` passed. Rendered
+contract tests cover both products; mapped Sage fixtures cover clean batches,
+ticket-local failures, cross-ticket conflicts, skipped context, unaffected
+stamps, and combined delta recovery. These tests validate prompt delivery and
+the existing stamp boundary, not a live model's design judgment.
+
+Independent correctness, fit, and test review completed. Two Important findings
+were fixed in `55f7c72e` and verified in round 2: retained completeness evidence
+during delta recovery, and distinct local versus cross-ticket failure fixtures.
+The fresh-reader audit's prior-report ambiguity was also clarified. No findings
+remain unresolved; no scope was deferred.
