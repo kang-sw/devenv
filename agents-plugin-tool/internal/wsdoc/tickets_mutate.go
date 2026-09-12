@@ -191,8 +191,8 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 	}
 	// Non-implementation categories (epic, research, workset) are board
 	// artifacts, never execution targets, so they never enter ready/ — the
-	// implementation queue lead-run drains. This is the single hard chokepoint
-	// enforcing that rule in code: without it a stray tickets.move(epic, to:
+	// implementation queue lead-run drains. Like TicketCreate, this rejects
+	// board artifacts: without it a stray tickets.move(epic, to:
 	// "ready") would succeed against the prose bar and hand a worker an epic.
 	// Placed before any write so the rejection is a genuine no-op. sage_gate is
 	// decoupled from this path (see tickets_sage.go's epic-at-ready branch), so
@@ -311,9 +311,7 @@ var ticketCategoryRE = regexp.MustCompile(`^\d{6}-([a-z]+)-`)
 // implementation phases: an epic decomposes into children, and research and
 // legacy workset tickets are board artifacts. Checks that only make sense for a
 // ticket that will actually be routed and implemented skip these. TicketsMove
-// also reads this set as the hard bar that rejects any of these categories at
-// the ready/ landing — the single chokepoint behind "epics and research never
-// enter ready/".
+// and TicketCreate also read this set to reject board artifacts at ready/.
 var nonImplementationCategories = map[string]bool{
 	"epic":     true,
 	"research": true,

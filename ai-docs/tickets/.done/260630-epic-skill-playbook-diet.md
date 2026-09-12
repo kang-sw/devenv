@@ -1,6 +1,7 @@
 ---
 title: "Epic: skill playbook diet — playbook-body / MCP / unnecessary golden rule"
 sage-review: completed
+completed: 2026-09-12
 ---
 
 ## Summary
@@ -142,3 +143,8 @@ renumbered away.
 - `lead-forge-spec` (290 lines) — was a Phase 3 candidate in the original
   scoping; not carried into the 2026-07-01 curated target list. Deferred, not
   ruled out — revisit in a separate pass if it resurfaces as a target.
+
+
+## Resolution (2026-09-12)
+
+The epic delivered the golden-rule authoring discipline and its initial diet passes. The refoundation absorbed the remaining audit and curated-target scope through direct-contact evidence checks, lead-surface retirement, and the workflow-manual prose audits, leaving no executable scope under this epic.

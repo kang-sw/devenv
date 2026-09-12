@@ -3,6 +3,7 @@ title: Anchor-scope placement rule — site-local traps to code comments, cross-
 sage-review-design: completed
 related:
   260716-feat-mental-model-openup-injection: complement — injection delivers the doc half; the comment half is delivered by code reading at the edit site
+dropped: 2026-09-12
 ---
 
 # Anchor-scope placement rule — site-local traps to code comments, cross-cutting invariants to mental-model
@@ -82,3 +83,8 @@ model prescribes (judgment rules belong in playbook bodies; no schema or
 rationale prose). Verification: fresh-reader pass over each changed playbook
 confirms the rule is stated once per owning document without cross-document
 contradiction; wsflow mirror tests stay green.
+
+
+## Resolution (2026-09-12)
+
+The refoundation retired the mental-model document layer and kept site-local non-derivable traps at the code site. This ticket's document-placement contract therefore has no remaining implementation surface.

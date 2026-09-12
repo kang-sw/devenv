@@ -683,6 +683,7 @@ func TestRenderPathMintedChildRecordsLeadParent(t *testing.T) {
 	rsrcRoot := buildTestRsrcTree(t, map[string]string{
 		"leaf-pb/leaf-pb.md": leafPlaybookContent,
 	})
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
 	initGit(t, rsrcRoot)
 	server := NewServer(rsrcRoot, "test")
 	leadKey, err := server.sessions.mint(rsrcRoot, roleLead, "")

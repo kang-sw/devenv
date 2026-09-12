@@ -3,6 +3,7 @@ title: "Promote ready spec-address from soft-warn to a hard gate"
 related:
   260723-research-spec-collocator-subagent: blocker — the hard gate needs the collocator's ergonomic path before it can land
 parent: 260723-epic-ticket-write-reshape
+dropped: 2026-09-12
 ---
 
 # Promote ready spec-address from soft-warn to a hard gate
@@ -39,3 +40,8 @@ Preserve the existing exemptions: `epic` / `research` / `workset` remain ungated
 addressing (mechanical); the judgment of whether the spec text *actually*
 addresses the phase remains semantic and stays with the lead/collocator, not this
 gate.
+
+
+## Resolution (2026-09-12)
+
+The refoundation retired the spec layer and the spec-address gate. Hardening that removed gate is opposite to the landed direction and has no remaining implementation surface.

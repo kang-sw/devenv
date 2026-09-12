@@ -6,6 +6,7 @@ related:
   260627-bug-write-ticket-bypasses-tickets-create: prose-only fix left zero mechanical backstop against direct-file-edit bypass; the verify-commit gate closes exactly that hole
   260702-research-destructive-dedup-methodology: guardrail-vs-restatement discipline governs what the concept doc may absorb vs what must stay a mechanical check
 sage-review-design: completed
+completed: 2026-09-12
 ---
 
 # Ticket-write reshape — verify-commit gate, must-not-forget tool collapse, concept-doc consolidation
@@ -99,3 +100,8 @@ Deliverables (child tickets):
   `git.commit` layer and no equivalent chokepoint exists.
 - Deferred: hard spec-address gate + spec-collocator, until the collocator is
   designed.
+
+
+## Resolution (2026-09-12)
+
+The verify/commit guardrail, mutation-tool collapse, ticket-system concept document, and single Sage chokepoint all landed. The deferred spec-collocator and hard-gate direction was later retired with the spec layer by the refoundation, so no closure criterion remains open.
