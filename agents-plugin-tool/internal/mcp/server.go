@@ -1426,8 +1426,8 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 				return toolTextResponse(req.ID, "", err)
 			}
 		}
-		// Rsrc root: root_override rebinds the auto-include resolution root when set.
-		rsrcRoot, err := resolveRsrcRoot(rootOverride)
+		// Delegate worktrees do not contain the installed resource manifest.
+		rsrcRoot, err := resolveRsrcRoot("")
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -3724,7 +3724,7 @@ func tools() []map[string]any {
 					"session_key":   stringProperty("Caller's ws session key (required for root resolution; lead callers trigger child-key minting)."),
 					"name":          stringProperty("Playbook name (bare stem resolvable by the rsrc loader)."),
 					"context":       map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional caller-supplied substitution values for variables declared in the playbook's frontmatter. In wsflow no-agent mode, legacy render-eligible stems append context as a ## Render Context block instead."},
-					"root_override": stringProperty("Optional path to override both the auto-include resolution root and the child-key binding root. Use when the delegate runs in a different worktree."),
+					"root_override": stringProperty("Optional delegate worktree path for prompt artifact allocation and child-key binding. Playbooks, manifests, and includes use the plugin resource root (WS_RSRC_ROOT or the executable-derived bundle)."),
 				},
 				"required": []string{"name"},
 			},

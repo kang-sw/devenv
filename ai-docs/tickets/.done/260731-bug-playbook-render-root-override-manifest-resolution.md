@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 6265b8e4e1309ed4
 sage-review-completeness-reviewed: 6265b8e4e1309ed4
+completed: 2026-09-12
 ---
 
 # playbook.render root_override resolves manifest from repository root
@@ -74,3 +75,28 @@ Make `playbook.render` resolve the resource tree independently of
 child-key binding. Align the published schema description and shipped workflow
 guidance with that contract, add the split-root regression test, and verify the
 full Go suite plus affected plugin surface tests.
+
+### Result (63542b5c) - 2026-09-12
+
+The render dispatch now resolves plugin resources independently of the delegate
+worktree override. Artifact allocation and render-minted child-session roots
+retain the override; resource inspection and `playbook.read` retain their
+existing behavior. The public schema and cross-worktree workflow guidance agree
+with this boundary, and the wsflow resource mirror was regenerated.
+
+The dispatch regression uses a real linked worktree without a manifest and a
+separate plugin resource tree containing the playbook and its include. Both
+override and no-override cases verify rendered content, artifact directory,
+child role, root, and parent linkage. The existing child-parent fixture now
+selects its resource tree through `WS_RSRC_ROOT`.
+
+Verification: focused render/root-parent tests passed; `go test ./...` passed;
+`scripts/smoke-ws-mcp.sh ..` passed; plugin Python suites passed (58 ws tests,
+11 wsflow tests); resource manifest and wsflow mirror generators passed;
+`git diff --check` passed. Independent correctness, fit/contracts, and test
+reviews were clean; the workflow guidance fresh-reader audit was also clean.
+
+Decisions: reuse the existing separate renderer arguments and normal resource
+resolver rather than introduce a new parameter. Keep cross-worktree guidance
+about when to render, leaving field semantics in the tool schema. No deferred
+work or unresolved findings.
