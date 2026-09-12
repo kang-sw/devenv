@@ -44,6 +44,59 @@ project.
   audit. It identifies the affected prose and proposes a direct rewrite or
   deletion; the lead applies meaning-preserving fixes and returns semantic or
   policy changes to the user.
+- Add a dedicated `fresh-read-doc-auditor` playbook rather than broadening the
+  existing `fresh-reader-audit`, whose contract serves skill and prompt
+  authoring.
+
+## Verbatim Shipped Prose
+
+### Skill description
+
+```yaml
+description: Draft, revise, or audit frequently reread project documents such as AGENTS.md, rules, manuals, procedures, and references. Also use after materially editing one of these documents to remove over-negation and defensive prose, and to offer an independent fresh-read audit.
+```
+
+### Lead playbook
+
+```markdown
+# Audit Doc
+
+Draft or revise the requested project document under its existing instructions.
+Preserve its meaning. Remove repeated exclusions that a positive owner or
+default can state once, qualifications that change no reader action, scope, or
+stop, and rationale written to defend the author rather than guide the reader.
+
+The document keeps its own structure and style.
+
+After writing, if the user did not already request an independent audit, ask
+whether to spawn one. On acceptance, render `fresh-read-doc-auditor` through
+`{{.McpNamespace}}/playbook.render` with the target path or excerpts and spawn
+it with the returned bindings. Give it no conversation context.
+
+Apply meaning-preserving findings. Return any finding that would change policy
+or intent to the user.
+
+Report the changed path and whether the independent audit ran.
+```
+
+### Fresh-read auditor playbook
+
+```markdown
+# Fresh-Read Document Audit
+
+You are a first-time reader. Read only {{.TargetFiles}}.
+
+Your entire scope is:
+
+- repeated exclusions where one positive owner or default states the contract;
+- disclaimers or qualifications that do not change reader action, scope, or a
+  stop condition;
+- rationale that defends the author or repeats a rule without narrowing it.
+
+Preserve the intended meaning and existing project-specific instructions. For
+each finding, quote the affected text, say which scope item it matches, and
+propose a direct rewrite or deletion. If there are no findings, say `No findings.`
+```
 
 ## Constraints
 
@@ -69,7 +122,8 @@ project.
 
 Remove the durable-rule entry skill and its routed playbook, introduce the
 concise write-capable document-audit entry and its fresh-reader delegation
-contract, and update both package inventories, manifests, mirrors, and tests.
+contract through the dedicated `fresh-read-doc-auditor`, and update both
+package inventories, manifests, mirrors, and tests.
 Verify autonomous description matching for recurring project-document edits,
 the user confirmation boundary before subagent dispatch, downstream-only
 resolution, the narrow prose-pathology scope, and absence of the retired skill
