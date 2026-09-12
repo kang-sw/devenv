@@ -217,6 +217,7 @@ import { createToolPreviewTuiRef, loadToolResultTuiModules } from "./tool-result
 import { createAgentStorageContext } from "./agent-storage.ts";
 import { addClaudeDelegateIfLead, registerClaudeDelegateSession } from "./claude-delegate.ts";
 import { assertPolicyTool, readDelegationPolicy } from "./delegation-policy.ts";
+import { registerWebTools } from "./web-tools.ts";
 import { publishSubtree } from "./subtree-lifecycle.ts";
 
 // This is the exact physical entry module Pi loaded (whether from `-e`, an
@@ -343,6 +344,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   // Filled before the bridge starts so native tool renderers are available
   // independently of async MCP startup; absent helpers retain Pi fallback.
   const toolPreviewTuiRef = createToolPreviewTuiRef();
+  registerWebTools(pi, extensionEntryPath, toolPreviewTuiRef);
   let handle: BridgeHandle | undefined;
   let agentTools: AgentToolsHandle | undefined;
   // The manual-snapshot + guide-text half of the ws block, filled once per

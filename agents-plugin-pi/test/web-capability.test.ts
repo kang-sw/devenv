@@ -33,6 +33,10 @@ test("network schema and actual execution fail closed", () => {
   assert.throws(() => parseDelegationPolicy({ ...root, network: null }), /malformed/);
   assert.throws(() => assertPolicyTool({ ...root, tools: ["web_search"] }, "web_search"), /ceiling/);
   assert.throws(() => childPolicy(root, ["web_search"], "leaf", false, undefined, { search: false, fetch: false }), /lacks explicit authority/);
+  const input = { ...root, network: { search: true, fetch: false } };
+  const parsed = parseDelegationPolicy(input);
+  input.network.fetch = true;
+  assert.equal(parsed.network?.fetch, false);
 });
 
 test("all persistent Explore modes receive the identical web authority", () => {

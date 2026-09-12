@@ -53,7 +53,7 @@ export function parseDelegationPolicy(value: unknown): DelegationPolicy {
       !Object.hasOwn(AUTHORITY, p.authority) || (p.sessionKey !== undefined && typeof p.sessionKey !== "string") ||
       (p.parentSessionKey !== undefined && typeof p.parentSessionKey !== "string") ||
       (p.network !== undefined && (!p.network || typeof p.network.search !== "boolean" || typeof p.network.fetch !== "boolean"))) throw new Error("ws-pi-agent: malformed delegation policy");
-  return { ...p, tools: [...new Set(p.tools)] };
+  return { ...p, tools: [...new Set(p.tools)], ...(p.network ? { network: { ...p.network } } : {}) };
 }
 export function readDelegationPolicy(env: NodeJS.ProcessEnv = process.env): DelegationPolicy | undefined {
   const raw = env[DELEGATION_ENV];

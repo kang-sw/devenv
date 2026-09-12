@@ -147,6 +147,14 @@ import type { McpStdioClient, McpToolCallResult } from "../src/mcp-stdio-client.
 import { mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { DELEGATION_ENV } from "../src/delegation-policy.ts";
+import { WEB_HOME_ENV, WEB_NONCE_ENV } from "../src/web-readiness.ts";
+const REAL_EXTENSION_ENTRY = fileURLToPath(new URL("../src/index.ts", import.meta.url));
+async function startRpcWithWebProof(this: { options?: { env?: Record<string, string> } }) {
+  const env = this.options?.env ?? {};
+  if (env[WEB_HOME_ENV]) writeFileSync(join(env[WEB_HOME_ENV], "web-tools-ready.json"), JSON.stringify({ nonce: env[WEB_NONCE_ENV], tools: ["web_search", "ws_web_fetch"] }));
+}
 
 // Deliberately contains spaces: argv is passed as an array, so this exact
 // loaded-entry identity must reach the child without shell escaping/rebuilds.
@@ -166,7 +174,7 @@ function registerAgentTools(pi: any, bridge: any, sessionCtx: any, ...rest: any[
     }
     return tool.execute(...args);
   } });
-  return registerAgentToolsBase(pi, bridge, { ...sessionCtx, extensionPath: sessionCtx.extensionPath ?? TEST_EXTENSION_ENTRY }, ...rest);
+  return registerAgentToolsBase(pi, bridge, { ...sessionCtx, extensionPath: sessionCtx.extensionPath ?? REAL_EXTENSION_ENTRY }, ...rest);
 }
 
 const storageRoots = new Set<string>();
@@ -924,7 +932,7 @@ describe("registerAgentTools worker exploration retains a persistent researcher 
     } as never;
     const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
     const effort = (payload as { effort?: string }).effort || "medium";
-    Object.assign(RpcClient.prototype, { start: async () => {}, stop: async () => {}, abort: async () => {}, onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {}, getState: async () => ({ model: { provider: "provider", id: "id" }, thinkingLevel: effort }) });
+    Object.assign(RpcClient.prototype, { start: startRpcWithWebProof, stop: async () => {}, abort: async () => {}, onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {}, getState: async () => ({ model: { provider: "provider", id: "id" }, thinkingLevel: effort }) });
     const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" }, undefined, fakeRunExploreLeaf);
     const stop = handle.stopAll.bind(handle);
     handle.stopAll = async () => { await stop(); Object.assign(RpcClient.prototype, original); };
@@ -1125,7 +1133,7 @@ describe("explore tool: onModelResolved / resolved-line publishing (260906 Phase
   function installRpcHarness() {
     const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
     Object.assign(RpcClient.prototype, {
-      start: async () => {}, stop: async () => {}, abort: async () => {},
+      start: startRpcWithWebProof, stop: async () => {}, abort: async () => {},
       onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {},
       getState: async () => ({ model: { provider: "pi", id: "small" }, thinkingLevel: "medium", sessionFile: "/tmp/ws-pi-agent-test/session.jsonl" }),
     });
@@ -1159,7 +1167,9 @@ describe("explore tool: onModelResolved / resolved-line publishing (260906 Phase
   test("worker persistent explore publishes the same resolved line as lead exploration", async () => {
     const rpc = installRpcHarness();
     const previousRole = process.env[WS_PI_SPAWN_ROLE_ENV];
+    const previousPolicy = process.env[DELEGATION_ENV];
     process.env[WS_PI_SPAWN_ROLE_ENV] = "worker";
+    process.env[DELEGATION_ENV] = JSON.stringify({ version: 1, depth: 1, maxDepth: 2, authority: "lead", tools: resolveTools("full-worker").split(","), network: { search: true, fetch: true } });
     try {
       const tools = new Map<string, CapturedTool>();
       const pi = { registerTool: (tool: CapturedTool) => tools.set(tool.name, tool) } as unknown as ExtensionAPI;
@@ -1182,6 +1192,7 @@ describe("explore tool: onModelResolved / resolved-line publishing (260906 Phase
       await handle.stopAll();
     } finally {
       rpc.restore();
+      if (previousPolicy === undefined) delete process.env[DELEGATION_ENV]; else process.env[DELEGATION_ENV] = previousPolicy;
       if (previousRole === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV]; else process.env[WS_PI_SPAWN_ROLE_ENV] = previousRole;
     }
   });
@@ -3778,6 +3789,8 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
       [WS_PI_PARENT_SESSION_KEY_ENV]: "",
       WS_PI_DELEGATION_POLICY: "",
       WS_PI_SUBTREE_CHANNEL: "",
+      WS_PI_WEB_HOME: "",
+      WS_PI_WEB_READY_NONCE: "",
       WS_MCP_BOOTSTRAP_BINARY: "",
       WS_MCP_BOOTSTRAP_URL: "",
     });
@@ -3785,7 +3798,7 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
 
   test("env overrides an inherited exploration mode while preserving role and approvals markers", () => {
     const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-y/session.jsonl", "/tmp/system.md", "read");
-    assert.deepEqual(new Set(Object.keys(options.env ?? {})), new Set([WS_PI_SPAWN_ROLE_ENV, WS_PI_APPROVAL_DIR_ENV, "WS_PI_EXPLORE_MODE", "WS_PI_FORK_CONTEXT", "WS_PI_FORK_READY_PATH", "WS_PI_FORK_READY_NONCE", "WS_PI_FORK_AFFINITY", WS_PI_PARENT_SESSION_KEY_ENV, "WS_PI_DELEGATION_POLICY", "WS_PI_SUBTREE_CHANNEL", "WS_MCP_BOOTSTRAP_BINARY", "WS_MCP_BOOTSTRAP_URL"]));
+    assert.deepEqual(new Set(Object.keys(options.env ?? {})), new Set([WS_PI_SPAWN_ROLE_ENV, WS_PI_APPROVAL_DIR_ENV, "WS_PI_EXPLORE_MODE", "WS_PI_FORK_CONTEXT", "WS_PI_FORK_READY_PATH", "WS_PI_FORK_READY_NONCE", "WS_PI_FORK_AFFINITY", WS_PI_PARENT_SESSION_KEY_ENV, "WS_PI_DELEGATION_POLICY", "WS_PI_SUBTREE_CHANNEL", "WS_PI_WEB_HOME", "WS_PI_WEB_READY_NONCE", "WS_MCP_BOOTSTRAP_BINARY", "WS_MCP_BOOTSTRAP_URL"]));
     assert.equal(options.env?.WS_PI_EXPLORE_MODE, "");
   });
 

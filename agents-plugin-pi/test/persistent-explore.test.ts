@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { DELEGATION_ENV } from "../src/delegation-policy.ts";
+import { WEB_HOME_ENV, WEB_NONCE_ENV } from "../src/web-readiness.ts";
 import { createAgentStorageContext } from "../src/agent-storage.ts";
 import { RpcClient, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
@@ -16,7 +19,7 @@ import { WS_PI_EXPLORE_MODE_ENV, WS_PI_SPAWN_ROLE_ENV } from "../src/process-rol
 import { captureOrphans, parseOrphans, reviveOrphans, serializeOrphans } from "../src/agent-sidecar.ts";
 import type { McpToolCallResult } from "../src/mcp-stdio-client.ts";
 
-const TEST_EXTENSION_ENTRY = "/tmp/loaded ws adapter/index copy.ts";
+const TEST_EXTENSION_ENTRY = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 function registerAgentTools(pi: any, bridge: any, sessionCtx: any, ...rest: any[]) {
   return registerAgentToolsBase(pi, bridge, { ...sessionCtx, extensionPath: sessionCtx.extensionPath ?? TEST_EXTENSION_ENTRY }, ...rest);
 }
@@ -45,9 +48,13 @@ function record(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
 async function withRole<T>(role: string | undefined, mode: string | undefined, fn: () => Promise<T> | T): Promise<T> {
   const oldRole = process.env[WS_PI_SPAWN_ROLE_ENV];
   const oldMode = process.env[WS_PI_EXPLORE_MODE_ENV];
+  const oldPolicy = process.env[DELEGATION_ENV];
+  if (role) process.env[DELEGATION_ENV] = JSON.stringify({ version: 1, depth: 1, maxDepth: 2, authority: "lead", tools: resolveTools("full-worker").split(","), network: { search: true, fetch: true } });
+  else delete process.env[DELEGATION_ENV];
   if (role === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV]; else process.env[WS_PI_SPAWN_ROLE_ENV] = role;
   if (mode === undefined) delete process.env[WS_PI_EXPLORE_MODE_ENV]; else process.env[WS_PI_EXPLORE_MODE_ENV] = mode;
   try { return await fn(); } finally {
+    if (oldPolicy === undefined) delete process.env[DELEGATION_ENV]; else process.env[DELEGATION_ENV] = oldPolicy;
     if (oldRole === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV]; else process.env[WS_PI_SPAWN_ROLE_ENV] = oldRole;
     if (oldMode === undefined) delete process.env[WS_PI_EXPLORE_MODE_ENV]; else process.env[WS_PI_EXPLORE_MODE_ENV] = oldMode;
   }
@@ -61,9 +68,11 @@ function installRpcHarness(state: { model: string; thinking: string; clamp?: str
   const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
   const calls: string[] = [];
   Object.assign(RpcClient.prototype, {
-    start: async function(this: { options?: { args?: string[] } }) {
+    start: async function(this: { options?: { args?: string[]; env?: Record<string, string> } }) {
       calls.push("start");
       const args = this.options?.args ?? [];
+      const env = this.options?.env ?? {};
+      if (env[WEB_HOME_ENV]) writeFileSync(join(env[WEB_HOME_ENV], "web-tools-ready.json"), JSON.stringify({ nonce: env[WEB_NONCE_ENV], tools: ["web_search", "ws_web_fetch"] }));
       const sessionIndex = args.indexOf("--session");
       const sessionDirIndex = args.indexOf("--session-dir");
       const session = sessionIndex >= 0 ? args[sessionIndex + 1] : undefined;
@@ -164,12 +173,16 @@ describe("persistent explore registration, dispatch, and frozen selection", () =
         assert.equal(researcher.ownership?.home, join(realpathSync(h.root), "ws-agents", "test-lead", result.agent_id));
         assert.equal(researcher.ownership?.sessionPath, researcher.sessionPath);
         assert.equal(researcher.toolGroup, "read-only");
+        assert.deepEqual(researcher.delegation?.network, { search: true, fetch: true });
+        assert(researcher.delegation?.tools.includes("web_search"));
+        assert(researcher.delegation?.tools.includes("ws_web_fetch"));
         assert.equal(researcher.modelBase, "pi/small");
         assert.equal(researcher.modelEffort, "high", "Pi's actual clamp replaces requested xhigh before persistence");
         assert.equal(h.lookups(), 1);
         const restored: RpcAgentRegistry = new Map();
         reviveOrphans(restored, parseOrphans(serializeOrphans(captureOrphans(h.handle.rpcRegistry))));
         const revived = restored.get(result.agent_id)!;
+        assert.deepEqual(revived.delegation?.network, researcher.delegation?.network);
         assert.deepEqual([revived.spawnRole, revived.exploreMode, revived.toolGroup, revived.modelBase, revived.modelEffort], ["explore", "simple", "read-only", "pi/small", "high"]);
         rpc.calls.length = 0;
         await sendToAgent(restored, { cwd: "/tmp", extensionPath: TEST_EXTENSION_ENTRY }, revived.agentId, "follow up");
