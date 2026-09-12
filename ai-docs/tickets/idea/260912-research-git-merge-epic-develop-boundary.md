@@ -53,20 +53,29 @@ epic-to-review-track boundary.
 ### Confirmed Decisions
 <!-- Normative choices explicitly confirmed by the user. -->
 
+- Generalize `ws/git.merge` to accept any exact local source branch and exact
+  local target branch. Leads should not need to classify a branch before
+  deciding whether the merge tool is callable.
+- Preserve the impl lifecycle invariant: when the source is `impl/*`, its
+  explicit target must match the root encoded in the source branch name.
+- Keep the existing lead-only authority, `--no-ff` merge, structured merge
+  record, exact-ref checks, clean-state checks, merge-in-progress refusal,
+  containment checks, source and target OID rechecks, and conflict handoff.
+- Keep the default-deny `main` and `master` policy, structured diagnostics, and
+  OID-bound `release_target_override`; the override never waives a
+  `must_resolve` finding.
+- Delete `impl/*` and `goal/*` source branches only after a successful merge.
+  Goal branches are convention-managed one-shot branches. Preserve `epic/*`
+  and other source branches after a successful merge.
+- Route goal-to-parent, epic-to-review-track, and other lead-owned branch
+  integrations through `ws/git.merge` instead of branch-type-specific native
+  Git fallbacks.
+
 ### Proposals
 <!-- Unconfirmed candidates. Never treat these as actionable authority. -->
 
 ### Open Questions
 <!-- Unresolved choices that require further investigation or user input. -->
-
-- Should `ws/git.merge` accept additional structured lifecycle sources such as
-  `epic/*`, or should epic-to-review-track promotion use a distinct lead-owned
-  primitive?
-- If the boundary stays impl-only, where should the supported epic-to-develop
-  path be made explicit so a caller does not infer a generic merge surface from
-  the tool name?
-- Which existing safety checks, OID pinning, review evidence, and branch cleanup
-  behavior should apply to a non-impl promotion path?
 
 ### Rejected Alternatives
 <!-- Alternatives explicitly rejected, with the reason when useful. -->
