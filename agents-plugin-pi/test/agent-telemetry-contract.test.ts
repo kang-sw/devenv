@@ -61,7 +61,7 @@ test("reported zero is retained, while an empty history has no invented usage or
 test("a known call with absent or invalid cost makes the complete total unknown without discarding valid latest input", () => withSession([
   header(), assistant("known", 20, .2), assistant("uncosted", 30),
 ], path => {
-  assert.deepEqual(reduceTelemetry(origin(path), readSessionEntries(path)), { latestInput: 30 });
+  assert.deepEqual(reduceTelemetry(origin(path), readSessionEntries(path)), { latestInput: 30, partialEstimatedUsd: .2 });
   writeFileSync(path, `${[header(), assistant("invalid", 31, -1)].map(JSON.stringify).join("\n")}\n`);
   assert.deepEqual(reduceTelemetry(origin(path), readSessionEntries(path)), { latestInput: 31 });
 }));

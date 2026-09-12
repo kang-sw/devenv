@@ -35,10 +35,12 @@ test("row projection preserves reported zero latest input for live and thread-on
   assert.equal(buildAgentRows(new Map(), [thread], Date.now())[0].latestInput, 0);
 });
 
-test("telemetry retains reported zero and refuses malformed/missing anchors", () => withSession([header, assistant("a", 0, 0)], path => {
+test("telemetry retains reported zero and partial known cost while refusing malformed/missing anchors", () => withSession([header, assistant("a", 0, 0)], path => {
   const read = readSessionEntries(path);
   assert.deepEqual(reduceTelemetry({ sessionId: "child", sessionPath: path, emptyPrefix: true }, read), { latestInput: 0, estimatedUsd: 0 });
-  assert.equal(reduceTelemetry({ sessionId: "child", sessionPath: path, prefixEntryId: "gone" }, read), undefined);
+  writeFileSync(path, `${JSON.stringify(header)}\n${JSON.stringify(assistant("known", 4, .25))}\n${JSON.stringify({ type: "message", id: "unknown", message: { role: "assistant", usage: { input: 5, cost: {} } } })}\n`);
+  assert.deepEqual(reduceTelemetry({ sessionId: "child", sessionPath: path, emptyPrefix: true }, readSessionEntries(path)), { latestInput: 5, partialEstimatedUsd: .25 });
+  assert.equal(reduceTelemetry({ sessionId: "child", sessionPath: path, prefixEntryId: "gone" }, readSessionEntries(path)), undefined);
   writeFileSync(path, `${JSON.stringify(header)}\n{"type":"message"\n`);
   assert.deepEqual(readSessionEntries(path), { transient: true });
 }));

@@ -4,7 +4,17 @@ import { readFileSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 
 export interface TelemetryOrigin { sessionId: string; sessionPath: string; prefixEntryId?: string; emptyPrefix?: true }
-export interface AgentTelemetry { version: 1; origin: TelemetryOrigin; model?: string; effort?: string; latestInput?: number; estimatedUsd?: number }
+export interface AgentTelemetry {
+  version: 1;
+  origin: TelemetryOrigin;
+  model?: string;
+  effort?: string;
+  latestInput?: number;
+  /** Complete child-attributable cumulative estimate. Existing widget semantics read only this field. */
+  estimatedUsd?: number;
+  /** Known subtotal when one or more attributable usage entries have unknown cost. */
+  partialEstimatedUsd?: number;
+}
 type Entry = { id: string; type: string; message?: { role?: string; usage?: unknown }; usage?: unknown };
 
 const nonnegative = (v: unknown): number | undefined => typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
@@ -23,7 +33,8 @@ export function parseTelemetry(value: unknown): AgentTelemetry | undefined {
   const out: AgentTelemetry = { version: 1, origin: { sessionId: o.sessionId, sessionPath: o.sessionPath, ...(o.prefixEntryId ? { prefixEntryId: o.prefixEntryId } : { emptyPrefix: true }) } };
   if (typeof t.model === "string" && t.model) out.model = t.model;
   if (typeof t.effort === "string" && t.effort) out.effort = t.effort;
-  for (const k of ["latestInput", "estimatedUsd"] as const) { const n = nonnegative(t[k]); if (n !== undefined) out[k] = n; }
+  for (const k of ["latestInput", "estimatedUsd", "partialEstimatedUsd"] as const) { const n = nonnegative(t[k]); if (n !== undefined) out[k] = n; }
+  if (out.estimatedUsd !== undefined && out.partialEstimatedUsd !== undefined) delete out.partialEstimatedUsd;
   return out;
 }
 export function readSessionEntries(path: string): { headerId: string; parentSession?: string; entries: Entry[] } | { transient: true } | undefined {
@@ -45,7 +56,7 @@ export function readSessionEntries(path: string): { headerId: string; parentSess
   return { headerId: h.id, ...(typeof h.parentSession === "string" && h.parentSession ? { parentSession: h.parentSession } : {}), entries };
 }
 /** Recomputes, never adds. Unavailable or invalid input returns undefined; callers classify the read before choosing fallback. */
-export function reduceTelemetry(origin: TelemetryOrigin, read: ReturnType<typeof readSessionEntries>): Pick<AgentTelemetry, "latestInput" | "estimatedUsd"> | undefined {
+export function reduceTelemetry(origin: TelemetryOrigin, read: ReturnType<typeof readSessionEntries>): Pick<AgentTelemetry, "latestInput" | "estimatedUsd" | "partialEstimatedUsd"> | undefined {
   if (!read || "transient" in read || read.headerId !== origin.sessionId) return undefined;
   let start = 0;
   if (origin.prefixEntryId) { const at = read.entries.findIndex(e => e.id === origin.prefixEntryId); if (at < 0) return undefined; start = at + 1; }
@@ -61,12 +72,15 @@ export function reduceTelemetry(origin: TelemetryOrigin, read: ReturnType<typeof
     if (summary) latest = undefined;
     if (usage.cost === undefined) invalidCost = true; else { observedCost = true; total += usage.cost; }
   }
-  return { ...(latest !== undefined ? { latestInput: latest } : {}), ...(!invalidCost && observedCost ? { estimatedUsd: total } : {}) };
+  return {
+    ...(latest !== undefined ? { latestInput: latest } : {}),
+    ...(!invalidCost && observedCost ? { estimatedUsd: total } : invalidCost && observedCost ? { partialEstimatedUsd: total } : {}),
+  };
 }
 export function refreshTelemetry(snapshot: AgentTelemetry): AgentTelemetry | undefined {
   const reduced = reduceTelemetry(snapshot.origin, readSessionEntries(snapshot.origin.sessionPath));
   if (reduced === undefined) return undefined;
   const next = { ...snapshot };
-  delete next.latestInput; delete next.estimatedUsd;
+  delete next.latestInput; delete next.estimatedUsd; delete next.partialEstimatedUsd;
   return { ...next, ...reduced };
 }

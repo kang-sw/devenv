@@ -17,6 +17,7 @@ function registerAgentTools(pi: any, bridge: any, sessionCtx: any, ...rest: any[
 }
 import { captureForkResume, createThreadRegistryHandle, hydrateThreadRegistry, rehydrateForkRecord, saveThreadRegistryFile } from "../src/ask.ts";
 import { persistShutdownAgentSnapshots } from "../src/index.ts";
+import { allocateAgentHome, createAgentStorageContext, readOwnership } from "../src/agent-storage.ts";
 
 const roots = new Set<string>();
 afterEach(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); roots.clear(); });
@@ -62,6 +63,17 @@ describe("agent telemetry lifecycle at production boundaries", () => {
     if (contradiction === "interior") writeFileSync(session, JSON.stringify(entries[0]) + '\n{broken\n' + JSON.stringify(entries[2]) + '\n');
     refreshAgentTelemetry(record, contradiction === "path" ? { ...state, sessionFile: session + ".other" } : state);
     assert.equal(record.telemetry, undefined); assert.equal(record.telemetryInputFloor, undefined); assert.equal(record.observedLatestInput, undefined);
+  });
+
+  test("validated child-attributable cost is mirrored into durable ownership for ancestor reconstruction", () => {
+    const dir = root();
+    const ownership = allocateAgentHome(createAgentStorageContext("lead", dir), "owned", "worker");
+    write(ownership.sessionPath!, [header("owned"), assistant("known", 20, .2), { type: "message", id: "unknown", message: { role: "assistant", usage: { input: 30, cost: {} } } }]);
+    const record = { agentId: "owned", sessionPath: ownership.sessionPath!, ownership } as RpcAgentRecord;
+    refreshAgentTelemetry(record, { sessionId: "owned", sessionFile: ownership.sessionPath! });
+    assert.equal(record.telemetry?.estimatedUsd, undefined);
+    assert.equal(record.telemetry?.partialEstimatedUsd, .2);
+    assert.deepEqual(readOwnership(ownership.home)?.telemetry, record.telemetry);
   });
 
   test("collector rejection clears current selection and notifies once while preserving usage", async () => {

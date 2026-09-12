@@ -6,6 +6,7 @@ import { describe, test } from "node:test";
 import { allocateAgentHome, createAgentStorageContext, readOwnership, writeOwnership } from "../src/agent-storage.ts";
 import type { PersistedOrphan } from "../src/agent-sidecar.ts";
 import { applySessionStartAgentRetention } from "../src/index.ts";
+import { aggregateDescendantCosts } from "../src/agent-footer.ts";
 
 function orphan(agentId: string, sessionPath: string, ownership?: PersistedOrphan["ownership"]): PersistedOrphan {
   return { agentId, sessionPath, systemPromptPath: "/tmp/prompt.md", wsToolNames: [], toolGroup: "full-worker", ...(ownership ? { ownership } : {}) };
@@ -21,9 +22,9 @@ describe("controller session-start child retention", () => {
       writeFileSync(config, JSON.stringify({ child_retention_ttl_days: 0.5 }));
       const stale = allocateAgentHome(createAgentStorageContext("other-lead", root), "stale-child", "worker");
       const recent = allocateAgentHome(createAgentStorageContext("other-lead", root), "recent-child", "worker");
-      for (const [owned, lastActivityAt] of [[stale, now - 86_400_000], [recent, now - 1_000]] as const) {
+      for (const [owned, lastActivityAt, cost] of [[stale, now - 86_400_000, .4], [recent, now - 1_000, .2]] as const) {
         const metadata = readOwnership(owned.home)!;
-        writeOwnership({ ...metadata, lastActivityAt, liveness: { ...metadata.liveness, lifecycle: "stopped", running: false } });
+        writeOwnership({ ...metadata, lastActivityAt, telemetry: { version: 1, origin: { sessionId: `${owned.agentId}-session`, sessionPath: owned.sessionPath!, emptyPrefix: true }, estimatedUsd: cost }, liveness: { ...metadata.liveness, lifecycle: "stopped", running: false } });
       }
       const legacy = orphan("legacy", join(root, "legacy-session.jsonl"));
       const recovered = [orphan(stale.agentId, stale.sessionPath!, stale), orphan(recent.agentId, recent.sessionPath!, recent), legacy];
@@ -32,6 +33,9 @@ describe("controller session-start child retention", () => {
       assert.equal(existsSync(stale.home), false);
       assert.equal(existsSync(recent.home), true);
       assert.deepEqual(retained.map(entry => entry.agentId), [recent.agentId, "legacy"]);
+      const aggregate = aggregateDescendantCosts(createAgentStorageContext("other-lead", root), new Map());
+      assert.equal(aggregate.knownUsd.toFixed(2), "0.60");
+      assert.deepEqual({ ...aggregate, knownUsd: 0 }, { knownUsd: 0, knownContributors: 2, unknownContributors: 0, descendants: 2 }, "retention roll-up preserves the deleted child beside the retained child");
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
