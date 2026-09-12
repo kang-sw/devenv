@@ -21,9 +21,11 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { buildPushComponent, buildPushRenderLines, registerPushMessageRenderers, type PushTuiModules } from "../src/push-render.ts";
+import { buildPushBatchComponent, buildPushComponent, buildPushRenderLines, registerPushMessageRenderers, type PushTuiModules } from "../src/push-render.ts";
 import { buildPushContent, PUSH_FAMILIES } from "../src/spawner.ts";
 import { approximateCodePointWidth } from "../src/tool-result-render.ts";
+
+const PUSH_BATCH_CUSTOM_TYPE = "ws-push-batch";
 
 describe("buildPushRenderLines", () => {
   test("splits a real pushed message into head, payload and status", () => {
@@ -173,9 +175,17 @@ function fakeTui(): { modules: PushTuiModules; boxes: FakeBox[]; strips: number;
   }
   type FakeBox = FakeBoxImpl;
 
+  class FakeContainer implements FakeComponent {
+    children: FakeComponent[] = [];
+    addChild(child: FakeComponent): void { this.children.push(child); }
+    render(width: number): string[] { return this.children.flatMap((child) => child.render(width)); }
+    invalidate(): void { for (const child of this.children) child.invalidate(); }
+  }
+
   return {
     modules: {
       Box: FakeBoxImpl,
+      Container: FakeContainer,
       Text: FakeText,
       stripTerminalSequences: (text: string) => {
         strips += 1;
@@ -410,6 +420,48 @@ describe("buildPushComponent", () => {
   });
 });
 
+describe("buildPushBatchComponent", () => {
+  test("renders every structured item as its own current-style card and marks superseded controls", () => {
+    const tui = fakeTui();
+    const component = buildPushBatchComponent(tui.modules, { details: { items: [
+      {
+        customType: "ws-agent-report",
+        content: buildPushContent("ws-agent-report", "worker-1", { report: "done" }, undefined),
+        display: true,
+        details: { agent_id: "worker-1", report: "done" },
+        state: "informational",
+      },
+      {
+        customType: "ws-agent-approval",
+        content: buildPushContent("ws-agent-approval", "worker-2", { cmd_id: "cmd-1", request: "run?" }, undefined),
+        display: true,
+        details: { agent_id: "worker-2", cmd_id: "cmd-1", request: "run?" },
+        state: "superseded",
+      },
+      {
+        customType: "ws-thread-summary",
+        content: "owner decision",
+        display: true,
+        details: { threadId: "q1" },
+        state: "informational",
+      },
+    ] } }, undefined, false) as FakeComponent;
+
+    assert.deepEqual(component.render(80), [
+      "worker-1 · report", "report: done",
+      "worker-2 · approval", "cmd_id: cmd-1", "request: run?", "state: superseded",
+      "[ws-thread-summary]", "owner decision",
+    ]);
+    assert.equal(tui.boxes.length, 3, "the batch renderer preserves one card per original item");
+  });
+
+  test("returns undefined for missing or empty structured items", () => {
+    const tui = fakeTui();
+    assert.equal(buildPushBatchComponent(tui.modules, {}, undefined), undefined);
+    assert.equal(buildPushBatchComponent(tui.modules, {details: {items: []}}, undefined), undefined);
+  });
+});
+
 describe("registerPushMessageRenderers", () => {
   test("registers exactly one renderer per push family, and each one renders", async () => {
     const registered = new Map<string, (message: unknown, options: unknown, theme: unknown) => unknown>();
@@ -421,7 +473,7 @@ describe("registerPushMessageRenderers", () => {
     const tui = fakeTui();
 
     assert.equal(await registerPushMessageRenderers(pi as never, tui.modules), true);
-    assert.deepEqual([...registered.keys()], [...PUSH_FAMILIES]);
+    assert.deepEqual([...registered.keys()], [...PUSH_FAMILIES, PUSH_BATCH_CUSTOM_TYPE]);
 
     const rendered = registered.get("ws-agent-settled")!(
       { content: buildPushContent("ws-agent-settled", "a1", { reason: "idle" }, undefined) },

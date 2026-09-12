@@ -151,6 +151,7 @@ import { fileURLToPath } from "node:url";
 import { DELEGATION_ENV } from "../src/delegation-policy.ts";
 import { WEB_HOME_ENV, WEB_NONCE_ENV } from "../src/web-readiness.ts";
 import { allocateAgentHome, createAgentStorageContext, updateOwnership } from "../src/agent-storage.ts";
+const PUSH_BATCH_CUSTOM_TYPE = "ws-push-batch";
 const REAL_EXTENSION_ENTRY = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 async function startRpcWithWebProof(this: { options?: { env?: Record<string, string> } }) {
   const env = this.options?.env ?? {};
@@ -1311,10 +1312,10 @@ function liveRpcRecord(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord 
 }
 
 /**
- * Duck-typed `ExtensionAPI` stand-in exposing only `sendMessage` — the one
- * method `pushToLead` touches. Every push assertion below reads `sent`
- * rather than a live Pi session, the same plain-object convention the rest
- * of this file uses for `RpcClient`.
+ * Duck-typed `ExtensionAPI` stand-in exposing only the push methods. `sent`
+ * is the item-level delivery view used by the lifecycle assertions below:
+ * a `ws-push-batch` is flattened back to its structured `details.items` while
+ * dedicated push-wake tests assert the real one-envelope transport.
  */
 function fakePi(overrides: { sendMessage?: (message: unknown, options?: unknown) => void } = {}): {
   api: Parameters<typeof pushToLead>[0];
@@ -1337,7 +1338,10 @@ function fakePi(overrides: { sendMessage?: (message: unknown, options?: unknown)
     sendMessage:
       overrides.sendMessage ??
       ((message: unknown, options?: unknown) => {
-        sent.push({ message: message as never, options: options as never });
+        const candidate = message as { customType?: string; details?: { items?: unknown[] } };
+        if (candidate.customType === PUSH_BATCH_CUSTOM_TYPE && Array.isArray(candidate.details?.items)) {
+          for (const item of candidate.details.items) sent.push({ message: item as never, options: options as never });
+        } else sent.push({ message: message as never, options: options as never });
       }),
   };
   registerPushFlush(api as never, { delayMs: () => 10 });
@@ -1860,13 +1864,15 @@ describe("pushToLead", () => {
   // file.
   beforeEach(() => {
     leadWakeStartPendingRef.current = false;
+    heldPushQueue.length = 0;
   });
 
   afterEach(() => {
     leadWakeStartPendingRef.current = false;
+    heldPushQueue.length = 0;
   });
 
-  test("confirmed-start release sends one custom message per family, with details carrying agent_id, the payload, and the status line", () => {
+  test("confirmed-start release retains each structured item with agent_id, payload, and status", () => {
     const pi = fakePi();
     const record = liveRpcRecord({ agentId: "a", running: true });
     const registry: RpcAgentRegistry = new Map([["a", record]]);
@@ -1899,6 +1905,7 @@ describe("pushToLead", () => {
       },
     });
     assert.doesNotThrow(() => pushToLead(pi.api, new Map(), undefined, "ws-agent-report", { report: "x" }, "followUp"));
+    assert.equal(heldPushQueue.length, 1, "synchronous batch rejection retains the item for fallback delivery");
   });
 
   test("a worker process receives child reports through the real push path", () => {
@@ -2149,7 +2156,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
 
     leadCompactingRef.current = false;
     settled?.();
-    assert.deepEqual(sent, ["ws-agent-report"], "an ordinary settle once compaction is over flushes normally");
+    assert.deepEqual(sent, [PUSH_BATCH_CUSTOM_TYPE], "an ordinary settle once compaction is over flushes one batch normally");
   });
 
   test("the live-run failure itself: three workers, two finals landing mid-turn, read 1 then 0 — never a premature 0", () => {
@@ -2257,7 +2264,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
 
     idle = true;
     settled?.();
-    assert.deepEqual(sent, ["ws-agent-report"]);
+    assert.deepEqual(sent, [PUSH_BATCH_CUSTOM_TYPE]);
   });
 });
 
