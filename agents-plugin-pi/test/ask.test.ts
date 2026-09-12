@@ -1392,6 +1392,17 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     assert.equal(record.forkResume?.sessionPath, "/tmp/s.jsonl", "the resume snapshot is refreshed on detach");
   });
 
+  test("a repeated /done after finish released a dormant fork thread is a no-op", () => {
+    const { pi, sent, handle, record } = setup("fork-raised");
+    record.status = "dormant";
+    record.respondentAgentId = "agent-7";
+    const live = liveRespondent([]);
+    live.threadBound = false;
+    closeThreadOnDone(pi, handle, new Map([[live.agentId, live]]), record, "");
+    assert.equal(live.forkFinish, undefined);
+    assert.deepEqual(sent, []);
+  });
+
   test("C2: detaching a fork-raised thread whose respondent is gone is a no-op, not a throw", () => {
     const { pi, sent, handle, record } = setup("fork-raised");
     record.respondentAgentId = "gone";

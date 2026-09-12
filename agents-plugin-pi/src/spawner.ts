@@ -1533,6 +1533,9 @@ export interface ForkFinishOperation {
   phase: "waiting" | "evaluating" | "closeout" | "parking" | "complete";
   settled: boolean;
   closeoutIssued: boolean;
+  /** `agent_start` observed for the closeout's own run. It fences a duplicate
+   * settle from the pre-closeout run. */
+  closeoutRunStarted: boolean;
   candidate?: { message: string; toolCallId?: string; accepted?: boolean };
   sawQuestion?: boolean;
   terminal?: TerminalDelivery;
@@ -1718,6 +1721,7 @@ export function startForkFinish(
     phase: record.running || record.streaming ? "waiting" : "evaluating",
     settled: !(record.running || record.streaming),
     closeoutIssued: false,
+    closeoutRunStarted: false,
   };
   // A final that was observed before `/done` is still current work only while
   // it remains pending. Validate it through the fork-provided policy below.
@@ -1763,6 +1767,13 @@ function advanceForkFinish(
     }
 
     const candidate = operation.candidate;
+    // A closeout question is terminal for this operation even if a prior
+    // report looked valid. The owner must receive the existing incomplete
+    // advisory rather than synthetic completion.
+    if (operation.sawQuestion) {
+      await finishWithAdvisory(record, registry, pi, operation);
+      return;
+    }
     // A report-tool start is not a completion fact. In particular `/done`
     // can race the tool's own end event, so wait for that matching outcome
     // instead of issuing a closeout while the candidate is still in flight.
@@ -1778,6 +1789,9 @@ function advanceForkFinish(
 
     if (!operation.closeoutIssued) {
       operation.closeoutIssued = true;
+      operation.closeoutRunStarted = false;
+      operation.candidate = undefined;
+      operation.sawQuestion = false;
       operation.phase = "closeout";
       // The closeout itself begins a new turn; only its next observed settle
       // may choose final versus missing-final advisory.
@@ -1786,7 +1800,11 @@ function advanceForkFinish(
         await sendToAgent(registry, { ...finishResumeCtx(operation), pi, finishToken: operation.token }, record.agentId,
           "The owner closed this side thread. Finish the task now and report the normal final report via ws-report-to-lead (kind: final).", false);
       } catch (err) {
-        await finishWithAdvisory(record, registry, pi, operation, `closeout failed: ${err instanceof Error ? err.message : String(err)}`);
+        // A replacement instruction can supersede us while the RPC promise
+        // rejects. Never publish an outcome into that replacement work.
+        if (record.forkFinish === operation && record.launchGeneration === operation.generation) {
+          await finishWithAdvisory(record, registry, pi, operation, `closeout failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
       return;
     }
@@ -1809,6 +1827,7 @@ function finishResumeCtx(operation: ForkFinishOperation): Pick<RpcResumeCtx, "cw
 }
 
 function finishWithAdvisory(record: RpcAgentRecord, registry: RpcAgentRegistry, pi: ExtensionAPI, operation: ForkFinishOperation, detail?: string): Promise<void> {
+  if (record.forkFinish !== operation || record.launchGeneration !== operation.generation) return Promise.resolve();
   const terminal: TerminalDelivery = {};
   operation.terminal = terminal;
   record.terminalDelivery = terminal;
@@ -1820,7 +1839,7 @@ function finishWithAdvisory(record: RpcAgentRecord, registry: RpcAgentRegistry, 
 }
 
 async function parkForkFinish(record: RpcAgentRecord, registry: RpcAgentRegistry, pi: ExtensionAPI, operation: ForkFinishOperation, failure?: string): Promise<void> {
-  if (record.forkFinish !== operation || operation.phase === "parking" || operation.phase === "complete") return;
+  if (record.forkFinish !== operation || record.launchGeneration !== operation.generation || operation.phase === "parking" || operation.phase === "complete") return;
   operation.phase = "parking";
   // Preserve the thread bind until this coordinator owns the park; stopAgent
   // performs the normal silent stop and clears it synchronously.
@@ -1831,7 +1850,7 @@ async function parkForkFinish(record: RpcAgentRecord, registry: RpcAgentRegistry
   } catch (err) {
     failure ??= `park failed: ${err instanceof Error ? err.message : String(err)}`;
   }
-  if (record.forkFinish !== operation) return;
+  if (record.forkFinish !== operation || record.launchGeneration !== operation.generation) return;
   operation.phase = "complete";
   record.forkFinish = undefined;
   try { record.onForkFinishComplete?.(record, failure); } catch { /* ordinary thread persistence is best effort */ }
@@ -1841,16 +1860,24 @@ async function parkForkFinish(record: RpcAgentRecord, registry: RpcAgentRegistry
 function observeForkFinishEvent(record: RpcAgentRecord, evt: { type?: string; toolName?: string; args?: unknown; toolCallId?: string; isError?: unknown; result?: unknown }): void {
   const operation = record.forkFinish;
   if (!operation || record.launchGeneration !== operation.generation) return;
+  if (evt.type === "agent_start") {
+    if (operation.closeoutIssued) operation.closeoutRunStarted = true;
+    return;
+  }
   if (evt.type === "agent_settled") {
-    operation.settled = true;
+    // Before closeout this is the original run's one settle. After closeout,
+    // require a positive start observation for the new run so a duplicate
+    // original settle cannot abort the dispatched closeout.
+    if (!operation.closeoutIssued || operation.closeoutRunStarted) operation.settled = true;
     return;
   }
   if (evt.type === "tool_execution_start" && evt.toolName === REPORT_TO_LEAD_TOOL_NAME) {
     const args = evt.args as { kind?: unknown; message?: unknown } | undefined;
-    if (args?.kind === "final" && typeof args.message === "string") {
-      operation.candidate = { message: args.message, toolCallId: evt.toolCallId };
-    } else if (args?.kind === "question") {
+    if (args?.kind === "question") {
       operation.sawQuestion = true;
+      operation.candidate = undefined;
+    } else if (args?.kind === "final" && typeof args.message === "string" && !operation.sawQuestion) {
+      operation.candidate = { message: args.message, toolCallId: evt.toolCallId };
     }
     return;
   }
@@ -1902,10 +1929,9 @@ export async function promptAgent(
   record.terminalThisTurn = false;
   // A final that never reached a settle belongs to the task being replaced,
   // not to the one starting now.
-  record.pendingFinal = undefined;
-  record.pendingFinalToolCallId = undefined;
-  record.pendingFinalAccepted = undefined;
-  record.terminalDelivery = undefined;
+  // The anti-bleed nudge continues the same task, so it deliberately keeps
+  // completion facts. Every real prompt is a new instruction boundary.
+  if (opts?.isLeadPrompt !== false) clearTerminalFacts(record);
   record.runStartedAt = Date.now();
   if (record.ownership) observeSessionWrite(record.ownership.home, record.sessionPath);
   if (record.ownership) updateOwnership(record.ownership.home, { lastActivityAt: Date.now(), liveness: { lifecycle: "live", running: true, observedAt: Date.now() } });
@@ -1921,6 +1947,13 @@ export async function promptAgent(
  * the in-flight-rejection paths, and `stopAgent`, so "what a stopped record
  * looks like" is defined once.
  */
+function clearTerminalFacts(record: RpcAgentRecord): void {
+  record.pendingFinal = undefined;
+  record.pendingFinalToolCallId = undefined;
+  record.pendingFinalAccepted = undefined;
+  record.terminalDelivery = undefined;
+}
+
 function clearLiveState(record: RpcAgentRecord): void {
   record.unsubscribe?.();
   record.unsubscribe = undefined;
@@ -1966,11 +1999,13 @@ export function markAgentExited(
   pi: ExtensionAPI | undefined,
   registry: RpcAgentRegistry | undefined,
   record: RpcAgentRecord,
+  opts?: { suppressTerminal?: boolean },
 ): void {
   if (!record.client) return;
   clearLiveState(record);
   if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "unknown", running: false, observedAt: Date.now() } });
   triggerAgentWidgetRefresh();
+  if (opts?.suppressTerminal) return;
   // A child that filed a final and then died before settling still answered;
   // `settled_reason: "exited"` is what tells the lead the death, not silence.
   if (flushPendingFinal(pi, registry, record, "exited")) return;
@@ -2446,6 +2481,7 @@ export function applyRpcEvent(
   }
   if (evt.type === "agent_start") {
     record.streaming = true;
+    observeForkFinishEvent(record, evt);
   } else if (evt.type === "agent_settled") {
     record.streaming = false;
     // The run is over: the child stops counting toward the fan-in the instant
@@ -3208,17 +3244,25 @@ export async function sendToAgent(
       // Mirror `promptAgent`: a final stashed before this instruction answers
       // the task being replaced, not the one just dispatched — a later settle
       // must not flush it as the reply to the new message.
-      record.pendingFinal = undefined;
+      clearTerminalFacts(record);
     } else {
       await promptAgent(record, live, message);
     }
   } catch (err) {
+    // A superseded closeout is no longer allowed to mutate or publish against
+    // the replacement task. Its old RPC rejection is deliberately ignored by
+    // lifecycle bookkeeping; the replacement owns the record now.
+    if (ctx.finishToken !== undefined && record.forkFinish?.token !== ctx.finishToken) throw err;
     // 260905: an in-flight request rejection is the other deterministic
     // "the child is gone" signal (`RpcClient.send()` throws once the process
     // has exited) — treat it exactly like a failed liveness probe so the lead
     // is told rather than left counting a dead agent, then re-throw so the
     // caller still sees the failure.
-    markAgentExited(ctx.pi, registry, record);
+    markAgentExited(ctx.pi, registry, record, {
+      // A coordinator-owned closeout chooses its own one advisory terminal;
+      // do not let the generic exited path admit a competing terminal event.
+      suppressTerminal: ctx.finishToken !== undefined,
+    });
     throw err;
   }
   return { agent_id: record.agentId };
@@ -3353,6 +3397,11 @@ export async function stopAgent(
       await client.stop();
     } catch {
       stopped = false;
+    }
+    // A new send can revive this record while the old client is stopping.
+    // Never let the old stop clear the replacement's bind/final state.
+    if (record.client !== undefined || record.launchGeneration !== generation) {
+      return { agent_id: record.agentId };
     }
     // `message_end` can be persisted while abort/stop is in flight.  The
     // record is already synchronously dormant, so this final disk-only read

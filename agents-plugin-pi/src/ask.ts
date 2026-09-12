@@ -1327,6 +1327,10 @@ function finishForkRaisedThread(pi: ExtensionAPI, handle: ThreadRegistryHandle, 
     detachForkRaisedThread(handle, rpcRegistry, thread);
     return;
   }
+  // A completed coordinator has already made this thread dormant and
+  // released its temporary bind. A repeated `/done` is then a no-op, not a
+  // fresh closeout against the parked record.
+  if (thread.status === "dormant" && !record.threadBound) return;
   if (record.forkFinish) return;
 
   record.overlayAttached = false;
