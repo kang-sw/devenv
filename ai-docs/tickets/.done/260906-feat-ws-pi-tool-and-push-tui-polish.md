@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: bb7857b84cbc67d3
 sage-review-completeness-reviewed: bb7857b84cbc67d3
+completed: 2026-09-12
 ---
 
 # Complete compact direct-tool results and muted push rows while retaining native tool styling
@@ -232,8 +233,16 @@ Spec captured in `pi-adapter-runtime.md` (new `{#260906-pi-push-display-polish}`
 subsection + the two-direct-tools addendum, drafted `fadd329a`, lead-finalized at
 doc pre-pass, `spec_index.verify` ok).
 
-Owner-live acceptance in a real Pi TUI is human-only and remains pending; see
-`## Blocked (2026-09-09)` below. Ticket stays in `ready/` (not `.done/`).
+#### Edition (75246e7d) - 2026-09-12
+
+The final owner-live approval-control check passed after exact extension-entry
+propagation restored the execute-worker tool group. Live approve, denial,
+`run-instead`, stale-ID rejection, completion, and diagnostics all behaved
+correctly, and the owner confirmed the approval card's command, rationale,
+context, layout, and interaction were readable and problem-free. Together with
+the 2026-09-09 acceptance below, this completes the Phase 1 owner-live gate.
+The spacing and bordered-error observations remain follow-up requests under the
+dogfood UX workset rather than reopening this ticket's completed contract.
 
 ## Resolved review decision (2026-09-08)
 
@@ -287,10 +296,16 @@ The owner confirmed the following checks in a real Pi TUI:
   distinct foregrounds, and separators under both light and dark themes.
 - No noticeable long-session delay or stutter occurred during this run.
 
-The approval control remains **unverified**: two separate `ws-execute` probes
-could not raise an approval because their workers did not expose
-`ws-worker-exec`. This leaves the owner-live gate blocked.
+The approval control remained unverified in this attempt: two separate
+`ws-execute` probes could not raise an approval because their workers did not
+expose `ws-worker-exec`. The later 2026-09-12 Edition records the successful
+retest and completion of this gate.
 
 Owner UX observations for follow-up: report/settled rows need one line of
 background-colored vertical breathing room above and below, and error rows need
 more margin plus a visible border.
+
+
+## Resolution (2026-09-12)
+
+Closed after the final owner-live approval-control gate passed on 2026-09-12. The earlier 2026-09-09 run had already accepted direct read/run previews, compact subdued push rows, question/error controls, bridged YAML styling under light/dark themes, and long-session responsiveness. Follow-up spacing and bordered-error requests remain in the Pi dogfood UX workset rather than reopening this completed display contract.
