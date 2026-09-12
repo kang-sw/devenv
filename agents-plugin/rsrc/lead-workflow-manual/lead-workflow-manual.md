@@ -63,6 +63,8 @@ Render a bundled delegate prompt with `{{.McpNamespace}}/playbook.render` and
 give the returned path to the native subagent. Pass the lead `session_key` so
 the rendered prompt carries the delegate's session context. Use the dispatch
 tier and bindings reported by the render when spawning.
+When delegating into another worktree, select that worktree at render time so
+the prompt artifact and session context follow the delegate.
 
 ### Artifact paths
 

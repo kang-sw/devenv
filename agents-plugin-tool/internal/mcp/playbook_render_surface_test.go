@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // playbook.render surface: render-minted child keys, the delegation
@@ -166,6 +167,63 @@ func TestRenderRootOverrideBindsChildKey(t *testing.T) {
 	}
 	if entry.root != overrideRoot {
 		t.Errorf("minted key bound to %q, want override root %q", entry.root, overrideRoot)
+	}
+}
+
+func TestRenderDispatchSeparatesResourceAndWorktreeRoots(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"impl-pb/impl-pb.md": strings.Replace(implementerPlaybookContent, "role: implementer", "role: implementer\nincludes:\n  - shared", 1),
+		"shared.md":          "Included from plugin resources.\n",
+	})
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	repo := initGitRepo(t)
+	runGit(t, repo, "commit", "--allow-empty", "-m", "initial")
+	worktree := filepath.Join(t.TempDir(), "linked")
+	runGit(t, repo, "worktree", "add", "-b", "delegate", worktree)
+	if _, err := os.Stat(filepath.Join(worktree, "manifest.json")); !os.IsNotExist(err) {
+		t.Fatalf("worktree must not contain a resource manifest: %v", err)
+	}
+	s := NewServer(repo, "test")
+	s.observeHarness("test", "claude")
+	leadKey, err := s.sessions.mint(repo, roleLead, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, override := range []string{"", worktree} {
+		t.Run(map[bool]string{true: "override", false: "no-override"}[override != ""], func(t *testing.T) {
+			wantRoot := repo
+			args := map[string]any{"name": "impl-pb", "session_key": leadKey}
+			if override != "" {
+				args["root_override"] = override
+				wantRoot = override
+			}
+			resp := callToolOnce(t, s, 1, "playbook.render", args)
+			if toolIsError(t, resp) {
+				t.Fatalf("playbook.render: %s", resp)
+			}
+			path := strings.Split(strings.TrimSpace(toolText(t, resp)), "\n")[0]
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(body), "Do the work.") || !strings.Contains(string(body), "Included from plugin resources.") {
+				t.Fatalf("missing plugin playbook or include: %s", body)
+			}
+			layout, _, _, err := wsstate.NewManager(wsstate.Options{}).Ensure(wantRoot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if filepath.Dir(path) != layout.PromptDir {
+				t.Errorf("artifact directory = %q, want %q", filepath.Dir(path), layout.PromptDir)
+			}
+			entry, ok := s.sessions.lookup(extractSplicedKey(t, string(body)))
+			if !ok || entry.root != wantRoot || entry.scope != roleDelegate || entry.parent != leadKey {
+				t.Errorf("child session = %+v, found=%v; want delegate bound to %q with parent %q", entry, ok, wantRoot, leadKey)
+			}
+		})
 	}
 }
 

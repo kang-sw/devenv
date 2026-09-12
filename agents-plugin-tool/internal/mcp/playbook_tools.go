@@ -657,13 +657,9 @@ func selectProductModeBlocks(body string) string {
 	return strings.Join(filtered, "\n")
 }
 
-// resolveRsrcRoot resolves the rsrc tree root for a playbook tool call.
-// rsrcRootOverride carries playbook.render's root_override (Phase 2c, active): a
-// non-empty value rebinds the auto-include resolution root; pass "" to fall back
-// to wsrsrc.ResolveRoot() (WS_RSRC_ROOT env → exe-derived path).
-//
-// This is the call-site-overridable seam: the caller, not the internal logic,
-// decides the rsrc root.
+// resolveRsrcRoot resolves the plugin resource tree (WS_RSRC_ROOT or the
+// executable-derived bundle). A non-empty override is reserved for resource
+// inspection; playbook.render's worktree override must not select this root.
 func resolveRsrcRoot(rsrcRootOverride string) (string, error) {
 	if strings.TrimSpace(rsrcRootOverride) != "" {
 		return rsrcRootOverride, nil
@@ -679,7 +675,7 @@ func resolveRsrcRoot(rsrcRootOverride string) (string, error) {
 //
 // The delegation tip is appended after substitution when meta.Delegates is true.
 //
-// rsrcRoot is a call-site-overridable seam (root_override is threaded here).
+// rsrcRoot selects the plugin playbook, manifest, and includes.
 // configOpts is forwarded to resolveModelVars; tests pass Options{CacheHome:tmpDir}.
 //
 // mintRoot: when non-empty, the caller is a lead and this function will mint a
@@ -828,7 +824,7 @@ func workflowPreferSubagentEnabled(configOpts wsconfig.Options) (bool, error) {
 //
 // printPlaybook never mints child keys (mintRoot="").
 //
-// rsrcRoot is a call-site-overridable seam for root_override support.
+// rsrcRoot selects the plugin resource tree.
 // configOpts controls config-backed model alias resolution.
 // overrideLookup: when non-nil, the session-keyed closure for resolving prompt
 // override-point values; pass nil to render every override-point with its seed.
@@ -853,7 +849,7 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 // splice), writes it to a worktree-scoped tmp file, and returns the file path.
 // The caller hands this path to a host-native subagent.
 //
-// rsrcRoot and worktreeRoot are call-site-overridable seams for root_override support.
+// rsrcRoot selects plugin resources; worktreeRoot selects the artifact cache.
 // mintRoot: when non-empty, caller is a lead and a child key is minted for the delegate.
 // configOpts controls config-backed model alias resolution.
 // overrideLookup: when non-nil, the session-keyed closure for resolving prompt
