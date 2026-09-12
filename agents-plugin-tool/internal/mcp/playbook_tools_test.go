@@ -2715,6 +2715,8 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				"All impl integration stays with `" + product + "/git.merge`",
 				"on approval call `" + product + "/git.merge` with the goal branch and explicit PARENT target",
 				"do not reset the retry count on resume or reclassify the original risks",
+				"When the executed phase has no `### Result`, revise that unimplemented phase directly; when it already has a Result, append an `#### Edition` under its Result area",
+				"A `pass` commits the phase update and resumes the worker",
 			} {
 				if !strings.Contains(body, want) {
 					t.Errorf("rendered policy missing %q", want)
