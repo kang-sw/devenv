@@ -12,6 +12,7 @@ import { assertSubtreeFinal, beginSubtreeDispatch, installSubtreePublisher, read
 import { applyRpcEvent, attachEventListener, evictForCapacity, flushHeldPushes, flushPendingFinal, hasRunningAgents, heldPushQueue, leadIdleRef, leadWakeStartPendingRef, listAgents, markAgentExited, promptAgent, registerPushFlush, resolveTools, sendToAgent, spawnAdmission, stopAgent, type RpcAgentRecord } from "../src/spawner.ts";
 import { captureOrphans, parseOrphans, readAndClearSidecar, rehydrateOrphanRecord, reviveOrphans, serializeOrphans, writeSidecar } from "../src/agent-sidecar.ts";
 import { captureForkResume, rehydrateForkRecord } from "../src/ask.ts";
+import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 
 const dirs: string[] = [];
 function home() { const dir = mkdtempSync(join(tmpdir(), "ws-subtree-test-")); dirs.push(dir); return dir; }
@@ -19,7 +20,7 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 
 function capturePush(sent: unknown[], message: unknown): void {
   const batch = message as { customType?: string; details?: { items?: unknown[] } };
-  if (batch.customType === "ws-push-batch" && Array.isArray(batch.details?.items)) sent.push(...batch.details.items);
+  if (batch.customType === PUSH_BATCH_CUSTOM_TYPE && Array.isArray(batch.details?.items)) sent.push(...batch.details.items);
   else sent.push(message);
 }
 const full = resolveTools("full-worker", ["ws__playbook_render", "ws__git_diff", "ws__git_commit", "ws__ferrule"]).split(",");

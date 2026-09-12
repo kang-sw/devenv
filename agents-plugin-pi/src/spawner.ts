@@ -105,6 +105,7 @@ import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, SUBTRE
 import { createWebSearch } from "./web-search.ts";
 import { clearWebReadiness, verifyWebReadiness, WEB_HOME_ENV, WEB_NONCE_ENV } from "./web-readiness.ts";
 import { assertSubtreeFinal, beginSubtreeDispatch, installSubtreePublisher, publishSubtree, readSubtreeChannel, readSubtreeSnapshot, subtreeWaiting, type SubtreeChannel } from "./subtree-lifecycle.ts";
+import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers: tool-group resolution, terminal-stopReason classification,
@@ -1309,21 +1310,6 @@ export type PushFamily = (typeof PUSH_FAMILIES)[number];
 /** Pi's own `sendMessage` delivery axis (`ExtensionAPI.sendMessage`'s `options.deliverAs`). */
 export type PushDeliverAs = "steer" | "followUp" | "nextTurn";
 
-/** Versioned model/TUI envelope used for one atomic held-queue snapshot. */
-const PUSH_BATCH_CUSTOM_TYPE = "ws-push-batch";
-const PUSH_BATCH_VERSION = "1";
-
-type PushBatchItemState = "informational" | "actionable" | "superseded";
-
-/** One original custom message plus batch-only actionability metadata. */
-interface PushBatchItem {
-  customType: string;
-  content: string | unknown[];
-  display: boolean;
-  details?: unknown;
-  state: PushBatchItemState;
-}
-
 /**
  * Every eligible dispatcher injects its direct children's events into its own
  * session. Its own reports separately travel outward over its parent RPC edge.
@@ -1489,7 +1475,7 @@ function admitPush(pi: ExtensionAPI, held: HeldPush | HeldRawSend): void {
   } catch {
     return; // stale session accessor
   }
-  if (leadCompactingRef.current || leadWakeStartPendingRef.current || isOwningAgentIdle() || held.deliverAs === "followUp") {
+  if (leadCompactingRef.current || leadWakeStartPendingRef.current || isOwningAgentIdle() || held.deliverAs === "followUp" || heldPushQueue.length > 0) {
     if (held.kind === "push") {
       if (held.terminal) held.terminal.state = "held";
       held.actionGeneration = held.record?.workGeneration;
@@ -1661,7 +1647,7 @@ function batchItemIdentity(item: PushBatchItem): { agentId?: string; commandId?:
 
 /** Serialize a FIFO snapshot without truncation; actionable summaries follow every ordered message. */
 function buildPushBatchContent(items: readonly PushBatchItem[]): string {
-  const lines = [`<ws-push-batch version="${PUSH_BATCH_VERSION}">`];
+  const lines = [`<${PUSH_BATCH_CUSTOM_TYPE} version="${PUSH_BATCH_VERSION}">`];
   for (const item of items) {
     const { agentId, commandId } = batchItemIdentity(item);
     const attrs = [
@@ -1683,7 +1669,7 @@ function buildPushBatchContent(items: readonly PushBatchItem[]): string {
     }
     return [];
   });
-  lines.push("  <action-summary>", ...(actions.length ? actions : ["    none"]), "  </action-summary>", "</ws-push-batch>");
+  lines.push("  <action-summary>", ...(actions.length ? actions : ["    none"]), "  </action-summary>", `</${PUSH_BATCH_CUSTOM_TYPE}>`);
   return lines.join("\n");
 }
 

@@ -121,6 +121,7 @@ import {
   type RpcAgentRegistry,
   leadIdleRef, registerPushFlush, clearWakeStart,
 } from "../src/spawner.ts";
+import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { allocateAgentHome, createAgentStorageContext } from "../src/agent-storage.ts";
 import { rmSync } from "node:fs";
@@ -147,7 +148,7 @@ afterEach(() => {
 /** Keep item-level lifecycle assertions while the transport delivers a batch envelope. */
 function capturePush(sent: Array<{ message: unknown; options: unknown }>, message: unknown, options: unknown): void {
   const batch = message as { customType?: string; details?: { items?: unknown[] } };
-  if (batch.customType === "ws-push-batch" && Array.isArray(batch.details?.items)) {
+  if (batch.customType === PUSH_BATCH_CUSTOM_TYPE && Array.isArray(batch.details?.items)) {
     for (const item of batch.details.items) sent.push({ message: item, options });
   } else {
     sent.push({ message, options });

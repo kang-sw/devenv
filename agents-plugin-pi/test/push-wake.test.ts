@@ -6,8 +6,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { heldPushQueue, leadIdleRef, leadCompactingRef, leadWakeStartPendingRef, pushToLead, registerPushFlush, sendToLead } from '../src/spawner.ts';
-
-const PUSH_BATCH_CUSTOM_TYPE = 'ws-push-batch';
+import { PUSH_BATCH_CUSTOM_TYPE } from '../src/push-protocol.ts';
 
 function harness(withGoal = false, steeringMode: 'one-at-a-time' | 'all' = 'one-at-a-time') {
   const handlers = new Map<string, Function[]>();
@@ -190,14 +189,43 @@ test('start cannot release compaction hold; busy release waits for settle', () =
   leadCompactingRef.current = false; h.settle(); assert.equal(h.custom.length, 0);
   h.start(); assert.equal(h.custom.length, 1); h.emit('session_shutdown');
 });
-test('ordinary busy steer is immediate and followUp releases as one boundary follow-up', () => {
-  const h = harness(); h.busy(); h.push('followUp'); h.push('steer');
+test('ordinary busy steer with no older hold stays an immediate individual custom message', () => {
+  const h = harness(); h.busy(); h.push('steer');
   assert.equal(h.custom.length, 1);
-  assert.deepEqual(h.custom[0].options, {deliverAs: 'steer', triggerTurn: true}, 'busy steer keeps its interrupting admission behavior');
+  assert.equal(h.custom[0].message.customType, 'ws-agent-report');
+  assert.notEqual(h.custom[0].message.customType, PUSH_BATCH_CUSTOM_TYPE);
+  assert.deepEqual(h.custom[0].options, {deliverAs: 'steer', triggerTurn: true});
+  assert.equal(heldPushQueue.length, 0);
+  h.settle(); h.emit('session_shutdown');
+});
+
+test('approval and question steer with no older hold keep their individual custom types', () => {
+  const h = harness(); h.busy();
+  const approvalRecord: any = {agentId: 'approval-agent', workGeneration: 1, pendingApproval: {cmdId: 'cmd-1'}, reportLog: [], terminalThisTurn: false};
+  const questionRecord: any = {agentId: 'question-agent', workGeneration: 1, reportLog: [{kind: 'question', at: 1}], terminalThisTurn: true};
+  h.registry.set(approvalRecord.agentId, approvalRecord);
+  h.registry.set(questionRecord.agentId, questionRecord);
+  pushToLead(h.pi, h.registry, approvalRecord, 'ws-agent-approval', {cmd_id: 'cmd-1', request: 'approve'}, 'steer');
+  pushToLead(h.pi, h.registry, questionRecord, 'ws-agent-question', {question: 'continue?'}, 'steer');
+  assert.deepEqual(h.custom.map((entry) => entry.message.customType), ['ws-agent-approval', 'ws-agent-question']);
+  assert.ok(h.custom.every((entry) => entry.message.customType !== PUSH_BATCH_CUSTOM_TYPE));
+  assert.equal(heldPushQueue.length, 0);
+  h.settle(); h.emit('session_shutdown');
+});
+
+test('an actionable steer joins an older held followUp instead of overtaking FIFO', () => {
+  const h = harness(); h.busy();
+  const approvalRecord: any = {agentId: 'approval-agent', workGeneration: 1, pendingApproval: {cmdId: 'cmd-1'}, reportLog: [], terminalThisTurn: false};
+  h.registry.set(approvalRecord.agentId, approvalRecord);
+  h.push('followUp', 'progress first');
+  pushToLead(h.pi, h.registry, approvalRecord, 'ws-agent-approval', {cmd_id: 'cmd-1', request: 'approve second'}, 'steer');
+  assert.equal(h.custom.length, 0, 'the later steer cannot overtake the held FIFO prefix');
   h.end();
-  assert.equal(h.custom.length, 2);
-  assert.equal(h.custom[1].message.customType, PUSH_BATCH_CUSTOM_TYPE);
-  assert.deepEqual(h.custom[1].options, {deliverAs: 'followUp', triggerTurn: true});
+  assert.equal(h.custom.length, 1);
+  assert.equal(h.custom[0].message.customType, PUSH_BATCH_CUSTOM_TYPE);
+  assert.deepEqual(h.custom[0].message.details.items.map((item: any) => item.customType), ['ws-agent-report', 'ws-agent-approval']);
+  assert.deepEqual(h.custom[0].message.details.items.map((item: any) => item.state), ['informational', 'actionable']);
+  assert.deepEqual(h.custom[0].options, {deliverAs: 'followUp', triggerTurn: true});
   assert.equal(h.users.length, 0, 'the accepted boundary batch needs no counted fallback wake');
   h.settle(); assert.equal(h.users.length, 0);
   h.emit('session_shutdown');
@@ -345,7 +373,7 @@ test('batch content stays uncapped for an oversized report', () => {
   const content = h.custom[0].message.content as string;
   assert.ok(content.length > large.length, 'escaping grows rather than truncates the payload');
   assert.match(content, /界&lt;&amp;界&lt;&amp;/);
-  assert.ok(content.endsWith('</ws-push-batch>'));
+  assert.ok(content.endsWith(`</${PUSH_BATCH_CUSTOM_TYPE}>`));
   h.settle(); h.emit('session_shutdown');
 });
 

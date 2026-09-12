@@ -151,7 +151,7 @@ import { fileURLToPath } from "node:url";
 import { DELEGATION_ENV } from "../src/delegation-policy.ts";
 import { WEB_HOME_ENV, WEB_NONCE_ENV } from "../src/web-readiness.ts";
 import { allocateAgentHome, createAgentStorageContext, updateOwnership } from "../src/agent-storage.ts";
-const PUSH_BATCH_CUSTOM_TYPE = "ws-push-batch";
+import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 const REAL_EXTENSION_ENTRY = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 async function startRpcWithWebProof(this: { options?: { env?: Record<string, string> } }) {
   const env = this.options?.env ?? {};

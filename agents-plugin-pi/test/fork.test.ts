@@ -68,6 +68,7 @@ import {
 } from "../src/fork.ts";
 import { registerFork as registerForkBase } from "../src/fork.ts";
 import { leadIdleRef, registerPushFlush, applyRpcEvent, attachEventListener, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV } from "../src/process-role.ts";
 import type { BridgeHandle } from "../src/bridge.ts";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
@@ -396,7 +397,7 @@ describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2, 260
     const pi = {
       sendMessage(message: { customType?: string; details?: Record<string, unknown> }, options?: { deliverAs?: string; triggerTurn?: boolean }) {
         const batch = message as { customType?: string; details?: { items?: Array<{ customType?: string; details?: Record<string, unknown> }> } };
-        if (batch.customType === "ws-push-batch" && Array.isArray(batch.details?.items)) {
+        if (batch.customType === PUSH_BATCH_CUSTOM_TYPE && Array.isArray(batch.details?.items)) {
           for (const item of batch.details.items) pushes.push({ ...item, deliverAs: options?.deliverAs, triggerTurn: options?.triggerTurn });
         } else {
           pushes.push({ ...message, deliverAs: options?.deliverAs, triggerTurn: options?.triggerTurn });
@@ -708,7 +709,7 @@ describe("buildForkSpawnCtx (the ws-fork push channel)", () => {
     const sent: Array<{ customType?: string; details?: Record<string, unknown> }> = [];
     const pushPi = {
       sendMessage: (message: { customType?: string; details?: { items?: Array<{ customType?: string; details?: Record<string, unknown> }> } }) => {
-        if (message.customType === "ws-push-batch" && Array.isArray(message.details?.items)) sent.push(...message.details.items);
+        if (message.customType === PUSH_BATCH_CUSTOM_TYPE && Array.isArray(message.details?.items)) sent.push(...message.details.items);
         else sent.push(message);
       },
     } as unknown as ExtensionAPI;

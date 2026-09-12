@@ -24,8 +24,7 @@ import assert from "node:assert/strict";
 import { buildPushBatchComponent, buildPushComponent, buildPushRenderLines, registerPushMessageRenderers, type PushTuiModules } from "../src/push-render.ts";
 import { buildPushContent, PUSH_FAMILIES } from "../src/spawner.ts";
 import { approximateCodePointWidth } from "../src/tool-result-render.ts";
-
-const PUSH_BATCH_CUSTOM_TYPE = "ws-push-batch";
+import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 
 describe("buildPushRenderLines", () => {
   test("splits a real pushed message into head, payload and status", () => {

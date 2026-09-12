@@ -46,6 +46,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadHostPiTui } from "./pi-tui.ts";
 import { PUSH_FAMILIES } from "./spawner.ts";
+import { PUSH_BATCH_CUSTOM_TYPE, type PushBatchItem } from "./push-protocol.ts";
 import { createBoundedText, updateText, type NativeBox, type NativeText } from "./tool-result-render.ts";
 
 /** The three visual bands of a pushed message, split out of its plain-text content. */
@@ -123,16 +124,6 @@ export interface PushRenderTheme {
   fg?(color: string, text: string): string;
   bg?(color: string, text: string): string;
   bold?(text: string): string;
-}
-
-const PUSH_BATCH_CUSTOM_TYPE = "ws-push-batch";
-
-interface PushBatchItem {
-  customType: string;
-  content: unknown;
-  display: boolean;
-  details?: unknown;
-  state: "informational" | "actionable" | "superseded";
 }
 
 const PUSH_FAMILY_SUFFIXES: Record<string, string> = {

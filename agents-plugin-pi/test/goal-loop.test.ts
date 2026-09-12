@@ -56,6 +56,7 @@ import {
 } from "../src/goal-loop.ts";
 import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 import { flushHeldPushes, leadIdleRef, clearWakeStart, leadCompactingRef, leadWakeStartPendingRef, heldPushQueue, isOwningAgentIdle, type RpcAgentRegistry } from "../src/spawner.ts";
+import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 
 const tmpDir = mkdtempSync(join(tmpdir(), "ws-goal-loop-test-"));
 after(() => {
@@ -1437,7 +1438,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     assert.equal(pi.streaming.current, false, "idle release cannot start a custom run");
     flushHeldPushes(pi.api, true);
     assert.equal(pi.streaming.current, true, "confirmed-start flush delivers the batch");
-    assert.equal((pi.sentMessages[0]!.content as { customType?: string }).customType, "ws-push-batch", "the confirmed start transports the held item in one batch envelope");
+    assert.equal((pi.sentMessages[0]!.content as { customType?: string }).customType, PUSH_BATCH_CUSTOM_TYPE, "the confirmed start transports the held item in one batch envelope");
     assert.deepEqual(pi.sentMessages[0]!.options, { deliverAs: "steer", triggerTurn: true }, "the batch honors confirmed-start steering");
     assert.equal(pi.sentUserMessages.length, 1, "the deferred release only armed the settle timer");
     assert.equal(clock.pendingCount(), 1);
