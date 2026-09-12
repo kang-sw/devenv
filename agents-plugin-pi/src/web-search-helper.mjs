@@ -29,7 +29,9 @@ export function validateQuery(args) {
       !Object.hasOwn(args, 'query') || typeof args.query !== 'string' || !args.query.trim() ||
       Buffer.byteLength(args.query) > 4096) throw Error('invalid query');
   // Upstream expands a JSON array string into concurrent independent searches.
-  if (args.query.trim().startsWith('[')) throw Error('query arrays unsupported');
+  let parsed;
+  try { parsed = JSON.parse(args.query.trim()); } catch { /* Ordinary bracketed prose remains a literal query. */ }
+  if (Array.isArray(parsed) && parsed.every(entry => typeof entry === 'string')) throw Error('query arrays unsupported');
   return args.query.trim();
 }
 export function frame(value) {

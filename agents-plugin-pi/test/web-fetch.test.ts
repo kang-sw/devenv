@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { createServer } from "node:http";
+import { Socket } from "node:net";
+import dns from "node:dns/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -63,6 +67,50 @@ test("pinned request keeps fixed GET headers, disables pooled sockets, and suppl
   options.lookup("attacker.example", { all: true }, (error, addresses) => { assert.equal(error, null); assert.deepEqual(addresses, [publicAddress]); });
 });
 
+test("native HTTP socket consumes the per-hop pinned lookup and preserves the URL Host", async t => {
+  const hosts: string[] = [];
+  const server = createServer((req, res) => {
+    hosts.push(req.headers.host!);
+    if (req.url === '/start') { res.writeHead(302, { location: '/end' }); res.end(); }
+    else { res.setHeader('content-type', 'text/plain'); res.end('socket evidence'); }
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const port = (server.address() as any).port;
+  const pinned: string[] = [];
+  const connect = Socket.prototype.connect;
+  t.mock.method(Socket.prototype, 'connect', function (...args: any[]) {
+    // Keep ClientRequest and Node's socket lookup execution real. Translate only
+    // the final test destination after observing the production pinned callback.
+    const normalized = Array.isArray(args[0]) ? args[0] : args;
+    const options = normalized[0];
+    assert.equal(typeof options.lookup, 'function', 'native request must install its pin');
+    const lookup = options.lookup;
+    options.lookup = (host: string, opts: any, callback: Function) => lookup(host, opts, (error: Error, address: any, family: number) => {
+      assert.equal(error, null);
+      const selected = Array.isArray(address) ? address[0].address : address;
+      pinned.push(selected);
+      callback(null, Array.isArray(address) ? [{ address: '127.0.0.1', family: 4 }] : '127.0.0.1', 4);
+    });
+    return connect.apply(this, args as any);
+  });
+  const home = realpathSync(mkdtempSync(join(tmpdir(), 'web-socket-')));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  let resolutions = 0;
+  t.mock.method(dns, 'lookup', async (host, options) => {
+    assert.equal(host, 'unresolvable.invalid');
+    assert.deepEqual(options, { all: true, verbatim: true });
+    return [{ address: ++resolutions === 1 ? '8.8.8.8' : '1.1.1.1', family: 4 }];
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const fetch = createBoundedWebFetcher();
+  const result = await fetch({ url: `http://unresolvable.invalid:${port}/start`, cacheHome: home });
+  assert.match(result.content!, /socket evidence/);
+  assert.deepEqual(pinned, ['8.8.8.8', '1.1.1.1']);
+  assert.deepEqual(hosts, Array(2).fill(`unresolvable.invalid:${port}`));
+});
+
 test("all accepted content types yield fenced metadata with no raw file", async () => {
   for (const type of ["text/plain", "text/markdown", "text/html", "application/xhtml+xml", "application/json"]) {
     const f = fixture(async () => response(type.includes("html") ? "<main><h1>Hello</h1><p>world</p></main>" : type.endsWith("json") ? '{"hello":"world"}' : "hello world", `${type}; charset=utf-8`));
@@ -122,7 +170,7 @@ test("8 KiB UTF-8 is exactly inline; one byte over spills private fenced content
   }
 });
 
-test("markdown spills use content.md and disappear with the owning home lifecycle", async () => {
+test("markdown spills use content.md and remain contained in the fixture home",  async () => {
   const f = fixture(async () => response("<p>" + "x".repeat(8193) + "</p>", "text/html"));
   const result = await f.fetch({ url: base.href, cacheHome: f.home });
   assert.match(result.path!, /content\.md$/);

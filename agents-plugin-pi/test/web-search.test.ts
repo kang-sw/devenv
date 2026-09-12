@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createWebSearch, webSearchParameters } from '../src/web-search.ts';
-import { captureSearch, frame, parseFrame, PROXY_KEYS } from '../src/web-search-helper.mjs';
+import { captureSearch, frame, parseFrame, PROXY_KEYS, validateQuery } from '../src/web-search-helper.mjs';
 
 const packageRoot = realpathSync(join(dirname(fileURLToPath(import.meta.url)), '..'));
 function setup(t) {
@@ -33,7 +33,10 @@ test('query-only runtime rejects hostile fields and upstream array expansion bef
   const { env } = setup(t);
   const search = createWebSearch({ env, packageRoot });
   assert.equal(webSearchParameters.additionalProperties, false);
-  for (const args of [null, {}, { query: '' }, { query: ' ' }, { query: '["one","two"]' }, { query: 'x'.repeat(4097) },
+  for (const query of ['[RFC 9110] redirect handling', '[unfinished', '[1,"two"]', '[null]', '["one"] suffix']) {
+    assert.equal(validateQuery({ query }), query);
+  }
+  for (const args of [null, {}, { query: '' }, { query: ' ' }, ...['["one","two"]', '[]', '["one"]', ' [" "] '].map(query => ({ query })), { query: 'x'.repeat(4097) },
     ...['queries', 'provider', 'proxy', 'includeContent', 'workflow', 'headers', 'env'].map(key => ({ query: 'x', [key]: true }))]) {
     await assert.rejects(search.execute(args), /web-search-tool-unavailable/);
   }
@@ -42,11 +45,17 @@ test('query-only runtime rejects hostile fields and upstream array expansion bef
 test('exact pinned capture and real direct Brave fixture ignore conflicting content/curator config', async t => {
   const { home, env } = setup(t);
   let calls = 0;
+  const pageRequests: string[] = [];
+  const pageUrl = await provider(t, (req, res) => {
+    pageRequests.push(req.url);
+    res.end('forbidden result-page body');
+  });
+  const observedFixture = { web: { results: [{ ...fixture.web.results[0], url: `${pageUrl}/must-not-fetch` }] } };
   env.BRAVE_BASE_URL = await provider(t, (req, res) => {
     calls++;
     assert.equal(req.headers['x-subscription-token'], 'fixture-secret');
-    assert.equal(new URL(req.url, 'http://fixture').searchParams.get('q'), 'bounded search');
-    res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(fixture));
+    assert.equal(new URL(req.url, 'http://fixture').searchParams.get('q'), '[RFC 9110] redirect handling');
+    res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(observedFixture));
   });
   env.BRAVE_API_KEY = 'fixture-secret';
   env.NO_PROXY = '*';
@@ -54,8 +63,10 @@ test('exact pinned capture and real direct Brave fixture ignore conflicting cont
   const before = globalThis.fetch;
   const search = createWebSearch({ env, packageRoot });
   await search.probe();
-  const result = await search.execute({ query: 'bounded search' });
+  const result = await search.execute({ query: '[RFC 9110] redirect handling' });
   assert.equal(calls, 1);
+  assert.deepEqual(pageRequests, [], 'the helper has exited without requesting any returned result page');
+  assert.equal(result.details.results[0].url, `${pageUrl}/must-not-fetch`);
   assert.equal(globalThis.fetch, before);
   assert.equal(result.details.results[0].title, 'Fixture result');
   assert.deepEqual(Object.keys(result.details), ['query', 'answer', 'results']);
