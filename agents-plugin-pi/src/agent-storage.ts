@@ -4,6 +4,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSy
 import { basename, dirname, join, resolve, relative, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { parseDelegationPolicy, type DelegationPolicy } from "./delegation-policy.ts";
+import { parseTelemetry, type AgentTelemetry } from "./agent-telemetry.ts";
 
 export const OWNERSHIP_VERSION = 1;
 const SAFE_COMPONENT = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
@@ -15,6 +16,8 @@ export interface AgentOwnership {
 }
 export interface OwnershipMetadata extends AgentOwnership {
   createdAt: number; lastActivityAt: number; updatedAt: number;
+  /** Latest durable child-attributable usage projection, used by ancestor footer aggregation and eviction roll-up. */
+  telemetry?: AgentTelemetry;
   liveness: { lifecycle: "starting" | "live" | "stopping" | "stopped" | "unknown"; running?: boolean; observedAt?: number; pid?: number; instanceNonce?: string; threadBound?: boolean; ownerHeld?: boolean; pendingQuestion?: boolean; waitingOnChildren?: boolean; expectedReport?: boolean; pendingApprovalCommandId?: string; recovery?: "none" | "sidecar" | "thread" | "revived" };
   sessionSignature?: { mtimeMs: number; size: number };
 }
@@ -125,6 +128,7 @@ export function validOwnership(value: unknown): value is OwnershipMetadata {
     (l.pendingQuestion === undefined || typeof l.pendingQuestion === "boolean") &&
     (l.waitingOnChildren === undefined || typeof l.waitingOnChildren === "boolean") && (l.expectedReport === undefined || typeof l.expectedReport === "boolean") &&
     (l.pendingApprovalCommandId === undefined || SAFE_COMPONENT.test(l.pendingApprovalCommandId)) &&
+    (o.telemetry === undefined || parseTelemetry(o.telemetry) !== undefined) &&
     (l.recovery === undefined || ["none","sidecar","thread","revived"].includes(l.recovery)) &&
     (signature === undefined || (Number.isFinite(signature.mtimeMs) && Number.isFinite(signature.size) && signature.size >= 0));
 }
@@ -133,7 +137,7 @@ function validDelegationDescriptor(value: unknown): boolean {
   if (value === undefined) return true;
   try { parseDelegationPolicy(value); return true; } catch { return false; }
 }
-export function updateOwnership(home: string, update: Partial<Pick<OwnershipMetadata, "lastActivityAt" | "liveness" | "delegation">>): OwnershipMetadata | undefined {
+export function updateOwnership(home: string, update: Partial<Pick<OwnershipMetadata, "lastActivityAt" | "liveness" | "delegation" | "telemetry">>): OwnershipMetadata | undefined {
   let lock: OwnershipLock | undefined;
   try {
     lock = acquireOwnershipLock(home);
@@ -261,6 +265,8 @@ interface StaleAgentPruneOptions {
   now?: () => number;
   observeSession?: (home: string, sessionPath: string) => void;
   removeOwned?: (ownership: AgentOwnership) => OwnedHomeRemovalResult;
+  /** Called under the same final-age decision before removal; false retains the home. */
+  beforeRemove?: (metadata: OwnershipMetadata) => boolean;
 }
 
 /**
@@ -299,6 +305,7 @@ export function pruneStaleAgentHomes(root: string, ttlDays: number | false, opti
           if (metadata.sessionPath) observe(home, metadata.sessionPath);
           metadata = readOwnership(home);
           if (!metadata || metadata.lastActivityAt > cutoff) { result.retained += 1; continue; }
+          if (options.beforeRemove && !options.beforeRemove(metadata)) { result.retained += 1; continue; }
           const removal = options.removeOwned
             ? remove(metadata)
             : removeOwnedAgentHome(metadata, undefined, current => current.lastActivityAt <= cutoff);

@@ -117,6 +117,7 @@ import { createWebSearch } from "./web-search.ts";
 import { clearWebReadiness, verifyWebReadiness, WEB_HOME_ENV, WEB_NONCE_ENV } from "./web-readiness.ts";
 import { assertSubtreeFinal, beginSubtreeDispatch, installSubtreePublisher, publishSubtree, readSubtreeChannel, readSubtreeSnapshot, subtreeWaiting, type SubtreeChannel } from "./subtree-lifecycle.ts";
 import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
+import { persistEvictedAgentCost, registerAgentCostOwner } from "./agent-footer.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers: tool-group resolution, terminal-stopReason classification,
@@ -1164,7 +1165,13 @@ export interface RpcAgentRecord {
 
 /** Binds once before the first prompt and only recomputes from durable IDs thereafter. */
 export function refreshAgentTelemetry(record: RpcAgentRecord, state?: { sessionFile?: string; sessionId?: string; model?: { provider?: string; id?: string }; thinkingLevel?: string }, opts?: { fresh?: boolean }): boolean {
-  const before = JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+  const snapshot = () => JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+  const before = snapshot();
+  const finish = (): boolean => {
+    const changed = before !== snapshot();
+    if (record.ownership) updateOwnership(record.ownership.home, { telemetry: record.telemetry });
+    return changed;
+  };
   const path = state?.sessionFile ?? record.sessionPath;
   const read = readSessionEntries(path);
   const sessionId = state?.sessionId ?? (read && !("transient" in read) ? read.headerId : undefined);
@@ -1172,32 +1179,32 @@ export function refreshAgentTelemetry(record: RpcAgentRecord, state?: { sessionF
   if (model) record.observedModel = model; else if (state) delete record.observedModel;
   if (typeof state?.thinkingLevel === "string" && state.thinkingLevel) record.observedEffort = state.thinkingLevel; else if (state) delete record.observedEffort;
   if (!record.telemetry) {
-    if (!sessionId) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+    if (!sessionId) return finish();
     // A non-fork legacy child has no inherited history and can be recovered
     // completely. A fork without its saved boundary must remain unknown.
     if (read && !("transient" in read) && read.parentSession && opts?.fresh) {
       const anchor = read.entries.at(-1)?.id;
-      if (!anchor) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+      if (!anchor) return finish();
       record.telemetry = { version: 1, origin: { sessionId, sessionPath: path, prefixEntryId: anchor } };
     } else if (read && !("transient" in read) && read.parentSession && !opts?.fresh) {
       if (!record.telemetryInputFloor) record.telemetryInputFloor = { sessionId, sessionPath: path, ...(read.entries.at(-1)?.id ? { prefixEntryId: read.entries.at(-1)!.id } : { emptyPrefix: true }) };
       const floor = reduceTelemetry(record.telemetryInputFloor, read);
       if (floor) record.observedLatestInput = floor.latestInput; else delete record.observedLatestInput;
-      return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+      return finish();
     }
-    if (!read || ("transient" in (read ?? {}))) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+    if (!read || ("transient" in (read ?? {}))) return finish();
     if (!record.telemetry) record.telemetry = { version: 1, origin: { sessionId, sessionPath: path, emptyPrefix: true } };
   }
   const telemetry = record.telemetry;
-  if (telemetry.origin.sessionPath !== path || (sessionId && telemetry.origin.sessionId !== sessionId)) { delete record.telemetry; delete record.telemetryInputFloor; delete record.observedLatestInput; return true; }
+  if (telemetry.origin.sessionPath !== path || (sessionId && telemetry.origin.sessionId !== sessionId)) { delete record.telemetry; delete record.telemetryInputFloor; delete record.observedLatestInput; return finish(); }
   if (model) telemetry.model = model; else if (state) delete telemetry.model;
   if (typeof state?.thinkingLevel === "string" && state.thinkingLevel) telemetry.effort = state.thinkingLevel; else if (state) delete telemetry.effort;
-  if (read && "transient" in read) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+  if (read && "transient" in read) return finish();
   const reduced = reduceTelemetry(telemetry.origin, read);
-  if (!reduced) { delete record.telemetry; delete record.telemetryInputFloor; delete record.observedLatestInput; return true; }
-  delete telemetry.latestInput; delete telemetry.estimatedUsd;
+  if (!reduced) { delete record.telemetry; delete record.telemetryInputFloor; delete record.observedLatestInput; return finish(); }
+  delete telemetry.latestInput; delete telemetry.estimatedUsd; delete telemetry.partialEstimatedUsd;
   Object.assign(telemetry, reduced);
-  return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+  return finish();
 }
 
 /**
@@ -2918,7 +2925,10 @@ export function attachEventListener(
         dirty = false;
         try {
           const state = await client.getState();
-          if (record.client === client && record.launchGeneration === generation && refreshAgentTelemetry(record, state)) triggerAgentWidgetRefresh();
+          if (record.client === client && record.launchGeneration === generation && refreshAgentTelemetry(record, state)) {
+            publishSubtree(registry);
+            triggerAgentWidgetRefresh();
+          }
         } catch {
           if (record.client === client && record.launchGeneration === generation) {
             const changed = record.observedModel !== undefined || record.observedEffort !== undefined || record.telemetry?.model !== undefined || record.telemetry?.effort !== undefined;
@@ -3156,6 +3166,9 @@ export function evictForCapacity(
         ok: false,
         error: `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) reached and every remaining record is live, protected, or durably unknown — nothing can be evicted to fit`,
       };
+    }
+    if (!persistEvictedAgentCost(registry, candidate)) {
+      return { ok: false, error: `ws-pi-agent: ws-agent-spawn rejected: could not preserve evicted cost telemetry for ${candidate.agentId}` };
     }
     if (candidate.ownership) {
       const removal = removeOwned(candidate.ownership);
@@ -3955,6 +3968,7 @@ export function registerAgentTools(
   toolPreviewTuiRef: ToolPreviewTuiRef = createToolPreviewTuiRef(),
 ): AgentToolsHandle {
   const rpcRegistry: RpcAgentRegistry = new Map();
+  registerAgentCostOwner(rpcRegistry, sessionCtx.storage);
   installSubtreePublisher(rpcRegistry, readSubtreeChannel(), () => heldPushQueue.length);
   const exploreRegistry: AgentRegistry = new Map();
   const stopLivenessProbe = startLivenessProbe(pi, rpcRegistry);

@@ -4302,7 +4302,9 @@ describe("evictForCapacity", () => {
       const registry: RpcAgentRegistry = new Map([["owned-a", freshRpcRecord({ agentId: "owned-a", ownership, sessionPath: ownership.sessionPath })]]);
       assert.deepEqual(evictForCapacity(registry, 1), { ok: true, evictedLabel: "owned-a" });
       assert.equal(registry.size, 0);
-      assert.equal(readdirSync(join(realpathSync(root), "ws-agents")).length, 0);
+      assert.equal(existsSync(ownership.home), false);
+      assert.deepEqual(readdirSync(join(realpathSync(root), "ws-agents")), ["lead-1"]);
+      assert.deepEqual(readdirSync(join(realpathSync(root), "ws-agents", "lead-1")), [".cost-rollup"], "eviction retains only the durable cost roll-up directory");
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 

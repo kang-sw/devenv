@@ -216,6 +216,8 @@ import { registerAuditCommands } from "./audit.ts";
 import { registerWsSkillTool } from "./lead-skills.ts";
 import { createToolPreviewTuiRef, loadToolResultTuiModules } from "./tool-result-render.ts";
 import { createAgentStorageContext, pruneStaleAgentHomes } from "./agent-storage.ts";
+import { createAgentFooterController, persistOwnedTelemetryRollup, shouldArmAgentFooter, type AgentFooterController } from "./agent-footer.ts";
+import { loadHostPiTui } from "./pi-tui.ts";
 import { addClaudeDelegateIfLead, registerClaudeDelegateSession } from "./claude-delegate.ts";
 import { assertPolicyTool, readDelegationPolicy } from "./delegation-policy.ts";
 import { registerWebTools } from "./web-tools.ts";
@@ -245,7 +247,7 @@ export function applySessionStartAgentRetention(
 ): PersistedOrphan[] {
   if (!isLeadOrFork(role)) return recovered;
   try {
-    const retention = prune(root, resolveChildRetentionTtlDays(readGoalLoopConfig(configPath)));
+    const retention = prune(root, resolveChildRetentionTtlDays(readGoalLoopConfig(configPath)), { beforeRemove: persistOwnedTelemetryRollup });
     if (retention.deletedHomes.length === 0) return recovered;
     const deletedHomes = new Set(retention.deletedHomes);
     return recovered.filter(orphan => !orphan.ownership || !deletedHomes.has(orphan.ownership.home));
@@ -419,6 +421,12 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   // `session_shutdown`. `undefined` in every non-TUI or non-lead/fork process,
   // which is also what keeps `agentWidgetRefreshRef.current` unset there.
   let agentWidgetHandle: AgentWidgetController | undefined;
+  // The footer has the same TUI lead/fork lifetime as the widget, but remains
+  // a separate component: replacing the footer never touches belowEditor cards.
+  let agentFooterHandle: AgentFooterController | undefined;
+  for (const event of ["message_end", "model_select", "thinking_level_select", "session_info_changed", "session_compact"] as const) {
+    pi.on(event, () => { agentFooterHandle?.refresh(); });
+  }
   // This event fires for both startup and /reload, so local workflow syncs
   // replace the ignored generated tree before Pi rebuilds its skill list.
   registerSkillResources(pi, pluginDir, repoRoot);
@@ -684,13 +692,27 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       // must not. A prior controller (a `/reload`) is stopped first so its
       // timer never outlives the registry/threads it closed over.
       const spawnRole = readSpawnRole(process.env);
+      if (shouldArmAgentFooter(spawnRole, ctx.mode)) {
+        agentFooterHandle?.stop();
+        const hostTui = await loadHostPiTui();
+        agentFooterHandle = createAgentFooterController(ctx, agentTools.rpcRegistry, dispatchStorage, {
+          truncateToWidth: hostTui.truncateToWidth,
+          visibleWidth: hostTui.visibleWidth,
+        });
+      } else {
+        agentFooterHandle?.stop();
+        agentFooterHandle = undefined;
+      }
       if (shouldArmAgentWidget(spawnRole, ctx.mode)) {
         agentWidgetHandle?.stop();
         agentWidgetHandle = createAgentWidgetController(ctx, agentTools.rpcRegistry, threadHandle.threads, {
           ownerLead: spawnRole === undefined,
           animationEnabled: () => resolveAgentWaitAnimation(readGoalLoopConfig(goalLoopConfigPath)),
         });
-        agentWidgetRefreshRef.current = () => agentWidgetHandle?.refresh();
+        agentWidgetRefreshRef.current = () => {
+          agentWidgetHandle?.refresh();
+          agentFooterHandle?.refresh();
+        };
         agentWidgetHandle.refresh();
       }
     }
@@ -833,6 +855,8 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // — the registries the controller closed over are about to be discarded.
     agentWidgetHandle?.stop();
     agentWidgetHandle = undefined;
+    agentFooterHandle?.stop();
+    agentFooterHandle = undefined;
     agentWidgetRefreshRef.current = undefined;
     handle?.shutdown();
     handle = undefined;
