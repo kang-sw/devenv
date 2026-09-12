@@ -180,6 +180,7 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { startBridge, type BridgeHandle } from "./bridge.ts";
 import {
+  agentCostRefreshRef,
   agentWidgetRefreshRef,
   heldPushQueue,
   leadIdleRef,
@@ -710,16 +711,15 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       // must not. A prior controller (a `/reload`) is stopped first so its
       // timer never outlives the registry/threads it closed over.
       const spawnRole = readSpawnRole(process.env);
+      agentCostRefreshRef.current = undefined;
       if (shouldArmAgentWidget(spawnRole, ctx.mode)) {
         agentWidgetHandle?.stop();
         agentWidgetHandle = createAgentWidgetController(ctx, agentTools.rpcRegistry, threadHandle.threads, {
           ownerLead: spawnRole === undefined,
           animationEnabled: () => resolveAgentWaitAnimation(readGoalLoopConfig(goalLoopConfigPath)),
         });
-        agentWidgetRefreshRef.current = () => {
-          agentWidgetHandle?.refresh();
-          agentFooterLifecycle.refreshAgents();
-        };
+        agentWidgetRefreshRef.current = () => { agentWidgetHandle?.refresh(); };
+        agentCostRefreshRef.current = () => { agentFooterLifecycle.refreshAgents(); };
         agentWidgetHandle.refresh();
       }
     }
@@ -868,6 +868,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     agentWidgetHandle = undefined;
     applySessionShutdownAgentFooter(agentFooterLifecycle);
     agentWidgetRefreshRef.current = undefined;
+    agentCostRefreshRef.current = undefined;
     handle?.shutdown();
     handle = undefined;
   });

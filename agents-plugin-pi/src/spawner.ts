@@ -1060,6 +1060,16 @@ function triggerAgentWidgetRefresh(): void {
   }
 }
 
+/** Separate event seam for the footer's bounded telemetry reconciliation. */
+export const agentCostRefreshRef: { current: (() => void) | undefined } = { current: undefined };
+function triggerAgentCostRefresh(): void {
+  try {
+    agentCostRefreshRef.current?.();
+  } catch {
+    // Cosmetic accounting must never fail an agent lifecycle transition.
+  }
+}
+
 /** Read current idleness with the independent compaction hold composed in. Delivery also requires an initialized, live accessor. */
 export function isOwningAgentIdle(): boolean {
   if (leadCompactingRef.current) return false;
@@ -2431,6 +2441,7 @@ export function attachEventListener(
           if (record.client === client && record.launchGeneration === generation && refreshAgentTelemetry(record, state)) {
             publishSubtree(registry);
             triggerAgentWidgetRefresh();
+            triggerAgentCostRefresh();
           }
         } catch {
           if (record.client === client && record.launchGeneration === generation) {
@@ -2971,6 +2982,7 @@ export async function spawnAgent(
   // 260905 (live-agent widget ticket): a brand-new registry member, live and
   // running from its initial prompt — the widget's first sighting of it.
   triggerAgentWidgetRefresh();
+  triggerAgentCostRefresh();
   return { agent_id: agentId, alias: record.alias, evicted: eviction.evictedLabel };
   } finally { finishDispatch(); }
 }
@@ -3358,6 +3370,7 @@ export async function stopAgent(
     // The final disk reconciliation above is the accounting boundary: refresh
     // the in-memory estimate first, then persist its one bounded checkpoint.
     triggerAgentWidgetRefresh();
+    triggerAgentCostRefresh();
     if (!opts?.skipCostCheckpoint) persistAgentCostCheckpoint(registry);
   }
   publishSubtree(registry);
