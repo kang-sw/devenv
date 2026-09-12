@@ -118,10 +118,10 @@ Advance `260911-bug-ws-pi-question-queue-dogfood` from `idea/` through the requi
 | --- | --- | --- | --- |
 | 2026-09-12 | `260908-research-ws-pi-ws-ask-removal` | The redesign decision was implemented by done ticket `260911-feat-ws-pi-async-question-queue`; q1/q3/q4/q5 supplied live queue and attachment evidence. | Closed as resolved research; remaining actionable findings stay in the question-queue dogfood ticket. |
 | 2026-09-12 | `260908-feat-ws-pi-subagent-audit-window-and-owner-steering` | Live `q5` `/done` produced one final with `Decisions: alpha` and parked the fork dormant. | Same-process `/done` slice accepted; broader Phase 2 remains open. |
-| 2026-09-12 | `260910-bug-ws-execute-worker-missing-exec-tool` | A guarded merge produced an approval request, accepted `approve`, executed the command, and returned a final report. | Approve path accepted; deny, run-instead, and stale-ID checks remain. |
+| 2026-09-12 | `260910-bug-ws-execute-worker-missing-exec-tool` | `ccb370af` restored exact-extension RPC-child loading. Live approve, denial, run-instead, stale-ID rejection, completion, diagnostics, and owner-visible approval-card checks passed. | Closed after the full functional and visual matrix passed. |
 | 2026-09-12 | `260907-feat-ws-pi-persistent-explore-deep-research` | Multiple simple Explore children settled; a settled child accepted a follow-up. A deep-research discovery also returned. | Partial evidence only; exact deep-child profile and stop/restart matrix remain. |
 | 2026-09-12 | `260906-feat-ws-config-tune-agents-tier-returns-only-the-written-harness` | Temporary Pi small-tier writes returned the complete multi-harness alias table. | Existing defect reproduced; implementation remains. |
 
 ## Current next action
 
-Complete the remaining sequence-step-1 `ws-execute` approval matrix. Reconcile `260910-bug-ws-execute-worker-missing-exec-tool`, then reuse the result for the tool/push approval-control gate before proceeding to the consolidated visual TUI session.
+Start sequence step 2 with the consolidated visual TUI session. Reuse the accepted execute-worker approval card as the final approval-control evidence for `260906-feat-ws-pi-tool-and-push-tui-polish`, then verify the remaining light/dark, narrow-width, count, telemetry, report-header, and attention contracts.
