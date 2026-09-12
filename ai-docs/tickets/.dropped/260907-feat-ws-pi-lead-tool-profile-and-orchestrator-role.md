@@ -7,6 +7,7 @@ related:
   260906-bug-ws-pi-rsrc-mirror-drift: the orchestrator guide is an adapter-owned package-root file, deliberately outside the byte-identical rsrc/ mirror that ticket guards
   260907-bug-ws-pi-fork-first-call-prompt-cache-miss: prerequisite for the fork half of the profile — a fork's `tools` array must equal the lead's at spawn, so fork-only tools load after the prefix (see the deferred-tool decision here)
   260904-feat-ws-pi-side-thread-fork-question-surface: Entry A already names `lead-write-ticket` from Populate onward as the canonical fork task; this ticket makes that the only ticket-authoring path
+dropped: 2026-09-12
 ---
 
 # Curate the Pi lead's tool profile and add an orchestrator spawn role that runs ticket phases on the lead's behalf
@@ -232,3 +233,8 @@ ticket phase driven end to end as discuss → hand-off → orchestrator →
 the phase and compared against the ~200k-per-phase baseline; the `final`
 contract is refined from what that phase shows and the refinement recorded
 as an Edition.
+
+
+## Resolution (2026-09-12)
+
+Superseded after the worker-interpreter refoundation. The obsolete separate orchestrator-role and lead-profile design is not being implemented. Its remaining recursive delegation need is owned by `260912-feat-ws-pi-recursive-worker-subtree-lifecycle`, which uses ordinary workers, a role-independent depth budget, monotonic descendant capability ceilings, and subtree-aware semantic completion.
