@@ -41,9 +41,9 @@ import {
   type PersistedOrphan,
 } from "../src/agent-sidecar.ts";
 import { armForkRoleWiring } from "../src/fork.ts";
-import { applyRpcEvent, listAgents, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { applyRpcEvent, evictForCapacity, listAgents, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import type { ExtensionAPI, RpcClient } from "@earendil-works/pi-coding-agent";
-import { allocateAgentHome, createAgentStorageContext, readOwnership } from "../src/agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, readOwnership, updateOwnership } from "../src/agent-storage.ts";
 
 function record(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
   return {
@@ -700,6 +700,44 @@ describe("reviveOrphans (role wiring re-armed on revival)", () => {
     assert.deepEqual(revived, []);
     assert.equal(registry.get("a1"), live);
   });
+
+  test("a different confirmed-stopped owned home on a discarded duplicate sidecar entry is removed", () => withTempDir((root) => {
+    const staleOwnership = allocateAgentHome(createAgentStorageContext("lead-old", root), "a1", "worker");
+    updateOwnership(staleOwnership.home, { liveness: { lifecycle: "stopped", running: false } });
+    const live = record({ agentId: "a1", client: {} as RpcClient, spawnRole: "worker" });
+    const registry: RpcAgentRegistry = new Map([["a1", live]]);
+    const revived = reviveOrphans(registry, [{
+      agentId: "a1", sessionPath: staleOwnership.sessionPath!, systemPromptPath: "/old-prompt", wsToolNames: [], toolGroup: "full-worker", ownership: staleOwnership,
+    }]);
+    assert.deepEqual(revived, []);
+    assert.equal(registry.get("a1"), live);
+    assert.equal(existsSync(staleOwnership.home), false);
+  }));
+
+  test("revival preserves confirmed-stopped liveness so an idle recovered child remains cap-evictable", () => withTempDir((root) => {
+    const ownership = allocateAgentHome(createAgentStorageContext("lead-old", root), "recovered", "worker");
+    updateOwnership(ownership.home, { liveness: { lifecycle: "stopped", running: false } });
+    const registry: RpcAgentRegistry = new Map();
+    reviveOrphans(registry, [{
+      agentId: "recovered", sessionPath: ownership.sessionPath!, systemPromptPath: "/prompt", wsToolNames: [], toolGroup: "full-worker", ownership,
+    }]);
+    assert.equal(readOwnership(ownership.home)?.liveness.lifecycle, "stopped");
+    assert.deepEqual(evictForCapacity(registry, 1), { ok: true, evictedLabel: "recovered" });
+    assert.equal(registry.size, 0);
+    assert.equal(existsSync(ownership.home), false);
+  }));
+
+  test("revival never clears a durable protection bit merely because the sidecar lacks it", () => withTempDir((root) => {
+    const ownership = allocateAgentHome(createAgentStorageContext("lead-old", root), "protected", "worker");
+    updateOwnership(ownership.home, { liveness: { lifecycle: "stopped", running: false, pendingQuestion: true } });
+    const registry: RpcAgentRegistry = new Map();
+    reviveOrphans(registry, [{
+      agentId: "protected", sessionPath: ownership.sessionPath!, systemPromptPath: "/prompt", wsToolNames: [], toolGroup: "full-worker", ownership,
+    }]);
+    assert.equal(readOwnership(ownership.home)?.liveness.pendingQuestion, true);
+    assert.equal(evictForCapacity(registry, 1).ok, false);
+    assert.equal(existsSync(ownership.home), true);
+  }));
 
   test("a throwing wiring callback still leaves the record registered and does not stop the rest", () => {
     const registry: RpcAgentRegistry = new Map();
