@@ -381,7 +381,18 @@ export function reviveOrphans(registry: RpcAgentRegistry, orphans: PersistedOrph
     }
     const record = rehydrateOrphanRecord(orphan);
     startOwnedSessionObserver(record);
-    if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "unknown", running: false, observedAt: Date.now(), recovery: "sidecar", threadBound: record.threadBound, waitingOnChildren: record.waitingOnChildren, expectedReport: record.expectedReport, pendingApprovalCommandId: record.pendingApproval?.cmdId } });
+    if (record.ownership) {
+      const durable = readOwnership(record.ownership.home);
+      const confirmedStopped = durable?.liveness.lifecycle === "stopped" && durable.liveness.running === false;
+      updateOwnership(record.ownership.home, { liveness: {
+        lifecycle: confirmedStopped ? "stopped" : "unknown", running: false, observedAt: Date.now(), recovery: "sidecar",
+        ...(record.threadBound === true ? { threadBound: true } : {}),
+        ...(record.ownerHeld === true ? { ownerHeld: true } : {}),
+        ...(record.waitingOnChildren === true ? { waitingOnChildren: true } : {}),
+        ...(record.expectedReport === true ? { expectedReport: true } : {}),
+        ...(record.pendingApproval?.cmdId ? { pendingApprovalCommandId: record.pendingApproval.cmdId } : {}),
+      } });
+    }
     registry.set(orphan.agentId, record);
     const arm = orphan.spawnRole === "fork" ? wiring.fork : orphan.spawnRole === "execute-worker" ? wiring.executeWorker : orphan.spawnRole === "explore" ? undefined : wiring.worker;
     try {

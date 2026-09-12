@@ -144,7 +144,7 @@ import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, type SpawnRole } fr
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { McpStdioClient, McpToolCallResult } from "../src/mcp-stdio-client.ts";
-import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { allocateAgentHome, createAgentStorageContext, updateOwnership } from "../src/agent-storage.ts";
@@ -866,6 +866,37 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
       assert.equal(handle.rpcRegistry.size, 1);
       await handle.stopAll();
     } finally { rpc.restore(); }
+  });
+
+  test("a real owned-home removal failure is diagnostic-only and the cap-triggering spawn still succeeds", async (t) => {
+    const rpc = installRpcHarness();
+    const previousCap = process.env[WS_PI_AGENT_REGISTRY_CAP_ENV];
+    const diagnostics = t.mock.method(console, "error", () => {});
+    let locked: string | undefined;
+    try {
+      const { tool, handle, ctx } = harness(async () => jsonResult({}));
+      const ownership = allocateAgentHome(createAgentStorageContext("test-lead", ctx.agentStorageRoot), "blocked-delete", "worker");
+      locked = join(ownership.home, "locked");
+      mkdirSync(locked);
+      writeFileSync(join(locked, "payload"), "keep until retry");
+      chmodSync(locked, 0o500);
+      updateOwnership(ownership.home, { liveness: { lifecycle: "stopped", running: false } });
+      handle.rpcRegistry.set("blocked-delete", freshRpcRecord({ agentId: "blocked-delete", ownership, sessionPath: ownership.sessionPath }));
+      process.env[WS_PI_AGENT_REGISTRY_CAP_ENV] = "1";
+
+      const parsed = JSON.parse((await tool.execute("call", { system_prompt_path: "/tmp/p.md", prompt: "replacement" }, undefined, undefined, ctx)).content[0]!.text);
+      assert.ok(parsed.agent_id);
+      assert.equal(handle.rpcRegistry.has("blocked-delete"), false, "eligible record is evicted despite best-effort disk failure");
+      assert.equal(handle.rpcRegistry.has(parsed.agent_id), true, "the replacement spawn is admitted");
+      assert.equal(existsSync(ownership.home), true, "failed removal was rolled back for retry");
+      assert.ok(diagnostics.mock.callCount() >= 1);
+      if (existsSync(locked)) chmodSync(locked, 0o700);
+      await handle.stopAll();
+    } finally {
+      if (locked && existsSync(locked)) chmodSync(locked, 0o700);
+      if (previousCap === undefined) delete process.env[WS_PI_AGENT_REGISTRY_CAP_ENV]; else process.env[WS_PI_AGENT_REGISTRY_CAP_ENV] = previousCap;
+      rpc.restore();
+    }
   });
 });
 
@@ -4130,6 +4161,33 @@ describe("evictForCapacity", () => {
         assert.equal(result.ok, false, record.agentId);
         assert.equal(registry.size, 1, record.agentId);
       }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("a legacy cap eviction forgets only the registry record and never deletes its unowned path", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-legacy-cap-test-"));
+    try {
+      const legacyHome = join(root, "ws-pi-agent-legacy");
+      mkdirSync(legacyHome);
+      const sessionPath = join(legacyHome, "session.jsonl");
+      writeFileSync(sessionPath, "legacy history");
+      const registry: RpcAgentRegistry = new Map([["legacy", freshRpcRecord({ agentId: "legacy", sessionPath })]]);
+      assert.deepEqual(evictForCapacity(registry, 1), { ok: true, evictedLabel: "legacy" });
+      assert.equal(registry.size, 0);
+      assert.equal(readFileSync(sessionPath, "utf8"), "legacy history");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("a late durable-retention result aborts capacity eviction and keeps the record", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-cap-test-"));
+    try {
+      const ownership = allocateAgentHome(createAgentStorageContext("lead-1", root), "late-protected", "worker");
+      updateOwnership(ownership.home, { liveness: { lifecycle: "stopped", running: false } });
+      const registry: RpcAgentRegistry = new Map([["late-protected", freshRpcRecord({ agentId: "late-protected", ownership, sessionPath: ownership.sessionPath })]]);
+      const result = evictForCapacity(registry, 1, () => ({ status: "retained", reason: "protection changed" }));
+      assert.equal(result.ok, false);
+      assert.equal(registry.has("late-protected"), true);
+      assert.equal(existsSync(ownership.home), true);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 

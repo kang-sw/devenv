@@ -139,42 +139,39 @@ export function inspectOwnedHomeRemoval(ownership: AgentOwnership): OwnedHomeRem
   }
 }
 
-function removeTreeEntry(path: string): void {
-  const stat = lstatSync(path);
-  if (!stat.isDirectory()) { rmSync(path, { force: false }); return; }
-  for (const entry of readdirSync(path)) removeTreeEntry(join(path, entry));
-  rmdirSync(path);
-}
-
-function removeOwnedHomeTree(home: string): void {
-  const metadataPath = ownershipPath(home);
-  // Ownership is the retry authorization. Remove it only after every payload
-  // entry succeeds, then remove the now-empty home itself.
-  for (const entry of readdirSync(home)) {
-    const path = join(home, entry);
-    if (path !== metadataPath) removeTreeEntry(path);
-  }
-  rmSync(metadataPath, { force: false });
-  rmdirSync(home);
-}
-
 /** Best-effort exact-home removal. Eligibility is checked again immediately before deletion. */
 export function removeOwnedAgentHome(
   ownership: AgentOwnership,
-  remove: (path: string) => void = removeOwnedHomeTree,
+  remove: (path: string) => void = path => rmSync(path, { recursive: true, force: false }),
 ): OwnedHomeRemovalResult {
   const first = inspectOwnedHomeRemoval(ownership);
   if (first.status !== "eligible") return first;
   const final = inspectOwnedHomeRemoval(ownership);
   if (final.status !== "eligible") return final;
+  const ownerRoot = dirname(ownership.home);
+  const staged = join(ownerRoot, `.${ownership.agentId}.deleting-${process.pid}-${randomUUID()}`);
+  let moved = false;
   try {
-    remove(ownership.home);
-    try { rmdirSync(dirname(ownership.home)); } catch { /* another child or sidecar still owns the lead subtree */ }
+    // Atomic detachment closes the checked-path race: a concurrent replacement
+    // at the old name is never traversed. fs.rm treats any later symlink swap
+    // under the private staged tree as the link entry itself, not its target.
+    renameSync(ownership.home, staged);
+    moved = true;
+    const stagedEntry = lstatSync(staged);
+    if (!stagedEntry.isDirectory() || stagedEntry.isSymbolicLink() || realpathSync(staged) !== staged) {
+      throw new Error("owned home changed type during deletion");
+    }
+    remove(staged);
+    moved = false;
+    try { rmdirSync(ownerRoot); } catch { /* another child or sidecar still owns the lead subtree */ }
     return { status: "deleted" };
   } catch (error) {
-    // A late failure after metadata removal (for example a concurrent writer
-    // racing the final rmdir) gets one best-effort authorization restore.
-    if (existsSync(ownership.home) && !readOwnership(ownership.home)) {
+    if (moved && existsSync(staged) && !existsSync(ownership.home)) {
+      try { renameSync(staged, ownership.home); moved = false; } catch { /* diagnostic below; never chase a replacement path */ }
+    }
+    // A late partial failure after metadata removal gets one best-effort
+    // authorization restore, but only at the original canonical home.
+    if (!moved && existsSync(ownership.home) && !readOwnership(ownership.home)) {
       try { writeOwnership(final.metadata); } catch { /* original failure remains the diagnostic */ }
     }
     const message = String(error);

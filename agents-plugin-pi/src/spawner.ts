@@ -685,7 +685,7 @@ function spawnPiProcess(record: AgentRecord, args: string[], cwd: string): void 
     record.errorMessage = `pi process failed to start: ${err.message}`;
     record.state = "done";
     settleWaiters(record);
-    if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "unknown", observedAt: Date.now() } });
+    if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "stopped", running: false, observedAt: Date.now() } });
   });
 
   proc.on("close", (code, signal) => {
@@ -2947,8 +2947,16 @@ export function evictForCapacity(
         error: `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) reached and every remaining record is live, protected, or durably unknown — nothing can be evicted to fit`,
       };
     }
+    if (candidate.ownership) {
+      const removal = removeOwned(candidate.ownership);
+      if (removal.status !== "deleted" && removal.status !== "failed") {
+        return {
+          ok: false,
+          error: `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) candidate became protected or durably unknown before eviction`,
+        };
+      }
+    }
     candidate.ownershipObserverStop?.();
-    if (candidate.ownership) removeOwned(candidate.ownership);
     registry.delete(candidate.agentId);
     evictedLabels.push(candidate.alias ?? candidate.agentId);
   }
