@@ -98,6 +98,7 @@ import {
   buildQueueCoverageLine,
   buildQueueSubmitConfirmMessage,
   resolveLeadAskQueueEntryAction,
+  buildLeadAskQueueOnClose,
   LeadAskQueueComponent,
   type ThreadRecord,
   type OverlayHandle,
@@ -1826,12 +1827,14 @@ describe("registerThreadCommands /answer target selection", () => {
     const handle = createThreadRegistryHandle();
     const answered = thread({ threadId: "q6", origin: "lead-ask", status: "dormant" });
     const withdrawn = thread({ threadId: "q7", origin: "lead-ask", status: "closed" });
-    const pending = thread({ threadId: "q8", origin: "lead-ask", status: "pending" });
-    for (const record of [answered, withdrawn, pending]) handle.threads.set(record.threadId, record);
-    registerThreadCommands(pi, {} as never, new Map(), handle, {} as never);
+    const pending = thread({ threadId: "q8", origin: "lead-ask", status: "pending", createdAt: "2026-09-05T12:00:00.000Z" });
+    const oldest = thread({ threadId: "q5", origin: "lead-ask", status: "pending", createdAt: "2026-09-05T09:00:00.000Z" });
+    for (const record of [answered, withdrawn, pending, oldest]) handle.threads.set(record.threadId, record);
+    const opened: string[] = [];
+    registerThreadCommands(pi, {} as never, new Map(), handle, {} as never, async (record) => { opened.push(record.threadId); });
     const notices: Array<{ message: string; level: string }> = [];
     const ctx = { mode: "tui", ui: { notify: (message: string, level: string) => notices.push({ message, level }) } };
-    return { commands, handle, pending, notices, ctx };
+    return { commands, handle, pending, notices, opened, ctx };
   }
 
   test("explicit answered or withdrawn ids report their exact terminal state and never fall through to another modal", async () => {
@@ -1852,15 +1855,12 @@ describe("registerThreadCommands /answer target selection", () => {
     assert.equal(pending.status, "pending");
   });
 
-  test("bare /answer advertises and resolves through the oldest-first lead-ask queue", () => {
-    const { commands } = setup();
+  test("bare /answer opens the oldest answerable item, while an explicit answerable id opens exactly that item", async () => {
+    const { commands, opened, ctx } = setup();
     assert.match(commands.get("answer")!.description ?? "", /oldest queued/i);
-    const records = [
-      thread({ threadId: "q8", origin: "lead-ask", status: "pending", createdAt: "2026-09-05T12:00:00.000Z" }),
-      thread({ threadId: "q6", origin: "lead-ask", status: "pending", createdAt: "2026-09-05T10:00:00.000Z" }),
-      thread({ threadId: "q7", origin: "lead-ask", status: "pending", createdAt: "2026-09-05T11:00:00.000Z" }),
-    ];
-    assert.equal(collectLeadAskQueue(records)[0].threadId, "q6");
+    await commands.get("answer")!.handler("", ctx);
+    await commands.get("answer")!.handler("q8", ctx);
+    assert.deepEqual(opened, ["q5", "q8"]);
   });
 });
 
@@ -2055,6 +2055,43 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
     assert.equal(closes[0].drafts.get("q1"), "first answer");
     assert.equal(closes[0].drafts.get("q2"), "");
     assert.equal(closes[0].drafts.get("q3"), "last answer");
+  });
+
+  test("the production modal-close callback batches multiple component answers into one follow-up and leaves blanks pending", () => {
+    const rawSent: Array<{ message: unknown; options: unknown }> = [];
+    const handlers = new Map<string, () => void>();
+    leadIdleRef.current = () => false;
+    const pi = {
+      on: (event: string, fn: () => void) => handlers.set(event, fn),
+      sendUserMessage: () => assert.fail("a busy lead is not woken before its boundary"),
+      sendMessage: (message: unknown, options: unknown) => rawSent.push({ message, options }),
+    } as unknown as ExtensionAPI;
+    registerPushFlush(pi, { delayMs: () => 10 });
+    const handle = createThreadRegistryHandle();
+    const dir = mkdtempSync(join(tmpdir(), "ws-pi-ask-test-"));
+    hydrateThreadRegistry(handle, join(dir, "session.jsonl.ws-threads.json"));
+    const threads = threeThreads();
+    for (const record of threads) handle.threads.set(record.threadId, record);
+    const { component } = buildQueue(threads, {
+      onClose: buildLeadAskQueueOnClose(pi, handle, threads),
+    });
+
+    component.handleInput("alpha");
+    component.handleInput("\r"); // commit q1, advance q2
+    component.handleInput("beta");
+    component.handleInput("\r"); // commit q2, advance q3
+    component.handleInput("\r"); // blank q3 raises final confirmation
+    component.handleInput("\x1b[D"); // Yes
+    component.handleInput("\r");
+
+    assert.equal(heldPushQueue.length, 1, "the actual modal close callback admits one combined follow-up");
+    handlers.get("agent_end")?.();
+    assert.equal(rawSent.length, 1);
+    const envelope = rawSent[0].message as { details: { items: Array<{ details: { threadIds: string[] } }> } };
+    assert.deepEqual(envelope.details.items[0].details.threadIds, ["q1", "q2"]);
+    assert.equal(threads[0].status, "dormant");
+    assert.equal(threads[1].status, "dormant");
+    assert.equal(threads[2].status, "pending");
   });
 
   test("Esc with nothing answered anywhere closes immediately, preserving, with no confirm screen", () => {
@@ -2264,6 +2301,36 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
     lines = component.render(80);
     assert.ok(lines.some((l) => l.includes("line 0")), "repeated PageUp returns to the first line");
     assert.equal(editors[0].getText(), "", "question scrolling is not forwarded into the answer editor");
+  });
+
+  test("a one-row question viewport reserves cue width so every character remains reachable", () => {
+    const threads = [thread({
+      threadId: "q1",
+      question: `${"A".repeat(72)}TAIL\nsecond row`,
+      origin: "lead-ask",
+      status: "open",
+    })];
+    const wrapByWidth = (text: string, width: number): string[] => {
+      if (text.length === 0) return [""];
+      const chunks: string[] = [];
+      for (let i = 0; i < text.length; i += Math.max(1, width)) chunks.push(text.slice(i, i + Math.max(1, width)));
+      return chunks;
+    };
+    const tui: ConversationViewTui = { requestRender: () => {}, terminal: { rows: 14 } };
+    const component = new LeadAskQueueComponent(tui, {
+      threads,
+      initialFocusIndex: 0,
+      editorFactory: () => new FakeQueueEditor(),
+      matchesKey: fakeMatchesKey,
+      wrapText: wrapByWidth,
+      border: true,
+      onClose: () => {},
+    });
+    let lines = component.render(80);
+    assert.ok(lines.some((line) => line.includes("↕")), "the only row still exposes the overflow cue");
+    component.handleInput("\x1b[6~");
+    lines = component.render(80);
+    assert.ok(lines.some((line) => line.includes("IL")), "the characters displaced by the cue are reachable on a later page");
   });
 
   test("a short question well within the viewport is never truncated", () => {

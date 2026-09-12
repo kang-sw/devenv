@@ -1711,8 +1711,7 @@ export async function ensureRespondent(
 
   // §7: anchor a compacted entry with a verbatim excerpt of its own window.
   let excerpt: string | undefined;
-  const sessionManager = (ctx as { sessionManager?: { buildContextEntries?: () => { id: string }[]; getBranch?: (id: string) => { id: string }[] } })
-    .sessionManager;
+  const sessionManager = (ctx as { sessionManager?: LeadAskSessionManager }).sessionManager;
   if (thread.entryId && sessionManager) {
     try {
       const liveEntries = sessionManager.buildContextEntries?.() ?? [];
@@ -2033,7 +2032,7 @@ export function runLeadAskEscapeAction(
   handle: ThreadRegistryHandle,
   thread: ThreadRecord,
   draft: string,
-  sessionManager?: { buildContextEntries?: () => { id: string }[]; getBranch?: (id: string) => { id: string }[] },
+  sessionManager?: LeadAskSessionManager,
 ): void {
   if (action === "deliver") {
     deliverQueuedAnswer(pi, handle, thread, draft, sessionManager);
@@ -2054,6 +2053,27 @@ export function runLeadAskEscapeAction(
   thread.touchedAt = nowIso();
   persistThreads(handle);
   refreshAgentWidget();
+}
+
+/** The production modal-close callback, extracted so its one-follow-up batch boundary is directly testable. */
+export function buildLeadAskQueueOnClose(
+  pi: ExtensionAPI,
+  handle: ThreadRegistryHandle,
+  threads: readonly ThreadRecord[],
+  sessionManager?: LeadAskSessionManager,
+  onDone?: () => void,
+): (mode: "submit" | "preserve", drafts: ReadonlyMap<string, string>) => void {
+  return (mode, drafts) => {
+    const deliveries: Array<{ thread: ThreadRecord; answer: string }> = [];
+    for (const thread of threads) {
+      const draft = drafts.get(thread.threadId) ?? "";
+      const action = resolveLeadAskQueueEntryAction(mode, thread.withdrawnPending === true, draft);
+      if (action === "deliver") deliveries.push({ thread, answer: draft });
+      else runLeadAskEscapeAction(action, pi, handle, thread, draft, sessionManager);
+    }
+    deliverQueuedAnswers(pi, handle, deliveries, sessionManager);
+    onDone?.();
+  };
 }
 
 /**
@@ -2411,17 +2431,26 @@ export class LeadAskQueueComponent implements Component {
       this.questionMaxScroll[index] = 0;
       return lines;
     }
+    const singleRow = budget === 1;
+    const cuePrefix = singleRow && width >= 3 ? "↕ " : "";
+    // At a one-row height, reserve the cue's columns before wrapping. Prefixing
+    // an already width-filled line and then taking only the first wrapped row
+    // would make its tail permanently unreachable.
+    const scrollLines = singleRow
+      ? lines.flatMap((line) => this.options.wrapText(line, Math.max(1, width - cuePrefix.length)))
+      : lines;
     const contentRows = Math.max(1, budget - 1);
-    const maxScroll = Math.max(0, lines.length - contentRows);
+    const maxScroll = Math.max(0, scrollLines.length - contentRows);
     const offset = Math.min(maxScroll, this.questionScrollOffsets[index]);
     this.questionScrollOffsets[index] = offset;
     this.questionViewportRows[index] = contentRows;
     this.questionMaxScroll[index] = maxScroll;
-    const visible = lines.slice(offset, offset + contentRows);
+    const visible = scrollLines.slice(offset, offset + contentRows);
+    if (singleRow) return [this.line(this.paint(this.options.overflowText, `${cuePrefix}${visible[0] ?? ""}`), width)];
     const above = offset > 0 ? "↑ more above · " : "";
     const below = offset < maxScroll ? " · more below ↓" : "";
-    const cue = this.line(this.paint(this.options.overflowText, `${above}question lines ${offset + 1}-${offset + visible.length}/${lines.length} · PgUp/PgDn${below}`), width);
-    return budget === 1 ? [this.line(this.paint(this.options.overflowText, `↕ ${visible[0] ?? ""}`), width)] : [...visible, cue];
+    const cue = this.line(this.paint(this.options.overflowText, `${above}question lines ${offset + 1}-${offset + visible.length}/${scrollLines.length} · PgUp/PgDn${below}`), width);
+    return [...visible, cue];
   }
 
   private renderConfirm(w: number, answered: number, total: number): string[] {
@@ -2507,8 +2536,7 @@ async function openLeadAskQueue(
   activeOverlay = undefined;
   const token = ++overlayToken;
 
-  const sessionManager = (ctx as { sessionManager?: { buildContextEntries?: () => { id: string }[]; getBranch?: (id: string) => { id: string }[] } })
-    .sessionManager;
+  const sessionManager = (ctx as { sessionManager?: LeadAskSessionManager }).sessionManager;
 
   try {
     await (ctx as unknown as { ui: AskCustomUiCtx["ui"] }).ui.custom<undefined>(
@@ -2526,17 +2554,7 @@ async function openLeadAskQueue(
           helpText: (text) => theme.fg("dim", text),
           overflowText: (text) => theme.fg("warning", text),
           editorFactory: () => new hostPiTui.Editor(tui as never, QUEUE_IDENTITY_EDITOR_THEME) as unknown as FocusableEditorLike,
-          onClose: (mode, drafts) => {
-            const deliveries: Array<{ thread: ThreadRecord; answer: string }> = [];
-            for (const thread of threads) {
-              const draft = drafts.get(thread.threadId) ?? "";
-              const action = resolveLeadAskQueueEntryAction(mode, thread.withdrawnPending === true, draft);
-              if (action === "deliver") deliveries.push({ thread, answer: draft });
-              else runLeadAskEscapeAction(action, pi, handle, thread, draft, sessionManager);
-            }
-            deliverQueuedAnswers(pi, handle, deliveries, sessionManager);
-            done(undefined);
-          },
+          onClose: buildLeadAskQueueOnClose(pi, handle, threads, sessionManager, () => done(undefined)),
         });
         activeOverlay = {
           token,
@@ -2715,7 +2733,9 @@ export function registerThreadCommands(
   rpcRegistry: RpcAgentRegistry,
   handle: ThreadRegistryHandle,
   sessionCtx: AskSessionCtx,
+  openAnswerThread?: (thread: ThreadRecord, ctx: unknown) => Promise<void>,
 ): void {
+  const openSelected = openAnswerThread ?? ((thread: ThreadRecord, ctx: unknown) => openThread(pi, ctx as never, bridge, rpcRegistry, handle, thread, sessionCtx));
   pi.registerCommand("thread", {
     description: "List ws discussion threads (pending, open, and dormant-but-reopenable).",
     handler: async (_args, ctx) => {
@@ -2733,7 +2753,7 @@ export function registerThreadCommands(
           notify(ctx as AskUiCtx, "ws: no queued lead questions to answer.", "info");
           return;
         }
-        await openThread(pi, ctx as never, bridge, rpcRegistry, handle, oldest, sessionCtx);
+        await openSelected(oldest, ctx);
         return;
       }
 
@@ -2746,7 +2766,7 @@ export function registerThreadCommands(
         notify(ctx as AskUiCtx, `ws: question ${id} was ${thread.status === "dormant" ? "already answered" : "withdrawn"}.`, "warning");
         return;
       }
-      await openThread(pi, ctx as never, bridge, rpcRegistry, handle, thread, sessionCtx);
+      await openSelected(thread, ctx);
     },
   });
 
