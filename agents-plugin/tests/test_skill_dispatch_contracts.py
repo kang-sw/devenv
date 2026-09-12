@@ -76,6 +76,27 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn('ws/playbook.read(name: "lead-delegate", session_key:', shim)
         self.assertIn("ws/workflow_manual", shim)
 
+    def test_review_local_fix_uses_delegate_gate_and_returns_to_review(self):
+        for package in (RSRC_DIR, SKILLS_DIR.parent.parent / "agents-plugin-wsflow" / "rsrc"):
+            review = (package / "lead-review" / "lead-review.md").read_text()
+            handoff = review.split("- **NEEDS FIX**:")[1].split("- **OPEN**:")[0]
+            self.assertIn("{{.SkillNamespace}}:lead-delegate` with the findings path", handoff)
+            self.assertIn("If its routing gate requires a ticket", handoff)
+            self.assertIn("{{.SkillNamespace}}:lead-ticket` with those inputs, then", handoff)
+            self.assertIn("{{.SkillNamespace}}:lead-run` with the ready ticket", handoff)
+            self.assertIn("After either local\n  repair route completes", handoff)
+            self.assertIn("{{.SkillNamespace}}:lead-review` again", handoff)
+            self.assertIn("retain the original base and include the\n  repair commits", handoff)
+            self.assertIn("Contributor → the config's Comment Method, else hand over the path", handoff)
+            self.assertNotIn("with that path as the contract", handoff)
+            delegate = (package / "lead-delegate" / "lead-delegate.md").read_text()
+            gate = delegate.split("## Routing")[1].split("## Assignment")[0]
+            self.assertIn("public behavior, an API, protocol, schema, template", gate)
+            self.assertIn("canonical flow, or architecture", gate)
+            self.assertIn("unresolved product or workflow decision", gate)
+            self.assertIn("independent review is needed, unless the task is a local NEEDS FIX repair", gate)
+            self.assertIn("whose follow-up review supplies\n  that verification", gate)
+
     def test_delegate_implementer_is_a_tier_unaware_reviewer_free_floor(self):
         # The delegate-side implementer floor is a render-only rsrc playbook with
         # no lead-skill entry; lead-delegate renders it when the assignment writes
