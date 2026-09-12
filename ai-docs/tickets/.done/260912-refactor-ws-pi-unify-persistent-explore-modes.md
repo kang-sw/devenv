@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: fc33228416be2bf9
 sage-review-design-reviewed: fc33228416be2bf9
+completed: 2026-09-13
 ---
 
 # Refactor Pi Explore onto one persistent spawn path and intent-tier modes
@@ -68,3 +69,17 @@ At the same time, the public `deep_research?: boolean` schema biases leads towar
 Remove the unreachable blocking implementation and its dedicated storage, lifecycle, shutdown, and test seams. Simplify registration and dispatch so every eligible lead/worker caller reaches the same persistent `spawnAgent` path, receives `{agent_id, alias}`, participates in subtree obligations, and resumes through `ws-agent-send`.
 
 Replace `simple/deep` and `deep_research` with the settled intent-mode vocabulary and tier mapping. Regenerate Pi-only guidance and schema, update runtime/spec language, persist only new modes, and provide the bounded legacy sidecar read migration without accepting the removed public argument. Verify dead-symbol absence; default and every mode-to-tier mapping; authentication refusal before allocation; lead/worker surface identity; terminal-depth omission; same-session follow-up; compaction and restart recovery; legacy sidecar normalization; unknown/removed argument rejection; web-profile identity after its prerequisite lands; and no regression in recursive subtree completion or capability monotonicity.
+
+### Result (c4f78aab) - 2026-09-12
+
+- Replaced the role-keyed blocking/one-shot implementation with one RPC-backed Explore path for every eligible lead, fork, worker, and researcher caller. Persistent children now share ordinary continuation, recovery, transcript, stop, subtree, and push behavior.
+- Replaced the public boolean and simple/deep vocabulary with the eight closed intent modes and their fixed small/medium/large mappings. Omission defaults to `code-search`; removed and unknown arguments fail before tier lookup or allocation.
+- Removed the obsolete recon/no-session process machinery and aligned the Pi guides, live model-tier advisory, runtime specification, role metadata, ownership, sidecars, and affected tests. Legacy stored simple/deep records normalize only at read boundaries; obsolete recon records are no longer accepted.
+- Strengthened the behavioral contract with literal mode/tier oracles, actual RPC prompt/client and resumed-session assertions, and inspection of the terminal child's real `--tools` allowlist.
+- Verification: the affected 19-file test selection passed 606 tests with one intentional skip; the focused bridge/sidecar/Explore selection passed 132 tests; the final Explore selection passed 7 tests; `npm pack --dry-run` succeeded; and `git diff --check` passed. The full `npm test -- --test-reporter=dot` run retained only six pre-existing `fork-lifecycle.integration.test.ts` matrix failures for missing `ws-queue-question`; the same six failures reproduced on an isolated clean `a075db31` worktree.
+- Review: round-one correctness passed. Fit and test review raised five Important findings, all fixed. Round-two fit passed; round-two test verification found one remaining Important false-positive assertion, which was fixed by requiring the argv flags themselves. No Critical findings remained, and the two-round cap was respected.
+
+
+## Resolution (2026-09-13)
+
+Completed the single persistent Explore lifecycle, closed intent-mode tier mapping, legacy persisted-mode normalization, authoritative guidance/spec alignment, and the behavioral coverage required by Phase 1.
