@@ -375,6 +375,35 @@ removed.
     No MCP-owned spawn surface is introduced, and completeness review remains
     ticket-only.
 
+## After-Removal Workflow-Cost Measurement (2026-09-12)
+
+The complete record is
+`ai-docs/ref/refoundation-workflow-cost-measurement-260912.md`. Both runs use
+the corrected manual, pinned commits `84b1f825f5858716833d2f8094ab2848826c6011`
+and `cb0458151aecf4979dd05b6c7e702ebbcbf755a2`, and the same `SIZE=51`,
+`FLOOR=5`, selector, exclusions, and four-reader judgment protocol. Increasing
+the window from the original 20 is permitted when both halves change together;
+51 is the smallest size at which neither run has more missing-`completed:`
+skips than the window size. The after window contains 37 new and 14 shared
+tickets.
+
+Recorded abort indicators do not increase: blocked headings remain 10,
+dropped phases remain four, dropped tickets with real implementation remain
+four of nine printed candidates, judged Result stops remain zero, and
+first-parent goal landings remain five. Other reachable goal-merge traffic
+increases from nine to 11; the manual explicitly treats that as merge traffic,
+not an abort or completion rate.
+
+Visible corrective work increases from 10 of 162 post-implementation commits
+before to 19 of 114 after, and to 19 of 78 in the new partition. The comparison
+does not establish that the worker interpreter causes more re-work: commit
+ownership and granularity changed, the samples cover different topic mixes and
+periods, and 23 of the 37 new tickets have no eligible implementation anchor
+while five more have defective selected anchors. It also does not establish
+parity or improvement. The evidence therefore does not trigger the epic's
+Dropped criterion, whose second condition—no child can bring the result below
+parity—is likewise unestablished.
+
 ## Completion Criteria
 
 - Done: all listed children are `.done/`; the measurement manual has been

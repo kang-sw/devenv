@@ -4,6 +4,7 @@ sage-review-completeness: completed
 sage-review-design: completed
 sage-review-design-reviewed: 6bcbbee708004ce9
 sage-review-completeness-reviewed: 6bcbbee708004ce9
+completed: 2026-09-12
 ---
 
 # Align reference-discovery ticket query examples with the MCP schema
@@ -45,3 +46,19 @@ This duplicated schema prose can directly teach an invalid call.
 
 Align shipped guidance with the authoritative tool schema and add coverage that
 prevents rendered examples from naming unsupported arguments.
+
+### Result (2b112390) - 2026-09-12
+
+- Replaced the singular `status` examples in canonical `reference-discovery`
+  guidance with the schema-supported `statuses: ["…"]` form, regenerated the
+  rsrc manifest, and regenerated the byte-identical wsflow rsrc mirror.
+- Added a render-level regression test for ws and wsflow that requires each
+  ready/todo/idea array-valued query and rejects the unsupported singular form.
+- Verified with `go test ./internal/mcp ./internal/wsrsrc -count=1` and
+  `git diff --check`; partitioned correctness, fit, and test reviews plus the
+  second review round found no remaining findings.
+
+
+## Resolution (2026-09-12)
+
+Phase 1 completed: reference-discovery now uses the schema-supported statuses array in both shipped renders, with regression coverage for ws and wsflow.

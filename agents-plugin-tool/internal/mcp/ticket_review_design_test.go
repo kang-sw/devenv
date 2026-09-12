@@ -96,6 +96,31 @@ func TestTicketDesignReviewExplorationBindings(t *testing.T) {
 	}
 }
 
+func TestReferenceDiscoveryTicketQuerySchema(t *testing.T) {
+	for _, product := range []struct{ pkg, namespace string }{
+		{"agents-plugin", "ws"}, {"agents-plugin-wsflow", "wsflow"},
+	} {
+		t.Run(product.namespace, func(t *testing.T) {
+			t.Setenv("WS_MCP_NAMESPACE", product.namespace)
+			t.Setenv("WS_MCP_NO_AGENT", map[bool]string{true: "1", false: "0"}[product.namespace == "wsflow"])
+			root := filepath.Join("..", "..", "..", product.pkg, "rsrc")
+			body, _, err := renderPlaybookBody(&Server{}, root, "reference-discovery", nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, status := range []string{"ready", "todo", "idea"} {
+				want := product.namespace + `/tickets.query(statuses: ["` + status + `"])`
+				if !strings.Contains(body, want) {
+					t.Errorf("rendered reference discovery is missing %q", want)
+				}
+			}
+			if strings.Contains(body, product.namespace+`/tickets.query(status:`) {
+				t.Errorf("rendered reference discovery uses unsupported status argument:\n%s", body)
+			}
+		})
+	}
+}
+
 func TestTicketFactPopulatorGroundingBoundary(t *testing.T) {
 	for _, pkg := range []string{"agents-plugin", "agents-plugin-wsflow"} {
 		root := filepath.Join("..", "..", "..", pkg, "rsrc")
@@ -108,6 +133,9 @@ func TestTicketFactPopulatorGroundingBoundary(t *testing.T) {
 			"You edit exactly one file: the ticket at the path you were given",
 			"Verify each against matching tree artifacts, using scope-bounded search when necessary",
 			"Replace a contradicted factual claim in place with the true fact and its evidence",
+			"keep every existing `- Convention:` line that exactly matches a current row",
+			"union of those retained valid lines and the path-matched lines",
+			"Count every added, removed, or changed convention line as a correction",
 			"Preserve every `### Result` section, `#### Edition` entry, decision, and phase goal",
 			"Report a gap that requires a product, contract, or architecture choice as a decision gap",
 			"Limit prose corrections to verifiable facts the ticket claims",
@@ -118,6 +146,29 @@ func TestTicketFactPopulatorGroundingBoundary(t *testing.T) {
 				t.Errorf("%s missing %q", pkg, want)
 			}
 		}
+	}
+}
+
+func TestTicketFactPopulatorPreservesConstraintsFixture(t *testing.T) {
+	for _, pkg := range []string{"agents-plugin", "agents-plugin-wsflow"} {
+		t.Run(pkg, func(t *testing.T) {
+			root := filepath.Join("..", "..", "..", pkg, "rsrc")
+			body, _, err := renderPlaybookBody(&Server{}, root, "ticket-fact-populator", nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := strings.Join(strings.Fields(body), " ")
+			for _, want := range []string{
+				"a ticket that names both a `project/rsrc/` path and a `project-tool/internal/mcp/` path",
+				"keeps a valid existing MCP-manual convention line",
+				"adds any missing matching rsrc convention lines",
+				"reports `corrections: 1` or more when that union changes the section",
+			} {
+				if !strings.Contains(text, want) {
+					t.Errorf("%s missing constraint-preservation fixture %q", pkg, want)
+				}
+			}
+		})
 	}
 }
 
