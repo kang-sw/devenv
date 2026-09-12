@@ -1575,14 +1575,21 @@ covered by the "Attach to a live task fork" bullet below exactly as before.
   `open` and the fork keeps running, reattachable at any time. `/done` typed
   in the overlay closes the **thread** — this bullet's fork-raised path only;
   `lead-ask` has no `/done` command post-`260911` (see the queue's own
-  Enter/Esc contract above). No summary, no injection, no stop: the overlay
-  closes at once and the thread goes `dormant` while the task fork carries
-  on. What was decided reaches the lead through that fork's own
-  `kind:"final"` report under `Decisions:`; stopping the fork here would
-  destroy its in-flight task, and the fork's own final is the lead's
-  completion signal. Closing the thread clears the fork's thread-bound flag,
-  so it re-enters the pushed status line and its final is pushed as an
-  ordinary `ws-agent-report`.
+  Enter/Esc contract above). The overlay closes at once with no summary or
+  injection, then the adapter reconciles that task fork before releasing it:
+  a running fork is allowed to settle; an already accepted or queued terminal
+  outcome is not duplicated; and an idle fork with no terminal outcome receives
+  exactly one lead-attributed closeout request for its normal final report. A
+  valid final reaches the lead once as an ordinary `ws-agent-report`. A closeout
+  that settles without a valid final, reports another question, or fails emits
+  one missing-final or operational advisory instead; the adapter never
+  manufactures a successful final. After selecting that one terminal outcome,
+  it silently parks the fork. Repeated `/done`, report, and settle callbacks in
+  the same adapter run do not issue another closeout, terminal push, or park.
+  Exact continuation across abrupt process death or plugin `/reload` is
+  best-effort: those boundaries may lose or duplicate a closeout or terminal
+  notification, and ordinary inspect/send/stop actions remain the recovery
+  path.
   The lead session is never rewound; injection is forward-only.
 - **Headless baseline preserved.** Off the TUI (`ctx.mode !== "tui"`, e.g.
   `--mode rpc`), a fork-raised question is pushed to the lead byte-for-byte as

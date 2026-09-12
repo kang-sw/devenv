@@ -423,6 +423,11 @@ export function wireAntiBleedLoop(
   client.onEvent((evt) => {
     const e = evt as { type?: string; toolName?: string; args?: unknown };
 
+    // A fork-raised `/done` is coordinated in spawner.ts before ordinary
+    // settle/park handling. Its report/question/final and settle outcomes
+    // must not also trigger this independent anti-bleed listener.
+    if (record.forkFinish && (e.type === "agent_settled" || (e.type === "tool_execution_start" && e.toolName === REPORT_TO_LEAD_TOOL_NAME))) return;
+
     if (e.type === "agent_start") {
       hadToolCallThisTurn = false;
       turnReportKind = undefined;
@@ -627,6 +632,14 @@ export function armForkRoleWiring(
   onQuestion?: ForkQuestionCallback,
   expectsCommit = false,
 ): void {
+  // The lower lifecycle layer cannot import this module, so hand it the same
+  // final policy used by the anti-bleed notices. A finish-owned report is
+  // accepted only after its tool invocation succeeds and this callback says
+  // it is a real completion.
+  record.validateForkFinal = (message) => {
+    if (!validateFinalReportShape(message).ok) return false;
+    return checkExpectsCommitCompletion(expectsCommit, extractReportField(message, "Commit")).ok;
+  };
   if (onQuestion) {
     // 260904 Phase 2 (review relay #1 I6), revised 260905: armed at the
     // report-handling site rather than on turn settle. A defined return
