@@ -287,7 +287,7 @@ describe("buildCompactionLeverResult", () => {
 });
 
 describe("buildGoalReminder", () => {
-  const info = { percent: 42, advisoryPercent: 70 };
+  const info = { percent: 42, advisoryPercent: 50 };
 
   test("names the goal and all three lever tool names (two terminal, one compact-and-continue)", () => {
     const reminder = buildGoalReminder("ship the widget", info);
@@ -309,22 +309,23 @@ describe("buildGoalReminder", () => {
   });
 
   test("percent below the advisory point explicitly tells the model not to compact", () => {
-    const reminder = buildGoalReminder("a goal", { percent: 42, advisoryPercent: 70 });
-    assert.match(reminder, /Context usage: 42% of window — below the compaction advisory point \(70%\); do not call goal-compact-and-continue\.$/m);
+    const reminder = buildGoalReminder("a goal", { percent: 42, advisoryPercent: 50 });
+    assert.match(reminder, /Context usage: 42% of window — below the compaction advisory point \(50%\); do not call goal-compact-and-continue\.$/m);
   });
 
-  test("percent at the advisory point renders the stronger nudge phrase", () => {
-    const reminder = buildGoalReminder("a goal", { percent: 70, advisoryPercent: 70 });
-    assert.match(reminder, /Context usage: 70% of window — at or above the advisory point/);
+  test("percent at the advisory point prioritizes compact-and-continue for weakly related next work", () => {
+    const reminder = buildGoalReminder("a goal", { percent: 50, advisoryPercent: 50 });
+    assert.match(reminder, /Context usage: 50% of window — at or above the advisory point/);
+    assert.match(reminder, /prioritize goal-compact-and-continue when the next work is weakly related to the current context/);
   });
 
   test("percent above the advisory point renders the stronger nudge phrase", () => {
-    const reminder = buildGoalReminder("a goal", { percent: 85, advisoryPercent: 70 });
+    const reminder = buildGoalReminder("a goal", { percent: 85, advisoryPercent: 50 });
     assert.match(reminder, /Context usage: 85% of window — at or above the advisory point/);
   });
 
   test("null percent renders as unknown, not a crash", () => {
-    const reminder = buildGoalReminder("a goal", { percent: null, advisoryPercent: 70 });
+    const reminder = buildGoalReminder("a goal", { percent: null, advisoryPercent: 50 });
     assert.match(reminder, /Context usage: unknown\./);
   });
 });

@@ -111,7 +111,7 @@ export function resolveAgentWaitAnimation(config: GoalLoopConfig | undefined): b
 export const DEFAULT_RUNAWAY_THRESHOLD = 10;
 
 /** Default advisory context-usage percent (adapter-chosen, no ticket-pinned value; config-tunable) surfaced in the reinject reminder. */
-export const DEFAULT_COMPACTION_ADVISORY_PERCENT = 70;
+export const DEFAULT_COMPACTION_ADVISORY_PERCENT = 50;
 
 /** Default settle-timer delay in milliseconds, absent (or overridden by) a config file (260906 Phase 1). */
 export const DEFAULT_SETTLE_DELAY_MS = 5000;
@@ -246,7 +246,7 @@ export function buildGoalReminder(goal: string, info: { percent: number | null; 
     percent === null
       ? "Context usage: unknown."
       : percent >= advisoryPercent
-        ? `Context usage: ${Math.round(percent)}% of window — at or above the advisory point (${advisoryPercent}%); consider goal-compact-and-continue if you are at a safe compaction point.`
+        ? `Context usage: ${Math.round(percent)}% of window — at or above the advisory point (${advisoryPercent}%); prioritize goal-compact-and-continue when the next work is weakly related to the current context and you are at a safe compaction point.`
         : `Context usage: ${Math.round(percent)}% of window — below the compaction advisory point (${advisoryPercent}%); do not call goal-compact-and-continue.`;
   return (
     `Goal yet running: "${goal}". Call goal-achieved <summary> or goal-blocked <reason> for a state ` +
