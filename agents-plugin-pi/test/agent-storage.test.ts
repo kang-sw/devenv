@@ -292,21 +292,60 @@ describe("agent storage", () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test("a newly observed session write refreshes activity before the stale decision", () => {
+  test("a newly observed session write refreshes activity before the stale decision", (t) => {
     const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
     const now = Date.parse("2026-10-10T00:00:00.000Z");
+    t.mock.method(Date, "now", () => now);
     try {
       const owned = allocateAgentHome(createAgentStorageContext("lead-write", root), "agent-write", "worker");
       const metadata = readOwnership(owned.home)!;
       writeOwnership({ ...metadata, lastActivityAt: now - 31 * 86_400_000, liveness: { ...metadata.liveness, lifecycle: "stopped", running: false } });
       writeFileSync(owned.sessionPath!, "new history");
-      const result = pruneStaleAgentHomes(realpathSync(root), 30, {
-        now: () => now,
-        observeSession: home => { updateOwnership(home, { lastActivityAt: now }); },
-      });
+      const result = pruneStaleAgentHomes(realpathSync(root), 30, { now: () => now });
       assert.deepEqual(result.deletedHomes, []);
       assert.equal(existsSync(owned.home), true);
       assert.equal(readOwnership(owned.home)!.lastActivityAt, now);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("the deletion claim blocks a racing activity write and stale eligibility is rechecked under that claim", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+    try {
+      const owned = allocateAgentHome(createAgentStorageContext("lead-race", root), "agent-race-lock", "worker");
+      updateOwnership(owned.home, { liveness: { lifecycle: "stopped", running: false } });
+      const cutoff = Date.now() - 1;
+      touchOwnership(owned.home);
+      const refreshed = removeOwnedAgentHome(owned, undefined, metadata => metadata.lastActivityAt <= cutoff);
+      assert.equal(refreshed.status, "retained", "a touch that wins the claim invalidates stale eligibility");
+
+      const metadata = readOwnership(owned.home)!;
+      writeOwnership({ ...metadata, lastActivityAt: 1 });
+      const removed = removeOwnedAgentHome(owned, staged => {
+        assert.equal(touchOwnership(owned.home), false, "a touch cannot cross the deletion claim or recreate the detached home");
+        rmSync(staged, { recursive: true, force: false });
+      }, current => current.lastActivityAt <= cutoff);
+      assert.deepEqual(removed, { status: "deleted" });
+      assert.equal(existsSync(owned.home), false);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("a claim abandoned by a dead process is recovered without weakening malformed/live claim retention", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+    try {
+      const owned = allocateAgentHome(createAgentStorageContext("lead-abandoned", root), "agent-abandoned", "worker");
+      const lock = join(dirname(owned.home), `.${owned.agentId}.ownership-lock`);
+      mkdirSync(lock);
+      writeFileSync(join(lock, "owner.json"), JSON.stringify({ pid: 2_147_483_647 }));
+      assert.equal(touchOwnership(owned.home), true);
+      assert.equal(existsSync(lock), false);
+
+      mkdirSync(lock);
+      writeFileSync(join(lock, "owner.json"), JSON.stringify({ pid: process.pid }));
+      assert.equal(touchOwnership(owned.home), false, "a live holder is never reclaimed");
+      rmSync(lock, { recursive: true, force: true });
+      mkdirSync(lock);
+      writeFileSync(join(lock, "owner.json"), "{}");
+      assert.equal(touchOwnership(owned.home), false, "malformed holder facts fail closed");
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
