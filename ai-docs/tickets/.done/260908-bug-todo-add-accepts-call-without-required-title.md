@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 8de8d4fc5d2a7f5a
 sage-review-completeness-reviewed: 8de8d4fc5d2a7f5a
+completed: 2026-09-12
 ---
 
 # todo.add accepts a call that omits the required title and silently stores an empty item
@@ -52,3 +53,12 @@ to be unreadable.
 Validate the advertised required `title` at the `todo.add` handler boundary and
 add contract coverage for omitted, empty, and valid titles without changing
 unknown-field behavior.
+
+### Result (3ef60be2) - 2026-09-12
+
+- `todo.add` now validates `title` with the existing raw required-string helper
+  before append or insert mutation, returning `todo.add: title is required` for
+  omitted or empty values.
+- Contract coverage verifies omitted and empty titles fail without creating an
+  item, while a valid title succeeds and is stored unchanged.
+- Verification: `go test ./internal/mcp -run '^TestServeStdioTodoAdd(ErrorBranches|ReproducesOldPlacements)$' -count=1` and `go test ./...` passed from `agents-plugin-tool`; correctness, fit, and test reviews plus the round-two convergence check were clean.
