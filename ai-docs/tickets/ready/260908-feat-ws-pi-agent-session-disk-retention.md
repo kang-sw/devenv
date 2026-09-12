@@ -205,6 +205,10 @@ Probe roots and processes were removed. An initial SDK signature probe created
 one synthetic file in the owner's default session directory; that exact new
 file was immediately removed, without changing pre-existing history.
 
+#### Edition (d08e0dc1) - 2026-09-13
+
+The actual Pi extension live acceptance passed for fresh fork, ordinary-worker, and Explore samples. The fork and both child types used ownership-recorded homes under the configured `~/.pi/agent/ws-agents` root; the fork transcript preserved its lead `parentSession` ancestry; none of their identifiers appeared under Pi's ordinary resume-session directory; and the acceptance window created no legacy `ws-pi-agent-*` temporary home. The ordinary sample settled cleanly with zero active/outstanding descendants. A fork-owned Explore request was correctly refused because network authority exceeded that fork's ceiling, so a fresh root-owned Explore supplied the Explore storage sample. Retain these owned homes as audit evidence for the real Phase 2/3 cleanup paths rather than deleting them manually. This satisfies the Phase 1 owner live adapter gate.
+
 ### Phase 2: Clean up scratch homes and cap-evicted sessions
 
 Build on Phase 1 metadata to remove unused scratch homes and safely remove
@@ -224,13 +228,3 @@ protected children in another live lead, mixed-age subtrees, unknown legacy home
 missing lead files, missing audit history, and permission failures. Owner live
 check uses disposable owned fixtures with a short TTL; production history is not
 needed to verify deletion.
-
-## Blocked (2026-09-09)
-
-Awaiting the Phase 1 owner live adapter check: launch fresh worker, fork, and
-explore children through the actual extension, confirm their configured owned
-homes and fork ancestry, and confirm they neither enter Pi's ordinary resume
-list nor allocate legacy `ws-pi-agent-*` homes. The extension-disabled CLI probe
-does not satisfy this gate. Record acceptance before advancing to Phase 2;
-the ticket stays open in `ready/` and autonomous selection should skip it while
-this condition remains outstanding. No production-history deletion is needed.
