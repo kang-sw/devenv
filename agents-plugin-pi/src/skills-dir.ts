@@ -90,3 +90,18 @@ export function prepareSkillsDir(pluginDir: string, repoRoot: string): string {
   validateGeneratedSkillTargets(resolved, join(pluginDir, "rsrc", "manifest.json"));
   return resolved;
 }
+
+type SkillResourcesRegistrar = {
+  on(event: "resources_discover", handler: () => { skillPaths: string[] }): unknown;
+};
+
+/** Register the startup/reload seam that prepares skills before Pi discovers them. */
+export function registerSkillResources(
+  pi: SkillResourcesRegistrar,
+  pluginDir: string,
+  repoRoot: string,
+): void {
+  pi.on("resources_discover", () => ({
+    skillPaths: [prepareSkillsDir(pluginDir, repoRoot)],
+  }));
+}

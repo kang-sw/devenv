@@ -194,7 +194,7 @@ import { registerPushMessageRenderers } from "./push-render.ts";
 import { buildOrphanPush, captureOrphans, noSessionSidecarPath, readAndClearSidecarAt, reviveOrphans, sidecarPath, writeSidecarAt, type PersistedOrphan } from "./agent-sidecar.ts";
 import { buildDiscussKickoff } from "./discuss.ts";
 import { registerGoalLoop, readGoalLoopConfig, resolveAgentWaitAnimation, resolveChildRetentionTtlDays, resolveSettleDelayMs } from "./goal-loop.ts";
-import { prepareSkillsDir } from "./skills-dir.ts";
+import { registerSkillResources } from "./skills-dir.ts";
 import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
 import { applyForkAffinity, captureRegisteredTools, classifyForkRegistrations, compareForkRegistrations, effectiveForkDescriptor, formatForkRegistrationMismatch, frameForkInput, isCompletionCriticalForkTool, readForkLaunchContext, removeForkTransport, restoreForkContext, restoreForkKeys, writePrivateJson, type ForkContext } from "./fork-context.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, type SpawnRole } from "./process-role.ts";
@@ -419,11 +419,9 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   // `session_shutdown`. `undefined` in every non-TUI or non-lead/fork process,
   // which is also what keeps `agentWidgetRefreshRef.current` unset there.
   let agentWidgetHandle: AgentWidgetController | undefined;
-  pi.on("resources_discover", () => ({
-    // This event fires for both startup and /reload, so local workflow syncs
-    // replace the ignored generated tree before Pi rebuilds its skill list.
-    skillPaths: [prepareSkillsDir(pluginDir, repoRoot)],
-  }));
+  // This event fires for both startup and /reload, so local workflow syncs
+  // replace the ignored generated tree before Pi rebuilds its skill list.
+  registerSkillResources(pi, pluginDir, repoRoot);
 
   // Read-only: lists Pi's currently scoped (or, if unscoped, all available)
   // models as `provider/id` candidates for the user to hand-copy into a
