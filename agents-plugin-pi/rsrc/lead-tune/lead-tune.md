@@ -16,7 +16,6 @@ Scope
 Surface
 - Treat `config.list` as the source of supported knob ids, the `config.tune` write contract, field options, and current values.
 - Treat prompt override-point ids as valid only when they appear as `prompt.<pointId>` knobs in `config.list`.
-- Before proposing a `harness` value for any knob, confirm it against that knob's `config.list`-reported selector enum; do not assume `codex`/`claude` are the only accepted names.
 - State that any tuning request that does not map to one of this playbook's handlers is not yet supported.
 
 Storage
@@ -52,15 +51,14 @@ Examples:
 4. Call `config.tune` with `key` set to `"workflow.prefer_subagent"`, `session_key`, and the selected value.
 5. Report the global state and that it applies to the next workflow-manual load.
 
-<!-- ws:full-only:start -->
-## On: tune delegation mode
+## On: tune Sage review posture
 
-1. Map the request to the `"workflow.prefer_mercenary"` catalog knob.
-2. Choose the new state from the catalog value field.
-3. Confirm the Tuning Proposal with the selected value.
-4. Call `config.tune` with `key` set to `"workflow.prefer_mercenary"`, `session_key`, and the selected value.
-5. Report the global state and that it controls both mercenary visibility and default render guidance.
-<!-- ws:full-only:end -->
+1. Map a request to skip, recommend, or require Sage review to the `sage_review` catalog knob.
+2. Obtain its writer, `off`/`ask`/`auto` value choices, and scope choices from `config.list`; map skipped to `off`, recommended to `ask`, and required to `auto`.
+3. Choose the catalog-provided scope, using its declared default unless the user selects session, project, or global scope.
+4. Confirm the Tuning Proposal with the selected posture value and scope.
+5. Call the catalog writer with `key` set to `sage_review`, `session_key`, the selected scope, and the mapped value.
+6. Report the stored posture and scope; it applies to subsequent ticket boundaries.
 
 ## On: tune model tier
 
@@ -72,19 +70,17 @@ Examples:
 
 ## On: unsupported axis
 
-1. State that the request is not a supported tuning knob today.
-2. If it is per-role tier tuning (a `(role) -> tier` override), point to research ticket `260611-research-ws-per-role-delegation-tuning-config`.
-3. Do not fabricate a tool for an unsupported knob.
+1. State that the request is not a supported tuning knob today. Per-role tier
+   tuning (a `(role) -> tier` override) is one such unsupported axis.
+2. Do not fabricate a tool for an unsupported knob.
 
 ## Judgments
 
 ### judge: tune-target
 - User standing preferences, communication style, language, terminology, or wording conventions -> prompt override (`UserPreferenceSection`).
 - Prompt wording or a named manual section -> prompt override for that named override point.
-- "delegate more/less" or strict subagent posture -> workflow preference (`"workflow.prefer_subagent"`).
-<!-- ws:full-only:start -->
-- A preference for mercenary delegation mode, including persistent agents where supported -> workflow preference (`"workflow.prefer_mercenary"`).
-<!-- ws:full-only:end -->
+- "delegate more/less" or default delegation of eligible general work -> workflow preference (`"workflow.prefer_subagent"`).
+- A default request to skip, recommend, or require Sage review at ticket boundaries -> Sage review posture (`sage_review`).
 - A model, tier, or "cheaper/stronger model" preference -> model tier (`agents.tier`).
 - Anything else -> unsupported axis.
 

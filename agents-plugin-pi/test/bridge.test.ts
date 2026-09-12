@@ -45,41 +45,56 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 // repo's own lead playbook), and `test/fixtures/workflow-manual-response.txt`
 // is a live CONTINUE-mode `workflow_manual` response for the same session key
 // against this repo — both captured via a throwaway spawnWsMcpClient() +
-// initialize() + ferrule + the two calls, the same technique this file's
-// LIVE_TOOL_NAMES comment (below) says was already used once. The response
-// fixture's `## Session Key` onward (session state + notes) is trimmed to a
-// few representative lines; everything before it (ws-mcp's prepended
-// warnings/manuals block, then the full manual body) is untouched, so the
-// anchor cut is exercised against a genuinely real-shaped response, not a
-// hand-authored stand-in.
-const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
+// initialize() + ferrule + the two calls. The response fixture's `## Session
+// Key` onward (session state + notes) is trimmed to a few representative
+// lines; everything before it is untouched, so the anchor cut is exercised
+// against a genuinely real-shaped response, not a hand-authored stand-in.
+// `develop-marker.integration.test.ts` re-runs this path only when explicitly
+// opted in with WS_PI_VERIFY_DEVELOP_MARKER=1; it proves the marker build,
+// exact runtime tool set, static fixture, and anchor cut against live ws-mcp.
+const TEST_DIR = dirname(fileURLToPath(import.meta.url));
+const FIXTURES_DIR = join(TEST_DIR, "fixtures");
 const REAL_STATIC_BODY_SNAPSHOT = readFileSync(join(FIXTURES_DIR, "workflow-manual-static-body.txt"), "utf8");
 const REAL_WORKFLOW_MANUAL_RESPONSE = readFileSync(join(FIXTURES_DIR, "workflow-manual-response.txt"), "utf8");
+const BUNDLED_RUNTIME = JSON.parse(readFileSync(join(TEST_DIR, "..", "runtime.json"), "utf8")) as {
+  tools: Record<string, string>;
+  commands: Record<string, string>;
+};
 
-// Live snapshot of ws-mcp's tools/list response (60 tools), captured via a
-// direct spawnWsMcpClient() probe against this repo's ws-mcp launcher. Not
-// re-fetched on every test run (that would make this a subprocess-spawning
-// integration test, not a unit test) — if ws-mcp's tool set changes, the
-// live gate re-verification step (run separately, see the implementation
-// report) is what catches drift; this fixture only locks in the naming
-// invariants against the set known at review-fix time.
+// Captured develop-root ws-mcp tools/list snapshot. The exact set is compared
+// to the bundled contract below; it is not an independent hand-maintained
+// contract source.
 const LIVE_TOOL_NAMES = [
-  "agenda.clear", "agenda.list", "agenda.set", "api.list", "config.list",
-  "config.tune", "convention.read", "enter.implement", "enter.proceed",
-  "ferrule", "git.commit", "git.diff", "git.log", "git.merge_base",
-  "git.status", "infra.read", "mental_models.find", "mental_models.list",
-  "mental_models.status", "note.erase", "note.mute", "note.search",
-  "note.unmute", "note.write", "path.generate", "playbook.print",
-  "playbook.render", "project_tree", "references.trace",
-  "runtime.debug_events", "runtime.info", "session.children",
-  "session.note", "spec_index.verify", "spec_stem.generate", "specs.find",
-  "specs.list", "specs.status", "tickets.checklist", "tickets.close",
-  "tickets.create_empty", "tickets.find", "tickets.list", "tickets.move",
-  "tickets.sage_gate", "tickets.sage_stamp", "tickets.status",
-  "tickets.template", "tickets.verify", "todo.append", "todo.check",
-  "todo.clear", "todo.erase", "todo.insert_after", "todo.insert_before",
-  "todo.list", "todo.read", "todo.reorder", "workflow_manual",
-  "workflow_state",
+  "runtime.read", "runtime.debug_events", "session.children", "session.note",
+  "ferrule", "agenda.set", "agenda.clear", "agenda.list",
+  "route.resolve_implement", "route.resolve_proceed", "todo.add", "todo.check",
+  "todo.erase", "todo.clear", "todo.list", "todo.read", "todo.reorder",
+  "api.list", "config.list", "config.tune", "config.resolve_agent",
+  "git.status", "git.diff", "git.log", "git.merge_base", "git.merge",
+  "git.commit", "project_tree", "infra.read", "convention.read", "note.write",
+  "note.erase", "note.mute", "note.unmute", "note.query", "tickets.query",
+  "tickets.close", "review.marker", "review.stamp", "tickets.move",
+  "tickets.create_empty", "tickets.template", "tickets.checklist", "tickets.sage_gate",
+  "tickets.sage_stamp", "tickets.verify", "path.generate", "workflow_manual",
+  "workflow_state", "playbook.read", "playbook.render",
+];
+const RETIRED_TOOL_NAMES = [
+  "specs.query", "mental_models.list", "mental_models.query", "mental_models.status",
+  "references.trace", "spec_index.verify", "spec_stem.generate",
+];
+const EXPECTED_COMMAND_NAMES = [
+  "runtime.info", "runtime.capabilities", "smoke", "config.list", "config.tune",
+  "path.generate", "git.status", "git.diff", "git.log", "git.merge-base", "git.commit",
+  "tickets.list", "tickets.find", "tickets.status", "tickets.close", "tickets.move",
+  "tickets.create-empty", "tickets.verify",
+];
+const RETIRED_COMMAND_NAMES = [
+  "mercenary.register", "mercenary.call", "mercenary.run-current", "mercenary.wait",
+  "mercenary.result", "mercenary.status", "mercenary.interrupt", "mercenary.check-inbox",
+  "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout", "mercenary.debug.stderr",
+  "mercenary.debug.runtime-log", "mercenary.debug.events", "mercenary.cancel", "mercenary.print",
+  "mercenary.erase", "specs.list", "specs.find", "specs.status", "mental-models.find",
+  "mental-models.status", "references.trace",
 ];
 
 describe("sanitizeToolName", () => {
@@ -90,8 +105,23 @@ describe("sanitizeToolName", () => {
     assert.equal(sanitizeToolName("ferrule"), "ws__ferrule");
   });
 
-  test("live tool set: exactly 60 names", () => {
-    assert.equal(LIVE_TOOL_NAMES.length, 60);
+  test("captured tool set exactly matches the bundled 51-tool contract", () => {
+    const bundledToolNames = Object.keys(BUNDLED_RUNTIME.tools).sort();
+    assert.equal(bundledToolNames.length, 51);
+    assert.deepEqual([...LIVE_TOOL_NAMES].sort(), bundledToolNames);
+    assert.ok(bundledToolNames.includes("git.merge"));
+    for (const retiredName of RETIRED_TOOL_NAMES) {
+      assert.ok(!bundledToolNames.includes(retiredName), `retired tool must remain absent: ${retiredName}`);
+    }
+  });
+
+  test("bundled command contract is the settled 18-command surface", () => {
+    const bundledCommandNames = Object.keys(BUNDLED_RUNTIME.commands).sort();
+    assert.equal(bundledCommandNames.length, 18);
+    assert.deepEqual(bundledCommandNames, [...EXPECTED_COMMAND_NAMES].sort());
+    for (const retiredName of RETIRED_COMMAND_NAMES) {
+      assert.ok(!bundledCommandNames.includes(retiredName), `retired command must remain absent: ${retiredName}`);
+    }
   });
 
   test("live tool set: every sanitized name matches provider-legal charset ^[a-zA-Z0-9_-]+$", () => {
@@ -338,7 +368,7 @@ describe("cutStaticBody", () => {
     assert.equal(result.text, expected);
     assert.ok(!result.text.includes(REAL_START_LINE), "the manual body's start heading must be cut out");
     assert.ok(result.text.startsWith("review watermark"), "the prepended advisory block ahead of the manual body must survive");
-    assert.ok(result.text.includes("## Session Key\nwooing-lunchbox-parsnip"), "the ## Session Key tail must survive, end-anchor line included");
+    assert.ok(result.text.includes("## Session Key\ncork-crease-renewable"), "the ## Session Key tail must survive, end-anchor line included");
   });
 
   test("reason: end-anchor when the response's ## Session Key heading is missing", () => {
