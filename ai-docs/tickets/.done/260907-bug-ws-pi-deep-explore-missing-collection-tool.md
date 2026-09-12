@@ -6,6 +6,7 @@ spec:
   - 260903-pi-explore-recon-leaf
 sage-review-design: skipped
 sage-review-completeness: skipped
+completed: 2026-09-12
 ---
 
 # Deep exploration researcher lacks its blocking collection tool in live Pi
@@ -208,9 +209,13 @@ self-report of unobservable model state):
   acceptance remains incomplete until supported by evidence, and this bug's
   capture does not mark it done.
 
-## Blocked (2026-09-09)
+### Result (c327aca7) - 2026-09-12
 
-Blocked on a human/owner-run gate, not on remaining agent work. Phase 1 (the
+Phase 2 completed as a no-fix live verification result. Fresh and post-full-process-restart deep researchers successfully invoked read-only blocking collection four times across initial, explicit stop/resume, and restored follow-up turns. Lead-observed transcript results resolved every leaf to `small` / `openai-codex/gpt-5.6-luna/high`, exposed the expected `read`, `grep`, `find`, `ls` allowlist, and delivered each result to synthesis. The restored ownership sidecar retained deep role/mode and the current Pi-track source marker pinned ws `0.45.2`. No launch, registration, mutation, recursion, stale-bootstrap, or deep-group defect reproduced, so no additional code change is warranted.
+
+## Prior Blocked (2026-09-09; resolved 2026-09-12)
+
+At that checkpoint, the ticket was blocked on a human/owner-run gate, not on remaining agent work. Phase 1 (the
 structural fail-loud guard that stands regardless of the exact trigger) is
 complete, reviewed clean, and recorded above (`### Result (55172110)`). The only
 remaining work is **Phase 2**, which the ticket itself scopes as blocked
@@ -228,3 +233,8 @@ not be re-dispatched for implementation until the owner captures the live
 evidence. Clear this note when that evidence is recorded on the prerequisite
 feature ticket (`260907-feat-ws-pi-persistent-explore-deep-research`) and Phase 2
 becomes actionable.
+
+
+## Resolution (2026-09-12)
+
+Closed with a no-fix Phase 2 result after four fresh, stop/resume, and post-restart deep collections succeeded with the expected read-only allowlist and small Luna/high resolution; the reported launch/registration defect did not reproduce.

@@ -12,6 +12,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 7e08cef8d289588b
 sage-review-completeness-reviewed: 7e08cef8d289588b
+completed: 2026-09-12
 ---
 
 # Persistent explore preset with an optional deep-research mode
@@ -93,7 +94,13 @@ Verification must cover:
 - Existing worker/execute-worker blocking exploration remains blocking, read-only and self-reaping. Shared resolver changes do not accidentally change unrelated spawn callers' policies.
 - Run the adapter tests with realistic tool-surface/lifecycle fixtures, not only flag assertions. Owner-run dogfood: simple explore -> settle -> send follow-up; deep explore -> small blocking collection -> synthesis; stop/resume; restart and follow-up with recorded role/model/effort intact. No implementation completion claim substitutes mocked coverage for the live check.
 
-## Implementation checkpoint - 2026-09-07
+### Result (c327aca7) - 2026-09-12
+
+The implementation and mandatory owner-run live provider/restart matrix are complete. Fresh simple Explore settled, accepted a follow-up through the same retained alias, and settled again. Deep Explore performed successful read-only small collection and synthesis, survived an explicit mid-turn stop and auto-resume, then restored after a full Pi process exit/reopen as the same dormant agent ID and alias and completed further collection-backed follow-ups.
+
+Lead-side registry, ownership-sidecar, and JSONL evidence preserved `role: explore`, `exploreMode: deep`, sidecar recovery, and the frozen parent `openai-codex/gpt-5.6-sol/medium` profile. The preserved deep transcript contains exactly four blocking collection calls; all returned `state: done` and resolved independently to `small` / `openai-codex/gpt-5.6-luna/high`. The live collection surface remained read-only (`read`, `grep`, `find`, `ls`), results reached researcher synthesis, and no launch, registration, mutation, or recursion error occurred.
+
+## Prior implementation checkpoint - 2026-09-07
 
 Implementation is committed on `impl/track/pi-agent/suave-kooky-halt`: initial implementation `048a9cb2`, review corrections `6998a5b0`, against plan baseline `1083e01a`. The unrelated research-ticket commit `5a962f0a` is preserved and excluded from implementation review scope.
 
@@ -103,9 +110,9 @@ Relay verification reports 946/946 tests passing both normally and with inherite
 
 **Phase 1 remains unfinished pending the mandatory owner-run live provider/restart dogfood above.** Automated tests and the no-model probe do not clear this gate. No Result is recorded and the ticket remains ready until live evidence is recorded. Merge has not been authorized or performed. Spec and adapter guidance are updated; no shared rsrc or ws-mcp code was changed.
 
-## Blocked (2026-09-09)
+## Prior Blocked (2026-09-09; resolved 2026-09-12)
 
-Blocked on a human-only gate, not on agent-doable work. Phase 1's automated
+At that checkpoint, the ticket was blocked on a human-only gate, not on agent-doable work. Phase 1's automated
 slice is already complete on `impl/track/pi-agent/suave-kooky-halt` (impl
 `048a9cb2`, review corrections `6998a5b0`, plan baseline `1083e01a`):
 partitioned review closed both Critical findings, Important dispositions are
@@ -121,3 +128,8 @@ the evidence, so this queue turn cannot advance it further.
 Unblocks when: the owner runs the live dogfood and records the evidence (append
 the Phase 1 Result and clear this note). Drain-queue selector should skip this
 ticket until then.
+
+
+## Resolution (2026-09-12)
+
+Closed after the mandatory live matrix passed for simple settle/follow-up, deep collection/synthesis, explicit stop/resume, full Pi process restart, same-agent restoration, frozen parent profile, and read-only small collection profile retention.
