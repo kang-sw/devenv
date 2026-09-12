@@ -2,6 +2,7 @@
 title: "Fact-populator regression fixture leaks repository paths into shipped prose"
 related:
   260912-bug-ticket-fact-populator-drops-manual-constraints: regression source
+completed: 2026-09-12
 ---
 
 # Fact-populator regression fixture leaks repository paths into shipped prose
@@ -24,3 +25,8 @@ population and that constraint mutations are reported, without embedding this
 repository's private layout names in shipped prompt text. Verification must
 include the targeted fact-populator contract test and the full shipped-surface
 downstream-neutral test suite.
+
+
+## Resolution (2026-09-12)
+
+Replaced repository-private fixture paths with project-neutral examples, regenerated both resource manifests and the wsflow mirror, and updated the Go assertion. The full ws and wsflow plugin test suites, downstream-neutral suite, resource mirror tests, and git diff check pass at e5f8a393.
