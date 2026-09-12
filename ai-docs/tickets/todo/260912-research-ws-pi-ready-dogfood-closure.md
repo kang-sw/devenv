@@ -22,6 +22,8 @@ The baseline audit on 2026-09-12 found fourteen tickets in `ready/`: eight with 
 - Keep report and collection tickets distinct from implementation tickets. Closing an implementation ticket does not automatically close its workset or monitoring record.
 - Preserve explicit non-goals: the same-process fork `/done` fix does not promise exact crash or plugin-reload reconciliation and does not complete the broader owner-steering phase.
 - Append dated evidence and dispositions here as work proceeds; update the owning ticket before moving it to `.done/`.
+- For multi-step owner-live UI checks, queue the checklist in the owner answer modal while the relevant state is still visible and collect the observations before changing that state. Do not ask the owner to reconstruct several visual states after the run.
+- Treat an agent's narration of an owner action as unverified unless the owner explicitly confirms it or the adapter emits direct lifecycle evidence. In particular, a fork report saying the owner closed a thread is not evidence that `/done` was entered.
 
 ## Baseline ready inventory
 
@@ -125,4 +127,4 @@ Advance `260911-bug-ws-pi-question-queue-dogfood` from `idea/` through the requi
 
 ## Current next action
 
-Continue sequence step 2 with the remaining consolidated visual TUI session: verify light/dark report headers, narrow-width waiting cues, count placement, worker/fork telemetry, and attention behavior, then close each independent ticket whose owner-live contract passes.
+Repeat sequence step 2 using in-modal, state-local checklists. The first attempt explicitly confirmed only gutter behavior at 120/80/40 columns; its retrospective checklist and the fork's unsupported `/done` narration are not acceptance evidence. Recreate pending question and approval states, collect their checks in the answer modal before resolving them, then separately collect report/theme and attention-toggle checks.
