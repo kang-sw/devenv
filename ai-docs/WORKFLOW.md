@@ -50,8 +50,13 @@ template rather than relying on a project-local guide override.
 - Reference tickets by stem, never by path; stems stay stable when tickets move
   between status directories.
 - `idea/` is rough intake, `todo/` is accepted backlog, and `ready/` is the
-  implementation-ready status: a ticket reaches it once its plan and decisions
-  have passed independent design review.
+  implementation-ready status for actionable tickets. Ordinary actionable
+  `todo/` creation and editing are ungated; at `ready/` promotion populate
+  facts, then run design and completeness review against that body.
+- Epics settle design explicitly at `idea/` to `todo/`: check facts, then run
+  design-only review. Material cross-child decision edits require explicit
+  re-settlement before a child relies on them; ordinary edits do not auto-review.
+  Epics and research stay in `idea/` or `todo/`; research remains ungated.
 - Actionable tickets use `## Phases` with stable `### Phase N: <title>`
   headings. Research tickets may use freeform topic sections.
 - After a phase has a `### Result` section, treat its plan text and existing
@@ -93,9 +98,9 @@ design decisions route to `lead-run`. Ticket capture, standalone review, and
 release retain their owning workflows. `workflow.prefer_subagent` defaults only
 eligible general work to `lead-delegate`.
 
-The ticket is the plan. Its decisions are settled when it is written: its
-stated facts are checked against the code and written into it, and its plan
-passes independent design review, before it enters `ready/`. Execution
+The ticket is the plan. At actionable `ready/` promotion its stated facts are
+checked against the code and written into it, then its plan passes independent
+design and completeness review against that populated body. Execution
 consumes those decisions instead of re-making them.
 
 One worker executes one whole ticket: it routes, edits, verifies, runs

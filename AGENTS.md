@@ -343,4 +343,4 @@ ai-docs/tickets/.dropped/
      `## Project Orientation` section or the `repo` note layer; a procedure
      goes in `ai-docs/manuals/`; process goes in skills. -->
 
-<!-- Template Version: v0048 -->
+<!-- Template Version: v0050 -->
