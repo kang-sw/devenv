@@ -134,6 +134,17 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 		add("override_scope", "release_target_override applies only to main or master", "Remove release_target_override for this non-release target.")
 	}
 	inspectOID := func(ref string) string {
+		// rev-parse alone uses DWIM: a missing refs/heads/X can resolve to
+		// refs/tags/refs/heads/X. Require the exact local ref on every recheck.
+		if strings.HasPrefix(ref, "refs/heads/") {
+			args := []string{"show-ref", "--verify", "--hash", ref}
+			out, err := run(args...)
+			if err != nil || !validMergeOID(out) {
+				gitFailure("ref_inspection", "Cannot resolve the exact local branch "+ref, out, err, args...)
+				return ""
+			}
+			ref = out
+		}
 		args := []string{"rev-parse", "--verify", ref + "^{commit}"}
 		out, err := run(args...)
 		if err != nil || !validMergeOID(out) {

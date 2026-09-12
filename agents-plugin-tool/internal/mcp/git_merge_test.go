@@ -198,7 +198,7 @@ func TestImplMergeReleaseRawDiagnosticAndFinalRecheck(t *testing.T) {
 				if fault == "count" && args[0] == "rev-list" {
 					return []byte(strings.Repeat("not-a-number", 400)), nil, true
 				}
-				if fault == "oid" && args[0] == "rev-parse" && strings.Contains(args[len(args)-1], "refs/heads/impl/") {
+				if fault == "oid" && args[0] == "show-ref" && strings.Contains(args[len(args)-1], "refs/heads/impl/") {
 					return []byte("ambiguous\nresult"), nil, true
 				}
 				if fault == "merge-state" && args[len(args)-1] == "MERGE_HEAD" {
@@ -303,6 +303,50 @@ func TestImplMergeOverrideScope(t *testing.T) {
 	_, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{ReleaseTargetOverride: true})
 	if err == nil || !strings.Contains(err.Error(), "only to main or master") {
 		t.Fatalf("override scope lost: %v", err)
+	}
+}
+
+func TestImplMergeRequiresExactLocalRefsDespiteTagShadows(t *testing.T) {
+	for _, target := range []string{"main", "develop"} {
+		for _, missing := range []string{"source", "target", "source-at-checkout"} {
+			t.Run(target+"/"+missing, func(t *testing.T) {
+				root, branch := mergeFixture(t, target)
+				sourceOID := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", branch)))
+				targetOID := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", target)))
+				ack := implMergeAcknowledgement{}
+				if target == "main" {
+					ack = implMergeAcknowledgement{ReleaseTargetOverride: true, ExpectedSourceOID: sourceOID, ExpectedTargetOID: targetOID}
+				}
+				if missing == "source" {
+					branch = "impl/" + target + "/absent"
+					runGit(t, root, "tag", "refs/heads/"+branch, sourceOID)
+				} else if missing == "target" {
+					runGit(t, root, "tag", "refs/heads/"+target, targetOID)
+					runGit(t, root, "branch", "-D", target)
+				}
+				merged := false
+				runner := mergeInterceptRunner{intercept: func(ctx context.Context, root string, args []string) ([]byte, error, bool) {
+					if args[0] == "merge" {
+						merged = true
+					}
+					if missing == "source-at-checkout" && args[0] == "switch" {
+						out, err := (wsgit.ExecRunner{}).RunGit(ctx, root, args...)
+						if err != nil {
+							return out, err, true
+						}
+						runGit(t, root, "tag", "refs/heads/"+branch, sourceOID)
+						runGit(t, root, "branch", "-D", branch)
+						return out, nil, true
+					}
+					return nil, nil, false
+				}}
+				r, err := mergeImplBranch(context.Background(), root, runner, branch, "", mergeMessage(), ack)
+				if merged || r.Status != "policy_blocked" || (target == "main" && err != nil) || (target != "main" && err == nil) {
+					t.Fatalf("tag shadow accepted: %+v err=%v merged=%t", r, err, merged)
+				}
+				requireMergeDiagnostic(t, r, "ref_inspection", "must_resolve")
+			})
+		}
 	}
 }
 
