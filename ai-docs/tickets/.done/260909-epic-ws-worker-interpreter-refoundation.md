@@ -13,6 +13,7 @@ related:
   260716-feat-mental-model-openup-injection: built on a retired layer; drop candidate
   260716-feat-sage-related-mental-model-curation: built on a retired layer; drop candidate
 sage-review-design-reviewed: 0c6f903d85f40883
+completed: 2026-09-12
 ---
 
 # ws refoundation: worker as workflow interpreter, lead as escalation handler
@@ -415,3 +416,8 @@ parity—is likewise unestablished.
   parity, in which case the surviving children are re-scoped under a new
   epic and this one records the finding.
 - Deferred: parallelism inside `drain-ready-queue`; per-role tier tuning.
+
+
+## Resolution (2026-09-12)
+
+Closed after all listed child tickets landed. The workflow-cost manual was applied before and after the removals; the after-run did not establish the Dropped criterion. AGENTS.md now binds the declared topics to 260909-research-ws-refoundation-evidence-audit, which remains active as the live reference anchor. Fresh-bootstrap and upgraded-project verification converged on the reduced layout. Parallel execution inside lead-run and per-role tier tuning remain deferred.
