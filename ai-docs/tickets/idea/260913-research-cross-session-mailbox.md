@@ -249,8 +249,22 @@ hooks on 0.154.0 and is out of scope (the primary "idle executor waits for
    `wait` on the MCP surface.
 6. **wake:** blocking lives only in the CLI `ws-mcp mailbox wait --timeout`,
    launched by the model as a harness background task (the one non-implicit
-   model obligation), with a listening marker. The `Stop` hook is an
-   arm-reminder safety net only. Idle interactive sessions remain best-effort.
+   model obligation), with a listening marker. **The wait is level-triggered,
+   not edge-triggered: on startup it synchronously checks the durable
+   name-keyed queue for unread mail and returns immediately if any exists,
+   blocking only when the mailbox is empty.** Waiting on a bare arrival event
+   would lose mail deposited in the arm/drain gap (lost wakeup); since the store
+   is durable (Decision 4), the wait just reads it on startup. The `Stop` hook
+   is an arm-reminder / backstop safety net only. Wake coverage is bounded: an
+   *idle* session's armed wait fires promptly (immediately if mail is already
+   present, else on arrival); a *busy* session (mid-turn) learns of mail via the
+   response-piggyback badge on its ws calls and, at worst, at the next `Stop`
+   boundary — a one-turn latency ceiling. On Claude a background-task completion
+   can additionally surface mid-turn (observed this session: task-completion
+   notifications arrive within the running turn); on Codex it lands at the `Stop`
+   boundary. Truly idle interactive sessions with the user away remain
+   best-effort (a background task's completion may not fire until the user next
+   interacts).
 7. **harness adapters:** Codex `Stop`/`PostToolUse` hooks, Claude hooks, pi
    native push — all adapter/best-effort per the shipped-surface boundary,
    never the host-neutral contract.
