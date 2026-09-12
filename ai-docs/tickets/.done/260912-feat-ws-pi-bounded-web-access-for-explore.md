@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 4e8171eab77b1020
 sage-review-design-reviewed: fd2bc42bedfe80a7
+completed: 2026-09-13
 ---
 
 # Pi Explore: bounded fetch plus bundled web-search extension
@@ -129,3 +130,12 @@ Before the bounded round-two check, address the retained round-one findings:
 Fit review and the guide fresh-reader audit are clean. The fit review's initial inference that lockfile `inBundle` annotations proved physical Pi-core bundling was withdrawn against actual artifact evidence. No Critical findings were raised; no round-2 review has run.
 
 The read-only reviewer/artifact-writing contract mismatch was captured separately as `260912-bug-ws-pi-readonly-reviewer-artifact-contract`; the parent preserved all returned review reports without granting source-write authority.
+
+### Result (c229895d) - 2026-09-13
+
+- Landed explicit descendant network authority, native public-only DNS-pinned bounded fetch, nonce-fenced inline/owned-home spills, and the query-only facade over the exact bundled `pi-web-access@0.29.0` one-shot helper. The settled process-isolation/direct-only Editions govern: unsupported proxies fail redacted, provider configuration remains owner-controlled, and upstream content/curator modes are forced off. Pi core packages remain host peers; shared ws-mcp/Codex/Claude surfaces are unchanged.
+- Integrated completed shared retention through lead merge `0b2519a4`. Real cap eviction and controller stale pruning now remove actual fetched spills; interrupted sessions with uncertain liveness remain protected until termination is confirmed. No web-specific TTL or deletion mechanism was added.
+- Remediation `c229895d` fixes ordinary leading-bracket query rejection while still refusing upstream-expandable string arrays. Tests now exercise real native socket lookup across redirects, real no-inference RPC startup/dormant restart with fresh readiness, observable absence of result-page requests, and offline packed install/reinstall with archive/license/host-peer checks and installed-helper capture.
+- Verification: `cd agents-plugin-pi && npm test -- --test-reporter=dot` passed on the integrated/remediated source. The opt-in `test/web-explore-live.test.ts` was rerun at this checkpoint with the installed Pi CLI and `openai-codex/gpt-6-astra`; real direct-lead and nested-worker searches both passed at depths one and two. Prior real public HTTPS fetch acceptance is retained. No separate build script exists in the Pi package. Startup-fixture failures were diagnosed as ESM resolution, missing frozen model selection, and an ambiguous catalog identifier; the fixture was corrected without changing production guards or making paid requests in the default suite.
+- Independent review: round-one fit and guide fresh-reader audit were clean; bounded round-two correctness and test reviewers resolved all six retained Important findings and confirmed the retention stop was resolved rather than waived. No Critical or unresolved findings remain; no third round or fresh round-two sweep was performed.
+- Decisions: native-socket coverage translates only the final test destination after observing the production pin; startup coverage suppresses only model prompting; package installation uses the existing npm cache and explicit host peers. These are test isolation choices, not production exceptions. The related Explore mode-alias refactor and future proxy support remain outside this ticket. Omitted: none within the settled phase contract.
