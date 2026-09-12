@@ -96,6 +96,16 @@ roots (worktree cache / per-project shared / `~/.ws`). Cross-machine is out of
 scope (records carry no machine identity and no non-tracked layer crosses
 machines by default).
 
+For the ambient/zero-config path, `WS_MAILBOX_AUTO=<scope>` (Decision 10) lets
+the user set one global env and have every session auto-participate: the server
+mints a random 3-word stem per session and registers `<stem>@<scope>`, with
+`<scope>` selecting visibility only. The name is deliberately non-deterministic
+(random per session), which is what makes "several sessions in one worktree"
+work without collision; the cost is that the address is not memorizable, which
+the mandatory self-address surface (ambient block + `lookup-peers` self entry +
+descriptive presence metadata) covers so the user can ask an agent "what is this
+environment's mailbox address?" and relay the answer.
+
 ## Owner binding and misfire prevention
 
 Native subagents share the lead's single multiplexed ws-mcp process, which
@@ -275,8 +285,24 @@ hooks on 0.154.0 and is out of scope (the primary "idle executor waits for
    owner/root-turn context, keyed off the harness's structural main-vs-subagent
    hook distinction (Claude: `Stop`, never `SubagentStop`); subagent stop/tool
    events must not emit it.
-
-### Proposals
+10. **auto-identity (`WS_MAILBOX_AUTO`):** an alternative launch-time env
+    `WS_MAILBOX_AUTO=<machine|clone|worktree>` under which the server generates a
+    **random 3-word stem** at startup (reusing the impl-branch / session-key
+    word-chain generator) and self-registers as `<stem>@<scope>`. `<scope>`
+    controls **visibility only**; uniqueness comes from the random stem, so the
+    name is intentionally **non-deterministic** — multiple sessions in one
+    worktree each get a distinct address and never collide, and no harness
+    discriminator is needed. Explicit `WS_MAILBOX` overrides `WS_MAILBOX_AUTO`;
+    the mailbox is inert unless one of the two is set (this widens the
+    inert-by-default rule from "`WS_MAILBOX` unset" to "both unset"). The stem is
+    per-server-process: stable across `ferrule` re-login, regenerated on a full
+    server/harness restart — so the auto address is **discoverable, not
+    durable** (a restart yields a new address; peers re-ask or re-discover).
+    Because the address is unpredictable, a **self-address surface is
+    mandatory**: the resolved `<stem>@<scope>` is exposed in the workflow ambient
+    block and returned as a self entry by `lookup-peers`, and each presence
+    record carries descriptive metadata (harness, cwd, started-at) so a human
+    can tell peers apart when relaying an address.
 
 - Consumption/ack semantics: piggyback shows only an "unread N" badge; actual
   body consumption is via explicit `recv`. Whether `recv` is
