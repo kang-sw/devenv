@@ -16,6 +16,12 @@ import { captureForkResume, rehydrateForkRecord } from "../src/ask.ts";
 const dirs: string[] = [];
 function home() { const dir = mkdtempSync(join(tmpdir(), "ws-subtree-test-")); dirs.push(dir); return dir; }
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); heldPushQueue.length = 0; leadIdleRef.current = undefined; leadWakeStartPendingRef.current = false; });
+
+function capturePush(sent: unknown[], message: unknown): void {
+  const batch = message as { customType?: string; details?: { items?: unknown[] } };
+  if (batch.customType === "ws-push-batch" && Array.isArray(batch.details?.items)) sent.push(...batch.details.items);
+  else sent.push(message);
+}
 const full = resolveTools("full-worker", ["ws__playbook_render", "ws__git_diff", "ws__git_commit", "ws__ferrule"]).split(",");
 const root: DelegationPolicy = { version: 1, depth: 0, maxDepth: 2, authority: "lead", tools: ["ws-agent-spawn"] };
 const worker = () => childPolicy(root, full, "lead");
@@ -136,7 +142,7 @@ test("a late prompt acknowledgement cannot reopen an already completed own turn"
   applyRpcEvent(r, { type: "tool_execution_end", toolCallId: "final", isError: false });
   applyRpcEvent(r, { type: "agent_settled" });
   const sent: unknown[] = [];
-  const pi = { sendMessage: (message: unknown) => sent.push(message) } as any;
+  const pi = { sendMessage: (message: unknown) => capturePush(sent, message) } as any;
   leadIdleRef.current = () => false;
   flushPendingFinal(pi, new Map([[r.agentId, r]]), r, "idle");
   assert.equal(r.expectedReport, true, "an accepted report stays outstanding until its direct-parent delivery is accepted");
@@ -166,7 +172,7 @@ test("held and failed terminal delivery preserve the obligation until direct-par
   const r = record("child", { delegation: worker(), expectedReport: true, pendingFinal: "done", pendingFinalAccepted: true });
   const registry = new Map([[r.agentId, r]]);
   const sent: any[] = [];
-  const pi = { sendMessage: (message: unknown) => sent.push(message) } as any;
+  const pi = { sendMessage: (message: unknown) => capturePush(sent, message) } as any;
   leadIdleRef.current = () => false;
   assert.equal(flushPendingFinal(pi, registry, r, "idle"), true);
   assert.equal(r.expectedReport, true);
@@ -195,7 +201,7 @@ test("exited delegated child releases its obligation only with the terminal fail
   const r = record("child", { client: {} as RpcClient, delegation: worker(), expectedReport: true, running: true });
   const registry = new Map([[r.agentId, r]]);
   const sent: unknown[] = [];
-  const pi = { sendMessage: (message: unknown) => sent.push(message) } as any;
+  const pi = { sendMessage: (message: unknown) => capturePush(sent, message) } as any;
   leadIdleRef.current = () => false;
   markAgentExited(pi, registry, r);
   assert.equal(r.expectedReport, true);
@@ -224,7 +230,7 @@ function edge(r: RpcAgentRecord, registry: Map<string, RpcAgentRecord>, sent: an
   let listener: (e: any) => void = () => {};
   let stopped = 0;
   const hooks = new Map<string, Function>();
-  const pi: any = { on: (name: string, fn: Function) => hooks.set(name, fn), sendMessage: (message: any) => sent.push(message), sendUserMessage: () => hooks.get("agent_start")?.() };
+  const pi: any = { on: (name: string, fn: Function) => hooks.set(name, fn), sendMessage: (message: unknown) => capturePush(sent, message), sendUserMessage: () => hooks.get("agent_start")?.() };
   registerPushFlush(pi, { delayMs: () => 0 });
   leadIdleRef.current = () => true;
   const client: any = { onEvent: (fn: any) => { listener = fn; return () => {}; }, getState: async () => ({}), getLastAssistantText: async () => "leaf answer", stop: async () => { stopped++; }, abort: async () => {}, prompt: async () => {} };

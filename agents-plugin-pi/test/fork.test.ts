@@ -395,7 +395,12 @@ describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2, 260
     } as unknown as RpcAgentRecord;
     const pi = {
       sendMessage(message: { customType?: string; details?: Record<string, unknown> }, options?: { deliverAs?: string; triggerTurn?: boolean }) {
-        pushes.push({ ...message, deliverAs: options?.deliverAs, triggerTurn: options?.triggerTurn });
+        const batch = message as { customType?: string; details?: { items?: Array<{ customType?: string; details?: Record<string, unknown> }> } };
+        if (batch.customType === "ws-push-batch" && Array.isArray(batch.details?.items)) {
+          for (const item of batch.details.items) pushes.push({ ...item, deliverAs: options?.deliverAs, triggerTurn: options?.triggerTurn });
+        } else {
+          pushes.push({ ...message, deliverAs: options?.deliverAs, triggerTurn: options?.triggerTurn });
+        }
       },
     } as unknown as ExtensionAPI;
     initializePushLifecycle(pi);
@@ -701,7 +706,12 @@ describe("buildForkSpawnCtx (the ws-fork push channel)", () => {
 
   test("C1: a record wired through that ctx's pi pushes ws-agent-report when the fork's own final turn ends", async () => {
     const sent: Array<{ customType?: string; details?: Record<string, unknown> }> = [];
-    const pushPi = { sendMessage: (m: { customType?: string; details?: Record<string, unknown> }) => void sent.push(m) } as unknown as ExtensionAPI;
+    const pushPi = {
+      sendMessage: (message: { customType?: string; details?: { items?: Array<{ customType?: string; details?: Record<string, unknown> }> } }) => {
+        if (message.customType === "ws-push-batch" && Array.isArray(message.details?.items)) sent.push(...message.details.items);
+        else sent.push(message);
+      },
+    } as unknown as ExtensionAPI;
     initializePushLifecycle(pushPi);
     const ctx = buildForkSpawnCtx(pushPi, bridge, { cwd: "/repo" }, {
       forkFrom: "/tmp/lead-session.jsonl",

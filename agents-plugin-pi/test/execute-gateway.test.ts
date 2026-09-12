@@ -472,7 +472,12 @@ describe("createApprovalRelay (260905: unconditional ws-agent-approval push)", (
       on: (event: string, handler: () => void) => handlers.set(event, handler),
       sendMessage: (message: unknown, options?: unknown) => {
         assert.equal(idle, false, "approval custom message cannot start an idle run");
-        sent.push({ message: message as never, options: options as never });
+        const batch = message as { customType?: string; details?: { items?: unknown[] } };
+        if (batch.customType === "ws-push-batch" && Array.isArray(batch.details?.items)) {
+          for (const item of batch.details.items) sent.push({ message: item as never, options: options as never });
+        } else {
+          sent.push({ message: message as never, options: options as never });
+        }
       },
       sendUserMessage: (content: unknown, options: unknown) => {
         assert.match(String(content), /^\d+ ws messages waiting;[^\n]+$/);
