@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0bec273329d7af0d
 sage-review-completeness-reviewed: 0bec273329d7af0d
+completed: 2026-09-12
 ---
 
 # Replace durable-rule capture with concise project-document prose auditing
@@ -153,3 +154,42 @@ Verify autonomous description matching for recurring project-document edits,
 the user confirmation boundary before subagent dispatch, downstream-only
 resolution, the narrow prose-pathology scope, and absence of the retired skill
 name and behavior.
+
+### Result (b2548d63) - 2026-09-12
+
+Replaced the public skill and routed playbook in both packages with
+`lead-audit-doc`; added the separate large-tier `fresh-read-doc-auditor` render
+playbook. The descriptions and both playbook bodies match the approved prose
+verbatim. Removed the retired invocation from root guidance, updated inventories,
+and regenerated the resource manifests, skill manifest, and wsflow resource
+mirror. The existing skill/prompt authoring auditor remains unchanged.
+
+Verification: `go test ./...` passed (MCP package 102.404s), `go build ./...`
+passed, and `scripts/smoke-ws-mcp.sh ..` passed from `agents-plugin-tool/`.
+Both package suites passed: 60 full-package tests and 11 wsflow tests. Both new
+skill entries passed the skill-creator validator through `uv run --with pyyaml`
+because the system Python lacks PyYAML. The new dual-product rendering test
+passed after correcting its temporary downstream fixture to initialize Git with
+the existing helper. Exact prose fixtures cover discovery wording, the consent
+boundary, the narrow audit scope, and retirement; runtime tests cover installed
+resource resolution and namespace substitution in both products. Correctness,
+fit, and test partition reviews were clean in round one.
+
+A separate fresh-reader audit read only the four new skill/playbook source
+files. It found five ambiguities in the locked prose. These were retained as
+approved wording, with the following costs recorded for lead veto:
+
+- Risk accepted: audit-only write limits rely on the user's requested scope;
+  the opening draft/revise sentence does not repeat that boundary.
+- Intentional difference: prior independent-audit authorization satisfies the
+  consent boundary; a literal reader may ask redundantly.
+- Intentional difference: paths and excerpts share the string input
+  `TargetFiles`; their representation remains caller judgment.
+- Risk accepted: treating target instructions as audit material relies on the
+  auditor's stated role and host instruction hierarchy.
+- Intentional difference: the fresh reader sees only supplied instructions;
+  the lead checks proposed rewrites against the full project context.
+
+No installed-cache refresh or release was performed. Source-bundle rendering
+is verified; native automatic skill selection remains model judgment rather
+than a deterministic routing assertion. Omitted: none from the phase contract.
