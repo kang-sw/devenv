@@ -42,13 +42,12 @@
  * and pushed when that child's own turn ends, so "done" is never announced
  * while its author is still working.
  *
- * The spawn tool's `model_name` param names one of the four fixed tiers
- * (`small`/`medium`/`large`/`xlarge`); the caller (the lead) passes an
- * already-rendered `system_prompt_path` — this module never calls
- * `playbook.render` itself for the RPC-backed path — plus that optional
- * `model_name`, resolved through ws-mcp's `config.resolve_agent` tool
- * (`resolveModelForAliasViaWsMcp` below), or omits it to inherit the parent
- * session's model.
+ * The spawn tool's `model_name` param accepts one of the four fixed tiers
+ * (`small`/`medium`/`large`/`xlarge`) or a concrete Pi catalog `provider/id`.
+ * Tier names resolve through ws-mcp's `config.resolve_agent`; concrete IDs
+ * validate directly against the live Pi catalog and configured auth. Omitting
+ * the parameter retains parent-model inheritance. The caller still passes an
+ * already-rendered `system_prompt_path` — this module never renders it.
  *
  * `explore` (260906) is now two different implementations behind one tool
  * name, keyed on the calling process's own role (`registerAgentTools`
@@ -96,7 +95,19 @@ import type { McpStdioClient, McpToolCallResult } from "./mcp-stdio-client.ts";
 import type { BridgeHandle } from "./bridge.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 import { buildAgentSendSummary, buildAgentSpawnSummary, buildExploreSummary, createDispatchToolPreview } from "./tool-row-render.ts";
-import { suggestModels, formatExploreTierRefusal, formatTierWarning, modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx, type ModelCatalogEntry, type TierFailure, type TierRejection } from "./model-catalog.ts";
+import {
+  formatConcreteModelWarning,
+  formatExploreTierRefusal,
+  formatTierWarning,
+  modelCatalogFromToolCtx,
+  suggestModels,
+  tierWarningNotifierFromToolCtx,
+  validateConcreteModel,
+  type ConcreteModelRejection,
+  type ModelCatalogEntry,
+  type TierFailure,
+  type TierRejection,
+} from "./model-catalog.ts";
 import { WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readExploreMode, readSpawnRole, type ExploreMode, type SpawnRole } from "./process-role.ts";
 import { captureForkContext, compareForkRegistrations, removeForkTransport, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
 import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, readOwnership, removeOwnedAgentHome, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
@@ -411,19 +422,17 @@ export interface TierResolution {
   model?: string;
   effort?: string;
   rejected?: TierRejection;
-  source: "tier" | "inherit";
+  concreteRejected?: ConcreteModelRejection;
+  source: "tier" | "concrete" | "inherit";
   failure?: TierFailure;
 }
 
 /**
  * 260906 Phase 2 (YAML/TUI dispatch-row rendering): the display-only shape
- * `ctx.onModelResolved` hands back the instant `spawnAgent` finishes
- * resolving a tier (both refusal guards already passed, so `rejected` is
- * guaranteed absent). `tier` is the raw tier name on a tier hit, or the
- * literal `"inherit"` when `resolution.source === "inherit"` — never derived
- * from `resolution.rejected`, which cannot be set at this point. `effort` is
- * the *effective* value (`effectiveModelEffort(params.modelEffort,
- * resolution.effort)`), matching `record.modelEffort` exactly.
+ * `ctx.onModelResolved` hands back the instant `spawnAgent` finishes model
+ * selection (all refusal guards already passed). `tier` is the raw tier name
+ * for a tier hit, `"concrete"` for a direct catalog selection, or `"inherit"`
+ * for parent-model inheritance. `effort` matches `record.modelEffort` exactly.
  */
 export interface ResolvedModelInfo {
   tier: string;
@@ -432,7 +441,11 @@ export interface ResolvedModelInfo {
   inherited: boolean;
 }
 
-function tierResolution(base: { model?: string; effort?: string; rejected?: TierRejection }, source: TierResolution["source"], failure?: TierFailure): TierResolution {
+function tierResolution(
+  base: { model?: string; effort?: string; rejected?: TierRejection; concreteRejected?: ConcreteModelRejection },
+  source: TierResolution["source"],
+  failure?: TierFailure,
+): TierResolution {
   // New policy callers read source/failure explicitly; legacy advisory
   // consumers retain their model/rejected object enumeration.
   return Object.defineProperties(base, {
@@ -491,21 +504,38 @@ export async function resolveModelForAliasViaWsMcp(
   return tierResolution({ model: checkedModel, effort: parsed.effort || undefined }, "tier");
 }
 
+async function resolveSpawnModel(
+  client: ResolveAgentCallToolClient,
+  selection: string | undefined,
+  inheritModel: string | undefined,
+  catalog: readonly ModelCatalogEntry[],
+  allowConcreteModel: boolean,
+): Promise<TierResolution> {
+  if (!allowConcreteModel || !selection?.includes("/")) return resolveModelForAliasViaWsMcp(client, selection, inheritModel, catalog);
+  const concrete = validateConcreteModel(selection, catalog);
+  return concrete.rejected
+    ? tierResolution({ concreteRejected: concrete.rejected }, "concrete")
+    : tierResolution({ model: concrete.model }, "concrete");
+}
+
 /**
- * Pure merge rule for `spawnAgent`'s `modelEffort`: an explicit caller
- * `model_effort` always wins over the config-resolved `effort`, but only
- * when it is actually non-empty — `model_effort` is a free-form `string`
- * param with no enum (`SpawnAgentParams.modelEffort`), so a caller-supplied
- * `""` is reachable and must NOT shadow a genuine tier effort (`??` would
- * only guard `null`/`undefined`, not `""`; `applyModelEffort`'s own guard
- * (`if (!modelEffort) return`) already treats `""` as absent, so this
- * matches that convention). The single call site
- * (`record.modelEffort = effectiveModelEffort(...)`) is the one place this
- * rule is computed — both the spawn-time and dormant-resume `applyModelEffort`
- * calls read the already-folded `record.modelEffort` back, never re-deriving
- * it from `params`.
+ * Pure merge rule for `spawnAgent`'s effective effort. A non-empty explicit
+ * Pi level wins. The `"default"` sentinel applies no caller override: an
+ * inherited model keeps the captured parent effort, a tier keeps its configured
+ * effort, and a concrete model leaves effort unset for Pi/model defaulting.
+ * Omission and the historical empty string retain the prior merge behavior.
  */
-export function effectiveModelEffort(callerEffort: string | undefined, resolvedEffort: string | undefined): string | undefined {
+export function effectiveModelEffort(
+  callerEffort: string | undefined,
+  resolvedEffort: string | undefined,
+  source: TierResolution["source"] = "tier",
+  inheritEffort?: string,
+): string | undefined {
+  if (callerEffort === "default") {
+    if (source === "inherit") return inheritEffort;
+    if (source === "concrete") return undefined;
+    return resolvedEffort;
+  }
   return callerEffort || resolvedEffort;
 }
 
@@ -861,7 +891,7 @@ export interface RpcAgentRecord {
   systemPromptPath?: string;
   /** Resolved `provider/id`, or undefined to inherit pi's own default resolution. Cached so a dormant resume reuses the same model. */
   modelBase?: string;
-  /** Caller-supplied thinking level, applied via `setThinkingLevel()` after every (re)start. */
+  /** Effective thinking override, applied via `setThinkingLevel()` after every (re)start; absent means Pi/model default. */
   modelEffort?: string;
   /** Observed child selection and recomputed durable usage; launch intent stays above. */
   telemetry?: AgentTelemetry;
@@ -871,9 +901,9 @@ export interface RpcAgentRecord {
   observedEffort?: string;
   observedLatestInput?: number;
   /**
-   * 260906 Phase 2 (YAML/TUI dispatch-row rendering): the raw tier name
-   * (`params.modelName`) requested at spawn, or `undefined` for an inherit
-   * spawn — display-only, reconstructs `ws-agent-send`'s resolved-model line
+   * 260906 Phase 2 (YAML/TUI dispatch-row rendering): the raw model selection
+   * requested at spawn, or `undefined` when omitted — display-only,
+   * reconstructs `ws-agent-send`'s resolved-model line
    * for a target agent without a live resolution. NOT persisted to the
    * sidecar (`agent-sidecar.ts`); a record revived after a restart carries
    * neither field (see `modelSource`'s doc comment for the degrade rule).
@@ -881,12 +911,12 @@ export interface RpcAgentRecord {
   modelTier?: string;
   /**
    * 260906 Phase 2: mirrors `TierResolution.source` at spawn time
-   * (`"tier" | "inherit"`). NOT persisted to the sidecar — a `ws-agent-send`
+   * (`"tier" | "concrete" | "inherit"`). NOT persisted to the sidecar — a `ws-agent-send`
    * to a record revived from a sidecar snapshot after a restart finds this
    * field `undefined` and treats that as `"inherit"` (the safe default),
    * never throwing or guessing a tier name.
    */
-  modelSource?: "tier" | "inherit";
+  modelSource?: "tier" | "concrete" | "inherit";
   /** Cached bridge `ws__*` tool names, for `--tools` re-resolution on a dormant resume. */
   wsToolNames: readonly string[];
   /** Curated `--tools` group this record was spawned with; reused unchanged on a dormant resume so `resolveTools` never silently widens/narrows a resumed child's tool surface. Set at spawn (`ctx.toolGroup ?? "full-worker"`), never mutated afterward. */
@@ -2304,8 +2334,12 @@ export interface RpcSpawnCtx {
   storage?: AgentStorageContext;
   /** `provider/id`, forwarded from the calling tool-execute ctx.model, or undefined to inherit pi's own default. */
   inheritModel?: string;
+  /** Current thinking level, used only when the caller explicitly requests model_effort:"default" with inherited-model dispatch. */
+  inheritEffort?: string;
   /** Current execute/command context's live getAll + configured-auth catalog. */
   catalog: readonly ModelCatalogEntry[];
+  /** ws-agent-spawn-only public contract; other spawnAgent consumers retain tier-only model_name behavior. */
+  allowConcreteModel?: boolean;
   /** UI-only adapter; never a lifecycle push. */
   notifyTierWarning?: (warning: string) => void;
   /** Bridge's sanitized `ws__*` registered tool names, for the `full-worker` group. */
@@ -3184,14 +3218,14 @@ export function nextGeneratedAlias(registry: RpcAgentRegistry, prefix: string): 
  * `playbook.render` call itself (D-A): the caller (the lead) renders the
  * playbook and passes the resulting path directly as `systemPromptPath`.
  *
- * `modelBase` resolves `model_name`-first through `config.resolve_agent`
- * (`resolveModelForAliasViaWsMcp`), falling back to `ctx.inheritModel`
- * unchanged when `model_name` is unset or resolves to a non-genuine `pi`
- * answer. A config-resolved `effort` is folded into `record.modelEffort` via
- * `effectiveModelEffort` — an explicit, non-empty caller `params.modelEffort`
- * always wins. `record.modelEffort` is then the single value both the
- * spawn-time and dormant-resume `applyModelEffort` calls apply — neither
- * re-reads `params.modelEffort` directly.
+ * `modelBase` resolves a tier-shaped `model_name` through
+ * `config.resolve_agent`, validates a concrete provider/id directly against
+ * the live Pi catalog/auth state, or uses `ctx.inheritModel` when omitted.
+ * Invalid concrete IDs and rejected tier answers fail before allocation. A
+ * config-resolved effort is folded into `record.modelEffort`; explicit levels
+ * win, while `"default"` retains source-specific defaults. `record.modelEffort`
+ * is then the single value both the spawn-time and dormant-resume
+ * `applyModelEffort` calls apply.
  *
  * Returns as soon as `client.prompt()` has sent the initial message — that
  * call only awaits transmission, not full-run completion (docs/rpc.md) — so
@@ -3262,11 +3296,15 @@ export async function spawnAgent(
   try {
   const delegation = spawnAdmission(ctx);
   // Resolve exactly once before any guard, alias transfer, eviction, UUID, or
-  // session allocation. Exploration's caller-specific policy is fail-closed;
-  // an ordinary spawn now refuses too, but only on a NAMED tier that comes
-  // back `rejected` (unknown/no-auth/unset) — an omitted `model_name` (or a
-  // transport/parse failure, which never sets `rejected`) still inherits.
-  const resolution = await resolveModelForAliasViaWsMcp(ctx.client, params.modelName, ctx.inheritModel, ctx.catalog);
+  // session allocation. Concrete ws-agent-spawn IDs validate locally and fail
+  // closed. Named tiers retain their existing resolution/refusal behavior; an
+  // omitted model_name (or tier transport/parse failure) still inherits.
+  const resolution = await resolveSpawnModel(ctx.client, params.modelName, ctx.inheritModel, ctx.catalog, ctx.allowConcreteModel === true);
+  if (resolution.concreteRejected) {
+    const rejection = formatConcreteModelWarning(resolution.concreteRejected, ctx.catalog.length === 0);
+    ctx.notifyTierWarning?.(rejection);
+    throw new Error(`ws-pi-agent: ws-agent-spawn rejected: ${rejection}`);
+  }
   if (ctx.requireTier && (resolution.source !== "tier" || !resolution.model || resolution.failure || resolution.rejected)) {
     const refusal = formatExploreTierRefusal(params.modelName ?? "small", resolution.failure, resolution.rejected);
     ctx.notifyTierWarning?.(refusal);
@@ -3286,9 +3324,9 @@ export async function spawnAgent(
   // `resolvedEffort` is computed once and reused below (`record.modelEffort`)
   // rather than recomputed, so the pushed line and the stored record can
   // never drift apart.
-  const resolvedEffort = effectiveModelEffort(params.modelEffort, resolution.effort);
+  const resolvedEffort = effectiveModelEffort(params.modelEffort, resolution.effort, resolution.source, ctx.inheritEffort);
   ctx.onModelResolved?.({
-    tier: resolution.source === "tier" ? params.modelName! : "inherit",
+    tier: resolution.source === "tier" ? params.modelName! : resolution.source,
     model: resolution.model,
     effort: resolvedEffort,
     inherited: resolution.source === "inherit",
@@ -3335,13 +3373,9 @@ export async function spawnAgent(
     delegation,
     subtreeChannel,
     modelBase,
-    // Explicit caller effort always wins over the config-resolved one
-    // (effectiveModelEffort's `||` semantics — an empty-string caller value
-    // is treated as absent). This is the single fold point: both the
-    // spawn-time and dormant-resume `applyModelEffort` calls read
-    // `record.modelEffort` back rather than re-deriving it from `params`.
-    // Reuses the SAME `resolvedEffort` already pushed to `onModelResolved`
-    // above rather than recomputing it.
+    // Explicit effort wins; "default" retains the selected source's policy.
+    // This is the single fold point for spawn and dormant resume, and reuses
+    // the same value already published through `onModelResolved`.
     modelEffort: resolvedEffort,
     modelTier: params.modelName,
     modelSource: resolution.source,
@@ -3976,7 +4010,7 @@ export function registerAgentTools(
     name: "ws-agent-spawn",
     label: "ws-agent-spawn",
     description:
-      "Spawn a persistent RPC-backed pi subagent from an already-rendered system-prompt file (e.g. via ws/playbook.render). Returns {agent_id, alias?, evicted?} immediately after the initial prompt is sent. A named model_name that config.resolve_agent rejects (unknown/no-auth/not configured for harness pi) throws instead of spawning on an inherited model — leave model_name unset to inherit the parent session's model on purpose. Do not wait for it: end your turn, and its reports, questions and completion arrive on their own as ws-agent-* messages carrying a running-count status line.",
+      "Spawn a persistent RPC-backed pi subagent from an already-rendered system-prompt file (e.g. via ws/playbook.render). Returns {agent_id, alias?, evicted?} immediately after the initial prompt is sent. model_name accepts a configured tier alias or concrete Pi model ID; either is catalog/auth validated before allocation, while omission inherits the parent model. Do not wait for it: end your turn, and its reports, questions and completion arrive on their own as ws-agent-* messages carrying a running-count status line.",
     parameters: {
       type: "object",
       properties: {
@@ -3988,12 +4022,12 @@ export function registerAgentTools(
         model_name: {
           type: "string",
           description:
-            "Optional tier name (small|medium|large|xlarge) resolved against harness pi's config.tune agents.tier entries (see lead-tune/config.list); omitted or unmapped inherits the parent session's model.",
+            "Optional tier alias (small|medium|large|xlarge) resolved against harness pi agents.tier config, or a concrete Pi model ID (provider/id) validated with configured auth. Invalid named selections fail; omit to inherit the parent model.",
         },
         model_effort: {
           type: "string",
           description:
-            "Optional Pi thinking level (off|minimal|low|medium|high|xhigh|max), applied via setThinkingLevel after start; an unsupported value degrades to a no-op.",
+            "Optional Pi thinking level (off|minimal|low|medium|high|xhigh|max) or default. default applies no caller override: inherit keeps parent effort, tiers keep configured effort, and concrete models use their own default. Unsupported explicit values degrade to a no-op.",
         },
         alias: {
           type: "string",
@@ -4024,7 +4058,11 @@ export function registerAgentTools(
           cwd: sessionCtx.cwd,
           storage: sessionCtx.storage ?? storageContextFromToolCtx(toolCtx),
           inheritModel: inheritModelFromToolCtx(toolCtx),
+          inheritEffort: typeof (toolCtx as { thinkingLevel?: unknown }).thinkingLevel === "string"
+            ? (toolCtx as { thinkingLevel: string }).thinkingLevel
+            : undefined,
           catalog: modelCatalogFromToolCtx(toolCtx),
+          allowConcreteModel: true,
           notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx),
           wsToolNames: bridge.wsToolNames,
           extensionPath: sessionCtx.extensionPath,
@@ -4087,7 +4125,7 @@ export function registerAgentTools(
       const record = rpcRegistry.get(result.agent_id);
       const inherited = record?.modelSource === undefined ? true : record.modelSource === "inherit";
       const resolved: ResolvedModelInfo = {
-        tier: inherited ? "inherit" : record?.modelTier ?? "?",
+        tier: inherited ? "inherit" : record?.modelSource === "concrete" ? "concrete" : record?.modelTier ?? "?",
         model: record?.modelBase,
         effort: record?.modelEffort,
         inherited,
