@@ -160,6 +160,32 @@ func edgeLanded(edge BlockedByEdge, prereq TicketInfo, found bool) (bool, string
 	return true, ""
 }
 
+// boardByStem scans the whole board (including `.done/`, `.dropped/`, and
+// index-hidden entries under a sparse-checkout scope) with bodies resolved, and
+// returns the most-open copy of each stem. scanTickets is sorted by
+// ticketStatusRank, so first-wins keeps the most-open copy of a duplicate stem —
+// the conservative pick, since a less-landed prerequisite blocks rather than
+// clears. Shared by the dispatch gate and the promotion-time advisory warning so
+// the two read the board through one live scan and never diverge.
+func boardByStem(root string) (map[string]TicketInfo, error) {
+	tickets, err := scanTickets(root, ticketScanOptions{
+		IncludeDone:    true,
+		IncludeDropped: true,
+		Resolve:        resolveFull,
+	})
+	if err != nil {
+		return nil, err
+	}
+	byStem := make(map[string]TicketInfo, len(tickets))
+	for _, ticket := range tickets {
+		if _, seen := byStem[ticket.Stem]; seen {
+			continue
+		}
+		byStem[ticket.Stem] = ticket
+	}
+	return byStem, nil
+}
+
 // DispatchBlockFor computes the dispatch-time hard gate for a consumer ticket:
 // the first `blocked-by:` prerequisite not landed by the live code-level
 // predicate, or nil when nothing blocks. Absent a `blocked-by:` edge there is no
@@ -170,23 +196,9 @@ func DispatchBlockFor(root string, info TicketInfo) (*DispatchBlock, error) {
 	if len(info.BlockedBy) == 0 {
 		return nil, nil
 	}
-	tickets, err := scanTickets(root, ticketScanOptions{
-		IncludeDone:    true,
-		IncludeDropped: true,
-		Resolve:        resolveFull,
-	})
+	byStem, err := boardByStem(root)
 	if err != nil {
 		return nil, err
-	}
-	// scanTickets is sorted by ticketStatusRank, so first-wins keeps the
-	// most-open copy of a duplicate stem — the conservative pick, since a less
-	// landed prerequisite blocks rather than clears.
-	byStem := make(map[string]TicketInfo, len(tickets))
-	for _, ticket := range tickets {
-		if _, seen := byStem[ticket.Stem]; seen {
-			continue
-		}
-		byStem[ticket.Stem] = ticket
 	}
 	for _, spec := range info.BlockedBy {
 		edge, ok := parseBlockedByEdge(spec)
@@ -227,4 +239,50 @@ func blockedByPromotionError(root string, scope *ticketScope, absTicketPath stri
 		}
 	}
 	return nil
+}
+
+// blockedByPromotionWarning builds the soft, non-blocking advisory for the
+// in-between case blockedByPromotionError deliberately allows: a typed
+// blocked-by prerequisite already in ready/ (so the closure passed) but not yet
+// code-landed by the live predicate — the producer is staged but unexecuted (not
+// in .done/, and any named phase carries no ### Result). It tells the promoter
+// the producer is not executed yet without blocking, preserving the "stage the
+// consumer now, promote the producer imminently" workflow. It fires only on the
+// typed blocked-by: edge, never on a soft related: edge, and never for a .done/
+// prerequisite or a consumed-phase-### Result prerequisite (both landed).
+// Computed live from board state at promotion, never from a review stamp. A
+// malformed or unresolvable edge is the closure/dispatch gate's concern — it
+// already blocked there — so this soft layer stays silent on it rather than
+// double-reporting, and it fails open on a scan error (the dispatch gate
+// backstops the hard cases). The empty string means no advisory.
+func blockedByPromotionWarning(root, absTicketPath string) (string, error) {
+	edges := blockedByEntries(frontmatter(absTicketPath)["blocked-by"])
+	if len(edges) == 0 {
+		return "", nil
+	}
+	byStem, err := boardByStem(root)
+	if err != nil {
+		return "", err
+	}
+	var pending []string
+	for _, spec := range edges {
+		edge, ok := parseBlockedByEdge(spec)
+		if !ok {
+			continue
+		}
+		prereq, found := byStem[edge.Stem]
+		if !found || prereq.Status != "ready" {
+			continue
+		}
+		if landed, _ := edgeLanded(edge, prereq, found); !landed {
+			pending = append(pending, edge.Raw)
+		}
+	}
+	if len(pending) == 0 {
+		return "", nil
+	}
+	return fmt.Sprintf(
+		"blocked-by prerequisite(s) %s are in ready/ but not yet landed (the producer is staged but unexecuted: not in .done/, and any named phase carries no ### Result). Promotion is allowed, but the dispatch gate will refuse to spawn a worker for this ticket until they land.",
+		strings.Join(pending, ", "),
+	), nil
 }
