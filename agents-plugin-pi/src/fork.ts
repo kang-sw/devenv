@@ -60,6 +60,7 @@ import { modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx, type ModelCata
 import {
   REPORT_TO_LEAD_TOOL_NAME,
   inheritModelFromToolCtx,
+  isOwnerHeld,
   promptAgent,
   pushToLead,
   reportKindsSinceLeadPrompt,
@@ -488,7 +489,7 @@ export function wireAntiBleedLoop(
     // thread's normal shape, so neither the nudge nor the fail-loud path
     // applies. Reset the counter so a later, unbound stall is still judged
     // from zero.
-    if (record.threadBound || record.ownerHeld || record.waitingOnChildren) {
+    if (record.threadBound || isOwnerHeld(record) || record.waitingOnChildren) {
       nudgeCount = 0;
       return;
     }

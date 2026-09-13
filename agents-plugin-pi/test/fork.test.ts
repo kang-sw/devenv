@@ -453,6 +453,18 @@ describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2, 260
     assert.deepEqual(advisories(h.pushes), [], "and must never be reported to the lead as stalled");
   });
 
+  test("last-writer owner suppresses anti-bleed even without a thread bind", () => {
+    const h = harness();
+    h.record.lastWriter = "owner";
+    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
+    for (let turn = 0; turn < 3; turn += 1) {
+      h.emit({ type: "agent_start" });
+      h.emit({ type: "agent_settled" });
+    }
+    assert.deepEqual(h.prompts, []);
+    assert.deepEqual(advisories(h.pushes), []);
+  });
+
   test("C1: the same record still nudges once the thread closes", () => {
     const h = harness();
     h.record.threadBound = true;

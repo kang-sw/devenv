@@ -110,7 +110,7 @@ test("one-edge snapshot distinguishes idle waiting from subtree quiescence and f
   assert.equal(readSubtreeSnapshot({ ...channel, nonce: "stale-launch" }), undefined);
   child.threadBound = true;
   assert.throws(() => assertSubtreeFinal(registry), /final rejected/);
-  child.threadBound = false; child.ownerHeld = true;
+  child.threadBound = false; child.lastWriter = "owner";
   assert.throws(() => assertSubtreeFinal(registry), /final rejected/);
 });
 

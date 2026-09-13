@@ -559,8 +559,8 @@ report channel" below):
   registry record for `ws-agent-list` and for alias-or-uuid resolution
   everywhere an `agent_id` param is accepted; reusing an alias already held by a
   dormant/idle record silently reassigns it (clearing the old holder's alias,
-  keeping its title) while reusing one held by a running or thread-bound record
-  rejects the spawn instead of stealing it out from under it. The registry is
+  keeping its title) while reusing one held by a running, thread-bound, or
+  owner-held record rejects the spawn instead of stealing it out from under it. The registry is
   capped (`WS_PI_AGENT_REGISTRY_CAP`, default 256); a spawn that would exceed
   the cap evicts the oldest fully-dormant, non-thread-bound record(s) first and
   reports the evicted label(s) back as `evicted`, rejecting only if every
@@ -582,7 +582,8 @@ report channel" below):
   is delivered by `ws-agent-settled.last_message`, and a send starts the next
   research turn without re-resolving or retuning them.
 - `ws-agent-list({ include_prompt? })` — enumerate registry members with their
-  status, alias, title and model. Status vocabulary is `running` / `idle` /
+  status, alias, title and model, plus `owner_held: true` when the latest
+  successful writer was the owner. Status vocabulary is `running` / `idle` /
   `dormant`, but `idle` (260905) is now transient rather than a resting state:
   an idle, non-thread-bound record is parked to `dormant` by the adapter
   shortly after it settles (see "Turn completion is gated on RPC idle"), so
@@ -997,9 +998,13 @@ reach the lead only through the summary / fork-final paths (in current
 the `fork-question-thread` registration notice itself: it is pushed for the
 very record the same hook call just made
 thread-bound, since that push is how the lead learns the thread exists at
-all; every later settle or advisory for that record is suppressed as above. A
-child's turn therefore never reaches the lead twice, and within a live
-session no push is dropped or duplicated.
+all; every later settle or advisory for that record is suppressed as above.
+An **owner-held** record likewise sends settle/advisory information only to the
+owner's TUI toast route, never into the lead transcript, while final reports,
+questions, approvals and orphan signals remain unchanged. These owner-time
+notices are ephemeral and are not replayed after handoff. A child's turn
+therefore never reaches the lead twice, and within a live session no routed
+push is dropped or duplicated.
 
 **Idle pushes wake through user preflight (260906 Phase 2).** Busy `followUp`
 pushes stay held until settle; busy `steer` pushes still interrupt normally.
@@ -1060,7 +1065,9 @@ thread closing) rather than through settling, and which children are running
 is `ws-agent-list`'s job. A child blocked on an approval is running; a child
 parked on a question is thread-bound; a child that settled idle or reported
 `final` leaves N — and is itself parked to dormant shortly after, per "Turn
-completion is gated on RPC idle" — until it is prompted again. The last
+completion is gated on RPC idle" — until it is prompted again. Owner-held
+children are outside N from the moment the owner successfully sends and stay
+outside it until a lead-side prompt takes last-writer ownership back. The last
 `final` of a fan-out reads `0 delegated agents still running`, and a worker
 that never reports `final` reaches it through its `ws-agent-settled`, so the
 lead can tell "not yet — end the turn again" (N > 0) from "all in —
@@ -1554,36 +1561,35 @@ covered by the "Attach to a live task fork" bullet below exactly as before.
   turn is running and no text has streamed yet, the overlay shows one
   `working…` line in the streaming-tail slot — the first text delta replaces
   it and settle clears it; the state is read from `ConversationChannel.liveness()`
-  at render time (derived from the registry's streaming flag), not derived from
-  `agent_start`/`agent_settled` events the component itself receives, because
+  at render time (running from `record.running`, otherwise owner-idle from the
+  last writer), not derived from `agent_start`/`agent_settled` events the
+  component itself receives, because
   attaching to a live fork mid-turn or a dormant thread's first message never
   delivers a start event to the component. The transcript scrolls in
   full — there is no 24-line tail cut — and its items carry the
   `ConversationItem` model, so the child's tool calls and their results appear
-  as collapsible items alongside the message turns. It is
-  persisted per thread (on the thread record, newest 200 items), so a reopen
-  after `Esc` or after a lead restart shows the conversation so far; owner
-  lines are styled with the host's user-message background, and child text is
-  rendered as Markdown with the host theme. A recorded original question
-  appears as the first dialogue turn with assistant styling, including when
-  its text matches the thread title. Newly inserted or upgraded question
-  turns carry an emphasized `Question:` label; an existing matching first
-  assistant turn is preserved.
-  Reopening an older conversation restores a missing initial question or
-  upgrades its legacy seed note without duplicating it or removing later
-  turns. The compact header shows the thread ID and, when available,
+  as collapsible items alongside the message turns. Conversation history is
+  read from the child session plus its owner-send attribution log; the thread
+  record carries no duplicate transcript. A reopen after `Esc` or after a lead
+  restart therefore shows the record's conversation so far; owner lines are
+  styled with the host's user-message background, and child text is rendered
+  as Markdown with the host theme. The compact header shows the thread ID and,
+  when available,
   `opened <time>` on one line; the question itself stays in the conversation.
   The next header line states, once,
   `Esc: close view (thread stays open) · /done: end thread`
-  — there is no footer hint. `Esc` closes the view only: the thread stays
-  `open` and the fork keeps running, reattachable at any time. `/done` typed
-  in the overlay closes the **thread** — this bullet's fork-raised path only;
+  — there is no footer hint. Interactive Esc opens the shared owner-steering
+  action modal; hold closes the view only, so the thread stays `open` and the
+  fork remains reattachable. `/done` typed in the overlay aliases finish and
+  closes the **thread** — this bullet's fork-raised path only;
   `lead-ask` has no `/done` command post-`260911` (see the queue's own
   Enter/Esc contract above). The overlay closes at once with no summary or
   injection, then the adapter reconciles that task fork before releasing it:
-  a running fork is allowed to settle; an already accepted or queued terminal
-  outcome is not duplicated; and an idle fork with no terminal outcome receives
-  exactly one lead-attributed closeout request for its normal final report. A
+  an already accepted or queued terminal outcome is not duplicated; an
+  owner-held fork immediately receives exactly one lead-attributed closeout
+  (queued behind a running turn or prompting an idle/dormant one); and a
+  lead-held running fork may first settle before the same missing-terminal
+  evaluation. A
   valid final reaches the lead once as an ordinary `ws-agent-report`. A closeout
   that settles without a valid final, reports another question, or fails emits
   one missing-final or operational advisory instead; the adapter never
@@ -1636,22 +1642,24 @@ of its own: every repaint rebuilds the rows from those registries.
   `worker`, `execute`, `fork`, `explore`, or `thread` (an owner discussion
   respondent, or a thread with no live respondent yet). A persistent
   researcher is an `explore` row while it has a live client; after settle it
-  parks and disappears from the live widget but stays in the registry for
-  transcript, send and restart. `state` is `awaiting owner`, `awaiting
-  approval`, or `running`; idle/dormant records have no row.
+  parks and disappears from the live widget unless owner-held, but stays in
+  the registry for transcript, send and restart. `state` is `awaiting owner`,
+  `idle awaiting owner`, `awaiting approval`, or `running`; ordinary
+  idle/dormant records have no row. Owner-held rows retain an `/audit <alias or
+  id>` inspection hint.
   `elapsed` counts from the record's last prompt (`runStartedAt`, stamped by
   every prompt including the anti-bleed nudge), or from the thread's
   `touchedAt` for a row that awaits the owner on a thread.
 - **Which records are rows.** An RPC record is a row while it has a live
-  client, a pending approval, or is thread-bound (a thread-bound record stays
-  a row while parked between messages — it is the owner's action cue). A
+  client, a pending approval, is thread-bound, or is owner-held (the latter two
+  stay rows between messages because they are owner action cues). A
   thread is a row while it is `pending` or `open`; it collapses onto its
   respondent's row when that respondent is a thread-bound record, and
   otherwise stands alone (an owner question without a live respondent,
   or a fork-raised question whose respondent was revived dormant after
   a lead restart). `dormant` and `closed` threads produce no row.
-- **Order and cap.** Rows sort `awaiting owner`, then `awaiting approval`,
-  then `running`, longest elapsed first within a state. At most five rows
+- **Order and cap.** Rows sort `awaiting owner`/`idle awaiting owner`, then
+  `awaiting approval`, then `running`, longest elapsed first within a state. At most five rows
   render; only `running` rows are folded into a trailing `+N more` line, so
   every awaiting row is always visible. Each line is bounded to the terminal
   width the host passes at render time (`visibleWidth(line) <= width`,
@@ -1759,6 +1767,52 @@ current-state observation clears those labels independently of retained usage.
   per-frame polling. Width limits, row order, caps, and waiting-row visibility
   remain unchanged. The full `/answer <id>` cue takes priority whenever it
   fits; telemetry is omitted before that cue when the row is too narrow.
+
+## Subagent audit and owner steering {#260908-pi-subagent-audit-owner-steering}
+
+A true TUI lead registers `/audit [id-or-alias]` and `ctrl+shift+u`; child
+processes and headless leads register neither. With no argument, `/audit` opens
+a width-bounded picker over every live and dormant registry child, ordered by
+owner wait, approval wait, running time, then dormant last activity. Identity
+uses alias, then title, then the first eight ID characters. Selecting a child
+opens its conversation without resuming a dormant process.
+
+The conversation source is the child registry record: persisted Pi session
+history plus future events from its current RPC client. User-side session
+entries matching the record's ordered `ownerSends` log render as owner turns;
+other user-side entries render as lead prompts. Assistant text, tool calls, and
+tool results retain the shared `ConversationItem` mapping. Missing/pruned
+history is shown explicitly. Fork-raised `/answer` uses this same binding and
+no longer stores a second transcript on the thread record; the record's
+`lastWriter` and `ownerSends` fields round-trip through both the ordinary agent
+sidecar and the fork-thread resume copy.
+
+The audit window starts in view mode. Enter raises that same component to
+interactive mode and owner text uses the ordinary send branch table: prompt a
+live-idle or auto-resumed dormant child, steer a streaming child. A successful
+owner send appends `{text, at}` to `ownerSends` and sets `lastWriter: owner`;
+every lead-side prompt (spawn, `ws-agent-send`, fork nudge, finish handoff)
+sets `lastWriter: lead`. Absence is the legacy lead default. This one last-writer
+rule, not separate booleans, defines settle ownership.
+
+In interactive mode Esc opens `[hold] [finish] [interrupt]`, defaulting to
+hold; left/right selects, Enter acts, Esc cancels, and Ctrl+C does nothing in
+the modal. Hold closes the view without changing ownership. Finish closes and,
+only while owner-held, sends one lead-attributed continuation/final-report
+handoff (fork-raised threads route that through their existing finish
+reconciliation). Interrupt aborts only a currently running RPC turn, leaves
+the view open, and does not change ownership; when abort is unavailable the
+action is disabled and a no-op. Typed `/done` is an alias for finish.
+
+While owner-held, `record.running` renders `running`; otherwise it renders
+`idle-awaiting-owner`. Settle and advisory signals are owner-only TUI
+notifications rather than lead custom messages and are never replayed later;
+final reports, questions, approvals, and orphan recovery keep their established
+routes. Owner-held records remain outside lead fan-in and are protected from
+automatic park, alias reuse, registry-cap eviction, retention deletion,
+sidecar loss, and fork anti-bleed nudging. Finish hands ownership to the lead
+before the child can settle, so the subsequent terminal signal follows the
+normal lead route.
 
 ## Shared conversation-view component {#260909-pi-conversation-view-component}
 

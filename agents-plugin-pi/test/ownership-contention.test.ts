@@ -113,7 +113,7 @@ describe("durable ownership contention at accepted operation boundaries", () => 
       let release: (() => Promise<void>) | undefined;
       try {
         release = await holdClaim(ownership.home, kind);
-        assert.equal(syncOwnershipProtection({ ...record, ownerHeld: true }), false);
+        assert.equal(syncOwnershipProtection({ ...record, lastWriter: "owner" }), false);
         assert.throws(() => handleForkRaisedQuestion(handle, registry, record.agentId, "Owner decision?"), /cannot bind owner thread.*busy/);
         assert.equal(record.threadBound, undefined, "local bind must not precede durable protection");
         assert.equal(handle.threads.size, 0, "no accepted pending thread on a failed bind");

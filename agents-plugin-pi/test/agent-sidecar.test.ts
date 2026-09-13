@@ -127,6 +127,15 @@ describe("captureOrphans", () => {
     ]);
   });
 
+  test("owner last-writer state and ordered owner-send attribution survive capture, parse, and rehydrate", () => {
+    const r = record({ lastWriter: "owner", ownerSends: [{ text: "first", at: 10 }, { text: "second", at: 20 }] });
+    const [captured] = captureOrphans(new Map([[r.agentId, r]]));
+    const [parsed] = parseOrphans(serializeOrphans([captured]));
+    const revived = rehydrateOrphanRecord(parsed);
+    assert.equal(revived.lastWriter, "owner");
+    assert.deepEqual(revived.ownerSends, [{ text: "first", at: 10 }, { text: "second", at: 20 }]);
+  });
+
   test("records the state at shutdown and the last-report time (relay #2: the roll-call needs both)", () => {
     const registry: RpcAgentRegistry = new Map([
       ["busy", record({ agentId: "busy", client: {} as RpcClient, running: true, reportLog: [{ at: 1_000 }, { kind: "final", at: 2_000 }] })],

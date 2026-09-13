@@ -459,7 +459,10 @@ export interface RpcAgentRecord {
   subtreeChannel?: SubtreeChannel;
   expectedReport?: boolean;
   waitingOnChildren?: boolean;
-  ownerHeld?: boolean;
+  /** Last successful writer to this child. Absence is the legacy/lead default. */
+  lastWriter?: "lead" | "owner";
+  /** Owner-authored sends, in delivery order, used to attribute persisted user entries. */
+  ownerSends?: Array<{ text: string; at: number }>;
   requiresFreshFinal?: boolean;
   subtreeRevision?: number;
   workGeneration?: number;
@@ -918,11 +921,15 @@ export function shouldPushToLead(env: NodeJS.ProcessEnv = process.env): boolean 
  * of those are still `running` and not `terminalThisTurn`. Extracted so the
  * two call sites can never drift apart in what they count as fan-in.
  */
+export function isOwnerHeld(record: Pick<RpcAgentRecord, "lastWriter"> | undefined): boolean {
+  return record?.lastWriter === "owner";
+}
+
 function computeFanIn(registry: RpcAgentRegistry | undefined): { present: boolean; running: number } {
   let present = false;
   let running = 0;
   for (const record of registry?.values() ?? []) {
-    if (record.threadBound || record.ownerHeld) continue;
+    if (record.threadBound || isOwnerHeld(record)) continue;
     present = true;
     if (record.expectedReport || record.waitingOnChildren || (record.running && !record.terminalThisTurn)) running += 1;
   }
@@ -1000,6 +1007,9 @@ export function buildPushContent(
 
 /** Live session idleness accessor, supplied at session_start. Missing or stale accessors never authorize a custom turn start. */
 export const leadIdleRef: { current: (() => boolean) | undefined } = { current: undefined };
+
+/** Human-only owner notification route, supplied by the active TUI lead session. */
+export const ownerNotifyRef: { current: ((message: string, type?: "info" | "warning" | "error") => void) | undefined } = { current: undefined };
 
 /** Independent compaction hold, set before any compaction and cleared only by deferred completion/failure or lever callbacks. agent_start is not proof of release. */
 export const leadCompactingRef: { current: boolean } = { current: false };
@@ -1441,7 +1451,7 @@ function reportObligationDelivery(record: RpcAgentRecord, registry: RpcAgentRegi
       publishSubtree(registry);
     },
     afterEnqueue: () => {
-      if (registry && record.client && !record.running && !record.streaming && !record.threadBound && !record.ownerHeld && !record.waitingOnChildren && !record.expectedReport) {
+      if (registry && record.client && !record.running && !record.streaming && !record.threadBound && !isOwnerHeld(record) && !record.waitingOnChildren && !record.expectedReport) {
         void stopAgent(registry, record.agentId, undefined, { silent: true });
       }
     },
@@ -1520,7 +1530,26 @@ export function startForkFinish(
     record.pendingFinalAccepted = undefined;
   }
   record.forkFinish = operation;
-  void advanceForkFinish(record, registry, pi, resumeCtx, operation);
+  // Last-writer ownership requires an immediate, lead-attributed handoff.
+  // Joining a streaming run uses followUp, so no new agent_start is expected;
+  // mark that closeout run observable now and let its next settle reconcile.
+  if (isOwnerHeld(record) && operation.candidate === undefined && record.terminalDelivery?.state !== "enqueued" && record.terminalDelivery?.state !== "held") {
+    operation.closeoutIssued = true;
+    operation.closeoutRunStarted = record.running || record.streaming;
+    operation.candidate = undefined;
+    operation.sawQuestion = false;
+    operation.phase = "closeout";
+    operation.settled = false;
+    void sendToAgent(registry, { ...finishResumeCtx(operation), pi, finishToken: operation.token }, record.agentId,
+      "The owner closed this side thread. Finish the task now and report the normal final report via ws-report-to-lead (kind: final).", false)
+      .catch((err) => {
+        if (record.forkFinish === operation && record.launchGeneration === operation.generation) {
+          void finishWithAdvisory(record, registry, pi, operation, `closeout failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      });
+  } else {
+    void advanceForkFinish(record, registry, pi, resumeCtx, operation);
+  }
   return operation;
 }
 
@@ -1686,6 +1715,14 @@ export function pushToLead(
   deliverAs: PushDeliverAs,
   terminal?: TerminalDelivery,
 ): void {
+  if (record && isOwnerHeld(record) && (family === "ws-agent-settled" || family === "ws-agent-advisory")) {
+    const name = record.alias ?? record.title ?? record.agentId.slice(0, 8);
+    const detail = family === "ws-agent-settled"
+      ? `settled${typeof payload.last_message === "string" && payload.last_message.trim() ? `: ${payload.last_message.trim()}` : ""}`
+      : `advisory: ${String(payload.detail ?? payload.advisory ?? "attention required")}`;
+    try { ownerNotifyRef.current?.(`ws: ${name} ${detail}`, family === "ws-agent-advisory" ? "warning" : "info"); } catch { /* human-only best effort */ }
+    return;
+  }
   if (!pi || !shouldPushToLead() || !leadIdleRef.current) return;
   admitPush(pi, { kind: "push", registry, record, family, payload, deliverAs, terminal });
   publishSubtree(registry);
@@ -1709,12 +1746,33 @@ export function pushToLead(
  * resets on a nudge too, since the nudge really did start a fresh turn on
  * the wire even though it is not a new lead-issued task boundary.
  */
+function stampWriter(record: RpcAgentRecord, writer: "lead" | "owner", text?: string): { previous: RpcAgentRecord["lastWriter"]; previousLeadPromptAt: number | undefined; ownerSend?: { text: string; at: number } } {
+  const previous = record.lastWriter;
+  const previousLeadPromptAt = record.lastLeadPromptAt;
+  const ownerSend = writer === "owner" && text !== undefined ? { text, at: Date.now() } : undefined;
+  record.lastWriter = writer;
+  if (ownerSend) (record.ownerSends ??= []).push(ownerSend);
+  syncOwnershipProtection(record);
+  triggerAgentWidgetRefresh();
+  return { previous, previousLeadPromptAt, ownerSend };
+}
+
+function rollbackWriter(record: RpcAgentRecord, stamp: ReturnType<typeof stampWriter>, writer: "lead" | "owner"): void {
+  if (stamp.ownerSend && record.ownerSends?.at(-1) === stamp.ownerSend) record.ownerSends.pop();
+  if (record.lastWriter === writer) record.lastWriter = stamp.previous;
+  if (writer === "lead") record.lastLeadPromptAt = stamp.previousLeadPromptAt;
+  syncOwnershipProtection(record);
+  triggerAgentWidgetRefresh();
+}
+
 export async function promptAgent(
   record: RpcAgentRecord,
   client: RpcClient,
   message: string,
-  opts?: { isLeadPrompt?: boolean },
+  opts?: { isLeadPrompt?: boolean; writer?: "lead" | "owner" },
 ): Promise<void> {
+  const writer = opts?.writer ?? "lead";
+  const writerStamp = stampWriter(record, writer, writer === "owner" ? message : undefined);
   record.running = true;
   record.workGeneration = (record.workGeneration ?? 0) + 1;
   record.terminalThisTurn = false;
@@ -1722,15 +1780,20 @@ export async function promptAgent(
   // not to the one starting now.
   // The anti-bleed nudge continues the same task, so it deliberately keeps
   // completion facts. Every real prompt is a new instruction boundary.
-  if (opts?.isLeadPrompt !== false) clearTerminalFacts(record);
+  if (opts?.isLeadPrompt !== false || writer === "owner") clearTerminalFacts(record);
   record.runStartedAt = Date.now();
   if (record.ownership) observeSessionWrite(record.ownership.home, record.sessionPath);
   if (record.ownership) updateOwnership(record.ownership.home, { lastActivityAt: Date.now(), liveness: { lifecycle: "live", running: true, observedAt: Date.now() } });
-  if (opts?.isLeadPrompt !== false) {
+  if (writer === "lead" && opts?.isLeadPrompt !== false) {
     record.lastLeadPromptAt = Date.now();
   }
   const workGeneration = record.workGeneration;
-  await client.prompt(message);
+  try {
+    await client.prompt(message);
+  } catch (error) {
+    rollbackWriter(record, writerStamp, writer);
+    throw error;
+  }
   if (record.delegation && record.workGeneration === workGeneration) {
     record.expectedReport = true;
     syncOwnershipProtection(record);
@@ -2008,6 +2071,8 @@ export interface RpcResumeCtx {
    * typing into an open thread must leave the bind exactly as it is.
    */
   leadSend?: boolean;
+  /** Attribution for the message. Omitted is a lead-side prompt. */
+  writer?: "lead" | "owner";
   /** Internal token carried only by a coordinator-owned closeout send. */
   finishToken?: string;
 }
@@ -2174,7 +2239,7 @@ export function syncOwnershipProtection(record: RpcAgentRecord): boolean {
       running: record.running,
       observedAt: Date.now(),
       threadBound: record.threadBound,
-      ownerHeld: record.ownerHeld,
+      ownerHeld: isOwnerHeld(record),
       waitingOnChildren: record.waitingOnChildren,
       expectedReport: record.expectedReport,
       pendingQuestion: record.threadBound,
@@ -2549,7 +2614,7 @@ export function attachEventListener(
         void advanceForkFinish(record, registry ?? new Map([[record.agentId, record]]), pi as ExtensionAPI, finishResumeCtx(finish), finish);
       } else void (async () => {
         // The deferred final, if this turn filed one, IS the settle message.
-        if (!flushPendingFinal(pi, registry, record, "idle") && !record.threadBound && !record.terminalThisTurn) {
+        if (!flushPendingFinal(pi, registry, record, "idle") && !record.terminalThisTurn && (!record.threadBound || isOwnerHeld(record))) {
           const lastMessage = await harvestLastMessage(record);
           if (!stillSettled()) return;
           const terminal: TerminalDelivery = {};
@@ -2560,7 +2625,7 @@ export function attachEventListener(
         // Automatic park: the last step, after the liveness probe and (by
         // event-loop ordering) after any synchronous nudge has had its chance
         // to re-prompt this record. See the doc comment above.
-        if (registry && stillSettled() && !record.threadBound && !record.ownerHeld && !record.expectedReport) {
+        if (registry && stillSettled() && !record.threadBound && !isOwnerHeld(record) && !record.expectedReport) {
           try {
             await stopAgent(registry, record.agentId, pi, { silent: true });
           } catch {
@@ -2665,7 +2730,7 @@ export function reserveAgentAlias(
   if (!alias) return { ok: true };
   for (const holder of registry.values()) {
     if (holder.alias !== alias) continue;
-    if (holder.running || holder.threadBound || holder.ownerHeld || holder.expectedReport || holder.waitingOnChildren) {
+    if (holder.running || holder.threadBound || isOwnerHeld(holder) || holder.expectedReport || holder.waitingOnChildren) {
       const state = holder.running ? "running" : holder.threadBound ? "threadBound" : "held/outstanding";
       return {
         ok: false,
@@ -2688,7 +2753,8 @@ export function reserveAgentAlias(
  */
 export function lastActivityAt(record: RpcAgentRecord): number {
   const lastReportActivity = record.reportLog.at(-1)?.at ?? (record.lastReportAtOverride ? Date.parse(record.lastReportAtOverride) : 0);
-  return Math.max(record.lastLeadPromptAt ?? 0, lastReportActivity);
+  const lastOwnerActivity = record.ownerSends?.at(-1)?.at ?? 0;
+  return Math.max(record.lastLeadPromptAt ?? 0, lastReportActivity, lastOwnerActivity);
 }
 
 /**
@@ -2713,7 +2779,7 @@ export function evictForCapacity(
     let candidate: RpcAgentRecord | undefined;
     let candidateActivity = Number.POSITIVE_INFINITY;
     for (const record of registry.values()) {
-      if (record.client || record.running || record.threadBound || record.ownerHeld || record.pendingApproval || record.expectedReport || record.waitingOnChildren) continue;
+      if (record.client || record.running || record.threadBound || isOwnerHeld(record) || record.pendingApproval || record.expectedReport || record.waitingOnChildren) continue;
       if (record.ownership && inspectOwnedHomeRemoval(record.ownership).status !== "eligible") continue;
       const activity = lastActivityAt(record);
       if (activity < candidateActivity) {
@@ -3106,6 +3172,8 @@ export async function sendToAgent(
     if (admitted.depth !== record.delegation.depth || parentPolicy.maxDepth < record.delegation.maxDepth) throw new Error("ws-pi-agent: recovered child exceeds the current delegation budget");
   }
 
+  const writer = ctx.writer ?? "lead";
+
   // Claim activity before mutating a dormant record. If retention already
   // owns the cross-process deletion claim, this resume fails closed instead
   // of launching against a home that can disappear mid-start.
@@ -3205,14 +3273,17 @@ export async function sendToAgent(
     } catch {
       // ignored — see above.
     }
-    await promptAgent(record, client, message);
+    await promptAgent(record, client, message, { writer });
     publishSubtree(registry, true);
     return { agent_id: record.agentId };
   }
 
   const live = record.client;
+  let writerStamp: ReturnType<typeof stampWriter> | undefined;
   try {
     if (record.streaming) {
+      writerStamp = stampWriter(record, writer, writer === "owner" ? message : undefined);
+      if (writer === "lead") record.lastLeadPromptAt = Date.now();
       if (interrupt) {
         await live.steer(message);
       } else {
@@ -3232,9 +3303,10 @@ export async function sendToAgent(
       record.workGeneration = (record.workGeneration ?? 0) + 1;
       if (record.delegation) record.expectedReport = true;
     } else {
-      await promptAgent(record, live, message);
+      await promptAgent(record, live, message, { writer });
     }
   } catch (err) {
+    if (writerStamp) rollbackWriter(record, writerStamp, writer);
     // A superseded closeout is no longer allowed to mutate or publish against
     // the replacement task. Its old RPC rejection is deliberately ignored by
     // lifecycle bookkeeping; the replacement owns the record now.
@@ -3311,7 +3383,7 @@ async function harvestLastMessage(record: RpcAgentRecord): Promise<string | unde
 export function listAgents(
   registry: RpcAgentRegistry,
   opts?: { includePrompt?: boolean },
-): Array<{ agent_id: string; status: AgentStatus; alias?: string; title?: string; model?: string; last_report_at?: string; prompt?: string }> {
+): Array<{ agent_id: string; status: AgentStatus; alias?: string; title?: string; model?: string; last_report_at?: string; owner_held?: true; prompt?: string }> {
   return [...registry.entries()].map(([agentId, record]) => {
     const lastReport = record.reportLog[record.reportLog.length - 1];
     const lastReportAt = lastReport ? new Date(lastReport.at).toISOString() : record.lastReportAtOverride;
@@ -3323,6 +3395,7 @@ export function listAgents(
       ...(record.title ? { title: record.title } : {}),
       ...(model ? { model } : {}),
       ...(lastReportAt ? { last_report_at: lastReportAt } : {}),
+      ...(isOwnerHeld(record) ? { owner_held: true as const } : {}),
       ...(opts?.includePrompt && record.prompt ? { prompt: record.prompt } : {}),
     };
   });
@@ -3412,7 +3485,7 @@ export async function stopAgent(
     if (record.ownership && record.launchGeneration === generation && !record.client) {
       updateOwnership(record.ownership.home, { liveness: {
         lifecycle: stopped ? "stopped" : "unknown", running: false, observedAt: Date.now(),
-        threadBound: false, ownerHeld: record.ownerHeld, pendingQuestion: false,
+        threadBound: false, ownerHeld: isOwnerHeld(record), pendingQuestion: false,
         waitingOnChildren: record.waitingOnChildren, expectedReport: record.expectedReport,
         pendingApprovalCommandId: record.pendingApproval?.cmdId,
       } });
@@ -3574,7 +3647,7 @@ export function registerAgentTools(
         alias: {
           type: "string",
           description:
-            "Optional short name for this agent, usable in place of agent_id on ws-agent-send/stop/transcript/ws-approve. Reusing an alias held by a running/threadBound agent rejects this spawn; a dormant/idle holder's alias is overwritten (its title is kept). Never derived automatically — omit to address this agent by uuid only.",
+            "Optional short name for this agent, usable in place of agent_id on ws-agent-send/stop/transcript/ws-approve. Reusing an alias held by a running, thread-bound, or owner-held agent rejects this spawn; a dormant/idle holder's alias is overwritten (its title is kept). Never derived automatically — omit to address this agent by uuid only.",
         },
         title: {
           type: "string",
@@ -3681,7 +3754,7 @@ export function registerAgentTools(
     name: "ws-agent-list",
     label: "ws-agent-list",
     description:
-      "List every tracked agent_id, its alias/title (when set), status (running/idle/dormant — most agents park to dormant shortly after settling, so idle is transient), model (the model the agent runs on; an inheriting child shows its parent's model), and last_report_at (ISO, absent if it has never reported). Use it to check on a quiet agent — there is no wait tool; every report, question, approval request and completion is pushed to you as a ws-agent-* message on its own.",
+      "List every tracked agent_id, its alias/title (when set), status (running/idle/dormant — most agents park to dormant shortly after settling, so idle is transient), model, last_report_at, and owner_held:true while the owner's last send retains settle ownership. Use it to check on a quiet agent — there is no wait tool; every unchanged report/question/approval/orphan signal is pushed on its own.",
     parameters: {
       type: "object",
       properties: {

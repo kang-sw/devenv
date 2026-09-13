@@ -33,8 +33,8 @@
  * IO functions.
  */
 
-import { countPending, type ThreadRecord } from "./ask.ts";
-import type { RpcAgentRecord, RpcAgentRegistry, SpawnAgentRole } from "./spawner.ts";
+import type { ThreadRecord } from "./ask.ts";
+import { isOwnerHeld, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole } from "./spawner.ts";
 import { visibleWidth } from "./text-width.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
 
@@ -141,7 +141,8 @@ export function rowName(record: RpcAgentRecord): string {
 export function classifyRegistryRowState(record: RpcAgentRecord): AgentRowState | undefined {
   if (record.threadBound === true) return "awaiting-owner";
   if (record.pendingApproval !== undefined) return "awaiting-approval";
-  if (record.client !== undefined) return "running";
+  if (isOwnerHeld(record) && !record.running) return "idle-awaiting-owner";
+  if (record.client !== undefined || record.running || record.streaming || record.waitingOnChildren) return "running";
   return undefined;
 }
 
@@ -226,6 +227,7 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
       state,
       elapsedMs,
       ...(isAwaitingOwnerWithThread ? { answerHint: `/answer ${boundThread!.threadId}` } : {}),
+      ...(isOwnerHeld(record) ? { inspectionHint: `/audit ${record.alias ?? record.agentId}` } : {}),
       ...(record.telemetry?.model ?? record.observedModel ? { model: record.telemetry?.model ?? record.observedModel } : {}),
       ...(record.telemetry?.effort ?? record.observedEffort ? { effort: record.telemetry?.effort ?? record.observedEffort } : {}),
       ...((record.telemetry?.contextTokens ?? record.observedContextTokens) !== undefined ? { contextTokens: record.telemetry?.contextTokens ?? record.observedContextTokens } : {}),
@@ -532,7 +534,7 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
   function paint(): void {
     const threadList = [...threads.values()];
     const rows = buildAgentRows(registry, threadList, Date.now());
-    const pendingCount = countPending(threadList);
+    const pendingCount = threadList.filter((thread) => thread.status === "pending").length;
     const visible = rows.length > 0 || pendingCount > 0;
     const qualifying = rows.some((row) => isAttentionState(row.state));
     const animationEnabled = options.animationEnabled?.() !== false;

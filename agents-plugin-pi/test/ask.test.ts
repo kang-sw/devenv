@@ -240,78 +240,15 @@ describe("threadRegistryPath / serialize / parse", () => {
     assert.deepEqual(parseThreadRegistry(JSON.stringify({ threads: [{ threadId: "q1", title: "t", status: "weird" }] })), []);
   });
 
-  test("a persisted transcript round-trips (dogfood: Esc/reopen and restart must not open an empty view)", () => {
-    const record = thread({
+  test("legacy thread-local transcripts are discarded on hydration so the child record/session is the only conversation source", () => {
+    const original = thread({
       threadId: "q1",
       status: "open",
-      transcript: [
-        { kind: "note", text: "Rebase or merge?" },
-        { kind: "user", text: "merge" },
-        { kind: "assistant", text: "Merging keeps both histories." },
-        { kind: "tool-call", id: "t1", name: "ws-note", args: { text: "x" } },
-        { kind: "tool-result", id: "t1", name: "ws-note", content: "ok", isError: false },
-      ],
+      transcript: [{ kind: "user", text: "legacy owner text" }],
     });
-    assert.deepEqual(parseThreadRegistry(serializeThreadRegistry([record])), [record]);
-  });
-
-  test("an absent transcript stays absent, and a malformed one degrades to only its well-formed entries", () => {
-    const [absent] = parseThreadRegistry(JSON.stringify({ threads: [thread({ threadId: "q1" })] }));
-    assert.ok(!("transcript" in absent), "no field is invented for a record written before transcripts existed");
-    const [notArray] = parseThreadRegistry(JSON.stringify({ threads: [{ ...thread({ threadId: "q2" }), transcript: "nope" }] }));
-    assert.ok(!("transcript" in notArray));
-    const [mixed] = parseThreadRegistry(
-      JSON.stringify({
-        threads: [{ ...thread({ threadId: "q3" }), transcript: [{ kind: "user", text: "ok" }, { kind: "alien", text: "x" }, { kind: "note" }, null, 7] }],
-      }),
-    );
-    assert.deepEqual(mixed.transcript, [{ kind: "user", text: "ok" }]);
-  });
-
-  test("review relay #2 I5: a malformed native tool-call/tool-result is dropped, never poisoning a well-formed neighbor", () => {
-    const [record] = parseThreadRegistry(
-      JSON.stringify({
-        threads: [
-          {
-            ...thread({ threadId: "q4" }),
-            transcript: [
-              { kind: "tool-call", name: "ws-read", args: {} }, // missing id
-              { kind: "tool-call", id: "c1", name: "ws-read", args: { path: "a.txt" } }, // well-formed
-              { kind: "tool-result", id: "c1", name: "ws-read", content: { not: "a string" } }, // non-string content
-              { kind: "tool-result", id: "c1", name: "ws-read", content: "ok" }, // well-formed
-              { kind: "tool-result", id: "c2" }, // missing name/content
-            ],
-          },
-        ],
-      }),
-    );
-    assert.deepEqual(record.transcript, [
-      { kind: "tool-call", id: "c1", name: "ws-read", args: { path: "a.txt" } },
-      { kind: "tool-result", id: "c1", name: "ws-read", content: "ok" },
-    ]);
-  });
-
-  test("legacy {who,text}[] entries hydrate to their ConversationItem.kind equivalents (records written before Phase 2)", () => {
-    const [record] = parseThreadRegistry(
-      JSON.stringify({
-        threads: [
-          {
-            ...thread({ threadId: "q1" }),
-            transcript: [
-              { who: "note", text: "Rebase or merge?" },
-              { who: "you", text: "merge" },
-              { who: "thread", text: "Merging keeps both histories." },
-              { who: "alien", text: "dropped" },
-            ],
-          },
-        ],
-      }),
-    );
-    assert.deepEqual(record.transcript, [
-      { kind: "note", text: "Rebase or merge?" },
-      { kind: "user", text: "merge" },
-      { kind: "assistant", text: "Merging keeps both histories." },
-    ]);
+    const [parsed] = parseThreadRegistry(serializeThreadRegistry([original]));
+    assert.ok(!("transcript" in parsed));
+    assert.equal(parsed.threadId, "q1");
   });
 
   test("normalizeTranscript caps at the newest THREAD_TRANSCRIPT_CAP entries", () => {
@@ -325,9 +262,10 @@ describe("threadRegistryPath / serialize / parse", () => {
   });
 
   describe("resolveChildLiveness", () => {
-    test("streaming -> running, not streaming -> settled", () => {
-      assert.equal(resolveChildLiveness(true), "running");
-      assert.equal(resolveChildLiveness(false), "settled");
+    test("running wins; an owner last-writer makes an idle child await the owner", () => {
+      assert.equal(resolveChildLiveness(true, true), "running");
+      assert.equal(resolveChildLiveness(false, true), "idle-awaiting-owner");
+      assert.equal(resolveChildLiveness(false, false), "settled");
     });
   });
 
@@ -752,6 +690,13 @@ describe("captureForkResume / rehydrateForkRecord (the persistence-gap resolutio
       modelEffort: "high",
     });
     assert.deepEqual(JSON.parse(JSON.stringify(resume)), resume, "must round-trip through JSON");
+  });
+
+  test("last-writer ownership and owner-send attribution survive the thread resume copy", () => {
+    const original = { ...live, lastWriter: "owner" as const, ownerSends: [{ text: "owner turn", at: 42 }] };
+    const revived = rehydrateForkRecord("agent-owner", captureForkResume(original));
+    assert.equal(revived.lastWriter, "owner");
+    assert.deepEqual(revived.ownerSends, [{ text: "owner turn", at: 42 }]);
   });
 
   test("rehydration reconstructs a spec-conformant dormant record with client undefined", () => {
@@ -1489,7 +1434,8 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
 
       handleRespondentFinalReport(pi, handle, registry, record, "Task done. Decisions: rebase.", overlay.handle);
 
-      assert.deepEqual(overlay.calls.summaries, [""], "a task fork's final is not a thread summary");
+      assert.equal(overlay.calls.close, 1, "the already-terminal fork closes the view without routing through /done finish");
+      assert.deepEqual(overlay.calls.summaries, [], "a task fork's final is not a thread summary or a second closeout");
       assert.deepEqual(sent, [], "the lead reads the fork's own final report; nothing is injected");
       assert.equal(record.status, "dormant");
       assert.equal(live.overlayAttached, false);

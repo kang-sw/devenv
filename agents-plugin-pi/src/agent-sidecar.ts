@@ -39,7 +39,7 @@
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { TOOL_GROUPS, refreshAgentTelemetry, startOwnedSessionObserver, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole, type ToolGroup } from "./spawner.ts";
+import { TOOL_GROUPS, isOwnerHeld, refreshAgentTelemetry, startOwnedSessionObserver, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole, type ToolGroup } from "./spawner.ts";
 import { parseForkContext, type ForkContext } from "./fork-context.ts";
 import { normalizeStoredExploreMode, type ExploreMode } from "./process-role.ts";
 import { readOwnership, removeOwnedAgentHome, updateOwnership, validDescriptor, type AgentOwnership } from "./agent-storage.ts";
@@ -79,6 +79,8 @@ export interface PersistedOrphan {
   subtreeChannel?: SubtreeChannel;
   expectedReport?: boolean;
   waitingOnChildren?: boolean;
+  lastWriter?: "lead" | "owner";
+  ownerSends?: Array<{ text: string; at: number }>;
   requiresFreshFinal?: boolean;
   spawnRole?: SpawnAgentRole;
   /** Persistent explore identity; only valid with the coherent explore tuple. */
@@ -162,6 +164,8 @@ export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
       ...(record.subtreeChannel ? { subtreeChannel: record.subtreeChannel } : {}),
       ...(record.expectedReport !== undefined ? { expectedReport: record.expectedReport } : {}),
       ...(record.waitingOnChildren !== undefined ? { waitingOnChildren: record.waitingOnChildren } : {}),
+      ...(record.lastWriter ? { lastWriter: record.lastWriter } : {}),
+      ...(record.ownerSends?.length ? { ownerSends: record.ownerSends.map((send) => ({ ...send })) } : {}),
       ...(record.requiresFreshFinal !== undefined ? { requiresFreshFinal: record.requiresFreshFinal } : {}),
       spawnRole: record.spawnRole,
       ...(record.exploreMode ? { exploreMode: record.exploreMode } : {}),
@@ -224,6 +228,13 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
     let delegation: DelegationPolicy | undefined;
     try { if (o.delegation !== undefined) delegation = parseDelegationPolicy(o.delegation); } catch { continue; }
     if ([o.expectedReport, o.waitingOnChildren, o.requiresFreshFinal].some(v => v !== undefined && typeof v !== "boolean")) continue;
+    if (o.lastWriter !== undefined && o.lastWriter !== "lead" && o.lastWriter !== "owner") continue;
+    const ownerSends = Array.isArray(o.ownerSends)
+      ? o.ownerSends.flatMap((send) => send && typeof send === "object" && typeof send.text === "string" && typeof send.at === "number" && Number.isFinite(send.at)
+        ? [{ text: send.text, at: send.at }]
+        : [])
+      : undefined;
+    if (o.ownerSends !== undefined && !Array.isArray(o.ownerSends)) continue;
     if (o.subtreeChannel !== undefined && (!o.subtreeChannel || typeof o.subtreeChannel.path !== "string" || typeof o.subtreeChannel.nonce !== "string")) continue;
     let forkContext: ForkContext | undefined;
     try { forkContext = parseForkContext(o.forkContext); } catch { continue; }
@@ -271,6 +282,8 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
       ...(o.subtreeChannel ? { subtreeChannel: o.subtreeChannel } : {}),
       ...(o.expectedReport !== undefined ? { expectedReport: o.expectedReport } : {}),
       ...(o.waitingOnChildren !== undefined ? { waitingOnChildren: o.waitingOnChildren } : {}),
+      ...(o.lastWriter ? { lastWriter: o.lastWriter } : {}),
+      ...(ownerSends?.length ? { ownerSends } : {}),
       ...(o.requiresFreshFinal !== undefined ? { requiresFreshFinal: o.requiresFreshFinal } : {}),
       spawnRole: o.spawnRole,
       ...(exploreMode ? { exploreMode } : {}),
@@ -330,6 +343,8 @@ export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
     subtreeChannel: orphan.subtreeChannel,
     expectedReport: orphan.expectedReport,
     waitingOnChildren: orphan.waitingOnChildren,
+    lastWriter: orphan.lastWriter,
+    ownerSends: orphan.ownerSends?.map((send) => ({ ...send })),
     requiresFreshFinal: orphan.requiresFreshFinal,
     spawnRole: orphan.spawnRole,
     exploreMode: orphan.exploreMode,
@@ -392,7 +407,7 @@ export function reviveOrphans(registry: RpcAgentRegistry, orphans: PersistedOrph
       updateOwnership(record.ownership.home, { liveness: {
         lifecycle: confirmedStopped ? "stopped" : "unknown", running: false, observedAt: Date.now(), recovery: "sidecar",
         ...(record.threadBound === true ? { threadBound: true } : {}),
-        ...(record.ownerHeld === true ? { ownerHeld: true } : {}),
+        ...(isOwnerHeld(record) ? { ownerHeld: true } : {}),
         ...(record.waitingOnChildren === true ? { waitingOnChildren: true } : {}),
         ...(record.expectedReport === true ? { expectedReport: true } : {}),
         ...(record.pendingApproval?.cmdId ? { pendingApprovalCommandId: record.pendingApproval.cmdId } : {}),
