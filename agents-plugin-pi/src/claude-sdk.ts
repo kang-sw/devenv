@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import type { Options, Query, SDKMessage, SpawnOptions, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
 import type { ClaudeDelegatePreset } from "./claude-delegate-prompts.ts";
@@ -20,25 +20,29 @@ const SAFE: Record<ClaudeDelegateError["code"], string> = { timeout: "Claude req
 function fail(code: ClaudeDelegateError["code"]): never { throw new ClaudeDelegateError(code, SAFE[code]); }
 export function delegateEnvironment(env: NodeJS.ProcessEnv = process.env): Record<string, string> { const keys = ["HOME", "PATH", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR"]; return Object.fromEntries(keys.flatMap((key) => typeof env[key] === "string" ? [[key, env[key]!]] : [])); }
 export function resolveClaudeExecutable(executable?: string): string { const candidate = executable ?? join(homedir(), ".local", "bin", "claude"); if (!existsSync(candidate)) fail("sdk_error"); return candidate; }
-function contained(root: string, candidate: string): boolean { const value = relative(root, candidate); return value === "" || (value !== ".." && !value.startsWith(`..${sep}`)); }
+export function pathContained(root: string, candidate: string, pathOps: Pick<typeof import("node:path"), "relative" | "isAbsolute" | "sep"> = { relative, isAbsolute, sep }): boolean {
+  const value = pathOps.relative(root, candidate);
+  return !pathOps.isAbsolute(value) && (value === "" || (value !== ".." && !value.startsWith(`..${pathOps.sep}`)));
+}
 function canonicalEditTarget(root: string, path: string): string {
   const candidate = resolve(root, path);
-  try {
-    const canonical = realpathSync(candidate);
-    if (canonical === root || !contained(root, canonical) || !statSync(canonical).isFile()) throw new Error("edit target must resolve to a worktree file");
+  let entry;
+  try { entry = lstatSync(candidate, { throwIfNoEntry: false }); } catch { throw new Error("edit target path is not accessible"); }
+  if (entry) {
+    let canonical: string;
+    try { canonical = realpathSync(candidate); } catch { throw new Error("edit target symlink must resolve inside the worktree"); }
+    if (canonical === root || !pathContained(root, canonical) || !statSync(canonical).isFile()) throw new Error("edit target must resolve to a worktree file");
     return canonical;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    let parent: string;
-    try { parent = realpathSync(dirname(candidate)); } catch { throw new Error("edit target parent must already exist"); }
-    if (!contained(root, parent) || !statSync(parent).isDirectory()) throw new Error("edit target parent must stay inside the worktree");
-    return join(parent, basename(candidate));
   }
+  let parent: string;
+  try { parent = realpathSync(dirname(candidate)); } catch { throw new Error("edit target parent must already exist"); }
+  if (!pathContained(root, parent) || !statSync(parent).isDirectory()) throw new Error("edit target parent must stay inside the worktree");
+  return join(parent, basename(candidate));
 }
 function fingerprint(root: string, path: string): string {
   try {
     const canonical = realpathSync(path);
-    if (canonical !== path || !contained(root, canonical) || !statSync(canonical).isFile()) return "invalid";
+    if (canonical !== path || !pathContained(root, canonical) || !statSync(canonical).isFile()) return "invalid";
     return `file:${createHash("sha256").update(readFileSync(canonical)).digest("hex")}`;
   } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return "missing"; return "unreadable"; }
 }
