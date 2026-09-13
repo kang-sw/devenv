@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0e8af6755f7f8c34
 sage-review-completeness-reviewed: 0e8af6755f7f8c34
+completed: 2026-09-13
 ---
 
 # Cross-session mailbox core — host-neutral MCP surface, identity, and owner binding
@@ -383,3 +384,8 @@ found 1 new Important (Windows no-op in the liveness check) plus the test
 partition's 2 Important (a vacuous post-rebind assertion; shallow
 crashed-process test coverage) and 1 Minor; all fixed in `18d50953`, with
 no Critical open after round 2.
+
+
+## Resolution (2026-09-13)
+
+Phase 1 (the only phase) is complete: MCP surface (mailbox.send/recv/lookup_peers), WS_MAILBOX/WS_MAILBOX_AUTO identity with self-registration and liveness, universal send with the machine-tier reply-id registry, sender-server envelope stamping, name-keyed queue/presence storage, owner binding at a parent-less ferrule with server-side caller==owner gate, env-less reply-id recv/piggyback, central piggyback badge, and the self-address surface — all landed across c0e0816a, 6d786057, 18d50953, verified by a full build/vet/gofmt/test pass and two review rounds with no Critical findings open. See the ### Result section under Phase 1 for full detail. Decisions 6, 7, 9, and the wake half of 14 remain deferred to 260913-feat-cross-session-mailbox-wake, untouched by this ticket.
