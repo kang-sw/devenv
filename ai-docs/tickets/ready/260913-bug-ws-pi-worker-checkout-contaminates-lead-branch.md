@@ -2,6 +2,10 @@
 title: "Worker checkout can contaminate lead-owned commits"
 related:
   260909-epic-ws-worker-interpreter-refoundation: constraint — lead-run/ticket-worker are the shared worker-interpreter surface this touches
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 7f3a5b86ff2cb6c4
+sage-review-completeness-reviewed: 7f3a5b86ff2cb6c4
 ---
 
 # Worker checkout can contaminate lead-owned commits
@@ -40,7 +44,7 @@ Recovery required preserving the contaminated tip, selectively transplanting onl
 
 | fact | value | evidence |
 |---|---|---|
-| scope.span | multi-file | agents-plugin/rsrc/lead-run/lead-run.md, agents-plugin/rsrc/ticket-worker/ticket-worker.md, and their required shipped mirrors |
+| scope.span | multi-file | agents-plugin/rsrc/lead-run/lead-run.md, agents-plugin/rsrc/ticket-worker/ticket-worker.md, agents-plugin/rsrc/worker-stop-protocol.md (shared `worker-stop-protocol` include holding the Report block and Branch section; also included by ticket-worker-escalated.md and ticket-worker-elevated.md), and their required shipped mirrors |
 | scope.surface | public-interface | lead-run and ticket-worker are shared shipped workflow interfaces |
 | scope.new_public_symbol | no | no new tool or exported symbol is required; the awareness step reuses the existing ws/git.status impl_ticket surface |
 | scope.new_type_contract | no | the light approach records nothing new — no base_branch/base_oid/impl_oid handoff fields are added to notes or reports |
@@ -56,6 +60,6 @@ Recovery required preserving the contaminated tip, selectively transplanting onl
 
 ### Phase 1: Add a mandatory branch-awareness step to lead-run stop handling
 
-On `develop`, update the shared lead-run playbook (and the ticket-worker handoff note where it documents the return) so that, on a worker's terminal stop-condition report, the lead must call `ws/git.status` and read `branch.head`/`impl_ticket` before any HEAD-relative lead-owned write (ticket Edition/revision, hotfix commit, follow-up dispatch base), then make an explicit stack-vs-return decision stated in the playbook text: stack on the impl branch when the write belongs to that impl ticket; check out the derived base branch (`impl/<root>/<stem>` → `<root>`) when the write is unrelated or the ticket is fully blocked and the lead is exiting. Do not add base/impl handoff fields to the assignment note, do not add fail-closed refusal machinery, and do not allocate a worktree. Regenerate the required shipped mirrors.
+On `develop`, update the shared lead-run playbook and the shared `worker-stop-protocol` include (`agents-plugin/rsrc/worker-stop-protocol.md`, which holds the Report block and Branch section and is also pulled into `ticket-worker.md`, `ticket-worker-elevated.md`, and `ticket-worker-escalated.md`) so that, on a worker's terminal stop-condition report, the lead must call `ws/git.status` and read `branch.head`/`impl_ticket` before any HEAD-relative lead-owned write (ticket Edition/revision, hotfix commit, follow-up dispatch base), then make an explicit stack-vs-return decision stated in the playbook text: stack on the impl branch when the write belongs to that impl ticket; check out the derived base branch (`impl/<root>/<stem>` → `<root>`) when the write is unrelated or the ticket is fully blocked and the lead is exiting. Do not add base/impl handoff fields to the assignment note, do not add fail-closed refusal machinery, and do not allocate a worktree. Regenerate the required shipped mirrors.
 
 Verify: the awareness step is present in the shared source and its shipped mirrors (mirror-integrity); the stack-vs-return guidance names both branches of the decision; the base-branch derivation matches the `ws/git.merge` `impl/<root>/<stem>` convention; and `ws/git.merge`'s existing branch-explicit behavior is documented as unaffected by the current checkout. No behavioral regression harness is required because the change is playbook text; the 2026-09-13 six-commit contamination is cited as the motivating example, not a coded test.
