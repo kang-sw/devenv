@@ -217,7 +217,7 @@ import {
 import { registerAuditCommands } from "./audit.ts";
 import { registerWsSkillTool } from "./lead-skills.ts";
 import { createToolPreviewTuiRef, loadToolResultTuiModules } from "./tool-result-render.ts";
-import { createAgentStorageContext, pruneStaleAgentHomes, type AgentStorageContext } from "./agent-storage.ts";
+import { createAgentStorageContext, createOwnershipDiagnosticReporter, pruneStaleAgentHomes, reportOwnershipDiagnostic, setOwnershipDiagnosticReporter, type AgentStorageContext } from "./agent-storage.ts";
 import { createAgentFooterSessionLifecycle, persistOwnedTelemetryRollup, type AgentFooterContext, type AgentFooterSessionLifecycle } from "./agent-footer.ts";
 import { loadHostPiTui } from "./pi-tui.ts";
 import { addClaudeDelegateIfLead, registerClaudeDelegateSession } from "./claude-delegate.ts";
@@ -239,6 +239,20 @@ const goalLoopConfigPath = join(pluginDir, "goal-loop-config.json");
 const piLeadGuidePath = join(pluginDir, "pi-lead-guide.md");
 const executeWorkerGuidePath = join(pluginDir, "execute-worker-guide.md");
 const exploreGuidePath = join(pluginDir, "explore-guide.md");
+
+/** Installs one bounded reporter for the active adapter session. Only a TUI owner lead has a notification surface. */
+export function applySessionStartOwnershipDiagnostics(
+  role: SpawnRole | undefined,
+  ctx: Pick<ExtensionUIContext, "mode" | "ui">,
+): void {
+  setOwnershipDiagnosticReporter(createOwnershipDiagnosticReporter(
+    role === undefined && ctx.mode === "tui" ? (message, type) => ctx.ui.notify(message, type) : undefined,
+  ));
+}
+
+export function applySessionShutdownOwnershipDiagnostics(): void {
+  setOwnershipDiagnosticReporter();
+}
 
 /** Controller-session retention seam: child workers never run global disk maintenance. */
 export async function applySessionStartAgentFooter(
@@ -269,7 +283,7 @@ export function applySessionStartAgentRetention(
     const deletedHomes = new Set(retention.deletedHomes);
     return recovered.filter(orphan => !orphan.ownership || !deletedHomes.has(orphan.ownership.home));
   } catch (error) {
-    console.error(`ws-pi-agent: child retention failed during session start: ${String(error)}`);
+    reportOwnershipDiagnostic("retention-start", error);
     return recovered;
   }
 }
@@ -537,6 +551,8 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   let pushRenderersRegistered = false;
 
   pi.on("session_start", async (_event, ctx) => {
+    const sessionRole = readSpawnRole(process.env);
+    applySessionStartOwnershipDiagnostics(sessionRole, ctx);
     if (forkContextError) { ctx.ui.notify(forkContextError, "error"); return; }
     if (readSpawnRole(process.env) === "fork" && !durableForkContextRef.current) {
       durableForkContextRef.current = restoreForkContext(ctx.sessionManager.getEntries(), ctx.sessionManager.getSessionId());
@@ -874,6 +890,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     goalLoopHandle.resetCompactionStateForShutdown();
     leadIdleRef.current = undefined;
     ownerNotifyRef.current = undefined;
+    applySessionShutdownOwnershipDiagnostics();
     // 260905 (live-agent widget ticket): stop the elapsed timer and clear the
     // widget/status segment (mirrors `leadIdleRef.current = undefined` above)
     // — the registries the controller closed over are about to be discarded.

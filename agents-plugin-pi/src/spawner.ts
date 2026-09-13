@@ -2858,7 +2858,7 @@ export function evictForCapacity(
         return {
           ok: false,
           error: removal.status === "failed"
-            ? `ws-pi-agent: ws-agent-spawn rejected: owned-home removal failed for ${candidate.agentId}: ${removal.error}`
+            ? "ws-pi-agent: ws-agent-spawn rejected: owned-home removal failed; the existing agent was retained for safety"
             : `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) candidate became protected or durably unknown before eviction`,
         };
       }
