@@ -5,22 +5,66 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
 
-// repoRootForTest returns this test binary's own working-tree root: a real
-// git checkout, used only as a WorktreePath-resolvable root for the
-// worktree-scope payload-cwd test below. It does not need to be the
-// canonical top of the devenv repo — wsstate.Manager.Ensure resolves the
-// canonical worktree root from any path inside it.
-func repoRootForTest(t *testing.T) string {
+// initGitFixtureForHookTest creates a throwaway git repo under t.TempDir(),
+// mirroring internal/wsmailbox's own initGitFixture test helper: a real
+// commit is needed for `git rev-parse --show-toplevel` (which
+// wsstate.Manager.Resolve shells out to) to succeed.
+func initGitFixtureForHookTest(t *testing.T) string {
 	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("os.Getwd: %v", err)
+	repo := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	return dir
+	runGitForHookTest(t, repo, "init")
+	runGitForHookTest(t, repo, "config", "user.email", "test@example.invalid")
+	runGitForHookTest(t, repo, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("# Test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitForHookTest(t, repo, "add", "README.md")
+	runGitForHookTest(t, repo, "commit", "-m", "init")
+	return repo
+}
+
+func runGitForHookTest(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// seedWorktreeInbox seeds root's own worktree-scope mailbox store (as
+// opposed to seedNamedInbox's machine scope) with one queued envelope for
+// name, directly via internal/wsmailbox — mirrors seedNamedInbox's
+// temporarily-scoped-env pattern so the same isolated cache/config home the
+// CLI subprocess uses is the one this in-process seed call resolves
+// against.
+func seedWorktreeInbox(t *testing.T, env []string, root, name, ownerKey, content string) {
+	t.Helper()
+	t.Setenv("WS_CACHE_HOME", cacheHomeFromEnv(t, env))
+	t.Setenv("WS_CONFIG_HOME", configHomeFromEnv(t, env))
+
+	path, err := wsmailbox.WorktreePath(root)
+	if err != nil {
+		t.Fatalf("WorktreePath(%s): %v", root, err)
+	}
+	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+		store.Presence[name] = wsmailbox.Presence{Name: name, Scope: wsmailbox.ScopeWorktree, Owner: ownerKey, LastSeen: "2026-09-13T00:00:00Z"}
+		store.Queues = wsmailbox.AppendQueue(store.Queues, name, wsmailbox.Envelope{Content: content, SentAt: "2026-09-13T00:00:00Z"})
+		return nil
+	}); err != nil {
+		t.Fatalf("seed worktree inbox %s at %s: %v", name, root, err)
+	}
 }
 
 // mailbox_codex_hook_test.go covers the Codex Stop-hook adapter subcommand
@@ -40,8 +84,19 @@ func repoRootForTest(t *testing.T) string {
 
 func runMailboxCodexStopHook(t *testing.T, bin string, env []string, stdin string, args ...string) (string, int) {
 	t.Helper()
+	return runMailboxCodexStopHookInDir(t, bin, env, "", stdin, args...)
+}
+
+// runMailboxCodexStopHookInDir is runMailboxCodexStopHook with an explicit
+// subprocess working directory, needed only by the payload-cwd test below
+// to make the OS-level process cwd deliberately diverge from the Stop
+// payload's own "cwd" field — proving which one --root's default actually
+// resolves against.
+func runMailboxCodexStopHookInDir(t *testing.T, bin string, env []string, dir string, stdin string, args ...string) (string, int) {
+	t.Helper()
 	cmd := exec.Command(bin, append([]string{"mailbox", "codex-stop-hook"}, args...)...)
 	cmd.Env = env
+	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(stdin)
 	out, err := cmd.CombinedOutput()
 	exitCode := 0
@@ -198,23 +253,67 @@ func TestMailboxCodexStopHookAcceptsEmptyStdin(t *testing.T) {
 // correctness finding that the Stop payload's own cwd (the only reliable
 // signal of the actual session's working directory a bare hook subprocess
 // has) was parsed but never used, leaving --root at "." for a
-// worktree/clone-scope slug. Machine scope does not need root, so this test
-// only confirms cwd flows into the CLI's effective root computation by
-// checking a worktree-scope slug resolves without error against a real
-// repo checkout at the payload's cwd rather than failing to resolve.
+// worktree/clone-scope slug.
+//
+// Round-2 (test-partition, fix-verification) review flagged the original
+// version of this test as too weak to actually catch a regression: it only
+// asserted the ABSENCE of a warning against the test binary's own ambient
+// process cwd (which happened to already be a valid worktree root), so it
+// would have passed identically whether payload.cwd was wired in or
+// silently ignored. This version deliberately makes the OS-level process
+// cwd (via cmd.Dir) diverge from the payload's own cwd field, and seeds
+// unread mail ONLY at the payload-cwd fixture's worktree-scope store: a
+// decision:block response is possible only if the CLI actually resolved
+// --root's default against payload.Cwd, not the subprocess's own OS cwd.
 func TestMailboxCodexStopHookUsesPayloadCwdForWorktreeSlug(t *testing.T) {
 	bin := buildWsMCPMailboxTestBin(t)
 	env := mailboxTestEnv(t)
 
-	// repoRoot: this package's own repo checkout, a valid git worktree root.
-	repoRoot := repoRootForTest(t)
+	mailFixture := initGitFixtureForHookTest(t)       // has unread "lead@worktree" mail
+	processCwdFixture := initGitFixtureForHookTest(t) // deliberately does not
+	seedWorktreeInbox(t, env, mailFixture, "lead", "owner-key", "run ticket X")
 
-	payload := `{"hook_event_name":"Stop","stop_hook_active":false,"cwd":"` + strings.ReplaceAll(repoRoot, `\`, `\\`) + `"}`
-	out, exitCode := runMailboxCodexStopHook(t, bin, withMailboxEnv(env, "lead@worktree"), payload)
-	// No mail seeded for this worktree-scope slug: expect a clean silent
-	// no-op (exit 0, no output), not a resolution error surfaced as a
-	// warning — proving cwd resolved the worktree store path successfully.
-	if exitCode != 0 || strings.Contains(out, "warning") {
-		t.Fatalf("mailbox codex-stop-hook with a worktree-scope slug and payload cwd = (exit %d, out %q), want a clean (0, \"\") with no resolution warning", exitCode, out)
+	payload := `{"hook_event_name":"Stop","stop_hook_active":false,"cwd":"` + strings.ReplaceAll(mailFixture, `\`, `\\`) + `"}`
+	out, exitCode := runMailboxCodexStopHookInDir(t, bin, withMailboxEnv(env, "lead@worktree"), processCwdFixture, payload)
+	if exitCode != 0 || !strings.Contains(out, `"decision":"block"`) {
+		t.Fatalf("mailbox codex-stop-hook with payload.cwd pointing at the seeded fixture = (exit %d, out %q), want a decision:block response — --root's default must resolve against payload.cwd, not the OS process cwd", exitCode, out)
+	}
+
+	// Negative control: the exact same slug and the exact same OS process
+	// cwd, but this time cwd is absent from the payload. --root's default
+	// then resolves against processCwdFixture (which has no seeded mail),
+	// so this must go silent — proving the prior block truly depended on
+	// payload.cwd, not on some other ambient signal.
+	noCwdPayload := `{"hook_event_name":"Stop","stop_hook_active":false}`
+	out2, exit2 := runMailboxCodexStopHookInDir(t, bin, withMailboxEnv(env, "lead@worktree"), processCwdFixture, noCwdPayload)
+	if exit2 != 0 || strings.TrimSpace(out2) != "" {
+		t.Fatalf("mailbox codex-stop-hook without payload.cwd, OS cwd at the unseeded fixture = (exit %d, out %q), want a clean (0, \"\")", exit2, out2)
+	}
+}
+
+// TestMailboxCodexStopHookHonorsExplicitReason closes the round-1
+// test-partition Minor finding (still open per round-2 verification): no
+// test previously exercised --reason, so a regression breaking that flag
+// entirely (e.g. a typo dropping it from the flag set) would have gone
+// unnoticed by every other test here, which all leave it at its default.
+func TestMailboxCodexStopHookHonorsExplicitReason(t *testing.T) {
+	bin := buildWsMCPMailboxTestBin(t)
+	env := mailboxTestEnv(t)
+	seedNamedInbox(t, env, "lead", "owner-key", "run ticket X")
+
+	const customReason = "custom drain instruction for this test"
+	out, exitCode := runMailboxCodexStopHook(t, bin, withMailboxEnv(env, "lead@machine"), `{"hook_event_name":"Stop","stop_hook_active":false}`, "--reason", customReason)
+	if exitCode != 0 {
+		t.Fatalf("mailbox codex-stop-hook --reason exit code = %d, want 0\n%s", exitCode, out)
+	}
+	var got struct {
+		Decision string `json:"decision"`
+		Reason   string `json:"reason"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace([]byte(out)), &got); err != nil {
+		t.Fatalf("invalid mailbox codex-stop-hook JSON: %v\n%s", err, out)
+	}
+	if got.Decision != "block" || got.Reason != customReason {
+		t.Fatalf("mailbox codex-stop-hook --reason output = %#v, want decision=block with reason=%q", got, customReason)
 	}
 }
