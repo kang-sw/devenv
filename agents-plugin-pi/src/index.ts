@@ -286,10 +286,10 @@ export async function persistShutdownAgentSnapshots(
     const record = agentTools.rpcRegistry.get(orphan.agentId);
     if (!record) continue;
     orphan.telemetry = record.telemetry;
-    orphan.telemetryInputFloor = record.telemetryInputFloor;
+    orphan.telemetryContextFloor = record.telemetryContextFloor;
     orphan.observedModel = record.observedModel;
     orphan.observedEffort = record.observedEffort;
-    orphan.observedLatestInput = record.observedLatestInput;
+    orphan.observedContextTokens = record.observedContextTokens;
   }
   writeSidecarAt(sidecar, orphans);
   for (const thread of threads.threads.values()) {

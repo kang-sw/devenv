@@ -9,7 +9,8 @@ export interface AgentTelemetry {
   origin: TelemetryOrigin;
   model?: string;
   effort?: string;
-  latestInput?: number;
+  /** Current context-window occupancy. Pi's live ContextUsage.tokens overrides the latest-call usage fallback. */
+  contextTokens?: number;
   /** Complete child-attributable cumulative estimate. Existing widget semantics read only this field. */
   estimatedUsd?: number;
   /** Known subtotal when one or more attributable usage entries have unknown cost. */
@@ -18,11 +19,15 @@ export interface AgentTelemetry {
 type Entry = { id: string; type: string; message?: { role?: string; usage?: unknown }; usage?: unknown };
 
 const nonnegative = (v: unknown): number | undefined => typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
-function usageOf(value: unknown): { input?: number; cost?: number } | undefined {
+function usageOf(value: unknown): { contextTokens?: number; cost?: number } | undefined {
   if (!value || typeof value !== "object") return undefined;
-  const u = value as { input?: unknown; cost?: { total?: unknown } };
-  const input = nonnegative(u.input), cost = nonnegative(u.cost?.total);
-  return input === undefined && cost === undefined ? undefined : { input, cost };
+  const u = value as { input?: unknown; output?: unknown; cacheRead?: unknown; cacheWrite?: unknown; totalTokens?: unknown; cost?: { total?: unknown } };
+  const explicitTotal = nonnegative(u.totalTokens);
+  const parts = [u.input, u.output, u.cacheRead, u.cacheWrite].map(nonnegative).filter((part): part is number => part !== undefined);
+  const summed = parts.length > 0 ? parts.reduce((total, part) => total + part, 0) : undefined;
+  const contextTokens = explicitTotal ?? (summed !== undefined && Number.isFinite(summed) ? summed : undefined);
+  const cost = nonnegative(u.cost?.total);
+  return contextTokens === undefined && cost === undefined ? undefined : { contextTokens, cost };
 }
 export function parseTelemetry(value: unknown): AgentTelemetry | undefined {
   const t = value as Partial<AgentTelemetry> | null;
@@ -33,7 +38,7 @@ export function parseTelemetry(value: unknown): AgentTelemetry | undefined {
   const out: AgentTelemetry = { version: 1, origin: { sessionId: o.sessionId, sessionPath: o.sessionPath, ...(o.prefixEntryId ? { prefixEntryId: o.prefixEntryId } : { emptyPrefix: true }) } };
   if (typeof t.model === "string" && t.model) out.model = t.model;
   if (typeof t.effort === "string" && t.effort) out.effort = t.effort;
-  for (const k of ["latestInput", "estimatedUsd", "partialEstimatedUsd"] as const) { const n = nonnegative(t[k]); if (n !== undefined) out[k] = n; }
+  for (const k of ["contextTokens", "estimatedUsd", "partialEstimatedUsd"] as const) { const n = nonnegative(t[k]); if (n !== undefined) out[k] = n; }
   if (out.estimatedUsd !== undefined && out.partialEstimatedUsd !== undefined) delete out.partialEstimatedUsd;
   return out;
 }
@@ -56,24 +61,24 @@ export function readSessionEntries(path: string): { headerId: string; parentSess
   return { headerId: h.id, ...(typeof h.parentSession === "string" && h.parentSession ? { parentSession: h.parentSession } : {}), entries };
 }
 /** Recomputes, never adds. Unavailable or invalid input returns undefined; callers classify the read before choosing fallback. */
-export function reduceTelemetry(origin: TelemetryOrigin, read: ReturnType<typeof readSessionEntries>): Pick<AgentTelemetry, "latestInput" | "estimatedUsd" | "partialEstimatedUsd"> | undefined {
+export function reduceTelemetry(origin: TelemetryOrigin, read: ReturnType<typeof readSessionEntries>): Pick<AgentTelemetry, "contextTokens" | "estimatedUsd" | "partialEstimatedUsd"> | undefined {
   if (!read || "transient" in read || read.headerId !== origin.sessionId) return undefined;
   let start = 0;
   if (origin.prefixEntryId) { const at = read.entries.findIndex(e => e.id === origin.prefixEntryId); if (at < 0) return undefined; start = at + 1; }
   else if (!origin.emptyPrefix) return undefined;
-  let total = 0, observedCost = false, invalidCost = false, latest: number | undefined;
+  let total = 0, observedCost = false, invalidCost = false, contextTokens: number | undefined;
   for (const e of read.entries.slice(start)) {
     const assistant = e.type === "message" && e.message?.role === "assistant";
     const summary = e.type === "compaction" || e.type === "branch_summary";
     const rawUsage = e.message?.usage ?? e.usage;
     const usage = usageOf(rawUsage);
-    if (!usage) { if (assistant || (rawUsage !== undefined && (summary || e.type === "message"))) invalidCost = true; if (assistant || summary) latest = undefined; continue; }
-    if (assistant) latest = usage.input; // later summary entries below clear this.
-    if (summary) latest = undefined;
+    if (!usage) { if (assistant || (rawUsage !== undefined && (summary || e.type === "message"))) invalidCost = true; if (assistant || summary) contextTokens = undefined; continue; }
+    if (assistant) contextTokens = usage.contextTokens; // a later summary makes pre-compaction occupancy unknown.
+    if (summary) contextTokens = undefined;
     if (usage.cost === undefined) invalidCost = true; else { observedCost = true; total += usage.cost; }
   }
   return {
-    ...(latest !== undefined ? { latestInput: latest } : {}),
+    ...(contextTokens !== undefined ? { contextTokens } : {}),
     ...(!invalidCost && observedCost ? { estimatedUsd: total } : invalidCost && observedCost ? { partialEstimatedUsd: total } : {}),
   };
 }
@@ -81,6 +86,9 @@ export function refreshTelemetry(snapshot: AgentTelemetry): AgentTelemetry | und
   const reduced = reduceTelemetry(snapshot.origin, readSessionEntries(snapshot.origin.sessionPath));
   if (reduced === undefined) return undefined;
   const next = { ...snapshot };
-  delete next.latestInput; delete next.estimatedUsd; delete next.partialEstimatedUsd;
+  // Context is a last-valid snapshot: a compaction or provider gap makes the
+  // current value unknown, but must not replace a valid same-session value
+  // with a false near-zero fallback. Cost remains a full recomputation.
+  delete next.estimatedUsd; delete next.partialEstimatedUsd;
   return { ...next, ...reduced };
 }

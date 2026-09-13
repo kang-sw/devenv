@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 7113fc60273a2d60
 sage-review-completeness-reviewed: 7113fc60273a2d60
+completed: 2026-09-13
 ---
 
 # Pi subagent row token value looks like context usage but omits cached input
@@ -57,3 +58,16 @@ Current source intentionally records only `usage.input` as `latestInput` in `age
 ### Phase 1: Make subagent token telemetry semantically honest across compaction
 
 Settle the row's intended metric, then ensure its label, calculation, formatting, and compaction transition match that meaning. Verify cached-prefix-heavy calls, uncached calls, normal context growth, threshold compaction, the temporary null context-usage interval, dormant/resumed children, and providers with missing usage fields. Add regression coverage using the live-observed `342 + 61440` and `3150 + 68608` cases so neither can be rendered as a misleading `0.3k` or `3.1k` context value.
+
+### Result (c103df3) - 2026-09-13
+
+Replaced the latest uncached-input projection with explicitly labeled `ctx` occupancy throughout live records, the compact widget, audit rows, sidecars, and thread-resume persistence. Completed lifecycle snapshots prefer `getSessionStats().contextUsage.tokens`; when unavailable they use assistant `totalTokens`, then the sum of present nonnegative input/output/cache fields. Temporary null or unreadable same-session snapshots retain the last valid occupancy, while session identity changes clear it.
+
+Regression coverage includes the observed cached-prefix cases (`61.8k` and `71.8k` rather than `0.3k` and `3.1k`), unknown rendering, compaction retention, session reset, dormant resume, persistence, width safety, and audit output. Round-one correctness and fit review were clean. Test review requested production-boundary coverage for `compaction_end` refresh and rejected stats-RPC fallback; `da94baa` added both and round two confirmed both findings resolved with no remaining findings.
+
+Verification: `cd agents-plugin-pi && npm test -- --test-reporter=dot` passed; the focused seven-file telemetry/lifecycle/widget/audit/persistence run passed 453 tests; the post-review lifecycle run passed 26 tests; `git diff --check` passed. The reviewer findings-path permission mismatch discovered during dogfooding is tracked separately as `260913-bug-reviewer-findings-path-write-unavailable`.
+
+
+## Resolution (2026-09-13)
+
+Completed Phase 1 in `c103df3`; `da94baa` added the round-one review-requested production-boundary regressions. Partitioned correctness and fit reviews were clean, and round-two test review confirmed both Important findings resolved.

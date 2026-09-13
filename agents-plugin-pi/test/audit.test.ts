@@ -165,9 +165,9 @@ describe("parseSessionFile", () => {
 describe("buildAuditPickerItems", () => {
   test("uses alias-or-short-ID identity and preserves all four status tiers and ordering", () => {
     const NOW = Date.parse("2026-09-09T10:00:00.000Z");
-    const owner = record({ agentId: "owner-agent-id", alias: "scout", threadBound: true, runStartedAt: NOW - 180_000, telemetry: { version: 1, origin: { sessionId: "owner", sessionPath: "/tmp/owner", emptyPrefix: true }, model: "gpt-5.6-terra", latestInput: 0 } });
-    const approval = record({ agentId: "appr-agent-id", title: "ignored title", pendingApproval: { cmdId: "c1", command: "rm -rf /" }, runStartedAt: NOW - 120_000, observedModel: "stored-model", observedLatestInput: 132_400 });
-    const runningOld = record({ agentId: "run-old-id", alias: "old-runner", client: {} as never, runStartedAt: NOW - 60_000, telemetry: { version: 1, origin: { sessionId: "old", sessionPath: "/tmp/old", emptyPrefix: true }, model: "large-model", latestInput: 1_354_100 } });
+    const owner = record({ agentId: "owner-agent-id", alias: "scout", threadBound: true, runStartedAt: NOW - 180_000, telemetry: { version: 1, origin: { sessionId: "owner", sessionPath: "/tmp/owner", emptyPrefix: true }, model: "gpt-5.6-terra", contextTokens: 0 } });
+    const approval = record({ agentId: "appr-agent-id", title: "ignored title", pendingApproval: { cmdId: "c1", command: "rm -rf /" }, runStartedAt: NOW - 120_000, observedModel: "stored-model", observedContextTokens: 132_400 });
+    const runningOld = record({ agentId: "run-old-id", alias: "old-runner", client: {} as never, runStartedAt: NOW - 60_000, telemetry: { version: 1, origin: { sessionId: "old", sessionPath: "/tmp/old", emptyPrefix: true }, model: "large-model", contextTokens: 1_354_100 } });
     const runningNew = record({ agentId: "run-new-id", alias: "new-runner", client: {} as never, runStartedAt: NOW - 5_000 });
     const dormantRecent = record({ agentId: "dorm-recent-id", alias: "recent-dormant", lastLeadPromptAt: NOW - 1_000 });
     const dormantOld = record({ agentId: "dorm-old-id", alias: "old-dormant", lastLeadPromptAt: NOW - 100_000 });
@@ -175,12 +175,12 @@ describe("buildAuditPickerItems", () => {
     // Insertion order deliberately scrambled — the function must sort, not preserve Map order.
     const registry = registryOf(dormantOld, runningOld, approval, dormantRecent, owner, runningNew);
     assert.deepEqual(buildAuditPickerItems(registry, NOW), [
-      { value: "owner-agent-id", label: "scout · awaiting owner · gpt-5.6-terra · 0.0k · running for 3m" },
-      { value: "appr-agent-id", label: "appr-age · awaiting approval · stored-model · 132.4k · running for 2m" },
-      { value: "run-old-id", label: "old-runner · running · large-model · 1354.1k · running for 1m" },
-      { value: "run-new-id", label: "new-runner · running · — · — · running for 5s" },
-      { value: "dorm-recent-id", label: "recent-dormant · dormant · — · — · last active 1s ago" },
-      { value: "dorm-old-id", label: "old-dormant · dormant · — · — · last active 1m ago" },
+      { value: "owner-agent-id", label: "scout · awaiting owner · gpt-5.6-terra · ctx 0.0k · running for 3m" },
+      { value: "appr-agent-id", label: "appr-age · awaiting approval · stored-model · ctx 132.4k · running for 2m" },
+      { value: "run-old-id", label: "old-runner · running · large-model · ctx 1354.1k · running for 1m" },
+      { value: "run-new-id", label: "new-runner · running · — · ctx ? · running for 5s" },
+      { value: "dorm-recent-id", label: "recent-dormant · dormant · — · ctx ? · last active 1s ago" },
+      { value: "dorm-old-id", label: "old-dormant · dormant · — · ctx ? · last active 1m ago" },
     ]);
   });
 
@@ -189,8 +189,8 @@ describe("buildAuditPickerItems", () => {
     const running = record({ agentId: "future-running-id", client: {} as never, runStartedAt: NOW + 60_000 });
     const dormant = record({ agentId: "future-dormant-id", lastLeadPromptAt: NOW + 60_000 });
     assert.deepEqual(buildAuditPickerItems(registryOf(running, dormant), NOW), [
-      { value: "future-running-id", label: "future-r · running · — · — · running for 0s" },
-      { value: "future-dormant-id", label: "future-d · dormant · — · — · last active 0s ago" },
+      { value: "future-running-id", label: "future-r · running · — · ctx ? · running for 0s" },
+      { value: "future-dormant-id", label: "future-d · dormant · — · ctx ? · last active 0s ago" },
     ]);
   });
 
@@ -210,7 +210,7 @@ describe("buildAuditPickerItems", () => {
     const NOW = Date.parse("2026-09-09T10:00:00.000Z");
     const idle = record({ agentId: "idle-1", lastLeadPromptAt: NOW });
     assert.deepEqual(buildAuditPickerItems(registryOf(idle), NOW), [
-      { value: "idle-1", label: "idle-1 · dormant · — · — · last active 0s ago" },
+      { value: "idle-1", label: "idle-1 · dormant · — · ctx ? · last active 0s ago" },
     ]);
   });
 
@@ -350,13 +350,13 @@ describe("registerAuditCommands", () => {
     assert.equal(await cancelledResult, undefined, "Esc cancels through the framed wrapper");
   });
 
-  test("the framed picker drops whole token/model fields before narrowing protected identity, status, and activity", async () => {
+  test("the framed picker drops whole context/model fields before narrowing protected identity, status, and activity", async () => {
     const registry = registryOf(record({
       agentId: "orphan-copy-hotfix-id",
       alias: "orphan-copy-hotfix",
       client: {} as never,
       runStartedAt: Date.now() - 180_000,
-      telemetry: { version: 1, origin: { sessionId: "picker", sessionPath: "/tmp/picker", emptyPrefix: true }, model: "provider/gpt-5.6-terra", latestInput: 132_400 },
+      telemetry: { version: 1, origin: { sessionId: "picker", sessionPath: "/tmp/picker", emptyPrefix: true }, model: "provider/gpt-5.6-terra", contextTokens: 132_400 },
     }));
     const opened = fakePickerCtx();
     const result = openPicker(opened.ctx as never, registry);
@@ -372,7 +372,7 @@ describe("registerAuditCommands", () => {
     const at80 = rendered.get(80)!.join("\n");
     assert.match(at80, /provider\/gpt-5\.6-terra/, "model remains while it fits");
     assert.doesNotMatch(at80, /132\.4k/, "tokens are omitted before model");
-    assert.match(rendered.get(120)!.join("\n"), /orphan-copy-hotfix · running · provider\/gpt-5\.6-terra · 132\.4k · running for 3m/, "wide rows retain every semantic field");
+    assert.match(rendered.get(120)!.join("\n"), /orphan-copy-hotfix · running · provider\/gpt-5\.6-terra · ctx 132\.4k · running for 3m/, "wide rows retain every semantic field");
 
     component.handleInput?.("\x1b");
     assert.equal(await result, undefined);
