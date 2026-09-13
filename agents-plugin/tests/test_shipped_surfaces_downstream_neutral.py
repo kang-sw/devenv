@@ -24,12 +24,21 @@ from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# The four non-Go shipped text trees, relative to REPO_ROOT. Every git-tracked
-# text file under these is scanned line by line.
+# The non-Go shipped text trees, relative to REPO_ROOT. Every git-tracked text
+# file under one of these directories, or an entry that is itself an exact
+# tracked file path, is scanned line by line.
+#
+# "agents-plugin/.codex-plugin/hooks.json" is listed as an exact file, not
+# the whole "agents-plugin/.codex-plugin" directory: that directory's
+# plugin.json predates this entry and already carries this-repo migration
+# vocabulary ("codex-first") unrelated to the hooks.json surface this entry
+# exists to cover (260913-feat-cross-session-mailbox-wake Phase 2). Scoping
+# to the one file it needs to cover avoids re-litigating that pre-existing,
+# separately tracked gap under this ticket.
 TEXT_TREES = (
     "agents-plugin/rsrc",
     "agents-plugin/skills",
-    "agents-plugin/hooks",
+    "agents-plugin/.codex-plugin/hooks.json",
     "agents-plugin-wsflow/rsrc",
     "agents-plugin-wsflow/skills",
     "agents-plugin-tool/internal/wsdoc/conventions",
@@ -483,7 +492,7 @@ class ShippedSurfacesDownstreamNeutralTest(unittest.TestCase):
         for tree in TEXT_TREES:
             prefix = tree + "/"
             for path in sorted(self.tracked):
-                if not path.startswith(prefix):
+                if path != tree and not path.startswith(prefix):
                     continue
                 try:
                     text = (REPO_ROOT / path).read_text(encoding="utf-8")

@@ -341,10 +341,27 @@ Hook commands reportedly receive plugin-path env vars: `PLUGIN_ROOT` /
 `PLUGIN_DATA`, plus Claude-compatibility aliases `CLAUDE_PLUGIN_ROOT` /
 `CLAUDE_PLUGIN_DATA` — the mechanism a hook command uses to locate a
 plugin-bundled script without relying on the `mcpServers`-block-only `cwd`
-normalization. The mailbox wake adapter's `hooks/hooks.json` (see
-`agents-plugin/hooks/hooks.json`) uses `$PLUGIN_ROOT` on this basis; if a
-live probe finds that variable absent or differently named, fix the hook
-command there rather than only this note.
+normalization. The mailbox wake adapter's `hooks.json` (see
+`agents-plugin/.codex-plugin/hooks.json`, referenced from `plugin.json`'s
+`"hooks"` field — moved out of a `hooks/` subdirectory during round-1 review,
+because Claude Code auto-discovers `<plugin-root>/hooks/hooks.json` by
+directory-name convention alone with no manifest key required, which would
+have silently also activated this Codex-only hook in Claude, where
+`$PLUGIN_ROOT` is undefined) uses `$PLUGIN_ROOT` on this basis; if a live
+probe finds that variable absent or differently named, fix the hook command
+there rather than only this note.
+
+The shipped hook command never bakes the mailbox slug into its own argv or
+manifest text (a static value there cannot know a per-session slug at
+authoring time, and interpolating an untrusted env var into a shell command
+string is an injection surface); it reads `WS_MAILBOX` directly from its own
+inherited process environment at fire time (`cmd/ws-mcp mailbox
+codex-stop-hook`, `agents-plugin-tool/cmd/ws-mcp/mailbox.go`). It also fires
+`decision:block` at most once per queue-length change for a slug (a
+persisted watermark, `internal/wsmailbox/hook_peek.go`'s
+`ShouldNotifyNamedInboxUnread`), not on every `Stop`, since a queue the woken
+session structurally cannot drain (unowned or rebound presence) would
+otherwise re-block forever.
 
 **Hook trust persistence has no found CLI/config mechanism.** `codex hooks`
 is not a subcommand (`error: unexpected argument 'hooks' found` on 0.154.0),
