@@ -1,10 +1,12 @@
 /**
  * Goal-mode arming + `agent_settled` re-injection loop (260903 Phase 1).
  *
- * Design: a user-invoked `/goal <goal>` command arms an in-memory state
- * machine and announces the goal via `pi.sendUserMessage`; the exact
- * `/goal stop|clear|reset` aliases disarm future automatic continuation
- * without interrupting current work. While armed, every
+ * Design: a user-invoked idle `/goal <goal>` command arms an in-memory state
+ * machine and announces the goal via `pi.sendUserMessage`; during active work
+ * the same validated command enters the shared held-input FIFO as control
+ * state, applies at the next safe boundary, and never becomes model prose.
+ * The exact `/goal stop|clear|reset` aliases disarm future automatic
+ * continuation immediately without interrupting current work. While armed, every
  * `agent_settled` event (fired after a run has fully settled with no
  * automatic retry/compaction/continuation queued — see
  * `AgentSettledEvent`'s doc comment in the installed Pi type defs) re-injects
@@ -79,7 +81,7 @@ import { readFileSync } from "node:fs";
 import type { ContextUsage, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readSpawnRole } from "./process-role.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
-import { clearWakeStart, reserveWakeStart, heldPushQueue, flushHeldPushes, hasRunningAgents, leadCompactingRef, leadWakeStartPendingRef, type RpcAgentRegistry } from "./spawner.ts";
+import { clearWakeStart, enqueueHeldGoalReplacement, reserveWakeStart, heldPushQueue, flushHeldPushes, hasRunningAgents, leadCompactingRef, leadWakeStartPendingRef, type HeldGoalReplacementResult, type RpcAgentRegistry } from "./spawner.ts";
 
 // ---------------------------------------------------------------------------
 // Config: adapter-owned runaway-threshold data file. Never-hard-fail,
@@ -483,6 +485,8 @@ export function registerGoalLoop(
    * submitting or mutating a replacement goal.
    */
   let goalGeneration = 0;
+  /** Invalidates queued replacements only when an immediate command or terminal transition supersedes them. */
+  let goalControlGeneration = 0;
   let shuttingDown = false;
 
   /**
@@ -582,16 +586,37 @@ export function registerGoalLoop(
     return !shuttingDown && state.active && goalGeneration === generation;
   }
 
-  /** Invalidate goal-owned work without touching compaction or child-report wake ownership. */
-  function invalidateGoal(): void {
-    goalGeneration += 1;
+  /** Clear goal-owned scheduling without touching compaction or child-report wake ownership. */
+  function clearGoalOwnedWork(): void {
     cancelSettleTimer();
     pendingRearm = false;
     pendingRearmFailureReason = undefined;
     pendingRearmGeneration = undefined;
     settleSwallowedWhileCompacting = false;
     settleSwallowedGeneration = undefined;
+  }
+
+  /** Invalidate active and queued goal-owned work. */
+  function invalidateGoal(): void {
+    goalGeneration += 1;
+    goalControlGeneration += 1;
+    clearGoalOwnedWork();
     state = disarmGoal();
+  }
+
+  /** Apply one FIFO replacement without invalidating later replacements admitted in the same generation. */
+  function applyQueuedGoal(goal: string, generation: number): HeldGoalReplacementResult {
+    if (shuttingDown) {
+      return { outcome: "failed", message: `Goal update failed: session ended before "${goal}" could be applied.` };
+    }
+    if (generation !== goalControlGeneration) {
+      return { outcome: "failed", message: `Goal update failed: "${goal}" was invalidated by a newer immediate or terminal goal transition.` };
+    }
+    const next = armGoal(goal);
+    clearGoalOwnedWork();
+    goalGeneration += 1;
+    state = next;
+    return { outcome: "applied", message: `Goal update applied: ${goal}` };
   }
 
   function beginCompaction(generation: number | undefined): { id: number; generation: number | undefined } {
@@ -855,7 +880,6 @@ export function registerGoalLoop(
     if (!activeCompaction || operation?.id === activeCompaction.id) activeCompaction = undefined;
 
     const generation = operation?.generation;
-    const rearmIsCurrent = generation !== undefined && isCurrentArmedGeneration(generation);
     const pendingBelongsToOperation = pendingRearm && pendingRearmGeneration === generation;
     const swallowedBelongsToOperation = settleSwallowedWhileCompacting && settleSwallowedGeneration === generation;
 
@@ -872,7 +896,8 @@ export function registerGoalLoop(
       }
       return;
     }
-    flushHeldPushes(pi);
+    const flushed = flushHeldPushes(pi);
+    const rearmIsCurrent = generation !== undefined && isCurrentArmedGeneration(generation);
     if (!rearmIsCurrent) {
       if (pendingBelongsToOperation) {
         pendingRearm = false;
@@ -883,6 +908,7 @@ export function registerGoalLoop(
         settleSwallowedWhileCompacting = false;
         settleSwallowedGeneration = undefined;
       }
+      if (flushed > 0 && heldPushQueue.length === 0 && state.active) armSettleTimer(ctx, goalGeneration);
       return;
     }
     if (pendingBelongsToOperation) pendingRearmFailureReason = failureReason;
@@ -909,7 +935,15 @@ export function registerGoalLoop(
         return;
       }
       if (!ctx.isIdle()) {
-        ctx.ui.notify("Agent is busy — try again when idle.", "warning");
+        const generation = goalControlGeneration;
+        enqueueHeldGoalReplacement({
+          kind: "goal-replacement",
+          goal,
+          generation,
+          apply: () => applyQueuedGoal(goal, generation),
+          report: (result) => ctx.ui.notify(result.message, result.outcome === "applied" ? "info" : "error"),
+        });
+        ctx.ui.notify(`Goal update queued: ${goal}`, "info");
         return;
       }
       invalidateGoal();
