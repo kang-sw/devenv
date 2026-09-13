@@ -312,7 +312,7 @@ export interface FooterPrimitives {
   visibleWidth(text: string): number;
   truncateToWidth(text: string, width: number, ellipsis?: string): string;
 }
-interface FooterTheme { fg(color: "dim" | "accent" | "warning" | "error", text: string): string }
+interface FooterTheme { fg(color: "text" | "dim" | "accent" | "warning" | "error", text: string): string }
 interface FooterData {
   getGitBranch(): string | null;
   getExtensionStatuses(): ReadonlyMap<string, string>;
@@ -396,7 +396,7 @@ function styleStats(plain: string, values: readonly string[], contextPart: strin
     ranges.push({ start, text: money, color: "accent" }); searchAt = start + money.length;
   }
   const contextStart = plain.indexOf(contextPart);
-  if (contextStart >= 0 && contextPercent != null && contextPercent > 70) ranges.push({ start: contextStart, text: contextPart, color: contextPercent > 90 ? "error" : "warning" });
+  if (contextStart >= 0) ranges.push({ start: contextStart, text: contextPart, color: contextPercent != null && contextPercent > 70 ? "error" : "text" });
   ranges.sort((a, b) => a.start - b.start);
   let at = 0, styled = "";
   for (const range of ranges) {

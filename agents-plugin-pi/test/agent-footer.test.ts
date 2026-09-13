@@ -48,10 +48,10 @@ function context(entries: readonly unknown[] = []) {
     getContextUsage: () => ({ percent: 25, contextWindow: 200_000 }),
     ui: { setFooter(next: any) { component?.dispose?.(); component = undefined; footerFactory = next; if (!next) restores++; } },
   };
-  const mount = () => {
+  const mount = (fg: (color: string, text: string) => string = (_color, text) => text) => {
     component = footerFactory(
       { requestRender() {} },
-      { fg: (_color: string, text: string) => text },
+      { fg },
       { getGitBranch: () => "feature/footer", getExtensionStatuses: () => new Map(), getAvailableProviderCount: () => 2, onBranchChange: () => () => {} },
     );
     return component!;
@@ -259,6 +259,21 @@ describe("custom footer render and lifecycle", () => {
     const wide = plain(component.render(120).join("\n"));
     assert.match(wide, /Lead ~\$0\.00/); assert.match(wide, /Direct agents ~\$2\.56/);
     (registry as any).entries = originalEntries; (registry as any)[Symbol.iterator] = originalIterator;
+    controller.stop();
+  });
+
+  test("styles context occupancy as primary text through 70 percent and error above it", () => {
+    const dir = root(), storage = createAgentStorageContext("lead", dir), registry: RpcAgentRegistry = new Map();
+    const ui = context();
+    let percent = 70;
+    ui.ctx.getContextUsage = () => ({ percent, contextWindow: 200_000 });
+    const controller = createAgentFooterController(ui.ctx, registry, storage, { truncateToWidth, visibleWidth });
+    const component = ui.mount((color, text) => `<${color}>${text}</${color}>`);
+    assert.match(component.render(120)[1], /<text>70\.0%\/200k<\/text>/);
+    percent = 70.1;
+    const high = component.render(120)[1];
+    assert.match(high, /<error>70\.1%\/200k<\/error>/);
+    assert.doesNotMatch(high, /<warning>/);
     controller.stop();
   });
 
