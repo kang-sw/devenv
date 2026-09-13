@@ -51,26 +51,26 @@ function registryOf(...records: RpcAgentRecord[]): RpcAgentRegistry {
 
 describe("buildAgentRows", () => {
   test("a plain live (client-holding) non-threadBound record is a running row with no answer hint", () => {
-    const r = record({ client: {} as never, runStartedAt: NOW - 5_000 });
+    const r = record({ client: {} as never, running: true, runStartedAt: NOW - 5_000 });
     const rows = buildAgentRows(registryOf(r), [], NOW);
     assert.deepEqual(rows, [{ name: "11111111", role: "worker", state: "running", elapsedMs: 5_000 }]);
   });
 
   test("name precedence: alias > title > shortened uuid", () => {
-    const byAlias = record({ client: {} as never, alias: "scout", title: "irrelevant title" });
-    const byTitle = record({ client: {} as never, title: "the title" });
-    const byUuid = record({ client: {} as never });
+    const byAlias = record({ client: {} as never, running: true, alias: "scout", title: "irrelevant title" });
+    const byTitle = record({ client: {} as never, running: true, title: "the title" });
+    const byUuid = record({ client: {} as never, running: true });
     assert.equal(buildAgentRows(registryOf(byAlias), [], NOW)[0].name, "scout");
     assert.equal(buildAgentRows(registryOf(byTitle), [], NOW)[0].name, "the title");
     assert.equal(buildAgentRows(registryOf(byUuid), [], NOW)[0].name, "11111111");
   });
 
   test("roleFromSpawnRole: worker -> worker, execute-worker -> execute, fork -> fork, explore -> explore, unset -> worker", () => {
-    const worker = record({ client: {} as never, spawnRole: "worker" });
-    const exec = record({ client: {} as never, spawnRole: "execute-worker" });
-    const fork = record({ client: {} as never, spawnRole: "fork" });
-    const explore = record({ client: {} as never, spawnRole: "explore" });
-    const unset = record({ client: {} as never });
+    const worker = record({ client: {} as never, running: true, spawnRole: "worker" });
+    const exec = record({ client: {} as never, running: true, spawnRole: "execute-worker" });
+    const fork = record({ client: {} as never, running: true, spawnRole: "fork" });
+    const explore = record({ client: {} as never, running: true, spawnRole: "explore" });
+    const unset = record({ client: {} as never, running: true });
     assert.equal(buildAgentRows(registryOf(worker), [], NOW)[0].role, "worker");
     assert.equal(buildAgentRows(registryOf(exec), [], NOW)[0].role, "execute");
     assert.equal(buildAgentRows(registryOf(fork), [], NOW)[0].role, "fork");
@@ -163,8 +163,8 @@ describe("buildAgentRows", () => {
 
   test("elapsed: a thread row uses now - Date.parse(touchedAt); a non-thread row uses now - runStartedAt, defaulting to 0 when never prompted", () => {
     const bound = record({ threadBound: true });
-    const running = record({ agentId: "cccccccc-0000-0000-0000-000000000000", client: {} as never, runStartedAt: NOW - 3_000 });
-    const neverPrompted = record({ agentId: "dddddddd-0000-0000-0000-000000000000", client: {} as never });
+    const running = record({ agentId: "cccccccc-0000-0000-0000-000000000000", client: {} as never, running: true, runStartedAt: NOW - 3_000 });
+    const neverPrompted = record({ agentId: "dddddddd-0000-0000-0000-000000000000", client: {} as never, running: true });
     const threads: ThreadRecord[] = [thread({ respondentAgentId: bound.agentId, origin: "lead-ask", touchedAt: new Date(NOW - 7_000).toISOString() })];
     const rows = buildAgentRows(registryOf(bound, running, neverPrompted), threads, NOW);
     assert.equal(rows.find((r) => r.state === "awaiting-owner")!.elapsedMs, 7_000);
@@ -174,7 +174,7 @@ describe("buildAgentRows", () => {
 
   test("elapsed never goes negative even when the source clock is in the future", () => {
     const bound = record({ threadBound: true });
-    const running = record({ agentId: "eeeeeeee-0000-0000-0000-000000000000", client: {} as never, runStartedAt: NOW + 10_000 });
+    const running = record({ agentId: "eeeeeeee-0000-0000-0000-000000000000", client: {} as never, running: true, runStartedAt: NOW + 10_000 });
     const threads: ThreadRecord[] = [thread({ respondentAgentId: bound.agentId, origin: "lead-ask", touchedAt: new Date(NOW + 10_000).toISOString() })];
     const rows = buildAgentRows(registryOf(bound, running), threads, NOW);
     for (const row of rows) assert.equal(row.elapsedMs, 0);
@@ -189,8 +189,8 @@ describe("buildAgentRows", () => {
   test("sort: state rank first (awaiting-owner, awaiting-approval, running), then elapsed descending within a state", () => {
     const bound = record({ agentId: "10000000-0000-0000-0000-000000000000", threadBound: true });
     const approvalOld = record({ agentId: "20000000-0000-0000-0000-000000000000", pendingApproval: { cmdId: "c", command: "x" } });
-    const runningNew = record({ agentId: "30000000-0000-0000-0000-000000000000", client: {} as never, runStartedAt: NOW - 1_000 });
-    const runningOld = record({ agentId: "40000000-0000-0000-0000-000000000000", client: {} as never, runStartedAt: NOW - 9_000 });
+    const runningNew = record({ agentId: "30000000-0000-0000-0000-000000000000", client: {} as never, running: true, runStartedAt: NOW - 1_000 });
+    const runningOld = record({ agentId: "40000000-0000-0000-0000-000000000000", client: {} as never, running: true, runStartedAt: NOW - 9_000 });
     const threads: ThreadRecord[] = [thread({ respondentAgentId: bound.agentId, origin: "lead-ask", touchedAt: new Date(NOW - 2_000).toISOString() })];
     const rows = buildAgentRows(registryOf(runningNew, approvalOld, runningOld, bound), threads, NOW);
     assert.deepEqual(
@@ -504,7 +504,7 @@ describe("createAgentWidgetController", () => {
   test("renders the uncapped heading at real widths, preserves the body cap, clears only its retired footer key, and disarms on empty", (t) => {
     const records = Array.from({ length: 7 }, (_, i) => record({
       agentId: `${String(i + 1).padStart(8, "0")}-0000-0000-0000-000000000000`,
-      client: {} as never,
+      client: {} as never, running: true,
       runStartedAt: NOW - i,
     }));
     const registry = registryOf(...records);
@@ -569,7 +569,7 @@ describe("createAgentWidgetController", () => {
     });
     const running = Array.from({ length: 6 }, (_, i) => record({
       agentId: `${String(i + 1).padStart(8, "0")}-0000-0000-0000-000000000000`,
-      client: {} as never,
+      client: {} as never, running: true,
       runStartedAt: NOW - i,
     }));
     const threads = new Map([["q1", thread({

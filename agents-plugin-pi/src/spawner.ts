@@ -23,8 +23,8 @@
  * in one of six families — `ws-agent-report`, `ws-agent-settled`,
  * `ws-agent-question`, `ws-agent-approval`, `ws-agent-advisory`,
  * `ws-agent-orphaned` — each carrying `details.agent_id`, its own payload, and
- * a fan-in status line (`computeRunningStatusLine`) counting how many
- * delegated agents are still outstanding. The lead therefore ends its turn
+ * a fan-in status line (`computeRunningStatusLine`) counting only children
+ * still executing autonomously. The lead therefore ends its turn
  * after dispatching work and is woken by the pushes themselves; it never
  * blocks in a wait call, so an approval request can reach it mid-flight
  * instead of queueing behind an unfinished wait turn.
@@ -37,10 +37,9 @@
  * wake remains the fallback for compaction, late arrival, or rejected sends;
  * confirmed wake starts release one batch as steering before their first
  * response. `steer` pushes that were never held remain immediate, since
- * interrupting is their purpose. Symmetrically, a child's `kind:"final"`
- * report is held on the CHILD's side of the same boundary (`pendingFinal`)
- * and pushed when that child's own turn ends, so "done" is never announced
- * while its author is still working.
+ * interrupting is their purpose. A child's ordinary assistant answer becomes
+ * terminal only at `agent_settled`; its queue admission is independently
+ * tracked so pending delivery is recoverable without being called execution.
  *
  * The spawn tool's `model_name` param accepts one of the four fixed tiers
  * (`small`/`medium`/`large`/`xlarge`) or a concrete Pi catalog `provider/id`.
@@ -55,8 +54,8 @@
  * remains authoritative for child depth and tools.
  *
  * A parent's local settle is not subtree completion. Its private channel
- * publishes outstanding direct-child obligations and queued deliveries; the
- * outer owner keeps it alive until a fresh accepted final covers the subtree.
+ * publishes active descendants and queued deliveries; a later synthesized
+ * settled turn is required after the subtree becomes quiescent.
  *
  * `--tools` curation (`read-only`/`read-only-explore`/`full-worker`)
  * lives only in the in-memory `TOOL_GROUPS` table and Pi CLI flags.
@@ -66,10 +65,9 @@
  * `RpcClient.onEvent()` stream's `tool_execution_start` events — no new
  * transport (see `applyRpcEvent`'s doc comment for the full trace) — and, as
  * of 260905, pushed straight to the lead rather than buffered. Only a bounded
- * `RpcAgentRecord.reportLog` (kind + timestamp, no text) is retained, because
- * two consumers need the history rather than the event: `fork.ts`'s
- * `isIdleWithoutFinal` check (filtered to entries since the record's last LEAD
- * prompt) and `ws-agent-list`'s last-report time.
+ * `RpcAgentRecord.reportLog` (question kind + timestamp, no text) is retained
+ * for control freshness and `ws-agent-list`'s last-report time; it is not a
+ * completion ledger.
  * `ws-agent-transcript` (lead-side, not in any `TOOL_GROUPS`) returns the
  * already-tracked `sessionPath` with no RPC round-trip.
  */
@@ -108,7 +106,7 @@ import { readSessionEntries, reduceTelemetry, type AgentTelemetry, type Telemetr
 import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, SUBTREE_ENV, READ_TOOLS, NETWORK_TOOLS, childPolicy, readDelegationPolicy, readOnlyWsTools, type DelegationPolicy, type PlaybookProfile, type RenderProvenance } from "./delegation-policy.ts";
 import { createWebSearch } from "./web-search.ts";
 import { clearWebReadiness, verifyWebReadiness, WEB_HOME_ENV, WEB_NONCE_ENV } from "./web-readiness.ts";
-import { assertSubtreeFinal, beginSubtreeDispatch, installSubtreePublisher, publishSubtree, readSubtreeChannel, readSubtreeSnapshot, subtreeWaiting, type SubtreeChannel } from "./subtree-lifecycle.ts";
+import { beginSubtreeDispatch, installSubtreePublisher, publishSubtree, readSubtreeChannel, readSubtreeSnapshot, subtreeWaiting, type SubtreeChannel } from "./subtree-lifecycle.ts";
 import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
 import { persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-footer.ts";
 
@@ -459,16 +457,15 @@ export interface RpcAgentRecord {
   /** Persisted authority and one-edge semantic lifecycle; independent of owner holds. */
   delegation?: DelegationPolicy;
   subtreeChannel?: SubtreeChannel;
-  expectedReport?: boolean;
   waitingOnChildren?: boolean;
   /** Last successful writer to this child. Absence is the legacy/lead default. */
   lastWriter?: "lead" | "owner";
   /** Owner-authored sends, in delivery order, used to attribute persisted user entries. */
   ownerSends?: Array<{ text: string; at: number }>;
-  requiresFreshFinal?: boolean;
   subtreeRevision?: number;
   workGeneration?: number;
-  pendingFinalRevision?: number;
+  /** Work generation whose ordinary settlement has entered terminal admission. */
+  settlementAdmissionGeneration?: number;
   /** Persistent exploration mode; meaningful only for explore records. */
   exploreMode?: ExploreMode;
   /** `true` while an agent run is actively looping (between `agent_start` and `agent_settled`). */
@@ -477,17 +474,14 @@ export interface RpcAgentRecord {
    * 260905 fan-in bookkeeping: `true` from the instant a prompt is ISSUED to
    * this child (`promptAgent`, i.e. before any `agent_start` event can arrive)
    * until it settles, is stopped, exits, or fails to spawn. Deliberately a
-   * DIFFERENT, narrower flag than `streaming` (which is event-confirmed and
-   * still the right signal for `ws-agent-list`'s display status): this one
-   * exists only to feed `computeRunningStatusLine`'s running count, where a
-   * just-dispatched child must already count as outstanding.
+   * complementary flag to event-confirmed `streaming`; both mean executable
+   * work is in flight and feed list/widget/fan-in status consistently.
    */
   running: boolean;
   /**
    * 260905 (live-agent widget ticket): epoch-ms stamp of the most recent
-   * prompt ISSUED to this child, stamped unconditionally by `promptAgent` —
-   * including the anti-bleed nudge (`isLeadPrompt: false`), unlike
-   * `lastLeadPromptAt` below, because the widget's "running" row is meant to
+   * prompt ISSUED to this child, stamped unconditionally by `promptAgent`,
+   * unlike `lastLeadPromptAt` below, because the widget's "running" row is meant to
    * show how long THIS turn has been going, and a nudge starts a new turn on
    * the wire even though it is not a new lead-issued task boundary. Read by
    * `agent-widget.ts`'s `buildAgentRows` as the running-row elapsed clock;
@@ -496,64 +490,28 @@ export interface RpcAgentRecord {
    * turn's original start, by design.
    */
   runStartedAt?: number;
-  /**
-   * 260905: `true` once this child has sent a `kind:"final"` or
-   * `kind:"question"` report during the current turn; cleared by the next
-   * `promptAgent`. Two uses: it removes the sender from N on its own push (a
-   * child that just filed its final is not "still running" from the lead's
-   * point of view), and it suppresses the redundant `ws-agent-settled`
-   * `reason:"idle"` push that would otherwise follow the terminal report a
-   * few milliseconds later.
-   */
-  terminalThisTurn?: boolean;
-  /**
-   * 260905 (Phase 1 Edition): the text of a `kind:"final"` report this child
-   * filed during the current turn, stashed instead of pushed. A final is the
-   * child's ANSWER, but at the instant the tool call is observed the child is
-   * still mid-turn — it may still be committing, cleaning up, or (rarely)
-   * filing a corrected final. Pushing then handed the lead a completion signal
-   * while its author was still working. So the final is held here and pushed
-   * when the child actually leaves the running state, carrying
-   * `settled_reason` (`idle`/`stopped`/`exited`) to say how.
-   *
-   * Last one wins within a turn (a corrected final supersedes the first), and
-   * `promptAgent` clears it: an un-pushed final from a previous task must not
-   * surface as the answer to a new one. A hook-consumed final (a `lead-ask`
-   * thread's decision) is never stashed at all — it is not the lead's message.
-   */
-  pendingFinal?: string;
-  /**
-   * 260905: epoch-ms stamp of the last LEAD-issued prompt on this record
-   * (`promptAgent` with `isLeadPrompt` not `false`). An internal nudge
-   * (`fork.ts`'s anti-bleed loop) deliberately does NOT move it, so a stale
-   * pre-nudge `final` cannot be mistaken for a fresh one. `fork.ts` filters
-   * `reportLog` by it.
-   */
+  /** Epoch-ms stamp of the last lead-issued prompt, retained for activity display and attribution. */
   lastLeadPromptAt?: number;
   /**
    * 260905: `true` for the whole lifetime of an owner discussion thread bound
    * to this agent — set by `ask.ts` on every open/reopen (`ensureRespondent`/
    * `openThread`) and on fork-raised question registration
    * (`handleForkRaisedQuestion`), cleared only when the thread actually closes
-   * (`/done`, the respondent's own fork final, `ws-withdraw-question`
-   * — renamed by `260911` from `ws-resolve`). While set, this
-   * agent produces no settle/advisory push and is left out of the fan-in
-   * status line entirely: the exchange belongs to the owner, and the lead is
-   * not part of it.
+   * (`/done`, lead takeover, or `ws-withdraw-question`). While set, settled
+   * output routes to the owner surface and the record is left out of the lead
+   * fan-in status line: the exchange belongs to the owner, not the lead.
    */
   threadBound?: boolean;
   /** Same-process `/done` coordinator for a fork-raised owner thread; never persisted. */
   forkFinish?: ForkFinishOperation;
   /** Existing terminal push admission for the current work, if one exists. */
   terminalDelivery?: TerminalDelivery;
-  /** Fork-owned final policy injected by fork.ts to avoid a reverse import. */
-  validateForkFinal?: (message: string) => boolean;
-  /** Tool outcome for the deferred final; finish reconciliation must not
-   * mistake a report-tool failure for a completed task. */
-  pendingFinalToolCallId?: string;
-  pendingFinalAccepted?: boolean;
-  /** Last-seen final assistant text, cached across `getLastAssistantText()` calls. */
+  /** Last assistant text observed from this work generation's message_end event. */
   lastText?: string;
+  /** Work generation that produced lastText; absent text is never borrowed across turns. */
+  lastTextGeneration?: number;
+  /** Accepted steer/follow-up instructions awaiting their actual user message_start boundary. */
+  pendingQueuedWork?: Array<{ message: string }>;
   /**
    * 260905: the head-truncated (`truncatePromptForStorage`,
    * `PROMPT_STORAGE_CAP_BYTES`) copy of the spawn's initial `prompt`, stashed
@@ -619,22 +577,6 @@ export interface RpcAgentRecord {
    * `onApprovalPending`'s existing callback-injection convention.
    */
   onQuestionReport?: (record: RpcAgentRecord, message: string) => string | undefined;
-  /**
-   * 260904 Phase 2 (post-close dogfood, 2026-09-05): consulted by
-   * `applyRpcEvent` the instant a `kind:"final"` report is observed on this
-   * record. A throwing hook is swallowed. `ask.ts` sets it on a thread's
-   * respondent so a discussion fork can end its own thread by reporting the
-   * decision; the report text is then the thread summary.
-   *
-   * 260905 (push model) gives it a SUPPRESSION contract: returning `true`
-   * means the hook fully consumed the report, so no `ws-agent-report` push is
-   * emitted for it. `ask.ts` returns `true` for a `"lead-ask"` discussion
-   * thread — the owner's decision already reaches the lead as the
-   * `ws-thread-summary` custom message, and pushing the raw report too would
-   * deliver the same event twice — and falsy for a `"fork-raised"` task fork,
-   * whose final IS the completion signal the lead is meant to see.
-   */
-  onFinalReport?: (record: RpcAgentRecord, message: string) => boolean | void;
   /**
    * 260908 same-process finish callback, owned by ask.ts. It persists the
    * ordinary thread snapshot only after this coordinator parks the fork.
@@ -761,7 +703,7 @@ export function refreshAgentTelemetry(
  * appended.
  */
 export interface AgentReportLogEntry {
-  kind?: "question" | "final";
+  kind?: "question";
   at: number;
 }
 
@@ -786,7 +728,7 @@ export function resolveAgentId(registry: RpcAgentRegistry, idOrAlias: string): s
   return undefined;
 }
 
-export type AgentStatus = "running" | "idle" | "dormant" | "waiting-on-children";
+export type AgentStatus = "running" | "idle" | "dormant" | "waiting-on-children" | "pending-delivery";
 
 /**
  * 260905: the three RPC-backed spawn shapes, recorded on the record at spawn
@@ -858,20 +800,18 @@ export function truncatePromptForStorage(prompt: string, capBytes: number = PROM
  * 260905: the six push families. Each is a Pi custom-message `customType`
  * delivered by `pushToLead` into whichever session owns the child:
  *
- * - `ws-agent-report` — a `ws-report-to-lead` progress update (pushed at once)
- *   or a `kind:"final"` completion report (deferred to the end of the child's
- *   turn and then carrying `settled_reason`; see `flushPendingFinal`).
+ * - `ws-agent-report` — a `ws-report-to-lead` progress update or intermediate
+ *   finding, pushed at once and never treated as terminal.
  * - `ws-agent-settled` — the child stopped producing: `reason` is `"idle"`
- *   (settled with no terminal report this turn, carrying `last_message`),
+ *   (ordinary terminal settlement carrying `last_message`),
  *   `"stopped"` (an explicit `ws-agent-stop`), `"exited"` (its process died —
  *   see the liveness probe), or `"spawn-failed"`.
  * - `ws-agent-question` — a headless `kind:"question"` report the lead itself
  *   must answer (in TUI the owner surface consumes it, and the lead instead
  *   gets the `fork-question-thread` advisory below).
  * - `ws-agent-approval` — an `execute-worker` is blocked on `ws-approve`.
- * - `ws-agent-advisory` — the adapter's own statement about a child: emitted
- *   by `fork.ts`'s anti-bleed loop (a fork's turn shape) and, since 260905,
- *   by this module's question branch registering a fork-raised thread
+ * - `ws-agent-advisory` — the adapter's own statement about a child, including
+ *   this module's question branch registering a fork-raised thread
  *   (`advisory: "fork-question-thread"`, `followUp`).
  * - `ws-agent-orphaned` — children that outlived their lead session and are
  *   revivable with `ws-agent-send` (shutdown sidecar, `agent-sidecar.ts`).
@@ -902,11 +842,10 @@ export function shouldPushToLead(env: NodeJS.ProcessEnv = process.env): boolean 
 /**
  * The shared registry walk behind both `computeRunningStatusLine` (below) and
  * the goal-loop yield predicate (`hasRunningAgents`, 260905 Phase 2): skips
- * only `threadBound` records, and reports whether anything counts as
- * "present" (any non-threadBound registry member — dormant/parked included,
- * see the alias/park/cap ticket's presence-rule change) at all, plus how many
- * of those are still `running` and not `terminalThisTurn`. Extracted so the
- * two call sites can never drift apart in what they count as fan-in.
+ * owner-routed records and reports whether anything counts as "present"
+ * (any lead-owned registry member — dormant/parked included) plus how many
+ * turns can still make autonomous progress. Delivery and descendant waits
+ * are intentionally not execution.
  */
 export function isOwnerHeld(record: Pick<RpcAgentRecord, "lastWriter"> | undefined): boolean {
   return record?.lastWriter === "owner";
@@ -918,7 +857,7 @@ function computeFanIn(registry: RpcAgentRegistry | undefined): { present: boolea
   for (const record of registry?.values() ?? []) {
     if (record.threadBound || isOwnerHeld(record)) continue;
     present = true;
-    if (record.expectedReport || record.waitingOnChildren || (record.running && !record.terminalThisTurn)) running += 1;
+    if (record.running || record.streaming) running += 1;
   }
   return { present, running };
 }
@@ -933,10 +872,9 @@ function computeFanIn(registry: RpcAgentRegistry | undefined): { present: boolea
  *   present, since automatic parking (see the settle handler below) now
  *   routinely turns a settled, non-threadBound child dormant. Persistent
  *   researchers are members of this same registry.
- * - N counts the subset of those that is still `running` and has not yet
- *   filed a `final`/`question` this turn (`terminalThisTurn`), so the agent
- *   whose own terminal report triggered this very push has already removed
- *   itself. `0 delegated agents still running` is the lead's synthesis cue —
+ * - N counts only turns still executing (`running || streaming`). A pending
+ *   terminal delivery, descendant wait, or owner action is not execution.
+ *   `0 delegated agents still running` is the lead's synthesis cue —
  *   and, per the presence rule above, `0 …` stays visible (not omitted) as
  *   long as any non-threadBound record — dormant included — remains
  *   registered; cap eviction is what eventually removes it.
@@ -1126,12 +1064,10 @@ export function isOwningAgentIdle(): boolean {
  * call, not that the model consumed it. */
 export interface TerminalDelivery {
   state?: "held" | "enqueued";
-  /** Release a delegated report obligation only when Pi accepts its direct-parent delivery. */
-  releaseObligation?: () => void;
-  /** Restore the obligation when synchronous delivery fails after release for status rendering. */
-  restoreObligation?: () => void;
-  /** Re-evaluate parking after a held terminal finally reaches its parent. */
+  /** Re-evaluate parking and subtree protection after direct-parent admission. */
   afterEnqueue?: () => void;
+  /** Retry a failed pre-queue admission without harvesting or notifying twice. */
+  retry?: () => void;
 }
 
 /** In-memory finish state for one fork-raised `/done`. It intentionally has
@@ -1150,8 +1086,6 @@ export interface ForkFinishOperation {
   /** The observed settle that ended the work before closeout. Exact repeated
    * delivery of that event is not evidence that the closeout has settled. */
   preCloseoutSettleEvent?: object;
-  candidate?: { message: string; toolCallId?: string; accepted?: boolean };
-  sawQuestion?: boolean;
   terminal?: TerminalDelivery;
   advancing?: Promise<void>;
 }
@@ -1273,7 +1207,7 @@ function heldActionState(held: HeldPush): PushBatchItemState {
   }
   if (held.family === "ws-agent-question") {
     const latest = held.record?.reportLog.at(-1);
-    return held.record?.workGeneration === held.actionGeneration && held.record?.terminalThisTurn === true && latest === held.questionReport && latest?.kind === "question"
+    return held.record?.workGeneration === held.actionGeneration && latest === held.questionReport && latest?.kind === "question"
       ? "actionable"
       : "superseded";
   }
@@ -1314,7 +1248,6 @@ function sendPush(
   terminal?: TerminalDelivery,
 ): void {
   const wasHeld = terminal?.state === "held";
-  terminal?.releaseObligation?.();
   const status = computeRunningStatusLine(registry);
   const base: Record<string, unknown> = record ? { agent_id: record.agentId, ...payload } : { ...payload };
   const details = status ? { ...base, status } : base;
@@ -1339,7 +1272,6 @@ function sendPush(
       if (wasHeld) terminal.afterEnqueue?.();
     }
   } catch {
-    terminal?.restoreObligation?.();
     // Best effort: a push that cannot be delivered (a torn-down session, a
     // host that rejected the message) must never turn a child's routine
     // report into a crashed event listener.
@@ -1357,7 +1289,6 @@ function submitHeldPushBatch(pi: ExtensionAPI, deliverAs: "steer" | "followUp"):
   const terminalStates = snapshot.flatMap((held) => held.kind === "push" && held.terminal
     ? [{ terminal: held.terminal, wasHeld: held.terminal.state === "held" }]
     : []);
-  for (const { terminal } of terminalStates) terminal.releaseObligation?.();
   const items = snapshot.map(materializeHeldPush);
   try {
     pi.sendMessage(
@@ -1370,7 +1301,6 @@ function submitHeldPushBatch(pi: ExtensionAPI, deliverAs: "steer" | "followUp"):
       { deliverAs, triggerTurn: true },
     );
   } catch {
-    for (const { terminal } of terminalStates) terminal.restoreObligation?.();
     requestPushWake(pi);
     return 0;
   }
@@ -1415,70 +1345,35 @@ export function registerPushFlush(pi: ExtensionAPI, options: WakeStartOptions): 
   });
 }
 
-function reportObligationDelivery(record: RpcAgentRecord, registry: RpcAgentRegistry | undefined): TerminalDelivery {
-  const workGeneration = record.workGeneration;
-  const expected = record.expectedReport === true;
-  let released = false;
-  return {
-    releaseObligation: () => {
-      if (!expected || released || record.workGeneration !== workGeneration) return;
-      released = true;
-      record.expectedReport = false;
-      syncOwnershipProtection(record);
-      publishSubtree(registry);
-    },
-    restoreObligation: () => {
-      if (!released || record.workGeneration !== workGeneration) return;
-      released = false;
-      record.expectedReport = true;
-      syncOwnershipProtection(record);
-      publishSubtree(registry);
-    },
-    afterEnqueue: () => {
-      if (registry && record.client && !record.running && !record.streaming && !record.threadBound && !isOwnerHeld(record) && !record.waitingOnChildren && !record.expectedReport) {
-        void stopAgent(registry, record.agentId, undefined, { silent: true });
-      }
-    },
-  };
+/** `true` while a settled result still has not reached its direct parent's queue. */
+export function hasPendingTerminalDelivery(record: Pick<RpcAgentRecord, "terminalDelivery">): boolean {
+  return record.terminalDelivery !== undefined && record.terminalDelivery.state !== "enqueued";
 }
 
-/**
- * Emits the deferred `kind:"final"` report for a child that has just left the
- * running state, and says whether there was one.
- *
- * Phase 1 Edition: a `final` observed mid-turn is stashed on the record
- * (`pendingFinal`) rather than pushed, because at that instant the child is
- * still working — it filed its answer through a tool call and its turn
- * continues. This is the release point, reached from every way a child can
- * stop running: the RPC `agent_settled` (`idle`), the `ws-agent-stop` tool
- * (`stopped`), and the liveness probe's exit detection (`exited`).
- * `details.settled_reason` records which, so a final released by a stop or a
- * process death is not read as an orderly completion.
- *
- * A `true` return means the caller must NOT also push `ws-agent-settled` for
- * the same transition — one child turn is one message to the lead.
- */
-export function flushPendingFinal(
-  pi: ExtensionAPI | undefined,
-  registry: RpcAgentRegistry | undefined,
+function createTerminalDelivery(
   record: RpcAgentRecord,
-  settledReason: "idle" | "stopped" | "exited",
-): boolean {
-  const report = record.pendingFinal;
-  if (record.delegation && (record.waitingOnChildren || record.pendingFinalAccepted !== true)) {
-    clearTerminalFacts(record);
-    record.terminalThisTurn = false;
-    return false;
-  }
-  record.pendingFinal = undefined;
-  record.pendingFinalToolCallId = undefined;
-  record.pendingFinalAccepted = undefined;
-  if (report === undefined) return false;
-  publishSubtree(registry);
-  const terminal = record.delegation ? reportObligationDelivery(record, registry) : {};
+  registry: RpcAgentRegistry | undefined,
+  pi: ExtensionAPI | undefined,
+  generation: number | undefined,
+  payload?: Record<string, unknown>,
+): TerminalDelivery {
+  const terminal: TerminalDelivery = {};
+  terminal.afterEnqueue = () => {
+    if (record.workGeneration !== generation || record.terminalDelivery !== terminal) return;
+    syncOwnershipProtection(record);
+    publishSubtree(registry);
+    if (registry && record.client && !record.running && !record.streaming && !record.threadBound && !isOwnerHeld(record) && !record.waitingOnChildren) {
+      void stopAgent(registry, record.agentId, pi, { silent: true });
+    }
+  };
+  if (payload) terminal.retry = () => {
+    if (terminal.state !== undefined || record.workGeneration !== generation || record.terminalDelivery !== terminal) return;
+    pushToLead(pi, registry, record, "ws-agent-settled", payload, "followUp", terminal);
+  };
   record.terminalDelivery = terminal;
-  pushToLead(pi, registry, record, "ws-agent-report", { kind: "final", report, settled_reason: settledReason }, "followUp", terminal);
-  return true;
+  syncOwnershipProtection(record);
+  publishSubtree(registry);
+  return terminal;
 }
 
 /** Starts (or joins) one same-process finish operation for a fork-raised
@@ -1491,51 +1386,29 @@ export function startForkFinish(
   resumeCtx: Pick<RpcResumeCtx, "cwd" | "extensionPath">,
 ): ForkFinishOperation {
   if (record.forkFinish) return record.forkFinish;
-  const ownerWasHolding = isOwnerHeld(record);
-  if (ownerWasHolding) claimLeadOwnership(record);
+  claimLeadOwnership(record);
   const operation: ForkFinishOperation = {
     token: randomUUID(),
     cwd: resumeCtx.cwd,
     extensionPath: resumeCtx.extensionPath,
     generation: record.launchGeneration,
-    phase: record.running || record.streaming ? "waiting" : "evaluating",
-    settled: !(record.running || record.streaming),
-    closeoutIssued: false,
-    closeoutRunStarted: false,
+    phase: "closeout",
+    settled: false,
+    closeoutIssued: true,
+    // A follow-up joins an already-running turn and produces no fresh
+    // `agent_start`; its next settle still belongs to this handoff.
+    closeoutRunStarted: record.running || record.streaming,
   };
-  // A final that was observed before `/done` is still current work only while
-  // it remains pending. Validate it through the fork-provided policy below.
-  if (record.pendingFinal !== undefined) {
-    operation.candidate = {
-      message: record.pendingFinal,
-      toolCallId: record.pendingFinalToolCallId,
-      accepted: record.pendingFinalAccepted,
-    };
-    record.pendingFinal = undefined;
-    record.pendingFinalToolCallId = undefined;
-    record.pendingFinalAccepted = undefined;
-  }
   record.forkFinish = operation;
-  // Last-writer ownership requires an immediate, lead-attributed handoff.
-  // Joining a streaming run uses followUp, so no new agent_start is expected;
-  // mark that closeout run observable now and let its next settle reconcile.
-  if (ownerWasHolding && operation.candidate === undefined && record.terminalDelivery?.state !== "enqueued" && record.terminalDelivery?.state !== "held") {
-    operation.closeoutIssued = true;
-    operation.closeoutRunStarted = record.running || record.streaming;
-    operation.candidate = undefined;
-    operation.sawQuestion = false;
-    operation.phase = "closeout";
-    operation.settled = false;
-    void sendToAgent(registry, { ...finishResumeCtx(operation), pi, finishToken: operation.token }, record.agentId,
-      "The owner closed this side thread. Finish the task now and report the normal final report via ws-report-to-lead (kind: final).", false)
-      .catch((err) => {
-        if (record.forkFinish === operation && record.launchGeneration === operation.generation) {
-          void finishWithAdvisory(record, registry, pi, operation, `closeout failed: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      });
-  } else {
-    void advanceForkFinish(record, registry, pi, resumeCtx, operation);
-  }
+  void sendToAgent(registry, { ...finishResumeCtx(operation), pi, finishToken: operation.token }, record.agentId,
+    "The owner closed this side thread. Finish the task now. End with the requested final-response format in your ordinary assistant answer; do not use ws-report-to-lead as a completion channel.", false)
+    .catch((err) => {
+      if (record.forkFinish === operation && record.launchGeneration === operation.generation) {
+        operation.phase = "complete";
+        record.forkFinish = undefined;
+        try { record.onForkFinishComplete?.(record, `closeout failed: ${err instanceof Error ? err.message : String(err)}`); } catch { /* best effort */ }
+      }
+    });
   return operation;
 }
 
@@ -1551,64 +1424,35 @@ function advanceForkFinish(
   if (operation.advancing) return operation.advancing;
   operation.advancing = (async () => {
     if (record.forkFinish !== operation || operation.phase === "complete") return;
-    if (record.launchGeneration !== operation.generation) return;
-    // Initial idle evaluation marks `settled` at construction. Every later
-    // closeout decision requires the positive settle observation, rather than
-    // inferring it from mutable running/streaming flags.
-    if (!operation.settled || record.waitingOnChildren) return;
+    if (record.launchGeneration !== operation.generation || !operation.settled || record.waitingOnChildren) return;
     operation.phase = "evaluating";
 
     const existing = operation.terminal ?? record.terminalDelivery;
-    if (existing?.state === "held" || existing?.state === "enqueued") {
-      operation.terminal = existing;
+    if (existing?.state === "enqueued") {
       await parkForkFinish(record, registry, pi, operation);
       return;
     }
-
-    const candidate = operation.candidate;
-    // A closeout question is terminal for this operation even if a prior
-    // report looked valid. The owner must receive the existing incomplete
-    // advisory rather than synthetic completion.
-    if (operation.sawQuestion) {
-      await finishWithAdvisory(record, registry, pi, operation);
+    if (existing?.state === "held") {
+      operation.terminal = existing;
       return;
     }
-    // A report-tool start is not a completion fact. In particular `/done`
-    // can race the tool's own end event, so wait for that matching outcome
-    // instead of issuing a closeout while the candidate is still in flight.
-    if (candidate && candidate.accepted === undefined) return;
-    if (candidate?.accepted && (record.validateForkFinal?.(candidate.message) ?? false)) {
-      const terminal: TerminalDelivery = {};
-      operation.terminal = terminal;
-      record.terminalDelivery = terminal;
-      pushToLead(pi, registry, record, "ws-agent-report", { kind: "final", report: candidate.message, settled_reason: "idle" }, "followUp", terminal);
-      await parkForkFinish(record, registry, pi, operation, terminal.state ? undefined : "final push was not admitted");
+    if (existing) {
+      existing.retry?.();
       return;
     }
 
-    if (!operation.closeoutIssued) {
-      operation.closeoutIssued = true;
-      operation.closeoutRunStarted = false;
-      operation.candidate = undefined;
-      operation.sawQuestion = false;
-      operation.phase = "closeout";
-      // The closeout itself begins a new turn; only its next observed settle
-      // may choose final versus missing-final advisory.
-      operation.settled = false;
-      try {
-        await sendToAgent(registry, { ...finishResumeCtx(operation), pi, finishToken: operation.token }, record.agentId,
-          "The owner closed this side thread. Finish the task now and report the normal final report via ws-report-to-lead (kind: final).", false);
-      } catch (err) {
-        // A replacement instruction can supersede us while the RPC promise
-        // rejects. Never publish an outcome into that replacement work.
-        if (record.forkFinish === operation && record.launchGeneration === operation.generation) {
-          await finishWithAdvisory(record, registry, pi, operation, `closeout failed: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
-      return;
-    }
-
-    await finishWithAdvisory(record, registry, pi, operation);
+    const generation = record.workGeneration;
+    const lastMessage = await harvestLastMessage(record);
+    if (record.forkFinish !== operation || record.launchGeneration !== operation.generation || record.workGeneration !== generation || record.running || record.streaming || record.waitingOnChildren) return;
+    const terminal = createTerminalDelivery(record, registry, pi, generation, { reason: "idle", last_message: lastMessage });
+    operation.terminal = terminal;
+    terminal.afterEnqueue = () => {
+      if (record.forkFinish !== operation || record.launchGeneration !== operation.generation || record.workGeneration !== generation) return;
+      syncOwnershipProtection(record);
+      publishSubtree(registry);
+      void parkForkFinish(record, registry, pi, operation);
+    };
+    terminal.retry?.();
   })().finally(() => {
     operation.advancing = undefined;
     // A settle can arrive while the closeout RPC promise is unresolved. The
@@ -1623,18 +1467,6 @@ function advanceForkFinish(
 
 function finishResumeCtx(operation: ForkFinishOperation): Pick<RpcResumeCtx, "cwd" | "extensionPath"> {
   return { cwd: operation.cwd, extensionPath: operation.extensionPath };
-}
-
-function finishWithAdvisory(record: RpcAgentRecord, registry: RpcAgentRegistry, pi: ExtensionAPI, operation: ForkFinishOperation, detail?: string): Promise<void> {
-  if (record.forkFinish !== operation || record.launchGeneration !== operation.generation) return Promise.resolve();
-  const terminal: TerminalDelivery = {};
-  operation.terminal = terminal;
-  record.terminalDelivery = terminal;
-  pushToLead(pi, registry, record, "ws-agent-advisory", {
-    advisory: "missing-final",
-    detail: detail ?? "This fork settled without a valid final report. Treat the task as incomplete.",
-  }, "followUp", terminal);
-  return parkForkFinish(record, registry, pi, operation, terminal.state ? undefined : "missing-final advisory was not admitted");
 }
 
 async function parkForkFinish(record: RpcAgentRecord, registry: RpcAgentRegistry, pi: ExtensionAPI, operation: ForkFinishOperation, failure?: string): Promise<void> {
@@ -1675,20 +1507,6 @@ function observeForkFinishEvent(record: RpcAgentRecord, evt: { type?: string; to
     }
     return;
   }
-  if (evt.type === "tool_execution_start" && evt.toolName === REPORT_TO_LEAD_TOOL_NAME) {
-    const args = evt.args as { kind?: unknown; message?: unknown } | undefined;
-    if (args?.kind === "question") {
-      operation.sawQuestion = true;
-      operation.candidate = undefined;
-    } else if (args?.kind === "final" && typeof args.message === "string" && !operation.sawQuestion) {
-      operation.candidate = { message: args.message, toolCallId: evt.toolCallId };
-    }
-    return;
-  }
-  if (evt.type === "tool_execution_end" && operation.candidate && operation.candidate.toolCallId === evt.toolCallId) {
-    const result = evt.result as { isError?: unknown } | undefined;
-    operation.candidate.accepted = evt.isError !== true && result?.isError !== true;
-  }
 }
 
 /** Admit a family push through the shared FIFO. Idle, compacting, pending-start, and ordinary busy followUps are held; normal busy steers still interrupt. Idle wakes use sendUserMessage so before_agent_start composes the ws block for the run. */
@@ -1701,12 +1519,28 @@ export function pushToLead(
   deliverAs: PushDeliverAs,
   terminal?: TerminalDelivery,
 ): void {
-  if (record && isOwnerHeld(record) && (family === "ws-agent-settled" || family === "ws-agent-advisory")) {
+  const ownerRouteAvailable = ownerNotifyRef.current !== undefined;
+  if (record && (isOwnerHeld(record) || (record.threadBound && !record.forkFinish)) && ownerRouteAvailable && (family === "ws-agent-settled" || family === "ws-agent-advisory")) {
     const name = record.alias ?? record.title ?? record.agentId.slice(0, 8);
     const detail = family === "ws-agent-settled"
       ? `settled${typeof payload.last_message === "string" && payload.last_message.trim() ? `: ${payload.last_message.trim()}` : ""}`
       : `advisory: ${String(payload.detail ?? payload.advisory ?? "attention required")}`;
-    try { ownerNotifyRef.current?.(`ws: ${name} ${detail}`, family === "ws-agent-advisory" ? "warning" : "info"); } catch { /* human-only best effort */ }
+    try {
+      ownerNotifyRef.current?.(`ws: ${name} ${detail}`, family === "ws-agent-advisory" ? "warning" : "info");
+      if (terminal) {
+        terminal.state = "enqueued";
+        terminal.afterEnqueue?.();
+      }
+    } catch {
+      // Owner UI routes can be temporarily unavailable during overlay/session
+      // transitions. Keep the terminal obligation live and actively retry it;
+      // a successor generation clears record.terminalDelivery and makes the
+      // scheduled callback a no-op.
+      if (terminal?.retry && terminal.state === undefined) {
+        const timer = setTimeout(() => terminal.retry?.(), OWNER_TERMINAL_RETRY_DELAY_MS);
+        timer.unref?.();
+      }
+    }
     return;
   }
   if (!pi || !shouldPushToLead() || !leadIdleRef.current) return;
@@ -1719,13 +1553,8 @@ export function pushToLead(
  * fan-in bookkeeping cannot drift from the actual dispatches: marks the child
  * `running` from the instant the prompt is ISSUED (not when `agent_start`
  * arrives — a lead ending its turn immediately after dispatch must already
- * see it counted), clears the previous turn's `terminalThisTurn` and any
- * un-pushed `pendingFinal`, and stamps `lastLeadPromptAt`.
- *
- * `isLeadPrompt: false` is passed by exactly one caller — `fork.ts`'s
- * anti-bleed nudge — because an internal re-prompt is not a new task
- * boundary: moving `lastLeadPromptAt` there would hide a stale
- * idle-without-final from the very check the nudge exists to serve.
+ * see it counted), starts a fresh work generation, and stamps
+ * `lastLeadPromptAt`.
  *
  * 260905 (live-agent widget ticket): `runStartedAt` is stamped
  * unconditionally, unlike `lastLeadPromptAt` — the widget's elapsed clock
@@ -1824,6 +1653,8 @@ function claimLeadOwnership(record: RpcAgentRecord): void {
   acceptWriter(record, stamp);
 }
 
+export const OWNER_TERMINAL_RETRY_DELAY_MS = 100;
+
 export async function promptAgent(
   record: RpcAgentRecord,
   client: RpcClient,
@@ -1834,13 +1665,8 @@ export async function promptAgent(
   const now = Date.now();
   const writerStamp = stampWriter(record, writer, writer === "owner" ? message : undefined, writer === "lead" && opts?.isLeadPrompt !== false ? now : undefined);
   record.running = true;
-  record.workGeneration = (record.workGeneration ?? 0) + 1;
-  record.terminalThisTurn = false;
-  // A final that never reached a settle belongs to the task being replaced,
-  // not to the one starting now.
-  // The anti-bleed nudge continues the same task, so it deliberately keeps
-  // completion facts. Every real prompt is a new instruction boundary.
-  if (opts?.isLeadPrompt !== false || writer === "owner") clearTerminalFacts(record);
+  record.pendingQueuedWork = undefined;
+  advanceWorkGeneration(record);
   record.runStartedAt = now;
   if (record.ownership) observeSessionWrite(record.ownership.home, record.sessionPath);
   if (record.ownership) updateOwnership(record.ownership.home, { lastActivityAt: now, liveness: { lifecycle: "live", running: true, observedAt: now } });
@@ -1852,10 +1678,7 @@ export async function promptAgent(
     throw error;
   }
   acceptWriter(record, writerStamp);
-  if (record.delegation && record.workGeneration === workGeneration) {
-    record.expectedReport = true;
-    syncOwnershipProtection(record);
-  }
+  if (record.delegation && record.workGeneration === workGeneration) syncOwnershipProtection(record);
 }
 
 /**
@@ -1865,11 +1688,15 @@ export async function promptAgent(
  * looks like" is defined once.
  */
 function clearTerminalFacts(record: RpcAgentRecord): void {
-  record.pendingFinal = undefined;
-  record.pendingFinalToolCallId = undefined;
-  record.pendingFinalAccepted = undefined;
-  record.pendingFinalRevision = undefined;
   record.terminalDelivery = undefined;
+}
+
+/** Start work whose assistant output must never inherit an earlier turn. */
+function advanceWorkGeneration(record: RpcAgentRecord): void {
+  record.workGeneration = (record.workGeneration ?? 0) + 1;
+  record.lastText = undefined;
+  record.lastTextGeneration = undefined;
+  clearTerminalFacts(record);
 }
 
 function clearLiveState(record: RpcAgentRecord): void {
@@ -1920,16 +1747,21 @@ export function markAgentExited(
   opts?: { suppressTerminal?: boolean },
 ): void {
   if (!record.client) return;
+  const hadQueuedSuccessor = (record.pendingQueuedWork?.length ?? 0) > 0;
   clearLiveState(record);
+  record.pendingQueuedWork = undefined;
   if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "unknown", running: false, observedAt: Date.now() } });
   triggerAgentWidgetRefresh();
   if (opts?.suppressTerminal) return;
-  // A child that filed a final and then died before settling still answered;
-  // `settled_reason: "exited"` is what tells the lead the death, not silence.
-  if (flushPendingFinal(pi, registry, record, "exited")) return;
-  const terminal = record.delegation ? reportObligationDelivery(record, registry) : undefined;
-  if (terminal) record.terminalDelivery = terminal;
-  pushToLead(pi, registry, record, "ws-agent-settled", { reason: "exited" }, "followUp", terminal);
+  const workGeneration = record.workGeneration;
+  if (record.settlementAdmissionGeneration === workGeneration) {
+    record.terminalDelivery?.retry?.();
+    return;
+  }
+  record.settlementAdmissionGeneration = workGeneration;
+  const lastMessage = !hadQueuedSuccessor && record.lastTextGeneration === workGeneration ? record.lastText : undefined;
+  const terminal = createTerminalDelivery(record, registry, pi, workGeneration, { reason: "exited", last_message: lastMessage });
+  terminal.retry?.();
 }
 
 /** Interval of the background liveness sweep, while at least one agent is outstanding. */
@@ -1949,7 +1781,7 @@ export function startLivenessProbe(
 ): () => void {
   const timer = setInterval(() => {
     for (const record of [...registry.values()]) {
-      if ((record.running || record.waitingOnChildren || record.expectedReport) && record.client) {
+      if ((record.running || record.streaming || record.waitingOnChildren || hasPendingTerminalDelivery(record)) && record.client) {
         void probeAgentLiveness(pi, registry, record);
       }
     }
@@ -2280,7 +2112,7 @@ export function buildRpcClientOptions(
  * entirely (not stored as an explicit `undefined` property) when the caller
  * omits it, so a plain progress update round-trips as `{at}`.
  */
-export function recordReport(record: RpcAgentRecord, kind: "question" | "final" | undefined, at: number = Date.now()): void {
+export function recordReport(record: RpcAgentRecord, kind: "question" | undefined, at: number = Date.now()): void {
   record.reportLog.push(kind === undefined ? { at } : { kind, at });
   if (record.reportLog.length > REPORT_LOG_CAP) {
     record.reportLog.shift();
@@ -2299,7 +2131,7 @@ export function syncOwnershipProtection(record: RpcAgentRecord): boolean {
       threadBound: record.threadBound,
       ownerHeld: isOwnerHeld(record),
       waitingOnChildren: record.waitingOnChildren,
-      expectedReport: record.expectedReport,
+      pendingDelivery: hasPendingTerminalDelivery(record),
       pendingQuestion: record.threadBound,
       pendingApprovalCommandId: record.pendingApproval?.cmdId,
       recovery: record.client ? "none" : "revived",
@@ -2318,18 +2150,6 @@ export function startOwnedSessionObserver(record: RpcAgentRecord, intervalMs = 5
 }
 
 /**
- * The report kinds `record` has filed since its last LEAD prompt — the input
- * `fork.ts`'s `isIdleWithoutFinal` judges a turn against. Filtering by
- * `lastLeadPromptAt` is what makes a `final` from a PREVIOUS task stop
- * counting once the lead sends a new one; a nudge deliberately does not move
- * that stamp (see `promptAgent`), so it cannot un-flag a stale record.
- */
-export function reportKindsSinceLeadPrompt(record: RpcAgentRecord): Array<"question" | "final" | undefined> {
-  const since = record.lastLeadPromptAt ?? 0;
-  return record.reportLog.filter((entry) => entry.at >= since).map((entry) => entry.kind);
-}
-
-/**
  * What `attachEventListener` must DO about an event `applyRpcEvent` just
  * applied. 260905: `applyRpcEvent` stays pure (no `pi`, no `RpcClient` — the
  * convention its existing plain-fake-record tests depend on), so it describes
@@ -2345,99 +2165,29 @@ export interface RpcEventOutcome {
 }
 
 /**
- * Applies an `agent_start`/`agent_settled`/`ws-report-to-lead`-tool RPC event
- * onto `record`'s locally-tracked streaming/report state, and returns what the
- * IO layer should push for it. Exported so the streaming/turn bookkeeping and
- * the report-classification branch have direct unit coverage without a real
- * `RpcClient` subprocess.
- *
- * The report branch matches a raw `tool_execution_start` event (the same
- * event Pi's own extension-hook fan-out emits the instant the LLM dispatches
- * a tool call, forwarded verbatim to the parent's `RpcClient.onEvent()` — see
- * the plan's Codebase Findings for the full trace) whose `toolName` is
- * `REPORT_TO_LEAD_TOOL_NAME`; `evt.args.message`, if a string, becomes a push
- * (260904 Phase 1, side-thread fork ticket: along with `evt.args.kind` when
- * it is exactly `"question"` or `"final"` — any other value, including a
- * malformed one, is dropped, same as an absent `kind`).
- * All other event types (including a `tool_execution_start` for any other
- * tool name) are ignored here — they only matter to a live streaming UI or
- * to the tool's own execution, not to this module's bookkeeping.
- *
- * 260904 Phase 1 (execute-approve gateway) adds a 2nd `tool_execution_start` branch, matched on
- * `GATED_EXEC_TOOL_NAME`: sets `record.pendingApproval` from the event's
- * `toolCallId` (this IS the `cmd_id` — no new id needs minting) plus the
- * gated-exec tool's own `{command, rationale}` args. Requires both a string
- * `toolCallId` and a string `args.command`; a missing/malformed event is
- * silently ignored (never throws) — matches the report branch's own
- * best-effort shape-tolerance above.
- *
- * Review fix (relay #1): also captures `args.cwd` (the same optional
- * per-call working-directory override `ws-worker-exec`'s own `execute()`
- * accepts) onto `record.pendingApproval.cwd` when it is a string — omitted
- * (`undefined`) otherwise, so a caller falls back to the worker's base cwd
- * exactly as `execute-gateway.ts`'s `execute()` itself does.
- *
- * 260905 Phase 1 (fork-question lead notice, was 260904 Phase 2 / review
- * relay #1 I6): a `kind:"question"` report is passed through
- * `record.onQuestionReport` (when set) first. That hook thread-binds the
- * record and, in TUI mode, returns the registration-notice string built by
- * `buildForkQuestionLeadNotice` — the lead must still be told a thread now
- * exists, just not asked to answer it. A DEFINED (string) return is pushed to
- * the lead as `ws-agent-advisory`/`fork-question-thread` (`detail` is that
- * notice text) so the lead is told the thread exists rather than seeing
- * nothing at all — `followUp` delivery only guarantees the notice is queued
- * for the lead's next turn boundary, not that it precedes the owner's
- * `/answer`; `undefined` is the headless baseline and the question is pushed
- * as `ws-agent-question`/`steer` for the lead to answer directly. A throwing
- * hook degrades to that same headless baseline rather than dropping the
- * report.
- *
- * `record.onFinalReport` gained the parallel contract: returning `true` means
- * the hook fully consumed the report (a `lead-ask` discussion thread, whose
- * decision reaches the lead as its own `ws-thread-summary` message), so
- * nothing is stashed; falsy stashes it as `record.pendingFinal`.
- *
- * Phase 1 Edition: an un-consumed `final` produces NO push from here. It is
- * stashed and released by `flushPendingFinal` when the child leaves the
- * running state — see that function and `RpcAgentRecord.pendingFinal`.
- * `question` and untagged progress reports keep their immediate push: a
- * question blocks the child until it is answered, and progress is only
- * meaningful while the work is still going.
+ * Applies lifecycle and intermediate-report RPC events to a record. A
+ * `kind:"question"` report uses the owner-thread hook when available; every
+ * other report-tool call is an immediate informational push. No report-tool
+ * value is terminal. `agent_settled` clears execution synchronously, while
+ * `attachEventListener` performs asynchronous terminal transcript harvest and
+ * queue admission. Gated execution events additionally capture approval data.
  */
 export function applyRpcEvent(
   record: RpcAgentRecord,
   evt: { type?: string; toolName?: string; args?: unknown; toolCallId?: string; isError?: unknown; result?: unknown },
 ): RpcEventOutcome {
-  const finishing = record.forkFinish;
   if (evt.type === "tool_execution_end") {
     observeForkFinishEvent(record, evt);
-    if (record.pendingFinal !== undefined && record.pendingFinalToolCallId === evt.toolCallId) {
-      const result = evt.result as { isError?: unknown } | undefined;
-      const details = (evt.result as { details?: { subtreeRevision?: number } })?.details;
-      record.pendingFinalRevision = details?.subtreeRevision;
-      record.pendingFinalAccepted = evt.isError !== true && result?.isError !== true && (!record.delegation || (!record.waitingOnChildren && (!record.requiresFreshFinal || details?.subtreeRevision === record.subtreeRevision)));
-      if (record.delegation && !record.pendingFinalAccepted) {
-        record.terminalThisTurn = false;
-        clearTerminalFacts(record);
-      } else if (record.delegation && record.onFinalReport) {
-        try {
-          if (record.onFinalReport(record, record.pendingFinal!) === true) {
-            record.expectedReport = false;
-            clearTerminalFacts(record);
-          }
-        } catch { /* keep the accepted final for the ordinary relay */ }
-      }
-    }
     return {};
   }
   if (evt.type === "agent_start") {
+    const alreadyRunning = record.running;
     record.streaming = true;
-    if (record.delegation) {
+    if (record.delegation && !alreadyRunning) {
       // A direct child can wake itself for its own children's reports, without
       // a new outer promptAgent call. This is a new own-turn generation.
       record.running = true;
-      record.expectedReport = true;
-      record.workGeneration = (record.workGeneration ?? 0) + 1;
+      advanceWorkGeneration(record);
     }
     observeForkFinishEvent(record, evt);
   } else if (evt.type === "agent_settled") {
@@ -2453,22 +2203,8 @@ export function applyRpcEvent(
     const args = evt.args as { message?: unknown; kind?: unknown } | undefined;
     const message = args?.message;
     if (typeof message === "string") {
-      const kind = args?.kind === "question" || args?.kind === "final" ? args.kind : undefined;
+      const kind = args?.kind === "question" ? args.kind : undefined;
       recordReport(record, kind);
-      if (kind !== undefined) {
-        // A terminal report for this turn: the sender is out of N from here
-        // on (including on its own push), and the `agent_settled` that
-        // follows must not emit a redundant idle-settle push.
-        record.terminalThisTurn = true;
-      }
-
-      // An active fork-raised `/done` owns terminal report/question handling
-      // exclusively. Do not register a new owner question or let the normal
-      // final hook detach its bind while the coordinator is still deciding.
-      if (finishing && (kind === "question" || kind === "final")) {
-        observeForkFinishEvent(record, evt);
-        return {};
-      }
 
       if (kind === "question") {
         // A defined (string) return is the registration notice for a fork
@@ -2487,29 +2223,6 @@ export function applyRpcEvent(
         return notice !== undefined
           ? { push: { family: "ws-agent-advisory", payload: { advisory: "fork-question-thread", detail: notice }, deliverAs: "followUp" } }
           : { push: { family: "ws-agent-question", payload: { question: message }, deliverAs: "steer" } };
-      }
-
-      if (kind === "final") {
-        let consumed = false;
-        if (record.onFinalReport && !record.delegation) {
-          try {
-            consumed = record.onFinalReport(record, message) === true;
-          } catch {
-            // swallowed: a hook failure must not drop the report
-            consumed = false;
-          }
-        }
-        // Phase 1 Edition: NOT pushed here. The child is still mid-turn at
-        // this instant; the final is stashed and pushed when it actually
-        // leaves the running state (`flushPendingFinal`), so the lead is told
-        // "done" only once the author has stopped working. A consumed report
-        // belongs to an owner thread and is not stashed at all.
-        if (!consumed) {
-          record.pendingFinal = message;
-          record.pendingFinalToolCallId = evt.toolCallId;
-          record.pendingFinalAccepted = undefined;
-        }
-        return {};
       }
 
       return { push: { family: "ws-agent-report", payload: { report: message }, deliverAs: "followUp" } };
@@ -2537,55 +2250,12 @@ export function applyRpcEvent(
 }
 
 /**
- * Wires `client.onEvent()` into `applyRpcEvent` for `record` and performs the
- * IO half of whatever it reports: emits the described push, and — on
- * `agent_settled` — decides whether an idle-settle push follows. It also,
- * since 260904 Phase 1, invokes `onApprovalPending(record)` right after any
- * `tool_execution_start` for `GATED_EXEC_TOOL_NAME` (the same event
- * `applyRpcEvent` just used to set `record.pendingApproval`). Kept as a
- * second, independent check on the raw event (not a "did pendingApproval
- * change" diff) so the approval-relay's actual payload/injection behavior
- * stays owned entirely by `execute-gateway.ts`, which supplies that callback.
- *
- * The settle push is deliberately conditional and asynchronous:
- * - replaced by the deferred `kind:"final"` report when this turn filed one
- *   (`flushPendingFinal`) — that report IS the completion signal, and the
- *   settle notice would be the same event a second time;
- * - suppressed while `record.threadBound` — an owner discussion thread's turn
- *   boundaries are not the lead's business (§1);
- * - suppressed when `record.terminalThisTurn` — the child already filed a
- *   `final`/`question` this turn, and that push IS the signal; a settle
- *   notice milliseconds later would just be a duplicate wake;
- * - otherwise pushed with `last_message` from `harvestLastMessage` (the
- *   former `ws-agent-wait` `reason:"idle"` payload, reused verbatim), which
- *   needs an RPC round-trip and so cannot happen inline in the listener.
- *
- * The settle is also a registry transition, so it doubles as a liveness-probe
- * point (`probeAgentLiveness`) — a child that died mid-turn is reported as
- * `exited` rather than silently going quiet.
- *
- * 260905 (alias/park/cap ticket): **automatic park** is the last step of this
- * settle handling, run AFTER `probeAgentLiveness` resolves (so a park never
- * races the liveness check) and after the (separately-registered) anti-bleed
- * advisory/nudge judgment has had its chance to re-prompt the child — see the
- * plan's Codebase Findings for why no explicit ordering call into `fork.ts` is
- * needed: a synchronous nudge already flips `record.running` before this IIFE
- * resumes past its own `await`. Parks (silent `stopAgent`) iff
- * `!record.threadBound && !record.running` at that point: a `threadBound`
- * record is never parked, and a record the nudge re-prompted is not parked
- * either. No grace period, and no extra push for the park itself — the
- * settle/final push above already told the lead the child stopped; parking is
- * pure resource cleanup, silently resumed later by `sendToAgent`'s dormant
- * branch. A park failure is swallowed (best effort), matching every other
- * best-effort branch in this handler.
- *
- * Exported (review relay #1, test partition C2) purely so the suppression
- * conditions above have direct offline coverage: this listener, not the pure
- * `applyRpcEvent`, is where the `!threadBound && !terminalThisTurn` gate
- * actually lives, and `spawnAgent`/`sendToAgent` — its only production call
- * sites — both construct a real `RpcClient` and are live-gate only. Tests
- * drive it with a duck-typed `client` exposing `onEvent`/`getState`/
- * `getLastAssistantText`.
+ * Wires the child event stream to immediate reports and per-generation
+ * terminal settlement. Settlement clears execution before any async work,
+ * waits for the published descendant subtree, harvests the ordinary assistant
+ * answer, admits one retryable terminal delivery, and parks only after enqueue.
+ * Duplicate events join the generation latch; replacement work invalidates a
+ * late harvest. Owner-held output uses the owner notification route.
  */
 export function attachEventListener(
   pi: ExtensionAPI | undefined,
@@ -2597,6 +2267,10 @@ export function attachEventListener(
   let refreshing = false;
   let dirty = false;
   let statsDirty = false;
+  // Older/revived records may predate generation tracking. Normalize once so
+  // the first settlement is not mistaken for a duplicate undefined latch.
+  record.launchGeneration ??= 0;
+  record.workGeneration ??= 0;
   const generation = record.launchGeneration;
   const refresh = (includeStats = false) => {
     dirty = true;
@@ -2628,17 +2302,20 @@ export function attachEventListener(
     })();
   };
   record.unsubscribe = client.onEvent((evt) => {
-    const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string; isError?: unknown; result?: unknown };
+    const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string; isError?: unknown; result?: unknown; message?: unknown };
     if (record.client !== client || record.launchGeneration !== generation) return;
+    if (e.type === "message_start") observeQueuedWorkBoundary(record, e.message);
+    if (e.type === "message_end") {
+      const text = assistantMessageText(e.message);
+      if (text !== undefined) {
+        record.lastText = text;
+        record.lastTextGeneration = record.workGeneration;
+      }
+    }
     if (record.subtreeChannel) {
       const snapshot = readSubtreeSnapshot(record.subtreeChannel);
       record.waitingOnChildren = subtreeWaiting(snapshot);
       record.subtreeRevision = snapshot?.revision;
-      record.requiresFreshFinal ||= snapshot?.delegated;
-      if (record.pendingFinalAccepted && (record.waitingOnChildren || (record.requiresFreshFinal && record.pendingFinalRevision !== snapshot?.revision))) {
-        clearTerminalFacts(record);
-        record.terminalThisTurn = false;
-      }
     }
     const outcome = applyRpcEvent(record, e);
     publishSubtree(registry);
@@ -2658,7 +2335,6 @@ export function attachEventListener(
     }
     if (outcome.settled && record.waitingOnChildren) {
       clearTerminalFacts(record);
-      record.terminalThisTurn = false;
       syncOwnershipProtection(record);
       publishSubtree(registry);
       triggerAgentWidgetRefresh();
@@ -2670,32 +2346,28 @@ export function attachEventListener(
       const finish = record.forkFinish;
       if (finish) {
         void advanceForkFinish(record, registry ?? new Map([[record.agentId, record]]), pi as ExtensionAPI, finishResumeCtx(finish), finish);
-      } else void (async () => {
-        // The deferred final, if this turn filed one, IS the settle message.
-        if (!flushPendingFinal(pi, registry, record, "idle") && !record.terminalThisTurn && (!record.threadBound || isOwnerHeld(record))) {
-          const lastMessage = await harvestLastMessage(record);
-          if (!stillSettled()) return;
-          const terminal: TerminalDelivery = {};
-          record.terminalDelivery = terminal;
-          pushToLead(pi, registry, record, "ws-agent-settled", { reason: "idle", last_message: lastMessage }, "followUp", terminal);
+      } else {
+        if (record.settlementAdmissionGeneration === workGeneration) {
+          record.terminalDelivery?.retry?.();
+        } else {
+          // Latch before the asynchronous transcript harvest so duplicate
+          // settle events for one generation cannot enqueue twice.
+          record.settlementAdmissionGeneration = workGeneration;
+          const terminal = createTerminalDelivery(record, registry, pi, workGeneration);
+          void (async () => {
+            const lastMessage = await harvestLastMessage(record);
+            if (!stillSettled() || record.terminalDelivery !== terminal) return;
+            const payload = { reason: "idle", last_message: lastMessage };
+            terminal.retry = () => {
+              if (terminal.state !== undefined || !stillSettled() || record.terminalDelivery !== terminal) return;
+              pushToLead(pi, registry, record, "ws-agent-settled", payload, "followUp", terminal);
+            };
+            terminal.retry();
+            await probeAgentLiveness(pi, registry, record);
+            triggerAgentWidgetRefresh();
+          })();
         }
-        await probeAgentLiveness(pi, registry, record);
-        // Automatic park: the last step, after the liveness probe and (by
-        // event-loop ordering) after any synchronous nudge has had its chance
-        // to re-prompt this record. See the doc comment above.
-        if (registry && stillSettled() && !record.threadBound && !isOwnerHeld(record) && !record.expectedReport) {
-          try {
-            await stopAgent(registry, record.agentId, pi, { silent: true });
-          } catch {
-            // best effort — a park failure must not crash the settle handler.
-          }
-        }
-        // 260905 (live-agent widget ticket): fired after the liveness probe
-        // and the possible automatic park above, so the widget's re-render
-        // sees the record's fully-settled state (dormant if parked, still
-        // running if a synchronous nudge re-prompted it first).
-        triggerAgentWidgetRefresh();
-      })();
+      }
     }
     if (record.forkFinish && e.type === "tool_execution_end") {
       const finish = record.forkFinish;
@@ -2788,7 +2460,7 @@ export function reserveAgentAlias(
   if (!alias) return { ok: true };
   for (const holder of registry.values()) {
     if (holder.alias !== alias) continue;
-    if (holder.running || holder.threadBound || isOwnerHeld(holder) || holder.expectedReport || holder.waitingOnChildren) {
+    if (holder.running || holder.streaming || holder.threadBound || isOwnerHeld(holder) || hasPendingTerminalDelivery(holder) || holder.waitingOnChildren) {
       const state = holder.running ? "running" : holder.threadBound ? "threadBound" : "held/outstanding";
       return {
         ok: false,
@@ -2837,7 +2509,7 @@ export function evictForCapacity(
     let candidate: RpcAgentRecord | undefined;
     let candidateActivity = Number.POSITIVE_INFINITY;
     for (const record of registry.values()) {
-      if (record.client || record.running || record.threadBound || isOwnerHeld(record) || record.pendingApproval || record.expectedReport || record.waitingOnChildren) continue;
+      if (record.client || record.running || record.streaming || record.threadBound || isOwnerHeld(record) || record.pendingApproval || hasPendingTerminalDelivery(record) || record.waitingOnChildren) continue;
       if (record.ownership && inspectOwnedHomeRemoval(record.ownership).status !== "eligible") continue;
       const activity = lastActivityAt(record);
       if (activity < candidateActivity) {
@@ -2989,7 +2661,7 @@ export function spawnAdmission(ctx: RpcSpawnCtx): DelegationPolicy {
   return policy;
 }
 
-const WORKER_LIFECYCLE_GUIDE = `\n\n## Persistent delegation\nChild results return to this session, not directly to your caller. End your turn while children work; the adapter keeps your subtree outstanding and wakes you on their reports. Continue the same child with ws-agent-send. A plain settled answer still needs your disposition: follow up, or call ws-agent-stop to accept it and release its outstanding obligation. Finish your own task with ws-report-to-lead(kind: "final", message: <your required report>), only after consuming all child results. A final submitted while children remain outstanding is rejected; submit a fresh final after synthesizing their results.\n`;
+const WORKER_LIFECYCLE_GUIDE = `\n\n## Persistent delegation\nChild results return to this session, not directly to your caller. End your turn while children work; the adapter keeps the subtree outstanding and wakes you on their settled output. Continue the same child with ws-agent-send when its output is insufficient. After every descendant has settled and you have synthesized their results, end with the final-output shape required by your playbook in your ordinary assistant answer. Settlement delivers that answer; ws-report-to-lead is only for progress or a question before settlement.\n`;
 
 export async function spawnAgent(
   registry: RpcAgentRegistry,
@@ -3323,8 +2995,8 @@ export async function sendToAgent(
     } finally {
       if (forkLaunch) rmSync(dirname(forkLaunch.contextPath), { recursive: true, force: true });
     }
-    // Role wiring that needs a live client (a revived fork's anti-bleed loop —
-    // see `RpcAgentRecord.onResume`). Best effort: a wiring failure must not
+    // Role wiring that needs a live client (see `RpcAgentRecord.onResume`).
+    // Best effort: a wiring failure must not
     // turn a routine resume into a failed send.
     try {
       record.onResume?.(record);
@@ -3342,26 +3014,27 @@ export async function sendToAgent(
   try {
     if (record.streaming) {
       writerStamp = stampWriter(record, writer, writer === "owner" ? message : undefined, writer === "lead" ? Date.now() : undefined);
-      if (interrupt) {
-        await live.steer(message);
-      } else {
-        await live.followUp(message);
+      const queuedBoundary = { message };
+      (record.pendingQueuedWork ??= []).push(queuedBoundary);
+      try {
+        if (interrupt) {
+          await live.steer(message);
+        } else {
+          await live.followUp(message);
+        }
+      } catch (error) {
+        const index = record.pendingQueuedWork?.indexOf(queuedBoundary) ?? -1;
+        if (index >= 0) record.pendingQueuedWork!.splice(index, 1);
+        if (record.pendingQueuedWork?.length === 0) record.pendingQueuedWork = undefined;
+        throw error;
       }
       acceptWriter(record, writerStamp);
       writerStamp = undefined;
-      // A steer/followUp joins the run already in flight, so the child is
-      // outstanding again from the lead's point of view even though no fresh
-      // prompt was issued — including for `terminalThisTurn` (review relay #1,
-      // minor): new work was just dispatched, so a `final` filed before it no
-      // longer keeps the child out of N.
+      // Queue admission keeps the child outstanding, but the work generation
+      // changes only when Pi emits the queued user message_start. Until that
+      // boundary, assistant events still belong to the preceding turn.
       record.running = true;
-      record.terminalThisTurn = false;
-      // Mirror `promptAgent`: a final stashed before this instruction answers
-      // the task being replaced, not the one just dispatched — a later settle
-      // must not flush it as the reply to the new message.
       clearTerminalFacts(record);
-      record.workGeneration = (record.workGeneration ?? 0) + 1;
-      if (record.delegation) record.expectedReport = true;
     } else {
       await promptAgent(record, live, message, { writer });
     }
@@ -3391,22 +3064,49 @@ export async function sendToAgent(
 }
 
 /**
- * The agent's last assistant text, refreshed over RPC when the child is still
- * live and falling back to the cached `lastText` otherwise. This is the
- * former `ws-agent-wait` `reason:"idle"` payload, reused verbatim as the
- * `last_message` field of the `ws-agent-settled` push.
+ * Read the agent's ordinary assistant answer at settlement without borrowing
+ * from an earlier generation. `getLastAssistantText()` remains the native RPC
+ * read, while the current generation's assistant `message_end` is the proof
+ * that the returned transcript tail belongs to this turn. When the RPC skips
+ * an empty/aborted message or disagrees with that event, preserve the event's
+ * exact text; when no current assistant event exists, report missing output.
  */
+function messageText(message: unknown, role: "assistant" | "user"): string | undefined {
+  if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== role) return undefined;
+  const content = (message as { content?: unknown }).content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.flatMap((part) => part && typeof part === "object" && (part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string"
+    ? [(part as { text: string }).text]
+    : []).join("");
+}
+
+function observeQueuedWorkBoundary(record: RpcAgentRecord, message: unknown): void {
+  if (messageText(message, "user") === undefined || !record.pendingQueuedWork?.length) return;
+  // Pi can expand a queued skill/template before emitting its user message, so
+  // text equality is not a stable identity. User queue consumption is the
+  // actual FIFO boundary; steering may overtake follow-ups, but either accepted
+  // item starts one successor generation and removes exactly one obligation.
+  record.pendingQueuedWork.shift();
+  if (record.pendingQueuedWork.length === 0) record.pendingQueuedWork = undefined;
+  advanceWorkGeneration(record);
+}
+
+function assistantMessageText(message: unknown): string | undefined {
+  return messageText(message, "assistant");
+}
+
 async function harvestLastMessage(record: RpcAgentRecord): Promise<string | undefined> {
-  if (!record.client) return record.lastText;
-  try {
-    const text = await record.client.getLastAssistantText();
-    if (text !== null && text !== undefined) {
-      record.lastText = text;
-    }
-  } catch {
-    // best effort — fall back to whatever lastText was last cached.
+  const workGeneration = record.workGeneration;
+  const observed = record.lastTextGeneration === workGeneration ? record.lastText : undefined;
+  if (record.lastTextGeneration !== workGeneration) return undefined;
+  if (record.client) {
+    try {
+      const rpcText = await record.client.getLastAssistantText();
+      if (rpcText === observed) return rpcText ?? undefined;
+    } catch { /* the generation-scoped event text remains authoritative */ }
   }
-  return record.lastText;
+  return observed;
 }
 
 /**
@@ -3452,7 +3152,13 @@ export function listAgents(
     const model = record.modelBase ? (record.modelEffort ? `${record.modelBase}/${record.modelEffort}` : record.modelBase) : undefined;
     return {
       agent_id: agentId,
-      status: (record.waitingOnChildren && record.client ? "waiting-on-children" : record.client ? (record.streaming ? "running" : "idle") : "dormant") as AgentStatus,
+      status: record.running || record.streaming
+        ? "running"
+        : record.waitingOnChildren
+          ? "waiting-on-children"
+          : hasPendingTerminalDelivery(record)
+            ? "pending-delivery"
+            : record.client ? "idle" : "dormant",
       ...(record.alias ? { alias: record.alias } : {}),
       ...(record.title ? { title: record.title } : {}),
       ...(model ? { model } : {}),
@@ -3495,9 +3201,9 @@ export async function stopAgent(
   }
   const client = record.client;
   if (!opts?.silent) {
-    record.expectedReport = false;
     record.waitingOnChildren = false;
-    record.workGeneration = (record.workGeneration ?? 0) + 1;
+    record.pendingQueuedWork = undefined;
+    advanceWorkGeneration(record);
     publishSubtree(registry);
   }
   if (record.ownership) touchOwnership(record.ownership.home);
@@ -3548,20 +3254,15 @@ export async function stopAgent(
       updateOwnership(record.ownership.home, { liveness: {
         lifecycle: stopped ? "stopped" : "unknown", running: false, observedAt: Date.now(),
         threadBound: false, ownerHeld: isOwnerHeld(record), pendingQuestion: false,
-        waitingOnChildren: record.waitingOnChildren, expectedReport: record.expectedReport,
+        waitingOnChildren: record.waitingOnChildren, pendingDelivery: hasPendingTerminalDelivery(record),
         pendingApprovalCommandId: record.pendingApproval?.cmdId,
       } });
     }
     try { opts?.onStopped?.(stopped); } catch { /* internal observer only */ }
-    if (opts?.silent) {
-      // An adapter-internal stop (a thread close, session shutdown) is not a
-      // lead-facing event at all, so an un-pushed final dies with it rather
-      // than arriving out of nowhere.
-      record.pendingFinal = undefined;
-    } else if (!flushPendingFinal(pi, registry, record, "stopped") && !(record.delegation && readDelegationPolicy())) {
+    if (!opts?.silent && !(record.delegation && readDelegationPolicy())) {
       // A delegated owner invoked this stop in its current turn, so the tool
-      // result is the disposition. A self-generated follow-up would create a
-      // held delivery that blocks the owner's fresh subtree final.
+      // result is the disposition. A self-generated follow-up would block
+      // the owner's fresh subtree settlement.
       pushToLead(pi, registry, record, "ws-agent-settled", { reason: "stopped" }, "followUp");
     }
     // The final disk reconciliation above is the accounting boundary: refresh
@@ -3816,7 +3517,7 @@ export function registerAgentTools(
     name: "ws-agent-list",
     label: "ws-agent-list",
     description:
-      "List every tracked agent_id, its alias/title (when set), status (running/idle/dormant — most agents park to dormant shortly after settling, so idle is transient), model, last_report_at, and owner_held:true while the owner's last send retains settle ownership. Use it to check on a quiet agent — there is no wait tool; every unchanged report/question/approval/orphan signal is pushed on its own.",
+      "List every tracked agent_id, its alias/title (when set), status (running, idle, dormant, waiting-on-children, or pending-delivery), model, last_report_at, and owner_held:true while the owner's last send retains settle ownership. Only running means autonomous execution; settled output is pushed without a wait tool.",
     parameters: {
       type: "object",
       properties: {
@@ -3880,17 +3581,15 @@ export function registerAgentTools(
         message: { type: "string", description: "Status update or intermediate finding to surface to the lead immediately." },
         kind: {
           type: "string",
-          enum: ["question", "final"],
+          enum: ["question"],
           description:
-            "Optional disambiguation for a task-thread fork's turn-end (ws-fork): \"question\" ends your turn awaiting the lead's input; \"final\" marks the task fully complete, using the required Outcome/Files changed/Verification/Blockers/Commit/Decisions report shape. Omit for a normal full-worker/execute-worker progress update.",
+            "Optional disambiguation for a question that needs the lead's input. Omit for a normal progress update; final output is the ordinary assistant answer delivered when the agent settles.",
         },
       },
       required: ["message"],
     } as never,
-    async execute(_id, params) {
-      const kind = (params as { kind?: string }).kind;
-      const subtreeRevision = kind === "final" ? assertSubtreeFinal(rpcRegistry) : undefined;
-      return { content: [{ type: "text", text: "reported" }], details: { subtreeRevision } };
+    async execute() {
+      return { content: [{ type: "text", text: "reported" }] };
     },
   }, toolPreviewTuiRef);
 

@@ -77,11 +77,9 @@ export interface PersistedOrphan {
   explicitTools?: string;
   delegation?: DelegationPolicy;
   subtreeChannel?: SubtreeChannel;
-  expectedReport?: boolean;
   waitingOnChildren?: boolean;
   lastWriter?: "lead" | "owner";
   ownerSends?: Array<{ text: string; at: number }>;
-  requiresFreshFinal?: boolean;
   spawnRole?: SpawnAgentRole;
   /** Persistent explore identity; only valid with the coherent explore tuple. */
   exploreMode?: ExploreMode;
@@ -162,14 +160,12 @@ export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
       explicitTools: record.explicitTools,
       ...(record.delegation ? { delegation: record.delegation } : {}),
       ...(record.subtreeChannel ? { subtreeChannel: record.subtreeChannel } : {}),
-      ...(record.expectedReport !== undefined ? { expectedReport: record.expectedReport } : {}),
       ...(record.waitingOnChildren !== undefined ? { waitingOnChildren: record.waitingOnChildren } : {}),
       ...(record.lastWriter ? { lastWriter: record.lastWriter } : {}),
       ...(record.ownerSends?.length ? { ownerSends: record.ownerSends.map((send) => ({ ...send })) } : {}),
-      ...(record.requiresFreshFinal !== undefined ? { requiresFreshFinal: record.requiresFreshFinal } : {}),
       spawnRole: record.spawnRole,
       ...(record.exploreMode ? { exploreMode: record.exploreMode } : {}),
-      state: record.running || record.expectedReport || record.waitingOnChildren ? "running" : "idle",
+      state: record.running || record.streaming ? "running" : "idle",
       // `undefined` (never reported) rather than an omitted key, matching every
       // other optional field above — `JSON.stringify` drops it on the way out
       // and `parseOrphans` reads it back the same way.
@@ -227,7 +223,7 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
     if (o.systemPromptPath !== undefined && typeof o.systemPromptPath !== "string") continue;
     let delegation: DelegationPolicy | undefined;
     try { if (o.delegation !== undefined) delegation = parseDelegationPolicy(o.delegation); } catch { continue; }
-    if ([o.expectedReport, o.waitingOnChildren, o.requiresFreshFinal].some(v => v !== undefined && typeof v !== "boolean")) continue;
+    if (o.waitingOnChildren !== undefined && typeof o.waitingOnChildren !== "boolean") continue;
     if (o.lastWriter !== undefined && o.lastWriter !== "lead" && o.lastWriter !== "owner") continue;
     const ownerSends = Array.isArray(o.ownerSends)
       ? o.ownerSends.flatMap((send) => send && typeof send === "object" && typeof send.text === "string" && typeof send.at === "number" && Number.isFinite(send.at)
@@ -280,11 +276,9 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
       explicitTools: typeof o.explicitTools === "string" ? o.explicitTools : undefined,
       ...(delegation ? { delegation } : {}),
       ...(o.subtreeChannel ? { subtreeChannel: o.subtreeChannel } : {}),
-      ...(o.expectedReport !== undefined ? { expectedReport: o.expectedReport } : {}),
       ...(o.waitingOnChildren !== undefined ? { waitingOnChildren: o.waitingOnChildren } : {}),
       ...(o.lastWriter ? { lastWriter: o.lastWriter } : {}),
       ...(ownerSends?.length ? { ownerSends } : {}),
-      ...(o.requiresFreshFinal !== undefined ? { requiresFreshFinal: o.requiresFreshFinal } : {}),
       spawnRole: o.spawnRole,
       ...(exploreMode ? { exploreMode } : {}),
       // An older sidecar (or a corrupt value) has no state to trust; "idle" is
@@ -341,11 +335,9 @@ export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
     explicitTools: orphan.explicitTools,
     delegation: orphan.delegation,
     subtreeChannel: orphan.subtreeChannel,
-    expectedReport: orphan.expectedReport,
     waitingOnChildren: orphan.waitingOnChildren,
     lastWriter: orphan.lastWriter,
     ownerSends: orphan.ownerSends?.map((send) => ({ ...send })),
-    requiresFreshFinal: orphan.requiresFreshFinal,
     spawnRole: orphan.spawnRole,
     exploreMode: orphan.exploreMode,
     streaming: false,
@@ -366,7 +358,7 @@ export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
  * module stays free of both imports and directly testable.
  */
 export interface OrphanRoleWiring {
-  /** A `ws-fork`/discussion fork: question routing (§1) plus the §4 anti-bleed loop. */
+  /** A `ws-fork`/discussion fork: re-arm owner-question routing. */
   fork?: (record: RpcAgentRecord) => void;
   /** A `ws-execute` worker: the approval relay's `onApprovalPending`. */
   executeWorker?: (record: RpcAgentRecord) => void;
@@ -380,8 +372,8 @@ export interface OrphanRoleWiring {
  *
  * Review relay #1 (I1): the re-arm is the load-bearing half and was missing —
  * `spawnRole` was persisted and parsed but read only for the roll-call text,
- * so a revived FORK came back as a plain record with no `onQuestionReport` and
- * no anti-bleed loop. Its next `kind:"question"` would then be pushed straight
+ * so a revived FORK came back as a plain record with no `onQuestionReport`.
+ * Its next `kind:"question"` would then be pushed straight
  * at the lead as `ws-agent-question` instead of routing to the owner surface,
  * a direct §1 violation.
  *
@@ -409,7 +401,7 @@ export function reviveOrphans(registry: RpcAgentRegistry, orphans: PersistedOrph
         ...(record.threadBound === true ? { threadBound: true } : {}),
         ...(isOwnerHeld(record) ? { ownerHeld: true } : {}),
         ...(record.waitingOnChildren === true ? { waitingOnChildren: true } : {}),
-        ...(record.expectedReport === true ? { expectedReport: true } : {}),
+        ...(record.terminalDelivery && record.terminalDelivery.state !== "enqueued" ? { pendingDelivery: true } : {}),
         ...(record.pendingApproval?.cmdId ? { pendingApprovalCommandId: record.pendingApproval.cmdId } : {}),
       } });
     }

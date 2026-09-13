@@ -74,8 +74,8 @@
  *
  * The 260904 "side-thread fork question surface" ticket's Phase 1 adds
  * `ws-fork` (src/fork.ts, `registerFork`): a `pi --fork <own session>`
- * lateral peer sharing the caller's full context, plus the anti-bleed
- * mechanical loop. `session_start` calls `registerFork` right after
+ * lateral peer sharing the caller's full context and ordinary settlement
+ * lifecycle. `session_start` calls `registerFork` right after
  * `registerExecuteGateway` (same shared `agentTools.rpcRegistry`), then,
  * inside the same lead/fork-only `isLeadOrFork` block as
  * `computeLeadActiveTools` above, applies `addForkToolIfLead` as a
@@ -198,7 +198,7 @@ import { buildDiscussKickoff } from "./discuss.ts";
 import { registerGoalLoop, readGoalLoopConfig, resolveAgentWaitAnimation, resolveChildRetentionTtlDays, resolveSettleDelayMs } from "./goal-loop.ts";
 import { registerSkillResources } from "./skills-dir.ts";
 import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
-import { applyForkAffinity, captureRegisteredTools, classifyForkRegistrations, compareForkRegistrations, effectiveForkDescriptor, formatForkRegistrationMismatch, frameForkInput, isCompletionCriticalForkTool, readForkLaunchContext, removeForkTransport, restoreForkContext, restoreForkKeys, writePrivateJson, type ForkContext } from "./fork-context.ts";
+import { applyForkAffinity, captureRegisteredTools, classifyForkRegistrations, compareForkRegistrations, effectiveForkDescriptor, formatForkRegistrationMismatch, frameForkInput, readForkLaunchContext, removeForkTransport, restoreForkContext, restoreForkKeys, writePrivateJson, type ForkContext } from "./fork-context.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, type SpawnRole } from "./process-role.ts";
 import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
 import { armForkRoleWiring, registerFork } from "./fork.ts";
@@ -364,8 +364,6 @@ function installMissingTaskForkTools(
   const comparison = classifyForkRegistrations(context.registeredTools, captureRegisteredTools(pi.getActiveTools(), pi.getAllTools()));
   const structuralError = formatForkRegistrationMismatch({ ...comparison, missing: [] });
   if (structuralError) return { unavailableTools: [], error: structuralError };
-  const critical = comparison.missing.find((tool) => isCompletionCriticalForkTool(tool.name));
-  if (critical) return { unavailableTools: [], error: `missing completion-critical callable tool: ${critical.name}` };
   for (const tool of comparison.missing) {
     pi.registerTool({
       name: tool.name,
@@ -702,8 +700,8 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
         if (orphans.length > 0) {
           // Role-keyed wiring re-arm (review relay #1, I1): `spawnRole` is
           // persisted precisely so a revived FORK comes back with its question
-          // routing (§1 keeps a fork-raised question on the owner surface) and
-          // its anti-bleed loop, rather than silently degrading to plain-worker
+          // routing (§1 keeps a fork-raised question on the owner surface),
+          // rather than silently degrading to plain-worker
           // behavior on the next ws-agent-send. A revived execute-worker gets
           // the approval relay pinned to the record itself, so it no longer
           // depends on which call site happens to resume it.

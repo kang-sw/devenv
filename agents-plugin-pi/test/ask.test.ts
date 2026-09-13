@@ -76,7 +76,6 @@ import {
   registerThreadCommands,
   injectDiscussionSummary,
   closeThreadOnDone,
-  handleRespondentFinalReport,
   normalizeThreadOrigin,
   checkContextLength,
   buildForkQuestionLeadNotice,
@@ -507,13 +506,12 @@ describe("Entry B texts (deliberately NOT wrapped in Entry A's structural frame)
     }
   });
 
-  test("the directive names both exits: the owner's /done, and the fork's own kind:\"final\" report once a decision is stated", () => {
+  test("the directive names /done and ordinary settled output as the two close paths", () => {
     const directive = buildDiscussionForkDirectiveText();
     assert.ok(directive.includes("/done"));
-    assert.ok(directive.includes("ws-report-to-lead"));
-    assert.ok(directive.includes('kind:"final"'));
-    assert.match(directive, /decision/i);
-    assert.match(directive, /delivered to the lead/);
+    assert.ok(!directive.includes("ws-report-to-lead"));
+    assert.ok(!directive.includes('kind:"final"'));
+    assert.match(directive, /ordinary settled answer/i);
     for (const marker of framedMarkers) {
       assert.ok(!directive.includes(marker));
     }
@@ -616,8 +614,7 @@ describe("captureForkResume / rehydrateForkRecord (the persistence-gap resolutio
     streaming: true,
     running: true,
     threadBound: true,
-    terminalThisTurn: true,
-    reportLog: [{ kind: "final", at: 1 }],
+        reportLog: [{ at: 1 }],
   } as unknown as RpcAgentRecord;
 
   test("capture keeps only JSON-serializable resume fields (never the live client or runtime state)", () => {
@@ -786,31 +783,6 @@ describe("handleForkRaisedQuestion (Entry A meets Entry B)", () => {
       undefined,
       "a question-parked fork is outside the fan-in count entirely, and an empty fan-in produces no line at all",
     );
-  });
-
-  test("I2 (headless): the fork's OWN final releases the bind even though no owner ever opened the thread", () => {
-    const { handle, registry } = setup();
-    // Headless (§8): `index.ts` still registers the thread, returns undefined
-    // (so the question is relayed to the lead), and there is no owner surface
-    // that could ever run /answer or /done on it.
-    const pi = { sendMessage: () => assert.fail("§1: a fork-raised close never injects a summary") } as unknown as ExtensionAPI;
-    const live = liveFork();
-    registry.set("agent-7", live);
-    const thread = handleForkRaisedQuestion(handle, registry, "agent-7", "Should I rebase?", pi);
-    assert.equal(live.threadBound, true);
-    assert.equal(thread.status, "pending", "the owner never opened it");
-
-    // The fork works it out and files its own completion.
-    const outcome = applyRpcEvent(live, {
-      type: "tool_execution_start",
-      toolName: REPORT_TO_LEAD_TOOL_NAME,
-      args: { kind: "final", message: "Outcome: rebased." },
-    });
-
-    assert.equal(live.threadBound, false, "without this the fork is outside the fan-in count, and settle-suppressed, forever");
-    assert.equal(handle.threads.get(thread.threadId)!.status, "dormant", "the owner has nothing left to answer");
-    assert.deepEqual(outcome, {}, "Edition: a final is stashed, not pushed at tool-invocation time");
-    assert.equal(live.pendingFinal, "Outcome: rebased.", "a fork-raised final is still the lead's completion signal — it is released when the fork's turn ends");
   });
 
   test("I2 (headless): the lead answering through ws-agent-send releases the bind at that moment", async () => {
@@ -1307,122 +1279,6 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     assert.equal(record.status, "dormant");
   });
 
-  describe("handleRespondentFinalReport (the fork ends the thread itself)", () => {
-    /** An overlay stub whose `closeWithSummary` does what the real component does: fire `onDone` (= closeThreadOnDone) with the text. */
-    function overlayStub(onDone: (summary: string) => void) {
-      const calls: { close: number; summaries: string[] } = { close: 0, summaries: [] };
-      const handle: OverlayHandle = {
-        close: () => {
-          calls.close += 1;
-        },
-        closeWithSummary: (summary) => {
-          calls.summaries.push(summary);
-          onDone(summary);
-        },
-      };
-      return { handle, calls };
-    }
-
-    test("lead-ask, no overlay attached (owner pressed Esc): injects the report as the summary, stops the fork, goes dormant", async () => {
-      const { pi, sent, handle, path, record } = setup("lead-ask");
-      record.status = "open";
-      record.respondentAgentId = "agent-7";
-      const stops: string[] = [];
-      const live = liveRespondent(stops);
-      const registry: RpcAgentRegistry = new Map([["agent-7", live]]);
-
-      handleRespondentFinalReport(pi, handle, registry, record, "Decided: merge, keep both histories.", undefined);
-
-      assert.equal(sent.length, 1, "no summary turn is requested — the report text is the summary");
-      const msg = sent[0].message as { content: string };
-      assert.ok(msg.content.includes("Decided: merge, keep both histories."));
-      assert.equal(record.status, "dormant");
-      assert.equal(loadThreadRegistryFile(path)[0]?.status, "dormant");
-      await new Promise((resolve) => setImmediate(resolve));
-      assert.deepEqual(stops, ["agent-7"]);
-    });
-
-    test("lead-ask with the overlay attached: the overlay is closed with the report text, and that close runs the same /done path", async () => {
-      const { pi, sent, handle, record } = setup("lead-ask");
-      record.status = "open";
-      record.respondentAgentId = "agent-7";
-      const stops: string[] = [];
-      const registry: RpcAgentRegistry = new Map([["agent-7", liveRespondent(stops)]]);
-      const overlay = overlayStub((summary) => closeThreadOnDone(pi, handle, registry, record, summary));
-
-      handleRespondentFinalReport(pi, handle, registry, record, "We go with the second anchor.", overlay.handle);
-
-      assert.deepEqual(overlay.calls.summaries, ["We go with the second anchor."]);
-      assert.equal(overlay.calls.close, 0, "closed through closeWithSummary, never the bare close");
-      assert.equal(sent.length, 1);
-      assert.equal(record.status, "dormant");
-      await new Promise((resolve) => setImmediate(resolve));
-      assert.deepEqual(stops, ["agent-7"]);
-    });
-
-    test("fork-raised with the overlay attached: closes the overlay and detaches only — no injection, no stop", async () => {
-      const { pi, sent, handle, record } = setup("fork-raised");
-      record.status = "open";
-      record.respondentAgentId = "agent-7";
-      const stops: string[] = [];
-      const live = liveRespondent(stops);
-      const registry: RpcAgentRegistry = new Map([["agent-7", live]]);
-      const overlay = overlayStub((summary) => closeThreadOnDone(pi, handle, registry, record, summary));
-
-      handleRespondentFinalReport(pi, handle, registry, record, "Task done. Decisions: rebase.", overlay.handle);
-
-      assert.equal(overlay.calls.close, 1, "the already-terminal fork closes the view without routing through /done finish");
-      assert.deepEqual(overlay.calls.summaries, [], "a task fork's final is not a thread summary or a second closeout");
-      assert.deepEqual(sent, [], "the lead reads the fork's own final report; nothing is injected");
-      assert.equal(record.status, "dormant");
-      await new Promise((resolve) => setImmediate(resolve));
-      assert.deepEqual(stops, []);
-    });
-
-    test("260905: fork-raised with no overlay attached still detaches the thread and releases the bind", () => {
-      const { pi, sent, handle, record } = setup("fork-raised");
-      record.status = "open";
-      record.respondentAgentId = "agent-7";
-      const live = liveRespondent([]);
-      const consumed = handleRespondentFinalReport(pi, handle, new Map([["agent-7", live]]), record, "Task done.", undefined);
-      assert.equal(consumed, false, "a fork-raised final IS the completion signal — it must still be pushed to the lead");
-      assert.deepEqual(sent, [], "nothing is injected; the lead reads the pushed report itself");
-      assert.equal(record.status, "dormant", "the thread that the question opened is over");
-      assert.equal(live.threadBound, false, "the fork rejoins the lead's fan-in on the very report that ends the thread");
-    });
-
-    test("260905 suppression contract: a lead-ask final returns true (consumed), a fork-raised final returns false", () => {
-      const leadAsk = setup("lead-ask");
-      leadAsk.record.status = "open";
-      assert.equal(
-        handleRespondentFinalReport(leadAsk.pi, leadAsk.handle, new Map(), leadAsk.record, "Decided.", undefined),
-        true,
-        "the decision already reaches the lead as the ws-thread-summary message; pushing the raw report too would duplicate it",
-      );
-
-      const forkRaised = setup("fork-raised");
-      forkRaised.record.status = "open";
-      assert.equal(handleRespondentFinalReport(forkRaised.pi, forkRaised.handle, new Map(), forkRaised.record, "Task done.", undefined), false);
-    });
-
-    test("260905: a final on a non-open thread returns false — nothing was consumed", () => {
-      const { pi, handle, record } = setup("lead-ask");
-      record.status = "dormant";
-      assert.equal(handleRespondentFinalReport(pi, handle, new Map(), record, "late", undefined), false);
-    });
-
-    test("a final report on a thread that is not open (pending, dormant, closed) is ignored — no duplicate injection", () => {
-      for (const status of ["pending", "dormant", "closed"] as const) {
-        const { pi, sent, handle, record } = setup("lead-ask");
-        record.status = status;
-        const overlay = overlayStub(() => {});
-        handleRespondentFinalReport(pi, handle, new Map(), record, "late", overlay.handle);
-        assert.deepEqual(sent, [], status);
-        assert.deepEqual(overlay.calls.summaries, [], status);
-        assert.equal(record.status, status);
-      }
-    });
-  });
 });
 
 describe("deliverQueuedAnswer (260911 D1: the fork-less lead-ask send path — no respondent to stop or summarize)", () => {
@@ -2285,9 +2141,9 @@ describe("checkContextLength / buildForkQuestionLeadNotice", () => {
     assert.match(notice, /end your turn/i);
     assert.ok(!/ws-agent-wait/i.test(notice), "ws-agent-wait is deleted — the notice must not send the lead to a tool that no longer exists");
     assert.match(notice, /do not relay/i);
-    // C2: the decision comes back on the fork's own final report, not as a
-    // thread-summary message — /done never injects one for this origin.
-    assert.match(notice, /Decisions:/);
+    // The outcome comes back through the fork's later ordinary settlement,
+    // not as a thread-summary message from /done.
+    assert.match(notice, /ordinary settled answer/i);
     assert.ok(!/thread-summary/i.test(notice), notice);
   });
 });
@@ -2316,7 +2172,7 @@ describe("ensureRespondent (threadBound on open and on reopen)", () => {
     return thread({ threadId: "q1", status: "open", origin: "fork-raised", respondentAgentId: "agent-7", question: "Which anchor?" });
   }
 
-  test("first open of an already-live respondent binds the thread and arms the final-report hook", async () => {
+  test("first open of an already-live respondent binds the thread", async () => {
     const handle = createThreadRegistryHandle();
     const record = openThreadRecord();
     handle.threads.set(record.threadId, record);
@@ -2338,7 +2194,6 @@ describe("ensureRespondent (threadBound on open and on reopen)", () => {
 
     assert.equal(agentId, "agent-7");
     assert.equal(live.threadBound, true);
-    assert.equal(typeof live.onFinalReport, "function", "the respondent can end its own thread");
   });
 
   test("REOPEN after a lead restart rehydrates the record from forkResume and binds it again", async () => {
@@ -2361,7 +2216,6 @@ describe("ensureRespondent (threadBound on open and on reopen)", () => {
     const revived = registry.get("agent-7")!;
     assert.equal(revived.threadBound, true, "a reopen binds just like a first open");
     assert.equal(revived.client, undefined, "still dormant — the relaunch happens on the owner's first message");
-    assert.equal(typeof revived.onFinalReport, "function");
   });
 
   test("a second open of the same live respondent re-binds rather than leaving a stale unbound record", async () => {
@@ -2409,8 +2263,7 @@ describe("ensureRespondent (threadBound on open and on reopen)", () => {
  * component's internal channel-event/liveness handling into `ask.ts`'s
  * `summarizeThenClose`, so these now drive that function directly against a
  * fake `ConversationViewComponent` (only `appendItem` is read), a fake
- * `ConversationChannel`, and a fake `OverlayHandle` — the same fake-`pi`-free
- * style `handleRespondentFinalReport`'s `overlayStub` already uses above.
+ * `ConversationChannel`, and a fake `OverlayHandle`.
  */
 describe("summarizeThenClose (/done's single fixed round-trip)", () => {
   function fakeComponent() {
@@ -2901,8 +2754,7 @@ describe("summarizeThenClose + buildOverlayHandle + ConversationViewComponent wi
     pendingUnsubscribe = summarizeThenClose(component, ch.channel, overlay);
     assert.equal(ch.sent.length, 1);
 
-    // handleRespondentFinalReport's path: the fork's kind:"final" report
-    // arrives out-of-band (never a channel event) and wins the race.
+    // An external close-with-summary arrives out-of-band and wins the race.
     overlay.closeWithSummary("We go with the second anchor.");
     assert.equal(sent.length, 1);
     assert.equal(record.status, "dormant");

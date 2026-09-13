@@ -50,24 +50,14 @@ import {
   FORK_EXCLUDED_TOOL_NAMES,
   computeForkToolSurface,
   addForkToolIfLead,
-  MAX_FORK_NUDGES,
-  shouldNudge,
-  classifyForkTurnOutcome,
-  isIdleWithoutFinal,
-  REQUIRED_FINAL_REPORT_FIELDS,
-  extractReportField,
-  validateFinalReportShape,
-  checkExpectsCommitCompletion,
-  tailLines,
   getForkSourceSessionFile,
   buildForkDirectiveText,
   buildForkInitialMessage,
-  wireAntiBleedLoop,
   armForkRoleWiring,
   buildForkSpawnCtx,
 } from "../src/fork.ts";
 import { registerFork as registerForkBase } from "../src/fork.ts";
-import { leadIdleRef, registerPushFlush, applyRpcEvent, attachEventListener, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { leadIdleRef, registerPushFlush, flushHeldPushes, applyRpcEvent, attachEventListener, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV } from "../src/process-role.ts";
 import type { BridgeHandle } from "../src/bridge.ts";
@@ -150,152 +140,6 @@ describe("addForkToolIfLead (risk-signal fix: role-differentiated, never folded 
   });
 });
 
-describe("shouldNudge", () => {
-  test("allows nudging while nudgeCount is below MAX_FORK_NUDGES", () => {
-    for (let i = 0; i < MAX_FORK_NUDGES; i++) {
-      assert.equal(shouldNudge(i), true, `expected shouldNudge(${i}) to be true`);
-    }
-  });
-
-  test("refuses once nudgeCount has reached MAX_FORK_NUDGES (the fail-loud transition)", () => {
-    assert.equal(shouldNudge(MAX_FORK_NUDGES), false);
-    assert.equal(shouldNudge(MAX_FORK_NUDGES + 1), false);
-  });
-});
-
-describe("classifyForkTurnOutcome (§4 disambiguation table)", () => {
-  test('reportKind "question" always classifies as "question", tool call or not', () => {
-    assert.equal(classifyForkTurnOutcome({ hadToolCall: true, reportKind: "question" }), "question");
-    assert.equal(classifyForkTurnOutcome({ hadToolCall: false, reportKind: "question" }), "question");
-  });
-
-  test('reportKind "final" always classifies as "final", tool call or not', () => {
-    assert.equal(classifyForkTurnOutcome({ hadToolCall: true, reportKind: "final" }), "final");
-    assert.equal(classifyForkTurnOutcome({ hadToolCall: false, reportKind: "final" }), "final");
-  });
-
-  test('no report but a tool call happened -> "acknowledge-and-return" (not itself a bleed signal)', () => {
-    assert.equal(classifyForkTurnOutcome({ hadToolCall: true }), "acknowledge-and-return");
-  });
-
-  test('neither a report nor a tool call -> "no-signal" (the actual bleed condition)', () => {
-    assert.equal(classifyForkTurnOutcome({ hadToolCall: false }), "no-signal");
-  });
-});
-
-describe("isIdleWithoutFinal", () => {
-  test("true when no kind in the list is \"final\"", () => {
-    assert.equal(isIdleWithoutFinal([undefined, "question", undefined]), true);
-  });
-
-  test("false as soon as any kind is \"final\"", () => {
-    assert.equal(isIdleWithoutFinal(["question", "final"]), false);
-  });
-
-  test("an empty list is vacuously true (no final report was ever seen)", () => {
-    assert.equal(isIdleWithoutFinal([]), true);
-  });
-});
-
-describe("extractReportField", () => {
-  const message = ["Outcome: did the thing", "Files changed: a.ts, b.ts", "Commit: none", "  Blockers:   none  "].join("\n");
-
-  test("extracts the trimmed value after a matching '<field>:' line", () => {
-    assert.equal(extractReportField(message, "Outcome"), "did the thing");
-    assert.equal(extractReportField(message, "Files changed"), "a.ts, b.ts");
-  });
-
-  test("tolerates leading whitespace on the line itself", () => {
-    assert.equal(extractReportField(message, "Blockers"), "none");
-  });
-
-  test("returns undefined when the field's line is absent", () => {
-    assert.equal(extractReportField(message, "Verification"), undefined);
-  });
-
-  test("does not match a field name that is a substring of another field's line", () => {
-    // "Commit" must not accidentally match inside some other longer field.
-    assert.equal(extractReportField("Recommit: no", "Commit"), undefined);
-  });
-});
-
-describe("validateFinalReportShape (§4 required field-prefix check)", () => {
-  const wellFormed = [
-    "Outcome: did the thing",
-    "Files changed: a.ts",
-    "Verification: ran npm test, all green",
-    "Blockers: none",
-    "Commit: abc123",
-    "Decisions: chose X over Y",
-  ].join("\n");
-
-  test("a message carrying every required field passes", () => {
-    assert.deepEqual(validateFinalReportShape(wellFormed), { ok: true });
-  });
-
-  test("a message missing one or more required fields lists exactly the missing ones", () => {
-    const partial = ["Outcome: did the thing", "Commit: none"].join("\n");
-    const result = validateFinalReportShape(partial);
-    assert.equal(result.ok, false);
-    if (!result.ok) {
-      assert.deepEqual(result.missing.sort(), ["Blockers", "Decisions", "Files changed", "Verification"].sort());
-    }
-  });
-
-  test("an empty message is missing every required field", () => {
-    const result = validateFinalReportShape("");
-    assert.equal(result.ok, false);
-    if (!result.ok) {
-      assert.deepEqual(result.missing.sort(), [...REQUIRED_FINAL_REPORT_FIELDS].sort());
-    }
-  });
-
-  test("Commit: none is valid SHAPE-wise (the expects_commit non-completion rule is a separate check)", () => {
-    assert.deepEqual(validateFinalReportShape(wellFormed.replace("Commit: abc123", "Commit: none")), { ok: true });
-  });
-});
-
-describe("checkExpectsCommitCompletion (§4 expects_commit non-completion rule)", () => {
-  test("expects_commit:false never flags anything, regardless of commitLine", () => {
-    assert.deepEqual(checkExpectsCommitCompletion(false, undefined), { ok: true });
-    assert.deepEqual(checkExpectsCommitCompletion(false, "none"), { ok: true });
-    assert.deepEqual(checkExpectsCommitCompletion(false, "abc123"), { ok: true });
-  });
-
-  test("expects_commit:true with a missing Commit line is flagged non-completion", () => {
-    const result = checkExpectsCommitCompletion(true, undefined);
-    assert.equal(result.ok, false);
-  });
-
-  test('expects_commit:true with the literal "none" (case/whitespace tolerant) is flagged non-completion', () => {
-    for (const commitLine of ["none", "None", "NONE", "  none  "]) {
-      const result = checkExpectsCommitCompletion(true, commitLine);
-      assert.equal(result.ok, false, `expected commitLine=${JSON.stringify(commitLine)} to be flagged`);
-    }
-  });
-
-  test("expects_commit:true with a real commit value is accepted", () => {
-    assert.deepEqual(checkExpectsCommitCompletion(true, "abc123"), { ok: true });
-  });
-});
-
-describe("tailLines", () => {
-  const text = ["l1", "l2", "l3", "l4", "l5"].join("\n");
-
-  test("returns the last n lines", () => {
-    assert.equal(tailLines(text, 2), "l4\nl5");
-  });
-
-  test("n beyond the total line count returns the whole text unchanged", () => {
-    assert.equal(tailLines(text, 100), text);
-  });
-
-  test("n <= 0 returns an empty string", () => {
-    assert.equal(tailLines(text, 0), "");
-    assert.equal(tailLines(text, -3), "");
-  });
-});
-
 describe("getForkSourceSessionFile", () => {
   test("extracts the session file path from a well-formed toolCtx.sessionManager.getSessionFile()", () => {
     const toolCtx = { sessionManager: { getSessionFile: () => "/tmp/lead-session.jsonl" } };
@@ -315,14 +159,20 @@ describe("getForkSourceSessionFile", () => {
 });
 
 describe("buildForkDirectiveText", () => {
-  test("names the report tool and both kind values, with no identity framing or ALL-CAPS override language", () => {
+  test("keeps questions intermediate and the structured ordinary answer terminal without adapter parsing", () => {
     const text = buildForkDirectiveText();
     assert.ok(text.includes(REPORT_TO_LEAD_TOOL_NAME));
     assert.ok(text.includes('kind:"question"'));
-    assert.ok(text.includes('kind:"final"'));
-    for (const field of REQUIRED_FINAL_REPORT_FIELDS) {
-      assert.ok(text.includes(`${field}:`), `expected the directive to name required field "${field}"`);
+    assert.ok(!text.includes('kind:"final"'));
+    for (const field of ["Outcome", "Files changed", "Verification", "Blockers", "Commit", "Decisions"]) {
+      assert.ok(text.includes(`${field}:`), `expected the directive to name requested field "${field}"`);
     }
+    assert.match(text, /adapter does not parse or approve/i);
+  });
+
+  test("expects_commit stays visible in the prompt without changing settlement semantics", () => {
+    assert.match(buildForkDirectiveText(true), /Commit: <required commit hash or range>/);
+    assert.match(buildForkDirectiveText(false), /literal "none"/);
   });
 
   test("carries no identity-framing persona opener", () => {
@@ -365,320 +215,6 @@ describe("buildForkInitialMessage (260905 structural anti-bleed frame)", () => {
  * registers; the hook is exercised through the real `applyRpcEvent` (its
  * actual call site) rather than through the loop.
  */
-describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2, 260905 push model)", () => {
-  function harness() {
-    // Review relay #1 (I4): the OPTIONS object is captured too. Capturing only
-    // the message left every "(followUp)" assertion in this file unverified —
-    // a regression back to `deliverAs: "steer"` would have stayed green.
-    const pushes: Array<{ customType?: string; details?: Record<string, unknown>; deliverAs?: string; triggerTurn?: boolean }> = [];
-    const prompts: string[] = [];
-    let listener: ((evt: unknown) => void) | undefined;
-    const record = {
-      agentId: "a1",
-      sessionPath: "/nonexistent/session.jsonl",
-      systemPromptPath: "/nonexistent/prompt.md",
-      wsToolNames: [],
-      toolGroup: "full-worker",
-      spawnRole: "fork",
-      streaming: false,
-      running: false,
-      reportLog: [],
-      client: {
-        onEvent(l: (evt: unknown) => void) {
-          listener = l;
-          return () => {};
-        },
-        prompt(message: string) {
-          prompts.push(message);
-          return Promise.resolve();
-        },
-      },
-    } as unknown as RpcAgentRecord;
-    const pi = {
-      sendMessage(message: { customType?: string; details?: Record<string, unknown> }, options?: { deliverAs?: string; triggerTurn?: boolean }) {
-        const batch = message as { customType?: string; details?: { items?: Array<{ customType?: string; details?: Record<string, unknown> }> } };
-        if (batch.customType === PUSH_BATCH_CUSTOM_TYPE && Array.isArray(batch.details?.items)) {
-          for (const item of batch.details.items) pushes.push({ ...item, deliverAs: options?.deliverAs, triggerTurn: options?.triggerTurn });
-        } else {
-          pushes.push({ ...message, deliverAs: options?.deliverAs, triggerTurn: options?.triggerTurn });
-        }
-      },
-    } as unknown as ExtensionAPI;
-    initializePushLifecycle(pi);
-    // Two extra live siblings so the status line this loop's registry argument
-    // produces is distinguishable from the absent line an empty/wrong registry
-    // would render (review relay #1, I4).
-    const registry: RpcAgentRegistry = new Map([
-      ["a1", record],
-      ["sibling-1", { ...record, agentId: "sibling-1", running: true, reportLog: [] } as RpcAgentRecord],
-      ["sibling-2", { ...record, agentId: "sibling-2", running: true, reportLog: [] } as RpcAgentRecord],
-    ]);
-    return { pi, registry, record, pushes, prompts, emit: (evt: unknown) => listener?.(evt) };
-  }
-
-  /** The advisory names pushed for each `ws-agent-advisory` message, in order. */
-  function advisories(pushes: Array<{ customType?: string; details?: Record<string, unknown> }>): string[] {
-    return pushes.filter((p) => p.customType === "ws-agent-advisory").map((p) => String(p.details?.advisory));
-  }
-
-  const questionTurn = [
-    { type: "agent_start" },
-    { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "question", message: "Which of the two anchors should I use?" } },
-    { type: "agent_settled" },
-  ];
-
-  const questionReportEvent = {
-    type: "tool_execution_start",
-    toolName: REPORT_TO_LEAD_TOOL_NAME,
-    args: { kind: "question", message: "Which of the two anchors should I use?" },
-  };
-
-  test("a question turn is a valid stop — no nudge, no advisory", () => {
-    const h = harness();
-    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
-    for (const evt of questionTurn) h.emit(evt);
-    assert.deepEqual(advisories(h.pushes), [], "a question turn is a valid stop");
-    assert.deepEqual(h.prompts, [], "a question turn is never nudged");
-  });
-
-  test("C1 (widened 260905): a bound owner discussion thread suppresses the no-signal nudge", () => {
-    const h = harness();
-    h.record.threadBound = true;
-    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
-    for (let turn = 0; turn < 5; turn += 1) {
-      h.emit({ type: "agent_start" });
-      h.emit({ type: "agent_settled" });
-    }
-    assert.deepEqual(h.prompts, [], "a thread-bound fork must never be re-prompted mid-discussion");
-    assert.deepEqual(advisories(h.pushes), [], "and must never be reported to the lead as stalled");
-  });
-
-  test("last-writer owner suppresses anti-bleed even without a thread bind", () => {
-    const h = harness();
-    h.record.lastWriter = "owner";
-    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
-    for (let turn = 0; turn < 3; turn += 1) {
-      h.emit({ type: "agent_start" });
-      h.emit({ type: "agent_settled" });
-    }
-    assert.deepEqual(h.prompts, []);
-    assert.deepEqual(advisories(h.pushes), []);
-  });
-
-  test("C1: the same record still nudges once the thread closes", () => {
-    const h = harness();
-    h.record.threadBound = true;
-    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
-    h.emit({ type: "agent_start" });
-    h.emit({ type: "agent_settled" });
-    assert.deepEqual(h.prompts, []);
-    h.record.threadBound = false;
-    h.emit({ type: "agent_start" });
-    h.emit({ type: "agent_settled" });
-    assert.equal(h.prompts.length, 1, "suppression is scoped to the bound window, not permanent");
-  });
-
-  test("260905: the nudge goes through promptAgent — running latches without moving the lead-prompt watermark", () => {
-    const h = harness();
-    h.record.lastLeadPromptAt = 1_000;
-    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
-    h.emit({ type: "agent_start" });
-    h.emit({ type: "agent_settled" });
-    assert.equal(h.prompts.length, 1);
-    assert.equal(h.record.running, true, "the nudged fork is outstanding again");
-    assert.equal(h.record.lastLeadPromptAt, 1_000, "an internal re-prompt is not a new task boundary");
-  });
-
-  test('260905: a kind:"final" already filed for THIS task stops the idle-without-final flag (reportLog, not the deleted pendingReports)', () => {
-    const h = harness();
-    h.record.lastLeadPromptAt = 1_000;
-    h.record.reportLog.push({ kind: "final", at: 2_000 });
-    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
-    h.emit({ type: "agent_start" });
-    h.emit({ type: "agent_settled" });
-    assert.deepEqual(h.prompts, [], "the fork already completed — a text-only turn after that is not a bleed");
-    assert.deepEqual(advisories(h.pushes), []);
-  });
-
-  test('260905: a kind:"final" from BEFORE the last lead prompt does NOT count — the stale completion is filtered out', () => {
-    const h = harness();
-    h.record.lastLeadPromptAt = 5_000;
-    h.record.reportLog.push({ kind: "final", at: 1_000 });
-    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
-    h.emit({ type: "agent_start" });
-    h.emit({ type: "agent_settled" });
-    assert.equal(h.prompts.length, 1, "the new task has produced no completion signal yet");
-  });
-
-  test("260905: acknowledge-and-return admits a ws-agent-advisory as followUp, then releases it as steering", () => {
-    const h = harness();
-    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
-    h.emit({ type: "agent_start" });
-    h.emit({ type: "tool_execution_start", toolName: "bash", args: {} });
-    h.emit({ type: "agent_settled" });
-    assert.deepEqual(advisories(h.pushes), ["acknowledge-and-return"]);
-    assert.deepEqual(h.prompts, [], "a turn that did real work is not itself a bleed signal");
-    // The fake confirms the idle wake synchronously, so admission's followUp
-    // is overridden to steering at confirmed start.
-    assert.equal(h.pushes[0].deliverAs, "steer", "the advisory reaches the woken run before its first response");
-    assert.equal(h.pushes[0].triggerTurn, true, "an idle lead must act on it rather than leaving it queued");
-  });
-
-  test("I4: every idle advisory family is released as steering at confirmed start", () => {
-    const h = harness();
-    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, true);
-    // final-report-shape
-    h.emit({ type: "agent_start" });
-    h.emit({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "final", message: "all done" } });
-    // expects-commit
-    h.emit({
-      type: "tool_execution_start",
-      toolName: REPORT_TO_LEAD_TOOL_NAME,
-      args: { kind: "final", message: REQUIRED_FINAL_REPORT_FIELDS.map((f) => (f === "Commit" ? "Commit: none" : `${f}: something`)).join("\n") },
-    });
-    // stalled (nudge budget exhausted)
-    h.record.reportLog.length = 0;
-    for (let turn = 0; turn < MAX_FORK_NUDGES + 1; turn += 1) {
-      h.emit({ type: "agent_start" });
-      h.emit({ type: "agent_settled" });
-    }
-    assert.deepEqual(advisories(h.pushes), ["final-report-shape", "expects-commit", "stalled"]);
-    assert.deepEqual(
-      h.pushes.map((p) => p.deliverAs),
-      ["steer", "steer", "steer"],
-    );
-  });
-
-  test("I4: an advisory's status line is computed from the registry actually threaded in, not an empty one", () => {
-    const h = harness();
-    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
-    h.emit({ type: "agent_start" });
-    h.emit({ type: "tool_execution_start", toolName: "bash", args: {} });
-    h.emit({ type: "agent_settled" });
-    assert.deepEqual(advisories(h.pushes), ["acknowledge-and-return"]);
-    assert.equal(
-      h.pushes[0].details?.status,
-      "2 delegated agents still running",
-      "the two live siblings are what distinguish the real shared registry from an empty stand-in",
-    );
-    assert.equal(h.pushes[0].details?.agent_id, "a1");
-  });
-
-  test("260905: exhausting the nudge budget pushes a `stalled` advisory carrying a transcript tail", () => {
-    const h = harness();
-    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
-    for (let turn = 0; turn < MAX_FORK_NUDGES + 1; turn += 1) {
-      h.emit({ type: "agent_start" });
-      h.emit({ type: "agent_settled" });
-    }
-    assert.equal(h.prompts.length, MAX_FORK_NUDGES);
-    assert.deepEqual(advisories(h.pushes), ["stalled"]);
-    const stalled = h.pushes.find((p) => p.details?.advisory === "stalled");
-    assert.ok(typeof stalled?.details?.transcript_tail === "string", "an unreadable transcript degrades to a placeholder, never to a missing field");
-  });
-
-  test('260905: a malformed kind:"final" pushes a final-report-shape advisory', () => {
-    const h = harness();
-    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, false);
-    h.emit({ type: "agent_start" });
-    h.emit({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "final", message: "all done" } });
-    assert.deepEqual(advisories(h.pushes), ["final-report-shape"]);
-  });
-
-  test('260905: expects_commit with Commit: none pushes an expects-commit advisory', () => {
-    const h = harness();
-    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, true);
-    h.emit({ type: "agent_start" });
-    h.emit({
-      type: "tool_execution_start",
-      toolName: REPORT_TO_LEAD_TOOL_NAME,
-      args: { kind: "final", message: REQUIRED_FINAL_REPORT_FIELDS.map((f) => (f === "Commit" ? "Commit: none" : `${f}: something`)).join("\n") },
-    });
-    assert.deepEqual(advisories(h.pushes), ["expects-commit"]);
-  });
-
-  test("260905: a well-formed final with a real Commit pushes no advisory at all", () => {
-    const h = harness();
-    wireAntiBleedLoop(h.pi, h.registry, "a1", h.record, true);
-    h.emit({ type: "agent_start" });
-    h.emit({
-      type: "tool_execution_start",
-      toolName: REPORT_TO_LEAD_TOOL_NAME,
-      args: { kind: "final", message: REQUIRED_FINAL_REPORT_FIELDS.map((f) => (f === "Commit" ? "Commit: abc1234" : `${f}: something`)).join("\n") },
-    });
-    assert.deepEqual(advisories(h.pushes), []);
-  });
-
-  test("I6 (260905): a hook return PUSHES the registration notice as ws-agent-advisory — the owner surface consumed the question, not the lead notice", () => {
-    const h = harness();
-    const seen: Array<{ agentId: string; message: string }> = [];
-    h.record.onQuestionReport = (rec, message) => {
-      seen.push({ agentId: rec.agentId, message });
-      return "[ws] thread T1 — the owner answers this.";
-    };
-    const outcome = applyRpcEvent(h.record, questionReportEvent);
-    assert.deepEqual(seen, [{ agentId: "a1", message: "Which of the two anchors should I use?" }]);
-    assert.deepEqual(
-      outcome,
-      { push: { family: "ws-agent-advisory", payload: { advisory: "fork-question-thread", detail: "[ws] thread T1 — the owner answers this." }, deliverAs: "followUp" } },
-      "§1 keeps the lead out of the fork-raised question exchange, but the lead must still see the thread notice",
-    );
-    assert.equal(h.record.reportLog.length, 1, "the report is still logged for the anti-bleed loop");
-  });
-
-  test("I6: returning undefined (headless) keeps the ws-agent-question push", () => {
-    const h = harness();
-    h.record.onQuestionReport = () => undefined;
-    assert.deepEqual(applyRpcEvent(h.record, questionReportEvent), {
-      push: { family: "ws-agent-question", payload: { question: "Which of the two anchors should I use?" }, deliverAs: "steer" },
-    });
-  });
-
-  test("I6: a throwing hook degrades to the headless baseline rather than dropping the question", () => {
-    const h = harness();
-    h.record.onQuestionReport = () => {
-      throw new Error("boom");
-    };
-    assert.deepEqual(applyRpcEvent(h.record, questionReportEvent), {
-      push: { family: "ws-agent-question", payload: { question: "Which of the two anchors should I use?" }, deliverAs: "steer" },
-    });
-  });
-
-  test("I6: a final-kind report never reaches the question hook", () => {
-    const h = harness();
-    let calls = 0;
-    h.record.onQuestionReport = () => {
-      calls += 1;
-      return "replaced";
-    };
-    const outcome = applyRpcEvent(h.record, {
-      type: "tool_execution_start",
-      toolName: REPORT_TO_LEAD_TOOL_NAME,
-      args: { kind: "final", message: "Outcome: x" },
-    });
-    assert.equal(calls, 0);
-    assert.deepEqual(outcome, {}, "Edition: a final is stashed for the turn end rather than pushed here");
-    assert.equal(h.record.pendingFinal, "Outcome: x");
-  });
-
-  test("I6: with no hook set the question is pushed to the lead", () => {
-    const h = harness();
-    assert.deepEqual(applyRpcEvent(h.record, questionReportEvent), {
-      push: { family: "ws-agent-question", payload: { question: "Which of the two anchors should I use?" }, deliverAs: "steer" },
-    });
-  });
-});
-
-/**
- * Review relay #1, C1: `RpcSpawnCtx.pi` became a REQUIRED field with the push
- * model and `registerFork`'s own ctx literal was the one call site that never
- * got it — silently, since this package has no `tsc` step. The result was that
- * every `ws-fork` child ran with `ctx.pi === undefined`, so `pushToLead`'s
- * `if (!pi) return` guard dropped its `kind:"final"` report (the lead's only
- * completion signal now that `ws-agent-wait` is gone), its settles, and its
- * headless questions. These tests pin both halves: the ctx carries `pi`, and a
- * record wired from that ctx actually pushes on a final.
- */
 describe("buildForkSpawnCtx (the ws-fork push channel)", () => {
   const bridge = {
     wsToolNames: ["ws__ferrule"],
@@ -717,7 +253,7 @@ describe("buildForkSpawnCtx (the ws-fork push channel)", () => {
     assert.equal(ctx.client, bridge.client, "must read the ws-mcp client off the bridge");
   });
 
-  test("C1: a record wired through that ctx's pi pushes ws-agent-report when the fork's own final turn ends", async () => {
+  test("C1: a record wired through that ctx's pi pushes its ordinary settled result", async () => {
     const sent: Array<{ customType?: string; details?: Record<string, unknown> }> = [];
     const pushPi = {
       sendMessage: (message: { customType?: string; details?: { items?: Array<{ customType?: string; details?: Record<string, unknown> }> } }) => {
@@ -739,6 +275,7 @@ describe("buildForkSpawnCtx (the ws-fork push channel)", () => {
         return () => {};
       },
       getState: async () => ({}),
+      getLastAssistantText: async () => "Outcome: shipped",
     } as unknown as RpcClient;
     const record = {
       agentId: "fork-1",
@@ -756,19 +293,18 @@ describe("buildForkSpawnCtx (the ws-fork push channel)", () => {
 
     // Exactly what spawnAgent does with the ctx it is handed.
     attachEventListener(ctx.pi, registry, record, client);
-    listener?.({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "final", message: "Outcome: shipped" } });
-    assert.deepEqual(sent, [], "Edition: the final is stashed while the fork is still mid-turn");
-
+    listener?.({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Outcome: shipped" }] } });
     listener?.({ type: "agent_settled" });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    flushHeldPushes(pushPi, true);
 
     assert.deepEqual(
       sent.map((m) => m.customType),
-      ["ws-agent-report"],
-      "a fork's final is the lead's completion signal — dropping it strands the whole ws-fork surface",
+      ["ws-agent-settled"],
+      "the ordinary settled answer is the fork's terminal result",
     );
-    assert.equal(sent[0].details?.report, "Outcome: shipped");
-    assert.equal(sent[0].details?.settled_reason, "idle");
+    assert.equal(sent[0].details?.last_message, "Outcome: shipped");
+    assert.equal(sent[0].details?.reason, "idle");
     assert.equal(sent[0].details?.agent_id, "fork-1");
   });
 });
@@ -815,68 +351,6 @@ describe("armForkRoleWiring (fresh spawn and sidecar revival)", () => {
     );
   });
 
-  test("defers the anti-bleed loop to onResume when the record is dormant, and arms it immediately when it is live", () => {
-    const dormant = dormantForkRecord();
-    armForkRoleWiring(pi, new Map([["fork-1", dormant]]), dormant);
-    assert.equal(typeof dormant.onResume, "function", "wireAntiBleedLoop needs a client the dormant record has not got yet");
-    assert.equal(dormant.validateForkFinal?.(REQUIRED_FINAL_REPORT_FIELDS.map((field) => `${field}: ${field === "Commit" ? "abc123" : "ok"}`).join("\n")), true, "the finish coordinator receives the fork's existing final policy without importing fork.ts");
-
-    let subscriptions = 0;
-    const client = {
-      onEvent() {
-        subscriptions += 1;
-        return () => {};
-      },
-    } as unknown as RpcClient;
-    dormant.client = client;
-    dormant.onResume?.(dormant);
-    assert.equal(subscriptions, 1, "the resume is what restores the loop");
-
-    const live = dormantForkRecord();
-    live.client = client;
-    armForkRoleWiring(pi, new Map([["fork-1", live]]), live);
-    assert.equal(subscriptions, 2, "an already-live record is wired straight away");
-  });
-
-  test("260905 review relay #1 (Important, test case 2): a parked-then-resumed fork can still be nudged — onResume re-arms wireAntiBleedLoop on the NEW client", () => {
-    // Case 2 of the ticket's Tests bullet. `sendToAgent`'s dormant-resume
-    // branch itself (constructing a real `RpcClient`) is live-gate only —
-    // see that describe block's own doc comment — but the thing the "nudge
-    // path survives a park/resume cycle" claim actually depends on is this
-    // seam: `onResume` re-arming `wireAntiBleedLoop` on whatever client
-    // shows up next, and that re-armed loop firing on it exactly like it
-    // would on a never-parked fork. Both are duck-typed/offline-testable and
-    // exercised here end-to-end.
-    const dormant = dormantForkRecord();
-    const registry: RpcAgentRegistry = new Map([["fork-1", dormant]]);
-    armForkRoleWiring(pi, registry, dormant);
-    assert.equal(typeof dormant.onResume, "function", "parked (no client yet): wireAntiBleedLoop is deferred to onResume");
-
-    // Simulate the moment `sendToAgent`'s dormant branch resumes this
-    // record: a fresh client is assigned, then `onResume` fires.
-    let listener: ((evt: unknown) => void) | undefined;
-    const prompts: string[] = [];
-    const resumedClient = {
-      onEvent(l: (evt: unknown) => void) {
-        listener = l;
-        return () => {};
-      },
-      prompt(message: string) {
-        prompts.push(message);
-        return Promise.resolve();
-      },
-    } as unknown as RpcClient;
-    dormant.client = resumedClient;
-    dormant.onResume?.(dormant);
-
-    // The resumed fork's first turn ends with no report and no tool call —
-    // the "no-signal" bleed condition — and the re-armed loop must nudge it
-    // on the client resume created, not the one that was parked away.
-    listener?.({ type: "agent_start" });
-    listener?.({ type: "agent_settled" });
-    assert.equal(prompts.length, 1, "the nudge fired through the re-armed loop on the resumed client");
-    assert.equal(dormant.running, true, "promptAgent (inside the nudge) latched running on the resumed record");
-  });
 });
 
 /**

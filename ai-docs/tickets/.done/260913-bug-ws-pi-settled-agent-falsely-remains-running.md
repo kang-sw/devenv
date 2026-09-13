@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 416abc74407a1131
 sage-review-completeness-reviewed: 416abc74407a1131
+completed: 2026-09-13
 ---
 
 # Stop counting idle-settled Pi agents as running after terminal result delivery
@@ -84,3 +85,17 @@ Add regression coverage for:
 5. duplicate ordinary settle events producing one terminal delivery or owner notification per generation;
 6. nested children, stale pre-child settlement, owner-held results, generic Finish handoff, exited/stopped agents, replacement-work races, and resumed dormant agents retaining ordering and routing guarantees;
 7. the widget, `ws-agent-list`, pushed status line, and goal-loop yield predicate agreeing about actual autonomous work.
+
+### Result (4f6ecbda) - 2026-09-13
+
+- Native `agent_settled` now ends autonomous execution for every role and delivers the generation-scoped ordinary assistant result exactly once; progress and question reports remain intermediate only.
+- Execution fan-in, descendant waiting, pending delivery, and owner/thread holds now have distinct lifecycle accounting and caller-visible states. Eligible agents park only after direct-parent queue admission and remain resumable.
+- Worker and fork completion no longer depends on final-report parsing. Structured output and `expects_commit` remain prompt-level lead expectations, while owner-held output and generic Finish retain distinct routes.
+- Generation fences now use the consumed queued-user `message_start` boundary for accepted steer/follow-up instructions. Assistant `message_end` supplies current-generation provenance, so empty, aborted, missing, replacement, and pre-queue output cannot borrow a stale prior answer.
+- Verification: `cd agents-plugin-pi && npm test` passed 1,649 tests with 2 expected skips, including all six fork lifecycle provider/version combinations; focused recursive lifecycle tests passed 15/15.
+- Independent review: round one was clean for Fit and found two Important Correctness plus two Important Test issues, all addressed in `d8e56421`; round two was clean for Fit and Test and found one remaining Important queued-generation race, addressed in `4f6ecbda`. No Critical finding remains; the fixed two-round cap prohibited a third sweep.
+
+
+## Resolution (2026-09-13)
+
+Implemented native settled-result delivery with execution-only fan-in, generation-scoped terminal text, retryable direct-parent and owner delivery, distinct waiting/delivery states, and preserved resumability. The full Pi suite and both independent review rounds completed; no Critical finding remains.

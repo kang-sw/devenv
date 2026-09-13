@@ -231,16 +231,15 @@ export function createAuditChannel(
 }
 
 // ---------------------------------------------------------------------------
-// The picker's row builder — the registry's three live tiers
+// The picker's row builder — the registry's visible lifecycle tiers
 // (`agent-widget.ts`'s own naming/ordering rules, reused verbatim) plus a
-// fourth, picker-only dormant tier by last activity.
+// picker-only dormant tier by last activity.
 // ---------------------------------------------------------------------------
 
 /**
- * One row per registry child, running AND dormant. Tiers 1-3 reuse
- * `agent-widget.ts`'s own `classifyRegistryRowState` and its three-state
- * ordering (awaiting-owner, awaiting-approval, running by elapsed
- * descending) verbatim. Tier 4 is picker-only: every `undefined` (dormant)
+ * One row per registry child, visible AND dormant. Visible tiers reuse
+ * `agent-widget.ts`'s own `classifyRegistryRowState` and its state ordering
+ * verbatim. The final picker-only tier contains every `undefined` (dormant)
  * record, ordered by `spawner.ts`'s `lastActivityAt`, most-recent first —
  * the widget itself never rows a dormant child at all. Unlike
  * `agent-widget.ts`'s `buildAgentRows`, this reads the registry alone (no
