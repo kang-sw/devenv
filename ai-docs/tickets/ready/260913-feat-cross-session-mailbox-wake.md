@@ -158,6 +158,89 @@ Verification (host-neutral, no harness hook needed):
 - An env-less caller's `wait` targets its own reply-id queue and returns on a
   reply addressed to that reply-id.
 
+### Result (588dda97) - 2026-09-13
+
+Implemented `ws-mcp mailbox wait --timeout [--slug] [--session-key] [--format]`
+as a blocking CLI subcommand (never an MCP tool), landed across two commits:
+`e3c50663` (initial implementation) and `588dda97` (round-1 review fixes).
+
+- **Host-neutral wait primitive** (`internal/wsmailbox/wait.go`): `Wait()`
+  performs one up-front resolution (`resolveWaitTarget`: slug parse/scope-path
+  resolution, reply-id derivation) and then loops over a cheap `peek()`
+  (`Load`/`LoadReplyStore` only) at `DefaultWaitPoll` (500ms) increments,
+  level-triggered (immediate return if either queue already has unread mail)
+  with an injectable clock/sleep for deterministic tests. `NamedInboxStatus()`
+  is a one-time diagnostic reporting whether an explicit `--slug` currently
+  has a presence record and is owned by the caller.
+- **Listening marker** (`internal/wsmailbox/listening.go`): a discoverable
+  "armed wait" marker (session_key, slug, PID, started/timeout-at), written
+  before blocking and cleared on every exit path (explicit clears, not
+  `defer`, since `os.Exit` skips deferred functions). `session_key` is
+  validated against `^[a-z0-9-]{1,128}$` (mirroring
+  `internal/mcp/session_auth.go`'s pattern, duplicated rather than imported to
+  avoid a Go import cycle) before it is ever interpolated into a filename.
+- **CLI layer** (`cmd/ws-mcp/mailbox.go`, wired into `main.go`): validates
+  `--session-key` (required) and `--timeout` (must be `>= 0`), emits a
+  one-time stderr warning when an explicit `--slug` cannot currently be
+  reached (no presence yet, or owned by a different session), handles
+  SIGINT/SIGTERM via `signal.NotifyContext` (clearing the marker before exit),
+  and reports outcomes with distinguishable exit codes: 0 (mail found), 3
+  (`mailboxWaitExitTimeout`), 130 (interrupted), 1 (any other error). Text and
+  `--format json` output both normalize empty queues to `[]`, never `null`.
+
+Verification: `go build ./...`, `go vet ./...`, and `go test ./...` all pass
+(`agents-plugin-tool`, all packages). CLI-level tests in
+`cmd/ws-mcp/mailbox_test.go` cover the required-session-key/negative-timeout
+error paths, immediate-return-on-unread-mail (both reply-id and owned
+`--slug`), the unowned/absent-`--slug` warning, the JSON output shape, the
+listening-marker write/clear lifecycle, a real-subprocess block-then-arrival
+case (mail deposited while genuinely blocked, confirmed to return well before
+its timeout), the timeout exit code, and the exit-code-1 error path. Package
+tests in `internal/wsmailbox/{wait,listening}_test.go` cover the primitive
+and marker directly, including path-traversal rejection and all four
+present/owned combinations for `NamedInboxStatus`.
+
+Two-round independent review (correctness: opus, test: sonnet, partitioned
+per route verdict): round 1 found one Critical (session_key path traversal
+into the listening marker path — fixed) and two Important correctness
+findings (unbounded per-tick `PathForScope` re-resolution shelling out to git
+on a worktree/clone `--slug` — fixed by resolving once up front; silent
+degradation on an unreachable/unowned `--slug` — fixed via
+`NamedInboxStatus` + a startup stderr warning), two Minor correctness
+findings (negative `--timeout` silently accepted; JSON `null` vs `[]` for
+empty queues — both fixed), and three Important test-coverage gaps (no
+CLI-level `--slug` end-to-end test, no real-subprocess block-then-arrival
+test, no exit-code-1 test — all three closed with new tests). Round 2
+(fresh reviewers, fix-verification only) confirmed all Critical/Important
+findings fixed with supporting code evidence and a clean
+build/vet/test run; no new Critical/Important issues were raised.
+
+**Decisions and deferred items:**
+
+- `--slug` is an explicit, caller-supplied flag; `Wait` never re-derives a
+  slug from `WS_MAILBOX`/`WS_MAILBOX_AUTO` itself, because a fresh CLI
+  process re-reading `WS_MAILBOX_AUTO` would mint a different random stem
+  than the already-registered server process.
+- `"mailbox.wait"` was deliberately **not** added to
+  `runtimeCapabilityCommandNames()` / `agents-plugin/runtime.json`'s
+  "commands" map: that map is a pinned launcher contract
+  (`TestRuntimeCapabilitiesCommandReportsLauncherContractSurface`), and a
+  CLI-only wait primitive with no MCP-tool surface does not belong in it.
+- **Deferred (Minor, accepted risk):** stale marker / PID-liveness / two
+  waits sharing a session_key silently overwriting each other's marker is
+  unfixed. Both reviewers agreed this is a landmine rather than a live
+  defect in Phase 1, since nothing reads the marker yet (Phase 2/3
+  territory) — revisit when a hook adapter starts consuming it.
+- **Deferred (non-blocking observation from round 2):** the CLI's startup
+  `NamedInboxStatus` diagnostic and `Wait`'s own `resolveWaitTarget` each
+  independently resolve an explicit `--slug`'s scope path, doing the
+  work (and, for a worktree/clone scope, the `git` shell-out) twice at
+  startup instead of once. One-time only, so it does not reintroduce the
+  round-1 per-tick-resolution finding; left as a minor efficiency
+  opportunity rather than a fix-now item.
+
+Phases 2-4 remain open; this ticket stays in `ready/`.
+
 ### Phase 2: Codex hook adapter
 
 Wire the Codex adapter over Phase 1 (depends on the Phase 1 CLI + marker).
