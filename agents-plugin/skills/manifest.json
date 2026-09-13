@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "files": {
-    "lead-add-rule/SKILL.md": "2e113a12f9bbc72af2210f2cbab63b2a44802f1a342b4ec730fa02d48c545d04",
+    "lead-audit-doc/SKILL.md": "c18c312d42a489bcfee3e535a58d618d9fac758cf90f5328230c16dc81fcdd3b",
     "lead-bootstrap/AGENTS.template.md": "1b96aee76f5d3af61002efb3a7514af87035c29cf3b0cd6af636e9a83199cb16",
     "lead-bootstrap/SKILL.md": "a15f6e640341b35a2b770239768c714e51cedb4b9c04c8fbd1c1effc9694a631",
     "lead-bootstrap/WORKFLOW.md": "957e4447a79ccfd49971f9b699d9979e5a7e95b7b513e47a102d50fdde7fa9e5",
@@ -15,6 +15,7 @@
     "lead-ship/SKILL.md": "3af6ee6ff42c12cc5e2e50492fb31e49d82f3f7a2ea910393625d0c8fa9f1f43",
     "lead-ticket/SKILL.md": "be262c31e63190c21eb0f585f2cfd44ce25265656a5f98ae2beb3eb2b9532d9e",
     "lead-tune/SKILL.md": "55049930fc05418c156c857abca611c4e3234c9576493fe696e2cb7e7548c9f1",
+    "lead-use-mailbox/SKILL.md": "083d096ca5a83d0aea97fbc6ac096135efae526f9c3fbf92b82ad62bda95af02",
     "mcp-server-repair/SKILL.md": "7ec0b1c436d7ea2b5fad5386b52775c8d8bf44e2844501aab09dd7862a37495a"
   }
 }

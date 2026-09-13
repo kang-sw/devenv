@@ -1012,7 +1012,10 @@ func (s *Server) handleTodoAdd(id json.RawMessage, args map[string]any) response
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
-	title, _ := args["title"].(string)
+	title, err := rawStringArg(tool, "title", args)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
 	instruction, err := todoInstructionArg(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)

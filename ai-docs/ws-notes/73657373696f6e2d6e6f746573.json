@@ -1,7 +1,7 @@
 {
   "key": "session-notes",
-  "value": "Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role assignment remains deferred.",
+  "value": "Codex hook feedback semantics re-probed 2026-09-13 (Codex 0.154.0/macOS) — see codex-integration.md 'Re-probe 2026-09-13'. Durable leaf role assignment remains deferred.",
   "priority": 0,
-  "written_at": "2026-08-12T07:41:35Z",
+  "written_at": "2026-09-12T23:18:44Z",
   "visible": true
 }

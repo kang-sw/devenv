@@ -3,6 +3,11 @@ title: "Replace durable-rule capture with concise project-document prose auditin
 related:
   260909-research-ws-refoundation-evidence-audit: binding context for the reduced lead surface and downstream-first workflow
   260912-research-september-active-ticket-inventory-triage: inventory record for this implementation candidate
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 0bec273329d7af0d
+sage-review-completeness-reviewed: 0bec273329d7af0d
+completed: 2026-09-12
 ---
 
 # Replace durable-rule capture with concise project-document prose auditing
@@ -21,6 +26,11 @@ The repository's `skill-authoring` manual is not installed downstream and
 cannot supply this behavior to shipped skills. The replacement must be
 self-contained in the plugin surface available to an ordinary downstream
 project.
+
+The current `lead-add-rule` description also attracts unrelated requests that
+mention saving, remembering, or persisting workflow context. Removing that
+high-frequency misrouting source makes this replacement release-priority work,
+not optional post-release cleanup.
 
 ## Decisions
 
@@ -112,9 +122,25 @@ propose a direct rewrite or deletion. If there are no findings, say `No findings
   install.
 - Preserve the full and agentless package mirrors, resource manifests, and
   skill-inventory contracts while replacing the public skill name.
-- Apply the shipped-surface, skill-authoring, and wsflow-mirroring manuals to
-  every matching source change in this repository; these are implementation
-  constraints, not downstream dependencies.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/rsrc/, agents-plugin-wsflow/skills/, agents-plugin-tool/internal/wsdoc/conventions/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/)
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin/skills/lead-add-rule/SKILL.md, agents-plugin/rsrc/lead-add-rule/lead-add-rule.md, agents-plugin-wsflow/skills/lead-add-rule/SKILL.md, agents-plugin-wsflow/rsrc/lead-add-rule/lead-add-rule.md |
+| scope.surface | public-interface | agents-plugin/skills/lead-add-rule/SKILL.md#L2-L3 exposes the installed skill name and description |
+| scope.new_public_symbol | yes | lead-audit-doc replaces the public lead-add-rule skill name |
+| scope.new_type_contract | no | no Go type or signature change is named |
+| scope.test_surface | existing | agents-plugin/tests/test_skill_dispatch_contracts.py, agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py, agents-plugin-tool/internal/mcp/playbook_tools_test.go |
+| complexity.reuse_points | confirmed | agents-plugin/rsrc/fresh-reader-audit/fresh-reader-audit.md provides the existing fresh-reader pattern |
+| complexity.side_effect_risk | high | replaces an installed public skill and its delegated-playbook behavior |
+| risk.correctness | high | full and agentless package mirrors, manifests, and inventories must remain aligned |
+| risk.fit | moderate | shipped text must remain downstream-self-contained while preserving project instructions |
+| risk.test | high | dispatch, user-confirmation, mirror, manifest, and retired-name behavior require coverage |
+| risk.security_or_contract | high | removal of the public lead-add-rule contract and introduction of lead-audit-doc changes skill dispatch |
 
 ## Phases
 
@@ -128,3 +154,42 @@ Verify autonomous description matching for recurring project-document edits,
 the user confirmation boundary before subagent dispatch, downstream-only
 resolution, the narrow prose-pathology scope, and absence of the retired skill
 name and behavior.
+
+### Result (b2548d63) - 2026-09-12
+
+Replaced the public skill and routed playbook in both packages with
+`lead-audit-doc`; added the separate large-tier `fresh-read-doc-auditor` render
+playbook. The descriptions and both playbook bodies match the approved prose
+verbatim. Removed the retired invocation from root guidance, updated inventories,
+and regenerated the resource manifests, skill manifest, and wsflow resource
+mirror. The existing skill/prompt authoring auditor remains unchanged.
+
+Verification: `go test ./...` passed (MCP package 102.404s), `go build ./...`
+passed, and `scripts/smoke-ws-mcp.sh ..` passed from `agents-plugin-tool/`.
+Both package suites passed: 60 full-package tests and 11 wsflow tests. Both new
+skill entries passed the skill-creator validator through `uv run --with pyyaml`
+because the system Python lacks PyYAML. The new dual-product rendering test
+passed after correcting its temporary downstream fixture to initialize Git with
+the existing helper. Exact prose fixtures cover discovery wording, the consent
+boundary, the narrow audit scope, and retirement; runtime tests cover installed
+resource resolution and namespace substitution in both products. Correctness,
+fit, and test partition reviews were clean in round one.
+
+A separate fresh-reader audit read only the four new skill/playbook source
+files. It found five ambiguities in the locked prose. These were retained as
+approved wording, with the following costs recorded for lead veto:
+
+- Risk accepted: audit-only write limits rely on the user's requested scope;
+  the opening draft/revise sentence does not repeat that boundary.
+- Intentional difference: prior independent-audit authorization satisfies the
+  consent boundary; a literal reader may ask redundantly.
+- Intentional difference: paths and excerpts share the string input
+  `TargetFiles`; their representation remains caller judgment.
+- Risk accepted: treating target instructions as audit material relies on the
+  auditor's stated role and host instruction hierarchy.
+- Intentional difference: the fresh reader sees only supplied instructions;
+  the lead checks proposed rewrites against the full project context.
+
+No installed-cache refresh or release was performed. Source-bundle rendering
+is verified; native automatic skill selection remains model judgment rather
+than a deterministic routing assertion. Omitted: none from the phase contract.

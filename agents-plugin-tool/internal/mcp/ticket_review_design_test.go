@@ -218,3 +218,45 @@ func TestTicketDesignReviewContradictionAnchors(t *testing.T) {
 		})
 	}
 }
+
+// TestTicketDesignReviewDependencyLandingAdvisory pins the shipped instruction
+// for the solo-path dependency-landing advisory: it must render in both
+// namespaces, key on the typed blocked-by: edge (resolved via the
+// namespace-correct tickets.query), and be an advisory minor finding that never
+// raises the verdict — so a solo promotion surfaces an unlanded prerequisite as
+// a non-block ordering note. The rendered prompt is the contract boundary for
+// this model-executed check, and the dual-namespace assertion also catches
+// ws/wsflow mirror drift on the new text.
+func TestTicketDesignReviewDependencyLandingAdvisory(t *testing.T) {
+	for _, product := range []struct{ pkg, namespace string }{
+		{"agents-plugin", "ws"},
+		{"agents-plugin-wsflow", "wsflow"},
+	} {
+		t.Run(product.namespace, func(t *testing.T) {
+			root := filepath.Join("..", "..", "..", product.pkg, "rsrc")
+			t.Setenv("WS_MCP_NAMESPACE", product.namespace)
+			if product.namespace == "wsflow" {
+				t.Setenv("WS_MCP_NO_AGENT", "1")
+			} else {
+				t.Setenv("WS_MCP_NO_AGENT", "0")
+			}
+			body, _, err := renderPlaybookBody(&Server{}, root, "ticket-reviewer-design", nil, wsconfig.Options{}, "", "", "", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := strings.Join(strings.Fields(body), " ")
+			for _, want := range []string{
+				"Dependency-landing advisory (single-ticket path)",
+				"typed `blocked-by:` edge",
+				product.namespace + "/tickets.query(ticket_stem: <prereq>, include_done: true)",
+				"`minor` ordering finding (always `resolution: autonomous`)",
+				"never raises the verdict",
+				"Only the typed `blocked-by:` edge triggers this advisory",
+			} {
+				if !strings.Contains(text, want) {
+					t.Errorf("rendered design review is missing dependency-landing advisory fragment %q", want)
+				}
+			}
+		})
+	}
+}

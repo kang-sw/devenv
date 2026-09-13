@@ -69,6 +69,15 @@ type sessionRecord struct {
 	// the nudge still fires on the first workflow_manual call after an
 	// upgrade — the correct "not shown yet" behavior.
 	ReviewTrackNudgeShown bool `json:"review_track_nudge_shown,omitempty"`
+	// MailboxReplyOpened marks that this session has, at least once, sent
+	// mail or performed an env-less mailbox.lookup_peers self-lookup,
+	// opening its live-only reply-id return channel (mailbox core Decision
+	// 11). Gates the piggyback wrapper's decision to check this session's
+	// own reply-id queue at all, keeping a session that has never touched
+	// mailbox at zero additional disk I/O (mailbox core Decision 1). Added
+	// as an additive field; older records parse with the zero value
+	// (false), the correct "never opened" default.
+	MailboxReplyOpened bool `json:"mailbox_reply_opened,omitempty"`
 }
 
 const sessionRecordSchemaVersion = 1
