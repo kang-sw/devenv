@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 3fd30e7661a29b94
 sage-review-completeness-reviewed: 3fd30e7661a29b94
+completed: 2026-09-13
 ---
 
 # Cross-session mailbox wake path & usage — CLI wait, harness hook adapters, lead-use-mailbox skill
@@ -682,3 +683,97 @@ Verification:
 - The documented flow (launch → self-address → arm → send/recv → remote-control
   recipe) references only shipped, host-neutral surfaces, with Codex/Claude
   specifics called out as adapter behavior.
+
+### Result (7c447df5) - 2026-09-13
+
+Authored the `lead-use-mailbox` guidance skill over the landed Phases 1-3, and
+mirrored it into `agents-plugin-wsflow/` per `wsflow-mirroring.md`. Landed in
+one commit, `7c447df5`.
+
+- **Shared playbook body** (`agents-plugin/rsrc/lead-use-mailbox/lead-use-mailbox.md`,
+  `kind: print`, mirrored byte-identically into `agents-plugin-wsflow/rsrc/`):
+  covers the full documented flow as `## On:` sections — register an address
+  (`WS_MAILBOX`/`WS_MAILBOX_AUTO`, `WS_MAILBOX` wins), find an address
+  (workflow ambient block / `mailbox.lookup_peers` self entry), send and
+  receive (`mailbox.send`/`mailbox.recv`, the unread badge riding ordinary
+  tool responses), arm the wait (the literal `ws-mcp mailbox wait
+  --session-key ... [--slug ...] [--timeout ...]` CLI launched as a
+  background task, never inline or polled), and remote-control another
+  session (the "run ticket X" recipe). An `## Invariants` block states the
+  peer-vs-subagent scope boundary, the inert-by-default rule, and the
+  wait's level-triggered no-lost-wakeup guarantee. Codex's `Stop`-hook wake
+  and Claude's background-task wake are named inline as adapter-layer
+  distinctions in the `On: arm the wait` section rather than split into
+  separate `.codex.md`/`.claude.md` rsrc variants: the difference is a
+  short qualifying clause per step, not enough divergent content to justify
+  full-file duplication across three variants.
+- **Thin shims**: `agents-plugin/skills/lead-use-mailbox/SKILL.md` (single-call
+  `ws/playbook.read` shim with the `mcp-server-repair` pointer tail, matching
+  the `lead-tune`/`lead-scope-worktree` template) and a hand-curated
+  `agents-plugin-wsflow/skills/lead-use-mailbox/SKILL.md` (`wsflow/playbook.read`,
+  `wsflow:mcp-server-repair` pointer, the wsflow single-call wording).
+- **Manifests and drift guards**: regenerated `agents-plugin/rsrc/manifest.json`,
+  `agents-plugin/skills/manifest.json`, and the byte-identical
+  `agents-plugin-wsflow/rsrc/manifest.json` via the documented
+  `WSRSRC_REGEN`/`WSRSRC_REGEN_SKILLS`/`WS_REGEN_WSFLOW_RSRC` test entrypoints.
+  Added `lead-use-mailbox` to the static shipped-skill-inventory guards that
+  fail loudly on an unlisted new skill:
+  `agents-plugin/tests/test_skill_dispatch_contracts.py`'s
+  `EXPECTED_LEAD_SKILLS`, `agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py`'s
+  `EXPECTED_SKILLS`/`POINTER_TAIL_TITLES`, and `wsflow-mirroring.md`'s Included
+  shipped-skill list.
+
+**Verification:** `go build ./...`, `go vet ./...`, and `go test ./...
+-count=1` all pass across every `agents-plugin-tool` package (including the
+rsrc-mirror and skills-manifest drift tests). `python3 -m unittest discover`
+passes for both `agents-plugin/tests/` (68 tests) and
+`agents-plugin-wsflow/tests/` (11 tests), including
+`test_shipped_surfaces_downstream_neutral.py`'s scan of the new files for
+repo-specific leaks.
+
+Two-round-eligible independent review (correctness: opus, test: sonnet,
+partitioned per the route verdict) was spawned as round 1. Both partitions
+returned clean: the correctness reviewer verified every factual claim in the
+new playbook body against the actual implementation (CLI flag names,
+level-triggered wait semantics, `WS_MAILBOX`/`WS_MAILBOX_AUTO` precedence,
+the `id:` reply-handle prefix, the piggyback badge, `lookup_peers`' self
+entry) and against the shipped-surface-boundary leak test, and reported no
+remaining findings; the test reviewer independently re-ran the full
+verification suite, confirmed every changed manifest hash and the
+rsrc-mirror byte-identity, and judged the touched drift guards genuinely
+load-bearing for this diff (not vacuous), reporting only one **pre-existing,
+non-regression** Minor observation: `agents-plugin/tests/` has no
+regex-pinning test for the exact flagship `SKILL.md` shim body (unlike
+wsflow's `test_single_call_shims_carry_repair_pointer`) — confirmed to be a
+systemic gap already present for every sibling single-call shim
+(`lead-tune`, `lead-scope-worktree`, etc.), not something this phase
+introduced or was asked to fix. With zero Critical/Important findings and
+nothing to fix, no round 2 was spawned: round 2 exists to verify round-1
+fixes, and there was no fix to verify (the Worker Protocol caps review at
+two rounds; it does not mandate a second sweep of an unchanged diff with
+nothing outstanding).
+
+**Decisions recorded:**
+
+- Named the literal `ws-mcp` binary and `mailbox wait`/`mailbox.send`/
+  `mailbox.recv`/`mailbox.lookup_peers`/`WS_MAILBOX`/`WS_MAILBOX_AUTO` names
+  directly in the shared playbook body: these are runtime primitives shipped
+  identically by both the `ws` and `wsflow` packages (the binary name does
+  not vary the way the MCP tool/skill namespace does), so naming them is not
+  a `shipped-surface-boundary.md` leak — reviewer-confirmed.
+- Kept the Codex-Stop-hook-vs-Claude-background-task wake distinction as
+  inline qualifying prose in one shared body rather than per-harness rsrc
+  variants (the loader's `.codex.md`/`.claude.md` overlay mechanism used
+  elsewhere for `lead-ticket`/`sample-playbook`): the difference here is a
+  short clause per step, not full-page divergent framing.
+- No `## Judgments` section: unlike `lead-tune`, this skill has no
+  ambiguous request-to-handler routing decision that needs a named judgment.
+
+This was the last open phase; every phase now has a `### Result`. Closed via
+`ws/tickets.close(stem: "260913-feat-cross-session-mailbox-wake", status:
+"done")` in the same commit that closes this ticket.
+
+
+## Resolution (2026-09-13)
+
+All four phases complete: Phase 1 (host-neutral `ws-mcp mailbox wait` CLI + listening marker + env-less registration), Phase 2 (Codex `Stop`-hook adapter), Phase 3 (Claude `Stop`-hook adapter), and Phase 4 (the `lead-use-mailbox` guidance skill, mirrored into `agents-plugin-wsflow/`). See each phase's `### Result` for detail, verification, and review record. Landed across `e3c50663`, `588dda97`, `67478735`, `a4ba3daf`, `772929ae`, and `7c447df5`.
