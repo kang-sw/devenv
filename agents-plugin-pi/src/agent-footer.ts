@@ -1,14 +1,15 @@
-/** Theme-aware replacement for Pi's built-in footer with descendant cost telemetry. */
-import { existsSync, lstatSync, readdirSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
+/** Theme-aware replacement for Pi's built-in footer with bounded cost estimates. */
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { readSessionEntries, refreshTelemetry, type AgentTelemetry } from "./agent-telemetry.ts";
-import { readOwnerArtifacts, readOwnership, writeOwnerArtifact, type AgentStorageContext, type OwnershipMetadata } from "./agent-storage.ts";
+import { readOwnerArtifacts, writeOwnerArtifact, type AgentStorageContext, type OwnershipMetadata } from "./agent-storage.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
+import type { AgentTelemetry } from "./agent-telemetry.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "./spawner.ts";
 
-const ROLLUP_DIR = ".cost-rollup";
-const ROLLUP_VERSION = 1;
+const CHECKPOINT_BUCKET = ".cost-estimate";
+const CHECKPOINT_FILE = "checkpoint.json";
+const CHECKPOINT_VERSION = 1;
+const retainedFailedCheckpoints = new Map<string, CostCheckpoint>();
 
 export interface CumulativeCost {
   knownUsd: number;
@@ -24,194 +25,30 @@ function addCost(target: CumulativeCost, source: CumulativeCost): void {
   target.unknownContributors += source.unknownContributors;
   target.descendants += source.descendants;
 }
+function cloneCost(value: CumulativeCost): CumulativeCost { return { ...value }; }
 function telemetryCost(value: AgentTelemetry | undefined): CumulativeCost {
   if (value?.estimatedUsd !== undefined) return { knownUsd: value.estimatedUsd, knownContributors: 1, unknownContributors: 0, descendants: 1 };
   if (value?.partialEstimatedUsd !== undefined) return { knownUsd: value.partialEstimatedUsd, knownContributors: 1, unknownContributors: 1, descendants: 1 };
   return { knownUsd: 0, knownContributors: 0, unknownContributors: 1, descendants: 1 };
 }
 
+/** Monotonic merge for one directly tracked agent's cumulative telemetry. */
+function mergeAgentCost(previous: CumulativeCost | undefined, observed: CumulativeCost): CumulativeCost {
+  if (!previous) return cloneCost(observed);
+  const regressed = observed.knownUsd < previous.knownUsd;
+  if (!regressed && observed.knownContributors > 0) return cloneCost(observed);
+  return {
+    knownUsd: previous.knownUsd,
+    knownContributors: previous.knownContributors,
+    unknownContributors: 1,
+    descendants: 1,
+  };
+}
+
 export function formatCumulativeCost(cost: CumulativeCost): string {
   if (cost.knownContributors === 0 && cost.unknownContributors > 0) return "—";
   const known = `~$${cost.knownUsd.toFixed(2)}`;
   return cost.unknownContributors > 0 ? `${known} + ?` : known;
-}
-
-interface RollupEntry extends CumulativeCost { version: 1; agentId: string }
-function safePart(value: string): boolean { return /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(value); }
-function ownerRoot(storage: AgentStorageContext, ownerSessionId = storage.ownerSessionId): string {
-  return join(storage.root, "ws-agents", ownerSessionId);
-}
-function rollupDirectory(storage: AgentStorageContext, ownerSessionId = storage.ownerSessionId): string {
-  return join(ownerRoot(storage, ownerSessionId), ROLLUP_DIR);
-}
-function parseRollup(value: unknown): RollupEntry | undefined {
-  const entry = value as Partial<RollupEntry> | null;
-  if (!entry || entry.version !== 1 || typeof entry.agentId !== "string" || !safePart(entry.agentId)) return undefined;
-  if (![entry.knownUsd, entry.knownContributors, entry.unknownContributors, entry.descendants].every(number => typeof number === "number" && Number.isFinite(number) && number >= 0)) return undefined;
-  if (![entry.knownContributors, entry.unknownContributors, entry.descendants].every(Number.isSafeInteger)) return undefined;
-  return entry as RollupEntry;
-}
-function readRollups(storage: AgentStorageContext, ownerSessionId: string): Map<string, RollupEntry> {
-  const entries = new Map<string, RollupEntry>();
-  const scoped = { ...storage, ownerSessionId };
-  for (const { name, content } of readOwnerArtifacts(scoped, ROLLUP_DIR)) {
-    if (!name.endsWith(".json")) continue;
-    try {
-      const parsed = parseRollup(JSON.parse(content) as unknown);
-      if (parsed && name === `${parsed.agentId}.json`) entries.set(parsed.agentId, parsed);
-    } catch { /* one corrupt roll-up never hides its siblings */ }
-  }
-  return entries;
-}
-function sessionIdFor(metadata: Pick<OwnershipMetadata, "sessionPath" | "telemetry"> | RpcAgentRecord): string | undefined {
-  if (metadata.telemetry?.origin.sessionId) return metadata.telemetry.origin.sessionId;
-  if (!metadata.sessionPath) return undefined;
-  const read = readSessionEntries(metadata.sessionPath);
-  return read && !("transient" in read) ? read.headerId : undefined;
-}
-function validOwnedMetadata(metadata: OwnershipMetadata | undefined, ownerSessionId: string, agentId: string): metadata is OwnershipMetadata {
-  return !!metadata && metadata.ownerSessionId === ownerSessionId && metadata.agentId === agentId && basename(metadata.home) === agentId && basename(dirname(metadata.home)) === ownerSessionId;
-}
-
-interface AggregateOptions {
-  direct?: RpcAgentRegistry;
-  watchPaths?: Set<string>;
-  visitedOwners?: Set<string>;
-}
-function aggregateOwner(storage: AgentStorageContext, ownerSessionId: string, options: AggregateOptions): CumulativeCost {
-  const result = emptyCost();
-  const visited = options.visitedOwners ?? new Set<string>();
-  if (!safePart(ownerSessionId) || visited.has(ownerSessionId)) return result;
-  visited.add(ownerSessionId);
-  const root = ownerRoot(storage, ownerSessionId);
-  options.watchPaths?.add(storage.root);
-  options.watchPaths?.add(join(storage.root, "ws-agents"));
-  options.watchPaths?.add(root);
-  const rollups = readRollups(storage, ownerSessionId);
-  options.watchPaths?.add(rollupDirectory(storage, ownerSessionId));
-  let names: string[] = [];
-  try { names = readdirSyncless(root); } catch { /* an owner with only a not-yet-created namespace has no descendants yet */ }
-  const ids = new Set(names.filter(name => !name.startsWith(".") && safePart(name)));
-  if (options.direct) for (const id of options.direct.keys()) ids.add(id);
-  const accounted = new Set<string>();
-  for (const agentId of ids) {
-    const direct = options.direct?.get(agentId);
-    const home = direct?.ownership?.home ?? join(root, agentId);
-    options.watchPaths?.add(home);
-    const metadata = readOwnership(home);
-    if (!direct && !validOwnedMetadata(metadata, ownerSessionId, agentId)) {
-      const rolled = rollups.get(agentId);
-      if (rolled) { addCost(result, rolled); accounted.add(agentId); }
-      continue;
-    }
-    const own = telemetryCost(direct?.telemetry ?? metadata?.telemetry);
-    addCost(result, own);
-    accounted.add(agentId);
-    const childSessionId = sessionIdFor(direct ?? metadata!);
-    if (childSessionId) addCost(result, aggregateOwner(storage, childSessionId, { watchPaths: options.watchPaths, visitedOwners: visited }));
-  }
-  for (const [agentId, rolled] of rollups) if (!accounted.has(agentId)) addCost(result, rolled);
-  return result;
-}
-function readdirSyncless(path: string): string[] { return readdirSync(path, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name); }
-
-/** Reconstructs all descendants reachable from this session's exact ownership namespace. */
-export function aggregateDescendantCosts(storage: AgentStorageContext, registry: RpcAgentRegistry): CumulativeCost {
-  const total = aggregateOwner(storage, storage.ownerSessionId, { direct: registry, visitedOwners: new Set() });
-  for (const [agentId, rolled] of registryRollups.get(registry) ?? []) if (!registry.has(agentId)) addCost(total, rolled);
-  return total;
-}
-
-const registryStorage = new WeakMap<RpcAgentRegistry, AgentStorageContext>();
-const registryRollups = new WeakMap<RpcAgentRegistry, Map<string, CumulativeCost>>();
-export function registerAgentCostOwner(registry: RpcAgentRegistry, storage: AgentStorageContext | undefined): void {
-  if (storage) registryStorage.set(registry, storage);
-}
-function storageFromRecord(record: RpcAgentRecord): AgentStorageContext | undefined {
-  const home = record.ownership?.home;
-  if (!home) return undefined;
-  const owner = dirname(home), namespace = dirname(owner), root = dirname(namespace);
-  if (basename(namespace) !== "ws-agents" || basename(owner) !== record.ownership!.ownerSessionId) return undefined;
-  return { root, ownerSessionId: record.ownership!.ownerSessionId };
-}
-
-/** Upserts one identity-keyed durable roll-up before registry/home removal. */
-export function persistEvictedAgentCost(registry: RpcAgentRegistry, record: RpcAgentRecord): boolean {
-  const storage = registryStorage.get(registry) ?? storageFromRecord(record);
-  if (!safePart(record.agentId)) return false;
-  const durable = record.ownership ? readOwnership(record.ownership.home)?.telemetry : undefined;
-  const total = telemetryCost(record.telemetry ?? durable);
-  const childSessionId = sessionIdFor(record);
-  if (storage && childSessionId) addCost(total, aggregateOwner(storage, childSessionId, { visitedOwners: new Set([storage.ownerSessionId]) }));
-  if (!storage) {
-    let rollups = registryRollups.get(registry);
-    if (!rollups) { rollups = new Map(); registryRollups.set(registry, rollups); }
-    rollups.set(record.agentId, total);
-    return true;
-  }
-  const prior = readRollups(storage, storage.ownerSessionId).get(record.agentId);
-  if (prior) {
-    total.knownUsd = Math.max(total.knownUsd, prior.knownUsd);
-    total.knownContributors = Math.max(total.knownContributors, prior.knownContributors);
-    total.unknownContributors = Math.max(total.unknownContributors, prior.unknownContributors);
-    total.descendants = Math.max(total.descendants, prior.descendants);
-  }
-  const entry: RollupEntry = { version: ROLLUP_VERSION, agentId: record.agentId, ...total };
-  return writeOwnerArtifact(storage, ROLLUP_DIR, `${record.agentId}.json`, `${JSON.stringify(entry, null, 2)}\n`);
-}
-
-/** Retention uses the same identity-keyed roll-up before detaching an owned home. */
-export function persistOwnedTelemetryRollup(metadata: OwnershipMetadata): boolean {
-  const telemetry = metadata.telemetry ? refreshTelemetry(metadata.telemetry) ?? metadata.telemetry : undefined;
-  const record = { agentId: metadata.agentId, sessionPath: metadata.sessionPath ?? "", ownership: metadata, telemetry } as RpcAgentRecord;
-  return persistEvictedAgentCost(new Map(), record);
-}
-
-function aggregateWithWatchPaths(storage: AgentStorageContext, registry: RpcAgentRegistry): { cost: CumulativeCost; paths: Set<string> } {
-  const paths = new Set<string>();
-  const cost = aggregateOwner(storage, storage.ownerSessionId, { direct: registry, watchPaths: paths, visitedOwners: new Set() });
-  return { cost, paths };
-}
-function existingDirectories(paths: Iterable<string>): string[] {
-  const out: string[] = [];
-  for (const path of paths) {
-    try { if (existsSync(path) && statSync(path).isDirectory() && !lstatSync(path).isSymbolicLink() && realpathSync(path) === resolve(path)) out.push(path); } catch { /* raced with retention */ }
-  }
-  return out;
-}
-export function watchDescendantCosts(storage: AgentStorageContext, registry: RpcAgentRegistry, onChange: () => void): () => void {
-  const watchers = new Map<string, FSWatcher>();
-  let stopped = false;
-  let scheduled: ReturnType<typeof setTimeout> | undefined;
-  let fingerprint = JSON.stringify(aggregateDescendantCosts(storage, registry));
-  const reconcile = () => {
-    if (stopped) return;
-    const snapshot = aggregateWithWatchPaths(storage, registry);
-    const next = JSON.stringify(snapshot.cost);
-    for (const path of existingDirectories(snapshot.paths)) {
-      if (watchers.has(path)) continue;
-      try { watchers.set(path, watch(path, { persistent: false }, schedule)); } catch { /* direct refresh can retry later */ }
-    }
-    for (const [path, watcher] of watchers) if (!snapshot.paths.has(path) || !existsSync(path)) { watcher.close(); watchers.delete(path); }
-    if (next !== fingerprint) { fingerprint = next; onChange(); }
-  };
-  const schedule = () => {
-    if (stopped || scheduled) return;
-    scheduled = setTimeout(() => { scheduled = undefined; reconcile(); }, 20);
-    scheduled.unref?.();
-  };
-  reconcile();
-  // `fs.watch` cannot observe through a directory that did not exist when it
-  // was armed on every host; a cheap unref'd reconciliation closes that gap.
-  const fallback = setInterval(reconcile, 250);
-  fallback.unref?.();
-  return () => {
-    stopped = true;
-    clearInterval(fallback);
-    if (scheduled) clearTimeout(scheduled);
-    for (const watcher of watchers.values()) watcher.close();
-    watchers.clear();
-  };
 }
 
 export interface LeadUsageSummary {
@@ -222,36 +59,253 @@ export interface LeadUsageSummary {
   latestCacheHitRate?: number;
   cost: CumulativeCost;
 }
+
+interface StoredAgentCost { agentId: string; cost: CumulativeCost }
+interface CostCheckpoint {
+  version: 1;
+  lead: LeadUsageSummary;
+  evictedBaseline: CumulativeCost;
+  agents: StoredAgentCost[];
+}
+
+const emptyLeadUsage = (): LeadUsageSummary => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: emptyCost() });
+const emptyCheckpoint = (): CostCheckpoint => ({ version: CHECKPOINT_VERSION, lead: emptyLeadUsage(), evictedBaseline: emptyCost(), agents: [] });
+function cloneCheckpoint(value: CostCheckpoint): CostCheckpoint {
+  return {
+    version: CHECKPOINT_VERSION,
+    lead: { ...value.lead, cost: cloneCost(value.lead.cost) },
+    evictedBaseline: cloneCost(value.evictedBaseline),
+    agents: value.agents.map(agent => ({ agentId: agent.agentId, cost: cloneCost(agent.cost) })),
+  };
+}
+function checkpointKey(storage: AgentStorageContext): string { return `${storage.root}\0${storage.ownerSessionId}`; }
+function retainFailedCheckpoint(storage: AgentStorageContext, checkpoint: CostCheckpoint): void {
+  retainedFailedCheckpoints.set(checkpointKey(storage), cloneCheckpoint(checkpoint));
+}
 const nonnegative = (value: unknown): number | undefined => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
-export function summarizeLeadUsage(entries: readonly unknown[]): LeadUsageSummary {
-  const summary: LeadUsageSummary = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: emptyCost() };
-  let sawCost = false, unknownCost = false;
-  for (const raw of entries) {
-    const entry = raw as { type?: string; message?: { role?: string; usage?: unknown }; usage?: unknown };
-    const relevant = entry.type === "message" && entry.message?.role === "assistant"
-      ? entry.message.usage
-      : entry.type === "message" && entry.message?.role === "toolResult" && entry.message.usage
-        ? entry.message.usage
-        : (entry.type === "branch_summary" || entry.type === "compaction") && entry.usage
-          ? entry.usage : undefined;
-    if (relevant === undefined) {
-      if (entry.type === "message" && entry.message?.role === "assistant") unknownCost = true;
-      continue;
+const nonnegativeInteger = (value: unknown): number | undefined => {
+  const number = nonnegative(value);
+  return number !== undefined && Number.isSafeInteger(number) ? number : undefined;
+};
+function safePart(value: string): boolean { return /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(value); }
+function parseCost(value: unknown): CumulativeCost | undefined {
+  const cost = value as Partial<CumulativeCost> | null;
+  if (!cost) return undefined;
+  const knownUsd = nonnegative(cost.knownUsd);
+  const knownContributors = nonnegativeInteger(cost.knownContributors);
+  const unknownContributors = nonnegativeInteger(cost.unknownContributors);
+  const descendants = nonnegativeInteger(cost.descendants);
+  return knownUsd === undefined || knownContributors === undefined || unknownContributors === undefined || descendants === undefined
+    ? undefined : { knownUsd, knownContributors, unknownContributors, descendants };
+}
+function parseLeadUsage(value: unknown): LeadUsageSummary | undefined {
+  const lead = value as Partial<LeadUsageSummary> | null;
+  if (!lead) return undefined;
+  const input = nonnegative(lead.input), output = nonnegative(lead.output), cacheRead = nonnegative(lead.cacheRead), cacheWrite = nonnegative(lead.cacheWrite);
+  const latestCacheHitRate = lead.latestCacheHitRate === undefined ? undefined : nonnegative(lead.latestCacheHitRate);
+  const cost = parseCost(lead.cost);
+  if ([input, output, cacheRead, cacheWrite].some(number => number === undefined) || !cost || (latestCacheHitRate !== undefined && latestCacheHitRate > 100)) return undefined;
+  return { input: input!, output: output!, cacheRead: cacheRead!, cacheWrite: cacheWrite!, ...(latestCacheHitRate !== undefined ? { latestCacheHitRate } : {}), cost };
+}
+function parseCheckpoint(raw: string): CostCheckpoint | undefined {
+  let value: unknown;
+  try { value = JSON.parse(raw); } catch { return undefined; }
+  const file = value as Partial<CostCheckpoint> | null;
+  const lead = parseLeadUsage(file?.lead), evictedBaseline = parseCost(file?.evictedBaseline);
+  if (!file || file.version !== CHECKPOINT_VERSION || !lead || !evictedBaseline || !Array.isArray(file.agents)) return undefined;
+  const agents: StoredAgentCost[] = [];
+  const seen = new Set<string>();
+  for (const rawAgent of file.agents) {
+    const agent = rawAgent as Partial<StoredAgentCost> | null;
+    const cost = parseCost(agent?.cost);
+    if (!agent || typeof agent.agentId !== "string" || !safePart(agent.agentId) || !cost || seen.has(agent.agentId)) return undefined;
+    seen.add(agent.agentId); agents.push({ agentId: agent.agentId, cost });
+  }
+  return { version: CHECKPOINT_VERSION, lead, evictedBaseline, agents };
+}
+function loadCheckpoint(storage: AgentStorageContext): { checkpoint: CostCheckpoint; found: boolean } {
+  const retained = retainedFailedCheckpoints.get(checkpointKey(storage));
+  if (retained) return { checkpoint: cloneCheckpoint(retained), found: true };
+  const artifact = readOwnerArtifacts(storage, CHECKPOINT_BUCKET).find(entry => entry.name === CHECKPOINT_FILE);
+  if (!artifact) return { checkpoint: emptyCheckpoint(), found: false };
+  const checkpoint = parseCheckpoint(artifact.content);
+  return checkpoint ? { checkpoint, found: true } : { checkpoint: emptyCheckpoint(), found: false };
+}
+function writeCheckpoint(storage: AgentStorageContext, checkpoint: CostCheckpoint): boolean {
+  const written = writeOwnerArtifact(storage, CHECKPOINT_BUCKET, CHECKPOINT_FILE, `${JSON.stringify(checkpoint, null, 2)}\n`);
+  if (written) retainedFailedCheckpoints.delete(checkpointKey(storage));
+  else {
+    retainFailedCheckpoint(storage, checkpoint);
+    console.error(`ws-pi-agent: cost checkpoint write failed for owner ${storage.ownerSessionId}; retaining the latest estimate until retry`);
+  }
+  return written;
+}
+function storageFromRecord(record: Pick<RpcAgentRecord, "ownership">): AgentStorageContext | undefined {
+  const home = record.ownership?.home;
+  if (!home) return undefined;
+  const owner = dirname(home), namespace = dirname(owner), root = dirname(namespace);
+  if (basename(namespace) !== "ws-agents" || basename(owner) !== record.ownership!.ownerSessionId) return undefined;
+  return { root, ownerSessionId: record.ownership!.ownerSessionId };
+}
+
+class CostEstimateState {
+  readonly storage: AgentStorageContext;
+  readonly registry: RpcAgentRegistry;
+  readonly lead: LeadUsageSummary;
+  readonly evictedBaseline: CumulativeCost;
+  readonly agents: Map<string, CumulativeCost>;
+  private directTotal = emptyCost();
+  private acceptedObjects = new WeakSet<object>();
+
+  constructor(storage: AgentStorageContext, registry: RpcAgentRegistry, checkpoint: CostCheckpoint) {
+    this.storage = storage;
+    this.registry = registry;
+    this.lead = { ...checkpoint.lead, cost: cloneCost(checkpoint.lead.cost) };
+    this.evictedBaseline = cloneCost(checkpoint.evictedBaseline);
+    this.agents = new Map(checkpoint.agents.map(agent => [agent.agentId, cloneCost(agent.cost)]));
+    this.reconcile();
+  }
+
+  reconcile(omit: ReadonlySet<string> = new Set()): void {
+    for (const [agentId, record] of this.registry) {
+      if (omit.has(agentId)) continue;
+      this.agents.set(agentId, mergeAgentCost(this.agents.get(agentId), telemetryCost(record.telemetry)));
     }
-    const usage = relevant as { input?: unknown; output?: unknown; cacheRead?: unknown; cacheWrite?: unknown; cost?: { total?: unknown } };
+    this.recomputeDirectTotal();
+  }
+
+  acceptUsage(source: unknown): void {
+    if (!source || typeof source !== "object" || this.acceptedObjects.has(source as object)) return;
+    this.acceptedObjects.add(source as object);
+    const entry = source as { type?: string; role?: string; message?: { role?: string; usage?: unknown }; usage?: unknown };
+    const role = entry.role ?? entry.message?.role;
+    const usageValue = entry.message?.usage ?? entry.usage;
+    const assistant = role === "assistant";
+    const toolResult = role === "toolResult";
+    const summary = entry.type === "compaction" || entry.type === "branch_summary";
+    if ((!assistant && !toolResult && !summary) || !usageValue || typeof usageValue !== "object") {
+      if (assistant) this.lead.cost.unknownContributors = 1;
+      return;
+    }
+    const usage = usageValue as { input?: unknown; output?: unknown; cacheRead?: unknown; cacheWrite?: unknown; cost?: { total?: unknown } };
     const input = nonnegative(usage.input) ?? 0, output = nonnegative(usage.output) ?? 0, cacheRead = nonnegative(usage.cacheRead) ?? 0, cacheWrite = nonnegative(usage.cacheWrite) ?? 0;
-    summary.input += input; summary.output += output; summary.cacheRead += cacheRead; summary.cacheWrite += cacheWrite;
-    if (entry.type === "message" && entry.message?.role === "assistant") {
+    this.lead.input += input; this.lead.output += output; this.lead.cacheRead += cacheRead; this.lead.cacheWrite += cacheWrite;
+    if (assistant) {
       const prompt = input + cacheRead + cacheWrite;
-      summary.latestCacheHitRate = prompt > 0 ? cacheRead / prompt * 100 : undefined;
+      this.lead.latestCacheHitRate = prompt > 0 ? cacheRead / prompt * 100 : undefined;
     }
     const cost = nonnegative(usage.cost?.total);
-    if (cost === undefined) unknownCost = true; else { sawCost = true; summary.cost.knownUsd += cost; }
+    if (cost === undefined) this.lead.cost.unknownContributors = 1;
+    else { this.lead.cost.knownUsd += cost; this.lead.cost.knownContributors = 1; }
+    this.lead.cost.descendants = this.lead.cost.knownContributors || this.lead.cost.unknownContributors ? 1 : 0;
   }
-  summary.cost.knownContributors = sawCost ? 1 : 0;
-  summary.cost.unknownContributors = unknownCost ? 1 : 0;
-  summary.cost.descendants = sawCost || unknownCost ? 1 : 0;
-  return summary;
+
+  foldAndPersist(record: RpcAgentRecord): boolean {
+    this.reconcile();
+    const stable = this.snapshot();
+    const cost = mergeAgentCost(this.agents.get(record.agentId), telemetryCost(record.telemetry));
+    addCost(this.evictedBaseline, cost);
+    this.agents.delete(record.agentId);
+    this.recomputeDirectTotal();
+    if (this.persist(new Set([record.agentId]))) return true;
+    this.restore(stable);
+    retainFailedCheckpoint(this.storage, stable);
+    return false;
+  }
+
+  presentation(): { lead: LeadUsageSummary; leadCost: string; directCost: string } {
+    return {
+      lead: { ...this.lead, cost: cloneCost(this.lead.cost) },
+      leadCost: formatCumulativeCost(this.lead.cost),
+      directCost: formatCumulativeCost(this.directTotal),
+    };
+  }
+
+  persist(omit: ReadonlySet<string> = new Set()): boolean {
+    this.reconcile(omit);
+    const stable = this.snapshot();
+    const activeIds = new Set([...this.registry.keys()].filter(id => !omit.has(id)));
+    for (const [agentId, cost] of [...this.agents]) {
+      if (activeIds.has(agentId)) continue;
+      addCost(this.evictedBaseline, cost);
+      this.agents.delete(agentId);
+    }
+    // The serialized identity set can never exceed the live registry it snapshots.
+    while (this.agents.size > activeIds.size) {
+      const first = this.agents.entries().next().value as [string, CumulativeCost] | undefined;
+      if (!first) break;
+      addCost(this.evictedBaseline, first[1]); this.agents.delete(first[0]);
+    }
+    this.recomputeDirectTotal();
+    const written = writeCheckpoint(this.storage, this.snapshot());
+    if (!written) {
+      this.restore(stable);
+      retainFailedCheckpoint(this.storage, stable);
+    }
+    return written;
+  }
+
+  private snapshot(): CostCheckpoint {
+    return {
+      version: CHECKPOINT_VERSION,
+      lead: { ...this.lead, cost: cloneCost(this.lead.cost) },
+      evictedBaseline: cloneCost(this.evictedBaseline),
+      agents: [...this.agents].map(([agentId, cost]) => ({ agentId, cost: cloneCost(cost) })),
+    };
+  }
+
+  private restore(checkpoint: CostCheckpoint): void {
+    Object.assign(this.lead, checkpoint.lead, { cost: cloneCost(checkpoint.lead.cost) });
+    if (checkpoint.lead.latestCacheHitRate === undefined) delete this.lead.latestCacheHitRate;
+    Object.assign(this.evictedBaseline, checkpoint.evictedBaseline);
+    this.agents.clear();
+    for (const agent of checkpoint.agents) this.agents.set(agent.agentId, cloneCost(agent.cost));
+    this.recomputeDirectTotal();
+  }
+
+  private recomputeDirectTotal(): void {
+    const total = cloneCost(this.evictedBaseline);
+    for (const cost of this.agents.values()) addCost(total, cost);
+    this.directTotal = total;
+  }
+}
+
+const registryStorage = new WeakMap<RpcAgentRegistry, AgentStorageContext>();
+const registryEstimates = new WeakMap<RpcAgentRegistry, CostEstimateState>();
+const foldedAgentRecords = new WeakSet<object>();
+export function registerAgentCostOwner(registry: RpcAgentRegistry, storage: AgentStorageContext | undefined): void {
+  if (storage) registryStorage.set(registry, storage);
+}
+
+/** Persists the mounted registry's cached estimate at an explicit lifecycle boundary. */
+export function persistAgentCostCheckpoint(registry: RpcAgentRegistry): boolean {
+  return registryEstimates.get(registry)?.persist() ?? true;
+}
+
+/** Folds one evicted direct record into the scalar baseline before registry/home removal. */
+export function persistEvictedAgentCost(registry: RpcAgentRegistry, record: RpcAgentRecord): boolean {
+  if (foldedAgentRecords.has(record)) return true;
+  const storage = registryStorage.get(registry) ?? storageFromRecord(record);
+  if (!safePart(record.agentId)) return false;
+  if (!storage) { foldedAgentRecords.add(record); return true; }
+  registryStorage.set(registry, storage);
+  const state = registryEstimates.get(registry) ?? new CostEstimateState(storage, registry, loadCheckpoint(storage).checkpoint);
+  const written = state.foldAndPersist(record);
+  if (written) foldedAgentRecords.add(record);
+  return written;
+}
+
+/** Retention folds only this direct owned record; it never discovers descendants. */
+export function persistOwnedTelemetryRollup(metadata: OwnershipMetadata): boolean {
+  const storage = storageFromRecord({ ownership: metadata } as Pick<RpcAgentRecord, "ownership">);
+  if (!storage || !safePart(metadata.agentId)) return false;
+  const { checkpoint } = loadCheckpoint(storage);
+  const agents = new Map(checkpoint.agents.map(agent => [agent.agentId, cloneCost(agent.cost)]));
+  const observed = mergeAgentCost(agents.get(metadata.agentId), telemetryCost(metadata.telemetry));
+  addCost(checkpoint.evictedBaseline, observed);
+  agents.delete(metadata.agentId);
+  checkpoint.agents = [...agents].map(([agentId, cost]) => ({ agentId, cost }));
+  return writeCheckpoint(storage, checkpoint);
 }
 
 export interface FooterPrimitives {
@@ -275,13 +329,21 @@ export interface AgentFooterContext {
   getContextUsage?(): { percent?: number | null; contextWindow?: number } | undefined;
   ui: { setFooter(factory: ((tui: FooterTui, theme: FooterTheme, data: FooterData) => AgentFooterComponent) | undefined): void };
 }
-export interface AgentFooterController { refresh(): void; stop(): void }
+export interface AgentFooterController {
+  refresh(): void;
+  refreshAgents(): void;
+  acceptUsage(source: unknown): void;
+  checkpoint(): boolean;
+  stop(): void;
+}
 export interface AgentFooterSessionLifecycle {
   start(role: SpawnRole | undefined, ctx: AgentFooterContext & { mode?: string }, registry: RpcAgentRegistry, storage: AgentStorageContext): Promise<void>;
   refresh(): void;
+  refreshAgents(): void;
+  acceptUsage(source: unknown): void;
+  checkpoint(): void;
   stop(): void;
 }
-interface ControllerOptions { watchCosts?: typeof watchDescendantCosts }
 
 /** Owns replacement/reload/mode-transition/shutdown semantics for index.ts. */
 export function createAgentFooterSessionLifecycle(
@@ -289,15 +351,21 @@ export function createAgentFooterSessionLifecycle(
   createController: typeof createAgentFooterController = createAgentFooterController,
 ): AgentFooterSessionLifecycle {
   let current: AgentFooterController | undefined;
+  let generation = 0;
   return {
     async start(role, ctx, registry, storage) {
-      current?.stop();
-      current = undefined;
+      const ownGeneration = ++generation;
+      current?.stop(); current = undefined;
       if (!shouldArmAgentFooter(role, ctx.mode)) return;
-      current = createController(ctx, registry, storage, await loadPrimitives());
+      const primitives = await loadPrimitives();
+      if (ownGeneration !== generation) return;
+      current = createController(ctx, registry, storage, primitives);
     },
     refresh() { current?.refresh(); },
-    stop() { current?.stop(); current = undefined; },
+    refreshAgents() { current?.refreshAgents(); },
+    acceptUsage(source) { current?.acceptUsage(source); },
+    checkpoint() { current?.checkpoint(); },
+    stop() { generation += 1; current?.stop(); current = undefined; },
   };
 }
 
@@ -325,20 +393,15 @@ function styleStats(plain: string, values: readonly string[], contextPart: strin
     if (!money) continue;
     const start = plain.indexOf(money, searchAt);
     if (start < 0) continue;
-    ranges.push({ start, text: money, color: "accent" });
-    searchAt = start + money.length;
+    ranges.push({ start, text: money, color: "accent" }); searchAt = start + money.length;
   }
   const contextStart = plain.indexOf(contextPart);
-  if (contextStart >= 0 && contextPercent != null && contextPercent > 70) {
-    ranges.push({ start: contextStart, text: contextPart, color: contextPercent > 90 ? "error" : "warning" });
-  }
+  if (contextStart >= 0 && contextPercent != null && contextPercent > 70) ranges.push({ start: contextStart, text: contextPart, color: contextPercent > 90 ? "error" : "warning" });
   ranges.sort((a, b) => a.start - b.start);
   let at = 0, styled = "";
   for (const range of ranges) {
     if (range.start < at) continue;
-    styled += theme.fg("dim", plain.slice(at, range.start));
-    styled += theme.fg(range.color, range.text);
-    at = range.start + range.text.length;
+    styled += theme.fg("dim", plain.slice(at, range.start)); styled += theme.fg(range.color, range.text); at = range.start + range.text.length;
   }
   return styled + theme.fg("dim", plain.slice(at));
 }
@@ -348,28 +411,38 @@ export function createAgentFooterController(
   registry: RpcAgentRegistry,
   storage: AgentStorageContext,
   primitives: FooterPrimitives,
-  options: ControllerOptions = {},
 ): AgentFooterController {
   registerAgentCostOwner(registry, storage);
+  const loaded = loadCheckpoint(storage);
+  const state = new CostEstimateState(storage, registry, loaded.checkpoint);
+  if (!loaded.found && ctx.sessionManager.getEntries().length > 0) {
+    state.lead.cost.unknownContributors = 1;
+    state.lead.cost.descendants = 1;
+  }
+  registryEstimates.set(registry, state);
+  let presentation = state.presentation();
   let renderRequest: (() => void) | undefined;
+  let componentDispose: (() => void) | undefined;
   let stopped = false;
+  const updatePresentation = () => { presentation = state.presentation(); if (!stopped) renderRequest?.(); };
+
   ctx.ui.setFooter((tui, theme, footerData) => {
     renderRequest = () => tui.requestRender();
     const unbranch = footerData.onBranchChange(renderRequest);
-    const unwatch = (options.watchCosts ?? watchDescendantCosts)(storage, registry, renderRequest);
     let disposed = false;
+    componentDispose = () => {
+      if (disposed) return;
+      disposed = true; unbranch();
+      if (renderRequest) renderRequest = undefined;
+      componentDispose = undefined;
+    };
     return {
-      invalidate() { /* Theme is read from the host callback on every render; no themed cache exists. */ },
-      dispose() {
-        if (disposed) return;
-        disposed = true; unbranch(); unwatch();
-        if (renderRequest) renderRequest = undefined;
-      },
+      invalidate() { /* Theme is read from the host callback on every render. */ },
+      dispose: componentDispose,
       render(width: number): string[] {
         if (width <= 0) return [""];
-        const usage = summarizeLeadUsage(ctx.sessionManager.getEntries());
-        const descendants = aggregateDescendantCosts(storage, registry);
-        const leadCost = formatCumulativeCost(usage.cost), childCost = formatCumulativeCost(descendants);
+        const usage = presentation.lead;
+        const leadCost = presentation.leadCost, directCost = presentation.directCost;
         const tokenParts = [
           usage.input ? `↑${formatTokens(usage.input)}` : undefined,
           usage.output ? `↓${formatTokens(usage.output)}` : undefined,
@@ -381,7 +454,7 @@ export function createAgentFooterController(
         const window = context?.contextWindow ?? ctx.model?.contextWindow ?? 0;
         const percent = context?.percent == null ? "?" : context.percent.toFixed(1);
         const contextPart = `${percent}%/${formatTokens(window)}`.replace("?%", "?");
-        const required = [`Lead ${leadCost}`, `Subagents ${childCost}`];
+        const required = [`Lead ${leadCost}`, `Direct agents ${directCost}`];
         let optional = [...tokenParts, contextPart];
         const modelId = ctx.model?.id ?? "no-model";
         let model = ctx.model?.reasoning ? `${modelId} • ${ctx.thinkingLevel ?? "off"}` : modelId;
@@ -394,7 +467,7 @@ export function createAgentFooterController(
         const padding = model ? " ".repeat(Math.max(2, width - primitives.visibleWidth(left) - primitives.visibleWidth(model))) : "";
         let statsPlain = left + padding + model;
         if (primitives.visibleWidth(statsPlain) > width) statsPlain = primitives.truncateToWidth(statsPlain, width, "");
-        const stats = styleStats(statsPlain, [leadCost, childCost], contextPart, context?.percent, theme);
+        const stats = styleStats(statsPlain, [leadCost, directCost], contextPart, context?.percent, theme);
 
         let path = displayCwd(ctx.sessionManager.getCwd?.() ?? ctx.cwd);
         const branch = footerData.getGitBranch(); if (branch) path += ` (${branch})`;
@@ -406,8 +479,17 @@ export function createAgentFooterController(
       },
     };
   });
+
   return {
     refresh() { if (!stopped) renderRequest?.(); },
-    stop() { if (stopped) return; stopped = true; ctx.ui.setFooter(undefined); renderRequest = undefined; },
+    refreshAgents() { if (stopped) return; state.reconcile(); updatePresentation(); },
+    acceptUsage(source) { if (stopped) return; state.acceptUsage(source); updatePresentation(); },
+    checkpoint() { return stopped ? true : state.persist(); },
+    stop() {
+      if (stopped) return;
+      state.persist(); stopped = true;
+      ctx.ui.setFooter(undefined); componentDispose?.(); renderRequest = undefined;
+      if (registryEstimates.get(registry) === state) registryEstimates.delete(registry);
+    },
   };
 }

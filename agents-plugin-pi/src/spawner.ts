@@ -108,7 +108,7 @@ import { createWebSearch } from "./web-search.ts";
 import { clearWebReadiness, verifyWebReadiness, WEB_HOME_ENV, WEB_NONCE_ENV } from "./web-readiness.ts";
 import { assertSubtreeFinal, beginSubtreeDispatch, installSubtreePublisher, publishSubtree, readSubtreeChannel, readSubtreeSnapshot, subtreeWaiting, type SubtreeChannel } from "./subtree-lifecycle.ts";
 import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
-import { persistEvictedAgentCost, registerAgentCostOwner } from "./agent-footer.ts";
+import { persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-footer.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers shared by persistent RPC-backed child paths.
@@ -1057,6 +1057,16 @@ function triggerAgentWidgetRefresh(): void {
     agentWidgetRefreshRef.current?.();
   } catch {
     // best effort — see doc comment above.
+  }
+}
+
+/** Separate event seam for the footer's bounded telemetry reconciliation. */
+export const agentCostRefreshRef: { current: (() => void) | undefined } = { current: undefined };
+function triggerAgentCostRefresh(): void {
+  try {
+    agentCostRefreshRef.current?.();
+  } catch {
+    // Cosmetic accounting must never fail an agent lifecycle transition.
   }
 }
 
@@ -2431,6 +2441,7 @@ export function attachEventListener(
           if (record.client === client && record.launchGeneration === generation && refreshAgentTelemetry(record, state)) {
             publishSubtree(registry);
             triggerAgentWidgetRefresh();
+            triggerAgentCostRefresh();
           }
         } catch {
           if (record.client === client && record.launchGeneration === generation) {
@@ -2635,7 +2646,8 @@ export function lastActivityAt(record: RpcAgentRecord): number {
  * eligible only when durable metadata independently confirms it stopped;
  * missing or ambiguous metadata blocks both memory and disk eviction. Legacy
  * records retain registry-only eviction because their paths do not authorize
- * disk deletion. Deletion failure is diagnostic and does not fail the spawn.
+ * disk deletion. A deletion failure retains the registry record and rejects
+ * the spawn so a later retention pass cannot fold the same cost a second time.
  */
 export function evictForCapacity(
   registry: RpcAgentRegistry,
@@ -2661,17 +2673,24 @@ export function evictForCapacity(
         error: `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) reached and every remaining record is live, protected, or durably unknown — nothing can be evicted to fit`,
       };
     }
-    if (!persistEvictedAgentCost(registry, candidate)) {
-      return { ok: false, error: `ws-pi-agent: ws-agent-spawn rejected: could not preserve evicted cost telemetry for ${candidate.agentId}` };
-    }
     if (candidate.ownership) {
       const removal = removeOwned(candidate.ownership);
-      if (removal.status !== "deleted" && removal.status !== "failed") {
+      if (removal.status !== "deleted") {
         return {
           ok: false,
-          error: `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) candidate became protected or durably unknown before eviction`,
+          error: removal.status === "failed"
+            ? `ws-pi-agent: ws-agent-spawn rejected: owned-home removal failed for ${candidate.agentId}: ${removal.error}`
+            : `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) candidate became protected or durably unknown before eviction`,
         };
       }
+    }
+    if (!persistEvictedAgentCost(registry, candidate)) {
+      // The owned home may already be gone, but the in-memory record and its
+      // cached telemetry remain retryable. Treat it as unowned on the retry.
+      candidate.ownershipObserverStop?.();
+      candidate.ownershipObserverStop = undefined;
+      candidate.ownership = undefined;
+      return { ok: false, error: `ws-pi-agent: ws-agent-spawn rejected: could not preserve evicted cost telemetry for ${candidate.agentId}` };
     }
     candidate.ownershipObserverStop?.();
     registry.delete(candidate.agentId);
@@ -2971,6 +2990,7 @@ export async function spawnAgent(
   // 260905 (live-agent widget ticket): a brand-new registry member, live and
   // running from its initial prompt — the widget's first sighting of it.
   triggerAgentWidgetRefresh();
+  triggerAgentCostRefresh();
   return { agent_id: agentId, alias: record.alias, evicted: eviction.evictedLabel };
   } finally { finishDispatch(); }
 }
@@ -3275,7 +3295,7 @@ export async function stopAgent(
   registry: RpcAgentRegistry,
   agentId: string,
   pi?: ExtensionAPI,
-  opts?: { silent?: boolean; onStopped?: (success: boolean) => void },
+  opts?: { silent?: boolean; onStopped?: (success: boolean) => void; skipCostCheckpoint?: boolean },
 ): Promise<{ agent_id: string }> {
   // 260905 (alias/park/cap ticket): resolve alias-or-uuid first — see
   // `sendToAgent`'s identical resolve-then-`.get()` shape.
@@ -3355,9 +3375,11 @@ export async function stopAgent(
       // held delivery that blocks the owner's fresh subtree final.
       pushToLead(pi, registry, record, "ws-agent-settled", { reason: "stopped" }, "followUp");
     }
-    // 260905 (live-agent widget ticket): the record just left the live state
-    // (or lost its thread bind) — either way a widget-relevant transition.
+    // The final disk reconciliation above is the accounting boundary: refresh
+    // the in-memory estimate first, then persist its one bounded checkpoint.
     triggerAgentWidgetRefresh();
+    triggerAgentCostRefresh();
+    if (!opts?.skipCostCheckpoint) persistAgentCostCheckpoint(registry);
   }
   publishSubtree(registry);
   return { agent_id: record.agentId };
@@ -3761,7 +3783,7 @@ export function registerAgentTools(
       // stopAgent so shutdown leaves records in the same resting shape every
       // other stop does (the sidecar snapshot, index.ts, is taken BEFORE this
       // runs, while the records are still marked live).
-      const rpcStops = [...rpcRegistry.keys()].map((agentId) => stopAgent(rpcRegistry, agentId, pi, { silent: true }).catch(() => undefined));
+      const rpcStops = [...rpcRegistry.keys()].map((agentId) => stopAgent(rpcRegistry, agentId, pi, { silent: true, skipCostCheckpoint: true }).catch(() => undefined));
       await Promise.allSettled(rpcStops);
     },
   };

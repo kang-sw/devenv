@@ -722,7 +722,7 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
     } finally { rpc.restore(); }
   });
 
-  test("a real owned-home removal failure is diagnostic-only and the cap-triggering spawn still succeeds", async (t) => {
+  test("a real owned-home removal failure retains the record and rejects the cap-triggering spawn", async (t) => {
     const rpc = installRpcHarness();
     const previousCap = process.env[WS_PI_AGENT_REGISTRY_CAP_ENV];
     const diagnostics = t.mock.method(console, "error", () => {});
@@ -738,10 +738,12 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
       handle.rpcRegistry.set("blocked-delete", freshRpcRecord({ agentId: "blocked-delete", ownership, sessionPath: ownership.sessionPath }));
       process.env[WS_PI_AGENT_REGISTRY_CAP_ENV] = "1";
 
-      const parsed = JSON.parse((await tool.execute("call", { system_prompt_path: "/tmp/p.md", prompt: "replacement" }, undefined, undefined, ctx)).content[0]!.text);
-      assert.ok(parsed.agent_id);
-      assert.equal(handle.rpcRegistry.has("blocked-delete"), false, "eligible record is evicted despite best-effort disk failure");
-      assert.equal(handle.rpcRegistry.has(parsed.agent_id), true, "the replacement spawn is admitted");
+      await assert.rejects(
+        () => tool.execute("call", { system_prompt_path: "/tmp/p.md", prompt: "replacement" }, undefined, undefined, ctx),
+        /owned-home removal failed/,
+      );
+      assert.equal(handle.rpcRegistry.has("blocked-delete"), true, "failed deletion keeps the only copy of the record retryable");
+      assert.equal(handle.rpcRegistry.size, 1, "the replacement spawn is not admitted without an exactly-once eviction");
       assert.equal(existsSync(ownership.home), true, "failed removal was rolled back for retry");
       assert.ok(diagnostics.mock.callCount() >= 1);
       if (existsSync(locked)) chmodSync(locked, 0o700);
@@ -3745,7 +3747,7 @@ describe("evictForCapacity", () => {
       assert.equal(registry.size, 0);
       assert.equal(existsSync(ownership.home), false);
       assert.deepEqual(readdirSync(join(realpathSync(root), "ws-agents")), ["lead-1"]);
-      assert.deepEqual(readdirSync(join(realpathSync(root), "ws-agents", "lead-1")), [".cost-rollup"], "eviction retains only the durable cost roll-up directory");
+      assert.deepEqual(readdirSync(join(realpathSync(root), "ws-agents", "lead-1")), [".cost-estimate"], "eviction retains only the bounded cost checkpoint directory");
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
@@ -3795,15 +3797,15 @@ describe("evictForCapacity", () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test("an owned-home deletion failure remains diagnostic-only after eligibility and does not reject capacity eviction", () => {
+  test("an owned-home deletion failure retains the candidate instead of risking a later duplicate fold", () => {
     const root = mkdtempSync(join(tmpdir(), "ws-pi-cap-test-"));
     try {
       const ownership = allocateAgentHome(createAgentStorageContext("lead-1", root), "owned-failure", "worker");
       updateOwnership(ownership.home, { liveness: { lifecycle: "stopped", running: false } });
       const registry: RpcAgentRegistry = new Map([["owned-failure", freshRpcRecord({ agentId: "owned-failure", ownership, sessionPath: ownership.sessionPath })]]);
       const result = evictForCapacity(registry, 1, () => ({ status: "failed", error: "permission denied" }));
-      assert.deepEqual(result, { ok: true, evictedLabel: "owned-failure" });
-      assert.equal(registry.size, 0);
+      assert.deepEqual(result, { ok: false, error: "ws-pi-agent: ws-agent-spawn rejected: owned-home removal failed for owned-failure: permission denied" });
+      assert.equal(registry.size, 1);
       assert.ok(readFileSync(join(ownership.home, "ownership.json"), "utf8"), "metadata remains for a later retry");
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
