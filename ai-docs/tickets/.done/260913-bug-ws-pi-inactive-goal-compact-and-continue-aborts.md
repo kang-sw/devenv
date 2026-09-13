@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 72a2c0a4b6bd76d7
 sage-review-completeness-reviewed: 72a2c0a4b6bd76d7
+completed: 2026-09-13
 ---
 
 # Pi accepts goal-compact-and-continue without an active goal, then aborts compaction
@@ -52,3 +53,16 @@ The lever is meaningful only while a goal is active. Accepting it after goal tea
 ### Phase 1: Fail fast before inactive-goal compaction
 
 Add the inactive-goal precondition at the authoritative `goal-compact-and-continue` execution boundary. Cover both the rejected inactive call and the unchanged active-goal path with focused regression tests. Verify that rejection occurs before any compaction callback, carry-forward persistence, or re-injection scheduling, and run the relevant Pi extension suite.
+
+### Result (1aa53a0) - 2026-09-13
+
+The existing lever execution boundary now throws a clear inactive-goal precondition error before entering the compaction hold, saving carry-forward text, scheduling re-injection, or calling the host compaction API. Active-goal compaction and verbatim carry-forward behavior remain unchanged.
+
+Regression coverage proves the rejected call leaves host compaction, notifications, status, timers, and reminders untouched; `a5a18897` additionally proves the rejected carry cannot appear after a later goal is armed. `npm --prefix agents-plugin-pi test -- test/goal-loop.test.ts` passed 133 tests, and `npm --prefix agents-plugin-pi test` passed 1,809 tests with two expected skips.
+
+Correctness and Fit review were clean. Test review's one Important coverage finding was fixed in `a5a18897`, and round-two Test review confirmed it resolved with no new observations. The rejection uses Pi's native thrown-tool-error path rather than ordinary result content so an inactive call cannot appear successful.
+
+
+## Resolution (2026-09-13)
+
+Rejected inactive `goal-compact-and-continue` calls synchronously at the authoritative Pi lever boundary, before compaction or goal-loop state mutation. Added focused no-side-effect and carry-leak regressions; the full Pi suite and two-round independent review completed cleanly.
