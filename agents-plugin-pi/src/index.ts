@@ -223,6 +223,7 @@ import { loadHostPiTui } from "./pi-tui.ts";
 import { addClaudeDelegateIfLead, registerClaudeDelegateSession } from "./claude-delegate.ts";
 import { createClaudeDesignReviewContextProvider } from "./claude-design-review.ts";
 import { assertPolicyTool, readDelegationPolicy } from "./delegation-policy.ts";
+import { registerScopedWriteTools } from "./write-scopes.ts";
 import { registerWebTools } from "./web-tools.ts";
 import { publishSubtree } from "./subtree-lifecycle.ts";
 
@@ -381,6 +382,11 @@ function installMissingTaskForkTools(
 
 export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   const delegation = readDelegationPolicy();
+  // Same-name wrappers preserve Pi's native schema, diff renderer, queue, and
+  // result shape while the explicit policy — not tool visibility — authorizes
+  // each target. A missing native delegation seam fails extension startup and
+  // therefore child allocation rather than falling back to broad write tools.
+  if (delegation?.write?.mode === "scoped") registerScopedWriteTools(pi, delegation.write);
   // CLI visibility alone is not authority: deferred activation may expose a
   // name later. Enforce the immutable ceiling at every actual tool call.
   pi.on("tool_call", event => {

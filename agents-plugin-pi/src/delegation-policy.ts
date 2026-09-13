@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { canDelegateWriteCapability, parseEffectiveWriteCapability, type EffectiveWriteCapability } from "./write-scopes.ts";
 
 export const DEFAULT_MAX_AGENT_DEPTH = 2;
 export const DELEGATION_ENV = "WS_PI_DELEGATION_POLICY";
@@ -20,6 +21,8 @@ export interface DelegationPolicy {
   authority: SessionAuthority;
   /** Separate from active tools: workers can delegate network reads without exposing a web tool themselves. */
   network?: NetworkAuthority;
+  /** Explicit filesystem write authority; tool-name presence is not the authority model. */
+  write?: EffectiveWriteCapability;
   sessionKey?: string;
   parentSessionKey?: string;
 }
@@ -46,6 +49,15 @@ const READ_WS = new Set([
 export function readOnlyWsTools(tools: readonly string[]): string[] {
   return tools.filter(name => name.startsWith("ws__") && READ_WS.has(name.slice(4)));
 }
+function legacyWriteCapability(policy: Pick<DelegationPolicy, "depth" | "tools">): EffectiveWriteCapability {
+  if (policy.depth === 0 || (policy.tools.includes("edit") && policy.tools.includes("write"))) return { mode: "unrestricted" };
+  return { mode: "none" };
+}
+
+export function effectiveWriteCapability(policy: Pick<DelegationPolicy, "depth" | "tools" | "write">): EffectiveWriteCapability {
+  return policy.write ? parseEffectiveWriteCapability(policy.write) : legacyWriteCapability(policy);
+}
+
 export function parseDelegationPolicy(value: unknown): DelegationPolicy {
   const p = value as DelegationPolicy;
   if (!p || p.version !== 1 || !Number.isSafeInteger(p.depth) || !Number.isSafeInteger(p.maxDepth) ||
@@ -53,7 +65,10 @@ export function parseDelegationPolicy(value: unknown): DelegationPolicy {
       !Object.hasOwn(AUTHORITY, p.authority) || (p.sessionKey !== undefined && typeof p.sessionKey !== "string") ||
       (p.parentSessionKey !== undefined && typeof p.parentSessionKey !== "string") ||
       (p.network !== undefined && (!p.network || typeof p.network.search !== "boolean" || typeof p.network.fetch !== "boolean"))) throw new Error("ws-pi-agent: malformed delegation policy");
-  return { ...p, tools: [...new Set(p.tools)], ...(p.network ? { network: { ...p.network } } : {}) };
+  let write: EffectiveWriteCapability;
+  try { write = p.write === undefined ? legacyWriteCapability(p) : parseEffectiveWriteCapability(p.write); }
+  catch { throw new Error("ws-pi-agent: malformed delegation policy"); }
+  return { ...p, tools: [...new Set(p.tools)], write, ...(p.network ? { network: { ...p.network } } : {}) };
 }
 export function readDelegationPolicy(env: NodeJS.ProcessEnv = process.env): DelegationPolicy | undefined {
   const raw = env[DELEGATION_ENV];
@@ -62,7 +77,7 @@ export function readDelegationPolicy(env: NodeJS.ProcessEnv = process.env): Dele
 export function terminalTools(tools: readonly string[], depth: number, maxDepth: number): string[] {
   return [...new Set(tools)].filter(tool => depth < maxDepth || !CHILD_MANAGEMENT_TOOLS.includes(tool as never));
 }
-export function childPolicy(parent: DelegationPolicy, tools: readonly string[], authority: SessionAuthority, requiresChildren = false, sessionKey?: string, network?: NetworkAuthority): DelegationPolicy {
+export function childPolicy(parent: DelegationPolicy, tools: readonly string[], authority: SessionAuthority, requiresChildren = false, sessionKey?: string, network?: NetworkAuthority, write?: EffectiveWriteCapability): DelegationPolicy {
   const depth = parent.depth + 1;
   if (depth > parent.maxDepth) throw new Error(`ws-pi-agent: maximum delegation depth ${parent.maxDepth} reached`);
   if (requiresChildren && depth === parent.maxDepth) throw new Error("ws-pi-agent: playbook requires children but delegation budget is exhausted");
@@ -75,13 +90,18 @@ export function childPolicy(parent: DelegationPolicy, tools: readonly string[], 
   if ((effective.includes("web_search") && !requested.search) || (effective.includes("ws_web_fetch") && !requested.fetch)) {
     throw new Error("ws-pi-agent: network tool lacks explicit authority");
   }
+  const requestedWrite = write ?? legacyWriteCapability({ depth, tools: effective });
+  if (!canDelegateWriteCapability(effectiveWriteCapability(parent), requestedWrite)) {
+    throw new Error("ws-pi-agent: child write capability exceeds parent ceiling");
+  }
   if (parent.depth > 0) {
-    const excess = effective.filter(tool => !NETWORK_TOOLS.includes(tool as never) && !parent.tools.includes(tool));
+    const scopedWrapperTools = requestedWrite.mode === "scoped" ? new Set(["edit", "write"]) : undefined;
+    const excess = effective.filter(tool => !NETWORK_TOOLS.includes(tool as never) && !scopedWrapperTools?.has(tool) && !parent.tools.includes(tool));
     if (excess.length || AUTHORITY[authority] > AUTHORITY[parent.authority]) {
       throw new Error(`ws-pi-agent: child capability exceeds parent ceiling (${excess.join(", ") || `${parent.authority} -> ${authority}`})`);
     }
   }
-  return { version: 1, depth, maxDepth: parent.maxDepth, tools: effective, authority, ...(network || requested.search || requested.fetch ? { network: requested } : {}), ...(sessionKey ? { sessionKey } : {}), ...(!sessionKey && parent.sessionKey ? { parentSessionKey: parent.sessionKey } : {}) };
+  return { version: 1, depth, maxDepth: parent.maxDepth, tools: effective, authority, write: requestedWrite, ...(network || requested.search || requested.fetch ? { network: requested } : {}), ...(sessionKey ? { sessionKey } : {}), ...(!sessionKey && parent.sessionKey ? { parentSessionKey: parent.sessionKey } : {}) };
 }
 export function assertPolicyTool(policy: DelegationPolicy | undefined, name: string): void {
   if (policy && (!policy.tools.includes(name) || (name === "web_search" && !policy.network?.search) || (name === "ws_web_fetch" && !policy.network?.fetch))) throw new Error(`ws-pi-agent: ${name} exceeds this agent's capability ceiling`);

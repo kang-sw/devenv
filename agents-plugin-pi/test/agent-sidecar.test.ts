@@ -136,6 +136,18 @@ describe("captureOrphans", () => {
     assert.deepEqual(revived.ownerSends, [{ text: "first", at: 10 }, { text: "second", at: 20 }]);
   });
 
+  test("scoped write authority survives capture, parse, and rehydrate without widening", () => {
+    const delegation = {
+      version: 1 as const, depth: 1, maxDepth: 2, authority: "lead" as const,
+      tools: ["read", "edit", "write"], network: { search: false, fetch: false },
+      write: { mode: "scoped" as const, scopes: [{ path: "/tmp/ws-pi-agent-x/output", kind: "tree" as const, include: ["**/*.md"] }] },
+    };
+    const [captured] = captureOrphans(new Map([["a1", record({ delegation })]]));
+    const [parsed] = parseOrphans(serializeOrphans([captured]));
+    const revived = rehydrateOrphanRecord(parsed);
+    assert.deepEqual(revived.delegation?.write, delegation.write);
+  });
+
   test("records the state at shutdown and the last-report time (relay #2: the roll-call needs both)", () => {
     const registry: RpcAgentRegistry = new Map([
       ["busy", record({ agentId: "busy", client: {} as RpcClient, running: true, reportLog: [{ at: 1_000 }, { at: 2_000 }] })],
