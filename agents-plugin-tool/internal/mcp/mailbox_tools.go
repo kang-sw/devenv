@@ -257,15 +257,16 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, lerr))
 	}
 
-	// Resolved once, up front, so the peer-enumeration loop below can apply
-	// the same self-exclusion predicate the self block already trusted:
-	// isOwner here is exactly the condition self["address"] gets set under.
-	identity := s.mailboxIdentityResolved()
-	isOwner := false
-	if identity.Active {
-		if ok, _, oerr := s.mailboxOwnerCheck(sessionKey, entry.root); oerr == nil && ok {
-			isOwner = true
-		}
+	// isOwner mirrors the exact condition self["address"] gets populated
+	// under, so the peer-enumeration loop below can drop the caller's own
+	// live entry with the same predicate. mailboxOwnerCheck already
+	// resolves and Active-guards identity internally (file idiom, see
+	// mailboxFromStamp/handleMailboxSend/mailboxHasConflict call sites), so
+	// its returned identity is reused here rather than re-resolving it via
+	// a second mailboxIdentityResolved() call.
+	isOwner, identity, ownerErr := s.mailboxOwnerCheck(sessionKey, entry.root)
+	if ownerErr != nil {
+		isOwner = false
 	}
 
 	now := mailboxNow()
@@ -275,6 +276,7 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 	}
 	sort.Strings(names)
 	var peers []mailboxPeerOut
+	selfConflict := false
 	for _, name := range names {
 		p := store.Presence[name]
 		if !mailboxPresenceLive(p, now) {
@@ -291,6 +293,15 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 		// genuinely distinct second name (or a conflicted duplicate of a
 		// name this session does not own) is untouched.
 		if isOwner && identity.Scope == scope && name == identity.Name {
+			// Presence is name-keyed, so a contesting second live process
+			// claiming this same name flags Conflict on THIS, the
+			// rightful owner's, own record (mailbox_runtime.go's
+			// ensureMailboxRegistered) rather than creating a second
+			// entry. Dropping this entry must not swallow that signal —
+			// the owner is the party that most needs the warning — so
+			// relocate it into self instead (repair of the self-leak
+			// hotfix, which dropped the entry without relocating this).
+			selfConflict = p.Conflict
 			continue
 		}
 		peers = append(peers, mailboxPeerOut{
@@ -303,6 +314,9 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 		s.refreshMailboxPresenceHeartbeat(entry.root)
 		self["address"] = identity.address()
 		self["auto"] = identity.Auto
+		if selfConflict {
+			self["conflict"] = true
+		}
 	}
 	if _, hasAddress := self["address"]; !hasAddress {
 		// Decision 5: an env-less self-lookup — or a non-owner session
@@ -325,7 +339,11 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 		if v, _ := self["auto"].(bool); v {
 			autoTag = " (auto-identity)"
 		}
-		fmt.Fprintf(&b, "self: %s%s\n", addr, autoTag)
+		conflictTag := ""
+		if v, _ := self["conflict"].(bool); v {
+			conflictTag = " CONFLICT: another live process also claims this name"
+		}
+		fmt.Fprintf(&b, "self: %s%s%s\n", addr, autoTag, conflictTag)
 	} else if rid, ok := self["reply_id"].(string); ok {
 		fmt.Fprintf(&b, "self: %s (reply-id only; no durable inbox)\n", rid)
 	}
