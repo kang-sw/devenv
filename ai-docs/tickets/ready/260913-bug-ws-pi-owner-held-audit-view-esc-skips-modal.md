@@ -2,6 +2,10 @@
 title: "Owner-held `/audit` view hides the ownership modal behind Enter"
 related:
   260908-feat-ws-pi-subagent-audit-window-and-owner-steering: introduced persistent owner-held steering and the hold/finish/interrupt modal
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: a9d74078ac56f2f4
+sage-review-completeness-reviewed: a9d74078ac56f2f4
 ---
 
 # Owner-held `/audit` view hides the ownership modal behind Enter
@@ -25,6 +29,22 @@ The child ownership state is real and persists independently of the overlay's te
 - `hold` must close without releasing ownership; `finish` must release or reconcile ownership exactly as it does from interactive mode; `interrupt` remains enabled only while the child is running.
 - A child the owner has never written to retains the Phase 1 Esc-to-close behavior.
 - Preserve scroll position, transcript contents, live subscriptions, and editor state when opening or dismissing the modal.
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-pi/src/audit.ts and agents-plugin-pi/test/audit.test.ts |
+| scope.surface | public-interface | existing /audit owner-facing overlay behavior in agents-plugin-pi/src/audit.ts |
+| scope.new_public_symbol | no | no new command or exported symbol is specified |
+| scope.new_type_contract | no | no new type or signature is specified |
+| scope.test_surface | existing | agents-plugin-pi/test/audit.test.ts covers view-mode Esc, modal actions, and ownership transitions |
+| complexity.reuse_points | confirmed | existing createAuditChannel, OwnerSteeringComponent, and isOwnerHeld in agents-plugin-pi/src/audit.ts and agents-plugin-pi/src/spawner.ts |
+| complexity.side_effect_risk | moderate | Esc routing must preserve owner lifecycle behavior and lead-owned view closing |
+| risk.correctness | moderate | a wrong ownership predicate could expose release actions or close the wrong view |
+| risk.fit | moderate | the change must retain the shared audit conversation binding and modal semantics |
+| risk.test | moderate | existing unit seams cover the view and modal paths, but both ownership states need regressions |
+| risk.security_or_contract | moderate | changes the owner-facing lifecycle-control contract of the existing /audit command |
 
 ## Phases
 
