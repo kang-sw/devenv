@@ -5,7 +5,7 @@ import { allocateClaudeHandle, createClaudeDelegateController, registerClaudeDel
 import { buildClaudeOptions, CLAUDE_READ_TOOLS, runClaudeItem } from "../src/claude-sdk.ts";
 import { buildClaudeTaskFrame, buildClaudeRequest } from "../src/claude-delegate-prompts.ts";
 const item = { preset: "consult", request: "fixture" } as const;
-const terminal = (extra = {}) => ({ type: "result", subtype: "success", is_error: false, result: "ok", ...extra });
+const terminal = (extra = {}) => ({ type: "result", subtype: "success", is_error: false, result: "ok", session_id: "fixture-session", ...extra });
 function sdk(messages: any[]) { return { query: () => ({ close() {}, async *[Symbol.asyncIterator]() { yield* messages; } }) } as any; }
 
 test("invalid batch shapes launch zero queries; each unsupported/malformed item preserves valid siblings", async () => {
@@ -13,7 +13,7 @@ test("invalid batch shapes launch zero queries; each unsupported/malformed item 
   const controller = createClaudeDelegateController(() => "/tmp", { executable: process.execPath, loadSdk: async () => { queries++; return sdk([terminal()]); } });
   for (const shape of [null, {}, [], "x"]) await assert.rejects(() => controller.execute(shape), /non-empty items array/);
   assert.equal(queries, 0);
-  const invalid = [null, [], {}, { ...item, preset: "design-review" }, { ...item, "edit-targets": ["x"] }, { preset: "rewrite", request: "x" }, { preset: "rewrite", request: "x", "edit-targets": [] }, { preset: "rewrite", request: "x", "edit-targets": [" "] }, { ...item, editTargets: ["x"] }, { ...item, resume: "secret-session" }, { ...item, changed: [] }, { ...item, timeout: 1 }, { ...item, request: " " }, { ...item, paths: [4] }, { ...item, paths: [" "] }, { ...item, model: " " }];
+  const invalid = [null, [], {}, { ...item, "edit-targets": ["x"] }, { preset: "rewrite", request: "x" }, { preset: "rewrite", request: "x", "edit-targets": [] }, { preset: "rewrite", request: "x", "edit-targets": [" "] }, { ...item, editTargets: ["x"] }, { ...item, resume: "secret-session" }, { ...item, changed: [] }, { ...item, timeout: 1 }, { ...item, request: " " }, { ...item, paths: [4] }, { ...item, paths: [" "] }, { ...item, model: " " }];
   const results = await controller.execute([...invalid, item]);
   assert.deepEqual(results.slice(0, -1).map(r => r.error?.code), Array(invalid.length).fill("invalid_item"));
   assert.equal(results.at(-1)?.output, "ok"); assert.equal(queries, 1);
@@ -21,7 +21,7 @@ test("invalid batch shapes launch zero queries; each unsupported/malformed item 
   for (const result of results) { assert.match(result.id, /^[a-z]+-[a-z]+-[a-z]+$/); assert.equal("changed" in result, false); assert.equal("session_id" in result, false); }
 });
 
-test("registered schema exposes Phase 2 rewrite fields and aligned out-of-order output", async () => {
+test("registered schema exposes rewrite, design-review, and resume fields with aligned out-of-order output", async () => {
   let definition: any; const releases: (() => void)[] = [];
   const controller = createClaudeDelegateController(() => "/tmp", { executable: process.execPath,
     loadSdk: async () => ({ query: ({ prompt }: any) => ({ close() {}, async *[Symbol.asyncIterator]() { await new Promise<void>(resolve => releases.push(resolve)); yield terminal({ result: prompt }); } }) }) as any,
@@ -30,8 +30,9 @@ test("registered schema exposes Phase 2 rewrite fields and aligned out-of-order 
   assert.equal(definition.parameters.type, "object"); assert.deepEqual(definition.parameters.required, ["items"]);
   assert.equal(definition.parameters.additionalProperties, false); assert.equal(definition.parameters.properties.items.minItems, 1);
   const schema = definition.parameters.properties.items.items;
-  assert.deepEqual(Object.keys(schema.properties).sort(), ["edit-targets", "model", "paths", "preset", "request"]);
-  assert.deepEqual(schema.properties.preset.enum, ["audit", "consult", "rewrite"]); assert.equal(schema.additionalProperties, false);
+  assert.deepEqual(Object.keys(schema.properties).sort(), ["edit-targets", "model", "paths", "preset", "request", "resume"]);
+  assert.deepEqual(schema.properties.preset.enum, ["audit", "consult", "rewrite", "design-review"]); assert.equal(schema.additionalProperties, false);
+  assert.deepEqual(schema.required, ["request"]); assert.deepEqual(schema.anyOf, [{ required: ["preset"] }, { required: ["resume"] }]);
   assert.equal(schema.properties["edit-targets"].minItems, 1);
   const pending = definition.execute("id", { items: ["first", "second", "third"].map(request => ({ ...item, request })) });
   await new Promise(resolve => setImmediate(resolve)); releases[2](); releases[0](); releases[1]();
@@ -53,7 +54,7 @@ test("handle allocation skips reserved collisions and fails atomically at sessio
   await assert.rejects(() => controller.execute([item]), /handle space exhausted/); assert.equal(queries, 1);
 });
 
-for (const bad of [{ is_error: true }, { is_error: undefined }, { result: undefined }, { result: 42 }, { subtype: "error_max_turns", errors: ["SECRET"] }]) {
+for (const bad of [{ is_error: true }, { is_error: undefined }, { result: undefined }, { result: 42 }, { session_id: undefined }, { subtype: "error_max_turns", errors: ["SECRET"] }]) {
   test(`strict terminal validation rejects ${JSON.stringify(bad)}`, async () => {
     await assert.rejects(() => runClaudeItem({ ...item, cwd: "/tmp", abortController: new AbortController() }, { executable: process.execPath, loadSdk: async () => sdk([terminal(bad)]) }), { code: "sdk_error", message: "Claude request failed." });
   });
@@ -66,7 +67,7 @@ test("usage comes only from the terminal cumulative snapshot; absent usage is nu
     terminal({ usage: { input_tokens: 2 }, modelUsage: { chosen: { inputTokens: 2 } }, total_cost_usd: 0.02, session_id: "SECRET" }),
   ]) });
   assert.deepEqual(output.usage, { usage: { input_tokens: 2 }, model_usage: { chosen: { inputTokens: 2 } }, cost_estimate_usd: 0.02 });
-  assert.equal(JSON.stringify(output).includes("SECRET"), false);
+  assert.equal(output.sessionId, "SECRET");
   assert.equal(getEventListeners(abortController.signal, "abort").length, 0);
   assert.equal((await runClaudeItem({ ...item, cwd: "/tmp", abortController: new AbortController() }, { executable: process.execPath, loadSdk: async () => sdk([terminal()]) })).usage, null);
 });
@@ -86,7 +87,7 @@ test("closed options and small task frames never inherit seeded parent or provid
   assert.deepEqual(options.env, { HOME: parent.HOME, PATH: parent.PATH, LANG: parent.LANG });
   assert.deepEqual(options.tools, CLAUDE_READ_TOOLS); assert.deepEqual(options.allowedTools, CLAUDE_READ_TOOLS);
   assert.deepEqual(options.settingSources, []); assert.deepEqual(options.mcpServers, {}); assert.equal(options.strictMcpConfig, true);
-  assert.equal(options.permissionMode, "dontAsk"); assert.equal(options.persistSession, false); assert.equal(options.maxTurns, 20);
+  assert.equal(options.permissionMode, "dontAsk"); assert.equal(options.persistSession, true); assert.equal(options.maxTurns, 20);
   assert.equal(options.pathToClaudeCodeExecutable, process.execPath); assert.equal(options.cwd, "/worktree"); assert.equal(options.model, "chosen");
   for (const key of ["additionalDirectories", "plugins", "agents", "hooks", "resume", "settings", "executable", "bypassPermissions"]) assert.equal(key in options, false);
   for (const tool of ["Bash", "git", "exec", "Write", "Edit", "Task", "Agent", "mcp__account__read", "read"]) assert.equal((await options.canUseTool!(tool, {}, {} as any)).behavior, "deny");

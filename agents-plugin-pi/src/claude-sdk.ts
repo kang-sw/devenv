@@ -13,8 +13,8 @@ export type ClaudeUsage = { usage: Record<string, unknown>; model_usage: Record<
 export interface ClaudeSdk { query(args: { prompt: string; options?: Options }): Query; }
 export interface ClaudeSdkDependencies { loadSdk?: () => Promise<ClaudeSdk>; executable?: string; env?: NodeJS.ProcessEnv; cleanupMs?: number; spawnProcess?: (options: SpawnOptions) => SpawnedProcess; }
 export interface ClaudeEditScope { readonly root: string; readonly canonicalTargets: readonly string[]; readonly requestedTargets: readonly string[]; allows(path: unknown): boolean; changed(): string[]; }
-export interface ClaudeRunInput { preset: ClaudeDelegatePreset; request: string; paths?: readonly string[]; model?: string; cwd: string; editScope?: ClaudeEditScope; abortController: AbortController; }
-export interface ClaudeRunOutput { output: string; usage: ClaudeUsage; }
+export interface ClaudeRunInput { preset: ClaudeDelegatePreset; request: string; paths?: readonly string[]; model?: string; cwd: string; editScope?: ClaudeEditScope; resumeSessionId?: string; taskFrame?: string; abortController: AbortController; }
+export interface ClaudeRunOutput { output: string; usage: ClaudeUsage; sessionId: string; }
 export class ClaudeDelegateError extends Error { readonly code: "timeout" | "cancelled" | "sdk_error" | "missing_result" | "profile_violation" | "cleanup_failed"; constructor(code: "timeout" | "cancelled" | "sdk_error" | "missing_result" | "profile_violation" | "cleanup_failed", message: string) { super(message); this.code = code; } }
 const SAFE: Record<ClaudeDelegateError["code"], string> = { timeout: "Claude request timed out.", cancelled: "Claude request was cancelled.", sdk_error: "Claude request failed.", missing_result: "Claude returned no terminal result.", profile_violation: "Claude started with an unexpected tool profile.", cleanup_failed: "Claude child cleanup could not be confirmed." };
 function fail(code: ClaudeDelegateError["code"]): never { throw new ClaudeDelegateError(code, SAFE[code]); }
@@ -63,7 +63,7 @@ export function createClaudeEditScope(cwd: string, targets: readonly string[]): 
 }
 export function buildClaudeOptions(input: ClaudeRunInput, executable: string, env: NodeJS.ProcessEnv = process.env, spawnClaudeCodeProcess?: (options: SpawnOptions) => SpawnedProcess): Options {
   const tools = input.editScope ? [...CLAUDE_READ_TOOLS, ...CLAUDE_WRITE_TOOLS] : [...CLAUDE_READ_TOOLS];
-  return { systemPrompt: { type: "preset", preset: "claude_code", append: buildClaudeTaskFrame(input.preset) }, cwd: input.cwd, pathToClaudeCodeExecutable: executable, env: delegateEnvironment(env), ...(input.model ? { model: input.model } : {}), strictMcpConfig: true, mcpServers: {}, settingSources: [], tools, allowedTools: [...CLAUDE_READ_TOOLS], permissionMode: "dontAsk", persistSession: false, maxTurns: 20, abortController: input.abortController, canUseTool: async (name, toolInput) => {
+  return { systemPrompt: { type: "preset", preset: "claude_code", append: input.taskFrame ?? buildClaudeTaskFrame(input.preset) }, cwd: input.cwd, pathToClaudeCodeExecutable: executable, env: delegateEnvironment(env), ...(input.model ? { model: input.model } : {}), ...(input.resumeSessionId ? { resume: input.resumeSessionId } : {}), strictMcpConfig: true, mcpServers: {}, settingSources: [], tools, allowedTools: [...CLAUDE_READ_TOOLS], permissionMode: "dontAsk", persistSession: true, maxTurns: 20, abortController: input.abortController, canUseTool: async (name, toolInput) => {
     if (CLAUDE_READ_TOOLS.includes(name as never)) return { behavior: "allow", updatedInput: undefined };
     if (input.editScope && CLAUDE_WRITE_TOOLS.includes(name as never) && input.editScope.allows(toolInput.file_path)) return { behavior: "allow", updatedInput: undefined };
     return { behavior: "deny", message: input.editScope ? "ws-claude permits writes only to exact authorized edit targets." : "ws-claude permits read-only tools." };
@@ -168,12 +168,20 @@ export async function runClaudeItem(input: ClaudeRunInput, dependencies: ClaudeS
   try {
     const sdk = await Promise.race([(dependencies.loadSdk ?? defaultSdk)(), cancelled]); if (input.abortController.signal.aborted) fail("cancelled");
     query = sdk.query({ prompt: buildClaudeRequest({ ...input, editTargets: input.editScope?.requestedTargets }), options: buildClaudeOptions(input, resolveClaudeExecutable(dependencies.executable), dependencies.env, (options) => { if (child || finalized || input.abortController.signal.aborted) throw new ClaudeDelegateError("cancelled", SAFE.cancelled); child = spawnOwned(options); void ownChild(child).error.catch(rejectProcess); return child; }) });
-    let terminal: Extract<SDKMessage, { type: "result" }> | undefined;
+    let terminal: Extract<SDKMessage, { type: "result" }> | undefined; let sessionId: string | undefined;
     const permittedTools = input.editScope ? [...CLAUDE_READ_TOOLS, ...CLAUDE_WRITE_TOOLS] : [...CLAUDE_READ_TOOLS];
-    const consume = async () => { for await (const message of query!) { if (finalized || input.abortController.signal.aborted) return; if (message.type === "system" && message.subtype === "init" && (message.tools.some((tool) => !permittedTools.includes(tool as never)) || message.mcp_servers.length !== 0)) fail("profile_violation"); if (message.type === "result") terminal = message; } };
-    await Promise.race([consume(), cancelled, processError]); if (!terminal) fail("missing_result"); if (terminal.subtype !== "success" || terminal.is_error !== false || typeof terminal.result !== "string") fail("sdk_error");
+    const consume = async () => { for await (const message of query!) {
+      if (finalized || input.abortController.signal.aborted) return;
+      if (typeof message.session_id === "string" && message.session_id.trim()) {
+        if (sessionId && sessionId !== message.session_id) fail("sdk_error");
+        sessionId = message.session_id;
+      }
+      if (message.type === "system" && message.subtype === "init" && (message.tools.some((tool) => !permittedTools.includes(tool as never)) || message.mcp_servers.length !== 0)) fail("profile_violation");
+      if (message.type === "result") terminal = message;
+    } };
+    await Promise.race([consume(), cancelled, processError]); if (!terminal) fail("missing_result"); if (terminal.subtype !== "success" || terminal.is_error !== false || typeof terminal.result !== "string" || !sessionId) fail("sdk_error");
     const usage = terminal.usage && terminal.modelUsage && typeof terminal.total_cost_usd === "number" ? { usage: terminal.usage as unknown as Record<string, unknown>, model_usage: terminal.modelUsage as Record<string, unknown>, cost_estimate_usd: terminal.total_cost_usd } : null;
-    return { output: terminal.result, usage };
+    return { output: terminal.result, usage, sessionId };
   } catch (error) { if (error instanceof ClaudeDelegateError) throw error; fail(input.abortController.signal.aborted ? "cancelled" : "sdk_error"); }
   finally { finalized = true; input.abortController.signal.removeEventListener("abort", onAbort); input.abortController.abort(); if (!(await disposeClaudeChild(query, child, dependencies.cleanupMs))) throw new ClaudeDelegateError("cleanup_failed", SAFE.cleanup_failed); }
 }

@@ -221,6 +221,7 @@ import { createAgentStorageContext, pruneStaleAgentHomes, type AgentStorageConte
 import { createAgentFooterSessionLifecycle, persistOwnedTelemetryRollup, type AgentFooterContext, type AgentFooterSessionLifecycle } from "./agent-footer.ts";
 import { loadHostPiTui } from "./pi-tui.ts";
 import { addClaudeDelegateIfLead, registerClaudeDelegateSession } from "./claude-delegate.ts";
+import { createClaudeDesignReviewContextProvider } from "./claude-design-review.ts";
 import { assertPolicyTool, readDelegationPolicy } from "./delegation-policy.ts";
 import { registerWebTools } from "./web-tools.ts";
 import { publishSubtree } from "./subtree-lifecycle.ts";
@@ -485,7 +486,14 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
 
   const goalLoopHandle = registerGoalLoop(pi, { goalLoopConfigPath, rpcRegistryRef }, toolPreviewTuiRef);
   // Declare once; the controller is replaced and disposed at session boundaries.
-  const claudeDelegateSession = registerClaudeDelegateSession(pi, toolPreviewTuiRef);
+  const claudeDelegateSession = registerClaudeDelegateSession(pi, toolPreviewTuiRef, {
+    designReviewContext: createClaudeDesignReviewContextProvider({
+      async callTool(name, args) {
+        if (!handle) throw new Error("ws-claude design-review requires an active parent bridge");
+        return await handle.client.callTool(name, args);
+      },
+    }),
+  });
   registerLeadBootstrap(pi, wsBlockBaseRef, skillsBlockCacheRef, effectivePromptRef, inheritedForkPromptRef, sessionKeyRef);
   pi.on("input", (event, ctx) => {
     if (readSpawnRole(process.env) !== "fork") return undefined;
