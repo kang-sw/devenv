@@ -918,6 +918,43 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     });
   });
 
+  test("compact-and-continue rejects an inactive goal before any compaction state changes", async () => {
+    const clock = fakeClock();
+    const pi = fakePi();
+    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+    const { ctx, notifications, statusCalls } = fakeCtx();
+    let compactCalls = 0;
+    ctx.compact = () => { compactCalls += 1; };
+
+    await assert.rejects(
+      pi.tools.get("goal-compact-and-continue")!.execute(
+        "carry",
+        { carry_forward: "must not persist" },
+        undefined,
+        undefined,
+        ctx,
+      ),
+      /requires an active goal; compaction was not requested/i,
+    );
+
+    assert.equal(compactCalls, 0, "inactive rejection does not schedule host compaction");
+    assert.equal(leadCompactingRef.current, false, "inactive rejection does not enter the compaction hold");
+    assert.equal(clock.pendingCount(), 0, "inactive rejection does not schedule re-injection");
+    assert.deepEqual(notifications, [], "inactive rejection emits no compaction lifecycle notification");
+    assert.deepEqual(statusCalls, [], "inactive rejection does not mutate goal-loop status");
+
+    pi.handlers.get("agent_settled")!({}, ctx);
+    assert.equal(clock.pendingCount(), 0, "a later settle cannot re-arm an inactive rejected call");
+    assert.deepEqual(pi.sentUserMessages, [], "the rejected carry-forward is never delivered");
+
+    await pi.commands.get("goal")!("ship", ctx);
+    pi.handlers.get("agent_settled")!({}, ctx);
+    clock.fire();
+    assert.equal(pi.sentUserMessages.length, 2, "a later active goal still follows the ordinary reminder path");
+    assert.ok(!(pi.sentUserMessages[1]!.content as string).includes(carryHeading), "rejected carry-forward does not leak into the next active goal");
+    assert.doesNotMatch(pi.sentUserMessages[1]!.content as string, /must not persist/);
+  });
+
   for (const completion of ["event", "callback", "both", "error", "failed-event"] as const) {
     test(`verbatim carry is sent once after ${completion} release`, async () => {
       const clock = fakeClock();

@@ -1097,6 +1097,9 @@ export function registerGoalLoop(
       required: ["carry_forward"],
     } as never,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx: ExtensionContext) {
+      if (!state.active) {
+        throw new Error("goal-compact-and-continue requires an active goal; compaction was not requested.");
+      }
       const p = params as { carry_forward: string };
       // Does NOT call disarmGoal() — non-terminal. ctx.compact() aborts the
       // in-flight turn (the one that invoked this very tool call) and, once
