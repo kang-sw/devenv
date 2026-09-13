@@ -5,6 +5,7 @@ related:
   260913-feat-cross-session-mailbox-wake: source — the rebind-refusal and wait-clamp gaps are in this ticket's surface
   260913-feat-promotion-dependency-landing-gate: source — the dispatch_blocked JSON-contract and fail-open gaps are in this ticket's surface
   260909-epic-ws-worker-interpreter-refoundation: constraint — the landing-gate coverage touches the shared worker-interpreter tooling
+completed: 2026-09-13
 ---
 
 # Test-coverage gaps from the ship-gate sweep (mailbox + dependency-landing gate)
@@ -66,6 +67,39 @@ Verify: `cd agents-plugin-tool && go test ./...` green; `python3 -m unittest
 discover agents-plugin-wsflow/tests` green; each new test fails when its target
 behavior is deliberately broken (mutation spot-check on at least items 1, 5, 6).
 
+### Result (e31576b8) - 2026-09-13
+
+All 7 Important gaps closed, test-only (zero production change):
+1. `internal/wsmailbox/store_test.go` `TestAppendQueueTrimsToMaxLen` rewritten —
+   seeds ordinal `m0..mN`, asserts survivors are the newest N in send order.
+2. `internal/mcp/mailbox_tools_test.go`
+   `TestRebindMailboxOwnerRefusesLiveDifferentPIDHolder` — a genuinely-live
+   different PID (`os.Getppid()`) takes the record; asserts the
+   `p.PID != pid && mailboxPresenceLive` refusal branch fires (the
+   post-registration re-verify branch the flagging-path tests never reached).
+3. `store_test.go` `TestLoadRejectsCorruptStore` — malformed JSON surfaces a
+   `parse mailbox store` error, not a silently-zeroed store.
+4. `internal/wsmailbox/replyid_test.go`
+   `TestEnsureMachineSecretRepairsTruncatedFile` — a wrong-length secret is
+   regenerated to a valid `secretByteLen` secret, not propagated.
+5. `internal/mcp/ticket_dispatch_gate_test.go`
+   `TestTicketsQueryJSONDispatchBlockedContract` — pins
+   `dispatch_blocked`/`blocking_stem`/`reason` via raw-substring and
+   tagged-struct unmarshal (json-tag rename now fails).
+6. `ticket_dispatch_gate_test.go`
+   `TestTicketsQueryPointResolveDispatchGateFailsOpen` — injects a board-scan
+   error (unreadable `.dropped/` file, scanned only by `boardByStem`); asserts
+   the ticket still resolves and omits `dispatch_blocked`. Mutation-verified
+   (propagating `blockErr` made it fail, then reverted).
+7. `agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py`
+   `test_wsflow_run_and_stop_protocol_carry_merge_obligation_text` — mirrors
+   agents-plugin's substring pins against the wsflow `lead-run.md` /
+   `worker-stop-protocol.md` copies (template vars preserved verbatim).
+
+Verified: `go build/vet ./...` OK; `go test -count=1 ./...` all packages ok
+(uncached); `python3 -m unittest discover agents-plugin/tests` 69 OK;
+`agents-plugin-wsflow/tests` 12 OK. No production defect found.
+
 ### Phase 2: Close the Minor coverage gaps (optional, batchable)
 
 Lower-priority cases surfaced by the same sweep, safe to fold into Phase 1 or
@@ -81,6 +115,30 @@ defer:
 
 Verify: same suites green; no production change.
 
+### Result (e31576b8) - 2026-09-13
+
+Minor gaps folded in, test-only:
+- `store_test.go` `TestWithLockTimesOutWhenLockHeld` — pins the real
+  lock-acquisition-timeout error (`gofrs/flock` surfaces the expired context via
+  `acquire mailbox store lock: context deadline exceeded`).
+- `address_test.go` `TestIsValidNameLengthBoundary` — 63/64/65-char
+  `namePattern` boundary.
+- `wait_test.go` `TestWaitClampsFinalSleepToRemaining` — Timeout=1200ms,
+  Poll=500ms; asserts the final block is the clamped 200ms remainder with no
+  overshoot.
+- `internal/wsstate/process_alive_test.go` — hardened with a
+  `cmd.ProcessState.Exited()` assertion against PID reuse.
+- `agents-plugin/tests/test_skill_dispatch_contracts.py`
+  `test_run_pins_branch_awareness_reasoning` — pins the stack-vs-return /
+  base-derivation / dirty-tree text.
+
+Not added (deliberate): the self-referential `blocked-by:<own-stem>` case. Read
+`tickets_deps.go`: a ticket listing its own stem resolves to itself and blocks
+via the generic bare-stem "not `.done/`" branch already covered by
+`TestDispatchBlockForPredicate` — a self-ref test would re-assert an existing
+branch with no new coverage, so it was skipped rather than adding a redundant
+test.
+
 ## Non-goals
 
 - The three Minor correctness/fit observations from the sweep
@@ -88,3 +146,8 @@ Verify: same suites green; no production change.
   false-negative; Windows `hooks.json` missing `|| true`; stop-hook control-flow
   duplication) are behavior/design notes, not test gaps — if actioned they get
   their own bug/refactor ticket, not this one.
+
+
+## Resolution (2026-09-13)
+
+Both phases implemented test-only (zero production change); all Go packages (uncached) and both Python suites green. See the per-phase ### Result sections.
