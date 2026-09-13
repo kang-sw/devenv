@@ -31,6 +31,8 @@ export interface PlaybookProfile {
   authority: SessionAuthority;
   readOnly: boolean;
   requiresChildren: boolean;
+  /** Trusted playbook identity requires the code-review findings artifact contract. */
+  reviewArtifact: boolean;
 }
 export interface RenderProvenance extends PlaybookProfile {
   path: string;
@@ -113,7 +115,7 @@ export function assertSessionAuthority(policy: DelegationPolicy | undefined, arg
 }
 export function promptDigest(path: string): string { return createHash("sha256").update(readFileSync(path)).digest("hex"); }
 
-/** Classification uses the installed, manifest-verified playbook, never its rendered filename. */
+/** Classification uses the installed, manifest-verified playbook, never its rendered filename or prompt claims. */
 export function playbookProfile(pluginDir: string, name: unknown): PlaybookProfile {
   if (typeof name !== "string" || !/^[a-z][a-z0-9-]*$/.test(name)) throw new Error("ws-pi-agent: unrecognized delegated playbook");
   const relative = `${name}/${name}.md`;
@@ -124,11 +126,12 @@ export function playbookProfile(pluginDir: string, name: unknown): PlaybookProfi
   const header = body.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   const meta = header ? parseYaml(header[1]) : undefined;
   if (meta?.kind !== "render") throw new Error("ws-pi-agent: lead-control playbooks cannot be delegated");
-  if (name === "explore") return { class: "explore", authority: "leaf", readOnly: true, requiresChildren: false };
-  if (meta.role === "reviewer") return { class: "reviewer", authority: "delegate", readOnly: true, requiresChildren: false };
-  if (meta.role === "worker") return { class: "worker", authority: "lead", readOnly: false, requiresChildren: true };
-  if (meta.role === "implementer" || meta.role === "delegate") return { class: "delegate", authority: "delegate", readOnly: false, requiresChildren: false };
-  if (meta.role === "leaf") return { class: "delegate", authority: "leaf", readOnly: true, requiresChildren: false };
+  const reviewArtifact = Array.isArray(meta.includes) && meta.includes.includes("code-reviewer");
+  if (name === "explore") return { class: "explore", authority: "leaf", readOnly: true, requiresChildren: false, reviewArtifact };
+  if (meta.role === "reviewer") return { class: "reviewer", authority: "delegate", readOnly: true, requiresChildren: false, reviewArtifact };
+  if (meta.role === "worker") return { class: "worker", authority: "lead", readOnly: false, requiresChildren: true, reviewArtifact };
+  if (meta.role === "implementer" || meta.role === "delegate") return { class: "delegate", authority: "delegate", readOnly: false, requiresChildren: false, reviewArtifact };
+  if (meta.role === "leaf") return { class: "delegate", authority: "leaf", readOnly: true, requiresChildren: false, reviewArtifact };
   throw new Error("ws-pi-agent: unsupported delegated playbook class");
 }
 
@@ -153,7 +156,7 @@ export class RenderRegistry {
   restore(values: readonly unknown[]): void {
     for (const value of values) {
       const e = value as RenderProvenance;
-      if (!e || typeof e.path !== "string" || typeof e.digest !== "string" || !["worker", "reviewer", "delegate", "explore"].includes(e.class) || !Object.hasOwn(AUTHORITY, e.authority) || typeof e.readOnly !== "boolean" || typeof e.requiresChildren !== "boolean") continue;
+      if (!e || typeof e.path !== "string" || typeof e.digest !== "string" || !["worker", "reviewer", "delegate", "explore"].includes(e.class) || !Object.hasOwn(AUTHORITY, e.authority) || typeof e.readOnly !== "boolean" || typeof e.requiresChildren !== "boolean" || typeof e.reviewArtifact !== "boolean") continue;
       try {
         const canonical = realpathSync(e.path);
         if (promptDigest(canonical) === e.digest) this.entries.set(canonical, { ...e, path: canonical });

@@ -11,6 +11,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 2176c4676ba387b6
 sage-review-completeness-reviewed: 2176c4676ba387b6
+completed: 2026-09-13
 ---
 
 # Pi read-only reviewers cannot write required findings artifacts
@@ -60,6 +61,14 @@ After `260913-feat-ws-pi-delegated-write-scopes` lands, extend Pi reviewer dispa
 
 Add a spawned-reviewer integration regression rather than only static policy coverage. Verify clean and non-clean report publication, existing worker consumption, reload/resume with the same immutable file binding, rejection of an unbound or second artifact, checkout paths, directory or glob widening, and attempts to gain Bash or unrestricted native edit/write. Preserve the context-meter, held-push, and bounded-web reproductions as provenance for the one canonical defect.
 
+### Result (6765c8a) - 2026-09-13
+
+Pi now marks manifest-verified code-review renders with an artifact obligation, rejects their spawn unless `write_scopes` contains exactly one file grant, and tells spawned workers to bind the generated findings path. Reviewers retain the read-only tool surface plus scoped native edit/write wrappers for only that file; Bash, tree/glob grants, multiple files, and cross-artifact writes remain unavailable.
+
+The regression exercises the production spawn path with substituted RPC transport, loads the real Pi extension under the spawned and sidecar-restored policies, and publishes both clean and non-clean reports through the child's registered wrappers for worker-side consumption. Round-one test review found that the initial fixture installed wrappers locally; `8d7358e` corrected it to cover real child extension initialization, and round two passed with no remaining findings.
+
+Verification: `node --test test/reviewer-artifact.integration.test.ts test/native-tool-registration.test.ts test/agent-sidecar.test.ts` (58 passed); full `node --test --test-reporter=dot` under the package's clean delegation environment (passed). Decisions: derive the obligation from trusted installed playbook include metadata rather than rendered prompt prose, and ignore restored legacy render-provenance entries that lack the new marker so ambiguous old reviewer renders must be regenerated.
+
 ## Sage Review Round 1 (2026-09-13)
 
 ### Design Reviewer — block
@@ -73,3 +82,8 @@ Add a spawned-reviewer integration regression rather than only static policy cov
 
 | # | Title | Severity |
 |---|-------|----------|
+
+
+## Resolution (2026-09-13)
+
+Completed the Pi-local reviewer artifact binding: code-review spawns require one exact findings-file grant, the child receives only scoped native edit/write wrappers, and spawned/reloaded integration coverage proves clean and non-clean publication plus containment.
