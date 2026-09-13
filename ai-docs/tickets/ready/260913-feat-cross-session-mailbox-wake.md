@@ -518,6 +518,149 @@ Verification (Claude):
   (the model-driven arming obligation of Decision 6 / wake half of 14, documented
   in the Phase 4 skill).
 
+### Result (772929ae) - 2026-09-13
+
+Implemented the Claude Stop-hook adapter over Phase 1's storage primitives
+(reusing Phase 2's `internal/wsmailbox/hook_peek.go` check as-is, never
+Phase 1's blocking `wait` CLI — like Codex, Claude's `Stop` hook is per-turn
+event-driven, so it only ever needs one non-blocking read per firing).
+Landed across two commits: `a4ba3daf` (initial implementation) and
+`772929ae` (round-1 review fix). Two-round independent review (correctness:
+opus, test: sonnet, partitioned per route verdict) found zero
+Critical/Important findings in round 1 and confirmed the fix in round 2;
+both rounds are "clean" with one Minor each (one fixed, one deferred — see
+below).
+
+- **CLI adapter subcommand** (`cmd/ws-mcp/mailbox.go`, `mailboxClaudeStopHook`):
+  `ws-mcp mailbox claude-stop-hook` mirrors `mailboxCodexStopHook` in every
+  respect that does not depend on payload shape — `WS_MAILBOX` env
+  resolution (`--slug` as a direct-invocation override only), the
+  `stop_hook_active` loop guard, the payload-cwd root fallback for a
+  worktree/clone-scope slug, the shared
+  `internal/wsmailbox.ShouldNotifyNamedInboxUnread` watermark, and fail-open
+  (exit 0) on every error path. The one real difference: unlike Codex (no
+  classifier at all in its Stop payload, so owner/root-turn identity must be
+  baked into the hook command's own args), Claude's payload can be gated
+  directly per the research ticket's docs-sourced probe —
+  `hook_event_name == "Stop"` (defensive; hooks/hooks.json registers this
+  command only under `"Stop"`, never `"SubagentStop"`) and both
+  `agent_id`/`agent_type` absent — so this adapter needs no per-session
+  command-line identity argument at all.
+- **Shared-code generalization**: renamed `codexStopHookMailboxEnv` /
+  `defaultCodexStopHookReason` to `stopHookMailboxEnv` / `defaultStopHookReason`
+  and replaced the Codex-only `readCodexStopHookPayload` with a generic
+  `readStopHookPayload[T any]`, since both adapters need the identical
+  `WS_MAILBOX` env resolution, drain-instruction text, and
+  read-all/trim/tolerate-empty/unmarshal shape — only the payload struct
+  fields differ (`claudeStopHookPayload` adds `hook_event_name`, `agent_id`,
+  `agent_type` that `codexStopHookPayload` has no equivalent of).
+- **Plugin wiring** (`agents-plugin/hooks/hooks.json`, new file): a `Stop`
+  hook whose POSIX `command` shells out to `bin/ws-mcp-launcher.py mailbox
+  claude-stop-hook || true` (`timeout: 30`, matching the Codex adapter's
+  raised timeout for the same launcher binary-repair-path risk). No
+  `plugin.json` edit: Claude Code auto-discovers `<plugin-root>/hooks/
+  hooks.json` by directory-name convention alone (the same mechanism Phase
+  2's round-1 review found had almost silently activated the Codex-only
+  hook in Claude before that file was relocated) — this ticket's Phase 3 is
+  what that path is *for*, so this is the first hooks.json Claude is
+  actually meant to auto-discover from this plugin. Not mirrored into
+  `agents-plugin-wsflow/`: Phase 2 already established the
+  Codex-hook-is-`ws`-only precedent by leaving
+  `agents-plugin-wsflow/.codex-plugin/plugin.json`'s hooks unset, and this
+  ticket's Implementation Conventions table scopes `wsflow-mirroring.md` to
+  Phase 4's skill, not Phases 2-3's hook wiring.
+- **New tests**: `cmd/ws-mcp/mailbox_claude_hook_test.go` mirrors the Codex
+  adapter's own suite (env/`--slug` resolution, empty-queue silence, the
+  `stop_hook_active` loop guard, the watermark's repeat-firing bound,
+  payload-cwd root resolution via a genuine OS-cwd-vs-payload-cwd
+  divergence, `--reason`, fail-open on a malformed payload / unresolvable
+  slug, empty-stdin tolerance) plus three tests with no Codex equivalent
+  covering the `hook_event_name`/`agent_id`/`agent_type` misfire guard
+  (positive and negative cases each), and (added in the round-1 fix,
+  `772929ae`) `TestMailboxClaudeStopHookSharesWatermarkWithCodexAdapter`,
+  which fires the Codex hook then the Claude hook at an unchanged unread
+  count and asserts the second is silent — pinning that the two adapters
+  deliberately share one on-disk watermark per slug rather than each
+  tracking its own. `agents-plugin/tests/test_claude_hooks_manifest.py`
+  validates `hooks/hooks.json`'s existence and Claude-specific schema shape
+  (a `matcher`/`hooks`-wrapper list, structurally different from Codex's
+  flat per-entry shape) and that its `Stop` command actually invokes
+  `mailbox claude-stop-hook`.
+- **Doc updates**: `agents-plugin/tests/test_shipped_surfaces_downstream_neutral.py`'s
+  `TEXT_TREES` gained an `agents-plugin/hooks` directory-prefix entry (no
+  pre-existing sibling-file baggage to scope around, unlike the Codex
+  `.codex-plugin/hooks.json` exact-file entry, so a directory prefix was
+  used directly).
+
+Verification: `go build ./...`, `go vet ./...`, and `go test ./...` all pass
+across every `agents-plugin-tool` package (re-run after the round-1 fix).
+`python3 -m unittest discover` passes for the full `agents-plugin/tests/`
+suite (68 tests), including the new `test_claude_hooks_manifest.py` and the
+widened `test_shipped_surfaces_downstream_neutral.py`. `agents-plugin-wsflow`'s
+own test suite (11 tests) also passes, confirming the deliberate no-mirror
+decision above did not leave a drift-detector expecting a change there.
+
+**Review record:** round 1 (correctness + test partitions, fresh reviewers)
+returned zero Critical/Important findings and one Minor each: (1) no
+`commandWindows`/Windows-safe fallback for the POSIX `|| true` in
+`hooks/hooks.json`, flagged by the correctness reviewer as a likely
+platform-ecosystem ceiling rather than a fixable gap; (2) no test directly
+proved the Codex/Claude watermark-sharing design claim, flagged by the test
+reviewer. (2) was fixed in `772929ae`. Round 2 (fresh reviewers,
+fix-verification only) independently inspected every `hooks.json` in six
+real installed Claude Code plugins under `~/.claude/plugins/marketplaces/`
+and confirmed none uses any Windows-specific command field, corroborating
+(1) as a genuine ecosystem ceiling rather than an oversight, and confirmed
+the new watermark-sharing test is non-vacuous (keyed only by mailbox name +
+store dir, with no adapter identity in the key, so a future
+per-adapter-scoped regression would flip the assertion). Both rounds
+returned "clean" with a build/vet/test pass; no third round was spawned
+(protocol cap, and both remaining items are non-gating).
+
+**Decisions and deferred items:**
+
+- **Deferred (Minor, accepted risk):** `hooks/hooks.json`'s `Stop` command
+  has no Windows-specific variant, unlike the Codex adapter's `hooks.json`
+  (which carries a `commandWindows` field per Codex's documented schema).
+  Confirmed by inspecting six real installed Claude Code plugins that
+  Claude's hooks.json schema itself has no such field anywhere in the
+  observed ecosystem — there is no schema slot to populate, and the Go
+  binary's own `mailboxClaudeStopHook` already exits 0 on every internal
+  error path, so the POSIX-only `|| true` gap is narrow (covers only a
+  python3/launcher startup failure on a non-POSIX shell) and consistent with
+  the rest of this Claude plugin's cross-platform posture (its own
+  `mcpServers` block already uses one unbranched `python3` command for
+  every OS). Revisit only if Claude's own hooks schema grows a Windows
+  command field.
+- Reused Phase 2's `internal/wsmailbox/hook_peek.go` primitives verbatim
+  rather than forking Claude-specific copies, generalizing their doc
+  comments instead: both adapters check the same host-neutral queue with
+  the same per-slug watermark debounce contract, so a shared on-disk
+  watermark directory (still named `mailbox-codex-stop-notified` — kept
+  as-is rather than renamed, since a rename would only churn the on-disk
+  path with no behavior change) is correct, not a collision.
+- **Not independently re-verified this round:** an actual live Claude Code
+  round trip of this exact `hooks/hooks.json` (a real `Stop` event firing
+  through an installed plugin, a real `run_in_background` wait
+  re-invoking the agent). The underlying `Stop`+`decision:block` mechanism
+  and the `run_in_background` → task-notification re-invoke were already
+  live-probed at the research stage (this ticket's Decisions, citing the
+  2026-09-13 probe results); this round only re-verified the CLI's own
+  JSON I/O contract and misfire guard against that already-confirmed
+  mechanism via automated tests and real-subprocess execution, not a fresh
+  live plugin-cache round trip — mirroring Phase 2's own equivalent caveat
+  for Codex. A plugin-cache-level (Level 3-style) verification needs the
+  human-in-the-loop refresh `ai-docs/manuals/ws-mcp.md` describes.
+- The Phase 3 verification bullet on env-less arm-at-badge (a `run_in_
+  background` wait armed at piggyback time on an env-less session's own
+  reply-id queue) needed no new code this phase: it is the model's own
+  background-wait registration per Decision 6, already backed by Phase 1's
+  `wait` CLI and the research ticket's confirmed background-task-wake probe
+  result — the ticket's own Phase 3 text already scopes documenting that
+  flow to the Phase 4 skill, not to new adapter code here.
+
+Phase 4 remains open; this ticket stays in `ready/`.
+
 ### Phase 4: lead-use-mailbox skill
 
 Author a host-neutral guidance skill `lead-use-mailbox` under
