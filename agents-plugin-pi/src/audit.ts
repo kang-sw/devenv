@@ -25,10 +25,11 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme, getSelectListTheme } from "@earendil-works/pi-coding-agent";
 import { isOwnerHeld, lastActivityAt, resolveAgentId, sendToAgent, type RpcAgentRecord, type RpcAgentRegistry } from "./spawner.ts";
 import { touchOwnership } from "./agent-storage.ts";
-import { classifyRegistryRowState, formatCompactDuration, formatContextTokens, rowName, type AgentRowState } from "./agent-widget.ts";
+import { AGENT_STATE_LABEL, AGENT_STATE_RANK, classifyRegistryRowState, formatCompactDuration, formatContextTokens, rowName, type AgentRowState } from "./agent-widget.ts";
 import {
   ConversationViewComponent,
   conversationOverlayHeight,
+  isEscapeKey,
   toolResultContentText,
   wrapInBorder,
   type ConversationChannel,
@@ -46,6 +47,7 @@ import type { SpawnRole } from "./process-role.ts";
 /** Minimal shape of one session-file line this parser cares about — see `node_modules/@earendil-works/pi-coding-agent/docs/session-format.md`. Every other `type`/`role` is skipped (Phase 1's explicit mapping contract; see the plan's Escalations). */
 interface SessionMessageEntry {
   type?: string;
+  timestamp?: string;
   message?: {
     role?: string;
     content?: unknown;
@@ -125,7 +127,10 @@ export function readSessionHistory(path: string, ownerSends: readonly { text: st
 
     if (message.role === "user") {
       const text = joinTextContent(message.content);
-      if (nextOwnerSend < ownerSends.length && ownerSends[nextOwnerSend]!.text === text) {
+      const ownerSend = ownerSends[nextOwnerSend];
+      const entryAt = typeof entry.timestamp === "string" ? Date.parse(entry.timestamp) : Number.NaN;
+      const afterOwnerDispatch = !Number.isFinite(entryAt) || ownerSend === undefined || entryAt >= ownerSend.at;
+      if (ownerSend && ownerSend.text === text && afterOwnerDispatch) {
         items.push({ kind: "user", text });
         nextOwnerSend++;
       } else {
@@ -231,20 +236,6 @@ export function createAuditChannel(
 // fourth, picker-only dormant tier by last activity.
 // ---------------------------------------------------------------------------
 
-const LIVE_STATE_RANK: Record<AgentRowState, number> = {
-  "awaiting-owner": 0,
-  "idle-awaiting-owner": 0,
-  "awaiting-approval": 1,
-  running: 2,
-};
-
-const LIVE_STATE_LABEL: Record<AgentRowState, string> = {
-  "awaiting-owner": "awaiting owner",
-  "idle-awaiting-owner": "idle awaiting owner",
-  "awaiting-approval": "awaiting approval",
-  running: "running",
-};
-
 /**
  * One row per registry child, running AND dormant. Tiers 1-3 reuse
  * `agent-widget.ts`'s own `classifyRegistryRowState` and its three-state
@@ -337,7 +328,7 @@ export function buildAuditPickerItems(registry: RpcAgentRegistry, now: number, l
     live.push({
       agentId: record.agentId,
       identity,
-      status: LIVE_STATE_LABEL[state],
+      status: AGENT_STATE_LABEL[state],
       model,
       contextTokens,
       activity: state === "idle-awaiting-owner"
@@ -349,7 +340,7 @@ export function buildAuditPickerItems(registry: RpcAgentRegistry, now: number, l
   }
 
   live.sort((a, b) => {
-    const rankDiff = LIVE_STATE_RANK[a.state!] - LIVE_STATE_RANK[b.state!];
+    const rankDiff = AGENT_STATE_RANK[a.state!] - AGENT_STATE_RANK[b.state!];
     return rankDiff !== 0 ? rankDiff : b.elapsedMs - a.elapsedMs;
   });
   dormant.sort((a, b) => b.lastActivity! - a.lastActivity!);
@@ -558,6 +549,7 @@ interface OwnerSteeringOptions {
   interruptEnabled(): boolean;
   notify?(message: string, type?: "info" | "warning" | "error"): void;
   theme?: { fg?(color: string, text: string): string };
+  matchesKey?: (data: string, keyId: string) => boolean;
 }
 
 /** Shared interactive Esc modal used by `/audit` and fork-raised `/answer`. */
@@ -603,7 +595,7 @@ export class OwnerSteeringComponent implements Component {
 
   handleInput(data: string): void {
     if (!this.modal) {
-      if (data === "\x1b") {
+      if (isEscapeKey(data)) {
         if (this.view.getMode() === "interactive") {
           this.modal = true;
           this.selected = 0;
@@ -617,17 +609,17 @@ export class OwnerSteeringComponent implements Component {
       return;
     }
     if (this.busy || data === "\x03") return;
-    if (data === "\x1b") {
+    if (isEscapeKey(data)) {
       this.modal = false;
       this.tui.requestRender();
       return;
     }
-    if (data === "\x1b[D") {
+    if (this.options.matchesKey?.(data, "left") || data === "\x1b[D") {
       this.selected = (this.selected + STEERING_ACTIONS.length - 1) % STEERING_ACTIONS.length;
       this.tui.requestRender();
       return;
     }
-    if (data === "\x1b[C") {
+    if (this.options.matchesKey?.(data, "right") || data === "\x1b[C") {
       this.selected = (this.selected + 1) % STEERING_ACTIONS.length;
       this.tui.requestRender();
       return;
@@ -721,6 +713,7 @@ export async function openViewer(
         userLineBg: (text) => theme?.bg?.("userMessageBg", text) ?? text,
         toolTextFg: (text) => theme?.fg?.("muted", text) ?? text,
         workingTextFg: (text) => theme?.fg?.("dim", text) ?? text,
+        onSendError: (error) => notify(ctx, `ws: owner send failed: ${error instanceof Error ? error.message : String(error)}`, "error"),
         border: true,
         viewportHeight: () => conversationOverlayHeight(tui),
         keybindings: keybindings as { matches(data: string, id: string): boolean },
@@ -740,6 +733,7 @@ export async function openViewer(
         interruptEnabled: () => rpcRegistry.get(agentId)?.running === true && rpcRegistry.get(agentId)?.client !== undefined,
         notify: (message, type) => notify(ctx, message, type),
         theme,
+        matchesKey: hostPiTui.matchesKey as (data: string, keyId: string) => boolean,
       });
       activateOwnerOverlay({ token, close: () => done(undefined) });
       return component;

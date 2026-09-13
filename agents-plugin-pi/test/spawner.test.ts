@@ -2135,6 +2135,21 @@ describe("attachEventListener (the settle-suppression IO gate)", () => {
     }
   });
 
+  test("an owner-held advisory becomes one warning toast and never reaches the lead queue", () => {
+    const h = listenerHarness({ lastWriter: "owner", alias: "scout" });
+    const toasts: Array<{ message: string; type?: string }> = [];
+    ownerNotifyRef.current = (message, type) => { toasts.push({ message, type }); };
+    try {
+      pushToLead(h.pi as never, h.registry, h.record, "ws-agent-advisory", { advisory: "stalled", detail: "needs attention" }, "followUp");
+      assert.deepEqual(h.pi.sent, []);
+      assert.equal(toasts.length, 1);
+      assert.match(toasts[0]!.message, /scout advisory: needs attention/);
+      assert.equal(toasts[0]!.type, "warning");
+    } finally {
+      ownerNotifyRef.current = undefined;
+    }
+  });
+
   test("final reports are unchanged while owner-held: the lead still receives the report instead of a toast", async () => {
     const h = listenerHarness({ lastWriter: "owner" });
     const toasts: string[] = [];
@@ -2412,6 +2427,7 @@ describe("same-process fork /done finish coordinator", () => {
     await drain();
     assert.deepEqual(prompts, []);
     assert.deepEqual(pi.sent.map((entry) => entry.message.customType), ["ws-agent-report"]);
+    assert.equal(record.lastWriter, "lead", "finish releases owner-held retention even when no duplicate closeout is needed");
   });
 
   test("a failed closeout final emits one missing-final advisory and never retries", async () => {
@@ -2885,12 +2901,13 @@ describe("promptAgent (the single prompt funnel)", () => {
 
   test("isLeadPrompt:false (the anti-bleed nudge) still latches running but must NOT move lastLeadPromptAt", async () => {
     const { client } = fakeRpcClient();
-    const record = freshRpcRecord({ lastLeadPromptAt: 1_000 });
+    const record = freshRpcRecord({ lastLeadPromptAt: 1_000, lastWriter: "owner" });
 
     await promptAgent(record, client, "nudge", { isLeadPrompt: false });
 
     assert.equal(record.running, true);
     assert.equal(record.lastLeadPromptAt, 1_000, "moving the watermark would hide the very stale idle-without-final the nudge exists to serve");
+    assert.equal(record.lastWriter, "lead", "the lead-side nudge still reclaims last-writer ownership");
   });
 
   test("260905: stamps runStartedAt unconditionally, overwriting any stale prior value", async () => {
@@ -3408,6 +3425,31 @@ describe("sendToAgent (live branches only — dormant auto-resume is live-gate o
     await assert.rejects(() => sendToAgent(new Map([["a", record]]), { cwd: "/tmp", writer: "owner" }, "a", "not delivered", true), /rejected/);
     assert.equal(record.lastWriter, "lead");
     assert.deepEqual(record.ownerSends, []);
+  });
+
+  test("an earlier rejected owner send cannot roll back a later successful takeover", async () => {
+    let rejectFirst!: (error: Error) => void;
+    let call = 0;
+    const client = {
+      steer: async () => {
+        call++;
+        if (call === 1) await new Promise<void>((_resolve, reject) => { rejectFirst = reject; });
+      },
+      followUp: async () => {},
+      prompt: async () => {},
+    } as unknown as RpcClient;
+    const record = freshRpcRecord({ agentId: "a", client, streaming: true, running: true, lastWriter: "lead" });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+
+    const earlier = sendToAgent(registry, { cwd: "/tmp", writer: "owner" }, "a", "earlier", true);
+    const later = sendToAgent(registry, { cwd: "/tmp", writer: "owner" }, "a", "later", true);
+    await later;
+    rejectFirst(new Error("earlier rejected"));
+    await assert.rejects(earlier, /earlier rejected/);
+
+    assert.equal(record.lastWriter, "owner");
+    assert.deepEqual(record.ownerSends?.map(({ text }) => text), ["later"]);
+    assert.equal(record.client, client, "the stale rejection cannot mark a child dead after a later dispatch succeeded");
   });
 
   test("260905 review relay: a live streaming send (followUp branch) clears a stale pendingFinal so the next settle is a settle, not the old final", async () => {

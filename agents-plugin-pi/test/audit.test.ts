@@ -169,6 +169,26 @@ describe("parseSessionFile", () => {
     ]);
   });
 
+  test("owner attribution stays ordered when lead text repeats a later owner send", () => {
+    const ownerOneAt = Date.parse("2026-09-09T00:00:02.000Z");
+    const ownerTwoAt = Date.parse("2026-09-09T00:00:03.000Z");
+    const path = fixturePath([
+      `{"type":"message","timestamp":"2026-09-09T00:00:01.000Z","message":{"role":"user","content":"same"}}`,
+      `{"type":"message","timestamp":"2026-09-09T00:00:02.000Z","message":{"role":"user","content":"owner first"}}`,
+      `{"type":"message","timestamp":"2026-09-09T00:00:03.000Z","message":{"role":"user","content":"same"}}`,
+      `{"type":"message","timestamp":"2026-09-09T00:00:04.000Z","message":{"role":"user","content":"same"}}`,
+    ]);
+    assert.deepEqual(readSessionHistory(path, [
+      { text: "owner first", at: ownerOneAt },
+      { text: "same", at: ownerTwoAt },
+    ]).items, [
+      { kind: "lead-message", text: "same" },
+      { kind: "user", text: "owner first" },
+      { kind: "user", text: "same" },
+      { kind: "lead-message", text: "same" },
+    ]);
+  });
+
   test("a missing/unreadable session file is an explicit unavailable state while the compatibility parser stays empty", () => {
     const missing = join(tmpdir(), "ws-pi-audit-definitely-missing-", `${Date.now()}.jsonl`);
     assert.deepEqual(readSessionHistory(missing), { status: "unavailable", items: [] });
@@ -539,6 +559,22 @@ describe("openViewer (shared view/steering overlay and one-overlay-at-a-time sin
     await promise;
   });
 
+  test("Kitty and modifyOtherKeys Escape encodings open and cancel the action modal", async () => {
+    for (const escape of ["\x1b[27u", "\x1b[27;1;27~"]) {
+      const opened = fakeViewerCtx();
+      const promise = openViewer(opened.ctx as never, registryOf(record({ agentId: `a-${escape.length}` })), `a-${escape.length}`);
+      const component = await opened.componentReady;
+      component.handleInput("\r");
+      component.handleInput(escape);
+      assert.match(component.render(80).join("\n"), /Leave owner steering/);
+      component.handleInput(escape);
+      component.handleInput("\x1b");
+      assert.match(component.render(80).join("\n"), /Leave owner steering/, "encoded Esc canceled the modal, so the next raw Esc reopens it");
+      opened.close();
+      await promise;
+    }
+  });
+
   test("hold is the default modal action and closes without changing ownership", async () => {
     const held = record({ agentId: "a1", lastWriter: "owner" });
     const opened = fakeViewerCtx();
@@ -600,6 +636,31 @@ describe("openViewer (shared view/steering overlay and one-overlay-at-a-time sin
     await promise;
     assert.equal(followed.length, 1);
     assert.match(followed[0]!, /owner has finished steering/i);
+    assert.equal(live.lastWriter, "lead");
+  });
+
+  test("finish with no owner send closes without dispatching a lead handoff", async () => {
+    const followed: string[] = [];
+    const live = record({
+      agentId: "a1",
+      running: true,
+      streaming: true,
+      lastWriter: "lead",
+      client: {
+        onEvent: () => () => {},
+        followUp: async (text: string) => { followed.push(text); },
+        steer: async () => {},
+      } as never,
+    });
+    const opened = fakeViewerCtx();
+    const promise = openViewer(opened.ctx as never, registryOf(live), "a1", { pi: {} as ExtensionAPI, cwd: process.cwd(), extensionPath: "test-extension.ts" });
+    const component = await opened.componentReady;
+    component.handleInput("\r");
+    component.handleInput("\x1b");
+    component.handleInput("\x1b[C");
+    component.handleInput("\r");
+    await promise;
+    assert.deepEqual(followed, []);
     assert.equal(live.lastWriter, "lead");
   });
 

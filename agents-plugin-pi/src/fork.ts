@@ -400,9 +400,9 @@ export type ForkQuestionCallback = (agentId: string, message: string) => string 
  * it — a text-only turn is the NORMAL shape there, not §4's bleed signal.
  * Without this the loop re-prompts the fork mid-discussion (the owner watches
  * a machine nudge appear in their own conversation) and, one exchange later,
- * declares a healthy fork stalled to the lead. 260905 widens that guard from
- * the per-VIEW `overlayAttached` to the thread-lifetime `threadBound`: an
- * owner who presses Esc mid-discussion has not ended the thread, and the fork
+ * declares a healthy fork stalled to the lead. The guard uses the
+ * thread-lifetime `threadBound`: an owner who presses Esc mid-discussion has
+ * not ended the thread, and the fork
  * must not start being nudged in the gap before they reopen it. The
  * `"question"`/`"final"` branches need no guard: they already return early as
  * valid stops.

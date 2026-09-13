@@ -100,14 +100,14 @@ function sanitizeDisplayTitle(title: string | undefined, fallback: string): stri
   return cleaned || fallback;
 }
 
-const STATE_RANK: Record<AgentRowState, number> = {
+export const AGENT_STATE_RANK: Readonly<Record<AgentRowState, number>> = {
   "awaiting-owner": 0,
   "idle-awaiting-owner": 0,
   "awaiting-approval": 1,
   running: 2,
 };
 
-const STATE_LABEL: Record<AgentRowState, string> = {
+export const AGENT_STATE_LABEL: Readonly<Record<AgentRowState, string>> = {
   "awaiting-owner": "awaiting owner",
   "idle-awaiting-owner": "idle awaiting owner",
   "awaiting-approval": "awaiting approval",
@@ -251,7 +251,7 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
   }
 
   rows.sort((a, b) => {
-    const rankDiff = STATE_RANK[a.state] - STATE_RANK[b.state];
+    const rankDiff = AGENT_STATE_RANK[a.state] - AGENT_STATE_RANK[b.state];
     return rankDiff !== 0 ? rankDiff : b.elapsedMs - a.elapsedMs;
   });
 
@@ -312,7 +312,7 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
     : ownerAction
       ? `⚠ OWNER ACTION · ${sanitizeDisplayTitle(row.name, "owner action")}`
       : row.name;
-  const stateLabel = STATE_LABEL[row.state];
+  const stateLabel = AGENT_STATE_LABEL[row.state];
   const base = `${primary} · ${row.role} · ${stateLabel} · ${formatCompactDuration(row.elapsedMs)}`;
   const model = row.model ?? "—";
   const effort = row.effort ?? "—";

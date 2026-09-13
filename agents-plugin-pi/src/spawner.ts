@@ -538,9 +538,6 @@ export interface RpcAgentRecord {
    * agent produces no settle/advisory push and is left out of the fan-in
    * status line entirely: the exchange belongs to the owner, and the lead is
    * not part of it.
-   *
-   * Deliberately distinct from `overlayAttached`, which is per-VIEW (an owner
-   * pressing Esc clears the overlay while the thread stays bound).
    */
   threadBound?: boolean;
   /** Same-process `/done` coordinator for a fork-raised owner thread; never persisted. */
@@ -601,18 +598,6 @@ export interface RpcAgentRecord {
    * directory to the lead.
    */
   pendingApproval?: { cmdId: string; command: string; rationale?: string; cwd?: string; decisionWritten?: boolean };
-  /**
-   * 260904 Phase 2 (side-thread question surface, review relay #1 C1): `true`
-   * while an owner overlay chat VIEW is attached to this agent (`ask.ts`'s
-   * `openThread` sets it, closing the view clears it).
-   *
-   * 260905 narrowed its role: the suppression `fork.ts`'s anti-bleed loop and
-   * the push model both need is the THREAD's lifetime, not the view's — an
-   * owner pressing Esc must not re-arm nudges on a still-open discussion — so
-   * both now read `threadBound`. This flag stays as the per-view record
-   * `ask.ts` keeps for its own overlay bookkeeping.
-   */
-  overlayAttached?: boolean;
   /**
    * 260904 Phase 2 (review relay #1 I6): consulted by `applyRpcEvent` the
    * instant a `kind:"question"` report is observed on this record. It may
@@ -1507,6 +1492,8 @@ export function startForkFinish(
   resumeCtx: Pick<RpcResumeCtx, "cwd" | "extensionPath">,
 ): ForkFinishOperation {
   if (record.forkFinish) return record.forkFinish;
+  const ownerWasHolding = isOwnerHeld(record);
+  if (ownerWasHolding) claimLeadOwnership(record);
   const operation: ForkFinishOperation = {
     token: randomUUID(),
     cwd: resumeCtx.cwd,
@@ -1533,7 +1520,7 @@ export function startForkFinish(
   // Last-writer ownership requires an immediate, lead-attributed handoff.
   // Joining a streaming run uses followUp, so no new agent_start is expected;
   // mark that closeout run observable now and let its next settle reconcile.
-  if (isOwnerHeld(record) && operation.candidate === undefined && record.terminalDelivery?.state !== "enqueued" && record.terminalDelivery?.state !== "held") {
+  if (ownerWasHolding && operation.candidate === undefined && record.terminalDelivery?.state !== "enqueued" && record.terminalDelivery?.state !== "held") {
     operation.closeoutIssued = true;
     operation.closeoutRunStarted = record.running || record.streaming;
     operation.candidate = undefined;
@@ -1746,23 +1733,96 @@ export function pushToLead(
  * resets on a nudge too, since the nudge really did start a fresh turn on
  * the wire even though it is not a new lead-issued task boundary.
  */
-function stampWriter(record: RpcAgentRecord, writer: "lead" | "owner", text?: string): { previous: RpcAgentRecord["lastWriter"]; previousLeadPromptAt: number | undefined; ownerSend?: { text: string; at: number } } {
-  const previous = record.lastWriter;
-  const previousLeadPromptAt = record.lastLeadPromptAt;
-  const ownerSend = writer === "owner" && text !== undefined ? { text, at: Date.now() } : undefined;
-  record.lastWriter = writer;
-  if (ownerSend) (record.ownerSends ??= []).push(ownerSend);
-  syncOwnershipProtection(record);
-  triggerAgentWidgetRefresh();
-  return { previous, previousLeadPromptAt, ownerSend };
+interface WriterOperation {
+  writer: "lead" | "owner";
+  leadPromptAt?: number;
+  state: "pending" | "accepted";
+}
+interface WriterOperationState {
+  baseWriter: RpcAgentRecord["lastWriter"];
+  baseLeadPromptAt: number | undefined;
+  operations: WriterOperation[];
+}
+const writerOperations = new WeakMap<RpcAgentRecord, WriterOperationState>();
+const dispatchOrder = new WeakMap<RpcAgentRecord, { issued: number; accepted: number }>();
+
+function issueDispatch(record: RpcAgentRecord): number {
+  const order = dispatchOrder.get(record) ?? { issued: 0, accepted: 0 };
+  order.issued++;
+  dispatchOrder.set(record, order);
+  return order.issued;
 }
 
-function rollbackWriter(record: RpcAgentRecord, stamp: ReturnType<typeof stampWriter>, writer: "lead" | "owner"): void {
-  if (stamp.ownerSend && record.ownerSends?.at(-1) === stamp.ownerSend) record.ownerSends.pop();
-  if (record.lastWriter === writer) record.lastWriter = stamp.previous;
-  if (writer === "lead") record.lastLeadPromptAt = stamp.previousLeadPromptAt;
+function acceptDispatch(record: RpcAgentRecord, sequence: number): void {
+  const order = dispatchOrder.get(record);
+  if (order) order.accepted = Math.max(order.accepted, sequence);
+}
+
+function wasSupersededByAcceptedDispatch(record: RpcAgentRecord, sequence: number): boolean {
+  return (dispatchOrder.get(record)?.accepted ?? 0) > sequence;
+}
+
+function projectWriter(record: RpcAgentRecord, state: WriterOperationState): void {
+  let writer = state.baseWriter;
+  let leadPromptAt = state.baseLeadPromptAt;
+  for (const operation of state.operations) {
+    writer = operation.writer;
+    if (operation.leadPromptAt !== undefined) leadPromptAt = operation.leadPromptAt;
+  }
+  record.lastWriter = writer;
+  record.lastLeadPromptAt = leadPromptAt;
+}
+
+function compactWriterOperations(record: RpcAgentRecord, state: WriterOperationState): void {
+  while (state.operations[0]?.state === "accepted") {
+    const accepted = state.operations.shift()!;
+    state.baseWriter = accepted.writer;
+    if (accepted.leadPromptAt !== undefined) state.baseLeadPromptAt = accepted.leadPromptAt;
+  }
+  projectWriter(record, state);
+  if (state.operations.length === 0) writerOperations.delete(record);
   syncOwnershipProtection(record);
   triggerAgentWidgetRefresh();
+}
+
+function stampWriter(record: RpcAgentRecord, writer: "lead" | "owner", text?: string, leadPromptAt?: number): { operation: WriterOperation; ownerSend?: { text: string; at: number } } {
+  let state = writerOperations.get(record);
+  if (!state) {
+    state = { baseWriter: record.lastWriter, baseLeadPromptAt: record.lastLeadPromptAt, operations: [] };
+    writerOperations.set(record, state);
+  }
+  const operation: WriterOperation = { writer, ...(leadPromptAt === undefined ? {} : { leadPromptAt }), state: "pending" };
+  const ownerSend = writer === "owner" && text !== undefined ? { text, at: Date.now() } : undefined;
+  state.operations.push(operation);
+  if (ownerSend) (record.ownerSends ??= []).push(ownerSend);
+  projectWriter(record, state);
+  syncOwnershipProtection(record);
+  triggerAgentWidgetRefresh();
+  return { operation, ownerSend };
+}
+
+function acceptWriter(record: RpcAgentRecord, stamp: ReturnType<typeof stampWriter>): void {
+  const state = writerOperations.get(record);
+  if (!state || !state.operations.includes(stamp.operation)) return;
+  stamp.operation.state = "accepted";
+  compactWriterOperations(record, state);
+}
+
+function rollbackWriter(record: RpcAgentRecord, stamp: ReturnType<typeof stampWriter>): void {
+  const state = writerOperations.get(record);
+  if (stamp.ownerSend) {
+    const ownerIndex = record.ownerSends?.indexOf(stamp.ownerSend) ?? -1;
+    if (ownerIndex >= 0) record.ownerSends!.splice(ownerIndex, 1);
+  }
+  if (!state) return;
+  const index = state.operations.indexOf(stamp.operation);
+  if (index >= 0) state.operations.splice(index, 1);
+  compactWriterOperations(record, state);
+}
+
+function claimLeadOwnership(record: RpcAgentRecord): void {
+  const stamp = stampWriter(record, "lead");
+  acceptWriter(record, stamp);
 }
 
 export async function promptAgent(
@@ -1772,7 +1832,8 @@ export async function promptAgent(
   opts?: { isLeadPrompt?: boolean; writer?: "lead" | "owner" },
 ): Promise<void> {
   const writer = opts?.writer ?? "lead";
-  const writerStamp = stampWriter(record, writer, writer === "owner" ? message : undefined);
+  const now = Date.now();
+  const writerStamp = stampWriter(record, writer, writer === "owner" ? message : undefined, writer === "lead" && opts?.isLeadPrompt !== false ? now : undefined);
   record.running = true;
   record.workGeneration = (record.workGeneration ?? 0) + 1;
   record.terminalThisTurn = false;
@@ -1781,19 +1842,17 @@ export async function promptAgent(
   // The anti-bleed nudge continues the same task, so it deliberately keeps
   // completion facts. Every real prompt is a new instruction boundary.
   if (opts?.isLeadPrompt !== false || writer === "owner") clearTerminalFacts(record);
-  record.runStartedAt = Date.now();
+  record.runStartedAt = now;
   if (record.ownership) observeSessionWrite(record.ownership.home, record.sessionPath);
-  if (record.ownership) updateOwnership(record.ownership.home, { lastActivityAt: Date.now(), liveness: { lifecycle: "live", running: true, observedAt: Date.now() } });
-  if (writer === "lead" && opts?.isLeadPrompt !== false) {
-    record.lastLeadPromptAt = Date.now();
-  }
+  if (record.ownership) updateOwnership(record.ownership.home, { lastActivityAt: now, liveness: { lifecycle: "live", running: true, observedAt: now } });
   const workGeneration = record.workGeneration;
   try {
     await client.prompt(message);
   } catch (error) {
-    rollbackWriter(record, writerStamp, writer);
+    rollbackWriter(record, writerStamp);
     throw error;
   }
+  acceptWriter(record, writerStamp);
   if (record.delegation && record.workGeneration === workGeneration) {
     record.expectedReport = true;
     syncOwnershipProtection(record);
@@ -3279,16 +3338,18 @@ export async function sendToAgent(
   }
 
   const live = record.client;
+  const dispatchSequence = issueDispatch(record);
   let writerStamp: ReturnType<typeof stampWriter> | undefined;
   try {
     if (record.streaming) {
-      writerStamp = stampWriter(record, writer, writer === "owner" ? message : undefined);
-      if (writer === "lead") record.lastLeadPromptAt = Date.now();
+      writerStamp = stampWriter(record, writer, writer === "owner" ? message : undefined, writer === "lead" ? Date.now() : undefined);
       if (interrupt) {
         await live.steer(message);
       } else {
         await live.followUp(message);
       }
+      acceptWriter(record, writerStamp);
+      writerStamp = undefined;
       // A steer/followUp joins the run already in flight, so the child is
       // outstanding again from the lead's point of view even though no fresh
       // prompt was issued — including for `terminalThisTurn` (review relay #1,
@@ -3305,8 +3366,10 @@ export async function sendToAgent(
     } else {
       await promptAgent(record, live, message, { writer });
     }
+    acceptDispatch(record, dispatchSequence);
   } catch (err) {
-    if (writerStamp) rollbackWriter(record, writerStamp, writer);
+    const superseded = wasSupersededByAcceptedDispatch(record, dispatchSequence);
+    if (writerStamp) rollbackWriter(record, writerStamp);
     // A superseded closeout is no longer allowed to mutate or publish against
     // the replacement task. Its old RPC rejection is deliberately ignored by
     // lifecycle bookkeeping; the replacement owns the record now.
@@ -3316,7 +3379,7 @@ export async function sendToAgent(
     // has exited) — treat it exactly like a failed liveness probe so the lead
     // is told rather than left counting a dead agent, then re-throw so the
     // caller still sees the failure.
-    markAgentExited(ctx.pi, registry, record, {
+    if (!superseded) markAgentExited(ctx.pi, registry, record, {
       // A coordinator-owned closeout chooses its own one advisory terminal;
       // do not let the generic exited path admit a competing terminal event.
       suppressTerminal: ctx.finishToken !== undefined,

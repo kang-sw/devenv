@@ -331,6 +331,8 @@ export interface ConversationViewOptions {
   workingTextFg?: (text: string) => string;
   /** Fired with a full copy of the transcript after every append — never for the streaming tail. Lets a host persist the transcript as it grows. */
   onItemsChange?: (items: readonly ConversationItem[]) => void;
+  /** Reports an asynchronous channel-send rejection after the view adds an explicit failure note. */
+  onSendError?: (error: unknown, text: string) => void;
   /** Live overlay height, supplied by each consumer from host TUI geometry. Unset keeps non-overlay/unit consumers unbounded. */
   viewportHeight?: () => number;
   /** Host keybinding matcher injected by the custom-overlay factory. */
@@ -619,7 +621,11 @@ export class ConversationViewComponent implements Component {
       return;
     }
     this.appendItem({ kind: "user", text: trimmed });
-    void this.options.channel.send?.(trimmed);
+    const sent = this.options.channel.send?.(trimmed);
+    if (sent) void sent.catch((error) => {
+      this.appendItem({ kind: "note", text: `Send failed: ${error instanceof Error ? error.message : String(error)}` });
+      this.options.onSendError?.(error, trimmed);
+    });
   }
 
   private expandableIndices(): number[] {

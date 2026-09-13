@@ -123,7 +123,6 @@ import {
   wrapInBorder,
   type ChildLiveness,
   type ConversationChannel,
-  type ConversationItem,
   type ConversationViewTui,
   type EditorLike,
 } from "./conversation-view.ts";
@@ -210,7 +209,7 @@ export function checkContextLength(context: string | undefined, limit = MAX_CONT
  * was ALREADY appended to the view by the component's own internal
  * `agent_settled` handling (the same event, a separate listener registered
  * first). Passing `true` there skips the redundant second append that used
- * to double the summary turn on screen and in `thread.transcript`; the
+ * to double the summary turn on screen; the
  * thread-close side effects (`closeThreadOnDone`, `done`) still run exactly
  * as before.
  */
@@ -309,8 +308,6 @@ export interface ThreadRecord {
   respondentAgentId?: string;
   /** Denormalized resume fields for `respondentAgentId` — see this file's header. */
   forkResume?: PersistedForkResume;
-  /** Legacy read/test shape only; hydration discards it and serialization strips it. */
-  transcript?: ConversationItem[];
   createdAt: string;
   /** Last open/answer/close touch — orders the "reopen the most recent" shortcut. */
   touchedAt: string;
@@ -373,100 +370,6 @@ export type ThreadOrigin = "lead-ask" | "fork-raised";
 /** Normalizes a persisted/unknown `origin` value; see `ThreadOrigin` for why the default is the conservative one. */
 export function normalizeThreadOrigin(value: unknown): ThreadOrigin {
   return value === "lead-ask" ? "lead-ask" : "fork-raised";
-}
-
-/** Newest transcript entries kept per thread (`ThreadRecord.transcript`); older ones are dropped on write and on parse. */
-export const THREAD_TRANSCRIPT_CAP = 200;
-
-/** Maps a legacy `TranscriptEntry.who` value onto its `ConversationItem.kind` equivalent — see `normalizeTranscript`. */
-const LEGACY_WHO_TO_KIND: Record<string, "user" | "assistant" | "note"> = {
-  you: "user",
-  thread: "assistant",
-  note: "note",
-};
-
-/**
- * One persisted transcript entry, tolerantly converted to a `ConversationItem`
- * or dropped (`undefined`) when malformed. Accepts BOTH shapes: the legacy
- * `{who,text}` entry (`"you"`->`{kind:"user",...}`, `"thread"`->
- * `{kind:"assistant",...}`, `"note"`->`{kind:"note",...}`) written before this
- * ticket, and the native `ConversationItem` `{kind,...}` shape, validated
- * per-kind (`tool-call` needs `id`/`name`; `tool-result` needs `id`/`name`/
- * `content`, `isError` optional; the rest need `text: string`).
- */
-function normalizeTranscriptEntry(entry: unknown): ConversationItem | undefined {
-  const candidate = entry as
-    | { who?: unknown; kind?: unknown; text?: unknown; id?: unknown; name?: unknown; args?: unknown; content?: unknown; isError?: unknown }
-    | null;
-  if (!candidate || typeof candidate !== "object") return undefined;
-  if (typeof candidate.who === "string") {
-    const kind = LEGACY_WHO_TO_KIND[candidate.who];
-    return kind && typeof candidate.text === "string" ? ({ kind, text: candidate.text } as ConversationItem) : undefined;
-  }
-  switch (candidate.kind) {
-    case "user":
-    case "assistant":
-    case "lead-message":
-    case "note":
-      return typeof candidate.text === "string" ? ({ kind: candidate.kind, text: candidate.text } as ConversationItem) : undefined;
-    case "tool-call":
-      return typeof candidate.id === "string" && typeof candidate.name === "string"
-        ? { kind: "tool-call", id: candidate.id, name: candidate.name, args: candidate.args }
-        : undefined;
-    case "tool-result":
-      return typeof candidate.id === "string" && typeof candidate.name === "string" && typeof candidate.content === "string"
-        ? {
-            kind: "tool-result",
-            id: candidate.id,
-            name: candidate.name,
-            content: candidate.content,
-            ...(typeof candidate.isError === "boolean" ? { isError: candidate.isError } : {}),
-          }
-        : undefined;
-    default:
-      return undefined;
-  }
-}
-
-/**
- * Tolerant read of a persisted `transcript`: a non-array is `undefined`
- * (the field is simply absent), malformed entries are dropped, and the
- * result is capped to the newest `THREAD_TRANSCRIPT_CAP` — a hand-edited or
- * older registry file must never make a thread unopenable. See
- * `normalizeTranscriptEntry` for the legacy/native per-entry conversion.
- */
-export function normalizeTranscript(value: unknown): ConversationItem[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const entries = value.map((entry) => normalizeTranscriptEntry(entry)).filter((entry): entry is ConversationItem => entry !== undefined);
-  return entries.length > THREAD_TRANSCRIPT_CAP ? entries.slice(entries.length - THREAD_TRANSCRIPT_CAP) : entries;
-}
-
-/**
- * The `ConversationViewComponent` initial transcript for opening/reopening a
- * thread. The original question is always the first dialogue turn when one is
- * recorded on the thread. Older persisted transcripts either carry it as a
- * leading `Question: ...` note or omit it because the header used to be its
- * only presentation; upgrade/prepend that one turn without disturbing the
- * later history. Exported for direct testing (pure — no component/channel
- * needed).
- */
-export function buildInitialConversationItems(thread: Pick<ThreadRecord, "transcript" | "question" | "title">): ConversationItem[] {
-  const question = thread.question?.trim();
-  const transcript = thread.transcript ?? [];
-  if (!question) return transcript;
-
-  const questionTurn: ConversationItem = { kind: "assistant", text: `**Question:** ${question}` };
-  const first = transcript[0];
-  if (!first) return [questionTurn];
-
-  const firstText = "text" in first ? first.text.trim() : undefined;
-  if (first.kind === "note" && (firstText === question || firstText === `Question: ${question}`)) {
-    return [questionTurn, ...transcript.slice(1)];
-  }
-  if (first.kind === "assistant" && (firstText === question || firstText === `Question: ${question}` || firstText === `**Question:** ${question}`)) {
-    return transcript;
-  }
-  return [questionTurn, ...transcript];
 }
 
 /** Compact metadata/control header; the question itself belongs in the transcript. */
@@ -546,7 +449,7 @@ export function threadRegistryPath(sessionFile: string): string {
 /** Stable, pretty-printed on-disk form (a hand-inspectable adapter data file). */
 export function serializeThreadRegistry(records: readonly ThreadRecord[]): string {
   const threads = records.map((record) => {
-    const { transcript: _retiredTranscript, ...persisted } = record;
+    const { transcript: _retiredTranscript, ...persisted } = record as ThreadRecord & { transcript?: unknown };
     return persisted;
   });
   return `${JSON.stringify({ threads }, null, 2)}\n`;
@@ -1346,7 +1249,6 @@ function finishForkRaisedThread(pi: ExtensionAPI, handle: ThreadRegistryHandle, 
   if (record.forkFinish) return;
 
   bindThread(rpcRegistry, record.agentId, true);
-  record.overlayAttached = false;
   thread.status = "dormant";
   thread.touchedAt = nowIso();
   thread.forkResume = captureForkResume(record);
@@ -1356,7 +1258,6 @@ function finishForkRaisedThread(pi: ExtensionAPI, handle: ThreadRegistryHandle, 
   record.onForkFinishComplete = (finished, failure) => {
     // A replacement send can supersede this operation; only its own callback
     // may release the temporary bind and refresh this thread snapshot.
-    finished.overlayAttached = false;
     finished.threadBound = false;
     syncOwnershipProtection(finished);
     thread.forkResume = captureForkResume(finished);
@@ -1378,7 +1279,6 @@ export function detachForkRaisedThread(handle: ThreadRegistryHandle, rpcRegistry
   if (agentId) {
     const record = rpcRegistry.get(agentId);
     if (record) {
-      record.overlayAttached = false;
       // The thread itself is closing here, so the thread-lifetime bind is
       // released too: the fork rejoins the lead's fan-in and its own
       // kind:"final" is pushed to the lead as any other child's would be.
@@ -1418,7 +1318,6 @@ export function injectDiscussionSummary(
   if (agentId) {
     const record = rpcRegistry.get(agentId);
     if (record) {
-      record.overlayAttached = false;
       record.threadBound = false;
       syncOwnershipProtection(record);
       // Snapshot first: `stopAgent` clears `client`, and a later reopen needs
@@ -1764,9 +1663,8 @@ export async function ensureRespondent(
 }
 
 /**
- * Sets/clears `RpcAgentRecord.threadBound` — the thread-LIFETIME flag (§1's
- * "the lead is not part of this exchange"), as opposed to `overlayAttached`'s
- * per-VIEW lifetime. Set on every thread open/reopen and on fork-raised
+ * Sets/clears `RpcAgentRecord.threadBound` — the thread-lifetime flag (§1's
+ * "the lead is not part of this exchange"). Set on every thread open/reopen and on fork-raised
  * registration; cleared only where the thread itself actually closes
  * (`detachForkRaisedThread`, `injectDiscussionSummary`, `ws-resolve`), never
  * on a mere overlay Esc. While set, `spawner.ts` emits no settle push for the
@@ -2617,9 +2515,6 @@ async function openThread(
   // conversation and then steer a false "stalled, do not harvest" verdict
   // into the lead. Read (not imported) by `fork.ts`: the reverse import would
   // cycle.
-  const attachedRecord = rpcRegistry.get(agentId);
-  if (attachedRecord) attachedRecord.overlayAttached = true;
-
   const channel = createForkChannel(pi, rpcRegistry, sessionCtx.cwd, sessionCtx.extensionPath, agentId, (updated) => {
     thread.forkResume = captureForkResume(updated);
     thread.touchedAt = nowIso();
@@ -2673,6 +2568,7 @@ async function openThread(
           userLineBg: (text) => theme?.bg?.("userMessageBg", text) ?? text,
           toolTextFg: (text) => theme?.fg?.("muted", text) ?? text,
           workingTextFg: (text) => theme?.fg?.("dim", text) ?? text,
+          onSendError: (error) => notify(ctx, `ws: owner send failed: ${error instanceof Error ? error.message : String(error)}`, "error"),
           primitives: { ScrollView: hostPiTui.ScrollView, Markdown: hostPiTui.Markdown, Text: hostPiTui.Text, Editor: hostPiTui.Editor },
           onDone: () => component.finish(),
         });
@@ -2693,6 +2589,7 @@ async function openThread(
           interruptEnabled: () => rpcRegistry.get(agentId!)?.running === true && rpcRegistry.get(agentId!)?.client !== undefined,
           notify: (message, type) => notify(ctx, message, type),
           theme,
+          matchesKey: hostPiTui.matchesKey as (data: string, keyId: string) => boolean,
         });
         activateOwnerOverlay({ token, threadId: thread.threadId, close: overlayHandle.close, closeWithSummary: overlayHandle.closeWithSummary });
         return component;
@@ -2702,8 +2599,6 @@ async function openThread(
   } finally {
     // Cleared on every exit path — `/done` (which also stops the fork), a
     // plain close, or a throw out of the overlay.
-    const record = rpcRegistry.get(agentId);
-    if (record) record.overlayAttached = false;
     clearOwnerOverlay(token);
   }
 }

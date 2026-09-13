@@ -1793,7 +1793,11 @@ live-idle or auto-resumed dormant child, steer a streaming child. A successful
 owner send appends `{text, at}` to `ownerSends` and sets `lastWriter: owner`;
 every lead-side prompt (spawn, `ws-agent-send`, fork nudge, finish handoff)
 sets `lastWriter: lead`. Absence is the legacy lead default. This one last-writer
-rule, not separate booleans, defines settle ownership.
+rule, not separate booleans, defines settle ownership. Overlapping sends settle
+by dispatch order: a failed earlier send cannot roll back a later successful
+writer, and failed owner sends are removed from attribution. The conversation
+adds an explicit failure note and the TUI reports the rejected send instead of
+leaking an unhandled promise rejection.
 
 In interactive mode Esc opens `[hold] [finish] [interrupt]`, defaulting to
 hold; left/right selects, Enter acts, Esc cancels, and Ctrl+C does nothing in

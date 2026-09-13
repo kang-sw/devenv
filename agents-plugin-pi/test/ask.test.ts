@@ -78,13 +78,10 @@ import {
   closeThreadOnDone,
   handleRespondentFinalReport,
   normalizeThreadOrigin,
-  normalizeTranscript,
-  THREAD_TRANSCRIPT_CAP,
   checkContextLength,
   buildForkQuestionLeadNotice,
   MAX_CONTEXT_CHARS,
   resolveChildLiveness,
-  buildInitialConversationItems,
   buildThreadHeaderHint,
   formatSpawnTime,
   buildDoneSummaryPrompt,
@@ -106,7 +103,7 @@ import {
   type FocusableEditorLike,
   type LeadAskQueueOptions,
 } from "../src/ask.ts";
-import { ConversationViewComponent, type ConversationItem, type ConversationChannel, type ConversationViewTui } from "../src/conversation-view.ts";
+import { ConversationViewComponent, type ConversationChannel, type ConversationViewTui } from "../src/conversation-view.ts";
 import { FORK_EXCLUDED_TOOL_NAMES } from "../src/fork.ts";
 import {
   agentWidgetRefreshRef,
@@ -241,24 +238,13 @@ describe("threadRegistryPath / serialize / parse", () => {
   });
 
   test("legacy thread-local transcripts are discarded on hydration so the child record/session is the only conversation source", () => {
-    const original = thread({
-      threadId: "q1",
-      status: "open",
+    const original = {
+      ...thread({ threadId: "q1", status: "open" }),
       transcript: [{ kind: "user", text: "legacy owner text" }],
-    });
+    } as ThreadRecord & { transcript: unknown[] };
     const [parsed] = parseThreadRegistry(serializeThreadRegistry([original]));
     assert.ok(!("transcript" in parsed));
     assert.equal(parsed.threadId, "q1");
-  });
-
-  test("normalizeTranscript caps at the newest THREAD_TRANSCRIPT_CAP entries", () => {
-    const many = Array.from({ length: THREAD_TRANSCRIPT_CAP + 25 }, (_, i) => ({ who: "thread" as const, text: `turn ${i}` }));
-    const capped = normalizeTranscript(many)!;
-    assert.equal(capped.length, THREAD_TRANSCRIPT_CAP);
-    assert.equal((capped[0] as { text: string }).text, "turn 25", "the oldest entries are the ones dropped");
-    assert.equal((capped.at(-1) as { text: string }).text, `turn ${THREAD_TRANSCRIPT_CAP + 24}`);
-    assert.equal(normalizeTranscript(undefined), undefined);
-    assert.equal(normalizeTranscript({}), undefined);
   });
 
   describe("resolveChildLiveness", () => {
@@ -266,50 +252,6 @@ describe("threadRegistryPath / serialize / parse", () => {
       assert.equal(resolveChildLiveness(true, true), "running");
       assert.equal(resolveChildLiveness(false, true), "idle-awaiting-owner");
       assert.equal(resolveChildLiveness(false, false), "settled");
-    });
-  });
-
-  describe("buildInitialConversationItems", () => {
-    test("the original question is the first assistant dialogue turn even when it equals the metadata title", () => {
-      assert.deepEqual(buildInitialConversationItems({ transcript: [], question: "Rebase or merge?", title: "Rebase or merge?" }), [
-        { kind: "assistant", text: "**Question:** Rebase or merge?" },
-      ]);
-    });
-
-    test("an empty or absent transcript trims and seeds the question once", () => {
-      assert.deepEqual(buildInitialConversationItems({ transcript: undefined, question: "  Rebase or merge?  " }), [
-        { kind: "assistant", text: "**Question:** Rebase or merge?" },
-      ]);
-    });
-
-    test("repairs an existing history that omitted the question without discarding later turns", () => {
-      const items: ConversationItem[] = [
-        { kind: "user", text: "What about blue?" },
-        { kind: "assistant", text: "Blue is also available." },
-      ];
-      assert.deepEqual(buildInitialConversationItems({ transcript: items, question: "Which color do you prefer?" }), [
-        { kind: "assistant", text: "**Question:** Which color do you prefer?" },
-        ...items,
-      ]);
-    });
-
-    test("upgrades both legacy leading note forms and does not duplicate the question on later reopen", () => {
-      const later: ConversationItem[] = [{ kind: "user", text: "Blue." }];
-      for (const noteText of ["Which color?", "Question: Which color?"]) {
-        const upgraded = buildInitialConversationItems({
-          transcript: [{ kind: "note", text: noteText }, ...later],
-          question: "Which color?",
-        });
-        assert.deepEqual(upgraded, [{ kind: "assistant", text: "**Question:** Which color?" }, ...later]);
-        assert.deepEqual(buildInitialConversationItems({ transcript: upgraded, question: "Which color?" }), upgraded);
-      }
-    });
-
-    test("an absent question leaves genuine history unchanged", () => {
-      const items: ConversationItem[] = [{ kind: "note", text: "already open" }];
-      assert.equal(buildInitialConversationItems({ transcript: items, question: undefined }), items);
-      assert.deepEqual(buildInitialConversationItems({ transcript: undefined, question: undefined }), []);
-      assert.deepEqual(buildInitialConversationItems({ transcript: [], question: undefined }), []);
     });
   });
 
@@ -839,7 +781,6 @@ describe("handleForkRaisedQuestion (Entry A meets Entry B)", () => {
     handleForkRaisedQuestion(handle, registry, "agent-7", "Should I rebase?");
 
     assert.equal(live.threadBound, true, "the exchange belongs to the owner from the moment the fork raised it");
-    assert.equal(live.overlayAttached, undefined, "no VIEW is attached yet — the two flags have different lifetimes");
     assert.equal(
       computeRunningStatusLine(registry),
       undefined,
@@ -1188,7 +1129,6 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
       streaming: false,
       running: false,
       reportLog: [],
-      overlayAttached: true,
       threadBound: true,
       client: {
         prompt: async () => {},
@@ -1289,7 +1229,7 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     assert.equal(loadThreadRegistryFile(path)[0]?.status, "dormant");
   });
 
-  test("I5: snapshots the resume fields BEFORE stopping the respondent, and clears the overlay flag", async () => {
+  test("I5: snapshots the resume fields BEFORE stopping the respondent and releases the thread bind", async () => {
     const { pi, handle, record } = setup();
     record.respondentAgentId = "agent-7";
     const stops: string[] = [];
@@ -1299,7 +1239,6 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     injectDiscussionSummary(pi, handle, registry, record, "decided");
 
     assert.equal(record.forkResume?.sessionPath, "/tmp/s.jsonl", "captured while the record was still live");
-    assert.equal(live.overlayAttached, false);
     assert.equal(live.threadBound, false, "I5: the thread itself closed here, so the thread-lifetime bind is released too");
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(stops, ["agent-7"], "260903 ws-agent-stop semantics: the child process is actually stopped");
@@ -1341,7 +1280,6 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(stops, [], "stopping a live task fork would destroy the in-flight task the lead is still expecting a pushed final from");
     assert.ok(live.client, "the fork's client is untouched");
-    assert.equal(live.overlayAttached, false, "the owner view closes immediately");
     assert.equal(live.threadBound, true, "the temporary bind protects the finish operation until its closeout settles");
     assert.ok(live.forkFinish, "an already-idle fork is evaluated immediately rather than stranded awaiting another event");
     assert.equal(record.status, "dormant", "the ordinary thread snapshot is persisted while finish continues in memory");
@@ -1399,7 +1337,6 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
       const msg = sent[0].message as { content: string };
       assert.ok(msg.content.includes("Decided: merge, keep both histories."));
       assert.equal(record.status, "dormant");
-      assert.equal(live.overlayAttached, false);
       assert.equal(loadThreadRegistryFile(path)[0]?.status, "dormant");
       await new Promise((resolve) => setImmediate(resolve));
       assert.deepEqual(stops, ["agent-7"]);
@@ -1438,7 +1375,6 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
       assert.deepEqual(overlay.calls.summaries, [], "a task fork's final is not a thread summary or a second closeout");
       assert.deepEqual(sent, [], "the lead reads the fork's own final report; nothing is injected");
       assert.equal(record.status, "dormant");
-      assert.equal(live.overlayAttached, false);
       await new Promise((resolve) => setImmediate(resolve));
       assert.deepEqual(stops, []);
     });
