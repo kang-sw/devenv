@@ -3,6 +3,8 @@ title: "Promotion/dispatch dependency-landing gate with typed frontmatter edges"
 related:
   260913-research-promotion-dependency-landing-gate: design-source — carries the settled Confirmed Decisions this ticket implements and the scoped-out proposal 5
   260909-epic-ws-worker-interpreter-refoundation: constraint — lead-run/selector are the shared worker-interpreter surface this touches
+sage-review-design: required
+sage-review-completeness: required
 ---
 
 # Promotion/dispatch dependency-landing gate with typed frontmatter edges
@@ -32,16 +34,32 @@ stays in the research ticket.
 
 Confirmed with the user (2026-09-13); see the design source's Outcome Ledger.
 
-- **Typed machine-readable frontmatter edge.** A blocking prerequisite a phase
-  consumes is declared as a typed frontmatter edge distinct from soft `related:`
-  (candidate key `blocked-by:`; exact spelling is this ticket's implementation
-  choice). Both the dispatch-time gate and the ticket-selector read it directly,
-  so the cheap selector orders mechanically without parsing phase prose.
-- **Landed-predicate is code-level and phase-granular.** A declared prerequisite
-  counts as landed when the specific consumed phase carries a `### Result`, or
-  the prerequisite ticket is in `.done/` — not merely when the ticket has left
-  `todo/`. Phase-granular over whole-ticket so consuming phase N of a multi-phase
-  producer is a legitimate, allowed interleave.
+- **Typed, optional frontmatter edge `blocked-by:` (new key, additive).** A
+  blocking prerequisite a phase consumes is declared in a new frontmatter key
+  `blocked-by:`, distinct from soft `related:` so the machine signal needs no
+  prose parsing. Value shape resolves the phase-targeting question:
+  - `blocked-by: <stem>` — the whole prerequisite ticket must be in `.done/`.
+  - `blocked-by: <stem>#<phaseN>` — the prerequisite's phase N must carry a
+    `### Result` (or the whole ticket be `.done/`). The edge, not prose, names
+    *which* producer phase the landed-predicate checks — this is how the
+    phase-granular interleave is addressed.
+  The key is optional and additive: existing tickets without it are never broken
+  and never migrated. (Exact spelling/format of the `#<phaseN>` suffix is this
+  ticket's implementation choice.)
+- **Graceful degradation when `blocked-by:` is absent.** The hard gate
+  (`tickets.query` dispatch, `tickets.move` closure) fires ONLY on an explicit
+  `blocked-by:` edge; absent it, there is no hard block — exactly today's
+  behavior — because a hard refusal driven by prose inference would risk false
+  blocks. The ticket-selector's ordering is advisory (a preference, not a block),
+  so it keeps its EXISTING best-effort inference (its current
+  prerequisite-preference over prose `related:` hints) as the fallback path and
+  can still infer an order for legacy artifacts carrying no `blocked-by:`.
+  Precise when declared, best-effort inference when not.
+- **Landed-predicate is code-level, evaluated live.** A declared prerequisite
+  counts as landed by the code-level predicate above (`.done/`, or the named
+  phase carries a `### Result`) — never merely "the ticket left `todo/`", and
+  computed live at the scheduling moment, never read from a content-hashed review
+  stamp.
 - **Gate-owner layer = ws runtime, bound to real tool calls (confirmed
   mechanism).**
   - **Dispatch-time hard gate → `ws/tickets.query` single-stem point-resolve.**
@@ -52,11 +70,15 @@ Confirmed with the user (2026-09-13); see the design source's Outcome Ledger.
     point-resolve projection (populated only in single-stem projection mode, not
     on every query, to avoid noise); lead-run honors it by refusing to spawn and
     reporting the blocker.
-  - **Promotion closure → `ws/tickets.move(to: "ready")`.** The runtime reads the
-    typed edge and refuses to move a consumer to `ready/` while a typed
-    prerequisite is not in `ready/`, `.done/`, or the same batch — the
-    machine-enforced upgrade of lead-ticket's existing "Promote to ready" step-1
-    dependency-closure (today a playbook-text check over prose `related:`).
+  - **Promotion closure → split between the tool and the playbook.**
+    `ws/tickets.move(to: "ready")` is single-stem and batch-unaware, so the
+    machine gate there enforces only the tool-visible subset: refuse when a
+    `blocked-by:` prerequisite is neither in `ready/` nor `.done/`. The "or the
+    same batch" case stays owned by lead-ticket's existing playbook closure — it
+    evaluates the whole batch and moves prerequisites first, so a same-batch
+    producer is already in `ready/` when the consumer moves. Do NOT encode a
+    same-batch check into `tickets.move`: it has no batch handle, so that branch
+    could never populate.
   - **Never bound to `ws/tickets.sage_stamp`.** The stamp is content-hash based;
     a scheduling fact bound to it passes at review and stays green while the
     dependency moves underneath — the exact silent-staleness failure the gate
@@ -94,6 +116,10 @@ Confirmed with the user (2026-09-13); see the design source's Outcome Ledger.
   dispatch), never baked into a content-hashed review stamp, or it reproduces the
   silent-staleness failure it exists to prevent (design source: "Why (B) must
   NOT live inside a content-hashed review").
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/rsrc/, agents-plugin-wsflow/skills/, agents-plugin-tool/internal/wsdoc/conventions/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
 
 ## Prior Art
 
@@ -105,34 +131,53 @@ Confirmed with the user (2026-09-13); see the design source's Outcome Ledger.
   `ws/tickets.query`'s existing `related:` / status projection as the substrate
   a gate reads.
 
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin/rsrc/ticket-selector/ticket-selector.md, agents-plugin/rsrc/ticket-reviewer-design/ticket-reviewer-design.md, agents-plugin/rsrc/lead-run/lead-run.md (plus their agents-plugin-wsflow/rsrc/ mirrors), agents-plugin-tool/internal/wsdoc/tickets.go and sibling files, agents-plugin-tool/internal/mcp/server.go |
+| scope.surface | public-interface | new dispatch_blocked field on tickets.query's single-stem point-resolve projection, a new refusal behavior on tickets.move, and a new typed frontmatter key are all caller-visible tool/schema contracts |
+| scope.new_public_symbol | yes | dispatch_blocked field (tickets.query point-resolve output) and the typed frontmatter edge key (candidate blocked-by:) |
+| scope.new_type_contract | yes | the dispatch_blocked: {blocking_stem, reason} object shape on tickets.query's point-resolve response |
+| scope.test_surface | existing | agents-plugin-tool/internal/wsdoc/tickets_mutate_test.go, agents-plugin-tool/internal/wsdoc/tickets_route_facts_test.go, agents-plugin-tool/internal/mcp/tickets_scope_test.go, agents-plugin-tool/internal/mcp/ticket_review_design_test.go already cover tickets.move, route-facts projection, and the design reviewer |
+| complexity.reuse_points | confirmed | ticket-selector.md#L25-27 prerequisite-preference; ticket-reviewer-design.md#L145-148 batch dependency-mistake reasoning; lead-run.md#L74 session.note assignment; tickets.go#L461 relatedEntries projection |
+| complexity.side_effect_risk | high | the gate binds into tickets.query and tickets.move, the universal dispatch and promotion chokepoints every ticket in this repo and every downstream ws install passes through |
+| risk.correctness | high | the phase-granular landed-predicate must correctly find a ### Result on the specific consumed phase (not just ticket status) across arbitrary phase text |
+| risk.fit | moderate | the ticket's own Constraints section requires the gate stay host-neutral and downstream-first (AGENTS.md Architecture Rules 3-5); no devenv-specific rule may leak into a shipped surface |
+| risk.test | moderate | new coverage is needed for the point-resolve-only dispatch_blocked computation, phase-granular ### Result detection, and the ready/.done/same-batch promotion-closure boundary, though existing test files for these tools give a base to extend |
+| risk.security_or_contract | high | tickets.move(to:ready) gains a new refusal condition, a behavioral contract change for every existing caller of the promotion tool |
+
 ## Phases
 
 ### Phase 1: Typed dependency edge + dispatch-time hard gate + selector ordering
 
-Introduce the typed machine-readable frontmatter edge for a blocking
-prerequisite (distinct from soft `related:`), and make the runtime enforce it at
-two bound tool calls plus feed the selector:
+Introduce the new optional `blocked-by:` frontmatter edge (value shape per
+Decisions: bare `<stem>` = prerequisite `.done/`; `<stem>#<phaseN>` = that phase
+carries a `### Result`), and make the runtime enforce it at two bound tool calls
+plus feed the selector:
 (1) **dispatch-time hard gate on `ws/tickets.query` single-stem point-resolve** —
 the projection gains a live-computed `dispatch_blocked: {blocking_stem, reason}`
-when the ticket's earliest unfinished phase block-depends on a prerequisite not
-landed by the phase-granular code-level predicate (consumed phase has a
-`### Result`, or prerequisite in `.done/`); populated only in single-stem
-projection mode; lead-run honors it (refuse spawn, report blocker);
+when the ticket's earliest unfinished phase has a `blocked-by:` prerequisite not
+landed by the code-level predicate; populated only in single-stem projection
+mode; lead-run honors it (refuse spawn, report blocker);
 (2) **promotion closure on `ws/tickets.move(to: "ready")`** — refuse to move a
-consumer to `ready/` while a typed prerequisite is not in `ready/`/`.done/`/the
-same batch (machine-enforced upgrade of lead-ticket's step-1 closure);
-(3) the **ticket-selector** orders `ready/` mechanically from the typed edge
-without prose parsing. The predicate is computed live at each call, never read
-from a review stamp.
+consumer to `ready/` while a `blocked-by:` prerequisite is neither in `ready/`
+nor `.done/` (tool-visible subset only; the same-batch case stays with
+lead-ticket's playbook closure per Decisions);
+(3) the **ticket-selector** orders `ready/` from the `blocked-by:` edge when
+present, and falls back to its existing best-effort prose inference when absent.
+Every predicate is computed live at each call, never read from a review stamp.
 
-Verify: a consumer whose typed prerequisite is unlanded gets `dispatch_blocked`
-at point-resolve and lead-run refuses to spawn with the blocking stem named;
-`tickets.move(to:ready)` refuses a consumer whose typed prerequisite is in
-`idea/`/`todo/`; a consumer whose consumed phase's prerequisite phase carries a
-`### Result` (prerequisite not fully `.done/`) is allowed (phase-granular
-interleave); the selector orders a prerequisite ahead of its consumer from the
-typed edge alone; a soft `related:` edge neither gates nor reorders; and no gate
-path reads or writes a sage stamp.
+Verify: a consumer whose `blocked-by:` prerequisite is unlanded gets
+`dispatch_blocked` at point-resolve and lead-run refuses to spawn with the
+blocking stem named; `tickets.move(to:ready)` refuses a consumer whose
+`blocked-by:` prerequisite is in `idea/`/`todo/` (and, for a `#<phaseN>` edge,
+whose named phase has no `### Result`); a consumer whose `blocked-by: <stem>#<N>`
+target phase carries a `### Result` (prerequisite not fully `.done/`) is allowed
+(phase-granular interleave); **a ticket carrying no `blocked-by:` is neither
+gated nor refused, and the selector still infers an order for it from prose
+`related:` hints (no regression for legacy artifacts)**; a soft `related:` edge
+never triggers the hard gate; and no gate path reads or writes a sage stamp.
 
 ### Phase 2: Promotion-time advisory warning + design-reviewer solo-path advisory
 
