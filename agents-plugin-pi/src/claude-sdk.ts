@@ -1,23 +1,74 @@
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import type { Options, Query, SDKMessage, SpawnOptions, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
 import type { ClaudeDelegatePreset } from "./claude-delegate-prompts.ts";
 import { buildClaudeRequest, buildClaudeTaskFrame } from "./claude-delegate-prompts.ts";
 
 export const CLAUDE_READ_TOOLS = ["Read", "Grep", "Glob", "WebSearch", "WebFetch"] as const;
+export const CLAUDE_WRITE_TOOLS = ["Edit", "Write"] as const;
 export type ClaudeUsage = { usage: Record<string, unknown>; model_usage: Record<string, unknown>; cost_estimate_usd: number | null } | null;
 export interface ClaudeSdk { query(args: { prompt: string; options?: Options }): Query; }
 export interface ClaudeSdkDependencies { loadSdk?: () => Promise<ClaudeSdk>; executable?: string; env?: NodeJS.ProcessEnv; cleanupMs?: number; spawnProcess?: (options: SpawnOptions) => SpawnedProcess; }
-export interface ClaudeRunInput { preset: ClaudeDelegatePreset; request: string; paths?: readonly string[]; model?: string; cwd: string; abortController: AbortController; }
+export interface ClaudeEditScope { readonly root: string; readonly canonicalTargets: readonly string[]; readonly requestedTargets: readonly string[]; allows(path: unknown): boolean; changed(): string[]; }
+export interface ClaudeRunInput { preset: ClaudeDelegatePreset; request: string; paths?: readonly string[]; model?: string; cwd: string; editScope?: ClaudeEditScope; abortController: AbortController; }
 export interface ClaudeRunOutput { output: string; usage: ClaudeUsage; }
 export class ClaudeDelegateError extends Error { readonly code: "timeout" | "cancelled" | "sdk_error" | "missing_result" | "profile_violation" | "cleanup_failed"; constructor(code: "timeout" | "cancelled" | "sdk_error" | "missing_result" | "profile_violation" | "cleanup_failed", message: string) { super(message); this.code = code; } }
 const SAFE: Record<ClaudeDelegateError["code"], string> = { timeout: "Claude request timed out.", cancelled: "Claude request was cancelled.", sdk_error: "Claude request failed.", missing_result: "Claude returned no terminal result.", profile_violation: "Claude started with an unexpected tool profile.", cleanup_failed: "Claude child cleanup could not be confirmed." };
 function fail(code: ClaudeDelegateError["code"]): never { throw new ClaudeDelegateError(code, SAFE[code]); }
 export function delegateEnvironment(env: NodeJS.ProcessEnv = process.env): Record<string, string> { const keys = ["HOME", "PATH", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR"]; return Object.fromEntries(keys.flatMap((key) => typeof env[key] === "string" ? [[key, env[key]!]] : [])); }
 export function resolveClaudeExecutable(executable?: string): string { const candidate = executable ?? join(homedir(), ".local", "bin", "claude"); if (!existsSync(candidate)) fail("sdk_error"); return candidate; }
-export function buildClaudeOptions(input: ClaudeRunInput, executable: string, env: NodeJS.ProcessEnv = process.env, spawnClaudeCodeProcess?: (options: SpawnOptions) => SpawnedProcess): Options { return { systemPrompt: { type: "preset", preset: "claude_code", append: buildClaudeTaskFrame(input.preset) }, cwd: input.cwd, pathToClaudeCodeExecutable: executable, env: delegateEnvironment(env), ...(input.model ? { model: input.model } : {}), strictMcpConfig: true, mcpServers: {}, settingSources: [], tools: [...CLAUDE_READ_TOOLS], allowedTools: [...CLAUDE_READ_TOOLS], permissionMode: "dontAsk", persistSession: false, maxTurns: 20, abortController: input.abortController, canUseTool: async (name) => CLAUDE_READ_TOOLS.includes(name as never) ? { behavior: "allow", updatedInput: undefined } : { behavior: "deny", message: "ws-claude permits read-only tools." }, ...(spawnClaudeCodeProcess ? { spawnClaudeCodeProcess } : {}) }; }
+export function pathContained(root: string, candidate: string, pathOps: Pick<typeof import("node:path"), "relative" | "isAbsolute" | "sep"> = { relative, isAbsolute, sep }): boolean {
+  const value = pathOps.relative(root, candidate);
+  return !pathOps.isAbsolute(value) && (value === "" || (value !== ".." && !value.startsWith(`..${pathOps.sep}`)));
+}
+function canonicalEditTarget(root: string, path: string): string {
+  const candidate = resolve(root, path);
+  let entry;
+  try { entry = lstatSync(candidate, { throwIfNoEntry: false }); } catch { throw new Error("edit target path is not accessible"); }
+  if (entry) {
+    let canonical: string;
+    try { canonical = realpathSync(candidate); } catch { throw new Error("edit target symlink must resolve inside the worktree"); }
+    if (canonical === root || !pathContained(root, canonical) || !statSync(canonical).isFile()) throw new Error("edit target must resolve to a worktree file");
+    return canonical;
+  }
+  let parent: string;
+  try { parent = realpathSync(dirname(candidate)); } catch { throw new Error("edit target parent must already exist"); }
+  if (!pathContained(root, parent) || !statSync(parent).isDirectory()) throw new Error("edit target parent must stay inside the worktree");
+  return join(parent, basename(candidate));
+}
+function fingerprint(root: string, path: string): string {
+  try {
+    const canonical = realpathSync(path);
+    if (canonical !== path || !pathContained(root, canonical) || !statSync(canonical).isFile()) return "invalid";
+    return `file:${createHash("sha256").update(readFileSync(canonical)).digest("hex")}`;
+  } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return "missing"; return "unreadable"; }
+}
+export function createClaudeEditScope(cwd: string, targets: readonly string[]): ClaudeEditScope {
+  let root: string;
+  try { root = realpathSync(resolve(cwd)); } catch { throw new Error("edit target worktree must exist"); }
+  if (!statSync(root).isDirectory()) throw new Error("edit target worktree must be a directory");
+  const canonicalTargets = targets.map(path => canonicalEditTarget(root, path));
+  if (new Set(canonicalTargets).size !== canonicalTargets.length) throw new Error("edit targets must not overlap");
+  const names = canonicalTargets.map(path => relative(root, path).split(sep).join("/"));
+  const initial = new Map(canonicalTargets.map(path => [path, fingerprint(root, path)]));
+  const allowed = new Set(canonicalTargets);
+  return {
+    root, canonicalTargets, requestedTargets: [...targets],
+    allows(path) { if (typeof path !== "string" || path.trim().length === 0) return false; try { return allowed.has(canonicalEditTarget(root, path)); } catch { return false; } },
+    changed() { return canonicalTargets.flatMap((path, index) => fingerprint(root, path) !== initial.get(path) ? [names[index]!] : []); },
+  };
+}
+export function buildClaudeOptions(input: ClaudeRunInput, executable: string, env: NodeJS.ProcessEnv = process.env, spawnClaudeCodeProcess?: (options: SpawnOptions) => SpawnedProcess): Options {
+  const tools = input.editScope ? [...CLAUDE_READ_TOOLS, ...CLAUDE_WRITE_TOOLS] : [...CLAUDE_READ_TOOLS];
+  return { systemPrompt: { type: "preset", preset: "claude_code", append: buildClaudeTaskFrame(input.preset) }, cwd: input.cwd, pathToClaudeCodeExecutable: executable, env: delegateEnvironment(env), ...(input.model ? { model: input.model } : {}), strictMcpConfig: true, mcpServers: {}, settingSources: [], tools, allowedTools: [...CLAUDE_READ_TOOLS], permissionMode: "dontAsk", persistSession: false, maxTurns: 20, abortController: input.abortController, canUseTool: async (name, toolInput) => {
+    if (CLAUDE_READ_TOOLS.includes(name as never)) return { behavior: "allow", updatedInput: undefined };
+    if (input.editScope && CLAUDE_WRITE_TOOLS.includes(name as never) && input.editScope.allows(toolInput.file_path)) return { behavior: "allow", updatedInput: undefined };
+    return { behavior: "deny", message: input.editScope ? "ws-claude permits writes only to exact authorized edit targets." : "ws-claude permits read-only tools." };
+  }, ...(spawnClaudeCodeProcess ? { spawnClaudeCodeProcess } : {}) };
+}
 async function defaultSdk(): Promise<ClaudeSdk> { return await import("@anthropic-ai/claude-agent-sdk") as unknown as ClaudeSdk; }
 interface ChildOwnership {
   exited: boolean;
@@ -116,9 +167,10 @@ export async function runClaudeItem(input: ClaudeRunInput, dependencies: ClaudeS
   const spawnOwned = dependencies.spawnProcess ?? spawnClaudeProcess;
   try {
     const sdk = await Promise.race([(dependencies.loadSdk ?? defaultSdk)(), cancelled]); if (input.abortController.signal.aborted) fail("cancelled");
-    query = sdk.query({ prompt: buildClaudeRequest(input), options: buildClaudeOptions(input, resolveClaudeExecutable(dependencies.executable), dependencies.env, (options) => { if (child || finalized || input.abortController.signal.aborted) throw new ClaudeDelegateError("cancelled", SAFE.cancelled); child = spawnOwned(options); void ownChild(child).error.catch(rejectProcess); return child; }) });
+    query = sdk.query({ prompt: buildClaudeRequest({ ...input, editTargets: input.editScope?.requestedTargets }), options: buildClaudeOptions(input, resolveClaudeExecutable(dependencies.executable), dependencies.env, (options) => { if (child || finalized || input.abortController.signal.aborted) throw new ClaudeDelegateError("cancelled", SAFE.cancelled); child = spawnOwned(options); void ownChild(child).error.catch(rejectProcess); return child; }) });
     let terminal: Extract<SDKMessage, { type: "result" }> | undefined;
-    const consume = async () => { for await (const message of query!) { if (finalized || input.abortController.signal.aborted) return; if (message.type === "system" && message.subtype === "init" && (message.tools.some((tool) => !CLAUDE_READ_TOOLS.includes(tool as never)) || message.mcp_servers.length !== 0)) fail("profile_violation"); if (message.type === "result") terminal = message; } };
+    const permittedTools = input.editScope ? [...CLAUDE_READ_TOOLS, ...CLAUDE_WRITE_TOOLS] : [...CLAUDE_READ_TOOLS];
+    const consume = async () => { for await (const message of query!) { if (finalized || input.abortController.signal.aborted) return; if (message.type === "system" && message.subtype === "init" && (message.tools.some((tool) => !permittedTools.includes(tool as never)) || message.mcp_servers.length !== 0)) fail("profile_violation"); if (message.type === "result") terminal = message; } };
     await Promise.race([consume(), cancelled, processError]); if (!terminal) fail("missing_result"); if (terminal.subtype !== "success" || terminal.is_error !== false || typeof terminal.result !== "string") fail("sdk_error");
     const usage = terminal.usage && terminal.modelUsage && typeof terminal.total_cost_usd === "number" ? { usage: terminal.usage as unknown as Record<string, unknown>, model_usage: terminal.modelUsage as Record<string, unknown>, cost_estimate_usd: terminal.total_cost_usd } : null;
     return { output: terminal.result, usage };

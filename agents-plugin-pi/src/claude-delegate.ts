@@ -1,22 +1,26 @@
 import { readSpawnRole } from "./process-role.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
-import { ClaudeDelegateError, runClaudeItem, type ClaudeSdkDependencies, type ClaudeUsage } from "./claude-sdk.ts";
+import { ClaudeDelegateError, createClaudeEditScope, runClaudeItem, type ClaudeEditScope, type ClaudeSdkDependencies, type ClaudeUsage } from "./claude-sdk.ts";
 import type { ClaudeDelegatePreset } from "./claude-delegate-prompts.ts";
 
 export const CLAUDE_DELEGATE_TOOL_NAME = "ws-claude";
 const WORDS = ["amber", "birch", "cedar", "dawn", "elm", "fjord", "grove", "harbor", "iris", "juniper", "kite", "lumen"];
-export interface ClaudeDelegateItem { preset: ClaudeDelegatePreset; request: string; paths?: string[]; model?: string; editTargets?: unknown; resume?: unknown; }
-export interface ClaudeDelegateResult { id: string; status: "success" | "error"; output: string; usage: ClaudeUsage; error?: { code: string; message: string }; }
+export interface ClaudeDelegateItem { preset: ClaudeDelegatePreset; request: string; paths?: string[]; model?: string; "edit-targets"?: string[]; editTargets?: unknown; resume?: unknown; }
+export interface ClaudeDelegateResult { id: string; status: "success" | "error"; output: string; usage: ClaudeUsage; changed?: string[]; error?: { code: string; message: string }; }
 export interface ClaudeDelegateController { execute(items: unknown, signal?: AbortSignal): Promise<ClaudeDelegateResult[]>; shutdown(): Promise<void>; }
 export interface ClaudeDelegateDeps extends ClaudeSdkDependencies { timeoutMs?: number; cleanupMs?: number; }
 
-function errorResult(id: string, code: string, message: string): ClaudeDelegateResult { return { id, status: "error", output: "", usage: null, error: { code, message: message.slice(0, 500) } }; }
+function errorResult(id: string, code: string, message: string, changed?: string[]): ClaudeDelegateResult { return { id, status: "error", output: "", usage: null, ...(changed ? { changed } : {}), error: { code, message: message.slice(0, 500) } }; }
 function validItem(value: unknown): value is ClaudeDelegateItem {
   if (!value || typeof value !== "object") return false;
   const item = value as ClaudeDelegateItem;
-  if (Object.keys(item).some((key) => !["preset", "request", "paths", "model"].includes(key))) return false;
-  return (item.preset === "audit" || item.preset === "consult") && typeof item.request === "string" && item.request.trim().length > 0 &&
+  if (Object.keys(item).some((key) => !["preset", "request", "paths", "model", "edit-targets"].includes(key))) return false;
+  const editTargets = item["edit-targets"];
+  const preset = item.preset === "audit" || item.preset === "consult" || item.preset === "rewrite";
+  const targetShape = editTargets === undefined || (Array.isArray(editTargets) && editTargets.length > 0 && editTargets.every(path => typeof path === "string" && path.trim().length > 0));
+  const targetContract = item.preset === "rewrite" ? editTargets !== undefined && targetShape : editTargets === undefined;
+  return preset && targetContract && typeof item.request === "string" && item.request.trim().length > 0 &&
     (item.paths === undefined || (Array.isArray(item.paths) && item.paths.every((path) => typeof path === "string" && path.trim().length > 0))) &&
     (item.model === undefined || (typeof item.model === "string" && item.model.trim().length > 0)) && item.editTargets === undefined && item.resume === undefined;
 }
@@ -39,7 +43,7 @@ export function allocateClaudeHandle(used: Set<string>): string {
 }
 
 export function createClaudeDelegateController(cwd: () => string, deps: ClaudeDelegateDeps = {}): ClaudeDelegateController {
-  const used = new Set<string>(); let closed = false; let active = 0; let quarantined = false; const queue: { start: () => void; reject: () => void }[] = []; const controllers = new Set<AbortController>(); const running = new Set<Promise<unknown>>();
+  const used = new Set<string>(); let closed = false; let active = 0; let quarantined = false; const queue: { start: () => void; reject: () => void }[] = []; const controllers = new Set<AbortController>(); const running = new Set<Promise<unknown>>(); const scheduledEditTargets = new Set<string>();
   const quarantine = () => { quarantined = true; for (const entry of queue.splice(0)) entry.reject(); };
   const acquire = async (signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
     const detach = () => signal?.removeEventListener("abort", cancel);
@@ -60,16 +64,33 @@ export function createClaudeDelegateController(cwd: () => string, deps: ClaudeDe
   });
   const release = () => { active -= 1; if (!closed && !quarantined) queue.shift()?.start(); };
   const executeOne = async (value: unknown, id: string, callerSignal?: AbortSignal): Promise<ClaudeDelegateResult> => {
-    if (!validItem(value)) return errorResult(id, "invalid_item", "Each item needs a supported preset and nonblank request; edit-targets and resume are unavailable.");
-    try { await acquire(callerSignal); } catch { return errorResult(id, "cancelled", "Invocation was cancelled before this item started."); }
-    if (callerSignal?.aborted || closed || quarantined) { release(); return errorResult(id, "cancelled", "Invocation was cancelled before this item started."); }
-    const abort = new AbortController(); controllers.add(abort); const onAbort = () => abort.abort(); callerSignal?.addEventListener("abort", onAbort, { once: true });
-    let timedOut = false; const timeout = setTimeout(() => { timedOut = true; abort.abort(new Error("timeout")); }, deps.timeoutMs ?? 120_000);
+    if (!validItem(value)) return errorResult(id, "invalid_item", "Each item needs a supported preset and nonblank request; rewrite alone requires non-empty edit-targets, while read-only presets forbid them.");
+    let editScope: ClaudeEditScope | undefined;
+    if (value.preset === "rewrite") {
+      try { editScope = createClaudeEditScope(cwd(), value["edit-targets"]!); }
+      catch { return errorResult(id, "invalid_edit_target", "Rewrite edit targets must be exact files inside the worktree with existing in-root parents."); }
+      if (editScope.canonicalTargets.some(target => scheduledEditTargets.has(target))) return errorResult(id, "edit_target_conflict", "Rewrite edit targets overlap another scheduled item.");
+      for (const target of editScope.canonicalTargets) scheduledEditTargets.add(target);
+    }
+    let acquired = false;
     try {
-      const output = await runClaudeItem({ ...value, cwd: cwd(), abortController: abort }, deps);
-      return { id, status: "success", output: output.output, usage: output.usage };
-    } catch (error) { const raw = errorCode(error, callerSignal); const code = raw === "cleanup_failed" ? raw : timedOut ? "timeout" : raw; if (code === "cleanup_failed") quarantine(); return errorResult(id, code, code === "timeout" ? "Claude request timed out." : "Claude request failed."); }
-    finally { clearTimeout(timeout); callerSignal?.removeEventListener("abort", onAbort); controllers.delete(abort); release(); }
+      try { await acquire(callerSignal); acquired = true; } catch { return errorResult(id, "cancelled", "Invocation was cancelled before this item started.", editScope?.changed()); }
+      if (callerSignal?.aborted || closed || quarantined) return errorResult(id, "cancelled", "Invocation was cancelled before this item started.", editScope?.changed());
+      const abort = new AbortController(); controllers.add(abort); const onAbort = () => abort.abort(); callerSignal?.addEventListener("abort", onAbort, { once: true });
+      let timedOut = false; const timeout = setTimeout(() => { timedOut = true; abort.abort(new Error("timeout")); }, deps.timeoutMs ?? 120_000);
+      try {
+        const { "edit-targets": _editTargets, ...request } = value;
+        const output = await runClaudeItem({ ...request, cwd: editScope?.root ?? cwd(), ...(editScope ? { editScope } : {}), abortController: abort }, deps);
+        return { id, status: "success", output: output.output, usage: output.usage, ...(editScope ? { changed: editScope.changed() } : {}) };
+      } catch (error) {
+        const raw = errorCode(error, callerSignal); const code = raw === "cleanup_failed" ? raw : timedOut ? "timeout" : raw;
+        if (code === "cleanup_failed") quarantine();
+        return errorResult(id, code, code === "timeout" ? "Claude request timed out." : "Claude request failed.", editScope?.changed());
+      } finally { clearTimeout(timeout); callerSignal?.removeEventListener("abort", onAbort); controllers.delete(abort); }
+    } finally {
+      if (acquired) release();
+      for (const target of editScope?.canonicalTargets ?? []) scheduledEditTargets.delete(target);
+    }
   };
   return {
     async execute(items: unknown, signal?: AbortSignal) {
@@ -89,8 +110,8 @@ export function addClaudeDelegateIfLead(active: readonly string[], role: string 
 export function registerClaudeDelegate(pi: ExtensionAPI, controllerRef: { current: ClaudeDelegateController | undefined }, toolPreviewTuiRef: ToolPreviewTuiRef = createToolPreviewTuiRef()): void {
   registerWsTool(pi, {
     name: CLAUDE_DELEGATE_TOOL_NAME, label: CLAUDE_DELEGATE_TOOL_NAME,
-    description: "Run isolated, read-only Claude audit or consult requests. Supply one or more independent items.",
-    parameters: { type: "object", additionalProperties: false, properties: { items: { type: "array", minItems: 1, items: { type: "object", additionalProperties: false, properties: { preset: { type: "string", enum: ["audit", "consult"] }, request: { type: "string", minLength: 1 }, paths: { type: "array", items: { type: "string", minLength: 1 } }, model: { type: "string", minLength: 1 } }, required: ["preset", "request"] } }, }, required: ["items"] } as never,
+    description: "Run isolated Claude audit, consult, or exact-file rewrite requests. Supply one or more independent items; rewrite requires edit-targets and leaves changes unstaged.",
+    parameters: { type: "object", additionalProperties: false, properties: { items: { type: "array", minItems: 1, items: { type: "object", additionalProperties: false, properties: { preset: { type: "string", enum: ["audit", "consult", "rewrite"] }, request: { type: "string", minLength: 1 }, paths: { type: "array", items: { type: "string", minLength: 1 } }, model: { type: "string", minLength: 1 }, "edit-targets": { type: "array", minItems: 1, items: { type: "string", minLength: 1 } } }, required: ["preset", "request"] } }, }, required: ["items"] } as never,
     async execute(_id, params, signal) { const results = await controllerRef.current?.execute((params as { items?: unknown }).items, signal); if (!results) throw new Error("ws-claude is unavailable outside an active lead session"); const text = JSON.stringify(results); return { content: [{ type: "text", text }], details: { items: results } }; },
   } as never, toolPreviewTuiRef);
 }
