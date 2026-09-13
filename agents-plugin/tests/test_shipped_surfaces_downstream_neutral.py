@@ -35,10 +35,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # exists to cover (260913-feat-cross-session-mailbox-wake Phase 2). Scoping
 # to the one file it needs to cover avoids re-litigating that pre-existing,
 # separately tracked gap under this ticket.
+#
+# "agents-plugin/hooks" (Phase 3, the Claude adapter's auto-discovered
+# hooks/hooks.json) is listed as a directory prefix rather than an exact
+# file, unlike the Codex entry above: it has no pre-existing sibling file
+# with unrelated migration-vocabulary baggage to avoid re-litigating.
 TEXT_TREES = (
     "agents-plugin/rsrc",
     "agents-plugin/skills",
     "agents-plugin/.codex-plugin/hooks.json",
+    "agents-plugin/hooks",
     "agents-plugin-wsflow/rsrc",
     "agents-plugin-wsflow/skills",
     "agents-plugin-tool/internal/wsdoc/conventions",
