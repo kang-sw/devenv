@@ -28,6 +28,29 @@ function write(path: string, lines: unknown[]) { writeFileSync(path, `${lines.ma
 async function ticks() { await new Promise(resolve => setImmediate(resolve)); await new Promise(resolve => setImmediate(resolve)); }
 
 describe("agent telemetry lifecycle at production boundaries", () => {
+  test("authoritative RPC context usage wins over cached-input fallback and survives compaction null", () => {
+    const session = join(root(), "child.jsonl");
+    const state = { sessionId: "child", sessionFile: session, model: { provider: "p", id: "m" } };
+    write(session, [header("child"), { type: "message", id: "cached", parentId: null, timestamp: "x", message: { role: "assistant", usage: { input: 342, output: 8, cacheRead: 61_440, totalTokens: 61_790, cost: { total: .2 } } } }]);
+    const record = { agentId: "a", sessionPath: session } as RpcAgentRecord;
+    refreshAgentTelemetry(record, state, { stats: { sessionId: "child", sessionFile: session, contextUsage: { tokens: 78_000, contextWindow: 200_000, percent: 39 } } });
+    assert.equal(record.telemetry?.contextTokens, 78_000, "Pi's current-context estimate is authoritative over per-call usage");
+
+    write(session, [header("child"), assistant("before-compaction", 3_150, .2), { type: "compaction", id: "compact", usage: { input: 999, cost: { total: .1 } } }]);
+    refreshAgentTelemetry(record, state, { stats: { sessionId: "child", sessionFile: session, contextUsage: { tokens: null, contextWindow: 200_000, percent: null } } });
+    assert.equal(record.telemetry?.contextTokens, 78_000, "the temporary null interval retains the last valid value for this session identity");
+  });
+
+  test("context occupancy is cleared when the RPC session identity changes", () => {
+    const dir = root(), oldSession = join(dir, "old.jsonl"), nextSession = join(dir, "next.jsonl");
+    write(oldSession, [header("old"), assistant("old-call", 70_000, .2)]);
+    write(nextSession, [header("next")]);
+    const record = { agentId: "a", sessionPath: oldSession, telemetry: { version: 1, origin: { sessionId: "old", sessionPath: oldSession, emptyPrefix: true }, contextTokens: 70_000 } } as RpcAgentRecord;
+    refreshAgentTelemetry(record, { sessionId: "next", sessionFile: nextSession }, { stats: { sessionId: "next", sessionFile: nextSession, contextUsage: { tokens: null, contextWindow: 200_000, percent: null } } });
+    assert.equal(record.telemetry, undefined);
+    assert.equal(record.observedContextTokens, undefined);
+  });
+
   for (const interruption of ["partial", "missing", "read-error"] as const) test(`fork origin and usage survive ${interruption} and resume complete accounting`, () => {
     const session = join(root(), "child.jsonl");
     const state = { sessionId: "s", sessionFile: session, model: { provider: "p", id: "m" }, thinkingLevel: "low" };
@@ -40,13 +63,13 @@ describe("agent telemetry lifecycle at production boundaries", () => {
     if (interruption === "partial") writeFileSync(session, '{"type":');
     else { rmSync(session); if (interruption === "read-error") mkdirSync(session); }
     assert.equal(refreshAgentTelemetry(record, { ...state, thinkingLevel: "high" }), true, "selection changes notify even with stale usage");
-    assert.deepEqual(record.telemetry, { version: 1, origin, model: "p/m", effort: "high", latestInput: 20, estimatedUsd: .2 });
-    assert.equal(record.telemetryInputFloor, undefined);
+    assert.deepEqual(record.telemetry, { version: 1, origin, model: "p/m", effort: "high", contextTokens: 20, estimatedUsd: .2 });
+    assert.equal(record.telemetryContextFloor, undefined);
     if (interruption === "read-error") rmSync(session, { recursive: true });
     write(session, [...complete, assistant("next", 25, .3)]);
     refreshAgentTelemetry(record, state); refreshAgentTelemetry(record, state);
     assert.deepEqual(record.telemetry?.origin, origin);
-    assert.equal(record.telemetry?.latestInput, 25); assert.equal(record.telemetry?.estimatedUsd, .5);
+    assert.equal(record.telemetry?.contextTokens, 25); assert.equal(record.telemetry?.estimatedUsd, .5);
   });
 
   for (const contradiction of ["header", "path", "anchor", "duplicate", "interior", "entry-id"] as const) test(`readable ${contradiction} contradiction invalidates saved attribution`, () => {
@@ -62,7 +85,7 @@ describe("agent telemetry lifecycle at production boundaries", () => {
     if (contradiction === "entry-id") write(session, [...entries, { type: "message", message: { role: "assistant" } }]);
     if (contradiction === "interior") writeFileSync(session, JSON.stringify(entries[0]) + '\n{broken\n' + JSON.stringify(entries[2]) + '\n');
     refreshAgentTelemetry(record, contradiction === "path" ? { ...state, sessionFile: session + ".other" } : state);
-    assert.equal(record.telemetry, undefined); assert.equal(record.telemetryInputFloor, undefined); assert.equal(record.observedLatestInput, undefined);
+    assert.equal(record.telemetry, undefined); assert.equal(record.telemetryContextFloor, undefined); assert.equal(record.observedContextTokens, undefined);
   });
 
   test("validated child-attributable cost is mirrored into durable ownership for ancestor reconstruction", () => {
@@ -88,7 +111,7 @@ describe("agent telemetry lifecycle at production boundaries", () => {
       attachEventListener(undefined, undefined, record, client);
       listener({ type: "thinking_level_changed", thinkingLevel: "high" }); await ticks();
       assert.equal(record.observedModel, undefined); assert.equal(record.observedEffort, undefined);
-      assert.deepEqual(record.telemetry, { version: 1, origin, latestInput: 20, estimatedUsd: .2 });
+      assert.deepEqual(record.telemetry, { version: 1, origin, contextTokens: 20, estimatedUsd: .2 });
       assert.equal(notifications, 1);
       listener({ type: "thinking_level_changed" }); await ticks(); assert.equal(notifications, 1, "unchanged unknown selection does not notify again");
     } finally { agentWidgetRefreshRef.current = previous; }
@@ -104,7 +127,7 @@ describe("agent telemetry lifecycle at production boundaries", () => {
       attachEventListener(undefined, undefined, record, client); listener({ type: "thinking_level_changed" });
       if (replacement === "client") record.client = {} as RpcClient; else record.launchGeneration++;
       record.observedModel = "new/model"; record.observedEffort = "high";
-      record.telemetry = { version: 1, origin: { sessionId: "new", sessionPath: "/unused", emptyPrefix: true }, model: "new/model", effort: "high", latestInput: 12, estimatedUsd: .4 };
+      record.telemetry = { version: 1, origin: { sessionId: "new", sessionPath: "/unused", emptyPrefix: true }, model: "new/model", effort: "high", contextTokens: 12, estimatedUsd: .4 };
       const expected = structuredClone(record.telemetry);
       reject(new Error("old state unavailable")); await ticks();
       assert.equal(record.observedModel, "new/model"); assert.equal(record.observedEffort, "high"); assert.deepEqual(record.telemetry, expected); assert.equal(notifications, 0);
@@ -121,7 +144,7 @@ describe("agent telemetry lifecycle at production boundaries", () => {
       assert.deepEqual(record.telemetry?.origin, { sessionId: `${role}-child`, sessionPath: session, prefixEntryId: "parent-call" }, `${role} fork excludes its inherited history without fabricating an empty worker origin`);
       write(session, [header(`${role}-child`, "inherited"), assistant("parent-call", 900, 9), assistant("child-call", 20, .2)]);
       refreshAgentTelemetry(record, { sessionId: `${role}-child`, sessionFile: session });
-      assert.equal(record.telemetry?.latestInput, 20); assert.equal(record.telemetry?.estimatedUsd, .2);
+      assert.equal(record.telemetry?.contextTokens, 20); assert.equal(record.telemetry?.estimatedUsd, .2);
     }
   });
 
@@ -144,22 +167,23 @@ describe("agent telemetry lifecycle at production boundaries", () => {
     } finally { Object.assign(RpcClient.prototype, original); }
   });
 
-  test("a newer unknown floor-backed child call clears the prior latest input", () => {
+  test("a newer unknown floor-backed child call retains the prior valid context occupancy", () => {
     const dir = root(), session = join(dir, "floor.jsonl");
-    const record = { agentId: "floor", sessionPath: session, telemetryInputFloor: { sessionId: "floor", sessionPath: session, prefixEntryId: "parent" }, observedLatestInput: 20, wsToolNames: [], toolGroup: "full-worker", reportLog: [], spawnRole: "fork" } as RpcAgentRecord;
+    const record = { agentId: "floor", sessionPath: session, telemetryContextFloor: { sessionId: "floor", sessionPath: session, prefixEntryId: "parent" }, observedContextTokens: 20, wsToolNames: [], toolGroup: "full-worker", reportLog: [], spawnRole: "fork" } as RpcAgentRecord;
     write(session, [header("floor", "parent-session"), assistant("parent", 900, 9), assistant("child-known", 20, .2), { type: "message", id: "child-unknown", parentId: null, timestamp: "x", message: { role: "assistant", usage: { cost: { total: .3 } } } }]);
     refreshAgentTelemetry(record, { sessionId: "floor", sessionFile: session });
-    assert.equal(record.observedLatestInput, undefined, "the prior child input cannot stand in for a later unknown call");
-    assert.equal(record.telemetry, undefined, "a legacy floor proves only latest-call observation, never lifetime cost");
+    assert.equal(record.observedContextTokens, 20, "an unknown interval keeps the prior valid value for the same session identity");
+    assert.equal(record.telemetry, undefined, "a legacy floor proves only current context, never lifetime cost");
   });
 
-  test("spawnAgent captures the real pre-prompt baseline, then prompt sees actual clamped state", async () => {
+  test("spawnAgent captures authoritative context before prompting and refreshes it on dormant resume", async () => {
     const dir = root(), session = join(dir, "child.jsonl"); write(session, [header("child")]);
-    const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(key => [key, RpcClient.prototype[key as keyof RpcClient]]));
+    const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "getSessionStats", "setThinkingLevel"].map(key => [key, RpcClient.prototype[key as keyof RpcClient]]));
     const prompts: string[] = []; let resumed = false;
     Object.assign(RpcClient.prototype, {
       start: async () => {}, stop: async () => {}, abort: async () => {}, onEvent: () => () => {}, setThinkingLevel: async () => {},
       getState: async () => ({ sessionId: "child", sessionFile: session, model: { provider: "actual", id: resumed ? "resumed" : "clamped" }, thinkingLevel: resumed ? "medium" : "low" }),
+      getSessionStats: async () => ({ sessionId: "child", sessionFile: session, contextUsage: { tokens: resumed ? 71_758 : 61_782, contextWindow: 200_000, percent: 30 } }),
       prompt: async (message: string) => { prompts.push(message); },
     });
     try {
@@ -169,27 +193,32 @@ describe("agent telemetry lifecycle at production boundaries", () => {
       const result = await tools.get("ws-agent-spawn").execute("call", { system_prompt_path: join(dir, "p.md"), prompt: "first" }, undefined, undefined, { sessionManager: { getSessionId: () => "lead" }, agentStorageRoot: dir, model: { provider: "requested", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [], hasConfiguredAuth: () => true } });
       const record = handle.rpcRegistry.get(JSON.parse(result.content[0].text).agent_id)!;
       assert.deepEqual(record.telemetry?.origin, { sessionId: "child", sessionPath: session, emptyPrefix: true });
+      assert.equal(record.telemetry?.contextTokens, 61_782);
       assert.equal(record.observedModel, "actual/clamped"); assert.equal(record.observedEffort, "low"); assert.deepEqual(prompts, ["first"]);
       await stopAgent(handle.rpcRegistry, record.agentId, undefined, { silent: true }); resumed = true;
       await sendToAgent(handle.rpcRegistry, { cwd: dir, extensionPath: TEST_EXTENSION_ENTRY }, record.agentId, "resume");
       assert.deepEqual(prompts, ["first", "resume"], "the actual dormant send path relaunches then prompts");
-      assert.equal(record.observedModel, "actual/resumed"); assert.equal(record.observedEffort, "medium");
+      assert.equal(record.observedModel, "actual/resumed"); assert.equal(record.observedEffort, "medium"); assert.equal(record.telemetry?.contextTokens, 71_758);
       await handle.stopAll();
     } finally { Object.assign(RpcClient.prototype, original); }
   });
 
-  test("message_end waits for its getState barrier, coalesces bursts, and ignores an old launch", async () => {
+  test("message_end waits for state and authoritative context, coalesces bursts, and ignores an old launch", async () => {
     const dir = root(), session = join(dir, "child.jsonl"); write(session, [header("child")]);
-    let listener: ((event: unknown) => void) | undefined, calls = 0, release!: () => void;
+    let listener: ((event: unknown) => void) | undefined, calls = 0, statsCalls = 0, release!: () => void;
     const barrier = new Promise<void>(resolve => { release = resolve; });
-    const client = { onEvent: (fn: (event: unknown) => void) => (listener = fn, () => {}), getState: async () => { calls++; await barrier; return { sessionId: "child", sessionFile: session, model: { provider: "p", id: "new" }, thinkingLevel: "high" }; } } as unknown as RpcClient;
+    const client = {
+      onEvent: (fn: (event: unknown) => void) => (listener = fn, () => {}),
+      getState: async () => { calls++; await barrier; return { sessionId: "child", sessionFile: session, model: { provider: "p", id: "new" }, thinkingLevel: "high" }; },
+      getSessionStats: async () => { statsCalls++; return { sessionId: "child", sessionFile: session, contextUsage: { tokens: 61_782, contextWindow: 200_000, percent: 30.891 } }; },
+    } as unknown as RpcClient;
     const record = { agentId: "a", client, launchGeneration: 2, sessionPath: session, wsToolNames: [], toolGroup: "full-worker", reportLog: [], streaming: true, running: true } as RpcAgentRecord;
     attachEventListener(undefined, new Map([["a", record]]), record, client);
     listener!({ type: "message_end", message: { role: "assistant" } }); listener!({ type: "message_update" });
     write(session, [header("child"), assistant("call", 17, .4)]); release(); await ticks();
-    assert.equal(calls, 2, "a burst during the first read requests one final follow-up"); assert.equal(record.telemetry?.latestInput, 17); assert.equal(record.telemetry?.estimatedUsd, .4);
+    assert.equal(calls, 2, "a burst during the first read requests one final follow-up"); assert.equal(statsCalls, 1, "stream deltas do not repeat the authoritative RPC stats request"); assert.equal(record.telemetry?.contextTokens, 61_782); assert.equal(record.telemetry?.estimatedUsd, .4);
     const old = record.client; record.client = {} as RpcClient; listener!({ type: "message_end", message: { role: "assistant" } }); await ticks();
-    assert.equal(record.client, old === record.client ? old : record.client, "late old-client work cannot revive or overwrite a replacement"); assert.equal(record.telemetry?.latestInput, 17);
+    assert.equal(record.client, old === record.client ? old : record.client, "late old-client work cannot revive or overwrite a replacement"); assert.equal(record.telemetry?.contextTokens, 61_782);
   });
 
   test("stop clears live state before final disk reconciliation", async () => {
@@ -198,7 +227,7 @@ describe("agent telemetry lifecycle at production boundaries", () => {
     const client = { abort: async () => { assert.equal(record.client, undefined); write(session, [header("stop"), assistant("last", 23, .8)]); }, stop: async () => {} } as unknown as RpcClient;
     record = { agentId: "a", client, launchGeneration: 1, sessionPath: session, telemetry: { version: 1, origin: { sessionId: "stop", sessionPath: session, emptyPrefix: true } }, wsToolNames: [], toolGroup: "full-worker", reportLog: [], streaming: true, running: true } as RpcAgentRecord;
     await stopAgent(new Map([["a", record]]), "a", undefined, { silent: true });
-    assert.equal(record.client, undefined); assert.equal(record.telemetry?.latestInput, 23); assert.equal(record.telemetry?.estimatedUsd, .8);
+    assert.equal(record.client, undefined); assert.equal(record.telemetry?.contextTokens, 23); assert.equal(record.telemetry?.estimatedUsd, .8);
   });
 
   test("production shutdown preserves the pre-stop roll-call while persisting final telemetry to sidecar and thread resume", async () => {
@@ -216,9 +245,9 @@ describe("agent telemetry lifecycle at production boundaries", () => {
     threads.threads.set("q1", { threadId: "q1", title: "question", status: "dormant", origin: "fork-raised", createdAt: "2026-09-10T00:00:00.000Z", touchedAt: "2026-09-10T00:00:00.000Z", respondentAgentId: "fork", forkResume: captureForkResume(fork) });
     await persistShutdownAgentSnapshots({ rpcRegistry: registry, stopAll: async () => { await stopAgent(registry, "worker", undefined, { silent: true }); await stopAgent(registry, "fork", undefined, { silent: true }); } }, sidecar, threads);
     const [saved] = parseOrphans(readFileSync(sidecar, "utf8"));
-    assert.equal(saved.state, "running", "roll-call is captured before orderly stop clears live state"); assert.equal(saved.telemetry?.latestInput, 31); assert.equal(saved.telemetry?.estimatedUsd, .7);
+    assert.equal(saved.state, "running", "roll-call is captured before orderly stop clears live state"); assert.equal(saved.telemetry?.contextTokens, 31); assert.equal(saved.telemetry?.estimatedUsd, .7);
     const persistedThread = JSON.parse(readFileSync(threadPath, "utf8")).threads[0];
-    assert.equal(persistedThread.forkResume.telemetry.latestInput, 37); assert.equal(persistedThread.forkResume.telemetry.estimatedUsd, .9);
+    assert.equal(persistedThread.forkResume.telemetry.contextTokens, 37); assert.equal(persistedThread.forkResume.telemetry.estimatedUsd, .9);
     assert.equal(worker.client, undefined); assert.equal(fork.client, undefined);
   });
 
@@ -227,20 +256,20 @@ describe("agent telemetry lifecycle at production boundaries", () => {
     write(ordinary, [header("ordinary"), assistant("ordinary-call", 10, .1)]);
     write(fork, [header("fork", "parent"), assistant("inherited", 900, 9), assistant("unknown-boundary", 10, .1)]);
     const ordinaryRecord = rehydrateOrphanRecord({ agentId: "ordinary", sessionPath: ordinary, systemPromptPath: join(dir, "p.md"), wsToolNames: [], toolGroup: "full-worker", spawnRole: "worker", state: "running" } as any);
-    assert.equal(ordinaryRecord.telemetry?.latestInput, 10); assert.equal(ordinaryRecord.telemetry?.estimatedUsd, .1);
+    assert.equal(ordinaryRecord.telemetry?.contextTokens, 10); assert.equal(ordinaryRecord.telemetry?.estimatedUsd, .1);
     const forkRecord = rehydrateOrphanRecord({ agentId: "fork", sessionPath: fork, systemPromptPath: join(dir, "p.md"), wsToolNames: [], toolGroup: "full-worker", spawnRole: "fork", state: "running" } as any);
-    assert.equal(forkRecord.telemetry, undefined); assert.equal(forkRecord.observedLatestInput, undefined);
+    assert.equal(forkRecord.telemetry, undefined); assert.equal(forkRecord.observedContextTokens, undefined);
   });
 
   test("thread hydration itself reconciles a thread-only fork snapshot", () => {
     const dir = root(), session = join(dir, "child.jsonl"); write(session, [header("child"), assistant("old", 5, .1), assistant("new", 19, .3)]);
-    const live = { agentId: "a", sessionPath: session, systemPromptPath: join(dir, "p.md"), telemetry: { version: 1, origin: { sessionId: "child", sessionPath: session, emptyPrefix: true }, latestInput: 5, estimatedUsd: .1 }, wsToolNames: [], toolGroup: "full-worker", reportLog: [], spawnRole: "worker", running: true } as RpcAgentRecord;
+    const live = { agentId: "a", sessionPath: session, systemPromptPath: join(dir, "p.md"), telemetry: { version: 1, origin: { sessionId: "child", sessionPath: session, emptyPrefix: true }, contextTokens: 5, estimatedUsd: .1 }, wsToolNames: [], toolGroup: "full-worker", reportLog: [], spawnRole: "worker", running: true } as RpcAgentRecord;
     const [orphan] = parseOrphans(serializeOrphans(captureOrphans(new Map([["a", live]]))));
-    const revived = rehydrateOrphanRecord(orphan); assert.equal(revived.telemetry?.latestInput, 19); assert.equal(revived.telemetry?.estimatedUsd, .4);
+    const revived = rehydrateOrphanRecord(orphan); assert.equal(revived.telemetry?.contextTokens, 19); assert.equal(revived.telemetry?.estimatedUsd, .4);
     const resume = captureForkResume({ ...live, agentId: "fork", spawnRole: "fork", threadBound: true });
     const threadPath = join(dir, "threads.json"); saveThreadRegistryFile(threadPath, [{ threadId: "q1", title: "q", question: "q", status: "dormant", origin: "fork-raised", createdAt: "2026-09-10T00:00:00.000Z", touchedAt: "2026-09-10T00:00:00.000Z", respondentAgentId: "fork", forkResume: resume }]);
     const handle = createThreadRegistryHandle(); hydrateThreadRegistry(handle, threadPath);
     const threadOnly = handle.threads.get("q1")!;
-    assert.equal(threadOnly.forkResume?.telemetry?.latestInput, 19); assert.equal(threadOnly.forkResume?.telemetry?.estimatedUsd, .4, "hydration updates the row before /answer rehydrates its respondent"); assert.ok(readFileSync(threadPath, "utf8").includes("q1"));
+    assert.equal(threadOnly.forkResume?.telemetry?.contextTokens, 19); assert.equal(threadOnly.forkResume?.telemetry?.estimatedUsd, .4, "hydration updates the row before /answer rehydrates its respondent"); assert.ok(readFileSync(threadPath, "utf8").includes("q1"));
   });
 });

@@ -225,15 +225,15 @@ describe("buildWidgetLines", () => {
       answerHint: "/answer q7",
       model: "test-model",
       effort: "high",
-      latestInput: 42,
+      contextTokens: 42,
       estimatedUsd: .1,
     };
-    const approval = { name: "awaiting approval audit", role: "execute" as const, state: "awaiting-approval" as const, elapsedMs: 3_000, model: "test-model", effort: "high", latestInput: 42, estimatedUsd: .1 };
+    const approval = { name: "awaiting approval audit", role: "execute" as const, state: "awaiting-approval" as const, elapsedMs: 3_000, model: "test-model", effort: "high", contextTokens: 42, estimatedUsd: .1 };
     const semanticCalls: Array<[string, string]> = [];
     const theme = { fg(color: "error" | "warning" | "accent" | "dim" | "syntaxNumber", text: string) { semanticCalls.push([color, text]); return text; } };
     const animated = buildWidgetLines([question, approval], 1, 180, true, theme)!;
-    assert.equal(animated[1], "\u001b[1m⚠ OWNER ACTION · /answer q7\u001b[22m · fork · awaiting owner · 3s · test-model (high) · 0.0k · $0.1");
-    assert.equal(animated[2], "awaiting approval audit · execute · awaiting approval · 3s · test-model (high) · 0.0k · $0.1");
+    assert.equal(animated[1], "\u001b[1m⚠ OWNER ACTION · /answer q7\u001b[22m · fork · awaiting owner · 3s · test-model (high) · ctx 0.0k · $0.1");
+    assert.equal(animated[2], "awaiting approval audit · execute · awaiting approval · 3s · test-model (high) · ctx 0.0k · $0.1");
     assert.deepEqual(semanticCalls.filter(([, text]) => text.startsWith("⚠ OWNER ACTION") || text.startsWith("ws:")), [["error", "ws: 2 agents · 1 question"], ["error", "⚠ OWNER ACTION · /answer q7"]]);
     assert.ok(!animated[1].slice(animated[1].indexOf(" · fork")).includes("\u001b[1m"), "role, elapsed, telemetry, and separators stay plain");
     assert.ok(!animated[2].includes("\u001b[1m"), "approval remains entirely ordinary even beside an animated question");
@@ -242,7 +242,7 @@ describe("buildWidgetLines", () => {
   test("an owner-held row without qN receives an honest labeled inspection presentation", () => {
     const row = { name: "parked reviewer", role: "fork" as const, state: "idle-awaiting-owner" as const, elapsedMs: 3_000, inspectionHint: "/audit reviewer" };
     const line = buildWidgetLines([row], 0, 120, true)![1];
-    assert.equal(line, "\u001b[1m⚠ OWNER ACTION · parked reviewer\u001b[22m · fork · idle awaiting owner · 3s · — (—) · — · $— — /audit reviewer");
+    assert.equal(line, "\u001b[1m⚠ OWNER ACTION · parked reviewer\u001b[22m · fork · idle awaiting owner · 3s · — (—) · ctx ? · $— — /audit reviewer");
     assert.ok(!line.includes("/answer"), "presentation never fabricates an answer target for an owner-held idle row");
   });
 
@@ -265,16 +265,21 @@ describe("buildWidgetLines", () => {
       }
     }
   });
-  test("telemetry exposes compact token and cost fields at wide widths and never displaces a 40-column answer cue", () => {
-    const telemetry = { name: "模型-worker", role: "worker" as const, state: "running" as const, elapsedMs: 0, model: "provider/模型", effort: "high", latestInput: 0, estimatedUsd: 0 };
-    assert.match(buildWidgetLines([telemetry], 0, 120)![1], /provider\/模型 \(high\).*0.0k.*\$0/);
-    const missing = { ...telemetry, state: "awaiting-owner" as const, model: undefined, effort: undefined, latestInput: undefined, estimatedUsd: undefined, answerHint: "/answer q1" };
+  test("telemetry labels context occupancy and cost at wide widths and never displaces a 40-column answer cue", () => {
+    const telemetry = { name: "模型-worker", role: "worker" as const, state: "running" as const, elapsedMs: 0, model: "provider/模型", effort: "high", contextTokens: 0, estimatedUsd: 0 };
+    assert.match(buildWidgetLines([telemetry], 0, 120)![1], /provider\/模型 \(high\).*ctx 0.0k.*\$0/);
+    const missing = { ...telemetry, state: "awaiting-owner" as const, model: undefined, effort: undefined, contextTokens: undefined, estimatedUsd: undefined, answerHint: "/answer q1" };
     assert.match(buildWidgetLines([missing], 0, 40)![1], /^⚠ OWNER ACTION · \/answer q1/);
     assert.ok(visibleWidth(buildWidgetLines([missing], 0, 40)![1]) <= 40);
-    const compact = { ...telemetry, name: "a", model: "p", effort: "l", latestInput: 132_400, estimatedUsd: .123456789 };
-    assert.match(buildWidgetLines([compact], 0, 80)![1], /p \(l\).*132.4k.*\$0.123/);
-    const noMegabyteUnit = { ...compact, latestInput: 1_354_100, estimatedUsd: 12.34567 };
-    assert.match(buildWidgetLines([noMegabyteUnit], 0, 120)![1], /1354.1k.*\$12.346/);
+    const compact = { ...telemetry, name: "a", model: "p", effort: "l", contextTokens: 132_400, estimatedUsd: .123456789 };
+    assert.match(buildWidgetLines([compact], 0, 80)![1], /p \(l\).*ctx 132.4k.*\$0.123/);
+    const noMegabyteUnit = { ...compact, contextTokens: 1_354_100, estimatedUsd: 12.34567 };
+    assert.match(buildWidgetLines([noMegabyteUnit], 0, 120)![1], /ctx 1354.1k.*\$12.346/);
+    const cachedPrefixCases = [{ ...compact, contextTokens: 61_782 }, { ...compact, contextTokens: 71_758 }];
+    assert.match(buildWidgetLines([cachedPrefixCases[0]], 0, 80)![1], /ctx 61.8k/);
+    assert.match(buildWidgetLines([cachedPrefixCases[1]], 0, 80)![1], /ctx 71.8k/);
+    assert.doesNotMatch(buildWidgetLines([cachedPrefixCases[0]], 0, 80)![1], /ctx 0.3k/);
+    assert.doesNotMatch(buildWidgetLines([cachedPrefixCases[1]], 0, 80)![1], /ctx 3.1k/);
 
     const themedSpans: Array<[string, string]> = [];
     const themed = buildWidgetLines([compact], 0, 80, false, {
@@ -284,7 +289,7 @@ describe("buildWidgetLines", () => {
       },
     })![1];
     assert.ok(themedSpans.some(([color, text]) => color === "accent" && text === "p"), "model uses the theme accent");
-    assert.ok(themedSpans.some(([color, text]) => color === "syntaxNumber" && text === "132.4k"), "input telemetry uses the numeric theme color without a label");
+    assert.ok(themedSpans.some(([color, text]) => color === "syntaxNumber" && text === "ctx 132.4k"), "context telemetry keeps its label in the numeric theme span");
     assert.ok(themedSpans.some(([color, text]) => color === "warning" && text === "$0.123"), "estimated cost uses the warning/gold theme color without a label");
     assert.ok(visibleWidth(themed) <= 80, "ANSI theme styling does not change width accounting");
   });
@@ -341,15 +346,15 @@ describe("buildWidgetLines", () => {
   });
 
   test("telemetry fields remain independent, Unicode-safe, and subordinate to the 40-column answer cue", () => {
-    const complete = { name: "模型-worker", role: "thread" as const, state: "awaiting-owner" as const, elapsedMs: 0, answerHint: "/answer q1", model: "provider/模型", effort: "high", latestInput: 0, estimatedUsd: 0 };
+    const complete = { name: "模型-worker", role: "thread" as const, state: "awaiting-owner" as const, elapsedMs: 0, answerHint: "/answer q1", model: "provider/模型", effort: "high", contextTokens: 0, estimatedUsd: 0 };
     const completeWide = { ...complete, name: "模", role: "worker" as const, state: "running" as const, answerHint: undefined };
-    const unknown = { ...completeWide, name: "missing", model: undefined, effort: undefined, latestInput: undefined, estimatedUsd: undefined };
+    const unknown = { ...completeWide, name: "missing", model: undefined, effort: undefined, contextTokens: undefined, estimatedUsd: undefined };
     const narrow = buildWidgetLines([complete], 1, 40)![1];
     assert.match(narrow, /^⚠ OWNER ACTION · \/answer q1/); assert.ok(visibleWidth(narrow) <= 40);
     for (const width of [80, 120]) {
       const lines = buildWidgetLines([completeWide, unknown], 0, width)!;
-      assert.match(lines[1], /provider\/模型 \(high\).*0.0k.*\$0/, `complete reported zero is not rendered as unknown at ${width}`);
-      assert.match(lines[2], /— \(—\).*· — · \$—/, `unknown fields remain independently unknown at ${width}`);
+      assert.match(lines[1], /provider\/模型 \(high\).*ctx 0.0k.*\$0/, `complete reported zero is not rendered as unknown at ${width}`);
+      assert.match(lines[2], /— \(—\).*· ctx \? · \$—/, `unknown fields remain independently unknown at ${width}`);
       assert.ok(lines.every(line => visibleWidth(line) <= width), `Unicode display width is bounded at ${width}`);
     }
   });
@@ -357,7 +362,7 @@ describe("buildWidgetLines", () => {
   test("rendering telemetry performs neither disk reads nor RPC", (t) => {
     t.mock.method(fs, "readFile", async () => assert.fail("widget rendering must not read disk"));
     t.mock.method(RpcClient.prototype, "getState", async () => assert.fail("widget rendering must not query RPC"));
-    const row = { name: "worker", role: "worker" as const, state: "running" as const, elapsedMs: 0, model: "p/m", effort: "low", latestInput: 1, estimatedUsd: .01 };
+    const row = { name: "worker", role: "worker" as const, state: "running" as const, elapsedMs: 0, model: "p/m", effort: "low", contextTokens: 1, estimatedUsd: .01 };
     for (const width of [40, 80, 120]) assert.doesNotThrow(() => buildWidgetLines([row], 0, width));
   });
 

@@ -34,7 +34,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme, getSelectListTheme } from "@earendil-works/pi-coding-agent";
 import { lastActivityAt, resolveAgentId, type RpcAgentRegistry } from "./spawner.ts";
 import { touchOwnership } from "./agent-storage.ts";
-import { classifyRegistryRowState, formatCompactDuration, formatLatestInputTokens, rowName, type AgentRowState } from "./agent-widget.ts";
+import { classifyRegistryRowState, formatCompactDuration, formatContextTokens, rowName, type AgentRowState } from "./agent-widget.ts";
 import { resolveChildLiveness } from "./ask.ts";
 import {
   ConversationViewComponent,
@@ -257,7 +257,7 @@ interface AuditPickerRow {
   identity: string;
   status: string;
   model: string;
-  latestInput: string;
+  contextTokens: string;
   activity: string;
   state?: AgentRowState;
   elapsedMs: number;
@@ -297,7 +297,7 @@ function fitProtectedAuditFields(identity: string, status: string, activity: str
 /** Formats one picker row, dropping whole optional telemetry fields in order. */
 export function formatAuditPickerLabel(row: Omit<AuditPickerRow, "agentId" | "state" | "elapsedMs" | "lastActivity">, width = Number.POSITIVE_INFINITY): string {
   const separator = " · ";
-  const complete = [row.identity, row.status, row.model, row.latestInput, row.activity].join(separator);
+  const complete = [row.identity, row.status, row.model, row.contextTokens, row.activity].join(separator);
   if (visibleWidth(complete) <= width) return complete;
   const withoutTokens = [row.identity, row.status, row.model, row.activity].join(separator);
   if (visibleWidth(withoutTokens) <= width) return withoutTokens;
@@ -314,7 +314,7 @@ export function buildAuditPickerItems(registry: RpcAgentRegistry, now: number, l
     const state = classifyRegistryRowState(record);
     const identity = auditIdentity(record);
     const model = record.telemetry?.model ?? record.observedModel ?? "—";
-    const latestInput = formatLatestInputTokens(record.telemetry?.latestInput ?? record.observedLatestInput);
+    const contextTokens = formatContextTokens(record.telemetry?.contextTokens ?? record.observedContextTokens);
     if (state === undefined) {
       const activityAt = lastActivityAt(record);
       dormant.push({
@@ -322,7 +322,7 @@ export function buildAuditPickerItems(registry: RpcAgentRegistry, now: number, l
         identity,
         status: "dormant",
         model,
-        latestInput,
+        contextTokens,
         activity: formatDormantActivity(now, activityAt),
         elapsedMs: elapsedSince(now, activityAt),
         lastActivity: activityAt,
@@ -335,7 +335,7 @@ export function buildAuditPickerItems(registry: RpcAgentRegistry, now: number, l
       identity,
       status: LIVE_STATE_LABEL[state],
       model,
-      latestInput,
+      contextTokens,
       activity: `running for ${formatCompactDuration(elapsedMs)}`,
       state,
       elapsedMs,
@@ -348,9 +348,9 @@ export function buildAuditPickerItems(registry: RpcAgentRegistry, now: number, l
   });
   dormant.sort((a, b) => b.lastActivity! - a.lastActivity!);
 
-  return [...live, ...dormant].map(({ agentId, identity, status, model, latestInput, activity }) => ({
+  return [...live, ...dormant].map(({ agentId, identity, status, model, contextTokens, activity }) => ({
     value: agentId,
-    label: formatAuditPickerLabel({ identity, status, model, latestInput, activity }, labelWidth),
+    label: formatAuditPickerLabel({ identity, status, model, contextTokens, activity }, labelWidth),
   }));
 }
 

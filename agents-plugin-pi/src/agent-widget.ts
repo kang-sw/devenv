@@ -76,7 +76,7 @@ export interface AgentRow {
   inspectionHint?: string;
   model?: string;
   effort?: string;
-  latestInput?: number;
+  contextTokens?: number;
   estimatedUsd?: number;
 }
 
@@ -228,7 +228,7 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
       ...(isAwaitingOwnerWithThread ? { answerHint: `/answer ${boundThread!.threadId}` } : {}),
       ...(record.telemetry?.model ?? record.observedModel ? { model: record.telemetry?.model ?? record.observedModel } : {}),
       ...(record.telemetry?.effort ?? record.observedEffort ? { effort: record.telemetry?.effort ?? record.observedEffort } : {}),
-      ...((record.telemetry?.latestInput ?? record.observedLatestInput) !== undefined ? { latestInput: record.telemetry?.latestInput ?? record.observedLatestInput } : {}),
+      ...((record.telemetry?.contextTokens ?? record.observedContextTokens) !== undefined ? { contextTokens: record.telemetry?.contextTokens ?? record.observedContextTokens } : {}),
       ...(record.telemetry?.estimatedUsd !== undefined ? { estimatedUsd: record.telemetry.estimatedUsd } : {}),
     });
   }
@@ -243,7 +243,7 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
       answerHint: `/answer ${thread.threadId}`,
       ...(thread.forkResume?.telemetry?.model ?? thread.forkResume?.observedModel ? { model: thread.forkResume?.telemetry?.model ?? thread.forkResume?.observedModel } : {}),
       ...(thread.forkResume?.telemetry?.effort ?? thread.forkResume?.observedEffort ? { effort: thread.forkResume?.telemetry?.effort ?? thread.forkResume?.observedEffort } : {}),
-      ...((thread.forkResume?.telemetry?.latestInput ?? thread.forkResume?.observedLatestInput) !== undefined ? { latestInput: thread.forkResume?.telemetry?.latestInput ?? thread.forkResume?.observedLatestInput } : {}),
+      ...((thread.forkResume?.telemetry?.contextTokens ?? thread.forkResume?.observedContextTokens) !== undefined ? { contextTokens: thread.forkResume?.telemetry?.contextTokens ?? thread.forkResume?.observedContextTokens } : {}),
       ...(thread.forkResume?.telemetry?.estimatedUsd !== undefined ? { estimatedUsd: thread.forkResume.telemetry.estimatedUsd } : {}),
     });
   }
@@ -274,9 +274,9 @@ function isAttentionState(state: AgentRowState): boolean {
   return state === "awaiting-owner" || state === "idle-awaiting-owner";
 }
 
-/** Latest assistant-call input tokens, never a cumulative total. */
-export function formatLatestInputTokens(tokens: number | undefined): string {
-  return tokens === undefined ? "—" : `${(tokens / 1_000).toFixed(1)}k`;
+/** Labeled current context-window occupancy; unknown is explicit across compaction gaps. */
+export function formatContextTokens(tokens: number | undefined): string {
+  return tokens === undefined ? "ctx ?" : `ctx ${(tokens / 1_000).toFixed(1)}k`;
 }
 
 function formatEstimatedUsd(usd: number | undefined): string {
@@ -314,9 +314,9 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
   const base = `${primary} · ${row.role} · ${stateLabel} · ${formatCompactDuration(row.elapsedMs)}`;
   const model = row.model ?? "—";
   const effort = row.effort ?? "—";
-  const input = formatLatestInputTokens(row.latestInput);
+  const context = formatContextTokens(row.contextTokens);
   const estimate = `$${formatEstimatedUsd(row.estimatedUsd)}`;
-  const telemetry = ` · ${model} (${effort}) · ${input} · ${estimate}`;
+  const telemetry = ` · ${model} (${effort}) · ${context} · ${estimate}`;
   const protectedHint = row.inspectionHint;
   const hint = protectedHint ? ` — ${protectedHint}` : "";
   // A supplied inspection affordance remains the only protected tail. The
@@ -344,7 +344,7 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
       theme.fg("accent", model) +
       theme.fg("dim", ` (${effort})`) +
       theme.fg("dim", " · ") +
-      theme.fg("syntaxNumber", input) +
+      theme.fg("syntaxNumber", context) +
       theme.fg("dim", " · ") +
       theme.fg("warning", estimate);
     content = base + styledTelemetry;

@@ -493,10 +493,10 @@ export interface PersistedForkResume extends Pick<RpcAgentRecord, "delegation" |
   modelBase?: string;
   modelEffort?: string;
   telemetry?: AgentTelemetry;
-  telemetryInputFloor?: TelemetryOrigin;
+  telemetryContextFloor?: TelemetryOrigin;
   observedModel?: string;
   observedEffort?: string;
-  observedLatestInput?: number;
+  observedContextTokens?: number;
   ownership?: import("./agent-storage.ts").AgentOwnership;
 }
 
@@ -834,10 +834,10 @@ export function captureForkResume(record: RpcAgentRecord): PersistedForkResume {
     modelBase: record.modelBase,
     modelEffort: record.modelEffort,
     ...(record.telemetry ? { telemetry: record.telemetry } : {}),
-    ...(record.telemetryInputFloor ? { telemetryInputFloor: record.telemetryInputFloor } : {}),
+    ...(record.telemetryContextFloor ? { telemetryContextFloor: record.telemetryContextFloor } : {}),
     ...(record.observedModel ? { observedModel: record.observedModel } : {}),
     ...(record.observedEffort ? { observedEffort: record.observedEffort } : {}),
-    ...(record.observedLatestInput !== undefined ? { observedLatestInput: record.observedLatestInput } : {}),
+    ...(record.observedContextTokens !== undefined ? { observedContextTokens: record.observedContextTokens } : {}),
     ...(record.ownership ? { ownership: record.ownership } : {}),
   };
 }
@@ -862,10 +862,10 @@ export function rehydrateForkRecord(agentId: string, resume: PersistedForkResume
     modelBase: resume.modelBase,
     modelEffort: resume.modelEffort,
     ...(parseTelemetry(resume.telemetry) ? { telemetry: parseTelemetry(resume.telemetry) } : {}),
-    ...(parseTelemetry({ version: 1, origin: resume.telemetryInputFloor })?.origin ? { telemetryInputFloor: parseTelemetry({ version: 1, origin: resume.telemetryInputFloor })!.origin } : {}),
+    ...(parseTelemetry({ version: 1, origin: resume.telemetryContextFloor })?.origin ? { telemetryContextFloor: parseTelemetry({ version: 1, origin: resume.telemetryContextFloor })!.origin } : {}),
     ...(typeof resume.observedModel === "string" && resume.observedModel ? { observedModel: resume.observedModel } : {}),
     ...(typeof resume.observedEffort === "string" && resume.observedEffort ? { observedEffort: resume.observedEffort } : {}),
-    ...(typeof resume.observedLatestInput === "number" && Number.isFinite(resume.observedLatestInput) && resume.observedLatestInput >= 0 ? { observedLatestInput: resume.observedLatestInput } : {}),
+    ...(typeof resume.observedContextTokens === "number" && Number.isFinite(resume.observedContextTokens) && resume.observedContextTokens >= 0 ? { observedContextTokens: resume.observedContextTokens } : {}),
     wsToolNames: [...resume.wsToolNames],
     toolGroup: resume.toolGroup,
     explicitTools: resume.explicitTools,

@@ -68,10 +68,10 @@ export interface PersistedOrphan {
   modelBase?: string;
   modelEffort?: string;
   telemetry?: AgentTelemetry;
-  telemetryInputFloor?: TelemetryOrigin;
+  telemetryContextFloor?: TelemetryOrigin;
   observedModel?: string;
   observedEffort?: string;
-  observedLatestInput?: number;
+  observedContextTokens?: number;
   wsToolNames: string[];
   toolGroup: ToolGroup;
   explicitTools?: string;
@@ -151,10 +151,10 @@ export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
       modelBase: record.modelBase,
       modelEffort: record.modelEffort,
       ...(record.telemetry ? { telemetry: record.telemetry } : {}),
-      ...(record.telemetryInputFloor ? { telemetryInputFloor: record.telemetryInputFloor } : {}),
+      ...(record.telemetryContextFloor ? { telemetryContextFloor: record.telemetryContextFloor } : {}),
       ...(record.observedModel ? { observedModel: record.observedModel } : {}),
       ...(record.observedEffort ? { observedEffort: record.observedEffort } : {}),
-      ...(record.observedLatestInput !== undefined ? { observedLatestInput: record.observedLatestInput } : {}),
+      ...(record.observedContextTokens !== undefined ? { observedContextTokens: record.observedContextTokens } : {}),
       wsToolNames: [...record.wsToolNames],
       toolGroup: record.toolGroup,
       explicitTools: record.explicitTools,
@@ -260,10 +260,10 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
       modelBase: typeof o.modelBase === "string" ? o.modelBase : undefined,
       modelEffort: typeof o.modelEffort === "string" ? o.modelEffort : undefined,
       ...(parseTelemetry(o.telemetry) ? { telemetry: parseTelemetry(o.telemetry) } : {}),
-      ...(parseTelemetry({ version: 1, origin: o.telemetryInputFloor })?.origin ? { telemetryInputFloor: parseTelemetry({ version: 1, origin: o.telemetryInputFloor })!.origin } : {}),
+      ...(parseTelemetry({ version: 1, origin: o.telemetryContextFloor })?.origin ? { telemetryContextFloor: parseTelemetry({ version: 1, origin: o.telemetryContextFloor })!.origin } : {}),
       ...(typeof o.observedModel === "string" && o.observedModel ? { observedModel: o.observedModel } : {}),
       ...(typeof o.observedEffort === "string" && o.observedEffort ? { observedEffort: o.observedEffort } : {}),
-      ...(typeof o.observedLatestInput === "number" && Number.isFinite(o.observedLatestInput) && o.observedLatestInput >= 0 ? { observedLatestInput: o.observedLatestInput } : {}),
+      ...(typeof o.observedContextTokens === "number" && Number.isFinite(o.observedContextTokens) && o.observedContextTokens >= 0 ? { observedContextTokens: o.observedContextTokens } : {}),
       wsToolNames: Array.isArray(o.wsToolNames) ? o.wsToolNames.filter((n): n is string => typeof n === "string") : [],
       toolGroup: (legacySimple ? "read-only-explore" : o.toolGroup ?? "full-worker") as ToolGroup,
       explicitTools: typeof o.explicitTools === "string" ? o.explicitTools : undefined,
@@ -319,10 +319,10 @@ export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
     modelBase: orphan.modelBase,
     modelEffort: orphan.modelEffort,
     ...(orphan.telemetry ? { telemetry: orphan.telemetry } : {}),
-    ...(orphan.telemetryInputFloor ? { telemetryInputFloor: orphan.telemetryInputFloor } : {}),
+    ...(orphan.telemetryContextFloor ? { telemetryContextFloor: orphan.telemetryContextFloor } : {}),
     ...(orphan.observedModel ? { observedModel: orphan.observedModel } : {}),
     ...(orphan.observedEffort ? { observedEffort: orphan.observedEffort } : {}),
-    ...(orphan.observedLatestInput !== undefined ? { observedLatestInput: orphan.observedLatestInput } : {}),
+    ...(orphan.observedContextTokens !== undefined ? { observedContextTokens: orphan.observedContextTokens } : {}),
     wsToolNames: [...orphan.wsToolNames],
     toolGroup: orphan.toolGroup,
     explicitTools: orphan.explicitTools,

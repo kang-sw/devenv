@@ -406,11 +406,12 @@ export interface RpcAgentRecord {
   modelEffort?: string;
   /** Observed child selection and recomputed durable usage; launch intent stays above. */
   telemetry?: AgentTelemetry;
-  /** Legacy-fork floor: permits post-launch latest input, never lifetime cost. */
-  telemetryInputFloor?: TelemetryOrigin;
+  /** Legacy-fork floor: permits post-launch context occupancy, never lifetime cost. */
+  telemetryContextFloor?: TelemetryOrigin;
   observedModel?: string;
   observedEffort?: string;
-  observedLatestInput?: number;
+  /** Context occupancy for a legacy fork whose child-attribution boundary is unavailable. */
+  observedContextTokens?: number;
   /**
    * 260906 Phase 2 (YAML/TUI dispatch-row rendering): the raw model selection
    * requested at spawn, or `undefined` when omitted — display-only,
@@ -673,9 +674,43 @@ export interface RpcAgentRecord {
   onApprovalPending?: (record: RpcAgentRecord) => void;
 }
 
+interface AgentContextStats {
+  sessionFile?: string;
+  sessionId?: string;
+  contextUsage?: { tokens?: unknown };
+}
+
+type ContextReading = { kind: "value"; tokens: number } | { kind: "unknown" } | { kind: "unavailable" };
+
+function contextReading(stats: AgentContextStats | undefined, path: string, sessionId: string | undefined): ContextReading {
+  if (!stats || !sessionId || stats.sessionId !== sessionId || stats.sessionFile !== path || stats.contextUsage === undefined) return { kind: "unavailable" };
+  const tokens = typeof stats.contextUsage.tokens === "number" && Number.isFinite(stats.contextUsage.tokens) && stats.contextUsage.tokens >= 0
+    ? stats.contextUsage.tokens
+    : undefined;
+  return tokens === undefined ? { kind: "unknown" } : { kind: "value", tokens };
+}
+
+function nextContextTokens(previous: number | undefined, fallback: number | undefined, reading: ContextReading, refreshContext = true): number | undefined {
+  if (!refreshContext) return previous;
+  if (reading.kind === "value") return reading.tokens;
+  if (reading.kind === "unknown") return previous;
+  return fallback ?? previous;
+}
+
+async function getAgentRpcSnapshot(client: RpcClient, includeStats = true): Promise<{ state: Awaited<ReturnType<RpcClient["getState"]>>; stats?: AgentContextStats }> {
+  const state = await client.getState();
+  if (!includeStats || typeof client.getSessionStats !== "function") return { state };
+  try { return { state, stats: await client.getSessionStats() }; }
+  catch { return { state }; }
+}
+
 /** Binds once before the first prompt and only recomputes from durable IDs thereafter. */
-export function refreshAgentTelemetry(record: RpcAgentRecord, state?: { sessionFile?: string; sessionId?: string; model?: { provider?: string; id?: string }; thinkingLevel?: string }, opts?: { fresh?: boolean }): boolean {
-  const snapshot = () => JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+export function refreshAgentTelemetry(
+  record: RpcAgentRecord,
+  state?: { sessionFile?: string; sessionId?: string; model?: { provider?: string; id?: string }; thinkingLevel?: string },
+  opts?: { fresh?: boolean; stats?: AgentContextStats; refreshContext?: boolean },
+): boolean {
+  const snapshot = () => JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryContextFloor, model: record.observedModel, effort: record.observedEffort, context: record.observedContextTokens });
   const before = snapshot();
   const finish = (): boolean => {
     const changed = before !== snapshot();
@@ -685,6 +720,7 @@ export function refreshAgentTelemetry(record: RpcAgentRecord, state?: { sessionF
   const path = state?.sessionFile ?? record.sessionPath;
   const read = readSessionEntries(path);
   const sessionId = state?.sessionId ?? (read && !("transient" in read) ? read.headerId : undefined);
+  const reading = contextReading(opts?.stats, path, sessionId);
   const model = state?.model?.provider && state.model.id ? `${state.model.provider}/${state.model.id}` : undefined;
   if (model) record.observedModel = model; else if (state) delete record.observedModel;
   if (typeof state?.thinkingLevel === "string" && state.thinkingLevel) record.observedEffort = state.thinkingLevel; else if (state) delete record.observedEffort;
@@ -697,23 +733,32 @@ export function refreshAgentTelemetry(record: RpcAgentRecord, state?: { sessionF
       if (!anchor) return finish();
       record.telemetry = { version: 1, origin: { sessionId, sessionPath: path, prefixEntryId: anchor } };
     } else if (read && !("transient" in read) && read.parentSession && !opts?.fresh) {
-      if (!record.telemetryInputFloor) record.telemetryInputFloor = { sessionId, sessionPath: path, ...(read.entries.at(-1)?.id ? { prefixEntryId: read.entries.at(-1)!.id } : { emptyPrefix: true }) };
-      const floor = reduceTelemetry(record.telemetryInputFloor, read);
-      if (floor) record.observedLatestInput = floor.latestInput; else delete record.observedLatestInput;
+      const existingFloor = record.telemetryContextFloor;
+      if (existingFloor && (existingFloor.sessionId !== sessionId || existingFloor.sessionPath !== path)) {
+        delete record.telemetryContextFloor;
+        delete record.observedContextTokens;
+      }
+      if (!record.telemetryContextFloor) record.telemetryContextFloor = { sessionId, sessionPath: path, ...(read.entries.at(-1)?.id ? { prefixEntryId: read.entries.at(-1)!.id } : { emptyPrefix: true }) };
+      const floor = reduceTelemetry(record.telemetryContextFloor, read);
+      record.observedContextTokens = nextContextTokens(record.observedContextTokens, floor?.contextTokens, reading, opts?.refreshContext !== false);
+      if (record.observedContextTokens === undefined) delete record.observedContextTokens;
       return finish();
     }
     if (!read || ("transient" in (read ?? {}))) return finish();
     if (!record.telemetry) record.telemetry = { version: 1, origin: { sessionId, sessionPath: path, emptyPrefix: true } };
   }
   const telemetry = record.telemetry;
-  if (telemetry.origin.sessionPath !== path || (sessionId && telemetry.origin.sessionId !== sessionId)) { delete record.telemetry; delete record.telemetryInputFloor; delete record.observedLatestInput; return finish(); }
+  if (telemetry.origin.sessionPath !== path || (sessionId && telemetry.origin.sessionId !== sessionId)) { delete record.telemetry; delete record.telemetryContextFloor; delete record.observedContextTokens; return finish(); }
   if (model) telemetry.model = model; else if (state) delete telemetry.model;
   if (typeof state?.thinkingLevel === "string" && state.thinkingLevel) telemetry.effort = state.thinkingLevel; else if (state) delete telemetry.effort;
   if (read && "transient" in read) return finish();
   const reduced = reduceTelemetry(telemetry.origin, read);
-  if (!reduced) { delete record.telemetry; delete record.telemetryInputFloor; delete record.observedLatestInput; return finish(); }
-  delete telemetry.latestInput; delete telemetry.estimatedUsd; delete telemetry.partialEstimatedUsd;
+  if (!reduced) { delete record.telemetry; delete record.telemetryContextFloor; delete record.observedContextTokens; return finish(); }
+  const previousContext = telemetry.contextTokens;
+  delete telemetry.estimatedUsd; delete telemetry.partialEstimatedUsd;
   Object.assign(telemetry, reduced);
+  telemetry.contextTokens = nextContextTokens(previousContext, reduced.contextTokens, reading, opts?.refreshContext !== false);
+  if (telemetry.contextTokens === undefined) delete telemetry.contextTokens;
   return finish();
 }
 
@@ -2428,17 +2473,21 @@ export function attachEventListener(
 ): void {
   let refreshing = false;
   let dirty = false;
+  let statsDirty = false;
   const generation = record.launchGeneration;
-  const refresh = () => {
+  const refresh = (includeStats = false) => {
     dirty = true;
+    statsDirty ||= includeStats;
     if (refreshing) return;
     refreshing = true;
     void (async () => {
       do {
         dirty = false;
+        const readStats = statsDirty;
+        statsDirty = false;
         try {
-          const state = await client.getState();
-          if (record.client === client && record.launchGeneration === generation && refreshAgentTelemetry(record, state)) {
+          const snapshot = await getAgentRpcSnapshot(client, readStats);
+          if (record.client === client && record.launchGeneration === generation && refreshAgentTelemetry(record, snapshot.state, { stats: snapshot.stats, refreshContext: readStats })) {
             publishSubtree(registry);
             triggerAgentWidgetRefresh();
             triggerAgentCostRefresh();
@@ -2470,7 +2519,12 @@ export function attachEventListener(
     }
     const outcome = applyRpcEvent(record, e);
     publishSubtree(registry);
-    if (e.type === "agent_start" || e.type === "agent_settled" || e.type === "message_end" || e.type === "message_update" || e.type === "thinking_level_changed" || e.type === "compaction_end") refresh();
+    if (e.type === "agent_start" || e.type === "agent_settled" || e.type === "message_end" || e.type === "message_update" || e.type === "thinking_level_changed" || e.type === "compaction_end") {
+      // Context occupancy changes at completed message/compaction boundaries.
+      // Streaming deltas retain the disk/state refresh without
+      // hammering get_session_stats on every token.
+      refresh(e.type === "agent_settled" || e.type === "message_end" || e.type === "compaction_end");
+    }
     if (outcome.push) {
       pushToLead(pi, registry, record, outcome.push.family, outcome.push.payload, outcome.push.deliverAs);
     }
@@ -2972,7 +3026,7 @@ export async function spawnAgent(
     }
     // Capture the immutable pre-first-prompt boundary after all selection
     // work, before prompt() can append any attributable child turn.
-    try { refreshAgentTelemetry(record, await client.getState(), { fresh: true }); } catch { delete record.observedModel; delete record.observedEffort; if (record.telemetry) { delete record.telemetry.model; delete record.telemetry.effort; } }
+    try { const snapshot = await getAgentRpcSnapshot(client); refreshAgentTelemetry(record, snapshot.state, { fresh: true, stats: snapshot.stats }); } catch { delete record.observedModel; delete record.observedEffort; if (record.telemetry) { delete record.telemetry.model; delete record.telemetry.effort; } }
     if (forkLaunch) await captureForkSelection(client, record);
     attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     attachFirstTaskForkCacheNotice(record, client, ctx.forkCacheNoticeOwner);
@@ -3126,7 +3180,7 @@ export async function sendToAgent(
       } else {
         await applyModelEffort(client, record.modelEffort);
       }
-      try { refreshAgentTelemetry(record, await client.getState()); } catch { delete record.observedModel; delete record.observedEffort; if (record.telemetry) { delete record.telemetry.model; delete record.telemetry.effort; } }
+      try { const snapshot = await getAgentRpcSnapshot(client); refreshAgentTelemetry(record, snapshot.state, { stats: snapshot.stats }); } catch { delete record.observedModel; delete record.observedEffort; if (record.telemetry) { delete record.telemetry.model; delete record.telemetry.effort; } }
       if (forkLaunch) await captureForkSelection(client, record);
       attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     } catch (err) {
