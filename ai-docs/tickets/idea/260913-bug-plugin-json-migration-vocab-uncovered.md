@@ -58,21 +58,31 @@ get scanned too.
 
 ### Confirmed Decisions
 
-(none yet)
+- **Judged by the no-downstream-leak principle (user, 2026-09-13):** a shipped
+  surface must not leak this repository's own migration status downstream, so
+  `plugin.json` drops the "codex-first"/migration-status framing and describes
+  current capability instead. This resolves the Open Question below: Rule 4's
+  "non-negotiably" does foreclose migration-status text in shipped manifests —
+  "Codex-first candidate" is not acceptable shipped wording.
+- Consequently, after the reword, widen `TEXT_TREES` back to the full
+  `agents-plugin/.codex-plugin` directory so the manifest is scanned going
+  forward (the mailbox-wake ticket narrowed it to the single `hooks.json` file
+  only to avoid re-litigating this gap under an unrelated ticket).
 
 ### Proposals
 
 - Reword `plugin.json`'s `description`/`interface.longDescription` to drop
-  "codex-first" framing (e.g. describe current capability rather than
-  migration status), then widen the mailbox-wake ticket's narrowed
-  `TEXT_TREES` entry back to the full `agents-plugin/.codex-plugin`
-  directory so the manifest itself is covered going forward.
+  "codex-first" framing (describe current capability rather than migration
+  status), then widen the narrowed `TEXT_TREES` entry back to the full
+  `agents-plugin/.codex-plugin` directory and re-run the neutrality scanner.
+  (Now backed by the Confirmed Decision above — this is the actionable shape.)
 
 ### Open Questions
 
-- Is "Codex-first ws workflow plugin candidate" acceptable shipped text
-  despite naming this repo's migration status, or does Rule 4's
-  "non-negotiably" foreclose that reading entirely?
+- (Resolved 2026-09-13 — see Confirmed Decisions.) "Codex-first ws workflow
+  plugin candidate" is not acceptable shipped text: Rule 4's "non-negotiably"
+  forecloses naming this repo's migration status in a downstream-shipped
+  manifest.
 
 ### Rejected Alternatives
 
