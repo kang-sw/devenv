@@ -66,6 +66,7 @@ const BUNDLED_RUNTIME = JSON.parse(readFileSync(join(TEST_DIR, "..", "runtime.js
 // contract source.
 const LIVE_TOOL_NAMES = [
   "runtime.read", "runtime.debug_events", "session.children", "session.note",
+  "mailbox.send", "mailbox.recv", "mailbox.lookup_peers",
   "ferrule", "agenda.set", "agenda.clear", "agenda.list",
   "route.resolve_implement", "route.resolve_proceed", "todo.add", "todo.check",
   "todo.erase", "todo.clear", "todo.list", "todo.read", "todo.reorder",
@@ -105,9 +106,9 @@ describe("sanitizeToolName", () => {
     assert.equal(sanitizeToolName("ferrule"), "ws__ferrule");
   });
 
-  test("captured tool set exactly matches the bundled 51-tool contract", () => {
+  test("captured tool set exactly matches the bundled 54-tool contract", () => {
     const bundledToolNames = Object.keys(BUNDLED_RUNTIME.tools).sort();
-    assert.equal(bundledToolNames.length, 51);
+    assert.equal(bundledToolNames.length, 54);
     assert.deepEqual([...LIVE_TOOL_NAMES].sort(), bundledToolNames);
     assert.ok(bundledToolNames.includes("git.merge"));
     for (const retiredName of RETIRED_TOOL_NAMES) {
@@ -145,7 +146,7 @@ describe("sanitizeToolName", () => {
 test("production bridge registration returns the pointer on a repeat playbook.read", async () => {
   const directory = mkdtempSync(join(tmpdir(), "ws-pi-dedupe-bridge-"));
   const launcher = join(directory, "launcher.py");
-  writeFileSync(launcher, `import json,sys\nfor line in sys.stdin:\n q=json.loads(line); m=q['method'];\n if m=='initialize': r={'serverInfo':{'version':'0.45.2'},'capabilities':{}}\n elif m=='tools/list': r={'tools':[{'name':'playbook.read','description':'read','inputSchema':{'type':'object','properties':{'name':{'type':'string'}},'required':['name']}}]}\n elif m=='tools/call': r={'isError':False,'content':[{'type':'text','text':'# Repeat\\n## Detail'}]}\n print(json.dumps({'jsonrpc':'2.0','id':q['id'],'result':r}),flush=True)\n`);
+  writeFileSync(launcher, `import json,sys\nfor line in sys.stdin:\n q=json.loads(line); m=q['method'];\n if m=='initialize': r={'serverInfo':{'version':'0.46.1'},'capabilities':{}}\n elif m=='tools/list': r={'tools':[{'name':'playbook.read','description':'read','inputSchema':{'type':'object','properties':{'name':{'type':'string'}},'required':['name']}}]}\n elif m=='tools/call': r={'isError':False,'content':[{'type':'text','text':'# Repeat\\n## Detail'}]}\n print(json.dumps({'jsonrpc':'2.0','id':q['id'],'result':r}),flush=True)\n`);
   const tools = new Map<string, any>();
   const pi = { registerTool: (definition: any) => tools.set(definition.name, definition), on() {} } as unknown as ExtensionAPI;
   const oldRole = process.env.WS_PI_SPAWN_ROLE;
@@ -368,7 +369,7 @@ describe("cutStaticBody", () => {
     assert.equal(result.text, expected);
     assert.ok(!result.text.includes(REAL_START_LINE), "the manual body's start heading must be cut out");
     assert.ok(result.text.startsWith("review watermark"), "the prepended advisory block ahead of the manual body must survive");
-    assert.ok(result.text.includes("## Session Key\ncork-crease-renewable"), "the ## Session Key tail must survive, end-anchor line included");
+    assert.ok(result.text.includes("## Session Key\nplanner-overvalue-mangle"), "the ## Session Key tail must survive, end-anchor line included");
   });
 
   test("reason: end-anchor when the response's ## Session Key heading is missing", () => {
