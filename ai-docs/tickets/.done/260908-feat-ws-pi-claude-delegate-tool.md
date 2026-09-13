@@ -10,6 +10,7 @@ spec:
   - 260910-pi-claude-read-only-delegation
 sage-review-design-reviewed: bfdff06e04e9fa40
 sage-review-completeness-reviewed: bfdff06e04e9fa40
+completed: 2026-09-13
 ---
 
 # `ws-claude`: delegate bounded judgment tasks to Claude Code subagents (fan-out, edit-scoped, resumable)
@@ -310,6 +311,42 @@ its ticket/Relations inputs and lookup context without unavailable tool calls;
 missing context is reported explicitly, lead credentials are absent, and no
 additional MCP or execution tools become available.
 
+### Result (0efb4fad) - 2026-09-13
+
+Phase 3 makes every successful Claude delegation resumable within its Pi session.
+The adapter persists Claude sessions, captures their private SDK session IDs,
+and maps them behind the existing collision-free three-word handles. A resume
+call accepts only the handle and follow-up request, reuses the original preset,
+model, paths, edit authority, and canonical design-review frame, and rejects
+unknown or concurrently continued handles without exposing a raw session ID.
+
+The new read-only `design-review` preset resolves the canonical
+`ticket-reviewer-design` playbook through the parent bridge, supplies the target,
+current ready inventory, named parent epic, explicit Relations context, and any
+caller-named artifacts as a bounded worktree-contained bundle, and adapts
+unavailable ws/explorer instructions without changing the criteria or verdict
+format. Parent MCP calls receive the live parent session key through the bridge's
+existing fill-or-forward helper; neither that key nor account/ws MCP access
+reaches the Claude child. Missing or oversized essential context fails the item
+explicitly.
+
+Implementation landed in `27df2938`; Round 1 review fixes landed in `0efb4fad`.
+Partitioned correctness, fit, and test review completed in two rounds. Round 1
+found one Critical parent-session dispatch failure and three Important issues:
+design-review continuations lost their canonical frame, the public schema was
+wider than runtime resume validation, and the resume-context fixture was not
+stateful. Round 2 verified every finding fixed with no unresolved observations.
+
+Verification: `cd agents-plugin-pi && node --test test/claude-*.test.ts` passed
+56/56; `cd agents-plugin-pi && npm test` passed 1,808 tests with 0 failures and
+2 expected skips (1,810 total); `git diff --check` passed. The matrix covers
+private-ID isolation, stateful same-handle continuation, unknown and concurrent
+resume rejection, canonical-frame retention, parent-side ticket/playbook
+assembly, explicit missing context, closed tools/MCP, session-key fill, and
+provider-schema exclusivity. No additional live Claude model call was run; the
+existing Phase 1 subscription gate remains the live viability evidence while
+Phase 3 uses deterministic SDK-contract coverage.
+
 ## Pre-build live gate retained (2026-09-09)
 
 The owner's backlog review refers to this subprocess-as-Claude-Code direction,
@@ -356,3 +393,8 @@ followed by at most two seconds of cleanup. Cancellation is invocation-local;
 shutdown cancels all owned work. Unconfirmed child termination prevents new
 launches instead of releasing capacity as though cleanup succeeded.
 
+
+
+## Resolution (2026-09-13)
+
+Implemented all three phases. Phase 3 added private session-ID capture behind opaque three-word resume handles, same-session continuation with authority retention and collision rejection, and a canonical parent-resolved design-review context bundle under the existing closed Claude tool profile. Partitioned two-round review resolved all findings; focused Claude tests and the full Pi package suite are green.
