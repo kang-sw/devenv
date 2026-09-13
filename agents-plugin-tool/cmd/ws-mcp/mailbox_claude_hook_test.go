@@ -167,6 +167,36 @@ func TestMailboxClaudeStopHookBoundsRepeatedFiringAtSameCount(t *testing.T) {
 	}
 }
 
+// TestMailboxClaudeStopHookSharesWatermarkWithCodexAdapter pins the design
+// claim in this phase's own commit message: the Codex and Claude adapters
+// deliberately share ShouldNotifyNamedInboxUnread's on-disk watermark for
+// the same slug (there is only ever one queue to debounce against,
+// regardless of which harness is asking), so firing the Codex hook first and
+// then the Claude hook at the same unchanged unread count must notify once
+// total, not once per adapter. Without this, a session that somehow fired
+// both hook commands (e.g. a misconfigured install, or the correctness
+// reviewer's own noted scenario of Codex also auto-discovering
+// hooks/hooks.json) would silently re-block on every Claude firing after an
+// already-consumed Codex notification, reopening the exact "unbounded
+// re-block" failure mode Phase 2's round-1 Critical fix closed — just
+// crossing adapters instead of crossing owners or roots.
+func TestMailboxClaudeStopHookSharesWatermarkWithCodexAdapter(t *testing.T) {
+	bin := buildWsMCPMailboxTestBin(t)
+	env := mailboxTestEnv(t)
+	seedNamedInbox(t, env, "lead", "owner-key", "run ticket X")
+	hookEnv := withMailboxEnv(env, "lead@machine")
+
+	codexOut, codexExit := runMailboxCodexStopHook(t, bin, hookEnv, `{"hook_event_name":"Stop","stop_hook_active":false}`)
+	if codexExit != 0 || !strings.Contains(codexOut, `"decision":"block"`) {
+		t.Fatalf("codex-stop-hook first firing = (exit %d, out %q), want a decision:block response", codexExit, codexOut)
+	}
+
+	claudeOut, claudeExit := runMailboxClaudeStopHook(t, bin, hookEnv, `{"hook_event_name":"Stop","stop_hook_active":false}`)
+	if claudeExit != 0 || strings.TrimSpace(claudeOut) != "" {
+		t.Fatalf("claude-stop-hook firing after codex-stop-hook already notified at the same unread count = (exit %d, out %q), want (0, \"\") — the watermark is shared across adapters", claudeExit, claudeOut)
+	}
+}
+
 func TestMailboxClaudeStopHookNoOpWithoutMailboxIdentity(t *testing.T) {
 	bin := buildWsMCPMailboxTestBin(t)
 	env := mailboxTestEnv(t)
