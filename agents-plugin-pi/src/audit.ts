@@ -547,6 +547,7 @@ interface OwnerSteeringOptions {
   finish(): Promise<void> | void;
   interrupt(): Promise<void> | void;
   interruptEnabled(): boolean;
+  ownerHeld?(): boolean;
   notify?(message: string, type?: "info" | "warning" | "error"): void;
   theme?: { fg?(color: string, text: string): string };
   matchesKey?: (data: string, keyId: string) => boolean;
@@ -596,7 +597,9 @@ export class OwnerSteeringComponent implements Component {
   handleInput(data: string): void {
     if (!this.modal) {
       if (isEscapeKey(data)) {
-        if (this.view.getMode() === "interactive") {
+        // Ownership is registry-backed rather than view-local: `/audit` may
+        // still be in read-only mode while its child is owner-held.
+        if (this.view.getMode() === "interactive" || this.options.ownerHeld?.()) {
           this.modal = true;
           this.selected = 0;
           this.tui.requestRender();
@@ -657,9 +660,10 @@ export class OwnerSteeringComponent implements Component {
 }
 
 /**
- * Opens the record-backed viewer for `agentId`. View-mode Esc closes; Enter
- * raises the same component to interactive owner steering, where Esc opens
- * the shared action modal. Opening alone never resumes a dormant child.
+ * Opens the record-backed viewer for `agentId`. View-mode Esc closes unless
+ * the registry still marks the child owner-held, in which case it opens the
+ * shared action modal; Enter still raises the same component to interactive
+ * owner steering. Opening alone never resumes a dormant child.
  */
 export async function openViewer(
   ctx: AuditUiCtx & { ui?: { custom?: unknown } },
@@ -731,6 +735,7 @@ export async function openViewer(
           if (live?.running && live.client) await live.client.abort();
         },
         interruptEnabled: () => rpcRegistry.get(agentId)?.running === true && rpcRegistry.get(agentId)?.client !== undefined,
+        ownerHeld: () => isOwnerHeld(rpcRegistry.get(agentId)),
         notify: (message, type) => notify(ctx, message, type),
         theme,
         matchesKey: hostPiTui.matchesKey as (data: string, keyId: string) => boolean,

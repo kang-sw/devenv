@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: a9d74078ac56f2f4
 sage-review-completeness-reviewed: a9d74078ac56f2f4
+completed: 2026-09-13
 ---
 
 # Owner-held `/audit` view hides the ownership modal behind Enter
@@ -51,3 +52,16 @@ The child ownership state is real and persists independently of the overlay's te
 ### Phase 1: Make the ownership modal reachable from owner-held view mode
 
 Expose the current record's owner-held state through the existing audit conversation binding and route Esc to the existing ownership modal whenever that state is true, regardless of whether the editor has been opened. Add focused regressions for lead-owned view close, owner-held idle and running views, hold, finish, interrupt enablement, repeated reopen, and no implicit mode or ownership change merely from opening the modal.
+
+### Result (93ffda9e) - 2026-09-13
+
+- Routed read-only `/audit` Esc through the existing owner-steering modal when the live registry record is owner-held; lead-owned and never-owner views still close directly.
+- Preserved the existing modal lifecycle: hold keeps ownership, finish performs the existing handoff, and interrupt remains limited to running children.
+- Added regressions for idle and running owner-held views, modal cancel/reopen, no implicit mode or ownership change, absent ownership, and replacement of the registry record after open to prove Esc reads current ownership.
+- Verification: `cd agents-plugin-pi && npm test -- test/audit.test.ts` (47 passed); full `npm test` ran 1,798 tests with one unrelated `test/session-bootstrap-guard.test.ts` launcher assertion failure (`write EPIPE` instead of the expected process-exit text).
+- Decisions: left the ownership callback optional because `/answer` is always interactive and does not require an audit-specific registry dependency.
+
+
+## Resolution (2026-09-13)
+
+Phase 1 complete: owner-held `/audit` views now expose the existing ownership modal directly on Esc, with regression coverage for current registry ownership.
