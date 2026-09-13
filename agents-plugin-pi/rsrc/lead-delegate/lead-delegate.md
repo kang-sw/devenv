@@ -23,7 +23,9 @@ Use lead-run when any of these is true:
 - the change affects public behavior, an API, protocol, schema, template,
   canonical flow, or architecture;
 - the implementation scope is unclear or crosses module responsibilities;
-- independent review is needed;
+- independent review is needed, unless the task is a local NEEDS FIX repair
+  handed off by {{.SkillNamespace}}:lead-review, whose follow-up review supplies
+  that verification;
 - the task contains an unresolved product or workflow decision.
 
 Otherwise the lead may use lead-delegate for a bounded, reversible,

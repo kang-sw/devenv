@@ -22,9 +22,12 @@ ticket path, `ready/ empty`, `every remaining ticket blocked`, or a stop reason.
    - `missing` or `ambiguous`: call `{{.McpNamespace}}/git.status()` and stop
      with its nudge line verbatim.
 3. Without `impl_ticket`, inspect `ready/`. Skip candidates carrying a
-   `## Blocked (...)` note, then prefer an in-progress ticket (some phase has a
-   `### Result`, at least one does not), one named as a prerequisite by another
-   ready ticket's `related:` or `parent:`, then the oldest.
+   `## Blocked (...)` note, then prefer, in order: an in-progress ticket (some
+   phase has a `### Result`, at least one does not); a ticket named as a
+   prerequisite by another ready ticket's typed `blocked-by:` edge, falling back
+   to a `related:` or `parent:` prose hint when no `blocked-by:` edge is present;
+   then the oldest. This ordering is advisory — the dispatch-time
+   `dispatch_blocked` gate is what hard-blocks an unlanded prerequisite.
 4. Outside a `goal/*` branch, when the selection is `ready/ empty`, call
    `{{.McpNamespace}}/tickets.query(statuses: ["todo", "idea"], format: "json")`
    and emit up to five `todo` rows followed by up to five `idea` rows, sorting
