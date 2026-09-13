@@ -1134,6 +1134,18 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				// absent.
 				Resolve: true,
 			})
+			// The single-stem point-resolve is the one chokepoint both the
+			// selector path and the directly-named-ticket path pass through, so
+			// the dispatch-time hard gate is computed here and only here (the
+			// projection field stays absent on every discovery listing). A gate
+			// computation failure fails open — it must not turn a plain "where is
+			// this stem" resolve into an error — since the promotion closure is
+			// the other half of the same gate.
+			if err == nil && result != nil {
+				if block, blockErr := wsdoc.DispatchBlockFor(root, *result); blockErr == nil {
+					result.DispatchBlocked = block
+				}
+			}
 			if wantsJSON(params.Arguments) {
 				return toolJSONResponse(req.ID, result, err)
 			}
@@ -2705,6 +2717,9 @@ func formatTickets(tickets []wsdoc.TicketInfo) string {
 			fmt.Fprintf(&b, " [%s]", strings.Join(flags, " "))
 		}
 		b.WriteString("\n")
+		if ticket.DispatchBlocked != nil {
+			fmt.Fprintf(&b, "  dispatch_blocked: %s - %s\n", ticket.DispatchBlocked.BlockingStem, ticket.DispatchBlocked.Reason)
+		}
 		writeIndentedLines(&b, "  unresolved: ", ticket.UnresolvedPhases)
 		writeIndentedLines(&b, "  snippet: ", ticket.MatchingSnippets)
 	}
@@ -3597,7 +3612,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.query",
-			"description": "Query ticket paths by text query, ticket stem, or mentions of another ticket stem. A ticket_stem given alone (no query, no mentions_ticket_stem, no statuses) point-resolves that ticket and returns its status metadata, erroring if the stem is not found; otherwise this is a discovery search. Defaults to compact text; use format=json for structured metadata.",
+			"description": "Query ticket paths by text query, ticket stem, or mentions of another ticket stem. A ticket_stem given alone (no query, no mentions_ticket_stem, no statuses) point-resolves that ticket and returns its status metadata, erroring if the stem is not found; otherwise this is a discovery search. The point-resolve projection also carries a dispatch_blocked {blocking_stem, reason} field, computed live, when the ticket declares a blocked-by: prerequisite that has not landed (the producer is not yet in .done/, or its named phase carries no ### Result); it is absent otherwise and never on a discovery listing. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

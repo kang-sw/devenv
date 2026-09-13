@@ -28,7 +28,11 @@ invocation.
 
 For a ticket target, point-resolve the selected stem with
 `{{.McpNamespace}}/tickets.query(ticket_stem: "<stem>", format: "json")` and use its Route
-Facts projection; do not read or summarize the ticket body. If that section is
+Facts projection; do not read or summarize the ticket body. A
+`dispatch_blocked` field in that projection means the ticket declares a
+prerequisite that has not landed: do not spawn a worker on it. Report the named
+blocking stem to the user and end the turn — the prerequisite must land, or its
+edge be corrected, before this ticket can run. If the Route Facts section is
 absent, or a worker stops reporting it incomplete, render
 `ticket-fact-populator`, run it on that ticket once, apply what it returns,
 commit, and query again before choosing the worker. Once per ticket: a second
@@ -93,6 +97,21 @@ path, merge, or advance the assignment note; surface the raw report and end
 this invocation. `completion: ad_hoc` is incompatible with this ticket-only
 run. Otherwise act by stop letter. Carry lines from the worker's report to the
 user verbatim; do not re-summarize them.
+
+The worker's checkout is shared and worktree-global, so it outlives the
+worker's turn: before any write of your own that is relative to `HEAD` — a
+ticket Edition or phase revision, a hotfix commit, or the base for a
+follow-up dispatch — call `{{.McpNamespace}}/git.status` and read
+`branch.head`, `impl_ticket`, and the working-tree state, or your write
+silently lands on whichever branch the worker last left checked out, dirty
+changes and all. Decide explicitly: stack on the impl branch when the write
+belongs to that impl ticket, or check out the derived base branch — everything
+between `impl/` and the last `/`, the same convention
+`{{.McpNamespace}}/git.merge` already uses — when the write is unrelated to
+that ticket or you are exiting a fully blocked ticket. A dirty working tree at
+that point is your own judgment call: commit or stash before the checkout,
+never force one through it. Branch-explicit calls (`{{.McpNamespace}}/git.merge`)
+name their own source and target and need no check.
 
 On an accepted `stop: none` report, take the impl branch from the report or
 assignment note and retain it in the note until merged. Merging belongs to you:

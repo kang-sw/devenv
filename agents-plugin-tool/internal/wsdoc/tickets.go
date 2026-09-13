@@ -69,6 +69,16 @@ type TicketInfo struct {
 	// i.e. a ticket this worktree's sparse-checkout scope excludes. It is only
 	// ever set on a resolution-mode call; discovery calls stay filesystem-only.
 	Hidden bool `json:"hidden,omitempty"`
+	// BlockedBy holds the raw `blocked-by:` frontmatter edge specs (each a bare
+	// `<stem>` or a `<stem>#<phaseN>`), parsed on every projection so a caller
+	// can read the typed dependency edges. It is the substrate the dispatch gate
+	// and promotion closure resolve live.
+	BlockedBy []string `json:"blocked_by,omitempty"`
+	// DispatchBlocked is the dispatch-time hard gate result. It is a
+	// point-in-time cross-ticket scheduling fact, so it is populated only on the
+	// single-stem point-resolve projection (see DispatchBlockFor), never on a
+	// discovery listing.
+	DispatchBlocked *DispatchBlock `json:"dispatch_blocked,omitempty"`
 }
 
 type TicketPhase struct {
@@ -459,6 +469,7 @@ func readTicketFromBytes(relPath, status, text string) TicketInfo {
 	info.Title, _ = fm["title"].(string)
 	info.Parent, _ = fm["parent"].(string)
 	info.Related = relatedEntries(fm["related"])
+	info.BlockedBy = blockedByEntries(fm["blocked-by"])
 	info.Plans = scalarList(fm["plans"])
 	info.Skeletons = scalarList(fm["skeletons"])
 	info.Completed, _ = fm["completed"].(string)

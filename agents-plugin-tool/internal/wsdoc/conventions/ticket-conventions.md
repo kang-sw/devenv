@@ -50,6 +50,14 @@ An epic decomposes one outcome into child tickets and owns their cross-child inv
 
 - Use `parent:` for the epic hierarchy and `related:` for non-hierarchical
   relationships. A scoped `ready/` queue may mix parents.
+- Use the optional `blocked-by:` frontmatter key for a hard dependency-landing
+  prerequisite (distinct from soft `related:`): `blocked-by: <stem>` requires the
+  whole prerequisite ticket to be in `.done/`, and `blocked-by: <stem>#<phaseN>`
+  requires that phase of the prerequisite to carry a `### Result`. It is checked
+  live at scheduling time — a consumer cannot be promoted to `ready/` while the
+  prerequisite is neither in `ready/` nor `.done/`, and cannot be dispatched
+  while the prerequisite has not landed. Omit it when there is no hard
+  prerequisite; absent the key nothing is blocked.
 - Epic tickets do not use implementation phases; child tickets carry phases when needed.
 - A single child ticket may carry multiple phases when they form sequential complete implementation units.
 - Move implementation detail out of the epic body into an implementation child ticket; the epic body carries scope, cross-child invariants, and closure conditions only.
