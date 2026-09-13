@@ -69,13 +69,13 @@ test("unexpected init MCP inventory is rejected without exposing SDK diagnostics
 test("local no-model process fixture receives the typed closed profile and is reaped", async () => {
   const controller = new AbortController(); let captured: any;
   const output = await runClaudeItem({ preset: "consult", request: "x", cwd: process.cwd(), abortController: controller }, {
-    executable: "/usr/bin/true", loadSdk: async () => ({ query: ({ options }: any) => { captured = options; options.spawnClaudeCodeProcess({ command: "/usr/bin/true", args: [], cwd: process.cwd(), env: process.env, signal: undefined }); return { close() {}, async *[Symbol.asyncIterator]() { yield { type: "result", subtype: "success", is_error: false, result: "ok", usage: {}, modelUsage: {}, total_cost_usd: 0 }; } }; } }),
+    executable: "/usr/bin/true", loadSdk: async () => ({ query: ({ options }: any) => { captured = options; options.spawnClaudeCodeProcess({ command: "/usr/bin/true", args: [], cwd: process.cwd(), env: process.env, signal: undefined }); return { close() {}, async *[Symbol.asyncIterator]() { yield { type: "result", subtype: "success", is_error: false, result: "ok", session_id: "fixture-session", usage: {}, modelUsage: {}, total_cost_usd: 0 }; } }; } }),
   });
   assert.equal(output.output, "ok"); assert.equal(captured.pathToClaudeCodeExecutable, "/usr/bin/true"); assert.equal(captured.executable, undefined); assert.deepEqual(captured.tools, ["Read", "Grep", "Glob", "WebSearch", "WebFetch"]); assert.equal(captured.env.WS_SESSION_KEY, undefined);
 });
 
 test("non-init SDK system status events do not invalidate a closed init profile", async () => {
   const controller = new AbortController();
-  const output = await runClaudeItem({ preset: "audit", request: "x", cwd: "/tmp", abortController: controller }, { executable: "/usr/bin/true", loadSdk: async () => ({ query: () => ({ close() {}, async *[Symbol.asyncIterator]() { yield { type: "system", subtype: "init", tools: ["Read"], mcp_servers: [] }; yield { type: "system", subtype: "status", status: "requesting" }; yield { type: "result", subtype: "success", is_error: false, result: "ok", usage: {}, modelUsage: {}, total_cost_usd: 0 }; } }) }) });
+  const output = await runClaudeItem({ preset: "audit", request: "x", cwd: "/tmp", abortController: controller }, { executable: "/usr/bin/true", loadSdk: async () => ({ query: () => ({ close() {}, async *[Symbol.asyncIterator]() { yield { type: "system", subtype: "init", tools: ["Read"], mcp_servers: [] }; yield { type: "system", subtype: "status", status: "requesting" }; yield { type: "result", subtype: "success", is_error: false, result: "ok", session_id: "fixture-session", usage: {}, modelUsage: {}, total_cost_usd: 0 }; } }) }) });
   assert.equal(output.output, "ok");
 });

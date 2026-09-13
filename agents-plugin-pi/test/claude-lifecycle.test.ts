@@ -6,7 +6,7 @@ import { createClaudeDelegateController } from "../src/claude-delegate.ts";
 import { disposeClaudeChild, runClaudeItem } from "../src/claude-sdk.ts";
 
 const item = { preset: "consult", request: "fixture" } as const;
-const terminal = (result = "ok") => ({ type: "result", subtype: "success", is_error: false, result, usage: {}, modelUsage: {}, total_cost_usd: 0 });
+const terminal = (result = "ok") => ({ type: "result", subtype: "success", is_error: false, result, session_id: "fixture-session", usage: {}, modelUsage: {}, total_cost_usd: 0 });
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 class Child extends EventEmitter {
   stdin = new PassThrough(); stdout = new PassThrough(); stderr = new PassThrough();

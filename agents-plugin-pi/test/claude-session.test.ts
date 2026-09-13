@@ -18,7 +18,7 @@ test("production session seam registers once, preserves roles/fork capture, forw
     loadSdk: async () => ({ query: ({ options }: any) => {
       const child = options.spawnClaudeCodeProcess({}); const request = { options, child, closes: 0 };
       requests.push(request);
-      return { close() { request.closes++; }, async *[Symbol.asyncIterator]() { await new Promise(() => {}); } };
+      return { close() { request.closes++; }, async *[Symbol.asyncIterator]() { await new Promise(() => {}); yield { type: "result", subtype: "success", is_error: false, result: "ok", session_id: "fixture-session" }; } };
     } }) as any,
   });
   const invoke = (signal = new AbortController().signal) => definition.execute("id", { items: [{ preset: "audit", request: "x" }] }, signal);
@@ -56,7 +56,8 @@ test("production session seam registers once, preserves roles/fork capture, forw
     }
     // Guard the real extension call sites; the exercised seam owns their role/controller logic.
     const index = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
-    assert.match(index, /const claudeDelegateSession = registerClaudeDelegateSession\(pi, toolPreviewTuiRef\)/);
+    assert.match(index, /const claudeDelegateSession = registerClaudeDelegateSession\(pi, toolPreviewTuiRef, \{/);
+    assert.match(index, /handle\.client\.callTool\(name, resolveSessionKey\(args, handle\.defaultSessionKeyRef\)\)/);
     assert.match(index, /await claudeDelegateSession.start\(ctx.cwd\)/);
     assert.match(index, /await claudeDelegateSession.shutdown\(\)/);
   } finally {
