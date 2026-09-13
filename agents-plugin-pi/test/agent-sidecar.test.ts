@@ -21,7 +21,7 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -41,9 +41,10 @@ import {
   type PersistedOrphan,
 } from "../src/agent-sidecar.ts";
 import { armForkRoleWiring } from "../src/fork.ts";
-import { applyRpcEvent, evictForCapacity, listAgents, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
-import type { ExtensionAPI, RpcClient } from "@earendil-works/pi-coding-agent";
+import { applyRpcEvent, evictForCapacity, listAgents, REPORT_TO_LEAD_TOOL_NAME, sendToAgent, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { RpcClient, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { allocateAgentHome, createAgentStorageContext, readOwnership, updateOwnership } from "../src/agent-storage.ts";
+import { DELEGATION_ENV } from "../src/delegation-policy.ts";
 
 function record(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
   return {
@@ -136,16 +137,47 @@ describe("captureOrphans", () => {
     assert.deepEqual(revived.ownerSends, [{ text: "first", at: 10 }, { text: "second", at: 20 }]);
   });
 
-  test("scoped write authority survives capture, parse, and rehydrate without widening", () => {
-    const delegation = {
-      version: 1 as const, depth: 1, maxDepth: 2, authority: "lead" as const,
-      tools: ["read", "edit", "write"], network: { search: false, fetch: false },
-      write: { mode: "scoped" as const, scopes: [{ path: "/tmp/ws-pi-agent-x/output", kind: "tree" as const, include: ["**/*.md"] }] },
-    };
-    const [captured] = captureOrphans(new Map([["a1", record({ delegation })]]));
-    const [parsed] = parseOrphans(serializeOrphans([captured]));
-    const revived = rehydrateOrphanRecord(parsed);
-    assert.deepEqual(revived.delegation?.write, delegation.write);
+  test("scoped write authority survives sidecar revival and the dormant resume path without widening", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "ws-pi-agent-sidecar-scope-")));
+    const previousPolicy = process.env[DELEGATION_ENV];
+    const originalRpc = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "getSessionStats", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
+    let resumedPolicy: unknown;
+    Object.assign(RpcClient.prototype, {
+      async start(this: { options?: { env?: Record<string, string> } }) { resumedPolicy = JSON.parse(this.options!.env![DELEGATION_ENV]!); },
+      stop: async () => {}, abort: async () => {}, onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {},
+      getState: async () => ({}), getSessionStats: async () => { throw new Error("no stats"); },
+    });
+    try {
+      const target = join(root, "output.md");
+      const parent = {
+        version: 1 as const, depth: 0, maxDepth: 2, authority: "lead" as const, tools: ["read"],
+        write: { mode: "scoped" as const, scopes: [{ path: root, kind: "tree" as const }] },
+      };
+      const delegation = {
+        version: 1 as const, depth: 1, maxDepth: 2, authority: "leaf" as const,
+        tools: ["read", "edit", "write"],
+        write: { mode: "scoped" as const, scopes: [{ path: target, kind: "file" as const }] },
+      };
+      process.env[DELEGATION_ENV] = JSON.stringify(parent);
+      const [parsed] = parseOrphans(serializeOrphans(captureOrphans(new Map([["a1", record({ sessionPath: join(root, "session.jsonl"), delegation })]]))));
+      const revived = rehydrateOrphanRecord(parsed);
+      const registry = new Map([[revived.agentId, revived]]);
+      await sendToAgent(registry, { cwd: root, extensionPath: "/tmp/index.ts" }, revived.agentId, "resume");
+      assert.deepEqual((resumedPolicy as { write?: unknown }).write, delegation.write, "the resumed child process receives the same normalized binding");
+
+      const widenedDelegation = { ...delegation, write: { mode: "unrestricted" as const } };
+      const [widenedParsed] = parseOrphans(serializeOrphans(captureOrphans(new Map([["wide", record({ agentId: "wide", sessionPath: join(root, "wide.jsonl"), delegation: widenedDelegation })]]))));
+      const widened = rehydrateOrphanRecord(widenedParsed);
+      await assert.rejects(
+        sendToAgent(new Map([[widened.agentId, widened]]), { cwd: root, extensionPath: "/tmp/index.ts" }, widened.agentId, "resume"),
+        /child write capability exceeds parent ceiling/,
+      );
+      assert.equal(widened.client, undefined, "a widened recovered binding is refused before a resume client is allocated");
+    } finally {
+      Object.assign(RpcClient.prototype, originalRpc);
+      if (previousPolicy === undefined) delete process.env[DELEGATION_ENV]; else process.env[DELEGATION_ENV] = previousPolicy;
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test("records the state at shutdown and the last-report time (relay #2: the roll-call needs both)", () => {

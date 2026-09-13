@@ -1,5 +1,7 @@
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
+import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, EditToolInput, WriteToolInput } from "@earendil-works/pi-coding-agent";
 import { createEditToolDefinition, createWriteToolDefinition } from "@earendil-works/pi-coding-agent";
 
@@ -135,6 +137,22 @@ export function parseEffectiveWriteCapability(value: unknown): EffectiveWriteCap
   return Object.freeze({ mode: "scoped", scopes: Object.freeze(capability.scopes.map(parseNormalizedScope)) });
 }
 
+const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
+
+/** Mirror Pi's native edit/write input conveniences, then pass only the checked absolute result back to Pi. */
+function resolveNativeWriteInput(path: string, cwd: string): string {
+  let normalized = path.replace(UNICODE_SPACES, " ");
+  if (normalized.startsWith("@")) normalized = normalized.slice(1);
+  if (process.platform === "win32" && normalized.startsWith("/") && !normalized.startsWith("//") && !normalized.includes("\\")) {
+    const match = normalized.match(/^\/(?:mnt\/|cygdrive\/)?([a-z])(?:\/(.*))?$/i);
+    if (match) normalized = `${match[1]!.toUpperCase()}:\\${match[2]?.replaceAll("/", "\\") ?? ""}`;
+  }
+  if (normalized === "~") normalized = homedir();
+  else if (normalized.startsWith("~/") || (process.platform === "win32" && normalized.startsWith("~\\"))) normalized = join(homedir(), normalized.slice(2));
+  if (/^file:\/\//.test(normalized)) normalized = fileURLToPath(normalized);
+  return resolve(cwd, normalized);
+}
+
 function lstat(path: string): ReturnType<typeof lstatSync> | undefined {
   try { return lstatSync(path); } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
@@ -216,9 +234,9 @@ function scopeAuthorizes(scope: NormalizedWriteScope, candidate: string): boolea
 
 /** Throws one intentionally inventory-free diagnostic on every denial or canonicalization failure. */
 export function authorizeWritePath(capability: EffectiveWriteCapability, candidatePath: string, cwd = process.cwd()): string {
-  if (capability.mode === "unrestricted") return resolve(cwd, candidatePath);
+  if (capability.mode === "unrestricted") return resolveNativeWriteInput(candidatePath, cwd);
   try {
-    const candidate = canonicalPotentialPath(resolve(cwd, candidatePath));
+    const candidate = canonicalPotentialPath(resolveNativeWriteInput(candidatePath, cwd));
     if (capability.mode === "scoped" && capability.scopes.some(scope => scopeAuthorizes(scope, candidate))) return candidate;
   } catch {
     // Collapse filesystem and containment detail into the same bounded denial.
@@ -256,15 +274,15 @@ export function registerScopedWriteTools(pi: ExtensionAPI, capability: Effective
   pi.registerTool({
     ...edit,
     async execute(toolCallId, params: EditToolInput, signal, onUpdate, ctx) {
-      authorizeWritePath(capability, params.path, ctx.cwd);
-      return createEditToolDefinition(ctx.cwd).execute(toolCallId, params, signal, onUpdate, ctx);
+      const path = authorizeWritePath(capability, params.path, ctx.cwd);
+      return createEditToolDefinition(ctx.cwd).execute(toolCallId, { ...params, path }, signal, onUpdate, ctx);
     },
   });
   pi.registerTool({
     ...write,
     async execute(toolCallId, params: WriteToolInput, signal, onUpdate, ctx) {
-      authorizeWritePath(capability, params.path, ctx.cwd);
-      return createWriteToolDefinition(ctx.cwd).execute(toolCallId, params, signal, onUpdate, ctx);
+      const path = authorizeWritePath(capability, params.path, ctx.cwd);
+      return createWriteToolDefinition(ctx.cwd).execute(toolCallId, { ...params, path }, signal, onUpdate, ctx);
     },
   });
 }

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
@@ -142,7 +143,7 @@ describe("native scoped edit/write wrappers", () => {
   test("exposes only edit/write wrappers and preserves native create/replace/edit behavior", async () => {
     const root = tempRoot();
     const target = join(root, "result.md");
-    const capability = normalizeWriteScopes([{ path: target, kind: "file" }]);
+    const capability = normalizeWriteScopes([{ path: root, kind: "tree", include: ["**/*.md"] }]);
     const tools = new Map<string, any>();
     const pi = { registerTool: (tool: any) => tools.set(tool.name, tool) } as ExtensionAPI;
     registerScopedWriteTools(pi, capability);
@@ -157,9 +158,22 @@ describe("native scoped edit/write wrappers", () => {
     const editResult = await tools.get("edit").execute("e", { path: target, edits: [{ oldText: "before", newText: "after" }] }, undefined, undefined, ctx);
     assert.match(editResult.content[0].text, /Successfully replaced/);
     assert.equal(readFileSync(target, "utf8"), "after\n");
+
+    const urlTarget = join(root, "url.md");
+    await tools.get("write").execute("url", { path: pathToFileURL(urlTarget).href, content: "native url\n" }, undefined, undefined, ctx);
+    assert.equal(readFileSync(urlTarget, "utf8"), "native url\n", "native file-URL path semantics are authorized and preserved");
+
     await assert.rejects(
-      tools.get("write").execute("bad", { path: join(root, "other.md"), content: "no" }, undefined, undefined, ctx),
+      tools.get("write").execute("bad-extension", { path: join(root, "other.txt"), content: "no" }, undefined, undefined, ctx),
       /outside delegated write scopes/,
     );
+
+    const outside = tempRoot();
+    const confusedPath = `@../${basename(outside)}/escaped.md`;
+    await assert.rejects(
+      tools.get("write").execute("bad", { path: confusedPath, content: "no" }, undefined, undefined, ctx),
+      /outside delegated write scopes/,
+    );
+    assert.equal(existsSync(join(outside, "escaped.md")), false, "authorization and Pi's native resolver cannot select different targets");
   });
 });

@@ -692,6 +692,14 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
       }, undefined, undefined, unrestricted.ctx)).content[0]!.text);
       assert.deepEqual(result.write_scopes, { status: "ignored", reason: "child already has unrestricted native edit/write authority" });
       assert.deepEqual(unrestricted.handle.rpcRegistry.get(result.agent_id)!.delegation!.write, { mode: "unrestricted" });
+      const beforeInvalid = unrestricted.handle.rpcRegistry.size;
+      await assert.rejects(
+        () => unrestricted.tool.execute("invalid-redundant", {
+          system_prompt_path: "/tmp/p.md", prompt: "invalid", write_scopes: [{ path: "relative", kind: "tree" }],
+        }, undefined, undefined, unrestricted.ctx),
+        /path must be absolute/,
+      );
+      assert.equal(unrestricted.handle.rpcRegistry.size, beforeInvalid, "invalid redundant scopes still fail before allocation");
       await unrestricted.handle.stopAll();
     } finally { rpc.restore(); }
   });

@@ -2654,7 +2654,7 @@ function requestedWriteCapability(tools: string[], writeScopes: readonly WriteSc
   if (writeScopes === undefined) {
     return { tools, write: naturallyUnrestricted ? { mode: "unrestricted" } : { mode: "none" } };
   }
-  if (writeScopes.length === 0) normalizeWriteScopes(writeScopes);
+  const write = normalizeWriteScopes(writeScopes);
   if (naturallyUnrestricted) {
     return {
       tools,
@@ -2662,7 +2662,6 @@ function requestedWriteCapability(tools: string[], writeScopes: readonly WriteSc
       diagnostic: { status: "ignored", reason: "child already has unrestricted native edit/write authority" },
     };
   }
-  const write = normalizeWriteScopes(writeScopes);
   return { tools: [...new Set([...tools, "edit", "write"])], write, diagnostic: { status: "bound", count: write.mode === "scoped" ? write.scopes.length : 0 } };
 }
 
