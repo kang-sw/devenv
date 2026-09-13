@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 75d2e7efc6c99082
 sage-review-completeness-reviewed: 75d2e7efc6c99082
+completed: 2026-09-13
 ---
 
 # Pi custom cost footer can saturate the main thread after reload
@@ -76,3 +77,8 @@ Eviction and ordinary-stop boundaries persist final reconciled telemetry. Evicti
 Verification passed: `npm test` reported 1,771 passed, 0 failed, and 2 intentionally skipped; focused footer/spawner/ask coverage reported 510 passed; `npm pack --dry-run` completed with validated generated skills. Regression coverage includes 10,000 cached renders without history or registry access, 64 unique evictions folding into one scalar baseline, reload with an evicted baseline, partial and failed snapshots, failed checkpoint retry, and lifecycle disposal. A live PTY `/reload` comparison showed the diagnostic-disabled baseline at 1.14% mean / 3.4% maximum CPU across eight post-reload samples and the re-enabled custom footer visible with its final five one-second samples at 0%; no sustained saturation recurred.
 
 Independent correctness, fit, and test reviews each completed two rounds. Round-one Important findings were fixed in `b4b9bdfd`, `2513323a`, and `3fe80fff`; all round-two verifiers returned clean with no remaining findings.
+
+
+## Resolution (2026-09-13)
+
+Replaced polling and render-time recursive accounting with bounded event-driven checkpoints, re-enabled the footer, resolved two-round correctness/fit/test review, and verified automated plus live `/reload` responsiveness.
