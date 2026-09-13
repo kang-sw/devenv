@@ -510,11 +510,22 @@ describe("openViewer (shared view/steering overlay and one-overlay-at-a-time sin
     assert.equal(await promise, undefined);
   });
 
-  test("owner-held view-mode Esc opens, cancels, and reopens the action modal without changing mode or ownership", async () => {
-    const held = record({ agentId: "a1", lastWriter: "owner" });
+  test("Esc closes directly when the owner has never written", async () => {
+    const registry = registryOf(record({ agentId: "a1" }));
+    const opened = fakeViewerCtx();
+    const promise = openViewer(opened.ctx as never, registry, "a1");
+    const component = await opened.componentReady;
+
+    component.handleInput("\x1b");
+    assert.equal(await promise, undefined);
+  });
+
+  test("view-mode Esc reads current owner-held state and opens, cancels, and reopens the action modal without changing mode or ownership", async () => {
+    const held = record({ agentId: "a1", lastWriter: "lead" });
     const opened = fakeViewerCtx();
     const promise = openViewer(opened.ctx as never, registryOf(held), "a1");
     const component = await opened.componentReady;
+    held.lastWriter = "owner"; // Esc must read the current registry record, not the initial view state.
 
     component.handleInput("\x1b");
     assert.equal(component.getMode(), "view", "opening the modal does not raise the editor");
