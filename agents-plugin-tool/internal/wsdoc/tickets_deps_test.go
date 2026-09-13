@@ -255,6 +255,105 @@ func TestDispatchBlockForMultipleEdges(t *testing.T) {
 	}
 }
 
+// TestBlockedByPromotionWarning pins the promotion-time advisory warning: the
+// soft, non-blocking layer over the in-between the closure allows. A typed
+// prerequisite in ready/ but not code-landed warns; a .done/ prerequisite, a
+// phase-targeted prerequisite whose named phase carries a ### Result, a soft
+// related: edge, and an absent blocked-by all stay silent. Computed live from
+// board state, never from a stamp.
+func TestBlockedByPromotionWarning(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		consumerFM string
+		prereqs    map[string]string // stem -> "status|body"
+		wantWarn   bool
+		mentions   []string
+	}{
+		{
+			name:       "ready-but-unexecuted bare stem warns",
+			consumerFM: "blocked-by: 260101-feat-a\n",
+			prereqs:    map[string]string{"260101-feat-a": "ready|" + prereqWithPhases("A", false, false)},
+			wantWarn:   true,
+			mentions:   []string{"260101-feat-a"},
+		},
+		{
+			name:       "done prerequisite is silent",
+			consumerFM: "blocked-by: 260101-feat-a\n",
+			prereqs:    map[string]string{"260101-feat-a": ".done|" + prereqWithPhases("A", true, true)},
+			wantWarn:   false,
+		},
+		{
+			name:       "phase edge with Result on the named phase is silent",
+			consumerFM: "blocked-by: 260101-feat-a#2\n",
+			prereqs:    map[string]string{"260101-feat-a": "ready|" + prereqWithPhases("A", false, true)},
+			wantWarn:   false,
+		},
+		{
+			name:       "phase edge without Result on the named phase warns",
+			consumerFM: "blocked-by: 260101-feat-a#2\n",
+			prereqs:    map[string]string{"260101-feat-a": "ready|" + prereqWithPhases("A", true, false)},
+			wantWarn:   true,
+			mentions:   []string{"260101-feat-a#2"},
+		},
+		{
+			name:       "multi-edge names every pending prerequisite (join path)",
+			consumerFM: "blocked-by:\n  - 260101-feat-a\n  - 260101-feat-b\n",
+			prereqs: map[string]string{
+				"260101-feat-a": "ready|" + prereqWithPhases("A", false, false),
+				"260101-feat-b": "ready|" + prereqWithPhases("B", false, false),
+			},
+			wantWarn: true,
+			mentions: []string{"260101-feat-a", "260101-feat-b"},
+		},
+		{
+			name:       "malformed edge stays silent here (closure/dispatch gate owns it)",
+			consumerFM: "blocked-by: not-a-stem\n",
+			prereqs:    map[string]string{},
+			wantWarn:   false,
+		},
+		{
+			name:       "soft related edge never warns",
+			consumerFM: "related:\n  260101-feat-a: partner\n",
+			prereqs:    map[string]string{"260101-feat-a": "ready|" + prereqWithPhases("A", false, false)},
+			wantWarn:   false,
+		},
+		{
+			name:       "absent prerequisite is silent (closure/dispatch gate owns it)",
+			consumerFM: "blocked-by: 260101-feat-absent\n",
+			prereqs:    map[string]string{},
+			wantWarn:   false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			for stem, spec := range tc.prereqs {
+				parts := strings.SplitN(spec, "|", 2)
+				status, body := parts[0], parts[1]
+				mustWrite(t, root, filepath.Join("ai-docs", "tickets", statusDirs[status], stem+".md"), body)
+			}
+			consumerRel := "ai-docs/tickets/ready/260101-feat-consumer.md"
+			mustWrite(t, root, filepath.FromSlash(consumerRel),
+				"---\ntitle: Consumer\n"+tc.consumerFM+"---\n\n# Consumer\n\n## Phases\n\n### Phase 1: X\n")
+			warning, err := blockedByPromotionWarning(root, filepath.Join(root, filepath.FromSlash(consumerRel)))
+			if err != nil {
+				t.Fatalf("blockedByPromotionWarning: %v", err)
+			}
+			if tc.wantWarn {
+				if warning == "" {
+					t.Fatalf("want an advisory warning on %q, got none", tc.name)
+				}
+				for _, mention := range tc.mentions {
+					if !strings.Contains(warning, mention) {
+						t.Fatalf("warning = %q, want it to mention %q", warning, mention)
+					}
+				}
+			} else if warning != "" {
+				t.Fatalf("want no advisory warning, got %q", warning)
+			}
+		})
+	}
+}
+
 // TestBlockedByPromotionClosure pins the promotion-closure half bound to
 // tickets.move(to: "ready"): a typed prerequisite must already be in ready/ or
 // .done/. It is status-only — a ready-but-unexecuted prerequisite passes the

@@ -295,6 +295,14 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 		if readySageWarning != "" {
 			result.Tip = appendTip(result.Tip, readySageWarning)
 		}
+		// Promotion-time dependency advisory: the closure above already refused
+		// the idea/todo cases, so this soft layer covers only the in-between it
+		// allows — a typed blocked-by prerequisite in ready/ but not yet
+		// code-landed. Non-blocking; fails open on a scan error since the
+		// dispatch gate backstops the hard cases.
+		if warning, werr := blockedByPromotionWarning(root, filepath.Join(root, filepath.FromSlash(newPath))); werr == nil && warning != "" {
+			result.Tip = appendTip(result.Tip, warning)
+		}
 	}
 	return result, nil
 }

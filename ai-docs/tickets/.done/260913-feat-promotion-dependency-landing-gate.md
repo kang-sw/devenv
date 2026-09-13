@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: ce737ee5354ac419
 sage-review-completeness-reviewed: ce737ee5354ac419
+completed: 2026-09-13
 ---
 
 # Promotion/dispatch dependency-landing gate with typed frontmatter edges
@@ -243,3 +244,46 @@ Verify: promoting a consumer whose typed prerequisite is in
 promotion; the design reviewer on a solo promotion surfaces the ordering finding
 as advisory (not a block); neither surface fires for a `.done/` prerequisite, a
 consumed-phase-`### Result` prerequisite, or a soft `related:` edge.
+
+### Result (2735b63) - 2026-09-13
+
+Landed the softer, non-blocking layer over Phase 1's typed edge and gate.
+
+- **Promotion-time advisory warning.** `blockedByPromotionWarning`
+  (`agents-plugin-tool/internal/wsdoc/tickets_deps.go`) computes, live at
+  promotion, the in-between case the Phase 1 closure allows: a typed
+  `blocked-by:` prerequisite in `ready/` but not code-landed (not `.done/`, and
+  any named producer phase carries no `### Result`). Wired into
+  `TicketsMove(to: "ready")`'s post-move `to == "ready"` block
+  (`tickets_mutate.go`), appended to the result `Tip` via the existing
+  `appendTip`/`formatTicketMutate` channel (no `internal/mcp` change needed).
+  Non-blocking (the move always completes) and fails open on a scan error, since
+  the dispatch gate backstops the hard cases. Reuses Phase 1's `edgeLanded`
+  predicate; the shared board scan was extracted into `boardByStem`, now used by
+  both the dispatch gate and this warning.
+- **Design-reviewer solo-path advisory.** New checklist item 6 in
+  `agents-plugin/rsrc/ticket-reviewer-design/ticket-reviewer-design.md`
+  (mirrored byte-identical to `agents-plugin-wsflow/`): on the single-ticket
+  path, an unlanded typed `blocked-by:` prerequisite yields one `minor`,
+  `resolution: autonomous` ordering finding that never raises the verdict,
+  mirroring the batch path's dependency-mistake reasoning. Kept host-neutral
+  (names only the generic `blocked-by:` key and `tickets.query`); worded to
+  avoid the literal `related:` token so the existing checklist-anchoring guard
+  stays green.
+
+Verification: `go build ./...`, `go vet ./...`, `go test ./...` (all packages
+pass, incl. new `TestBlockedByPromotionWarning`,
+`TestTicketsMovePromotionAdvisory`, and
+`TestTicketDesignReviewDependencyLandingAdvisory`); `python3 -m unittest discover
+agents-plugin-wsflow/tests` (11 tests OK); rsrc manifest + wsflow mirror
+regenerated (`WSRSRC_REGEN`, `WS_REGEN_WSFLOW_RSRC`). Independent review:
+partitioned correctness/fit/test, round 1 (correctness clean, fit clean, test 1
+Important + 2 Minor) then round 2 fix-verification — final verdict clean. The
+Important (missing test for the design-reviewer advisory) and both Minors
+(multi-edge join, malformed-edge-silent) were fixed.
+
+Decisions: the promotion warning fails open on a scan error and stays silent on a
+malformed/absent edge (the closure and dispatch gate already own those cases), so
+the soft layer never double-reports; the design-reviewer advisory is `minor`, not
+a block, by ticket decision (conflating design quality with scheduling state
+produces noise, and "promote the partner in the next batch" is legitimate).
