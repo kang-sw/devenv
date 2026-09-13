@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { createEventBus, discoverAndLoadExtensions, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerAgentTools } from "../src/spawner.ts";
 import { registerExecuteGateway } from "../src/execute-gateway.ts";
 import { registerFork } from "../src/fork.ts";
 import { startBridge } from "../src/bridge.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolResultTuiModules } from "../src/tool-result-render.ts";
+import { DELEGATION_ENV } from "../src/delegation-policy.ts";
+import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 
 type Captured = { name: string; parameters?: { properties?: Record<string, unknown> }; execute?: (...args: never[]) => unknown; renderCall?: (...args: never[]) => unknown; renderResult?: (...args: never[]) => unknown };
 
@@ -147,6 +149,40 @@ test("actual MCP startup registers through the same cold then late-filled shared
     handle.shutdown();
   } finally {
     if (oldRole === undefined) delete process.env.WS_PI_SPAWN_ROLE; else process.env.WS_PI_SPAWN_ROLE = oldRole;
+  }
+});
+
+test("a child-role Pi extension load installs executable same-name scoped edit/write overrides", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "ws-pi-scoped-loader-")));
+  const previousPolicy = process.env[DELEGATION_ENV];
+  const previousRole = process.env[WS_PI_SPAWN_ROLE_ENV];
+  try {
+    const target = join(root, "result.md");
+    process.env[WS_PI_SPAWN_ROLE_ENV] = "worker";
+    process.env[DELEGATION_ENV] = JSON.stringify({
+      version: 1, depth: 1, maxDepth: 2, authority: "delegate", tools: ["read", "edit", "write"],
+      write: { mode: "scoped", scopes: [{ path: target, kind: "file" }] },
+    });
+    const extensionPath = fileURLToPath(new URL("../src/index.ts", import.meta.url));
+    const loaded = await discoverAndLoadExtensions([extensionPath], root, join(root, "agent"), createEventBus());
+    assert.deepEqual(loaded.errors, []);
+    const extension = loaded.extensions.find(candidate => candidate.resolvedPath === extensionPath);
+    assert.ok(extension, "the real Pi loader loaded the child extension entry");
+    const edit = extension.tools.get("edit")?.definition;
+    const write = extension.tools.get("write")?.definition;
+    assert.ok(edit?.execute && write?.execute, "same-name native edit/write overrides are registered on the child surface");
+    const ctx = { cwd: root } as never;
+    await write.execute("write", { path: target, content: "before\n" }, undefined, undefined, ctx);
+    await edit.execute("edit", { path: target, edits: [{ oldText: "before", newText: "after" }] }, undefined, undefined, ctx);
+    assert.equal(readFileSync(target, "utf8"), "after\n");
+    const outside = join(root, "outside.md");
+    await assert.rejects(write.execute("deny", { path: outside, content: "no" }, undefined, undefined, ctx), /outside delegated write scopes/);
+    assert.equal(existsSync(outside), false);
+    assert.equal(extension.tools.has("bash"), false, "the scope registration does not add shell or a parallel write vocabulary");
+  } finally {
+    if (previousPolicy === undefined) delete process.env[DELEGATION_ENV]; else process.env[DELEGATION_ENV] = previousPolicy;
+    if (previousRole === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV]; else process.env[WS_PI_SPAWN_ROLE_ENV] = previousRole;
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

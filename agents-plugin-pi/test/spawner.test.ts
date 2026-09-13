@@ -573,10 +573,14 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
   function harness(
     callTool: McpStdioClient["callTool"],
     catalog = [{ provider: "openai-codex", id: "gpt-5.6-high", hasAuth: true }],
+    provenance?: { class: "reviewer"; authority: "delegate"; readOnly: true; requiresChildren: false },
   ) {
     const tools = new Map<string, CapturedTool>();
     const pi = { registerTool: (tool: CapturedTool) => tools.set(tool.name, tool), sendMessage() {}, sendUserMessage() {} } as unknown as ExtensionAPI;
-    const bridge = { client: { callTool }, wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" } } as never;
+    const bridge = {
+      client: { callTool }, wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" },
+      ...(provenance ? { renderRegistry: { get: () => provenance } } : {}),
+    } as never;
     const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" });
     const ctx = {
       sessionManager: { getSessionId: () => "test-lead" },
@@ -643,11 +647,94 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
     } finally { rpc.restore(); }
   });
 
-  test("tool help advertises tier-or-concrete selection and the default effort sentinel", () => {
+  test("tool help advertises model selection and public write-scope semantics", () => {
     const { tool } = harness(async () => jsonResult({}));
     assert.match(tool.description, /tier alias or concrete Pi model ID/);
     assert.match(tool.parameters.properties.model_name!.description!, /concrete Pi model ID/);
     assert.match(tool.parameters.properties.model_effort!.description!, /default/);
+    assert.match(tool.parameters.properties.write_scopes!.description!, /absolute path/);
+    assert.match(tool.parameters.properties.write_scopes!.description!, /path\.posix\.matchesGlob/);
+  });
+
+  test("spawn admission preserves omitted legacy authority and persists restricted-child bindings", async () => {
+    const rpc = installRpcHarness();
+    try {
+      const legacy = harness(async () => jsonResult({}));
+      const legacyResult = JSON.parse((await legacy.tool.execute("legacy", { system_prompt_path: "/tmp/p.md", prompt: "legacy" }, undefined, undefined, legacy.ctx)).content[0]!.text);
+      assert.deepEqual(legacy.handle.rpcRegistry.get(legacyResult.agent_id)!.delegation!.write, { mode: "unrestricted" });
+      await legacy.handle.stopAll();
+
+      const scoped = harness(async () => jsonResult({}), undefined, { class: "reviewer", authority: "delegate", readOnly: true, requiresChildren: false });
+      const target = join(realpathSync(scoped.ctx.agentStorageRoot), "future.txt");
+      const scopedResult = JSON.parse((await scoped.tool.execute("scoped", {
+        system_prompt_path: "/tmp/p.md", prompt: "bounded",
+        write_scopes: [{ path: target, kind: "file" }],
+      }, undefined, undefined, scoped.ctx)).content[0]!.text);
+      const scopedDelegation = scoped.handle.rpcRegistry.get(scopedResult.agent_id)!.delegation!;
+      assert.deepEqual(scopedDelegation.write, {
+        mode: "scoped", scopes: [{ path: target, kind: "file" }],
+      });
+      assert.equal(scopedDelegation.tools.includes("edit"), true);
+      assert.equal(scopedDelegation.tools.includes("write"), true);
+      for (const absent of ["bash", "delete", "rename"]) assert.equal(scopedDelegation.tools.includes(absent), false);
+      assert.deepEqual(scopedResult.write_scopes, { status: "bound", count: 1 });
+      await scoped.handle.stopAll();
+    } finally { rpc.restore(); }
+  });
+
+  test("an unrestricted child reports redundant scopes as ignored rather than implying confinement", async () => {
+    const rpc = installRpcHarness();
+    try {
+      const unrestricted = harness(async () => jsonResult({}));
+      const result = JSON.parse((await unrestricted.tool.execute("redundant", {
+        system_prompt_path: "/tmp/p.md", prompt: "already unrestricted",
+        write_scopes: [{ path: realpathSync(unrestricted.ctx.agentStorageRoot), kind: "tree" }],
+      }, undefined, undefined, unrestricted.ctx)).content[0]!.text);
+      assert.deepEqual(result.write_scopes, { status: "ignored", reason: "child already has unrestricted native edit/write authority" });
+      assert.deepEqual(unrestricted.handle.rpcRegistry.get(result.agent_id)!.delegation!.write, { mode: "unrestricted" });
+      const beforeInvalid = unrestricted.handle.rpcRegistry.size;
+      await assert.rejects(
+        () => unrestricted.tool.execute("invalid-redundant", {
+          system_prompt_path: "/tmp/p.md", prompt: "invalid", write_scopes: [{ path: "relative", kind: "tree" }],
+        }, undefined, undefined, unrestricted.ctx),
+        /path must be absolute/,
+      );
+      assert.equal(unrestricted.handle.rpcRegistry.size, beforeInvalid, "invalid redundant scopes still fail before allocation");
+      await unrestricted.handle.stopAll();
+    } finally { rpc.restore(); }
+  });
+
+  test("spawn-time monotonicity accepts narrowing and rejects widening before child allocation", async () => {
+    const rpc = installRpcHarness();
+    const previousPolicy = process.env[DELEGATION_ENV];
+    try {
+      const narrowed = harness(async () => jsonResult({}), undefined, { class: "reviewer", authority: "delegate", readOnly: true, requiresChildren: false });
+      const root = realpathSync(narrowed.ctx.agentStorageRoot);
+      mkdirSync(join(root, "allowed"));
+      process.env[DELEGATION_ENV] = JSON.stringify({
+        version: 1, depth: 0, maxDepth: 2, authority: "lead",
+        tools: resolveTools("full-worker").split(","), network: { search: false, fetch: false },
+        write: { mode: "scoped", scopes: [{ path: root, kind: "tree", include: ["allowed/**"] }] },
+      });
+      const accepted = JSON.parse((await narrowed.tool.execute("narrow", {
+        system_prompt_path: "/tmp/p.md", prompt: "narrow",
+        write_scopes: [{ path: join(root, "allowed", "result.md"), kind: "file" }],
+      }, undefined, undefined, narrowed.ctx)).content[0]!.text);
+      assert.equal(narrowed.handle.rpcRegistry.has(accepted.agent_id), true);
+      const sizeBeforeWiden = narrowed.handle.rpcRegistry.size;
+      await assert.rejects(
+        () => narrowed.tool.execute("widen", {
+          system_prompt_path: "/tmp/p.md", prompt: "widen",
+          write_scopes: [{ path: join(root, "outside.md"), kind: "file" }],
+        }, undefined, undefined, narrowed.ctx),
+        /child write capability exceeds parent ceiling/,
+      );
+      assert.equal(narrowed.handle.rpcRegistry.size, sizeBeforeWiden, "a denied widening allocates no child record");
+      await narrowed.handle.stopAll();
+    } finally {
+      if (previousPolicy === undefined) delete process.env[DELEGATION_ENV]; else process.env[DELEGATION_ENV] = previousPolicy;
+      rpc.restore();
+    }
   });
 
   test("a concurrent concrete dispatch neither reads nor changes the tier dispatch selection", async () => {

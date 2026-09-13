@@ -104,6 +104,7 @@ import { ownerNotifyRef } from "./owner-notify.ts";
 export { ownerNotifyRef } from "./owner-notify.ts";
 import { readSessionEntries, reduceTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
 import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, SUBTREE_ENV, READ_TOOLS, NETWORK_TOOLS, childPolicy, readDelegationPolicy, readOnlyWsTools, type DelegationPolicy, type PlaybookProfile, type RenderProvenance } from "./delegation-policy.ts";
+import { normalizeWriteScopes, type EffectiveWriteCapability, type WriteScope } from "./write-scopes.ts";
 import { createWebSearch } from "./web-search.ts";
 import { clearWebReadiness, verifyWebReadiness, WEB_HOME_ENV, WEB_NONCE_ENV } from "./web-readiness.ts";
 import { beginSubtreeDispatch, installSubtreePublisher, publishSubtree, readSubtreeChannel, readSubtreeSnapshot, subtreeWaiting, type SubtreeChannel } from "./subtree-lifecycle.ts";
@@ -1830,7 +1831,13 @@ export interface SpawnAgentParams {
   alias?: string;
   /** 260905: optional free-text label, independent of `alias` — see `RpcAgentRecord.title`. */
   title?: string;
+  /** Optional bounded native edit/write grants for a child that is otherwise restricted. */
+  writeScopes?: WriteScope[];
 }
+
+export type WriteScopeDiagnostic =
+  | { status: "bound"; count: number }
+  | { status: "ignored"; reason: "child already has unrestricted native edit/write authority" };
 
 export interface RpcSpawnCtx {
   /** Trusted bridge render (or internal preset), never a public spawn argument. */
@@ -2638,27 +2645,52 @@ export function callerDelegationPolicy(wsToolNames: readonly string[]): Delegati
     authority: "lead", tools: resolveTools("full-worker", wsToolNames).split(",") };
 }
 
-export function spawnAdmission(ctx: RpcSpawnCtx): DelegationPolicy {
+function requestedWriteCapability(tools: string[], writeScopes: readonly WriteScope[] | undefined): {
+  tools: string[];
+  write: EffectiveWriteCapability;
+  diagnostic?: WriteScopeDiagnostic;
+} {
+  const naturallyUnrestricted = tools.includes("edit") && tools.includes("write");
+  if (writeScopes === undefined) {
+    return { tools, write: naturallyUnrestricted ? { mode: "unrestricted" } : { mode: "none" } };
+  }
+  const write = normalizeWriteScopes(writeScopes);
+  if (naturallyUnrestricted) {
+    return {
+      tools,
+      write: { mode: "unrestricted" },
+      diagnostic: { status: "ignored", reason: "child already has unrestricted native edit/write authority" },
+    };
+  }
+  return { tools: [...new Set([...tools, "edit", "write"])], write, diagnostic: { status: "bound", count: write.mode === "scoped" ? write.scopes.length : 0 } };
+}
+
+function resolveSpawnAdmission(ctx: RpcSpawnCtx, writeScopes?: readonly WriteScope[]): { policy: DelegationPolicy; diagnostic?: WriteScopeDiagnostic } {
   const parent = ctx.parentPolicy ?? callerDelegationPolicy(ctx.wsToolNames);
   const fork = ctx.spawnRole === "fork" || !!ctx.forkFrom;
   if (fork && parent.depth !== 0) throw new Error("ws-pi-agent: only the root lead may fork");
   const profile = ctx.provenance ?? ctx.profile;
   if (parent.depth > 0 && !profile && ctx.spawnRole !== "explore" && ctx.toolGroup !== "execute-worker") throw new Error("ws-pi-agent: nested spawn requires trusted render provenance");
   const group = resolveSpawnToolGroup(ctx.toolGroup);
-  const tools = profile?.readOnly
+  const baseTools = profile?.readOnly
     ? [...READ_TOOLS, REPORT_TO_LEAD_TOOL_NAME, ...CHILD_MANAGEMENT_TOOLS, ...readOnlyWsTools(ctx.wsToolNames)]
     : (ctx.explicitTools ?? resolveTools(group, ctx.wsToolNames)).split(",");
-  if (ctx.spawnRole === "explore") tools.push(...NETWORK_TOOLS);
+  if (ctx.spawnRole === "explore") baseTools.push(...NETWORK_TOOLS);
+  const binding = requestedWriteCapability(baseTools, writeScopes);
   const network = ctx.spawnRole === "explore" ? { search: true, fetch: true }
     : !profile?.readOnly && (group === "full-worker" || group === "execute-worker")
       ? parent.depth === 0 ? { search: true, fetch: true } : parent.network
       : undefined;
   const authority = profile?.authority ?? (ctx.spawnRole === "explore" || group === "execute-worker" ? "leaf" : "lead");
-  const policy = childPolicy(parent, tools, authority, profile?.requiresChildren, ctx.provenance?.sessionKey, network);
+  const policy = childPolicy(parent, binding.tools, authority, profile?.requiresChildren, ctx.provenance?.sessionKey, network, binding.write);
   // A lateral fork's curated active names are not its execution ceiling: the
   // lead shell fallback and worker bash have equivalent native authority.
   if (fork) policy.tools = [...new Set([...policy.tools, GATED_EXEC_TOOL_NAME, ...resolveTools("full-worker", ctx.wsToolNames).split(",")])];
-  return policy;
+  return { policy, diagnostic: binding.diagnostic };
+}
+
+export function spawnAdmission(ctx: RpcSpawnCtx, writeScopes?: readonly WriteScope[]): DelegationPolicy {
+  return resolveSpawnAdmission(ctx, writeScopes).policy;
 }
 
 const WORKER_LIFECYCLE_GUIDE = `\n\n## Persistent delegation\nChild results return to this session, not directly to your caller. End your turn while children work; the adapter keeps the subtree outstanding and wakes you on their settled output. Continue the same child with ws-agent-send when its output is insufficient. After every descendant has settled and you have synthesized their results, end with the final-output shape required by your playbook in your ordinary assistant answer. Settlement delivers that answer; ws-report-to-lead is only for progress or a question before settlement.\n`;
@@ -2667,10 +2699,11 @@ export async function spawnAgent(
   registry: RpcAgentRegistry,
   ctx: RpcSpawnCtx,
   params: SpawnAgentParams,
-): Promise<{ agent_id: string; alias?: string; evicted?: string }> {
+): Promise<{ agent_id: string; alias?: string; evicted?: string; write_scopes?: WriteScopeDiagnostic }> {
   const finishDispatch = beginSubtreeDispatch(registry);
   try {
-  const delegation = spawnAdmission(ctx);
+  const admission = resolveSpawnAdmission(ctx, params.writeScopes);
+  const delegation = admission.policy;
   // Resolve exactly once before any guard, alias transfer, eviction, UUID, or
   // session allocation. Concrete ws-agent-spawn IDs validate locally and fail
   // closed. Named tiers retain their existing resolution/refusal behavior; an
@@ -2841,7 +2874,7 @@ export async function spawnAgent(
   // running from its initial prompt — the widget's first sighting of it.
   triggerAgentWidgetRefresh();
   triggerAgentCostRefresh();
-  return { agent_id: agentId, alias: record.alias, evicted: eviction.evictedLabel };
+  return { agent_id: agentId, alias: record.alias, evicted: eviction.evictedLabel, ...(admission.diagnostic ? { write_scopes: admission.diagnostic } : {}) };
   } finally { finishDispatch(); }
 }
 
@@ -2898,7 +2931,7 @@ export async function sendToAgent(
   const parentPolicy = readDelegationPolicy();
   if (parentPolicy) {
     if (!record.delegation) throw new Error("ws-pi-agent: legacy child lacks a resumable capability envelope");
-    const admitted = childPolicy(parentPolicy, record.delegation.tools, record.delegation.authority, false, undefined, record.delegation.network);
+    const admitted = childPolicy(parentPolicy, record.delegation.tools, record.delegation.authority, false, undefined, record.delegation.network, record.delegation.write);
     if (admitted.depth !== record.delegation.depth || parentPolicy.maxDepth < record.delegation.maxDepth) throw new Error("ws-pi-agent: recovered child exceeds the current delegation budget");
   }
 
@@ -3388,7 +3421,7 @@ export function registerAgentTools(
     name: "ws-agent-spawn",
     label: "ws-agent-spawn",
     description:
-      "Spawn a persistent RPC-backed pi subagent from an already-rendered system-prompt file (e.g. via ws/playbook.render). Returns {agent_id, alias?, evicted?} immediately after the initial prompt is sent. model_name accepts a configured tier alias or concrete Pi model ID; either is catalog/auth validated before allocation, while omission inherits the parent model. Do not wait for it: end your turn, and its reports, questions and completion arrive on their own as ws-agent-* messages carrying a running-count status line.",
+      "Spawn a persistent RPC-backed pi subagent from an already-rendered system-prompt file (e.g. via ws/playbook.render). Returns {agent_id, alias?, evicted?, write_scopes?} immediately after the initial prompt is sent. model_name accepts a configured tier alias or concrete Pi model ID; either is catalog/auth validated before allocation, while omission inherits the parent model. write_scopes grants bounded native edit/write authority to an otherwise restricted child; it never confines a child that already has unrestricted native edit/write. Do not wait for it: end your turn, and its reports, questions and completion arrive on their own as ws-agent-* messages carrying a running-count status line.",
     parameters: {
       type: "object",
       properties: {
@@ -3416,6 +3449,21 @@ export function registerAgentTools(
           type: "string",
           description: "Optional free-text label for this agent, independent of alias (display only, never used for resolution).",
         },
+        write_scopes: {
+          type: "array",
+          minItems: 1,
+          description: "Optional exact-file or directory-tree grants, each rooted at an absolute path. Tree include entries are positive root-relative path.posix.matchesGlob patterns. Authorized restricted children receive Pi's native edit/write tools only within these scopes.",
+          items: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "Absolute file path or tree root." },
+              kind: { type: "string", enum: ["file", "tree"] },
+              include: { type: "array", minItems: 1, items: { type: "string" }, description: "Optional positive root-relative glob union for a tree grant." },
+            },
+            required: ["path", "kind"],
+            additionalProperties: false,
+          },
+        },
       },
       required: ["system_prompt_path", "prompt"],
     } as never,
@@ -3427,6 +3475,7 @@ export function registerAgentTools(
         model_effort?: string;
         alias?: string;
         title?: string;
+        write_scopes?: WriteScope[];
       };
       let resolvedInfo: ResolvedModelInfo | undefined;
       const result = await spawnAgent(
@@ -3460,6 +3509,7 @@ export function registerAgentTools(
           modelEffort: p.model_effort,
           alias: p.alias,
           title: p.title,
+          writeScopes: p.write_scopes,
         },
       );
       return { content: [{ type: "text", text: JSON.stringify(result) }], details: { resolved: resolvedInfo } };
