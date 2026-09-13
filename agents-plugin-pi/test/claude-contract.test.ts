@@ -13,7 +13,7 @@ test("invalid batch shapes launch zero queries; each unsupported/malformed item 
   const controller = createClaudeDelegateController(() => "/tmp", { executable: process.execPath, loadSdk: async () => { queries++; return sdk([terminal()]); } });
   for (const shape of [null, {}, [], "x"]) await assert.rejects(() => controller.execute(shape), /non-empty items array/);
   assert.equal(queries, 0);
-  const invalid = [null, [], {}, { ...item, preset: "rewrite" }, { ...item, preset: "design-review" }, { ...item, "edit-targets": ["x"] }, { ...item, editTargets: ["x"] }, { ...item, resume: "secret-session" }, { ...item, changed: [] }, { ...item, timeout: 1 }, { ...item, request: " " }, { ...item, paths: [4] }, { ...item, paths: [" "] }, { ...item, model: " " }];
+  const invalid = [null, [], {}, { ...item, preset: "design-review" }, { ...item, "edit-targets": ["x"] }, { preset: "rewrite", request: "x" }, { preset: "rewrite", request: "x", "edit-targets": [] }, { preset: "rewrite", request: "x", "edit-targets": [" "] }, { ...item, editTargets: ["x"] }, { ...item, resume: "secret-session" }, { ...item, changed: [] }, { ...item, timeout: 1 }, { ...item, request: " " }, { ...item, paths: [4] }, { ...item, paths: [" "] }, { ...item, model: " " }];
   const results = await controller.execute([...invalid, item]);
   assert.deepEqual(results.slice(0, -1).map(r => r.error?.code), Array(invalid.length).fill("invalid_item"));
   assert.equal(results.at(-1)?.output, "ok"); assert.equal(queries, 1);
@@ -21,7 +21,7 @@ test("invalid batch shapes launch zero queries; each unsupported/malformed item 
   for (const result of results) { assert.match(result.id, /^[a-z]+-[a-z]+-[a-z]+$/); assert.equal("changed" in result, false); assert.equal("session_id" in result, false); }
 });
 
-test("registered schema exposes only Phase 1 object envelope and aligned out-of-order output", async () => {
+test("registered schema exposes Phase 2 rewrite fields and aligned out-of-order output", async () => {
   let definition: any; const releases: (() => void)[] = [];
   const controller = createClaudeDelegateController(() => "/tmp", { executable: process.execPath,
     loadSdk: async () => ({ query: ({ prompt }: any) => ({ close() {}, async *[Symbol.asyncIterator]() { await new Promise<void>(resolve => releases.push(resolve)); yield terminal({ result: prompt }); } }) }) as any,
@@ -30,8 +30,9 @@ test("registered schema exposes only Phase 1 object envelope and aligned out-of-
   assert.equal(definition.parameters.type, "object"); assert.deepEqual(definition.parameters.required, ["items"]);
   assert.equal(definition.parameters.additionalProperties, false); assert.equal(definition.parameters.properties.items.minItems, 1);
   const schema = definition.parameters.properties.items.items;
-  assert.deepEqual(Object.keys(schema.properties).sort(), ["model", "paths", "preset", "request"]);
-  assert.deepEqual(schema.properties.preset.enum, ["audit", "consult"]); assert.equal(schema.additionalProperties, false);
+  assert.deepEqual(Object.keys(schema.properties).sort(), ["edit-targets", "model", "paths", "preset", "request"]);
+  assert.deepEqual(schema.properties.preset.enum, ["audit", "consult", "rewrite"]); assert.equal(schema.additionalProperties, false);
+  assert.equal(schema.properties["edit-targets"].minItems, 1);
   const pending = definition.execute("id", { items: ["first", "second", "third"].map(request => ({ ...item, request })) });
   await new Promise(resolve => setImmediate(resolve)); releases[2](); releases[0](); releases[1]();
   const result = await pending;
@@ -93,7 +94,9 @@ test("closed options and small task frames never inherit seeded parent or provid
   assert.deepEqual(options.systemPrompt, { type: "preset", preset: "claude_code", append: buildClaudeTaskFrame("consult") });
   assert.equal(JSON.stringify(options).includes("SECRET"), false);
   assert.equal(buildClaudeRequest(input), "fixture\n\nRead targets (if available):\n- relative.txt");
+  assert.equal(buildClaudeRequest({ ...input, editTargets: ["target.md"] }), "fixture\n\nRead targets (if available):\n- relative.txt\n\nAuthorized edit targets (exact files only):\n- target.md");
   for (const preset of ["audit", "consult"] as const) { assert.match(buildClaudeTaskFrame(preset), /unavailable/); assert.doesNotMatch(buildClaudeTaskFrame(preset), /relative.txt|SECRET|session_key/); }
+  assert.match(buildClaudeTaskFrame("rewrite"), /AGENTS\.md.*conventions|conventions.*AGENTS\.md/); assert.match(buildClaudeTaskFrame("rewrite"), /only the explicitly authorized edit targets/);
 });
 
 test("SDK/setup/spawn exceptions are bounded safe diagnostics and preserve successful siblings", async () => {
