@@ -2672,6 +2672,9 @@ function resolveSpawnAdmission(ctx: RpcSpawnCtx, writeScopes?: readonly WriteSco
   const profile = ctx.provenance ?? ctx.profile;
   if (parent.depth > 0 && !profile && ctx.spawnRole !== "explore" && ctx.toolGroup !== "execute-worker") throw new Error("ws-pi-agent: nested spawn requires trusted render provenance");
   const group = resolveSpawnToolGroup(ctx.toolGroup);
+  if (profile?.reviewArtifact && (writeScopes?.length !== 1 || writeScopes[0]?.kind !== "file")) {
+    throw new Error("ws-pi-agent: code reviewer requires exactly one file write scope");
+  }
   const baseTools = profile?.readOnly
     ? [...READ_TOOLS, REPORT_TO_LEAD_TOOL_NAME, ...CHILD_MANAGEMENT_TOOLS, ...readOnlyWsTools(ctx.wsToolNames)]
     : (ctx.explicitTools ?? resolveTools(group, ctx.wsToolNames)).split(",");
@@ -2693,7 +2696,7 @@ export function spawnAdmission(ctx: RpcSpawnCtx, writeScopes?: readonly WriteSco
   return resolveSpawnAdmission(ctx, writeScopes).policy;
 }
 
-const WORKER_LIFECYCLE_GUIDE = `\n\n## Persistent delegation\nChild results return to this session, not directly to your caller. End your turn while children work; the adapter keeps the subtree outstanding and wakes you on their settled output. Continue the same child with ws-agent-send when its output is insufficient. After every descendant has settled and you have synthesized their results, end with the final-output shape required by your playbook in your ordinary assistant answer. Settlement delivers that answer; ws-report-to-lead is only for progress or a question before settlement.\n`;
+const WORKER_LIFECYCLE_GUIDE = `\n\n## Persistent delegation\nChild results return to this session, not directly to your caller. End your turn while children work; the adapter keeps the subtree outstanding and wakes you on their settled output. Continue the same child with ws-agent-send when its output is insufficient. After every descendant has settled and you have synthesized their results, end with the final-output shape required by your playbook in your ordinary assistant answer. Settlement delivers that answer; ws-report-to-lead is only for progress or a question before settlement.\n\n## Code-review artifacts\nWhen your playbook tells you to spawn a code reviewer with a generated findings path, pass that exact absolute path as the sole \`write_scopes\` file grant. Reviewer admission rejects omission, trees, globs, and multiple paths so the required report cannot silently disappear.\n`;
 
 export async function spawnAgent(
   registry: RpcAgentRegistry,
