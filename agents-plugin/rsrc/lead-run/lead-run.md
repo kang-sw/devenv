@@ -28,7 +28,11 @@ invocation.
 
 For a ticket target, point-resolve the selected stem with
 `{{.McpNamespace}}/tickets.query(ticket_stem: "<stem>", format: "json")` and use its Route
-Facts projection; do not read or summarize the ticket body. If that section is
+Facts projection; do not read or summarize the ticket body. A
+`dispatch_blocked` field in that projection means the ticket declares a
+prerequisite that has not landed: do not spawn a worker on it. Report the named
+blocking stem to the user and end the turn — the prerequisite must land, or its
+edge be corrected, before this ticket can run. If the Route Facts section is
 absent, or a worker stops reporting it incomplete, render
 `ticket-fact-populator`, run it on that ticket once, apply what it returns,
 commit, and query again before choosing the worker. Once per ticket: a second
