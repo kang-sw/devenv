@@ -807,6 +807,30 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.doesNotMatch(pi.sentUserMessages.at(-1)!.content as string, /original|first replacement/);
     });
 
+    test("terminal control invalidates a queued replacement without rearming the terminated goal", async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      let idle = true;
+      const { ctx, notifications } = fakeCtx(() => idle);
+      await pi.commands.get("goal")!("original", ctx);
+
+      idle = false;
+      await pi.commands.get("goal")!("stale replacement", ctx);
+      await pi.commands.get("goal")!("stop", ctx);
+      assert.equal(flushHeldPushes(pi.api, true), 1);
+      assert.equal(pi.sentMessages.length, 0);
+      assert.deepEqual(notifications.at(-1), {
+        message: 'Goal update failed: "stale replacement" was invalidated by a newer immediate or terminal goal transition.',
+        level: "error",
+      });
+
+      idle = true;
+      pi.handlers.get("agent_settled")!({}, ctx);
+      assert.equal(clock.pendingCount(), 0, "failed stale replacement leaves the terminal goal state disarmed");
+      assert.equal(pi.sentUserMessages.length, 1, "the terminated original goal is never reminded");
+    });
+
     test("terminal control invalidates older queued replacements while a later replacement uses the new generation", async () => {
       const clock = fakeClock();
       const pi = fakePi();

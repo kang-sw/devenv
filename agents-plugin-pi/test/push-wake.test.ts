@@ -282,6 +282,33 @@ test('goal control renders in FIFO position but is omitted from the one prose mo
   h.goal!.resetCompactionStateForShutdown(); h.emit('session_shutdown');
 });
 
+test('mixed idle release defers goal application until confirmed delivery so a terminal command can invalidate it', async () => {
+  const h = harness(true);
+  await h.commands.get('goal').handler('original goal', h.ctx);
+  h.start();
+  h.push('followUp', 'held prose');
+  await h.commands.get('goal').handler('replacement goal', h.ctx);
+
+  h.settle();
+  assert.equal(h.users.length, 2, 'mixed input reserves one counted wake');
+  assert.equal(heldPushQueue.length, 2, 'the exact mixed snapshot remains queued until confirmed start');
+  assert.equal(h.notices.filter((notice) => notice === 'Goal update applied: replacement goal').length, 0);
+
+  await h.commands.get('goal').handler('stop', h.ctx);
+  h.start();
+  assert.equal(h.custom.length, 1);
+  assert.deepEqual(h.custom[0].message.details.items.map((item: any) => item.customType), ['ws-agent-report', 'ws-goal-control']);
+  assert.match(h.custom[0].message.details.items[1].content, /failed.*invalidated/i);
+  assert.match(h.custom[0].message.content, /held prose/);
+  assert.doesNotMatch(h.custom[0].message.content, /replacement goal|Goal update failed/);
+  assert.equal(h.notices.filter((notice) => notice === 'Goal update applied: replacement goal').length, 0);
+  assert.match(h.notices.at(-1), /failed.*invalidated/i);
+
+  h.settle();
+  assert.equal(h.timers.size, 0, 'the invalidated replacement cannot rearm the stopped goal');
+  h.goal!.resetCompactionStateForShutdown(); h.emit('session_shutdown');
+});
+
 test('rejected prose delivery retries without applying its queued goal control twice', async () => {
   const h = harness(true);
   await h.commands.get('goal').handler('original goal', h.ctx);

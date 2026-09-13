@@ -1373,16 +1373,14 @@ function submitHeldPushBatch(pi: ExtensionAPI, deliverAs: "steer" | "followUp"):
   return snapshot.length;
 }
 
-/** Idle release applies controls before deciding whether prose needs a counted wake. Confirmed starts and lead turn boundaries release one FIFO batch. */
+/** Idle release applies a control-only queue or reserves one counted wake for mixed/prose input. Confirmed starts and lead turn boundaries release one FIFO batch. */
 export function flushHeldPushes(pi: ExtensionAPI | undefined, confirmedStart = false, agentEndBoundary = false): number {
   if (!pi || !shouldPushToLead() || !leadIdleRef.current || leadCompactingRef.current || leadWakeStartPendingRef.current) return 0;
   if (agentEndBoundary) return submitHeldPushBatch(pi, "followUp");
   if (!confirmedStart) {
     const snapshot = heldPushQueue.slice();
-    for (const held of snapshot) {
-      if (held.kind === "goal-replacement") resolveHeldGoalReplacement(held);
-    }
     if (snapshot.length > 0 && snapshot.every((held) => held.kind === "goal-replacement")) {
+      for (const held of snapshot) resolveHeldGoalReplacement(held);
       heldPushQueue.splice(0, snapshot.length);
       return snapshot.length;
     }
