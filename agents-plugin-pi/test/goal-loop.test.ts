@@ -770,6 +770,96 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       }
     });
 
+    test("active-turn replacements queue, apply in FIFO order, and only the resulting goal is reminded", async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      let idle = true;
+      const { ctx, notifications } = fakeCtx(() => idle);
+      await pi.commands.get("goal")!("original", ctx);
+
+      idle = false;
+      await pi.commands.get("goal")!("first replacement", ctx);
+      await pi.commands.get("goal")!("final replacement", ctx);
+      assert.deepEqual(
+        notifications.slice(-2).map(({ message, level }) => ({ message, level })),
+        [
+          { message: "Goal update queued: first replacement", level: "info" },
+          { message: "Goal update queued: final replacement", level: "info" },
+        ],
+      );
+      assert.deepEqual(heldPushQueue.map((entry) => entry.kind), ["goal-replacement", "goal-replacement"]);
+
+      assert.equal(flushHeldPushes(pi.api, true), 2);
+      assert.equal(pi.sentMessages.length, 0, "control-only drainage creates no synthetic model message or turn");
+      assert.deepEqual(
+        notifications.slice(-2).map(({ message, level }) => ({ message, level })),
+        [
+          { message: "Goal update applied: first replacement", level: "info" },
+          { message: "Goal update applied: final replacement", level: "info" },
+        ],
+      );
+
+      idle = true;
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire();
+      assert.match(pi.sentUserMessages.at(-1)!.content as string, /Goal yet running: "final replacement"/);
+      assert.doesNotMatch(pi.sentUserMessages.at(-1)!.content as string, /original|first replacement/);
+    });
+
+    test("terminal control invalidates a queued replacement without rearming the terminated goal", async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      let idle = true;
+      const { ctx, notifications } = fakeCtx(() => idle);
+      await pi.commands.get("goal")!("original", ctx);
+
+      idle = false;
+      await pi.commands.get("goal")!("stale replacement", ctx);
+      await pi.commands.get("goal")!("stop", ctx);
+      assert.equal(flushHeldPushes(pi.api, true), 1);
+      assert.equal(pi.sentMessages.length, 0);
+      assert.deepEqual(notifications.at(-1), {
+        message: 'Goal update failed: "stale replacement" was invalidated by a newer immediate or terminal goal transition.',
+        level: "error",
+      });
+
+      idle = true;
+      pi.handlers.get("agent_settled")!({}, ctx);
+      assert.equal(clock.pendingCount(), 0, "failed stale replacement leaves the terminal goal state disarmed");
+      assert.equal(pi.sentUserMessages.length, 1, "the terminated original goal is never reminded");
+    });
+
+    test("terminal control invalidates older queued replacements while a later replacement uses the new generation", async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      let idle = true;
+      const { ctx, notifications } = fakeCtx(() => idle);
+      await pi.commands.get("goal")!("original", ctx);
+
+      idle = false;
+      await pi.commands.get("goal")!("stale replacement", ctx);
+      await pi.commands.get("goal")!("stop", ctx);
+      await pi.commands.get("goal")!("post-terminal replacement", ctx);
+      assert.equal(flushHeldPushes(pi.api, true), 2);
+      assert.equal(pi.sentMessages.length, 0);
+      assert.deepEqual(
+        notifications.slice(-2).map(({ message, level }) => ({ message, level })),
+        [
+          { message: 'Goal update failed: "stale replacement" was invalidated by a newer immediate or terminal goal transition.', level: "error" },
+          { message: "Goal update applied: post-terminal replacement", level: "info" },
+        ],
+      );
+
+      idle = true;
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire();
+      assert.match(pi.sentUserMessages.at(-1)!.content as string, /Goal yet running: "post-terminal replacement"/);
+      assert.doesNotMatch(pi.sentUserMessages.at(-1)!.content as string, /stale replacement/);
+    });
+
     for (const alias of ["stop", "clear", "reset"] as const) {
       test(`${alias} disarms while busy without interrupting work and repeated use is harmless`, async () => {
         const clock = fakeClock();

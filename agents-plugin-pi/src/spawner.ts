@@ -31,9 +31,11 @@
  *
  * A `followUp` push raised while the owning session is mid-turn is HELD
  * (`heldPushQueue`) and released at that turn's `agent_end` as one versioned
- * `ws-push-batch` follow-up. The batch retains FIFO model content and separate
- * structured TUI items, so Pi steering mode cannot stretch one boundary
- * snapshot across multiple assistant turns. `agent_settled` plus a counted
+ * `ws-push-batch` follow-up. Validated goal replacements share that FIFO as
+ * typed controls: they apply before delivery and appear in the structured TUI
+ * items but are omitted from model content. The batch retains FIFO prose and
+ * separate structured TUI items, so Pi steering mode cannot stretch one
+ * boundary snapshot across multiple assistant turns. `agent_settled` plus a counted
  * wake remains the fallback for compaction, late arrival, or rejected sends;
  * confirmed wake starts release one batch as steering before their first
  * response. `steer` pushes that were never held remain immediate, since
@@ -1114,6 +1116,28 @@ interface HeldRawSend {
   message: Parameters<ExtensionAPI["sendMessage"]>[0];
 }
 
+/** Delivery-time outcome for a queued `/goal <goal>` replacement. */
+export interface HeldGoalReplacementResult {
+  outcome: "applied" | "failed";
+  message: string;
+}
+
+/**
+ * Control state carried in the shared held-input FIFO. `result` latches the
+ * first safe-boundary application so a rejected prose batch can retry without
+ * applying the goal replacement twice.
+ */
+export interface HeldGoalReplacement {
+  kind: "goal-replacement";
+  goal: string;
+  generation: number;
+  apply: () => HeldGoalReplacementResult;
+  report: (result: HeldGoalReplacementResult) => void;
+  result?: HeldGoalReplacementResult;
+}
+
+export type HeldInput = HeldPush | HeldRawSend | HeldGoalReplacement;
+
 /**
  * Pushes that arrived while the owning session was mid-turn, in arrival order.
  *
@@ -1138,9 +1162,16 @@ interface HeldRawSend {
  * 260906 (compaction push-hold ticket, Phase 1): also holds `HeldRawSend`
  * entries (see that type's doc comment) so `ask.ts`'s
  * `injectDiscussionSummary` can share this same queue/flush-ordering
- * mechanism instead of maintaining a parallel one.
+ * mechanism instead of maintaining a parallel one. Goal replacements add a
+ * third typed entry: controls resolve in FIFO order at a safe boundary, stay
+ * out of model content, and retain their result across a rejected prose batch.
  */
-export const heldPushQueue: Array<HeldPush | HeldRawSend> = [];
+export const heldPushQueue: HeldInput[] = [];
+
+/** Admit a validated goal replacement without creating a parallel control queue. */
+export function enqueueHeldGoalReplacement(entry: HeldGoalReplacement): void {
+  heldPushQueue.push(entry);
+}
 
 function xmlEscape(value: string): string {
   return value
@@ -1215,13 +1246,39 @@ function heldActionState(held: HeldPush): PushBatchItemState {
   return "informational";
 }
 
-function materializeHeldPush(held: HeldPush | HeldRawSend): PushBatchItem {
+function resolveHeldGoalReplacement(held: HeldGoalReplacement): HeldGoalReplacementResult {
+  if (held.result) return held.result;
+  try {
+    held.result = held.apply();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    held.result = { outcome: "failed", message: `Goal update failed: ${message}` };
+  }
+  try {
+    held.report(held.result);
+  } catch {
+    // Goal state remains authoritative even if owner-visible feedback is unavailable.
+  }
+  return held.result;
+}
+
+function materializeHeldInput(held: HeldInput): PushBatchItem {
   if (held.kind === "raw") {
     return {
       customType: held.message.customType,
       content: held.message.content as string | unknown[],
       display: held.message.display,
       details: held.message.details,
+      state: "informational",
+    };
+  }
+  if (held.kind === "goal-replacement") {
+    const result = resolveHeldGoalReplacement(held);
+    return {
+      customType: "ws-goal-control",
+      content: result.message,
+      display: true,
+      details: { goal: held.goal, generation: held.generation, outcome: result.outcome },
       state: "informational",
     };
   }
@@ -1290,20 +1347,23 @@ function submitHeldPushBatch(pi: ExtensionAPI, deliverAs: "steer" | "followUp"):
   const terminalStates = snapshot.flatMap((held) => held.kind === "push" && held.terminal
     ? [{ terminal: held.terminal, wasHeld: held.terminal.state === "held" }]
     : []);
-  const items = snapshot.map(materializeHeldPush);
-  try {
-    pi.sendMessage(
-      {
-        customType: PUSH_BATCH_CUSTOM_TYPE,
-        content: buildPushBatchContent(items),
-        display: true,
-        details: { version: PUSH_BATCH_VERSION, items } as never,
-      },
-      { deliverAs, triggerTurn: true },
-    );
-  } catch {
-    requestPushWake(pi);
-    return 0;
+  const items = snapshot.map(materializeHeldInput);
+  const modelItems = items.filter((_item, index) => snapshot[index]!.kind !== "goal-replacement");
+  if (modelItems.length > 0) {
+    try {
+      pi.sendMessage(
+        {
+          customType: PUSH_BATCH_CUSTOM_TYPE,
+          content: buildPushBatchContent(modelItems),
+          display: true,
+          details: { version: PUSH_BATCH_VERSION, items } as never,
+        },
+        { deliverAs, triggerTurn: true },
+      );
+    } catch {
+      requestPushWake(pi);
+      return 0;
+    }
   }
   heldPushQueue.splice(0, snapshot.length);
   for (const { terminal, wasHeld } of terminalStates) {
@@ -1313,11 +1373,17 @@ function submitHeldPushBatch(pi: ExtensionAPI, deliverAs: "steer" | "followUp"):
   return snapshot.length;
 }
 
-/** Idle release requests one counted user wake without draining. Confirmed starts and lead turn boundaries each release one FIFO batch. */
+/** Idle release applies a control-only queue or reserves one counted wake for mixed/prose input. Confirmed starts and lead turn boundaries release one FIFO batch. */
 export function flushHeldPushes(pi: ExtensionAPI | undefined, confirmedStart = false, agentEndBoundary = false): number {
   if (!pi || !shouldPushToLead() || !leadIdleRef.current || leadCompactingRef.current || leadWakeStartPendingRef.current) return 0;
   if (agentEndBoundary) return submitHeldPushBatch(pi, "followUp");
   if (!confirmedStart) {
+    const snapshot = heldPushQueue.slice();
+    if (snapshot.length > 0 && snapshot.every((held) => held.kind === "goal-replacement")) {
+      for (const held of snapshot) resolveHeldGoalReplacement(held);
+      heldPushQueue.splice(0, snapshot.length);
+      return snapshot.length;
+    }
     requestPushWake(pi);
     return 0;
   }

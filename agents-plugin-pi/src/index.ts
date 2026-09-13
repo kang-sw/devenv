@@ -876,10 +876,10 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     rpcRegistryRef.current = undefined;
     leadSessionFile = undefined;
     leadSidecarPath = undefined;
-    // Held pushes die with the session, exactly like the Pi followUp queue
-    // they stand in for: their registry is about to be discarded, so a status
-    // line computed after this point would describe nothing. The sidecar
-    // written above carries child IDENTITIES forward; reports are not
+    // Held inputs die with the session, exactly like the Pi followUp queue
+    // they stand in for: report registries are about to be discarded and goal
+    // replacement controls are intentionally volatile. The sidecar written
+    // above carries child IDENTITIES forward; reports and controls are not
     // persisted (see spawner.ts's heldPushQueue).
     heldPushQueue.length = 0;
     // Review relay #1 (Minor, 260906): reset the compaction-in-flight flag

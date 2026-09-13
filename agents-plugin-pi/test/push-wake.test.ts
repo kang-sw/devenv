@@ -252,6 +252,99 @@ for (const steeringMode of ['one-at-a-time', 'all'] as const) test(`agent_end ba
   h.settle(); h.emit('session_shutdown');
 });
 
+test('goal control renders in FIFO position but is omitted from the one prose model delivery', async () => {
+  const h = harness(true);
+  await h.commands.get('goal').handler('original goal', h.ctx);
+  h.start();
+  h.push('followUp', 'prose before');
+  await h.commands.get('goal').handler('replacement goal', h.ctx);
+  h.push('followUp', 'prose after');
+
+  assert.equal(heldPushQueue.length, 3);
+  assert.equal(h.notices.at(-1), 'Goal update queued: replacement goal');
+  h.end();
+
+  assert.equal(h.custom.length, 1);
+  const batch = h.custom[0].message;
+  assert.deepEqual(batch.details.items.map((item: any) => item.customType), [
+    'ws-agent-report', 'ws-goal-control', 'ws-agent-report',
+  ]);
+  assert.deepEqual(batch.details.items.map((item: any) => item.content.includes?.('Goal update applied') ?? false), [false, true, false]);
+  assert.match(batch.content, /prose before/);
+  assert.match(batch.content, /prose after/);
+  assert.doesNotMatch(batch.content, /replacement goal|ws-goal-control|Goal update applied/);
+  assert.equal(h.modelTimeline.filter((entry: string) => entry === 'model-response').length, 1, 'prose on both sides remains one model turn');
+  assert.equal(h.notices.at(-1), 'Goal update applied: replacement goal');
+
+  h.settle(); h.tick();
+  assert.match(h.users.at(-1).content, /Goal yet running: "replacement goal"/);
+  assert.doesNotMatch(h.users.at(-1).content, /Goal yet running: "original goal"/);
+  h.goal!.resetCompactionStateForShutdown(); h.emit('session_shutdown');
+});
+
+test('mixed idle release defers goal application until confirmed delivery so a terminal command can invalidate it', async () => {
+  const h = harness(true);
+  await h.commands.get('goal').handler('original goal', h.ctx);
+  h.start();
+  h.push('followUp', 'held prose');
+  await h.commands.get('goal').handler('replacement goal', h.ctx);
+
+  h.settle();
+  assert.equal(h.users.length, 2, 'mixed input reserves one counted wake');
+  assert.equal(heldPushQueue.length, 2, 'the exact mixed snapshot remains queued until confirmed start');
+  assert.equal(h.notices.filter((notice) => notice === 'Goal update applied: replacement goal').length, 0);
+
+  await h.commands.get('goal').handler('stop', h.ctx);
+  h.start();
+  assert.equal(h.custom.length, 1);
+  assert.deepEqual(h.custom[0].message.details.items.map((item: any) => item.customType), ['ws-agent-report', 'ws-goal-control']);
+  assert.match(h.custom[0].message.details.items[1].content, /failed.*invalidated/i);
+  assert.match(h.custom[0].message.content, /held prose/);
+  assert.doesNotMatch(h.custom[0].message.content, /replacement goal|Goal update failed/);
+  assert.equal(h.notices.filter((notice) => notice === 'Goal update applied: replacement goal').length, 0);
+  assert.match(h.notices.at(-1), /failed.*invalidated/i);
+
+  h.settle();
+  assert.equal(h.timers.size, 0, 'the invalidated replacement cannot rearm the stopped goal');
+  h.goal!.resetCompactionStateForShutdown(); h.emit('session_shutdown');
+});
+
+test('rejected prose delivery retries without applying its queued goal control twice', async () => {
+  const h = harness(true);
+  await h.commands.get('goal').handler('original goal', h.ctx);
+  h.start();
+  h.push('followUp', 'held prose');
+  await h.commands.get('goal').handler('replacement goal', h.ctx);
+
+  h.failCustom();
+  h.end();
+  assert.equal(heldPushQueue.length, 2, 'the exact mixed snapshot remains available for retry');
+  assert.equal(h.notices.filter((notice) => notice === 'Goal update applied: replacement goal').length, 1);
+
+  h.allowCustom();
+  h.settle();
+  h.start();
+  assert.equal(h.custom.length, 1);
+  assert.deepEqual(h.custom[0].message.details.items.map((item: any) => item.customType), ['ws-agent-report', 'ws-goal-control']);
+  assert.equal(h.notices.filter((notice) => notice === 'Goal update applied: replacement goal').length, 1, 'latched result is rendered but not executed again');
+  assert.equal(heldPushQueue.length, 0);
+  h.goal!.resetCompactionStateForShutdown(); h.emit('session_shutdown');
+});
+
+test('shutdown drops an unapplied queued goal replacement with the volatile held-input FIFO', async () => {
+  const h = harness(true);
+  await h.commands.get('goal').handler('original goal', h.ctx);
+  h.start();
+  await h.commands.get('goal').handler('replacement goal', h.ctx);
+  assert.equal(heldPushQueue.length, 1);
+
+  h.emit('session_shutdown');
+  assert.equal(heldPushQueue.length, 0);
+  assert.equal(h.notices.filter((notice) => notice.startsWith('Goal update applied:')).length, 0);
+  assert.equal(h.notices.at(-1), 'Goal update queued: replacement goal');
+  h.goal!.resetCompactionStateForShutdown();
+});
+
 test('snapshot-time validation marks stale approval and question controls superseded', () => {
   const h = harness(); h.busy();
   const approvalRecord: any = {agentId: 'approval-agent', workGeneration: 1, pendingApproval: {cmdId: 'cmd-1'}, reportLog: []};
@@ -421,6 +514,29 @@ test('idle compaction release cannot cancel held-push timeout', async () => {
   h.tick(); assert.equal(h.custom.length, 0);
   assert.equal(h.timers.size, 1, 'only the pending push recovery remains');
   h.start(); h.goal!.resetCompactionStateForShutdown(); h.emit('session_shutdown');
+});
+
+test('compaction release applies a control-only queue before scheduling the resulting goal reminder', async () => {
+  const h = harness(true);
+  await h.commands.get('goal').handler('original goal', h.ctx);
+  h.start();
+  await h.commands.get('goal').handler('replacement after compact', h.ctx);
+  h.emit('session_before_compact', {reason: 'manual'});
+  h.end();
+  assert.equal(heldPushQueue.length, 1, 'agent_end cannot drain during the independent compaction hold');
+
+  h.settle();
+  h.emit('session_compact', {reason: 'manual'});
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(heldPushQueue.length, 0);
+  assert.equal(h.users.length, 1, 'control-only release creates neither a counted wake nor command prose');
+  assert.equal(h.custom.length, 0);
+  assert.equal(h.notices.at(-1), 'Goal update applied: replacement after compact');
+  assert.equal(h.timers.size, 1, 'the resulting goal, not the invalidated pre-compaction generation, owns the next reminder');
+  h.tick();
+  assert.match(h.users.at(-1).content, /Goal yet running: "replacement after compact"/);
+  h.goal!.resetCompactionStateForShutdown(); h.emit('session_shutdown');
 });
 
 for (const role of ['fork', 'worker', 'explore']) test(`${role} wake role containment`, () => {
