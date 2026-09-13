@@ -140,7 +140,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DELEGATION_ENV } from "../src/delegation-policy.ts";
 import { WEB_HOME_ENV, WEB_NONCE_ENV } from "../src/web-readiness.ts";
-import { allocateAgentHome, createAgentStorageContext, createOwnershipDiagnosticReporter, setOwnershipDiagnosticReporter, updateOwnership } from "../src/agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, updateOwnership } from "../src/agent-storage.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 const REAL_EXTENSION_ENTRY = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 async function startRpcWithWebProof(this: { options?: { env?: Record<string, string> } }) {
@@ -728,7 +728,7 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
     const previousCap = process.env[WS_PI_AGENT_REGISTRY_CAP_ENV];
     const diagnostics = t.mock.method(console, "error", () => {});
     const notices: string[] = [];
-    setOwnershipDiagnosticReporter(createOwnershipDiagnosticReporter(message => notices.push(message)));
+    ownerNotifyRef.current = message => notices.push(message);
     let locked: string | undefined;
     try {
       const { tool, handle, ctx } = harness(async () => jsonResult({}));
@@ -759,7 +759,7 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
     } finally {
       if (locked && existsSync(locked)) chmodSync(locked, 0o700);
       if (previousCap === undefined) delete process.env[WS_PI_AGENT_REGISTRY_CAP_ENV]; else process.env[WS_PI_AGENT_REGISTRY_CAP_ENV] = previousCap;
-      setOwnershipDiagnosticReporter();
+      ownerNotifyRef.current = undefined;
       rpc.restore();
     }
   });

@@ -3,9 +3,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
-import { allocateAgentHome, createAgentStorageContext, createOwnershipDiagnosticReporter, readOwnership, setOwnershipDiagnosticReporter, writeOwnership } from "../src/agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, readOwnership, writeOwnership } from "../src/agent-storage.ts";
 import type { PersistedOrphan } from "../src/agent-sidecar.ts";
 import { applySessionShutdownOwnershipDiagnostics, applySessionStartAgentRetention, applySessionStartOwnershipDiagnostics } from "../src/index.ts";
+import { ownerNotifyRef } from "../src/spawner.ts";
 
 function orphan(agentId: string, sessionPath: string, ownership?: PersistedOrphan["ownership"]): PersistedOrphan {
   return { agentId, sessionPath, systemPromptPath: "/tmp/prompt.md", wsToolNames: [], toolGroup: "full-worker", ...(ownership ? { ownership } : {}) };
@@ -84,7 +85,7 @@ describe("controller session-start child retention", () => {
     const config = join(root, "missing-config.json");
     const diagnostics = t.mock.method(console, "error", () => {});
     const notices: string[] = [];
-    setOwnershipDiagnosticReporter(createOwnershipDiagnosticReporter(message => notices.push(message)));
+    ownerNotifyRef.current = message => notices.push(message);
     try {
       const recovered = [orphan("legacy", join(root, "legacy-session.jsonl"))];
       const retained = applySessionStartAgentRetention("fork", root, config, recovered, () => { throw new Error("permission denied at /private/home"); });
@@ -93,6 +94,6 @@ describe("controller session-start child retention", () => {
       assert.deepEqual(notices, ["ws: owned-agent retention could not start; no uncertain home was removed."]);
       assert.doesNotMatch(notices[0]!, /permission|private/);
       assert.doesNotMatch(String(applySessionStartAgentRetention), /console\.|process\.(?:stdout|stderr)/);
-    } finally { setOwnershipDiagnosticReporter(); rmSync(root, { recursive: true, force: true }); }
+    } finally { ownerNotifyRef.current = undefined; rmSync(root, { recursive: true, force: true }); }
   });
 });

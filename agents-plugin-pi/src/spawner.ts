@@ -102,6 +102,8 @@ import {
 import { EXPLORE_MODE_TIERS, WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readSpawnRole, type ExploreMode, type SpawnRole } from "./process-role.ts";
 import { captureForkContext, compareForkRegistrations, removeForkTransport, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
 import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, readOwnership, removeOwnedAgentHome, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
+import { ownerNotifyRef } from "./owner-notify.ts";
+export { ownerNotifyRef } from "./owner-notify.ts";
 import { readSessionEntries, reduceTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
 import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, SUBTREE_ENV, READ_TOOLS, NETWORK_TOOLS, childPolicy, readDelegationPolicy, readOnlyWsTools, type DelegationPolicy, type PlaybookProfile, type RenderProvenance } from "./delegation-policy.ts";
 import { createWebSearch } from "./web-search.ts";
@@ -992,9 +994,6 @@ export function buildPushContent(
 
 /** Live session idleness accessor, supplied at session_start. Missing or stale accessors never authorize a custom turn start. */
 export const leadIdleRef: { current: (() => boolean) | undefined } = { current: undefined };
-
-/** Human-only owner notification route, supplied by the active TUI lead session. */
-export const ownerNotifyRef: { current: ((message: string, type?: "info" | "warning" | "error") => void) | undefined } = { current: undefined };
 
 /** Independent compaction hold, set before any compaction and cleared only by deferred completion/failure or lever callbacks. agent_start is not proof of release. */
 export const leadCompactingRef: { current: boolean } = { current: false };

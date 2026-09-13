@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { parseDelegationPolicy, type DelegationPolicy } from "./delegation-policy.ts";
 import { parseTelemetry, type AgentTelemetry } from "./agent-telemetry.ts";
 import { normalizeStoredExploreMode, type ExploreMode } from "./process-role.ts";
+import { ownerNotifyRef, type OwnershipOwnerNotificationFingerprint } from "./owner-notify.ts";
 
 export const OWNERSHIP_VERSION = 1;
 const SAFE_COMPONENT = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
@@ -18,34 +19,20 @@ export type OwnershipDiagnosticFingerprint =
   | "home-removal"
   | "retention-scan"
   | "retention-start";
-export type OwnershipDiagnosticReporter = (fingerprint: OwnershipDiagnosticFingerprint, error: unknown) => void;
-
-const OWNERSHIP_DIAGNOSTIC_MESSAGES: Partial<Record<OwnershipDiagnosticFingerprint, string>> = {
-  "metadata-update": "ws: could not persist owned-agent metadata; the affected operation was rejected.",
-  "home-removal": "ws: could not remove an owned-agent home; it was retained for safety.",
-  "retention-scan": "ws: owned-agent retention could not scan part of its storage; uncertain homes were retained.",
-  "retention-start": "ws: owned-agent retention could not start; no uncertain home was removed.",
+const OWNERSHIP_DIAGNOSTICS: Partial<Record<OwnershipDiagnosticFingerprint, {
+  ownerFingerprint: OwnershipOwnerNotificationFingerprint;
+  message: string;
+}>> = {
+  "metadata-update": { ownerFingerprint: "ownership-metadata-update", message: "ws: could not persist owned-agent metadata; the affected operation was rejected." },
+  "home-removal": { ownerFingerprint: "ownership-home-removal", message: "ws: could not remove an owned-agent home; it was retained for safety." },
+  "retention-scan": { ownerFingerprint: "ownership-retention-scan", message: "ws: owned-agent retention could not scan part of its storage; uncertain homes were retained." },
+  "retention-start": { ownerFingerprint: "ownership-retention-start", message: "ws: owned-agent retention could not start; no uncertain home was removed." },
 };
 
-/** Session-scoped, bounded diagnostics: observers stay silent and each authoritative class notifies once. */
-export function createOwnershipDiagnosticReporter(
-  notify?: (message: string, type: "warning") => void,
-): OwnershipDiagnosticReporter {
-  const reported = new Set<keyof typeof OWNERSHIP_DIAGNOSTIC_MESSAGES>();
-  return (fingerprint, _error) => {
-    const message = OWNERSHIP_DIAGNOSTIC_MESSAGES[fingerprint];
-    if (!message || reported.has(fingerprint)) return;
-    reported.add(fingerprint);
-    try { notify?.(message, "warning"); } catch { /* diagnostics never change the protected operation's outcome */ }
-  };
-}
-
-let ownershipDiagnosticReporter = createOwnershipDiagnosticReporter();
-export function setOwnershipDiagnosticReporter(reporter?: OwnershipDiagnosticReporter): void {
-  ownershipDiagnosticReporter = reporter ?? createOwnershipDiagnosticReporter();
-}
-export function reportOwnershipDiagnostic(fingerprint: OwnershipDiagnosticFingerprint, error: unknown): void {
-  ownershipDiagnosticReporter(fingerprint, error);
+/** Central ownership reporter: observers are silent; authoritative classes reuse the session's owner notification seam. */
+export function reportOwnershipDiagnostic(fingerprint: OwnershipDiagnosticFingerprint, _error: unknown): void {
+  const diagnostic = OWNERSHIP_DIAGNOSTICS[fingerprint];
+  if (diagnostic) ownerNotifyRef.notifyOwnershipOnce(diagnostic.ownerFingerprint, diagnostic.message);
 }
 
 export interface AgentOwnership {

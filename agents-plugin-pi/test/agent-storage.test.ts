@@ -3,23 +3,26 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameS
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
-import { allocateAgentHome, createAgentStorageContext, createOwnershipDiagnosticReporter, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, ownershipPath, pruneStaleAgentHomes, readOwnerArtifacts, readOwnership, removeOwnedAgentHome, setOwnershipDiagnosticReporter, touchOwnership, writeOwnerArtifact, writeOwnership, updateOwnership } from "../src/agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, ownershipPath, pruneStaleAgentHomes, readOwnerArtifacts, readOwnership, removeOwnedAgentHome, reportOwnershipDiagnostic, touchOwnership, writeOwnerArtifact, writeOwnership, updateOwnership } from "../src/agent-storage.ts";
 import { writePrivateJson } from "../src/fork-context.ts";
-import { prepareForkLaunch, validateForkReadiness } from "../src/spawner.ts";
+import { ownerNotifyRef, prepareForkLaunch, validateForkReadiness } from "../src/spawner.ts";
 
 describe("agent storage", () => {
   test("ownership diagnostics are bounded per reporter session and never expose raw errors", () => {
     const notices: string[] = [];
-    const first = createOwnershipDiagnosticReporter(message => notices.push(message));
-    first("observer-session-write", new Error("/private/observer-path"));
-    first("metadata-update", new Error("/private/first-path"));
-    first("metadata-update", new Error("/private/second-path"));
-    assert.deepEqual(notices, ["ws: could not persist owned-agent metadata; the affected operation was rejected."]);
-    assert.doesNotMatch(notices[0]!, /private|first|second|Error/);
+    try {
+      ownerNotifyRef.current = message => notices.push(message);
+      reportOwnershipDiagnostic("observer-session-write", new Error("/private/observer-path"));
+      reportOwnershipDiagnostic("metadata-update", new Error("/private/first-path"));
+      reportOwnershipDiagnostic("metadata-update", new Error("/private/second-path"));
+      assert.deepEqual(notices, ["ws: could not persist owned-agent metadata; the affected operation was rejected."]);
+      assert.doesNotMatch(notices[0]!, /private|first|second|Error/);
 
-    const second = createOwnershipDiagnosticReporter(message => notices.push(message));
-    second("metadata-update", new Error("new adapter session"));
-    assert.equal(notices.length, 2, "a replacement reporter starts a fresh session-bounded ledger");
+      ownerNotifyRef.current = undefined;
+      ownerNotifyRef.current = message => notices.push(message);
+      reportOwnershipDiagnostic("metadata-update", new Error("new adapter session"));
+      assert.equal(notices.length, 2, "a replacement owner notification session gets a fresh bounded ledger");
+    } finally { ownerNotifyRef.current = undefined; }
   });
 
   test("ownership storage contains no direct terminal-stream diagnostics", () => {
@@ -285,7 +288,7 @@ describe("agent storage", () => {
     const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
     const diagnostics = t.mock.method(console, "error", () => {});
     const notices: string[] = [];
-    setOwnershipDiagnosticReporter(createOwnershipDiagnosticReporter(message => notices.push(message)));
+    ownerNotifyRef.current = message => notices.push(message);
     try {
       const owned = allocateAgentHome(createAgentStorageContext("lead-1", root), "agent-failure", "worker");
       updateOwnership(owned.home, { liveness: { lifecycle: "stopped", running: false } });
@@ -298,7 +301,7 @@ describe("agent storage", () => {
       assert.deepEqual(notices, ["ws: could not remove an owned-agent home; it was retained for safety."]);
       assert.doesNotMatch(notices[0]!, /permission|agent-failure|ws-pi-storage/);
       assert.ok(readOwnership(owned.home), "metadata remains available for retry");
-    } finally { setOwnershipDiagnosticReporter(); rmSync(root, { recursive: true, force: true }); }
+    } finally { ownerNotifyRef.current = undefined; rmSync(root, { recursive: true, force: true }); }
   });
 
   test("prunes stopped children at the TTL boundary across lead subtrees while retaining recent, protected, live, and unknown homes", () => {
@@ -356,7 +359,7 @@ describe("agent storage", () => {
   test("the deletion claim blocks a racing activity write and stale eligibility is rechecked under that claim", (t) => {
     const diagnostics = t.mock.method(console, "error", () => {});
     const notices: string[] = [];
-    setOwnershipDiagnosticReporter(createOwnershipDiagnosticReporter(message => notices.push(message)));
+    ownerNotifyRef.current = message => notices.push(message);
     const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
     try {
       const owned = allocateAgentHome(createAgentStorageContext("lead-race", root), "agent-race-lock", "worker");
@@ -376,13 +379,13 @@ describe("agent storage", () => {
       assert.equal(existsSync(owned.home), false);
       assert.equal(diagnostics.mock.callCount(), 0);
       assert.deepEqual(notices, ["ws: could not persist owned-agent metadata; the affected operation was rejected."]);
-    } finally { setOwnershipDiagnosticReporter(); rmSync(root, { recursive: true, force: true }); }
+    } finally { ownerNotifyRef.current = undefined; rmSync(root, { recursive: true, force: true }); }
   });
 
   test("a claim abandoned by a dead process is recovered without weakening malformed/live claim retention", (t) => {
     const diagnostics = t.mock.method(console, "error", () => {});
     const notices: string[] = [];
-    setOwnershipDiagnosticReporter(createOwnershipDiagnosticReporter(message => notices.push(message)));
+    ownerNotifyRef.current = message => notices.push(message);
     const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
     try {
       const owned = allocateAgentHome(createAgentStorageContext("lead-abandoned", root), "agent-abandoned", "worker");
@@ -401,7 +404,7 @@ describe("agent storage", () => {
       assert.equal(touchOwnership(owned.home), false, "malformed holder facts fail closed");
       assert.equal(diagnostics.mock.callCount(), 0, "live and unreadable claims never write through console");
       assert.equal(notices.length, 1, "one session coalesces repeated metadata-update failures");
-    } finally { setOwnershipDiagnosticReporter(); rmSync(root, { recursive: true, force: true }); }
+    } finally { ownerNotifyRef.current = undefined; rmSync(root, { recursive: true, force: true }); }
   });
 
   test("disabled pruning does not scan, and one deletion failure does not stop later homes", () => {

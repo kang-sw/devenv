@@ -217,7 +217,7 @@ import {
 import { registerAuditCommands } from "./audit.ts";
 import { registerWsSkillTool } from "./lead-skills.ts";
 import { createToolPreviewTuiRef, loadToolResultTuiModules } from "./tool-result-render.ts";
-import { createAgentStorageContext, createOwnershipDiagnosticReporter, pruneStaleAgentHomes, reportOwnershipDiagnostic, setOwnershipDiagnosticReporter, type AgentStorageContext } from "./agent-storage.ts";
+import { createAgentStorageContext, pruneStaleAgentHomes, reportOwnershipDiagnostic, type AgentStorageContext } from "./agent-storage.ts";
 import { createAgentFooterSessionLifecycle, persistOwnedTelemetryRollup, type AgentFooterContext, type AgentFooterSessionLifecycle } from "./agent-footer.ts";
 import { loadHostPiTui } from "./pi-tui.ts";
 import { addClaudeDelegateIfLead, registerClaudeDelegateSession } from "./claude-delegate.ts";
@@ -245,13 +245,13 @@ export function applySessionStartOwnershipDiagnostics(
   role: SpawnRole | undefined,
   ctx: Pick<ExtensionUIContext, "mode" | "ui">,
 ): void {
-  setOwnershipDiagnosticReporter(createOwnershipDiagnosticReporter(
-    role === undefined && ctx.mode === "tui" ? (message, type) => ctx.ui.notify(message, type) : undefined,
-  ));
+  ownerNotifyRef.current = role === undefined && ctx.mode === "tui"
+    ? (message, type) => ctx.ui.notify(message, type)
+    : undefined;
 }
 
 export function applySessionShutdownOwnershipDiagnostics(): void {
-  setOwnershipDiagnosticReporter();
+  ownerNotifyRef.current = undefined;
 }
 
 /** Controller-session retention seam: child workers never run global disk maintenance. */
@@ -570,9 +570,6 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // followUp push raised while this session is mid-turn is held until its
     // turn settles instead of going out with an already-stale status line.
     leadIdleRef.current = () => ctx.isIdle();
-    ownerNotifyRef.current = readSpawnRole(process.env) === undefined && ctx.mode === "tui"
-      ? (message, type) => ctx.ui.notify(message, type)
-      : undefined;
     // TUI only: replace Pi's default custom-message rendering for the six
     // push families, whose own content already opens with the family label
     // the default would print again. `registerPushMessageRenderers` now
@@ -889,7 +886,6 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // forever with nothing left to release them.
     goalLoopHandle.resetCompactionStateForShutdown();
     leadIdleRef.current = undefined;
-    ownerNotifyRef.current = undefined;
     applySessionShutdownOwnershipDiagnostics();
     // 260905 (live-agent widget ticket): stop the elapsed timer and clear the
     // widget/status segment (mirrors `leadIdleRef.current = undefined` above)
