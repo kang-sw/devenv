@@ -510,6 +510,8 @@ export interface RpcAgentRecord {
   lastText?: string;
   /** Work generation that produced lastText; absent text is never borrowed across turns. */
   lastTextGeneration?: number;
+  /** Accepted steer/follow-up instructions awaiting their actual user message_start boundary. */
+  pendingQueuedWork?: Array<{ message: string }>;
   /**
    * 260905: the head-truncated (`truncatePromptForStorage`,
    * `PROMPT_STORAGE_CAP_BYTES`) copy of the spawn's initial `prompt`, stashed
@@ -1663,6 +1665,7 @@ export async function promptAgent(
   const now = Date.now();
   const writerStamp = stampWriter(record, writer, writer === "owner" ? message : undefined, writer === "lead" && opts?.isLeadPrompt !== false ? now : undefined);
   record.running = true;
+  record.pendingQueuedWork = undefined;
   advanceWorkGeneration(record);
   record.runStartedAt = now;
   if (record.ownership) observeSessionWrite(record.ownership.home, record.sessionPath);
@@ -1744,7 +1747,9 @@ export function markAgentExited(
   opts?: { suppressTerminal?: boolean },
 ): void {
   if (!record.client) return;
+  const hadQueuedSuccessor = (record.pendingQueuedWork?.length ?? 0) > 0;
   clearLiveState(record);
+  record.pendingQueuedWork = undefined;
   if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "unknown", running: false, observedAt: Date.now() } });
   triggerAgentWidgetRefresh();
   if (opts?.suppressTerminal) return;
@@ -1754,7 +1759,7 @@ export function markAgentExited(
     return;
   }
   record.settlementAdmissionGeneration = workGeneration;
-  const lastMessage = record.lastTextGeneration === workGeneration ? record.lastText : undefined;
+  const lastMessage = !hadQueuedSuccessor && record.lastTextGeneration === workGeneration ? record.lastText : undefined;
   const terminal = createTerminalDelivery(record, registry, pi, workGeneration, { reason: "exited", last_message: lastMessage });
   terminal.retry?.();
 }
@@ -2299,6 +2304,7 @@ export function attachEventListener(
   record.unsubscribe = client.onEvent((evt) => {
     const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string; isError?: unknown; result?: unknown; message?: unknown };
     if (record.client !== client || record.launchGeneration !== generation) return;
+    if (e.type === "message_start") observeQueuedWorkBoundary(record, e.message);
     if (e.type === "message_end") {
       const text = assistantMessageText(e.message);
       if (text !== undefined) {
@@ -3008,18 +3014,27 @@ export async function sendToAgent(
   try {
     if (record.streaming) {
       writerStamp = stampWriter(record, writer, writer === "owner" ? message : undefined, writer === "lead" ? Date.now() : undefined);
-      if (interrupt) {
-        await live.steer(message);
-      } else {
-        await live.followUp(message);
+      const queuedBoundary = { message };
+      (record.pendingQueuedWork ??= []).push(queuedBoundary);
+      try {
+        if (interrupt) {
+          await live.steer(message);
+        } else {
+          await live.followUp(message);
+        }
+      } catch (error) {
+        const index = record.pendingQueuedWork?.indexOf(queuedBoundary) ?? -1;
+        if (index >= 0) record.pendingQueuedWork!.splice(index, 1);
+        if (record.pendingQueuedWork?.length === 0) record.pendingQueuedWork = undefined;
+        throw error;
       }
       acceptWriter(record, writerStamp);
       writerStamp = undefined;
-      // A steer/followUp joins the run already in flight, so the child is
-      // outstanding again from the lead's point of view even though no fresh
-      // prompt was issued. The accepted instruction starts a new generation.
+      // Queue admission keeps the child outstanding, but the work generation
+      // changes only when Pi emits the queued user message_start. Until that
+      // boundary, assistant events still belong to the preceding turn.
       record.running = true;
-      advanceWorkGeneration(record);
+      clearTerminalFacts(record);
     } else {
       await promptAgent(record, live, message, { writer });
     }
@@ -3056,14 +3071,29 @@ export async function sendToAgent(
  * an empty/aborted message or disagrees with that event, preserve the event's
  * exact text; when no current assistant event exists, report missing output.
  */
-function assistantMessageText(message: unknown): string | undefined {
-  if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== "assistant") return undefined;
+function messageText(message: unknown, role: "assistant" | "user"): string | undefined {
+  if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== role) return undefined;
   const content = (message as { content?: unknown }).content;
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content.flatMap((part) => part && typeof part === "object" && (part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string"
     ? [(part as { text: string }).text]
     : []).join("");
+}
+
+function observeQueuedWorkBoundary(record: RpcAgentRecord, message: unknown): void {
+  if (messageText(message, "user") === undefined || !record.pendingQueuedWork?.length) return;
+  // Pi can expand a queued skill/template before emitting its user message, so
+  // text equality is not a stable identity. User queue consumption is the
+  // actual FIFO boundary; steering may overtake follow-ups, but either accepted
+  // item starts one successor generation and removes exactly one obligation.
+  record.pendingQueuedWork.shift();
+  if (record.pendingQueuedWork.length === 0) record.pendingQueuedWork = undefined;
+  advanceWorkGeneration(record);
+}
+
+function assistantMessageText(message: unknown): string | undefined {
+  return messageText(message, "assistant");
 }
 
 async function harvestLastMessage(record: RpcAgentRecord): Promise<string | undefined> {
@@ -3172,6 +3202,7 @@ export async function stopAgent(
   const client = record.client;
   if (!opts?.silent) {
     record.waitingOnChildren = false;
+    record.pendingQueuedWork = undefined;
     advanceWorkGeneration(record);
     publishSubtree(registry);
   }

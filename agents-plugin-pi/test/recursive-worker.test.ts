@@ -32,6 +32,7 @@ import {
   promptAgent,
   registerPushFlush,
   resolveTools,
+  sendToAgent,
   startForkFinish,
   stopAgent,
   type RpcAgentRecord,
@@ -335,6 +336,48 @@ test("a successor prompt invalidates a late harvest from the previous generation
   assert.equal(sent.length, 0);
   assert.equal(child.running, true);
   assert.equal(child.workGeneration, 2);
+});
+
+test("active steer and follow-up advance generation only at their queued user boundary", async () => {
+  for (const interrupt of [true, false]) {
+    heldPushQueue.length = 0;
+    const sent: any[] = [];
+    const h = pushHarness(sent);
+    const child = record(interrupt ? "steer" : "follow-up", { client: h.client, streaming: true, running: true, workGeneration: 1 });
+    const registry = new Map([[child.agentId, child]]);
+    attachEventListener(h.pi, registry, child, h.client);
+
+    await sendToAgent(registry, { cwd: "." }, child.agentId, "successor instruction", interrupt);
+    assert.equal(child.workGeneration, 1, "queue admission is not the execution boundary");
+    h.emit(assistantEnd("prior turn output"));
+    assert.equal(child.lastTextGeneration, 1);
+    h.emit({ type: "message_start", message: { role: "user", content: [{ type: "text", text: "successor instruction" }] } });
+    assert.equal(child.workGeneration, 2);
+    assert.equal(child.lastText, undefined, "the actual queued-user boundary clears prior text");
+    h.setLast("successor output");
+    h.emit(assistantEnd("successor output"));
+    h.emit({ type: "agent_settled" });
+    await drain();
+    flushHeldPushes(h.pi, true);
+    await drain();
+    assert.equal(sent[0].details.last_message, "successor output");
+  }
+});
+
+test("an exit before an accepted queued instruction starts never reports the prior turn", async () => {
+  const sent: any[] = [];
+  const h = pushHarness(sent);
+  const child = record("queued-exit", { client: h.client, streaming: true, running: true, workGeneration: 1 });
+  const registry = new Map([[child.agentId, child]]);
+  attachEventListener(h.pi, registry, child, h.client);
+  await sendToAgent(registry, { cwd: "." }, child.agentId, "queued successor");
+  h.emit(assistantEnd("prior turn output"));
+  (h.client as any).getState = async () => { throw new Error("process exited before queue drain"); };
+  assert.equal(await probeAgentLiveness(h.pi, registry, child), false);
+  flushHeldPushes(h.pi, true);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].details.reason, "exited");
+  assert.equal(sent[0].details.last_message, undefined);
 });
 
 test("empty or missing current output never falls back to a previous generation", async () => {
