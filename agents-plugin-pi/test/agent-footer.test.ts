@@ -77,7 +77,7 @@ describe("bounded direct-agent estimates", () => {
     const ui = context();
     const controller = createAgentFooterController(ui.ctx, registry, storage, { truncateToWidth, visibleWidth });
     const rendered = plain(ui.mount().render(120).join("\n"));
-    assert.match(rendered, /Direct agents ~\$0\.65 \+ \?/);
+    assert.match(rendered, /D ~\$0\.65 \+ \?/);
     assert.doesNotMatch(rendered, /99/);
     controller.stop();
   });
@@ -87,15 +87,15 @@ describe("bounded direct-agent estimates", () => {
     const registry: RpcAgentRegistry = new Map([[child.agentId, child]]), ui = context();
     const controller = createAgentFooterController(ui.ctx, registry, storage, { truncateToWidth, visibleWidth });
     const component = ui.mount();
-    assert.match(component.render(100)[1], /Direct agents ~\$1\.00/);
+    assert.match(component.render(100)[1], /D ~\$1\.00/);
     child.telemetry = undefined; controller.refreshAgents();
-    assert.match(component.render(100)[1], /Direct agents ~\$1\.00 \+ \?/);
+    assert.match(component.render(100)[1], /D ~\$1\.00 \+ \?/);
     child.telemetry = telemetry("child-session", child.sessionPath, "partial"); controller.refreshAgents();
-    assert.match(component.render(100)[1], /Direct agents ~\$1\.00 \+ \?/);
+    assert.match(component.render(100)[1], /D ~\$1\.00 \+ \?/);
     child.telemetry = telemetry("child-session", child.sessionPath, .5); controller.refreshAgents();
-    assert.match(component.render(100)[1], /Direct agents ~\$1\.00 \+ \?/);
+    assert.match(component.render(100)[1], /D ~\$1\.00 \+ \?/);
     child.telemetry = telemetry("child-session", child.sessionPath, 1.5); controller.refreshAgents();
-    assert.match(component.render(100)[1], /Direct agents ~\$1\.50/);
+    assert.match(component.render(100)[1], /D ~\$1\.50/);
     controller.stop();
   });
 
@@ -109,7 +109,7 @@ describe("bounded direct-agent estimates", () => {
     updateOwnership(old.ownership!.home, { liveness: { lifecycle: "stopped", running: false } });
     assert.deepEqual(evictForCapacity(registry, 2), { ok: true, evictedLabel: "old" });
     controller.refreshAgents();
-    assert.match(component.render(100)[1], /Direct agents ~\$0\.80/);
+    assert.match(component.render(100)[1], /D ~\$0\.80/);
     assert.equal(persistEvictedAgentCost(registry, old), true, "a retry on the same evicted record is idempotent");
     controller.stop();
     const saved = checkpoint(storage);
@@ -118,7 +118,7 @@ describe("bounded direct-agent estimates", () => {
     assert.ok(saved.agents.length <= registry.size, "checkpoint identity count is bounded by the registry");
     const restoredRegistry: RpcAgentRegistry = new Map([[kept.agentId, kept]]), restoredUi = context();
     const restored = createAgentFooterController(restoredUi.ctx, restoredRegistry, storage, { truncateToWidth, visibleWidth });
-    assert.match(restoredUi.mount().render(100)[1], /Direct agents ~\$0\.80/, "reload adds the evicted baseline and restored live identity exactly once");
+    assert.match(restoredUi.mount().render(100)[1], /D ~\$0\.80/, "reload adds the evicted baseline and restored live identity exactly once");
     restored.stop();
   });
 
@@ -152,7 +152,7 @@ describe("bounded direct-agent estimates", () => {
     const secondUi = context([{ type: "message", message: { role: "assistant" } }]);
     const second = createAgentFooterController(secondUi.ctx, restoredRegistry, storage, { truncateToWidth, visibleWidth });
     const rendered = plain(secondUi.mount().render(120).join("\n"));
-    assert.match(rendered, /↑10/); assert.match(rendered, /Lead ~\$0\.50/); assert.match(rendered, /Direct agents ~\$0\.40/);
+    assert.match(rendered, /↑10/); assert.match(rendered, /L ~\$0\.50/); assert.match(rendered, /D ~\$0\.40/);
     second.stop();
   });
 
@@ -165,7 +165,7 @@ describe("bounded direct-agent estimates", () => {
     const diagnostics = t.mock.method(console, "error", () => {});
     assert.equal(persistEvictedAgentCost(registry, child), false);
     assert.equal(persistEvictedAgentCost(registry, child), false);
-    assert.match(component.render(100)[1], /Direct agents ~\$0\.40/, "failed retries leave the mounted state unfurled");
+    assert.match(component.render(100)[1], /D ~\$0\.40/, "failed retries leave the mounted state unfurled");
     assert.ok(diagnostics.mock.callCount() >= 2, "each failed durability boundary is surfaced");
     rmSync(bucket);
     assert.equal(persistEvictedAgentCost(registry, child), true);
@@ -199,7 +199,7 @@ describe("bounded direct-agent estimates", () => {
     first.alias = "reviewer"; second.alias = "reviewer";
     const registry: RpcAgentRegistry = new Map([[first.agentId, first], [second.agentId, second]]), ui = context();
     const controller = createAgentFooterController(ui.ctx, registry, storage, { truncateToWidth, visibleWidth });
-    assert.match(ui.mount().render(100)[1], /Direct agents ~\$0\.70/);
+    assert.match(ui.mount().render(100)[1], /D ~\$0\.70/);
     controller.stop();
   });
 });
@@ -216,7 +216,7 @@ describe("incremental lead usage", () => {
     assert.equal(diagnostics.mock.callCount(), 1, "shutdown surfaces the failed checkpoint");
     rmSync(bucket);
     const secondUi = context(), second = createAgentFooterController(secondUi.ctx, registry, storage, { truncateToWidth, visibleWidth });
-    assert.match(secondUi.mount().render(100)[1], /Lead ~\$0\.50/, "reload uses the retained in-process estimate instead of stale disk state");
+    assert.match(secondUi.mount().render(100)[1], /L ~\$0\.50/, "reload uses the retained in-process estimate instead of stale disk state");
     second.stop();
     assert.equal(checkpoint(storage).lead.cost.knownUsd, .5, "the next writable boundary durably catches up");
   });
@@ -230,14 +230,14 @@ describe("incremental lead usage", () => {
     const compact = { type: "compaction", usage: { input: 7, output: 1, cost: { total: .2 } } };
     controller.acceptUsage(assistant); controller.acceptUsage(assistant); controller.acceptUsage(tool); controller.acceptUsage(compact);
     const rendered = plain(component.render(140).join("\n"));
-    assert.match(rendered, /↑22/); assert.match(rendered, /↓4/); assert.match(rendered, /CH17\.6%/); assert.match(rendered, /Lead ~\$0\.80/);
+    assert.match(rendered, /↑22/); assert.match(rendered, /↓4/); assert.match(rendered, /CH17\.6%/); assert.match(rendered, /L ~\$0\.80/);
     controller.stop();
   });
 
   test("a missing checkpoint with existing history starts unknown rather than scanning or inventing an exact lifetime value", () => {
     const dir = root(), storage = createAgentStorageContext("lead", dir), ui = context([{ type: "message", message: { role: "assistant" } }]);
     const controller = createAgentFooterController(ui.ctx, new Map(), storage, { truncateToWidth, visibleWidth });
-    assert.match(ui.mount().render(80)[1], /Lead —/);
+    assert.match(ui.mount().render(80)[1], /L —/);
     controller.stop();
   });
 });
@@ -257,7 +257,7 @@ describe("custom footer render and lifecycle", () => {
       assert.ok(lines.every(line => visibleWidth(line) <= 80));
     }
     const wide = plain(component.render(120).join("\n"));
-    assert.match(wide, /Lead ~\$0\.00/); assert.match(wide, /Direct agents ~\$2\.56/);
+    assert.match(wide, /L ~\$0\.00 \+ D ~\$2\.56/);
     (registry as any).entries = originalEntries; (registry as any)[Symbol.iterator] = originalIterator;
     controller.stop();
   });
@@ -315,7 +315,7 @@ test("index session seams mount the re-enabled footer beside an existing widget 
   const lifecycle = createAgentFooterSessionLifecycle(async () => ({ truncateToWidth, visibleWidth }));
   await applySessionStartAgentFooter(lifecycle, undefined, ctx, registry, storage);
   component = factory({ requestRender() {} }, { fg: (_c: string, text: string) => text }, { getGitBranch: () => null, getExtensionStatuses: () => new Map(), onBranchChange: () => () => {} });
-  assert.ok(component.render(80)[1].includes("Lead ~$0.00 Direct agents ~$0.00"));
+  assert.ok(component.render(80)[1].includes("L ~$0.00 + D ~$0.00"));
   await applySessionStartAgentFooter(lifecycle, undefined, ctx, registry, storage);
   assert.equal(restores, 1, "reload restores the prior footer before replacement");
   applySessionShutdownAgentFooter(lifecycle);

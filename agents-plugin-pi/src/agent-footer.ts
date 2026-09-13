@@ -454,7 +454,7 @@ export function createAgentFooterController(
         const window = context?.contextWindow ?? ctx.model?.contextWindow ?? 0;
         const contextUsedPart = context?.tokens == null ? "?" : formatTokens(context.tokens);
         const contextPart = `${contextUsedPart}/${formatTokens(window)}`;
-        const required = [`Lead ${leadCost}`, `Direct agents ${directCost}`];
+        const required = [`L ${leadCost} + D ${directCost}`];
         let optional = [...tokenParts, contextPart];
         const modelId = ctx.model?.id ?? "no-model";
         let model = ctx.model?.reasoning ? `${modelId} • ${ctx.thinkingLevel ?? "off"}` : modelId;
