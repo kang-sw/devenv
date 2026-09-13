@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 87826949d28bfe20
 sage-review-completeness-reviewed: 87826949d28bfe20
+completed: 2026-09-13
 ---
 
 # Pi delegated agents: bounded writable scopes with native edit/write semantics
@@ -66,3 +67,14 @@ Add a reusable Pi-local delegation capability that lets a parent grant a child a
 Extend Pi spawn admission, delegation policy, agent records, and sidecar persistence with normalized `WriteScope` bindings and explicit effective-write capability. Add the authorization wrapper around native edit/write execution and fail allocation when a restricted wrapper cannot be installed safely.
 
 Verify exact existing and new file grants, recursive tree grants, default-all descendants, dynamic include globs, create/replace behavior, path traversal and canonical escape rejection, symlink escape rejection, absent-parent and ambiguous subset refusal, unrestricted-to-scoped and scoped-to-narrower delegation, read-only refusal, nested monotonicity, reload/resume preservation, redundant unrestricted-child diagnostics, and the absence of Bash/delete/rename authority. Exercise the real child tool surface and native edit/write behavior rather than only pure path predicates. Run the committed glob-contract fixture against Pi's Node 22.19 version floor as well as the development runtime; do not infer floor semantics solely from a newer Node release.
+
+### Result (d00e66d3) - 2026-09-13
+
+- Added Pi-local `write_scopes` admission, explicit effective-write capability, immutable persisted bindings, conservative descendant narrowing, and same-name native edit/write wrappers. Unrestricted children retain their existing authority and receive an ignored diagnostic for valid redundant scopes; malformed scopes are rejected before allocation.
+- Native tool registration, scoped sidecar revival/resume, denial before widened recovery allocation, filesystem containment, dynamic glob matching, and native create/replace/edit behavior are covered by tests. Shared ws-mcp and other harness surfaces remain unchanged.
+- Review fixes landed in `10d1840e` and `94b1dc86`. The escalated Critical was a second native normalization of an authorized absolute path: a Unicode-space cwd could redirect execution into an ASCII-space sibling. The handoff now uses Node's file-URL encoding of the checked canonical target, which Pi decodes after convenience normalization. Regression coverage exercises all 15 normalized Unicode spaces from cwd, symlinks, and decoded URLs, plus percent/hash names and explicit sibling denials.
+- Decisions: use exact syntactic glob projection and exact-file membership to prove scope subsets, rejecting ambiguous subset claims; preserve native execution rather than reimplement filesystem operations; encode valid canonical paths rather than deny Unicode-space grants.
+- Verification: the new regression reproduced the original escape before the fix. `node --test test/write-scopes.test.ts` passed all 11 tests on Node 25.9.0; `npx --yes node@22.19.0 --test test/write-scopes.test.ts` passed all 11 tests, including the committed glob fixture, on the exact version floor. `npm test -- --test-reporter=dot` passed the full Pi suite; `git diff --check` passed. Commands ran from `agents-plugin-pi/` except the Git check; the package declares no separate build script.
+- Independent correctness, fit, and test verification of the escalation fix (`10d1840e..94b1dc86`) is clean. Correctness inspection covered both package-local Pi 0.84.4 and installed Pi 0.85.1; that reviewer could not execute tests under its restricted tool surface, so runtime evidence comes from the worker's commands above.
+- Unresolved: none. Omitted: none.
+
