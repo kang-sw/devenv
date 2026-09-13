@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 54015d12c350eea9
 sage-review-completeness-reviewed: 54015d12c350eea9
+dropped: 2026-09-13
 ---
 
 # config.tune(agents.tier) returns only the written harness bucket instead of the whole agents config
@@ -125,3 +126,8 @@ implementation to import. Continue this ticket through the develop workflow;
 after its source, tests, and response-contract spec land there, re-evaluate the
 upstream commit and the released runtime before clearing this track-local
 blocker. No source change, release, or completion is claimed by this note.
+
+
+## Resolution (2026-09-13)
+
+Deferred out of the Pi-track ready queue. The behavior remains a low-priority response-shaping UX improvement with no runtime consumer dependency; a byte-preserved copy is returned to the root develop worktree's idea inventory for later reconsideration.
