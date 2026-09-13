@@ -85,6 +85,7 @@ import {
   heldPushQueue,
   leadCompactingRef,
   leadIdleRef,
+  ownerNotifyRef,
   leadWakeStartPendingRef,
   markAgentExited,
   probeAgentLiveness,
@@ -1488,6 +1489,13 @@ describe("computeRunningStatusLine (fan-in running count)", () => {
     );
   });
 
+  test("an owner-held agent is excluded from BOTH fan-in presence and running count", () => {
+    const held = liveRpcRecord({ agentId: "held", running: true, streaming: true, lastWriter: "owner" });
+    const registry: RpcAgentRegistry = new Map([["held", held]]);
+    assert.equal(computeRunningStatusLine(registry), undefined);
+    assert.equal(hasRunningAgents(registry), false);
+  });
+
   test("an approval-blocked child is still counted — it is outstanding, and the lead is what unblocks it", () => {
     const registry: RpcAgentRegistry = new Map([
       ["a", liveRpcRecord({ agentId: "a", running: true, pendingApproval: { cmdId: "c1", command: "echo hi" } })],
@@ -2111,6 +2119,53 @@ describe("attachEventListener (the settle-suppression IO gate)", () => {
     assert.deepEqual(h.pi.sent, []);
   });
 
+  test("an owner-held settle becomes an owner toast, is never pushed to the lead, and is not parked", async () => {
+    const h = listenerHarness({ lastWriter: "owner", alias: "scout" });
+    const toasts: string[] = [];
+    ownerNotifyRef.current = (message) => { toasts.push(message); };
+    try {
+      h.emit({ type: "agent_settled" });
+      await settleDrain();
+      assert.deepEqual(h.pi.sent, []);
+      assert.equal(toasts.length, 1);
+      assert.match(toasts[0]!, /scout settled/);
+      assert.ok(h.record.client, "owner-held idle records are protected from automatic park");
+    } finally {
+      ownerNotifyRef.current = undefined;
+    }
+  });
+
+  test("an owner-held advisory becomes one warning toast and never reaches the lead queue", () => {
+    const h = listenerHarness({ lastWriter: "owner", alias: "scout" });
+    const toasts: Array<{ message: string; type?: string }> = [];
+    ownerNotifyRef.current = (message, type) => { toasts.push({ message, type }); };
+    try {
+      pushToLead(h.pi as never, h.registry, h.record, "ws-agent-advisory", { advisory: "stalled", detail: "needs attention" }, "followUp");
+      assert.deepEqual(h.pi.sent, []);
+      assert.equal(toasts.length, 1);
+      assert.match(toasts[0]!.message, /scout advisory: needs attention/);
+      assert.equal(toasts[0]!.type, "warning");
+    } finally {
+      ownerNotifyRef.current = undefined;
+    }
+  });
+
+  test("final reports are unchanged while owner-held: the lead still receives the report instead of a toast", async () => {
+    const h = listenerHarness({ lastWriter: "owner" });
+    const toasts: string[] = [];
+    ownerNotifyRef.current = (message) => { toasts.push(message); };
+    try {
+      h.emit({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, toolCallId: "final-1", args: { kind: "final", message: "Outcome: done" } });
+      h.emit({ type: "tool_execution_end", toolName: REPORT_TO_LEAD_TOOL_NAME, toolCallId: "final-1", result: { content: [{ type: "text", text: "ok" }] } });
+      h.emit({ type: "agent_settled" });
+      await settleDrain();
+      assert.deepEqual(families(h.pi), ["ws-agent-report"]);
+      assert.deepEqual(toasts, []);
+    } finally {
+      ownerNotifyRef.current = undefined;
+    }
+  });
+
   test("the same record settles loudly once the thread closes — suppression is scoped to the bind, not permanent", async () => {
     const h = listenerHarness();
     h.record.threadBound = true;
@@ -2349,7 +2404,7 @@ describe("same-process fork /done finish coordinator", () => {
     assert.equal(record.forkFinish, undefined);
   });
 
-  test("a final racing /done waits for its successful report-tool end and is delivered without a closeout", async () => {
+  test("an owner-held final racing /done waits for its successful report-tool end and is delivered without a closeout", async () => {
     const pi = fakePi();
     const prompts: string[] = [];
     let listener: ((event: unknown) => void) | undefined;
@@ -2358,7 +2413,7 @@ describe("same-process fork /done finish coordinator", () => {
       getState: async () => ({}), prompt: async (message: string) => void prompts.push(message),
       abort: async () => {}, stop: async () => {},
     } as unknown as RpcClient;
-    const record = liveRpcRecord({ agentId: "racing-final", client, threadBound: true, validateForkFinal: () => true });
+    const record = liveRpcRecord({ agentId: "racing-final", client, threadBound: true, lastWriter: "owner", validateForkFinal: () => true });
     const registry: RpcAgentRegistry = new Map([[record.agentId, record]]);
     attachEventListener(pi.api, registry, record, client);
 
@@ -2372,6 +2427,7 @@ describe("same-process fork /done finish coordinator", () => {
     await drain();
     assert.deepEqual(prompts, []);
     assert.deepEqual(pi.sent.map((entry) => entry.message.customType), ["ws-agent-report"]);
+    assert.equal(record.lastWriter, "lead", "finish releases owner-held retention even when no duplicate closeout is needed");
   });
 
   test("a failed closeout final emits one missing-final advisory and never retries", async () => {
@@ -2399,6 +2455,35 @@ describe("same-process fork /done finish coordinator", () => {
     assert.deepEqual(prompts.length, 1, "a failed report never causes a resend");
     assert.deepEqual(pi.sent.map((entry) => entry.message.customType), ["ws-agent-advisory"]);
     assert.equal((pi.sent[0].message.details as { advisory?: string }).advisory, "missing-final");
+  });
+
+  test("an owner-held running fork receives one immediate queued lead handoff and the next settle reconciles it", async () => {
+    const pi = fakePi();
+    const followUps: string[] = [];
+    let listener: ((event: unknown) => void) | undefined;
+    const client = {
+      onEvent(callback: (event: unknown) => void) { listener = callback; return () => {}; },
+      getState: async () => ({}),
+      followUp: async (message: string) => void followUps.push(message),
+      steer: async () => {},
+      abort: async () => {}, stop: async () => {},
+    } as unknown as RpcClient;
+    const record = liveRpcRecord({ agentId: "owner-fork", client, running: true, streaming: true, threadBound: true, lastWriter: "owner" });
+    const registry: RpcAgentRegistry = new Map([[record.agentId, record]]);
+    attachEventListener(pi.api, registry, record, client);
+
+    startForkFinish(record, registry, pi.api!, { cwd: "/tmp", extensionPath: "/tmp/extension.ts" });
+    await drain();
+    assert.equal(followUps.length, 1);
+    assert.match(followUps[0]!, /owner closed this side thread/i);
+    assert.equal(record.lastWriter, "lead");
+    assert.equal(record.forkFinish?.closeoutRunStarted, true, "a queued follow-up joins the existing run without a new agent_start");
+
+    listener?.({ type: "agent_settled" });
+    await drain();
+    await drain();
+    assert.deepEqual(pi.sent.map((entry) => entry.message.customType), ["ws-agent-advisory"]);
+    assert.equal(followUps.length, 1, "reconciliation never issues a second closeout");
   });
 
   test("a running fork waits for its actual settle before issuing a single closeout", async () => {
@@ -2816,12 +2901,13 @@ describe("promptAgent (the single prompt funnel)", () => {
 
   test("isLeadPrompt:false (the anti-bleed nudge) still latches running but must NOT move lastLeadPromptAt", async () => {
     const { client } = fakeRpcClient();
-    const record = freshRpcRecord({ lastLeadPromptAt: 1_000 });
+    const record = freshRpcRecord({ lastLeadPromptAt: 1_000, lastWriter: "owner" });
 
     await promptAgent(record, client, "nudge", { isLeadPrompt: false });
 
     assert.equal(record.running, true);
     assert.equal(record.lastLeadPromptAt, 1_000, "moving the watermark would hide the very stale idle-without-final the nudge exists to serve");
+    assert.equal(record.lastWriter, "lead", "the lead-side nudge still reclaims last-writer ownership");
   });
 
   test("260905: stamps runStartedAt unconditionally, overwriting any stale prior value", async () => {
@@ -3237,6 +3323,12 @@ describe("listAgents", () => {
     assert.deepEqual(listAgents(registry, { includePrompt: true }), [{ agent_id: "a", status: "dormant" }]);
   });
 
+  test("owner-held records expose owner_held:true and lead-held records omit the field", () => {
+    const owner = freshRpcRecord({ agentId: "owner", lastWriter: "owner" });
+    const lead = freshRpcRecord({ agentId: "lead", lastWriter: "lead" });
+    assert.deepEqual(listAgents(new Map([["owner", owner], ["lead", lead]])).map((row) => row.owner_held), [true, undefined]);
+  });
+
   test("260905 (list-model/last-report-fidelity): modelBase + modelEffort lists model as \"<base>/<effort>\"", () => {
     const record = freshRpcRecord({ agentId: "a", modelBase: "claude-opus-4", modelEffort: "high" });
     const registry: RpcAgentRegistry = new Map([["a", record]]);
@@ -3309,6 +3401,55 @@ describe("sendToAgent (live branches only — dormant auto-resume is live-gate o
     assert.equal(record.terminalThisTurn, false, "last turn's terminal report must not suppress this turn's settle push");
     assert.ok((record.lastLeadPromptAt ?? 0) > 0, "a lead send stamps the watermark reportKindsSinceLeadPrompt filters on");
     assert.deepEqual(calls, [["prompt", "next task"]]);
+  });
+
+  test("owner sends log attribution and take last-writer ownership; the next lead prompt takes it back", async () => {
+    const { client, calls } = fakeRpcClient();
+    const record = freshRpcRecord({ agentId: "a", client, streaming: true, running: true });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+
+    await sendToAgent(registry, { cwd: "/tmp", writer: "owner" }, "a", "owner direction", true);
+    assert.equal(record.lastWriter, "owner");
+    assert.deepEqual(record.ownerSends?.map(({ text }) => text), ["owner direction"]);
+    assert.deepEqual(calls, [["steer", "owner direction"]]);
+
+    await sendToAgent(registry, { cwd: "/tmp", leadSend: true }, "a", "lead direction", false);
+    assert.equal(record.lastWriter, "lead");
+    assert.deepEqual(record.ownerSends?.map(({ text }) => text), ["owner direction"], "lead prompts never enter the owner attribution log");
+    assert.deepEqual(calls.at(-1), ["followUp", "lead direction"]);
+  });
+
+  test("a rejected owner send rolls back both last-writer ownership and its attribution entry", async () => {
+    const client = { steer: async () => { throw new Error("rejected"); }, followUp: async () => {}, prompt: async () => {} } as unknown as RpcClient;
+    const record = freshRpcRecord({ agentId: "a", client, streaming: true, running: true, lastWriter: "lead" });
+    await assert.rejects(() => sendToAgent(new Map([["a", record]]), { cwd: "/tmp", writer: "owner" }, "a", "not delivered", true), /rejected/);
+    assert.equal(record.lastWriter, "lead");
+    assert.deepEqual(record.ownerSends, []);
+  });
+
+  test("an earlier rejected owner send cannot roll back a later successful takeover", async () => {
+    let rejectFirst!: (error: Error) => void;
+    let call = 0;
+    const client = {
+      steer: async () => {
+        call++;
+        if (call === 1) await new Promise<void>((_resolve, reject) => { rejectFirst = reject; });
+      },
+      followUp: async () => {},
+      prompt: async () => {},
+    } as unknown as RpcClient;
+    const record = freshRpcRecord({ agentId: "a", client, streaming: true, running: true, lastWriter: "lead" });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+
+    const earlier = sendToAgent(registry, { cwd: "/tmp", writer: "owner" }, "a", "earlier", true);
+    const later = sendToAgent(registry, { cwd: "/tmp", writer: "owner" }, "a", "later", true);
+    await later;
+    rejectFirst(new Error("earlier rejected"));
+    await assert.rejects(earlier, /earlier rejected/);
+
+    assert.equal(record.lastWriter, "owner");
+    assert.deepEqual(record.ownerSends?.map(({ text }) => text), ["later"]);
+    assert.equal(record.client, client, "the stale rejection cannot mark a child dead after a later dispatch succeeded");
   });
 
   test("260905 review relay: a live streaming send (followUp branch) clears a stale pendingFinal so the next settle is a settle, not the old final", async () => {
@@ -3658,6 +3799,13 @@ describe("reserveAgentAlias", () => {
       assert.match(result.error, /threadBound/);
     }
   });
+
+  test("an owner-held holder's alias also rejects the spawn", () => {
+    const holder = freshRpcRecord({ agentId: "a", alias: "scout", lastWriter: "owner" });
+    const result = reserveAgentAlias(new Map([["a", holder]]), "scout");
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /held\/outstanding/);
+  });
 });
 
 /**
@@ -3701,19 +3849,21 @@ describe("evictForCapacity", () => {
     assert.deepEqual(evictForCapacity(registry, 1), { ok: true, evictedLabel: "scout" });
   });
 
-  test("running and threadBound records are never evicted", () => {
+  test("running, threadBound, and owner-held records are never evicted", () => {
     const running = freshRpcRecord({ agentId: "running-one", running: true });
     const threadBound = freshRpcRecord({ agentId: "bound-one", threadBound: true });
+    const ownerHeld = freshRpcRecord({ agentId: "owner-one", lastWriter: "owner" });
     const registry: RpcAgentRegistry = new Map([
       ["running-one", running],
       ["bound-one", threadBound],
+      ["owner-one", ownerHeld],
     ]);
-    const result = evictForCapacity(registry, 2);
+    const result = evictForCapacity(registry, 3);
     assert.equal(result.ok, false);
     if (!result.ok) {
       assert.match(result.error, /cap/);
     }
-    assert.equal(registry.size, 2, "a rejected eviction must not remove anything");
+    assert.equal(registry.size, 3, "a rejected eviction must not remove anything");
   });
 
   test("a live (client-holding) idle record is never evicted either — only a fully dormant record is a candidate", () => {

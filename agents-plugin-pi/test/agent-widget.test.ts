@@ -83,6 +83,18 @@ describe("buildAgentRows", () => {
     assert.deepEqual(buildAgentRows(registryOf(r), [], NOW), []);
   });
 
+  test("last-writer owner records stay visible: running while active, idle-awaiting-owner after settle, both with /audit", () => {
+    const idle = record({ agentId: "owner-idle", alias: "reviewer", lastWriter: "owner", running: false });
+    const active = record({ agentId: "owner-running", title: "builder", lastWriter: "owner", running: true, client: {} as never });
+    const rows = buildAgentRows(registryOf(idle, active), [], NOW);
+    const idleRow = rows.find((row) => row.name === "reviewer")!;
+    const activeRow = rows.find((row) => row.name === "builder")!;
+    assert.equal(idleRow.state, "idle-awaiting-owner");
+    assert.equal(idleRow.inspectionHint, "/audit reviewer");
+    assert.equal(activeRow.state, "running");
+    assert.equal(activeRow.inspectionHint, "/audit owner-running");
+  });
+
   test("a pendingApproval record is included and ranked awaiting-approval even without a live client", () => {
     const r = record({ pendingApproval: { cmdId: "c1", command: "rm -rf /" } });
     const rows = buildAgentRows(registryOf(r), [], NOW);

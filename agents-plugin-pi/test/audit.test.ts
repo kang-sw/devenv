@@ -151,6 +151,44 @@ describe("parseSessionFile", () => {
     ]);
   });
 
+  test("attributes persisted user entries from the ordered owner-send log and leaves other prompts lead-authored", () => {
+    const path = fixturePath([
+      `{"type":"message","message":{"role":"user","content":"lead prompt"}}`,
+      `{"type":"message","message":{"role":"user","content":"owner one"}}`,
+      `{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"reply"}]}}`,
+      `{"type":"message","message":{"role":"user","content":"owner two"}}`,
+    ]);
+    assert.deepEqual(readSessionHistory(path, [
+      { text: "owner one", at: 1 },
+      { text: "owner two", at: 2 },
+    ]).items, [
+      { kind: "lead-message", text: "lead prompt" },
+      { kind: "user", text: "owner one" },
+      { kind: "assistant", text: "reply" },
+      { kind: "user", text: "owner two" },
+    ]);
+  });
+
+  test("owner attribution stays ordered when lead text repeats a later owner send", () => {
+    const ownerOneAt = Date.parse("2026-09-09T00:00:02.000Z");
+    const ownerTwoAt = Date.parse("2026-09-09T00:00:03.000Z");
+    const path = fixturePath([
+      `{"type":"message","timestamp":"2026-09-09T00:00:01.000Z","message":{"role":"user","content":"same"}}`,
+      `{"type":"message","timestamp":"2026-09-09T00:00:02.000Z","message":{"role":"user","content":"owner first"}}`,
+      `{"type":"message","timestamp":"2026-09-09T00:00:03.000Z","message":{"role":"user","content":"same"}}`,
+      `{"type":"message","timestamp":"2026-09-09T00:00:04.000Z","message":{"role":"user","content":"same"}}`,
+    ]);
+    assert.deepEqual(readSessionHistory(path, [
+      { text: "owner first", at: ownerOneAt },
+      { text: "same", at: ownerTwoAt },
+    ]).items, [
+      { kind: "lead-message", text: "same" },
+      { kind: "user", text: "owner first" },
+      { kind: "user", text: "same" },
+      { kind: "lead-message", text: "same" },
+    ]);
+  });
+
   test("a missing/unreadable session file is an explicit unavailable state while the compatibility parser stays empty", () => {
     const missing = join(tmpdir(), "ws-pi-audit-definitely-missing-", `${Date.now()}.jsonl`);
     assert.deepEqual(readSessionHistory(missing), { status: "unavailable", items: [] });
@@ -176,7 +214,7 @@ describe("buildAuditPickerItems", () => {
     const registry = registryOf(dormantOld, runningOld, approval, dormantRecent, owner, runningNew);
     assert.deepEqual(buildAuditPickerItems(registry, NOW), [
       { value: "owner-agent-id", label: "scout · awaiting owner · gpt-5.6-terra · ctx 0.0k · running for 3m" },
-      { value: "appr-agent-id", label: "appr-age · awaiting approval · stored-model · ctx 132.4k · running for 2m" },
+      { value: "appr-agent-id", label: "ignored title · awaiting approval · stored-model · ctx 132.4k · running for 2m" },
       { value: "run-old-id", label: "old-runner · running · large-model · ctx 1354.1k · running for 1m" },
       { value: "run-new-id", label: "new-runner · running · — · ctx ? · running for 5s" },
       { value: "dorm-recent-id", label: "recent-dormant · dormant · — · ctx ? · last active 1s ago" },
@@ -214,6 +252,14 @@ describe("buildAuditPickerItems", () => {
     ]);
   });
 
+  test("an owner-held settled record is an idle-awaiting-owner live tier, not dormant", () => {
+    const NOW = Date.parse("2026-09-09T10:00:00.000Z");
+    const held = record({ agentId: "held-id", alias: "held", lastWriter: "owner", ownerSends: [{ text: "look again", at: NOW - 2_000 }] });
+    assert.deepEqual(buildAuditPickerItems(registryOf(held), NOW), [
+      { value: "held-id", label: "held · idle awaiting owner · — · ctx ? · last active 2s ago" },
+    ]);
+  });
+
   test("an empty registry yields no items", () => {
     assert.deepEqual(buildAuditPickerItems(new Map(), Date.now()), []);
   });
@@ -242,7 +288,7 @@ describe("createAuditChannel", () => {
         };
       },
     };
-    const registry = registryOf(record({ agentId: "a1", client: client as never, streaming: true }));
+    const registry = registryOf(record({ agentId: "a1", client: client as never, streaming: true, running: true }));
     const channel = createAuditChannel(registry, "a1");
     assert.equal(channel.liveness(), "running");
 
@@ -257,12 +303,30 @@ describe("createAuditChannel", () => {
     ]);
   });
 
-  test("liveness delegates to resolveChildLiveness off record.streaming, read fresh each call", () => {
-    const r = record({ agentId: "a1", streaming: false });
+  test("a dormant owner send resyncs the event subscription to the resumed client", async () => {
+    const r = record({ agentId: "a1" });
+    const registry = registryOf(r);
+    let attached: ((evt: unknown) => void) | undefined;
+    const channel = createAuditChannel(registry, "a1", async () => {
+      r.client = { onEvent: (listener: (evt: unknown) => void) => { attached = listener; return () => {}; } } as never;
+    });
+    const events: unknown[] = [];
+    channel.onEvent((evt) => events.push(evt));
+    assert.equal(attached, undefined);
+    await channel.send?.("resume");
+    assert.ok(attached);
+    attached?.({ type: "message_update" });
+    assert.deepEqual(events, [{ type: "message_update" }]);
+  });
+
+  test("liveness reads record.running and last-writer ownership fresh each call", () => {
+    const r = record({ agentId: "a1", running: false });
     const registry = registryOf(r);
     const channel = createAuditChannel(registry, "a1");
     assert.equal(channel.liveness(), "settled");
-    r.streaming = true;
+    r.lastWriter = "owner";
+    assert.equal(channel.liveness(), "idle-awaiting-owner");
+    r.running = true;
     assert.equal(channel.liveness(), "running");
   });
 });
@@ -379,7 +443,7 @@ describe("registerAuditCommands", () => {
   });
 });
 
-describe("openViewer (the read-only overlay: Esc/Enter contract and the one-overlay-at-a-time singleton)", () => {
+describe("openViewer (shared view/steering overlay and one-overlay-at-a-time singleton)", () => {
   test("wires host semantic muted/dim foregrounds into tool rows and the working marker", async () => {
     const path = join(mkdtempSync(join(tmpdir(), "ws-pi-audit-theme-")), "session.jsonl");
     writeFileSync(path, [
@@ -393,7 +457,7 @@ describe("openViewer (the read-only overlay: Esc/Enter contract and the one-over
         return `\x1b[2m${text}\x1b[0m`;
       },
     };
-    const registry = registryOf(record({ agentId: "a1", sessionPath: path, streaming: true }));
+    const registry = registryOf(record({ agentId: "a1", sessionPath: path, streaming: true, running: true }));
     const opened = fakeViewerCtx(theme);
     const promise = openViewer(opened.ctx as never, registry, "a1");
     const component = await opened.componentReady;
@@ -435,7 +499,7 @@ describe("openViewer (the read-only overlay: Esc/Enter contract and the one-over
     await promise;
   });
 
-  test("Esc closes the viewer directly, with no confirmation modal in the way", async () => {
+  test("Esc closes directly in view mode", async () => {
     const registry = registryOf(record({ agentId: "a1" }));
     const opened = fakeViewerCtx();
     const promise = openViewer(opened.ctx as never, registry, "a1");
@@ -469,6 +533,135 @@ describe("openViewer (the read-only overlay: Esc/Enter contract and the one-over
     assert.equal(component.getMode(), "view");
     opened.close();
     await promise;
+  });
+
+  test("interactive Esc opens a width-safe action modal; Ctrl+C is swallowed and Esc cancels it", async () => {
+    const registry = registryOf(record({ agentId: "a1" }));
+    const opened = fakeViewerCtx();
+    const promise = openViewer(opened.ctx as never, registry, "a1");
+    const component = await opened.componentReady;
+    component.handleInput("\r");
+    component.handleInput("\x1b");
+    for (const width of [40, 80, 120]) {
+      const lines = component.render(width);
+      assert.match(lines.join("\n"), /\[hold\].*\[finish\].*\[interrupt\]/);
+      for (const line of lines) assert.ok(visibleWidth(line) <= width);
+    }
+    component.handleInput("\x1b[C");
+    component.handleInput("\x1b[C");
+    component.handleInput("\r");
+    assert.match(component.render(80).join("\n"), /Leave owner steering/, "disabled interrupt is a no-op");
+    component.handleInput("\x03");
+    assert.match(component.render(80).join("\n"), /Leave owner steering/);
+    component.handleInput("\x1b");
+    assert.equal(component.getMode(), "interactive");
+    opened.close();
+    await promise;
+  });
+
+  test("Kitty and modifyOtherKeys Escape encodings open and cancel the action modal", async () => {
+    for (const escape of ["\x1b[27u", "\x1b[27;1;27~"]) {
+      const opened = fakeViewerCtx();
+      const promise = openViewer(opened.ctx as never, registryOf(record({ agentId: `a-${escape.length}` })), `a-${escape.length}`);
+      const component = await opened.componentReady;
+      component.handleInput("\r");
+      component.handleInput(escape);
+      assert.match(component.render(80).join("\n"), /Leave owner steering/);
+      component.handleInput(escape);
+      component.handleInput("\x1b");
+      assert.match(component.render(80).join("\n"), /Leave owner steering/, "encoded Esc canceled the modal, so the next raw Esc reopens it");
+      opened.close();
+      await promise;
+    }
+  });
+
+  test("hold is the default modal action and closes without changing ownership", async () => {
+    const held = record({ agentId: "a1", lastWriter: "owner" });
+    const opened = fakeViewerCtx();
+    const promise = openViewer(opened.ctx as never, registryOf(held), "a1");
+    const component = await opened.componentReady;
+    component.handleInput("\r");
+    component.handleInput("\x1b");
+    component.handleInput("\r");
+    await promise;
+    assert.equal(held.lastWriter, "owner");
+  });
+
+  test("interrupt aborts only a running turn, preserves owner ownership, and leaves the view open", async () => {
+    let aborted = 0;
+    const live = record({
+      agentId: "a1",
+      running: true,
+      streaming: true,
+      lastWriter: "owner",
+      client: { onEvent: () => () => {}, abort: async () => { aborted++; } } as never,
+    });
+    const opened = fakeViewerCtx();
+    const promise = openViewer(opened.ctx as never, registryOf(live), "a1");
+    const component = await opened.componentReady;
+    component.handleInput("\r");
+    component.handleInput("\x1b");
+    component.handleInput("\x1b[C");
+    component.handleInput("\x1b[C");
+    component.handleInput("\r");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(aborted, 1);
+    assert.equal(live.lastWriter, "owner");
+    assert.equal(component.getMode(), "interactive");
+    opened.close();
+    await promise;
+  });
+
+  test("finish sends one lead-attributed handoff only for owner-held work and closes", async () => {
+    const followed: string[] = [];
+    const live = record({
+      agentId: "a1",
+      running: true,
+      streaming: true,
+      lastWriter: "owner",
+      client: {
+        onEvent: () => () => {},
+        followUp: async (text: string) => { followed.push(text); },
+        steer: async () => {},
+      } as never,
+    });
+    const registry = registryOf(live);
+    const opened = fakeViewerCtx();
+    const promise = openViewer(opened.ctx as never, registry, "a1", { pi: {} as ExtensionAPI, cwd: process.cwd(), extensionPath: "test-extension.ts" });
+    const component = await opened.componentReady;
+    component.handleInput("\r");
+    component.handleInput("\x1b");
+    component.handleInput("\x1b[C");
+    component.handleInput("\r");
+    await promise;
+    assert.equal(followed.length, 1);
+    assert.match(followed[0]!, /owner has finished steering/i);
+    assert.equal(live.lastWriter, "lead");
+  });
+
+  test("finish with no owner send closes without dispatching a lead handoff", async () => {
+    const followed: string[] = [];
+    const live = record({
+      agentId: "a1",
+      running: true,
+      streaming: true,
+      lastWriter: "lead",
+      client: {
+        onEvent: () => () => {},
+        followUp: async (text: string) => { followed.push(text); },
+        steer: async () => {},
+      } as never,
+    });
+    const opened = fakeViewerCtx();
+    const promise = openViewer(opened.ctx as never, registryOf(live), "a1", { pi: {} as ExtensionAPI, cwd: process.cwd(), extensionPath: "test-extension.ts" });
+    const component = await opened.componentReady;
+    component.handleInput("\r");
+    component.handleInput("\x1b");
+    component.handleInput("\x1b[C");
+    component.handleInput("\r");
+    await promise;
+    assert.deepEqual(followed, []);
+    assert.equal(live.lastWriter, "lead");
   });
 
   test("a second /audit closes the first overlay — the first agent's own record/session is untouched", async () => {

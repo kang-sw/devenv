@@ -40,7 +40,7 @@ export function publishSubtree(registry: RpcAgentRegistry | undefined, dispatche
   let outstanding = 0, active = p.dispatching;
   for (const r of registry.values()) {
     if (r.expectedReport || r.waitingOnChildren) outstanding++;
-    if (r.running || r.streaming || r.threadBound || r.ownerHeld) active++;
+    if (r.running || r.streaming || r.threadBound || r.lastWriter === "owner") active++;
   }
   p.delegated ||= registry.size > 0;
   const snapshot = { nonce: p.channel?.nonce ?? "local", outstanding, active, deliveries: p.deliveries(), delegated: p.delegated, revision: p.revision };

@@ -16,6 +16,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 6ee4871a088eabbf
 sage-review-design-reviewed: 6ee4871a088eabbf
+completed: 2026-09-13
 ---
 
 # Pi adapter: owner audit window for subagent conversations (`/audit`) and owner steering with last-writer settle ownership
@@ -365,3 +366,43 @@ rendering and the toast when it settles with no lead turn, reopen and
 the widget row returns to the lead's fan-in; `interrupt` a streaming child
 and confirm it stops mid-turn with the view still open.
 
+### Result (6d6e8207) - 2026-09-13
+
+Implemented owner steering over the Phase-1 audit surface and the shared
+fork-raised `/answer` conversation binding. `RpcAgentRecord.lastWriter` is the
+single ownership source, ordered `ownerSends` provide persisted transcript
+attribution, and rejected or overlapping sends roll back only their own writer
+operation. Owner-held children now receive TUI-only settle/advisory notices and
+share the thread-bound lifecycle exemptions for fan-in, parking, alias reuse,
+capacity eviction, retention, sidecar recovery, subtree activity, and anti-bleed
+nudging. Every lead-side prompt reclaims ownership.
+
+Added the shared hold/finish/interrupt overlay, semantic host key handling,
+visible rejected-send errors, audit-to-interactive mode promotion, dormant
+resume only on send, and record-backed history for both `/audit` and
+fork-raised `/answer`. Finish performs the appropriate lead handoff (or the
+existing lead-ask/fork reconciliation), including immediate ownership release
+when an already accepted terminal outcome avoids another prompt. Interrupt uses
+Pi's verified RPC `abort` and leaves the view and ownership intact. Removed the
+obsolete `overlayAttached` and thread-local transcript models. Updated
+`pi-adapter-runtime` for the public ownership, routing, lifecycle, widget, and
+modal contracts.
+
+Verification: `cd agents-plugin-pi && npm test` passed on the unchanged final
+input (1797 tests: 1795 pass, 0 fail, 2 skip). A preceding full-suite attempt
+hit a transient launcher `EPIPE`; its named test passed alone before the clean
+full retry. Focused audit/ask/conversation-view/spawner/widget runs passed and
+`git diff --check` passed. The package declares no `typecheck` script, so
+`npm run typecheck` reported `Missing script: "typecheck"`. Partitioned
+correctness, fit, and test review found 10 Important and 1 Minor issues in
+round one; commit `6d6e8207` resolved every named issue, and all three round-two
+verification reviews were clean with no unresolved observations.
+
+The owner-only live TUI exercise remains for the lead/owner after integration;
+it cannot be performed from the worker's model-side execution surface.
+
+
+
+## Resolution (2026-09-13)
+
+Completed Phase 2 owner steering, ownership lifecycle integration, persistence, shared audit/answer binding, runtime specification updates, and regression coverage. The unchanged final test input and all three round-two review partitions are clean. The owner-only live TUI exercise remains an explicit post-integration validation for the lead/owner.

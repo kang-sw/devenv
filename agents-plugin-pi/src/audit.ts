@@ -1,18 +1,9 @@
 /**
- * `260908-feat-ws-pi-subagent-audit-window-and-owner-steering` Phase 1: the
- * `/audit` command, its picker modal and keyboard shortcut, the session-file
- * parser to `ConversationItem`s, the `ConversationChannel` over a registry
- * record, and the `"view"`-mode overlay itself.
- *
- * Phase 1 is READ-ONLY, human-only surfaces: `ctx.ui.custom` (the picker,
- * the viewer overlay) plus `setWidget`/`setStatus`/tool-result `details`
- * conventions elsewhere in this package — this module never calls
- * `pi.sendMessage`, and `createAuditChannel`'s `ConversationChannel` omits
- * `send` entirely (that field is optional exactly so a `"view"`-only
- * consumer like this one is not forced to implement it — see
- * `conversation-view.ts`'s own header comment). Owner-steering
- * (`ConversationChannel.send`, the `[hold]/[finish]/[interrupt]` modal,
- * `lastWriter`/`ownerSends`) is Phase 2, untouched here.
+ * `260908-feat-ws-pi-subagent-audit-window-and-owner-steering`: `/audit`,
+ * session-backed conversation binding, and the shared owner-steering shell.
+ * Phase 1 supplied view mode; Phase 2 adds record-attributed owner sends,
+ * last-writer ownership, and the hold/finish/interrupt modal reused by the
+ * fork-raised `/answer` path.
  *
  * Registration gate is STRICTER than `agent-widget.ts`'s
  * `shouldArmAgentWidget` (`isLeadOrFork`): the ticket's own wording is
@@ -24,21 +15,21 @@
  * is false — `registerAuditCommands` returns before either call, not merely
  * guarding their handlers internally.
  *
- * Golden rule / placement: this module imports FROM `spawner.ts`,
- * `agent-widget.ts`, `ask.ts`, `conversation-view.ts`, `pi-tui.ts`, and
- * `process-role.ts` only, never the reverse.
+ * Placement: `ask.ts` imports the record binding and steering shell from this
+ * module; `agent-widget.ts` therefore keeps its `ask.ts` dependency type-only
+ * to avoid a runtime cycle.
  */
 
 import { readFileSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme, getSelectListTheme } from "@earendil-works/pi-coding-agent";
-import { lastActivityAt, resolveAgentId, type RpcAgentRegistry } from "./spawner.ts";
+import { isOwnerHeld, lastActivityAt, resolveAgentId, sendToAgent, type RpcAgentRecord, type RpcAgentRegistry } from "./spawner.ts";
 import { touchOwnership } from "./agent-storage.ts";
-import { classifyRegistryRowState, formatCompactDuration, formatContextTokens, rowName, type AgentRowState } from "./agent-widget.ts";
-import { resolveChildLiveness } from "./ask.ts";
+import { AGENT_STATE_LABEL, AGENT_STATE_RANK, classifyRegistryRowState, formatCompactDuration, formatContextTokens, rowName, type AgentRowState } from "./agent-widget.ts";
 import {
   ConversationViewComponent,
   conversationOverlayHeight,
+  isEscapeKey,
   toolResultContentText,
   wrapInBorder,
   type ConversationChannel,
@@ -56,6 +47,7 @@ import type { SpawnRole } from "./process-role.ts";
 /** Minimal shape of one session-file line this parser cares about — see `node_modules/@earendil-works/pi-coding-agent/docs/session-format.md`. Every other `type`/`role` is skipped (Phase 1's explicit mapping contract; see the plan's Escalations). */
 interface SessionMessageEntry {
   type?: string;
+  timestamp?: string;
   message?: {
     role?: string;
     content?: unknown;
@@ -93,9 +85,9 @@ function joinTextContent(content: unknown): string {
  * yields `[]`; a malformed line is skipped, not fatal to the rest of the
  * parse.
  *
- * Phase 1's mapping (the ticket's own Phase 1 test list): `role:"user"` ->
- * always `"lead-message"` (no `ownerSends` log exists yet — Phase 2 tells
- * an owner turn apart from a lead one); `role:"assistant"` -> one
+ * Mapping: `role:"user"` becomes `"user"` only when it consumes the next
+ * matching record-owned `ownerSends` entry; other user messages are
+ * `"lead-message"`. `role:"assistant"` becomes one
  * `"assistant"` item per `text` content block (thinking blocks dropped)
  * plus one `"tool-call"` item per `toolCall` block, in original order;
  * `role:"toolResult"` -> one `"tool-result"` item, its `content` converted
@@ -112,7 +104,7 @@ export interface SessionHistoryRead {
   items: ConversationItem[];
 }
 
-export function readSessionHistory(path: string): SessionHistoryRead {
+export function readSessionHistory(path: string, ownerSends: readonly { text: string; at: number }[] = []): SessionHistoryRead {
   let raw: string;
   try {
     raw = readFileSync(path, "utf8");
@@ -121,6 +113,7 @@ export function readSessionHistory(path: string): SessionHistoryRead {
   }
 
   const items: ConversationItem[] = [];
+  let nextOwnerSend = 0;
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
     let entry: SessionMessageEntry;
@@ -133,7 +126,16 @@ export function readSessionHistory(path: string): SessionHistoryRead {
     if (entry?.type !== "message" || !message || typeof message !== "object") continue;
 
     if (message.role === "user") {
-      items.push({ kind: "lead-message", text: joinTextContent(message.content) });
+      const text = joinTextContent(message.content);
+      const ownerSend = ownerSends[nextOwnerSend];
+      const entryAt = typeof entry.timestamp === "string" ? Date.parse(entry.timestamp) : Number.NaN;
+      const afterOwnerDispatch = !Number.isFinite(entryAt) || ownerSend === undefined || entryAt >= ownerSend.at;
+      if (ownerSend && ownerSend.text === text && afterOwnerDispatch) {
+        items.push({ kind: "user", text });
+        nextOwnerSend++;
+      } else {
+        items.push({ kind: "lead-message", text });
+      }
       continue;
     }
 
@@ -175,8 +177,8 @@ export function parseSessionFile(path: string): ConversationItem[] {
 }
 
 // ---------------------------------------------------------------------------
-// The audit `ConversationChannel` — `ask.ts`'s `createForkChannel` shape
-// minus `send` (Phase 1 is view-only; see this file's header).
+// Shared record-backed ConversationChannel. `/audit` and fork-raised
+// `/answer` supply their owner-send closures to this same event/liveness seam.
 // ---------------------------------------------------------------------------
 
 /**
@@ -184,11 +186,14 @@ export function parseSessionFile(path: string): ConversationItem[] {
  * `agentId`. `sync()` attaches to `record.client.onEvent` only when a
  * client exists — a dormant record (`client === undefined`) is never
  * attached, which is what makes "opening a dormant child resumes nothing"
- * true for free, exactly as `ask.ts`'s `createForkChannel` already relies
- * on for the same reason. `send` is omitted entirely — the interface marks
- * it optional precisely for a `"view"`-only consumer like this one.
+ * true for free. `send` is present only when the caller supplies the shared
+ * owner delivery closure.
  */
-export function createAuditChannel(rpcRegistry: RpcAgentRegistry, agentId: string): ConversationChannel {
+export function createAuditChannel(
+  rpcRegistry: RpcAgentRegistry,
+  agentId: string,
+  send?: (text: string) => Promise<void>,
+): ConversationChannel {
   const listeners = new Set<(evt: unknown) => void>();
   let attached: unknown;
   let detach: (() => void) | undefined;
@@ -218,8 +223,10 @@ export function createAuditChannel(rpcRegistry: RpcAgentRegistry, agentId: strin
       };
     },
     liveness() {
-      return resolveChildLiveness(rpcRegistry.get(agentId)?.streaming === true);
+      const record = rpcRegistry.get(agentId);
+      return record?.running ? "running" : isOwnerHeld(record) ? "idle-awaiting-owner" : "settled";
     },
+    ...(send ? { send: async (text: string) => { await send(text); sync(); } } : {}),
   };
 }
 
@@ -228,18 +235,6 @@ export function createAuditChannel(rpcRegistry: RpcAgentRegistry, agentId: strin
 // (`agent-widget.ts`'s own naming/ordering rules, reused verbatim) plus a
 // fourth, picker-only dormant tier by last activity.
 // ---------------------------------------------------------------------------
-
-const LIVE_STATE_RANK: Record<AgentRowState, number> = {
-  "awaiting-owner": 0,
-  "awaiting-approval": 1,
-  running: 2,
-};
-
-const LIVE_STATE_LABEL: Record<AgentRowState, string> = {
-  "awaiting-owner": "awaiting owner",
-  "awaiting-approval": "awaiting approval",
-  running: "running",
-};
 
 /**
  * One row per registry child, running AND dormant. Tiers 1-3 reuse
@@ -264,9 +259,9 @@ interface AuditPickerRow {
   lastActivity?: number;
 }
 
-/** Alias-first audit identity; otherwise the eight-character human-facing ID. */
-function auditIdentity(record: { agentId: string; alias?: string }): string {
-  return record.alias ?? record.agentId.slice(0, 8);
+/** The widget's alias > title > short-id identity rule. */
+function auditIdentity(record: RpcAgentRecord): string {
+  return rowName(record);
 }
 
 function elapsedSince(now: number, timestamp: number): number {
@@ -333,17 +328,19 @@ export function buildAuditPickerItems(registry: RpcAgentRegistry, now: number, l
     live.push({
       agentId: record.agentId,
       identity,
-      status: LIVE_STATE_LABEL[state],
+      status: AGENT_STATE_LABEL[state],
       model,
       contextTokens,
-      activity: `running for ${formatCompactDuration(elapsedMs)}`,
+      activity: state === "idle-awaiting-owner"
+        ? formatDormantActivity(now, lastActivityAt(record))
+        : `running for ${formatCompactDuration(elapsedMs)}`,
       state,
       elapsedMs,
     });
   }
 
   live.sort((a, b) => {
-    const rankDiff = LIVE_STATE_RANK[a.state!] - LIVE_STATE_RANK[b.state!];
+    const rankDiff = AGENT_STATE_RANK[a.state!] - AGENT_STATE_RANK[b.state!];
     return rankDiff !== 0 ? rankDiff : b.elapsedMs - a.elapsedMs;
   });
   dormant.sort((a, b) => b.lastActivity! - a.lastActivity!);
@@ -512,26 +509,164 @@ export async function openPicker(ctx: AuditUiCtx & { ui?: { custom?: unknown } }
   );
 }
 
-/**
- * Phase 1's "one overlay at a time": a second `/audit` closes the first —
- * own singleton to this module, independent of `ask.ts`'s own
- * `activeOverlay` (the two surfaces merge in Phase 2; see the plan's Out of
- * Scope). Closing never touches the child itself.
- */
-let activeAuditOverlay: { token: number; close: () => void } | undefined;
-let auditOverlayToken = 0;
+/** One owner conversation overlay across `/audit` and `/answer`. */
+export interface ActiveOwnerOverlay {
+  token: number;
+  close: () => void;
+  threadId?: string;
+  closeWithSummary?: (summary: string, alreadyRendered?: boolean) => void;
+}
+
+let activeOwnerOverlay: ActiveOwnerOverlay | undefined;
+let ownerOverlayToken = 0;
+
+export function reserveOwnerOverlay(): number {
+  activeOwnerOverlay?.close();
+  activeOwnerOverlay = undefined;
+  return ++ownerOverlayToken;
+}
+
+export function activateOwnerOverlay(overlay: ActiveOwnerOverlay): void {
+  if (overlay.token === ownerOverlayToken) activeOwnerOverlay = overlay;
+}
+
+export function clearOwnerOverlay(token: number): void {
+  if (activeOwnerOverlay?.token === token) activeOwnerOverlay = undefined;
+}
+
+export function currentOwnerOverlay(): ActiveOwnerOverlay | undefined {
+  return activeOwnerOverlay;
+}
+
+export const OWNER_FINISH_MESSAGE = "The owner has finished steering. Continue with the lead and report your result through the normal channel.";
+
+type SteeringAction = "hold" | "finish" | "interrupt";
+const STEERING_ACTIONS: readonly SteeringAction[] = ["hold", "finish", "interrupt"];
+interface OwnerSteeringOptions {
+  done(): void;
+  finish(): Promise<void> | void;
+  interrupt(): Promise<void> | void;
+  interruptEnabled(): boolean;
+  notify?(message: string, type?: "info" | "warning" | "error"): void;
+  theme?: { fg?(color: string, text: string): string };
+  matchesKey?: (data: string, keyId: string) => boolean;
+}
+
+/** Shared interactive Esc modal used by `/audit` and fork-raised `/answer`. */
+export class OwnerSteeringComponent implements Component {
+  private modal = false;
+  private selected = 0;
+  private busy = false;
+  private readonly tui: ConversationViewTui;
+  private readonly view: ConversationViewComponent;
+  private readonly options: OwnerSteeringOptions;
+
+  constructor(
+    tui: ConversationViewTui,
+    view: ConversationViewComponent,
+    options: OwnerSteeringOptions,
+  ) {
+    this.tui = tui;
+    this.view = view;
+    this.options = options;
+  }
+
+  invalidate(): void { this.view.invalidate(); }
+  getMode(): "view" | "interactive" { return this.view.getMode(); }
+
+  render(width: number): string[] {
+    if (!this.modal) return this.view.render(width);
+    const w = Math.max(1, width);
+    const innerWidth = Math.max(1, w - 4);
+    const labels = STEERING_ACTIONS.map((action, index) => {
+      const label = `[${action}]`;
+      if (action === "interrupt" && !this.options.interruptEnabled()) return this.options.theme?.fg?.("dim", label) ?? label;
+      return index === this.selected ? (this.options.theme?.fg?.("accent", label) ?? label) : label;
+    }).join(" ");
+    const state = this.busy ? "working…" : "Esc: cancel · Ctrl+C ignored";
+    return wrapInBorder([
+      "Leave owner steering",
+      "",
+      truncateToWidth(labels, innerWidth),
+      "",
+      truncateToWidth(state, innerWidth),
+    ], w, innerWidth);
+  }
+
+  handleInput(data: string): void {
+    if (!this.modal) {
+      if (isEscapeKey(data)) {
+        if (this.view.getMode() === "interactive") {
+          this.modal = true;
+          this.selected = 0;
+          this.tui.requestRender();
+        } else {
+          this.options.done();
+        }
+        return;
+      }
+      this.view.handleInput(data);
+      return;
+    }
+    if (this.busy || data === "\x03") return;
+    if (isEscapeKey(data)) {
+      this.modal = false;
+      this.tui.requestRender();
+      return;
+    }
+    if (this.options.matchesKey?.(data, "left") || data === "\x1b[D") {
+      this.selected = (this.selected + STEERING_ACTIONS.length - 1) % STEERING_ACTIONS.length;
+      this.tui.requestRender();
+      return;
+    }
+    if (this.options.matchesKey?.(data, "right") || data === "\x1b[C") {
+      this.selected = (this.selected + 1) % STEERING_ACTIONS.length;
+      this.tui.requestRender();
+      return;
+    }
+    if (data !== "\r" && data !== "\n") return;
+    const action = STEERING_ACTIONS[this.selected]!;
+    if (action === "hold") {
+      this.options.done();
+      return;
+    }
+    if (action === "interrupt" && !this.options.interruptEnabled()) return;
+    this.busy = true;
+    Promise.resolve(action === "finish" ? this.options.finish() : this.options.interrupt()).then(() => {
+      this.busy = false;
+      if (action === "finish") this.options.done();
+      else this.modal = false;
+      this.tui.requestRender();
+    }).catch((error) => {
+      this.busy = false;
+      this.options.notify?.(`ws: ${action} failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+      this.tui.requestRender();
+    });
+  }
+
+  /** Typed `/done` is the same operation as choosing finish. */
+  finish(): void {
+    if (this.busy) return;
+    this.busy = true;
+    Promise.resolve(this.options.finish()).then(() => this.options.done()).catch((error) => {
+      this.busy = false;
+      this.options.notify?.(`ws: finish failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+      this.tui.requestRender();
+    });
+  }
+}
 
 /**
- * Opens the read-only viewer overlay for `agentId`: history from
- * `parseSessionFile(record.sessionPath)`, live tail from
- * `createAuditChannel`, `"view"` mode. Esc closes the overlay directly (no
- * modal — nothing here asks for confirmation or a summary); Enter raises the
- * component to `"interactive"` via its own `setMode` (the send path itself
- * is Phase 2 — see this file's header). Never resumes a dormant child on its
- * own: opening only reads the session file and (for a live record) the
- * existing RPC client.
+ * Opens the record-backed viewer for `agentId`. View-mode Esc closes; Enter
+ * raises the same component to interactive owner steering, where Esc opens
+ * the shared action modal. Opening alone never resumes a dormant child.
  */
-export async function openViewer(ctx: AuditUiCtx & { ui?: { custom?: unknown } }, rpcRegistry: RpcAgentRegistry, agentId: string): Promise<void> {
+export async function openViewer(
+  ctx: AuditUiCtx & { ui?: { custom?: unknown } },
+  rpcRegistry: RpcAgentRegistry,
+  agentId: string,
+  sendCtx?: { pi: ExtensionAPI; cwd: string; extensionPath: string },
+): Promise<void> {
   if (ctx.mode !== "tui") {
     // Defensive; unreachable given `shouldRegisterAudit`'s registration
     // gate, but matches `ask.ts`'s `openThread` per-call defensive style.
@@ -548,16 +683,16 @@ export async function openViewer(ctx: AuditUiCtx & { ui?: { custom?: unknown } }
     return;
   }
 
-  activeAuditOverlay?.close();
-  activeAuditOverlay = undefined;
-  const token = ++auditOverlayToken;
+  const token = reserveOwnerOverlay();
 
-  const channel = createAuditChannel(rpcRegistry, agentId);
-  const history = readSessionHistory(record.sessionPath);
+  const channel = createAuditChannel(rpcRegistry, agentId, sendCtx ? async (text) => {
+    await sendToAgent(rpcRegistry, { ...sendCtx, writer: "owner" }, agentId, text, record.streaming === true);
+  } : undefined);
+  const history = readSessionHistory(record.sessionPath, record.ownerSends);
   const initialItems = history.status === "available"
     ? history.items
     : [{ kind: "note" as const, text: "History unavailable: the child session file is gone or unreadable." }];
-  const headerHint = `ws audit: ${rowName(record)} · Esc: close · Enter: interact (view-only in Phase 1 — nothing typed here is delivered yet)`;
+  const headerHint = `ws audit: ${rowName(record)} · Esc: actions · Enter: interact`;
 
   let markdownTheme: MarkdownTheme | undefined;
   try {
@@ -569,7 +704,8 @@ export async function openViewer(ctx: AuditUiCtx & { ui?: { custom?: unknown } }
   try {
     await (ctx as unknown as AuditCustomUiCtx).ui.custom<undefined>(async (tui, theme, keybindings, done) => {
       const hostPiTui = await loadHostPiTui();
-      const component: ConversationViewComponent = new ConversationViewComponent(tui, {
+      let component!: OwnerSteeringComponent;
+      const view = new ConversationViewComponent(tui, {
         channel,
         initialItems,
         headerHint,
@@ -577,22 +713,33 @@ export async function openViewer(ctx: AuditUiCtx & { ui?: { custom?: unknown } }
         userLineBg: (text) => theme?.bg?.("userMessageBg", text) ?? text,
         toolTextFg: (text) => theme?.fg?.("muted", text) ?? text,
         workingTextFg: (text) => theme?.fg?.("dim", text) ?? text,
+        onSendError: (error) => notify(ctx, `ws: owner send failed: ${error instanceof Error ? error.message : String(error)}`, "error"),
         border: true,
         viewportHeight: () => conversationOverlayHeight(tui),
         keybindings: keybindings as { matches(data: string, id: string): boolean },
         primitives: { ScrollView: hostPiTui.ScrollView, Markdown: hostPiTui.Markdown, Text: hostPiTui.Text, Editor: hostPiTui.Editor },
-        // No modal — Phase 1's "Esc closes the viewer directly" (contrast
-        // `ask.ts`'s `openThread`, which routes Esc through `overlayHandle`
-        // to participate in a pending-summary race this window has none of).
-        onEscape: () => done(undefined),
-        // Raise-only `setMode` — never touches `record`/the registry.
-        onEnter: () => component.setMode("interactive"),
+        onDone: () => component.finish(),
+        onEnter: () => view.setMode("interactive"),
       });
-      activeAuditOverlay = { token, close: () => done(undefined) };
+      component = new OwnerSteeringComponent(tui, view, {
+        done: () => done(undefined),
+        finish: async () => {
+          if (sendCtx && isOwnerHeld(record)) await sendToAgent(rpcRegistry, sendCtx, agentId, OWNER_FINISH_MESSAGE, false);
+        },
+        interrupt: async () => {
+          const live = rpcRegistry.get(agentId);
+          if (live?.running && live.client) await live.client.abort();
+        },
+        interruptEnabled: () => rpcRegistry.get(agentId)?.running === true && rpcRegistry.get(agentId)?.client !== undefined,
+        notify: (message, type) => notify(ctx, message, type),
+        theme,
+        matchesKey: hostPiTui.matchesKey as (data: string, keyId: string) => boolean,
+      });
+      activateOwnerOverlay({ token, close: () => done(undefined) });
       return component;
     }, AUDIT_OVERLAY_OPTIONS);
   } finally {
-    if (activeAuditOverlay?.token === token) activeAuditOverlay = undefined;
+    clearOwnerOverlay(token);
   }
 }
 
@@ -603,20 +750,26 @@ export async function openViewer(ctx: AuditUiCtx & { ui?: { custom?: unknown } }
  * internally guarded), per the ticket's literal "nothing is registered"
  * wording.
  */
-export function registerAuditCommands(pi: ExtensionAPI, rpcRegistry: RpcAgentRegistry, role: SpawnRole | undefined, mode: string | undefined): void {
+export function registerAuditCommands(
+  pi: ExtensionAPI,
+  rpcRegistry: RpcAgentRegistry,
+  role: SpawnRole | undefined,
+  mode: string | undefined,
+  sessionCtx?: { cwd: string; extensionPath: string },
+): void {
   if (!shouldRegisterAudit(role, mode)) return;
 
   pi.registerCommand("audit", {
-    description: "Open a subagent's read-only transcript (usage: /audit [id-or-alias]; no id opens a picker).",
+    description: "Inspect or steer a subagent (usage: /audit [id-or-alias]; no id opens a picker).",
     handler: async (args, ctx) => {
       const idOrAlias = args.trim();
       if (idOrAlias) {
         const resolved = resolveAgentId(rpcRegistry, idOrAlias) ?? idOrAlias;
-        await openViewer(ctx as never, rpcRegistry, resolved);
+        await openViewer(ctx as never, rpcRegistry, resolved, sessionCtx ? { pi, ...sessionCtx } : undefined);
         return;
       }
       const selected = await openPicker(ctx as never, rpcRegistry);
-      if (selected) await openViewer(ctx as never, rpcRegistry, selected);
+      if (selected) await openViewer(ctx as never, rpcRegistry, selected, sessionCtx ? { pi, ...sessionCtx } : undefined);
     },
   });
 
@@ -624,7 +777,7 @@ export function registerAuditCommands(pi: ExtensionAPI, rpcRegistry: RpcAgentReg
     description: "Open the subagent audit picker.",
     handler: async (ctx) => {
       const selected = await openPicker(ctx as never, rpcRegistry);
-      if (selected) await openViewer(ctx as never, rpcRegistry, selected);
+      if (selected) await openViewer(ctx as never, rpcRegistry, selected, sessionCtx ? { pi, ...sessionCtx } : undefined);
     },
   });
 }

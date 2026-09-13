@@ -184,6 +184,7 @@ import {
   agentWidgetRefreshRef,
   heldPushQueue,
   leadIdleRef,
+  ownerNotifyRef,
   pushToLead,
   registerAgentTools,
   registerPushFlush,
@@ -545,6 +546,9 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // followUp push raised while this session is mid-turn is held until its
     // turn settles instead of going out with an already-stale status line.
     leadIdleRef.current = () => ctx.isIdle();
+    ownerNotifyRef.current = readSpawnRole(process.env) === undefined && ctx.mode === "tui"
+      ? (message, type) => ctx.ui.notify(message, type)
+      : undefined;
     // TUI only: replace Pi's default custom-message rendering for the six
     // push families, whose own content already opens with the family label
     // the default would print again. `registerPushMessageRenderers` now
@@ -730,7 +734,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // marker at all), so a fork child never registers `/audit`. Neither
     // `pi.registerCommand` nor `pi.registerShortcut` is called when the gate
     // is false (see `audit.ts`'s own doc comment).
-    registerAuditCommands(pi, agentTools.rpcRegistry, readSpawnRole(process.env), ctx.mode);
+    registerAuditCommands(pi, agentTools.rpcRegistry, readSpawnRole(process.env), ctx.mode, { cwd: ctx.cwd, extensionPath: extensionEntryPath });
 
     // A task fork inherits the parent's ordered callable surface. A missing
     // parent-only extension may be represented only by a metadata-identical
@@ -861,6 +865,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // forever with nothing left to release them.
     goalLoopHandle.resetCompactionStateForShutdown();
     leadIdleRef.current = undefined;
+    ownerNotifyRef.current = undefined;
     // 260905 (live-agent widget ticket): stop the elapsed timer and clear the
     // widget/status segment (mirrors `leadIdleRef.current = undefined` above)
     // — the registries the controller closed over are about to be discarded.
