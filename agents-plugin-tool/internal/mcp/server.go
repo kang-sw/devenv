@@ -34,6 +34,7 @@ type Server struct {
 	rootMu         sync.RWMutex
 	sessionHarness string
 	sessions       *sessionStore
+	mailbox        mailboxRuntimeState
 }
 
 // gitStatusResult keeps the generic git observation intact while allowing the
@@ -251,6 +252,7 @@ func (s *Server) handle(ctx context.Context, req request) response {
 	switch req.Method {
 	case "initialize":
 		s.observeHarness("initialize", detectHarnessFromInitializeParams(req.Params))
+		s.ensureMailboxRegistered()
 		return response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{
 			"protocolVersion": ProtocolVersion,
 			"serverInfo": map[string]string{
@@ -492,7 +494,7 @@ func builtinConfigAndPromptDefaults() map[string]string {
 // "news/", "rows:", "workflows/") are never mangled.
 var wsNamespaceRef = regexp.MustCompile(`\bws([/:])`)
 
-func (s *Server) callTool(ctx context.Context, req request) response {
+func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	var params struct {
 		Name      string         `json:"name"`
 		Arguments map[string]any `json:"arguments"`
@@ -503,6 +505,14 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	}
 	if params.Arguments == nil {
 		params.Arguments = map[string]any{}
+	}
+	// Central mailbox piggyback wrapper (Decision: one interception point):
+	// every reply this call produces gets a chance at an unread-mail badge,
+	// regardless of which case below built it. See mailbox_tools.go.
+	if keyStr, ok := params.Arguments["session_key"].(string); ok {
+		defer func() {
+			resp = s.applyMailboxPiggyback(resp, keyStr)
+		}()
 	}
 	s.observeHarness("tools.call.meta", detectHarnessFromMeta(params.Meta))
 	if NoAgentMode() && noAgentHiddenTool(params.Name) {
@@ -1460,6 +1470,13 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, renderWorkflowLangRV.Value, renderOverrideLookup)
 		return toolTextResponse(req.ID, withRecommendedRenderBinding(path, s.currentHarness(), recommendedTier, wsconfig.Options{})+"\n", err)
 
+	case "mailbox.send":
+		return s.handleMailboxSend(req.ID, params.Arguments)
+	case "mailbox.recv":
+		return s.handleMailboxRecv(req.ID, params.Arguments)
+	case "mailbox.lookup_peers":
+		return s.handleMailboxLookupPeers(req.ID, params.Arguments)
+
 	default:
 		return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
 	}
@@ -1526,6 +1543,11 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
+	// Ferrule owner binding (mailbox core Decision 3): a parent-less mint is
+	// a top-lead (re-)login, so it rebinds this process's active mailbox
+	// identity's owner pointer to the freshly minted key. A parent-carrying
+	// (worker/delegate) mint never touches it.
+	s.rebindMailboxOwnerAtFerrule(key, parentKey)
 	result := map[string]any{
 		"session_key": key,
 		"root":        canonical,
@@ -3526,6 +3548,45 @@ func tools() []map[string]any {
 					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "mailbox.send",
+			"description": `Send a message to another harness session by stable address, without blocking. "to" is either "<slug>@<scope>" (scope one of "machine", "worktree", "clone") to reach a named inbox, or "id:<reply-id>" to reply to whatever mailbox.recv/mailbox.lookup_peers most recently surfaced as your_reply_id/reply_id for that peer. Works even when the caller has no mailbox identity of its own (WS_MAILBOX/WS_MAILBOX_AUTO unset): the first send from any session opens that session's own reply-id return channel, so a reply sent back to "id:<your reply-id>" is always retrievable via mailbox.recv.`,
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"to":          stringProperty(`Recipient address: "<slug>@<scope>" or "id:<reply-id>".`),
+					"content":     stringProperty("Message body."),
+					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+				},
+				"required": []string{"session_key", "to", "content"},
+			},
+		},
+		{
+			"name":        "mailbox.recv",
+			"description": "Drain and return every unread message addressed to the caller: both this session's own reply-id queue (always, once opened by a prior mailbox.send or self-lookup) and, when this session currently holds the owner binding for the process's active WS_MAILBOX/WS_MAILBOX_AUTO named inbox, that inbox's queue too. Each returned message carries the sender's return handle (its own slug when reachable, otherwise an id:<reply-id>) to reply to with mailbox.send. Non-blocking: returns immediately, empty when there is nothing unread.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "mailbox.lookup_peers",
+			"description": `List live peers self-registered in one mailbox scope ("machine", "worktree", or "clone"), plus a "self" entry: the caller process's own address when it holds an active WS_MAILBOX/WS_MAILBOX_AUTO identity, otherwise the caller session's own reply-id (opening that session's return channel as a side effect, the same as a first mailbox.send). Dead peers (no heartbeat within the liveness window) are filtered out; a name held by two still-live processes at once is surfaced with a conflict marker rather than silently picking one.`,
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"scope":       enumStringProperty(`Which scope to list: "machine", "worktree", or "clone".`, []string{"machine", "worktree", "clone"}),
+					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+				},
+				"required": []string{"session_key", "scope"},
 			},
 		},
 		{

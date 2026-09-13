@@ -1,0 +1,533 @@
+package mcp
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/kang-sw/devenv/internal/wsmailbox"
+)
+
+// setupMailboxTestEnv isolates WS_CACHE_HOME/WS_CONFIG_HOME/WS_RSRC_ROOT per
+// test, mirroring setupNoteTestEnv/setupWorkflowManualNoteEnv, so mailbox
+// storage and the workflow_manual render path never touch the real user
+// home directory and self-address-surface tests can render the manual body.
+func setupMailboxTestEnv(t *testing.T) {
+	t.Helper()
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("WS_RSRC_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "rsrc"))
+}
+
+// mailboxLogin binds a lead session_key to an existing root via ws.ferrule,
+// unlike mintRootKey (which always mints its own fresh root): mailbox scope
+// tests need several servers/keys to share ONE root so their worktree/clone
+// storage paths actually coincide.
+func mailboxLogin(t *testing.T, s *Server, id int, root string) string {
+	t.Helper()
+	key, _ := parseLoginResponse(t, callLogin(t, s, id, root, nil))
+	return key
+}
+
+// TestMailboxInertByDefault verifies Decision 1's inert-by-default contract:
+// with neither WS_MAILBOX nor WS_MAILBOX_AUTO set, and the session having
+// neither sent nor self-looked-up, ordinary tool traffic gets no piggyback
+// badge and touches no mailbox storage at all (no presence file, no
+// machine secret).
+func TestMailboxInertByDefault(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+	s := NewServer(root, "test")
+	key := mailboxLogin(t, s, 1, root)
+
+	resp := callToolWithKey(t, s, 2, key, "runtime.read", nil)
+	if strings.Contains(resp, "unread") {
+		t.Fatalf("inert session unexpectedly got a mailbox badge: %s", resp)
+	}
+
+	machinePath, err := wsmailbox.MachinePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(machinePath); !os.IsNotExist(err) {
+		t.Fatalf("machine mailbox store was created for a fully inert session: %s", machinePath)
+	}
+	worktreePath, err := wsmailbox.WorktreePath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Fatalf("worktree mailbox store was created for a fully inert session: %s", worktreePath)
+	}
+	secretPath, err := wsmailbox.MachineSecretPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(secretPath); !os.IsNotExist(err) {
+		t.Fatalf("machine secret was minted for a fully inert session: %s", secretPath)
+	}
+}
+
+// TestMailboxUniversalSendEnvLessReturnPathAndPiggyback verifies universal
+// send (Decision 11) from an env-less session, that the reply-id it
+// publishes is the HMAC of its session_key (never the raw key), that the
+// named-inbox owner can recv and reply to that reply-id, and that the
+// env-less sender can then recv its own reply and gets a piggyback badge for
+// it beforehand — even though it holds no owner pointer at all.
+func TestMailboxUniversalSendEnvLessReturnPathAndPiggyback(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	t.Setenv(envMailbox, "alice@worktree")
+	serverA := NewServer(root, "test")
+	keyA := mailboxLogin(t, serverA, 1, root)
+
+	t.Setenv(envMailbox, "")
+	serverB := NewServer(root, "test")
+	keyB := mailboxLogin(t, serverB, 1, root)
+
+	sendResp := callToolWithKey(t, serverB, 2, keyB, "mailbox.send", map[string]any{
+		"to": "alice@worktree", "content": "hi from env-less",
+	})
+	if strings.Contains(sendResp, keyB) {
+		t.Fatalf("send response leaked the raw session_key: %s", sendResp)
+	}
+	if !strings.Contains(sendResp, "your_reply_id: id:") {
+		t.Fatalf("send response missing your_reply_id handle: %s", sendResp)
+	}
+
+	secret, err := wsmailbox.EnsureMachineSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantReplyID := wsmailbox.ReplyID(secret, keyB)
+	if !strings.Contains(sendResp, wantReplyID) {
+		t.Fatalf("published reply-id does not match HMAC(machine_secret, session_key): resp=%s want=%s", sendResp, wantReplyID)
+	}
+
+	recvResp := callToolWithKey(t, serverA, 3, keyA, "mailbox.recv", nil)
+	if !strings.Contains(recvResp, "hi from env-less") || !strings.Contains(recvResp, "id:"+wantReplyID) {
+		t.Fatalf("owner recv did not surface the message with the sender's reply-id handle: %s", recvResp)
+	}
+
+	callToolWithKey(t, serverA, 4, keyA, "mailbox.send", map[string]any{
+		"to": "id:" + wantReplyID, "content": "welcome back",
+	})
+
+	badgeResp := callToolWithKey(t, serverB, 5, keyB, "runtime.read", nil)
+	if !strings.Contains(badgeResp, "unread 1") {
+		t.Fatalf("env-less sender got no piggyback badge for its own reply-id queue: %s", badgeResp)
+	}
+
+	drainResp := callToolWithKey(t, serverB, 6, keyB, "mailbox.recv", nil)
+	if !strings.Contains(drainResp, "welcome back") {
+		t.Fatalf("env-less sender could not recv its own reply: %s", drainResp)
+	}
+
+	afterDrain := callToolWithKey(t, serverB, 7, keyB, "runtime.read", nil)
+	if strings.Contains(afterDrain, "unread") {
+		t.Fatalf("piggyback badge still present after the reply was drained: %s", afterDrain)
+	}
+}
+
+// TestMailboxReplyIDStableAcrossRestartAndDiesAtNewFerrule verifies Decision
+// 11/13's restart-stability contract: the reply-id is a pure function of
+// (machine_secret, session_key), so it survives a simulated MCP-process
+// restart (a brand new Server instance) while the session_key stays live,
+// but a parent-less ferrule's freshly minted session_key computes a
+// different reply-id, orphaning the old one.
+func TestMailboxReplyIDStableAcrossRestartAndDiesAtNewFerrule(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	server1 := NewServer(root, "test")
+	key1 := mailboxLogin(t, server1, 1, root)
+
+	replyID1, err := server1.mailboxReplyID(key1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !wsmailbox.IsValidReplyID(replyID1) {
+		t.Fatalf("reply-id %q does not match the expected HMAC digest shape", replyID1)
+	}
+
+	// Simulated restart: a brand new process-lifetime Server, same storage
+	// roots (same WS_CACHE_HOME), same still-live session_key.
+	server2 := NewServer(root, "test")
+	replyID2, err := server2.mailboxReplyID(key1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replyID1 != replyID2 {
+		t.Fatalf("reply-id not stable across a simulated MCP-process restart: %s vs %s", replyID1, replyID2)
+	}
+
+	// A parent-less ferrule mints a brand new session_key (revive/re-login);
+	// the reply-id computed from it must differ from the old one.
+	key2 := mailboxLogin(t, server2, 2, root)
+	replyID3, err := server2.mailboxReplyID(key2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replyID3 == replyID1 {
+		t.Fatalf("a new parent-less ferrule's session_key produced the same reply-id as the old one")
+	}
+}
+
+// TestMailboxEnvelopeStampingSameTier verifies Decision 12: mail from a
+// slug'd sender to a recipient sharing that slug's tier arrives stamped
+// from: <slug>, and recv surfaces that handle.
+func TestMailboxEnvelopeStampingSameTier(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	t.Setenv(envMailbox, "alice@worktree")
+	serverA := NewServer(root, "test")
+	keyA := mailboxLogin(t, serverA, 1, root)
+
+	t.Setenv(envMailbox, "bob@worktree")
+	serverB := NewServer(root, "test")
+	keyB := mailboxLogin(t, serverB, 1, root)
+
+	sendResp := callToolWithKey(t, serverA, 2, keyA, "mailbox.send", map[string]any{
+		"to": "bob@worktree", "content": "same tier",
+	})
+	if !strings.Contains(sendResp, "from: alice@worktree") {
+		t.Fatalf("same-tier send not stamped from: <slug>: %s", sendResp)
+	}
+
+	recvResp := callToolWithKey(t, serverB, 3, keyB, "mailbox.recv", nil)
+	if !strings.Contains(recvResp, "alice@worktree: same tier") {
+		t.Fatalf("recv did not surface the sender's durable from: handle: %s", recvResp)
+	}
+}
+
+// TestMailboxAutoIdentityCollisionFreeAndExplicitOverride verifies Decision
+// 10: WS_MAILBOX_AUTO mints a random 3-word stem, two independent
+// resolutions never collide, and an explicit WS_MAILBOX overrides
+// WS_MAILBOX_AUTO when both are set.
+func TestMailboxAutoIdentityCollisionFreeAndExplicitOverride(t *testing.T) {
+	t.Setenv(envMailbox, "")
+	t.Setenv(envMailboxAuto, "worktree")
+
+	id1 := computeMailboxIdentity()
+	id2 := computeMailboxIdentity()
+	if !id1.Active || !id2.Active || !id1.Auto || !id2.Auto {
+		t.Fatalf("WS_MAILBOX_AUTO identity not active/auto: %#v %#v", id1, id2)
+	}
+	if id1.Scope != wsmailbox.ScopeWorktree || id2.Scope != wsmailbox.ScopeWorktree {
+		t.Fatalf("auto identity scope mismatch: %#v %#v", id1, id2)
+	}
+	if id1.Name == id2.Name {
+		t.Fatalf("two independent WS_MAILBOX_AUTO resolutions minted the same stem: %s", id1.Name)
+	}
+
+	t.Setenv(envMailbox, "carol@machine")
+	id3 := computeMailboxIdentity()
+	if id3.Auto || id3.Name != "carol" || id3.Scope != wsmailbox.ScopeMachine {
+		t.Fatalf("explicit WS_MAILBOX did not override WS_MAILBOX_AUTO when both are set: %#v", id3)
+	}
+}
+
+// TestMailboxSelfAddressSurface verifies Decision 10's self-address surface:
+// the workflow_manual ambient block exposes the caller's own resolved
+// <stem>@<scope>, mailbox.lookup_peers lists it as a self entry, an
+// env-less caller's self entry is its own reply-id (not an unreachable
+// address), and a peer's presence record carries descriptive metadata.
+func TestMailboxSelfAddressSurface(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	t.Setenv(envMailboxAuto, "worktree")
+	serverA := NewServer(root, "test")
+	keyA := mailboxLogin(t, serverA, 1, root)
+
+	identity := serverA.mailboxIdentityResolved()
+	if !identity.Active || !identity.Auto {
+		t.Fatalf("WS_MAILBOX_AUTO identity not active: %#v", identity)
+	}
+
+	manualResp := callToolWithKey(t, serverA, 2, keyA, "workflow_manual", nil)
+	if !strings.Contains(manualResp, "Mailbox address:") || !strings.Contains(manualResp, identity.Name+"@worktree") {
+		t.Fatalf("workflow_manual ambient block missing the resolved self mailbox address: %s", manualResp)
+	}
+
+	t.Setenv(envMailboxAuto, "")
+	serverB := NewServer(root, "test")
+	keyB := mailboxLogin(t, serverB, 1, root)
+
+	lookupResp := callToolWithKey(t, serverB, 2, keyB, "mailbox.lookup_peers", map[string]any{"scope": "worktree"})
+	if !strings.Contains(lookupResp, identity.Name+"@worktree") {
+		t.Fatalf("lookup_peers did not list the auto-identity peer: %s", lookupResp)
+	}
+	if !strings.Contains(lookupResp, "cwd=") || !strings.Contains(lookupResp, "started_at=") {
+		t.Fatalf("lookup_peers missing peer descriptive metadata (cwd/started_at): %s", lookupResp)
+	}
+	if !strings.Contains(lookupResp, "self: ") || !strings.Contains(lookupResp, "reply-id only") {
+		t.Fatalf("env-less caller's lookup_peers self entry is not its own reply-id: %s", lookupResp)
+	}
+}
+
+// TestMailboxOwnerGate verifies Decision 3: only the caller_session_key ==
+// owner_key gate is authorized against the named inbox (recv, and claiming
+// the slug's from: identity when sending, and the piggyback badge); a
+// non-owner session_key sharing the same process is inert with respect to
+// that named inbox, though it may still send/recv on its own reply-id.
+func TestMailboxOwnerGate(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	t.Setenv(envMailbox, "alice@worktree")
+	serverA := NewServer(root, "test")
+	keyA := mailboxLogin(t, serverA, 1, root)
+
+	// A parent-carrying (delegate) mint sharing serverA's process/identity,
+	// but never the owner.
+	delegateResp := callLogin(t, serverA, 2, root, map[string]any{
+		"parent_session_key": keyA,
+		"capability":         "delegate",
+	})
+	keyA2, _ := parseLoginResponse(t, delegateResp)
+
+	t.Setenv(envMailbox, "bob@worktree")
+	serverB := NewServer(root, "test")
+	keyB := mailboxLogin(t, serverB, 1, root)
+
+	// A third party's mail lands in alice's named inbox before either A key
+	// touches it.
+	callToolWithKey(t, serverB, 2, keyB, "mailbox.send", map[string]any{
+		"to": "alice@worktree", "content": "for the owner",
+	})
+
+	// The non-owner delegate key must not be able to claim alice@worktree's
+	// from: identity when sending.
+	delegateSend := callToolWithKey(t, serverA, 3, keyA2, "mailbox.send", map[string]any{
+		"to": "bob@worktree", "content": "from delegate",
+	})
+	if strings.Contains(delegateSend, "from: alice@worktree") || !strings.Contains(delegateSend, "reply_to: id:") {
+		t.Fatalf("non-owner session_key was able to claim the named inbox's from: identity: %s", delegateSend)
+	}
+
+	// The non-owner delegate key must not be able to drain the named inbox.
+	delegateRecv := callToolWithKey(t, serverA, 4, keyA2, "mailbox.recv", nil)
+	if strings.Contains(delegateRecv, "for the owner") {
+		t.Fatalf("non-owner session_key drained the named inbox: %s", delegateRecv)
+	}
+
+	// Nor does it get a piggyback badge for the named inbox's unread mail.
+	delegateBadge := callToolWithKey(t, serverA, 5, keyA2, "runtime.read", nil)
+	if strings.Contains(delegateBadge, "unread") {
+		t.Fatalf("non-owner session_key got a piggyback badge for the named inbox: %s", delegateBadge)
+	}
+
+	// The owner key, by contrast, gets the badge and can drain the mail.
+	ownerBadge := callToolWithKey(t, serverA, 6, keyA, "runtime.read", nil)
+	if !strings.Contains(ownerBadge, "unread 1") {
+		t.Fatalf("owner session_key got no piggyback badge for its own named inbox: %s", ownerBadge)
+	}
+	ownerRecv := callToolWithKey(t, serverA, 7, keyA, "mailbox.recv", nil)
+	if !strings.Contains(ownerRecv, "for the owner") {
+		t.Fatalf("owner session_key could not drain its own named inbox: %s", ownerRecv)
+	}
+}
+
+// TestMailboxFerruleRebindPreservesAddressAndQueuedMail verifies Decision 3:
+// a parent-carrying ferrule never rebinds the owner pointer; a parent-less
+// ferrule does, without re-minting the address; and mail queued before the
+// rebind stays drainable by the new owner while the stale old owner key
+// loses access.
+func TestMailboxFerruleRebindPreservesAddressAndQueuedMail(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	t.Setenv(envMailbox, "alice@worktree")
+	serverA := NewServer(root, "test")
+	keyA1 := mailboxLogin(t, serverA, 1, root)
+
+	// A parent-carrying ferrule must NOT rebind ownership.
+	callLogin(t, serverA, 2, root, map[string]any{"parent_session_key": keyA1})
+
+	path, err := wsmailbox.WorktreePath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := wsmailbox.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.Presence["alice"].Owner != keyA1 {
+		t.Fatalf("a parent-carrying ferrule rebound ownership: owner = %q, want unchanged %q", store.Presence["alice"].Owner, keyA1)
+	}
+
+	// Queue mail for alice while keyA1 still owns the name.
+	t.Setenv(envMailbox, "")
+	serverB := NewServer(root, "test")
+	keyB := mailboxLogin(t, serverB, 1, root)
+	callToolWithKey(t, serverB, 2, keyB, "mailbox.send", map[string]any{
+		"to": "alice@worktree", "content": "queued before rebind",
+	})
+
+	// A parent-less ferrule (revive) rebinds the owner pointer; the address
+	// itself must not change.
+	keyA2 := mailboxLogin(t, serverA, 3, root)
+	if keyA2 == keyA1 {
+		t.Fatalf("expected a fresh session_key from the parent-less ferrule")
+	}
+
+	identity := serverA.mailboxIdentityResolved()
+	if identity.Name != "alice" || identity.Scope != wsmailbox.ScopeWorktree {
+		t.Fatalf("mailbox address changed across a ferrule owner rebind: %#v", identity)
+	}
+
+	store2, err := wsmailbox.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store2.Presence["alice"].Owner != keyA2 {
+		t.Fatalf("parent-less ferrule did not rebind the owner pointer: owner = %q, want %q", store2.Presence["alice"].Owner, keyA2)
+	}
+
+	recvResp := callToolWithKey(t, serverA, 4, keyA2, "mailbox.recv", nil)
+	if !strings.Contains(recvResp, "queued before rebind") {
+		t.Fatalf("mail queued before an owner-key rebind was lost: %s", recvResp)
+	}
+
+	oldOwnerResp := callToolWithKey(t, serverA, 5, keyA1, "mailbox.recv", nil)
+	if strings.Contains(oldOwnerResp, "queued before rebind") {
+		t.Fatalf("stale pre-rebind owner key could still drain the named inbox after rebind")
+	}
+}
+
+// TestMailboxTieredSlugDurabilityAcrossScopeAndFerrule verifies Decision 13:
+// a machine-scope slug is reachable (and stamped from:) from a cross-scope
+// peer and keeps working across that peer's own ferrule churn; a
+// worktree-scope slug reaches a cross-scope peer only as a reply-to: id:
+// handle.
+func TestMailboxTieredSlugDurabilityAcrossScopeAndFerrule(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	t.Setenv(envMailbox, "carol@machine")
+	serverC := NewServer(root, "test")
+	keyC := mailboxLogin(t, serverC, 1, root)
+
+	t.Setenv(envMailbox, "alice@worktree")
+	serverA := NewServer(root, "test")
+	keyA1 := mailboxLogin(t, serverA, 1, root)
+
+	sendFromCarol := callToolWithKey(t, serverC, 2, keyC, "mailbox.send", map[string]any{
+		"to": "alice@worktree", "content": "from machine tier",
+	})
+	if !strings.Contains(sendFromCarol, "from: carol@machine") {
+		t.Fatalf("machine-scope sender not stamped from: <slug> across scopes: %s", sendFromCarol)
+	}
+
+	sendFromAlice := callToolWithKey(t, serverA, 3, keyA1, "mailbox.send", map[string]any{
+		"to": "carol@machine", "content": "from worktree tier",
+	})
+	if strings.Contains(sendFromAlice, "from: alice@worktree") || !strings.Contains(sendFromAlice, "reply_to: id:") {
+		t.Fatalf("worktree-scope sender wrongly claimed a durable from: handle across scopes: %s", sendFromAlice)
+	}
+
+	// alice's own ferrule churns; carol's machine-scope address and
+	// ownership must be completely unaffected.
+	keyA2 := mailboxLogin(t, serverA, 4, root)
+	sendFromAlice2 := callToolWithKey(t, serverA, 5, keyA2, "mailbox.send", map[string]any{
+		"to": "carol@machine", "content": "after churn",
+	})
+	if !strings.Contains(sendFromAlice2, "sent to carol@machine") {
+		t.Fatalf("carol's machine-scope slug stopped working after an unrelated peer's ferrule churn: %s", sendFromAlice2)
+	}
+
+	carolPath, err := wsmailbox.MachinePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	carolStore, err := wsmailbox.Load(carolPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if carolStore.Presence["carol"].Owner != keyC {
+		t.Fatalf("carol's ownership was disturbed by an unrelated peer's ferrule churn: %#v", carolStore.Presence["carol"])
+	}
+}
+
+// TestMailboxLookupPeersFiltersDeadPeersAndSurfacesConflict verifies
+// Decision 2: lookup_peers hides a peer once its heartbeat is older than
+// the liveness threshold, and a duplicate live-name registration never
+// clobbers the first process's presence record but flags it Conflict,
+// surfaced through lookup_peers.
+func TestMailboxLookupPeersFiltersDeadPeersAndSurfacesConflict(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	t.Setenv(envMailbox, "dora@worktree")
+	serverD := NewServer(root, "test")
+	mailboxLogin(t, serverD, 1, root)
+
+	t.Setenv(envMailbox, "")
+	serverLooker := NewServer(root, "test")
+	keyLooker := mailboxLogin(t, serverLooker, 1, root)
+
+	liveResp := callToolWithKey(t, serverLooker, 2, keyLooker, "mailbox.lookup_peers", map[string]any{"scope": "worktree"})
+	if !strings.Contains(liveResp, "dora@worktree") {
+		t.Fatalf("lookup_peers did not list a live peer: %s", liveResp)
+	}
+
+	original := mailboxNow
+	t.Cleanup(func() { mailboxNow = original })
+	mailboxNow = func() time.Time { return original().Add(mailboxLivenessThreshold + time.Minute) }
+
+	deadResp := callToolWithKey(t, serverLooker, 3, keyLooker, "mailbox.lookup_peers", map[string]any{"scope": "worktree"})
+	if strings.Contains(deadResp, "dora@worktree") {
+		t.Fatalf("lookup_peers listed a peer with no heartbeat inside the liveness window: %s", deadResp)
+	}
+	mailboxNow = original
+
+	// Duplicate-live-name conflict: fabricate an existing live presence
+	// record under a different PID, then self-register over it.
+	path, err := wsmailbox.WorktreePath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+		store.Presence["eve"] = wsmailbox.Presence{
+			Name: "eve", Scope: wsmailbox.ScopeWorktree, PID: os.Getpid() + 1, LastSeen: mailboxNowString(),
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv(envMailbox, "eve@worktree")
+	serverE := NewServer(root, "test")
+	serverE.ensureMailboxRegistered()
+
+	afterConflict, err := wsmailbox.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !afterConflict.Presence["eve"].Conflict {
+		t.Fatalf("duplicate live-name registration did not flag Conflict on the existing record: %#v", afterConflict.Presence["eve"])
+	}
+	if afterConflict.Presence["eve"].PID != os.Getpid()+1 {
+		t.Fatalf("duplicate live-name registration clobbered the first process's presence record: %#v", afterConflict.Presence["eve"])
+	}
+
+	conflictResp := callToolWithKey(t, serverLooker, 4, keyLooker, "mailbox.lookup_peers", map[string]any{"scope": "worktree"})
+	if !strings.Contains(conflictResp, "CONFLICT") {
+		t.Fatalf("lookup_peers did not surface the duplicate-live-name conflict: %s", conflictResp)
+	}
+}

@@ -280,6 +280,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				body = injectBootstrapStalenessWarning(body, warning)
 			}
 			body = injectBootstrapStalenessWarning(body, scopeAnnouncement(canonical))
+			body = injectBootstrapStalenessWarning(body, mailboxAddressAnnouncement(s))
 			body = injectBootstrapStalenessWarning(body, computeManuals(canonical))
 			body = injectBootstrapStalenessWarning(body, wsreview.CheckpointNudge(context.Background(), canonical))
 			if nudge := reviewTrackNudge(canonical); nudge != "" {
@@ -311,6 +312,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				body = injectBootstrapStalenessWarning(body, warning)
 			}
 			body = injectBootstrapStalenessWarning(body, scopeAnnouncement(rec.Root))
+			body = injectBootstrapStalenessWarning(body, mailboxAddressAnnouncement(s))
 			body = injectBootstrapStalenessWarning(body, computeManuals(rec.Root))
 			body = injectBootstrapStalenessWarning(body, wsreview.CheckpointNudge(context.Background(), rec.Root))
 			if !rec.ReviewTrackNudgeShown {
