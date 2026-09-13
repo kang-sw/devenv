@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -29,6 +32,8 @@ func mailboxCommand(args []string) {
 	switch args[0] {
 	case "wait":
 		mailboxWait(args[1:])
+	case "codex-stop-hook":
+		mailboxCodexStopHook(args[1:])
 	default:
 		mailboxUsage()
 		os.Exit(2)
@@ -36,7 +41,7 @@ func mailboxCommand(args []string) {
 }
 
 func mailboxUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp mailbox <wait>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp mailbox <wait|codex-stop-hook>")
 }
 
 // mailboxWaitExitTimeout is the distinguishable exit code for "the wait
@@ -176,4 +181,104 @@ func printMailboxEnvelope(m wsmailbox.Envelope) {
 		handle = m.ReplyTo
 	}
 	fmt.Printf("[%s] %s: %s\n", m.SentAt, handle, m.Content)
+}
+
+// mailboxCodexStopHook implements the Codex Stop-hook adapter's level check
+// (260913-feat-cross-session-mailbox-wake Phase 2, Decisions 6/7/9): a
+// turn-boundary, event-driven read of one slug's named-inbox queue, never a
+// poll loop (Cross-Child Decision 16 — this fires once per Stop event, it
+// does not sleep-and-recheck). It emits Codex's Stop-hook
+// `{"decision":"block","reason":...}` response only when unread mail is
+// pending; otherwise it is silent and exits 0 so the turn concludes
+// normally.
+//
+// This is adapter code, not the host-neutral contract: Phase 1's
+// `mailbox wait`/listening marker back the blocking CLI wait the env-less
+// and Claude paths use; Codex's Stop hook instead re-fires on every turn
+// conclusion, so it only ever needs one non-blocking peek per firing, over
+// internal/wsmailbox's PeekNamedInboxUnread rather than Wait.
+//
+// --slug is baked into the hook command's args at arm time from the
+// harness process's own inherited WS_MAILBOX/WS_MAILBOX_AUTO env — this
+// process has no ws session_key to derive one itself, and per Decision 6
+// the durable, hook-backed wake path requires that slug (env). Every
+// failure path here fails open (exit 0, stderr warning only): a hook that
+// crashes or blocks the harness's turn-conclude step would be worse than a
+// missed wake, and Decision 7 frames this whole adapter as best-effort,
+// never the contract.
+func mailboxCodexStopHook(args []string) {
+	fs := flag.NewFlagSet("mailbox codex-stop-hook", flag.ExitOnError)
+	root := fs.String("root", ".", "caller's own worktree/clone root; only needed to resolve a worktree/clone-scope --slug")
+	slug := fs.String("slug", "", `mailbox slug "name@scope" to check, baked into the hook command at arm time from the harness's own inherited WS_MAILBOX/WS_MAILBOX_AUTO; empty means nothing to check`)
+	reason := fs.String("reason", defaultCodexStopHookReason, "instruction text returned to the model when unread mail is pending")
+	_ = fs.Parse(args)
+
+	*slug = strings.TrimSpace(*slug)
+	if *slug == "" {
+		// No durable inbox to check (env-less session): this hook has
+		// nothing to do. The env-less wake path is the model's own
+		// background-wait registration at piggyback time, not this hook.
+		os.Exit(0)
+	}
+
+	payload, err := readCodexStopHookPayload(os.Stdin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ws-mcp mailbox codex-stop-hook: warning: could not read Stop hook payload: %v\n", err)
+		os.Exit(0)
+	}
+	if payload.StopHookActive {
+		// Loop guard: this is the re-entry Stop from a prior block. Blocking
+		// again here would loop regardless of whether the agent drained the
+		// mail on its one injected instruction cycle.
+		os.Exit(0)
+	}
+
+	unread, err := wsmailbox.PeekNamedInboxUnread(*slug, defaultRoot(*root))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ws-mcp mailbox codex-stop-hook: warning: could not check %s: %v\n", *slug, err)
+		os.Exit(0)
+	}
+	if unread == 0 {
+		os.Exit(0)
+	}
+
+	printJSONOrFatal("mailbox codex-stop-hook", map[string]any{
+		"decision": "block",
+		"reason":   *reason,
+	}, nil)
+}
+
+// defaultCodexStopHookReason is the instruction handed back to the model
+// through Stop's decision:block response. It must stay host-neutral (no
+// this-repository ticket/path references, per shipped-surface-boundary.md):
+// downstream projects install this same plugin text verbatim.
+const defaultCodexStopHookReason = "Unread mail is waiting in your mailbox. Call the mailbox recv tool now, then act on what it returns."
+
+// codexStopHookPayload is the subset of Codex's Stop hook stdin payload
+// this adapter reads. The full payload (per ai-docs/manuals/
+// codex-integration.md's 2026-09-13 re-probe) also carries session_id,
+// turn_id, transcript_path, cwd, hook_event_name, model, permission_mode,
+// and last_assistant_message; none of those are needed to decide whether to
+// block.
+type codexStopHookPayload struct {
+	StopHookActive bool `json:"stop_hook_active"`
+}
+
+// readCodexStopHookPayload decodes r's JSON body, tolerating an empty body
+// (no error, zero-value payload) so an ad-hoc or malformed invocation still
+// fails open rather than erroring on a merely-empty stdin.
+func readCodexStopHookPayload(r io.Reader) (codexStopHookPayload, error) {
+	raw, err := io.ReadAll(r)
+	if err != nil {
+		return codexStopHookPayload{}, fmt.Errorf("read stop hook payload: %w", err)
+	}
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return codexStopHookPayload{}, nil
+	}
+	var payload codexStopHookPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return codexStopHookPayload{}, fmt.Errorf("parse stop hook payload: %w", err)
+	}
+	return payload, nil
 }

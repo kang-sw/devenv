@@ -304,6 +304,56 @@ no plugin). Findings that supersede the 0.128.0 notes above:
 - Useful isolation flags on `codex exec`: `-C/--cd`, `--ignore-user-config`
   (auth still uses `CODEX_HOME`), `--ephemeral`, `--skip-git-repo-check`.
 
+### Plugin-Bundled `hooks.json` Schema (doc-sourced, 2026-09-13)
+
+Sourced from `developers.openai.com/codex/hooks` (redirects to
+`learn.chatgpt.com/docs/hooks`), not re-verified against a live plugin-cache
+install on this CLI — treat as lower-confidence than the hands-on re-probe
+above until dogfooded through an actual plugin refresh.
+
+A plugin manifest points at a bundled hook file the same way it points at
+`skills`/`mcpServers`:
+
+```json
+{ "hooks": "./hooks/hooks.json" }
+```
+
+`hooks.json`'s shape wraps event arrays under a `hooks` key (the JSON
+equivalent of the inline `-c hooks.<Event>=[...]` form used above):
+
+```json
+{
+  "description": "optional",
+  "hooks": {
+    "Stop": [
+      { "type": "command", "command": "<shell command string>", "timeout": 10 }
+    ]
+  }
+}
+```
+
+Per-handler fields: `type` (`"command"` or `"mcp_tool"`), `command` (one
+shell command string — args and quoting live inside that string, there is
+no separate `args` array), `commandWindows` (Windows override),
+`timeout` (seconds), `statusMessage`, `additionalContextLimit`, `async`.
+
+Hook commands reportedly receive plugin-path env vars: `PLUGIN_ROOT` /
+`PLUGIN_DATA`, plus Claude-compatibility aliases `CLAUDE_PLUGIN_ROOT` /
+`CLAUDE_PLUGIN_DATA` — the mechanism a hook command uses to locate a
+plugin-bundled script without relying on the `mcpServers`-block-only `cwd`
+normalization. The mailbox wake adapter's `hooks/hooks.json` (see
+`agents-plugin/hooks/hooks.json`) uses `$PLUGIN_ROOT` on this basis; if a
+live probe finds that variable absent or differently named, fix the hook
+command there rather than only this note.
+
+**Hook trust persistence has no found CLI/config mechanism.** `codex hooks`
+is not a subcommand (`error: unexpected argument 'hooks' found` on 0.154.0),
+and the fetched config reference documents `[hooks]`/`features.hooks` but no
+trust-persistence key. `--dangerously-bypass-hook-trust` is confirmed
+(`codex exec --help`); a config-file or one-time-prompt persistence path
+remains unconfirmed — dogfood an actual interactive install/first-hook-fire
+to find it before documenting one as a deployment step.
+
 ## Model Flag Behavior
 
 - Do **not** pass `--model codex` or `--model gemini` (backend shorthand names).

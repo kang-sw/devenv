@@ -29,6 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 TEXT_TREES = (
     "agents-plugin/rsrc",
     "agents-plugin/skills",
+    "agents-plugin/hooks",
     "agents-plugin-wsflow/rsrc",
     "agents-plugin-wsflow/skills",
     "agents-plugin-tool/internal/wsdoc/conventions",
