@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 3c7cf6fe9b4fbf31
 sage-review-completeness-reviewed: 3c7cf6fe9b4fbf31
+dropped: 2026-09-13
 ---
 
 # tickets.sage_stamp leaves a stale Blocked section on a ticket whose issues were all folded autonomously
@@ -147,3 +148,8 @@ A `goal/track/pi-agent/*` drain therefore cannot author this. Route it to a
 `develop` work session; once it lands on `develop` and the Pi bundle's ws-mcp
 pin advances, this note can be cleared. (No technical blocker — a track-routing
 block only.)
+
+
+## Resolution (2026-09-13)
+
+Superseded by the landed retitling behavior that prevents a completed Sage review from retaining a selector-visible `## Blocked` heading. The remaining shape-aware table cleanup and verifier warning were optional hygiene and are not retained as active work.
