@@ -3,6 +3,10 @@ title: "Pi subagent row token value looks like context usage but omits cached in
 related:
   260909-feat-ws-pi-agent-row-model-and-usage: introduced the compact per-agent usage display
   260912-feat-ws-pi-custom-footer-cost-telemetry: adjacent aggregate telemetry surface; does not own per-agent context semantics
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 7113fc60273a2d60
+sage-review-completeness-reviewed: 7113fc60273a2d60
 ---
 
 # Pi subagent row token value looks like context usage but omits cached input
@@ -21,10 +25,32 @@ Current source intentionally records only `usage.input` as `latestInput` in `age
 - A context meter must use Pi's context-usage source when available. The usage fallback is `usage.totalTokens`, or `usage.input + usage.output + usage.cacheRead + usage.cacheWrite` when the total is absent.
 - Handle the documented `ContextUsage.tokens === null` interval around compaction explicitly rather than briefly presenting a false near-zero context value.
 - Preserve the distinction between per-call uncached input, cumulative cost/usage, and current context occupancy. If more than one is retained, each must be visibly labeled and tested as a separate metric.
+- Replace the compact agent row's existing latest uncached-input value with current context occupancy. Do not retain latest uncached input elsewhere in the compact row.
+- Provider differences are expected: providers without prompt caching may report `usage.input` close to occupancy, while cache-aware providers split most prompt tokens into `cacheRead` or `cacheWrite`. The row must normalize those representations rather than inherit provider-specific apparent behavior.
 
-## Open Decision Queue
+## Constraints
 
-- Should the compact agent row replace the existing unlabeled latest-input value with context occupancy, label and retain latest input while adding context elsewhere, or remove latest input in favor of the planned custom-footer aggregate? Settle the intended owner-visible information density before ready promotion.
+- Prefer Pi's authoritative `ContextUsage.tokens` value when available.
+- When authoritative context usage is unavailable, fall back first to `usage.totalTokens`, then to `usage.input + usage.output + usage.cacheRead + usage.cacheWrite` using only present nonnegative fields.
+- During compaction-time `tokens === null` or an otherwise unknown interval, retain the last valid occupancy for the same agent/session generation or render `?`; never replace it with a misleading near-zero uncached-input value.
+- Reset retained occupancy when agent/session identity changes so stale values cannot cross a resumed or replaced session.
+- Keep the compact row width behavior and truncation guarantees intact.
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-pi/src/agent-telemetry.ts, agents-plugin-pi/src/spawner.ts, agents-plugin-pi/src/agent-widget.ts, and existing telemetry/widget tests |
+| scope.surface | public-interface | owner-visible compact subagent row metric |
+| scope.new_public_symbol | no | no new public symbol requested |
+| scope.new_type_contract | yes | AgentTelemetry occupancy snapshot and row projection |
+| scope.test_surface | existing | agents-plugin-pi/test/agent-telemetry-contract.test.ts, agents-plugin-pi/test/agent-telemetry.test.ts, and agents-plugin-pi/test/agent-widget.test.ts |
+| complexity.reuse_points | confirmed | RpcClient.getSessionStats() exposes contextUsage and current telemetry refresh already calls RpcClient.getState() |
+| complexity.side_effect_risk | moderate | telemetry refresh must preserve a valid occupancy across compaction and session replacement |
+| risk.correctness | high | cached-input-heavy calls and compaction null intervals can display a false occupancy |
+| risk.fit | high | the compact row must preserve its independent cost metric and width and truncation contract |
+| risk.test | high | regression coverage spans cached and uncached usage, compaction, resume, missing fields, and row rendering |
+| risk.security_or_contract | moderate | the owner-visible token value changes from latest input to a distinct context-occupancy contract |
 
 ## Phases
 
