@@ -108,6 +108,9 @@ export function allocateAgentHome(ctx: AgentStorageContext, agentId: string, rol
   return ownership;
 }
 interface OwnershipLock { home: string; release(): void; }
+class OwnershipLockBusyError extends Error {
+  constructor(cause: unknown) { super(String(cause)); this.name = "OwnershipLockBusyError"; }
+}
 
 /** A sibling lock survives atomic home detachment, serializing writers with deletion across processes. */
 function acquireOwnershipLock(home: string): OwnershipLock {
@@ -124,7 +127,7 @@ function acquireOwnershipLock(home: string): OwnershipLock {
       let held = true;
       return { home: canonical, release: () => { if (!held) return; held = false; try { rmSync(lock, { recursive: true, force: true }); } catch { /* a failed release conservatively blocks later deletion */ } } };
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST" || attempt > 0) throw error;
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       // A process killed while holding the claim must not strand the home
       // forever. PID reuse and unreadable/malformed owner facts retain it.
       let pid: number | undefined;
@@ -139,7 +142,8 @@ function acquireOwnershipLock(home: string): OwnershipLock {
         if ((probeError as NodeJS.ErrnoException).code !== "ESRCH") throw error;
         stale = true;
       }
-      if (!stale) throw error;
+      if (!stale) throw new OwnershipLockBusyError(error);
+      if (attempt > 0) throw error;
       const abandoned = `${lock}.abandoned-${process.pid}-${randomUUID()}`;
       renameSync(lock, abandoned);
       try { rmSync(abandoned, { recursive: true, force: true }); } catch { /* detached stale claim cannot block retry */ }
@@ -403,6 +407,7 @@ export function observeSessionWrite(home: string, sessionPath: string): void {
     const now = Date.now();
     writeOwnershipUnlocked({ ...current, sessionSignature: signature, ...(changed ? { lastActivityAt: Math.max(current.lastActivityAt, now) } : {}), updatedAt: now }, lock.home);
   } catch (error) {
+    if (error instanceof OwnershipLockBusyError) return;
     // Unknown observation remains conservative; never infer a write from directory metadata.
     console.error(`ws-pi-agent: could not observe owned session write: ${String(error)}`);
     if (lock && current) {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
@@ -69,6 +69,43 @@ function fixture() {
 }
 
 describe("durable ownership contention at accepted operation boundaries", () => {
+  test("observation silently skips a live claim while authoritative and malformed-lock failures stay diagnostic", { timeout: 15_000 }, async t => {
+    const { root, ownership } = fixture();
+    const diagnostics = t.mock.method(console, "error", () => {});
+    let release: (() => Promise<void>) | undefined;
+    try {
+      const before = readOwnership(ownership.home)!;
+      writeFileSync(ownership.sessionPath!, "new history after the first observation\n");
+      release = await holdClaim(ownership.home, "writer");
+
+      observeSessionWrite(ownership.home, ownership.sessionPath!);
+      assert.equal(diagnostics.mock.callCount(), 0, "a best-effort observer does not report an expected live-holder collision");
+      assert.deepEqual(readOwnership(ownership.home), before, "the skipped sample does not accept an ownership update");
+
+      assert.equal(touchOwnership(ownership.home), false, "authoritative writes still fail closed under the same live claim");
+      assert.equal(diagnostics.mock.callCount(), 1, "authoritative contention remains diagnostic");
+      assert.match(String(diagnostics.mock.calls[0].arguments[0]), /could not update owned agent home/);
+
+      await release(); release = undefined;
+      observeSessionWrite(ownership.home, ownership.sessionPath!);
+      const observed = readOwnership(ownership.home)!;
+      assert.equal(observed.sessionSignature?.size, 40, "the next observer sample records the session change");
+      assert.ok(observed.lastActivityAt > before.lastActivityAt);
+
+      const lock = join(dirname(ownership.home), `.${ownership.agentId}.ownership-lock`);
+      mkdirSync(lock);
+      writeFileSync(join(lock, "owner.json"), "{}");
+      const beforeMalformed = readOwnership(ownership.home)!;
+      observeSessionWrite(ownership.home, ownership.sessionPath!);
+      assert.equal(diagnostics.mock.callCount(), 2, "malformed lock-owner facts remain diagnostic");
+      assert.match(String(diagnostics.mock.calls[1].arguments[0]), /could not observe owned session write.*EEXIST/);
+      assert.deepEqual(readOwnership(ownership.home), beforeMalformed);
+    } finally {
+      if (release) await release();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   for (const kind of ["writer", "deleter"] as const) {
     test(`${kind} overlap refuses owner binds and references rather than accepting unpersisted protection/activity`, { timeout: 15_000 }, async t => {
       const { root, ownership, record, registry, handle } = fixture();

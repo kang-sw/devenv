@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: b1439cdfaeca9a15
 sage-review-completeness-reviewed: b1439cdfaeca9a15
+completed: 2026-09-13
 ---
 
 # Pi ownership observer emits transient lock contention into the TUI
@@ -58,3 +59,14 @@ This is distinct from authoritative ownership mutation and deletion. Those opera
 ### Phase 1: Keep expected observer contention out of the TUI
 
 Introduce an explicit transient-busy classification at the narrowest ownership-lock boundary and consume it silently only from `observeSessionWrite`. Preserve every existing fail-closed caller contract and stale dead-owner recovery behavior. Add cross-process or deterministic lock-fixture coverage proving that a live-holder observer collision emits no `console.error`, leaves ownership metadata unchanged for that sample, succeeds on a later sample after release, and does not suppress malformed-lock or non-observation diagnostics.
+
+### Result (a8a4abe) - 2026-09-13
+
+A confirmed live lock holder now produces an internal transient-busy error that only `observeSessionWrite` consumes silently; authoritative updates still report contention and fail without accepting state. Malformed owner facts, unrelated I/O failures, and stale-lock recovery failures retain their diagnostics and conservative behavior.
+
+A real subprocess lock barrier verifies the silent skipped sample, unchanged metadata, later signature/activity recovery, authoritative write failure, and malformed-lock diagnostics. Focused storage/contention tests passed 26/26; the full Pi suite passed 1,778 tests with 2 expected skips and no failures. Independent correctness, fit, and test reviews were clean with no findings.
+
+
+## Resolution (2026-09-13)
+
+Implemented observer-only transient live-lock suppression while preserving authoritative fail-closed ownership semantics and diagnostics. Cross-process regression coverage and the full Pi suite passed; partitioned correctness, fit, and test reviews were clean.
