@@ -140,9 +140,60 @@ describe("monotonic delegation", () => {
 });
 
 describe("native scoped edit/write wrappers", () => {
+  test("keeps canonical Unicode-space targets distinct from ASCII siblings in native execution", async () => {
+    // These characters are rewritten in native tool inputs, but not in cwd,
+    // decoded file URLs, or symlink targets. All three can enter the checked path.
+    for (const space of "\u00A0\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u202F\u205F\u3000") {
+      for (const origin of ["cwd", "symlink", "file URL"] as const) {
+        const root = tempRoot();
+        const grantedDir = join(root, `with${space}space`);
+        const siblingDir = join(root, "with space");
+        mkdirSync(grantedDir);
+        mkdirSync(siblingDir);
+        const target = join(grantedDir, "child.md");
+        const sibling = join(siblingDir, "child.md");
+        const alias = join(root, "alias");
+        if (origin === "symlink") symlinkSync(grantedDir, alias, "dir");
+        const input = origin === "cwd" ? "child.md"
+          : origin === "symlink" ? join(alias, "child.md") : pathToFileURL(target).href;
+        const ctx = { cwd: origin === "cwd" ? grantedDir : root };
+        const capability = normalizeWriteScopes([{ path: target, kind: "file" }]);
+        const tools = new Map<string, any>();
+        registerScopedWriteTools({ registerTool: (tool: any) => tools.set(tool.name, tool) } as ExtensionAPI, capability);
+        const label = `${origin}: U+${space.codePointAt(0)!.toString(16)}`;
+
+        await tools.get("write").execute("create", { path: input, content: "created\n" }, undefined, undefined, ctx);
+        assert.equal(existsSync(sibling), false, `${label}: must not create the ASCII sibling`);
+        assert.equal(readFileSync(target, "utf8"), "created\n", `${label}: must create the granted target`);
+
+        writeFileSync(sibling, "sibling sentinel\n");
+        await tools.get("write").execute("replace", { path: input, content: "before\n" }, undefined, undefined, ctx);
+        assert.equal(readFileSync(target, "utf8"), "before\n", `${label}: must replace the granted target`);
+        assert.equal(readFileSync(sibling, "utf8"), "sibling sentinel\n", `${label}: must not replace the sibling`);
+        writeFileSync(sibling, "before\n"); // Both targets match oldText, so an escaped edit would succeed.
+        const result = await tools.get("edit").execute("edit", {
+          path: input, edits: [{ oldText: "before", newText: "after" }],
+        }, undefined, undefined, ctx);
+        assert.match(result.details.diff, /\+.*after/, `${label}: must return the native edit diff`);
+        assert.equal(readFileSync(sibling, "utf8"), "before\n", `${label}: must not edit the ASCII sibling`);
+        assert.equal(readFileSync(target, "utf8"), "after\n", `${label}: must edit the granted target`);
+
+        for (const name of ["write", "edit"]) {
+          const params = name === "write" ? { content: "denied" } : { edits: [{ oldText: "before", newText: "denied" }] };
+          await assert.rejects(
+            tools.get(name).execute("denied", { ...params, path: pathToFileURL(sibling).href }, undefined, undefined, ctx),
+            /outside delegated write scopes/,
+            `${label}: explicit sibling ${name} must be denied`,
+          );
+        }
+        assert.equal(readFileSync(sibling, "utf8"), "before\n");
+      }
+    }
+  });
+
   test("exposes only edit/write wrappers and preserves native create/replace/edit behavior", async () => {
     const root = tempRoot();
-    const target = join(root, "result.md");
+    const target = join(root, "result #100%25.md");
     const capability = normalizeWriteScopes([{ path: root, kind: "tree", include: ["**/*.md"] }]);
     const tools = new Map<string, any>();
     const pi = { registerTool: (tool: any) => tools.set(tool.name, tool) } as ExtensionAPI;
@@ -159,7 +210,7 @@ describe("native scoped edit/write wrappers", () => {
     assert.match(editResult.content[0].text, /Successfully replaced/);
     assert.equal(readFileSync(target, "utf8"), "after\n");
 
-    const urlTarget = join(root, "url.md");
+    const urlTarget = join(root, "url #100%25.md");
     await tools.get("write").execute("url", { path: pathToFileURL(urlTarget).href, content: "native url\n" }, undefined, undefined, ctx);
     assert.equal(readFileSync(urlTarget, "utf8"), "native url\n", "native file-URL path semantics are authorized and preserved");
 

@@ -1,7 +1,7 @@
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { ExtensionAPI, EditToolInput, WriteToolInput } from "@earendil-works/pi-coding-agent";
 import { createEditToolDefinition, createWriteToolDefinition } from "@earendil-works/pi-coding-agent";
 
@@ -139,7 +139,7 @@ export function parseEffectiveWriteCapability(value: unknown): EffectiveWriteCap
 
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 
-/** Mirror Pi's native edit/write input conveniences, then pass only the checked absolute result back to Pi. */
+/** Mirror Pi's native edit/write input conveniences for authorization. */
 function resolveNativeWriteInput(path: string, cwd: string): string {
   let normalized = path.replace(UNICODE_SPACES, " ");
   if (normalized.startsWith("@")) normalized = normalized.slice(1);
@@ -264,7 +264,12 @@ export function canDelegateWriteCapability(parent: EffectiveWriteCapability, chi
   return child.scopes.every(scope => parent.scopes.some(parentScope => scopeSubset(parentScope, scope)));
 }
 
-/** Install same-name access-control wrappers while delegating execution and result shapes to Pi's native tools. */
+/**
+ * Install same-name wrappers delegating execution and result shapes to Pi.
+ * Handoff uses a file URL: Pi normalizes Unicode spaces before decoding URLs,
+ * so literal characters introduced by cwd or canonicalization survive intact.
+ * An absolute filesystem path alone would be normalized a second time.
+ */
 export function registerScopedWriteTools(pi: ExtensionAPI, capability: EffectiveWriteCapability): void {
   if (capability.mode !== "scoped" || capability.scopes.length === 0) throw scopeError("scoped wrappers require a nonempty binding");
   const edit = createEditToolDefinition(process.cwd());
@@ -274,14 +279,14 @@ export function registerScopedWriteTools(pi: ExtensionAPI, capability: Effective
   pi.registerTool({
     ...edit,
     async execute(toolCallId, params: EditToolInput, signal, onUpdate, ctx) {
-      const path = authorizeWritePath(capability, params.path, ctx.cwd);
+      const path = pathToFileURL(authorizeWritePath(capability, params.path, ctx.cwd)).href;
       return createEditToolDefinition(ctx.cwd).execute(toolCallId, { ...params, path }, signal, onUpdate, ctx);
     },
   });
   pi.registerTool({
     ...write,
     async execute(toolCallId, params: WriteToolInput, signal, onUpdate, ctx) {
-      const path = authorizeWritePath(capability, params.path, ctx.cwd);
+      const path = pathToFileURL(authorizeWritePath(capability, params.path, ctx.cwd)).href;
       return createWriteToolDefinition(ctx.cwd).execute(toolCallId, { ...params, path }, signal, onUpdate, ctx);
     },
   });
