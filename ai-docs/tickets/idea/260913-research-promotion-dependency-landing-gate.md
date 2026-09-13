@@ -201,6 +201,16 @@ actionable subset was carved into `260913-feat-promotion-dependency-landing-gate
 - **Design-reviewer solo-path advisory (proposal 3).** Non-blocking ordering
   finding on the solo path, mirroring the batch path's existing dependency-mistake
   reasoning.
+- **Gate-owner layer = ws runtime, bound to real tool calls (2026-09-13).** The
+  dispatch-time hard gate binds to `ws/tickets.query`'s single-stem point-resolve
+  (the universal dispatch chokepoint lead-run passes through on both the selector
+  and directly-named-ticket paths), emitting a live-computed `dispatch_blocked`
+  field. The promotion closure binds to `ws/tickets.move(to: "ready")` (the
+  machine-enforced upgrade of lead-ticket's step-1 dependency-closure). It is
+  **never** bound to `ws/tickets.sage_stamp` — a content-hashed stamp would go
+  silently stale, the very failure the gate prevents. Advisory surfaces stay in
+  text. idea/todo-level prerequisites are caught at the promotion layer;
+  `ready/`-but-unexecuted at the dispatch layer.
 
 ### Still open (NOT carried into the child)
 
@@ -209,8 +219,6 @@ actionable subset was carved into `260913-feat-promotion-dependency-landing-gate
   the completeness reviewer's charter deliberately excludes `Relations:`
   evaluation and the original design resisted role expansion. Needs discussion
   before it becomes actionable; see Open questions.
-- **Gate-owner layer.** ws runtime vs. promotion/dispatch skill text — resolve
-  during the child's own fact population / design review.
 
 ## Open questions
 

@@ -42,21 +42,42 @@ Confirmed with the user (2026-09-13); see the design source's Outcome Ledger.
   the prerequisite ticket is in `.done/` — not merely when the ticket has left
   `todo/`. Phase-granular over whole-ticket so consuming phase N of a multi-phase
   producer is a legitimate, allowed interleave.
-- **Two-tier gate placement.** A promotion-time *advisory warning* plus a
-  dispatch-time *hard gate*. The warning preserves the legitimate "stage the
-  consumer in `ready/` now, promote the producer imminently" workflow; the hard
-  gate blocks dispatching an un-executable ticket.
+- **Gate-owner layer = ws runtime, bound to real tool calls (confirmed
+  mechanism).**
+  - **Dispatch-time hard gate → `ws/tickets.query` single-stem point-resolve.**
+    lead-run always point-resolves the selected/named stem via `tickets.query`
+    before spawning a worker — the one chokepoint both the selector path and the
+    directly-named-ticket path pass through. The runtime computes, live from
+    directory state, a `dispatch_blocked: {blocking_stem, reason}` field in that
+    point-resolve projection (populated only in single-stem projection mode, not
+    on every query, to avoid noise); lead-run honors it by refusing to spawn and
+    reporting the blocker.
+  - **Promotion closure → `ws/tickets.move(to: "ready")`.** The runtime reads the
+    typed edge and refuses to move a consumer to `ready/` while a typed
+    prerequisite is not in `ready/`, `.done/`, or the same batch — the
+    machine-enforced upgrade of lead-ticket's existing "Promote to ready" step-1
+    dependency-closure (today a playbook-text check over prose `related:`).
+  - **Never bound to `ws/tickets.sage_stamp`.** The stamp is content-hash based;
+    a scheduling fact bound to it passes at review and stays green while the
+    dependency moves underneath — the exact silent-staleness failure the gate
+    exists to prevent (design source: "Why (B) must NOT live inside a
+    content-hashed review").
+  - **Promotion-time advisory warning (soft, text).** For the legitimate
+    in-between case — prerequisite in `ready/` (closure passes) but not yet
+    code-landed — warn without blocking, preserving the "stage the consumer now,
+    promote the producer imminently" workflow.
 - **Design-reviewer solo-path advisory.** A non-blocking ordering finding on the
   solo promotion path, mirroring the batch path's existing dependency-mistake
   reasoning. Non-blocking because "promote the partner in the next batch" is a
   legitimate plan and conflating design quality with scheduling state produces
   noise.
-- **OPEN — resolve at `ready/` promotion (fact population / design review):**
-  the gate-owner layer, i.e. whether the hard gate lives in ws runtime (a
-  tool/selector-side check) or in shared promotion/dispatch playbook text. The
-  research deferred this to the child; it is a real decision and must be settled
-  through the Open Decision Queue before this ticket is promoted, not invented by
-  a worker.
+- **Division of labor by prerequisite status (confirmed).** A prerequisite in
+  `idea/`/`todo/` is caught at the promotion layer (`tickets.move(to:ready)`
+  refuses the consumer); a prerequisite in `ready/`-but-unexecuted is allowed to
+  promote (with the advisory warning) and caught at the dispatch layer
+  (`tickets.query` gate) by the phase-granular code-level predicate; a
+  prerequisite in `.done/` or whose consumed phase carries a `### Result` passes
+  both.
 
 ## Constraints
 
@@ -89,33 +110,43 @@ Confirmed with the user (2026-09-13); see the design source's Outcome Ledger.
 ### Phase 1: Typed dependency edge + dispatch-time hard gate + selector ordering
 
 Introduce the typed machine-readable frontmatter edge for a blocking
-prerequisite (distinct from soft `related:`), and make two consumers read it:
-(1) a dispatch-time hard gate that refuses to dispatch a worker against a ticket
-whose earliest unfinished phase block-depends on a prerequisite that is not
+prerequisite (distinct from soft `related:`), and make the runtime enforce it at
+two bound tool calls plus feed the selector:
+(1) **dispatch-time hard gate on `ws/tickets.query` single-stem point-resolve** —
+the projection gains a live-computed `dispatch_blocked: {blocking_stem, reason}`
+when the ticket's earliest unfinished phase block-depends on a prerequisite not
 landed by the phase-granular code-level predicate (consumed phase has a
-`### Result`, or prerequisite in `.done/`); (2) the ticket-selector, so it orders
-`ready/` mechanically from the typed edge without prose parsing. Resolve the
-OPEN gate-owner-layer decision (runtime vs. shared playbook text) before
-implementing this phase — it determines where the gate code lives.
+`### Result`, or prerequisite in `.done/`); populated only in single-stem
+projection mode; lead-run honors it (refuse spawn, report blocker);
+(2) **promotion closure on `ws/tickets.move(to: "ready")`** — refuse to move a
+consumer to `ready/` while a typed prerequisite is not in `ready/`/`.done/`/the
+same batch (machine-enforced upgrade of lead-ticket's step-1 closure);
+(3) the **ticket-selector** orders `ready/` mechanically from the typed edge
+without prose parsing. The predicate is computed live at each call, never read
+from a review stamp.
 
-Verify: a consumer whose typed prerequisite is unlanded is refused at dispatch
-with a diagnostic naming the blocking stem; a consumer whose consumed phase's
-prerequisite phase carries a `### Result` (but the prerequisite ticket is not
-fully `.done/`) is allowed (phase-granular interleave); the selector orders a
-prerequisite ahead of its consumer from the typed edge alone; a soft `related:`
-edge does not gate or reorder; and the predicate is computed at
-dispatch/selection time, not read from any review stamp.
+Verify: a consumer whose typed prerequisite is unlanded gets `dispatch_blocked`
+at point-resolve and lead-run refuses to spawn with the blocking stem named;
+`tickets.move(to:ready)` refuses a consumer whose typed prerequisite is in
+`idea/`/`todo/`; a consumer whose consumed phase's prerequisite phase carries a
+`### Result` (prerequisite not fully `.done/`) is allowed (phase-granular
+interleave); the selector orders a prerequisite ahead of its consumer from the
+typed edge alone; a soft `related:` edge neither gates nor reorders; and no gate
+path reads or writes a sage stamp.
 
 ### Phase 2: Promotion-time advisory warning + design-reviewer solo-path advisory
 
-Add the softer, non-blocking layer on top of Phase 1's typed edge: a
-promotion-time advisory warning when a ticket is promoted to `ready/` while a
-typed prerequisite is unlanded (does not block the promotion), and a
-design-reviewer solo-path advisory ordering finding mirroring the batch path's
-dependency-mistake reasoning (non-blocking). Depends on Phase 1's typed edge as
-the machine-readable signal both surfaces consume.
+Add the softer, non-blocking layer on top of Phase 1's typed edge and gate. The
+promotion-time advisory warning fires for the in-between case Phase 1's closure
+deliberately allows — a typed prerequisite in `ready/` (closure passes) but not
+yet code-landed — telling the promoter the producer is not executed yet, without
+blocking the promotion. The design-reviewer solo-path advisory surfaces a
+non-blocking ordering finding mirroring the batch path's dependency-mistake
+reasoning. Both consume Phase 1's typed edge; both are text/advisory, never a
+block.
 
-Verify: promoting a consumer whose typed prerequisite is unlanded emits the
-advisory warning but still completes the promotion; the design reviewer on a
-solo promotion surfaces the ordering finding as advisory (not a block); neither
-surface fires for a landed prerequisite or a soft `related:` edge.
+Verify: promoting a consumer whose typed prerequisite is in
+`ready/`-but-unexecuted emits the advisory warning and still completes the
+promotion; the design reviewer on a solo promotion surfaces the ordering finding
+as advisory (not a block); neither surface fires for a `.done/` prerequisite, a
+consumed-phase-`### Result` prerequisite, or a soft `related:` edge.
