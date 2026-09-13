@@ -1,5 +1,9 @@
 ---
 title: "Stop counting idle-settled Pi agents as running after terminal result delivery"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 416abc74407a1131
+sage-review-completeness-reviewed: 416abc74407a1131
 ---
 
 # Stop counting idle-settled Pi agents as running after terminal result delivery
@@ -46,6 +50,22 @@ The result is a deterministic orchestration stall rather than a model still doin
 - `waitingOnChildren` remains distinct from a running agent turn. Goal-loop yielding follows work that can still make autonomous progress, not an already delivered settled result or a lead action-required condition.
 - Caller-visible wording distinguishes actual execution from pending delivery or lead action required.
 - Preserve prompt-level final-output templates and `expects_commit` intent without treating either as an adapter-enforced terminal protocol.
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-pi/src/spawner.ts, agents-plugin-pi/src/agent-widget.ts, agents-plugin-pi/src/fork.ts, agents-plugin-pi/src/ask.ts, agents-plugin-pi/src/subtree-lifecycle.ts |
+| scope.surface | public-interface | ws-agent-list, pushed lifecycle status, and ws-report-to-lead are caller-visible adapter surfaces |
+| scope.new_public_symbol | no | none |
+| scope.new_type_contract | no | no new exported type or signature is required; lifecycle fields remain adapter-internal |
+| scope.test_surface | existing | agents-plugin-pi/test/spawner.test.ts, agents-plugin-pi/test/fork.test.ts, agents-plugin-pi/test/recursive-worker.test.ts, agents-plugin-pi/test/agent-widget.test.ts |
+| complexity.reuse_points | confirmed | RpcAgentRecord workGeneration and TerminalDelivery in agents-plugin-pi/src/spawner.ts; subtree state in agents-plugin-pi/src/subtree-lifecycle.ts |
+| complexity.side_effect_risk | high | terminal delivery, parking, direct-parent routing, and owner-held state interact across turns |
+| risk.correctness | high | duplicate or stale settlement can misroute output or leave descendant work incomplete |
+| risk.fit | high | the settled-output contract replaces final-tool-specific behavior across worker and fork paths |
+| risk.test | high | lifecycle races, retries, resumed sessions, and nested children need regression coverage |
+| risk.security_or_contract | moderate | changing child terminal semantics changes the caller-visible report contract without adding authority |
 
 ## Phases
 
