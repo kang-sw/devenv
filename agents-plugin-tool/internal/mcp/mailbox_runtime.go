@@ -1,10 +1,12 @@
 package mcp
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wskey"
@@ -104,6 +106,16 @@ func computeMailboxIdentity() mailboxIdentity {
 			appendDebugEvent("mailbox.identity_invalid", map[string]any{"source": envMailboxAuto, "error": err.Error()})
 			return mailboxIdentity{}
 		}
+		// wskey.Generate's word-pool output is expected to already satisfy
+		// IsValidName (lowercase letters/digits/hyphens), but that is an
+		// invariant of a sibling package's word list, not something this
+		// package controls — validate rather than silently trusting it, the
+		// same defensive posture ParseSlugScope already applies to an
+		// explicit WS_MAILBOX value.
+		if !wsmailbox.IsValidName(stem) {
+			appendDebugEvent("mailbox.identity_invalid", map[string]any{"source": envMailboxAuto, "value": stem, "error": "auto-minted stem is not a valid mailbox name"})
+			return mailboxIdentity{}
+		}
 		return mailboxIdentity{Active: true, Name: stem, Scope: wsmailbox.Scope(scopeRaw), Auto: true}
 	}
 	return mailboxIdentity{}
@@ -121,13 +133,44 @@ func (identity mailboxIdentity) address() string {
 // mailboxPresenceLive reports whether p's LastSeen falls within
 // mailboxLivenessThreshold of now. An unparsable LastSeen is treated as
 // dead (safe default: allows reclaim rather than wedging a name forever on
-// a malformed record).
+// a malformed record). A presence record whose PID is definitively no
+// longer running is always dead regardless of LastSeen recency — this
+// closes the "ordinary restart" false-positive-conflict gap (a crashed
+// process's own recent heartbeat must not block its own restart from
+// reclaiming the name for up to mailboxLivenessThreshold). It intentionally
+// does NOT treat "PID still running" as sufficient for liveness on its own
+// (that would make an idle-but-alive process immune to the heartbeat
+// window, requiring a background liveness mechanism — out of scope here;
+// deferred to 260913-feat-cross-session-mailbox-wake's Decisions 6/7/9).
 func mailboxPresenceLive(p wsmailbox.Presence, now time.Time) bool {
+	if mailboxProcessDead(p.PID) {
+		return false
+	}
 	last, err := time.Parse(time.RFC3339, p.LastSeen)
 	if err != nil {
 		return false
 	}
 	return now.Sub(last) < mailboxLivenessThreshold
+}
+
+// mailboxProcessDead reports whether pid is definitively not a running
+// process on this machine (same-machine mailbox: PID liveness is always
+// checkable). It is conservative: any inconclusive result (permission
+// denied, or a platform where probing isn't meaningful) reports false
+// ("not provably dead") rather than risk a false-positive reclaim.
+func mailboxProcessDead(pid int) bool {
+	if pid <= 0 {
+		return true
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil || proc == nil {
+		return false
+	}
+	err = proc.Signal(syscall.Signal(0))
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, syscall.ESRCH)
 }
 
 func (s *Server) setMailboxConflict(v bool) {
@@ -144,13 +187,29 @@ func (s *Server) setMailboxConflict(v bool) {
 // a named inbox (send/recv/piggyback on it never find an Owner pointing at
 // this process's sessions), while the conflict itself surfaces through
 // lookup_peers. A no-op when this process carries no active identity.
-func (s *Server) ensureMailboxRegistered() {
+//
+// root must be the CALLING SESSION's own canonicalized root
+// (sessionEntry.root / sessionRecord.Root), never the process-level
+// Server.root: per ai-docs/manuals/ws-mcp.md, the MCP process's own cwd is
+// unreliable (Codex normalizes it to the installed plugin cache), so a
+// worktree/clone-scope identity cannot resolve its store path from process
+// state. A machine-scope identity needs no root at all.
+//
+// The registration attempt is deferred — never consumed — until a call
+// carries a real root for a worktree/clone identity: the guard sits before
+// registerOnce.Do so an early root-less call (e.g. "initialize") does not
+// permanently skip registration once a real root becomes available on a
+// later call (e.g. the owning ferrule login).
+func (s *Server) ensureMailboxRegistered(root string) {
+	identity := s.mailboxIdentityResolved()
+	if !identity.Active {
+		return
+	}
+	if identity.Scope != wsmailbox.ScopeMachine && strings.TrimSpace(root) == "" {
+		return
+	}
 	s.mailbox.registerOnce.Do(func() {
-		identity := s.mailboxIdentityResolved()
-		if !identity.Active {
-			return
-		}
-		path, err := wsmailbox.PathForScope(identity.Scope, s.root)
+		path, err := wsmailbox.PathForScope(identity.Scope, root)
 		if err != nil {
 			appendDebugEvent("mailbox.register_error", map[string]any{"error": err.Error()})
 			return
@@ -159,7 +218,6 @@ func (s *Server) ensureMailboxRegistered() {
 		nowStr := now.Format(time.RFC3339)
 		pid := os.Getpid()
 		harness := s.currentHarness()
-		root := s.root
 		werr := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
 			if existing, ok := store.Presence[identity.Name]; ok && existing.PID != pid && mailboxPresenceLive(existing, now) {
 				s.setMailboxConflict(true)
@@ -200,13 +258,21 @@ func (s *Server) mailboxHeartbeatDue() bool {
 // process's own presence LastSeen, throttled by mailboxHeartbeatDue. A
 // no-op when inert, when the throttle window has not elapsed, or when this
 // process has lost the name to a live conflict winner (PID mismatch: never
-// resurrect a name another process now legitimately holds).
-func (s *Server) refreshMailboxPresenceHeartbeat() {
+// resurrect a name another process now legitimately holds). root must be
+// the calling session's own canonicalized root (see ensureMailboxRegistered);
+// a root-less call is a no-op for a worktree/clone identity, but the
+// throttle window is still claimed for this call, matching the existing
+// per-process throttle contract (a machine-scope identity is unaffected,
+// needing no root).
+func (s *Server) refreshMailboxPresenceHeartbeat(root string) {
 	identity := s.mailboxIdentityResolved()
 	if !identity.Active || !s.mailboxHeartbeatDue() {
 		return
 	}
-	path, err := wsmailbox.PathForScope(identity.Scope, s.root)
+	if identity.Scope != wsmailbox.ScopeMachine && strings.TrimSpace(root) == "" {
+		return
+	}
+	path, err := wsmailbox.PathForScope(identity.Scope, root)
 	if err != nil {
 		return
 	}
@@ -241,6 +307,33 @@ func (s *Server) mailboxReplyID(callerSessionKey string) (string, error) {
 	return wsmailbox.ReplyID(secret, callerSessionKey), nil
 }
 
+// mailboxReplyIDRetention bounds how long an idle, empty-queue reply-id
+// entry survives in the machine-tier registry before lazy reaping deletes
+// it (Decision 11's lazy-expiry reaping), mirroring session_auth.go's
+// keyRetentionAge order of magnitude. Reaping only ever removes an entry
+// whose queue is already empty: undelivered mail is never dropped by this
+// pass, only the bookkeeping Entries record for a channel nobody has
+// touched in a long time.
+const mailboxReplyIDRetention = 30 * 24 * time.Hour
+
+// reapStaleReplyIDs deletes Entries whose LastSeen exceeds
+// mailboxReplyIDRetention and whose Queues slot is empty, bounding the
+// registry's otherwise-unbounded growth from one-off callers that never
+// return. Folded into every publishReplyID write rather than a background
+// sweep (background mechanisms are 260913-feat-cross-session-mailbox-wake's
+// territory, Decisions 6/7/9).
+func reapStaleReplyIDs(store *wsmailbox.ReplyStore, now time.Time) {
+	for id, entry := range store.Entries {
+		if len(store.Queues[id]) > 0 {
+			continue
+		}
+		last, err := time.Parse(time.RFC3339, entry.LastSeen)
+		if err != nil || now.Sub(last) > mailboxReplyIDRetention {
+			delete(store.Entries, id)
+		}
+	}
+}
+
 // publishReplyID publishes/refreshes callerSessionKey's reply-id entry in
 // the machine-tier registry (the channel-open act of Decision 11 send, and
 // Decision 5's env-less self-lookup) and returns the reply-id.
@@ -255,6 +348,7 @@ func (s *Server) publishReplyID(callerSessionKey string) (string, error) {
 	}
 	nowStr := mailboxNowString()
 	if err := wsmailbox.WithReplyLock(path, func(store *wsmailbox.ReplyStore) error {
+		reapStaleReplyIDs(store, mailboxNow())
 		store.Entries[replyID] = wsmailbox.ReplyEntry{LastSeen: nowStr}
 		return nil
 	}); err != nil {
@@ -284,7 +378,17 @@ func (s *Server) markMailboxReplyOpened(sessionKey string) {
 // ferrule call is parent-less (Decision 3: top-lead login / re-login
 // recovery, never a worker/delegate mint, which always carries a parent).
 // The address itself (identity.Name/Scope) is never re-minted here.
-func (s *Server) rebindMailboxOwnerAtFerrule(newSessionKey, parentKey string) {
+//
+// It refuses to bind when this process has lost (or is contesting) the
+// duplicate-live-name race: s.mailbox.conflict, set by
+// ensureMailboxRegistered on a collision, is checked first, and the
+// presence record is re-verified for a live different-PID holder under the
+// same lock the write would use, so a race that resolves against this
+// process AFTER its own registration is still caught. Binding ownership
+// over a name another live process legitimately holds would let this
+// session hijack that process's identity (Critical: owner-rebind ignoring
+// conflict state).
+func (s *Server) rebindMailboxOwnerAtFerrule(newSessionKey, parentKey, root string) {
 	if strings.TrimSpace(parentKey) != "" {
 		return
 	}
@@ -292,19 +396,31 @@ func (s *Server) rebindMailboxOwnerAtFerrule(newSessionKey, parentKey string) {
 	if !identity.Active {
 		return
 	}
-	s.ensureMailboxRegistered()
-	path, err := wsmailbox.PathForScope(identity.Scope, s.root)
+	s.ensureMailboxRegistered(root)
+	if s.mailboxHasConflict() {
+		appendDebugEvent("mailbox.rebind_skipped_conflict", map[string]any{"name": identity.Name, "scope": string(identity.Scope)})
+		return
+	}
+	path, err := wsmailbox.PathForScope(identity.Scope, root)
 	if err != nil {
 		return
 	}
 	nowStr := mailboxNowString()
+	pid := os.Getpid()
+	now := mailboxNow()
 	_ = wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
 		p, ok := store.Presence[identity.Name]
+		if ok && p.PID != pid && mailboxPresenceLive(p, now) {
+			// A different, still-live process now legitimately holds this
+			// name (a race resolved after our own registration); refuse to
+			// steal its ownership pointer.
+			return nil
+		}
 		if !ok {
 			// Registration was skipped or lost (e.g. a startup conflict);
 			// rebuild a minimal record so ownership still binds. A later
 			// heartbeat refresh backfills descriptive metadata.
-			p = wsmailbox.Presence{Name: identity.Name, Scope: identity.Scope, PID: os.Getpid(), StartedAt: nowStr}
+			p = wsmailbox.Presence{Name: identity.Name, Scope: identity.Scope, PID: pid, StartedAt: nowStr}
 		}
 		p.Owner = newSessionKey
 		p.LastSeen = nowStr
@@ -313,16 +429,31 @@ func (s *Server) rebindMailboxOwnerAtFerrule(newSessionKey, parentKey string) {
 	})
 }
 
+// mailboxHasConflict reports whether ensureMailboxRegistered flagged a
+// duplicate-live-name collision for this process's identity.
+func (s *Server) mailboxHasConflict() bool {
+	s.mailbox.conflictMu.Lock()
+	defer s.mailbox.conflictMu.Unlock()
+	return s.mailbox.conflict
+}
+
 // mailboxOwnerCheck reports whether callerSessionKey currently holds the
 // named-inbox owner pointer for this process's active identity. ok=false
 // with err=nil means "not the owner" (including: no active identity, or no
-// owner bound yet); a non-nil err means the store could not be read.
-func (s *Server) mailboxOwnerCheck(callerSessionKey string) (isOwner bool, identity mailboxIdentity, err error) {
+// owner bound yet); a non-nil err means the store could not be read. root
+// must be the calling session's own canonicalized root (see
+// ensureMailboxRegistered); a root-less call against a worktree/clone
+// identity reports "not the owner" rather than erroring, since no store
+// can be resolved yet.
+func (s *Server) mailboxOwnerCheck(callerSessionKey string, root string) (isOwner bool, identity mailboxIdentity, err error) {
 	identity = s.mailboxIdentityResolved()
 	if !identity.Active {
 		return false, identity, nil
 	}
-	path, perr := wsmailbox.PathForScope(identity.Scope, s.root)
+	if identity.Scope != wsmailbox.ScopeMachine && strings.TrimSpace(root) == "" {
+		return false, identity, nil
+	}
+	path, perr := wsmailbox.PathForScope(identity.Scope, root)
 	if perr != nil {
 		return false, identity, perr
 	}
@@ -339,17 +470,25 @@ func (s *Server) mailboxOwnerCheck(callerSessionKey string) (isOwner bool, ident
 
 // mailboxAddressAnnouncement computes the workflow_manual ambient
 // self-address line (Decision: self-address surface), or "" when this
-// process carries no active WS_MAILBOX/WS_MAILBOX_AUTO identity — the
-// common, mailbox-inert case, which must stay silent (Decision 1). Also
-// opportunistically refreshes this process's own presence heartbeat,
+// process carries no active WS_MAILBOX/WS_MAILBOX_AUTO identity (the
+// common, mailbox-inert case, which must stay silent per Decision 1) or
+// when sessionKey is not the confirmed owner of that identity — a
+// non-owner session sharing this process (e.g. a parent-carrying
+// worker/delegate mint) cannot actually recv from the named inbox, so
+// announcing an address it cannot use would be a leak, not a service.
+// Also opportunistically refreshes this process's own presence heartbeat,
 // internally throttled so a busy bootstrap/continue loop does not rewrite
 // presence on every call.
-func mailboxAddressAnnouncement(s *Server) string {
+func mailboxAddressAnnouncement(s *Server, sessionKey, root string) string {
 	identity := s.mailboxIdentityResolved()
 	if !identity.Active {
 		return ""
 	}
-	s.refreshMailboxPresenceHeartbeat()
+	isOwner, _, err := s.mailboxOwnerCheck(sessionKey, root)
+	if err != nil || !isOwner {
+		return ""
+	}
+	s.refreshMailboxPresenceHeartbeat(root)
 	autoTag := ""
 	if identity.Auto {
 		autoTag = " (auto-minted)"

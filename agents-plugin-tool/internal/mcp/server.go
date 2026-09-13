@@ -252,7 +252,12 @@ func (s *Server) handle(ctx context.Context, req request) response {
 	switch req.Method {
 	case "initialize":
 		s.observeHarness("initialize", detectHarnessFromInitializeParams(req.Params))
-		s.ensureMailboxRegistered()
+		// No session/root exists yet at this call: a machine-scope identity
+		// registers immediately (needs no root); a worktree/clone identity
+		// defers until a session-bound root arrives via the owning ferrule
+		// login (rebindMailboxOwnerAtFerrule), per ensureMailboxRegistered's
+		// root-deferral contract.
+		s.ensureMailboxRegistered("")
 		return response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{
 			"protocolVersion": ProtocolVersion,
 			"serverInfo": map[string]string{
@@ -510,8 +515,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	// every reply this call produces gets a chance at an unread-mail badge,
 	// regardless of which case below built it. See mailbox_tools.go.
 	if keyStr, ok := params.Arguments["session_key"].(string); ok {
+		jsonFormat := wantsJSON(params.Arguments)
 		defer func() {
-			resp = s.applyMailboxPiggyback(resp, keyStr)
+			resp = s.applyMailboxPiggyback(resp, keyStr, jsonFormat)
 		}()
 	}
 	s.observeHarness("tools.call.meta", detectHarnessFromMeta(params.Meta))
@@ -1547,7 +1553,7 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 	// a top-lead (re-)login, so it rebinds this process's active mailbox
 	// identity's owner pointer to the freshly minted key. A parent-carrying
 	// (worker/delegate) mint never touches it.
-	s.rebindMailboxOwnerAtFerrule(key, parentKey)
+	s.rebindMailboxOwnerAtFerrule(key, parentKey, canonical)
 	result := map[string]any{
 		"session_key": key,
 		"root":        canonical,

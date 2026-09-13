@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -177,6 +178,27 @@ func TestMailboxReplyIDStableAcrossRestartAndDiesAtNewFerrule(t *testing.T) {
 	}
 	if replyID3 == replyID1 {
 		t.Fatalf("a new parent-less ferrule's session_key produced the same reply-id as the old one")
+	}
+
+	// Prove delivery, not just digest inequality: mail addressed to the OLD
+	// reply-id must land in the old reply-id's own queue and be drainable
+	// only by the OLD session_key (key1) — never by the new one (key2),
+	// which computes and drains a different queue entirely.
+	t.Setenv(envMailbox, "")
+	serverSender := NewServer(root, "test")
+	keySender := mailboxLogin(t, serverSender, 3, root)
+	callToolWithKey(t, serverSender, 4, keySender, "mailbox.send", map[string]any{
+		"to": "id:" + replyID1, "content": "for the old reply-id",
+	})
+
+	newKeyRecv := callToolWithKey(t, server2, 5, key2, "mailbox.recv", nil)
+	if strings.Contains(newKeyRecv, "for the old reply-id") {
+		t.Fatalf("the new ferrule's session_key drained mail addressed to the orphaned old reply-id: %s", newKeyRecv)
+	}
+
+	oldKeyRecv := callToolWithKey(t, server2, 6, key1, "mailbox.recv", nil)
+	if !strings.Contains(oldKeyRecv, "for the old reply-id") {
+		t.Fatalf("the old session_key could not drain mail addressed to its own still-registered reply-id: %s", oldKeyRecv)
 	}
 }
 
@@ -402,9 +424,22 @@ func TestMailboxFerruleRebindPreservesAddressAndQueuedMail(t *testing.T) {
 		t.Fatalf("mail queued before an owner-key rebind was lost: %s", recvResp)
 	}
 
+	// The named inbox is now empty (just drained by the new owner). Queue a
+	// SECOND, post-rebind message before asserting the stale key can't see
+	// it — asserting on an already-empty queue would pass vacuously
+	// regardless of whether the gate actually works.
+	callToolWithKey(t, serverB, 6, keyB, "mailbox.send", map[string]any{
+		"to": "alice@worktree", "content": "queued after rebind",
+	})
+
+	newOwnerResp := callToolWithKey(t, serverA, 7, keyA2, "mailbox.recv", nil)
+	if !strings.Contains(newOwnerResp, "queued after rebind") {
+		t.Fatalf("new owner key could not drain mail queued after the rebind: %s", newOwnerResp)
+	}
+
 	oldOwnerResp := callToolWithKey(t, serverA, 5, keyA1, "mailbox.recv", nil)
-	if strings.Contains(oldOwnerResp, "queued before rebind") {
-		t.Fatalf("stale pre-rebind owner key could still drain the named inbox after rebind")
+	if strings.Contains(oldOwnerResp, "queued before rebind") || strings.Contains(oldOwnerResp, "queued after rebind") {
+		t.Fatalf("stale pre-rebind owner key could still drain the named inbox after rebind: %s", oldOwnerResp)
 	}
 }
 
@@ -497,14 +532,19 @@ func TestMailboxLookupPeersFiltersDeadPeersAndSurfacesConflict(t *testing.T) {
 	mailboxNow = original
 
 	// Duplicate-live-name conflict: fabricate an existing live presence
-	// record under a different PID, then self-register over it.
+	// record under a different, but genuinely still-running, PID (the test
+	// binary's own parent process — guaranteed alive for the test's
+	// duration, unlike an arbitrary os.Getpid()+1 which mailboxPresenceLive's
+	// real PID-liveness check would otherwise treat as already dead), then
+	// self-register over it.
 	path, err := wsmailbox.WorktreePath(root)
 	if err != nil {
 		t.Fatal(err)
 	}
+	otherLivePID := os.Getppid()
 	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
 		store.Presence["eve"] = wsmailbox.Presence{
-			Name: "eve", Scope: wsmailbox.ScopeWorktree, PID: os.Getpid() + 1, LastSeen: mailboxNowString(),
+			Name: "eve", Scope: wsmailbox.ScopeWorktree, PID: otherLivePID, LastSeen: mailboxNowString(),
 		}
 		return nil
 	}); err != nil {
@@ -513,7 +553,7 @@ func TestMailboxLookupPeersFiltersDeadPeersAndSurfacesConflict(t *testing.T) {
 
 	t.Setenv(envMailbox, "eve@worktree")
 	serverE := NewServer(root, "test")
-	serverE.ensureMailboxRegistered()
+	serverE.ensureMailboxRegistered(root)
 
 	afterConflict, err := wsmailbox.Load(path)
 	if err != nil {
@@ -522,12 +562,138 @@ func TestMailboxLookupPeersFiltersDeadPeersAndSurfacesConflict(t *testing.T) {
 	if !afterConflict.Presence["eve"].Conflict {
 		t.Fatalf("duplicate live-name registration did not flag Conflict on the existing record: %#v", afterConflict.Presence["eve"])
 	}
-	if afterConflict.Presence["eve"].PID != os.Getpid()+1 {
+	if afterConflict.Presence["eve"].PID != otherLivePID {
 		t.Fatalf("duplicate live-name registration clobbered the first process's presence record: %#v", afterConflict.Presence["eve"])
 	}
 
 	conflictResp := callToolWithKey(t, serverLooker, 4, keyLooker, "mailbox.lookup_peers", map[string]any{"scope": "worktree"})
 	if !strings.Contains(conflictResp, "CONFLICT") {
 		t.Fatalf("lookup_peers did not surface the duplicate-live-name conflict: %s", conflictResp)
+	}
+}
+
+// TestMailboxToolBoundaryErrors verifies each of the three MCP handlers'
+// argument/session validation surfaces a clear error rather than a panic,
+// a silently-wrong result, or a generic message indistinguishable from an
+// unrelated failure: an unknown session_key, a malformed "to" address, an
+// invalid lookup_peers scope, and a missing required "content"/"to"/"scope"
+// argument.
+func TestMailboxToolBoundaryErrors(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	t.Setenv(envMailbox, "")
+	s := NewServer(root, "test")
+	key := mailboxLogin(t, s, 1, root)
+
+	for _, tool := range []string{"mailbox.send", "mailbox.recv", "mailbox.lookup_peers"} {
+		resp := callToolWithKey(t, s, 2, "not-a-real-session-key", tool, map[string]any{
+			"to": "x@worktree", "content": "hi", "scope": "worktree",
+		})
+		if !strings.Contains(resp, "unknown_session") {
+			t.Fatalf("%s with an unknown session_key did not report unknown_session: %s", tool, resp)
+		}
+	}
+
+	sendMalformedTo := callToolWithKey(t, s, 3, key, "mailbox.send", map[string]any{
+		"to": "not a valid address", "content": "hi",
+	})
+	if !strings.Contains(sendMalformedTo, "mailbox.send") {
+		t.Fatalf("mailbox.send with a malformed to did not report a mailbox.send-scoped error: %s", sendMalformedTo)
+	}
+
+	sendMissingContent := callToolWithKey(t, s, 4, key, "mailbox.send", map[string]any{
+		"to": "x@worktree",
+	})
+	if !strings.Contains(sendMissingContent, "content") {
+		t.Fatalf("mailbox.send with missing content did not name the missing argument: %s", sendMissingContent)
+	}
+
+	sendMissingTo := callToolWithKey(t, s, 5, key, "mailbox.send", map[string]any{
+		"content": "hi",
+	})
+	if !strings.Contains(sendMissingTo, "to") {
+		t.Fatalf("mailbox.send with missing to did not name the missing argument: %s", sendMissingTo)
+	}
+
+	lookupInvalidScope := callToolWithKey(t, s, 6, key, "mailbox.lookup_peers", map[string]any{"scope": "planet"})
+	if !strings.Contains(lookupInvalidScope, "scope") {
+		t.Fatalf("mailbox.lookup_peers with an invalid scope did not name the scope problem: %s", lookupInvalidScope)
+	}
+
+	lookupMissingScope := callToolWithKey(t, s, 7, key, "mailbox.lookup_peers", nil)
+	if !strings.Contains(lookupMissingScope, "scope") {
+		t.Fatalf("mailbox.lookup_peers with a missing scope did not name the missing argument: %s", lookupMissingScope)
+	}
+}
+
+// TestMailboxPiggybackSuppressedForJSONFormat verifies the central piggyback
+// wrapper never concatenates badge text onto a format:"json" response: doing
+// so would corrupt the marshalled JSON for any caller parsing it
+// structurally. A text-format call to the same underlying tool, from the
+// same session with the same unread mail, still gets the badge.
+func TestMailboxPiggybackSuppressedForJSONFormat(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	t.Setenv(envMailbox, "alice@worktree")
+	serverA := NewServer(root, "test")
+	keyA := mailboxLogin(t, serverA, 1, root)
+
+	t.Setenv(envMailbox, "")
+	serverB := NewServer(root, "test")
+	keyB := mailboxLogin(t, serverB, 1, root)
+	callToolWithKey(t, serverB, 2, keyB, "mailbox.send", map[string]any{
+		"to": "alice@worktree", "content": "for the json check",
+	})
+
+	jsonResp := callToolWithKey(t, serverA, 3, keyA, "runtime.read", map[string]any{"format": "json"})
+	if strings.Contains(jsonResp, "unread") {
+		t.Fatalf("format:\"json\" response was corrupted with a piggyback badge: %s", jsonResp)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(jsonResp), &parsed); err != nil {
+		t.Fatalf("format:\"json\" response with unread mail pending did not parse as JSON: %v\nresp=%s", err, jsonResp)
+	}
+
+	textResp := callToolWithKey(t, serverA, 4, keyA, "runtime.read", nil)
+	if !strings.Contains(textResp, "unread 1") {
+		t.Fatalf("text-format response for the same session lost its piggyback badge: %s", textResp)
+	}
+}
+
+// TestMailboxLookupPeersSelfAddressGatedByOwnership verifies the self-address
+// surface never hands a non-owner session an address it cannot actually
+// recv from: a parent-carrying delegate session sharing the owner's process
+// identity gets a reply-id self entry, exactly like an env-less caller,
+// while the owner itself still gets its address.
+func TestMailboxLookupPeersSelfAddressGatedByOwnership(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	t.Setenv(envMailbox, "alice@worktree")
+	serverA := NewServer(root, "test")
+	keyA := mailboxLogin(t, serverA, 1, root)
+
+	delegateResp := callLogin(t, serverA, 2, root, map[string]any{
+		"parent_session_key": keyA,
+		"capability":         "delegate",
+	})
+	keyA2, _ := parseLoginResponse(t, delegateResp)
+
+	ownerLookup := callToolWithKey(t, serverA, 3, keyA, "mailbox.lookup_peers", map[string]any{"scope": "worktree"})
+	if !strings.Contains(ownerLookup, "self: alice@worktree") {
+		t.Fatalf("owner session's lookup_peers self entry is not its own address: %s", ownerLookup)
+	}
+
+	delegateLookup := callToolWithKey(t, serverA, 4, keyA2, "mailbox.lookup_peers", map[string]any{"scope": "worktree"})
+	if strings.Contains(delegateLookup, "self: alice@worktree") {
+		t.Fatalf("non-owner delegate session was handed the owner's unusable named-inbox address: %s", delegateLookup)
+	}
+	if !strings.Contains(delegateLookup, "reply-id only") {
+		t.Fatalf("non-owner delegate session's self entry is not a reply-id fallback: %s", delegateLookup)
 	}
 }

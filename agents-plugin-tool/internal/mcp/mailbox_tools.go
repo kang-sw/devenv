@@ -29,7 +29,8 @@ func (s *Server) handleMailboxSend(id json.RawMessage, args map[string]any) resp
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	if _, found := s.sessions.lookup(sessionKey); !found {
+	entry, found := s.sessions.lookup(sessionKey)
+	if !found {
 		return toolTextResponse(id, "", mailboxUnknownSessionError(tool))
 	}
 	to, err := stringArg(tool, "to", args)
@@ -64,7 +65,7 @@ func (s *Server) handleMailboxSend(id json.RawMessage, args map[string]any) resp
 	// identity when sending, only fall back to its own reply-id. An
 	// unbound owner pointer (no ferrule yet) also means nobody may claim it.
 	var from string
-	if isOwner, identity, oerr := s.mailboxOwnerCheck(sessionKey); oerr == nil && isOwner {
+	if isOwner, identity, oerr := s.mailboxOwnerCheck(sessionKey, entry.root); oerr == nil && isOwner {
 		switch addr.Kind {
 		case wsmailbox.AddressSlug:
 			from = mailboxFromStamp(identity, addr.Scope, false)
@@ -80,7 +81,7 @@ func (s *Server) handleMailboxSend(id json.RawMessage, args map[string]any) resp
 
 	switch addr.Kind {
 	case wsmailbox.AddressSlug:
-		path, perr := wsmailbox.PathForScope(addr.Scope, s.root)
+		path, perr := wsmailbox.PathForScope(addr.Scope, entry.root)
 		if perr != nil {
 			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, perr))
 		}
@@ -123,19 +124,32 @@ func (s *Server) handleMailboxRecv(id json.RawMessage, args map[string]any) resp
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	if _, found := s.sessions.lookup(sessionKey); !found {
+	entry, found := s.sessions.lookup(sessionKey)
+	if !found {
 		return toolTextResponse(id, "", mailboxUnknownSessionError(tool))
 	}
 
 	var drained []wsmailbox.Envelope
+	var readErrs []error
 
 	// Named-inbox drain: only when this session currently holds the owner
-	// pointer (server-layer caller==owner gate, Decision 3).
-	if isOwner, identity, oerr := s.mailboxOwnerCheck(sessionKey); oerr == nil && isOwner {
-		if path, perr := wsmailbox.PathForScope(identity.Scope, s.root); perr == nil {
+	// pointer (server-layer caller==owner gate, Decision 3). The tentative
+	// drain is accumulated in a block-local slice and only merged into the
+	// result after WithLock's write (temp+rename) has actually succeeded:
+	// merging it beforehand — while the closure return value is still
+	// pending the real disk write — risks reporting a message as delivered
+	// while it is still sitting in the on-disk queue, causing a duplicate
+	// delivery on the next recv.
+	if isOwner, identity, oerr := s.mailboxOwnerCheck(sessionKey, entry.root); oerr != nil {
+		readErrs = append(readErrs, fmt.Errorf("named-inbox owner check: %w", oerr))
+	} else if isOwner {
+		if path, perr := wsmailbox.PathForScope(identity.Scope, entry.root); perr != nil {
+			readErrs = append(readErrs, fmt.Errorf("named-inbox path: %w", perr))
+		} else {
+			var ownerDrained []wsmailbox.Envelope
 			now := mailboxNowString()
-			_ = wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
-				drained = append(drained, store.Queues[identity.Name]...)
+			werr := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+				ownerDrained = append(ownerDrained, store.Queues[identity.Name]...)
 				delete(store.Queues, identity.Name)
 				if p, ok := store.Presence[identity.Name]; ok {
 					p.LastSeen = now
@@ -143,22 +157,49 @@ func (s *Server) handleMailboxRecv(id json.RawMessage, args map[string]any) resp
 				}
 				return nil
 			})
+			if werr != nil {
+				readErrs = append(readErrs, fmt.Errorf("named-inbox drain: %w", werr))
+			} else {
+				drained = append(drained, ownerDrained...)
+			}
 		}
 	}
 
 	// Own reply-id queue: always drained, authorized intrinsically by the
 	// caller's own session_key (Decision 3's carve-out), independent of
-	// owner status.
-	if replyID, rerr := s.mailboxReplyID(sessionKey); rerr == nil {
-		if path, perr := wsmailbox.ReplyRegistryPath(); perr == nil {
-			_ = wsmailbox.WithReplyLock(path, func(store *wsmailbox.ReplyStore) error {
-				drained = append(drained, store.Queues[replyID]...)
-				delete(store.Queues, replyID)
-				return nil
-			})
+	// owner status. Same drain-after-confirmed-write discipline as above.
+	if replyID, rerr := s.mailboxReplyID(sessionKey); rerr != nil {
+		readErrs = append(readErrs, fmt.Errorf("reply-id: %w", rerr))
+	} else if path, perr := wsmailbox.ReplyRegistryPath(); perr != nil {
+		readErrs = append(readErrs, fmt.Errorf("reply-id registry path: %w", perr))
+	} else {
+		var replyDrained []wsmailbox.Envelope
+		werr := wsmailbox.WithReplyLock(path, func(store *wsmailbox.ReplyStore) error {
+			replyDrained = append(replyDrained, store.Queues[replyID]...)
+			delete(store.Queues, replyID)
+			return nil
+		})
+		if werr != nil {
+			readErrs = append(readErrs, fmt.Errorf("reply-id drain: %w", werr))
+		} else {
+			drained = append(drained, replyDrained...)
 		}
 	}
-	s.markMailboxReplyOpened(sessionKey)
+
+	// A genuine storage error must not be reported as "no unread mail": that
+	// would silently hide mail the caller cannot currently reach behind an
+	// indistinguishable empty-inbox response. Partial success (one queue
+	// drained, the other errored) still returns what was actually drained,
+	// with the error only logged — failing the whole call would discard
+	// mail that *was* successfully retrieved.
+	if len(readErrs) > 0 {
+		if len(drained) == 0 {
+			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, readErrs[0]))
+		}
+		for _, rerr := range readErrs {
+			appendDebugEvent("mailbox.recv_partial_error", map[string]any{"error": rerr.Error()})
+		}
+	}
 
 	sort.SliceStable(drained, func(i, j int) bool { return drained[i].SentAt < drained[j].SentAt })
 
@@ -194,7 +235,8 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	if _, found := s.sessions.lookup(sessionKey); !found {
+	entry, found := s.sessions.lookup(sessionKey)
+	if !found {
 		return toolTextResponse(id, "", mailboxUnknownSessionError(tool))
 	}
 	scopeRaw, err := stringArg(tool, "scope", args)
@@ -206,7 +248,7 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 	}
 	scope := wsmailbox.Scope(scopeRaw)
 
-	path, perr := wsmailbox.PathForScope(scope, s.root)
+	path, perr := wsmailbox.PathForScope(scope, entry.root)
 	if perr != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, perr))
 	}
@@ -235,13 +277,18 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 	identity := s.mailboxIdentityResolved()
 	self := map[string]any{}
 	if identity.Active {
-		s.refreshMailboxPresenceHeartbeat()
-		self["address"] = identity.address()
-		self["auto"] = identity.Auto
-	} else {
-		// Decision 5: an env-less self-lookup publishes the caller's reply-id
-		// (the same channel-open a send performs) rather than returning an
-		// unreachable handle.
+		if isOwner, _, oerr := s.mailboxOwnerCheck(sessionKey, entry.root); oerr == nil && isOwner {
+			s.refreshMailboxPresenceHeartbeat(entry.root)
+			self["address"] = identity.address()
+			self["auto"] = identity.Auto
+		}
+	}
+	if _, hasAddress := self["address"]; !hasAddress {
+		// Decision 5: an env-less self-lookup — or a non-owner session
+		// sharing this process's identity, which cannot recv from the named
+		// inbox either — publishes the caller's reply-id (the same
+		// channel-open a send performs) rather than returning an address
+		// this particular session cannot actually use.
 		if replyID, rerr := s.publishReplyID(sessionKey); rerr == nil {
 			s.markMailboxReplyOpened(sessionKey)
 			self["reply_id"] = wsmailbox.ReplyIDPrefix + replyID
@@ -290,7 +337,22 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 // decision. It is a no-op passthrough for any response shape it does not
 // recognize (an error response, or one with no text content), and for a
 // session with nothing to report.
-func (s *Server) applyMailboxPiggyback(resp response, sessionKey string) response {
+//
+// jsonFormat must be true when the original call requested format:"json"
+// (wantsJSON(params.Arguments)): toolJSONResponse builds the exact same
+// content[0]["text"] shape as a text response, just filled with marshalled
+// JSON — concatenating badge text onto it would corrupt that JSON for any
+// caller parsing it structurally. Rather than trying to detect this from
+// the response shape alone (indistinguishable from plain text) or thread a
+// sibling field through every arbitrarily-shaped JSON result (some of
+// which marshal to a bare array, with no object to attach a field to), the
+// badge is simply suppressed for JSON-format callers: automation consuming
+// format:"json" is not the ambient-badge audience Decision 1's piggyback
+// exists for.
+func (s *Server) applyMailboxPiggyback(resp response, sessionKey string, jsonFormat bool) response {
+	if jsonFormat {
+		return resp
+	}
 	badge := s.mailboxPiggybackBadge(sessionKey)
 	if badge == "" {
 		return resp
@@ -335,9 +397,9 @@ func (s *Server) mailboxPiggybackBadge(sessionKey string) string {
 	var senders []string
 
 	if identity.Active {
-		s.refreshMailboxPresenceHeartbeat()
-		if isOwner, _, oerr := s.mailboxOwnerCheck(sessionKey); oerr == nil && isOwner {
-			if path, perr := wsmailbox.PathForScope(identity.Scope, s.root); perr == nil {
+		s.refreshMailboxPresenceHeartbeat(record.Root)
+		if isOwner, _, oerr := s.mailboxOwnerCheck(sessionKey, record.Root); oerr == nil && isOwner {
+			if path, perr := wsmailbox.PathForScope(identity.Scope, record.Root); perr == nil {
 				if store, lerr := wsmailbox.Load(path); lerr == nil {
 					if queue := store.Queues[identity.Name]; len(queue) > 0 {
 						unread += len(queue)

@@ -47,47 +47,75 @@ func MachineSecretPath() (string, error) {
 }
 
 // EnsureMachineSecret reads the persisted machine secret, minting it on
-// first use. Minting races are resolved the same way sessionStore.mint
-// resolves session-key collisions: O_EXCL claims the file atomically, and
-// the loser of a race simply re-reads what the winner wrote.
+// first use. Minting (and recovery from a truncated/corrupt file) is
+// serialized with the same flock convention WithLock/WithReplyLock use: an
+// O_EXCL create can only ever claim a MISSING file, so a second process
+// racing against a truncated/corrupt existing file would fall through to
+// the "file already exists" branch and re-read + return the very same bad
+// bytes, unvalidated. flock covers both cases uniformly, and the actual
+// write is a temp-file + atomic rename, matching the package's own
+// StoreFile/ReplyStore write discipline instead of a bare in-place write.
 func EnsureMachineSecret() ([]byte, error) {
 	path, err := MachineSecretPath()
 	if err != nil {
 		return nil, err
 	}
-	if raw, err := os.ReadFile(path); err == nil {
-		if len(raw) == secretByteLen {
-			return raw, nil
-		}
-		// Unexpected length: fall through and re-mint rather than trusting a
-		// truncated/corrupt file.
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("read mailbox secret: %w", err)
+	if raw, err := readValidSecret(path); raw != nil || err != nil {
+		return raw, err
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("create mailbox secret dir: %w", err)
 	}
+	lockPath := path + ".lock"
+	fl := flock.New(lockPath)
+	ctx, cancel := context.WithTimeout(context.Background(), LockTimeout)
+	defer cancel()
+	locked, err := fl.TryLockContext(ctx, 50*time.Millisecond)
+	if err != nil {
+		return nil, fmt.Errorf("acquire mailbox secret lock: %w", err)
+	}
+	if !locked {
+		return nil, fmt.Errorf("timed out waiting for mailbox secret lock: %s", lockPath)
+	}
+	defer fl.Unlock() //nolint:errcheck
+
+	// Re-check under the lock: another process may have minted or repaired
+	// it while we were waiting to acquire the lock.
+	if raw, err := readValidSecret(path); raw != nil || err != nil {
+		return raw, err
+	}
+
 	secret := make([]byte, secretByteLen)
 	if _, err := rand.Read(secret); err != nil {
 		return nil, fmt.Errorf("generate mailbox secret: %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		if os.IsExist(err) {
-			raw, rerr := os.ReadFile(path)
-			if rerr != nil {
-				return nil, fmt.Errorf("read mailbox secret after mint race: %w", rerr)
-			}
-			return raw, nil
-		}
-		return nil, fmt.Errorf("create mailbox secret file: %w", err)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, secret, 0o600); err != nil {
+		return nil, fmt.Errorf("write mailbox secret temp file: %w", err)
 	}
-	defer f.Close()
-	if _, err := f.Write(secret); err != nil {
-		return nil, fmt.Errorf("write mailbox secret file: %w", err)
+	if err := os.Rename(tmp, path); err != nil {
+		return nil, fmt.Errorf("commit mailbox secret file: %w", err)
 	}
 	return secret, nil
+}
+
+// readValidSecret reads path and returns its contents when present and
+// exactly secretByteLen long. A missing file or a wrong-length (truncated/
+// corrupt) file both return (nil, nil) — "not valid yet, mint/repair it" —
+// distinct from a genuine read error.
+func readValidSecret(path string) ([]byte, error) {
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read mailbox secret: %w", err)
+	}
+	if len(raw) != secretByteLen {
+		return nil, nil
+	}
+	return raw, nil
 }
 
 // ReplyID computes the deterministic, unguessable reply-id for
