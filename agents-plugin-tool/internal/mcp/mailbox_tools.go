@@ -257,6 +257,17 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, lerr))
 	}
 
+	// Resolved once, up front, so the peer-enumeration loop below can apply
+	// the same self-exclusion predicate the self block already trusted:
+	// isOwner here is exactly the condition self["address"] gets set under.
+	identity := s.mailboxIdentityResolved()
+	isOwner := false
+	if identity.Active {
+		if ok, _, oerr := s.mailboxOwnerCheck(sessionKey, entry.root); oerr == nil && ok {
+			isOwner = true
+		}
+	}
+
 	now := mailboxNow()
 	names := make([]string, 0, len(store.Presence))
 	for name := range store.Presence {
@@ -269,19 +280,29 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 		if !mailboxPresenceLive(p, now) {
 			continue // lookup_peers filters dead peers (Decision: liveness)
 		}
+		// Self-exclusion (260913-bug-mailbox-lookup-peers-self-leak): the
+		// caller's own registered named inbox must surface only under
+		// self, never inside peers[]. A caller's own reply-id never faces
+		// this because it lives in an entirely separate store (the reply-id
+		// registry, not this scope's Presence map); a named inbox shares
+		// this same Presence map with every other name in scope, so it
+		// needs an explicit exclusion by owned identity (name+scope)
+		// instead. This only ever drops the caller's own live entry — a
+		// genuinely distinct second name (or a conflicted duplicate of a
+		// name this session does not own) is untouched.
+		if isOwner && identity.Scope == scope && name == identity.Name {
+			continue
+		}
 		peers = append(peers, mailboxPeerOut{
 			Address: name + "@" + string(scope), Harness: p.Harness, Cwd: p.Cwd, StartedAt: p.StartedAt, Conflict: p.Conflict,
 		})
 	}
 
-	identity := s.mailboxIdentityResolved()
 	self := map[string]any{}
-	if identity.Active {
-		if isOwner, _, oerr := s.mailboxOwnerCheck(sessionKey, entry.root); oerr == nil && isOwner {
-			s.refreshMailboxPresenceHeartbeat(entry.root)
-			self["address"] = identity.address()
-			self["auto"] = identity.Auto
-		}
+	if isOwner {
+		s.refreshMailboxPresenceHeartbeat(entry.root)
+		self["address"] = identity.address()
+		self["auto"] = identity.Auto
 	}
 	if _, hasAddress := self["address"]; !hasAddress {
 		// Decision 5: an env-less self-lookup — or a non-owner session
