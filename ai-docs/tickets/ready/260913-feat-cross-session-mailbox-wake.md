@@ -272,6 +272,232 @@ Verification (Codex CLI 0.154.0):
 - With hook trust persisted, the adapter's hooks run without an interactive trust
   prompt.
 
+### Result (67478735) - 2026-09-13
+
+Implemented the Codex Stop-hook adapter over Phase 1's storage primitives
+(never Phase 1's blocking `wait` CLI — Codex's mechanism is per-turn
+event-driven, so it only ever needs one non-blocking read per `Stop`
+firing, not a background block-until-arrival process). This phase went
+through one round of independent review (correctness + test partitions),
+which found 2 Critical and 5 Important issues in the initial pass; all are
+fixed below and confirmed by a second, fix-verification-only review round.
+
+- **Bounded, ownership-agnostic notify check**
+  (`internal/wsmailbox/hook_peek.go`): `PeekNamedInboxUnread(slug, root)`
+  reports a named inbox's queue length regardless of current
+  `Presence.Owner` — a bare hook subprocess has no ws session_key to assert
+  ownership with (Decision 9), so this deliberately skips the owner-match
+  check Phase 1's `Wait`/`peek` perform; the real `caller == owner` gate
+  stays server-side in `mailbox.recv`. On top of that,
+  `ShouldNotifyNamedInboxUnread(slug, root)` adds a persisted per-name
+  watermark (`<store-dir>/mailbox-codex-stop-notified/<name>.json`, a
+  sibling directory of the mailbox store file itself, atomic temp+rename
+  writes) so `decision:block` fires at most once per queue-length *change*,
+  clearing on drain so a later refill at any count notifies again.
+  **Round-1 Critical finding:** without this bound, a named inbox whose
+  owner is unset, rebound, or simply never drained would get
+  `decision:block` on every single `Stop` firing forever — worse than a
+  missed wake, and exactly what Decision 7 warns an adapter must not
+  become. **Round-2 Important finding (fix-verification round):** the
+  round-1 fix's first version keyed the watermark path by `(scope, name)`
+  under a fixed machine-global cache root, not by the actual resolved store
+  directory. For `worktree`/`clone` scope, `PathForScope` resolves a
+  *different* physical store per caller-supplied root, so two different
+  worktree roots sharing the same mailbox name (e.g. `lead@worktree`, the
+  exact per-role naming pattern this scope exists to support) would collide
+  on one watermark file despite tracking two independent queues — reopening
+  the same unbounded-re-block failure mode, just across roots instead of
+  across owners. Fixed by deriving the watermark path from
+  `filepath.Dir` of the same resolved store path
+  `ShouldNotifyNamedInboxUnread` already reads, rather than a separate
+  `wsstate.CacheRoot()` call: the store's own directory is already
+  root-scoped by construction, so the watermark inherits that scoping with
+  no extra bookkeeping (and no longer needs scope in its filename).
+  Regression-tested by
+  `TestShouldNotifyNamedInboxUnreadIsolatesWatermarkPerRoot`, which seeds
+  two separate git worktree fixtures with the same name and the same
+  static unread count and asserts both notify independently.
+- **CLI adapter subcommand** (`cmd/ws-mcp/mailbox.go`,
+  `mailboxCodexStopHook`): `ws-mcp mailbox codex-stop-hook` reads the mailbox
+  slug from its own inherited `WS_MAILBOX` environment variable at fire time
+  (`--slug` remains as an override for direct invocation/testing only — the
+  shipped hook never passes it), reads Codex's `Stop` JSON payload from
+  stdin (`stop_hook_active` for the loop guard, `cwd` as a root fallback for
+  a worktree/clone-scope slug), and prints `{"decision":"block","reason":...}`
+  to stdout (exit 0) only when `ShouldNotifyNamedInboxUnread` says to; every
+  other path (no `WS_MAILBOX`/`--slug`, malformed/empty stdin, an
+  unresolvable slug, an empty or already-notified-at-this-count queue) is
+  silent and exits 0 — fail-open, per Decision 7. Stdin is always drained
+  before any exit path, including the no-op ones, so the harness's payload
+  write is never left with an unread pipe on this end.
+- **Plugin wiring** (`agents-plugin/.codex-plugin/hooks.json`, referenced
+  from `agents-plugin/.codex-plugin/plugin.json` via
+  `"hooks": "./.codex-plugin/hooks.json"`): a `Stop` hook whose POSIX
+  `command` (plus a `commandWindows` counterpart) shells out to the existing
+  `bin/ws-mcp-launcher.py` with `mailbox codex-stop-hook || true` — no
+  `--slug` interpolated into the command string at all; the Go binary reads
+  `WS_MAILBOX` from its own environment instead, closing what would
+  otherwise be a command-substitution injection surface. `timeout: 30`
+  (raised from an initial 10 — see deferred items below).
+  **Round-1 Critical finding:** this file originally lived at
+  `agents-plugin/hooks/hooks.json`. Claude Code auto-discovers
+  `<plugin-root>/hooks/hooks.json` by directory-name convention alone, with
+  no manifest key required (unlike Codex, which needs an explicit `"hooks"`
+  path in its manifest) — so that path would have silently also activated
+  this Codex-only hook in Claude, where `$PLUGIN_ROOT` is undefined (Claude
+  uses `${CLAUDE_PLUGIN_ROOT}`), causing an exit-2 failure that *blocks* the
+  Stop in Claude and feeds stderr to the model on every turn — a broken
+  per-turn loop that `install.sh`'s `rsync -a --delete` would have shipped
+  before Phase 3 (the Claude adapter) even exists. Fixed by relocating the
+  file into `agents-plugin/.codex-plugin/` (a directory Claude never scans)
+  and updating `plugin.json`'s `"hooks"` pointer to match.
+- **Doc update** (`ai-docs/manuals/codex-integration.md`): added the
+  plugin-bundled `hooks.json` schema (`{"hooks": {"<Event>": [{"type",
+  "command", "timeout", ...}]}}`, one shell-string `command`, `PLUGIN_ROOT`/
+  `PLUGIN_DATA` path env vars) sourced from the official docs site,
+  explicitly flagged as lower-confidence than the manual's hands-on CLI
+  re-probes above it; a note that no CLI/config hook-trust-persistence
+  mechanism was found on 0.154.0; and, after the relocation above, a note
+  on why the file moved and on the env-based (not `--slug`-interpolated)
+  slug-discovery design.
+- **New manifest-validation test**
+  (`agents-plugin/tests/test_hooks_manifest.py`): asserts `plugin.json`'s
+  `"hooks"` pointer resolves to an existing file, that file parses as JSON
+  in the expected `{"hooks": {...}}` shape, every `command` is
+  syntactically valid POSIX shell (`sh -n`), and every entry with a
+  `command` also carries a non-blank `commandWindows`. Closes a round-1
+  Minor finding: nothing previously asserted the shipped hooks.json even
+  parses, so a typo would only have surfaced at live Codex install time.
+
+Verification: `go build ./...`, `go vet ./...`, and `go test ./...` all
+pass across every `agents-plugin-tool` package (re-run after every fix
+round, including the round-2 fix). New/updated Go coverage:
+`internal/wsmailbox/hook_peek_test.go` (the watermark's bound/re-notify-on-
+increase/reset-after-drain behavior, the pre-existing ownership-agnostic and
+malformed-slug cases, and — added after round 2 —
+`TestShouldNotifyNamedInboxUnreadIsolatesWatermarkPerRoot`, seeding two
+separate git worktree fixtures with the same name and unread count to prove
+the watermark no longer collides across roots) and
+`cmd/ws-mcp/mailbox_codex_hook_test.go` (rewritten for the env-based
+interface: block-on-unread via `WS_MAILBOX`, `--slug` still overriding the
+env for direct invocation, silent-on-empty-queue, the `stop_hook_active`
+loop guard, a CLI-level repeated-firing-suppression regression test
+mirroring the package-level watermark tests, no-op with neither env nor
+flag set, fail-open on malformed stdin and on an unresolvable slug,
+empty-stdin tolerance; and, added after round 2,
+`TestMailboxCodexStopHookHonorsExplicitReason` plus a rewritten
+`TestMailboxCodexStopHookUsesPayloadCwdForWorktreeSlug` that deliberately
+diverges the OS process cwd from the payload's `cwd` field with a negative
+control, rather than the original version's weaker "no warning surfaced"
+assertion against the test binary's own already-valid ambient cwd, which
+could not actually have caught a regression). `python3 -m unittest` passes
+for `test_shipped_surfaces_downstream_neutral.py` (its `TEXT_TREES` now
+lists the exact file `agents-plugin/.codex-plugin/hooks.json` rather than
+the whole `.codex-plugin` directory — see deferred items below for why),
+`test_skill_dispatch_contracts.py`, and the new `test_hooks_manifest.py`.
+The CLI subcommand was also driven directly (piped Stop-shaped stdin JSON,
+both via `WS_MAILBOX` and via `--slug`, against a real seeded machine-scope
+inbox) confirming the `{"decision":"block","reason":...}` shape and the
+watermark suppression by hand, matching the automated coverage.
+
+**Review record:** round 1 (correctness + test partitions) found 2
+Critical (Claude-leak relocation, unbounded re-block loop — both above),
+5 Important (fail-open scoped only to inside the Go binary, not the shell
+wrapper; the repair path in `ws-mcp-launcher.py` can exceed a 10s hook
+timeout under local-devenv dogfood mode; the `Stop` payload's `cwd` was
+parsed but discarded; doc comments inaccurately claimed the slug was baked
+into hook args and that `WS_MAILBOX_AUTO` was consulted; no Windows command
+variant), and several Minor (command-substitution injection via
+shell-interpolated `--slug`; an exit-before-stdin-read EPIPE risk; no
+manifest-parse test; no test for `--reason`) findings; all were fixed
+before round 2. Round 2 (same two playbooks, fix-verification only)
+confirmed 9 of the round-1 fixes clean, but the correctness partition
+caught one genuine remaining gap in the Critical-2 fix itself (the
+per-root watermark collision above, classified Important since the
+mechanism was present and only its root-scoping was wrong) — fixed and
+regression-tested as described above. The test partition returned "clean
+with 1 minor remaining" (the `--reason` gap, since fixed) plus a
+non-gating Observation that the cwd test was too weak to catch a
+regression (also since fixed, by rewriting rather than only noting it).
+No third independent review round was spawned for these fixes: both are
+narrow, mechanically verifiable corrections (a path-derivation change and
+two test rewrites) confirmed by the new regression tests and a clean full
+`go build`/`go vet`/`go test` pass, and the ws Worker Protocol caps
+independent review at two rounds.
+
+**Not independently re-verified this round:** an actual live
+`codex exec` round trip of this exact hook command (the sandbox's
+"Create Unsafe Agents" guard denied spawning `codex exec
+--dangerously-bypass-hook-trust --dangerously-bypass-approvals-and-sandbox`
+even in an isolated `--ephemeral --ignore-user-config` probe). The
+underlying `Stop`+`decision:block` re-invoke mechanism and the
+`stop_hook_active` re-entry guard were already live-probed at the
+research stage (`ai-docs/manuals/codex-integration.md`'s 2026-09-13
+re-probe, cited in this ticket's Decisions) with a placeholder hook; this
+round only re-verified the CLI's own JSON I/O contract and the on-disk
+watermark against that already-confirmed mechanism, not a fresh live round
+trip of the new command string. A plugin-cache-level (Level 3-style)
+verification also needs the human-in-the-loop refresh
+`ai-docs/manuals/ws-mcp.md` describes.
+
+**Decisions and deferred items:**
+
+- `WS_MAILBOX` (explicit slug) only, never `WS_MAILBOX_AUTO`: the
+  auto-registration path mints its name randomly inside the MCP server
+  process and never exports it anywhere a sibling hook subprocess can read
+  (confirmed by reading `internal/mcp/mailbox_runtime.go`'s
+  `computeMailboxIdentity`). A bare shell hook cannot discover that name, so
+  Codex's durable, hook-backed wake is scoped to the explicit-slug case for
+  now. Filed as a gap, not fixed here: the fix (e.g. the server writing a
+  discoverable self-address record once per process) would touch the
+  already-`.done` core ticket's surface and was not asked for by this
+  phase.
+- **Partially mitigated, not architecturally fixed:** the round-1 Important
+  finding that `ws-mcp-launcher.py`'s binary-repair path can exceed a Stop
+  hook's timeout under local-devenv dogfood mode. Mitigated by raising
+  `hooks.json`'s `timeout` from 10 to 30; a full fix (e.g. bypassing the
+  repair path entirely for hook invocations, or a fast-path binary lookup)
+  was deliberately deferred as out of proportion for this phase — the
+  process-env-visible `WS_MCP_RUNTIME_BINARY` shortcut was checked and ruled
+  out (it is set inside the launcher's own exec'd child, not visible to a
+  sibling hook subprocess). A future pass can revisit this if the 30s
+  timeout still proves insufficient in practice.
+- Filed `260913-research-codex-hook-trust-persistence` (idea): no
+  CLI subcommand or documented `config.toml` key persists hook trust on
+  Codex CLI 0.154.0 — only the always-required
+  `--dangerously-bypass-hook-trust` bypass flag was found. This ticket's
+  own Decision text assumed a persistable deployment step exists; that
+  assumption is now flagged as unconfirmed rather than restated as fact.
+- Filed `260913-bug-plugin-json-migration-vocab-uncovered` (idea): widening
+  the neutrality scanner's `TEXT_TREES` to cover the relocated
+  `hooks.json` surfaced that `agents-plugin/.codex-plugin/` (and thus
+  `plugin.json`) had never been scanned at all, and `plugin.json` itself
+  already carries pre-existing, unrelated "codex-first" migration-vocabulary
+  text that would fail the scan. Scoped this ticket's `TEXT_TREES` entry to
+  the exact file `agents-plugin/.codex-plugin/hooks.json` (the scanner's
+  matching loop was extended to support an exact-file entry, not only a
+  directory prefix) rather than fixing `plugin.json`'s wording under an
+  unrelated ticket.
+- Round-2 correctness review also logged 5 non-gating Observations (not
+  findings — round 2 is fix-verification-only per protocol, so new items it
+  notices are recorded rather than actioned): notably that `hooks.json`'s
+  `|| true` fail-open is POSIX-only (no equivalent on the `commandWindows`
+  side), and that `MaxQueueLen = 200` (`store.go`) means a named inbox that
+  fills past that cap silently drops old mail without ever being reflected
+  in the watermark's "queue-length change" signal in the one specific case
+  where the drop count happens to exactly offset a simultaneous arrival
+  count. Recorded here rather than fixed: neither was asked for by this
+  phase, and both are pre-existing behavior this phase's own changes did
+  not introduce.
+- No `PostToolUse` hook was added: per this phase's own Decision text,
+  Codex `PostToolUse` output never reaches the model, and mid-turn
+  awareness already rides the core ticket's piggyback spine — there is no
+  side effect this adapter currently needs a `PostToolUse` hook for.
+- The `hooks.json` schema documented in `codex-integration.md` is sourced
+  from the official docs site fetched today, not from a hands-on CLI probe
+  like the rest of that file's Codex findings — flagged inline at a lower
+  confidence tier pending a live plugin-cache dogfood pass.
+
 ### Phase 3: Claude hook adapter
 
 Wire the Claude adapter over Phase 1 (depends on the Phase 1 CLI + marker). A
