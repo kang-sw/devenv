@@ -265,6 +265,13 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			if err != nil {
 				return toolTextResponse(id, "", fmt.Errorf("workflow_manual: mint session: %w", err))
 			}
+			// Ferrule owner binding (mailbox core Decision 3): this FRESH-
+			// with-root path is itself a parent-less top-lead bootstrap,
+			// exactly like handleLeadLogin's own ws.ferrule path — it must
+			// rebind this process's active mailbox identity's owner pointer
+			// too, or its own ambient self-address announcement below would
+			// promise a channel this session was never actually bound to.
+			s.rebindMailboxOwnerAtFerrule(mintedKey, "", canonical)
 			body = stripModeGatedRegion(body, false)
 			body = injectSessionKeyLine(body, mintedKey)
 			body += "\n\n## Session Key\n" + mintedKey
@@ -280,6 +287,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				body = injectBootstrapStalenessWarning(body, warning)
 			}
 			body = injectBootstrapStalenessWarning(body, scopeAnnouncement(canonical))
+			body = injectBootstrapStalenessWarning(body, mailboxAddressAnnouncement(s, mintedKey, canonical))
 			body = injectBootstrapStalenessWarning(body, computeManuals(canonical))
 			body = injectBootstrapStalenessWarning(body, wsreview.CheckpointNudge(context.Background(), canonical))
 			if nudge := reviewTrackNudge(canonical); nudge != "" {
@@ -311,6 +319,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				body = injectBootstrapStalenessWarning(body, warning)
 			}
 			body = injectBootstrapStalenessWarning(body, scopeAnnouncement(rec.Root))
+			body = injectBootstrapStalenessWarning(body, mailboxAddressAnnouncement(s, key, rec.Root))
 			body = injectBootstrapStalenessWarning(body, computeManuals(rec.Root))
 			body = injectBootstrapStalenessWarning(body, wsreview.CheckpointNudge(context.Background(), rec.Root))
 			if !rec.ReviewTrackNudgeShown {

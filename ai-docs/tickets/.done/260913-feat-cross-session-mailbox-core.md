@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0e8af6755f7f8c34
 sage-review-completeness-reviewed: 0e8af6755f7f8c34
+completed: 2026-09-13
 ---
 
 # Cross-session mailbox core — host-neutral MCP surface, identity, and owner binding
@@ -281,3 +282,110 @@ Verification (all achievable without the probe / without any harness hook):
   presence is preserved) and the conflict is surfaced through `lookup_peers`.
 - Piggyback badge appears on a session's tool responses when it has unread mail
   (owner's named inbox, or the caller's own reply-id queue) and only then.
+
+### Result (18d50953) - 2026-09-13
+
+Implemented across `c0e0816a` (initial), `6d786057` (round-1 review fixes),
+`18d50953` (round-2 review fixes). All 13 verification bullets above are met:
+
+- MCP surface `mailbox.send`/`mailbox.recv`/`mailbox.lookup_peers` added as
+  non-blocking tools in `agents-plugin-tool/internal/mcp/mailbox_tools.go`,
+  wired into `agents-plugin-tool/internal/mcp/server.go`'s dispatch and
+  `runtime.json` for both `agents-plugin/` and `agents-plugin-wsflow/`.
+- `WS_MAILBOX`/`WS_MAILBOX_AUTO` identity resolution, self-registration,
+  liveness, and the machine-secret/reply-id HMAC primitives live in
+  `agents-plugin-tool/internal/wsmailbox/` (pure storage: `Scope`, `Presence`,
+  `Envelope`, `StoreFile`, `PathForScope`, `WithLock`/`WithReplyLock`,
+  `EnsureMachineSecret`/`ReplyID`, `ParseAddress`/`ParseSlugScope`,
+  `ReplyStore`/`ReplyEntry`) and
+  `agents-plugin-tool/internal/mcp/mailbox_runtime.go` (process-level policy:
+  identity resolution, self-registration, owner-rebind, envelope stamping,
+  liveness).
+- Owner binding at a parent-less `ferrule` is wired in
+  `agents-plugin-tool/internal/mcp/server.go` (`handleLeadLogin`) and
+  `agents-plugin-tool/internal/mcp/workflow_manual.go` (both the FRESH mint
+  path and the CONTINUE/re-login path), gated by
+  `rebindMailboxOwnerAtFerrule`, with a `caller == owner` gate
+  (`mailboxOwnerCheck`) enforced server-side on `send`/`recv`/piggyback for
+  the named inbox.
+- Self-address surface: workflow ambient block
+  (`mailboxAddressAnnouncement`) and `mailbox.lookup_peers`'s self entry,
+  both gated by ownership for the named-slug case and falling back to the
+  env-less reply-id self entry otherwise.
+- Inert-by-default preserved: no presence, no piggyback, no registry entry
+  for a session with neither env var set and no send/self-lookup performed.
+
+**Verification:** `go build ./...`, `go vet ./...`, `gofmt -l` (clean for
+every mailbox-touched file), and `go test ./...` all green across every
+package in `agents-plugin-tool/`, including `internal/mcp` (mailbox tool and
+runtime tests) and `internal/wsmailbox` (storage-layer tests). Key test
+names: `TestMailboxToolBoundaryErrors`,
+`TestMailboxPiggybackSuppressedForJSONFormat`,
+`TestMailboxLookupPeersSelfAddressGatedByOwnership`,
+`TestMailboxFerruleRebindPreservesAddressAndQueuedMail`,
+`TestMailboxReplyIDStableAcrossRestartAndDiesAtNewFerrule`,
+`TestMailboxLookupPeersFiltersDeadPeersAndSurfacesConflict`,
+`TestReapStaleReplyIDsRemovesOnlyStaleEmptyEntries`, and (new home for
+process-liveness coverage after the round-2 fix)
+`internal/wsstate.TestProcessAliveDetectsLiveAndExitedProcess`.
+
+**Decisions recorded:**
+- Root threading: every mailbox function takes an explicit `root string`
+  sourced from the calling session's own bound root (`sessionEntry.root` /
+  `sessionRecord.Root`), never the unreliable process-level `Server.root` —
+  mirrors the pre-existing `resolveToolRoot` pattern, per
+  `ai-docs/manuals/ws-mcp.md`'s "tools must not infer the project root from
+  process cwd."
+- A `sync.Once`-guarded registration's precondition check sits before
+  `.Do(...)`, not inside it, so a root-less call at `initialize` time defers
+  rather than permanently wasting the registration attempt for a
+  worktree/clone identity that only gets a real root at ferrule login.
+- Owner-rebind is double-guarded: `mailboxHasConflict()` checked before the
+  rebind attempt, then re-verified under the same write lock (fresh
+  liveness/PID check) to close the registration-to-rebind race window.
+- Piggyback badge is suppressed entirely (not structurally injected) for
+  `format:"json"` callers, since some JSON results marshal to a bare array
+  with no object to attach a sibling field to, and JSON-format automation
+  isn't the ambient-badge audience Decision 1 targets.
+- Presence liveness is asymmetric by design: a definitively-dead PID always
+  overrides `LastSeen` recency to "dead" (fixes a restart false-positive
+  conflict); a definitively-alive PID does NOT override recency to "alive"
+  (idle-dropout stays recency-bound, deliberately deferred to
+  `260913-feat-cross-session-mailbox-wake`'s Decisions 6/7/9). The syscall
+  liveness check itself reuses the codebase's own pre-existing,
+  cross-platform, CI-tested `internal/wsstate.processAlive` (exported as
+  `wsstate.ProcessAlive`) rather than a second hand-rolled implementation —
+  two earlier attempts at a private version were platform-buggy (Unix
+  `os.Process.Signal` masks `ESRCH` into an unmatchable sentinel; a
+  `syscall.Kill`-direct fix doesn't compile on Windows; the original
+  `os.FindProcess`-based check has an inverted failure-meaning on Windows).
+- Decision 11's lazy-expiry reaping (`reapStaleReplyIDs`, 30-day retention)
+  only reaps entries whose queue is already empty, never dropping
+  undelivered mail.
+- Self-address surface and `lookup_peers`'s self entry are gated by the same
+  `mailboxOwnerCheck` used for send/recv, closing a self-address leak to
+  non-owner sessions sharing a process.
+- `mailbox.recv`'s drain-then-persist ordering accumulates into block-local
+  slices and only merges into the returned result after the store write is
+  confirmed error-free, avoiding a tentative-drain-reported-as-delivered
+  bug on a write failure; `MailboxReplyOpened` is set only by `send` and the
+  self-lookup fallback (the two channel-opening acts), not by `recv`.
+- Two Minor findings were left deliberately unfixed and are recorded here,
+  not blocking: unvalidated send targets can create unbounded queues for a
+  never-draining name (bounded size/TTL is a stated phase-level default per
+  Decision 2, not yet enforced); message ordering within a same-second
+  window is nondeterministic (no sub-second sequence tiebreaker).
+
+Review: two rounds via `code-review-correctness`/`code-review-test`
+playbooks. Round 1 found 4 Critical + 4 Important + 5 Minor; all
+Critical/Important fixed in `6d786057` (3 of 5 Minor also fixed, 2
+deliberately deferred as above). Round 2 re-verified round-1 fixes and
+found 1 new Important (Windows no-op in the liveness check) plus the test
+partition's 2 Important (a vacuous post-rebind assertion; shallow
+crashed-process test coverage) and 1 Minor; all fixed in `18d50953`, with
+no Critical open after round 2.
+
+
+## Resolution (2026-09-13)
+
+Phase 1 (the only phase) is complete: MCP surface (mailbox.send/recv/lookup_peers), WS_MAILBOX/WS_MAILBOX_AUTO identity with self-registration and liveness, universal send with the machine-tier reply-id registry, sender-server envelope stamping, name-keyed queue/presence storage, owner binding at a parent-less ferrule with server-side caller==owner gate, env-less reply-id recv/piggyback, central piggyback badge, and the self-address surface — all landed across c0e0816a, 6d786057, 18d50953, verified by a full build/vet/gofmt/test pass and two review rounds with no Critical findings open. See the ### Result section under Phase 1 for full detail. Decisions 6, 7, 9, and the wake half of 14 remain deferred to 260913-feat-cross-session-mailbox-wake, untouched by this ticket.
