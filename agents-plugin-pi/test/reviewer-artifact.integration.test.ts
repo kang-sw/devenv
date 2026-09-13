@@ -4,12 +4,12 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileS
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RpcClient, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { RpcClient, createEventBus, discoverAndLoadExtensions, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { captureOrphans, parseOrphans, rehydrateOrphanRecord, serializeOrphans } from "../src/agent-sidecar.ts";
-import { playbookProfile, type DelegationPolicy } from "../src/delegation-policy.ts";
+import { DELEGATION_ENV, playbookProfile, type DelegationPolicy } from "../src/delegation-policy.ts";
 import { createAgentStorageContext } from "../src/agent-storage.ts";
+import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 import { resolveTools, spawnAdmission, spawnAgent, stopAgent, type RpcAgentRegistry } from "../src/spawner.ts";
-import { registerScopedWriteTools } from "../src/write-scopes.ts";
 
 const roots: string[] = [];
 const originalRpc = Object.fromEntries(
@@ -103,6 +103,8 @@ test("spawned reviewers publish clean and non-clean artifacts through one immuta
     setThinkingLevel: async () => {},
   });
 
+  const previousPolicy = process.env[DELEGATION_ENV];
+  const previousRole = process.env[WS_PI_SPAWN_ROLE_ENV];
   const root = tempRoot();
   const systemPromptPath = join(root, "reviewer-prompt.md");
   writeFileSync(systemPromptPath, "Offline code reviewer\n");
@@ -112,53 +114,67 @@ test("spawned reviewers publish clean and non-clean artifacts through one immuta
     { path: join(root, "clean.md"), content: "## Review findings: clean\nNo findings.\n" },
     { path: join(root, "non-clean.md"), content: "## Review findings: non-clean\n### Important\n- defect\n" },
   ];
-
-  for (const [index, report] of reports.entries()) {
-    const result = await spawnAgent(registry, context, {
-      systemPromptPath,
-      prompt: `Review and publish ${index}`,
-      writeScopes: [{ path: report.path, kind: "file" }],
-    });
-    const record = registry.get(result.agent_id)!;
-    assert.match(readFileSync(record.systemPromptPath!, "utf8"), /write_scopes/);
-    assert.equal(record.delegation?.tools.includes("bash"), false);
-    assert.deepEqual(record.delegation?.write, { mode: "scoped", scopes: [{ path: report.path, kind: "file" }] });
-
-    const tools = new Map<string, any>();
-    registerScopedWriteTools(
-      { registerTool: (tool: any) => tools.set(tool.name, tool) } as ExtensionAPI,
-      record.delegation!.write!,
+  const loadChildTools = async (policy: DelegationPolicy, suffix: string) => {
+    process.env[WS_PI_SPAWN_ROLE_ENV] = "worker";
+    process.env[DELEGATION_ENV] = JSON.stringify(policy);
+    const loaded = await discoverAndLoadExtensions(
+      [context.extensionPath],
+      root,
+      join(root, `child-agent-${suffix}`),
+      createEventBus(),
     );
-    await tools.get("write").execute("publish", { path: report.path, content: report.content }, undefined, undefined, { cwd: root });
-    assert.equal(readFileSync(report.path, "utf8"), report.content, "the worker can consume the complete published report");
+    assert.deepEqual(loaded.errors, []);
+    const extension = loaded.extensions.find(candidate => candidate.resolvedPath === context.extensionPath);
+    assert.ok(extension, "the spawned child loads the real Pi adapter entry");
+    assert.equal(extension.tools.has("bash"), false, "reviewer initialization does not add Bash");
+    const edit = extension.tools.get("edit")?.definition;
+    const write = extension.tools.get("write")?.definition;
+    assert.ok(edit?.execute && write?.execute, "reviewer initialization installs the same-name scoped wrappers");
+    return { edit, write };
+  };
+
+  try {
+    for (const [index, report] of reports.entries()) {
+      const result = await spawnAgent(registry, context, {
+        systemPromptPath,
+        prompt: `Review and publish ${index}`,
+        writeScopes: [{ path: report.path, kind: "file" }],
+      });
+      const record = registry.get(result.agent_id)!;
+      assert.match(readFileSync(record.systemPromptPath!, "utf8"), /write_scopes/);
+      assert.equal(record.delegation?.tools.includes("bash"), false);
+      assert.deepEqual(record.delegation?.write, { mode: "scoped", scopes: [{ path: report.path, kind: "file" }] });
+
+      const tools = await loadChildTools(record.delegation!, String(index));
+      await tools.write.execute("publish", { path: report.path, content: report.content }, undefined, undefined, { cwd: root } as never);
+      assert.equal(readFileSync(report.path, "utf8"), report.content, "the worker consumes the complete child-published report");
+      await assert.rejects(
+        tools.write.execute("second", { path: join(root, `unbound-${index}.md`), content: "escape" }, undefined, undefined, { cwd: root } as never),
+        /outside delegated write scopes/,
+      );
+      assert.equal(existsSync(join(root, `unbound-${index}.md`)), false);
+    }
+
+    const first = registry.values().next().value!;
+    const [restored] = parseOrphans(serializeOrphans(captureOrphans(new Map([[first.agentId, first]]))));
+    const revived = rehydrateOrphanRecord(restored);
+    assert.deepEqual(revived.delegation?.write, first.delegation?.write, "reload/resume keeps the exact file binding immutable");
+    const revivedTools = await loadChildTools(revived.delegation!, "revived");
+    await revivedTools.edit.execute(
+      "resume-edit",
+      { path: reports[0]!.path, edits: [{ oldText: "No findings.", newText: "No findings after resume." }] },
+      undefined,
+      undefined,
+      { cwd: root } as never,
+    );
+    assert.match(readFileSync(reports[0]!.path, "utf8"), /after resume/);
     await assert.rejects(
-      tools.get("write").execute("second", { path: join(root, `unbound-${index}.md`), content: "escape" }, undefined, undefined, { cwd: root }),
+      revivedTools.write.execute("resume-escape", { path: reports[1]!.path, content: "cross-artifact" }, undefined, undefined, { cwd: root } as never),
       /outside delegated write scopes/,
     );
-    assert.equal(existsSync(join(root, `unbound-${index}.md`)), false);
+  } finally {
+    for (const id of [...registry.keys()]) await stopAgent(registry, id, context.pi, { silent: true });
+    if (previousPolicy === undefined) delete process.env[DELEGATION_ENV]; else process.env[DELEGATION_ENV] = previousPolicy;
+    if (previousRole === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV]; else process.env[WS_PI_SPAWN_ROLE_ENV] = previousRole;
   }
-
-  const first = registry.values().next().value!;
-  const [restored] = parseOrphans(serializeOrphans(captureOrphans(new Map([[first.agentId, first]]))));
-  const revived = rehydrateOrphanRecord(restored);
-  assert.deepEqual(revived.delegation?.write, first.delegation?.write, "reload/resume keeps the exact file binding immutable");
-  const revivedTools = new Map<string, any>();
-  registerScopedWriteTools(
-    { registerTool: (tool: any) => revivedTools.set(tool.name, tool) } as ExtensionAPI,
-    revived.delegation!.write!,
-  );
-  await revivedTools.get("edit").execute(
-    "resume-edit",
-    { path: reports[0]!.path, edits: [{ oldText: "No findings.", newText: "No findings after resume." }] },
-    undefined,
-    undefined,
-    { cwd: root },
-  );
-  assert.match(readFileSync(reports[0]!.path, "utf8"), /after resume/);
-  await assert.rejects(
-    revivedTools.get("write").execute("resume-escape", { path: reports[1]!.path, content: "cross-artifact" }, undefined, undefined, { cwd: root }),
-    /outside delegated write scopes/,
-  );
-
-  for (const id of [...registry.keys()]) await stopAgent(registry, id, context.pi, { silent: true });
 });
