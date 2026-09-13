@@ -53,7 +53,7 @@ function writeWorkingLauncher(dir: string): string {
   const launcher = join(dir, "fake-mcp.py");
   writeFileSync(
     launcher,
-    `import json, sys\nfor line in sys.stdin:\n req=json.loads(line); method=req['method']; result={'serverInfo':{'version':'0.45.2'}} if method=='initialize' else {'tools':[{'name':'git.status','description':'status','inputSchema':{'type':'object','properties':{},'required':[]}}]} if method=='tools/list' else {'isError':True,'content':[{'type':'text','text':'no bootstrap'}]}; print(json.dumps({'jsonrpc':'2.0','id':req['id'],'result':result}), flush=True)\n`,
+    `import json, sys\nfor line in sys.stdin:\n req=json.loads(line); method=req['method']; result={'serverInfo':{'version':'0.46.1'}} if method=='initialize' else {'tools':[{'name':'git.status','description':'status','inputSchema':{'type':'object','properties':{},'required':[]}}]} if method=='tools/list' else {'isError':True,'content':[{'type':'text','text':'no bootstrap'}]}; print(json.dumps({'jsonrpc':'2.0','id':req['id'],'result':result}), flush=True)\n`,
   );
   return launcher;
 }
@@ -146,7 +146,7 @@ test("happy path: a working launcher never fires notify/exit and returns the rea
       "worker",
       async () => {
         const h = await startBridge(pi, { launcherPath: launcher, pluginDir: dir, runtimeJsonPath, cwd: dir, toolPreviewTuiRef: ref });
-        const agentTools = registerAgentTools(pi, h, { cwd: dir }, undefined, undefined, undefined, ref);
+        const agentTools = registerAgentTools(pi, h, { cwd: dir }, undefined, undefined, ref);
         return { handle: h, agentTools };
       },
       exitSpy,
@@ -162,7 +162,7 @@ test("happy path: a working launcher never fires notify/exit and returns the rea
   result!.handle.shutdown();
 });
 
-test("healthy simple researcher through the guard: only read/grep/find/ls-adjacent registration, no explore, no bash", async () => {
+test("healthy code-search researcher through the guard registers persistent Explore without bash", async () => {
   const { pi, tools } = harness();
   const dir = mkdtempSync(join(tmpdir(), "ws-pi-guard-simple-"));
   const launcher = writeWorkingLauncher(dir);
@@ -170,13 +170,13 @@ test("healthy simple researcher through the guard: only read/grep/find/ls-adjace
   const { ui, notify } = fakeUi();
   const exitSpy = mock.fn((_code: number) => undefined as never);
 
-  const result = await withRoleEnv("explore", "simple", async () =>
+  const result = await withRoleEnv("explore", "code-search", async () =>
     bootstrapOrFailLoud(
       ui,
       "explore",
       async () => {
         const h = await startBridge(pi, { launcherPath: launcher, pluginDir: dir, runtimeJsonPath, cwd: dir, toolPreviewTuiRef: ref });
-        const agentTools = registerAgentTools(pi, h, { cwd: dir }, undefined, undefined, undefined, ref);
+        const agentTools = registerAgentTools(pi, h, { cwd: dir }, undefined, undefined, ref);
         return { handle: h, agentTools };
       },
       exitSpy,
@@ -186,14 +186,14 @@ test("healthy simple researcher through the guard: only read/grep/find/ls-adjace
   assert.ok(result);
   assert.equal(notify.mock.calls.length, 0);
   assert.equal(exitSpy.mock.calls.length, 0);
-  assert.equal(tools.has("explore"), false, "a simple researcher must not gain the blocking deep-collection tool");
+  assert.equal(tools.has("explore"), true, "an eligible researcher uses the same persistent Explore path");
   assert.equal(tools.has("bash"), false, "this adapter never registers a native bash tool of its own");
 
   await result!.agentTools.stopAll();
   result!.handle.shutdown();
 });
 
-test("healthy deep researcher through the guard: explore is registered alongside the reads, still no bash", async () => {
+test("healthy synthesis researcher through the guard has the same persistent Explore registration, still no bash", async () => {
   const { pi, tools } = harness();
   const dir = mkdtempSync(join(tmpdir(), "ws-pi-guard-deep-"));
   const launcher = writeWorkingLauncher(dir);
@@ -201,13 +201,13 @@ test("healthy deep researcher through the guard: explore is registered alongside
   const { ui, notify } = fakeUi();
   const exitSpy = mock.fn((_code: number) => undefined as never);
 
-  const result = await withRoleEnv("explore", "deep", async () =>
+  const result = await withRoleEnv("explore", "synthesis", async () =>
     bootstrapOrFailLoud(
       ui,
       "explore",
       async () => {
         const h = await startBridge(pi, { launcherPath: launcher, pluginDir: dir, runtimeJsonPath, cwd: dir, toolPreviewTuiRef: ref });
-        const agentTools = registerAgentTools(pi, h, { cwd: dir }, undefined, undefined, undefined, ref);
+        const agentTools = registerAgentTools(pi, h, { cwd: dir }, undefined, undefined, ref);
         return { handle: h, agentTools };
       },
       exitSpy,
@@ -217,7 +217,7 @@ test("healthy deep researcher through the guard: explore is registered alongside
   assert.ok(result);
   assert.equal(notify.mock.calls.length, 0);
   assert.equal(exitSpy.mock.calls.length, 0);
-  assert.ok(tools.has("explore"), "a deep researcher must have the blocking collection tool registered");
+  assert.ok(tools.has("explore"), "mode does not change the registered persistent Explore path");
   assert.equal(tools.has("bash"), false, "this adapter never registers a native bash tool of its own");
 
   await result!.agentTools.stopAll();

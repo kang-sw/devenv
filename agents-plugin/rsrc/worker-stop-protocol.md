@@ -52,6 +52,11 @@ commit message, is a new commit. While a delegate you spawned runs, wait for the
 host's completion signal; do not poll with sleep loops or fill the wait with
 repeated verification runs.
 
+Your terminal report does not restore the checkout: the shared worktree's
+`HEAD` stays on whatever branch you left it on. Checking branch state before
+its own next write is the lead's responsibility, not yours — do not add a
+checkout step to your report.
+
 ## Inputs Are Pointers
 
 - Act on the ticket file at the path you were given, not on anything said

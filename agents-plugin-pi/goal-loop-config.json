@@ -1,3 +1,4 @@
 {
-  "agent_wait_animation": true
+  "agent_wait_animation": true,
+  "child_retention_ttl_days": 30
 }

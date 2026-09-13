@@ -39,11 +39,13 @@
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { refreshAgentTelemetry, startOwnedSessionObserver, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole, type ToolGroup } from "./spawner.ts";
+import { TOOL_GROUPS, isOwnerHeld, refreshAgentTelemetry, startOwnedSessionObserver, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole, type ToolGroup } from "./spawner.ts";
 import { parseForkContext, type ForkContext } from "./fork-context.ts";
-import type { ExploreMode } from "./process-role.ts";
-import { readOwnership, updateOwnership, validDescriptor, type AgentOwnership } from "./agent-storage.ts";
+import { normalizeStoredExploreMode, type ExploreMode } from "./process-role.ts";
+import { readOwnership, removeOwnedAgentHome, updateOwnership, validDescriptor, type AgentOwnership } from "./agent-storage.ts";
 import { parseTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
+import { parseDelegationPolicy, type DelegationPolicy } from "./delegation-policy.ts";
+import type { SubtreeChannel } from "./subtree-lifecycle.ts";
 
 /** Sidecar file version. Bumped only on a breaking shape change; a mismatch is treated as "no sidecar". */
 export const SIDECAR_VERSION = 1;
@@ -66,13 +68,18 @@ export interface PersistedOrphan {
   modelBase?: string;
   modelEffort?: string;
   telemetry?: AgentTelemetry;
-  telemetryInputFloor?: TelemetryOrigin;
+  telemetryContextFloor?: TelemetryOrigin;
   observedModel?: string;
   observedEffort?: string;
-  observedLatestInput?: number;
+  observedContextTokens?: number;
   wsToolNames: string[];
   toolGroup: ToolGroup;
   explicitTools?: string;
+  delegation?: DelegationPolicy;
+  subtreeChannel?: SubtreeChannel;
+  waitingOnChildren?: boolean;
+  lastWriter?: "lead" | "owner";
+  ownerSends?: Array<{ text: string; at: number }>;
   spawnRole?: SpawnAgentRole;
   /** Persistent explore identity; only valid with the coherent explore tuple. */
   exploreMode?: ExploreMode;
@@ -126,9 +133,8 @@ export function noSessionSidecarPath(agentDir: string, sessionId: string): strin
  * restart. Dormant records are already resumable; carrying them through the
  * sidecar too costs nothing and keeps the roll-call complete.
  *
- * Persistent simple/deep researchers are captured like every other
- * non-thread-bound record. Terminal collection leaves remain in their separate
- * self-reaping registry and are never sidecar records.
+ * Persistent researchers are captured like every other non-thread-bound
+ * record; intent mode is immutable across restart and continuation.
  */
 export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
   const orphans: PersistedOrphan[] = [];
@@ -145,16 +151,21 @@ export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
       modelBase: record.modelBase,
       modelEffort: record.modelEffort,
       ...(record.telemetry ? { telemetry: record.telemetry } : {}),
-      ...(record.telemetryInputFloor ? { telemetryInputFloor: record.telemetryInputFloor } : {}),
+      ...(record.telemetryContextFloor ? { telemetryContextFloor: record.telemetryContextFloor } : {}),
       ...(record.observedModel ? { observedModel: record.observedModel } : {}),
       ...(record.observedEffort ? { observedEffort: record.observedEffort } : {}),
-      ...(record.observedLatestInput !== undefined ? { observedLatestInput: record.observedLatestInput } : {}),
+      ...(record.observedContextTokens !== undefined ? { observedContextTokens: record.observedContextTokens } : {}),
       wsToolNames: [...record.wsToolNames],
       toolGroup: record.toolGroup,
       explicitTools: record.explicitTools,
+      ...(record.delegation ? { delegation: record.delegation } : {}),
+      ...(record.subtreeChannel ? { subtreeChannel: record.subtreeChannel } : {}),
+      ...(record.waitingOnChildren !== undefined ? { waitingOnChildren: record.waitingOnChildren } : {}),
+      ...(record.lastWriter ? { lastWriter: record.lastWriter } : {}),
+      ...(record.ownerSends?.length ? { ownerSends: record.ownerSends.map((send) => ({ ...send })) } : {}),
       spawnRole: record.spawnRole,
       ...(record.exploreMode ? { exploreMode: record.exploreMode } : {}),
-      state: record.running ? "running" : "idle",
+      state: record.running || record.streaming ? "running" : "idle",
       // `undefined` (never reported) rather than an omitted key, matching every
       // other optional field above — `JSON.stringify` drops it on the way out
       // and `parseOrphans` reads it back the same way.
@@ -210,24 +221,41 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
     if (typeof o.agentId !== "string" || !o.agentId) continue;
     if (typeof o.sessionPath !== "string" || !o.sessionPath) continue;
     if (o.systemPromptPath !== undefined && typeof o.systemPromptPath !== "string") continue;
+    let delegation: DelegationPolicy | undefined;
+    try { if (o.delegation !== undefined) delegation = parseDelegationPolicy(o.delegation); } catch { continue; }
+    if (o.waitingOnChildren !== undefined && typeof o.waitingOnChildren !== "boolean") continue;
+    if (o.lastWriter !== undefined && o.lastWriter !== "lead" && o.lastWriter !== "owner") continue;
+    const ownerSends = Array.isArray(o.ownerSends)
+      ? o.ownerSends.flatMap((send) => send && typeof send === "object" && typeof send.text === "string" && typeof send.at === "number" && Number.isFinite(send.at)
+        ? [{ text: send.text, at: send.at }]
+        : [])
+      : undefined;
+    if (o.ownerSends !== undefined && !Array.isArray(o.ownerSends)) continue;
+    if (o.subtreeChannel !== undefined && (!o.subtreeChannel || typeof o.subtreeChannel.path !== "string" || typeof o.subtreeChannel.nonce !== "string")) continue;
     let forkContext: ForkContext | undefined;
     try { forkContext = parseForkContext(o.forkContext); } catch { continue; }
     if (!o.systemPromptPath && !forkContext) continue;
-    const ownership = o.ownership && validDescriptor(o.ownership) && o.ownership.agentId === o.agentId && o.ownership.sessionPath === o.sessionPath && (() => { const disk = readOwnership(o.ownership!.home); return !!disk && disk.home === o.ownership!.home && disk.ownerSessionId === o.ownership!.ownerSessionId && disk.agentId === o.ownership!.agentId && disk.sessionPath === o.ownership!.sessionPath && disk.role === o.ownership!.role && disk.exploreMode === o.ownership!.exploreMode; })() ? o.ownership : undefined;
     const toolGroup = o.toolGroup;
-    const isKnownToolGroup = toolGroup === undefined || toolGroup === "read-only" || toolGroup === "read-only-explore" || toolGroup === "recon" || toolGroup === "full-worker" || toolGroup === "execute-worker";
+    const isKnownToolGroup = toolGroup === undefined || Object.hasOwn(TOOL_GROUPS, toolGroup);
     const isKnownRole = o.spawnRole === undefined || o.spawnRole === "worker" || o.spawnRole === "execute-worker" || o.spawnRole === "fork" || o.spawnRole === "explore";
     if (!isKnownToolGroup || !isKnownRole) continue;
     const hasExploreMode = Object.prototype.hasOwnProperty.call(o, "exploreMode");
-    const exploreMode = o.exploreMode === "simple" || o.exploreMode === "deep" ? o.exploreMode : undefined;
+    const exploreMode = normalizeStoredExploreMode(o.exploreMode);
+    const legacySimple = o.exploreMode === "simple";
     // Any research-shaped field makes the entire tuple strict. In particular,
     // do not discard an invalid mode and accidentally revive it as a worker.
     const hasResearchMetadata = o.spawnRole === "explore" || hasExploreMode || toolGroup === "read-only" || toolGroup === "read-only-explore";
     if (hasResearchMetadata && (
       o.spawnRole !== "explore" || !exploreMode || typeof o.modelBase !== "string" || !o.modelBase ||
       typeof o.modelEffort !== "string" || !o.modelEffort || Object.prototype.hasOwnProperty.call(o, "explicitTools") ||
-      (exploreMode === "simple" ? toolGroup !== "read-only" : toolGroup !== "read-only-explore")
+      (legacySimple ? toolGroup !== "read-only" : toolGroup !== "read-only-explore")
     )) continue;
+    const rawOwnership = o.ownership;
+    const ownershipMode = normalizeStoredExploreMode(rawOwnership?.exploreMode);
+    const normalizedOwnership = rawOwnership && rawOwnership.exploreMode !== undefined
+      ? { ...rawOwnership, exploreMode: ownershipMode }
+      : rawOwnership;
+    const ownership = normalizedOwnership && validDescriptor(normalizedOwnership) && normalizedOwnership.agentId === o.agentId && normalizedOwnership.sessionPath === o.sessionPath && (() => { const disk = readOwnership(normalizedOwnership.home); return !!disk && disk.home === normalizedOwnership.home && disk.ownerSessionId === normalizedOwnership.ownerSessionId && disk.agentId === normalizedOwnership.agentId && disk.sessionPath === normalizedOwnership.sessionPath && disk.role === normalizedOwnership.role && disk.exploreMode === normalizedOwnership.exploreMode; })() ? normalizedOwnership : undefined;
     out.push({
       agentId: o.agentId,
       alias: typeof o.alias === "string" ? o.alias : undefined,
@@ -239,13 +267,18 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
       modelBase: typeof o.modelBase === "string" ? o.modelBase : undefined,
       modelEffort: typeof o.modelEffort === "string" ? o.modelEffort : undefined,
       ...(parseTelemetry(o.telemetry) ? { telemetry: parseTelemetry(o.telemetry) } : {}),
-      ...(parseTelemetry({ version: 1, origin: o.telemetryInputFloor })?.origin ? { telemetryInputFloor: parseTelemetry({ version: 1, origin: o.telemetryInputFloor })!.origin } : {}),
+      ...(parseTelemetry({ version: 1, origin: o.telemetryContextFloor })?.origin ? { telemetryContextFloor: parseTelemetry({ version: 1, origin: o.telemetryContextFloor })!.origin } : {}),
       ...(typeof o.observedModel === "string" && o.observedModel ? { observedModel: o.observedModel } : {}),
       ...(typeof o.observedEffort === "string" && o.observedEffort ? { observedEffort: o.observedEffort } : {}),
-      ...(typeof o.observedLatestInput === "number" && Number.isFinite(o.observedLatestInput) && o.observedLatestInput >= 0 ? { observedLatestInput: o.observedLatestInput } : {}),
+      ...(typeof o.observedContextTokens === "number" && Number.isFinite(o.observedContextTokens) && o.observedContextTokens >= 0 ? { observedContextTokens: o.observedContextTokens } : {}),
       wsToolNames: Array.isArray(o.wsToolNames) ? o.wsToolNames.filter((n): n is string => typeof n === "string") : [],
-      toolGroup: (o.toolGroup ?? "full-worker") as ToolGroup,
+      toolGroup: (legacySimple ? "read-only-explore" : o.toolGroup ?? "full-worker") as ToolGroup,
       explicitTools: typeof o.explicitTools === "string" ? o.explicitTools : undefined,
+      ...(delegation ? { delegation } : {}),
+      ...(o.subtreeChannel ? { subtreeChannel: o.subtreeChannel } : {}),
+      ...(o.waitingOnChildren !== undefined ? { waitingOnChildren: o.waitingOnChildren } : {}),
+      ...(o.lastWriter ? { lastWriter: o.lastWriter } : {}),
+      ...(ownerSends?.length ? { ownerSends } : {}),
       spawnRole: o.spawnRole,
       ...(exploreMode ? { exploreMode } : {}),
       // An older sidecar (or a corrupt value) has no state to trust; "idle" is
@@ -293,13 +326,18 @@ export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
     modelBase: orphan.modelBase,
     modelEffort: orphan.modelEffort,
     ...(orphan.telemetry ? { telemetry: orphan.telemetry } : {}),
-    ...(orphan.telemetryInputFloor ? { telemetryInputFloor: orphan.telemetryInputFloor } : {}),
+    ...(orphan.telemetryContextFloor ? { telemetryContextFloor: orphan.telemetryContextFloor } : {}),
     ...(orphan.observedModel ? { observedModel: orphan.observedModel } : {}),
     ...(orphan.observedEffort ? { observedEffort: orphan.observedEffort } : {}),
-    ...(orphan.observedLatestInput !== undefined ? { observedLatestInput: orphan.observedLatestInput } : {}),
+    ...(orphan.observedContextTokens !== undefined ? { observedContextTokens: orphan.observedContextTokens } : {}),
     wsToolNames: [...orphan.wsToolNames],
     toolGroup: orphan.toolGroup,
     explicitTools: orphan.explicitTools,
+    delegation: orphan.delegation,
+    subtreeChannel: orphan.subtreeChannel,
+    waitingOnChildren: orphan.waitingOnChildren,
+    lastWriter: orphan.lastWriter,
+    ownerSends: orphan.ownerSends?.map((send) => ({ ...send })),
     spawnRole: orphan.spawnRole,
     exploreMode: orphan.exploreMode,
     streaming: false,
@@ -320,7 +358,7 @@ export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
  * module stays free of both imports and directly testable.
  */
 export interface OrphanRoleWiring {
-  /** A `ws-fork`/discussion fork: question routing (§1) plus the §4 anti-bleed loop. */
+  /** A `ws-fork`/discussion fork: re-arm owner-question routing. */
   fork?: (record: RpcAgentRecord) => void;
   /** A `ws-execute` worker: the approval relay's `onApprovalPending`. */
   executeWorker?: (record: RpcAgentRecord) => void;
@@ -334,8 +372,8 @@ export interface OrphanRoleWiring {
  *
  * Review relay #1 (I1): the re-arm is the load-bearing half and was missing —
  * `spawnRole` was persisted and parsed but read only for the roll-call text,
- * so a revived FORK came back as a plain record with no `onQuestionReport` and
- * no anti-bleed loop. Its next `kind:"question"` would then be pushed straight
+ * so a revived FORK came back as a plain record with no `onQuestionReport`.
+ * Its next `kind:"question"` would then be pushed straight
  * at the lead as `ws-agent-question` instead of routing to the owner surface,
  * a direct §1 violation.
  *
@@ -345,10 +383,28 @@ export interface OrphanRoleWiring {
 export function reviveOrphans(registry: RpcAgentRegistry, orphans: PersistedOrphan[], wiring: OrphanRoleWiring = {}): RpcAgentRecord[] {
   const revived: RpcAgentRecord[] = [];
   for (const orphan of orphans) {
-    if (registry.has(orphan.agentId)) continue;
+    const existing = registry.get(orphan.agentId);
+    if (existing) {
+      // A live/current registration wins. A different, confirmed-stopped owned
+      // home from a stale sidecar is deliberately discarded through the same
+      // conservative deletion gate used by capacity eviction.
+      if (orphan.ownership && existing.ownership?.home !== orphan.ownership.home) removeOwnedAgentHome(orphan.ownership);
+      continue;
+    }
     const record = rehydrateOrphanRecord(orphan);
     startOwnedSessionObserver(record);
-    if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "unknown", running: false, observedAt: Date.now(), recovery: "sidecar", threadBound: record.threadBound, pendingApprovalCommandId: record.pendingApproval?.cmdId } });
+    if (record.ownership) {
+      const durable = readOwnership(record.ownership.home);
+      const confirmedStopped = durable?.liveness.lifecycle === "stopped" && durable.liveness.running === false;
+      updateOwnership(record.ownership.home, { liveness: {
+        lifecycle: confirmedStopped ? "stopped" : "unknown", running: false, observedAt: Date.now(), recovery: "sidecar",
+        ...(record.threadBound === true ? { threadBound: true } : {}),
+        ...(isOwnerHeld(record) ? { ownerHeld: true } : {}),
+        ...(record.waitingOnChildren === true ? { waitingOnChildren: true } : {}),
+        ...(record.terminalDelivery && record.terminalDelivery.state !== "enqueued" ? { pendingDelivery: true } : {}),
+        ...(record.pendingApproval?.cmdId ? { pendingApprovalCommandId: record.pendingApproval.cmdId } : {}),
+      } });
+    }
     registry.set(orphan.agentId, record);
     const arm = orphan.spawnRole === "fork" ? wiring.fork : orphan.spawnRole === "execute-worker" ? wiring.executeWorker : orphan.spawnRole === "explore" ? undefined : wiring.worker;
     try {

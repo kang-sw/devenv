@@ -51,26 +51,26 @@ function registryOf(...records: RpcAgentRecord[]): RpcAgentRegistry {
 
 describe("buildAgentRows", () => {
   test("a plain live (client-holding) non-threadBound record is a running row with no answer hint", () => {
-    const r = record({ client: {} as never, runStartedAt: NOW - 5_000 });
+    const r = record({ client: {} as never, running: true, runStartedAt: NOW - 5_000 });
     const rows = buildAgentRows(registryOf(r), [], NOW);
     assert.deepEqual(rows, [{ name: "11111111", role: "worker", state: "running", elapsedMs: 5_000 }]);
   });
 
   test("name precedence: alias > title > shortened uuid", () => {
-    const byAlias = record({ client: {} as never, alias: "scout", title: "irrelevant title" });
-    const byTitle = record({ client: {} as never, title: "the title" });
-    const byUuid = record({ client: {} as never });
+    const byAlias = record({ client: {} as never, running: true, alias: "scout", title: "irrelevant title" });
+    const byTitle = record({ client: {} as never, running: true, title: "the title" });
+    const byUuid = record({ client: {} as never, running: true });
     assert.equal(buildAgentRows(registryOf(byAlias), [], NOW)[0].name, "scout");
     assert.equal(buildAgentRows(registryOf(byTitle), [], NOW)[0].name, "the title");
     assert.equal(buildAgentRows(registryOf(byUuid), [], NOW)[0].name, "11111111");
   });
 
   test("roleFromSpawnRole: worker -> worker, execute-worker -> execute, fork -> fork, explore -> explore, unset -> worker", () => {
-    const worker = record({ client: {} as never, spawnRole: "worker" });
-    const exec = record({ client: {} as never, spawnRole: "execute-worker" });
-    const fork = record({ client: {} as never, spawnRole: "fork" });
-    const explore = record({ client: {} as never, spawnRole: "explore" });
-    const unset = record({ client: {} as never });
+    const worker = record({ client: {} as never, running: true, spawnRole: "worker" });
+    const exec = record({ client: {} as never, running: true, spawnRole: "execute-worker" });
+    const fork = record({ client: {} as never, running: true, spawnRole: "fork" });
+    const explore = record({ client: {} as never, running: true, spawnRole: "explore" });
+    const unset = record({ client: {} as never, running: true });
     assert.equal(buildAgentRows(registryOf(worker), [], NOW)[0].role, "worker");
     assert.equal(buildAgentRows(registryOf(exec), [], NOW)[0].role, "execute");
     assert.equal(buildAgentRows(registryOf(fork), [], NOW)[0].role, "fork");
@@ -81,6 +81,18 @@ describe("buildAgentRows", () => {
   test("a plain idle record (no client, not threadBound, no pendingApproval) is excluded entirely", () => {
     const r = record();
     assert.deepEqual(buildAgentRows(registryOf(r), [], NOW), []);
+  });
+
+  test("last-writer owner records stay visible: running while active, idle-awaiting-owner after settle, both with /audit", () => {
+    const idle = record({ agentId: "owner-idle", alias: "reviewer", lastWriter: "owner", running: false });
+    const active = record({ agentId: "owner-running", title: "builder", lastWriter: "owner", running: true, client: {} as never });
+    const rows = buildAgentRows(registryOf(idle, active), [], NOW);
+    const idleRow = rows.find((row) => row.name === "reviewer")!;
+    const activeRow = rows.find((row) => row.name === "builder")!;
+    assert.equal(idleRow.state, "idle-awaiting-owner");
+    assert.equal(idleRow.inspectionHint, "/audit reviewer");
+    assert.equal(activeRow.state, "running");
+    assert.equal(activeRow.inspectionHint, "/audit owner-running");
   });
 
   test("a pendingApproval record is included and ranked awaiting-approval even without a live client", () => {
@@ -151,8 +163,8 @@ describe("buildAgentRows", () => {
 
   test("elapsed: a thread row uses now - Date.parse(touchedAt); a non-thread row uses now - runStartedAt, defaulting to 0 when never prompted", () => {
     const bound = record({ threadBound: true });
-    const running = record({ agentId: "cccccccc-0000-0000-0000-000000000000", client: {} as never, runStartedAt: NOW - 3_000 });
-    const neverPrompted = record({ agentId: "dddddddd-0000-0000-0000-000000000000", client: {} as never });
+    const running = record({ agentId: "cccccccc-0000-0000-0000-000000000000", client: {} as never, running: true, runStartedAt: NOW - 3_000 });
+    const neverPrompted = record({ agentId: "dddddddd-0000-0000-0000-000000000000", client: {} as never, running: true });
     const threads: ThreadRecord[] = [thread({ respondentAgentId: bound.agentId, origin: "lead-ask", touchedAt: new Date(NOW - 7_000).toISOString() })];
     const rows = buildAgentRows(registryOf(bound, running, neverPrompted), threads, NOW);
     assert.equal(rows.find((r) => r.state === "awaiting-owner")!.elapsedMs, 7_000);
@@ -162,7 +174,7 @@ describe("buildAgentRows", () => {
 
   test("elapsed never goes negative even when the source clock is in the future", () => {
     const bound = record({ threadBound: true });
-    const running = record({ agentId: "eeeeeeee-0000-0000-0000-000000000000", client: {} as never, runStartedAt: NOW + 10_000 });
+    const running = record({ agentId: "eeeeeeee-0000-0000-0000-000000000000", client: {} as never, running: true, runStartedAt: NOW + 10_000 });
     const threads: ThreadRecord[] = [thread({ respondentAgentId: bound.agentId, origin: "lead-ask", touchedAt: new Date(NOW + 10_000).toISOString() })];
     const rows = buildAgentRows(registryOf(bound, running), threads, NOW);
     for (const row of rows) assert.equal(row.elapsedMs, 0);
@@ -177,8 +189,8 @@ describe("buildAgentRows", () => {
   test("sort: state rank first (awaiting-owner, awaiting-approval, running), then elapsed descending within a state", () => {
     const bound = record({ agentId: "10000000-0000-0000-0000-000000000000", threadBound: true });
     const approvalOld = record({ agentId: "20000000-0000-0000-0000-000000000000", pendingApproval: { cmdId: "c", command: "x" } });
-    const runningNew = record({ agentId: "30000000-0000-0000-0000-000000000000", client: {} as never, runStartedAt: NOW - 1_000 });
-    const runningOld = record({ agentId: "40000000-0000-0000-0000-000000000000", client: {} as never, runStartedAt: NOW - 9_000 });
+    const runningNew = record({ agentId: "30000000-0000-0000-0000-000000000000", client: {} as never, running: true, runStartedAt: NOW - 1_000 });
+    const runningOld = record({ agentId: "40000000-0000-0000-0000-000000000000", client: {} as never, running: true, runStartedAt: NOW - 9_000 });
     const threads: ThreadRecord[] = [thread({ respondentAgentId: bound.agentId, origin: "lead-ask", touchedAt: new Date(NOW - 2_000).toISOString() })];
     const rows = buildAgentRows(registryOf(runningNew, approvalOld, runningOld, bound), threads, NOW);
     assert.deepEqual(
@@ -225,15 +237,15 @@ describe("buildWidgetLines", () => {
       answerHint: "/answer q7",
       model: "test-model",
       effort: "high",
-      latestInput: 42,
+      contextTokens: 42,
       estimatedUsd: .1,
     };
-    const approval = { name: "awaiting approval audit", role: "execute" as const, state: "awaiting-approval" as const, elapsedMs: 3_000, model: "test-model", effort: "high", latestInput: 42, estimatedUsd: .1 };
+    const approval = { name: "awaiting approval audit", role: "execute" as const, state: "awaiting-approval" as const, elapsedMs: 3_000, model: "test-model", effort: "high", contextTokens: 42, estimatedUsd: .1 };
     const semanticCalls: Array<[string, string]> = [];
     const theme = { fg(color: "error" | "warning" | "accent" | "dim" | "syntaxNumber", text: string) { semanticCalls.push([color, text]); return text; } };
     const animated = buildWidgetLines([question, approval], 1, 180, true, theme)!;
-    assert.equal(animated[1], "\u001b[1m⚠ OWNER ACTION · /answer q7\u001b[22m · fork · awaiting owner · 3s · test-model (high) · 0.0k · $0.1");
-    assert.equal(animated[2], "awaiting approval audit · execute · awaiting approval · 3s · test-model (high) · 0.0k · $0.1");
+    assert.equal(animated[1], "\u001b[1m⚠ OWNER ACTION · /answer q7\u001b[22m · fork · awaiting owner · 3s · test-model (high) · ctx 0.0k · $0.1");
+    assert.equal(animated[2], "awaiting approval audit · execute · awaiting approval · 3s · test-model (high) · ctx 0.0k · $0.1");
     assert.deepEqual(semanticCalls.filter(([, text]) => text.startsWith("⚠ OWNER ACTION") || text.startsWith("ws:")), [["error", "ws: 2 agents · 1 question"], ["error", "⚠ OWNER ACTION · /answer q7"]]);
     assert.ok(!animated[1].slice(animated[1].indexOf(" · fork")).includes("\u001b[1m"), "role, elapsed, telemetry, and separators stay plain");
     assert.ok(!animated[2].includes("\u001b[1m"), "approval remains entirely ordinary even beside an animated question");
@@ -242,7 +254,7 @@ describe("buildWidgetLines", () => {
   test("an owner-held row without qN receives an honest labeled inspection presentation", () => {
     const row = { name: "parked reviewer", role: "fork" as const, state: "idle-awaiting-owner" as const, elapsedMs: 3_000, inspectionHint: "/audit reviewer" };
     const line = buildWidgetLines([row], 0, 120, true)![1];
-    assert.equal(line, "\u001b[1m⚠ OWNER ACTION · parked reviewer\u001b[22m · fork · idle awaiting owner · 3s · — (—) · — · $— — /audit reviewer");
+    assert.equal(line, "\u001b[1m⚠ OWNER ACTION · parked reviewer\u001b[22m · fork · idle awaiting owner · 3s · — (—) · ctx ? · $— — /audit reviewer");
     assert.ok(!line.includes("/answer"), "presentation never fabricates an answer target for an owner-held idle row");
   });
 
@@ -265,16 +277,21 @@ describe("buildWidgetLines", () => {
       }
     }
   });
-  test("telemetry exposes compact token and cost fields at wide widths and never displaces a 40-column answer cue", () => {
-    const telemetry = { name: "模型-worker", role: "worker" as const, state: "running" as const, elapsedMs: 0, model: "provider/模型", effort: "high", latestInput: 0, estimatedUsd: 0 };
-    assert.match(buildWidgetLines([telemetry], 0, 120)![1], /provider\/模型 \(high\).*0.0k.*\$0/);
-    const missing = { ...telemetry, state: "awaiting-owner" as const, model: undefined, effort: undefined, latestInput: undefined, estimatedUsd: undefined, answerHint: "/answer q1" };
+  test("telemetry labels context occupancy and cost at wide widths and never displaces a 40-column answer cue", () => {
+    const telemetry = { name: "模型-worker", role: "worker" as const, state: "running" as const, elapsedMs: 0, model: "provider/模型", effort: "high", contextTokens: 0, estimatedUsd: 0 };
+    assert.match(buildWidgetLines([telemetry], 0, 120)![1], /provider\/模型 \(high\).*ctx 0.0k.*\$0/);
+    const missing = { ...telemetry, state: "awaiting-owner" as const, model: undefined, effort: undefined, contextTokens: undefined, estimatedUsd: undefined, answerHint: "/answer q1" };
     assert.match(buildWidgetLines([missing], 0, 40)![1], /^⚠ OWNER ACTION · \/answer q1/);
     assert.ok(visibleWidth(buildWidgetLines([missing], 0, 40)![1]) <= 40);
-    const compact = { ...telemetry, name: "a", model: "p", effort: "l", latestInput: 132_400, estimatedUsd: .123456789 };
-    assert.match(buildWidgetLines([compact], 0, 80)![1], /p \(l\).*132.4k.*\$0.123/);
-    const noMegabyteUnit = { ...compact, latestInput: 1_354_100, estimatedUsd: 12.34567 };
-    assert.match(buildWidgetLines([noMegabyteUnit], 0, 120)![1], /1354.1k.*\$12.346/);
+    const compact = { ...telemetry, name: "a", model: "p", effort: "l", contextTokens: 132_400, estimatedUsd: .123456789 };
+    assert.match(buildWidgetLines([compact], 0, 80)![1], /p \(l\).*ctx 132.4k.*\$0.123/);
+    const noMegabyteUnit = { ...compact, contextTokens: 1_354_100, estimatedUsd: 12.34567 };
+    assert.match(buildWidgetLines([noMegabyteUnit], 0, 120)![1], /ctx 1354.1k.*\$12.346/);
+    const cachedPrefixCases = [{ ...compact, contextTokens: 61_782 }, { ...compact, contextTokens: 71_758 }];
+    assert.match(buildWidgetLines([cachedPrefixCases[0]], 0, 80)![1], /ctx 61.8k/);
+    assert.match(buildWidgetLines([cachedPrefixCases[1]], 0, 80)![1], /ctx 71.8k/);
+    assert.doesNotMatch(buildWidgetLines([cachedPrefixCases[0]], 0, 80)![1], /ctx 0.3k/);
+    assert.doesNotMatch(buildWidgetLines([cachedPrefixCases[1]], 0, 80)![1], /ctx 3.1k/);
 
     const themedSpans: Array<[string, string]> = [];
     const themed = buildWidgetLines([compact], 0, 80, false, {
@@ -284,7 +301,7 @@ describe("buildWidgetLines", () => {
       },
     })![1];
     assert.ok(themedSpans.some(([color, text]) => color === "accent" && text === "p"), "model uses the theme accent");
-    assert.ok(themedSpans.some(([color, text]) => color === "syntaxNumber" && text === "132.4k"), "input telemetry uses the numeric theme color without a label");
+    assert.ok(themedSpans.some(([color, text]) => color === "syntaxNumber" && text === "ctx 132.4k"), "context telemetry keeps its label in the numeric theme span");
     assert.ok(themedSpans.some(([color, text]) => color === "warning" && text === "$0.123"), "estimated cost uses the warning/gold theme color without a label");
     assert.ok(visibleWidth(themed) <= 80, "ANSI theme styling does not change width accounting");
   });
@@ -341,15 +358,15 @@ describe("buildWidgetLines", () => {
   });
 
   test("telemetry fields remain independent, Unicode-safe, and subordinate to the 40-column answer cue", () => {
-    const complete = { name: "模型-worker", role: "thread" as const, state: "awaiting-owner" as const, elapsedMs: 0, answerHint: "/answer q1", model: "provider/模型", effort: "high", latestInput: 0, estimatedUsd: 0 };
+    const complete = { name: "模型-worker", role: "thread" as const, state: "awaiting-owner" as const, elapsedMs: 0, answerHint: "/answer q1", model: "provider/模型", effort: "high", contextTokens: 0, estimatedUsd: 0 };
     const completeWide = { ...complete, name: "模", role: "worker" as const, state: "running" as const, answerHint: undefined };
-    const unknown = { ...completeWide, name: "missing", model: undefined, effort: undefined, latestInput: undefined, estimatedUsd: undefined };
+    const unknown = { ...completeWide, name: "missing", model: undefined, effort: undefined, contextTokens: undefined, estimatedUsd: undefined };
     const narrow = buildWidgetLines([complete], 1, 40)![1];
     assert.match(narrow, /^⚠ OWNER ACTION · \/answer q1/); assert.ok(visibleWidth(narrow) <= 40);
     for (const width of [80, 120]) {
       const lines = buildWidgetLines([completeWide, unknown], 0, width)!;
-      assert.match(lines[1], /provider\/模型 \(high\).*0.0k.*\$0/, `complete reported zero is not rendered as unknown at ${width}`);
-      assert.match(lines[2], /— \(—\).*· — · \$—/, `unknown fields remain independently unknown at ${width}`);
+      assert.match(lines[1], /provider\/模型 \(high\).*ctx 0.0k.*\$0/, `complete reported zero is not rendered as unknown at ${width}`);
+      assert.match(lines[2], /— \(—\).*· ctx \? · \$—/, `unknown fields remain independently unknown at ${width}`);
       assert.ok(lines.every(line => visibleWidth(line) <= width), `Unicode display width is bounded at ${width}`);
     }
   });
@@ -357,7 +374,7 @@ describe("buildWidgetLines", () => {
   test("rendering telemetry performs neither disk reads nor RPC", (t) => {
     t.mock.method(fs, "readFile", async () => assert.fail("widget rendering must not read disk"));
     t.mock.method(RpcClient.prototype, "getState", async () => assert.fail("widget rendering must not query RPC"));
-    const row = { name: "worker", role: "worker" as const, state: "running" as const, elapsedMs: 0, model: "p/m", effort: "low", latestInput: 1, estimatedUsd: .01 };
+    const row = { name: "worker", role: "worker" as const, state: "running" as const, elapsedMs: 0, model: "p/m", effort: "low", contextTokens: 1, estimatedUsd: .01 };
     for (const width of [40, 80, 120]) assert.doesNotThrow(() => buildWidgetLines([row], 0, width));
   });
 
@@ -487,7 +504,7 @@ describe("createAgentWidgetController", () => {
   test("renders the uncapped heading at real widths, preserves the body cap, clears only its retired footer key, and disarms on empty", (t) => {
     const records = Array.from({ length: 7 }, (_, i) => record({
       agentId: `${String(i + 1).padStart(8, "0")}-0000-0000-0000-000000000000`,
-      client: {} as never,
+      client: {} as never, running: true,
       runStartedAt: NOW - i,
     }));
     const registry = registryOf(...records);
@@ -552,7 +569,7 @@ describe("createAgentWidgetController", () => {
     });
     const running = Array.from({ length: 6 }, (_, i) => record({
       agentId: `${String(i + 1).padStart(8, "0")}-0000-0000-0000-000000000000`,
-      client: {} as never,
+      client: {} as never, running: true,
       runStartedAt: NOW - i,
     }));
     const threads = new Map([["q1", thread({

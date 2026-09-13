@@ -51,7 +51,7 @@ test("first NEW assistant only: ignores history containers, deltas, tools and re
   h.emit({ type: "message_end", message: { role: "toolResult" } });
   assert.deepEqual(h.notices, []);
   h.emit(event());
-  h.emit({ type: "tool_execution_start", toolName: "ws-report-to-lead", args: { kind: "final" } });
+  h.emit({ type: "tool_execution_start", toolName: "ws-report-to-lead", args: { message: "progress" } });
   h.emit(event());
   assert.equal(h.notices.length, 1);
   assert.equal(JSON.stringify(h.record), before, "no durable first-response flag or lineage change");

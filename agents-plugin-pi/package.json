@@ -20,12 +20,25 @@
   ],
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.263",
-    "@earendil-works/pi-coding-agent": "^0.84.4",
-    "@earendil-works/pi-tui": "0.84.4",
+    "ipaddr.js": "2.3.0",
+    "jiti": "2.7.0",
+    "linkedom": "0.18.12",
+    "pi-web-access": "0.29.0",
     "yaml": "2.9.0"
   },
+  "bundledDependencies": ["pi-web-access"],
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.84.4",
+    "@earendil-works/pi-coding-agent": "0.84.4",
+    "@earendil-works/pi-tui": "0.84.4"
+  },
   "scripts": {
-    "test": "env -u WS_PI_SPAWN_ROLE -u WS_PI_EXPLORE_MODE node --test",
+    "test": "env -u WS_PI_SPAWN_ROLE -u WS_PI_EXPLORE_MODE -u WS_PI_DELEGATION_POLICY -u WS_PI_SUBTREE_CHANNEL node --test",
     "copy-skills": "node scripts/copy-skills.mjs",
     "prepack": "npm run copy-skills",
     "prepare": "npm run copy-skills"

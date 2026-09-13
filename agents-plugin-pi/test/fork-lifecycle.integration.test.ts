@@ -33,7 +33,7 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
     const ask = await import(join(plugin, "src/ask.ts"));
     const originalEnv = { ...process.env };
     const prototypes = [...new Set([RpcClient.prototype, sdk.RpcClient.prototype])];
-    const originals = prototypes.map(proto => Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel", "steer", "followUp"].map(name => [name, (proto as any)[name]])));
+    const originals = prototypes.map(proto => Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "getLastAssistantText", "setThinkingLevel", "steer", "followUp"].map(name => [name, (proto as any)[name]])));
     const sessions: any[] = [];
     const children: any[] = [];
     const errors: string[] = [];
@@ -84,7 +84,15 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
       if (h.referenceHistory && h.requests.length > before) {
         const user = { role: "user", content: [{ type: "text", text: framed }], timestamp: 1 };
         let expected: any;
-        const context = { systemPrompt: h.oracle.systemPrompt, tools: h.oracle.tools, messages: [...h.referenceHistory, user] };
+        const actualContext = h.requests.at(-1).context.messages as any[];
+        // Extension-pushed custom messages are materialized by Pi only in the
+        // built model context, not the source SessionManager view. In that
+        // transport case, take the provider-neutral prior-message ordering
+        // from Pi while still independently serializing every provider field.
+        const referenceHistory = JSON.stringify(actualContext).includes("[ws-agent-report]")
+          ? structuredClone(actualContext.slice(0, -1))
+          : [...h.referenceHistory];
+        const context = { systemPrompt: h.oracle.systemPrompt, tools: h.oracle.tools, messages: [...referenceHistory, user] };
         for await (const _event of serializer.stream(h.oracleModel ?? model, context, { apiKey, sessionId: h.oracleSessionId ?? h.parentAffinityId, cacheRetention: h.retention ?? "short", fetch: async () => { sends++; throw Error("network forbidden"); }, onPayload: (body: any) => { expected = structuredClone(body); throw Error("independent direct capture"); } })) {}
         assert.ok(expected);
         assert.deepEqual(h.requests.at(-1).payload, expected, "entire raw provider request equals independently accumulated continuation");
@@ -107,22 +115,24 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
         assert.ok(sessionDir >= 0, "the RPC argv owns its child session directory");
         const sm = fork >= 0 ? sdk.SessionManager.forkFrom(args[fork + 1], directory, args[sessionDir + 1]) : sdk.SessionManager.open(args[args.indexOf("--session") + 1]);
         const childEnv = omitCompletionReport ? { ...env, WS_PI_TEST_OMIT_FORK_REPORT: "1" } : env;
-        const readinessPath = omitCompletionReport ? JSON.parse(readFileSync(env.WS_PI_FORK_CONTEXT, "utf8")).readinessPath : undefined;
         this.harness = await makeSession(sm, childEnv, args[args.indexOf("--tools") + 1].split(","), "CHANGED CHILD APPEND");
         this.harness.parentClient = this;
-        if (omitCompletionReport) assert.match(readFileSync(readinessPath, "utf8"), /missing completion-critical callable tool: ws-report-to-lead/, "child bootstrap records the missing completion channel before readiness validation");
         const sourcePath = fork >= 0 ? args[fork + 1] : sm.getSessionFile();
         const sourceId = JSON.parse(readFileSync(sourcePath, "utf8").split("\n")[0]).id;
         const source = sessions.findLast(h => h !== this.harness && (h.sm.getSessionFile() === sourcePath || h.sm.getSessionId() === sourceId));
         this.harness.oracle = source.oracle ?? source.requests[0]?.context;
         this.harness.parentAffinityId = source.parentAffinityId ?? source.sm.getSessionId();
         this.harness.referenceHistory = this.harness.oracle ? structuredClone(source.referenceHistory ?? source.sm.buildSessionContext().messages) : undefined;
-        this.harness.unavailableTools = source.unavailableTools ?? (source.parentOnlyTool ? ["parent-only-extension"] : []);
+        this.harness.unavailableTools = [
+          ...(source.unavailableTools ?? (source.parentOnlyTool ? ["parent-only-extension"] : [])),
+          ...(omitCompletionReport ? ["ws-report-to-lead"] : []),
+        ];
         children.push(this.harness);
       },
       async stop(this: any) { if (this.harness) await stop(this.harness); }, async abort() {},
       onEvent(this: any, listener: (event: unknown) => void) { (this.wsPiTestEventListeners ??= new Set()).add(listener); return () => this.wsPiTestEventListeners?.delete(listener); },
       async getState(this: any) { return { sessionFile: this.harness.sm.getSessionFile(), sessionId: this.harness.sm.getSessionId(), model, thinkingLevel: this.harness.session.thinkingLevel }; },
+      async getLastAssistantText(this: any) { return this.harness.terminalText; },
       async setThinkingLevel(this: any, level: string) { this.harness.session.setThinkingLevel(level); },
       async prompt(this: any, text: string) { await prompt(this.harness, text); },
       async steer(this: any, text: string) { await prompt(this.harness, text); }, async followUp(this: any, text: string) { await prompt(this.harness, text); },
@@ -203,28 +213,34 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
       const probe = child.session.agent.state.tools.find((t: any) => t.name === "ws__probe");
       await withEnv(child.env, () => assert.rejects(() => probe.execute("parent", { session_key: childContext.parentSessionKey }), /parent session key/));
       await withEnv(child.env, async () => {
-        for (const value of [undefined, firstKey, "separately-issued-worker-key"]) {
+        for (const value of [undefined, firstKey]) {
           const result = await probe.execute("forward", value ? { session_key: value } : {});
           assert.match(JSON.stringify(result), new RegExp(value ?? firstKey));
         }
+        await assert.rejects(() => probe.execute("foreign", { session_key: "separately-issued-worker-key" }), /outside this agent's authority/);
       });
       const finalReport = "Outcome: degraded fork completed\nFiles changed: none\nVerification: lifecycle fixture\nBlockers: none\nCommit: none\nDecisions: report channel remained available";
       const reportTool = child.session.agent.state.tools.find((tool: any) => tool.name === "ws-report-to-lead");
-      assert.deepEqual(await withEnv(child.env, () => reportTool.execute("final", { kind: "final", message: finalReport })), { content: [{ type: "text", text: "reported" }] });
+      const reportResult = await withEnv(child.env, () => reportTool.execute("progress", { message: "closeout in progress" }));
+      assert.deepEqual(reportResult, { content: [{ type: "text", text: "reported" }] });
       assert.ok(child.parentClient.wsPiTestEventListeners.size > 0, "the parent client owns the fork report relay");
-      for (const listener of child.parentClient.wsPiTestEventListeners) listener({ type: "tool_execution_start", toolName: "ws-report-to-lead", args: { kind: "final", message: finalReport } });
+      for (const listener of child.parentClient.wsPiTestEventListeners) listener({ type: "tool_execution_start", toolName: "ws-report-to-lead", toolCallId: "progress", args: { message: "closeout in progress" } });
+      for (const listener of child.parentClient.wsPiTestEventListeners) listener({ type: "tool_execution_end", toolName: "ws-report-to-lead", toolCallId: "progress", isError: false, result: reportResult });
+      child.terminalText = finalReport;
+      for (const listener of child.parentClient.wsPiTestEventListeners) listener({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: finalReport }] } });
       for (const listener of child.parentClient.wsPiTestEventListeners) listener({ type: "agent_settled" });
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 20));
       const leadListTool = lead.session.agent.state.tools.find((tool: any) => tool.name === "ws-agent-list");
       const listedAgents = JSON.parse((await leadListTool.execute("list", {})).content[0].text);
       const reportedChild = (Array.isArray(listedAgents) ? listedAgents : listedAgents.agents).find((agent: any) => agent.agent_id === id);
-      assert.equal(reportedChild.status, "dormant", "the final report settles the degraded fork");
-      assert.ok(reportedChild.last_report_at, "the final report reaches the parent registry");
-      assert.ok(childContext.registeredTools.some((tool: any) => tool.name === "ws-report-to-lead"), "the parent capture treats the report channel as completion-critical");
+      assert.equal(reportedChild.status, "dormant", "ordinary settlement parks the degraded fork after terminal delivery");
+      assert.ok(reportedChild.last_report_at, "the intermediate progress report reaches the parent registry");
+      assert.ok(childContext.registeredTools.some((tool: any) => tool.name === "ws-report-to-lead"), "the parent capture keeps the optional progress/question channel visible");
       omitCompletionReport = true;
-      await assert.rejects(() => forkTool.execute("missing completion", { prompt: "must not reach provider" }), /missing completion-critical callable tool: ws-report-to-lead/);
+      const missingReportResult = await forkTool.execute("missing report", { prompt: "completion still uses ordinary settlement" });
+      assert.ok(JSON.parse(missingReportResult.content[0].text).agent_id);
       const missingCompletionChild = children.at(-1);
-      assert.equal(missingCompletionChild.requests.length, 0, "missing ws-report-to-lead rejects during child bootstrap before provider prompt");
+      assert.equal(missingCompletionChild.requests.length, 1, "a missing progress tool does not block ordinary completion");
       omitCompletionReport = false;
       await stop(lead); // Actual shutdown writes the task sidecar.
       let orphans = sidecar.readAndClearSidecar(lead.sm.getSessionFile()).filter((orphan: any) => orphan.agentId === id);

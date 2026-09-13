@@ -24,10 +24,9 @@
  *     live fork — it never spawns a second one. There is no fork-less
  *     quick-answer path.
  *
- * A discussion fork (Entry B) is deliberately NOT wrapped in Entry A's
- * structural anti-bleed frame (`buildForkInitialMessage`) and runs NO
- * anti-bleed loop (§4): a discussion fork is meant to speak AS the lead —
- * persona continuity is the feature there, not a bleed to suppress.
+ * A legacy discussion-fork prompt is deliberately not wrapped in Entry A's
+ * task frame (`buildForkInitialMessage`): it speaks as the lead, so persona
+ * continuity rather than task isolation is the feature.
  *
  * Persistence (§5): the registry is written to a sibling file of the lead's
  * own session file (`<sessionFile>.ws-threads.json`), so pending questions
@@ -77,7 +76,7 @@
  * (`ensureRespondent`'s spawn branch, `buildDiscussionForkDirectiveText`/
  * `buildDiscussionForkInitialMessage`, `resolveDoneAction`/
  * `summarizeThenClose`/`runDoneAction`'s "summarize" branch,
- * `closeThreadOnDone`/`handleRespondentFinalReport`'s `"lead-ask"` branches)
+ * `closeThreadOnDone`'s `"lead-ask"` branch)
  * is deliberately left in place rather than deleted: no live code path can
  * reach it for a `"lead-ask"` thread anymore (fork-raised always already has
  * a `respondentAgentId` at registration, so those branches were only ever
@@ -123,7 +122,6 @@ import {
   wrapInBorder,
   type ChildLiveness,
   type ConversationChannel,
-  type ConversationItem,
   type ConversationViewTui,
   type EditorLike,
 } from "./conversation-view.ts";
@@ -132,6 +130,16 @@ import { captureForkContext, captureRegisteredTools, captureUnflushedForkSource,
 import type { LeadPromptRef } from "./lead-bootstrap.ts";
 import { readOwnership, validDescriptor } from "./agent-storage.ts";
 import { parseTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
+import {
+  OwnerSteeringComponent,
+  activateOwnerOverlay,
+  clearOwnerOverlay,
+  createAuditChannel,
+  currentOwnerOverlay,
+  readSessionHistory,
+  reserveOwnerOverlay,
+} from "./audit.ts";
+import { parseDelegationPolicy } from "./delegation-policy.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers. Unit-tested directly (test/ask.test.ts) with no
@@ -190,8 +198,6 @@ export function checkContextLength(context: string | undefined, limit = MAX_CONT
  * old per-thread overlay module, now deleted, with one shape addition):
  * `close()` closes the view only (the fork and its thread are untouched);
  * `closeWithSummary(summary)` ends the thread with a supplied summary.
- * Reused unchanged by `handleRespondentFinalReport`'s
- * `overlay.closeWithSummary(message)` path.
  *
  * Review relay #2 C1/I1: `closeWithSummary`'s `alreadyRendered` parameter
  * (default `false`, so every EXISTING caller keeps its old append-then-close
@@ -200,7 +206,7 @@ export function checkContextLength(context: string | undefined, limit = MAX_CONT
  * was ALREADY appended to the view by the component's own internal
  * `agent_settled` handling (the same event, a separate listener registered
  * first). Passing `true` there skips the redundant second append that used
- * to double the summary turn on screen and in `thread.transcript`; the
+ * to double the summary turn on screen; the
  * thread-close side effects (`closeThreadOnDone`, `done`) still run exactly
  * as before.
  */
@@ -255,7 +261,7 @@ export function buildForkQuestionLeadNotice(agentId: string, threadId: string): 
   return [
     `[ws] Agent ${agentId} raised a question for the OWNER, registered as thread ${threadId}.`,
     "The owner answers it directly in their own discussion overlay (/answer " + threadId + "); you are not part of that exchange.",
-    "Do NOT relay this question, answer it yourself, or ask the owner about it. End your turn — this agent resumes its task once the owner replies, and what was decided reaches you in its own pushed final report's Decisions: line.",
+    "Do NOT relay this question, answer it yourself, or ask the owner about it. End your turn — this agent resumes its task once the owner replies, and its later ordinary settled answer carries the outcome.",
   ].join("\n");
 }
 
@@ -299,17 +305,6 @@ export interface ThreadRecord {
   respondentAgentId?: string;
   /** Denormalized resume fields for `respondentAgentId` — see this file's header. */
   forkResume?: PersistedForkResume;
-  /**
-   * The `ConversationViewComponent` transcript (owner turns, settled child
-   * turns, tool calls/results, adapter notes), newest last and capped at
-   * `THREAD_TRANSCRIPT_CAP` entries. Persisted with the record so a reopen
-   * after Esc — or after a lead restart — shows the conversation so far
-   * instead of an empty view (dogfood 2026-09-05). Absent until the thread is
-   * first opened. A record written before this ticket carries the legacy
-   * `{who,text}[]` shape instead — `normalizeTranscript` converts it on
-   * hydrate.
-   */
-  transcript?: ConversationItem[];
   createdAt: string;
   /** Last open/answer/close touch — orders the "reopen the most recent" shortcut. */
   touchedAt: string;
@@ -360,8 +355,8 @@ export type ThreadStatus = "pending" | "open" | "dormant" | "closed";
  *   mid-task via `ws-report-to-lead(kind:"question")`; its lifecycle belongs
  *   to `ws-fork`/`ws-agent-stop`, not to this surface. `/done`
  *   therefore only detaches the overlay: no summary request, no stop, no
- *   injection. The fork resumes its task and the lead learns the outcome from
- *   its own `kind:"final"` report's `Decisions:` line (§1/§4).
+ *   injection. The fork resumes its task and its later ordinary settled
+ *   answer reaches the lead through the shared terminal lifecycle.
  *
  * A record parsed without this field is treated as `"fork-raised"`: the
  * conservative default, since that is the origin whose respondent must never
@@ -372,100 +367,6 @@ export type ThreadOrigin = "lead-ask" | "fork-raised";
 /** Normalizes a persisted/unknown `origin` value; see `ThreadOrigin` for why the default is the conservative one. */
 export function normalizeThreadOrigin(value: unknown): ThreadOrigin {
   return value === "lead-ask" ? "lead-ask" : "fork-raised";
-}
-
-/** Newest transcript entries kept per thread (`ThreadRecord.transcript`); older ones are dropped on write and on parse. */
-export const THREAD_TRANSCRIPT_CAP = 200;
-
-/** Maps a legacy `TranscriptEntry.who` value onto its `ConversationItem.kind` equivalent — see `normalizeTranscript`. */
-const LEGACY_WHO_TO_KIND: Record<string, "user" | "assistant" | "note"> = {
-  you: "user",
-  thread: "assistant",
-  note: "note",
-};
-
-/**
- * One persisted transcript entry, tolerantly converted to a `ConversationItem`
- * or dropped (`undefined`) when malformed. Accepts BOTH shapes: the legacy
- * `{who,text}` entry (`"you"`->`{kind:"user",...}`, `"thread"`->
- * `{kind:"assistant",...}`, `"note"`->`{kind:"note",...}`) written before this
- * ticket, and the native `ConversationItem` `{kind,...}` shape, validated
- * per-kind (`tool-call` needs `id`/`name`; `tool-result` needs `id`/`name`/
- * `content`, `isError` optional; the rest need `text: string`).
- */
-function normalizeTranscriptEntry(entry: unknown): ConversationItem | undefined {
-  const candidate = entry as
-    | { who?: unknown; kind?: unknown; text?: unknown; id?: unknown; name?: unknown; args?: unknown; content?: unknown; isError?: unknown }
-    | null;
-  if (!candidate || typeof candidate !== "object") return undefined;
-  if (typeof candidate.who === "string") {
-    const kind = LEGACY_WHO_TO_KIND[candidate.who];
-    return kind && typeof candidate.text === "string" ? ({ kind, text: candidate.text } as ConversationItem) : undefined;
-  }
-  switch (candidate.kind) {
-    case "user":
-    case "assistant":
-    case "lead-message":
-    case "note":
-      return typeof candidate.text === "string" ? ({ kind: candidate.kind, text: candidate.text } as ConversationItem) : undefined;
-    case "tool-call":
-      return typeof candidate.id === "string" && typeof candidate.name === "string"
-        ? { kind: "tool-call", id: candidate.id, name: candidate.name, args: candidate.args }
-        : undefined;
-    case "tool-result":
-      return typeof candidate.id === "string" && typeof candidate.name === "string" && typeof candidate.content === "string"
-        ? {
-            kind: "tool-result",
-            id: candidate.id,
-            name: candidate.name,
-            content: candidate.content,
-            ...(typeof candidate.isError === "boolean" ? { isError: candidate.isError } : {}),
-          }
-        : undefined;
-    default:
-      return undefined;
-  }
-}
-
-/**
- * Tolerant read of a persisted `transcript`: a non-array is `undefined`
- * (the field is simply absent), malformed entries are dropped, and the
- * result is capped to the newest `THREAD_TRANSCRIPT_CAP` — a hand-edited or
- * older registry file must never make a thread unopenable. See
- * `normalizeTranscriptEntry` for the legacy/native per-entry conversion.
- */
-export function normalizeTranscript(value: unknown): ConversationItem[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const entries = value.map((entry) => normalizeTranscriptEntry(entry)).filter((entry): entry is ConversationItem => entry !== undefined);
-  return entries.length > THREAD_TRANSCRIPT_CAP ? entries.slice(entries.length - THREAD_TRANSCRIPT_CAP) : entries;
-}
-
-/**
- * The `ConversationViewComponent` initial transcript for opening/reopening a
- * thread. The original question is always the first dialogue turn when one is
- * recorded on the thread. Older persisted transcripts either carry it as a
- * leading `Question: ...` note or omit it because the header used to be its
- * only presentation; upgrade/prepend that one turn without disturbing the
- * later history. Exported for direct testing (pure — no component/channel
- * needed).
- */
-export function buildInitialConversationItems(thread: Pick<ThreadRecord, "transcript" | "question" | "title">): ConversationItem[] {
-  const question = thread.question?.trim();
-  const transcript = thread.transcript ?? [];
-  if (!question) return transcript;
-
-  const questionTurn: ConversationItem = { kind: "assistant", text: `**Question:** ${question}` };
-  const first = transcript[0];
-  if (!first) return [questionTurn];
-
-  const firstText = "text" in first ? first.text.trim() : undefined;
-  if (first.kind === "note" && (firstText === question || firstText === `Question: ${question}`)) {
-    return [questionTurn, ...transcript.slice(1)];
-  }
-  if (first.kind === "assistant" && (firstText === question || firstText === `Question: ${question}` || firstText === `**Question:** ${question}`)) {
-    return transcript;
-  }
-  return [questionTurn, ...transcript];
 }
 
 /** Compact metadata/control header; the question itself belongs in the transcript. */
@@ -482,7 +383,7 @@ export function buildThreadHeaderHint(thread: Pick<ThreadRecord, "threadId" | "c
  * field (see the plan's `spawner.ts#L647-706` finding) — this is a copy, not
  * a new contract.
  */
-export interface PersistedForkResume {
+export interface PersistedForkResume extends Pick<RpcAgentRecord, "delegation" | "subtreeChannel" | "waitingOnChildren" | "lastWriter" | "ownerSends"> {
   sessionPath: string;
   systemPromptPath?: string;
   forkContext?: ForkContext;
@@ -492,10 +393,10 @@ export interface PersistedForkResume {
   modelBase?: string;
   modelEffort?: string;
   telemetry?: AgentTelemetry;
-  telemetryInputFloor?: TelemetryOrigin;
+  telemetryContextFloor?: TelemetryOrigin;
   observedModel?: string;
   observedEffort?: string;
-  observedLatestInput?: number;
+  observedContextTokens?: number;
   ownership?: import("./agent-storage.ts").AgentOwnership;
 }
 
@@ -544,7 +445,11 @@ export function threadRegistryPath(sessionFile: string): string {
 
 /** Stable, pretty-printed on-disk form (a hand-inspectable adapter data file). */
 export function serializeThreadRegistry(records: readonly ThreadRecord[]): string {
-  return `${JSON.stringify({ threads: records }, null, 2)}\n`;
+  const threads = records.map((record) => {
+    const { transcript: _retiredTranscript, ...persisted } = record as ThreadRecord & { transcript?: unknown };
+    return persisted;
+  });
+  return `${JSON.stringify({ threads }, null, 2)}\n`;
 }
 
 /**
@@ -575,12 +480,12 @@ export function parseThreadRegistry(raw: string): ThreadRecord[] {
     })
     // `origin` is normalized rather than validated away: an entry written
     // before the field existed is still a usable thread, and defaulting it to
-    // "fork-raised" is the safe direction (see `ThreadOrigin`). `transcript`
-    // likewise: absent or malformed simply means "no transcript yet".
+    // "fork-raised" is the safe direction (see `ThreadOrigin`). Legacy
+    // thread-local transcripts are discarded: the child record/session is
+    // now the single conversation source.
     .map((entry) => {
-      const { transcript, ...rest } = entry as ThreadRecord & { transcript?: unknown };
-      const normalized = normalizeTranscript(transcript);
-      return { ...rest, origin: normalizeThreadOrigin(entry.origin), ...(normalized ? { transcript: normalized } : {}) };
+      const { transcript: _retiredTranscript, ...rest } = entry as ThreadRecord & { transcript?: unknown };
+      return { ...rest, origin: normalizeThreadOrigin(entry.origin) };
     });
 }
 
@@ -714,11 +619,9 @@ export function addAskToolsIfLead(activeTools: readonly string[], role: SpawnRol
  * directive-style rule): a discussion fork is meant to speak as the lead, so
  * nothing here tries to give it a separate identity.
  *
- * The thread has two exits: the owner's `/done` (which asks for a summary
- * turn), and — post-close dogfood 2026-09-05 — the fork's own
- * `ws-report-to-lead(kind:"final")` once the owner has stated a decision,
- * whose text IS the summary (`handleRespondentFinalReport`). No progress
- * reports, no task frame.
+ * The owner ends the thread with `/done`; ordinary settled answers before
+ * that remain part of the owner conversation. No completion report tool and
+ * no task frame are involved.
  */
 export function buildDiscussionForkDirectiveText(): string {
   return [
@@ -728,7 +631,7 @@ export function buildDiscussionForkDirectiveText(): string {
     "",
     "There is no task to complete and no progress report to file here. Do not start editing files or running work unless the owner explicitly asks for it in this thread.",
     "",
-    'The owner may end the thread themselves with /done, in which case you will be asked once for a short summary. When the owner states a decision, or says they will go a certain way, end the thread yourself: call ws-report-to-lead with kind:"final" and a short summary of what was decided — 2 to 4 sentences, the decision first. That summary is delivered to the lead.',
+    "The owner ends the thread with /done. Until then, each ordinary settled answer belongs to the owner conversation and is not a completion report to the lead.",
   ].join("\n");
 }
 
@@ -827,15 +730,18 @@ export function captureForkResume(record: RpcAgentRecord): PersistedForkResume {
     systemPromptPath: record.systemPromptPath,
     ...(record.forkContext ? { forkContext: record.forkContext } : {}),
     explicitTools: record.explicitTools,
+    ...(record.delegation ? { delegation: record.delegation, subtreeChannel: record.subtreeChannel, waitingOnChildren: record.waitingOnChildren } : {}),
+    ...(record.lastWriter ? { lastWriter: record.lastWriter } : {}),
+    ...(record.ownerSends?.length ? { ownerSends: record.ownerSends.map((send) => ({ ...send })) } : {}),
     wsToolNames: [...record.wsToolNames],
     toolGroup: record.toolGroup,
     modelBase: record.modelBase,
     modelEffort: record.modelEffort,
     ...(record.telemetry ? { telemetry: record.telemetry } : {}),
-    ...(record.telemetryInputFloor ? { telemetryInputFloor: record.telemetryInputFloor } : {}),
+    ...(record.telemetryContextFloor ? { telemetryContextFloor: record.telemetryContextFloor } : {}),
     ...(record.observedModel ? { observedModel: record.observedModel } : {}),
     ...(record.observedEffort ? { observedEffort: record.observedEffort } : {}),
-    ...(record.observedLatestInput !== undefined ? { observedLatestInput: record.observedLatestInput } : {}),
+    ...(record.observedContextTokens !== undefined ? { observedContextTokens: record.observedContextTokens } : {}),
     ...(record.ownership ? { ownership: record.ownership } : {}),
   };
 }
@@ -860,13 +766,16 @@ export function rehydrateForkRecord(agentId: string, resume: PersistedForkResume
     modelBase: resume.modelBase,
     modelEffort: resume.modelEffort,
     ...(parseTelemetry(resume.telemetry) ? { telemetry: parseTelemetry(resume.telemetry) } : {}),
-    ...(parseTelemetry({ version: 1, origin: resume.telemetryInputFloor })?.origin ? { telemetryInputFloor: parseTelemetry({ version: 1, origin: resume.telemetryInputFloor })!.origin } : {}),
+    ...(parseTelemetry({ version: 1, origin: resume.telemetryContextFloor })?.origin ? { telemetryContextFloor: parseTelemetry({ version: 1, origin: resume.telemetryContextFloor })!.origin } : {}),
     ...(typeof resume.observedModel === "string" && resume.observedModel ? { observedModel: resume.observedModel } : {}),
     ...(typeof resume.observedEffort === "string" && resume.observedEffort ? { observedEffort: resume.observedEffort } : {}),
-    ...(typeof resume.observedLatestInput === "number" && Number.isFinite(resume.observedLatestInput) && resume.observedLatestInput >= 0 ? { observedLatestInput: resume.observedLatestInput } : {}),
+    ...(typeof resume.observedContextTokens === "number" && Number.isFinite(resume.observedContextTokens) && resume.observedContextTokens >= 0 ? { observedContextTokens: resume.observedContextTokens } : {}),
     wsToolNames: [...resume.wsToolNames],
     toolGroup: resume.toolGroup,
     explicitTools: resume.explicitTools,
+    ...(resume.delegation ? { delegation: parseDelegationPolicy(resume.delegation), subtreeChannel: resume.subtreeChannel, waitingOnChildren: resume.waitingOnChildren } : {}),
+    ...(resume.lastWriter === "lead" || resume.lastWriter === "owner" ? { lastWriter: resume.lastWriter } : {}),
+    ...(Array.isArray(resume.ownerSends) ? { ownerSends: resume.ownerSends.flatMap((send) => send && typeof send.text === "string" && typeof send.at === "number" ? [{ text: send.text, at: send.at }] : []) } : {}),
     spawnRole: "fork",
     streaming: false,
     running: false,
@@ -1045,6 +954,7 @@ function refreshAgentWidget(): void {
  * immediately rather than waiting for the owner's next keystroke.
  */
 let activeQueueRepaint: (() => void) | undefined;
+let activeQueueOverlayToken: number | undefined;
 
 function repaintActiveQueue(): void {
   try {
@@ -1082,13 +992,8 @@ export function handleForkRaisedQuestion(
   rpcRegistry: RpcAgentRegistry,
   agentId: string,
   message: string,
-  /**
-   * Review relay #1 (I2): only used to arm the respondent's final-report hook
-   * here (see below). Optional so the registration itself still works from a
-   * call site with no extension API — the thread is registered either way; the
-   * bind is then released by the other close paths.
-   */
-  pi?: ExtensionAPI,
+  /** Retained for call-site compatibility; registration itself owns no IO. */
+  _pi?: ExtensionAPI,
 ): ThreadRecord {
   const now = nowIso();
   const record: ThreadRecord = {
@@ -1106,24 +1011,12 @@ export function handleForkRaisedQuestion(
     record.forkResume = captureForkResume(live);
     // 260905: the thread is bound from REGISTRATION, not from overlay open —
     // the exchange belongs to the owner from the moment the fork raised it,
-    // so the lead must not be pushed this fork's settles/advisories (nor
-    // count it as one of its own outstanding children) even before the owner
+    // so settled output routes to the owner when that surface exists (and the
+    // fork is not counted as one of the lead's children) even before the owner
     // gets around to `/answer`.
-    live.threadBound = true;
-    syncOwnershipProtection(live);
+    bindThread(rpcRegistry, agentId, true);
   }
   handle.threads.set(record.threadId, record);
-  // Review relay #1 (I2): arm the final-report hook HERE, not only from
-  // `ensureRespondent`. `ensureRespondent` runs on `/answer`, so before this
-  // fix the bind set above could only ever be released by an owner who
-  // actually opened the thread — and in headless (§8) there is no owner
-  // surface at all, so a fork-raised question latched `threadBound` forever:
-  // permanently outside the fan-in count, settles permanently suppressed,
-  // anti-bleed permanently disarmed, and the lead's fan-in showing no status
-  // line while the fork was still working. Armed at registration, the fork's OWN
-  // `kind:"final"` closes the thread and releases the bind with no owner
-  // involvement (`handleRespondentFinalReport` -> `detachForkRaisedThread`).
-  if (pi) armFinalReportHook(pi, handle, rpcRegistry, record.threadId, agentId);
   persistThreads(handle);
   refreshAgentWidget();
   return record;
@@ -1290,10 +1183,8 @@ export function registerAsk(
 }
 
 /**
- * The thread's close, routed on its `origin` — reached from the overlay's
- * `/done` (with the fork's summary turn) and from the respondent's own
- * `kind:"final"` report (`handleRespondentFinalReport`, with the report
- * text). The two entries own their respondent differently (review relay #2
+ * The thread's `/done` close, routed on its `origin`. The two entries own
+ * their respondent differently (review relay #2
  * C2, see `ThreadOrigin`):
  *
  * - `"lead-ask"`: this surface spawned the discussion fork, so `/done` runs
@@ -1301,8 +1192,8 @@ export function registerAsk(
  * - `"fork-raised"`: the respondent is a LIVE Entry A task fork the lead is
  *   parked on. Stopping it would destroy its in-flight task and hang the
  *   lead's own delegation of it, so `/done` only
- *   detaches: the thread goes dormant and the fork carries on, reporting what
- *   was decided through its own `kind:"final"` report (§1/§4).
+ *   starts a fresh lead-owned Finish handoff whose ordinary settled answer is
+ *   delivered through the shared terminal lifecycle.
  */
 export function closeThreadOnDone(
   pi: ExtensionAPI,
@@ -1310,17 +1201,18 @@ export function closeThreadOnDone(
   rpcRegistry: RpcAgentRegistry,
   thread: ThreadRecord,
   summary: string,
+  resumeCtx?: AskSessionCtx,
 ): void {
   if (thread.origin === "lead-ask") {
     injectDiscussionSummary(pi, handle, rpcRegistry, thread, summary);
     return;
   }
-  finishForkRaisedThread(pi, handle, rpcRegistry, thread);
+  finishForkRaisedThread(pi, handle, rpcRegistry, thread, resumeCtx);
 }
 
 /** `/done` on a fork-raised thread: close the view immediately, then let the
  * shared same-process coordinator wait for/obtain one terminal outcome. */
-function finishForkRaisedThread(pi: ExtensionAPI, handle: ThreadRegistryHandle, rpcRegistry: RpcAgentRegistry, thread: ThreadRecord): void {
+function finishForkRaisedThread(pi: ExtensionAPI, handle: ThreadRegistryHandle, rpcRegistry: RpcAgentRegistry, thread: ThreadRecord, resumeCtx?: AskSessionCtx): void {
   const record = thread.respondentAgentId ? rpcRegistry.get(thread.respondentAgentId) : undefined;
   if (!record) {
     // A missing live record has no in-process lifecycle to reconcile.
@@ -1333,19 +1225,16 @@ function finishForkRaisedThread(pi: ExtensionAPI, handle: ThreadRegistryHandle, 
   if (thread.status === "dormant" && !record.threadBound) return;
   if (record.forkFinish) return;
 
-  record.overlayAttached = false;
-  record.threadBound = true;
+  bindThread(rpcRegistry, record.agentId, true);
   thread.status = "dormant";
   thread.touchedAt = nowIso();
   thread.forkResume = captureForkResume(record);
-  syncOwnershipProtection(record);
   persistThreads(handle);
   refreshAgentWidget();
 
   record.onForkFinishComplete = (finished, failure) => {
     // A replacement send can supersede this operation; only its own callback
     // may release the temporary bind and refresh this thread snapshot.
-    finished.overlayAttached = false;
     finished.threadBound = false;
     syncOwnershipProtection(finished);
     thread.forkResume = captureForkResume(finished);
@@ -1355,22 +1244,17 @@ function finishForkRaisedThread(pi: ExtensionAPI, handle: ThreadRegistryHandle, 
     refreshAgentWidget();
     if (failure) notify(handle.ctxRef.current, `ws: fork finish for ${thread.threadId} ended without confirmed terminal admission (${failure}).`, "warning");
   };
-  startForkFinish(record, rpcRegistry, pi, { cwd: process.cwd(), extensionPath: process.argv[1] ?? "" });
+  startForkFinish(record, rpcRegistry, pi, resumeCtx ?? { cwd: process.cwd(), extensionPath: process.argv[1] ?? "" });
 }
 
-/**
- * Ordinary final-report close for a fork-raised thread when no `/done`
- * coordinator is active. It releases the bind and keeps the old behaviour.
- */
+/** Release a fork-raised thread bind when its respondent is gone or the thread is withdrawn. */
 export function detachForkRaisedThread(handle: ThreadRegistryHandle, rpcRegistry: RpcAgentRegistry, thread: ThreadRecord): void {
   const agentId = thread.respondentAgentId;
   if (agentId) {
     const record = rpcRegistry.get(agentId);
     if (record) {
-      record.overlayAttached = false;
       // The thread itself is closing here, so the thread-lifetime bind is
-      // released too: the fork rejoins the lead's fan-in and its own
-      // kind:"final" is pushed to the lead as any other child's would be.
+      // released too and any later turn belongs to the lead route.
       record.threadBound = false;
       syncOwnershipProtection(record);
       // Refresh the resume snapshot while the record is still live, so a
@@ -1407,7 +1291,6 @@ export function injectDiscussionSummary(
   if (agentId) {
     const record = rpcRegistry.get(agentId);
     if (record) {
-      record.overlayAttached = false;
       record.threadBound = false;
       syncOwnershipProtection(record);
       // Snapshot first: `stopAgent` clears `client`, and a later reopen needs
@@ -1446,13 +1329,12 @@ export function injectDiscussionSummary(
  * still-delivering an in-progress, already-typed answer behind a deferred
  * model withdrawal (`ThreadRecord.withdrawnPending`, cleared here).
  */
-export function deliverQueuedAnswer(
-  pi: ExtensionAPI,
-  handle: ThreadRegistryHandle,
-  thread: ThreadRecord,
-  answer: string,
-  sessionManager?: { buildContextEntries?: () => { id: string }[]; getBranch?: (id: string) => { id: string }[] },
-): void {
+type LeadAskSessionManager = {
+  buildContextEntries?: () => { id: string }[];
+  getBranch?: (id: string) => { id: string }[];
+};
+
+function queuedAnswerContent(thread: ThreadRecord, answer: string, sessionManager?: LeadAskSessionManager): string {
   let excerpt: string | undefined;
   if (thread.entryId && sessionManager) {
     try {
@@ -1466,22 +1348,49 @@ export function deliverQueuedAnswer(
     }
   }
   const anchor = buildAskAnchorLine(thread.askCommitHash, thread.entryId);
-  const message = {
-    customType: THREAD_SUMMARY_CUSTOM_TYPE,
-    content: buildQueuedAnswerInjectionMessage(thread.context, thread.question, answer, anchor, excerpt),
-    display: true,
-    details: { threadId: thread.threadId, title: thread.title },
-  };
-  sendToLead(pi, message, "followUp");
+  return buildQueuedAnswerInjectionMessage(thread.context, thread.question, answer, anchor, excerpt);
+}
 
-  thread.status = "dormant";
-  thread.withdrawnPending = false;
-  // Phase 2 (260911): the draft is delivered, not merely persisted — clear it
-  // so a later hand-edited/inspected registry never shows a stale one.
-  thread.draftAnswer = undefined;
-  thread.touchedAt = nowIso();
+/**
+ * Deliver one modal submission as one lead follow-up. Entries must already be
+ * in deterministic queue order; blank questions are excluded by the caller.
+ * The single-answer shape retains the original details contract, while a
+ * multi-answer submission carries ordered ids/titles beside one combined
+ * model payload.
+ */
+export function deliverQueuedAnswers(
+  pi: ExtensionAPI,
+  handle: ThreadRegistryHandle,
+  entries: readonly { thread: ThreadRecord; answer: string }[],
+  sessionManager?: LeadAskSessionManager,
+): void {
+  const deliverable = entries.filter(({ answer }) => answer.trim().length > 0);
+  if (deliverable.length === 0) return;
+  const content = deliverable.map(({ thread, answer }) => queuedAnswerContent(thread, answer, sessionManager)).join("\n\n---\n\n");
+  const details = deliverable.length === 1
+    ? { threadId: deliverable[0].thread.threadId, title: deliverable[0].thread.title }
+    : { threadIds: deliverable.map(({ thread }) => thread.threadId), titles: deliverable.map(({ thread }) => thread.title) };
+  sendToLead(pi, { customType: THREAD_SUMMARY_CUSTOM_TYPE, content, display: true, details }, "followUp");
+
+  const touchedAt = nowIso();
+  for (const { thread } of deliverable) {
+    thread.status = "dormant";
+    thread.withdrawnPending = false;
+    thread.draftAnswer = undefined;
+    thread.touchedAt = touchedAt;
+  }
   persistThreads(handle);
   refreshAgentWidget();
+}
+
+export function deliverQueuedAnswer(
+  pi: ExtensionAPI,
+  handle: ThreadRegistryHandle,
+  thread: ThreadRecord,
+  answer: string,
+  sessionManager?: LeadAskSessionManager,
+): void {
+  deliverQueuedAnswers(pi, handle, [{ thread, answer }], sessionManager);
 }
 
 /**
@@ -1496,48 +1405,25 @@ export function deliverQueuedAnswer(
  * has no `client` at open time — it only gets one once `sendToAgent`
  * relaunches the child.
  */
-/** `ConversationChannel.liveness()`'s two-state read off the registry's `streaming` flag — `"idle-awaiting-owner"` is child B's ownership rule, not this ticket's. Pulled out as a small exported pure helper matching the file's own `resolveOwnerSendInterrupt` precedent. */
-export function resolveChildLiveness(streaming: boolean): ChildLiveness {
-  return streaming ? "running" : "settled";
+/** Pure owner-steering liveness decision retained as a test seam. */
+export function resolveChildLiveness(running: boolean, ownerHeld = false): ChildLiveness {
+  return running ? "running" : ownerHeld ? "idle-awaiting-owner" : "settled";
 }
 
-function createForkChannel(pi: ExtensionAPI, rpcRegistry: RpcAgentRegistry, cwd: string, extensionPath: string, agentId: string): ConversationChannel {
-  const listeners = new Set<(evt: unknown) => void>();
-  let attached: unknown;
-  let detach: (() => void) | undefined;
-
-  function sync(): void {
+function createForkChannel(
+  pi: ExtensionAPI,
+  rpcRegistry: RpcAgentRegistry,
+  cwd: string,
+  extensionPath: string,
+  agentId: string,
+  onSent?: (record: RpcAgentRecord) => void,
+): ConversationChannel {
+  return createAuditChannel(rpcRegistry, agentId, async (text) => {
     const record = rpcRegistry.get(agentId);
-    const client = record?.client;
-    if (!client || client === attached) return;
-    detach?.();
-    attached = client;
-    detach = client.onEvent((evt) => {
-      for (const listener of listeners) listener(evt);
-    });
-  }
-
-  return {
-    onEvent(listener) {
-      listeners.add(listener);
-      sync();
-      return () => {
-        listeners.delete(listener);
-        if (listeners.size === 0) {
-          detach?.();
-          detach = undefined;
-          attached = undefined;
-        }
-      };
-    },
-    liveness() {
-      return resolveChildLiveness(rpcRegistry.get(agentId)?.streaming === true);
-    },
-    async send(text) {
-      await sendToAgent(rpcRegistry, { pi, cwd, extensionPath }, agentId, text, resolveOwnerSendInterrupt(rpcRegistry.get(agentId)?.streaming === true));
-      sync();
-    },
-  };
+    await sendToAgent(rpcRegistry, { pi, cwd, extensionPath, writer: "owner" }, agentId, text, resolveOwnerSendInterrupt(record?.streaming === true));
+    const updated = rpcRegistry.get(agentId);
+    if (updated) onSent?.(updated);
+  });
 }
 
 /**
@@ -1548,94 +1434,6 @@ function createForkChannel(pi: ExtensionAPI, rpcRegistry: RpcAgentRegistry, cwd:
  * and the thread stays reopenable (the doom-overlay example's own
  * persistent-state-vs-disposable-view split).
  */
-let activeOverlay: { token: number; threadId: string; handle: OverlayHandle } | undefined;
-/** Identifies one overlay INSTANCE, not one thread: reopening the same thread must not let the closing instance clear its successor's entry. */
-let overlayToken = 0;
-
-/** The live overlay handle for `threadId`, if the one open overlay is attached to that thread. */
-function attachedOverlayFor(threadId: string): OverlayHandle | undefined {
-  return activeOverlay?.threadId === threadId ? activeOverlay.handle : undefined;
-}
-
-/**
- * A respondent's own `kind:"final"` report (post-close dogfood 2026-09-05):
- * the discussion fork ends the thread itself once the owner has stated a
- * decision, and the report text is the summary. Routed exactly like `/done`
- * — through the attached overlay's `closeWithSummary` (whose `onDone` is
- * `closeThreadOnDone`) when one is open, directly through `closeThreadOnDone`
- * when the owner had already pressed Esc — so a `lead-ask` thread gets the
- * §6 injection, the stop, `dormant`, persistence and the widget refresh in
- * one place, with no summary turn. A `fork-raised` thread's final report
- * closes an attached overlay and detaches the thread (its lifecycle belongs
- * to `ws-fork`, and the lead reads the pushed report itself). A `lead-ask`
- * thread is ignored unless it is `open` — a late duplicate from an
- * already-closed thread must not re-inject — while a `fork-raised` thread also
- * accepts `pending` (review relay #1 I2: the owner may never open it, and in
- * headless never can, so this is that bind's only release path).
- *
- * 260905 return value = `spawner.ts`'s `onFinalReport` SUPPRESSION contract:
- * `true` means "consumed, do not push this report to the lead". Only a
- * `lead-ask` thread returns true — the owner's decision already reaches the
- * lead as the `ws-thread-summary` message, so a `ws-agent-report` push on top
- * would deliver the same event twice. A `fork-raised` fork's final IS the
- * completion signal the lead is meant to see, so it returns `false` and the
- * push goes out. A non-`open` thread also returns `false`: nothing was
- * consumed.
- *
- * `overlay` is injectable for tests; the default is the module-scope active
- * overlay.
- */
-export function handleRespondentFinalReport(
-  pi: ExtensionAPI,
-  handle: ThreadRegistryHandle,
-  rpcRegistry: RpcAgentRegistry,
-  thread: ThreadRecord,
-  message: string,
-  overlay: OverlayHandle | undefined = attachedOverlayFor(thread.threadId),
-): boolean {
-  if (thread.origin === "fork-raised") {
-    // Review relay #1 (I2): `"pending"` counts here, unlike for `lead-ask`. A
-    // fork-raised thread is bound from REGISTRATION, and in headless (§8) no
-    // owner surface will ever open it — so the fork's own final is the only
-    // event that can release the bind, and refusing it while the thread is
-    // merely pending is exactly the permanent latch this branch must not
-    // create. The fork answered itself or finished the task; either way the
-    // owner has nothing left to answer.
-    if (thread.status !== "open" && thread.status !== "pending") return false;
-    // Close the view if one is open, then run the thread close itself
-    // (previously only reachable via `/done`) so `threadBound` is released and
-    // the fork rejoins the lead's fan-in on the very report that ends the
-    // thread.
-    overlay?.closeWithSummary("");
-    detachForkRaisedThread(handle, rpcRegistry, thread);
-    return false;
-  }
-  if (thread.status !== "open") return false;
-  if (overlay) {
-    overlay.closeWithSummary(message);
-    return true;
-  }
-  closeThreadOnDone(pi, handle, rpcRegistry, thread, message);
-  return true;
-}
-
-/**
- * Arms `handleRespondentFinalReport` on the thread's respondent record. The
- * thread is re-read from the registry by id at fire time, since a
- * `session_start` re-hydration replaces the record objects.
- */
-function armFinalReportHook(pi: ExtensionAPI, handle: ThreadRegistryHandle, rpcRegistry: RpcAgentRegistry, threadId: string, agentId: string): void {
-  const record = rpcRegistry.get(agentId);
-  if (!record) return;
-  record.onFinalReport = (_record, message) => {
-    const thread = handle.threads.get(threadId);
-    if (!thread) return false;
-    // The boolean propagates verbatim: it is `spawner.ts`'s
-    // report-push suppression signal, not a local status.
-    return handleRespondentFinalReport(pi, handle, rpcRegistry, thread, message);
-  };
-}
-
 /**
  * Ensures the thread has a live-or-resumable respondent fork on the shared
  * `rpcRegistry`, spawning a discussion fork lazily when it has none.
@@ -1669,9 +1467,6 @@ export async function ensureRespondent(
       }
       rpcRegistry.set(agentId, rehydrateForkRecord(agentId, thread.forkResume));
     }
-    // Idempotent: a live or rehydrated respondent (either origin) reports its
-    // own final into this thread — see `handleRespondentFinalReport`.
-    armFinalReportHook(pi, handle, rpcRegistry, thread.threadId, agentId);
     bindThread(rpcRegistry, agentId, true);
     return agentId;
   }
@@ -1684,8 +1479,7 @@ export async function ensureRespondent(
 
   // §7: anchor a compacted entry with a verbatim excerpt of its own window.
   let excerpt: string | undefined;
-  const sessionManager = (ctx as { sessionManager?: { buildContextEntries?: () => { id: string }[]; getBranch?: (id: string) => { id: string }[] } })
-    .sessionManager;
+  const sessionManager = (ctx as { sessionManager?: LeadAskSessionManager }).sessionManager;
   if (thread.entryId && sessionManager) {
     try {
       const liveEntries = sessionManager.buildContextEntries?.() ?? [];
@@ -1743,18 +1537,16 @@ export async function ensureRespondent(
     },
   );
 
+  bindThread(rpcRegistry, result.agent_id, true);
   thread.respondentAgentId = result.agent_id;
   const record = rpcRegistry.get(result.agent_id);
   if (record) thread.forkResume = captureForkResume(record);
-  armFinalReportHook(pi, handle, rpcRegistry, thread.threadId, result.agent_id);
-  bindThread(rpcRegistry, result.agent_id, true);
   return result.agent_id;
 }
 
 /**
- * Sets/clears `RpcAgentRecord.threadBound` — the thread-LIFETIME flag (§1's
- * "the lead is not part of this exchange"), as opposed to `overlayAttached`'s
- * per-VIEW lifetime. Set on every thread open/reopen and on fork-raised
+ * Sets/clears `RpcAgentRecord.threadBound` — the thread-lifetime flag (§1's
+ * "the lead is not part of this exchange"). Set on every thread open/reopen and on fork-raised
  * registration; cleared only where the thread itself actually closes
  * (`detachForkRaisedThread`, `injectDiscussionSummary`, `ws-resolve`), never
  * on a mere overlay Esc. While set, `spawner.ts` emits no settle push for the
@@ -1763,7 +1555,13 @@ export async function ensureRespondent(
  */
 function bindThread(rpcRegistry: RpcAgentRegistry, agentId: string, bound: boolean): void {
   const record = rpcRegistry.get(agentId);
-  if (record) { record.threadBound = bound; syncOwnershipProtection(record); }
+  if (!record) return;
+  // Publish protection before the local bind: a busy maintenance claim must
+  // refuse this transition, not silently leave an accepted owner thread prunable.
+  // Releases may remain durably protected on failure; that only retains data.
+  const persisted = syncOwnershipProtection({ ...record, threadBound: bound });
+  if (bound && !persisted) throw new Error("ws-pi-agent: cannot bind owner thread — owned session home is busy, gone, or unreadable; retry the question");
+  record.threadBound = bound;
 }
 
 /**
@@ -1885,8 +1683,7 @@ export function runDoneAction(
 /**
  * Wraps a live `ConversationViewComponent` + the `ctx.ui.custom` `done`
  * callback as an `OverlayHandle` — the external contract
- * `handleRespondentFinalReport`'s `overlay.closeWithSummary` path, a pending
- * `summarizeThenClose` settle, an owner Esc, and a second `/answer` closing
+ * a pending `summarizeThenClose` settle, an owner Esc, and a second `/answer` closing
  * the first overlay all drive without reaching into the component itself.
  * `closeWithSummary` mirrors the old, now-deleted per-thread overlay
  * module's own: a non-empty summary is appended as the child's own turn
@@ -1896,9 +1693,8 @@ export function runDoneAction(
  *
  * Review relay #2 Important (I1a/I1b/I4): a private `finished` flag makes
  * `close`/`closeWithSummary` a no-op after either has already run once —
- * whichever of the three real races wins (an owner Esc during the summary
- * wait, the fork's own `kind:"final"` report arriving mid-wait via
- * `handleRespondentFinalReport`, or the summary settle itself) is the ONLY
+ * whichever close race wins (an owner Esc during the summary wait, a second
+ * owner action, or the summary settle itself) is the ONLY
  * one that runs `closeThreadOnDone`/injects a summary/calls `done`, exactly
  * mirroring the old component's own `finished` guard. `onFinish` — called
  * exactly once, by whichever path wins — is `openThread`'s hook to tear down
@@ -1913,6 +1709,7 @@ export function buildOverlayHandle(
   component: ConversationViewComponent,
   done: (result: undefined) => void,
   onFinish?: () => void,
+  resumeCtx?: AskSessionCtx,
 ): OverlayHandle {
   let finished = false;
   return {
@@ -1927,7 +1724,7 @@ export function buildOverlayHandle(
       finished = true;
       onFinish?.();
       if (!alreadyRendered && summary.trim().length > 0) component.appendItem({ kind: "assistant", text: summary.trim() });
-      closeThreadOnDone(pi, handle, rpcRegistry, thread, summary);
+      closeThreadOnDone(pi, handle, rpcRegistry, thread, summary, resumeCtx);
       done(undefined);
     },
   };
@@ -2000,7 +1797,7 @@ export function runLeadAskEscapeAction(
   handle: ThreadRegistryHandle,
   thread: ThreadRecord,
   draft: string,
-  sessionManager?: { buildContextEntries?: () => { id: string }[]; getBranch?: (id: string) => { id: string }[] },
+  sessionManager?: LeadAskSessionManager,
 ): void {
   if (action === "deliver") {
     deliverQueuedAnswer(pi, handle, thread, draft, sessionManager);
@@ -2021,6 +1818,27 @@ export function runLeadAskEscapeAction(
   thread.touchedAt = nowIso();
   persistThreads(handle);
   refreshAgentWidget();
+}
+
+/** The production modal-close callback, extracted so its one-follow-up batch boundary is directly testable. */
+export function buildLeadAskQueueOnClose(
+  pi: ExtensionAPI,
+  handle: ThreadRegistryHandle,
+  threads: readonly ThreadRecord[],
+  sessionManager?: LeadAskSessionManager,
+  onDone?: () => void,
+): (mode: "submit" | "preserve", drafts: ReadonlyMap<string, string>) => void {
+  return (mode, drafts) => {
+    const deliveries: Array<{ thread: ThreadRecord; answer: string }> = [];
+    for (const thread of threads) {
+      const draft = drafts.get(thread.threadId) ?? "";
+      const action = resolveLeadAskQueueEntryAction(mode, thread.withdrawnPending === true, draft);
+      if (action === "deliver") deliveries.push({ thread, answer: draft });
+      else runLeadAskEscapeAction(action, pi, handle, thread, draft, sessionManager);
+    }
+    deliverQueuedAnswers(pi, handle, deliveries, sessionManager);
+    onDone?.();
+  };
 }
 
 /**
@@ -2097,10 +1915,17 @@ export interface LeadAskQueueOptions {
   initialFocusIndex: number;
   /** Constructs one fresh `Editor` bound to the live host TUI — injectable for tests. */
   editorFactory: () => FocusableEditorLike;
-  /** The live host's `matchesKey` (resolved through `loadHostPiTui()` by the caller — never the static import; see `pi-tui.ts`'s dual-package-instance note) for confirm-screen arrow/enter detection across raw and Kitty-protocol encodings. */
+  /** The live host's `matchesKey` (resolved through `loadHostPiTui()` by the caller — never the static import; see `pi-tui.ts`'s dual-package-instance note) for terminal-key detection across raw and Kitty-protocol encodings. */
   matchesKey: (data: string, keyId: string) => boolean;
+  /** Pi's configured alternate-screen bindings, used for PageUp/PageDown question scrolling. */
+  keybindings?: { matches(data: string, id: string): boolean };
   /** Word-wraps one line of plain text (the live host's `wrapTextWithAnsi`, or an injected fake in tests). */
   wrapText: (text: string, width: number) => string[];
+  /** Semantic theme painters supplied by the live `ui.custom` callback. Identity defaults keep tests/headless use plain. */
+  headerText?: (text: string) => string;
+  separatorText?: (text: string) => string;
+  helpText?: (text: string) => string;
+  overflowText?: (text: string) => string;
   /** Draws the single-line box border, matching every other overlay tier. */
   border?: boolean;
   /** Fires exactly once, with the owner's final decision and every question's live draft text keyed by `threadId`. */
@@ -2150,6 +1975,9 @@ export class LeadAskQueueComponent implements Component {
   private readonly options: LeadAskQueueOptions;
   private readonly threads: readonly ThreadRecord[];
   private readonly editors: FocusableEditorLike[];
+  private readonly questionScrollOffsets: number[];
+  private readonly questionViewportRows: number[];
+  private readonly questionMaxScroll: number[];
   private index: number;
   private confirm: LeadAskQueueConfirmState | undefined;
   private finished = false;
@@ -2159,6 +1987,9 @@ export class LeadAskQueueComponent implements Component {
     this.options = options;
     this.threads = options.threads;
     this.index = Math.min(Math.max(0, options.initialFocusIndex), this.threads.length - 1);
+    this.questionScrollOffsets = this.threads.map(() => 0);
+    this.questionViewportRows = this.threads.map(() => 1);
+    this.questionMaxScroll = this.threads.map(() => 0);
     this.editors = this.threads.map((thread, i) => {
       const editor = options.editorFactory();
       editor.setText(thread.draftAnswer ?? "");
@@ -2178,6 +2009,7 @@ export class LeadAskQueueComponent implements Component {
       this.handleConfirmInput(data);
       return;
     }
+    if (this.handleQuestionScrollInput(data)) return;
     if (isEscapeKey(data)) {
       this.handleEscape();
       return;
@@ -2266,17 +2098,36 @@ export class LeadAskQueueComponent implements Component {
       this.resolveConfirm(confirm.kind, "no");
       return;
     }
-    if (matches(data, "left") || matches(data, "up")) {
-      confirm.choice = "no";
-      this.tui.requestRender();
+    if (matches(data, "left")) {
+      if (confirm.choice === "no") {
+        confirm.choice = "yes";
+        this.tui.requestRender();
+      }
       return;
     }
-    if (matches(data, "right") || matches(data, "down")) {
-      confirm.choice = "yes";
-      this.tui.requestRender();
+    if (matches(data, "right")) {
+      if (confirm.choice === "yes") {
+        confirm.choice = "no";
+        this.tui.requestRender();
+      }
       return;
     }
     if (matches(data, "enter")) this.resolveConfirm(confirm.kind, confirm.choice);
+  }
+
+  private handleQuestionScrollInput(data: string): boolean {
+    const pageUp = this.options.matchesKey(data, "pageUp") || this.options.keybindings?.matches(data, "tui.altScreen.pageUp") === true;
+    const pageDown = this.options.matchesKey(data, "pageDown") || this.options.keybindings?.matches(data, "tui.altScreen.pageDown") === true;
+    if (!pageUp && !pageDown) return false;
+    const index = this.index;
+    const page = Math.max(1, this.questionViewportRows[index] - 1);
+    const current = this.questionScrollOffsets[index];
+    const next = Math.min(this.questionMaxScroll[index], Math.max(0, current + (pageUp ? -page : page)));
+    if (next !== current) {
+      this.questionScrollOffsets[index] = next;
+      this.tui.requestRender();
+    }
+    return true;
   }
 
   private resolveConfirm(kind: "final" | "esc", choice: "yes" | "no"): void {
@@ -2305,49 +2156,66 @@ export class LeadAskQueueComponent implements Component {
   private renderInner(w: number): string[] {
     const total = this.threads.length;
     const answered = countQueueAnswered(this.liveDrafts());
-    const header = [this.line(buildQueueCoverageLine(this.index, total, answered), w), ""];
+    const header = [this.line(this.paint(this.options.headerText, buildQueueCoverageLine(this.index, total, answered)), w), ""];
     if (this.confirm) {
       return [...header, ...this.renderConfirm(w, answered, total)];
     }
     const thread = this.threads[this.index];
     const banner = thread.withdrawnPending
-      ? [this.line("⚠ the agent withdrew this question — your answer, if any, is still delivered when you close.", w), ""]
+      ? [this.line(this.paint(this.options.overflowText, "⚠ the agent withdrew this question — your answer, if any, is still delivered when you close."), w), ""]
       : [];
-    // Full multi-line wrap, not `this.line`'s single-line truncation (review-
-    // round-1 correctness Minor fix): at a narrow width this hint — the
-    // modal's only exit, since Ctrl+C is swallowed — wraps past one line,
-    // and `this.line` silently drops everything after the first.
     const hint = this.options.wrapText(
-      "Enter: answer & next · Shift+Enter/Ctrl+J: newline · Tab/Shift+Tab: switch question · Esc: exit",
+      this.paint(this.options.helpText, "Enter: answer & next · Shift+Enter/Ctrl+J: newline · Tab/Shift+Tab: switch question · PgUp/PgDn: scroll question · Esc: exit"),
       w,
     );
     const editorLines = this.editors[this.index].render(w);
+    const separatorPlain = `─ Answer ${"─".repeat(Math.max(0, w - 9))}`;
+    const separator = [this.line(this.paint(this.options.separatorText, separatorPlain), w)];
     let questionLines = this.options.wrapText(thread.question ?? thread.title, w);
     if (thread.context && thread.context.trim().length > 0) {
       questionLines = [...questionLines, "", ...this.options.wrapText(thread.context, w)];
     }
-    // Height budget (review-round-1 correctness Important fix): the host
-    // overlay hard-truncates from the BOTTOM past `overlayOptions.maxHeight`
-    // — with no budget here, a long lead-authored question/context can push
-    // the answer Editor and the Esc hint above off screen entirely, with no
-    // way back to either (↑/↓/pgUp/pgDn scroll the Editor's own ANSWER text
-    // per the ticket, not the question). Cap the question/context block
-    // instead, so the editor and the hint always render.
     const viewportRows = conversationOverlayHeight(this.tui);
     if (Number.isFinite(viewportRows)) {
       const borderOverhead = this.options.border === true ? QUEUE_BORDER_OVERHEAD : 0;
-      const fixedRows =
-        borderOverhead + header.length + banner.length + 1 /* blank before editor */ + editorLines.length + 1 /* blank after editor */ + hint.length;
-      const budget = Math.max(1, viewportRows - fixedRows);
-      if (questionLines.length > budget) {
-        const shown = Math.max(1, budget - 1);
-        questionLines = [
-          ...questionLines.slice(0, shown),
-          this.line(`… question truncated — see /thread ${thread.threadId} for the full text`, w),
-        ];
-      }
+      const fixedRows = borderOverhead + header.length + banner.length + separator.length + editorLines.length + 1 /* blank after editor */ + hint.length;
+      questionLines = this.renderQuestionRegion(questionLines, Math.max(1, viewportRows - fixedRows), w);
+    } else {
+      this.questionScrollOffsets[this.index] = 0;
+      this.questionViewportRows[this.index] = Math.max(1, questionLines.length);
+      this.questionMaxScroll[this.index] = 0;
     }
-    return [...header, ...banner, ...questionLines, "", ...editorLines, "", ...hint];
+    return [...header, ...banner, ...questionLines, ...separator, ...editorLines, "", ...hint];
+  }
+
+  private renderQuestionRegion(lines: string[], budget: number, width: number): string[] {
+    const index = this.index;
+    if (lines.length <= budget) {
+      this.questionScrollOffsets[index] = 0;
+      this.questionViewportRows[index] = Math.max(1, lines.length);
+      this.questionMaxScroll[index] = 0;
+      return lines;
+    }
+    const singleRow = budget === 1;
+    const cuePrefix = singleRow && width >= 3 ? "↕ " : "";
+    // At a one-row height, reserve the cue's columns before wrapping. Prefixing
+    // an already width-filled line and then taking only the first wrapped row
+    // would make its tail permanently unreachable.
+    const scrollLines = singleRow
+      ? lines.flatMap((line) => this.options.wrapText(line, Math.max(1, width - cuePrefix.length)))
+      : lines;
+    const contentRows = Math.max(1, budget - 1);
+    const maxScroll = Math.max(0, scrollLines.length - contentRows);
+    const offset = Math.min(maxScroll, this.questionScrollOffsets[index]);
+    this.questionScrollOffsets[index] = offset;
+    this.questionViewportRows[index] = contentRows;
+    this.questionMaxScroll[index] = maxScroll;
+    const visible = scrollLines.slice(offset, offset + contentRows);
+    if (singleRow) return [this.line(this.paint(this.options.overflowText, `${cuePrefix}${visible[0] ?? ""}`), width)];
+    const above = offset > 0 ? "↑ more above · " : "";
+    const below = offset < maxScroll ? " · more below ↓" : "";
+    const cue = this.line(this.paint(this.options.overflowText, `${above}question lines ${offset + 1}-${offset + visible.length}/${scrollLines.length} · PgUp/PgDn${below}`), width);
+    return [...visible, cue];
   }
 
   private renderConfirm(w: number, answered: number, total: number): string[] {
@@ -2359,8 +2227,12 @@ export class LeadAskQueueComponent implements Component {
       "",
       this.line(`  ${yes}   ${no}`, w),
       "",
-      ...this.options.wrapText("←/→ select · Enter confirm · Esc cancel", w),
+      ...this.options.wrapText(this.paint(this.options.helpText, "←/→ select · Enter confirm · Esc cancel"), w),
     ];
+  }
+
+  private paint(painter: ((text: string) => string) | undefined, text: string): string {
+    return painter?.(text) ?? text;
   }
 
   private line(text: string, width: number): string {
@@ -2423,41 +2295,37 @@ async function openLeadAskQueue(
   persistThreads(handle);
   refreshAgentWidget();
 
-  // One overlay at a time (§5, carried over from Phase 1): a live
-  // fork-raised chat, if any, is closed first.
-  activeOverlay?.handle.close();
-  activeOverlay = undefined;
-  const token = ++overlayToken;
+  // One owner overlay at a time across queued answers and audit/thread chat.
+  const token = reserveOwnerOverlay();
 
-  const sessionManager = (ctx as { sessionManager?: { buildContextEntries?: () => { id: string }[]; getBranch?: (id: string) => { id: string }[] } })
-    .sessionManager;
+  const sessionManager = (ctx as { sessionManager?: LeadAskSessionManager }).sessionManager;
 
   try {
     await (ctx as unknown as { ui: AskCustomUiCtx["ui"] }).ui.custom<undefined>(
-      async (tui, _theme, _keybindings, done) => {
+      async (tui, theme, keybindings, done) => {
         const hostPiTui = await loadHostPiTui();
         const component = new LeadAskQueueComponent(tui, {
           threads,
           initialFocusIndex,
           border: true,
           matchesKey: hostPiTui.matchesKey as (data: string, keyId: string) => boolean,
+          keybindings: keybindings as { matches(data: string, id: string): boolean },
           wrapText: (text, width) => hostPiTui.wrapTextWithAnsi(text, width),
+          headerText: (text) => theme.fg("accent", theme.bold(text)),
+          separatorText: (text) => theme.fg("borderAccent", text),
+          helpText: (text) => theme.fg("dim", text),
+          overflowText: (text) => theme.fg("warning", text),
           editorFactory: () => new hostPiTui.Editor(tui as never, QUEUE_IDENTITY_EDITOR_THEME) as unknown as FocusableEditorLike,
-          onClose: (mode, drafts) => {
-            for (const thread of threads) {
-              const draft = drafts.get(thread.threadId) ?? "";
-              const action = resolveLeadAskQueueEntryAction(mode, thread.withdrawnPending === true, draft);
-              runLeadAskEscapeAction(action, pi, handle, thread, draft, sessionManager);
-            }
-            done(undefined);
-          },
+          onClose: buildLeadAskQueueOnClose(pi, handle, threads, sessionManager, () => done(undefined)),
         });
-        activeOverlay = {
+        activateOwnerOverlay({
           token,
           threadId: threads[initialFocusIndex].threadId,
-          handle: { close: () => done(undefined), closeWithSummary: () => done(undefined) },
-        };
+          close: () => done(undefined),
+          closeWithSummary: () => done(undefined),
+        });
         activeQueueRepaint = () => tui.requestRender();
+        activeQueueOverlayToken = token;
         return component;
       },
       { overlay: true, overlayOptions: { width: "80%", maxHeight: "80%", anchor: "center" } },
@@ -2468,9 +2336,10 @@ async function openLeadAskQueue(
     // unconditionally clearing `activeQueueRepaint` — harmless while only one
     // queue can hold focus at a time, but the asymmetry could clear a
     // successor's hook if that single-overlay invariant ever loosens.
-    if (activeOverlay?.token === token) {
-      activeOverlay = undefined;
+    clearOwnerOverlay(token);
+    if (activeQueueOverlayToken === token) {
       activeQueueRepaint = undefined;
+      activeQueueOverlayToken = undefined;
     }
   }
 }
@@ -2516,11 +2385,8 @@ async function openThread(
   persistThreads(handle);
   refreshAgentWidget();
 
-  // One overlay at a time (§5): the previous one is closed first; its own
-  // fork is untouched and its thread stays reopenable.
-  activeOverlay?.handle.close();
-  activeOverlay = undefined;
-  const token = ++overlayToken;
+  // One owner overlay at a time: the prior audit/thread/queue view closes.
+  const token = reserveOwnerOverlay();
 
   // Review relay #1 C1: mark the respondent as owner-attached for as long as
   // this overlay lives. An Entry-A task fork still runs `wireAntiBleedLoop`
@@ -2529,15 +2395,17 @@ async function openThread(
   // conversation and then steer a false "stalled, do not harvest" verdict
   // into the lead. Read (not imported) by `fork.ts`: the reverse import would
   // cycle.
-  const attachedRecord = rpcRegistry.get(agentId);
-  if (attachedRecord) attachedRecord.overlayAttached = true;
-
-  const channel = createForkChannel(pi, rpcRegistry, sessionCtx.cwd, sessionCtx.extensionPath, agentId);
-  // The transcript lives on the record, not in the view: restored here (or
-  // seeded from the question when there is no transcript yet), and persisted
-  // on every append so Esc/reopen and a lead restart both show the
-  // conversation so far.
-  const initialItems = buildInitialConversationItems(thread);
+  const channel = createForkChannel(pi, rpcRegistry, sessionCtx.cwd, sessionCtx.extensionPath, agentId, (updated) => {
+    thread.forkResume = captureForkResume(updated);
+    thread.touchedAt = nowIso();
+    persistThreads(handle);
+    refreshAgentWidget();
+  });
+  const sourceRecord = rpcRegistry.get(agentId)!;
+  const history = readSessionHistory(sourceRecord.sessionPath, sourceRecord.ownerSends);
+  const initialItems = history.status === "available"
+    ? history.items
+    : [{ kind: "note" as const, text: "History unavailable: the child session file is gone or unreadable." }];
   // Keep identity/time/controls compact. The original question is the first
   // dialogue turn in `initialItems`, where it receives conversation styling.
   const headerHint = buildThreadHeaderHint(thread);
@@ -2564,44 +2432,46 @@ async function openThread(
         // Review relay #2 I1a: the one `summarizeThenClose` listener that may
         // be waiting on a settle at any given moment. Torn down by
         // `buildOverlayHandle`'s `onFinish` hook the instant ANY close path
-        // wins, so an owner Esc (or a racing final report) during the wait
+        // wins, so an owner Esc (or another close action) during the wait
         // stops this listener rather than leaving it to fire later into an
         // already-guarded (but still leaked) `closeWithSummary`.
         let pendingSummarizeUnsubscribe: (() => void) | undefined;
-        const component: ConversationViewComponent = new ConversationViewComponent(tui, {
+        let component!: OwnerSteeringComponent;
+        const view = new ConversationViewComponent(tui, {
           channel,
           initialItems,
           headerHint,
           markdownTheme,
-          // 260909 V1/V2: the overlay draws its own border + horizontal margin
-          // so it separates from the lead's background behind it.
           border: true,
           viewportHeight: () => conversationOverlayHeight(tui),
           keybindings: keybindings as { matches(data: string, id: string): boolean },
           userLineBg: (text) => theme?.bg?.("userMessageBg", text) ?? text,
           toolTextFg: (text) => theme?.fg?.("muted", text) ?? text,
           workingTextFg: (text) => theme?.fg?.("dim", text) ?? text,
+          onSendError: (error) => notify(ctx, `ws: owner send failed: ${error instanceof Error ? error.message : String(error)}`, "error"),
           primitives: { ScrollView: hostPiTui.ScrollView, Markdown: hostPiTui.Markdown, Text: hostPiTui.Text, Editor: hostPiTui.Editor },
-          // Routed through `overlayHandle.close()` (rather than the raw
-          // `done` callback) so an Esc during a pending summary wait
-          // participates in the SAME `finished` guard `closeWithSummary`
-          // uses — otherwise Esc would close the view here while a later
-          // settle still injected a summary into the lead behind it.
-          onEscape: () => overlayHandle?.close(),
-          onDone: () => {
-            pendingSummarizeUnsubscribe = runDoneAction(resolveDoneAction(summarizeOnDone), component, channel, overlayHandle!);
-          },
-          onItemsChange: (items) => {
-            thread.transcript = items.length > THREAD_TRANSCRIPT_CAP ? items.slice(-THREAD_TRANSCRIPT_CAP) : [...items];
-            persistThreads(handle);
-          },
+          onDone: () => component.finish(),
         });
-        component.setMode("interactive");
-        overlayHandle = buildOverlayHandle(pi, handle, rpcRegistry, thread, component, done, () => {
+        view.setMode("interactive");
+        overlayHandle = buildOverlayHandle(pi, handle, rpcRegistry, thread, view, done, () => {
           pendingSummarizeUnsubscribe?.();
           pendingSummarizeUnsubscribe = undefined;
+        }, sessionCtx);
+        component = new OwnerSteeringComponent(tui, view, {
+          done: () => overlayHandle!.close(),
+          finish: () => {
+            pendingSummarizeUnsubscribe = runDoneAction(resolveDoneAction(summarizeOnDone), view, channel, overlayHandle!);
+          },
+          interrupt: async () => {
+            const live = rpcRegistry.get(agentId!);
+            if (live?.running && live.client) await live.client.abort();
+          },
+          interruptEnabled: () => rpcRegistry.get(agentId!)?.running === true && rpcRegistry.get(agentId!)?.client !== undefined,
+          notify: (message, type) => notify(ctx, message, type),
+          theme,
+          matchesKey: hostPiTui.matchesKey as (data: string, keyId: string) => boolean,
         });
-        activeOverlay = { token, threadId: thread.threadId, handle: overlayHandle };
+        activateOwnerOverlay({ token, threadId: thread.threadId, close: overlayHandle.close, closeWithSummary: overlayHandle.closeWithSummary });
         return component;
       },
       { overlay: true, overlayOptions: { width: "80%", maxHeight: "80%", anchor: "center" } },
@@ -2609,9 +2479,7 @@ async function openThread(
   } finally {
     // Cleared on every exit path — `/done` (which also stops the fork), a
     // plain close, or a throw out of the overlay.
-    const record = rpcRegistry.get(agentId);
-    if (record) record.overlayAttached = false;
-    if (activeOverlay?.token === token) activeOverlay = undefined;
+    clearOwnerOverlay(token);
   }
 }
 
@@ -2629,7 +2497,9 @@ export function registerThreadCommands(
   rpcRegistry: RpcAgentRegistry,
   handle: ThreadRegistryHandle,
   sessionCtx: AskSessionCtx,
+  openAnswerThread?: (thread: ThreadRecord, ctx: unknown) => Promise<void>,
 ): void {
+  const openSelected = openAnswerThread ?? ((thread: ThreadRecord, ctx: unknown) => openThread(pi, ctx as never, bridge, rpcRegistry, handle, thread, sessionCtx));
   pi.registerCommand("thread", {
     description: "List ws discussion threads (pending, open, and dormant-but-reopenable).",
     handler: async (_args, ctx) => {
@@ -2638,15 +2508,29 @@ export function registerThreadCommands(
   });
 
   pi.registerCommand("answer", {
-    description: "Open a ws question thread in a chat overlay (usage: /answer <id>; no id opens the most recent).",
+    description: "Answer queued ws questions (usage: /answer <id>; no id opens the oldest queued lead question).",
     handler: async (args, ctx) => {
       const id = args.trim();
-      const thread = id ? handle.threads.get(id) : mostRecentReopenable([...handle.threads.values()]);
-      if (!thread) {
-        notify(ctx as AskUiCtx, id ? `ws: no thread "${id}" — /thread lists them.` : "ws: no thread to open.", "warning");
+      if (!id) {
+        const oldest = collectLeadAskQueue([...handle.threads.values()])[0];
+        if (!oldest) {
+          notify(ctx as AskUiCtx, "ws: no queued lead questions to answer.", "info");
+          return;
+        }
+        await openSelected(oldest, ctx);
         return;
       }
-      await openThread(pi, ctx as never, bridge, rpcRegistry, handle, thread, sessionCtx);
+
+      const thread = handle.threads.get(id);
+      if (!thread) {
+        notify(ctx as AskUiCtx, `ws: no thread "${id}" — /thread lists them.`, "error");
+        return;
+      }
+      if (thread.origin === "lead-ask" && thread.status !== "pending" && thread.status !== "open") {
+        notify(ctx as AskUiCtx, `ws: question ${id} was ${thread.status === "dormant" ? "already answered" : "withdrawn"}.`, "warning");
+        return;
+      }
+      await openSelected(thread, ctx);
     },
   });
 

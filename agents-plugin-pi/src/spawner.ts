@@ -23,47 +23,43 @@
  * in one of six families — `ws-agent-report`, `ws-agent-settled`,
  * `ws-agent-question`, `ws-agent-approval`, `ws-agent-advisory`,
  * `ws-agent-orphaned` — each carrying `details.agent_id`, its own payload, and
- * a fan-in status line (`computeRunningStatusLine`) counting how many
- * delegated agents are still outstanding. The lead therefore ends its turn
+ * a fan-in status line (`computeRunningStatusLine`) counting only children
+ * still executing autonomously. The lead therefore ends its turn
  * after dispatching work and is woken by the pushes themselves; it never
  * blocks in a wait call, so an approval request can reach it mid-flight
  * instead of queueing behind an unfinished wait turn.
  *
  * A `followUp` push raised while the owning session is mid-turn is HELD
- * (`heldPushQueue`) and released on that turn's `agent_settled`, so its status
- * line is fresh as of delivery rather than as of arrival; `steer` pushes are
- * sent immediately, since interrupting is their purpose. Symmetrically, a
- * child's `kind:"final"` report is held on the CHILD's side of the same
- * boundary (`pendingFinal`) and pushed when that child's own turn ends, so
- * "done" is never announced while its author is still working.
+ * (`heldPushQueue`) and released at that turn's `agent_end` as one versioned
+ * `ws-push-batch` follow-up. Validated goal replacements share that FIFO as
+ * typed controls: they apply before delivery and appear in the structured TUI
+ * items but are omitted from model content. The batch retains FIFO prose and
+ * separate structured TUI items, so Pi steering mode cannot stretch one
+ * boundary snapshot across multiple assistant turns. `agent_settled` plus a counted
+ * wake remains the fallback for compaction, late arrival, or rejected sends;
+ * confirmed wake starts release one batch as steering before their first
+ * response. `steer` pushes that were never held remain immediate, since
+ * interrupting is their purpose. A child's ordinary assistant answer becomes
+ * terminal only at `agent_settled`; its queue admission is independently
+ * tracked so pending delivery is recoverable without being called execution.
  *
- * The spawn tool's `model_name` param names one of the four fixed tiers
- * (`small`/`medium`/`large`/`xlarge`); the caller (the lead) passes an
- * already-rendered `system_prompt_path` — this module never calls
- * `playbook.render` itself for the RPC-backed path — plus that optional
- * `model_name`, resolved through ws-mcp's `config.resolve_agent` tool
- * (`resolveModelForAliasViaWsMcp` below), or omits it to inherit the parent
- * session's model.
+ * The spawn tool's `model_name` param accepts one of the four fixed tiers
+ * (`small`/`medium`/`large`/`xlarge`) or a concrete Pi catalog `provider/id`.
+ * Tier names resolve through ws-mcp's `config.resolve_agent`; concrete IDs
+ * validate directly against the live Pi catalog and configured auth. Omitting
+ * the parameter retains parent-model inheritance. The caller still passes an
+ * already-rendered `system_prompt_path` — this module never renders it.
  *
- * `explore` (260906) is now two different implementations behind one tool
- * name, keyed on the calling process's own role (`registerAgentTools`
- * branches on `isLeadOrFork(readSpawnRole(process.env))`):
- * - Lead or fork: a persistent researcher over `spawnAgent`. It returns
- *   `{ agent_id, alias }` immediately; each settled answer arrives as an
- *   ordinary settle push, then the record parks and remains sendable and
- *   sidecar-restorable. Simple researchers use authenticated `small` with
- *   `read-only`; deep researchers freeze the caller's model/effort and use
- *   `read-only-explore`.
- * - Worker or execute-worker: the original one-shot `recon` leaf remains
- *   blocking and self-reaping. A deep researcher may instead invoke the
- *   terminal, no-bash `read-only` collection leaf. Neither leaf enters the
- *   persistent RPC registry.
+ * `explore` is one persistent researcher preset over `spawnAgent`. Every
+ * eligible lead, fork, or worker receives the same schema and RPC lifecycle;
+ * an intent mode selects a configured tier while the delegation envelope
+ * remains authoritative for child depth and tools.
  *
- * The tree is non-recursive: lead/fork -> persistent researcher -> optional
- * deep collection, or lead/fork -> worker -> recon leaf. Only the leaf's
- * implicit small-tier lookup is performed before its rendering/allocation.
+ * A parent's local settle is not subtree completion. Its private channel
+ * publishes active descendants and queued deliveries; a later synthesized
+ * settled turn is required after the subtree becomes quiescent.
  *
- * `--tools` curation (`read-only`/`read-only-explore`/`recon`/`full-worker`)
+ * `--tools` curation (`read-only`/`read-only-explore`/`full-worker`)
  * lives only in the in-memory `TOOL_GROUPS` table and Pi CLI flags.
  *
  * Phase 2 adds the per-agent child->lead report channel: `ws-report-to-lead`
@@ -71,16 +67,14 @@
  * `RpcClient.onEvent()` stream's `tool_execution_start` events — no new
  * transport (see `applyRpcEvent`'s doc comment for the full trace) — and, as
  * of 260905, pushed straight to the lead rather than buffered. Only a bounded
- * `RpcAgentRecord.reportLog` (kind + timestamp, no text) is retained, because
- * two consumers need the history rather than the event: `fork.ts`'s
- * `isIdleWithoutFinal` check (filtered to entries since the record's last LEAD
- * prompt) and `ws-agent-list`'s last-report time.
+ * `RpcAgentRecord.reportLog` (question kind + timestamp, no text) is retained
+ * for control freshness and `ws-agent-list`'s last-report time; it is not a
+ * completion ledger.
  * `ws-agent-transcript` (lead-side, not in any `TOOL_GROUPS`) returns the
  * already-tracked `sessionPath` with no RPC round-trip.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -92,20 +86,38 @@ import type { McpStdioClient, McpToolCallResult } from "./mcp-stdio-client.ts";
 import type { BridgeHandle } from "./bridge.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 import { buildAgentSendSummary, buildAgentSpawnSummary, buildExploreSummary, createDispatchToolPreview } from "./tool-row-render.ts";
-import { suggestModels, formatExploreTierRefusal, formatTierWarning, modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx, type ModelCatalogEntry, type TierFailure, type TierRejection } from "./model-catalog.ts";
-import { WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readExploreMode, readSpawnRole, type ExploreMode, type SpawnRole } from "./process-role.ts";
+import {
+  formatConcreteModelWarning,
+  formatExploreTierRefusal,
+  formatTierWarning,
+  modelCatalogFromToolCtx,
+  tierWarningNotifierFromToolCtx,
+  validateCatalogModel,
+  validateConcreteModel,
+  type ConcreteModelRejection,
+  type ModelCatalogEntry,
+  type TierFailure,
+  type TierRejection,
+} from "./model-catalog.ts";
+import { EXPLORE_MODE_TIERS, WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readSpawnRole, type ExploreMode, type SpawnRole } from "./process-role.ts";
 import { captureForkContext, compareForkRegistrations, removeForkTransport, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
-import { allocateAgentHome, createAgentStorageContext, isOwnedSessionPath, observeSessionWrite, readOwnership, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, readOwnership, removeOwnedAgentHome, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
+import { ownerNotifyRef } from "./owner-notify.ts";
+export { ownerNotifyRef } from "./owner-notify.ts";
 import { readSessionEntries, reduceTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
+import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, SUBTREE_ENV, READ_TOOLS, NETWORK_TOOLS, childPolicy, readDelegationPolicy, readOnlyWsTools, type DelegationPolicy, type PlaybookProfile, type RenderProvenance } from "./delegation-policy.ts";
+import { normalizeWriteScopes, type EffectiveWriteCapability, type WriteScope } from "./write-scopes.ts";
+import { createWebSearch } from "./web-search.ts";
+import { clearWebReadiness, verifyWebReadiness, WEB_HOME_ENV, WEB_NONCE_ENV } from "./web-readiness.ts";
+import { beginSubtreeDispatch, installSubtreePublisher, publishSubtree, readSubtreeChannel, readSubtreeSnapshot, subtreeWaiting, type SubtreeChannel } from "./subtree-lifecycle.ts";
+import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
+import { persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-footer.ts";
 
 // ---------------------------------------------------------------------------
-// Pure helpers: tool-group resolution, terminal-stopReason classification,
-// spawn-arg building. Unit-tested directly (test/spawner.test.ts) with no
-// subprocess involved. Shared by both the one-shot `explore` path and the
-// RPC-backed path below.
+// Pure helpers shared by persistent RPC-backed child paths.
 // ---------------------------------------------------------------------------
 
-export type ToolGroup = "read-only" | "read-only-explore" | "recon" | "full-worker" | "execute-worker";
+export type ToolGroup = "read-only" | "read-only-explore" | "full-worker" | "execute-worker";
 
 /** Sole source of truth for the child-side report tool's name, shared by `TOOL_GROUPS`, its registration, and the event-matching branch in `applyRpcEvent`. */
 export const REPORT_TO_LEAD_TOOL_NAME = "ws-report-to-lead";
@@ -138,239 +150,22 @@ export const WS_PI_APPROVAL_DIR_ENV = "WS_PI_APPROVAL_DIR";
  * lead-launch policy, never child-launch policy. */
 const CHILD_BOOTSTRAP_OVERRIDE_ENVS = ["WS_MCP_BOOTSTRAP_BINARY", "WS_MCP_BOOTSTRAP_URL"] as const;
 
-/**
- * Pure env-builder for the one-shot `explore` path's `spawn(...)` call
- * (`spawnPiProcess` below): merges the `explore` process-role marker
- * (`WS_PI_SPAWN_ROLE_ENV`, see `process-role.ts`) over `baseEnv` without
- * dropping any inherited variable. Extracted (review fix, cycle 1) so the
- * marker-placement logic is unit-testable without invoking a real child
- * process — mirrors `buildRpcClientOptions`'s export for the same reason on
- * the RPC path.
- *
- * 260904 Phase 1: `WS_PI_SPAWN_ROLE_ENV` subsumes the old boolean
- * `WS_PI_AGENT_CHILD_ENV` marker (a role value instead of a single "is a
- * child" flag) — goal-loop.ts's `isChildProcess` now reads presence of ANY
- * role via `readSpawnRole`/`process-role.ts` instead of equality to `"1"`,
- * so this rename does not change that consuming contract.
- */
-export function buildChildProcessEnv(baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  // A collection leaf remains explore-role but is terminal: never inherit a
-  // deep marker that would re-enable recursive collection.
-  const env = { ...baseEnv, [WS_PI_SPAWN_ROLE_ENV]: "explore" };
-  for (const override of CHILD_BOOTSTRAP_OVERRIDE_ENVS) delete env[override];
-  delete env[WS_PI_EXPLORE_MODE_ENV];
-  for (const marker of [WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_AFFINITY_ENV]) delete env[marker];
-  return env;
-}
-
-/**
- * Built-in Pi tool names per curated group (docs/usage.md's `### Tool
- * Options`: `read, bash, edit, write, grep, find, ls`).
- *
- * - `read-only`: pure inspection, no shell at all — the tightest group.
- * - `recon`: read-only plus `bash` (git log/grep -r/etc.) for exploration —
- *   still excludes `edit`/`write` per `rsrc/explore/explore.md`'s own
- *   Constraints ("Use read-only exploration; ... write-capable work
- *   requires {{.SpawnIdiom}}"). Deliberately carries **no** `ws__*` bridge
- *   tool names: an explore leaf's rendered prompt (no `role:` frontmatter)
- *   never gets a scoped child session key spliced in, so any `ws__*` call
- *   from a recon worker would silently fall back to the bridge's own
- *   default-filled key instead of a scoped one.
- * - `full-worker`: everything, plus the literal `"explore"` and
- *   `"ws-report-to-lead"` custom tool names and the live `ws__*` bridge tool
- *   names (the latter passed in by the caller, not hardcoded, so this group
- *   tracks ws-mcp's actual registered tool set instead of drifting from it).
- *   `explore` and `ws-report-to-lead` are included as fixed built-ins here
- *   (not sourced from `wsToolNames`) because both are pi-native
- *   `pi.registerTool()` custom tools, not `ws__*` bridge tools — Pi's
- *   `--tools` allowlist filters "built-in, extension, and custom" tools
- *   alike, so omitting either literal name would silently strip it even
- *   though it is registered. Deliberately excludes every `ws-agent-*`
- *   driving/spawn tool (D-B): a worker can spawn `explore` but never
- *   another worker, so nested spawn depth never exceeds lead -> worker ->
- *   explore-leaf — depth-safe because `explore`'s own `recon` group
- *   excludes `explore`, `ws-report-to-lead`, and every `ws-agent-*` name.
- *   `ws-report-to-lead` is added only here, per the ticket's "the only
- *   child-side tool ADDED by this ticket" — `recon`/`read-only` are
- *   untouched.
- * - `execute-worker` (260904 Phase 1): the ticket's §5 "mutation-incapable
- *   read family" worker spawned by `ws-execute` — reuses the exact
- *   `read-only` builtins array (`READ_ONLY_BUILTINS` below), never
- *   re-derived, plus the gated-exec tool (`GATED_EXEC_TOOL_NAME` — every
- *   free-form shell command, including a "read" that mutates via
- *   redirection/`-exec`, must go through it and pause for lead approval),
- *   `ws-report-to-lead` (progress updates), and `explore` (scoped read-only
- *   sub-questions). Deliberately excludes `bash`/`edit`/`write` — those would
- *   let the worker bypass the approval gate entirely.
- */
-const READ_ONLY_BUILTINS: readonly string[] = ["read", "grep", "find", "ls"];
+const READ_ONLY_BUILTINS: readonly string[] = READ_TOOLS;
 
 export const TOOL_GROUPS: Record<ToolGroup, readonly string[]> = {
-  "read-only": READ_ONLY_BUILTINS,
-  "read-only-explore": [...READ_ONLY_BUILTINS, "explore"],
-  recon: ["read", "grep", "find", "ls", "bash"],
-  "full-worker": ["read", "bash", "edit", "write", "grep", "find", "ls", "explore", REPORT_TO_LEAD_TOOL_NAME],
+  "read-only": [...READ_ONLY_BUILTINS, REPORT_TO_LEAD_TOOL_NAME],
+  "read-only-explore": [...READ_ONLY_BUILTINS, REPORT_TO_LEAD_TOOL_NAME, ...CHILD_MANAGEMENT_TOOLS],
+  "full-worker": ["read", "bash", "edit", "write", "grep", "find", "ls", REPORT_TO_LEAD_TOOL_NAME, ...CHILD_MANAGEMENT_TOOLS],
   "execute-worker": [...READ_ONLY_BUILTINS, GATED_EXEC_TOOL_NAME, REPORT_TO_LEAD_TOOL_NAME, "explore"],
 };
 
-/**
- * Comma-joined `--tools` value for a curated group. `wsToolNames` (the
- * bridge's sanitized `ws__*` registered names) is only appended for
- * `full-worker` — `read-only`, `recon`, and `execute-worker` are
- * built-in/custom-only by design (see `TOOL_GROUPS` doc comment above); an
- * execute-worker never gets a scoped child session key spliced into its
- * prompt (same reasoning as `recon`), so it never calls a `ws__*` bridge tool
- * either.
- */
 export function resolveTools(group: ToolGroup, wsToolNames: readonly string[] = []): string {
   const builtins = TOOL_GROUPS[group];
   const extra = group === "full-worker" ? wsToolNames : [];
   return [...builtins, ...extra].join(",");
 }
 
-/**
- * Terminal `AssistantMessage.stopReason` values
- * (docs/session-format.md#L88): `"stop" | "length" | "toolUse" | "error" |
- * "aborted"`. `"toolUse"` is NOT terminal (the agent is still working);
- * `"pending"` is stream-only and never appears in a persisted message. This
- * classification is metadata only, used by the one-shot `explore` path's
- * event handling — never the completion signal, see `handleAgentEvent`'s
- * doc comment below.
- */
-const TERMINAL_STOP_REASONS: ReadonlySet<string> = new Set(["stop", "length", "error", "aborted"]);
-
-export function isTerminalStopReason(reason: string | undefined): boolean {
-  return reason !== undefined && TERMINAL_STOP_REASONS.has(reason);
-}
-
-export type SpawnMode = "explore";
-
-export interface BuildSpawnArgsOptions {
-  mode: SpawnMode;
-  /** Required unless `noSession` is true. */
-  sessionPath?: string;
-  /** `true` only for `explore` (ephemeral, ticket #L216-218). */
-  noSession: boolean;
-  /** Path to the rendered playbook prompt, passed via `--append-system-prompt`. */
-  promptPath?: string;
-  /** Comma-joined `--tools` allowlist, from `resolveTools()`. */
-  tools?: string;
-  /** `provider/id` pattern, or omitted to inherit pi's own default resolution. */
-  model?: string;
-  /** Pi thinking level forwarded to an ephemeral collection leaf. */
-  thinking?: string;
-  task: string;
-}
-
-/**
- * Builds the `pi` CLI argv for a one-shot `explore` invocation, mirroring
- * the shipped reference example's flag-ordering
- * (`examples/extensions/subagent/index.ts#L300-341`):
- * `--mode json -p [--session <path> | --no-session]
- * [--append-system-prompt <path>] [--tools <list>] [--model <pattern>]
- * "<task>"`.
- *
- * `sessionPath` and `noSession` are mutually exclusive by contract (an
- * `explore` leaf must never persist a session file) — passing both, or
- * neither, is a caller bug and throws rather than silently picking one.
- * Phase 1 narrows `SpawnMode` to `"explore"` only: the RPC-backed
- * spawn/send path builds its `pi` argv directly via `RpcClientOptions.args`
- * (see `buildRpcClientOptions` below), not through this helper.
- */
-export function buildSpawnArgs(opts: BuildSpawnArgsOptions): string[] {
-  if (opts.noSession && opts.sessionPath) {
-    throw new Error("ws-pi-agent: buildSpawnArgs: sessionPath and noSession are mutually exclusive");
-  }
-  if (!opts.noSession && !opts.sessionPath) {
-    throw new Error(`ws-pi-agent: buildSpawnArgs: mode "${opts.mode}" requires a sessionPath when noSession is false`);
-  }
-
-  const args: string[] = ["--mode", "json", "-p"];
-  if (opts.noSession) {
-    args.push("--no-session");
-  } else {
-    args.push("--session", opts.sessionPath as string);
-  }
-  if (opts.promptPath) {
-    args.push("--append-system-prompt", opts.promptPath);
-  }
-  if (opts.tools) {
-    args.push("--tools", opts.tools);
-  }
-  if (opts.model) {
-    args.push("--model", opts.model);
-  }
-  if (opts.thinking) {
-    args.push("--thinking", opts.thinking);
-  }
-  args.push(opts.task);
-  return args;
-}
-
-/**
- * Buffers raw child-process stdout bytes into newline-delimited
- * `AgentSessionEvent` JSON lines. Mirrors `mcp-stdio-client.ts`'s
- * `JsonRpcLineBuffer` StringDecoder-based, multibyte-safe pattern (a small
- * parallel class, not an import — this buffer parses bare NDJSON event
- * objects, not JSON-RPC envelopes) — deliberately NOT the shipped example's
- * naive per-chunk `data.toString()` split, which corrupts a UTF-8 codepoint
- * split across a `'data'` chunk boundary. Used only by the one-shot
- * `explore` path; the RPC-backed path gets its events from `RpcClient`'s
- * own `onEvent()`.
- */
-export class AgentEventLineBuffer {
-  private readonly decoder = new StringDecoder("utf8");
-  private readonly onEvent: (evt: unknown) => void;
-  private readonly onParseError?: (line: string) => void;
-  private carry = "";
-
-  // No TS constructor parameter properties — see mcp-stdio-client.ts's
-  // JsonRpcLineBuffer doc comment: Node's native .ts type-stripping cannot
-  // erase them (they inject an implicit assignment), so explicit field
-  // declarations + explicit assignment are used instead.
-  constructor(onEvent: (evt: unknown) => void, onParseError?: (line: string) => void) {
-    this.onEvent = onEvent;
-    this.onParseError = onParseError;
-  }
-
-  feed(chunk: Buffer): void {
-    this.carry += this.decoder.write(chunk);
-    const lines = this.carry.split("\n");
-    this.carry = lines.pop() ?? "";
-    for (const line of lines) {
-      this.emitLine(line);
-    }
-  }
-
-  /**
-   * Flushes any final partial line left in the decoder/carry buffer once the
-   * source stream has ended (e.g. a last event line with no trailing
-   * newline). Safe to call at most once per buffer lifetime.
-   */
-  end(): void {
-    const rest = this.decoder.end();
-    const remainder = this.carry + rest;
-    this.carry = "";
-    if (remainder.length > 0) {
-      this.emitLine(remainder);
-    }
-  }
-
-  private emitLine(line: string): void {
-    if (!line.trim()) return;
-    let evt: unknown;
-    try {
-      evt = JSON.parse(line);
-    } catch {
-      this.onParseError?.(line);
-      return;
-    }
-    this.onEvent(evt);
-  }
-}
-
-/**
- * Shared tier resolution for spawn, both explore paths, and the manual advisory.
+/** Shared tier resolution for persistent spawn and the manual advisory.
  * Accept only pi-labeled exact catalog membership with configured auth. Unknown
  * or unauthenticated pi values inherit with rejected detail and no tier effort.
  * Non-pi, omitted tiers and transport/parse failures silently inherit. Registry
@@ -408,19 +203,17 @@ export interface TierResolution {
   model?: string;
   effort?: string;
   rejected?: TierRejection;
-  source: "tier" | "inherit";
+  concreteRejected?: ConcreteModelRejection;
+  source: "tier" | "concrete" | "inherit";
   failure?: TierFailure;
 }
 
 /**
  * 260906 Phase 2 (YAML/TUI dispatch-row rendering): the display-only shape
- * `ctx.onModelResolved` hands back the instant `spawnAgent` finishes
- * resolving a tier (both refusal guards already passed, so `rejected` is
- * guaranteed absent). `tier` is the raw tier name on a tier hit, or the
- * literal `"inherit"` when `resolution.source === "inherit"` — never derived
- * from `resolution.rejected`, which cannot be set at this point. `effort` is
- * the *effective* value (`effectiveModelEffort(params.modelEffort,
- * resolution.effort)`), matching `record.modelEffort` exactly.
+ * `ctx.onModelResolved` hands back the instant `spawnAgent` finishes model
+ * selection (all refusal guards already passed). `tier` is the raw tier name
+ * for a tier hit, `"concrete"` for a direct catalog selection, or `"inherit"`
+ * for parent-model inheritance. `effort` matches `record.modelEffort` exactly.
  */
 export interface ResolvedModelInfo {
   tier: string;
@@ -429,7 +222,11 @@ export interface ResolvedModelInfo {
   inherited: boolean;
 }
 
-function tierResolution(base: { model?: string; effort?: string; rejected?: TierRejection }, source: TierResolution["source"], failure?: TierFailure): TierResolution {
+function tierResolution(
+  base: { model?: string; effort?: string; rejected?: TierRejection; concreteRejected?: ConcreteModelRejection },
+  source: TierResolution["source"],
+  failure?: TierFailure,
+): TierResolution {
   // New policy callers read source/failure explicitly; legacy advisory
   // consumers retain their model/rejected object enumeration.
   return Object.defineProperties(base, {
@@ -476,33 +273,50 @@ export async function resolveModelForAliasViaWsMcp(
   const provider = parsed.model.includes("/") ? undefined : BACKEND_TO_PROVIDER[parsed.backend ?? ""];
   const checkedModel = provider ? `${provider}/${parsed.model}` : parsed.model;
   const stored = provider ? parsed.model : undefined;
-  const entry = catalog.find(entry => `${entry.provider}/${entry.id}` === checkedModel);
-  if (!entry) {
-    const rejected: TierRejection = { model: checkedModel, resolvedFrom: parsed.resolved_from, why: "unknown", suggestions: suggestModels(checkedModel, catalog), ...(stored !== undefined ? { stored } : {}) };
+  const catalogResult = validateCatalogModel(checkedModel, catalog);
+  if (catalogResult.rejected?.why === "unknown") {
+    const rejected: TierRejection = { ...catalogResult.rejected, resolvedFrom: parsed.resolved_from, ...(stored !== undefined ? { stored } : {}) };
     return tierResolution({ model: inheritModel, rejected }, "inherit", { kind: "unknown", model: checkedModel, resolvedFrom: parsed.resolved_from, catalogEmpty: catalog.length === 0 });
   }
-  if (!entry.hasAuth) {
-    const rejected: TierRejection = { model: checkedModel, resolvedFrom: parsed.resolved_from, why: "no-auth", ...(stored !== undefined ? { stored } : {}) };
+  if (catalogResult.rejected?.why === "no-auth") {
+    const rejected: TierRejection = { ...catalogResult.rejected, resolvedFrom: parsed.resolved_from, ...(stored !== undefined ? { stored } : {}) };
     return tierResolution({ model: inheritModel, rejected }, "inherit", { kind: "no-auth", model: checkedModel, resolvedFrom: parsed.resolved_from });
   }
-  return tierResolution({ model: checkedModel, effort: parsed.effort || undefined }, "tier");
+  return tierResolution({ model: catalogResult.model, effort: parsed.effort || undefined }, "tier");
+}
+
+async function resolveSpawnModel(
+  client: ResolveAgentCallToolClient,
+  selection: string | undefined,
+  inheritModel: string | undefined,
+  catalog: readonly ModelCatalogEntry[],
+  allowConcreteModel: boolean,
+): Promise<TierResolution> {
+  if (!allowConcreteModel || !selection?.includes("/")) return resolveModelForAliasViaWsMcp(client, selection, inheritModel, catalog);
+  const concrete = validateConcreteModel(selection, catalog);
+  return concrete.rejected
+    ? tierResolution({ concreteRejected: concrete.rejected }, "concrete")
+    : tierResolution({ model: concrete.model }, "concrete");
 }
 
 /**
- * Pure merge rule for `spawnAgent`'s `modelEffort`: an explicit caller
- * `model_effort` always wins over the config-resolved `effort`, but only
- * when it is actually non-empty — `model_effort` is a free-form `string`
- * param with no enum (`SpawnAgentParams.modelEffort`), so a caller-supplied
- * `""` is reachable and must NOT shadow a genuine tier effort (`??` would
- * only guard `null`/`undefined`, not `""`; `applyModelEffort`'s own guard
- * (`if (!modelEffort) return`) already treats `""` as absent, so this
- * matches that convention). The single call site
- * (`record.modelEffort = effectiveModelEffort(...)`) is the one place this
- * rule is computed — both the spawn-time and dormant-resume `applyModelEffort`
- * calls read the already-folded `record.modelEffort` back, never re-deriving
- * it from `params`.
+ * Pure merge rule for `spawnAgent`'s effective effort. A non-empty explicit
+ * Pi level wins. The `"default"` sentinel applies no caller override: an
+ * inherited model keeps the captured parent effort, a tier keeps its configured
+ * effort, and a concrete model leaves effort unset for Pi/model defaulting.
+ * Omission and the historical empty string retain the prior merge behavior.
  */
-export function effectiveModelEffort(callerEffort: string | undefined, resolvedEffort: string | undefined): string | undefined {
+export function effectiveModelEffort(
+  callerEffort: string | undefined,
+  resolvedEffort: string | undefined,
+  source: TierResolution["source"] = "tier",
+  inheritEffort?: string,
+): string | undefined {
+  if (callerEffort === "default") {
+    if (source === "inherit") return inheritEffort;
+    if (source === "concrete") return undefined;
+    return resolvedEffort;
+  }
   return callerEffort || resolvedEffort;
 }
 
@@ -516,6 +330,14 @@ export function effectiveModelEffort(callerEffort: string | undefined, resolvedE
 export function inheritModelFromToolCtx(toolCtx: unknown): string | undefined {
   const model = (toolCtx as { model?: { provider?: string; id?: string } } | undefined)?.model;
   return model?.provider && model?.id ? `${model.provider}/${model.id}` : undefined;
+}
+
+/** Extracts the immediate dispatcher's stable Pi identity from a live tool call. */
+export function storageContextFromToolCtx(toolCtx: unknown): AgentStorageContext {
+  const value = toolCtx as { sessionManager?: { getSessionId?: () => string }; agentStorageRoot?: string } | undefined;
+  const id = value?.sessionManager?.getSessionId?.();
+  if (!id) throw new Error("ws-pi-agent: current Pi session identity is unavailable");
+  return createAgentStorageContext(id, value?.agentStorageRoot);
 }
 
 /**
@@ -533,279 +355,6 @@ export function resolveSpawnToolGroup(explicit: ToolGroup | undefined): ToolGrou
 }
 
 // ---------------------------------------------------------------------------
-// One-shot `explore` machinery (unchanged from Phase 2-3, only its model
-// resolution call switches to the reframed alias lookup).
-// ---------------------------------------------------------------------------
-
-export type AgentState = "running" | "done";
-
-export interface AgentRecord {
-  agentId: string;
-  playbook: string;
-  /** Absolute path to the ws-owned `--session` file; undefined for `noSession` (explore) records. */
-  sessionPath?: string;
-  noSession: boolean;
-  /** Rendered playbook prompt path (cached, reused unchanged across resumes). */
-  systemPromptPath?: string;
-  state: AgentState;
-  /** Last-seen `stopReason` — metadata only, never the completion signal. */
-  stopReason?: string;
-  outputText: string;
-  errorMessage?: string;
-  exitCode: number | null;
-  exitSignal: NodeJS.Signals | null;
-  proc?: ChildProcess;
-  /** Explore leaves self-reap from the registry once harvested by wait/exploreLeaf; workers never do. */
-  selfReap: boolean;
-  waiters: Array<() => void>;
-  ownership?: AgentOwnership;
-  ownershipObserverStop?: () => void;
-  launchGeneration?: number;
-}
-
-export type AgentRegistry = Map<string, AgentRecord>;
-
-function firstText(result: McpToolCallResult): string | undefined {
-  return result.content.find((item) => item.type === "text")?.text;
-}
-
-/**
- * Resolves the `pi` invocation the same way the shipped reference example
- * does (`examples/extensions/subagent/index.ts#L249-263`): prefer
- * re-invoking the currently-running script through the current Node binary
- * (works regardless of whether `pi` is on PATH), falling back to a bare
- * `pi` command otherwise. The Bun-virtual-script branch from the reference
- * is dropped — this package only ever runs under Node (package.json's
- * `"test": "node --test"`), so that branch would be dead code here. Used
- * only by the one-shot `explore` path; the RPC-backed path always passes
- * `cliPath: process.argv[1]` directly with no fallback (see
- * `RPC_CLI_PATH` below) since `RpcClient` itself has no bare-`pi` fallback.
- */
-function getPiInvocation(extraArgs: string[]): { command: string; args: string[] } {
-  const currentScript = process.argv[1];
-  if (currentScript && existsSync(currentScript)) {
-    return { command: process.execPath, args: [currentScript, ...extraArgs] };
-  }
-  return { command: "pi", args: extraArgs };
-}
-
-/**
- * Resolves every pending one-shot waiter on `record` (its `waiters` array is
- * drained and each resolved). Generic over any record shape carrying a
- * `waiters: Array<() => void>` field.
- *
- * 260905: now used ONLY by the one-shot `explore` registry (`AgentRecord`),
- * whose `waitForDone` genuinely blocks on child exit. The RPC-backed
- * registry no longer has waiters at all — under the push model a lead never
- * blocks on a child, so `RpcAgentRecord.waiters` and everything that drained
- * it went away with `ws-agent-wait`.
- */
-function settleWaiters<T extends { waiters: Array<() => void> }>(record: T): number {
-  const waiters = record.waiters;
-  record.waiters = [];
-  for (const resolve of waiters) resolve();
-  return waiters.length;
-}
-
-function waitForDone(record: AgentRecord): Promise<void> {
-  if (record.state === "done") return Promise.resolve();
-  return new Promise((resolve) => record.waiters.push(resolve));
-}
-
-/**
- * Extracts `stopReason`/`errorMessage`/final text from a `message_end`
- * event onto `record`. Deliberately NEVER touches `record.state` — the
- * load-bearing invariant is that `state:"done"` is flipped only by the
- * child's `close` event, never by observing a terminal `stopReason` in the
- * stream (the `--session` file is only flush-guaranteed complete after the
- * process exits). Exported so that invariant has direct unit coverage
- * (test/spawner.test.ts) instead of only being reachable through a live
- * subprocess.
- */
-export function handleAgentEvent(record: AgentRecord, evt: unknown): void {
-  if (!evt || typeof evt !== "object") return;
-  const e = evt as Record<string, unknown>;
-  if (e.type !== "message_end") return;
-  const msg = e.message as Record<string, unknown> | undefined;
-  if (!msg || msg.role !== "assistant") return;
-
-  if (typeof msg.stopReason === "string") {
-    record.stopReason = msg.stopReason;
-  }
-  if (typeof msg.errorMessage === "string") {
-    record.errorMessage = msg.errorMessage;
-  }
-  const content = Array.isArray(msg.content) ? msg.content : [];
-  const text = content
-    .filter((part): part is Record<string, unknown> => !!part && typeof part === "object" && part.type === "text")
-    .map((part) => (typeof part.text === "string" ? part.text : ""))
-    .join("");
-  if (text) {
-    // Last assistant message wins — this is the agent's final answer, not a
-    // transcript accumulator.
-    record.outputText = text;
-  }
-}
-
-/**
- * Spawns the `pi` child process for `record` and wires deadlock-safe
- * stdout/stderr draining (both streams get a `'data'` listener attached
- * immediately at spawn, per `mcp-stdio-client.ts#L187-199`'s precedent).
- *
- * `state:"done"` is flipped ONLY from the child's `close` event — never from
- * an in-stream terminal `stopReason` — because the `--session` file is only
- * flush-guaranteed complete after the process has actually exited. `close`
- * (not `exit`) is used deliberately: it fires after stdio streams have
- * ended, so `record.outputText`/`stopReason` are guaranteed fully drained by
- * the time waiters are settled.
- */
-function spawnPiProcess(record: AgentRecord, args: string[], cwd: string): void {
-  const invocation = getPiInvocation(args);
-  const proc = spawn(invocation.command, invocation.args, {
-    cwd,
-    env: { ...buildChildProcessEnv(process.env), ...(record.ownership ? { [WS_PI_APPROVAL_DIR_ENV]: join(record.ownership.home, "approvals") } : {}) },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  record.proc = proc;
-
-  const lineBuffer = new AgentEventLineBuffer(
-    (evt) => handleAgentEvent(record, evt),
-    (line) => console.error(`[ws-pi-agent:${record.agentId}] failed to parse event line: ${line}`),
-  );
-  proc.stdout.on("data", (chunk: Buffer) => lineBuffer.feed(chunk));
-  proc.stderr.on("data", (chunk: Buffer) => {
-    console.error(`[ws-pi-agent:${record.agentId}] ${chunk.toString().trimEnd()}`);
-  });
-
-  // Spawn-level failure (bad command, missing binary, permissions). Without
-  // a listener this becomes an unhandled exception instead of settling the
-  // record — mirrors mcp-stdio-client.ts's McpStdioClient 'error' handling.
-  // Explicitly flips state:"done" and settles waiters here rather than
-  // relying on Node also emitting 'close' after 'error' (a dual-emit
-  // assumption) — 'close' still fires afterward in the common case and
-  // re-applies the same done/settled state, which is idempotent (settleWaiters
-  // drains an already-empty waiters array; state/exitCode get overwritten
-  // with equivalent values).
-  proc.on("error", (err) => {
-    record.errorMessage = `pi process failed to start: ${err.message}`;
-    record.state = "done";
-    settleWaiters(record);
-    if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "unknown", observedAt: Date.now() } });
-  });
-
-  proc.on("close", (code, signal) => {
-    lineBuffer.end();
-    record.exitCode = code;
-    record.exitSignal = signal;
-    record.state = "done";
-    settleWaiters(record);
-    if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "stopped", running: false, observedAt: Date.now() } });
-  });
-}
-
-export interface AgentCallCtx {
-  /** The calling (lead) session's session_key, used for `playbook.render`. */
-  sessionKey: string;
-  cwd: string;
-  /** `provider/id`, forwarded from the calling tool-execute ctx.model, or undefined to inherit pi's own default. */
-  model?: string;
-  /** Bridge's sanitized `ws__*` registered tool names, for the `full-worker` group. */
-  wsToolNames: readonly string[];
-  storage?: AgentStorageContext;
-}
-
-/** Extracts the immediate dispatcher's stable Pi identity from a live tool call. */
-export function storageContextFromToolCtx(toolCtx: unknown): AgentStorageContext {
-  const value = toolCtx as { sessionManager?: { getSessionId?: () => string }; agentStorageRoot?: string } | undefined;
-  const id = value?.sessionManager?.getSessionId?.();
-  if (!id) throw new Error("ws-pi-agent: current Pi session identity is unavailable");
-  return createAgentStorageContext(id, value?.agentStorageRoot);
-}
-
-export interface ExploreParams {
-  query: string;
-}
-
-export interface ExploreLeafOptions {
-  profile?: "recon" | "read-only";
-  effort?: string;
-}
-
-function harvestExplore(id: string, record: AgentRecord, registry: AgentRegistry): { output: string; stopReason?: string } {
-  const entry = { output: record.outputText, stopReason: record.stopReason };
-  // Explore leaves have no continue path — reap right after the first
-  // harvest instead of lingering in the registry forever.
-  if (record.selfReap) {
-    registry.delete(id);
-  }
-  return entry;
-}
-
-/**
- * Thin one-shot `explore` preset: fixed `playbook: "explore"`,
- * `--tools=recon`, `--no-session`, no continuation. The leaf self-reaps from
- * the registry once its output has been harvested. Always blocks until the
- * child process closes and returns its output directly — the `async` param
- * this used to accept is gone (260906: the lead's own `explore` registration
- * is now a preset over the RPC-backed `spawnAgent` below, which is
- * async-by-nature; this worker/execute-worker-only leaf never needed a
- * non-blocking mode of its own, since its one caller — a worker's own
- * `explore` tool call — was always the sole consumer of `async: true`).
- */
-export async function exploreLeaf(
-  client: McpStdioClient,
-  registry: AgentRegistry,
-  ctx: Omit<AgentCallCtx, "wsToolNames">,
-  params: ExploreParams,
-  options: ExploreLeafOptions = {},
-): Promise<{ agentId: string; state: AgentState; output?: string; stopReason?: string }> {
-  const renderResult = await client.callTool("playbook.render", {
-    session_key: ctx.sessionKey,
-    name: "explore",
-  });
-  const text = firstText(renderResult);
-  if (renderResult.isError || !text) {
-    throw new Error(`ws-pi-agent: playbook.render("explore") failed: ${text ?? "no content returned"}`);
-  }
-  const systemPromptPath = text.split("\n")[0]?.trim();
-  if (!systemPromptPath) {
-    throw new Error('ws-pi-agent: playbook.render("explore") returned no prompt path');
-  }
-
-  const agentId = randomUUID();
-  const ownership = ctx.storage ? allocateAgentHome(ctx.storage, agentId, "explore", undefined, true) : undefined;
-  const record: AgentRecord = {
-    agentId,
-    playbook: "explore",
-    noSession: true,
-    systemPromptPath,
-    state: "running",
-    outputText: "",
-    exitCode: null,
-    exitSignal: null,
-    selfReap: true,
-    waiters: [],
-    ownership,
-  };
-  registry.set(agentId, record);
-
-  const args = buildSpawnArgs({
-    mode: "explore",
-    noSession: true,
-    promptPath: systemPromptPath,
-    tools: resolveTools(options.profile === "read-only" ? "read-only" : "recon"),
-    model: ctx.model,
-    thinking: options.effort,
-    task: params.query,
-  });
-  spawnPiProcess(record, args, ctx.cwd);
-
-  await waitForDone(record);
-  const harvested = harvestExplore(agentId, record, registry);
-  return { agentId, state: "done", output: harvested.output, stopReason: harvested.stopReason };
-}
-
-// ---------------------------------------------------------------------------
 // RPC-backed persistent-child engine (`ws-agent-spawn` / `ws-agent-send` /
 // `ws-agent-list` / `ws-agent-stop` / `ws-agent-transcript`).
 // ---------------------------------------------------------------------------
@@ -817,9 +366,8 @@ export async function exploreLeaf(
  * extension discovery disabled, so a child cannot load a duplicate adapter. `RpcClient.start()` in
  * the installed `@earendil-works/pi-coding-agent` package always does
  * `spawn("node", [cliPath, ...args])` with `cliPath = this.options.cliPath
- * ?? "dist/cli.js"`; there is no bare-`pi` fallback inside `RpcClient`
- * itself (unlike this module's own `getPiInvocation()` used by the one-shot
- * `explore` path above). If `process.argv[1]` is ever missing/non-existent
+ * ?? "dist/cli.js"`; there is no bare-`pi` fallback inside `RpcClient`.
+ * If `process.argv[1]` is ever missing/non-existent
  * there is no client-side fallback path — this is the ticket's settled
  * answer, carried forward as-is, not something to re-derive.
  */
@@ -857,19 +405,20 @@ export interface RpcAgentRecord {
   systemPromptPath?: string;
   /** Resolved `provider/id`, or undefined to inherit pi's own default resolution. Cached so a dormant resume reuses the same model. */
   modelBase?: string;
-  /** Caller-supplied thinking level, applied via `setThinkingLevel()` after every (re)start. */
+  /** Effective thinking override, applied via `setThinkingLevel()` after every (re)start; absent means Pi/model default. */
   modelEffort?: string;
   /** Observed child selection and recomputed durable usage; launch intent stays above. */
   telemetry?: AgentTelemetry;
-  /** Legacy-fork floor: permits post-launch latest input, never lifetime cost. */
-  telemetryInputFloor?: TelemetryOrigin;
+  /** Legacy-fork floor: permits post-launch context occupancy, never lifetime cost. */
+  telemetryContextFloor?: TelemetryOrigin;
   observedModel?: string;
   observedEffort?: string;
-  observedLatestInput?: number;
+  /** Context occupancy for a legacy fork whose child-attribution boundary is unavailable. */
+  observedContextTokens?: number;
   /**
-   * 260906 Phase 2 (YAML/TUI dispatch-row rendering): the raw tier name
-   * (`params.modelName`) requested at spawn, or `undefined` for an inherit
-   * spawn — display-only, reconstructs `ws-agent-send`'s resolved-model line
+   * 260906 Phase 2 (YAML/TUI dispatch-row rendering): the raw model selection
+   * requested at spawn, or `undefined` when omitted — display-only,
+   * reconstructs `ws-agent-send`'s resolved-model line
    * for a target agent without a live resolution. NOT persisted to the
    * sidecar (`agent-sidecar.ts`); a record revived after a restart carries
    * neither field (see `modelSource`'s doc comment for the degrade rule).
@@ -877,12 +426,12 @@ export interface RpcAgentRecord {
   modelTier?: string;
   /**
    * 260906 Phase 2: mirrors `TierResolution.source` at spawn time
-   * (`"tier" | "inherit"`). NOT persisted to the sidecar — a `ws-agent-send`
+   * (`"tier" | "concrete" | "inherit"`). NOT persisted to the sidecar — a `ws-agent-send`
    * to a record revived from a sidecar snapshot after a restart finds this
    * field `undefined` and treats that as `"inherit"` (the safe default),
    * never throwing or guessing a tier name.
    */
-  modelSource?: "tier" | "inherit";
+  modelSource?: "tier" | "concrete" | "inherit";
   /** Cached bridge `ws__*` tool names, for `--tools` re-resolution on a dormant resume. */
   wsToolNames: readonly string[];
   /** Curated `--tools` group this record was spawned with; reused unchanged on a dormant resume so `resolveTools` never silently widens/narrows a resumed child's tool surface. Set at spawn (`ctx.toolGroup ?? "full-worker"`), never mutated afterward. */
@@ -908,6 +457,18 @@ export interface RpcAgentRecord {
    * can re-arm the right role wiring for a resurrected orphan.
    */
   spawnRole?: SpawnAgentRole;
+  /** Persisted authority and one-edge semantic lifecycle; independent of owner holds. */
+  delegation?: DelegationPolicy;
+  subtreeChannel?: SubtreeChannel;
+  waitingOnChildren?: boolean;
+  /** Last successful writer to this child. Absence is the legacy/lead default. */
+  lastWriter?: "lead" | "owner";
+  /** Owner-authored sends, in delivery order, used to attribute persisted user entries. */
+  ownerSends?: Array<{ text: string; at: number }>;
+  subtreeRevision?: number;
+  workGeneration?: number;
+  /** Work generation whose ordinary settlement has entered terminal admission. */
+  settlementAdmissionGeneration?: number;
   /** Persistent exploration mode; meaningful only for explore records. */
   exploreMode?: ExploreMode;
   /** `true` while an agent run is actively looping (between `agent_start` and `agent_settled`). */
@@ -916,17 +477,14 @@ export interface RpcAgentRecord {
    * 260905 fan-in bookkeeping: `true` from the instant a prompt is ISSUED to
    * this child (`promptAgent`, i.e. before any `agent_start` event can arrive)
    * until it settles, is stopped, exits, or fails to spawn. Deliberately a
-   * DIFFERENT, narrower flag than `streaming` (which is event-confirmed and
-   * still the right signal for `ws-agent-list`'s display status): this one
-   * exists only to feed `computeRunningStatusLine`'s running count, where a
-   * just-dispatched child must already count as outstanding.
+   * complementary flag to event-confirmed `streaming`; both mean executable
+   * work is in flight and feed list/widget/fan-in status consistently.
    */
   running: boolean;
   /**
    * 260905 (live-agent widget ticket): epoch-ms stamp of the most recent
-   * prompt ISSUED to this child, stamped unconditionally by `promptAgent` —
-   * including the anti-bleed nudge (`isLeadPrompt: false`), unlike
-   * `lastLeadPromptAt` below, because the widget's "running" row is meant to
+   * prompt ISSUED to this child, stamped unconditionally by `promptAgent`,
+   * unlike `lastLeadPromptAt` below, because the widget's "running" row is meant to
    * show how long THIS turn has been going, and a nudge starts a new turn on
    * the wire even though it is not a new lead-issued task boundary. Read by
    * `agent-widget.ts`'s `buildAgentRows` as the running-row elapsed clock;
@@ -935,67 +493,28 @@ export interface RpcAgentRecord {
    * turn's original start, by design.
    */
   runStartedAt?: number;
-  /**
-   * 260905: `true` once this child has sent a `kind:"final"` or
-   * `kind:"question"` report during the current turn; cleared by the next
-   * `promptAgent`. Two uses: it removes the sender from N on its own push (a
-   * child that just filed its final is not "still running" from the lead's
-   * point of view), and it suppresses the redundant `ws-agent-settled`
-   * `reason:"idle"` push that would otherwise follow the terminal report a
-   * few milliseconds later.
-   */
-  terminalThisTurn?: boolean;
-  /**
-   * 260905 (Phase 1 Edition): the text of a `kind:"final"` report this child
-   * filed during the current turn, stashed instead of pushed. A final is the
-   * child's ANSWER, but at the instant the tool call is observed the child is
-   * still mid-turn — it may still be committing, cleaning up, or (rarely)
-   * filing a corrected final. Pushing then handed the lead a completion signal
-   * while its author was still working. So the final is held here and pushed
-   * when the child actually leaves the running state, carrying
-   * `settled_reason` (`idle`/`stopped`/`exited`) to say how.
-   *
-   * Last one wins within a turn (a corrected final supersedes the first), and
-   * `promptAgent` clears it: an un-pushed final from a previous task must not
-   * surface as the answer to a new one. A hook-consumed final (a `lead-ask`
-   * thread's decision) is never stashed at all — it is not the lead's message.
-   */
-  pendingFinal?: string;
-  /**
-   * 260905: epoch-ms stamp of the last LEAD-issued prompt on this record
-   * (`promptAgent` with `isLeadPrompt` not `false`). An internal nudge
-   * (`fork.ts`'s anti-bleed loop) deliberately does NOT move it, so a stale
-   * pre-nudge `final` cannot be mistaken for a fresh one. `fork.ts` filters
-   * `reportLog` by it.
-   */
+  /** Epoch-ms stamp of the last lead-issued prompt, retained for activity display and attribution. */
   lastLeadPromptAt?: number;
   /**
    * 260905: `true` for the whole lifetime of an owner discussion thread bound
    * to this agent — set by `ask.ts` on every open/reopen (`ensureRespondent`/
    * `openThread`) and on fork-raised question registration
    * (`handleForkRaisedQuestion`), cleared only when the thread actually closes
-   * (`/done`, the respondent's own fork final, `ws-withdraw-question`
-   * — renamed by `260911` from `ws-resolve`). While set, this
-   * agent produces no settle/advisory push and is left out of the fan-in
-   * status line entirely: the exchange belongs to the owner, and the lead is
-   * not part of it.
-   *
-   * Deliberately distinct from `overlayAttached`, which is per-VIEW (an owner
-   * pressing Esc clears the overlay while the thread stays bound).
+   * (`/done`, lead takeover, or `ws-withdraw-question`). While set, settled
+   * output routes to the owner surface and the record is left out of the lead
+   * fan-in status line: the exchange belongs to the owner, not the lead.
    */
   threadBound?: boolean;
   /** Same-process `/done` coordinator for a fork-raised owner thread; never persisted. */
   forkFinish?: ForkFinishOperation;
   /** Existing terminal push admission for the current work, if one exists. */
   terminalDelivery?: TerminalDelivery;
-  /** Fork-owned final policy injected by fork.ts to avoid a reverse import. */
-  validateForkFinal?: (message: string) => boolean;
-  /** Tool outcome for the deferred final; finish reconciliation must not
-   * mistake a report-tool failure for a completed task. */
-  pendingFinalToolCallId?: string;
-  pendingFinalAccepted?: boolean;
-  /** Last-seen final assistant text, cached across `getLastAssistantText()` calls. */
+  /** Last assistant text observed from this work generation's message_end event. */
   lastText?: string;
+  /** Work generation that produced lastText; absent text is never borrowed across turns. */
+  lastTextGeneration?: number;
+  /** Accepted steer/follow-up instructions awaiting their actual user message_start boundary. */
+  pendingQueuedWork?: Array<{ message: string }>;
   /**
    * 260905: the head-truncated (`truncatePromptForStorage`,
    * `PROMPT_STORAGE_CAP_BYTES`) copy of the spawn's initial `prompt`, stashed
@@ -1043,18 +562,6 @@ export interface RpcAgentRecord {
    */
   pendingApproval?: { cmdId: string; command: string; rationale?: string; cwd?: string; decisionWritten?: boolean };
   /**
-   * 260904 Phase 2 (side-thread question surface, review relay #1 C1): `true`
-   * while an owner overlay chat VIEW is attached to this agent (`ask.ts`'s
-   * `openThread` sets it, closing the view clears it).
-   *
-   * 260905 narrowed its role: the suppression `fork.ts`'s anti-bleed loop and
-   * the push model both need is the THREAD's lifetime, not the view's — an
-   * owner pressing Esc must not re-arm nudges on a still-open discussion — so
-   * both now read `threadBound`. This flag stays as the per-view record
-   * `ask.ts` keeps for its own overlay bookkeeping.
-   */
-  overlayAttached?: boolean;
-  /**
    * 260904 Phase 2 (review relay #1 I6): consulted by `applyRpcEvent` the
    * instant a `kind:"question"` report is observed on this record. It may
    * return a REPLACEMENT message to enqueue for the lead in place of the
@@ -1073,22 +580,6 @@ export interface RpcAgentRecord {
    * `onApprovalPending`'s existing callback-injection convention.
    */
   onQuestionReport?: (record: RpcAgentRecord, message: string) => string | undefined;
-  /**
-   * 260904 Phase 2 (post-close dogfood, 2026-09-05): consulted by
-   * `applyRpcEvent` the instant a `kind:"final"` report is observed on this
-   * record. A throwing hook is swallowed. `ask.ts` sets it on a thread's
-   * respondent so a discussion fork can end its own thread by reporting the
-   * decision; the report text is then the thread summary.
-   *
-   * 260905 (push model) gives it a SUPPRESSION contract: returning `true`
-   * means the hook fully consumed the report, so no `ws-agent-report` push is
-   * emitted for it. `ask.ts` returns `true` for a `"lead-ask"` discussion
-   * thread — the owner's decision already reaches the lead as the
-   * `ws-thread-summary` custom message, and pushing the raw report too would
-   * deliver the same event twice — and falsy for a `"fork-raised"` task fork,
-   * whose final IS the completion signal the lead is meant to see.
-   */
-  onFinalReport?: (record: RpcAgentRecord, message: string) => boolean | void;
   /**
    * 260908 same-process finish callback, owned by ask.ts. It persists the
    * ordinary thread snapshot only after this coordinator parks the fork.
@@ -1118,42 +609,92 @@ export interface RpcAgentRecord {
   onApprovalPending?: (record: RpcAgentRecord) => void;
 }
 
+interface AgentContextStats {
+  sessionFile?: string;
+  sessionId?: string;
+  contextUsage?: { tokens?: unknown };
+}
+
+type ContextReading = { kind: "value"; tokens: number } | { kind: "unknown" } | { kind: "unavailable" };
+
+function contextReading(stats: AgentContextStats | undefined, path: string, sessionId: string | undefined): ContextReading {
+  if (!stats || !sessionId || stats.sessionId !== sessionId || stats.sessionFile !== path || stats.contextUsage === undefined) return { kind: "unavailable" };
+  const tokens = typeof stats.contextUsage.tokens === "number" && Number.isFinite(stats.contextUsage.tokens) && stats.contextUsage.tokens >= 0
+    ? stats.contextUsage.tokens
+    : undefined;
+  return tokens === undefined ? { kind: "unknown" } : { kind: "value", tokens };
+}
+
+function nextContextTokens(previous: number | undefined, fallback: number | undefined, reading: ContextReading, refreshContext = true): number | undefined {
+  if (!refreshContext) return previous;
+  if (reading.kind === "value") return reading.tokens;
+  if (reading.kind === "unknown") return previous;
+  return fallback ?? previous;
+}
+
+async function getAgentRpcSnapshot(client: RpcClient, includeStats = true): Promise<{ state: Awaited<ReturnType<RpcClient["getState"]>>; stats?: AgentContextStats }> {
+  const state = await client.getState();
+  if (!includeStats || typeof client.getSessionStats !== "function") return { state };
+  try { return { state, stats: await client.getSessionStats() }; }
+  catch { return { state }; }
+}
+
 /** Binds once before the first prompt and only recomputes from durable IDs thereafter. */
-export function refreshAgentTelemetry(record: RpcAgentRecord, state?: { sessionFile?: string; sessionId?: string; model?: { provider?: string; id?: string }; thinkingLevel?: string }, opts?: { fresh?: boolean }): boolean {
-  const before = JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+export function refreshAgentTelemetry(
+  record: RpcAgentRecord,
+  state?: { sessionFile?: string; sessionId?: string; model?: { provider?: string; id?: string }; thinkingLevel?: string },
+  opts?: { fresh?: boolean; stats?: AgentContextStats; refreshContext?: boolean },
+): boolean {
+  const snapshot = () => JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryContextFloor, model: record.observedModel, effort: record.observedEffort, context: record.observedContextTokens });
+  const before = snapshot();
+  const finish = (): boolean => {
+    const changed = before !== snapshot();
+    if (record.ownership) updateOwnership(record.ownership.home, { telemetry: record.telemetry });
+    return changed;
+  };
   const path = state?.sessionFile ?? record.sessionPath;
   const read = readSessionEntries(path);
   const sessionId = state?.sessionId ?? (read && !("transient" in read) ? read.headerId : undefined);
+  const reading = contextReading(opts?.stats, path, sessionId);
   const model = state?.model?.provider && state.model.id ? `${state.model.provider}/${state.model.id}` : undefined;
   if (model) record.observedModel = model; else if (state) delete record.observedModel;
   if (typeof state?.thinkingLevel === "string" && state.thinkingLevel) record.observedEffort = state.thinkingLevel; else if (state) delete record.observedEffort;
   if (!record.telemetry) {
-    if (!sessionId) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+    if (!sessionId) return finish();
     // A non-fork legacy child has no inherited history and can be recovered
     // completely. A fork without its saved boundary must remain unknown.
     if (read && !("transient" in read) && read.parentSession && opts?.fresh) {
       const anchor = read.entries.at(-1)?.id;
-      if (!anchor) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+      if (!anchor) return finish();
       record.telemetry = { version: 1, origin: { sessionId, sessionPath: path, prefixEntryId: anchor } };
     } else if (read && !("transient" in read) && read.parentSession && !opts?.fresh) {
-      if (!record.telemetryInputFloor) record.telemetryInputFloor = { sessionId, sessionPath: path, ...(read.entries.at(-1)?.id ? { prefixEntryId: read.entries.at(-1)!.id } : { emptyPrefix: true }) };
-      const floor = reduceTelemetry(record.telemetryInputFloor, read);
-      if (floor) record.observedLatestInput = floor.latestInput; else delete record.observedLatestInput;
-      return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+      const existingFloor = record.telemetryContextFloor;
+      if (existingFloor && (existingFloor.sessionId !== sessionId || existingFloor.sessionPath !== path)) {
+        delete record.telemetryContextFloor;
+        delete record.observedContextTokens;
+      }
+      if (!record.telemetryContextFloor) record.telemetryContextFloor = { sessionId, sessionPath: path, ...(read.entries.at(-1)?.id ? { prefixEntryId: read.entries.at(-1)!.id } : { emptyPrefix: true }) };
+      const floor = reduceTelemetry(record.telemetryContextFloor, read);
+      record.observedContextTokens = nextContextTokens(record.observedContextTokens, floor?.contextTokens, reading, opts?.refreshContext !== false);
+      if (record.observedContextTokens === undefined) delete record.observedContextTokens;
+      return finish();
     }
-    if (!read || ("transient" in (read ?? {}))) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+    if (!read || ("transient" in (read ?? {}))) return finish();
     if (!record.telemetry) record.telemetry = { version: 1, origin: { sessionId, sessionPath: path, emptyPrefix: true } };
   }
   const telemetry = record.telemetry;
-  if (telemetry.origin.sessionPath !== path || (sessionId && telemetry.origin.sessionId !== sessionId)) { delete record.telemetry; delete record.telemetryInputFloor; delete record.observedLatestInput; return true; }
+  if (telemetry.origin.sessionPath !== path || (sessionId && telemetry.origin.sessionId !== sessionId)) { delete record.telemetry; delete record.telemetryContextFloor; delete record.observedContextTokens; return finish(); }
   if (model) telemetry.model = model; else if (state) delete telemetry.model;
   if (typeof state?.thinkingLevel === "string" && state.thinkingLevel) telemetry.effort = state.thinkingLevel; else if (state) delete telemetry.effort;
-  if (read && "transient" in read) return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+  if (read && "transient" in read) return finish();
   const reduced = reduceTelemetry(telemetry.origin, read);
-  if (!reduced) { delete record.telemetry; delete record.telemetryInputFloor; delete record.observedLatestInput; return true; }
-  delete telemetry.latestInput; delete telemetry.estimatedUsd;
+  if (!reduced) { delete record.telemetry; delete record.telemetryContextFloor; delete record.observedContextTokens; return finish(); }
+  const previousContext = telemetry.contextTokens;
+  delete telemetry.estimatedUsd; delete telemetry.partialEstimatedUsd;
   Object.assign(telemetry, reduced);
-  return before !== JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryInputFloor, model: record.observedModel, effort: record.observedEffort, input: record.observedLatestInput });
+  telemetry.contextTokens = nextContextTokens(previousContext, reduced.contextTokens, reading, opts?.refreshContext !== false);
+  if (telemetry.contextTokens === undefined) delete telemetry.contextTokens;
+  return finish();
 }
 
 /**
@@ -1165,7 +706,7 @@ export function refreshAgentTelemetry(record: RpcAgentRecord, state?: { sessionF
  * appended.
  */
 export interface AgentReportLogEntry {
-  kind?: "question" | "final";
+  kind?: "question";
   at: number;
 }
 
@@ -1190,7 +731,7 @@ export function resolveAgentId(registry: RpcAgentRegistry, idOrAlias: string): s
   return undefined;
 }
 
-export type AgentStatus = "running" | "idle" | "dormant";
+export type AgentStatus = "running" | "idle" | "dormant" | "waiting-on-children" | "pending-delivery";
 
 /**
  * 260905: the three RPC-backed spawn shapes, recorded on the record at spawn
@@ -1201,10 +742,9 @@ export type AgentStatus = "running" | "idle" | "dormant";
  * `execute-worker` (approval-gated) from a plain worker so the shutdown
  * sidecar can re-arm the right wiring on revival.
  *
- * `"explore"` is the fourth shape: a lead/fork researcher is a persistent
- * RPC record with a simple/deep mode. Its terminal collection leaf remains in
- * the separate self-reaping `AgentRegistry`; the persistent record is
- * sidecar-restored without worker/fork-specific wiring.
+ * `"explore"` is the fourth shape: every eligible dispatcher creates the same
+ * persistent RPC researcher record, sidecar-restored without worker/fork-specific
+ * wiring.
  */
 export type SpawnAgentRole = "worker" | "execute-worker" | "fork" | "explore";
 
@@ -1249,8 +789,7 @@ const PROMPT_TRUNCATION_MARKER = "\n…[truncated for storage]";
  * Byte-safe head-truncation of a prompt for storage: cuts at `capBytes` UTF-8
  * bytes (never mid-codepoint — a naive `Buffer.slice` cut can straddle a
  * multibyte sequence and corrupt the tail) and appends a cut-marker line when
- * truncation actually happened. Mirrors `AgentEventLineBuffer`'s existing
- * `StringDecoder`-based multibyte-safe convention.
+ * truncation actually happened.
  */
 export function truncatePromptForStorage(prompt: string, capBytes: number = PROMPT_STORAGE_CAP_BYTES): string {
   const buf = Buffer.from(prompt, "utf8");
@@ -1264,20 +803,18 @@ export function truncatePromptForStorage(prompt: string, capBytes: number = PROM
  * 260905: the six push families. Each is a Pi custom-message `customType`
  * delivered by `pushToLead` into whichever session owns the child:
  *
- * - `ws-agent-report` — a `ws-report-to-lead` progress update (pushed at once)
- *   or a `kind:"final"` completion report (deferred to the end of the child's
- *   turn and then carrying `settled_reason`; see `flushPendingFinal`).
+ * - `ws-agent-report` — a `ws-report-to-lead` progress update or intermediate
+ *   finding, pushed at once and never treated as terminal.
  * - `ws-agent-settled` — the child stopped producing: `reason` is `"idle"`
- *   (settled with no terminal report this turn, carrying `last_message`),
+ *   (ordinary terminal settlement carrying `last_message`),
  *   `"stopped"` (an explicit `ws-agent-stop`), `"exited"` (its process died —
  *   see the liveness probe), or `"spawn-failed"`.
  * - `ws-agent-question` — a headless `kind:"question"` report the lead itself
  *   must answer (in TUI the owner surface consumes it, and the lead instead
  *   gets the `fork-question-thread` advisory below).
  * - `ws-agent-approval` — an `execute-worker` is blocked on `ws-approve`.
- * - `ws-agent-advisory` — the adapter's own statement about a child: emitted
- *   by `fork.ts`'s anti-bleed loop (a fork's turn shape) and, since 260905,
- *   by this module's question branch registering a fork-raised thread
+ * - `ws-agent-advisory` — the adapter's own statement about a child, including
+ *   this module's question branch registering a fork-raised thread
  *   (`advisory: "fork-question-thread"`, `followUp`).
  * - `ws-agent-orphaned` — children that outlived their lead session and are
  *   revivable with `ws-agent-send` (shutdown sidecar, `agent-sidecar.ts`).
@@ -1297,34 +834,33 @@ export type PushFamily = (typeof PUSH_FAMILIES)[number];
 export type PushDeliverAs = "steer" | "followUp" | "nextTurn";
 
 /**
- * The push gate: only the process that OWNS the child pushes into its own
- * session. `isLeadOrFork` is exactly that set — the host lead and a `fork`
- * child (which runs its own `session_start` and may itself spawn workers) —
- * while a `worker`/`explore` child pushes nothing (its own reports travel to
- * ITS parent over the RPC event stream, not through a message into its own
- * transcript). Exported as a pure predicate over an explicit env so the gate
- * is unit-testable without mutating the real process env.
+ * Every eligible dispatcher injects its direct children's events into its own
+ * session. Its own reports separately travel outward over its parent RPC edge.
  */
 export function shouldPushToLead(env: NodeJS.ProcessEnv = process.env): boolean {
-  return isLeadOrFork(readSpawnRole(env));
+  const role = readSpawnRole(env);
+  return isLeadOrFork(role) || role === "worker" || role === "explore";
 }
 
 /**
  * The shared registry walk behind both `computeRunningStatusLine` (below) and
  * the goal-loop yield predicate (`hasRunningAgents`, 260905 Phase 2): skips
- * only `threadBound` records, and reports whether anything counts as
- * "present" (any non-threadBound registry member — dormant/parked included,
- * see the alias/park/cap ticket's presence-rule change) at all, plus how many
- * of those are still `running` and not `terminalThisTurn`. Extracted so the
- * two call sites can never drift apart in what they count as fan-in.
+ * owner-routed records and reports whether anything counts as "present"
+ * (any lead-owned registry member — dormant/parked included) plus how many
+ * turns can still make autonomous progress. Delivery and descendant waits
+ * are intentionally not execution.
  */
+export function isOwnerHeld(record: Pick<RpcAgentRecord, "lastWriter"> | undefined): boolean {
+  return record?.lastWriter === "owner";
+}
+
 function computeFanIn(registry: RpcAgentRegistry | undefined): { present: boolean; running: number } {
   let present = false;
   let running = 0;
   for (const record of registry?.values() ?? []) {
-    if (record.threadBound) continue;
+    if (record.threadBound || isOwnerHeld(record)) continue;
     present = true;
-    if (record.running && !record.terminalThisTurn) running += 1;
+    if (record.running || record.streaming) running += 1;
   }
   return { present, running };
 }
@@ -1337,15 +873,11 @@ function computeFanIn(registry: RpcAgentRegistry | undefined): { present: boolea
  *   `threadBound` — 260905 (alias/park/cap ticket) keys this on registry
  *   membership, not on a live client: a dormant/parked record still counts as
  *   present, since automatic parking (see the settle handler below) now
- *   routinely turns a settled, non-threadBound child dormant. 260906: a
- *   lead/fork `explore` IS a member of this same registry while it runs (a
- *   one-shot `RpcAgentRecord`, deleted rather than parked at settle) — only
- *   the worker/execute-worker leaf's separate one-shot `AgentRegistry` is
- *   never counted here.
- * - N counts the subset of those that is still `running` and has not yet
- *   filed a `final`/`question` this turn (`terminalThisTurn`), so the agent
- *   whose own terminal report triggered this very push has already removed
- *   itself. `0 delegated agents still running` is the lead's synthesis cue —
+ *   routinely turns a settled, non-threadBound child dormant. Persistent
+ *   researchers are members of this same registry.
+ * - N counts only turns still executing (`running || streaming`). A pending
+ *   terminal delivery, descendant wait, or owner action is not execution.
+ *   `0 delegated agents still running` is the lead's synthesis cue —
  *   and, per the presence rule above, `0 …` stays visible (not omitted) as
  *   long as any non-threadBound record — dormant included — remains
  *   registered; cap eviction is what eventually removes it.
@@ -1455,7 +987,7 @@ function requestPushWake(pi: ExtensionAPI): void {
 /** Admit raw summaries through the very same FIFO as family-shaped reports. */
 export function sendToLead(pi: ExtensionAPI, message: Parameters<ExtensionAPI["sendMessage"]>[0], deliverAs: PushDeliverAs): void {
   if (!shouldPushToLead() || !leadIdleRef.current) return;
-  admitPush(pi, { kind: "raw", deliverAs, send: (p, deliveryOverride) => p.sendMessage(message, { deliverAs: deliveryOverride ?? deliverAs, triggerTurn: true }) });
+  admitPush(pi, { kind: "raw", deliverAs, message });
 }
 
 function admitPush(pi: ExtensionAPI, held: HeldPush | HeldRawSend): void {
@@ -1464,12 +996,16 @@ function admitPush(pi: ExtensionAPI, held: HeldPush | HeldRawSend): void {
   } catch {
     return; // stale session accessor
   }
-  if (leadCompactingRef.current || leadWakeStartPendingRef.current || isOwningAgentIdle() || held.deliverAs === "followUp") {
-    if (held.kind === "push" && held.terminal) held.terminal.state = "held";
+  if (leadCompactingRef.current || leadWakeStartPendingRef.current || isOwningAgentIdle() || held.deliverAs === "followUp" || heldPushQueue.length > 0) {
+    if (held.kind === "push") {
+      if (held.terminal) held.terminal.state = "held";
+      held.actionGeneration = held.record?.workGeneration;
+      if (held.family === "ws-agent-question") held.questionReport = held.record?.reportLog.at(-1);
+    }
     heldPushQueue.push(held);
     requestPushWake(pi);
   } else if (held.kind === "raw") {
-    held.send(pi);
+    pi.sendMessage(held.message, { deliverAs: held.deliverAs, triggerTurn: true });
   } else {
     sendPush(pi, held.registry, held.record, held.family, held.payload, held.deliverAs, held.terminal);
   }
@@ -1504,6 +1040,16 @@ function triggerAgentWidgetRefresh(): void {
   }
 }
 
+/** Separate event seam for the footer's bounded telemetry reconciliation. */
+export const agentCostRefreshRef: { current: (() => void) | undefined } = { current: undefined };
+function triggerAgentCostRefresh(): void {
+  try {
+    agentCostRefreshRef.current?.();
+  } catch {
+    // Cosmetic accounting must never fail an agent lifecycle transition.
+  }
+}
+
 /** Read current idleness with the independent compaction hold composed in. Delivery also requires an initialized, live accessor. */
 export function isOwningAgentIdle(): boolean {
   if (leadCompactingRef.current) return false;
@@ -1521,6 +1067,10 @@ export function isOwningAgentIdle(): boolean {
  * call, not that the model consumed it. */
 export interface TerminalDelivery {
   state?: "held" | "enqueued";
+  /** Re-evaluate parking and subtree protection after direct-parent admission. */
+  afterEnqueue?: () => void;
+  /** Retry a failed pre-queue admission without harvesting or notifying twice. */
+  retry?: () => void;
 }
 
 /** In-memory finish state for one fork-raised `/done`. It intentionally has
@@ -1539,8 +1089,6 @@ export interface ForkFinishOperation {
   /** The observed settle that ended the work before closeout. Exact repeated
    * delivery of that event is not evidence that the closeout has settled. */
   preCloseoutSettleEvent?: object;
-  candidate?: { message: string; toolCallId?: string; accepted?: boolean };
-  sawQuestion?: boolean;
   terminal?: TerminalDelivery;
   advancing?: Promise<void>;
 }
@@ -1555,15 +1103,40 @@ interface HeldPush {
   terminal?: TerminalDelivery;
   /** Admission mode: governs whether busy delivery holds or interrupts. Confirmed-start delivery always overrides it to `steer`. */
   deliverAs: PushDeliverAs;
+  /** Work generation at admission, used to reject controls superseded before the snapshot. */
+  actionGeneration?: number;
+  /** Exact report-log entry created for a queued headless question. */
+  questionReport?: AgentReportLogEntry;
 }
 
-/** Pre-built summaries share the family-push FIFO and record their admission mode. */
+/** Pre-built summaries share the family-push FIFO and retain their original structured custom message. */
 interface HeldRawSend {
   kind: "raw";
   deliverAs: PushDeliverAs;
-  /** The optional override lets confirmed start release summaries as steering without changing admission. */
-  send: (pi: ExtensionAPI, deliveryOverride?: PushDeliverAs) => void;
+  message: Parameters<ExtensionAPI["sendMessage"]>[0];
 }
+
+/** Delivery-time outcome for a queued `/goal <goal>` replacement. */
+export interface HeldGoalReplacementResult {
+  outcome: "applied" | "failed";
+  message: string;
+}
+
+/**
+ * Control state carried in the shared held-input FIFO. `result` latches the
+ * first safe-boundary application so a rejected prose batch can retry without
+ * applying the goal replacement twice.
+ */
+export interface HeldGoalReplacement {
+  kind: "goal-replacement";
+  goal: string;
+  generation: number;
+  apply: () => HeldGoalReplacementResult;
+  report: (result: HeldGoalReplacementResult) => void;
+  result?: HeldGoalReplacementResult;
+}
+
+export type HeldInput = HeldPush | HeldRawSend | HeldGoalReplacement;
 
 /**
  * Pushes that arrived while the owning session was mid-turn, in arrival order.
@@ -1589,9 +1162,138 @@ interface HeldRawSend {
  * 260906 (compaction push-hold ticket, Phase 1): also holds `HeldRawSend`
  * entries (see that type's doc comment) so `ask.ts`'s
  * `injectDiscussionSummary` can share this same queue/flush-ordering
- * mechanism instead of maintaining a parallel one.
+ * mechanism instead of maintaining a parallel one. Goal replacements add a
+ * third typed entry: controls resolve in FIFO order at a safe boundary, stay
+ * out of model content, and retain their result across a rejected prose batch.
  */
-export const heldPushQueue: Array<HeldPush | HeldRawSend> = [];
+export const heldPushQueue: HeldInput[] = [];
+
+/** Admit a validated goal replacement without creating a parallel control queue. */
+export function enqueueHeldGoalReplacement(entry: HeldGoalReplacement): void {
+  heldPushQueue.push(entry);
+}
+
+function xmlEscape(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+function customContentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return String(content ?? "");
+  return content.map((part) => {
+    const candidate = part as { type?: unknown; text?: unknown };
+    return candidate?.type === "text" && typeof candidate.text === "string"
+      ? candidate.text
+      : JSON.stringify(part);
+  }).join("\n");
+}
+
+function batchItemIdentity(item: PushBatchItem): { agentId?: string; commandId?: string } {
+  const details = item.details as { agent_id?: unknown; cmd_id?: unknown } | undefined;
+  return {
+    agentId: typeof details?.agent_id === "string" ? details.agent_id : undefined,
+    commandId: typeof details?.cmd_id === "string" ? details.cmd_id : undefined,
+  };
+}
+
+/** Serialize a FIFO snapshot without truncation; actionable summaries follow every ordered message. */
+function buildPushBatchContent(items: readonly PushBatchItem[]): string {
+  const lines = [`<${PUSH_BATCH_CUSTOM_TYPE} version="${PUSH_BATCH_VERSION}">`];
+  for (const item of items) {
+    const { agentId, commandId } = batchItemIdentity(item);
+    const attrs = [
+      `type="${xmlEscape(item.customType)}"`,
+      `state="${item.state}"`,
+      ...(agentId ? [`agent-id="${xmlEscape(agentId)}"`] : []),
+      ...(commandId ? [`command-id="${xmlEscape(commandId)}"`] : []),
+    ];
+    lines.push(`  <message ${attrs.join(" ")}>${xmlEscape(customContentText(item.content))}</message>`);
+  }
+  const actions = items.flatMap((item) => {
+    if (item.state !== "actionable") return [];
+    const { agentId, commandId } = batchItemIdentity(item);
+    if (item.customType === "ws-agent-approval" && agentId && commandId) {
+      return [`    <action type="approval" agent-id="${xmlEscape(agentId)}" command-id="${xmlEscape(commandId)}">Call ws-approve with agent_id=&quot;${xmlEscape(agentId)}&quot; and cmd_id=&quot;${xmlEscape(commandId)}&quot;.</action>`];
+    }
+    if (item.customType === "ws-agent-question" && agentId) {
+      return [`    <action type="question" agent-id="${xmlEscape(agentId)}">Call ws-agent-send with agent_id=&quot;${xmlEscape(agentId)}&quot; and the answer.</action>`];
+    }
+    return [];
+  });
+  lines.push("  <action-summary>", ...(actions.length ? actions : ["    none"]), "  </action-summary>", `</${PUSH_BATCH_CUSTOM_TYPE}>`);
+  return lines.join("\n");
+}
+
+function heldActionState(held: HeldPush): PushBatchItemState {
+  if (held.family === "ws-agent-approval") {
+    const cmdId = typeof held.payload.cmd_id === "string" ? held.payload.cmd_id : undefined;
+    const pending = held.record?.pendingApproval;
+    return cmdId && held.record?.workGeneration === held.actionGeneration && pending?.cmdId === cmdId && pending.decisionWritten !== true
+      ? "actionable"
+      : "superseded";
+  }
+  if (held.family === "ws-agent-question") {
+    const latest = held.record?.reportLog.at(-1);
+    return held.record?.workGeneration === held.actionGeneration && latest === held.questionReport && latest?.kind === "question"
+      ? "actionable"
+      : "superseded";
+  }
+  return "informational";
+}
+
+function resolveHeldGoalReplacement(held: HeldGoalReplacement): HeldGoalReplacementResult {
+  if (held.result) return held.result;
+  try {
+    held.result = held.apply();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    held.result = { outcome: "failed", message: `Goal update failed: ${message}` };
+  }
+  try {
+    held.report(held.result);
+  } catch {
+    // Goal state remains authoritative even if owner-visible feedback is unavailable.
+  }
+  return held.result;
+}
+
+function materializeHeldInput(held: HeldInput): PushBatchItem {
+  if (held.kind === "raw") {
+    return {
+      customType: held.message.customType,
+      content: held.message.content as string | unknown[],
+      display: held.message.display,
+      details: held.message.details,
+      state: "informational",
+    };
+  }
+  if (held.kind === "goal-replacement") {
+    const result = resolveHeldGoalReplacement(held);
+    return {
+      customType: "ws-goal-control",
+      content: result.message,
+      display: true,
+      details: { goal: held.goal, generation: held.generation, outcome: result.outcome },
+      state: "informational",
+    };
+  }
+  const status = computeRunningStatusLine(held.registry);
+  const base: Record<string, unknown> = held.record ? { agent_id: held.record.agentId, ...held.payload } : { ...held.payload };
+  const details = status ? { ...base, status } : base;
+  const displayId = held.record?.alias ? `${held.record.alias} (${held.record.agentId})` : held.record?.agentId;
+  return {
+    customType: held.family,
+    content: buildPushContent(held.family, displayId, held.payload, status),
+    display: true,
+    details,
+    state: heldActionState(held),
+  };
+}
 
 /** Build current family status and send into a confirmed streaming run with the requested delivery mode. */
 function sendPush(
@@ -1603,6 +1305,7 @@ function sendPush(
   deliverAs: PushDeliverAs,
   terminal?: TerminalDelivery,
 ): void {
+  const wasHeld = terminal?.state === "held";
   const status = computeRunningStatusLine(registry);
   const base: Record<string, unknown> = record ? { agent_id: record.agentId, ...payload } : { ...payload };
   const details = status ? { ...base, status } : base;
@@ -1622,7 +1325,10 @@ function sendPush(
       },
       { deliverAs, triggerTurn: true },
     );
-    if (terminal) terminal.state = "enqueued";
+    if (terminal) {
+      terminal.state = "enqueued";
+      if (wasHeld) terminal.afterEnqueue?.();
+    }
   } catch {
     // Best effort: a push that cannot be delivered (a torn-down session, a
     // host that rejected the message) must never turn a child's routine
@@ -1630,28 +1336,58 @@ function sendPush(
   }
 }
 
-/** Idle release requests one counted user wake without draining. Only confirmed agent_start releases the batch, preserving FIFO and rebuilding family status at release time. Compaction and pending-start holds dominate every release. */
-export function flushHeldPushes(pi: ExtensionAPI | undefined, confirmedStart = false): number {
+/**
+ * Release one immutable prefix snapshot as one custom message. The prefix stays
+ * queued until `sendMessage` returns synchronously; rejection restores every
+ * terminal obligation and lets the ordinary settle/wake path retry it.
+ */
+function submitHeldPushBatch(pi: ExtensionAPI, deliverAs: "steer" | "followUp"): number {
+  if (heldPushQueue.length === 0) return 0;
+  const snapshot = heldPushQueue.slice();
+  const terminalStates = snapshot.flatMap((held) => held.kind === "push" && held.terminal
+    ? [{ terminal: held.terminal, wasHeld: held.terminal.state === "held" }]
+    : []);
+  const items = snapshot.map(materializeHeldInput);
+  const modelItems = items.filter((_item, index) => snapshot[index]!.kind !== "goal-replacement");
+  if (modelItems.length > 0) {
+    try {
+      pi.sendMessage(
+        {
+          customType: PUSH_BATCH_CUSTOM_TYPE,
+          content: buildPushBatchContent(modelItems),
+          display: true,
+          details: { version: PUSH_BATCH_VERSION, items } as never,
+        },
+        { deliverAs, triggerTurn: true },
+      );
+    } catch {
+      requestPushWake(pi);
+      return 0;
+    }
+  }
+  heldPushQueue.splice(0, snapshot.length);
+  for (const { terminal, wasHeld } of terminalStates) {
+    terminal.state = "enqueued";
+    if (wasHeld) terminal.afterEnqueue?.();
+  }
+  return snapshot.length;
+}
+
+/** Idle release applies a control-only queue or reserves one counted wake for mixed/prose input. Confirmed starts and lead turn boundaries release one FIFO batch. */
+export function flushHeldPushes(pi: ExtensionAPI | undefined, confirmedStart = false, agentEndBoundary = false): number {
   if (!pi || !shouldPushToLead() || !leadIdleRef.current || leadCompactingRef.current || leadWakeStartPendingRef.current) return 0;
+  if (agentEndBoundary) return submitHeldPushBatch(pi, "followUp");
   if (!confirmedStart) {
+    const snapshot = heldPushQueue.slice();
+    if (snapshot.length > 0 && snapshot.every((held) => held.kind === "goal-replacement")) {
+      for (const held of snapshot) resolveHeldGoalReplacement(held);
+      heldPushQueue.splice(0, snapshot.length);
+      return snapshot.length;
+    }
     requestPushWake(pi);
     return 0;
   }
-  const pending = heldPushQueue.splice(0, heldPushQueue.length);
-  for (const held of pending) {
-    if (held.kind === "raw") {
-      try {
-        held.send(pi, "steer");
-      } catch {
-        // Best effort, like family pushes; keep delivering the remaining batch.
-      }
-      continue;
-    }
-    // Admission mode decides busy-time holding or interruption only. A confirmed
-    // start releases every held message as steering before its first response.
-    sendPush(pi, held.registry, held.record, held.family, held.payload, "steer", held.terminal);
-  }
-  return pending.length;
+  return submitHeldPushBatch(pi, "steer");
 }
 
 /** Factory-scope wake lifecycle, also active in fork owners. Registration allocates no timers; only a reserved user wake does. Worker/explore roles never reserve wakes. */
@@ -1660,6 +1396,9 @@ export function registerPushFlush(pi: ExtensionAPI, options: WakeStartOptions): 
   pi.on("agent_start", () => {
     clearWakeStart();
     flushHeldPushes(pi, true);
+  });
+  pi.on("agent_end", () => {
+    flushHeldPushes(pi, false, true);
   });
   pi.on("agent_settled", () => {
     clearWakeStart();
@@ -1673,37 +1412,35 @@ export function registerPushFlush(pi: ExtensionAPI, options: WakeStartOptions): 
   });
 }
 
-/**
- * Emits the deferred `kind:"final"` report for a child that has just left the
- * running state, and says whether there was one.
- *
- * Phase 1 Edition: a `final` observed mid-turn is stashed on the record
- * (`pendingFinal`) rather than pushed, because at that instant the child is
- * still working — it filed its answer through a tool call and its turn
- * continues. This is the release point, reached from every way a child can
- * stop running: the RPC `agent_settled` (`idle`), the `ws-agent-stop` tool
- * (`stopped`), and the liveness probe's exit detection (`exited`).
- * `details.settled_reason` records which, so a final released by a stop or a
- * process death is not read as an orderly completion.
- *
- * A `true` return means the caller must NOT also push `ws-agent-settled` for
- * the same transition — one child turn is one message to the lead.
- */
-export function flushPendingFinal(
-  pi: ExtensionAPI | undefined,
-  registry: RpcAgentRegistry | undefined,
+/** `true` while a settled result still has not reached its direct parent's queue. */
+export function hasPendingTerminalDelivery(record: Pick<RpcAgentRecord, "terminalDelivery">): boolean {
+  return record.terminalDelivery !== undefined && record.terminalDelivery.state !== "enqueued";
+}
+
+function createTerminalDelivery(
   record: RpcAgentRecord,
-  settledReason: "idle" | "stopped" | "exited",
-): boolean {
-  const report = record.pendingFinal;
-  record.pendingFinal = undefined;
-  record.pendingFinalToolCallId = undefined;
-  record.pendingFinalAccepted = undefined;
-  if (report === undefined) return false;
+  registry: RpcAgentRegistry | undefined,
+  pi: ExtensionAPI | undefined,
+  generation: number | undefined,
+  payload?: Record<string, unknown>,
+): TerminalDelivery {
   const terminal: TerminalDelivery = {};
+  terminal.afterEnqueue = () => {
+    if (record.workGeneration !== generation || record.terminalDelivery !== terminal) return;
+    syncOwnershipProtection(record);
+    publishSubtree(registry);
+    if (registry && record.client && !record.running && !record.streaming && !record.threadBound && !isOwnerHeld(record) && !record.waitingOnChildren) {
+      void stopAgent(registry, record.agentId, pi, { silent: true });
+    }
+  };
+  if (payload) terminal.retry = () => {
+    if (terminal.state !== undefined || record.workGeneration !== generation || record.terminalDelivery !== terminal) return;
+    pushToLead(pi, registry, record, "ws-agent-settled", payload, "followUp", terminal);
+  };
   record.terminalDelivery = terminal;
-  pushToLead(pi, registry, record, "ws-agent-report", { kind: "final", report, settled_reason: settledReason }, "followUp", terminal);
-  return true;
+  syncOwnershipProtection(record);
+  publishSubtree(registry);
+  return terminal;
 }
 
 /** Starts (or joins) one same-process finish operation for a fork-raised
@@ -1716,30 +1453,29 @@ export function startForkFinish(
   resumeCtx: Pick<RpcResumeCtx, "cwd" | "extensionPath">,
 ): ForkFinishOperation {
   if (record.forkFinish) return record.forkFinish;
+  claimLeadOwnership(record);
   const operation: ForkFinishOperation = {
     token: randomUUID(),
     cwd: resumeCtx.cwd,
     extensionPath: resumeCtx.extensionPath,
     generation: record.launchGeneration,
-    phase: record.running || record.streaming ? "waiting" : "evaluating",
-    settled: !(record.running || record.streaming),
-    closeoutIssued: false,
-    closeoutRunStarted: false,
+    phase: "closeout",
+    settled: false,
+    closeoutIssued: true,
+    // A follow-up joins an already-running turn and produces no fresh
+    // `agent_start`; its next settle still belongs to this handoff.
+    closeoutRunStarted: record.running || record.streaming,
   };
-  // A final that was observed before `/done` is still current work only while
-  // it remains pending. Validate it through the fork-provided policy below.
-  if (record.pendingFinal !== undefined) {
-    operation.candidate = {
-      message: record.pendingFinal,
-      toolCallId: record.pendingFinalToolCallId,
-      accepted: record.pendingFinalAccepted,
-    };
-    record.pendingFinal = undefined;
-    record.pendingFinalToolCallId = undefined;
-    record.pendingFinalAccepted = undefined;
-  }
   record.forkFinish = operation;
-  void advanceForkFinish(record, registry, pi, resumeCtx, operation);
+  void sendToAgent(registry, { ...finishResumeCtx(operation), pi, finishToken: operation.token }, record.agentId,
+    "The owner closed this side thread. Finish the task now. End with the requested final-response format in your ordinary assistant answer; do not use ws-report-to-lead as a completion channel.", false)
+    .catch((err) => {
+      if (record.forkFinish === operation && record.launchGeneration === operation.generation) {
+        operation.phase = "complete";
+        record.forkFinish = undefined;
+        try { record.onForkFinishComplete?.(record, `closeout failed: ${err instanceof Error ? err.message : String(err)}`); } catch { /* best effort */ }
+      }
+    });
   return operation;
 }
 
@@ -1755,64 +1491,35 @@ function advanceForkFinish(
   if (operation.advancing) return operation.advancing;
   operation.advancing = (async () => {
     if (record.forkFinish !== operation || operation.phase === "complete") return;
-    if (record.launchGeneration !== operation.generation) return;
-    // Initial idle evaluation marks `settled` at construction. Every later
-    // closeout decision requires the positive settle observation, rather than
-    // inferring it from mutable running/streaming flags.
-    if (!operation.settled) return;
+    if (record.launchGeneration !== operation.generation || !operation.settled || record.waitingOnChildren) return;
     operation.phase = "evaluating";
 
     const existing = operation.terminal ?? record.terminalDelivery;
-    if (existing?.state === "held" || existing?.state === "enqueued") {
-      operation.terminal = existing;
+    if (existing?.state === "enqueued") {
       await parkForkFinish(record, registry, pi, operation);
       return;
     }
-
-    const candidate = operation.candidate;
-    // A closeout question is terminal for this operation even if a prior
-    // report looked valid. The owner must receive the existing incomplete
-    // advisory rather than synthetic completion.
-    if (operation.sawQuestion) {
-      await finishWithAdvisory(record, registry, pi, operation);
+    if (existing?.state === "held") {
+      operation.terminal = existing;
       return;
     }
-    // A report-tool start is not a completion fact. In particular `/done`
-    // can race the tool's own end event, so wait for that matching outcome
-    // instead of issuing a closeout while the candidate is still in flight.
-    if (candidate && candidate.accepted === undefined) return;
-    if (candidate?.accepted && (record.validateForkFinal?.(candidate.message) ?? false)) {
-      const terminal: TerminalDelivery = {};
-      operation.terminal = terminal;
-      record.terminalDelivery = terminal;
-      pushToLead(pi, registry, record, "ws-agent-report", { kind: "final", report: candidate.message, settled_reason: "idle" }, "followUp", terminal);
-      await parkForkFinish(record, registry, pi, operation, terminal.state ? undefined : "final push was not admitted");
+    if (existing) {
+      existing.retry?.();
       return;
     }
 
-    if (!operation.closeoutIssued) {
-      operation.closeoutIssued = true;
-      operation.closeoutRunStarted = false;
-      operation.candidate = undefined;
-      operation.sawQuestion = false;
-      operation.phase = "closeout";
-      // The closeout itself begins a new turn; only its next observed settle
-      // may choose final versus missing-final advisory.
-      operation.settled = false;
-      try {
-        await sendToAgent(registry, { ...finishResumeCtx(operation), pi, finishToken: operation.token }, record.agentId,
-          "The owner closed this side thread. Finish the task now and report the normal final report via ws-report-to-lead (kind: final).", false);
-      } catch (err) {
-        // A replacement instruction can supersede us while the RPC promise
-        // rejects. Never publish an outcome into that replacement work.
-        if (record.forkFinish === operation && record.launchGeneration === operation.generation) {
-          await finishWithAdvisory(record, registry, pi, operation, `closeout failed: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
-      return;
-    }
-
-    await finishWithAdvisory(record, registry, pi, operation);
+    const generation = record.workGeneration;
+    const lastMessage = await harvestLastMessage(record);
+    if (record.forkFinish !== operation || record.launchGeneration !== operation.generation || record.workGeneration !== generation || record.running || record.streaming || record.waitingOnChildren) return;
+    const terminal = createTerminalDelivery(record, registry, pi, generation, { reason: "idle", last_message: lastMessage });
+    operation.terminal = terminal;
+    terminal.afterEnqueue = () => {
+      if (record.forkFinish !== operation || record.launchGeneration !== operation.generation || record.workGeneration !== generation) return;
+      syncOwnershipProtection(record);
+      publishSubtree(registry);
+      void parkForkFinish(record, registry, pi, operation);
+    };
+    terminal.retry?.();
   })().finally(() => {
     operation.advancing = undefined;
     // A settle can arrive while the closeout RPC promise is unresolved. The
@@ -1829,20 +1536,8 @@ function finishResumeCtx(operation: ForkFinishOperation): Pick<RpcResumeCtx, "cw
   return { cwd: operation.cwd, extensionPath: operation.extensionPath };
 }
 
-function finishWithAdvisory(record: RpcAgentRecord, registry: RpcAgentRegistry, pi: ExtensionAPI, operation: ForkFinishOperation, detail?: string): Promise<void> {
-  if (record.forkFinish !== operation || record.launchGeneration !== operation.generation) return Promise.resolve();
-  const terminal: TerminalDelivery = {};
-  operation.terminal = terminal;
-  record.terminalDelivery = terminal;
-  pushToLead(pi, registry, record, "ws-agent-advisory", {
-    advisory: "missing-final",
-    detail: detail ?? "This fork settled without a valid final report. Treat the task as incomplete.",
-  }, "followUp", terminal);
-  return parkForkFinish(record, registry, pi, operation, terminal.state ? undefined : "missing-final advisory was not admitted");
-}
-
 async function parkForkFinish(record: RpcAgentRecord, registry: RpcAgentRegistry, pi: ExtensionAPI, operation: ForkFinishOperation, failure?: string): Promise<void> {
-  if (record.forkFinish !== operation || record.launchGeneration !== operation.generation || operation.phase === "parking" || operation.phase === "complete") return;
+  if (record.forkFinish !== operation || record.launchGeneration !== operation.generation || operation.phase === "parking" || operation.phase === "complete" || record.waitingOnChildren) return;
   operation.phase = "parking";
   // Preserve the thread bind until this coordinator owns the park; stopAgent
   // performs the normal silent stop and clears it synchronously.
@@ -1879,20 +1574,6 @@ function observeForkFinishEvent(record: RpcAgentRecord, evt: { type?: string; to
     }
     return;
   }
-  if (evt.type === "tool_execution_start" && evt.toolName === REPORT_TO_LEAD_TOOL_NAME) {
-    const args = evt.args as { kind?: unknown; message?: unknown } | undefined;
-    if (args?.kind === "question") {
-      operation.sawQuestion = true;
-      operation.candidate = undefined;
-    } else if (args?.kind === "final" && typeof args.message === "string" && !operation.sawQuestion) {
-      operation.candidate = { message: args.message, toolCallId: evt.toolCallId };
-    }
-    return;
-  }
-  if (evt.type === "tool_execution_end" && operation.candidate && operation.candidate.toolCallId === evt.toolCallId) {
-    const result = evt.result as { isError?: unknown } | undefined;
-    operation.candidate.accepted = evt.isError !== true && result?.isError !== true;
-  }
 }
 
 /** Admit a family push through the shared FIFO. Idle, compacting, pending-start, and ordinary busy followUps are held; normal busy steers still interrupt. Idle wakes use sendUserMessage so before_agent_start composes the ws block for the run. */
@@ -1905,8 +1586,33 @@ export function pushToLead(
   deliverAs: PushDeliverAs,
   terminal?: TerminalDelivery,
 ): void {
+  const ownerRouteAvailable = ownerNotifyRef.current !== undefined;
+  if (record && (isOwnerHeld(record) || (record.threadBound && !record.forkFinish)) && ownerRouteAvailable && (family === "ws-agent-settled" || family === "ws-agent-advisory")) {
+    const name = record.alias ?? record.title ?? record.agentId.slice(0, 8);
+    const detail = family === "ws-agent-settled"
+      ? `settled${typeof payload.last_message === "string" && payload.last_message.trim() ? `: ${payload.last_message.trim()}` : ""}`
+      : `advisory: ${String(payload.detail ?? payload.advisory ?? "attention required")}`;
+    try {
+      ownerNotifyRef.current?.(`ws: ${name} ${detail}`, family === "ws-agent-advisory" ? "warning" : "info");
+      if (terminal) {
+        terminal.state = "enqueued";
+        terminal.afterEnqueue?.();
+      }
+    } catch {
+      // Owner UI routes can be temporarily unavailable during overlay/session
+      // transitions. Keep the terminal obligation live and actively retry it;
+      // a successor generation clears record.terminalDelivery and makes the
+      // scheduled callback a no-op.
+      if (terminal?.retry && terminal.state === undefined) {
+        const timer = setTimeout(() => terminal.retry?.(), OWNER_TERMINAL_RETRY_DELAY_MS);
+        timer.unref?.();
+      }
+    }
+    return;
+  }
   if (!pi || !shouldPushToLead() || !leadIdleRef.current) return;
   admitPush(pi, { kind: "push", registry, record, family, payload, deliverAs, terminal });
+  publishSubtree(registry);
 }
 
 /**
@@ -1914,39 +1620,132 @@ export function pushToLead(
  * fan-in bookkeeping cannot drift from the actual dispatches: marks the child
  * `running` from the instant the prompt is ISSUED (not when `agent_start`
  * arrives — a lead ending its turn immediately after dispatch must already
- * see it counted), clears the previous turn's `terminalThisTurn` and any
- * un-pushed `pendingFinal`, and stamps `lastLeadPromptAt`.
- *
- * `isLeadPrompt: false` is passed by exactly one caller — `fork.ts`'s
- * anti-bleed nudge — because an internal re-prompt is not a new task
- * boundary: moving `lastLeadPromptAt` there would hide a stale
- * idle-without-final from the very check the nudge exists to serve.
+ * see it counted), starts a fresh work generation, and stamps
+ * `lastLeadPromptAt`.
  *
  * 260905 (live-agent widget ticket): `runStartedAt` is stamped
  * unconditionally, unlike `lastLeadPromptAt` — the widget's elapsed clock
  * resets on a nudge too, since the nudge really did start a fresh turn on
  * the wire even though it is not a new lead-issued task boundary.
  */
+interface WriterOperation {
+  writer: "lead" | "owner";
+  leadPromptAt?: number;
+  state: "pending" | "accepted";
+}
+interface WriterOperationState {
+  baseWriter: RpcAgentRecord["lastWriter"];
+  baseLeadPromptAt: number | undefined;
+  operations: WriterOperation[];
+}
+const writerOperations = new WeakMap<RpcAgentRecord, WriterOperationState>();
+const dispatchOrder = new WeakMap<RpcAgentRecord, { issued: number; accepted: number }>();
+
+function issueDispatch(record: RpcAgentRecord): number {
+  const order = dispatchOrder.get(record) ?? { issued: 0, accepted: 0 };
+  order.issued++;
+  dispatchOrder.set(record, order);
+  return order.issued;
+}
+
+function acceptDispatch(record: RpcAgentRecord, sequence: number): void {
+  const order = dispatchOrder.get(record);
+  if (order) order.accepted = Math.max(order.accepted, sequence);
+}
+
+function wasSupersededByAcceptedDispatch(record: RpcAgentRecord, sequence: number): boolean {
+  return (dispatchOrder.get(record)?.accepted ?? 0) > sequence;
+}
+
+function projectWriter(record: RpcAgentRecord, state: WriterOperationState): void {
+  let writer = state.baseWriter;
+  let leadPromptAt = state.baseLeadPromptAt;
+  for (const operation of state.operations) {
+    writer = operation.writer;
+    if (operation.leadPromptAt !== undefined) leadPromptAt = operation.leadPromptAt;
+  }
+  record.lastWriter = writer;
+  record.lastLeadPromptAt = leadPromptAt;
+}
+
+function compactWriterOperations(record: RpcAgentRecord, state: WriterOperationState): void {
+  while (state.operations[0]?.state === "accepted") {
+    const accepted = state.operations.shift()!;
+    state.baseWriter = accepted.writer;
+    if (accepted.leadPromptAt !== undefined) state.baseLeadPromptAt = accepted.leadPromptAt;
+  }
+  projectWriter(record, state);
+  if (state.operations.length === 0) writerOperations.delete(record);
+  syncOwnershipProtection(record);
+  triggerAgentWidgetRefresh();
+}
+
+function stampWriter(record: RpcAgentRecord, writer: "lead" | "owner", text?: string, leadPromptAt?: number): { operation: WriterOperation; ownerSend?: { text: string; at: number } } {
+  let state = writerOperations.get(record);
+  if (!state) {
+    state = { baseWriter: record.lastWriter, baseLeadPromptAt: record.lastLeadPromptAt, operations: [] };
+    writerOperations.set(record, state);
+  }
+  const operation: WriterOperation = { writer, ...(leadPromptAt === undefined ? {} : { leadPromptAt }), state: "pending" };
+  const ownerSend = writer === "owner" && text !== undefined ? { text, at: Date.now() } : undefined;
+  state.operations.push(operation);
+  if (ownerSend) (record.ownerSends ??= []).push(ownerSend);
+  projectWriter(record, state);
+  syncOwnershipProtection(record);
+  triggerAgentWidgetRefresh();
+  return { operation, ownerSend };
+}
+
+function acceptWriter(record: RpcAgentRecord, stamp: ReturnType<typeof stampWriter>): void {
+  const state = writerOperations.get(record);
+  if (!state || !state.operations.includes(stamp.operation)) return;
+  stamp.operation.state = "accepted";
+  compactWriterOperations(record, state);
+}
+
+function rollbackWriter(record: RpcAgentRecord, stamp: ReturnType<typeof stampWriter>): void {
+  const state = writerOperations.get(record);
+  if (stamp.ownerSend) {
+    const ownerIndex = record.ownerSends?.indexOf(stamp.ownerSend) ?? -1;
+    if (ownerIndex >= 0) record.ownerSends!.splice(ownerIndex, 1);
+  }
+  if (!state) return;
+  const index = state.operations.indexOf(stamp.operation);
+  if (index >= 0) state.operations.splice(index, 1);
+  compactWriterOperations(record, state);
+}
+
+function claimLeadOwnership(record: RpcAgentRecord): void {
+  const stamp = stampWriter(record, "lead");
+  acceptWriter(record, stamp);
+}
+
+export const OWNER_TERMINAL_RETRY_DELAY_MS = 100;
+
 export async function promptAgent(
   record: RpcAgentRecord,
   client: RpcClient,
   message: string,
-  opts?: { isLeadPrompt?: boolean },
+  opts?: { isLeadPrompt?: boolean; writer?: "lead" | "owner" },
 ): Promise<void> {
+  const writer = opts?.writer ?? "lead";
+  const now = Date.now();
+  const writerStamp = stampWriter(record, writer, writer === "owner" ? message : undefined, writer === "lead" && opts?.isLeadPrompt !== false ? now : undefined);
   record.running = true;
-  record.terminalThisTurn = false;
-  // A final that never reached a settle belongs to the task being replaced,
-  // not to the one starting now.
-  // The anti-bleed nudge continues the same task, so it deliberately keeps
-  // completion facts. Every real prompt is a new instruction boundary.
-  if (opts?.isLeadPrompt !== false) clearTerminalFacts(record);
-  record.runStartedAt = Date.now();
+  record.pendingQueuedWork = undefined;
+  advanceWorkGeneration(record);
+  record.runStartedAt = now;
   if (record.ownership) observeSessionWrite(record.ownership.home, record.sessionPath);
-  if (record.ownership) updateOwnership(record.ownership.home, { lastActivityAt: Date.now(), liveness: { lifecycle: "live", running: true, observedAt: Date.now() } });
-  if (opts?.isLeadPrompt !== false) {
-    record.lastLeadPromptAt = Date.now();
+  if (record.ownership) updateOwnership(record.ownership.home, { lastActivityAt: now, liveness: { lifecycle: "live", running: true, observedAt: now } });
+  const workGeneration = record.workGeneration;
+  try {
+    await client.prompt(message);
+  } catch (error) {
+    rollbackWriter(record, writerStamp);
+    throw error;
   }
-  await client.prompt(message);
+  acceptWriter(record, writerStamp);
+  if (record.delegation && record.workGeneration === workGeneration) syncOwnershipProtection(record);
 }
 
 /**
@@ -1956,10 +1755,15 @@ export async function promptAgent(
  * looks like" is defined once.
  */
 function clearTerminalFacts(record: RpcAgentRecord): void {
-  record.pendingFinal = undefined;
-  record.pendingFinalToolCallId = undefined;
-  record.pendingFinalAccepted = undefined;
   record.terminalDelivery = undefined;
+}
+
+/** Start work whose assistant output must never inherit an earlier turn. */
+function advanceWorkGeneration(record: RpcAgentRecord): void {
+  record.workGeneration = (record.workGeneration ?? 0) + 1;
+  record.lastText = undefined;
+  record.lastTextGeneration = undefined;
+  clearTerminalFacts(record);
 }
 
 function clearLiveState(record: RpcAgentRecord): void {
@@ -2010,14 +1814,21 @@ export function markAgentExited(
   opts?: { suppressTerminal?: boolean },
 ): void {
   if (!record.client) return;
+  const hadQueuedSuccessor = (record.pendingQueuedWork?.length ?? 0) > 0;
   clearLiveState(record);
+  record.pendingQueuedWork = undefined;
   if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "unknown", running: false, observedAt: Date.now() } });
   triggerAgentWidgetRefresh();
   if (opts?.suppressTerminal) return;
-  // A child that filed a final and then died before settling still answered;
-  // `settled_reason: "exited"` is what tells the lead the death, not silence.
-  if (flushPendingFinal(pi, registry, record, "exited")) return;
-  pushToLead(pi, registry, record, "ws-agent-settled", { reason: "exited" }, "followUp");
+  const workGeneration = record.workGeneration;
+  if (record.settlementAdmissionGeneration === workGeneration) {
+    record.terminalDelivery?.retry?.();
+    return;
+  }
+  record.settlementAdmissionGeneration = workGeneration;
+  const lastMessage = !hadQueuedSuccessor && record.lastTextGeneration === workGeneration ? record.lastText : undefined;
+  const terminal = createTerminalDelivery(record, registry, pi, workGeneration, { reason: "exited", last_message: lastMessage });
+  terminal.retry?.();
 }
 
 /** Interval of the background liveness sweep, while at least one agent is outstanding. */
@@ -2037,7 +1848,7 @@ export function startLivenessProbe(
 ): () => void {
   const timer = setInterval(() => {
     for (const record of [...registry.values()]) {
-      if (record.running && record.client) {
+      if ((record.running || record.streaming || record.waitingOnChildren || hasPendingTerminalDelivery(record)) && record.client) {
         void probeAgentLiveness(pi, registry, record);
       }
     }
@@ -2086,9 +1897,19 @@ export interface SpawnAgentParams {
   alias?: string;
   /** 260905: optional free-text label, independent of `alias` — see `RpcAgentRecord.title`. */
   title?: string;
+  /** Optional bounded native edit/write grants for a child that is otherwise restricted. */
+  writeScopes?: WriteScope[];
 }
 
+export type WriteScopeDiagnostic =
+  | { status: "bound"; count: number }
+  | { status: "ignored"; reason: "child already has unrestricted native edit/write authority" };
+
 export interface RpcSpawnCtx {
+  /** Trusted bridge render (or internal preset), never a public spawn argument. */
+  profile?: PlaybookProfile;
+  provenance?: RenderProvenance;
+  parentPolicy?: DelegationPolicy;
   /** Parent TUI only; initial task-fork observation, never persisted or resumed. */
   forkCacheNoticeOwner?: ForkCacheNoticeOwner;
   /**
@@ -2105,8 +1926,12 @@ export interface RpcSpawnCtx {
   storage?: AgentStorageContext;
   /** `provider/id`, forwarded from the calling tool-execute ctx.model, or undefined to inherit pi's own default. */
   inheritModel?: string;
+  /** Current thinking level, used only when the caller explicitly requests model_effort:"default" with inherited-model dispatch. */
+  inheritEffort?: string;
   /** Current execute/command context's live getAll + configured-auth catalog. */
   catalog: readonly ModelCatalogEntry[];
+  /** ws-agent-spawn-only public contract; other spawnAgent consumers retain tier-only model_name behavior. */
+  allowConcreteModel?: boolean;
   /** UI-only adapter; never a lifecycle push. */
   notifyTierWarning?: (warning: string) => void;
   /** Bridge's sanitized `ws__*` registered tool names, for the `full-worker` group. */
@@ -2209,6 +2034,8 @@ export interface RpcResumeCtx {
    * typing into an open thread must leave the bind exactly as it is.
    */
   leadSend?: boolean;
+  /** Attribution for the message. Omitted is a lead-side prompt. */
+  writer?: "lead" | "owner";
   /** Internal token carried only by a coordinator-owned closeout send. */
   finishToken?: string;
 }
@@ -2311,6 +2138,8 @@ export function buildRpcClientOptions(
   exploreMode?: ExploreMode,
   forkLaunch?: { contextPath: string; readinessPath: string; nonce: string; affinityId?: string },
   extensionPath: string,
+  delegation?: DelegationPolicy,
+  subtreeChannel?: SubtreeChannel,
 ): RpcClientOptions {
   if (!extensionPath) throw new Error("ws-pi-agent: missing loaded extension entry path for RPC child");
   const role = spawnRoleOverride ?? (forkFrom ? "fork" : "worker");
@@ -2328,6 +2157,10 @@ export function buildRpcClientOptions(
   env[WS_PI_FORK_READY_NONCE_ENV] = forkLaunch?.nonce ?? "";
   env[WS_PI_FORK_AFFINITY_ENV] = forkLaunch?.affinityId ?? "";
   env[WS_PI_PARENT_SESSION_KEY_ENV] = role === "fork" ? parentSessionKey ?? "" : "";
+  env[DELEGATION_ENV] = delegation ? JSON.stringify(delegation) : "";
+  env[SUBTREE_ENV] = subtreeChannel ? JSON.stringify(subtreeChannel) : "";
+  env[WEB_HOME_ENV] = role === "explore" ? dirname(sessionPath) : "";
+  env[WEB_NONCE_ENV] = role === "explore" ? subtreeChannel?.nonce ?? "" : "";
   // RpcClient overlays env onto process.env, so deletion here would preserve a
   // stale parent value. Empty values neutralize forced bootstrap selection.
   for (const override of CHILD_BOOTSTRAP_OVERRIDE_ENVS) env[override] = "";
@@ -2352,7 +2185,7 @@ export function buildRpcClientOptions(
  * entirely (not stored as an explicit `undefined` property) when the caller
  * omits it, so a plain progress update round-trips as `{at}`.
  */
-export function recordReport(record: RpcAgentRecord, kind: "question" | "final" | undefined, at: number = Date.now()): void {
+export function recordReport(record: RpcAgentRecord, kind: "question" | undefined, at: number = Date.now()): void {
   record.reportLog.push(kind === undefined ? { at } : { kind, at });
   if (record.reportLog.length > REPORT_LOG_CAP) {
     record.reportLog.shift();
@@ -2360,20 +2193,23 @@ export function recordReport(record: RpcAgentRecord, kind: "question" | "final" 
   if (record.ownership) touchOwnership(record.ownership.home);
 }
 
-/** Writes durable owner/approval protection without treating a poll as activity. */
-export function syncOwnershipProtection(record: RpcAgentRecord): void {
-  if (!record.ownership) return;
-  updateOwnership(record.ownership.home, {
+/** Writes durable protection without treating a poll as activity. A new owner bind must check success before committing local state. */
+export function syncOwnershipProtection(record: RpcAgentRecord): boolean {
+  if (!record.ownership) return true;
+  return updateOwnership(record.ownership.home, {
     liveness: {
       lifecycle: record.client ? (record.running ? "live" : "stopping") : "unknown",
       running: record.running,
       observedAt: Date.now(),
       threadBound: record.threadBound,
+      ownerHeld: isOwnerHeld(record),
+      waitingOnChildren: record.waitingOnChildren,
+      pendingDelivery: hasPendingTerminalDelivery(record),
       pendingQuestion: record.threadBound,
       pendingApprovalCommandId: record.pendingApproval?.cmdId,
       recovery: record.client ? "none" : "revived",
     },
-  });
+  }) !== undefined;
 }
 
 /** Unreferenced persistent-record observer; unchanged polling never renews activity. */
@@ -2384,18 +2220,6 @@ export function startOwnedSessionObserver(record: RpcAgentRecord, intervalMs = 5
   const timer = setInterval(sample, intervalMs);
   timer.unref();
   record.ownershipObserverStop = () => { clearInterval(timer); record.ownershipObserverStop = undefined; };
-}
-
-/**
- * The report kinds `record` has filed since its last LEAD prompt — the input
- * `fork.ts`'s `isIdleWithoutFinal` judges a turn against. Filtering by
- * `lastLeadPromptAt` is what makes a `final` from a PREVIOUS task stop
- * counting once the lead sends a new one; a nudge deliberately does not move
- * that stamp (see `promptAgent`), so it cannot un-flag a stale record.
- */
-export function reportKindsSinceLeadPrompt(record: RpcAgentRecord): Array<"question" | "final" | undefined> {
-  const since = record.lastLeadPromptAt ?? 0;
-  return record.reportLog.filter((entry) => entry.at >= since).map((entry) => entry.kind);
 }
 
 /**
@@ -2414,81 +2238,30 @@ export interface RpcEventOutcome {
 }
 
 /**
- * Applies an `agent_start`/`agent_settled`/`ws-report-to-lead`-tool RPC event
- * onto `record`'s locally-tracked streaming/report state, and returns what the
- * IO layer should push for it. Exported so the streaming/turn bookkeeping and
- * the report-classification branch have direct unit coverage without a real
- * `RpcClient` subprocess — mirrors `handleAgentEvent`'s test-injection pattern
- * for the one-shot `explore` path above.
- *
- * The report branch matches a raw `tool_execution_start` event (the same
- * event Pi's own extension-hook fan-out emits the instant the LLM dispatches
- * a tool call, forwarded verbatim to the parent's `RpcClient.onEvent()` — see
- * the plan's Codebase Findings for the full trace) whose `toolName` is
- * `REPORT_TO_LEAD_TOOL_NAME`; `evt.args.message`, if a string, becomes a push
- * (260904 Phase 1, side-thread fork ticket: along with `evt.args.kind` when
- * it is exactly `"question"` or `"final"` — any other value, including a
- * malformed one, is dropped, same as an absent `kind`).
- * All other event types (including a `tool_execution_start` for any other
- * tool name) are ignored here — they only matter to a live streaming UI or
- * to the tool's own execution, not to this module's bookkeeping.
- *
- * 260904 Phase 1 (execute-approve gateway) adds a 2nd `tool_execution_start` branch, matched on
- * `GATED_EXEC_TOOL_NAME`: sets `record.pendingApproval` from the event's
- * `toolCallId` (this IS the `cmd_id` — no new id needs minting) plus the
- * gated-exec tool's own `{command, rationale}` args. Requires both a string
- * `toolCallId` and a string `args.command`; a missing/malformed event is
- * silently ignored (never throws) — matches the report branch's own
- * best-effort shape-tolerance above.
- *
- * Review fix (relay #1): also captures `args.cwd` (the same optional
- * per-call working-directory override `ws-worker-exec`'s own `execute()`
- * accepts) onto `record.pendingApproval.cwd` when it is a string — omitted
- * (`undefined`) otherwise, so a caller falls back to the worker's base cwd
- * exactly as `execute-gateway.ts`'s `execute()` itself does.
- *
- * 260905 Phase 1 (fork-question lead notice, was 260904 Phase 2 / review
- * relay #1 I6): a `kind:"question"` report is passed through
- * `record.onQuestionReport` (when set) first. That hook thread-binds the
- * record and, in TUI mode, returns the registration-notice string built by
- * `buildForkQuestionLeadNotice` — the lead must still be told a thread now
- * exists, just not asked to answer it. A DEFINED (string) return is pushed to
- * the lead as `ws-agent-advisory`/`fork-question-thread` (`detail` is that
- * notice text) so the lead is told the thread exists rather than seeing
- * nothing at all — `followUp` delivery only guarantees the notice is queued
- * for the lead's next turn boundary, not that it precedes the owner's
- * `/answer`; `undefined` is the headless baseline and the question is pushed
- * as `ws-agent-question`/`steer` for the lead to answer directly. A throwing
- * hook degrades to that same headless baseline rather than dropping the
- * report.
- *
- * `record.onFinalReport` gained the parallel contract: returning `true` means
- * the hook fully consumed the report (a `lead-ask` discussion thread, whose
- * decision reaches the lead as its own `ws-thread-summary` message), so
- * nothing is stashed; falsy stashes it as `record.pendingFinal`.
- *
- * Phase 1 Edition: an un-consumed `final` produces NO push from here. It is
- * stashed and released by `flushPendingFinal` when the child leaves the
- * running state — see that function and `RpcAgentRecord.pendingFinal`.
- * `question` and untagged progress reports keep their immediate push: a
- * question blocks the child until it is answered, and progress is only
- * meaningful while the work is still going.
+ * Applies lifecycle and intermediate-report RPC events to a record. A
+ * `kind:"question"` report uses the owner-thread hook when available; every
+ * other report-tool call is an immediate informational push. No report-tool
+ * value is terminal. `agent_settled` clears execution synchronously, while
+ * `attachEventListener` performs asynchronous terminal transcript harvest and
+ * queue admission. Gated execution events additionally capture approval data.
  */
 export function applyRpcEvent(
   record: RpcAgentRecord,
   evt: { type?: string; toolName?: string; args?: unknown; toolCallId?: string; isError?: unknown; result?: unknown },
 ): RpcEventOutcome {
-  const finishing = record.forkFinish;
   if (evt.type === "tool_execution_end") {
     observeForkFinishEvent(record, evt);
-    if (record.pendingFinal !== undefined && record.pendingFinalToolCallId === evt.toolCallId) {
-      const result = evt.result as { isError?: unknown } | undefined;
-      record.pendingFinalAccepted = evt.isError !== true && result?.isError !== true;
-    }
     return {};
   }
   if (evt.type === "agent_start") {
+    const alreadyRunning = record.running;
     record.streaming = true;
+    if (record.delegation && !alreadyRunning) {
+      // A direct child can wake itself for its own children's reports, without
+      // a new outer promptAgent call. This is a new own-turn generation.
+      record.running = true;
+      advanceWorkGeneration(record);
+    }
     observeForkFinishEvent(record, evt);
   } else if (evt.type === "agent_settled") {
     record.streaming = false;
@@ -2503,22 +2276,8 @@ export function applyRpcEvent(
     const args = evt.args as { message?: unknown; kind?: unknown } | undefined;
     const message = args?.message;
     if (typeof message === "string") {
-      const kind = args?.kind === "question" || args?.kind === "final" ? args.kind : undefined;
+      const kind = args?.kind === "question" ? args.kind : undefined;
       recordReport(record, kind);
-      if (kind !== undefined) {
-        // A terminal report for this turn: the sender is out of N from here
-        // on (including on its own push), and the `agent_settled` that
-        // follows must not emit a redundant idle-settle push.
-        record.terminalThisTurn = true;
-      }
-
-      // An active fork-raised `/done` owns terminal report/question handling
-      // exclusively. Do not register a new owner question or let the normal
-      // final hook detach its bind while the coordinator is still deciding.
-      if (finishing && (kind === "question" || kind === "final")) {
-        observeForkFinishEvent(record, evt);
-        return {};
-      }
 
       if (kind === "question") {
         // A defined (string) return is the registration notice for a fork
@@ -2537,29 +2296,6 @@ export function applyRpcEvent(
         return notice !== undefined
           ? { push: { family: "ws-agent-advisory", payload: { advisory: "fork-question-thread", detail: notice }, deliverAs: "followUp" } }
           : { push: { family: "ws-agent-question", payload: { question: message }, deliverAs: "steer" } };
-      }
-
-      if (kind === "final") {
-        let consumed = false;
-        if (record.onFinalReport) {
-          try {
-            consumed = record.onFinalReport(record, message) === true;
-          } catch {
-            // swallowed: a hook failure must not drop the report
-            consumed = false;
-          }
-        }
-        // Phase 1 Edition: NOT pushed here. The child is still mid-turn at
-        // this instant; the final is stashed and pushed when it actually
-        // leaves the running state (`flushPendingFinal`), so the lead is told
-        // "done" only once the author has stopped working. A consumed report
-        // belongs to an owner thread and is not stashed at all.
-        if (!consumed) {
-          record.pendingFinal = message;
-          record.pendingFinalToolCallId = evt.toolCallId;
-          record.pendingFinalAccepted = undefined;
-        }
-        return {};
       }
 
       return { push: { family: "ws-agent-report", payload: { report: message }, deliverAs: "followUp" } };
@@ -2587,55 +2323,12 @@ export function applyRpcEvent(
 }
 
 /**
- * Wires `client.onEvent()` into `applyRpcEvent` for `record` and performs the
- * IO half of whatever it reports: emits the described push, and — on
- * `agent_settled` — decides whether an idle-settle push follows. It also,
- * since 260904 Phase 1, invokes `onApprovalPending(record)` right after any
- * `tool_execution_start` for `GATED_EXEC_TOOL_NAME` (the same event
- * `applyRpcEvent` just used to set `record.pendingApproval`). Kept as a
- * second, independent check on the raw event (not a "did pendingApproval
- * change" diff) so the approval-relay's actual payload/injection behavior
- * stays owned entirely by `execute-gateway.ts`, which supplies that callback.
- *
- * The settle push is deliberately conditional and asynchronous:
- * - replaced by the deferred `kind:"final"` report when this turn filed one
- *   (`flushPendingFinal`) — that report IS the completion signal, and the
- *   settle notice would be the same event a second time;
- * - suppressed while `record.threadBound` — an owner discussion thread's turn
- *   boundaries are not the lead's business (§1);
- * - suppressed when `record.terminalThisTurn` — the child already filed a
- *   `final`/`question` this turn, and that push IS the signal; a settle
- *   notice milliseconds later would just be a duplicate wake;
- * - otherwise pushed with `last_message` from `harvestLastMessage` (the
- *   former `ws-agent-wait` `reason:"idle"` payload, reused verbatim), which
- *   needs an RPC round-trip and so cannot happen inline in the listener.
- *
- * The settle is also a registry transition, so it doubles as a liveness-probe
- * point (`probeAgentLiveness`) — a child that died mid-turn is reported as
- * `exited` rather than silently going quiet.
- *
- * 260905 (alias/park/cap ticket): **automatic park** is the last step of this
- * settle handling, run AFTER `probeAgentLiveness` resolves (so a park never
- * races the liveness check) and after the (separately-registered) anti-bleed
- * advisory/nudge judgment has had its chance to re-prompt the child — see the
- * plan's Codebase Findings for why no explicit ordering call into `fork.ts` is
- * needed: a synchronous nudge already flips `record.running` before this IIFE
- * resumes past its own `await`. Parks (silent `stopAgent`) iff
- * `!record.threadBound && !record.running` at that point: a `threadBound`
- * record is never parked, and a record the nudge re-prompted is not parked
- * either. No grace period, and no extra push for the park itself — the
- * settle/final push above already told the lead the child stopped; parking is
- * pure resource cleanup, silently resumed later by `sendToAgent`'s dormant
- * branch. A park failure is swallowed (best effort), matching every other
- * best-effort branch in this handler.
- *
- * Exported (review relay #1, test partition C2) purely so the suppression
- * conditions above have direct offline coverage: this listener, not the pure
- * `applyRpcEvent`, is where the `!threadBound && !terminalThisTurn` gate
- * actually lives, and `spawnAgent`/`sendToAgent` — its only production call
- * sites — both construct a real `RpcClient` and are live-gate only. Tests
- * drive it with a duck-typed `client` exposing `onEvent`/`getState`/
- * `getLastAssistantText`.
+ * Wires the child event stream to immediate reports and per-generation
+ * terminal settlement. Settlement clears execution before any async work,
+ * waits for the published descendant subtree, harvests the ordinary assistant
+ * answer, admits one retryable terminal delivery, and parks only after enqueue.
+ * Duplicate events join the generation latch; replacement work invalidates a
+ * late harvest. Owner-held output uses the owner notification route.
  */
 export function attachEventListener(
   pi: ExtensionAPI | undefined,
@@ -2646,17 +2339,29 @@ export function attachEventListener(
 ): void {
   let refreshing = false;
   let dirty = false;
+  let statsDirty = false;
+  // Older/revived records may predate generation tracking. Normalize once so
+  // the first settlement is not mistaken for a duplicate undefined latch.
+  record.launchGeneration ??= 0;
+  record.workGeneration ??= 0;
   const generation = record.launchGeneration;
-  const refresh = () => {
+  const refresh = (includeStats = false) => {
     dirty = true;
+    statsDirty ||= includeStats;
     if (refreshing) return;
     refreshing = true;
     void (async () => {
       do {
         dirty = false;
+        const readStats = statsDirty;
+        statsDirty = false;
         try {
-          const state = await client.getState();
-          if (record.client === client && record.launchGeneration === generation && refreshAgentTelemetry(record, state)) triggerAgentWidgetRefresh();
+          const snapshot = await getAgentRpcSnapshot(client, readStats);
+          if (record.client === client && record.launchGeneration === generation && refreshAgentTelemetry(record, snapshot.state, { stats: snapshot.stats, refreshContext: readStats })) {
+            publishSubtree(registry);
+            triggerAgentWidgetRefresh();
+            triggerAgentCostRefresh();
+          }
         } catch {
           if (record.client === client && record.launchGeneration === generation) {
             const changed = record.observedModel !== undefined || record.observedEffort !== undefined || record.telemetry?.model !== undefined || record.telemetry?.effort !== undefined;
@@ -2670,9 +2375,29 @@ export function attachEventListener(
     })();
   };
   record.unsubscribe = client.onEvent((evt) => {
-    const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string; isError?: unknown; result?: unknown };
+    const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string; isError?: unknown; result?: unknown; message?: unknown };
+    if (record.client !== client || record.launchGeneration !== generation) return;
+    if (e.type === "message_start") observeQueuedWorkBoundary(record, e.message);
+    if (e.type === "message_end") {
+      const text = assistantMessageText(e.message);
+      if (text !== undefined) {
+        record.lastText = text;
+        record.lastTextGeneration = record.workGeneration;
+      }
+    }
+    if (record.subtreeChannel) {
+      const snapshot = readSubtreeSnapshot(record.subtreeChannel);
+      record.waitingOnChildren = subtreeWaiting(snapshot);
+      record.subtreeRevision = snapshot?.revision;
+    }
     const outcome = applyRpcEvent(record, e);
-    if (e.type === "agent_start" || e.type === "agent_settled" || e.type === "message_end" || e.type === "message_update" || e.type === "thinking_level_changed" || e.type === "compaction_end") refresh();
+    publishSubtree(registry);
+    if (e.type === "agent_start" || e.type === "agent_settled" || e.type === "message_end" || e.type === "message_update" || e.type === "thinking_level_changed" || e.type === "compaction_end") {
+      // Context occupancy changes at completed message/compaction boundaries.
+      // Streaming deltas retain the disk/state refresh without
+      // hammering get_session_stats on every token.
+      refresh(e.type === "agent_settled" || e.type === "message_end" || e.type === "compaction_end");
+    }
     if (outcome.push) {
       pushToLead(pi, registry, record, outcome.push.family, outcome.push.payload, outcome.push.deliverAs);
     }
@@ -2681,35 +2406,41 @@ export function attachEventListener(
       // fresh "running" row transition.
       triggerAgentWidgetRefresh();
     }
+    if (outcome.settled && record.waitingOnChildren) {
+      clearTerminalFacts(record);
+      syncOwnershipProtection(record);
+      publishSubtree(registry);
+      triggerAgentWidgetRefresh();
+      return;
+    }
     if (outcome.settled) {
+      const workGeneration = record.workGeneration;
+      const stillSettled = () => record.client === client && record.launchGeneration === generation && record.workGeneration === workGeneration && !record.running && !record.streaming && !record.waitingOnChildren;
       const finish = record.forkFinish;
       if (finish) {
         void advanceForkFinish(record, registry ?? new Map([[record.agentId, record]]), pi as ExtensionAPI, finishResumeCtx(finish), finish);
-      } else void (async () => {
-        // The deferred final, if this turn filed one, IS the settle message.
-        if (!flushPendingFinal(pi, registry, record, "idle") && !record.threadBound && !record.terminalThisTurn) {
-          const lastMessage = await harvestLastMessage(record);
-          const terminal: TerminalDelivery = {};
-          record.terminalDelivery = terminal;
-          pushToLead(pi, registry, record, "ws-agent-settled", { reason: "idle", last_message: lastMessage }, "followUp", terminal);
+      } else {
+        if (record.settlementAdmissionGeneration === workGeneration) {
+          record.terminalDelivery?.retry?.();
+        } else {
+          // Latch before the asynchronous transcript harvest so duplicate
+          // settle events for one generation cannot enqueue twice.
+          record.settlementAdmissionGeneration = workGeneration;
+          const terminal = createTerminalDelivery(record, registry, pi, workGeneration);
+          void (async () => {
+            const lastMessage = await harvestLastMessage(record);
+            if (!stillSettled() || record.terminalDelivery !== terminal) return;
+            const payload = { reason: "idle", last_message: lastMessage };
+            terminal.retry = () => {
+              if (terminal.state !== undefined || !stillSettled() || record.terminalDelivery !== terminal) return;
+              pushToLead(pi, registry, record, "ws-agent-settled", payload, "followUp", terminal);
+            };
+            terminal.retry();
+            await probeAgentLiveness(pi, registry, record);
+            triggerAgentWidgetRefresh();
+          })();
         }
-        await probeAgentLiveness(pi, registry, record);
-        // Automatic park: the last step, after the liveness probe and (by
-        // event-loop ordering) after any synchronous nudge has had its chance
-        // to re-prompt this record. See the doc comment above.
-        if (registry && !record.threadBound && !record.running) {
-          try {
-            await stopAgent(registry, record.agentId, pi, { silent: true });
-          } catch {
-            // best effort — a park failure must not crash the settle handler.
-          }
-        }
-        // 260905 (live-agent widget ticket): fired after the liveness probe
-        // and the possible automatic park above, so the widget's re-render
-        // sees the record's fully-settled state (dormant if parked, still
-        // running if a synchronous nudge re-prompted it first).
-        triggerAgentWidgetRefresh();
-      })();
+      }
     }
     if (record.forkFinish && e.type === "tool_execution_end") {
       const finish = record.forkFinish;
@@ -2731,19 +2462,10 @@ export function attachEventListener(
 }
 
 /**
- * Best-effort `setThinkingLevel()` after `start()`, for the RPC-backed
- * persistent-child path only. A launch-time `--thinking <level>` CLI flag
- * DOES exist — `buildSpawnArgs`'s `thinking` option, which the ephemeral
- * one-shot `exploreLeaf` collection leaf uses directly (260906 Phase 2) —
- * but this RPC path applies `model_effort` as a live post-start RPC call
- * instead, because a persistent child's effort can change across a
- * later resume/restart (dormant-resume `applyModelEffort` calls below),
- * unlike the one-shot leaf's single fixed launch. Decoupled from whether
- * `model_name` was also given. Never hard-fails — an unsupported/
- * unrecognized level string degrades to a no-op, matching the ticket's own
- * fallback wording (Out of Scope: validating against Pi's exact
- * `ThinkingLevel` enum is not this phase's job; the caller's string is
- * forwarded as-is).
+ * Best-effort `setThinkingLevel()` after `start()` for persistent children.
+ * The same cached effort is reapplied after a dormant resume, independently
+ * of whether a model was selected. Ordinary unsupported values degrade to a
+ * no-op; researchers use strict verification before their prompt.
  */
 async function applyModelEffort(client: RpcClient, modelEffort: string | undefined, strict = false): Promise<void> {
   if (!modelEffort) return;
@@ -2758,8 +2480,8 @@ async function applyModelEffort(client: RpcClient, modelEffort: string | undefin
 /**
  * Pi acknowledges setThinkingLevel even when it clamps to a model-supported
  * level. Researchers therefore read the actual RPC state before their first
- * prompt and on every resume. Simple records adopt the first actual default or
- * clamp; deep records must exactly retain the lead's captured selection.
+ * prompt and on every resume. The initial launch adopts the actual default or
+ * clamp, and every resume requires that frozen selection.
  */
 async function verifyResearchSelection(client: RpcClient, record: RpcAgentRecord, initial: boolean): Promise<void> {
   if (!record.exploreMode || !record.modelBase) {
@@ -2776,8 +2498,8 @@ async function verifyResearchSelection(client: RpcClient, record: RpcAgentRecord
   if (typeof actualEffort !== "string" || !actualEffort) {
     throw new Error("ws-pi-agent: research thinking level is unavailable");
   }
-  if (record.exploreMode === "simple" && initial) {
-    // The small tier may leave effort unset, and Pi may clamp a requested
+  if (initial) {
+    // A selected tier may leave effort unset, and Pi may clamp a requested
     // effort. Persist what the child actually accepted for all later resumes.
     record.modelEffort = actualEffort;
     return;
@@ -2811,8 +2533,8 @@ export function reserveAgentAlias(
   if (!alias) return { ok: true };
   for (const holder of registry.values()) {
     if (holder.alias !== alias) continue;
-    if (holder.running || holder.threadBound) {
-      const state = holder.running ? "running" : "threadBound";
+    if (holder.running || holder.streaming || holder.threadBound || isOwnerHeld(holder) || hasPendingTerminalDelivery(holder) || holder.waitingOnChildren) {
+      const state = holder.running ? "running" : holder.threadBound ? "threadBound" : "held/outstanding";
       return {
         ok: false,
         error: `ws-pi-agent: ws-agent-spawn rejected: alias "${alias}" is held by agent ${holder.agentId}, which is ${state}`,
@@ -2834,7 +2556,8 @@ export function reserveAgentAlias(
  */
 export function lastActivityAt(record: RpcAgentRecord): number {
   const lastReportActivity = record.reportLog.at(-1)?.at ?? (record.lastReportAtOverride ? Date.parse(record.lastReportAtOverride) : 0);
-  return Math.max(record.lastLeadPromptAt ?? 0, lastReportActivity);
+  const lastOwnerActivity = record.ownerSends?.at(-1)?.at ?? 0;
+  return Math.max(record.lastLeadPromptAt ?? 0, lastReportActivity, lastOwnerActivity);
 }
 
 /**
@@ -2842,19 +2565,25 @@ export function lastActivityAt(record: RpcAgentRecord): number {
  * guard clauses. While the registry is at or over `cap`, evicts the dormant
  * (`!record.client`), non-`running`, non-`threadBound` record with the
  * oldest last-activity stamp (`lastActivityAt`, above) until the new spawn
- * fits. Never evicts a `running`/`threadBound` record — when none remain to
- * evict, the spawn fails outright rather than silently exceeding the cap.
- * Only forgets the registry entry (never touches the evicted agent's
- * on-disk session file). Exported for direct unit coverage without a real
- * `RpcClient`.
+ * fits. Never evicts a live or protected record. An owned record is also
+ * eligible only when durable metadata independently confirms it stopped;
+ * missing or ambiguous metadata blocks both memory and disk eviction. Legacy
+ * records retain registry-only eviction because their paths do not authorize
+ * disk deletion. A deletion failure retains the registry record and rejects
+ * the spawn so a later retention pass cannot fold the same cost a second time.
  */
-export function evictForCapacity(registry: RpcAgentRegistry, cap: number): { ok: true; evictedLabel?: string } | { ok: false; error: string } {
+export function evictForCapacity(
+  registry: RpcAgentRegistry,
+  cap: number,
+  removeOwned: typeof removeOwnedAgentHome = removeOwnedAgentHome,
+): { ok: true; evictedLabel?: string } | { ok: false; error: string } {
   const evictedLabels: string[] = [];
   while (registry.size >= cap) {
     let candidate: RpcAgentRecord | undefined;
     let candidateActivity = Number.POSITIVE_INFINITY;
     for (const record of registry.values()) {
-      if (record.client || record.running || record.threadBound) continue;
+      if (record.client || record.running || record.streaming || record.threadBound || isOwnerHeld(record) || record.pendingApproval || hasPendingTerminalDelivery(record) || record.waitingOnChildren) continue;
+      if (record.ownership && inspectOwnedHomeRemoval(record.ownership).status !== "eligible") continue;
       const activity = lastActivityAt(record);
       if (activity < candidateActivity) {
         candidate = record;
@@ -2864,8 +2593,27 @@ export function evictForCapacity(registry: RpcAgentRegistry, cap: number): { ok:
     if (!candidate) {
       return {
         ok: false,
-        error: `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) reached and every remaining record is running/threadBound — nothing can be evicted to fit`,
+        error: `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) reached and every remaining record is live, protected, or durably unknown — nothing can be evicted to fit`,
       };
+    }
+    if (candidate.ownership) {
+      const removal = removeOwned(candidate.ownership);
+      if (removal.status !== "deleted") {
+        return {
+          ok: false,
+          error: removal.status === "failed"
+            ? "ws-pi-agent: ws-agent-spawn rejected: owned-home removal failed; the existing agent was retained for safety"
+            : `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) candidate became protected or durably unknown before eviction`,
+        };
+      }
+    }
+    if (!persistEvictedAgentCost(registry, candidate)) {
+      // The owned home may already be gone, but the in-memory record and its
+      // cached telemetry remain retryable. Treat it as unowned on the retry.
+      candidate.ownershipObserverStop?.();
+      candidate.ownershipObserverStop = undefined;
+      candidate.ownership = undefined;
+      return { ok: false, error: `ws-pi-agent: ws-agent-spawn rejected: could not preserve evicted cost telemetry for ${candidate.agentId}` };
     }
     candidate.ownershipObserverStop?.();
     registry.delete(candidate.agentId);
@@ -2919,14 +2667,14 @@ export function nextGeneratedAlias(registry: RpcAgentRegistry, prefix: string): 
  * `playbook.render` call itself (D-A): the caller (the lead) renders the
  * playbook and passes the resulting path directly as `systemPromptPath`.
  *
- * `modelBase` resolves `model_name`-first through `config.resolve_agent`
- * (`resolveModelForAliasViaWsMcp`), falling back to `ctx.inheritModel`
- * unchanged when `model_name` is unset or resolves to a non-genuine `pi`
- * answer. A config-resolved `effort` is folded into `record.modelEffort` via
- * `effectiveModelEffort` — an explicit, non-empty caller `params.modelEffort`
- * always wins. `record.modelEffort` is then the single value both the
- * spawn-time and dormant-resume `applyModelEffort` calls apply — neither
- * re-reads `params.modelEffort` directly.
+ * `modelBase` resolves a tier-shaped `model_name` through
+ * `config.resolve_agent`, validates a concrete provider/id directly against
+ * the live Pi catalog/auth state, or uses `ctx.inheritModel` when omitted.
+ * Invalid concrete IDs and rejected tier answers fail before allocation. A
+ * config-resolved effort is folded into `record.modelEffort`; explicit levels
+ * win, while `"default"` retains source-specific defaults. `record.modelEffort`
+ * is then the single value both the spawn-time and dormant-resume
+ * `applyModelEffort` calls apply.
  *
  * Returns as soon as `client.prompt()` has sent the initial message — that
  * call only awaits transmission, not full-run completion (docs/rpc.md) — so
@@ -2955,17 +2703,86 @@ export function nextGeneratedAlias(registry: RpcAgentRegistry, prefix: string): 
  * side effects (`mkdtempSync`, `randomUUID`, `registry.set`) run, so a
  * rejected spawn leaves no trace and no other record touched.
  */
+export function callerDelegationPolicy(wsToolNames: readonly string[]): DelegationPolicy {
+  const carried = readDelegationPolicy();
+  if (carried) return carried;
+  // Legacy spawned sessions predate the envelope. They never gain the root exception.
+  return { version: 1, depth: readSpawnRole(process.env) ? 1 : 0, maxDepth: DEFAULT_MAX_AGENT_DEPTH,
+    authority: "lead", tools: resolveTools("full-worker", wsToolNames).split(",") };
+}
+
+function requestedWriteCapability(tools: string[], writeScopes: readonly WriteScope[] | undefined): {
+  tools: string[];
+  write: EffectiveWriteCapability;
+  diagnostic?: WriteScopeDiagnostic;
+} {
+  const naturallyUnrestricted = tools.includes("edit") && tools.includes("write");
+  if (writeScopes === undefined) {
+    return { tools, write: naturallyUnrestricted ? { mode: "unrestricted" } : { mode: "none" } };
+  }
+  const write = normalizeWriteScopes(writeScopes);
+  if (naturallyUnrestricted) {
+    return {
+      tools,
+      write: { mode: "unrestricted" },
+      diagnostic: { status: "ignored", reason: "child already has unrestricted native edit/write authority" },
+    };
+  }
+  return { tools: [...new Set([...tools, "edit", "write"])], write, diagnostic: { status: "bound", count: write.mode === "scoped" ? write.scopes.length : 0 } };
+}
+
+function resolveSpawnAdmission(ctx: RpcSpawnCtx, writeScopes?: readonly WriteScope[]): { policy: DelegationPolicy; diagnostic?: WriteScopeDiagnostic } {
+  const parent = ctx.parentPolicy ?? callerDelegationPolicy(ctx.wsToolNames);
+  const fork = ctx.spawnRole === "fork" || !!ctx.forkFrom;
+  if (fork && parent.depth !== 0) throw new Error("ws-pi-agent: only the root lead may fork");
+  const profile = ctx.provenance ?? ctx.profile;
+  if (parent.depth > 0 && !profile && ctx.spawnRole !== "explore" && ctx.toolGroup !== "execute-worker") throw new Error("ws-pi-agent: nested spawn requires trusted render provenance");
+  const group = resolveSpawnToolGroup(ctx.toolGroup);
+  if (profile?.reviewArtifact && (writeScopes?.length !== 1 || writeScopes[0]?.kind !== "file")) {
+    throw new Error("ws-pi-agent: code reviewer requires exactly one file write scope");
+  }
+  const baseTools = profile?.readOnly
+    ? [...READ_TOOLS, REPORT_TO_LEAD_TOOL_NAME, ...CHILD_MANAGEMENT_TOOLS, ...readOnlyWsTools(ctx.wsToolNames)]
+    : (ctx.explicitTools ?? resolveTools(group, ctx.wsToolNames)).split(",");
+  if (ctx.spawnRole === "explore") baseTools.push(...NETWORK_TOOLS);
+  const binding = requestedWriteCapability(baseTools, writeScopes);
+  const network = ctx.spawnRole === "explore" ? { search: true, fetch: true }
+    : !profile?.readOnly && (group === "full-worker" || group === "execute-worker")
+      ? parent.depth === 0 ? { search: true, fetch: true } : parent.network
+      : undefined;
+  const authority = profile?.authority ?? (ctx.spawnRole === "explore" || group === "execute-worker" ? "leaf" : "lead");
+  const policy = childPolicy(parent, binding.tools, authority, profile?.requiresChildren, ctx.provenance?.sessionKey, network, binding.write);
+  // A lateral fork's curated active names are not its execution ceiling: the
+  // lead shell fallback and worker bash have equivalent native authority.
+  if (fork) policy.tools = [...new Set([...policy.tools, GATED_EXEC_TOOL_NAME, ...resolveTools("full-worker", ctx.wsToolNames).split(",")])];
+  return { policy, diagnostic: binding.diagnostic };
+}
+
+export function spawnAdmission(ctx: RpcSpawnCtx, writeScopes?: readonly WriteScope[]): DelegationPolicy {
+  return resolveSpawnAdmission(ctx, writeScopes).policy;
+}
+
+const WORKER_LIFECYCLE_GUIDE = `\n\n## Persistent delegation\nChild results return to this session, not directly to your caller. End your turn while children work; the adapter keeps the subtree outstanding and wakes you on their settled output. Continue the same child with ws-agent-send when its output is insufficient. After every descendant has settled and you have synthesized their results, end with the final-output shape required by your playbook in your ordinary assistant answer. Settlement delivers that answer; ws-report-to-lead is only for progress or a question before settlement.\n\n## Code-review artifacts\nWhen your playbook tells you to spawn a code reviewer with a generated findings path, pass that exact absolute path as the sole \`write_scopes\` file grant. Reviewer admission rejects omission, trees, globs, and multiple paths so the required report cannot silently disappear.\n`;
+
 export async function spawnAgent(
   registry: RpcAgentRegistry,
   ctx: RpcSpawnCtx,
   params: SpawnAgentParams,
-): Promise<{ agent_id: string; alias?: string; evicted?: string }> {
+): Promise<{ agent_id: string; alias?: string; evicted?: string; write_scopes?: WriteScopeDiagnostic }> {
+  const finishDispatch = beginSubtreeDispatch(registry);
+  try {
+  const admission = resolveSpawnAdmission(ctx, params.writeScopes);
+  const delegation = admission.policy;
   // Resolve exactly once before any guard, alias transfer, eviction, UUID, or
-  // session allocation. Exploration's caller-specific policy is fail-closed;
-  // an ordinary spawn now refuses too, but only on a NAMED tier that comes
-  // back `rejected` (unknown/no-auth/unset) — an omitted `model_name` (or a
-  // transport/parse failure, which never sets `rejected`) still inherits.
-  const resolution = await resolveModelForAliasViaWsMcp(ctx.client, params.modelName, ctx.inheritModel, ctx.catalog);
+  // session allocation. Concrete ws-agent-spawn IDs validate locally and fail
+  // closed. Named tiers retain their existing resolution/refusal behavior; an
+  // omitted model_name (or tier transport/parse failure) still inherits.
+  const resolution = await resolveSpawnModel(ctx.client, params.modelName, ctx.inheritModel, ctx.catalog, ctx.allowConcreteModel === true);
+  if (resolution.concreteRejected) {
+    const rejection = formatConcreteModelWarning(resolution.concreteRejected, ctx.catalog.length === 0);
+    ctx.notifyTierWarning?.(rejection);
+    throw new Error(`ws-pi-agent: ws-agent-spawn rejected: ${rejection}`);
+  }
   if (ctx.requireTier && (resolution.source !== "tier" || !resolution.model || resolution.failure || resolution.rejected)) {
     const refusal = formatExploreTierRefusal(params.modelName ?? "small", resolution.failure, resolution.rejected);
     ctx.notifyTierWarning?.(refusal);
@@ -2985,14 +2802,16 @@ export async function spawnAgent(
   // `resolvedEffort` is computed once and reused below (`record.modelEffort`)
   // rather than recomputed, so the pushed line and the stored record can
   // never drift apart.
-  const resolvedEffort = effectiveModelEffort(params.modelEffort, resolution.effort);
+  const resolvedEffort = effectiveModelEffort(params.modelEffort, resolution.effort, resolution.source, ctx.inheritEffort);
   ctx.onModelResolved?.({
-    tier: resolution.source === "tier" ? params.modelName! : "inherit",
+    tier: resolution.source === "tier" ? params.modelName! : resolution.source,
     model: resolution.model,
     effort: resolvedEffort,
     inherited: resolution.source === "inherit",
   });
 
+  if (ctx.spawnRole === "explore") await createWebSearch({ packageRoot: dirname(dirname(ctx.extensionPath)) }).probe();
+  const promptBody = params.systemPromptPath ? readFileSync(params.systemPromptPath, "utf8") : undefined;
   const alias = params.alias ?? (ctx.aliasPrefix ? nextGeneratedAlias(registry, ctx.aliasPrefix) : undefined);
   const eviction = runSpawnGuards(registry, alias, resolveAgentRegistryCap());
   if (!eviction.ok) throw new Error(eviction.error);
@@ -3004,6 +2823,8 @@ export async function spawnAgent(
   const role = ctx.spawnRole ?? (ctx.forkFrom ? "fork" : resolveSpawnToolGroup(ctx.toolGroup) === "execute-worker" ? "execute-worker" : "worker");
   if (!ctx.storage) throw new Error("ws-pi-agent: missing Pi storage context for durable child allocation");
   const ownership = allocateAgentHome(ctx.storage, agentId, role, ctx.exploreMode);
+  ownership.delegation = delegation;
+  updateOwnership(ownership.home, { delegation });
   const sessionPath = ownership.sessionPath!;
   const forkLaunch = ctx.forkFrom || ctx.spawnRole === "fork" ? prepareForkLaunch(ctx.forkContext) : undefined;
   let forkSourcePath = ctx.forkFrom;
@@ -3013,22 +2834,26 @@ export async function spawnAgent(
   }
   const modelBase = resolution.model;
   const toolGroup: ToolGroup = resolveSpawnToolGroup(ctx.toolGroup);
-  const tools = ctx.explicitTools ?? resolveTools(toolGroup, ctx.wsToolNames);
+  const tools = ctx.spawnRole === "fork" || ctx.forkFrom ? ctx.explicitTools ?? delegation.tools.join(",") : delegation.tools.join(",");
+  const subtreeChannel = { path: join(ownership.home, "subtree.json"), nonce: randomUUID() };
+  let promptPath = params.systemPromptPath;
+  if (promptPath && role !== "fork") {
+    promptPath = join(ownership.home, "prompt.md");
+    writeFileSync(promptPath, promptBody + WORKER_LIFECYCLE_GUIDE, { mode: 0o600 });
+  }
   const record: RpcAgentRecord = {
     agentId,
     alias,
     title: params.title,
     sessionPath,
     ownership,
-    systemPromptPath: params.systemPromptPath,
+    systemPromptPath: promptPath,
+    delegation,
+    subtreeChannel,
     modelBase,
-    // Explicit caller effort always wins over the config-resolved one
-    // (effectiveModelEffort's `||` semantics — an empty-string caller value
-    // is treated as absent). This is the single fold point: both the
-    // spawn-time and dormant-resume `applyModelEffort` calls read
-    // `record.modelEffort` back rather than re-deriving it from `params`.
-    // Reuses the SAME `resolvedEffort` already pushed to `onModelResolved`
-    // above rather than recomputing it.
+    // Explicit effort wins; "default" retains the selected source's policy.
+    // This is the single fold point for spawn and dormant resume, and reuses
+    // the same value already published through `onModelResolved`.
     modelEffort: resolvedEffort,
     modelTier: params.modelName,
     modelSource: resolution.source,
@@ -3045,13 +2870,14 @@ export async function spawnAgent(
   };
   registry.set(agentId, record);
   startOwnedSessionObserver(record);
+  if (role === "explore") clearWebReadiness(ownership.home);
 
   const client = new RpcClient(
     buildRpcClientOptions(
       ctx.cwd,
       modelBase,
       sessionPath,
-      params.systemPromptPath,
+      record.systemPromptPath,
       tools,
       forkSourcePath,
       ctx.forkContext?.parentSessionKey ?? ctx.parentSessionKey,
@@ -3059,6 +2885,8 @@ export async function spawnAgent(
       ctx.exploreMode,
       forkLaunch,
       ctx.extensionPath,
+      delegation,
+      subtreeChannel,
     ),
   );
   record.client = client;
@@ -3090,16 +2918,18 @@ export async function spawnAgent(
     // field).
     if (record.spawnRole === "explore") {
       await verifyResearchSelection(client, record, true);
+      verifyWebReadiness(ownership.home, subtreeChannel.nonce);
     } else {
       await applyModelEffort(client, record.modelEffort);
     }
     // Capture the immutable pre-first-prompt boundary after all selection
     // work, before prompt() can append any attributable child turn.
-    try { refreshAgentTelemetry(record, await client.getState(), { fresh: true }); } catch { delete record.observedModel; delete record.observedEffort; if (record.telemetry) { delete record.telemetry.model; delete record.telemetry.effort; } }
+    try { const snapshot = await getAgentRpcSnapshot(client); refreshAgentTelemetry(record, snapshot.state, { fresh: true, stats: snapshot.stats }); } catch { delete record.observedModel; delete record.observedEffort; if (record.telemetry) { delete record.telemetry.model; delete record.telemetry.effort; } }
     if (forkLaunch) await captureForkSelection(client, record);
     attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     attachFirstTaskForkCacheNotice(record, client, ctx.forkCacheNoticeOwner);
     await promptAgent(record, client, params.prompt);
+    publishSubtree(registry, true);
   } catch (err) {
     clearLiveState(record);
     try { await client.stop(); } catch { /* best effort */ }
@@ -3112,7 +2942,9 @@ export async function spawnAgent(
   // 260905 (live-agent widget ticket): a brand-new registry member, live and
   // running from its initial prompt — the widget's first sighting of it.
   triggerAgentWidgetRefresh();
-  return { agent_id: agentId, alias: record.alias, evicted: eviction.evictedLabel };
+  triggerAgentCostRefresh();
+  return { agent_id: agentId, alias: record.alias, evicted: eviction.evictedLabel, ...(admission.diagnostic ? { write_scopes: admission.diagnostic } : {}) };
+  } finally { finishDispatch(); }
 }
 
 /**
@@ -3155,6 +2987,8 @@ export async function sendToAgent(
   message: string,
   interrupt?: boolean,
 ): Promise<{ agent_id: string }> {
+  const finishDispatch = beginSubtreeDispatch(registry);
+  try {
   // 260905 (alias/park/cap ticket): resolve alias-or-uuid through the one
   // shared helper first; an unresolvable input falls back to the original
   // string so the existing "unknown agentId" error path is unchanged.
@@ -3163,6 +2997,20 @@ export async function sendToAgent(
   if (!record) {
     throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
   }
+  const parentPolicy = readDelegationPolicy();
+  if (parentPolicy) {
+    if (!record.delegation) throw new Error("ws-pi-agent: legacy child lacks a resumable capability envelope");
+    const admitted = childPolicy(parentPolicy, record.delegation.tools, record.delegation.authority, false, undefined, record.delegation.network, record.delegation.write);
+    if (admitted.depth !== record.delegation.depth || parentPolicy.maxDepth < record.delegation.maxDepth) throw new Error("ws-pi-agent: recovered child exceeds the current delegation budget");
+  }
+
+  const writer = ctx.writer ?? "lead";
+
+  // Claim activity before mutating a dormant record. If retention already
+  // owns the cross-process deletion claim, this resume fails closed instead
+  // of launching against a home that can disappear mid-start.
+  const ownershipTouched = !record.ownership || touchOwnership(record.ownership.home);
+  if (!record.client && !ownershipTouched) throw new Error("ws-pi-agent: owned session home is unavailable during resume");
 
   // A real new instruction supersedes an in-memory `/done` operation. Its
   // late settle/park callbacks must not affect this replacement work.
@@ -3175,9 +3023,14 @@ export async function sendToAgent(
   // fork-raised-question path). A coordinator closeout is lead-attributed
   // text, but not an external takeover, so it never takes this branch.
   if (ctx.leadSend && !ctx.finishToken && record.threadBound) record.threadBound = false;
-  if (record.ownership) touchOwnership(record.ownership.home);
 
   if (!record.client) {
+    if (record.spawnRole === "explore") {
+      if (!record.delegation?.network?.search || !record.delegation.network.fetch || !record.subtreeChannel) throw new Error("web-search-tool-unavailable: legacy Explore lacks network authority; start a new researcher");
+      await createWebSearch({ packageRoot: dirname(dirname(ctx.extensionPath)) }).probe();
+      clearWebReadiness(dirname(record.sessionPath));
+    }
+    if (record.subtreeChannel) record.subtreeChannel = { ...record.subtreeChannel, nonce: randomUUID() };
     const forkLaunch = record.spawnRole === "fork" ? prepareForkLaunch(record.forkContext) : undefined;
     // 260904 Phase 1 (side-thread fork): `forkFrom` is deliberately never
     // passed here — a dormant resume (including a stopped fork) always
@@ -3192,13 +3045,15 @@ export async function sendToAgent(
         record.modelBase,
         record.sessionPath,
         record.systemPromptPath,
-        record.explicitTools ?? resolveTools(record.toolGroup, record.wsToolNames),
+        record.explicitTools ?? record.delegation?.tools.join(",") ?? resolveTools(record.toolGroup, record.wsToolNames),
         undefined,
         record.forkContext?.parentSessionKey,
         record.spawnRole === "fork" ? "fork" : record.spawnRole === "explore" ? "explore" : "worker",
         record.exploreMode,
         forkLaunch,
         ctx.extensionPath,
+        record.delegation,
+        record.subtreeChannel,
       ),
     );
     record.client = client;
@@ -3221,10 +3076,11 @@ export async function sendToAgent(
       if (forkLaunch) validateForkReadiness(forkLaunch, record, await client.getState());
       if (record.spawnRole === "explore") {
         await verifyResearchSelection(client, record, false);
+        verifyWebReadiness(dirname(record.sessionPath), record.subtreeChannel?.nonce ?? "");
       } else {
         await applyModelEffort(client, record.modelEffort);
       }
-      try { refreshAgentTelemetry(record, await client.getState()); } catch { delete record.observedModel; delete record.observedEffort; if (record.telemetry) { delete record.telemetry.model; delete record.telemetry.effort; } }
+      try { const snapshot = await getAgentRpcSnapshot(client); refreshAgentTelemetry(record, snapshot.state, { stats: snapshot.stats }); } catch { delete record.observedModel; delete record.observedEffort; if (record.telemetry) { delete record.telemetry.model; delete record.telemetry.effort; } }
       if (forkLaunch) await captureForkSelection(client, record);
       attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     } catch (err) {
@@ -3241,41 +3097,53 @@ export async function sendToAgent(
     } finally {
       if (forkLaunch) rmSync(dirname(forkLaunch.contextPath), { recursive: true, force: true });
     }
-    // Role wiring that needs a live client (a revived fork's anti-bleed loop —
-    // see `RpcAgentRecord.onResume`). Best effort: a wiring failure must not
+    // Role wiring that needs a live client (see `RpcAgentRecord.onResume`).
+    // Best effort: a wiring failure must not
     // turn a routine resume into a failed send.
     try {
       record.onResume?.(record);
     } catch {
       // ignored — see above.
     }
-    await promptAgent(record, client, message);
+    await promptAgent(record, client, message, { writer });
+    publishSubtree(registry, true);
     return { agent_id: record.agentId };
   }
 
   const live = record.client;
+  const dispatchSequence = issueDispatch(record);
+  let writerStamp: ReturnType<typeof stampWriter> | undefined;
   try {
     if (record.streaming) {
-      if (interrupt) {
-        await live.steer(message);
-      } else {
-        await live.followUp(message);
+      writerStamp = stampWriter(record, writer, writer === "owner" ? message : undefined, writer === "lead" ? Date.now() : undefined);
+      const queuedBoundary = { message };
+      (record.pendingQueuedWork ??= []).push(queuedBoundary);
+      try {
+        if (interrupt) {
+          await live.steer(message);
+        } else {
+          await live.followUp(message);
+        }
+      } catch (error) {
+        const index = record.pendingQueuedWork?.indexOf(queuedBoundary) ?? -1;
+        if (index >= 0) record.pendingQueuedWork!.splice(index, 1);
+        if (record.pendingQueuedWork?.length === 0) record.pendingQueuedWork = undefined;
+        throw error;
       }
-      // A steer/followUp joins the run already in flight, so the child is
-      // outstanding again from the lead's point of view even though no fresh
-      // prompt was issued — including for `terminalThisTurn` (review relay #1,
-      // minor): new work was just dispatched, so a `final` filed before it no
-      // longer keeps the child out of N.
+      acceptWriter(record, writerStamp);
+      writerStamp = undefined;
+      // Queue admission keeps the child outstanding, but the work generation
+      // changes only when Pi emits the queued user message_start. Until that
+      // boundary, assistant events still belong to the preceding turn.
       record.running = true;
-      record.terminalThisTurn = false;
-      // Mirror `promptAgent`: a final stashed before this instruction answers
-      // the task being replaced, not the one just dispatched — a later settle
-      // must not flush it as the reply to the new message.
       clearTerminalFacts(record);
     } else {
-      await promptAgent(record, live, message);
+      await promptAgent(record, live, message, { writer });
     }
+    acceptDispatch(record, dispatchSequence);
   } catch (err) {
+    const superseded = wasSupersededByAcceptedDispatch(record, dispatchSequence);
+    if (writerStamp) rollbackWriter(record, writerStamp);
     // A superseded closeout is no longer allowed to mutate or publish against
     // the replacement task. Its old RPC rejection is deliberately ignored by
     // lifecycle bookkeeping; the replacement owns the record now.
@@ -3285,33 +3153,62 @@ export async function sendToAgent(
     // has exited) — treat it exactly like a failed liveness probe so the lead
     // is told rather than left counting a dead agent, then re-throw so the
     // caller still sees the failure.
-    markAgentExited(ctx.pi, registry, record, {
+    if (!superseded) markAgentExited(ctx.pi, registry, record, {
       // A coordinator-owned closeout chooses its own one advisory terminal;
       // do not let the generic exited path admit a competing terminal event.
       suppressTerminal: ctx.finishToken !== undefined,
     });
     throw err;
   }
+  publishSubtree(registry, true);
   return { agent_id: record.agentId };
+  } finally { finishDispatch(); }
 }
 
 /**
- * The agent's last assistant text, refreshed over RPC when the child is still
- * live and falling back to the cached `lastText` otherwise. This is the
- * former `ws-agent-wait` `reason:"idle"` payload, reused verbatim as the
- * `last_message` field of the `ws-agent-settled` push.
+ * Read the agent's ordinary assistant answer at settlement without borrowing
+ * from an earlier generation. `getLastAssistantText()` remains the native RPC
+ * read, while the current generation's assistant `message_end` is the proof
+ * that the returned transcript tail belongs to this turn. When the RPC skips
+ * an empty/aborted message or disagrees with that event, preserve the event's
+ * exact text; when no current assistant event exists, report missing output.
  */
+function messageText(message: unknown, role: "assistant" | "user"): string | undefined {
+  if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== role) return undefined;
+  const content = (message as { content?: unknown }).content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.flatMap((part) => part && typeof part === "object" && (part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string"
+    ? [(part as { text: string }).text]
+    : []).join("");
+}
+
+function observeQueuedWorkBoundary(record: RpcAgentRecord, message: unknown): void {
+  if (messageText(message, "user") === undefined || !record.pendingQueuedWork?.length) return;
+  // Pi can expand a queued skill/template before emitting its user message, so
+  // text equality is not a stable identity. User queue consumption is the
+  // actual FIFO boundary; steering may overtake follow-ups, but either accepted
+  // item starts one successor generation and removes exactly one obligation.
+  record.pendingQueuedWork.shift();
+  if (record.pendingQueuedWork.length === 0) record.pendingQueuedWork = undefined;
+  advanceWorkGeneration(record);
+}
+
+function assistantMessageText(message: unknown): string | undefined {
+  return messageText(message, "assistant");
+}
+
 async function harvestLastMessage(record: RpcAgentRecord): Promise<string | undefined> {
-  if (!record.client) return record.lastText;
-  try {
-    const text = await record.client.getLastAssistantText();
-    if (text !== null && text !== undefined) {
-      record.lastText = text;
-    }
-  } catch {
-    // best effort — fall back to whatever lastText was last cached.
+  const workGeneration = record.workGeneration;
+  const observed = record.lastTextGeneration === workGeneration ? record.lastText : undefined;
+  if (record.lastTextGeneration !== workGeneration) return undefined;
+  if (record.client) {
+    try {
+      const rpcText = await record.client.getLastAssistantText();
+      if (rpcText === observed) return rpcText ?? undefined;
+    } catch { /* the generation-scoped event text remains authoritative */ }
   }
-  return record.lastText;
+  return observed;
 }
 
 /**
@@ -3350,18 +3247,25 @@ async function harvestLastMessage(record: RpcAgentRecord): Promise<string | unde
 export function listAgents(
   registry: RpcAgentRegistry,
   opts?: { includePrompt?: boolean },
-): Array<{ agent_id: string; status: AgentStatus; alias?: string; title?: string; model?: string; last_report_at?: string; prompt?: string }> {
+): Array<{ agent_id: string; status: AgentStatus; alias?: string; title?: string; model?: string; last_report_at?: string; owner_held?: true; prompt?: string }> {
   return [...registry.entries()].map(([agentId, record]) => {
     const lastReport = record.reportLog[record.reportLog.length - 1];
     const lastReportAt = lastReport ? new Date(lastReport.at).toISOString() : record.lastReportAtOverride;
     const model = record.modelBase ? (record.modelEffort ? `${record.modelBase}/${record.modelEffort}` : record.modelBase) : undefined;
     return {
       agent_id: agentId,
-      status: (record.client ? (record.streaming ? "running" : "idle") : "dormant") as AgentStatus,
+      status: record.running || record.streaming
+        ? "running"
+        : record.waitingOnChildren
+          ? "waiting-on-children"
+          : hasPendingTerminalDelivery(record)
+            ? "pending-delivery"
+            : record.client ? "idle" : "dormant",
       ...(record.alias ? { alias: record.alias } : {}),
       ...(record.title ? { title: record.title } : {}),
       ...(model ? { model } : {}),
       ...(lastReportAt ? { last_report_at: lastReportAt } : {}),
+      ...(isOwnerHeld(record) ? { owner_held: true as const } : {}),
       ...(opts?.includePrompt && record.prompt ? { prompt: record.prompt } : {}),
     };
   });
@@ -3388,7 +3292,7 @@ export async function stopAgent(
   registry: RpcAgentRegistry,
   agentId: string,
   pi?: ExtensionAPI,
-  opts?: { silent?: boolean; onStopped?: (success: boolean) => void },
+  opts?: { silent?: boolean; onStopped?: (success: boolean) => void; skipCostCheckpoint?: boolean },
 ): Promise<{ agent_id: string }> {
   // 260905 (alias/park/cap ticket): resolve alias-or-uuid first — see
   // `sendToAgent`'s identical resolve-then-`.get()` shape.
@@ -3398,6 +3302,12 @@ export async function stopAgent(
     throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
   }
   const client = record.client;
+  if (!opts?.silent) {
+    record.waitingOnChildren = false;
+    record.pendingQueuedWork = undefined;
+    advanceWorkGeneration(record);
+    publishSubtree(registry);
+  }
   if (record.ownership) touchOwnership(record.ownership.home);
   if (client) {
     const generation = record.launchGeneration;
@@ -3434,7 +3344,6 @@ export async function stopAgent(
     // record is already synchronously dormant, so this final disk-only read
     // cannot revive a stale client or delay the stop race protection.
     refreshAgentTelemetry(record);
-    if (record.ownership && record.launchGeneration === generation && !record.client) updateOwnership(record.ownership.home, { liveness: { lifecycle: stopped ? "stopped" : "unknown", running: false, observedAt: Date.now() } });
     if (record.ownership && record.launchGeneration === generation && !record.client) observeSessionWrite(record.ownership.home, record.sessionPath);
     // Review relay #1 (I2): a stop is a thread-close path too — the ticket
     // names "lead stop" alongside `/done`/fork final/`ws-withdraw-question`
@@ -3443,19 +3352,28 @@ export async function stopAgent(
     // later `ws-agent-send` revival, where it would silently suppress every
     // settle push for the rest of the session.
     record.threadBound = false;
+    if (record.ownership && record.launchGeneration === generation && !record.client) {
+      updateOwnership(record.ownership.home, { liveness: {
+        lifecycle: stopped ? "stopped" : "unknown", running: false, observedAt: Date.now(),
+        threadBound: false, ownerHeld: isOwnerHeld(record), pendingQuestion: false,
+        waitingOnChildren: record.waitingOnChildren, pendingDelivery: hasPendingTerminalDelivery(record),
+        pendingApprovalCommandId: record.pendingApproval?.cmdId,
+      } });
+    }
     try { opts?.onStopped?.(stopped); } catch { /* internal observer only */ }
-    if (opts?.silent) {
-      // An adapter-internal stop (a thread close, session shutdown) is not a
-      // lead-facing event at all, so an un-pushed final dies with it rather
-      // than arriving out of nowhere.
-      record.pendingFinal = undefined;
-    } else if (!flushPendingFinal(pi, registry, record, "stopped")) {
+    if (!opts?.silent && !(record.delegation && readDelegationPolicy())) {
+      // A delegated owner invoked this stop in its current turn, so the tool
+      // result is the disposition. A self-generated follow-up would block
+      // the owner's fresh subtree settlement.
       pushToLead(pi, registry, record, "ws-agent-settled", { reason: "stopped" }, "followUp");
     }
-    // 260905 (live-agent widget ticket): the record just left the live state
-    // (or lost its thread bind) — either way a widget-relevant transition.
+    // The final disk reconciliation above is the accounting boundary: refresh
+    // the in-memory estimate first, then persist its one bounded checkpoint.
     triggerAgentWidgetRefresh();
+    triggerAgentCostRefresh();
+    if (!opts?.skipCostCheckpoint) persistAgentCostCheckpoint(registry);
   }
+  publishSubtree(registry);
   return { agent_id: record.agentId };
 }
 
@@ -3475,7 +3393,9 @@ export function getAgentTranscriptPath(registry: RpcAgentRegistry, agentId: stri
   if (!record) {
     throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
   }
-  if (record.ownership) touchOwnership(record.ownership.home);
+  if (record.ownership && !touchOwnership(record.ownership.home)) {
+    throw new Error("ws-pi-agent: history unavailable — owned session home is busy, gone, or unreadable; retry the reference");
+  }
   if (record.ownership) observeSessionWrite(record.ownership.home, record.sessionPath);
   return { transcript_path: record.sessionPath };
 }
@@ -3484,15 +3404,14 @@ export function getAgentTranscriptPath(registry: RpcAgentRegistry, agentId: stri
 // Pi tool registration.
 // ---------------------------------------------------------------------------
 
+export interface ExploreParams {
+  query: string;
+  mode?: ExploreMode;
+}
+
 export interface AgentToolsHandle {
-  /**
-   * Graceful teardown for `session_shutdown`: awaits a best-effort
-   * `client.stop()` over every live RPC-backed child (renamed from the old
-   * synchronous `killRunning` — the shutdown semantics changed from a fire-
-   * and-forget SIGTERM to an awaited graceful RPC stop), plus a SIGTERM of
-   * any still-running one-shot `explore` process (that machinery is
-   * untouched, so it keeps the old kill style).
-   */
+  /** Graceful teardown for `session_shutdown`: awaits a best-effort
+   * `client.stop()` over every live RPC-backed child. */
   stopAll(): Promise<void>;
   /**
    * 260904 Phase 1: the same RPC-backed registry `ws-agent-*` already reads
@@ -3507,12 +3426,9 @@ export interface AgentToolsHandle {
 /**
  * Registers the six RPC-backed delegation tools (`ws-agent-spawn`,
  * `ws-agent-send`, `ws-agent-list`, `ws-agent-stop`, `ws-agent-transcript`,
- * `ws-report-to-lead`) plus a role-keyed `explore` tool. A lead or fork gets
- * the persistent simple/deep researcher preset in the shared `rpcRegistry`;
- * workers retain their blocking self-reaping recon leaf, while only a deep
- * researcher gets the terminal no-bash collection leaf in `exploreRegistry`.
- * The registries remain separate because persistent researchers settle over
- * RPC and leaves complete on a child-process close event.
+ * `ws-report-to-lead`) plus the persistent `explore` preset. Every dispatcher
+ * registers the same tool; the persisted delegation allowlist removes child
+ * management, including Explore, at terminal depth.
  *
  * Phase 2 adds a child->lead report channel: `ws-report-to-lead` is the only
  * child-side tool this ticket adds (registered here but reachable only from
@@ -3530,12 +3446,8 @@ export interface AgentToolsHandle {
  * probe started here is what turns a child that dies without settling into an
  * `exited` push instead of silence.
  *
- * MVP depth is 0->1 leaf (D-B): none of the `ws-agent-*` tools are
- * themselves part of any `TOOL_GROUPS` entry, so a worker spawned through
- * `ws-agent-spawn` never receives a nested-spawn tool in its own `--tools`
- * allowlist even though its own `pi` process loads this same extension —
- * only the non-recursive `explore` leaf (and now `ws-report-to-lead`, a
- * non-spawning report call) is reachable from a worker.
+ * Child management is available only within the persisted depth/capability
+ * envelope. The tool-call gate enforces the same ceiling after lazy activation.
  */
 export function registerAgentTools(
   pi: ExtensionAPI,
@@ -3548,50 +3460,18 @@ export function registerAgentTools(
    * `ws-execute`-spawned `execute-worker` keeps its approval relay wired even
    * if it is later driven through the generic `ws-agent-*` tools (shared
    * registry, §4). A no-op for every other `toolGroup` — `GATED_EXEC_TOOL_NAME`
-   * is unreachable from `full-worker`/`recon`/`read-only`'s `--tools` lists,
-   * so this callback simply never fires for them.
+   * is unreachable from their `--tools` lists, so this callback never fires.
    */
   onApprovalPending?: (record: RpcAgentRecord) => void,
-  /** Narrow runner seam: worker exploration tests must never execute the test file as a child Pi. */
-  runExploreLeaf: typeof exploreLeaf = exploreLeaf,
   /** Adapter-owned persistent-research guide, wired by index.ts. */
   exploreGuidePath = "explore-guide.md",
   /** Shared ws-owned native/MCP presentation seam. */
   toolPreviewTuiRef: ToolPreviewTuiRef = createToolPreviewTuiRef(),
 ): AgentToolsHandle {
   const rpcRegistry: RpcAgentRegistry = new Map();
-  const exploreRegistry: AgentRegistry = new Map();
+  registerAgentCostOwner(rpcRegistry, sessionCtx.storage);
+  installSubtreePublisher(rpcRegistry, readSubtreeChannel(), () => heldPushQueue.length);
   const stopLivenessProbe = startLivenessProbe(pi, rpcRegistry);
-
-  /**
-   * 260906 (lead explore as an async RPC child): role is fixed for this
-   * process's whole lifetime, so it is read once at factory time rather than
-   * per tool call. `true` for the host lead and a `fork` child — both get the
-   * new RPC-backed preset; every other role (worker, execute-worker, and,
-   * harmlessly, an explore leaf itself, which can never reach this tool per
-   * the depth cap) keeps the blocking `exploreLeaf` behavior unchanged.
-   */
-  const role = readSpawnRole(process.env);
-  const exploreMode = readExploreMode(process.env);
-  const isLeadRole = isLeadOrFork(role);
-
-  /**
-   * IO wrapper around `resolveModelForAliasViaWsMcp` for `explore`'s implicit
-   * `"small"` lookup: re-resolves through `config.resolve_agent` fresh on
-   * every call (no caching) so a `config.tune agents.tier harness:pi` edit
-   * applies without restarting Pi, matching bridge.ts's advisory's
-   * no-caching choice.
-   */
-  async function resolveRequiredExploreModel(toolCtx: unknown): Promise<{ model: string; effort?: string }> {
-    const catalog = modelCatalogFromToolCtx(toolCtx);
-    const resolution = await resolveModelForAliasViaWsMcp(bridge.client, "small", inheritModelFromToolCtx(toolCtx), catalog);
-    if (resolution.source !== "tier" || !resolution.model || resolution.failure || resolution.rejected) {
-      const refusal = formatExploreTierRefusal("small", resolution.failure, resolution.rejected);
-      tierWarningNotifierFromToolCtx(toolCtx)?.(refusal);
-      throw new Error(`ws-pi-agent: ${refusal}`);
-    }
-    return { model: resolution.model, effort: resolution.effort };
-  }
 
   /** Cap on the head-truncated query used as a spawned explore's display title. */
   const EXPLORE_TITLE_CAP = 60;
@@ -3603,17 +3483,14 @@ export function registerAgentTools(
   }
 
   function composeExploreTask(query: string, mode: ExploreMode): string {
-    const method = mode === "deep"
-      ? "Use deep research: inspect directly, and delegate one scoped evidence collection only when it adds value; synthesize the result yourself."
-      : "Use simple research: inspect the available evidence directly and return an evidence-backed answer.";
-    return `${method}\n\nQuestion:\n${query}`;
+    return `Intent mode: ${mode}\n\nQuestion:\n${query}`;
   }
 
   registerWsTool(pi, {
     name: "ws-agent-spawn",
     label: "ws-agent-spawn",
     description:
-      "Spawn a persistent RPC-backed pi subagent from an already-rendered system-prompt file (e.g. via ws/playbook.render). Returns {agent_id, alias?, evicted?} immediately after the initial prompt is sent. A named model_name that config.resolve_agent rejects (unknown/no-auth/not configured for harness pi) throws instead of spawning on an inherited model — leave model_name unset to inherit the parent session's model on purpose. Do not wait for it: end your turn, and its reports, questions and completion arrive on their own as ws-agent-* messages carrying a running-count status line.",
+      "Spawn a persistent RPC-backed pi subagent from an already-rendered system-prompt file (e.g. via ws/playbook.render). Returns {agent_id, alias?, evicted?, write_scopes?} immediately after the initial prompt is sent. model_name accepts a configured tier alias or concrete Pi model ID; either is catalog/auth validated before allocation, while omission inherits the parent model. write_scopes grants bounded native edit/write authority to an otherwise restricted child; it never confines a child that already has unrestricted native edit/write. Do not wait for it: end your turn, and its reports, questions and completion arrive on their own as ws-agent-* messages carrying a running-count status line.",
     parameters: {
       type: "object",
       properties: {
@@ -3625,21 +3502,36 @@ export function registerAgentTools(
         model_name: {
           type: "string",
           description:
-            "Optional tier name (small|medium|large|xlarge) resolved against harness pi's config.tune agents.tier entries (see lead-tune/config.list); omitted or unmapped inherits the parent session's model.",
+            "Optional tier alias (small|medium|large|xlarge) resolved against harness pi agents.tier config, or a concrete Pi model ID (provider/id) validated with configured auth. Invalid named selections fail; omit to inherit the parent model.",
         },
         model_effort: {
           type: "string",
           description:
-            "Optional Pi thinking level (off|minimal|low|medium|high|xhigh|max), applied via setThinkingLevel after start; an unsupported value degrades to a no-op.",
+            "Optional Pi thinking level (off|minimal|low|medium|high|xhigh|max) or default. default applies no caller override: inherit keeps parent effort, tiers keep configured effort, and concrete models use their own default. Unsupported explicit values degrade to a no-op.",
         },
         alias: {
           type: "string",
           description:
-            "Optional short name for this agent, usable in place of agent_id on ws-agent-send/stop/transcript/ws-approve. Reusing an alias held by a running/threadBound agent rejects this spawn; a dormant/idle holder's alias is overwritten (its title is kept). Never derived automatically — omit to address this agent by uuid only.",
+            "Optional short name for this agent, usable in place of agent_id on ws-agent-send/stop/transcript/ws-approve. Reusing an alias held by a running, thread-bound, or owner-held agent rejects this spawn; a dormant/idle holder's alias is overwritten (its title is kept). Never derived automatically — omit to address this agent by uuid only.",
         },
         title: {
           type: "string",
           description: "Optional free-text label for this agent, independent of alias (display only, never used for resolution).",
+        },
+        write_scopes: {
+          type: "array",
+          minItems: 1,
+          description: "Optional exact-file or directory-tree grants, each rooted at an absolute path. Tree include entries are positive root-relative path.posix.matchesGlob patterns. Authorized restricted children receive Pi's native edit/write tools only within these scopes.",
+          items: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "Absolute file path or tree root." },
+              kind: { type: "string", enum: ["file", "tree"] },
+              include: { type: "array", minItems: 1, items: { type: "string" }, description: "Optional positive root-relative glob union for a tree grant." },
+            },
+            required: ["path", "kind"],
+            additionalProperties: false,
+          },
         },
       },
       required: ["system_prompt_path", "prompt"],
@@ -3652,6 +3544,7 @@ export function registerAgentTools(
         model_effort?: string;
         alias?: string;
         title?: string;
+        write_scopes?: WriteScope[];
       };
       let resolvedInfo: ResolvedModelInfo | undefined;
       const result = await spawnAgent(
@@ -3661,11 +3554,17 @@ export function registerAgentTools(
           cwd: sessionCtx.cwd,
           storage: sessionCtx.storage ?? storageContextFromToolCtx(toolCtx),
           inheritModel: inheritModelFromToolCtx(toolCtx),
+          inheritEffort: typeof (toolCtx as { thinkingLevel?: unknown }).thinkingLevel === "string"
+            ? (toolCtx as { thinkingLevel: string }).thinkingLevel
+            : undefined,
           catalog: modelCatalogFromToolCtx(toolCtx),
+          allowConcreteModel: true,
           notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx),
           wsToolNames: bridge.wsToolNames,
           extensionPath: sessionCtx.extensionPath,
           client: bridge.client,
+          provenance: bridge.renderRegistry?.get(p.system_prompt_path),
+          parentPolicy: { ...callerDelegationPolicy(bridge.wsToolNames), sessionKey: bridge.defaultSessionKeyRef.current },
           onApprovalPending,
           onModelResolved: (resolved) => {
             resolvedInfo = resolved;
@@ -3679,6 +3578,7 @@ export function registerAgentTools(
           modelEffort: p.model_effort,
           alias: p.alias,
           title: p.title,
+          writeScopes: p.write_scopes,
         },
       );
       return { content: [{ type: "text", text: JSON.stringify(result) }], details: { resolved: resolvedInfo } };
@@ -3722,7 +3622,7 @@ export function registerAgentTools(
       const record = rpcRegistry.get(result.agent_id);
       const inherited = record?.modelSource === undefined ? true : record.modelSource === "inherit";
       const resolved: ResolvedModelInfo = {
-        tier: inherited ? "inherit" : record?.modelTier ?? "?",
+        tier: inherited ? "inherit" : record?.modelSource === "concrete" ? "concrete" : record?.modelTier ?? "?",
         model: record?.modelBase,
         effort: record?.modelEffort,
         inherited,
@@ -3736,7 +3636,7 @@ export function registerAgentTools(
     name: "ws-agent-list",
     label: "ws-agent-list",
     description:
-      "List every tracked agent_id, its alias/title (when set), status (running/idle/dormant — most agents park to dormant shortly after settling, so idle is transient), model (the model the agent runs on; an inheriting child shows its parent's model), and last_report_at (ISO, absent if it has never reported). Use it to check on a quiet agent — there is no wait tool; every report, question, approval request and completion is pushed to you as a ws-agent-* message on its own.",
+      "List every tracked agent_id, its alias/title (when set), status (running, idle, dormant, waiting-on-children, or pending-delivery), model, last_report_at, and owner_held:true while the owner's last send retains settle ownership. Only running means autonomous execution; settled output is pushed without a wait tool.",
     parameters: {
       type: "object",
       properties: {
@@ -3800,97 +3700,85 @@ export function registerAgentTools(
         message: { type: "string", description: "Status update or intermediate finding to surface to the lead immediately." },
         kind: {
           type: "string",
-          enum: ["question", "final"],
+          enum: ["question"],
           description:
-            "Optional disambiguation for a task-thread fork's turn-end (ws-fork): \"question\" ends your turn awaiting the lead's input; \"final\" marks the task fully complete, using the required Outcome/Files changed/Verification/Blockers/Commit/Decisions report shape. Omit for a normal full-worker/execute-worker progress update.",
+            "Optional disambiguation for a question that needs the lead's input. Omit for a normal progress update; final output is the ordinary assistant answer delivered when the agent settles.",
         },
       },
       required: ["message"],
     } as never,
     async execute() {
-      // No-op ack: the relay to the parent already happens via the existing
-      // RpcClient.onEvent() stream (Pi emits tool_execution_start the instant
-      // the LLM dispatches this call, forwarded verbatim to the parent's
-      // applyRpcEvent, which pushes it into the lead's session) — see that
-      // function's doc comment for the full trace. This execute() body does
-      // not touch the registry.
       return { content: [{ type: "text", text: "reported" }] };
     },
   }, toolPreviewTuiRef);
 
-  // Tool registration is role/mode gated, while the CLI allowlist remains the
-  // enforcement layer. A simple researcher and a terminal collector get no
-  // explore tool at all; only workers and deep researchers can collect.
-  if (isLeadRole || role === "worker" || (role === "explore" && exploreMode === "deep")) {
-    registerWsTool(pi, {
-      name: "explore",
-      label: "explore",
-      description: isLeadRole
-        ? "Spawn a persistent exploration researcher. explore({query, deep_research?}) returns exactly {agent_id, alias}; simple uses configured small, while deep freezes your current model and thinking level and may request one cheap read-only collection."
-        : "Run one blocking, scoped evidence collection. This terminal leaf cannot delegate or use bash.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "Exploration question." },
-          ...(isLeadRole ? { deep_research: { type: "boolean", description: "Use the dispatcher's current model and thinking level; optional cheap collection is allowed." } } : {}),
+  registerWsTool(pi, {
+    name: "explore",
+    label: "explore",
+    description:
+      "Spawn a persistent exploration researcher. It returns exactly {agent_id, alias}; use ws-agent-send to continue the same child. Select mode by evidence intent, not importance: code-search traces bounded code/tests while diagnosis connects evidence into a cause; comparison evaluates alternatives while synthesis reconciles conflicting or architecture-level evidence.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Exploration question." },
+        mode: {
+          type: "string",
+          enum: Object.keys(EXPLORE_MODE_TIERS),
+          description:
+            "Intent mode; defaults to code-search. lookup locates one known fact; code-search traces bounded repository code/tests; history-search traces Git, tickets, or decisions; docs-search inspects local or installed documentation; web-search collects current external evidence; diagnosis connects code/tests/logs/runtime observations into a cause; comparison evaluates alternatives against evidence; synthesis reconciles conflicting evidence or produces a cross-source architecture conclusion.",
         },
-        required: ["query"],
-      } as never,
-      async execute(_toolCallId, params, _signal, onUpdate, toolCtx) {
-        const p = params as ExploreParams & { deep_research?: boolean };
-        if (isLeadRole) {
-          const mode: ExploreMode = p.deep_research === true ? "deep" : "simple";
-          // Pi's current model/effort are captured as one snapshot before any
-          // await, so later parent retuning cannot affect this researcher.
-          const inherited = inheritModelFromToolCtx(toolCtx);
-          const effort = (toolCtx as { thinkingLevel?: unknown }).thinkingLevel;
-          if (mode === "deep" && (!inherited || typeof effort !== "string")) {
-            throw new Error("ws-pi-agent: deep explore requires a concrete current model and thinking level");
-          }
-          let resolvedInfo: ResolvedModelInfo | undefined;
-          const result = await spawnAgent(
-            rpcRegistry,
-            {
-              pi, cwd: sessionCtx.cwd, storage: sessionCtx.storage ?? storageContextFromToolCtx(toolCtx), inheritModel: mode === "deep" ? inherited : inheritModelFromToolCtx(toolCtx),
-              catalog: mode === "simple" ? modelCatalogFromToolCtx(toolCtx) : [],
-              notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx), wsToolNames: bridge.wsToolNames, extensionPath: sessionCtx.extensionPath, client: bridge.client,
-              toolGroup: mode === "deep" ? "read-only-explore" : "read-only", spawnRole: "explore", exploreMode: mode,
-              requireTier: mode === "simple", aliasPrefix: "explore", onApprovalPending,
-              onModelResolved: (resolved) => {
-                resolvedInfo = resolved;
-                onUpdate?.({ content: [], details: { resolved } });
-              },
-            },
-            {
-              systemPromptPath: exploreGuidePath,
-              prompt: composeExploreTask(p.query, mode),
-              modelName: mode === "simple" ? "small" : undefined,
-              modelEffort: mode === "deep" ? effort as string | undefined : undefined,
-              title: deriveExploreTitle(p.query),
-            },
-          );
-          return {
-            content: [{ type: "text", text: JSON.stringify({ agent_id: result.agent_id, alias: result.alias }) }],
-            details: { resolved: resolvedInfo },
-          };
-        }
-        // Worker-leaf branch never calls `spawnAgent` — `resolveRequiredExploreModel`
-        // always succeeds with a genuine tier hit (throws otherwise, `requireTier`
-        // semantics), so this line is always a non-inherited "small" hit. Published
-        // independently of the `spawnAgent`-based `onModelResolved` plumbing above.
-        const resolved = await resolveRequiredExploreModel(toolCtx);
-        const resolvedInfo: ResolvedModelInfo = { tier: "small", model: resolved.model, effort: resolved.effort, inherited: false };
-        onUpdate?.({ content: [], details: { resolved: resolvedInfo } });
-        const result = await runExploreLeaf(
-          bridge.client, exploreRegistry,
-          { sessionKey: bridge.defaultSessionKeyRef.current ?? "", cwd: sessionCtx.cwd, model: resolved.model },
-          { query: p.query }, { profile: role === "explore" && exploreMode === "deep" ? "read-only" : "recon", effort: resolved.effort },
-        );
-        return { content: [{ type: "text", text: JSON.stringify(result) }], details: { resolved: resolvedInfo } };
       },
-      ...createDispatchToolPreview(toolPreviewTuiRef, "explore", buildExploreSummary),
-    }, toolPreviewTuiRef);
-  }
+      required: ["query"],
+      additionalProperties: false,
+    } as never,
+    async execute(_toolCallId, params, _signal, onUpdate, toolCtx) {
+      const raw = params as Record<string, unknown>;
+      if (Object.keys(raw).some((key) => key !== "query" && key !== "mode")) {
+        throw new Error("ws-pi-agent: invalid explore arguments");
+      }
+      const p = params as ExploreParams;
+      const mode = p.mode ?? "code-search";
+      const tier = EXPLORE_MODE_TIERS[mode];
+      if (!tier) throw new Error(`ws-pi-agent: unknown explore mode: ${String(p.mode)}`);
+      let resolvedInfo: ResolvedModelInfo | undefined;
+      const result = await spawnAgent(
+        rpcRegistry,
+        {
+          pi,
+          cwd: sessionCtx.cwd,
+          storage: sessionCtx.storage ?? storageContextFromToolCtx(toolCtx),
+          inheritModel: inheritModelFromToolCtx(toolCtx),
+          catalog: modelCatalogFromToolCtx(toolCtx),
+          notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx),
+          wsToolNames: bridge.wsToolNames,
+          extensionPath: sessionCtx.extensionPath,
+          client: bridge.client,
+          toolGroup: "read-only-explore",
+          spawnRole: "explore",
+          exploreMode: mode,
+          parentPolicy: { ...callerDelegationPolicy(bridge.wsToolNames), sessionKey: bridge.defaultSessionKeyRef.current },
+          requireTier: true,
+          aliasPrefix: "explore",
+          onApprovalPending,
+          onModelResolved: (resolved) => {
+            resolvedInfo = resolved;
+            onUpdate?.({ content: [], details: { resolved } });
+          },
+        },
+        {
+          systemPromptPath: exploreGuidePath,
+          prompt: composeExploreTask(p.query, mode),
+          modelName: tier,
+          title: deriveExploreTitle(p.query),
+        },
+      );
+      return {
+        content: [{ type: "text", text: JSON.stringify({ agent_id: result.agent_id, alias: result.alias }) }],
+        details: { resolved: resolvedInfo },
+      };
+    },
+    ...createDispatchToolPreview(toolPreviewTuiRef, "explore", buildExploreSummary),
+  }, toolPreviewTuiRef);
 
   return {
     rpcRegistry,
@@ -3902,18 +3790,8 @@ export function registerAgentTools(
       // stopAgent so shutdown leaves records in the same resting shape every
       // other stop does (the sidecar snapshot, index.ts, is taken BEFORE this
       // runs, while the records are still marked live).
-      const rpcStops = [...rpcRegistry.keys()].map((agentId) => stopAgent(rpcRegistry, agentId, pi, { silent: true }).catch(() => undefined));
+      const rpcStops = [...rpcRegistry.keys()].map((agentId) => stopAgent(rpcRegistry, agentId, pi, { silent: true, skipCostCheckpoint: true }).catch(() => undefined));
       await Promise.allSettled(rpcStops);
-
-      for (const record of exploreRegistry.values()) {
-        if (record.state === "running" && record.proc && !record.proc.killed) {
-          try {
-            record.proc.kill();
-          } catch {
-            // best effort
-          }
-        }
-      }
     },
   };
 }

@@ -563,6 +563,31 @@ describe("ConversationViewComponent — /done, Esc, and submit routing", () => {
     assert.deepEqual(channel.sent, ["ping"]);
   });
 
+  test("a rejected asynchronous send is consumed, reported, and marked in the conversation", async () => {
+    const editor = new FakeEditor();
+    const errors: Array<{ error: unknown; text: string }> = [];
+    const view = new ConversationViewComponent(fakeTui(), {
+      channel: {
+        onEvent: () => () => {},
+        liveness: () => "settled",
+        send: async () => { throw new Error("resume failed"); },
+      },
+      primitives: { Editor: class { constructor() { return editor as never; } } as never },
+      onSendError: (error, text) => errors.push({ error, text }),
+    });
+    view.setMode("interactive");
+    for (const ch of "ping") view.handleInput(ch);
+    view.handleInput("\r");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0]!.text, "ping");
+    assert.match(String(errors[0]!.error), /resume failed/);
+    assert.deepEqual(view.getItems(), [
+      { kind: "user", text: "ping" },
+      { kind: "note", text: "Send failed: resume failed" },
+    ]);
+  });
+
   test("submitting empty/whitespace-only text does nothing", () => {
     const { view, channel } = buildInteractive();
     view.handleInput(" ");

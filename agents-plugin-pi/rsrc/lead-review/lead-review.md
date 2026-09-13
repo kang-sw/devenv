@@ -56,8 +56,14 @@ you resolve the target, adjudicate their findings, and carry the decisions.
 - **NEEDS FIX**: write the findings to
   `{{.McpNamespace}}/path.generate(kind: "review")` and ask: fix locally, or
   post to the contributor. Locally →
-  `{{.SkillNamespace}}:lead-run` with that path as the contract. Contributor
-  → the config's Comment Method, else hand over the path.
+  `{{.SkillNamespace}}:lead-delegate` with the findings path and the reviewed
+  target for a bounded repair. If its routing gate requires a ticket, invoke
+  `{{.SkillNamespace}}:lead-ticket` with those inputs, then
+  `{{.SkillNamespace}}:lead-run` with the ready ticket. After either local
+  repair route completes, invoke `{{.SkillNamespace}}:lead-review` again on
+  the repaired target; for a range, retain the original base and include the
+  repair commits in the head so the findings and range are independently
+  verified. Contributor → the config's Comment Method, else hand over the path.
 - **OPEN**: judgment needed before a fix decision →
   `{{.SkillNamespace}}:lead-discuss` with the findings path.
 

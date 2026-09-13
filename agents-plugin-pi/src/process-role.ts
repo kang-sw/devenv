@@ -6,8 +6,7 @@
  * Subsumes the older `WS_PI_AGENT_CHILD_ENV` marker (spawner.ts,
  * pre-260904): rather than a single boolean "is a child" flag, every spawned
  * child now carries a role value (`"worker"` for the RPC-backed
- * `ws-agent-spawn` path, `"explore"` for a persistent researcher or terminal
- * collection leaf); the host
+ * `ws-agent-spawn` path, `"explore"` for a persistent researcher); the host
  * lead process carries no marker at all (`readSpawnRole` returns `undefined`
  * there). `"fork"` is reserved by this phase for a not-yet-implemented
  * side-thread fork spawn (`260904-feat-ws-pi-side-thread-fork-question-surface`,
@@ -30,15 +29,34 @@ export type SpawnRole = "worker" | "explore" | "fork";
 /** Env var carrying the spawned child's role. Absent on the host lead process. */
 export const WS_PI_SPAWN_ROLE_ENV = "WS_PI_SPAWN_ROLE";
 
-/** Internal exploration preset mode. It is meaningful only for an explore-role process. */
+/** Internal exploration intent. It is meaningful only for an explore-role process. */
 export const WS_PI_EXPLORE_MODE_ENV = "WS_PI_EXPLORE_MODE";
-export type ExploreMode = "simple" | "deep";
+export const EXPLORE_MODE_TIERS = {
+  lookup: "small",
+  "code-search": "small",
+  "history-search": "small",
+  "docs-search": "medium",
+  "web-search": "medium",
+  diagnosis: "medium",
+  comparison: "medium",
+  synthesis: "large",
+} as const;
+export type ExploreMode = keyof typeof EXPLORE_MODE_TIERS;
+export type ExploreTier = (typeof EXPLORE_MODE_TIERS)[ExploreMode];
+
+export function normalizeStoredExploreMode(value: unknown): ExploreMode | undefined {
+  if (typeof value !== "string") return undefined;
+  if (Object.prototype.hasOwnProperty.call(EXPLORE_MODE_TIERS, value)) return value as ExploreMode;
+  if (value === "simple") return "code-search";
+  if (value === "deep") return "synthesis";
+  return undefined;
+}
 
 /** Reads the internal mode only for a correctly marked explore process. */
 export function readExploreMode(env: NodeJS.ProcessEnv): ExploreMode | undefined {
   if (readSpawnRole(env) !== "explore") return undefined;
   const value = env[WS_PI_EXPLORE_MODE_ENV];
-  return value === "simple" || value === "deep" ? value : undefined;
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(EXPLORE_MODE_TIERS, value) ? value as ExploreMode : undefined;
 }
 
 /**

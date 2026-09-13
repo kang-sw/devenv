@@ -10,7 +10,7 @@
  * tool and `session_before_compact` listener) is covered by the live
  * `pi --mode json` gate (see the 260903 Phase 1/2 plans' Verification Plans),
  * not by this unit suite. The companion env-marker-placement coverage
- * (`buildRpcClientOptions`/`buildChildProcessEnv`) lives in
+ * (`buildRpcClientOptions`) lives in
  * `test/spawner.test.ts`.
  *
  * Phase 2 (260903) note: `decideOnSettle`'s `"reinject"` decision now carries
@@ -35,6 +35,7 @@ import {
   resolveCompactionAdvisoryPercent,
   resolveContextWindowOverride,
   resolveSettleDelayMs,
+  resolveChildRetentionTtlDays,
   computeContextPercent,
   buildGoalAnnouncement,
   buildCompactionLeverResult,
@@ -50,10 +51,12 @@ import {
   DEFAULT_RUNAWAY_THRESHOLD,
   DEFAULT_COMPACTION_ADVISORY_PERCENT,
   DEFAULT_SETTLE_DELAY_MS,
+  DEFAULT_CHILD_RETENTION_TTL_DAYS,
   type GoalLoopConfig,
 } from "../src/goal-loop.ts";
 import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 import { flushHeldPushes, leadIdleRef, clearWakeStart, leadCompactingRef, leadWakeStartPendingRef, heldPushQueue, isOwningAgentIdle, type RpcAgentRegistry } from "../src/spawner.ts";
+import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 
 const tmpDir = mkdtempSync(join(tmpdir(), "ws-goal-loop-test-"));
 after(() => {
@@ -136,6 +139,22 @@ describe("resolveRunawayThreshold", () => {
   test("NaN/Infinity fall back to the default", () => {
     assert.equal(resolveRunawayThreshold({ runaway_threshold: Number.NaN }), DEFAULT_RUNAWAY_THRESHOLD);
     assert.equal(resolveRunawayThreshold({ runaway_threshold: Number.POSITIVE_INFINITY }), DEFAULT_RUNAWAY_THRESHOLD);
+  });
+});
+
+describe("resolveChildRetentionTtlDays", () => {
+  test("defaults invalid or missing values to 30 days", () => {
+    assert.equal(resolveChildRetentionTtlDays(undefined), DEFAULT_CHILD_RETENTION_TTL_DAYS);
+    assert.equal(resolveChildRetentionTtlDays({}), DEFAULT_CHILD_RETENTION_TTL_DAYS);
+    for (const value of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, "30", true, null]) {
+      assert.equal(resolveChildRetentionTtlDays({ child_retention_ttl_days: value as never }), DEFAULT_CHILD_RETENTION_TTL_DAYS);
+    }
+  });
+
+  test("accepts finite positive fractional days and only literal false disables pruning", () => {
+    assert.equal(resolveChildRetentionTtlDays({ child_retention_ttl_days: 0.25 }), 0.25);
+    assert.equal(resolveChildRetentionTtlDays({ child_retention_ttl_days: 45 }), 45);
+    assert.equal(resolveChildRetentionTtlDays({ child_retention_ttl_days: false }), false);
   });
 });
 
@@ -287,7 +306,7 @@ describe("buildCompactionLeverResult", () => {
 });
 
 describe("buildGoalReminder", () => {
-  const info = { percent: 42, advisoryPercent: 70 };
+  const info = { percent: 42, advisoryPercent: 50 };
 
   test("names the goal and all three lever tool names (two terminal, one compact-and-continue)", () => {
     const reminder = buildGoalReminder("ship the widget", info);
@@ -309,22 +328,23 @@ describe("buildGoalReminder", () => {
   });
 
   test("percent below the advisory point explicitly tells the model not to compact", () => {
-    const reminder = buildGoalReminder("a goal", { percent: 42, advisoryPercent: 70 });
-    assert.match(reminder, /Context usage: 42% of window — below the compaction advisory point \(70%\); do not call goal-compact-and-continue\.$/m);
+    const reminder = buildGoalReminder("a goal", { percent: 42, advisoryPercent: 50 });
+    assert.match(reminder, /Context usage: 42% of window — below the compaction advisory point \(50%\); do not call goal-compact-and-continue\.$/m);
   });
 
-  test("percent at the advisory point renders the stronger nudge phrase", () => {
-    const reminder = buildGoalReminder("a goal", { percent: 70, advisoryPercent: 70 });
-    assert.match(reminder, /Context usage: 70% of window — at or above the advisory point/);
+  test("percent at the advisory point prioritizes compact-and-continue for weakly related next work", () => {
+    const reminder = buildGoalReminder("a goal", { percent: 50, advisoryPercent: 50 });
+    assert.match(reminder, /Context usage: 50% of window — at or above the advisory point/);
+    assert.match(reminder, /prioritize goal-compact-and-continue when the next work is weakly related to the current context/);
   });
 
   test("percent above the advisory point renders the stronger nudge phrase", () => {
-    const reminder = buildGoalReminder("a goal", { percent: 85, advisoryPercent: 70 });
+    const reminder = buildGoalReminder("a goal", { percent: 85, advisoryPercent: 50 });
     assert.match(reminder, /Context usage: 85% of window — at or above the advisory point/);
   });
 
   test("null percent renders as unknown, not a crash", () => {
-    const reminder = buildGoalReminder("a goal", { percent: null, advisoryPercent: 70 });
+    const reminder = buildGoalReminder("a goal", { percent: null, advisoryPercent: 50 });
     assert.match(reminder, /Context usage: unknown\./);
   });
 });
@@ -591,15 +611,18 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     fire: () => void;
     cancelled: NodeJS.Timeout[];
     scheduledDelays: number[];
+    scheduledCallbacks: Array<() => void>;
   } {
     let nextId = 1;
     const pending = new Map<number, () => void>();
     const cancelled: NodeJS.Timeout[] = [];
     const scheduledDelays: number[] = [];
+    const scheduledCallbacks: Array<() => void> = [];
     const scheduleTimer = (cb: () => void, ms: number): NodeJS.Timeout => {
       const id = nextId++;
       pending.set(id, cb);
       scheduledDelays.push(ms);
+      scheduledCallbacks.push(cb);
       return id as unknown as NodeJS.Timeout;
     };
     const clearTimer = (handle: NodeJS.Timeout): void => {
@@ -616,7 +639,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       pending.delete(id);
       cb();
     };
-    return { scheduleTimer, clearTimer, pendingCount: () => pending.size, fire, cancelled, scheduledDelays };
+    return { scheduleTimer, clearTimer, pendingCount: () => pending.size, fire, cancelled, scheduledDelays, scheduledCallbacks };
   }
 
   /**
@@ -632,6 +655,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     api: ExtensionAPI;
     handlers: Map<string, (event: unknown, ctx: ExtensionContext) => void>;
     commands: Map<string, (args: string, ctx: ExtensionContext) => Promise<void> | void>;
+    commandDefs: Map<string, { description?: string; getArgumentCompletions?: (prefix: string) => Array<{ value: string; label: string }> | null }>;
     tools: Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>;
     sentUserMessages: Array<{ content: unknown; options?: unknown }>;
     sentMessages: Array<{ content: unknown; options?: unknown }>;
@@ -639,6 +663,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
   } {
     const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => void>();
     const commands = new Map<string, (args: string, ctx: ExtensionContext) => Promise<void> | void>();
+    const commandDefs = new Map<string, { description?: string; getArgumentCompletions?: (prefix: string) => Array<{ value: string; label: string }> | null }>();
     const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
     const sentUserMessages: Array<{ content: unknown; options?: unknown }> = [];
     const sentMessages: Array<{ content: unknown; options?: unknown }> = [];
@@ -647,8 +672,9 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       on: (event: string, handler: (event: unknown, ctx: ExtensionContext) => void) => {
         handlers.set(event, handler);
       },
-      registerCommand: (name: string, def: { handler: (args: string, ctx: ExtensionContext) => Promise<void> | void }) => {
+      registerCommand: (name: string, def: { description?: string; getArgumentCompletions?: (prefix: string) => Array<{ value: string; label: string }> | null; handler: (args: string, ctx: ExtensionContext) => Promise<void> | void }) => {
         commands.set(name, def.handler);
+        commandDefs.set(name, def);
       },
       registerTool: (def: { name: string; execute: (...args: unknown[]) => Promise<unknown> }) => {
         tools.set(def.name, def);
@@ -667,7 +693,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
         }
       },
     };
-    return { api: api as unknown as ExtensionAPI, handlers, commands, tools, sentUserMessages, sentMessages, streaming };
+    return { api: api as unknown as ExtensionAPI, handlers, commands, commandDefs, tools, sentUserMessages, sentMessages, streaming };
   }
 
   /**
@@ -706,6 +732,319 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     assert.equal(parts[1], payload, "raw suffix preserves every character");
   }
 
+  function reminderMarker(content: unknown): string {
+    assert.equal(typeof content, "string");
+    const match = (content as string).match(/<!-- ws-pi-goal-reminder:[^ ]+ -->/);
+    assert.ok(match, "reminder carries an adapter-owned correlation marker");
+    return match[0];
+  }
+
+  function acknowledgeLatestReminder(pi: ReturnType<typeof fakePi>, ctx: ExtensionContext): void {
+    const content = pi.sentUserMessages.at(-1)!.content;
+    reminderMarker(content);
+    pi.handlers.get("message_start")!({ message: { role: "user", content } }, ctx);
+  }
+
+  describe("explicit /goal stop controls (260909)", () => {
+    test("help and completion reserve only stop, clear, and reset while ordinary goal text still arms", async () => {
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath });
+      const { ctx, notifications } = fakeCtx();
+      const def = pi.commandDefs.get("goal")!;
+
+      assert.match(def.description!, /stop.*clear.*reset/i);
+      assert.deepEqual(def.getArgumentCompletions!(""), [
+        { value: "stop", label: "stop" },
+        { value: "clear", label: "clear" },
+        { value: "reset", label: "reset" },
+      ]);
+      assert.deepEqual(def.getArgumentCompletions!("cl"), [{ value: "clear", label: "clear" }]);
+      assert.equal(def.getArgumentCompletions!("ship"), null);
+
+      await pi.commands.get("goal")!("", ctx);
+      assert.match(notifications.at(-1)!.message, /\/goal <goal>.*stop.*clear.*reset/i);
+
+      for (const text of ["stopping", "reset plan", "STOP"]) {
+        await pi.commands.get("goal")!(text, ctx);
+        assert.equal(pi.sentUserMessages.at(-1)!.content, `Goal armed: ${text}`);
+      }
+    });
+
+    test("active-turn replacements queue, apply in FIFO order, and only the resulting goal is reminded", async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      let idle = true;
+      const { ctx, notifications } = fakeCtx(() => idle);
+      await pi.commands.get("goal")!("original", ctx);
+
+      idle = false;
+      await pi.commands.get("goal")!("first replacement", ctx);
+      await pi.commands.get("goal")!("final replacement", ctx);
+      assert.deepEqual(
+        notifications.slice(-2).map(({ message, level }) => ({ message, level })),
+        [
+          { message: "Goal update queued: first replacement", level: "info" },
+          { message: "Goal update queued: final replacement", level: "info" },
+        ],
+      );
+      assert.deepEqual(heldPushQueue.map((entry) => entry.kind), ["goal-replacement", "goal-replacement"]);
+
+      assert.equal(flushHeldPushes(pi.api, true), 2);
+      assert.equal(pi.sentMessages.length, 0, "control-only drainage creates no synthetic model message or turn");
+      assert.deepEqual(
+        notifications.slice(-2).map(({ message, level }) => ({ message, level })),
+        [
+          { message: "Goal update applied: first replacement", level: "info" },
+          { message: "Goal update applied: final replacement", level: "info" },
+        ],
+      );
+
+      idle = true;
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire();
+      assert.match(pi.sentUserMessages.at(-1)!.content as string, /Goal yet running: "final replacement"/);
+      assert.doesNotMatch(pi.sentUserMessages.at(-1)!.content as string, /original|first replacement/);
+    });
+
+    test("terminal control invalidates a queued replacement without rearming the terminated goal", async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      let idle = true;
+      const { ctx, notifications } = fakeCtx(() => idle);
+      await pi.commands.get("goal")!("original", ctx);
+
+      idle = false;
+      await pi.commands.get("goal")!("stale replacement", ctx);
+      await pi.commands.get("goal")!("stop", ctx);
+      assert.equal(flushHeldPushes(pi.api, true), 1);
+      assert.equal(pi.sentMessages.length, 0);
+      assert.deepEqual(notifications.at(-1), {
+        message: 'Goal update failed: "stale replacement" was invalidated by a newer immediate or terminal goal transition.',
+        level: "error",
+      });
+
+      idle = true;
+      pi.handlers.get("agent_settled")!({}, ctx);
+      assert.equal(clock.pendingCount(), 0, "failed stale replacement leaves the terminal goal state disarmed");
+      assert.equal(pi.sentUserMessages.length, 1, "the terminated original goal is never reminded");
+    });
+
+    test("terminal control invalidates older queued replacements while a later replacement uses the new generation", async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      let idle = true;
+      const { ctx, notifications } = fakeCtx(() => idle);
+      await pi.commands.get("goal")!("original", ctx);
+
+      idle = false;
+      await pi.commands.get("goal")!("stale replacement", ctx);
+      await pi.commands.get("goal")!("stop", ctx);
+      await pi.commands.get("goal")!("post-terminal replacement", ctx);
+      assert.equal(flushHeldPushes(pi.api, true), 2);
+      assert.equal(pi.sentMessages.length, 0);
+      assert.deepEqual(
+        notifications.slice(-2).map(({ message, level }) => ({ message, level })),
+        [
+          { message: 'Goal update failed: "stale replacement" was invalidated by a newer immediate or terminal goal transition.', level: "error" },
+          { message: "Goal update applied: post-terminal replacement", level: "info" },
+        ],
+      );
+
+      idle = true;
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire();
+      assert.match(pi.sentUserMessages.at(-1)!.content as string, /Goal yet running: "post-terminal replacement"/);
+      assert.doesNotMatch(pi.sentUserMessages.at(-1)!.content as string, /stale replacement/);
+    });
+
+    for (const alias of ["stop", "clear", "reset"] as const) {
+      test(`${alias} disarms while busy without interrupting work and repeated use is harmless`, async () => {
+        const clock = fakeClock();
+        const pi = fakePi();
+        registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+        let idle = true;
+        const { ctx, notifications, statusCalls } = fakeCtx(() => idle);
+        await pi.commands.get("goal")!("ship", ctx);
+        pi.handlers.get("agent_settled")!({}, ctx);
+        assert.equal(clock.pendingCount(), 1);
+
+        idle = false;
+        await pi.commands.get("goal")!(`  ${alias}  `, ctx);
+        assert.equal(clock.pendingCount(), 0, "stop cancels local goal scheduling even during an active response");
+        assert.equal(pi.sentUserMessages.length, 1, "stop does not inject, abort, compact, or replace the current response");
+        assert.match(notifications.at(-1)!.message, /automatic goal continuation stopped/i);
+        assert.deepEqual(statusCalls.at(-1), { key: "ws-goal-loop-yield", value: undefined });
+
+        await pi.commands.get("goal")!(alias, ctx);
+        assert.equal(pi.sentUserMessages.length, 1, "repeated stop remains inert");
+        assert.match(notifications.at(-1)!.message, /automatic goal continuation stopped/i);
+      });
+    }
+
+    test("a cancelled timer callback cannot submit after stop or replace a newly armed goal", async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      const { ctx } = fakeCtx();
+      await pi.commands.get("goal")!("old", ctx);
+      pi.handlers.get("agent_settled")!({}, ctx);
+      const stale = clock.scheduledCallbacks.at(-1)!;
+
+      await pi.commands.get("goal")!("stop", ctx);
+      await pi.commands.get("goal")!("new", ctx);
+      stale();
+      assert.deepEqual(pi.sentUserMessages.map((message) => message.content), ["Goal armed: old", "Goal armed: new"]);
+
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire();
+      assert.match(pi.sentUserMessages.at(-1)!.content as string, /Goal yet running: "new"/);
+      assert.doesNotMatch(pi.sentUserMessages.at(-1)!.content as string, /Goal yet running: "old"/);
+    });
+
+    test("one reminder handoff remains outstanding until its matching public user message_start", async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      const { ctx } = fakeCtx();
+      await pi.commands.get("goal")!("ship", ctx);
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire();
+      assert.equal(pi.sentUserMessages.length, 2);
+      const marker = reminderMarker(pi.sentUserMessages[1]!.content);
+
+      pi.handlers.get("message_start")!({ message: { role: "assistant", content: marker } }, ctx);
+      pi.handlers.get("message_start")!({ message: { role: "user", content: "unrelated owner message" } }, ctx);
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire();
+      assert.equal(pi.sentUserMessages.length, 2, "unrelated messages do not clear or duplicate the outstanding handoff");
+
+      pi.handlers.get("message_start")!({ message: { role: "user", content: [{ type: "text", text: `queued ${marker}` }] } }, ctx);
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire();
+      assert.equal(pi.sentUserMessages.length, 3, "matching queued-consumption message_start clears the handoff without requiring agent_start");
+      reminderMarker(pi.sentUserMessages[2]!.content);
+    });
+
+    test("wake timeout does not resubmit an unconfirmed reminder handoff", async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      const { ctx, statusCalls } = fakeCtx();
+      await pi.commands.get("goal")!("ship", ctx);
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire(); // reminder handoff; wake timeout is now pending
+      assert.equal(pi.sentUserMessages.length, 2);
+
+      clock.fire(); // wake timeout expires before message_start
+      assert.equal(pi.sentUserMessages.length, 2, "no duplicate reminder is handed to Pi");
+      assert.equal(clock.pendingCount(), 0, "unconfirmed handoff suppresses recovery rearm");
+      assert.match(statusCalls.at(-1)!.value!, /awaiting reminder handoff/i);
+    });
+
+    test("stop preserves one already-handed reminder but prevents its settle from rearming", async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      const { ctx } = fakeCtx();
+      await pi.commands.get("goal")!("ship", ctx);
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire();
+      const marker = reminderMarker(pi.sentUserMessages[1]!.content);
+      assert.equal(clock.pendingCount(), 1, "handoff recovery is active before stop");
+
+      await pi.commands.get("goal")!("stop", ctx);
+      assert.equal(clock.pendingCount(), 1, "stop does not clear the shared wake reservation after host handoff");
+      pi.handlers.get("message_start")!({ message: { role: "user", content: marker } }, ctx);
+      pi.handlers.get("agent_settled")!({}, ctx);
+      assert.equal(clock.pendingCount(), 0);
+      assert.equal(pi.sentUserMessages.length, 2, "the accepted reminder may execute once, but cannot rearm a stopped goal");
+    });
+
+    test("stale compaction completion releases the shared hold but cannot revive old rearm or carry state", async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      const { ctx } = fakeCtx();
+      await pi.commands.get("goal")!("old", ctx);
+      let compactCall!: Parameters<ExtensionContext["compact"]>[0];
+      ctx.compact = (opts) => { compactCall = opts; };
+      await pi.tools.get("goal-compact-and-continue")!.execute("carry", { carry_forward: "old carry" }, undefined, undefined, ctx);
+      assert.equal(leadCompactingRef.current, true);
+
+      await pi.commands.get("goal")!("stop", ctx);
+      await pi.commands.get("goal")!("new", ctx);
+      compactCall!.onComplete!({} as never);
+      assert.equal(leadCompactingRef.current, false, "old completion still releases the independent compaction hold");
+      assert.equal(clock.pendingCount(), 0, "old completion cannot schedule against the new generation");
+
+      pi.handlers.get("agent_settled")!({}, ctx);
+      clock.fire();
+      assert.match(pi.sentUserMessages.at(-1)!.content as string, /Goal yet running: "new"/);
+      assert.doesNotMatch(pi.sentUserMessages.at(-1)!.content as string, /old carry/);
+    });
+
+    test("shutdown invalidates stale callbacks and a recovered session starts disarmed", async () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      const handle = registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      const { ctx } = fakeCtx();
+      await pi.commands.get("goal")!("ship", ctx);
+      pi.handlers.get("agent_settled")!({}, ctx);
+      const stale = clock.scheduledCallbacks.at(-1)!;
+      handle.resetCompactionStateForShutdown();
+      stale();
+      assert.deepEqual(pi.sentUserMessages.map((message) => message.content), ["Goal armed: ship"]);
+
+      const recoveredClock = fakeClock();
+      const recoveredPi = fakePi();
+      registerGoalLoop(recoveredPi.api, { goalLoopConfigPath: configPath, ...recoveredClock });
+      const { ctx: recoveredCtx } = fakeCtx();
+      recoveredPi.handlers.get("agent_settled")!({}, recoveredCtx);
+      assert.equal(recoveredClock.pendingCount(), 0, "session recovery does not restore the stopped goal or its timer");
+      assert.deepEqual(recoveredPi.sentUserMessages, [], "the first recovered settle cannot create an automatic turn");
+    });
+  });
+
+  test("compact-and-continue rejects an inactive goal before any compaction state changes", async () => {
+    const clock = fakeClock();
+    const pi = fakePi();
+    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+    const { ctx, notifications, statusCalls } = fakeCtx();
+    let compactCalls = 0;
+    ctx.compact = () => { compactCalls += 1; };
+
+    await assert.rejects(
+      pi.tools.get("goal-compact-and-continue")!.execute(
+        "carry",
+        { carry_forward: "must not persist" },
+        undefined,
+        undefined,
+        ctx,
+      ),
+      /requires an active goal; compaction was not requested/i,
+    );
+
+    assert.equal(compactCalls, 0, "inactive rejection does not schedule host compaction");
+    assert.equal(leadCompactingRef.current, false, "inactive rejection does not enter the compaction hold");
+    assert.equal(clock.pendingCount(), 0, "inactive rejection does not schedule re-injection");
+    assert.deepEqual(notifications, [], "inactive rejection emits no compaction lifecycle notification");
+    assert.deepEqual(statusCalls, [], "inactive rejection does not mutate goal-loop status");
+
+    pi.handlers.get("agent_settled")!({}, ctx);
+    assert.equal(clock.pendingCount(), 0, "a later settle cannot re-arm an inactive rejected call");
+    assert.deepEqual(pi.sentUserMessages, [], "the rejected carry-forward is never delivered");
+
+    await pi.commands.get("goal")!("ship", ctx);
+    pi.handlers.get("agent_settled")!({}, ctx);
+    clock.fire();
+    assert.equal(pi.sentUserMessages.length, 2, "a later active goal still follows the ordinary reminder path");
+    assert.ok(!(pi.sentUserMessages[1]!.content as string).includes(carryHeading), "rejected carry-forward does not leak into the next active goal");
+    assert.doesNotMatch(pi.sentUserMessages[1]!.content as string, /must not persist/);
+  });
+
   for (const completion of ["event", "callback", "both", "error", "failed-event"] as const) {
     test(`verbatim carry is sent once after ${completion} release`, async () => {
       const clock = fakeClock();
@@ -734,6 +1073,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
         assert.match(pi.sentUserMessages[1]!.content as string, /^Compaction failed: boom Do not retry/);
       }
       pi.handlers.get("agent_start")!({}, ctx);
+      acknowledgeLatestReminder(pi, ctx);
       pi.handlers.get("agent_settled")!({}, ctx);
       clock.fire();
       assert.equal(pi.sentUserMessages.length, 3);
@@ -760,7 +1100,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     test(`carry survives ${interruption} until an eligible ordinary reminder`, async () => {
       const clock = fakeClock();
       const pi = fakePi();
-      const registry = new Map([["child", { threadBound: false, running: false, terminalThisTurn: false }]]) as unknown as RpcAgentRegistry;
+      const registry = new Map([["child", { threadBound: false, running: false }]]) as unknown as RpcAgentRegistry;
       registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock, rpcRegistryRef: { current: registry } });
       let idle = true;
       const { ctx } = fakeCtx(() => idle);
@@ -813,7 +1153,8 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
         pi.handlers.get("agent_settled")!({}, ctx);
         clock.fire();
       }
-      assert.match(pi.sentUserMessages.at(-1)!.content as string, /Goal yet running/);
+      if (cleanup === "shutdown") assert.equal(pi.sentUserMessages.length, 1, "shutdown leaves the old loop inert");
+      else assert.match(pi.sentUserMessages.at(-1)!.content as string, /Goal yet running/);
       for (const message of pi.sentUserMessages) assert.ok(!(message.content as string).includes(carryHeading));
     });
   }
@@ -953,13 +1294,16 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     pi.handlers.get("session_before_compact")!({ reason: "manual" }, ctx);
     assert.equal(leadCompactingRef.current, true);
 
-    let flushed = false;
-    heldPushQueue.push({ kind: "raw", deliverAs: "followUp", send: () => { flushed = true; } });
+    heldPushQueue.push({
+      kind: "raw",
+      deliverAs: "followUp",
+      message: { customType: "ws-agent-advisory", content: "held fixture", display: true, details: { advisory: "held-fixture" } },
+    });
 
     pi.handlers.get("agent_start")!({}, ctx);
     assert.equal(leadCompactingRef.current, true, "start cannot clear an independent compaction hold");
     assert.equal(pi.sentUserMessages.length, 0, "no reminder during compaction");
-    assert.equal(flushed, false, "no queue touch either — that is releaseAfterCompaction's job, not this backstop's");
+    assert.equal(pi.sentMessages.length, 0, "no queue touch either — that is releaseAfterCompaction's job, not this backstop's");
     assert.equal(heldPushQueue.length, 1, "left untouched for that turn's own settle/flush handler");
   });
 
@@ -975,16 +1319,19 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     pi.handlers.get("session_before_compact")!({ reason: "manual" }, ctx);
     assert.equal(leadCompactingRef.current, true);
 
-    let flushed = false;
-    heldPushQueue.push({ kind: "raw", deliverAs: "followUp", send: () => { flushed = true; } });
+    heldPushQueue.push({
+      kind: "raw",
+      deliverAs: "followUp",
+      message: { customType: "ws-agent-advisory", content: "held fixture", display: true, details: { advisory: "held-fixture" } },
+    });
 
     pi.handlers.get("session_compact")!({ reason: "manual" }, ctx);
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(leadCompactingRef.current, false);
-    assert.equal(flushed, false, "idle release cannot directly send custom messages");
+    assert.equal(pi.sentMessages.length, 0, "idle release cannot directly send custom messages");
     assert.equal(flushHeldPushes(pi.api, true), 1, "confirmed start releases the held push");
-    assert.equal(flushed, true);
+    assert.equal(pi.sentMessages.length, 1);
     assert.equal(pi.sentUserMessages.length, 1, "still just the armed announcement — no synthesized reminder for a non-lever compaction");
   });
 
@@ -1003,8 +1350,11 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     assert.ok(compactCall, "ctx.compact was called");
     assert.equal(leadCompactingRef.current, true);
 
-    let flushed = false;
-    heldPushQueue.push({ kind: "raw", deliverAs: "followUp", send: () => { flushed = true; } });
+    heldPushQueue.push({
+      kind: "raw",
+      deliverAs: "followUp",
+      message: { customType: "ws-agent-advisory", content: "held fixture", display: true, details: { advisory: "held-fixture" } },
+    });
 
     // The release-time ctx reports NOT idle — e.g. agent_start's own backstop
     // raced this call and a fresh turn is already underway.
@@ -1014,7 +1364,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
 
     assert.equal(leadCompactingRef.current, false, "the flag is still cleared even when nothing else fires");
     assert.equal(pi.sentUserMessages.length, 1, "nothing sent while the agent already looks busy again");
-    assert.equal(flushed, false, "the held queue is left for that turn's own settle, not drained here");
+    assert.equal(pi.sentMessages.length, 0, "the held queue is left for that turn's own settle, not drained here");
     assert.equal(clock.pendingCount(), 0, "the not-idle branch clears pendingRearm rather than arming a timer");
 
     // A subsequent settle re-evaluates normally: leadCompactingRef is false
@@ -1065,7 +1415,16 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     assert.equal(leadCompactingRef.current, true);
 
     const order: string[] = [];
-    heldPushQueue.push({ kind: "raw", deliverAs: "followUp", send: () => order.push("flush") });
+    heldPushQueue.push({
+      kind: "raw",
+      deliverAs: "followUp",
+      message: { customType: "ws-agent-advisory", content: "held fixture", display: true, details: { advisory: "held-fixture" } },
+    });
+    const originalPush = pi.api.sendMessage;
+    pi.api.sendMessage = (content, options) => {
+      order.push("flush");
+      originalPush(content, options);
+    };
     const originalSend = (pi.api as unknown as { sendUserMessage: (content: unknown, options?: unknown) => void }).sendUserMessage;
     (pi.api as unknown as { sendUserMessage: (content: unknown, options?: unknown) => void }).sendUserMessage = (content, options) => {
       order.push("reminder");
@@ -1114,6 +1473,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     assert.equal(pi.sentUserMessages.length, 2, "the settle timer fired, replaying the swallowed settle as one ordinary reminder");
     const reminder = pi.sentUserMessages[1]!.content as string;
     assert.doesNotMatch(reminder, /Compaction failed/, "an ordinary reinject, not a lever failure reminder");
+    acknowledgeLatestReminder(pi, ctx);
 
     // Streak advanced: a second replayed settle force-stops at threshold 2.
     pi.handlers.get("session_before_compact")!({ reason: "threshold" }, ctx);
@@ -1192,12 +1552,12 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     pi.handlers.get("agent_settled")!({}, fakeCtx().ctx);
     assert.equal(pi.sentUserMessages.length, 1, "swallowed, not sent yet");
 
-    // A push held during the compaction window — flushing it starts a turn
-    // SYNCHRONOUSLY, exactly like a real `HeldPush`/`HeldRawSend` calling
-    // `pi.sendMessage(..., { triggerTurn: true })` (`spawner.ts`'s `sendPush`).
+    // A held raw item is batched with every other pending push at the next
+    // confirmed start; the fixture is the original item, not a send callback.
     heldPushQueue.push({
-      kind: "raw", deliverAs: "followUp",
-      send: (p, deliveryOverride) => p.sendMessage({ customType: "ws-agent-report" }, { deliverAs: deliveryOverride, triggerTurn: true }),
+      kind: "raw",
+      deliverAs: "followUp",
+      message: { customType: "ws-agent-report", content: "held report", display: true, details: { report: "held report" } },
     });
 
     await new Promise((resolve) => setImmediate(resolve));
@@ -1205,7 +1565,8 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     assert.equal(pi.streaming.current, false, "idle release cannot start a custom run");
     flushHeldPushes(pi.api, true);
     assert.equal(pi.streaming.current, true, "confirmed-start flush delivers the batch");
-    assert.deepEqual(pi.sentMessages[0]!.options, { deliverAs: "steer", triggerTurn: true }, "the raw fixture honors confirmed-start steering");
+    assert.equal((pi.sentMessages[0]!.content as { customType?: string }).customType, PUSH_BATCH_CUSTOM_TYPE, "the confirmed start transports the held item in one batch envelope");
+    assert.deepEqual(pi.sentMessages[0]!.options, { deliverAs: "steer", triggerTurn: true }, "the batch honors confirmed-start steering");
     assert.equal(pi.sentUserMessages.length, 1, "the deferred release only armed the settle timer");
     assert.equal(clock.pendingCount(), 1);
 
@@ -1217,6 +1578,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       "followUp",
       "queues behind the flush's turn instead of throwing — a bare call would hit the streaming guard above",
     );
+    acknowledgeLatestReminder(pi, ctx);
 
     // The reminder's own boundary-guard fallback timer is now pending; a real
     // settle proves its turn started, clearing that guard (agent_settled's
@@ -1355,7 +1717,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     test("a running child at fire time yields — no send, and a later settle with nothing running re-arms and fires normally", () => {
       const clock = fakeClock();
       const pi = fakePi();
-      const registry = new Map([["child-1", { threadBound: false, running: true, terminalThisTurn: false }]]) as unknown as RpcAgentRegistry;
+      const registry = new Map([["child-1", { threadBound: false, running: true }]]) as unknown as RpcAgentRegistry;
       const rpcRegistryRef = { current: registry };
       registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer, rpcRegistryRef });
       const { ctx } = fakeCtx();
@@ -1543,7 +1905,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.match(reminder, /Goal yet running/, "the ordinary reinject wording, proving the loop is not stuck");
     });
 
-    test("the boundary guard's flag clears on agent_start, on agent_settled, and by its own fallback timeout (which retries via a fresh settle timer)", () => {
+    test("the shared wake guard clears on start/settle while an unconfirmed reminder suppresses timeout retry", () => {
       const clock = fakeClock();
       const pi = fakePi();
       registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
@@ -1559,12 +1921,14 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       pi.handlers.get("agent_start")!({}, ctx);
       assert.equal(leadWakeStartPendingRef.current, false);
       assert.equal(clock.pendingCount(), 0, "agent_start cancelled the fallback timer too");
+      acknowledgeLatestReminder(pi, ctx);
 
       // Re-drive to the same point to test clear point 2: agent_settled.
       pi.handlers.get("agent_settled")!({}, ctx);
       assert.equal(clock.pendingCount(), 1);
       clock.fire();
       assert.equal(leadWakeStartPendingRef.current, true);
+      acknowledgeLatestReminder(pi, ctx);
       pi.handlers.get("agent_settled")!({}, ctx);
       assert.equal(leadWakeStartPendingRef.current, false, "a real settle is proof the reminder's run at least started");
       assert.equal(
@@ -1573,31 +1937,25 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
         "the fallback timer was cancelled, but this same settle (state still active, not compacting) immediately arms a fresh settle timer",
       );
 
-      // Re-drive once more to test clear point 3: the fallback timeout itself.
-      pi.handlers.get("agent_settled")!({}, ctx);
+      // Re-drive once more to test the fallback timeout itself. Without a
+      // matching message_start, the adapter must not hand Pi a duplicate.
       clock.fire(); // sends the reminder, arms the fallback timer
       assert.equal(leadWakeStartPendingRef.current, true);
       const statusCallsBeforeTimeout = statusCalls.length;
-      clock.fire(); // no agent_start/agent_settled ever arrived — the fallback fires
-      assert.equal(leadWakeStartPendingRef.current, false, "cleared by its own timeout");
-      // 260906 Phase 1 review relay #1 (Minor): the fallback timeout re-arms
-      // the settle timer FIRST, then sets the retry status LAST — so the
-      // retry text is the observable status after this fire, not immediately
-      // overwritten by armSettleTimer's own "Goal loop: settling" set.
-      const newStatusCalls = statusCalls.slice(statusCallsBeforeTimeout);
+      clock.fire(); // no matching message_start ever arrived
+      assert.equal(leadWakeStartPendingRef.current, false, "shared reservation cleared by its own timeout");
       assert.deepEqual(
-        newStatusCalls.map((c) => c.value),
-        ["Goal loop: settling", "Goal loop: reminder did not start a turn, retrying"],
-        "the re-armed settle timer's own status, then the retry status text — observable, not immediately clobbered",
+        statusCalls.slice(statusCallsBeforeTimeout).map((c) => c.value),
+        ["Goal loop: awaiting reminder handoff"],
       );
-      assert.equal(clock.pendingCount(), 1, "the timeout re-arms the settle timer");
+      assert.equal(clock.pendingCount(), 0, "unconfirmed reminder handoff is not resubmitted");
     });
 
     test("the streak advances only on fired reminders — a yielded tick leaves noToolCallStreak untouched", () => {
       const threshold3Path = writeConfig("streak-threshold-3.json", JSON.stringify({ runaway_threshold: 3 }));
       const clock = fakeClock();
       const pi = fakePi();
-      const registry = new Map([["child-1", { threadBound: false, running: true, terminalThisTurn: false }]]) as unknown as RpcAgentRegistry;
+      const registry = new Map([["child-1", { threadBound: false, running: true }]]) as unknown as RpcAgentRegistry;
       const rpcRegistryRef = { current: registry };
       registerGoalLoop(pi.api, { goalLoopConfigPath: threshold3Path, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer, rpcRegistryRef });
       const { ctx } = fakeCtx();
@@ -1619,6 +1977,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       // reaches streak 2 — still below threshold 3.
       pi.handlers.get("agent_settled")!({}, ctx);
       clock.fire();
+      acknowledgeLatestReminder(pi, ctx);
       pi.handlers.get("agent_settled")!({}, ctx);
       clock.fire();
       assert.equal(pi.sentUserMessages.length, 3, "two ordinary reinjects — no force-stop yet, since the yields never advanced the streak");

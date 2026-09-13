@@ -213,6 +213,8 @@ Update from 2026-05-04 on Codex CLI 0.128.0 / WSL2 Linux: the inline
 host difference from the Claude prior art is semantic rather than configurational:
 `PostToolUse` `exit 2` injects hook feedback into the next model step instead
 of stopping the Codex subprocess and returning control to the wrapper.
+**Superseded on Codex 0.154.0 — see the 2026-09-13 re-probe below; on 0.154.0
+`PostToolUse` no longer steers the model at all.**
 
 ### Injecting Hooks via `-c`
 
@@ -255,6 +257,119 @@ path unless a structured hook result is needed.
 Codex hook commands receive hook metadata as JSON on stdin. The ws Codex
 adapter passes the repository root and agent name in the configured hook command
 instead of relying on a Claude-style `WS_AGENT_OUTBOX` environment variable.
+
+### Re-probe 2026-09-13 (Codex CLI 0.154.0, macOS)
+
+Re-verified the hook path on a current CLI in an isolated `codex exec`
+(`--ignore-user-config --ephemeral --skip-git-repo-check`, inline `-c` hooks,
+no plugin). Findings that supersede the 0.128.0 notes above:
+
+- **Hook trust is now gated.** 0.154.0 requires *persisted hook trust*; enabled
+  hooks do not run non-interactively without it. Ad-hoc/inline hooks need
+  `--dangerously-bypass-hook-trust` for automation, or the hook source must be
+  persisted as trusted. A real adapter deployment persists trust rather than
+  passing the dangerous flag.
+- **`Stop` + `decision: block` steers the model — confirmed.** A `Stop` hook
+  returning `{"decision":"block","reason":"<instruction>"}` re-invokes the model
+  with `reason` as an instruction (the model ran the injected command), then
+  concludes. The re-entry `Stop` fires with `stop_hook_active: true` (loop
+  guard). This is the load-bearing turn-boundary wake/drain mechanism.
+- **`PostToolUse` output never reaches the model.** The hook still *fires* (it
+  can observe and produce side effects), but nothing it emits reaches the model
+  on 0.154.0: not `exit 2` + stderr, not JSON `decision: block` + `reason`, not
+  `hookSpecificOutput.additionalContext`. Verified even with a *passive* note
+  (exit 0, `additionalContext` asking the model to append a codeword to its
+  final message) — the codeword never surfaced, so the content did not reach the
+  model at all. Asymmetry: `Stop`'s `reason` reaches the model, `PostToolUse`'s
+  does not. A Codex `PostToolUse` hook is therefore side-effect-only (write a
+  marker, check state); it cannot notify or steer the model mid-turn. This
+  reverses the 2026-05-04 `exit 2` finding. Anything that must reach the model
+  mid-turn has to travel through a channel the model reads (e.g. an MCP tool
+  response), not a `PostToolUse` hook.
+- **Hook payload carries no agent classifier.** `Stop` stdin is
+  `{session_id, turn_id, transcript_path, cwd, hook_event_name, model,
+  permission_mode, stop_hook_active, last_assistant_message}`; `PostToolUse`
+  adds `{tool_name, tool_input, tool_response, tool_use_id}`. There is no
+  `agent_id`/`agent_type`/agent-name field, so a Codex hook cannot structurally
+  tell a main turn from a subagent turn from the payload alone (contrast Claude,
+  whose `Stop`/`SubagentStop` split plus optional `agent_id`/`agent_type`
+  does). Owner/main-turn context must be baked into the hook command args by the
+  adapter, per the note above. Payload is delivered on **stdin**, not argv.
+- **Subagent spawn needs the app-server daemon.** In `--ephemeral` `codex exec`
+  the base agent has a subagent-spawn tool but the spawn fails
+  (`no thread with id ...`); subagent turns (and thus any `SubagentStart`/
+  `SubagentStop` firing) could not be observed without the shared local
+  app-server daemon (`codex agents`). Whether Codex subagents fire hooks at all
+  remains open and needs a daemon-backed probe.
+- Useful isolation flags on `codex exec`: `-C/--cd`, `--ignore-user-config`
+  (auth still uses `CODEX_HOME`), `--ephemeral`, `--skip-git-repo-check`.
+
+### Plugin-Bundled `hooks.json` Schema (doc-sourced, 2026-09-13)
+
+Sourced from `developers.openai.com/codex/hooks` (redirects to
+`learn.chatgpt.com/docs/hooks`), not re-verified against a live plugin-cache
+install on this CLI — treat as lower-confidence than the hands-on re-probe
+above until dogfooded through an actual plugin refresh.
+
+A plugin manifest points at a bundled hook file the same way it points at
+`skills`/`mcpServers`:
+
+```json
+{ "hooks": "./hooks/hooks.json" }
+```
+
+`hooks.json`'s shape wraps event arrays under a `hooks` key (the JSON
+equivalent of the inline `-c hooks.<Event>=[...]` form used above):
+
+```json
+{
+  "description": "optional",
+  "hooks": {
+    "Stop": [
+      { "type": "command", "command": "<shell command string>", "timeout": 10 }
+    ]
+  }
+}
+```
+
+Per-handler fields: `type` (`"command"` or `"mcp_tool"`), `command` (one
+shell command string — args and quoting live inside that string, there is
+no separate `args` array), `commandWindows` (Windows override),
+`timeout` (seconds), `statusMessage`, `additionalContextLimit`, `async`.
+
+Hook commands reportedly receive plugin-path env vars: `PLUGIN_ROOT` /
+`PLUGIN_DATA`, plus Claude-compatibility aliases `CLAUDE_PLUGIN_ROOT` /
+`CLAUDE_PLUGIN_DATA` — the mechanism a hook command uses to locate a
+plugin-bundled script without relying on the `mcpServers`-block-only `cwd`
+normalization. The mailbox wake adapter's `hooks.json` (see
+`agents-plugin/.codex-plugin/hooks.json`, referenced from `plugin.json`'s
+`"hooks"` field — moved out of a `hooks/` subdirectory during round-1 review,
+because Claude Code auto-discovers `<plugin-root>/hooks/hooks.json` by
+directory-name convention alone with no manifest key required, which would
+have silently also activated this Codex-only hook in Claude, where
+`$PLUGIN_ROOT` is undefined) uses `$PLUGIN_ROOT` on this basis; if a live
+probe finds that variable absent or differently named, fix the hook command
+there rather than only this note.
+
+The shipped hook command never bakes the mailbox slug into its own argv or
+manifest text (a static value there cannot know a per-session slug at
+authoring time, and interpolating an untrusted env var into a shell command
+string is an injection surface); it reads `WS_MAILBOX` directly from its own
+inherited process environment at fire time (`cmd/ws-mcp mailbox
+codex-stop-hook`, `agents-plugin-tool/cmd/ws-mcp/mailbox.go`). It also fires
+`decision:block` at most once per queue-length change for a slug (a
+persisted watermark, `internal/wsmailbox/hook_peek.go`'s
+`ShouldNotifyNamedInboxUnread`), not on every `Stop`, since a queue the woken
+session structurally cannot drain (unowned or rebound presence) would
+otherwise re-block forever.
+
+**Hook trust persistence has no found CLI/config mechanism.** `codex hooks`
+is not a subcommand (`error: unexpected argument 'hooks' found` on 0.154.0),
+and the fetched config reference documents `[hooks]`/`features.hooks` but no
+trust-persistence key. `--dangerously-bypass-hook-trust` is confirmed
+(`codex exec --help`); a config-file or one-time-prompt persistence path
+remains unconfirmed — dogfood an actual interactive install/first-hook-fire
+to find it before documenting one as a deployment step.
 
 ## Model Flag Behavior
 

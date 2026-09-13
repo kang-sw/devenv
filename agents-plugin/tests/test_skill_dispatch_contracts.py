@@ -23,9 +23,10 @@ EXPECTED_LEAD_SKILLS = {
     "lead-tune",
     "lead-revive",
     "mcp-server-repair",
+    "lead-audit-doc",
+    "lead-use-mailbox",
     # undecided disposition; survive unchanged
     "lead-scope-worktree",
-    "lead-add-rule",
 }
 
 # Names that must not reappear on this flagship package's shipped skill or
@@ -36,6 +37,7 @@ EXPECTED_LEAD_SKILLS = {
 # test_wsflow_only_aliases_route_to_target. Do not extend this sweep to the
 # wsflow surface — that would break the intended one-package carve-out.
 RETIRED_SKILL_NAMES = (
+    "lead-add-rule",
     "lead-prefer-subagent",
     "lead-proceed",
     "lead-implement",
@@ -53,6 +55,21 @@ RETIRED_SKILL_NAMES = (
 
 
 class SkillDispatchContractsTest(unittest.TestCase):
+    def test_document_audit_preserves_approved_prose_and_dispatch_boundary(self):
+        contract = json.loads((Path(__file__).parent / "fixtures" / "lead_audit_doc_contract.json").read_text())
+        for package in (SKILLS_DIR.parent, SKILLS_DIR.parent.parent / "agents-plugin-wsflow"):
+            shim = (package / "skills" / "lead-audit-doc" / "SKILL.md").read_text()
+            self.assertEqual(re.search(r"^description: (.*)$", shim, re.M).group(1), contract["description"])
+            self.assertNotIn("allow_implicit_invocation: false", shim)
+            for name, key in (("lead-audit-doc", "lead"), ("fresh-read-doc-auditor", "auditor")):
+                body = (package / "rsrc" / name / f"{name}.md").read_text().split("---", 2)[2].strip()
+                self.assertEqual(body, contract[key])
+            for root in (package / "skills", package / "rsrc"):
+                self.assertFalse((root / "lead-add-rule").exists())
+                for path in root.rglob("*.md"):
+                    self.assertNotIn("lead-add-rule", path.read_text(), str(path))
+            self.assertFalse((package / "skills" / "fresh-read-doc-auditor").exists())
+
     def test_delegate_and_sibling_exact_prose(self):
         contract = json.loads((Path(__file__).parent / "fixtures" / "lead_delegate_contract.json").read_text())
         for package in (SKILLS_DIR.parent, SKILLS_DIR.parent.parent / "agents-plugin-wsflow"):
@@ -75,6 +92,27 @@ class SkillDispatchContractsTest(unittest.TestCase):
         shim = (SKILLS_DIR / "lead-delegate" / "SKILL.md").read_text()
         self.assertIn('ws/playbook.read(name: "lead-delegate", session_key:', shim)
         self.assertIn("ws/workflow_manual", shim)
+
+    def test_review_local_fix_uses_delegate_gate_and_returns_to_review(self):
+        for package in (RSRC_DIR, SKILLS_DIR.parent.parent / "agents-plugin-wsflow" / "rsrc"):
+            review = (package / "lead-review" / "lead-review.md").read_text()
+            handoff = review.split("- **NEEDS FIX**:")[1].split("- **OPEN**:")[0]
+            self.assertIn("{{.SkillNamespace}}:lead-delegate` with the findings path", handoff)
+            self.assertIn("If its routing gate requires a ticket", handoff)
+            self.assertIn("{{.SkillNamespace}}:lead-ticket` with those inputs, then", handoff)
+            self.assertIn("{{.SkillNamespace}}:lead-run` with the ready ticket", handoff)
+            self.assertIn("After either local\n  repair route completes", handoff)
+            self.assertIn("{{.SkillNamespace}}:lead-review` again", handoff)
+            self.assertIn("retain the original base and include the\n  repair commits", handoff)
+            self.assertIn("Contributor → the config's Comment Method, else hand over the path", handoff)
+            self.assertNotIn("with that path as the contract", handoff)
+            delegate = (package / "lead-delegate" / "lead-delegate.md").read_text()
+            gate = delegate.split("## Routing")[1].split("## Assignment")[0]
+            self.assertIn("public behavior, an API, protocol, schema, template", gate)
+            self.assertIn("canonical flow, or architecture", gate)
+            self.assertIn("unresolved product or workflow decision", gate)
+            self.assertIn("independent review is needed, unless the task is a local NEEDS FIX repair", gate)
+            self.assertIn("whose follow-up review supplies\n  that verification", gate)
 
     def test_delegate_implementer_is_a_tier_unaware_reviewer_free_floor(self):
         # The delegate-side implementer floor is a render-only rsrc playbook with
@@ -156,6 +194,40 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn("With `completion: ticket`", text)
         self.assertIn("incompatible values are a protocol mismatch", text)
         self.assertIn("do not query the ticket, infer a\npath, merge", text)
+        self.assertIn(
+            "call `{{.McpNamespace}}/git.status` and read\n`branch.head`, `impl_ticket`, and the working-tree state",
+            text,
+        )
+        self.assertIn("Branch-explicit calls (`{{.McpNamespace}}/git.merge`)", text)
+        self.assertIn(
+            "Your terminal report does not restore the checkout: the shared worktree's",
+            protocol,
+        )
+
+    def test_run_pins_branch_awareness_reasoning(self):
+        # The existing merge/stop test pins the mechanical ws/git.status call and
+        # its field names; this pins the branch-awareness REASONING the lead must
+        # apply to those fields, so a rewrite that keeps the call but drops the
+        # stack-vs-return decision, the base-derivation convention, or the
+        # dirty-tree judgment fails here.
+        run = (RSRC_DIR / "lead-run" / "lead-run.md").read_text(encoding="utf-8")
+        # stack-vs-return: the explicit either/or the lead must decide.
+        self.assertIn(
+            "Decide explicitly: stack on the impl branch when the write\n"
+            "belongs to that impl ticket, or check out the derived base branch",
+            run,
+        )
+        # base-derivation: how the base branch is computed, tied to git.merge's
+        # own convention.
+        self.assertIn("between `impl/` and the last `/`, the same convention", run)
+        # dirty-tree: the worker's shared checkout may be dirty; commit/stash, do
+        # not force a checkout through it.
+        self.assertIn(
+            "A dirty working tree at\n"
+            "that point is your own judgment call: commit or stash before the checkout,\n"
+            "never force one through it.",
+            run,
+        )
 
     def test_run_dispatches_through_playbook_read(self):
         # lead-run is a playbook.read shim over an rsrc body, not an inline

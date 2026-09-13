@@ -20,6 +20,31 @@ export type TierFailure = {
   catalogEmpty?: boolean;
 };
 
+export type CatalogModelRejection =
+  | { model: string; why: "unknown"; suggestions: string[] }
+  | { model: string; why: "no-auth" };
+
+export type ConcreteModelRejection = CatalogModelRejection;
+
+/** One exact-membership/auth primitive shared by configured tiers and caller-selected provider/id values. */
+export function validateCatalogModel(
+  model: string,
+  catalog: readonly ModelCatalogEntry[],
+): { model: string; rejected?: undefined } | { model?: undefined; rejected: CatalogModelRejection } {
+  const entry = catalog.find(candidate => `${candidate.provider}/${candidate.id}` === model);
+  if (!entry) return { rejected: { model, why: "unknown", suggestions: suggestModels(model, catalog) } };
+  if (!entry.hasAuth) return { rejected: { model, why: "no-auth" } };
+  return { model };
+}
+
+/** Concrete selections use the common catalog validator without tier-specific configuration metadata. */
+export function validateConcreteModel(
+  model: string,
+  catalog: readonly ModelCatalogEntry[],
+): ReturnType<typeof validateCatalogModel> {
+  return validateCatalogModel(model, catalog);
+}
+
 /** Read current runtime membership and configured-auth presence, never cached availability or scoped models. */
 export function modelCatalogFromToolCtx(toolCtx: unknown): ModelCatalogEntry[] {
   const registry = (toolCtx as ExtensionContext | undefined)?.modelRegistry;
@@ -111,8 +136,19 @@ export function formatTierWarning(alias: string, rejected: TierRejection, inheri
   return `${base}which is not a provider/id entry in Pi's model catalog.${tail}${hint}`;
 }
 
-/** Exploration fails closed: unlike ordinary workers it must never replace an
- * unavailable cheap tier with the caller's potentially expensive model. */
+/** Concrete selection never suggests mutating shared tier configuration. */
+export function formatConcreteModelWarning(rejected: ConcreteModelRejection, catalogEmpty: boolean): string {
+  const base = `warning: concrete model ${quoted(rejected.model)} `;
+  if (rejected.why === "no-auth") {
+    return `${base}cannot be selected because provider ${oneLine(rejected.model.slice(0, rejected.model.indexOf("/")))} has no configured auth.`;
+  }
+  const tail = catalogEmpty ? " Pi's model catalog is empty." : rejected.suggestions.length
+    ? ` Did you mean ${rejected.suggestions.map(oneLine).join(", ")}?` : " No close match in Pi's model catalog.";
+  return `${base}is not a provider/id entry in Pi's model catalog.${tail}`;
+}
+
+/** Exploration fails closed: an unavailable intent-mapped tier never falls
+ * back to the caller's unrelated model selection. */
 export function formatExploreTierRefusal(alias: string, failure: TierFailure | undefined, rejected: TierRejection | undefined): string {
   const model = rejected?.model ?? failure?.model;
   const detail = failure?.kind === "no-auth" || rejected?.why === "no-auth"
@@ -123,6 +159,6 @@ export function formatExploreTierRefusal(alias: string, failure: TierFailure | u
         ? `configured model ${quoted(model ?? "unknown")} is not in Pi's model catalog`
         : failure?.kind === "unset"
           ? `not configured for harness pi (resolved from ${quoted(failure?.resolvedFrom ?? rejected?.resolvedFrom ?? "unknown")}); set it via config.tune(key: "agents.tier", harness: "pi", value: {tier: ${quoted(alias)}, model: "<provider/id>"})`
-          : "small resolution failed";
-  return `explore refused: tier ${oneLine(alias)} cannot select an authenticated cheap Pi model: ${detail}. Configure agents.tier for harness pi via config.tune or lead-tune.`;
+          : "tier resolution failed";
+  return `explore refused: tier ${oneLine(alias)} cannot select an authenticated Pi model: ${detail}. Configure agents.tier for harness pi via config.tune or lead-tune.`;
 }

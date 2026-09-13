@@ -831,3 +831,49 @@ func TestTicketsMoveUpwardToReadyAllowsResolvedSageReviewPosture(t *testing.T) {
 		})
 	}
 }
+
+// TestTicketsMovePromotionAdvisory pins that TicketsMove(to: "ready") surfaces
+// the promotion-time dependency advisory in its Tip when a typed blocked-by
+// prerequisite is in ready/ but not yet code-landed, and stays silent when the
+// prerequisite is already .done/. The move itself always completes — the
+// advisory never blocks.
+func TestTicketsMovePromotionAdvisory(t *testing.T) {
+	consumerBody := func(fm string) string {
+		return "---\ntitle: Consumer\n" + fm + "sage-review-design: completed\nsage-review-completeness: completed\n---\n\n# Consumer\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| scope.span | single-file | a.go |\n"
+	}
+
+	t.Run("ready-but-unexecuted prerequisite warns and still promotes", func(t *testing.T) {
+		root := t.TempDir()
+		mustWrite(t, root, filepath.Join("ai-docs", "tickets", "ready", "260101-feat-prod.md"),
+			"---\ntitle: Producer\n---\n\n# Producer\n\n## Phases\n\n### Phase 1: A\n")
+		stem := "260101-feat-consumer"
+		mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
+			consumerBody("blocked-by: 260101-feat-prod\n"))
+		result, err := TicketsMove(root, &mockGitRunner{}, TicketMoveOptions{TicketStem: stem, To: "ready"})
+		if err != nil {
+			t.Fatalf("TicketsMove: %v", err)
+		}
+		if result.NewPath != "ai-docs/tickets/ready/"+stem+".md" {
+			t.Fatalf("promotion did not complete: NewPath = %q", result.NewPath)
+		}
+		if !strings.Contains(result.Tip, "260101-feat-prod") || !strings.Contains(result.Tip, "not yet landed") {
+			t.Fatalf("Tip = %q, want the promotion advisory naming the ready-but-unexecuted prerequisite", result.Tip)
+		}
+	})
+
+	t.Run("done prerequisite is silent", func(t *testing.T) {
+		root := t.TempDir()
+		mustWrite(t, root, filepath.Join("ai-docs", "tickets", ".done", "260101-feat-prod.md"),
+			"---\ntitle: Producer\n---\n\n# Producer\n")
+		stem := "260101-feat-consumer"
+		mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
+			consumerBody("blocked-by: 260101-feat-prod\n"))
+		result, err := TicketsMove(root, &mockGitRunner{}, TicketMoveOptions{TicketStem: stem, To: "ready"})
+		if err != nil {
+			t.Fatalf("TicketsMove: %v", err)
+		}
+		if strings.Contains(result.Tip, "not yet landed") {
+			t.Fatalf("Tip = %q, want no promotion advisory for a .done/ prerequisite", result.Tip)
+		}
+	})
+}

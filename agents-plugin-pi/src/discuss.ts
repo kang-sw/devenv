@@ -13,7 +13,7 @@
  *   (b) bridge call    — the discuss skill body itself calls the bridged
  *                        `ws__playbook_read` / `ws__workflow_manual` tools;
  *   (c) spawn round-trip — the appended instruction tells the model to dispatch
- *                        one `explore` recon leaf and report its result.
+ *                        one persistent `explore` researcher and report its result.
  *
  * (a)+(b) come free from the skill; (c) is NOT inherent to the discuss skill,
  * so the kickoff MUST add it explicitly to make gate (c) deterministic (see the
@@ -26,7 +26,7 @@ const DEFAULT_TOPIC =
   "the ws-pi-native MVP proof-of-concept: does skills-load + bridge + spawner compose end-to-end on Pi?";
 
 const SPAWN_INSTRUCTION =
-  "After loading the discuss procedure, also dispatch one `explore` recon leaf " +
+  "After loading the discuss procedure, also dispatch one persistent `explore` researcher " +
   "to survey how the ws skills are exposed to Pi (the resources_discover skillPaths wiring) " +
   "and report its result — this proves the ws-mcp bridge and the delegation spawner compose.";
 

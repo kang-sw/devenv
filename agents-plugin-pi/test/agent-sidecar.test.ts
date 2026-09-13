@@ -21,7 +21,7 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -41,9 +41,10 @@ import {
   type PersistedOrphan,
 } from "../src/agent-sidecar.ts";
 import { armForkRoleWiring } from "../src/fork.ts";
-import { applyRpcEvent, listAgents, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
-import type { ExtensionAPI, RpcClient } from "@earendil-works/pi-coding-agent";
-import { allocateAgentHome, createAgentStorageContext, readOwnership } from "../src/agent-storage.ts";
+import { applyRpcEvent, evictForCapacity, listAgents, REPORT_TO_LEAD_TOOL_NAME, sendToAgent, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { RpcClient, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { allocateAgentHome, createAgentStorageContext, readOwnership, updateOwnership } from "../src/agent-storage.ts";
+import { DELEGATION_ENV } from "../src/delegation-policy.ts";
 
 function record(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
   return {
@@ -107,29 +108,81 @@ describe("captureOrphans", () => {
   test("persistent explore records are captured for restart alongside workers", () => {
     const registry: RpcAgentRegistry = new Map([
       ["worker", record({ agentId: "worker", client: {} as RpcClient })],
-      ["explore", record({ agentId: "explore", client: {} as RpcClient, spawnRole: "explore", exploreMode: "simple", modelBase: "p/m", modelEffort: "off", toolGroup: "read-only" })],
+      ["explore", record({ agentId: "explore", client: {} as RpcClient, spawnRole: "explore", exploreMode: "code-search", modelBase: "p/m", modelEffort: "off", toolGroup: "read-only-explore" })],
     ]);
     assert.deepEqual(captureOrphans(registry).map((o) => o.agentId).sort(), ["explore", "worker"]);
   });
 
-  test("round-trips simple/deep research selections through two sidecar cycles", () => {
+  test("round-trips intent-mode research selections through two sidecar cycles", () => {
     const source: RpcAgentRegistry = new Map([
-      ["simple", record({ agentId: "simple", spawnRole: "explore", exploreMode: "simple", modelBase: "pi/small", modelEffort: "medium", toolGroup: "read-only" })],
-      ["deep", record({ agentId: "deep", spawnRole: "explore", exploreMode: "deep", modelBase: "pi/lead", modelEffort: "high", toolGroup: "read-only-explore" })],
+      ["code", record({ agentId: "code", spawnRole: "explore", exploreMode: "code-search", modelBase: "pi/small", modelEffort: "medium", toolGroup: "read-only-explore" })],
+      ["synthesis", record({ agentId: "synthesis", spawnRole: "explore", exploreMode: "synthesis", modelBase: "pi/large", modelEffort: "high", toolGroup: "read-only-explore" })],
     ]);
     const first = parseOrphans(serializeOrphans(captureOrphans(source)));
     const revived = new Map<string, RpcAgentRecord>();
     reviveOrphans(revived, first);
     const second = parseOrphans(serializeOrphans(captureOrphans(revived)));
     assert.deepEqual(second.map(({ agentId, spawnRole, exploreMode, toolGroup, modelBase, modelEffort }) => ({ agentId, spawnRole, exploreMode, toolGroup, modelBase, modelEffort })), [
-      { agentId: "simple", spawnRole: "explore", exploreMode: "simple", toolGroup: "read-only", modelBase: "pi/small", modelEffort: "medium" },
-      { agentId: "deep", spawnRole: "explore", exploreMode: "deep", toolGroup: "read-only-explore", modelBase: "pi/lead", modelEffort: "high" },
+      { agentId: "code", spawnRole: "explore", exploreMode: "code-search", toolGroup: "read-only-explore", modelBase: "pi/small", modelEffort: "medium" },
+      { agentId: "synthesis", spawnRole: "explore", exploreMode: "synthesis", toolGroup: "read-only-explore", modelBase: "pi/large", modelEffort: "high" },
     ]);
+  });
+
+  test("owner last-writer state and ordered owner-send attribution survive capture, parse, and rehydrate", () => {
+    const r = record({ lastWriter: "owner", ownerSends: [{ text: "first", at: 10 }, { text: "second", at: 20 }] });
+    const [captured] = captureOrphans(new Map([[r.agentId, r]]));
+    const [parsed] = parseOrphans(serializeOrphans([captured]));
+    const revived = rehydrateOrphanRecord(parsed);
+    assert.equal(revived.lastWriter, "owner");
+    assert.deepEqual(revived.ownerSends, [{ text: "first", at: 10 }, { text: "second", at: 20 }]);
+  });
+
+  test("scoped write authority survives sidecar revival and the dormant resume path without widening", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "ws-pi-agent-sidecar-scope-")));
+    const previousPolicy = process.env[DELEGATION_ENV];
+    const originalRpc = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "getSessionStats", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
+    let resumedPolicy: unknown;
+    Object.assign(RpcClient.prototype, {
+      async start(this: { options?: { env?: Record<string, string> } }) { resumedPolicy = JSON.parse(this.options!.env![DELEGATION_ENV]!); },
+      stop: async () => {}, abort: async () => {}, onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {},
+      getState: async () => ({}), getSessionStats: async () => { throw new Error("no stats"); },
+    });
+    try {
+      const target = join(root, "output.md");
+      const parent = {
+        version: 1 as const, depth: 0, maxDepth: 2, authority: "lead" as const, tools: ["read"],
+        write: { mode: "scoped" as const, scopes: [{ path: root, kind: "tree" as const }] },
+      };
+      const delegation = {
+        version: 1 as const, depth: 1, maxDepth: 2, authority: "leaf" as const,
+        tools: ["read", "edit", "write"],
+        write: { mode: "scoped" as const, scopes: [{ path: target, kind: "file" as const }] },
+      };
+      process.env[DELEGATION_ENV] = JSON.stringify(parent);
+      const [parsed] = parseOrphans(serializeOrphans(captureOrphans(new Map([["a1", record({ sessionPath: join(root, "session.jsonl"), delegation })]]))));
+      const revived = rehydrateOrphanRecord(parsed);
+      const registry = new Map([[revived.agentId, revived]]);
+      await sendToAgent(registry, { cwd: root, extensionPath: "/tmp/index.ts" }, revived.agentId, "resume");
+      assert.deepEqual((resumedPolicy as { write?: unknown }).write, delegation.write, "the resumed child process receives the same normalized binding");
+
+      const widenedDelegation = { ...delegation, write: { mode: "unrestricted" as const } };
+      const [widenedParsed] = parseOrphans(serializeOrphans(captureOrphans(new Map([["wide", record({ agentId: "wide", sessionPath: join(root, "wide.jsonl"), delegation: widenedDelegation })]]))));
+      const widened = rehydrateOrphanRecord(widenedParsed);
+      await assert.rejects(
+        sendToAgent(new Map([[widened.agentId, widened]]), { cwd: root, extensionPath: "/tmp/index.ts" }, widened.agentId, "resume"),
+        /child write capability exceeds parent ceiling/,
+      );
+      assert.equal(widened.client, undefined, "a widened recovered binding is refused before a resume client is allocated");
+    } finally {
+      Object.assign(RpcClient.prototype, originalRpc);
+      if (previousPolicy === undefined) delete process.env[DELEGATION_ENV]; else process.env[DELEGATION_ENV] = previousPolicy;
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test("records the state at shutdown and the last-report time (relay #2: the roll-call needs both)", () => {
     const registry: RpcAgentRegistry = new Map([
-      ["busy", record({ agentId: "busy", client: {} as RpcClient, running: true, reportLog: [{ at: 1_000 }, { kind: "final", at: 2_000 }] })],
+      ["busy", record({ agentId: "busy", client: {} as RpcClient, running: true, reportLog: [{ at: 1_000 }, { at: 2_000 }] })],
       ["quiet", record({ agentId: "quiet", client: {} as RpcClient, running: false })],
     ]);
     const [busy, quiet] = captureOrphans(registry);
@@ -154,7 +207,7 @@ describe("captureOrphans", () => {
           spawnRole: "fork",
           running: true,
           streaming: true,
-          reportLog: [{ kind: "final", at: 1 }],
+          reportLog: [{ at: 1 }],
         }),
       ],
     ]);
@@ -268,11 +321,12 @@ describe("serializeOrphans / parseOrphans", () => {
   test("rejects contradictory research metadata instead of reviving it with worker/fork wiring", () => {
     const base = { agentId: "research", sessionPath: "/tmp/s.jsonl", systemPromptPath: "/tmp/p.md", wsToolNames: [], modelBase: "pi/model", modelEffort: "high" };
     const invalid = [
-      { ...base, spawnRole: "worker", exploreMode: "deep", toolGroup: "read-only-explore" },
-      { ...base, spawnRole: "explore", exploreMode: "simple", toolGroup: "read-only-explore" },
-      { ...base, spawnRole: "explore", exploreMode: "bogus", toolGroup: "read-only" },
-      { ...base, spawnRole: "explore", exploreMode: "deep", toolGroup: "read-only-explore", explicitTools: "bash" },
+      { ...base, spawnRole: "worker", exploreMode: "synthesis", toolGroup: "read-only-explore" },
+      { ...base, spawnRole: "explore", exploreMode: "code-search", toolGroup: "read-only" },
+      { ...base, spawnRole: "explore", exploreMode: "bogus", toolGroup: "read-only-explore" },
+      { ...base, spawnRole: "explore", exploreMode: "synthesis", toolGroup: "read-only-explore", explicitTools: "bash" },
       { ...base, spawnRole: "fork", toolGroup: "read-only" },
+      { ...base, spawnRole: "worker", toolGroup: "recon" },
     ];
     for (const orphan of invalid) {
       assert.deepEqual(parseOrphans(JSON.stringify({ version: SIDECAR_VERSION, orphans: [orphan] })), [], JSON.stringify(orphan));
@@ -658,23 +712,6 @@ describe("reviveOrphans (role wiring re-armed on revival)", () => {
     assert.equal(worker.onQuestionReport, undefined, "a plain worker has no role wiring to re-arm");
   });
 
-  test("a revived fork's anti-bleed loop is restored on its first resume", () => {
-    const parsed = parseOrphans(serializeOrphans([{ ...(captureOrphans(new Map([["f", record({ agentId: "f", spawnRole: "fork", client: {} as RpcClient })]]))[0]) }]));
-    const registry: RpcAgentRegistry = new Map();
-    reviveOrphans(registry, parsed, { fork: (rec) => armForkRoleWiring(pi, registry, rec) });
-
-    const fork = registry.get("f")!;
-    let subscriptions = 0;
-    fork.client = {
-      onEvent() {
-        subscriptions += 1;
-        return () => {};
-      },
-    } as unknown as RpcClient;
-    fork.onResume?.(fork);
-    assert.equal(subscriptions, 1, "sendToAgent's dormant-resume branch fires this once the client exists");
-  });
-
   test("an execute-worker's approval relay is re-armed on the record itself, not left to the resume call site", () => {
     const parsed = parseOrphans(
       serializeOrphans(captureOrphans(new Map([["ex", record({ agentId: "ex", spawnRole: "execute-worker", client: {} as RpcClient })]]))),
@@ -700,6 +737,44 @@ describe("reviveOrphans (role wiring re-armed on revival)", () => {
     assert.deepEqual(revived, []);
     assert.equal(registry.get("a1"), live);
   });
+
+  test("a different confirmed-stopped owned home on a discarded duplicate sidecar entry is removed", () => withTempDir((root) => {
+    const staleOwnership = allocateAgentHome(createAgentStorageContext("lead-old", root), "a1", "worker");
+    updateOwnership(staleOwnership.home, { liveness: { lifecycle: "stopped", running: false } });
+    const live = record({ agentId: "a1", client: {} as RpcClient, spawnRole: "worker" });
+    const registry: RpcAgentRegistry = new Map([["a1", live]]);
+    const revived = reviveOrphans(registry, [{
+      agentId: "a1", sessionPath: staleOwnership.sessionPath!, systemPromptPath: "/old-prompt", wsToolNames: [], toolGroup: "full-worker", ownership: staleOwnership,
+    }]);
+    assert.deepEqual(revived, []);
+    assert.equal(registry.get("a1"), live);
+    assert.equal(existsSync(staleOwnership.home), false);
+  }));
+
+  test("revival preserves confirmed-stopped liveness so an idle recovered child remains cap-evictable", () => withTempDir((root) => {
+    const ownership = allocateAgentHome(createAgentStorageContext("lead-old", root), "recovered", "worker");
+    updateOwnership(ownership.home, { liveness: { lifecycle: "stopped", running: false } });
+    const registry: RpcAgentRegistry = new Map();
+    reviveOrphans(registry, [{
+      agentId: "recovered", sessionPath: ownership.sessionPath!, systemPromptPath: "/prompt", wsToolNames: [], toolGroup: "full-worker", ownership,
+    }]);
+    assert.equal(readOwnership(ownership.home)?.liveness.lifecycle, "stopped");
+    assert.deepEqual(evictForCapacity(registry, 1), { ok: true, evictedLabel: "recovered" });
+    assert.equal(registry.size, 0);
+    assert.equal(existsSync(ownership.home), false);
+  }));
+
+  test("revival never clears a durable protection bit merely because the sidecar lacks it", () => withTempDir((root) => {
+    const ownership = allocateAgentHome(createAgentStorageContext("lead-old", root), "protected", "worker");
+    updateOwnership(ownership.home, { liveness: { lifecycle: "stopped", running: false, pendingQuestion: true } });
+    const registry: RpcAgentRegistry = new Map();
+    reviveOrphans(registry, [{
+      agentId: "protected", sessionPath: ownership.sessionPath!, systemPromptPath: "/prompt", wsToolNames: [], toolGroup: "full-worker", ownership,
+    }]);
+    assert.equal(readOwnership(ownership.home)?.liveness.pendingQuestion, true);
+    assert.equal(evictForCapacity(registry, 1).ok, false);
+    assert.equal(existsSync(ownership.home), true);
+  }));
 
   test("a throwing wiring callback still leaves the record registered and does not stop the rest", () => {
     const registry: RpcAgentRegistry = new Map();

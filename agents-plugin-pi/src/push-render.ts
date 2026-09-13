@@ -1,6 +1,7 @@
 /**
- * TUI rendering for the six pushed child-report families
- * (`spawner.ts`'s `PUSH_FAMILIES`).
+ * TUI rendering for the six pushed child-report families and the versioned
+ * held-queue batch envelope (`spawner.ts`'s `PUSH_FAMILIES`/
+ * `PUSH_BATCH_CUSTOM_TYPE`).
  *
  * Why this exists at all: Pi's default custom-message component
  * (`modes/interactive/components/custom-message.ts`) prints a bold
@@ -35,13 +36,17 @@
  * anyway — only the `Theme` class is), and that instance is the same singleton
  * Pi's own component paints with.
  *
- * `buildPushRenderLines` is the pure half, kept free of every host import so
- * the line split has direct `node --test` coverage.
+ * The batch renderer reads `details.items` and composes those same family
+ * cards (plus a default-style card for raw owner summaries) without exposing
+ * the XML envelope to the owner. `buildPushRenderLines` is the pure half,
+ * kept free of every host import so the line split has direct `node --test`
+ * coverage.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadHostPiTui } from "./pi-tui.ts";
 import { PUSH_FAMILIES } from "./spawner.ts";
+import { PUSH_BATCH_CUSTOM_TYPE, type PushBatchItem } from "./push-protocol.ts";
 import { createBoundedText, updateText, type NativeBox, type NativeText } from "./tool-result-render.ts";
 
 /** The three visual bands of a pushed message, split out of its plain-text content. */
@@ -108,6 +113,7 @@ export function buildPushRenderLines(message: { content?: unknown; details?: unk
  */
 export interface PushTuiModules {
   Box: new (paddingX?: number, paddingY?: number, bgFn?: (text: string) => string) => NativeBox;
+  Container: new () => { addChild(child: unknown): void; render(width: number): string[]; invalidate(): void };
   Text: new (text?: string, paddingX?: number, paddingY?: number) => NativeText;
   stripTerminalSequences(text: string): string;
   truncateToWidth(text: string, width: number, ellipsis?: string): string;
@@ -222,12 +228,64 @@ export function buildPushComponent(
     }, theme);
     box.addChild(body);
   }
+  if ((message as { state?: unknown }).state === "superseded") {
+    box.addChild(new tui.Text(paint("dim", "state: superseded"), 0, 0));
+  }
   if (parts.status) box.addChild(new tui.Text(paint("dim", parts.status), 0, 0));
   return box;
 }
 
+/** Render a batch as the same independent cards its structured items had before batching. */
+export function buildPushBatchComponent(
+  tui: PushTuiModules,
+  message: { details?: unknown },
+  theme: PushRenderTheme | undefined,
+  expanded = false,
+): unknown {
+  const rawItems = (message.details as { items?: unknown } | undefined)?.items;
+  if (!Array.isArray(rawItems) || rawItems.length === 0) return undefined;
+  const container = new tui.Container();
+  let rendered = 0;
+  for (const candidate of rawItems) {
+    const item = candidate as PushBatchItem;
+    if (!item || typeof item.customType !== "string") continue;
+    let component: unknown;
+    if ((PUSH_FAMILIES as readonly string[]).includes(item.customType)) {
+      component = buildPushComponent(tui, item, theme, expanded, item.customType);
+    } else {
+      const paint = (color: string, text: string): string => {
+        try { return theme?.fg?.(color, text) ?? text; } catch { return text; }
+      };
+      const paintBg = (text: string): string => {
+        try { return theme?.bg?.("customMessageBg", text) ?? text; } catch { return text; }
+      };
+      const box = new tui.Box(1, 1, paintBg);
+      box.addChild(new tui.Text(paint("customMessageLabel", `[${item.customType}]`), 0, 0));
+      const text = extractText(item.content);
+      if (text) {
+        const body = createBoundedText(tui);
+        updateText(tui, body, text, (value) => paint("muted", value), {
+          expanded,
+          trimOuterWhitespace: false,
+          lineBudget: "logical",
+          startIndent: 0,
+          continuationIndent: 0,
+          markerStyle: (marker) => paint("muted", marker),
+        }, theme);
+        box.addChild(body);
+      }
+      component = box;
+    }
+    if (component) {
+      container.addChild(component);
+      rendered += 1;
+    }
+  }
+  return rendered > 0 ? container : undefined;
+}
+
 /**
- * Registers the compact renderer for every push family. Call only from a TUI
+ * Registers the compact renderer for every push family and the batch envelope. Call only from a TUI
  * process (`ctx.mode === "tui"`) — there is no component to draw anywhere
  * else. The `Promise<boolean>` return is no longer an "unavailable" signal
  * (`loadPushTuiModules` always resolves — see `pi-tui.ts`'s Addendum doc
@@ -243,5 +301,8 @@ export async function registerPushMessageRenderers(pi: ExtensionAPI, tuiModules?
       buildPushComponent(tui, message as { content?: unknown; details?: unknown }, theme as unknown as PushRenderTheme, (options as { expanded?: boolean } | undefined)?.expanded, family) as never,
     );
   }
+  pi.registerMessageRenderer(PUSH_BATCH_CUSTOM_TYPE, (message, options, theme) =>
+    buildPushBatchComponent(tui, message as { details?: unknown }, theme as unknown as PushRenderTheme, (options as { expanded?: boolean } | undefined)?.expanded) as never,
+  );
   return true;
 }

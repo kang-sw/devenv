@@ -2848,6 +2848,24 @@ func TestServeStdioTodoAddErrorBranches(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 903200, root, nil))
 
+	// title is advertised as required. Omitted and empty values must fail before
+	// either append or insert can mutate the list.
+	if got := callToolWithKey(t, server, 0, key, "todo.add", map[string]any{
+		"key": "missing-title",
+	}); !strings.Contains(got, "todo.add: title is required") {
+		t.Fatalf("missing title error expected, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 0, key, "todo.add", map[string]any{
+		"key": "empty-title", "title": "",
+	}); !strings.Contains(got, "todo.add: title is required") {
+		t.Fatalf("empty title error expected, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 0, key, "todo.add", map[string]any{
+		"key": "valid-title", "title": "Valid title",
+	}); !strings.Contains(got, "todo added: valid-title") {
+		t.Fatalf("valid title should be accepted, got: %s", got)
+	}
+
 	// position not in the end|before|after enum.
 	if got := callToolWithKey(t, server, 1, key, "todo.add", map[string]any{
 		"key": "x", "title": "X", "position": "middle",
@@ -2904,9 +2922,10 @@ func TestServeStdioTodoAddErrorBranches(t *testing.T) {
 		t.Fatalf("empty ref_key-for-end(implicit) error expected, got: %s", got)
 	}
 
-	// None of the error paths above should have mutated the list.
-	if rec, ok := server.sessions.readState(key); !ok || len(rec.Todos) != 0 {
-		t.Fatalf("error paths must not mutate the todo list: %v", keysOf(rec.Todos))
+	// None of the error paths above should have mutated the list beyond the
+	// one valid-title control item.
+	if rec, ok := server.sessions.readState(key); !ok || len(rec.Todos) != 1 || rec.Todos[0].Key != "valid-title" || rec.Todos[0].Title != "Valid title" {
+		t.Fatalf("error paths must not mutate the todo list: %+v", rec.Todos)
 	}
 
 	// Pin the other side of the comma-ok distinction: an ABSENT ref_key for

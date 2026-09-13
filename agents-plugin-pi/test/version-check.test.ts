@@ -13,6 +13,7 @@ import { join, dirname, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { assertVersionPin, type RuntimeContract } from "../src/version-check.ts";
+import { validateGeneratedSkillTargets } from "../src/skills-dir.ts";
 
 describe("assertVersionPin", () => {
   test("does not throw when the bundled runtime.json version matches the live server version", () => {
@@ -31,6 +32,16 @@ describe("assertVersionPin", () => {
         return true;
       },
     );
+  });
+});
+
+describe("generated skill playbook targets", () => {
+  const testDir = dirname(fileURLToPath(import.meta.url));
+  const canonicalSkills = join(testDir, "..", "..", "agents-plugin", "skills");
+  const piRsrcManifest = join(testDir, "..", "rsrc", "manifest.json");
+
+  test("every shim copied into the Pi package targets a playbook in the current Pi rsrc manifest", () => {
+    assert.doesNotThrow(() => validateGeneratedSkillTargets(canonicalSkills, piRsrcManifest));
   });
 });
 

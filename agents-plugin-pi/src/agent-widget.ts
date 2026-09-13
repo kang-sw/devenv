@@ -33,8 +33,8 @@
  * IO functions.
  */
 
-import { countPending, type ThreadRecord } from "./ask.ts";
-import type { RpcAgentRecord, RpcAgentRegistry, SpawnAgentRole } from "./spawner.ts";
+import type { ThreadRecord } from "./ask.ts";
+import { isOwnerHeld, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole } from "./spawner.ts";
 import { visibleWidth } from "./text-width.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
 
@@ -59,8 +59,9 @@ export const DEFAULT_AGENT_WIDGET_WIDTH = 80;
 /** One live-agent row's display role. `"thread"` overrides the record's own `spawnRole` label only for a `threadBound` record whose bound thread is `origin: "lead-ask"`. `"explore"` is a persistent researcher role — see `roleFromSpawnRole`. */
 export type AgentRowRole = "worker" | "execute" | "fork" | "thread" | "explore";
 
-/** One live-agent row's state, in display precedence order (`awaiting-owner` first). Idle is deliberately not a state here — an idle, non-`threadBound` record is auto-parked (see `spawner.ts`'s `attachEventListener`) before it would ever read this way. */
-export type AgentRowState = "awaiting-owner" | "idle-awaiting-owner" | "awaiting-approval" | "running";
+/** One live-agent row's state, in display precedence order. Execution,
+ * descendant waits, delivery, and owner action remain distinct. */
+export type AgentRowState = "awaiting-owner" | "idle-awaiting-owner" | "awaiting-approval" | "waiting-on-children" | "pending-delivery" | "running";
 
 /** One rendered row of the live-agent widget. Pure data — no `RpcAgentRecord`/`ThreadRecord` reference — so `buildWidgetLines`/`buildHeadingLine` need no registry access of their own. */
 export interface AgentRow {
@@ -76,7 +77,7 @@ export interface AgentRow {
   inspectionHint?: string;
   model?: string;
   effort?: string;
-  latestInput?: number;
+  contextTokens?: number;
   estimatedUsd?: number;
 }
 
@@ -100,17 +101,21 @@ function sanitizeDisplayTitle(title: string | undefined, fallback: string): stri
   return cleaned || fallback;
 }
 
-const STATE_RANK: Record<AgentRowState, number> = {
+export const AGENT_STATE_RANK: Readonly<Record<AgentRowState, number>> = {
   "awaiting-owner": 0,
   "idle-awaiting-owner": 0,
   "awaiting-approval": 1,
-  running: 2,
+  "waiting-on-children": 2,
+  "pending-delivery": 3,
+  running: 4,
 };
 
-const STATE_LABEL: Record<AgentRowState, string> = {
+export const AGENT_STATE_LABEL: Readonly<Record<AgentRowState, string>> = {
   "awaiting-owner": "awaiting owner",
   "idle-awaiting-owner": "idle awaiting owner",
   "awaiting-approval": "awaiting approval",
+  "waiting-on-children": "waiting on children",
+  "pending-delivery": "pending delivery",
   running: "running",
 };
 
@@ -130,18 +135,18 @@ export function rowName(record: RpcAgentRecord): string {
 /**
  * 260908 (subagent audit window ticket): the row-inclusion/state
  * classification half of `buildAgentRows`'s per-record loop below, pulled
- * out as its own pure predicate so the audit picker's three live tiers
- * (`260908` sibling ticket) reuse the identical inclusion rule and state
- * precedence rather than a second copy. `undefined` means "not included by
- * the widget" — i.e. the record is dormant (`client === undefined &&
- * !threadBound && pendingApproval === undefined`), exactly the complement
- * `buildAgentRows`'s own doc comment already describes. Pure refactor:
- * `buildAgentRows`'s own output is unchanged.
+ * out as its own pure predicate so the audit picker reuses identical
+ * inclusion and precedence. Execution, descendant waiting, pending terminal
+ * delivery, approval, and owner action are distinct states. `undefined`
+ * means the record is resting with no visible action or delivery pending.
  */
 export function classifyRegistryRowState(record: RpcAgentRecord): AgentRowState | undefined {
   if (record.threadBound === true) return "awaiting-owner";
   if (record.pendingApproval !== undefined) return "awaiting-approval";
-  if (record.client !== undefined) return "running";
+  if (isOwnerHeld(record) && !record.running && !record.streaming) return "idle-awaiting-owner";
+  if (record.running || record.streaming) return "running";
+  if (record.waitingOnChildren) return "waiting-on-children";
+  if (record.terminalDelivery && record.terminalDelivery.state !== "enqueued") return "pending-delivery";
   return undefined;
 }
 
@@ -165,14 +170,10 @@ function clampElapsed(deltaMs: number): number {
  * both cases used to render zero rows and silently drop the merged-in
  * pending-question surface entirely).
  *
- * Row inclusion, RPC-registry side (a record the widget cares about even
- * with no matching thread): `record.threadBound || record.pendingApproval
- * !== undefined || record.client !== undefined`. A plain, non-`threadBound`
- * idle record never satisfies any of these — the automatic-park step in
- * `spawner.ts`'s `attachEventListener` has already cleared `client` by the
- * time it would otherwise read that way — which is what makes "idle is not a
- * row state" true without this function needing to check `streaming`/
- * `running` itself. A `threadBound` record renders even while dormant
+ * RPC-side rows render only for an explicit classified state: owner action,
+ * approval, execution, descendant waiting, or pending terminal delivery. A
+ * retained but settled client is not implicitly running. A `threadBound`
+ * record renders even while dormant
  * (`client === undefined`): that row is the owner's action cue, and it must
  * not disappear just because the respondent fork happens to be parked
  * between messages.
@@ -185,8 +186,8 @@ function clampElapsed(deltaMs: number): number {
  * `"awaiting-owner"`, elapsed is `now - touchedAt`, and the `/answer <id>`
  * hint is always set. This is the ticket's merged-in pending-question row.
  *
- * State precedence: `threadBound` (awaiting owner) beats `pendingApproval`
- * (awaiting approval) beats the default `"running"`.
+ * State precedence keeps owner and approval actions ahead of execution, then
+ * descendant waiting and terminal delivery as distinct non-running states.
  *
  * Hint/clock vs. role (review relay #1 Important #2): a `threadBound`
  * record's `/answer <id>` hint and `touchedAt`-based elapsed follow the
@@ -197,8 +198,7 @@ function clampElapsed(deltaMs: number): number {
  * match (the ticket's Entry-B-only role override); a fork-raised match keeps
  * the record's own `spawnRole` label (typically `"fork"`).
  *
- * Sort: state rank first (awaiting owner, then awaiting approval, then
- * running), elapsed descending within each state. No cap here — `N` for the
+ * Sort: state rank first, elapsed descending within each state. No cap here — `N` for the
  * panel heading is this deduped, UNCAPPED row count; the display cap
  * to `AGENT_WIDGET_ROW_CAP` with its `+N more` tail is `buildWidgetLines`'s
  * own rendering concern, not a property of the underlying agent count.
@@ -226,9 +226,10 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
       state,
       elapsedMs,
       ...(isAwaitingOwnerWithThread ? { answerHint: `/answer ${boundThread!.threadId}` } : {}),
+      ...(isOwnerHeld(record) ? { inspectionHint: `/audit ${record.alias ?? record.agentId}` } : {}),
       ...(record.telemetry?.model ?? record.observedModel ? { model: record.telemetry?.model ?? record.observedModel } : {}),
       ...(record.telemetry?.effort ?? record.observedEffort ? { effort: record.telemetry?.effort ?? record.observedEffort } : {}),
-      ...((record.telemetry?.latestInput ?? record.observedLatestInput) !== undefined ? { latestInput: record.telemetry?.latestInput ?? record.observedLatestInput } : {}),
+      ...((record.telemetry?.contextTokens ?? record.observedContextTokens) !== undefined ? { contextTokens: record.telemetry?.contextTokens ?? record.observedContextTokens } : {}),
       ...(record.telemetry?.estimatedUsd !== undefined ? { estimatedUsd: record.telemetry.estimatedUsd } : {}),
     });
   }
@@ -243,13 +244,13 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
       answerHint: `/answer ${thread.threadId}`,
       ...(thread.forkResume?.telemetry?.model ?? thread.forkResume?.observedModel ? { model: thread.forkResume?.telemetry?.model ?? thread.forkResume?.observedModel } : {}),
       ...(thread.forkResume?.telemetry?.effort ?? thread.forkResume?.observedEffort ? { effort: thread.forkResume?.telemetry?.effort ?? thread.forkResume?.observedEffort } : {}),
-      ...((thread.forkResume?.telemetry?.latestInput ?? thread.forkResume?.observedLatestInput) !== undefined ? { latestInput: thread.forkResume?.telemetry?.latestInput ?? thread.forkResume?.observedLatestInput } : {}),
+      ...((thread.forkResume?.telemetry?.contextTokens ?? thread.forkResume?.observedContextTokens) !== undefined ? { contextTokens: thread.forkResume?.telemetry?.contextTokens ?? thread.forkResume?.observedContextTokens } : {}),
       ...(thread.forkResume?.telemetry?.estimatedUsd !== undefined ? { estimatedUsd: thread.forkResume.telemetry.estimatedUsd } : {}),
     });
   }
 
   rows.sort((a, b) => {
-    const rankDiff = STATE_RANK[a.state] - STATE_RANK[b.state];
+    const rankDiff = AGENT_STATE_RANK[a.state] - AGENT_STATE_RANK[b.state];
     return rankDiff !== 0 ? rankDiff : b.elapsedMs - a.elapsedMs;
   });
 
@@ -274,9 +275,9 @@ function isAttentionState(state: AgentRowState): boolean {
   return state === "awaiting-owner" || state === "idle-awaiting-owner";
 }
 
-/** Latest assistant-call input tokens, never a cumulative total. */
-export function formatLatestInputTokens(tokens: number | undefined): string {
-  return tokens === undefined ? "—" : `${(tokens / 1_000).toFixed(1)}k`;
+/** Labeled current context-window occupancy; unknown is explicit across compaction gaps. */
+export function formatContextTokens(tokens: number | undefined): string {
+  return tokens === undefined ? "ctx ?" : `ctx ${(tokens / 1_000).toFixed(1)}k`;
 }
 
 function formatEstimatedUsd(usd: number | undefined): string {
@@ -310,13 +311,13 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
     : ownerAction
       ? `⚠ OWNER ACTION · ${sanitizeDisplayTitle(row.name, "owner action")}`
       : row.name;
-  const stateLabel = STATE_LABEL[row.state];
+  const stateLabel = AGENT_STATE_LABEL[row.state];
   const base = `${primary} · ${row.role} · ${stateLabel} · ${formatCompactDuration(row.elapsedMs)}`;
   const model = row.model ?? "—";
   const effort = row.effort ?? "—";
-  const input = formatLatestInputTokens(row.latestInput);
+  const context = formatContextTokens(row.contextTokens);
   const estimate = `$${formatEstimatedUsd(row.estimatedUsd)}`;
-  const telemetry = ` · ${model} (${effort}) · ${input} · ${estimate}`;
+  const telemetry = ` · ${model} (${effort}) · ${context} · ${estimate}`;
   const protectedHint = row.inspectionHint;
   const hint = protectedHint ? ` — ${protectedHint}` : "";
   // A supplied inspection affordance remains the only protected tail. The
@@ -344,7 +345,7 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
       theme.fg("accent", model) +
       theme.fg("dim", ` (${effort})`) +
       theme.fg("dim", " · ") +
-      theme.fg("syntaxNumber", input) +
+      theme.fg("syntaxNumber", context) +
       theme.fg("dim", " · ") +
       theme.fg("warning", estimate);
     content = base + styledTelemetry;
@@ -532,7 +533,7 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
   function paint(): void {
     const threadList = [...threads.values()];
     const rows = buildAgentRows(registry, threadList, Date.now());
-    const pendingCount = countPending(threadList);
+    const pendingCount = threadList.filter((thread) => thread.status === "pending").length;
     const visible = rows.length > 0 || pendingCount > 0;
     const qualifying = rows.some((row) => isAttentionState(row.state));
     const animationEnabled = options.animationEnabled?.() !== false;

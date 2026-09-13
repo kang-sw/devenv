@@ -101,6 +101,20 @@ contract conflict as a missing decision, and carry exploration gaps into
    contradict the planned behavior or constraints of any other ticket currently
    in `ready/`, or a cross-child invariant its `parent:` epic states regardless of
    the epic's status? Name the conflicting stem.
+6. **Dependency-landing advisory (single-ticket path)**: When the ticket under
+   review declares a typed `blocked-by:` edge, resolve each named prerequisite
+   with {{.McpNamespace}}/tickets.query(ticket_stem: <prereq>, include_done: true).
+   A prerequisite is landed when it is in `.done/`, or — for a `<stem>#<phaseN>`
+   edge — when that phase carries a `### Result`. For a prerequisite that is not
+   landed, emit one `minor` ordering finding (always `resolution: autonomous`)
+   naming the stem. This finding is advisory and never raises the verdict:
+   promoting the prerequisite in a later batch is a legitimate plan, and the
+   dispatch-time gate hard-blocks an unlanded prerequisite regardless, so
+   conflating design quality with scheduling state here would only add noise.
+   Only the typed `blocked-by:` edge triggers this advisory; an untyped soft
+   relation never does. This mirrors, on the single-ticket path, the
+   dependency-mistake reasoning the batch path already applies in **Batch review
+   boundary**.
 
 ## Heuristics
 

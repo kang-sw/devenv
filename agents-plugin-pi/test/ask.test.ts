@@ -22,11 +22,10 @@
  * stop, and the headless paths (the fork's own final on a never-opened thread,
  * and the lead answering through `ws-agent-send`).
  *
- * NOT covered here — genuinely live-gate only, mirroring test/fork.test.ts's
- * own pure/IO split: `registerThreadCommands`'s handlers, the lazy
- * discussion-fork spawn and the overlay attach (all need a live `pi` session
- * or a real `RpcClient`). Those are the plan's tmux-probe and owner-runbook
- * tiers.
+ * The `/answer` command's target-selection/refusal branches are covered with
+ * a fake command registry. The genuinely live-only remainder is the lazy
+ * discussion-fork spawn and overlay attachment, which need a live Pi session
+ * or a real `RpcClient`.
  *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
@@ -63,6 +62,7 @@ import {
   buildAskAnchorLine,
   withdrawQueuedQuestion,
   deliverQueuedAnswer,
+  deliverQueuedAnswers,
   resolveLeadAskEscapeAction,
   runLeadAskEscapeAction,
   type LeadAskEscapeAction,
@@ -73,17 +73,14 @@ import {
   handleForkRaisedQuestion,
   ensureRespondent,
   registerAsk,
+  registerThreadCommands,
   injectDiscussionSummary,
   closeThreadOnDone,
-  handleRespondentFinalReport,
   normalizeThreadOrigin,
-  normalizeTranscript,
-  THREAD_TRANSCRIPT_CAP,
   checkContextLength,
   buildForkQuestionLeadNotice,
   MAX_CONTEXT_CHARS,
   resolveChildLiveness,
-  buildInitialConversationItems,
   buildThreadHeaderHint,
   formatSpawnTime,
   buildDoneSummaryPrompt,
@@ -97,6 +94,7 @@ import {
   buildQueueCoverageLine,
   buildQueueSubmitConfirmMessage,
   resolveLeadAskQueueEntryAction,
+  buildLeadAskQueueOnClose,
   LeadAskQueueComponent,
   type ThreadRecord,
   type OverlayHandle,
@@ -104,7 +102,7 @@ import {
   type FocusableEditorLike,
   type LeadAskQueueOptions,
 } from "../src/ask.ts";
-import { ConversationViewComponent, type ConversationItem, type ConversationChannel, type ConversationViewTui } from "../src/conversation-view.ts";
+import { ConversationViewComponent, type ConversationChannel, type ConversationViewTui } from "../src/conversation-view.ts";
 import { FORK_EXCLUDED_TOOL_NAMES } from "../src/fork.ts";
 import {
   agentWidgetRefreshRef,
@@ -121,6 +119,7 @@ import {
   type RpcAgentRegistry,
   leadIdleRef, registerPushFlush, clearWakeStart,
 } from "../src/spawner.ts";
+import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { allocateAgentHome, createAgentStorageContext } from "../src/agent-storage.ts";
 import { rmSync } from "node:fs";
@@ -143,6 +142,16 @@ afterEach(() => {
   heldPushQueue.length = 0;
   leadWakeStartPendingRef.current = false;
 });
+
+/** Keep item-level lifecycle assertions while the transport delivers a batch envelope. */
+function capturePush(sent: Array<{ message: unknown; options: unknown }>, message: unknown, options: unknown): void {
+  const batch = message as { customType?: string; details?: { items?: unknown[] } };
+  if (batch.customType === PUSH_BATCH_CUSTOM_TYPE && Array.isArray(batch.details?.items)) {
+    for (const item of batch.details.items) sent.push({ message: item, options });
+  } else {
+    sent.push({ message, options });
+  }
+}
 
 function thread(overrides: Partial<ThreadRecord> = {}): ThreadRecord {
   return {
@@ -227,138 +236,21 @@ describe("threadRegistryPath / serialize / parse", () => {
     assert.deepEqual(parseThreadRegistry(JSON.stringify({ threads: [{ threadId: "q1", title: "t", status: "weird" }] })), []);
   });
 
-  test("a persisted transcript round-trips (dogfood: Esc/reopen and restart must not open an empty view)", () => {
-    const record = thread({
-      threadId: "q1",
-      status: "open",
-      transcript: [
-        { kind: "note", text: "Rebase or merge?" },
-        { kind: "user", text: "merge" },
-        { kind: "assistant", text: "Merging keeps both histories." },
-        { kind: "tool-call", id: "t1", name: "ws-note", args: { text: "x" } },
-        { kind: "tool-result", id: "t1", name: "ws-note", content: "ok", isError: false },
-      ],
-    });
-    assert.deepEqual(parseThreadRegistry(serializeThreadRegistry([record])), [record]);
-  });
-
-  test("an absent transcript stays absent, and a malformed one degrades to only its well-formed entries", () => {
-    const [absent] = parseThreadRegistry(JSON.stringify({ threads: [thread({ threadId: "q1" })] }));
-    assert.ok(!("transcript" in absent), "no field is invented for a record written before transcripts existed");
-    const [notArray] = parseThreadRegistry(JSON.stringify({ threads: [{ ...thread({ threadId: "q2" }), transcript: "nope" }] }));
-    assert.ok(!("transcript" in notArray));
-    const [mixed] = parseThreadRegistry(
-      JSON.stringify({
-        threads: [{ ...thread({ threadId: "q3" }), transcript: [{ kind: "user", text: "ok" }, { kind: "alien", text: "x" }, { kind: "note" }, null, 7] }],
-      }),
-    );
-    assert.deepEqual(mixed.transcript, [{ kind: "user", text: "ok" }]);
-  });
-
-  test("review relay #2 I5: a malformed native tool-call/tool-result is dropped, never poisoning a well-formed neighbor", () => {
-    const [record] = parseThreadRegistry(
-      JSON.stringify({
-        threads: [
-          {
-            ...thread({ threadId: "q4" }),
-            transcript: [
-              { kind: "tool-call", name: "ws-read", args: {} }, // missing id
-              { kind: "tool-call", id: "c1", name: "ws-read", args: { path: "a.txt" } }, // well-formed
-              { kind: "tool-result", id: "c1", name: "ws-read", content: { not: "a string" } }, // non-string content
-              { kind: "tool-result", id: "c1", name: "ws-read", content: "ok" }, // well-formed
-              { kind: "tool-result", id: "c2" }, // missing name/content
-            ],
-          },
-        ],
-      }),
-    );
-    assert.deepEqual(record.transcript, [
-      { kind: "tool-call", id: "c1", name: "ws-read", args: { path: "a.txt" } },
-      { kind: "tool-result", id: "c1", name: "ws-read", content: "ok" },
-    ]);
-  });
-
-  test("legacy {who,text}[] entries hydrate to their ConversationItem.kind equivalents (records written before Phase 2)", () => {
-    const [record] = parseThreadRegistry(
-      JSON.stringify({
-        threads: [
-          {
-            ...thread({ threadId: "q1" }),
-            transcript: [
-              { who: "note", text: "Rebase or merge?" },
-              { who: "you", text: "merge" },
-              { who: "thread", text: "Merging keeps both histories." },
-              { who: "alien", text: "dropped" },
-            ],
-          },
-        ],
-      }),
-    );
-    assert.deepEqual(record.transcript, [
-      { kind: "note", text: "Rebase or merge?" },
-      { kind: "user", text: "merge" },
-      { kind: "assistant", text: "Merging keeps both histories." },
-    ]);
-  });
-
-  test("normalizeTranscript caps at the newest THREAD_TRANSCRIPT_CAP entries", () => {
-    const many = Array.from({ length: THREAD_TRANSCRIPT_CAP + 25 }, (_, i) => ({ who: "thread" as const, text: `turn ${i}` }));
-    const capped = normalizeTranscript(many)!;
-    assert.equal(capped.length, THREAD_TRANSCRIPT_CAP);
-    assert.equal((capped[0] as { text: string }).text, "turn 25", "the oldest entries are the ones dropped");
-    assert.equal((capped.at(-1) as { text: string }).text, `turn ${THREAD_TRANSCRIPT_CAP + 24}`);
-    assert.equal(normalizeTranscript(undefined), undefined);
-    assert.equal(normalizeTranscript({}), undefined);
+  test("legacy thread-local transcripts are discarded on hydration so the child record/session is the only conversation source", () => {
+    const original = {
+      ...thread({ threadId: "q1", status: "open" }),
+      transcript: [{ kind: "user", text: "legacy owner text" }],
+    } as ThreadRecord & { transcript: unknown[] };
+    const [parsed] = parseThreadRegistry(serializeThreadRegistry([original]));
+    assert.ok(!("transcript" in parsed));
+    assert.equal(parsed.threadId, "q1");
   });
 
   describe("resolveChildLiveness", () => {
-    test("streaming -> running, not streaming -> settled", () => {
-      assert.equal(resolveChildLiveness(true), "running");
-      assert.equal(resolveChildLiveness(false), "settled");
-    });
-  });
-
-  describe("buildInitialConversationItems", () => {
-    test("the original question is the first assistant dialogue turn even when it equals the metadata title", () => {
-      assert.deepEqual(buildInitialConversationItems({ transcript: [], question: "Rebase or merge?", title: "Rebase or merge?" }), [
-        { kind: "assistant", text: "**Question:** Rebase or merge?" },
-      ]);
-    });
-
-    test("an empty or absent transcript trims and seeds the question once", () => {
-      assert.deepEqual(buildInitialConversationItems({ transcript: undefined, question: "  Rebase or merge?  " }), [
-        { kind: "assistant", text: "**Question:** Rebase or merge?" },
-      ]);
-    });
-
-    test("repairs an existing history that omitted the question without discarding later turns", () => {
-      const items: ConversationItem[] = [
-        { kind: "user", text: "What about blue?" },
-        { kind: "assistant", text: "Blue is also available." },
-      ];
-      assert.deepEqual(buildInitialConversationItems({ transcript: items, question: "Which color do you prefer?" }), [
-        { kind: "assistant", text: "**Question:** Which color do you prefer?" },
-        ...items,
-      ]);
-    });
-
-    test("upgrades both legacy leading note forms and does not duplicate the question on later reopen", () => {
-      const later: ConversationItem[] = [{ kind: "user", text: "Blue." }];
-      for (const noteText of ["Which color?", "Question: Which color?"]) {
-        const upgraded = buildInitialConversationItems({
-          transcript: [{ kind: "note", text: noteText }, ...later],
-          question: "Which color?",
-        });
-        assert.deepEqual(upgraded, [{ kind: "assistant", text: "**Question:** Which color?" }, ...later]);
-        assert.deepEqual(buildInitialConversationItems({ transcript: upgraded, question: "Which color?" }), upgraded);
-      }
-    });
-
-    test("an absent question leaves genuine history unchanged", () => {
-      const items: ConversationItem[] = [{ kind: "note", text: "already open" }];
-      assert.equal(buildInitialConversationItems({ transcript: items, question: undefined }), items);
-      assert.deepEqual(buildInitialConversationItems({ transcript: undefined, question: undefined }), []);
-      assert.deepEqual(buildInitialConversationItems({ transcript: [], question: undefined }), []);
+    test("running wins; an owner last-writer makes an idle child await the owner", () => {
+      assert.equal(resolveChildLiveness(true, true), "running");
+      assert.equal(resolveChildLiveness(false, true), "idle-awaiting-owner");
+      assert.equal(resolveChildLiveness(false, false), "settled");
     });
   });
 
@@ -614,13 +506,12 @@ describe("Entry B texts (deliberately NOT wrapped in Entry A's structural frame)
     }
   });
 
-  test("the directive names both exits: the owner's /done, and the fork's own kind:\"final\" report once a decision is stated", () => {
+  test("the directive names /done and ordinary settled output as the two close paths", () => {
     const directive = buildDiscussionForkDirectiveText();
     assert.ok(directive.includes("/done"));
-    assert.ok(directive.includes("ws-report-to-lead"));
-    assert.ok(directive.includes('kind:"final"'));
-    assert.match(directive, /decision/i);
-    assert.match(directive, /delivered to the lead/);
+    assert.ok(!directive.includes("ws-report-to-lead"));
+    assert.ok(!directive.includes('kind:"final"'));
+    assert.match(directive, /ordinary settled answer/i);
     for (const marker of framedMarkers) {
       assert.ok(!directive.includes(marker));
     }
@@ -723,8 +614,7 @@ describe("captureForkResume / rehydrateForkRecord (the persistence-gap resolutio
     streaming: true,
     running: true,
     threadBound: true,
-    terminalThisTurn: true,
-    reportLog: [{ kind: "final", at: 1 }],
+        reportLog: [{ at: 1 }],
   } as unknown as RpcAgentRecord;
 
   test("capture keeps only JSON-serializable resume fields (never the live client or runtime state)", () => {
@@ -739,6 +629,13 @@ describe("captureForkResume / rehydrateForkRecord (the persistence-gap resolutio
       modelEffort: "high",
     });
     assert.deepEqual(JSON.parse(JSON.stringify(resume)), resume, "must round-trip through JSON");
+  });
+
+  test("last-writer ownership and owner-send attribution survive the thread resume copy", () => {
+    const original = { ...live, lastWriter: "owner" as const, ownerSends: [{ text: "owner turn", at: 42 }] };
+    const revived = rehydrateForkRecord("agent-owner", captureForkResume(original));
+    assert.equal(revived.lastWriter, "owner");
+    assert.deepEqual(revived.ownerSends, [{ text: "owner turn", at: 42 }]);
   });
 
   test("rehydration reconstructs a spec-conformant dormant record with client undefined", () => {
@@ -881,37 +778,11 @@ describe("handleForkRaisedQuestion (Entry A meets Entry B)", () => {
     handleForkRaisedQuestion(handle, registry, "agent-7", "Should I rebase?");
 
     assert.equal(live.threadBound, true, "the exchange belongs to the owner from the moment the fork raised it");
-    assert.equal(live.overlayAttached, undefined, "no VIEW is attached yet — the two flags have different lifetimes");
     assert.equal(
       computeRunningStatusLine(registry),
       undefined,
       "a question-parked fork is outside the fan-in count entirely, and an empty fan-in produces no line at all",
     );
-  });
-
-  test("I2 (headless): the fork's OWN final releases the bind even though no owner ever opened the thread", () => {
-    const { handle, registry } = setup();
-    // Headless (§8): `index.ts` still registers the thread, returns undefined
-    // (so the question is relayed to the lead), and there is no owner surface
-    // that could ever run /answer or /done on it.
-    const pi = { sendMessage: () => assert.fail("§1: a fork-raised close never injects a summary") } as unknown as ExtensionAPI;
-    const live = liveFork();
-    registry.set("agent-7", live);
-    const thread = handleForkRaisedQuestion(handle, registry, "agent-7", "Should I rebase?", pi);
-    assert.equal(live.threadBound, true);
-    assert.equal(thread.status, "pending", "the owner never opened it");
-
-    // The fork works it out and files its own completion.
-    const outcome = applyRpcEvent(live, {
-      type: "tool_execution_start",
-      toolName: REPORT_TO_LEAD_TOOL_NAME,
-      args: { kind: "final", message: "Outcome: rebased." },
-    });
-
-    assert.equal(live.threadBound, false, "without this the fork is outside the fan-in count, and settle-suppressed, forever");
-    assert.equal(handle.threads.get(thread.threadId)!.status, "dormant", "the owner has nothing left to answer");
-    assert.deepEqual(outcome, {}, "Edition: a final is stashed, not pushed at tool-invocation time");
-    assert.equal(live.pendingFinal, "Outcome: rebased.", "a fork-raised final is still the lead's completion signal — it is released when the fork's turn ends");
   });
 
   test("I2 (headless): the lead answering through ws-agent-send releases the bind at that moment", async () => {
@@ -1206,7 +1077,7 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     const pi = {
       on: (event: string, fn: () => void) => handlers.set(event, fn),
       sendUserMessage: () => handlers.get("agent_start")?.(),
-      sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }),
+      sendMessage: (message: unknown, options: unknown) => capturePush(sent, message, options),
     } as unknown as ExtensionAPI;
     registerPushFlush(pi, { delayMs: () => 10 });
     const handle = createThreadRegistryHandle();
@@ -1230,7 +1101,6 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
       streaming: false,
       running: false,
       reportLog: [],
-      overlayAttached: true,
       threadBound: true,
       client: {
         prompt: async () => {},
@@ -1331,7 +1201,7 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     assert.equal(loadThreadRegistryFile(path)[0]?.status, "dormant");
   });
 
-  test("I5: snapshots the resume fields BEFORE stopping the respondent, and clears the overlay flag", async () => {
+  test("I5: snapshots the resume fields BEFORE stopping the respondent and releases the thread bind", async () => {
     const { pi, handle, record } = setup();
     record.respondentAgentId = "agent-7";
     const stops: string[] = [];
@@ -1341,7 +1211,6 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     injectDiscussionSummary(pi, handle, registry, record, "decided");
 
     assert.equal(record.forkResume?.sessionPath, "/tmp/s.jsonl", "captured while the record was still live");
-    assert.equal(live.overlayAttached, false);
     assert.equal(live.threadBound, false, "I5: the thread itself closed here, so the thread-lifetime bind is released too");
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(stops, ["agent-7"], "260903 ws-agent-stop semantics: the child process is actually stopped");
@@ -1383,7 +1252,6 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(stops, [], "stopping a live task fork would destroy the in-flight task the lead is still expecting a pushed final from");
     assert.ok(live.client, "the fork's client is untouched");
-    assert.equal(live.overlayAttached, false, "the owner view closes immediately");
     assert.equal(live.threadBound, true, "the temporary bind protects the finish operation until its closeout settles");
     assert.ok(live.forkFinish, "an already-idle fork is evaluated immediately rather than stranded awaiting another event");
     assert.equal(record.status, "dormant", "the ordinary thread snapshot is persisted while finish continues in memory");
@@ -1411,123 +1279,6 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     assert.equal(record.status, "dormant");
   });
 
-  describe("handleRespondentFinalReport (the fork ends the thread itself)", () => {
-    /** An overlay stub whose `closeWithSummary` does what the real component does: fire `onDone` (= closeThreadOnDone) with the text. */
-    function overlayStub(onDone: (summary: string) => void) {
-      const calls: { close: number; summaries: string[] } = { close: 0, summaries: [] };
-      const handle: OverlayHandle = {
-        close: () => {
-          calls.close += 1;
-        },
-        closeWithSummary: (summary) => {
-          calls.summaries.push(summary);
-          onDone(summary);
-        },
-      };
-      return { handle, calls };
-    }
-
-    test("lead-ask, no overlay attached (owner pressed Esc): injects the report as the summary, stops the fork, goes dormant", async () => {
-      const { pi, sent, handle, path, record } = setup("lead-ask");
-      record.status = "open";
-      record.respondentAgentId = "agent-7";
-      const stops: string[] = [];
-      const live = liveRespondent(stops);
-      const registry: RpcAgentRegistry = new Map([["agent-7", live]]);
-
-      handleRespondentFinalReport(pi, handle, registry, record, "Decided: merge, keep both histories.", undefined);
-
-      assert.equal(sent.length, 1, "no summary turn is requested — the report text is the summary");
-      const msg = sent[0].message as { content: string };
-      assert.ok(msg.content.includes("Decided: merge, keep both histories."));
-      assert.equal(record.status, "dormant");
-      assert.equal(live.overlayAttached, false);
-      assert.equal(loadThreadRegistryFile(path)[0]?.status, "dormant");
-      await new Promise((resolve) => setImmediate(resolve));
-      assert.deepEqual(stops, ["agent-7"]);
-    });
-
-    test("lead-ask with the overlay attached: the overlay is closed with the report text, and that close runs the same /done path", async () => {
-      const { pi, sent, handle, record } = setup("lead-ask");
-      record.status = "open";
-      record.respondentAgentId = "agent-7";
-      const stops: string[] = [];
-      const registry: RpcAgentRegistry = new Map([["agent-7", liveRespondent(stops)]]);
-      const overlay = overlayStub((summary) => closeThreadOnDone(pi, handle, registry, record, summary));
-
-      handleRespondentFinalReport(pi, handle, registry, record, "We go with the second anchor.", overlay.handle);
-
-      assert.deepEqual(overlay.calls.summaries, ["We go with the second anchor."]);
-      assert.equal(overlay.calls.close, 0, "closed through closeWithSummary, never the bare close");
-      assert.equal(sent.length, 1);
-      assert.equal(record.status, "dormant");
-      await new Promise((resolve) => setImmediate(resolve));
-      assert.deepEqual(stops, ["agent-7"]);
-    });
-
-    test("fork-raised with the overlay attached: closes the overlay and detaches only — no injection, no stop", async () => {
-      const { pi, sent, handle, record } = setup("fork-raised");
-      record.status = "open";
-      record.respondentAgentId = "agent-7";
-      const stops: string[] = [];
-      const live = liveRespondent(stops);
-      const registry: RpcAgentRegistry = new Map([["agent-7", live]]);
-      const overlay = overlayStub((summary) => closeThreadOnDone(pi, handle, registry, record, summary));
-
-      handleRespondentFinalReport(pi, handle, registry, record, "Task done. Decisions: rebase.", overlay.handle);
-
-      assert.deepEqual(overlay.calls.summaries, [""], "a task fork's final is not a thread summary");
-      assert.deepEqual(sent, [], "the lead reads the fork's own final report; nothing is injected");
-      assert.equal(record.status, "dormant");
-      assert.equal(live.overlayAttached, false);
-      await new Promise((resolve) => setImmediate(resolve));
-      assert.deepEqual(stops, []);
-    });
-
-    test("260905: fork-raised with no overlay attached still detaches the thread and releases the bind", () => {
-      const { pi, sent, handle, record } = setup("fork-raised");
-      record.status = "open";
-      record.respondentAgentId = "agent-7";
-      const live = liveRespondent([]);
-      const consumed = handleRespondentFinalReport(pi, handle, new Map([["agent-7", live]]), record, "Task done.", undefined);
-      assert.equal(consumed, false, "a fork-raised final IS the completion signal — it must still be pushed to the lead");
-      assert.deepEqual(sent, [], "nothing is injected; the lead reads the pushed report itself");
-      assert.equal(record.status, "dormant", "the thread that the question opened is over");
-      assert.equal(live.threadBound, false, "the fork rejoins the lead's fan-in on the very report that ends the thread");
-    });
-
-    test("260905 suppression contract: a lead-ask final returns true (consumed), a fork-raised final returns false", () => {
-      const leadAsk = setup("lead-ask");
-      leadAsk.record.status = "open";
-      assert.equal(
-        handleRespondentFinalReport(leadAsk.pi, leadAsk.handle, new Map(), leadAsk.record, "Decided.", undefined),
-        true,
-        "the decision already reaches the lead as the ws-thread-summary message; pushing the raw report too would duplicate it",
-      );
-
-      const forkRaised = setup("fork-raised");
-      forkRaised.record.status = "open";
-      assert.equal(handleRespondentFinalReport(forkRaised.pi, forkRaised.handle, new Map(), forkRaised.record, "Task done.", undefined), false);
-    });
-
-    test("260905: a final on a non-open thread returns false — nothing was consumed", () => {
-      const { pi, handle, record } = setup("lead-ask");
-      record.status = "dormant";
-      assert.equal(handleRespondentFinalReport(pi, handle, new Map(), record, "late", undefined), false);
-    });
-
-    test("a final report on a thread that is not open (pending, dormant, closed) is ignored — no duplicate injection", () => {
-      for (const status of ["pending", "dormant", "closed"] as const) {
-        const { pi, sent, handle, record } = setup("lead-ask");
-        record.status = status;
-        const overlay = overlayStub(() => {});
-        handleRespondentFinalReport(pi, handle, new Map(), record, "late", overlay.handle);
-        assert.deepEqual(sent, [], status);
-        assert.deepEqual(overlay.calls.summaries, [], status);
-        assert.equal(record.status, status);
-      }
-    });
-  });
 });
 
 describe("deliverQueuedAnswer (260911 D1: the fork-less lead-ask send path — no respondent to stop or summarize)", () => {
@@ -1538,7 +1289,7 @@ describe("deliverQueuedAnswer (260911 D1: the fork-less lead-ask send path — n
     const pi = {
       on: (event: string, fn: () => void) => handlers.set(event, fn),
       sendUserMessage: () => handlers.get("agent_start")?.(),
-      sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }),
+      sendMessage: (message: unknown, options: unknown) => capturePush(sent, message, options),
     } as unknown as ExtensionAPI;
     registerPushFlush(pi, { delayMs: () => 10 });
     const handle = createThreadRegistryHandle();
@@ -1636,6 +1387,52 @@ describe("deliverQueuedAnswer (260911 D1: the fork-less lead-ask send path — n
     assert.equal(sent.length, 1, "the answer still arrives");
     assert.equal(handle.threads.get("q1")!.status, "dormant");
   });
+
+  test("one modal batch becomes one injected follow-up with every answer and provenance in queue order", () => {
+    const rawSent: Array<{ message: unknown; options: unknown }> = [];
+    const handlers = new Map<string, () => void>();
+    leadIdleRef.current = () => false; // the lead is mid-turn; no eager wake can split the submission
+    const pi = {
+      on: (event: string, fn: () => void) => handlers.set(event, fn),
+      sendUserMessage: () => assert.fail("a busy lead is not woken before its turn boundary"),
+      sendMessage: (message: unknown, options: unknown) => rawSent.push({ message, options }),
+    } as unknown as ExtensionAPI;
+    registerPushFlush(pi, { delayMs: () => 10 });
+    const handle = createThreadRegistryHandle();
+    const dir = mkdtempSync(join(tmpdir(), "ws-pi-ask-test-"));
+    hydrateThreadRegistry(handle, join(dir, "session.jsonl.ws-threads.json"));
+    const q1 = thread({ threadId: "q1", origin: "lead-ask", status: "open", question: "First?", context: "first context", askCommitHash: "aaa111", entryId: "entry-1" });
+    const q2 = thread({ threadId: "q2", origin: "lead-ask", status: "open", question: "Second?", context: "second context", askCommitHash: "bbb222", entryId: "entry-2" });
+    const q3 = thread({ threadId: "q3", origin: "lead-ask", status: "pending", question: "Blank stays pending?" });
+    handle.threads.set(q1.threadId, q1);
+    handle.threads.set(q2.threadId, q2);
+    handle.threads.set(q3.threadId, q3);
+
+    deliverQueuedAnswers(pi, handle, [
+      { thread: q1, answer: "alpha" },
+      { thread: q2, answer: "beta" },
+      { thread: q3, answer: "   " },
+    ]);
+
+    assert.equal(heldPushQueue.length, 1, "the modal submission admits one raw follow-up, not one per answer");
+    handlers.get("agent_end")?.();
+    assert.equal(rawSent.length, 1, "one lead turn boundary receives one batch envelope");
+    const envelope = rawSent[0].message as { customType: string; details: { items: Array<{ content: string; details: { threadIds: string[] } }> } };
+    assert.equal(envelope.customType, PUSH_BATCH_CUSTOM_TYPE);
+    assert.equal(envelope.details.items.length, 1, "the envelope contains one aggregated queued-answer item");
+    const item = envelope.details.items[0];
+    assert.deepEqual(item.details.threadIds, ["q1", "q2"]);
+    assert.ok(item.content.indexOf("Question: First?") < item.content.indexOf("Question: Second?"), "payload order follows the deterministic queue snapshot");
+    assert.match(item.content, /first context/);
+    assert.match(item.content, /alpha/);
+    assert.match(item.content, /Asked at: commit aaa111, entry entry-1/);
+    assert.match(item.content, /second context/);
+    assert.match(item.content, /beta/);
+    assert.match(item.content, /Asked at: commit bbb222, entry entry-2/);
+    assert.equal(q1.status, "dormant");
+    assert.equal(q2.status, "dormant");
+    assert.equal(q3.status, "pending", "a blank entry is excluded from delivery and remains pending");
+  });
 });
 
 describe("resolveLeadAskEscapeAction / runLeadAskEscapeAction (260911 D-model-side-withdrawal: the queue modal's exit decision, extracted per review relay #1/#2)", () => {
@@ -1662,7 +1459,7 @@ describe("resolveLeadAskEscapeAction / runLeadAskEscapeAction (260911 D-model-si
     const pi = {
       on: (event: string, fn: () => void) => handlers.set(event, fn),
       sendUserMessage: () => handlers.get("agent_start")?.(),
-      sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }),
+      sendMessage: (message: unknown, options: unknown) => capturePush(sent, message, options),
     } as unknown as ExtensionAPI;
     registerPushFlush(pi, { delayMs: () => 10 });
     const handle = createThreadRegistryHandle();
@@ -1755,6 +1552,53 @@ describe("resolveLeadAskQueueEntryAction (260911 Phase 2 D3: the queue modal's p
     assert.equal(resolveLeadAskQueueEntryAction("preserve", false, "an answer"), "revert-pending");
     assert.equal(resolveLeadAskQueueEntryAction("preserve", true, "an answer"), "deliver");
     assert.equal(resolveLeadAskQueueEntryAction("preserve", true, ""), "finalize-withdrawal");
+  });
+});
+
+describe("registerThreadCommands /answer target selection", () => {
+  function setup() {
+    const commands = new Map<string, { description?: string; handler: (args: string, ctx: unknown) => Promise<void> }>();
+    const pi = {
+      registerCommand: (name: string, command: { description?: string; handler: (args: string, ctx: unknown) => Promise<void> }) => commands.set(name, command),
+      registerShortcut: () => {},
+    } as unknown as ExtensionAPI;
+    const handle = createThreadRegistryHandle();
+    const answered = thread({ threadId: "q6", origin: "lead-ask", status: "dormant" });
+    const withdrawn = thread({ threadId: "q7", origin: "lead-ask", status: "closed" });
+    const pending = thread({ threadId: "q8", origin: "lead-ask", status: "pending", createdAt: "2026-09-05T12:00:00.000Z" });
+    const oldest = thread({ threadId: "q5", origin: "lead-ask", status: "pending", createdAt: "2026-09-05T09:00:00.000Z" });
+    for (const record of [answered, withdrawn, pending, oldest]) handle.threads.set(record.threadId, record);
+    const opened: string[] = [];
+    registerThreadCommands(pi, {} as never, new Map(), handle, {} as never, async (record) => { opened.push(record.threadId); });
+    const notices: Array<{ message: string; level: string }> = [];
+    const ctx = { mode: "tui", ui: { notify: (message: string, level: string) => notices.push({ message, level }) } };
+    return { commands, handle, pending, notices, opened, ctx };
+  }
+
+  test("explicit answered or withdrawn ids report their exact terminal state and never fall through to another modal", async () => {
+    const { commands, pending, notices, ctx } = setup();
+    await commands.get("answer")!.handler("q6", ctx);
+    await commands.get("answer")!.handler("q7", ctx);
+    assert.deepEqual(notices.map((notice) => notice.message), [
+      "ws: question q6 was already answered.",
+      "ws: question q7 was withdrawn.",
+    ]);
+    assert.equal(pending.status, "pending", "a terminal explicit target never opens the rest of the queue");
+  });
+
+  test("an unknown explicit id reports an error and returns without opening the queue", async () => {
+    const { commands, pending, notices, ctx } = setup();
+    await commands.get("answer")!.handler("q404", ctx);
+    assert.deepEqual(notices, [{ message: 'ws: no thread "q404" — /thread lists them.', level: "error" }]);
+    assert.equal(pending.status, "pending");
+  });
+
+  test("bare /answer opens the oldest answerable item, while an explicit answerable id opens exactly that item", async () => {
+    const { commands, opened, ctx } = setup();
+    assert.match(commands.get("answer")!.description ?? "", /oldest queued/i);
+    await commands.get("answer")!.handler("", ctx);
+    await commands.get("answer")!.handler("q8", ctx);
+    assert.deepEqual(opened, ["q5", "q8"]);
   });
 });
 
@@ -1858,6 +1702,8 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
     if (keyId === "right") return data === "\x1b[C";
     if (keyId === "up") return data === "\x1b[A";
     if (keyId === "down") return data === "\x1b[B";
+    if (keyId === "pageUp") return data === "\x1b[5~";
+    if (keyId === "pageDown") return data === "\x1b[6~";
     return false;
   }
 
@@ -1940,13 +1786,50 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
     editors[0].handleInput("first answer");
     editors[2].handleInput("last answer");
     editors[2].handleInput("\r"); // raises the confirm on the last question
-    component.handleInput("\x1b[C"); // -> right/Yes
+    component.handleInput("\x1b[D"); // left from the right-hand No -> Yes
     component.handleInput("\r"); // confirm
     assert.equal(closes.length, 1);
     assert.equal(closes[0].mode, "submit");
     assert.equal(closes[0].drafts.get("q1"), "first answer");
     assert.equal(closes[0].drafts.get("q2"), "");
     assert.equal(closes[0].drafts.get("q3"), "last answer");
+  });
+
+  test("the production modal-close callback batches multiple component answers into one follow-up and leaves blanks pending", () => {
+    const rawSent: Array<{ message: unknown; options: unknown }> = [];
+    const handlers = new Map<string, () => void>();
+    leadIdleRef.current = () => false;
+    const pi = {
+      on: (event: string, fn: () => void) => handlers.set(event, fn),
+      sendUserMessage: () => assert.fail("a busy lead is not woken before its boundary"),
+      sendMessage: (message: unknown, options: unknown) => rawSent.push({ message, options }),
+    } as unknown as ExtensionAPI;
+    registerPushFlush(pi, { delayMs: () => 10 });
+    const handle = createThreadRegistryHandle();
+    const dir = mkdtempSync(join(tmpdir(), "ws-pi-ask-test-"));
+    hydrateThreadRegistry(handle, join(dir, "session.jsonl.ws-threads.json"));
+    const threads = threeThreads();
+    for (const record of threads) handle.threads.set(record.threadId, record);
+    const { component } = buildQueue(threads, {
+      onClose: buildLeadAskQueueOnClose(pi, handle, threads),
+    });
+
+    component.handleInput("alpha");
+    component.handleInput("\r"); // commit q1, advance q2
+    component.handleInput("beta");
+    component.handleInput("\r"); // commit q2, advance q3
+    component.handleInput("\r"); // blank q3 raises final confirmation
+    component.handleInput("\x1b[D"); // Yes
+    component.handleInput("\r");
+
+    assert.equal(heldPushQueue.length, 1, "the actual modal close callback admits one combined follow-up");
+    handlers.get("agent_end")?.();
+    assert.equal(rawSent.length, 1);
+    const envelope = rawSent[0].message as { details: { items: Array<{ details: { threadIds: string[] } }> } };
+    assert.deepEqual(envelope.details.items[0].details.threadIds, ["q1", "q2"]);
+    assert.equal(threads[0].status, "dormant");
+    assert.equal(threads[1].status, "dormant");
+    assert.equal(threads[2].status, "pending");
   });
 
   test("Esc with nothing answered anywhere closes immediately, preserving, with no confirm screen", () => {
@@ -1980,7 +1863,7 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
     const { component, editors, closes } = buildQueue(threeThreads());
     editors[0].handleInput("first answer");
     component.handleInput("\x1b");
-    component.handleInput("\x1b[B"); // down -> Yes
+    component.handleInput("\x1b[D"); // left from the right-hand No -> Yes
     component.handleInput("\r");
     assert.equal(closes.length, 1);
     assert.equal(closes[0].mode, "submit");
@@ -1991,7 +1874,7 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
     const { component, editors, closes } = buildQueue(threeThreads());
     editors[0].handleInput("first answer");
     component.handleInput("\x1b"); // esc confirm raised, default No
-    component.handleInput("\x1b[C"); // move to Yes
+    component.handleInput("\x1b[D"); // move left to Yes
     component.handleInput("\x1b"); // Esc inside the confirm -> No branch (exit, no submit)
     assert.equal(closes.length, 1);
     assert.equal(closes[0].mode, "preserve");
@@ -2027,6 +1910,16 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
     threads[1].draftAnswer = "resumed draft text";
     const { component } = buildQueue(threads);
     assert.equal(component.getDraft(1), "resumed draft text");
+  });
+
+  test("Korean multiline drafts remain exact and isolated while switching questions", () => {
+    const { component, editors } = buildQueue(threeThreads());
+    editors[0].setText("첫째 줄\n둘째 줄");
+    component.handleInput("\t");
+    editors[1].setText("다른 답변");
+    component.handleInput("\x1b[Z");
+    assert.equal(component.getDraft(0), "첫째 줄\n둘째 줄");
+    assert.equal(component.getDraft(1), "다른 답변");
   });
 
   test("initialFocusIndex positions the focused question (e.g. from /answer <id> or the reopen shortcut)", () => {
@@ -2080,7 +1973,7 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
     const { component, editors, closes } = buildQueue(threads, { initialFocusIndex: 2 });
     editors[2].handleInput("answered despite the withdrawal");
     editors[2].handleInput("\r"); // raises the final confirm (last question)
-    component.handleInput("\x1b[C"); // -> Yes
+    component.handleInput("\x1b[D"); // left -> Yes
     component.handleInput("\r");
     assert.equal(closes.length, 1);
     assert.equal(closes[0].mode, "submit");
@@ -2104,13 +1997,13 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
     assert.equal(closes.length, 0, "the confirm intercepts first, even with only one question in the batch");
     const lines = component.render(80);
     assert.ok(lines.some((l) => l.includes("Q1/1")), lines.join("\n"));
-    component.handleInput("\x1b[C");
+    component.handleInput("\x1b[D");
     component.handleInput("\r");
     assert.equal(closes.length, 1);
     assert.equal(closes[0].drafts.get("q1"), "the only answer");
   });
 
-  test("review-round-1 correctness Important fix: a very long question never pushes the answer Editor or the Esc hint off a short viewport", () => {
+  test("a very long question scrolls from first through final line while the answer editor and footer stay fixed", () => {
     const threads = threeThreads();
     threads[0].question = Array.from({ length: 200 }, (_, i) => `line ${i}`).join("\n");
     const tui: ConversationViewTui & { renderCount: number } = { requestRender: () => {}, renderCount: 0, terminal: { rows: 20 } };
@@ -2126,13 +2019,56 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
       matchesKey: fakeMatchesKey,
       wrapText: fakeWrapText,
       border: true,
+      overflowText: (text) => `[overflow:${text}]`,
       onClose: () => {},
     });
-    const lines = component.render(80);
+
+    let lines = component.render(80);
     assert.ok(lines.length <= 20, `rendered ${lines.length} lines against a 20-row viewport`);
-    assert.ok(lines.some((l) => l.includes("Esc: exit")), "the exit hint (the modal's only way out — Ctrl+C is swallowed) must survive even behind a very long question");
-    assert.ok(lines.some((l) => l.includes("[e:")), "the answer editor itself must still render");
-    assert.ok(lines.some((l) => l.includes("truncated")), "the dropped question tail is flagged, not silently vanished");
+    assert.ok(lines.some((l) => l.includes("line 0")), "the question starts at its first line");
+    assert.ok(lines.some((l) => l.includes("[overflow:")), "the inaccessible boundary cue is semantically distinct");
+    assert.ok(!lines.some((l) => l.includes("truncated")), "scrolling replaces destructive truncation");
+
+    for (let i = 0; i < 100; i += 1) component.handleInput("\x1b[6~");
+    lines = component.render(80);
+    assert.ok(lines.some((l) => l.includes("line 199")), "repeated PageDown reaches the complete original question");
+    assert.ok(lines.some((l) => l.includes("Esc: exit")), "the fixed footer survives at the bottom of the question");
+    assert.ok(lines.some((l) => l.includes("[e:")), "the fixed answer editor survives at the bottom of the question");
+
+    for (let i = 0; i < 100; i += 1) component.handleInput("\x1b[5~");
+    lines = component.render(80);
+    assert.ok(lines.some((l) => l.includes("line 0")), "repeated PageUp returns to the first line");
+    assert.equal(editors[0].getText(), "", "question scrolling is not forwarded into the answer editor");
+  });
+
+  test("a one-row question viewport reserves cue width so every character remains reachable", () => {
+    const threads = [thread({
+      threadId: "q1",
+      question: `${"A".repeat(72)}TAIL\nsecond row`,
+      origin: "lead-ask",
+      status: "open",
+    })];
+    const wrapByWidth = (text: string, width: number): string[] => {
+      if (text.length === 0) return [""];
+      const chunks: string[] = [];
+      for (let i = 0; i < text.length; i += Math.max(1, width)) chunks.push(text.slice(i, i + Math.max(1, width)));
+      return chunks;
+    };
+    const tui: ConversationViewTui = { requestRender: () => {}, terminal: { rows: 14 } };
+    const component = new LeadAskQueueComponent(tui, {
+      threads,
+      initialFocusIndex: 0,
+      editorFactory: () => new FakeQueueEditor(),
+      matchesKey: fakeMatchesKey,
+      wrapText: wrapByWidth,
+      border: true,
+      onClose: () => {},
+    });
+    let lines = component.render(80);
+    assert.ok(lines.some((line) => line.includes("↕")), "the only row still exposes the overflow cue");
+    component.handleInput("\x1b[6~");
+    lines = component.render(80);
+    assert.ok(lines.some((line) => line.includes("IL")), "the characters displaced by the cue are reachable on a later page");
   });
 
   test("a short question well within the viewport is never truncated", () => {
@@ -2155,6 +2091,37 @@ describe("LeadAskQueueComponent (260911 Phase 2 D3: sequential prose-modal tier)
     assert.ok(lines.some((l) => l.includes("First?")));
     assert.ok(!lines.some((l) => l.includes("truncated")));
   });
+
+  test("confirmation navigation follows bounded horizontal positions without wrapping", () => {
+    const { component, editors } = buildQueue(threeThreads(), { initialFocusIndex: 2 });
+    editors[2].handleInput("answer");
+    editors[2].handleInput("\r");
+
+    component.handleInput("\x1b[C"); // already on the right-hand No: edge no-op
+    let lines = component.render(80);
+    assert.ok(lines.some((l) => l.includes("[No]")), "Right at the right edge stays on No");
+
+    component.handleInput("\x1b[D"); // left -> Yes
+    component.handleInput("\x1b[D"); // already at left edge: no wrap
+    lines = component.render(80);
+    assert.ok(lines.some((l) => l.includes("[Yes]")), "Left moves to and stays on the visually left Yes");
+
+    component.handleInput("\x1b[C"); // right -> No
+    lines = component.render(80);
+    assert.ok(lines.some((l) => l.includes("[No]")), "Right moves to the visually right No");
+  });
+
+  test("semantic painters distinguish queue hierarchy while keeping shortcut help dimmable", () => {
+    const { component } = buildQueue(threeThreads(), {
+      headerText: (text) => `[header:${text}]`,
+      separatorText: (text) => `[separator:${text}]`,
+      helpText: (text) => `[help:${text}]`,
+    });
+    const lines = component.render(80);
+    assert.ok(lines.some((line) => line.includes("[header:Q1/3")), lines.join("\n"));
+    assert.ok(lines.some((line) => line.includes("[separator:")), lines.join("\n"));
+    assert.ok(lines.some((line) => line.includes("[help:Enter: answer")), lines.join("\n"));
+  });
 });
 
 describe("checkContextLength / buildForkQuestionLeadNotice", () => {
@@ -2174,9 +2141,9 @@ describe("checkContextLength / buildForkQuestionLeadNotice", () => {
     assert.match(notice, /end your turn/i);
     assert.ok(!/ws-agent-wait/i.test(notice), "ws-agent-wait is deleted — the notice must not send the lead to a tool that no longer exists");
     assert.match(notice, /do not relay/i);
-    // C2: the decision comes back on the fork's own final report, not as a
-    // thread-summary message — /done never injects one for this origin.
-    assert.match(notice, /Decisions:/);
+    // The outcome comes back through the fork's later ordinary settlement,
+    // not as a thread-summary message from /done.
+    assert.match(notice, /ordinary settled answer/i);
     assert.ok(!/thread-summary/i.test(notice), notice);
   });
 });
@@ -2205,7 +2172,7 @@ describe("ensureRespondent (threadBound on open and on reopen)", () => {
     return thread({ threadId: "q1", status: "open", origin: "fork-raised", respondentAgentId: "agent-7", question: "Which anchor?" });
   }
 
-  test("first open of an already-live respondent binds the thread and arms the final-report hook", async () => {
+  test("first open of an already-live respondent binds the thread", async () => {
     const handle = createThreadRegistryHandle();
     const record = openThreadRecord();
     handle.threads.set(record.threadId, record);
@@ -2227,7 +2194,6 @@ describe("ensureRespondent (threadBound on open and on reopen)", () => {
 
     assert.equal(agentId, "agent-7");
     assert.equal(live.threadBound, true);
-    assert.equal(typeof live.onFinalReport, "function", "the respondent can end its own thread");
   });
 
   test("REOPEN after a lead restart rehydrates the record from forkResume and binds it again", async () => {
@@ -2250,7 +2216,6 @@ describe("ensureRespondent (threadBound on open and on reopen)", () => {
     const revived = registry.get("agent-7")!;
     assert.equal(revived.threadBound, true, "a reopen binds just like a first open");
     assert.equal(revived.client, undefined, "still dormant — the relaunch happens on the owner's first message");
-    assert.equal(typeof revived.onFinalReport, "function");
   });
 
   test("a second open of the same live respondent re-binds rather than leaving a stale unbound record", async () => {
@@ -2298,8 +2263,7 @@ describe("ensureRespondent (threadBound on open and on reopen)", () => {
  * component's internal channel-event/liveness handling into `ask.ts`'s
  * `summarizeThenClose`, so these now drive that function directly against a
  * fake `ConversationViewComponent` (only `appendItem` is read), a fake
- * `ConversationChannel`, and a fake `OverlayHandle` — the same fake-`pi`-free
- * style `handleRespondentFinalReport`'s `overlayStub` already uses above.
+ * `ConversationChannel`, and a fake `OverlayHandle`.
  */
 describe("summarizeThenClose (/done's single fixed round-trip)", () => {
   function fakeComponent() {
@@ -2430,7 +2394,7 @@ describe("buildOverlayHandle (wraps a live component + the ctx.ui.custom done ca
     const pi = {
       on: (event: string, fn: () => void) => handlers.set(event, fn),
       sendUserMessage: () => handlers.get("agent_start")?.(),
-      sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }),
+      sendMessage: (message: unknown, options: unknown) => capturePush(sent, message, options),
     } as unknown as ExtensionAPI;
     registerPushFlush(pi, { delayMs: () => 10 });
     const handle = createThreadRegistryHandle();
@@ -2561,7 +2525,7 @@ describe("runDoneAction (openThread's /done dispatch — F1 regression guard + s
     const pi = {
       on: (event: string, fn: () => void) => handlers.set(event, fn),
       sendUserMessage: () => handlers.get("agent_start")?.(),
-      sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }),
+      sendMessage: (message: unknown, options: unknown) => capturePush(sent, message, options),
     } as unknown as ExtensionAPI;
     registerPushFlush(pi, { delayMs: () => 10 });
     const handle = createThreadRegistryHandle();
@@ -2714,7 +2678,7 @@ describe("summarizeThenClose + buildOverlayHandle + ConversationViewComponent wi
     const pi = {
       on: (event: string, fn: () => void) => handlers.set(event, fn),
       sendUserMessage: () => handlers.get("agent_start")?.(),
-      sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }),
+      sendMessage: (message: unknown, options: unknown) => capturePush(sent, message, options),
     } as unknown as ExtensionAPI;
     registerPushFlush(pi, { delayMs: () => 10 });
     const handle = createThreadRegistryHandle();
@@ -2790,8 +2754,7 @@ describe("summarizeThenClose + buildOverlayHandle + ConversationViewComponent wi
     pendingUnsubscribe = summarizeThenClose(component, ch.channel, overlay);
     assert.equal(ch.sent.length, 1);
 
-    // handleRespondentFinalReport's path: the fork's kind:"final" report
-    // arrives out-of-band (never a channel event) and wins the race.
+    // An external close-with-summary arrives out-of-band and wins the race.
     overlay.closeWithSummary("We go with the second anchor.");
     assert.equal(sent.length, 1);
     assert.equal(record.status, "dormant");

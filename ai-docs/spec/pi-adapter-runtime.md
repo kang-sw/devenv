@@ -460,16 +460,15 @@ The ws-mcp child process is bound to a Pi session, not to extension load:
   catches a thrown `session_start` handler and keeps the process running, so
   without a guard a spawned child would come up alive but presenting only Pi's
   builtin `--tools` (`read`/`grep`/`find`/`ls` and the parallel wrapper) —
-  indistinguishable from a healthy simple researcher, and in particular a deep
-  researcher silently missing its blocking `explore` collection tool. The
-  adapter guards the whole seam: on any such failure a **spawned child**
+  indistinguishable from a healthy researcher while silently missing its
+  persistent delegation surface. The adapter guards the whole seam: on any such failure a **spawned child**
   (`worker`/`explore`/`fork`) exits its process with a loud error, which its
   RPC parent surfaces as a real spawn/dispatch error to the lead instead of a
   toolless child; the **interactive host lead** (which has no RPC parent to
   signal) raises a loud notification and comes up without the ws bridge or
   custom tools rather than crashing the user's terminal. Either way a
   partial/toolless session is never presented as healthy. This guard changes
-  only failure visibility; a successful session's tool surface per role/mode is
+  only failure visibility; a successful session's depth-bounded tool surface is
   unchanged.
 
 The stdio transport reads the child's stdout as newline-delimited JSON-RPC (one
@@ -560,8 +559,8 @@ report channel" below):
   registry record for `ws-agent-list` and for alias-or-uuid resolution
   everywhere an `agent_id` param is accepted; reusing an alias already held by a
   dormant/idle record silently reassigns it (clearing the old holder's alias,
-  keeping its title) while reusing one held by a running or thread-bound record
-  rejects the spawn instead of stealing it out from under it. The registry is
+  keeping its title) while reusing one held by a running, thread-bound, or
+  owner-held record rejects the spawn instead of stealing it out from under it. The registry is
   capped (`WS_PI_AGENT_REGISTRY_CAP`, default 256); a spawn that would exceed
   the cap evicts the oldest fully-dormant, non-thread-bound record(s) first and
   reports the evicted label(s) back as `evicted`, rejecting only if every
@@ -583,7 +582,8 @@ report channel" below):
   is delivered by `ws-agent-settled.last_message`, and a send starts the next
   research turn without re-resolving or retuning them.
 - `ws-agent-list({ include_prompt? })` — enumerate registry members with their
-  status, alias, title and model. Status vocabulary is `running` / `idle` /
+  status, alias, title and model, plus `owner_held: true` when the latest
+  successful writer was the owner. Status vocabulary is `running` / `idle` /
   `dormant`, but `idle` (260905) is now transient rather than a resting state:
   an idle, non-thread-bound record is parked to `dormant` by the adapter
   shortly after it settles (see "Turn completion is gated on RPC idle"), so
@@ -706,8 +706,33 @@ directory age alone do not. Before the first session write, an absent file is
 pending, not a failed observation. Actual observation failures and disappearance
 after an observed write retain conservative unknown state and diagnostics.
 Later metadata-write failures are diagnostic and nonfatal to live operations.
-These records prepare safe cleanup; automatic scratch removal, cap-driven disk
-deletion, and age pruning are not implemented by this storage relocation.
+Ownership mutation, activity observation, dormant resume, and deletion share a
+cross-process claim beside the exact home. Deletion holds that claim while it
+revalidates eligibility and atomically detaches the canonical home, so a racing
+activity or protection write either wins and is observed or fails closed before
+a child can be relaunched against a disappearing home.
+
+Registry-cap eviction deletes a candidate's exact owned home only when durable
+metadata still proves it stopped, unprotected, canonical, and safe. Legacy,
+malformed, symlinked, live, unknown, or protected homes are retained. A late
+eligibility change aborts that eviction; a filesystem removal failure is
+reported but does not make registry capacity permanently unavailable.
+
+Controller (`lead` or `fork`) session startup also performs best-effort age
+pruning across all dispatch-session namespaces under the configured Pi agent
+root. `goal-loop-config.json` key `child_retention_ttl_days` defaults to 30;
+any finite positive day value, including a fraction, overrides it, and literal
+`false` disables the scan. Before comparing `lastActivityAt` with the cutoff,
+the scanner samples a recorded session file so an actual later write refreshes
+activity. It then applies the same ownership, liveness, protection, canonical
+path, and final-under-claim checks as cap eviction. Busy or uncertain homes and
+individual scan/removal failures are retained with diagnostics and never block
+startup. Worker and explore child processes do not run this global maintenance.
+Recovered sidecar records whose exact owned homes were deleted are filtered;
+retained owned records and unowned legacy records remain resumable. If a later
+audit encounters a deleted or unreadable transcript, it states that historical
+session data is unavailable rather than presenting an empty history. Automatic
+terminal scratch removal remains intentionally absent.
 
 ### Turn completion is gated on RPC idle {#260903-pi-spawner-completion-gating}
 
@@ -746,73 +771,58 @@ adapter issues a prompt to the child (every prompt site goes through one
 just-launched child reads as not running), confirmed by `agent_start`, and
 cleared on settle, stop, exit or spawn failure.
 
-### explore — persistent two-mode research {#260903-pi-explore-recon-leaf}
+### explore — persistent intent-tier research {#260903-pi-explore-recon-leaf}
 
-`explore({ query, deep_research? })` is a persistent research preset. It returns
-exactly `{ agent_id, alias }` after the initial RPC prompt is accepted; the
-record parks, resumes through `ws-agent-send`, persists through the sidecar, and
-its settle `last_message` is an exploration answer. Omitted/false is **simple**:
-configured authenticated `small` and exactly `read, grep, find, ls`; missing,
-unavailable, malformed, or unauthenticated small fails before allocation. True is
-**deep**: the dispatching lead/fork's concrete model and thinking level are
-captured together and frozen; it has those reads plus `explore`, and can use one
-blocking authenticated-small, no-bash collection leaf. Registration branches on
-the calling process role and internal mode:
+`explore({ query, mode? })` is one persistent research preset for every eligible
+lead, fork, and worker. It returns exactly `{ agent_id, alias }` after the
+initial RPC prompt is accepted; the record parks, resumes through
+`ws-agent-send`, persists through the sidecar, and its settle `last_message` is
+an exploration answer. Omission defaults to `code-search`.
 
-- **Lead or fork.** `explore` is a persistent `spawnAgent` preset with an
-  auto-generated alias (`explore-1`, `explore-2`, ...) and a query-derived
-  title. Simple records use `toolGroup: "read-only"`, resolve authenticated
-  `small` exactly once, and refuse before guards/allocation on every bad
-  resolution. Deep records use `"read-only-explore"` and freeze the caller's
-  concrete model and thinking level without looking up `small`. Both return
-  `{ agent_id, alias }` after prompt acceptance. They remain ordinary registry
-  records: a settle delivers `last_message`, then parks; send/stop/resume,
-  transcript, aliases, sidecars, widgets and failure transitions retain the
-  same identity. Their model and effective thinking level are verified with
-  `RpcClient.getState()` before the first prompt and every resumed prompt:
-  simple captures the actual default or clamp once, while deep must match its
-  captured selection.
-- **Worker or execute-worker.** `explore` remains the blocking, self-reaping
-  `recon` leaf (`--no-session`) and therefore retains bash. A deep researcher
-  alone registers the same query-only tool for one terminal collection; it
-  resolves authenticated `small` before rendering/allocation, forwards its
-  resolved effort, and runs the no-bash `read-only` profile. A failed
-  collection throws to the researcher and never launches an inherited leaf.
+Mode selects only an existing harness-`pi` tier alias: `lookup`, `code-search`,
+and `history-search` use `small`; `docs-search`, `web-search`, `diagnosis`, and
+`comparison` use `medium`; `synthesis` uses `large`. Every mode otherwise uses
+the same bundled researcher guide, `read-only-explore` profile, bounded web
+capabilities, persistent RPC/session lifecycle, continuation path, and subtree
+rules. No mode inherits the dispatcher's model/effort or automatically selects
+`xlarge`. Missing, malformed, unknown, or unauthenticated mapped tiers fail
+before guard, alias, registry, or storage allocation.
 
-A simple researcher has no explore tool. A deep researcher alone has the
-internal `read-only-explore` group and may invoke one terminal collection leaf;
-the leaf clears the deep marker and uses the genuinely no-bash `read-only`
-profile. Recon remains the worker leaf profile and retains bash.
+The mode is immutable on the record and in the child role environment. The
+initial launch records the model and actual accepted effort, including Pi
+defaults or clamping; every dormant resume verifies and reuses them without
+re-resolving configuration. Sidecar reads normalize legacy `simple` to
+`code-search` and `deep` to `synthesis`; new sidecars and ownership metadata
+write only current modes. The public schema is closed: legacy `deep_research`
+and unknown modes are rejected.
+
+Depth remains independent of mode. An eligible researcher may use the same
+persistent Explore path for a child while delegation budget remains; terminal
+depth strips all child-management tools, including `explore`, without changing
+the researcher's read or web profile.
 
 ### Per-spawn tool curation {#260903-pi-spawner-tool-groups}
 
 The `--tools` allowlist for each spawn resolves from an adapter-owned tool-group
-table — `read-only`, `read-only-explore`, `recon`, and `full-worker` — mapping each group to a Pi
-tool-name allowlist. Built-in Pi tools are named directly; the `full-worker` group
-additionally includes the bridge's live `ws__*` tool names, taken from the running
-bridge rather than hardcoded so the group tracks the actual ws-mcp tool set. A
-worker's `full-worker` allowlist **excludes every delegation-driving tool**
-(`ws-agent-spawn` / `-send` / `-list` / `-stop`), so a worker cannot
-spawn or drive a further generation of persistent workers, but it **includes the
-literal `explore` tool** — a pi-native custom tool, not a `ws__*` bridge name, so
-it must be named explicitly to survive Pi's `--tools` allowlist — so a worker may
-spawn a read-only recon leaf via the blocking `exploreLeaf` shape. The same
-`explore` name on a lead/fork is the persistent two-mode preset, while a
-worker gets the recon leaf and a deep researcher gets its no-bash collection
-leaf. Role plus internal mode controls registration; Pi's dynamic `--tools`
+table — `read-only`, `read-only-explore`, `full-worker`, and `execute-worker` —
+mapping each group to a Pi tool-name allowlist. Built-in Pi tools are named
+directly; the `full-worker` group additionally includes the bridge's live
+`ws__*` tool names, taken from the running bridge rather than hardcoded so the
+group tracks the actual ws-mcp tool set. Explore always uses
+`read-only-explore`; spawn admission adds its bounded web tools and the depth
+filter removes child management at the terminal edge. Pi's dynamic `--tools`
 allowlist is the enforcement layer. No agent-profile files are written to disk
 (no `.pi/agents/`); all curation is in-memory plus Pi CLI flags.
 
 ### Bounded delegation depth {#260904-pi-spawner-bounded-depth-explore-leaf}
 
-The delegation tree terminates at depth 2: lead/fork → persistent simple
-researcher, lead/fork → deep researcher → terminal collection leaf, or
-lead/fork → worker → recon leaf. Workers admit `explore` but no
-worker-driving tools; simple researchers and terminal leaves admit no
-`explore`; only deep researchers have `read-only-explore`, whose single
-collection leaf clears the deep marker. This is enforced by per-spawn Pi
-`--tools` allowlists; ws-mcp's keyed-handler role check is untouched. A
-side-thread fork is lateral and cannot fork again, so it starts its own tree.
+The default delegation tree terminates at depth 2. Leads, forks, workers, and
+researchers with remaining budget use the same persistent Explore spawn path;
+a child at terminal depth retains its read/web profile but receives no
+child-management or Explore tool. This is enforced by per-spawn Pi `--tools`
+allowlists and the persisted delegation envelope; mode never bypasses the
+ceiling. A side-thread fork is lateral and cannot fork again, so it starts its
+own tree.
 
 ### Model resolution: fixed tier through ws-mcp {#260903-pi-spawner-model-tier-inherit}
 
@@ -862,23 +872,18 @@ non-empty `effort` field (`low`/`medium`/`high`/`xhigh`) is applied as
 leaving the child's own default effort untouched. A non-genuine hit never
 contributes an effort value, even if its raw payload happened to carry one.
 
-`explore` is a **role**, not a caller-facing model choice. Simple persistent
-research and every blocking collection resolve the fixed `small` tier through
-the same path, require an authenticated exact catalog hit, and apply its
-resolved effort. Simple persistent research freezes the actual post-start
-model/effort (including Pi defaults or clamping); collection forwards effort
-as `--thinking`. Deep persistent research does not resolve `small` at
-creation: it freezes and verifies the dispatcher's actual model and thinking
-level, and may later request one separately fail-closed cheap collection. A
-resolved tier effort reaches a **process-spawned** child (the ephemeral
-collection leaf) as the `--thinking <level>` launch flag and a **persistent,
-RPC-backed** child through a post-start `setThinkingLevel` call; an inherit or
-an empty effort passes no level in either path.
+`explore` is a **role**, not an arbitrary caller-facing model choice. Its
+intent mode maps to `small`, `medium`, or `large`, and every mapped tier must
+resolve to an authenticated exact catalog hit. The persistent researcher
+freezes the actual post-start model/effort, including Pi defaults or clamping,
+and verifies the same selection on resume. A resolved tier effort reaches the
+**persistent, RPC-backed** child through a post-start `setThinkingLevel` call;
+an empty effort leaves the child default untouched.
 
 ### Model resolution via ws-mcp config, not an adapter data file {#260903-pi-model-catalog-config-file}
 
 There is no adapter-owned model-catalog file any more. `ws-agent-spawn`,
-`ws-fork` and `explore`'s implicit `small` lookup all resolve `model_name`
+`ws-fork` and Explore's mode-mapped tier lookup all resolve `model_name`
 by calling ws-mcp's `config.resolve_agent` tool at spawn time (see the
 anchor above for the exact accept/reject rule) — the adapter never reads or
 writes model configuration on disk. User config may carry Pi model strings;
@@ -993,9 +998,13 @@ reach the lead only through the summary / fork-final paths (in current
 the `fork-question-thread` registration notice itself: it is pushed for the
 very record the same hook call just made
 thread-bound, since that push is how the lead learns the thread exists at
-all; every later settle or advisory for that record is suppressed as above. A
-child's turn therefore never reaches the lead twice, and within a live
-session no push is dropped or duplicated.
+all; every later settle or advisory for that record is suppressed as above.
+An **owner-held** record likewise sends settle/advisory information only to the
+owner's TUI toast route, never into the lead transcript, while final reports,
+questions, approvals and orphan signals remain unchanged. These owner-time
+notices are ephemeral and are not replayed after handoff. A child's turn
+therefore never reaches the lead twice, and within a live session no routed
+push is dropped or duplicated.
 
 **Idle pushes wake through user preflight (260906 Phase 2).** Busy `followUp`
 pushes stay held until settle; busy `steer` pushes still interrupt normally.
@@ -1056,7 +1065,9 @@ thread closing) rather than through settling, and which children are running
 is `ws-agent-list`'s job. A child blocked on an approval is running; a child
 parked on a question is thread-bound; a child that settled idle or reported
 `final` leaves N — and is itself parked to dormant shortly after, per "Turn
-completion is gated on RPC idle" — until it is prompted again. The last
+completion is gated on RPC idle" — until it is prompted again. Owner-held
+children are outside N from the moment the owner successfully sends and stay
+outside it until a lead-side prompt takes last-writer ownership back. The last
 `final` of a fan-out reads `0 delegated agents still running`, and a worker
 that never reports `final` reaches it through its `ws-agent-settled`, so the
 lead can tell "not yet — end the turn again" (N > 0) from "all in —
@@ -1176,8 +1187,8 @@ Accordingly the gate applies only to the `ws-execute` worker path; ordinary
 ### Gated exec and the mutation-incapable read family {#260905-pi-worker-gated-exec}
 
 The `ws-execute` worker's tool group is **not** the general `full-worker` set. It
-gets structured, mutation-incapable read tools (the same `read-only` family
-`ls`/`read`/`grep`/`find` the recon leaf uses — cannot write by construction),
+gets structured, mutation-incapable read tools (`ls`/`read`/`grep`/`find`,
+which cannot write by construction),
 the report and `explore` tools, and **one** free-form execution tool
 (`ws-worker-exec`) — but **not** native `bash`. "Anything that can write is
 gated" therefore holds by construction, with no command-string parsing:
@@ -1550,36 +1561,35 @@ covered by the "Attach to a live task fork" bullet below exactly as before.
   turn is running and no text has streamed yet, the overlay shows one
   `working…` line in the streaming-tail slot — the first text delta replaces
   it and settle clears it; the state is read from `ConversationChannel.liveness()`
-  at render time (derived from the registry's streaming flag), not derived from
-  `agent_start`/`agent_settled` events the component itself receives, because
+  at render time (running from `record.running`, otherwise owner-idle from the
+  last writer), not derived from `agent_start`/`agent_settled` events the
+  component itself receives, because
   attaching to a live fork mid-turn or a dormant thread's first message never
   delivers a start event to the component. The transcript scrolls in
   full — there is no 24-line tail cut — and its items carry the
   `ConversationItem` model, so the child's tool calls and their results appear
-  as collapsible items alongside the message turns. It is
-  persisted per thread (on the thread record, newest 200 items), so a reopen
-  after `Esc` or after a lead restart shows the conversation so far; owner
-  lines are styled with the host's user-message background, and child text is
-  rendered as Markdown with the host theme. A recorded original question
-  appears as the first dialogue turn with assistant styling, including when
-  its text matches the thread title. Newly inserted or upgraded question
-  turns carry an emphasized `Question:` label; an existing matching first
-  assistant turn is preserved.
-  Reopening an older conversation restores a missing initial question or
-  upgrades its legacy seed note without duplicating it or removing later
-  turns. The compact header shows the thread ID and, when available,
+  as collapsible items alongside the message turns. Conversation history is
+  read from the child session plus its owner-send attribution log; the thread
+  record carries no duplicate transcript. A reopen after `Esc` or after a lead
+  restart therefore shows the record's conversation so far; owner lines are
+  styled with the host's user-message background, and child text is rendered
+  as Markdown with the host theme. The compact header shows the thread ID and,
+  when available,
   `opened <time>` on one line; the question itself stays in the conversation.
   The next header line states, once,
   `Esc: close view (thread stays open) · /done: end thread`
-  — there is no footer hint. `Esc` closes the view only: the thread stays
-  `open` and the fork keeps running, reattachable at any time. `/done` typed
-  in the overlay closes the **thread** — this bullet's fork-raised path only;
+  — there is no footer hint. Interactive Esc opens the shared owner-steering
+  action modal; hold closes the view only, so the thread stays `open` and the
+  fork remains reattachable. `/done` typed in the overlay aliases finish and
+  closes the **thread** — this bullet's fork-raised path only;
   `lead-ask` has no `/done` command post-`260911` (see the queue's own
   Enter/Esc contract above). The overlay closes at once with no summary or
   injection, then the adapter reconciles that task fork before releasing it:
-  a running fork is allowed to settle; an already accepted or queued terminal
-  outcome is not duplicated; and an idle fork with no terminal outcome receives
-  exactly one lead-attributed closeout request for its normal final report. A
+  an already accepted or queued terminal outcome is not duplicated; an
+  owner-held fork immediately receives exactly one lead-attributed closeout
+  (queued behind a running turn or prompting an idle/dormant one); and a
+  lead-held running fork may first settle before the same missing-terminal
+  evaluation. A
   valid final reaches the lead once as an ordinary `ws-agent-report`. A closeout
   that settles without a valid final, reports another question, or fails emits
   one missing-final or operational advisory instead; the adapter never
@@ -1632,22 +1642,24 @@ of its own: every repaint rebuilds the rows from those registries.
   `worker`, `execute`, `fork`, `explore`, or `thread` (an owner discussion
   respondent, or a thread with no live respondent yet). A persistent
   researcher is an `explore` row while it has a live client; after settle it
-  parks and disappears from the live widget but stays in the registry for
-  transcript, send and restart. `state` is `awaiting owner`, `awaiting
-  approval`, or `running`; idle/dormant records have no row.
+  parks and disappears from the live widget unless owner-held, but stays in
+  the registry for transcript, send and restart. `state` is `awaiting owner`,
+  `idle awaiting owner`, `awaiting approval`, or `running`; ordinary
+  idle/dormant records have no row. Owner-held rows retain an `/audit <alias or
+  id>` inspection hint.
   `elapsed` counts from the record's last prompt (`runStartedAt`, stamped by
   every prompt including the anti-bleed nudge), or from the thread's
   `touchedAt` for a row that awaits the owner on a thread.
 - **Which records are rows.** An RPC record is a row while it has a live
-  client, a pending approval, or is thread-bound (a thread-bound record stays
-  a row while parked between messages — it is the owner's action cue). A
+  client, a pending approval, is thread-bound, or is owner-held (the latter two
+  stay rows between messages because they are owner action cues). A
   thread is a row while it is `pending` or `open`; it collapses onto its
   respondent's row when that respondent is a thread-bound record, and
   otherwise stands alone (an owner question without a live respondent,
   or a fork-raised question whose respondent was revived dormant after
   a lead restart). `dormant` and `closed` threads produce no row.
-- **Order and cap.** Rows sort `awaiting owner`, then `awaiting approval`,
-  then `running`, longest elapsed first within a state. At most five rows
+- **Order and cap.** Rows sort `awaiting owner`/`idle awaiting owner`, then
+  `awaiting approval`, then `running`, longest elapsed first within a state. At most five rows
   render; only `running` rows are folded into a trailing `+N more` line, so
   every awaiting row is always visible. Each line is bounded to the terminal
   width the host passes at render time (`visibleWidth(line) <= width`,
@@ -1756,6 +1768,56 @@ current-state observation clears those labels independently of retained usage.
   remain unchanged. The full `/answer <id>` cue takes priority whenever it
   fits; telemetry is omitted before that cue when the row is too narrow.
 
+## Subagent audit and owner steering {#260908-pi-subagent-audit-owner-steering}
+
+A true TUI lead registers `/audit [id-or-alias]` and `ctrl+shift+u`; child
+processes and headless leads register neither. With no argument, `/audit` opens
+a width-bounded picker over every live and dormant registry child, ordered by
+owner wait, approval wait, running time, then dormant last activity. Identity
+uses alias, then title, then the first eight ID characters. Selecting a child
+opens its conversation without resuming a dormant process.
+
+The conversation source is the child registry record: persisted Pi session
+history plus future events from its current RPC client. User-side session
+entries matching the record's ordered `ownerSends` log render as owner turns;
+other user-side entries render as lead prompts. Assistant text, tool calls, and
+tool results retain the shared `ConversationItem` mapping. Missing/pruned
+history is shown explicitly. Fork-raised `/answer` uses this same binding and
+no longer stores a second transcript on the thread record; the record's
+`lastWriter` and `ownerSends` fields round-trip through both the ordinary agent
+sidecar and the fork-thread resume copy.
+
+The audit window starts in view mode. Enter raises that same component to
+interactive mode and owner text uses the ordinary send branch table: prompt a
+live-idle or auto-resumed dormant child, steer a streaming child. A successful
+owner send appends `{text, at}` to `ownerSends` and sets `lastWriter: owner`;
+every lead-side prompt (spawn, `ws-agent-send`, fork nudge, finish handoff)
+sets `lastWriter: lead`. Absence is the legacy lead default. This one last-writer
+rule, not separate booleans, defines settle ownership. Overlapping sends settle
+by dispatch order: a failed earlier send cannot roll back a later successful
+writer, and failed owner sends are removed from attribution. The conversation
+adds an explicit failure note and the TUI reports the rejected send instead of
+leaking an unhandled promise rejection.
+
+In interactive mode Esc opens `[hold] [finish] [interrupt]`, defaulting to
+hold; left/right selects, Enter acts, Esc cancels, and Ctrl+C does nothing in
+the modal. Hold closes the view without changing ownership. Finish closes and,
+only while owner-held, sends one lead-attributed continuation/final-report
+handoff (fork-raised threads route that through their existing finish
+reconciliation). Interrupt aborts only a currently running RPC turn, leaves
+the view open, and does not change ownership; when abort is unavailable the
+action is disabled and a no-op. Typed `/done` is an alias for finish.
+
+While owner-held, `record.running` renders `running`; otherwise it renders
+`idle-awaiting-owner`. Settle and advisory signals are owner-only TUI
+notifications rather than lead custom messages and are never replayed later;
+final reports, questions, approvals, and orphan recovery keep their established
+routes. Owner-held records remain outside lead fan-in and are protected from
+automatic park, alias reuse, registry-cap eviction, retention deletion,
+sidecar loss, and fork anti-bleed nudging. Finish hands ownership to the lead
+before the child can settle, so the subsequent terminal signal follows the
+normal lead route.
+
 ## Shared conversation-view component {#260909-pi-conversation-view-component}
 
 The adapter renders child-agent conversations through one shared component,
@@ -1828,11 +1890,19 @@ working toward the goal, and the model ends the run only by an explicit terminal
 call. State lives in memory for the session; there is no on-disk goal substrate in
 this surface.
 
-- **Arming.** `/goal <goal>` (a `pi.registerCommand`) enters goal mode: it injects
-  a `Goal armed: <goal>` announcement turn and sets an active-goal marker. A
-  settle outside goal mode is an ordinary stop — the `agent_settled` handler is
-  armed **only** while a goal is active, which is what keeps an ordinary Pi session
-  from looping.
+- **Arming and explicit stop.** `/goal <goal>` (a `pi.registerCommand`) enters
+  goal mode: it injects a `Goal armed: <goal>` announcement turn and sets an
+  active-goal marker. The three exact, case-sensitive arguments `/goal stop`,
+  `/goal clear`, and `/goal reset` are aliases for one idempotent stop operation;
+  whitespace around the argument is ignored, while `stopping`, `reset plan`, and
+  other text still arm or replace a goal. Stop is accepted while Pi is busy. It
+  cancels adapter-owned timers/rearm state, clears the goal footer, and reports
+  that automatic continuation stopped without aborting the current response,
+  stopping children, clearing history, releasing an in-progress compaction, or
+  disturbing child-report delivery and its independent wake recovery. A settle
+  outside goal mode is an ordinary stop — the `agent_settled` handler is armed
+  **only** while a goal is active, which is what keeps an ordinary Pi session
+  from looping. A later explicit non-reserved goal arms a fresh generation.
 - **Re-fire reminder is delayed past settle by a settle timer (260906 Phase
   1).** An `agent_settled` that would otherwise re-inject no longer sends
   immediately: it arms a single settle timer (`scheduleTimer`, real
@@ -1857,12 +1927,21 @@ this surface.
   (falls back to the yield outcome). Held pushes and a pending wake take
   priority over a reminder. Only when
   eligible does it reserve the shared wake start and arm recovery before
-  sending the reminder as an explicit `deliverAs: "followUp"` user turn.
-  The short fallback clears the boundary guard, prioritizes held pushes, or
-  retries an active goal (`Goal loop: reminder did not start a turn, retrying`, followed by
-  re-arming the settle timer) if `agent_start`/`agent_settled` never observed
-  the resulting turn. `agent_start` and `agent_settled` both clear the
-  boundary guard unconditionally as their first action.
+  sending the reminder as an explicit `deliverAs: "followUp"` user turn. Each
+  submitted reminder carries an adapter-owned correlation marker, and the
+  session tracks at most one unconfirmed reminder handoff. Only a public user
+  `message_start` whose text contains that exact marker confirms consumption;
+  an unrelated owner message, assistant/custom message, child-report wake, or
+  `agent_start` alone does not. This also covers a follow-up consumed inside an
+  existing run, where no additional `agent_start` occurs. The short fallback
+  still clears the shared boundary guard and prioritizes held pushes, but it
+  does not submit another reminder while the marked handoff remains
+  unconfirmed. Once the matching message starts, a later settle may submit the
+  next reminder normally. `/goal stop` does not clear Pi's host queues: a
+  reminder already handed to Pi may therefore execute once after stop, but its
+  settle cannot rearm the disarmed generation. The shared wake reservation
+  remains independently cleared by `agent_start` and `agent_settled`, so goal correlation never owns
+  or suppresses child-report recovery.
   - **`settle_delay_ms` config knob.** Joins the other goal-loop knobs in
     `agents-plugin-pi/goal-loop-config.json`, read fresh per arm with the
     same never-throw fallback (`DEFAULT_SETTLE_DELAY_MS`, 5000ms); a missing,
@@ -1985,7 +2064,13 @@ auto-compaction remains the last-resort backstop.
   path as an ordinary delayed settle, against a freshly-read context percent.
   Both reminder origins use explicit `deliverAs: "followUp"` delivery to
   survive a push that starts a turn between the fire-time check and the send.
-  This is what lets an armed goal recover from an
+  Goal arms/disarms advance a generation token, and settle timers, compaction
+  origins, deferred completion callbacks, and wake recovery compare their
+  captured generation before submitting or mutating goal-owned state. A stale
+  callback still releases the independent compaction hold and child pushes it
+  owns, but cannot resurrect a stopped goal, attach old carry/failure text to a
+  replacement goal, or clear a newer compaction operation. This is what lets an
+  armed goal recover from an
   auto-compaction that would otherwise have left nothing to ever re-evaluate
   the loop again. When a settle's outcome qualifies for both (the lever's own
   `ctx.compact()` call produces a swallowed settle for its own invoking
@@ -2058,7 +2143,7 @@ incidental prose. It has two parts:
   `ws__playbook_print` / `ws__workflow_manual` tools, so skills-load transitively
   drives the bridge with no imperative tool call in the handler.
 - It **appends**, after a blank-line separator, an explicit instruction to
-  dispatch one `explore` recon leaf and report its result. The blank line keeps
+  dispatch one persistent `explore` researcher and report its result. The blank line keeps
   this instruction off the skill-command line (so it does not corrupt the
   `User:` args split). This append is load-bearing: the discuss skill does not
   itself spawn, so the spawn round-trip that the gate requires is not inherent to
