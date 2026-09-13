@@ -298,6 +298,10 @@ recorded, 0 Critical/Important, no relay.
 
 The owner-run isolated-tmux live check remains pending (see `## Blocked`).
 
+#### Owner acceptance (2026-09-13)
+
+The owner exercised `/audit explore-20` in the real Pi TUI while the child was active and accepted the Phase 1 surface: live tool activity and tail updates were visible, tool content could be inspected and scrolled, Esc closed the overlay, reopening preserved the conversation, and viewer content did not enter the lead transcript. The probe later settled normally without modifying files. This clears the owner-only Phase 1 gate; the already-closed conversation-view prerequisite leaves Phase 2 advanceable.
+
 ### Phase 2: owner steering, ownership, modal
 
 Depends on Phase 1 and on `260908-feat-ws-pi-conversation-view-component`
@@ -343,21 +347,3 @@ rendering and the toast when it settles with no lead turn, reopen and
 the widget row returns to the lead's fan-in; `interrupt` a streaming child
 and confirm it stops mid-turn with the view still open.
 
-## Blocked (2026-09-09)
-
-Phase 1 automated slice is complete and merged (`### Result (33ae460e)`), but
-its **owner-run live check is a post-build acceptance gate that only a human on
-a real TUI can clear**: `/audit` a worker mid-task on an isolated tmux socket
-(`tmux -L ws-probe-<pid>`), watch a tool call appear and expand it, Esc, reopen,
-and confirm the lead transcript received nothing from the viewer. No automated
-harness can drive the live TUI overlay + RPC event stream end-to-end, so this
-sign-off is owner-only.
-
-The ticket also stays out of `.done/` because **Phase 2 (owner steering,
-ownership, modal) is not yet implemented** — and Phase 2 additionally depends on
-`260908-feat-ws-pi-conversation-view-component` Phase 2, whose own owner
-acceptance was subsequently completed on 2026-09-09 and that prerequisite is
-now closed. This ticket therefore remains in `ready/` with
-Phase 1 code landed; a drain selector should skip it (blocked note present)
-until the owner clears the Phase 1 live check and Phase 2's prerequisites are
-met.

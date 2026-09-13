@@ -231,6 +231,10 @@ The post-build owner-run real-ticket audit/consult and actual five-tool profile
 acceptance remain pending. This Result records source and automated evidence,
 not that owner acceptance or ticket closure.
 
+#### Owner acceptance (2026-09-13)
+
+The owner authorized and observed real-subscription Phase 1 dogfood from the Pi lead. A two-item fan-out returned one useful `consult` result and one isolated timeout without losing the successful sibling; a narrowed retry then returned a useful `audit` against this real ticket. The Claude child reported exactly `Glob`, `Grep`, `Read`, `WebFetch`, and `WebSearch`, with no MCP, Bash, Edit, Write, Task, or connector tools. The registered Pi schema exposes only `audit` and `consult`, so later-phase `rewrite`, edit-target, and resume inputs remain rejected at the tool boundary. Current Pi package verification is green in later branch evidence (`1,778` passed, `0` failed, `2` expected skips), superseding the historical environment-red package baseline while retaining its review history above. This clears the owner-run Phase 1 gate; Phase 2 and Phase 3 remain implementation work.
+
 ### Phase 2: edit-scoped rewrite
 
 Add the `rewrite` preset and the `edit-targets` whitelist permission model:
@@ -308,12 +312,3 @@ followed by at most two seconds of cleanup. Cancellation is invocation-local;
 shutdown cancels all owned work. Unconfirmed child termination prevents new
 launches instead of releasing capacity as though cleanup succeeded.
 
-## Blocked (2026-09-10)
-
-Await owner-run Phase 1 acceptance on a normal subscription login: invoke the
-built `ws-claude` with one audit and one consult against a real ticket, confirm
-useful aligned outputs, and inspect the actual five-read-tool and empty-MCP
-profile. The passed text-only pre-build probe and automated fixtures do not
-substitute for this check. Stop/report any refusal without prompt iteration.
-Keep the ticket in `ready/`; do not advance Phases 2/3 automatically before this
-acceptance. No additional live call was made during implementation or review.
