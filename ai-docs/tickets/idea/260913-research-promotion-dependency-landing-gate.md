@@ -175,6 +175,43 @@ puts *status verification* (B) at a scheduling gate and leaves the reviewers to
 text (A) plus an advisory. The fix should respect the existing design axis, not
 fight it.
 
+## Outcome Ledger
+
+### Confirmed Decisions (2026-09-13)
+
+Confirmed with the user; these are the contract a derived child inherits. The
+actionable subset was carved into `260913-feat-promotion-dependency-landing-gate`
+(todo).
+
+- **Landed-predicate is code-level and phase-granular (concern C).** A declared
+  prerequisite counts as landed when the *specific consumed phase* carries a
+  `### Result`, or the prerequisite ticket is in `.done/` — not merely when the
+  ticket has left `todo/`. Phase-granular is chosen over whole-ticket so a
+  legitimate interleave (consume phase N of a multi-phase producer) is allowed.
+- **Typed machine-readable frontmatter edge (proposal 4).** Each blocking
+  prerequisite a phase consumes is declared as a typed frontmatter edge distinct
+  from soft `related:`, so both the dispatch-time gate and the cheap
+  ticket-selector order mechanically without prose parsing. The exact key
+  (e.g. `blocked-by:`) is an implementation choice for the child.
+- **Two-tier gate placement (proposal 2 + open-question split).** A
+  promotion-time *advisory warning* plus a dispatch-time *hard gate*: the warning
+  preserves the legitimate "stage the consumer in `ready/` now, promote the
+  producer imminently" workflow, while the hard gate blocks dispatching an
+  unexecutable ticket.
+- **Design-reviewer solo-path advisory (proposal 3).** Non-blocking ordering
+  finding on the solo path, mirroring the batch path's existing dependency-mistake
+  reasoning.
+
+### Still open (NOT carried into the child)
+
+- **Proposal 5 — owner of the frontmatter-matches-prose consistency check.**
+  Completeness reviewer vs. promotion-time lint vs. the gate. Contested because
+  the completeness reviewer's charter deliberately excludes `Relations:`
+  evaluation and the original design resisted role expansion. Needs discussion
+  before it becomes actionable; see Open questions.
+- **Gate-owner layer.** ws runtime vs. promotion/dispatch skill text — resolve
+  during the child's own fact population / design review.
+
 ## Open questions
 
 - **Gate placement: promotion vs dispatch vs both?** Checking at promotion-to-
