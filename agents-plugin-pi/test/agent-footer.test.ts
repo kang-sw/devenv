@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, test } from "node:test";
@@ -156,6 +156,25 @@ describe("bounded direct-agent estimates", () => {
     second.stop();
   });
 
+  test("failed eviction checkpoint retries without double folding", (t) => {
+    const dir = root(), storage = createAgentStorageContext("lead", dir), child = record("child", storage, .4);
+    const registry: RpcAgentRegistry = new Map([[child.agentId, child]]), ui = context();
+    const controller = createAgentFooterController(ui.ctx, registry, storage, { truncateToWidth, visibleWidth });
+    const component = ui.mount(), bucket = join(storage.root, "ws-agents", storage.ownerSessionId, ".cost-estimate"), blocked = join(dir, "blocked-checkpoint");
+    mkdirSync(blocked); symlinkSync(blocked, bucket, "dir");
+    const diagnostics = t.mock.method(console, "error", () => {});
+    assert.equal(persistEvictedAgentCost(registry, child), false);
+    assert.equal(persistEvictedAgentCost(registry, child), false);
+    assert.match(component.render(100)[1], /Direct agents ~\$0\.40/, "failed retries leave the mounted state unfurled");
+    assert.ok(diagnostics.mock.callCount() >= 2, "each failed durability boundary is surfaced");
+    rmSync(bucket);
+    assert.equal(persistEvictedAgentCost(registry, child), true);
+    assert.equal(persistEvictedAgentCost(registry, child), true, "a committed fold stays idempotent");
+    registry.delete(child.agentId);
+    controller.stop();
+    assert.equal(checkpoint(storage).evictedBaseline.knownUsd, .4);
+  });
+
   test("ordinary child stop persists the post-reconciliation estimate boundary", async () => {
     const dir = root(), storage = createAgentStorageContext("lead", dir), child = record("child", storage, .2);
     const registry: RpcAgentRegistry = new Map([[child.agentId, child]]), ui = context();
@@ -186,6 +205,22 @@ describe("bounded direct-agent estimates", () => {
 });
 
 describe("incremental lead usage", () => {
+  test("failed final checkpoint is surfaced and retained across same-process reload", (t) => {
+    const dir = root(), storage = createAgentStorageContext("lead", dir), registry: RpcAgentRegistry = new Map(), firstUi = context();
+    const first = createAgentFooterController(firstUi.ctx, registry, storage, { truncateToWidth, visibleWidth });
+    first.acceptUsage({ role: "assistant", usage: { input: 10, output: 2, cost: { total: .5 } } });
+    const owner = join(storage.root, "ws-agents", storage.ownerSessionId), bucket = join(owner, ".cost-estimate"), blocked = join(dir, "blocked-checkpoint");
+    mkdirSync(owner, { recursive: true }); mkdirSync(blocked); symlinkSync(blocked, bucket, "dir");
+    const diagnostics = t.mock.method(console, "error", () => {});
+    first.stop();
+    assert.equal(diagnostics.mock.callCount(), 1, "shutdown surfaces the failed checkpoint");
+    rmSync(bucket);
+    const secondUi = context(), second = createAgentFooterController(secondUi.ctx, registry, storage, { truncateToWidth, visibleWidth });
+    assert.match(secondUi.mount().render(100)[1], /Lead ~\$0\.50/, "reload uses the retained in-process estimate instead of stale disk state");
+    second.stop();
+    assert.equal(checkpoint(storage).lead.cost.knownUsd, .5, "the next writable boundary durably catches up");
+  });
+
   test("accepts assistant, nested tool, and compaction usage once and keeps latest assistant cache rate", () => {
     const dir = root(), storage = createAgentStorageContext("lead", dir), registry: RpcAgentRegistry = new Map(), ui = context();
     const controller = createAgentFooterController(ui.ctx, registry, storage, { truncateToWidth, visibleWidth });

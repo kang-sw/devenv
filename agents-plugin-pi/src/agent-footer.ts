@@ -9,6 +9,7 @@ import type { RpcAgentRecord, RpcAgentRegistry } from "./spawner.ts";
 const CHECKPOINT_BUCKET = ".cost-estimate";
 const CHECKPOINT_FILE = "checkpoint.json";
 const CHECKPOINT_VERSION = 1;
+const retainedFailedCheckpoints = new Map<string, CostCheckpoint>();
 
 export interface CumulativeCost {
   knownUsd: number;
@@ -69,6 +70,18 @@ interface CostCheckpoint {
 
 const emptyLeadUsage = (): LeadUsageSummary => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: emptyCost() });
 const emptyCheckpoint = (): CostCheckpoint => ({ version: CHECKPOINT_VERSION, lead: emptyLeadUsage(), evictedBaseline: emptyCost(), agents: [] });
+function cloneCheckpoint(value: CostCheckpoint): CostCheckpoint {
+  return {
+    version: CHECKPOINT_VERSION,
+    lead: { ...value.lead, cost: cloneCost(value.lead.cost) },
+    evictedBaseline: cloneCost(value.evictedBaseline),
+    agents: value.agents.map(agent => ({ agentId: agent.agentId, cost: cloneCost(agent.cost) })),
+  };
+}
+function checkpointKey(storage: AgentStorageContext): string { return `${storage.root}\0${storage.ownerSessionId}`; }
+function retainFailedCheckpoint(storage: AgentStorageContext, checkpoint: CostCheckpoint): void {
+  retainedFailedCheckpoints.set(checkpointKey(storage), cloneCheckpoint(checkpoint));
+}
 const nonnegative = (value: unknown): number | undefined => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 const nonnegativeInteger = (value: unknown): number | undefined => {
   const number = nonnegative(value);
@@ -111,13 +124,21 @@ function parseCheckpoint(raw: string): CostCheckpoint | undefined {
   return { version: CHECKPOINT_VERSION, lead, evictedBaseline, agents };
 }
 function loadCheckpoint(storage: AgentStorageContext): { checkpoint: CostCheckpoint; found: boolean } {
+  const retained = retainedFailedCheckpoints.get(checkpointKey(storage));
+  if (retained) return { checkpoint: cloneCheckpoint(retained), found: true };
   const artifact = readOwnerArtifacts(storage, CHECKPOINT_BUCKET).find(entry => entry.name === CHECKPOINT_FILE);
   if (!artifact) return { checkpoint: emptyCheckpoint(), found: false };
   const checkpoint = parseCheckpoint(artifact.content);
   return checkpoint ? { checkpoint, found: true } : { checkpoint: emptyCheckpoint(), found: false };
 }
 function writeCheckpoint(storage: AgentStorageContext, checkpoint: CostCheckpoint): boolean {
-  return writeOwnerArtifact(storage, CHECKPOINT_BUCKET, CHECKPOINT_FILE, `${JSON.stringify(checkpoint, null, 2)}\n`);
+  const written = writeOwnerArtifact(storage, CHECKPOINT_BUCKET, CHECKPOINT_FILE, `${JSON.stringify(checkpoint, null, 2)}\n`);
+  if (written) retainedFailedCheckpoints.delete(checkpointKey(storage));
+  else {
+    retainFailedCheckpoint(storage, checkpoint);
+    console.error(`ws-pi-agent: cost checkpoint write failed for owner ${storage.ownerSessionId}; retaining the latest estimate until retry`);
+  }
+  return written;
 }
 function storageFromRecord(record: Pick<RpcAgentRecord, "ownership">): AgentStorageContext | undefined {
   const home = record.ownership?.home;
@@ -179,11 +200,17 @@ class CostEstimateState {
     this.lead.cost.descendants = this.lead.cost.knownContributors || this.lead.cost.unknownContributors ? 1 : 0;
   }
 
-  fold(record: RpcAgentRecord): void {
+  foldAndPersist(record: RpcAgentRecord): boolean {
+    this.reconcile();
+    const stable = this.snapshot();
     const cost = mergeAgentCost(this.agents.get(record.agentId), telemetryCost(record.telemetry));
     addCost(this.evictedBaseline, cost);
     this.agents.delete(record.agentId);
     this.recomputeDirectTotal();
+    if (this.persist(new Set([record.agentId]))) return true;
+    this.restore(stable);
+    retainFailedCheckpoint(this.storage, stable);
+    return false;
   }
 
   presentation(): { lead: LeadUsageSummary; leadCost: string; directCost: string } {
@@ -196,6 +223,7 @@ class CostEstimateState {
 
   persist(omit: ReadonlySet<string> = new Set()): boolean {
     this.reconcile(omit);
+    const stable = this.snapshot();
     const activeIds = new Set([...this.registry.keys()].filter(id => !omit.has(id)));
     for (const [agentId, cost] of [...this.agents]) {
       if (activeIds.has(agentId)) continue;
@@ -209,12 +237,30 @@ class CostEstimateState {
       addCost(this.evictedBaseline, first[1]); this.agents.delete(first[0]);
     }
     this.recomputeDirectTotal();
-    return writeCheckpoint(this.storage, {
+    const written = writeCheckpoint(this.storage, this.snapshot());
+    if (!written) {
+      this.restore(stable);
+      retainFailedCheckpoint(this.storage, stable);
+    }
+    return written;
+  }
+
+  private snapshot(): CostCheckpoint {
+    return {
       version: CHECKPOINT_VERSION,
       lead: { ...this.lead, cost: cloneCost(this.lead.cost) },
       evictedBaseline: cloneCost(this.evictedBaseline),
       agents: [...this.agents].map(([agentId, cost]) => ({ agentId, cost: cloneCost(cost) })),
-    });
+    };
+  }
+
+  private restore(checkpoint: CostCheckpoint): void {
+    Object.assign(this.lead, checkpoint.lead, { cost: cloneCost(checkpoint.lead.cost) });
+    if (checkpoint.lead.latestCacheHitRate === undefined) delete this.lead.latestCacheHitRate;
+    Object.assign(this.evictedBaseline, checkpoint.evictedBaseline);
+    this.agents.clear();
+    for (const agent of checkpoint.agents) this.agents.set(agent.agentId, cloneCost(agent.cost));
+    this.recomputeDirectTotal();
   }
 
   private recomputeDirectTotal(): void {
@@ -242,9 +288,9 @@ export function persistEvictedAgentCost(registry: RpcAgentRegistry, record: RpcA
   const storage = registryStorage.get(registry) ?? storageFromRecord(record);
   if (!safePart(record.agentId)) return false;
   if (!storage) { foldedAgentRecords.add(record); return true; }
+  registryStorage.set(registry, storage);
   const state = registryEstimates.get(registry) ?? new CostEstimateState(storage, registry, loadCheckpoint(storage).checkpoint);
-  state.fold(record);
-  const written = state.persist(new Set([record.agentId]));
+  const written = state.foldAndPersist(record);
   if (written) foldedAgentRecords.add(record);
   return written;
 }

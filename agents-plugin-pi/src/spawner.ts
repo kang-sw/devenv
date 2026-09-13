@@ -2646,7 +2646,8 @@ export function lastActivityAt(record: RpcAgentRecord): number {
  * eligible only when durable metadata independently confirms it stopped;
  * missing or ambiguous metadata blocks both memory and disk eviction. Legacy
  * records retain registry-only eviction because their paths do not authorize
- * disk deletion. Deletion failure is diagnostic and does not fail the spawn.
+ * disk deletion. A deletion failure retains the registry record and rejects
+ * the spawn so a later retention pass cannot fold the same cost a second time.
  */
 export function evictForCapacity(
   registry: RpcAgentRegistry,
@@ -2672,17 +2673,24 @@ export function evictForCapacity(
         error: `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) reached and every remaining record is live, protected, or durably unknown — nothing can be evicted to fit`,
       };
     }
-    if (!persistEvictedAgentCost(registry, candidate)) {
-      return { ok: false, error: `ws-pi-agent: ws-agent-spawn rejected: could not preserve evicted cost telemetry for ${candidate.agentId}` };
-    }
     if (candidate.ownership) {
       const removal = removeOwned(candidate.ownership);
-      if (removal.status !== "deleted" && removal.status !== "failed") {
+      if (removal.status !== "deleted") {
         return {
           ok: false,
-          error: `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) candidate became protected or durably unknown before eviction`,
+          error: removal.status === "failed"
+            ? `ws-pi-agent: ws-agent-spawn rejected: owned-home removal failed for ${candidate.agentId}: ${removal.error}`
+            : `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) candidate became protected or durably unknown before eviction`,
         };
       }
+    }
+    if (!persistEvictedAgentCost(registry, candidate)) {
+      // The owned home may already be gone, but the in-memory record and its
+      // cached telemetry remain retryable. Treat it as unowned on the retry.
+      candidate.ownershipObserverStop?.();
+      candidate.ownershipObserverStop = undefined;
+      candidate.ownership = undefined;
+      return { ok: false, error: `ws-pi-agent: ws-agent-spawn rejected: could not preserve evicted cost telemetry for ${candidate.agentId}` };
     }
     candidate.ownershipObserverStop?.();
     registry.delete(candidate.agentId);
