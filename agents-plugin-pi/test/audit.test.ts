@@ -499,8 +499,8 @@ describe("openViewer (shared view/steering overlay and one-overlay-at-a-time sin
     await promise;
   });
 
-  test("Esc closes directly in view mode", async () => {
-    const registry = registryOf(record({ agentId: "a1" }));
+  test("Esc closes directly in lead-owned view mode", async () => {
+    const registry = registryOf(record({ agentId: "a1", lastWriter: "lead" }));
     const opened = fakeViewerCtx();
     const promise = openViewer(opened.ctx as never, registry, "a1");
     const component = await opened.componentReady;
@@ -508,6 +508,26 @@ describe("openViewer (shared view/steering overlay and one-overlay-at-a-time sin
 
     component.handleInput("\x1b"); // a single Esc — no second interaction is needed to actually close.
     assert.equal(await promise, undefined);
+  });
+
+  test("owner-held view-mode Esc opens, cancels, and reopens the action modal without changing mode or ownership", async () => {
+    const held = record({ agentId: "a1", lastWriter: "owner" });
+    const opened = fakeViewerCtx();
+    const promise = openViewer(opened.ctx as never, registryOf(held), "a1");
+    const component = await opened.componentReady;
+
+    component.handleInput("\x1b");
+    assert.equal(component.getMode(), "view", "opening the modal does not raise the editor");
+    assert.match(component.render(80).join("\n"), /Leave owner steering/);
+    component.handleInput("\x1b");
+    assert.equal(component.getMode(), "view", "dismissing the modal preserves view mode");
+    assert.equal(held.lastWriter, "owner", "dismissing the modal preserves ownership");
+
+    component.handleInput("\x1b");
+    assert.match(component.render(80).join("\n"), /Leave owner steering/, "Esc reopens the same modal");
+    component.handleInput("\r"); // hold remains the default action
+    await promise;
+    assert.equal(held.lastWriter, "owner", "hold closes without releasing ownership");
   });
 
   test("Enter in view mode raises the viewer to interactive via setMode — the record is left untouched", async () => {
@@ -599,6 +619,10 @@ describe("openViewer (shared view/steering overlay and one-overlay-at-a-time sin
     const opened = fakeViewerCtx();
     const promise = openViewer(opened.ctx as never, registryOf(live), "a1");
     const component = await opened.componentReady;
+    component.handleInput("\x1b");
+    assert.equal(component.getMode(), "view", "owner-held running work reaches the modal without Enter");
+    assert.match(component.render(80).join("\n"), /Leave owner steering/);
+    component.handleInput("\x1b");
     component.handleInput("\r");
     component.handleInput("\x1b");
     component.handleInput("\x1b[C");
