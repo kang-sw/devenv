@@ -3,8 +3,10 @@ title: "Promotion/dispatch dependency-landing gate with typed frontmatter edges"
 related:
   260913-research-promotion-dependency-landing-gate: design-source — carries the settled Confirmed Decisions this ticket implements and the scoped-out proposal 5
   260909-epic-ws-worker-interpreter-refoundation: constraint — lead-run/selector are the shared worker-interpreter surface this touches
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: ce737ee5354ac419
+sage-review-completeness-reviewed: ce737ee5354ac419
 ---
 
 # Promotion/dispatch dependency-landing gate with typed frontmatter edges
@@ -149,7 +151,7 @@ Confirmed with the user (2026-09-13); see the design source's Outcome Ledger.
 
 ## Phases
 
-### Phase 1: Typed dependency edge + dispatch-time hard gate + selector ordering
+### Phase 1: Typed dependency edge + dispatch gate + promotion closure + selector ordering
 
 Introduce the new optional `blocked-by:` frontmatter edge (value shape per
 Decisions: bare `<stem>` = prerequisite `.done/`; `<stem>#<phaseN>` = that phase
@@ -171,9 +173,10 @@ Every predicate is computed live at each call, never read from a review stamp.
 Verify: a consumer whose `blocked-by:` prerequisite is unlanded gets
 `dispatch_blocked` at point-resolve and lead-run refuses to spawn with the
 blocking stem named; `tickets.move(to:ready)` refuses a consumer whose
-`blocked-by:` prerequisite is in `idea/`/`todo/` (and, for a `#<phaseN>` edge,
-whose named phase has no `### Result`); a consumer whose `blocked-by: <stem>#<N>`
-target phase carries a `### Result` (prerequisite not fully `.done/`) is allowed
+`blocked-by:` prerequisite is neither in `ready/` nor `.done/` (a status-only
+check — phase-granular `### Result` targeting is the dispatch gate's job, not the
+promotion closure's); a consumer whose `blocked-by: <stem>#<N>` target phase
+carries a `### Result` (prerequisite not fully `.done/`) is allowed at dispatch
 (phase-granular interleave); **a ticket carrying no `blocked-by:` is neither
 gated nor refused, and the selector still infers an order for it from prose
 `related:` hints (no regression for legacy artifacts)**; a soft `related:` edge
