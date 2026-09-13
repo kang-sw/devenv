@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 1532dde6eb1d895a
 sage-review-completeness-reviewed: 1532dde6eb1d895a
+completed: 2026-09-13
 ---
 
 # Pi ownership maintenance errors flood the terminal UI
@@ -58,3 +59,16 @@ The immediate caller-visible defect is the output transport: extension maintenan
 Trace every ownership observer and agent-home maintenance error emission, classify it as observer-only or authoritative, and route it through one bounded reporter. Remove direct stdout/stderr/console writes from normal operation. Silence observer-only failures; coalesce authoritative owner notification by stable fingerprint while leaving the underlying operation fail-closed.
 
 Add regressions for repeated live-holder `EEXIST`, stale or unverifiable ownership locks, missing/unreadable ownership metadata, and ordinary non-ownership I/O failures. Assert repeated events do not call stdout, stderr, or console; observer failures produce no normal notification; authoritative failures remain rejected and produce at most one concise Pi-native signal. Verify reporter state is session-bounded, no polling is introduced, existing retention/deletion safety tests remain green, and the full Pi suite passes.
+
+### Result (36dd34f) - 2026-09-13
+
+Ownership observation, metadata update, removal, and retention failures now route through one closed-fingerprint reporter over the existing session-scoped `ownerNotifyRef` lifecycle. Observer-only failures are silent in normal mode, while authoritative operations preserve their rejection or safe-retention outcomes and emit at most one concise TUI-lead warning per failure class. Capacity-eviction errors no longer expose agent identities, raw filesystem details, or stack text.
+
+Regression coverage exercises live and unverifiable ownership locks, missing and unreadable metadata, ordinary observer I/O errors, removal and retention failures, and repeated authoritative contention. It behaviorally intercepts stdout, stderr, and common `console.*` methods, verifies session-bound dedup reset, and preserves retention/deletion safety. No timers, polling, public debug configuration, or root-cause lock/metadata repair was added.
+
+Verification: `npm --prefix agents-plugin-pi test` passed 1,812 tests with 2 skipped. Focused storage, contention, retention, and spawner coverage passed 330 tests. Round-one correctness review was clean; its Fit and Test Important findings were fixed in `36dd34f`, and both round-two fix verifications were clean with no unresolved observations.
+
+
+## Resolution (2026-09-13)
+
+Contained ownership maintenance diagnostics within the Pi-native session notification lifecycle. Observer failures are silent, authoritative failures remain fail-closed with bounded concise owner warnings, raw capacity-eviction details are redacted, and full Pi verification plus two review rounds passed.

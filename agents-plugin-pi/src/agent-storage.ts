@@ -6,11 +6,35 @@ import { randomUUID } from "node:crypto";
 import { parseDelegationPolicy, type DelegationPolicy } from "./delegation-policy.ts";
 import { parseTelemetry, type AgentTelemetry } from "./agent-telemetry.ts";
 import { normalizeStoredExploreMode, type ExploreMode } from "./process-role.ts";
+import { ownerNotifyRef, type OwnershipOwnerNotificationFingerprint } from "./owner-notify.ts";
 
 export const OWNERSHIP_VERSION = 1;
 const SAFE_COMPONENT = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
 
 export interface AgentStorageContext { root: string; ownerSessionId: string; }
+
+export type OwnershipDiagnosticFingerprint =
+  | "observer-session-write"
+  | "metadata-update"
+  | "home-removal"
+  | "retention-scan"
+  | "retention-start";
+const OWNERSHIP_DIAGNOSTICS: Partial<Record<OwnershipDiagnosticFingerprint, {
+  ownerFingerprint: OwnershipOwnerNotificationFingerprint;
+  message: string;
+}>> = {
+  "metadata-update": { ownerFingerprint: "ownership-metadata-update", message: "ws: could not persist owned-agent metadata; the affected operation was rejected." },
+  "home-removal": { ownerFingerprint: "ownership-home-removal", message: "ws: could not remove an owned-agent home; it was retained for safety." },
+  "retention-scan": { ownerFingerprint: "ownership-retention-scan", message: "ws: owned-agent retention could not scan part of its storage; uncertain homes were retained." },
+  "retention-start": { ownerFingerprint: "ownership-retention-start", message: "ws: owned-agent retention could not start; no uncertain home was removed." },
+};
+
+/** Central ownership reporter: observers are silent; authoritative classes reuse the session's owner notification seam. */
+export function reportOwnershipDiagnostic(fingerprint: OwnershipDiagnosticFingerprint, _error: unknown): void {
+  const diagnostic = OWNERSHIP_DIAGNOSTICS[fingerprint];
+  if (diagnostic) ownerNotifyRef.notifyOwnershipOnce(diagnostic.ownerFingerprint, diagnostic.message);
+}
+
 export interface AgentOwnership {
   version: number; ownerSessionId: string; agentId: string; home: string; delegation?: DelegationPolicy;
   role: "worker" | "execute-worker" | "fork" | "explore"; exploreMode?: ExploreMode; sessionPath?: string;
@@ -208,7 +232,7 @@ export function updateOwnership(home: string, update: Partial<Pick<OwnershipMeta
     writeOwnershipUnlocked(next, lock.home);
     return next;
   } catch (error) {
-    console.error(`ws-pi-agent: could not update owned agent home ${home}: ${String(error)}`);
+    reportOwnershipDiagnostic("metadata-update", error);
     return undefined;
   } finally { lock?.release(); }
 }
@@ -306,7 +330,7 @@ export function removeOwnedAgentHome(
       try { writeOwnershipUnlocked(checked, canonicalHome(ownership.home)); } catch { /* original failure remains the diagnostic */ }
     }
     const message = String(error);
-    console.error(`ws-pi-agent: could not remove owned agent home: ${message}`);
+    reportOwnershipDiagnostic("home-removal", error);
     return { status: "failed", error: message };
   } finally {
     lock.release();
@@ -375,14 +399,14 @@ export function pruneStaleAgentHomes(root: string, ttlDays: number | false, opti
         }
       } catch (error) {
         result.failed += 1;
-        console.error(`ws-pi-agent: could not scan owned lead subtree for retention: ${String(error)}`);
+        reportOwnershipDiagnostic("retention-scan", error);
       }
     }
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code !== "ENOENT") {
       result.failed += 1;
-      console.error(`ws-pi-agent: could not scan owned agent homes for retention: ${String(error)}`);
+      reportOwnershipDiagnostic("retention-scan", error);
     }
   }
   return result;
@@ -409,7 +433,7 @@ export function observeSessionWrite(home: string, sessionPath: string): void {
   } catch (error) {
     if (error instanceof OwnershipLockBusyError) return;
     // Unknown observation remains conservative; never infer a write from directory metadata.
-    console.error(`ws-pi-agent: could not observe owned session write: ${String(error)}`);
+    reportOwnershipDiagnostic("observer-session-write", error);
     if (lock && current) {
       try { writeOwnershipUnlocked({ ...current, updatedAt: Date.now(), liveness: { ...current.liveness, lifecycle: "unknown", observedAt: Date.now() } }, lock.home); } catch { /* the original observation failure remains diagnostic */ }
     }

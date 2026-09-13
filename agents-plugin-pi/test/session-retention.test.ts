@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { describe, test } from "node:test";
 import { allocateAgentHome, createAgentStorageContext, readOwnership, writeOwnership } from "../src/agent-storage.ts";
 import type { PersistedOrphan } from "../src/agent-sidecar.ts";
-import { applySessionStartAgentRetention } from "../src/index.ts";
+import { applySessionShutdownOwnershipDiagnostics, applySessionStartAgentRetention, applySessionStartOwnershipDiagnostics } from "../src/index.ts";
+import { ownerNotifyRef } from "../src/spawner.ts";
 
 function orphan(agentId: string, sessionPath: string, ownership?: PersistedOrphan["ownership"]): PersistedOrphan {
   return { agentId, sessionPath, systemPromptPath: "/tmp/prompt.md", wsToolNames: [], toolGroup: "full-worker", ...(ownership ? { ownership } : {}) };
@@ -56,16 +57,43 @@ describe("controller session-start child retention", () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test("a retention failure is diagnostic-only and preserves every recovered sidecar record", (t) => {
+  test("the production ownership reporter is TUI-owner-only and resets at the session boundary", (t) => {
+    const diagnostics = t.mock.method(console, "error", () => {});
+    const notices: string[] = [];
+    const ctx = { mode: "tui", ui: { notify: (message: string) => notices.push(message) } } as never;
+    const fail = () => { throw new Error("raw /private/path"); };
+    try {
+      applySessionStartOwnershipDiagnostics(undefined, ctx);
+      applySessionStartAgentRetention(undefined, "/unused", "/unused", [], fail);
+      applySessionStartAgentRetention(undefined, "/unused", "/unused", [], fail);
+      assert.equal(notices.length, 1, "one adapter session reports a stable authoritative fingerprint once");
+
+      applySessionShutdownOwnershipDiagnostics();
+      applySessionStartOwnershipDiagnostics(undefined, ctx);
+      applySessionStartAgentRetention(undefined, "/unused", "/unused", [], fail);
+      assert.equal(notices.length, 2, "a new adapter session gets a fresh bounded reporter");
+
+      applySessionStartOwnershipDiagnostics("fork", ctx);
+      applySessionStartAgentRetention("fork", "/unused", "/unused", [], fail);
+      assert.equal(notices.length, 2, "a spawned role never owns the Pi-native owner notification surface");
+      assert.equal(diagnostics.mock.callCount(), 0);
+    } finally { applySessionShutdownOwnershipDiagnostics(); }
+  });
+
+  test("a retention failure reports once outside terminal streams and preserves every recovered sidecar record", (t) => {
     const root = mkdtempSync(join(tmpdir(), "ws-pi-session-retention-"));
     const config = join(root, "missing-config.json");
     const diagnostics = t.mock.method(console, "error", () => {});
+    const notices: string[] = [];
+    ownerNotifyRef.current = message => notices.push(message);
     try {
       const recovered = [orphan("legacy", join(root, "legacy-session.jsonl"))];
-      const retained = applySessionStartAgentRetention("fork", root, config, recovered, () => { throw new Error("permission denied"); });
+      const retained = applySessionStartAgentRetention("fork", root, config, recovered, () => { throw new Error("permission denied at /private/home"); });
       assert.strictEqual(retained, recovered);
-      assert.equal(diagnostics.mock.callCount(), 1);
-      assert.match(String(diagnostics.mock.calls[0].arguments[0]), /permission denied/);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+      assert.equal(diagnostics.mock.callCount(), 0);
+      assert.deepEqual(notices, ["ws: owned-agent retention could not start; no uncertain home was removed."]);
+      assert.doesNotMatch(notices[0]!, /permission|private/);
+      assert.doesNotMatch(String(applySessionStartAgentRetention), /console\.|process\.(?:stdout|stderr)/);
+    } finally { ownerNotifyRef.current = undefined; rmSync(root, { recursive: true, force: true }); }
   });
 });

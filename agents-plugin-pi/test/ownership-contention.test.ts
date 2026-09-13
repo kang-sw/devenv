@@ -4,11 +4,24 @@ import { once } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { describe, test } from "node:test";
+import { describe, test, type TestContext } from "node:test";
 import { allocateAgentHome, createAgentStorageContext, observeSessionWrite, pruneStaleAgentHomes, readOwnership, touchOwnership, writeOwnership } from "../src/agent-storage.ts";
 import { createThreadRegistryHandle, ensureRespondent, handleForkRaisedQuestion } from "../src/ask.ts";
 import { openViewer } from "../src/audit.ts";
-import { applyRpcEvent, getAgentTranscriptPath, REPORT_TO_LEAD_TOOL_NAME, syncOwnershipProtection, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { applyRpcEvent, getAgentTranscriptPath, ownerNotifyRef, REPORT_TO_LEAD_TOOL_NAME, syncOwnershipProtection, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+
+function captureTerminalOutput(t: TestContext) {
+  const output: string[] = [];
+  const restorers: Array<() => void> = [];
+  for (const method of ["log", "error", "warn", "info", "debug", "trace", "dir", "table"] as const) {
+    const mocked = t.mock.method(console, method, ((...args: unknown[]) => { output.push(`console.${method}:${args.map(String).join(" ")}`); }) as never);
+    restorers.push(() => mocked.mock.restore());
+  }
+  const stdout = t.mock.method(process.stdout, "write", ((chunk: unknown) => { output.push(`stdout:${String(chunk)}`); return true; }) as never);
+  const stderr = t.mock.method(process.stderr, "write", ((chunk: unknown) => { output.push(`stderr:${String(chunk)}`); return true; }) as never);
+  restorers.push(() => stdout.mock.restore(), () => stderr.mock.restore());
+  return { output, restore: () => { for (const restore of restorers.reverse()) restore(); } };
+}
 
 // A separate process pauses INSIDE the production writer/deleter's claim.
 // A fixture-only release file is a barrier, not a timing-dependent overlap guess.
@@ -69,22 +82,27 @@ function fixture() {
 }
 
 describe("durable ownership contention at accepted operation boundaries", () => {
-  test("observation silently skips a live claim while authoritative and malformed-lock failures stay diagnostic", { timeout: 15_000 }, async t => {
+  test("observer contention stays silent while authoritative failures coalesce outside terminal output", { timeout: 15_000 }, async t => {
     const { root, ownership } = fixture();
-    const diagnostics = t.mock.method(console, "error", () => {});
+    const notices: string[] = [];
+    ownerNotifyRef.current = message => notices.push(message);
     let release: (() => Promise<void>) | undefined;
     try {
       const before = readOwnership(ownership.home)!;
       writeFileSync(ownership.sessionPath!, "new history after the first observation\n");
       release = await holdClaim(ownership.home, "writer");
 
-      observeSessionWrite(ownership.home, ownership.sessionPath!);
-      assert.equal(diagnostics.mock.callCount(), 0, "a best-effort observer does not report an expected live-holder collision");
-      assert.deepEqual(readOwnership(ownership.home), before, "the skipped sample does not accept an ownership update");
+      const busyTerminal = captureTerminalOutput(t);
+      try {
+        observeSessionWrite(ownership.home, ownership.sessionPath!);
+        assert.deepEqual(notices, []);
+        assert.deepEqual(readOwnership(ownership.home), before, "the skipped sample does not accept an ownership update");
 
-      assert.equal(touchOwnership(ownership.home), false, "authoritative writes still fail closed under the same live claim");
-      assert.equal(diagnostics.mock.callCount(), 1, "authoritative contention remains diagnostic");
-      assert.match(String(diagnostics.mock.calls[0].arguments[0]), /could not update owned agent home/);
+        assert.equal(touchOwnership(ownership.home), false, "authoritative writes still fail closed under the same live claim");
+        assert.equal(touchOwnership(ownership.home), false, "repeated authoritative writes remain rejected");
+        assert.deepEqual(busyTerminal.output, [], "repeated observer and authoritative contention stays outside all terminal output");
+        assert.deepEqual(notices, ["ws: could not persist owned-agent metadata; the affected operation was rejected."]);
+      } finally { busyTerminal.restore(); }
 
       await release(); release = undefined;
       observeSessionWrite(ownership.home, ownership.sessionPath!);
@@ -96,12 +114,16 @@ describe("durable ownership contention at accepted operation boundaries", () => 
       mkdirSync(lock);
       writeFileSync(join(lock, "owner.json"), "{}");
       const beforeMalformed = readOwnership(ownership.home)!;
-      observeSessionWrite(ownership.home, ownership.sessionPath!);
-      assert.equal(diagnostics.mock.callCount(), 2, "malformed lock-owner facts remain diagnostic");
-      assert.match(String(diagnostics.mock.calls[1].arguments[0]), /could not observe owned session write.*EEXIST/);
-      assert.deepEqual(readOwnership(ownership.home), beforeMalformed);
+      const malformedTerminal = captureTerminalOutput(t);
+      try {
+        observeSessionWrite(ownership.home, ownership.sessionPath!);
+        assert.deepEqual(malformedTerminal.output, [], "malformed observer lock facts stay outside all terminal output");
+        assert.equal(notices.length, 1, "observer-only failures never add a normal notification");
+        assert.deepEqual(readOwnership(ownership.home), beforeMalformed);
+      } finally { malformedTerminal.restore(); }
     } finally {
       if (release) await release();
+      ownerNotifyRef.current = undefined;
       rmSync(root, { recursive: true, force: true });
     }
   });
@@ -110,6 +132,8 @@ describe("durable ownership contention at accepted operation boundaries", () => 
     test(`${kind} overlap refuses owner binds and references rather than accepting unpersisted protection/activity`, { timeout: 15_000 }, async t => {
       const { root, ownership, record, registry, handle } = fixture();
       const diagnostics = t.mock.method(console, "error", () => {});
+      const diagnosticNotices: string[] = [];
+      ownerNotifyRef.current = message => diagnosticNotices.push(message);
       let release: (() => Promise<void>) | undefined;
       try {
         release = await holdClaim(ownership.home, kind);
@@ -132,7 +156,8 @@ describe("durable ownership contention at accepted operation boundaries", () => 
         assert.throws(() => getAgentTranscriptPath(registry, record.agentId), /history unavailable.*retry/);
         assert.equal(readOwnership(ownership.home)!.lastActivityAt, 1);
         assert.equal(readOwnership(ownership.home)!.liveness.threadBound, undefined);
-        assert.ok(diagnostics.mock.callCount() >= 5, "failed metadata writes are diagnostic, not silent");
+        assert.equal(diagnostics.mock.callCount(), 0, "repeated failed metadata writes never use console.error");
+        assert.equal(diagnosticNotices.length, 1, "repeated authoritative metadata failures coalesce per session");
 
         await release(); release = undefined;
         if (kind === "writer") {
@@ -149,6 +174,7 @@ describe("durable ownership contention at accepted operation boundaries", () => 
         }
       } finally {
         if (release) await release();
+        ownerNotifyRef.current = undefined;
         rmSync(root, { recursive: true, force: true });
       }
     });
@@ -193,18 +219,23 @@ describe("durable ownership contention at accepted operation boundaries", () => 
     });
   }
 
-  test("unreadable metadata refuses a new bind without throwing from best-effort metadata IO", t => {
+  test("missing or unreadable metadata refuses a new bind and coalesces its owner signal", t => {
     const { root, ownership, record, registry, handle } = fixture();
     const diagnostics = t.mock.method(console, "error", () => {});
+    const notices: string[] = [];
+    ownerNotifyRef.current = message => notices.push(message);
     try {
-      writeFileSync(join(ownership.home, "ownership.json"), "not-json");
-      assert.equal(touchOwnership(ownership.home), false);
+      const metadataPath = join(ownership.home, "ownership.json");
+      writeFileSync(metadataPath, "not-json");
+      assert.equal(touchOwnership(ownership.home), false, "unreadable metadata rejects the write");
+      rmSync(metadataPath);
+      assert.equal(touchOwnership(ownership.home), false, "missing metadata rejects the write");
       assert.throws(() => handleForkRaisedQuestion(handle, registry, record.agentId, "Unknown?"), /cannot bind owner thread/);
       assert.equal(record.threadBound, undefined);
       assert.equal(handle.threads.size, 0);
       assert.deepEqual(pruneStaleAgentHomes(root, 30).deletedHomes, []);
-      assert.equal(diagnostics.mock.callCount(), 2);
-      assert.match(String(diagnostics.mock.calls[0].arguments[0]), /metadata is missing or unreadable/);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+      assert.equal(diagnostics.mock.callCount(), 0);
+      assert.deepEqual(notices, ["ws: could not persist owned-agent metadata; the affected operation was rejected."]);
+    } finally { ownerNotifyRef.current = undefined; rmSync(root, { recursive: true, force: true }); }
   });
 });

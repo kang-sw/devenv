@@ -727,6 +727,8 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
     const rpc = installRpcHarness();
     const previousCap = process.env[WS_PI_AGENT_REGISTRY_CAP_ENV];
     const diagnostics = t.mock.method(console, "error", () => {});
+    const notices: string[] = [];
+    ownerNotifyRef.current = message => notices.push(message);
     let locked: string | undefined;
     try {
       const { tool, handle, ctx } = harness(async () => jsonResult({}));
@@ -741,17 +743,23 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
 
       await assert.rejects(
         () => tool.execute("call", { system_prompt_path: "/tmp/p.md", prompt: "replacement" }, undefined, undefined, ctx),
-        /owned-home removal failed/,
+        error => {
+          assert.match(String(error), /owned-home removal failed/);
+          assert.doesNotMatch(String(error), /blocked-delete|payload|EACCES|permission denied/);
+          return true;
+        },
       );
       assert.equal(handle.rpcRegistry.has("blocked-delete"), true, "failed deletion keeps the only copy of the record retryable");
       assert.equal(handle.rpcRegistry.size, 1, "the replacement spawn is not admitted without an exactly-once eviction");
       assert.equal(existsSync(ownership.home), true, "failed removal was rolled back for retry");
-      assert.ok(diagnostics.mock.callCount() >= 1);
+      assert.equal(diagnostics.mock.callCount(), 0);
+      assert.deepEqual(notices, ["ws: could not remove an owned-agent home; it was retained for safety."]);
       if (existsSync(locked)) chmodSync(locked, 0o700);
       await handle.stopAll();
     } finally {
       if (locked && existsSync(locked)) chmodSync(locked, 0o700);
       if (previousCap === undefined) delete process.env[WS_PI_AGENT_REGISTRY_CAP_ENV]; else process.env[WS_PI_AGENT_REGISTRY_CAP_ENV] = previousCap;
+      ownerNotifyRef.current = undefined;
       rpc.restore();
     }
   });
@@ -3953,8 +3961,9 @@ describe("evictForCapacity", () => {
       const ownership = allocateAgentHome(createAgentStorageContext("lead-1", root), "owned-failure", "worker");
       updateOwnership(ownership.home, { liveness: { lifecycle: "stopped", running: false } });
       const registry: RpcAgentRegistry = new Map([["owned-failure", freshRpcRecord({ agentId: "owned-failure", ownership, sessionPath: ownership.sessionPath })]]);
-      const result = evictForCapacity(registry, 1, () => ({ status: "failed", error: "permission denied" }));
-      assert.deepEqual(result, { ok: false, error: "ws-pi-agent: ws-agent-spawn rejected: owned-home removal failed for owned-failure: permission denied" });
+      const result = evictForCapacity(registry, 1, () => ({ status: "failed", error: "permission denied at /private/owned-failure" }));
+      assert.deepEqual(result, { ok: false, error: "ws-pi-agent: ws-agent-spawn rejected: owned-home removal failed; the existing agent was retained for safety" });
+      assert.doesNotMatch(result.error ?? "", /permission|private|owned-failure/);
       assert.equal(registry.size, 1);
       assert.ok(readFileSync(join(ownership.home, "ownership.json"), "utf8"), "metadata remains for a later retry");
     } finally { rmSync(root, { recursive: true, force: true }); }
