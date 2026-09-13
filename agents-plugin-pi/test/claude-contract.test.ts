@@ -32,7 +32,11 @@ test("registered schema exposes rewrite, design-review, and resume fields with a
   const schema = definition.parameters.properties.items.items;
   assert.deepEqual(Object.keys(schema.properties).sort(), ["edit-targets", "model", "paths", "preset", "request", "resume"]);
   assert.deepEqual(schema.properties.preset.enum, ["audit", "consult", "rewrite", "design-review"]); assert.equal(schema.additionalProperties, false);
-  assert.deepEqual(schema.required, ["request"]); assert.deepEqual(schema.anyOf, [{ required: ["preset"] }, { required: ["resume"] }]);
+  assert.deepEqual(schema.required, ["request"]);
+  assert.deepEqual(schema.oneOf, [
+    { required: ["preset"], not: { required: ["resume"] } },
+    { required: ["resume"], not: { anyOf: [{ required: ["preset"] }, { required: ["paths"] }, { required: ["model"] }, { required: ["edit-targets"] }] } },
+  ]);
   assert.equal(schema.properties["edit-targets"].minItems, 1);
   const pending = definition.execute("id", { items: ["first", "second", "third"].map(request => ({ ...item, request })) });
   await new Promise(resolve => setImmediate(resolve)); releases[2](); releases[0](); releases[1]();

@@ -12,12 +12,15 @@ function textResult(text: string) { return { content: [{ type: "text", text }] }
 
 test("resume continues the mapped Claude session under the same opaque handle", async () => {
   const calls: Array<{ prompt: string; options: any }> = [];
+  const sessionFacts = new Map<string, string>();
   const controller = createClaudeDelegateController(() => "/tmp", {
     executable: process.execPath,
     loadSdk: async () => ({ query: ({ prompt, options }: any) => {
       calls.push({ prompt, options });
-      const resumed = options.resume === "private-session-1";
-      return { close() {}, async *[Symbol.asyncIterator]() { yield terminal(resumed ? "remembered cobalt" : "stored cobalt", "private-session-1"); } };
+      const sessionId = options.resume ?? "private-session-1";
+      if (!options.resume) sessionFacts.set(sessionId, prompt.match(/Remember ([a-z]+)\./)?.[1] ?? "");
+      const fact = options.resume ? sessionFacts.get(options.resume) : sessionFacts.get(sessionId);
+      return { close() {}, async *[Symbol.asyncIterator]() { yield terminal(options.resume ? `remembered ${fact ?? "missing"}` : `stored ${fact}`, sessionId); } };
     } }) as any,
   });
 
@@ -110,6 +113,11 @@ test("design-review injects the canonical playbook and complete parent-side read
     assert.match(captured?.prompt ?? "", /Relations:\nnone/);
     assert.equal(JSON.stringify(captured).includes("finishing-hazelnut-tuesday"), false);
     assert.equal(calls.every(call => !("session_key" in call.args)), true);
+    assert.deepEqual(calls.map(call => call.name), ["playbook.read", "tickets.query", "tickets.query"]);
+
+    const [continued] = await controller.execute([{ resume: result!.id, request: "Check one issue again." }]);
+    assert.equal(continued?.status, "success");
+    assert.match(captured?.options.systemPrompt.append, /CANONICAL DESIGN CRITERIA/);
     assert.deepEqual(calls.map(call => call.name), ["playbook.read", "tickets.query", "tickets.query"]);
     await controller.shutdown();
   } finally { rmSync(root, { recursive: true, force: true }); }

@@ -57,6 +57,7 @@ test("production session seam registers once, preserves roles/fork capture, forw
     // Guard the real extension call sites; the exercised seam owns their role/controller logic.
     const index = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
     assert.match(index, /const claudeDelegateSession = registerClaudeDelegateSession\(pi, toolPreviewTuiRef, \{/);
+    assert.match(index, /handle\.client\.callTool\(name, resolveSessionKey\(args, handle\.defaultSessionKeyRef\)\)/);
     assert.match(index, /await claudeDelegateSession.start\(ctx.cwd\)/);
     assert.match(index, /await claudeDelegateSession.shutdown\(\)/);
   } finally {

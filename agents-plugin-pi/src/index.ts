@@ -178,7 +178,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import { startBridge, type BridgeHandle } from "./bridge.ts";
+import { resolveSessionKey, startBridge, type BridgeHandle } from "./bridge.ts";
 import {
   agentCostRefreshRef,
   agentWidgetRefreshRef,
@@ -490,7 +490,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     designReviewContext: createClaudeDesignReviewContextProvider({
       async callTool(name, args) {
         if (!handle) throw new Error("ws-claude design-review requires an active parent bridge");
-        return await handle.client.callTool(name, args);
+        return await handle.client.callTool(name, resolveSessionKey(args, handle.defaultSessionKeyRef));
       },
     }),
   });

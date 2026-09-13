@@ -11,7 +11,7 @@ export interface ClaudeDelegateItem { preset?: ClaudeDelegatePreset; request: st
 export interface ClaudeDelegateResult { id: string; status: "success" | "error"; output: string; usage: ClaudeUsage; changed?: string[]; error?: { code: string; message: string }; }
 export interface ClaudeDelegateController { execute(items: unknown, signal?: AbortSignal): Promise<ClaudeDelegateResult[]>; shutdown(): Promise<void>; }
 export interface ClaudeDelegateDeps extends ClaudeSdkDependencies { timeoutMs?: number; cleanupMs?: number; designReviewContext?: ClaudeDesignReviewContextProvider; }
-interface ClaudeSessionRecord { sessionId: string; preset: ClaudeDelegatePreset; paths?: string[]; model?: string; editTargets?: string[]; }
+interface ClaudeSessionRecord { sessionId: string; preset: ClaudeDelegatePreset; paths?: string[]; model?: string; editTargets?: string[]; taskFrame?: string; }
 
 function errorResult(id: string, code: string, message: string, changed?: string[]): ClaudeDelegateResult { return { id, status: "error", output: "", usage: null, ...(changed ? { changed } : {}), error: { code, message: message.slice(0, 500) } }; }
 function resumeHandle(value: unknown): string | undefined {
@@ -104,7 +104,7 @@ export function createClaudeDelegateController(cwd: () => string, deps: ClaudeDe
       const abort = new AbortController(); controllers.add(abort); const onAbort = () => abort.abort(); callerSignal?.addEventListener("abort", onAbort, { once: true });
       let timedOut = false; const timeout = setTimeout(() => { timedOut = true; abort.abort(new Error("timeout")); }, deps.timeoutMs ?? 120_000);
       try {
-        let request = value.request; let taskFrame: string | undefined;
+        let request = value.request; let taskFrame = session?.taskFrame;
         if (!resumed && preset === "design-review") {
           if (!deps.designReviewContext) return errorResult(id, "missing_context", "Design-review context is unavailable.");
           try {
@@ -117,7 +117,7 @@ export function createClaudeDelegateController(cwd: () => string, deps: ClaudeDe
           }
         }
         const output = await runClaudeItem({ preset, request, ...(preset === "design-review" ? {} : { paths }), model, cwd: editScope?.root ?? cwd(), ...(editScope ? { editScope } : {}), ...(session ? { resumeSessionId: session.sessionId } : {}), ...(taskFrame ? { taskFrame } : {}), abortController: abort }, deps);
-        sessions.set(id, { sessionId: output.sessionId, preset, ...(paths ? { paths: [...paths] } : {}), ...(model ? { model } : {}), ...(editTargets ? { editTargets: [...editTargets] } : {}) });
+        sessions.set(id, { sessionId: output.sessionId, preset, ...(paths ? { paths: [...paths] } : {}), ...(model ? { model } : {}), ...(editTargets ? { editTargets: [...editTargets] } : {}), ...(taskFrame ? { taskFrame } : {}) });
         return { id, status: "success", output: output.output, usage: output.usage, ...(editScope ? { changed: editScope.changed() } : {}) };
       } catch (error) {
         const raw = errorCode(error, callerSignal); const code = raw === "cleanup_failed" ? raw : timedOut ? "timeout" : raw;
@@ -156,7 +156,7 @@ export function registerClaudeDelegate(pi: ExtensionAPI, controllerRef: { curren
   registerWsTool(pi, {
     name: CLAUDE_DELEGATE_TOOL_NAME, label: CLAUDE_DELEGATE_TOOL_NAME,
     description: "Run isolated Claude audit, consult, exact-file rewrite, or ticket design-review requests, or continue a returned handle. Supply one or more independent items; rewrite requires edit-targets and leaves changes unstaged. Design-review request format is `Ticket: <path>\\nRelations:\\n<context|none>`.",
-    parameters: { type: "object", additionalProperties: false, properties: { items: { type: "array", minItems: 1, items: { type: "object", additionalProperties: false, properties: { preset: { type: "string", enum: ["audit", "consult", "rewrite", "design-review"] }, resume: { type: "string", pattern: "^[a-z]+-[a-z]+-[a-z]+$" }, request: { type: "string", minLength: 1 }, paths: { type: "array", items: { type: "string", minLength: 1 } }, model: { type: "string", minLength: 1 }, "edit-targets": { type: "array", minItems: 1, items: { type: "string", minLength: 1 } } }, required: ["request"], anyOf: [{ required: ["preset"] }, { required: ["resume"] }] } }, }, required: ["items"] } as never,
+    parameters: { type: "object", additionalProperties: false, properties: { items: { type: "array", minItems: 1, items: { type: "object", additionalProperties: false, properties: { preset: { type: "string", enum: ["audit", "consult", "rewrite", "design-review"] }, resume: { type: "string", pattern: "^[a-z]+-[a-z]+-[a-z]+$" }, request: { type: "string", minLength: 1 }, paths: { type: "array", items: { type: "string", minLength: 1 } }, model: { type: "string", minLength: 1 }, "edit-targets": { type: "array", minItems: 1, items: { type: "string", minLength: 1 } } }, required: ["request"], oneOf: [{ required: ["preset"], not: { required: ["resume"] } }, { required: ["resume"], not: { anyOf: [{ required: ["preset"] }, { required: ["paths"] }, { required: ["model"] }, { required: ["edit-targets"] }] } }] } }, }, required: ["items"] } as never,
     async execute(_id, params, signal) { const results = await controllerRef.current?.execute((params as { items?: unknown }).items, signal); if (!results) throw new Error("ws-claude is unavailable outside an active lead session"); const text = JSON.stringify(results); return { content: [{ type: "text", text }], details: { items: results } }; },
   } as never, toolPreviewTuiRef);
 }
