@@ -45,7 +45,7 @@ function context(entries: readonly unknown[] = []) {
     mode: "tui", cwd: "/work/project",
     model: { provider: "provider", id: "model", reasoning: true, contextWindow: 200_000 }, thinkingLevel: "high",
     sessionManager: { getEntries: () => entries, getSessionName: () => "named session", getCwd: () => "/work/project" },
-    getContextUsage: () => ({ percent: 25, contextWindow: 200_000 }),
+    getContextUsage: () => ({ tokens: 50_000, percent: 25, contextWindow: 200_000 }),
     ui: { setFooter(next: any) { component?.dispose?.(); component = undefined; footerFactory = next; if (!next) restores++; } },
   };
   const mount = (fg: (color: string, text: string) => string = (_color, text) => text) => {
@@ -262,17 +262,17 @@ describe("custom footer render and lifecycle", () => {
     controller.stop();
   });
 
-  test("styles context occupancy as primary text through 70 percent and error above it", () => {
+  test("shows used over maximum context, emphasizing only usage and turning it red above 70 percent", () => {
     const dir = root(), storage = createAgentStorageContext("lead", dir), registry: RpcAgentRegistry = new Map();
     const ui = context();
-    let percent = 70;
-    ui.ctx.getContextUsage = () => ({ percent, contextWindow: 200_000 });
+    let tokens = 140_000, percent = 70;
+    ui.ctx.getContextUsage = () => ({ tokens, percent, contextWindow: 200_000 });
     const controller = createAgentFooterController(ui.ctx, registry, storage, { truncateToWidth, visibleWidth });
     const component = ui.mount((color, text) => `<${color}>${text}</${color}>`);
-    assert.match(component.render(120)[1], /<text>70\.0%\/200k<\/text>/);
-    percent = 70.1;
+    assert.match(component.render(120)[1], /<text>140k<\/text><dim>\/200k/);
+    tokens = 142_000; percent = 71;
     const high = component.render(120)[1];
-    assert.match(high, /<error>70\.1%\/200k<\/error>/);
+    assert.match(high, /<error>142k<\/error><dim>\/200k/);
     assert.doesNotMatch(high, /<warning>/);
     controller.stop();
   });

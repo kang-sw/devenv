@@ -326,7 +326,7 @@ export interface AgentFooterContext {
   model?: { provider?: string; id?: string; reasoning?: boolean; contextWindow?: number };
   thinkingLevel?: string;
   sessionManager: { getEntries(): readonly unknown[]; getSessionName?(): string | undefined; getCwd?(): string };
-  getContextUsage?(): { percent?: number | null; contextWindow?: number } | undefined;
+  getContextUsage?(): { tokens?: number | null; percent?: number | null; contextWindow?: number } | undefined;
   ui: { setFooter(factory: ((tui: FooterTui, theme: FooterTheme, data: FooterData) => AgentFooterComponent) | undefined): void };
 }
 export interface AgentFooterController {
@@ -385,7 +385,7 @@ function displayCwd(cwd: string): string {
   return rel === "" ? "~" : rel !== ".." && !rel.startsWith(`..${sep}`) ? `~${sep}${rel}` : cwd;
 }
 function sanitizeStatus(text: string): string { return text.replace(/[\r\n\t]/g, " ").replace(/ +/g, " ").trim(); }
-function styleStats(plain: string, values: readonly string[], contextPart: string, contextPercent: number | null | undefined, theme: FooterTheme): string {
+function styleStats(plain: string, values: readonly string[], contextUsedPart: string, contextPart: string, contextPercent: number | null | undefined, theme: FooterTheme): string {
   const ranges: Array<{ start: number; text: string; color: "dim" | "accent" | "warning" | "error" }> = [];
   let searchAt = 0;
   for (const value of values) {
@@ -396,7 +396,7 @@ function styleStats(plain: string, values: readonly string[], contextPart: strin
     ranges.push({ start, text: money, color: "accent" }); searchAt = start + money.length;
   }
   const contextStart = plain.indexOf(contextPart);
-  if (contextStart >= 0) ranges.push({ start: contextStart, text: contextPart, color: contextPercent != null && contextPercent > 70 ? "error" : "text" });
+  if (contextStart >= 0) ranges.push({ start: contextStart, text: contextUsedPart, color: contextPercent != null && contextPercent > 70 ? "error" : "text" });
   ranges.sort((a, b) => a.start - b.start);
   let at = 0, styled = "";
   for (const range of ranges) {
@@ -452,8 +452,8 @@ export function createAgentFooterController(
         ].filter((part): part is string => !!part);
         const context = ctx.getContextUsage?.();
         const window = context?.contextWindow ?? ctx.model?.contextWindow ?? 0;
-        const percent = context?.percent == null ? "?" : context.percent.toFixed(1);
-        const contextPart = `${percent}%/${formatTokens(window)}`.replace("?%", "?");
+        const contextUsedPart = context?.tokens == null ? "?" : formatTokens(context.tokens);
+        const contextPart = `${contextUsedPart}/${formatTokens(window)}`;
         const required = [`Lead ${leadCost}`, `Direct agents ${directCost}`];
         let optional = [...tokenParts, contextPart];
         const modelId = ctx.model?.id ?? "no-model";
@@ -467,7 +467,7 @@ export function createAgentFooterController(
         const padding = model ? " ".repeat(Math.max(2, width - primitives.visibleWidth(left) - primitives.visibleWidth(model))) : "";
         let statsPlain = left + padding + model;
         if (primitives.visibleWidth(statsPlain) > width) statsPlain = primitives.truncateToWidth(statsPlain, width, "");
-        const stats = styleStats(statsPlain, [leadCost, directCost], contextPart, context?.percent, theme);
+        const stats = styleStats(statsPlain, [leadCost, directCost], contextUsedPart, contextPart, context?.percent, theme);
 
         let path = displayCwd(ctx.sessionManager.getCwd?.() ?? ctx.cwd);
         const branch = footerData.getGitBranch(); if (branch) path += ` (${branch})`;
