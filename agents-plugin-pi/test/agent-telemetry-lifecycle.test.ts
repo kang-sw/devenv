@@ -41,6 +41,26 @@ describe("agent telemetry lifecycle at production boundaries", () => {
     assert.equal(record.telemetry?.contextTokens, 78_000, "the temporary null interval retains the last valid value for this session identity");
   });
 
+  test("compaction_end requests authoritative stats and preserves prior occupancy through Pi's null interval", async () => {
+    const dir = root(), session = join(dir, "child.jsonl");
+    const state = { sessionId: "child", sessionFile: session, model: { provider: "p", id: "m" } };
+    write(session, [header("child"), assistant("before", 3_150, .2)]);
+    let listener: ((event: unknown) => void) | undefined, statsCalls = 0;
+    const client = {
+      onEvent: (fn: (event: unknown) => void) => (listener = fn, () => {}),
+      getState: async () => state,
+      getSessionStats: async () => { statsCalls++; return { sessionId: "child", sessionFile: session, contextUsage: { tokens: null, contextWindow: 200_000, percent: null } }; },
+    } as unknown as RpcClient;
+    const record = { agentId: "a", client, launchGeneration: 1, sessionPath: session, wsToolNames: [], toolGroup: "full-worker", reportLog: [], streaming: true, running: true } as RpcAgentRecord;
+    refreshAgentTelemetry(record, state, { stats: { sessionId: "child", sessionFile: session, contextUsage: { tokens: 78_000, contextWindow: 200_000, percent: 39 } } });
+    attachEventListener(undefined, new Map([["a", record]]), record, client);
+
+    write(session, [header("child"), assistant("before", 3_150, .2), { type: "compaction", id: "compact", usage: { input: 999, cost: { total: .1 } } }]);
+    listener!({ type: "compaction_end" }); await ticks();
+    assert.equal(statsCalls, 1, "the production compaction boundary requests a fresh authoritative snapshot");
+    assert.equal(record.telemetry?.contextTokens, 78_000, "the temporary RPC null retains the preceding same-session occupancy");
+  });
+
   test("context occupancy is cleared when the RPC session identity changes", () => {
     const dir = root(), oldSession = join(dir, "old.jsonl"), nextSession = join(dir, "next.jsonl");
     write(oldSession, [header("old"), assistant("old-call", 70_000, .2)]);
@@ -219,6 +239,27 @@ describe("agent telemetry lifecycle at production boundaries", () => {
     assert.equal(calls, 2, "a burst during the first read requests one final follow-up"); assert.equal(statsCalls, 1, "stream deltas do not repeat the authoritative RPC stats request"); assert.equal(record.telemetry?.contextTokens, 61_782); assert.equal(record.telemetry?.estimatedUsd, .4);
     const old = record.client; record.client = {} as RpcClient; listener!({ type: "message_end", message: { role: "assistant" } }); await ticks();
     assert.equal(record.client, old === record.client ? old : record.client, "late old-client work cannot revive or overwrite a replacement"); assert.equal(record.telemetry?.contextTokens, 61_782);
+  });
+
+  test("message_end falls back to cached-input JSONL usage when the stats RPC is unavailable", async () => {
+    const dir = root(), session = join(dir, "child.jsonl");
+    const state = { sessionId: "child", sessionFile: session, model: { provider: "p", id: "m" } };
+    write(session, [header("child")]);
+    let listener: ((event: unknown) => void) | undefined, statsCalls = 0;
+    const client = {
+      onEvent: (fn: (event: unknown) => void) => (listener = fn, () => {}),
+      getState: async () => state,
+      getSessionStats: async () => { statsCalls++; throw new Error("stats unavailable"); },
+    } as unknown as RpcClient;
+    const record = { agentId: "a", client, launchGeneration: 1, sessionPath: session, wsToolNames: [], toolGroup: "full-worker", reportLog: [], streaming: true, running: true } as RpcAgentRecord;
+    refreshAgentTelemetry(record, state, { fresh: true });
+    attachEventListener(undefined, new Map([["a", record]]), record, client);
+
+    write(session, [header("child"), { type: "message", id: "cached", parentId: null, timestamp: "x", message: { role: "assistant", usage: { input: 342, output: 8, cacheRead: 61_440, totalTokens: 61_790, cost: { total: .2 } } } }]);
+    listener!({ type: "message_end", message: { role: "assistant" } }); await ticks();
+    assert.equal(statsCalls, 1, "the production boundary attempts the authoritative source first");
+    assert.equal(record.telemetry?.contextTokens, 61_790, "a rejected stats RPC falls back to totalTokens including cached input");
+    assert.equal(record.telemetry?.estimatedUsd, .2);
   });
 
   test("stop clears live state before final disk reconciliation", async () => {
