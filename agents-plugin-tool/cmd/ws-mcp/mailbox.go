@@ -64,8 +64,27 @@ func mailboxWait(args []string) {
 	if *sessionKey == "" {
 		fatal("mailbox wait", fmt.Errorf("--session-key is required"))
 	}
+	if *timeout < 0 {
+		fatal("mailbox wait", fmt.Errorf("--timeout must be >= 0 (0 blocks until mail arrives)"))
+	}
 
 	target := wsmailbox.WaitTarget{SessionKey: *sessionKey, Root: defaultRoot(*root), Slug: strings.TrimSpace(*slug)}
+
+	// One-time startup diagnostic (never repeated in the poll loop): warn
+	// when an explicit --slug cannot actually be reached, so a wait that
+	// silently degrades to reply-id-only does not also silently time out
+	// with no explanation while the named inbox it names fills up.
+	if target.Slug != "" {
+		if present, owned, err := wsmailbox.NamedInboxStatus(target); err != nil {
+			fmt.Fprintf(os.Stderr, "ws-mcp mailbox wait: warning: could not resolve --slug %s: %v\n", target.Slug, err)
+		} else if !owned {
+			reason := "has no presence record yet"
+			if present {
+				reason = "is not currently owned by this --session-key"
+			}
+			fmt.Fprintf(os.Stderr, "ws-mcp mailbox wait: warning: named inbox %s %s; falling back to a reply-id-only wait\n", target.Slug, reason)
+		}
+	}
 
 	nowStr := time.Now().UTC().Format(time.RFC3339)
 	marker := wsmailbox.ListeningMarker{SessionKey: *sessionKey, Slug: target.Slug, PID: os.Getpid(), StartedAt: nowStr}
@@ -111,7 +130,10 @@ func mailboxWait(args []string) {
 func emitMailboxWaitResult(result wsmailbox.WaitResult, format string) {
 	if result.TimedOut {
 		if outputJSON(format) {
-			printJSONOrFatal("mailbox wait", map[string]any{"timed_out": true, "unread": 0}, nil)
+			printJSONOrFatal("mailbox wait", map[string]any{
+				"timed_out": true, "unread": 0,
+				"named": []wsmailbox.Envelope{}, "reply": []wsmailbox.Envelope{},
+			}, nil)
 		} else {
 			fmt.Println("timeout: no unread mail")
 		}
@@ -120,11 +142,22 @@ func emitMailboxWaitResult(result wsmailbox.WaitResult, format string) {
 
 	total := result.Total()
 	if outputJSON(format) {
+		// Normalize a nil (empty) slice to "[]" rather than "null": this
+		// JSON shape is a declared new type contract for future adapters,
+		// so every consumer gets one array shape per field, never a null
+		// case to special-case.
+		named, reply := result.Named, result.Reply
+		if named == nil {
+			named = []wsmailbox.Envelope{}
+		}
+		if reply == nil {
+			reply = []wsmailbox.Envelope{}
+		}
 		printJSONOrFatal("mailbox wait", map[string]any{
 			"timed_out": false,
 			"unread":    total,
-			"named":     result.Named,
-			"reply":     result.Reply,
+			"named":     named,
+			"reply":     reply,
 		}, nil)
 		return
 	}

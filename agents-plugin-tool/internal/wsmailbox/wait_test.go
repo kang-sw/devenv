@@ -180,6 +180,35 @@ func TestWaitTimesOutCleanlyWithNoMail(t *testing.T) {
 	}
 }
 
+func TestNamedInboxStatusReportsPresenceAndOwnership(t *testing.T) {
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	if present, owned, err := NamedInboxStatus(WaitTarget{SessionKey: "amber-tide-fox"}); err != nil || present || owned {
+		t.Fatalf("NamedInboxStatus(no slug) = present=%v owned=%v err=%v, want false/false/nil", present, owned, err)
+	}
+	if present, owned, err := NamedInboxStatus(WaitTarget{SessionKey: "amber-tide-fox", Slug: "alice@machine"}); err != nil || present || owned {
+		t.Fatalf("NamedInboxStatus(no presence yet) = present=%v owned=%v err=%v, want false/false/nil", present, owned, err)
+	}
+
+	path, err := MachinePath()
+	if err != nil {
+		t.Fatalf("MachinePath: %v", err)
+	}
+	if err := WithLock(path, func(store *StoreFile) error {
+		store.Presence["alice"] = Presence{Name: "alice", Scope: ScopeMachine, Owner: "someone-else-key", LastSeen: "2026-09-13T00:00:00Z"}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed presence: %v", err)
+	}
+	if present, owned, err := NamedInboxStatus(WaitTarget{SessionKey: "amber-tide-fox", Slug: "alice@machine"}); err != nil || !present || owned {
+		t.Fatalf("NamedInboxStatus(owned by someone else) = present=%v owned=%v err=%v, want true/false/nil", present, owned, err)
+	}
+	if present, owned, err := NamedInboxStatus(WaitTarget{SessionKey: "someone-else-key", Slug: "alice@machine"}); err != nil || !present || !owned {
+		t.Fatalf("NamedInboxStatus(owned by this session) = present=%v owned=%v err=%v, want true/true/nil", present, owned, err)
+	}
+}
+
 func TestWaitEnvLessTargetsOwnReplyIDOnly(t *testing.T) {
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))

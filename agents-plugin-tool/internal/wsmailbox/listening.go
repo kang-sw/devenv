@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
@@ -25,6 +26,18 @@ import (
 
 const listeningDirName = "mailbox-listening"
 
+// listeningKeyPattern bounds which session_key strings may become a marker
+// filename component: no separators, no dots, lowercase alnum + hyphen only.
+// Deliberately the same path-safety guard as internal/mcp/session_auth.go's
+// sessionKeyFilenamePattern (duplicated rather than imported: internal/mcp
+// already imports this package, so importing back would cycle). A caller
+// today only ever supplies its own already-minted session_key, but
+// WriteListeningMarker/ClearListeningMarker/ReadListeningMarker are exported
+// for Phase 2/3 adapters that will feed a key sourced from hook args/env, at
+// which point an unvalidated key becomes a straight path traversal: write
+// outside the cache root, then remove that same out-of-tree path on clear.
+var listeningKeyPattern = regexp.MustCompile(`^[a-z0-9-]{1,128}$`)
+
 // ListeningMarker is one armed wait's discoverable record.
 type ListeningMarker struct {
 	SessionKey string `json:"session_key"`
@@ -34,8 +47,13 @@ type ListeningMarker struct {
 	TimeoutAt  string `json:"timeout_at,omitempty"`
 }
 
-// ListeningMarkerPath resolves the marker file path for sessionKey.
+// ListeningMarkerPath resolves the marker file path for sessionKey, after
+// validating sessionKey against listeningKeyPattern (path-safety: rejects
+// separators/traversal such as "../../etc/passwd").
 func ListeningMarkerPath(sessionKey string) (string, error) {
+	if !listeningKeyPattern.MatchString(sessionKey) {
+		return "", fmt.Errorf("wsmailbox: invalid session_key %q for a listening marker path", sessionKey)
+	}
 	root, err := wsstate.CacheRoot(wsstate.Options{})
 	if err != nil {
 		return "", err

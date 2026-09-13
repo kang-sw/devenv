@@ -99,8 +99,22 @@ func Wait(target WaitTarget, opts WaitOptions) (WaitResult, error) {
 		deadline = now().Add(opts.Timeout)
 	}
 
+	// Resolve once, outside the loop: for a worktree/clone Slug,
+	// PathForScope resolves through wsnote/wsstate, which shells out to git
+	// and rewrites project/worktree metadata (see ai-docs/manuals/ws-mcp.md
+	// on why process cwd alone cannot stand in for this). Re-resolving on
+	// every poll tick would spawn a git process and rewrite metadata every
+	// DefaultWaitPoll for the whole armed-wait lifetime (unbounded with
+	// Timeout == 0), and would also mean one transient resolution failure
+	// hours into an idle wait kills the wake path outright. Only the cheap
+	// Load/LoadReplyStore disk reads repeat per tick below.
+	resolved, err := resolveWaitTarget(target)
+	if err != nil {
+		return WaitResult{}, err
+	}
+
 	for {
-		result, err := peekWaitTarget(target)
+		result, err := resolved.peek()
 		if err != nil {
 			return WaitResult{}, err
 		}
@@ -123,65 +137,96 @@ func Wait(target WaitTarget, opts WaitOptions) (WaitResult, error) {
 	}
 }
 
-// peekWaitTarget reads both queues once, without draining either.
-func peekWaitTarget(target WaitTarget) (WaitResult, error) {
-	named, err := peekNamedInbox(target)
-	if err != nil {
-		return WaitResult{}, err
-	}
-	reply, err := peekReplyQueue(target.SessionKey)
-	if err != nil {
-		return WaitResult{}, err
-	}
-	return WaitResult{Named: named, Reply: reply}, nil
+// resolvedWaitTarget holds the one-time-resolved paths/identity a Wait
+// call's recheck loop needs, computed once by resolveWaitTarget.
+type resolvedWaitTarget struct {
+	sessionKey string
+	namedPath  string // "" when target.Slug was empty
+	namedName  string
+	replyPath  string
+	replyID    string
 }
 
-// peekNamedInbox reads target.Slug's queue, gated on target.SessionKey
-// currently holding that name's Owner pointer — a pure disk read mirroring
-// internal/mcp's server-layer caller==owner check (mailboxOwnerCheck), but
-// against an already-loaded store rather than live session state, since a
-// standalone CLI process has none. Returns (nil, nil) when Slug is empty,
-// the name has no presence yet, or SessionKey is not the current owner.
-func peekNamedInbox(target WaitTarget) ([]Envelope, error) {
+// resolveWaitTarget performs every resolution step that only needs to run
+// once per Wait call: parsing/resolving an explicit Slug's store path, and
+// deriving the caller's reply-id + registry path.
+func resolveWaitTarget(target WaitTarget) (resolvedWaitTarget, error) {
+	r := resolvedWaitTarget{sessionKey: target.SessionKey}
+
+	if target.Slug != "" {
+		name, scope, err := ParseSlugScope(target.Slug)
+		if err != nil {
+			return resolvedWaitTarget{}, err
+		}
+		path, err := PathForScope(scope, target.Root)
+		if err != nil {
+			return resolvedWaitTarget{}, err
+		}
+		r.namedName = name
+		r.namedPath = path
+	}
+
+	secret, err := EnsureMachineSecret()
+	if err != nil {
+		return resolvedWaitTarget{}, err
+	}
+	r.replyID = ReplyID(secret, target.SessionKey)
+	replyPath, err := ReplyRegistryPath()
+	if err != nil {
+		return resolvedWaitTarget{}, err
+	}
+	r.replyPath = replyPath
+	return r, nil
+}
+
+// peek reads both queues once from their already-resolved paths, without
+// draining either.
+func (r resolvedWaitTarget) peek() (WaitResult, error) {
+	var named []Envelope
+	if r.namedPath != "" {
+		store, err := Load(r.namedPath)
+		if err != nil {
+			return WaitResult{}, err
+		}
+		if p, ok := store.Presence[r.namedName]; ok && p.Owner != "" && p.Owner == r.sessionKey {
+			named = store.Queues[r.namedName]
+		}
+	}
+
+	replyStore, err := LoadReplyStore(r.replyPath)
+	if err != nil {
+		return WaitResult{}, err
+	}
+	return WaitResult{Named: named, Reply: replyStore.Queues[r.replyID]}, nil
+}
+
+// NamedInboxStatus is a one-time startup diagnostic (never part of the
+// recheck loop): it reports whether target.Slug currently has a presence
+// record and is owned by target.SessionKey, so a CLI caller can warn when an
+// armed --slug wait cannot actually reach the named inbox it names instead
+// of degrading to a reply-id-only wait with no explanation (an unbound,
+// stale, or wrong-root slug otherwise times out silently reporting "no
+// unread mail" while the named inbox it was meant to watch fills up).
+// Returns present=false, owned=false, err=nil when target.Slug is empty.
+func NamedInboxStatus(target WaitTarget) (present, owned bool, err error) {
 	if target.Slug == "" {
-		return nil, nil
+		return false, false, nil
 	}
 	name, scope, err := ParseSlugScope(target.Slug)
 	if err != nil {
-		return nil, err
+		return false, false, err
 	}
 	path, err := PathForScope(scope, target.Root)
 	if err != nil {
-		return nil, err
+		return false, false, err
 	}
 	store, err := Load(path)
 	if err != nil {
-		return nil, err
+		return false, false, err
 	}
 	p, ok := store.Presence[name]
-	if !ok || p.Owner == "" || p.Owner != target.SessionKey {
-		return nil, nil
+	if !ok {
+		return false, false, nil
 	}
-	return store.Queues[name], nil
-}
-
-// peekReplyQueue reads sessionKey's own reply-id queue (always checked,
-// Decision 6's "always the caller's own reply-id queue" — authorized
-// intrinsically by the caller's own session_key, same carve-out
-// mailbox.recv applies).
-func peekReplyQueue(sessionKey string) ([]Envelope, error) {
-	secret, err := EnsureMachineSecret()
-	if err != nil {
-		return nil, err
-	}
-	replyID := ReplyID(secret, sessionKey)
-	path, err := ReplyRegistryPath()
-	if err != nil {
-		return nil, err
-	}
-	store, err := LoadReplyStore(path)
-	if err != nil {
-		return nil, err
-	}
-	return store.Queues[replyID], nil
+	return true, p.Owner != "" && p.Owner == target.SessionKey, nil
 }

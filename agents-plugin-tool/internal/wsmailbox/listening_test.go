@@ -51,3 +51,28 @@ func TestClearListeningMarkerIsNoOpWhenNeverArmed(t *testing.T) {
 		t.Fatalf("ClearListeningMarker on never-armed key: %v", err)
 	}
 }
+
+// TestListeningMarkerPathRejectsPathTraversal pins the path-safety guard a
+// round-1 correctness review flagged Critical: an unvalidated session_key
+// interpolated into a filename lets a caller escape the listening directory
+// (verified live: "../../escaped/pwned" wrote a marker one level above the
+// cache root before this guard existed).
+func TestListeningMarkerPathRejectsPathTraversal(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	for _, bad := range []string{
+		"../../escaped/pwned",
+		"nested/path",
+		"UPPER-CASE",
+		"trailing.dot.",
+		"",
+		"has a space",
+	} {
+		if _, err := ListeningMarkerPath(bad); err == nil {
+			t.Fatalf("ListeningMarkerPath(%q) succeeded, want a path-safety rejection", bad)
+		}
+		if err := WriteListeningMarker(ListeningMarker{SessionKey: bad}); err == nil {
+			t.Fatalf("WriteListeningMarker with session_key %q succeeded, want a path-safety rejection", bad)
+		}
+	}
+}
