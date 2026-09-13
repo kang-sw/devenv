@@ -106,6 +106,20 @@ the mandatory self-address surface (ambient block + `lookup-peers` self entry +
 descriptive presence metadata) covers so the user can ask an agent "what is this
 environment's mailbox address?" and relay the answer.
 
+The env is only the *receiving* half. **Sending is universal** (Decision 11): any
+session carrying a `session_key` can mail a discoverable address with no env at
+all, and the first `send` opens a live-only **reply-id** return channel
+(`HMAC(machine_secret, caller_session_key)`, published into the machine-tier
+presence registry with lazy expiry). Addressing is thus two-tiered — a durable
+`slug@scope` alias for anyone who opted into a name, and an always-available
+reply-id for the sender's own handle — with the sender's server stamping each
+envelope `from: <slug>` when the recipient can reach that slug and `reply-to:
+id:<reply-id>` otherwise (Decisions 12-13). Scope is therefore **visibility
+only** for discovery; actual delivery reachability is store-tier sharing (slug)
+or the global reply-id registry (capability). Durability tracks the same axis:
+reply-id lives for the ferrule span, a slug is cross-ferrule durable (machine
+slug everywhere, clone/worktree slug within its scope).
+
 ## Owner binding and misfire prevention
 
 Native subagents share the lead's single multiplexed ws-mcp process, which
@@ -241,8 +255,13 @@ hooks on 0.154.0 and is out of scope (the primary "idle executor waits for
 
 ### Confirmed Decisions
 
-1. **opt-in / identity:** `WS_MAILBOX=slug@scope` launch-time env. Absent →
-   mailbox fully inert (no presence, no piggyback, zero overhead).
+1. **opt-in / identity:** `WS_MAILBOX=slug@scope` launch-time env names a
+   **durable, discoverable** endpoint. With neither `WS_MAILBOX` nor
+   `WS_MAILBOX_AUTO` set **and no `send` issued** → mailbox fully inert (no
+   presence, no piggyback, zero overhead). Refined by Decision 11: the env gates
+   durable *receiving* (a named inbox + piggyback + hook wake), not *sending* —
+   `send` is always available and a first `send` opens a live-only reply-id
+   channel even with no env.
 2. **self-registration:** the server self-registers presence from the env at
    startup, keyed by the mailbox name, with liveness (heartbeat/pidfile) and
    duplicate-live-name detection. No agent-facing `register` call.
@@ -256,7 +275,11 @@ hooks on 0.154.0 and is out of scope (the primary "idle executor waits for
    owner `session_key` is a rebindable pointer, so key churn never loses mail
    or breaks senders.
 5. **MCP tools:** `send`, `recv`, `lookup-peers`, all non-blocking. No blocking
-   `wait` on the MCP surface.
+   `wait` on the MCP surface. `send`'s `to:` is **polymorphic** (Decision 12):
+   `slug@scope` (durable, discovery-resolved) or `id:<reply-id>` (a reply
+   capability handed out in an envelope). `recv` surfaces, per message, whichever
+   return handle the envelope carried; `lookup-peers` returns the caller's own
+   endpoint (self entry) and, for env-less callers, its own live-only reply-id.
 6. **wake:** blocking lives only in the CLI `ws-mcp mailbox wait --timeout`,
    launched by the model as a harness background task (the one non-implicit
    model obligation), with a listening marker. **The wait is level-triggered,
@@ -303,6 +326,66 @@ hooks on 0.154.0 and is out of scope (the primary "idle executor waits for
     block and returned as a self entry by `lookup-peers`, and each presence
     record carries descriptive metadata (harness, cwd, started-at) so a human
     can tell peers apart when relaying an address.
+11. **universal send + always-on reply-id:** `send` is available to **any**
+    session that carries a `session_key`, regardless of env — a session with no
+    `WS_MAILBOX`/`WS_MAILBOX_AUTO` can still mail any *discoverable* address. The
+    act of sending is what opens a return channel: on `send` the server publishes
+    the sender's **reply-id** = `HMAC(machine_secret, caller_session_key)` into
+    the machine-tier presence registry, so a correspondent can reply even though
+    the sender has no slug. The reply-id is HMAC'd precisely because the raw
+    `caller_session_key` is the owner-gate secret (Decision 3) and must never
+    leak in an envelope; the HMAC is deterministic (same session_key → same
+    reply-id, recomputed each process, no persistence needed) and unguessable.
+    The machine-tier registry therefore now holds reply-id presence for **all
+    sending sessions**, not only mailbox-enabled ones; entries use **lazy
+    expiry** (a `last-seen` stamp refreshed on each `send` / session-aware call,
+    stale entries reaped) since the MCP process lifetime is too short to hang
+    cleanup on process exit. A session that never sends and has no env leaves no
+    entry (stays inert); overhead begins only at first `send`.
+12. **polymorphic `to:` + server-stamped envelope:** `send(to:)` accepts
+    `slug@scope` **or** `id:<reply-id>`. Delivery stamping is decided by the
+    **sender's server**, which knows its own identity (reply-id + any published
+    slugs) and can compare store-tier roots against the resolved recipient: if
+    the recipient shares a layer where the sender published a slug, stamp
+    `from: <slug>` (a durable reply path); otherwise stamp `reply-to:
+    id:<reply-id>` only (a live-only reply path). The recipient replies with
+    whichever handle the envelope carried. This unifies reply-to with identity —
+    reply-to is the sender's own handle, not a per-message capability with TTL —
+    so multi-turn threads chain naturally (each reply re-stamps the current
+    sender's handle).
+13. **reachability/durability asymmetry (the addressing contract):** discovery
+    is **scope-bounded** (visibility only — `lookup-peers` filters by scope; no
+    cross-scope enumeration), while delivery is **capability-gated** (you need a
+    reply-id or a slug you were handed / can discover). "Can't find you by name,
+    but anyone you mailed can reply." The durability axis falls out of the same
+    store-sharing/visibility split:
+    - **reply-id only → live-only, valid for the ferrule span.** Its anchor is
+      `caller_session_key`, which survives MCP-process restart (the agent
+      re-sends it) **and** compaction (`lead-revive` recovers the same key), but
+      is re-minted at a genuine parent-less `ferrule` — so the channel dies only
+      at real re-login, not at every context reset. This defines "process
+      session ≡ ferrule span."
+    - **clone/worktree slug → cross-ferrule durable within that scope.**
+    - **machine slug → cross-ferrule durable everywhere** (global visibility →
+      cross-scope peers are handed the slug, not just a reply-id).
+    - **Corollary:** cross-scope *and* cross-ferrule durable reach requires a
+      **machine-layer slug**; a clone-only slug reaches a cross-scope peer only
+      as a reply-id, which dies at the slug-holder's next ferrule.
+    - **Cross-platform anchor choice:** the anchor is `caller_session_key`
+      (a logical value threaded on every call) precisely so the contract holds
+      identically on Windows/macOS/Linux with **zero OS-specific code**.
+      Host-process anchors (ppid chain) were rejected as Windows-fragile
+      (aggressive PID reuse, no reparent-to-init, platform-specific start-time
+      APIs). A host-provided stable session-id env, if one exists portably, is
+      the only viable upgrade that could extend a reply-id's life across ferrule
+      — left as an open question, not a core requirement.
+14. **env-less notification fallback (best-effort):** a session with no
+    `WS_MAILBOX`/`WS_MAILBOX_AUTO` has no durable inbox and no hook-driven wake;
+    its awareness of a reply is best-effort — the response-piggyback badge on its
+    own ws calls, plus a background CLI `wait` registration arranged at piggyback
+    time. Durable, hook-backed wake requires a slug (env). This is the awareness
+    counterpart of the durability asymmetry: opt into a slug for a durable
+    inbox + wake, or stay env-less for a live-only, best-effort-notified channel.
 
 - Consumption/ack semantics: piggyback shows only an "unread N" badge; actual
   body consumption is via explicit `recv`. Whether `recv` is
@@ -326,6 +409,14 @@ hooks on 0.154.0 and is out of scope (the primary "idle executor waits for
   gating on Codex must bake identity into the hook command args (the server-layer
   `caller == owner` gate remains the real guard). Direction confirmed; adapter
   wiring unspecified.
+- **reply-id lifetime upgrade (optional):** the reply-id anchor is
+  `caller_session_key`, so a reply-id dies at the sender's next parent-less
+  `ferrule` (Decision 13). Whether either harness injects a **stable per-session
+  id into the spawned MCP server's env, portably across Windows/macOS/Linux**,
+  is open. If one exists, anchoring the reply-id on it would extend a live-only
+  channel across ferrule without OS-specific code; if not, `caller_session_key`
+  stands and cross-ferrule reach remains slug-only. A small env-dump probe on
+  both hosts answers this; it is not core-blocking.
 
 ### Rejected Alternatives
 
@@ -347,3 +438,14 @@ hooks on 0.154.0 and is out of scope (the primary "idle executor waits for
 - **Explicit `register` MCP call.** Rejected: superseded by env + server
   self-registration (invariant 2), which also removes "agent forgot to
   register" drift.
+- **Host-process (ppid-chain) anchor for the reply-id.** Rejected: cannot hold a
+  stable cross-platform contract — Windows has aggressive PID reuse, no
+  reparent-to-init on parent exit (dangling/reused ppid), and platform-specific
+  process-start-time APIs, compounded by a launcher intermediary between the
+  host and the MCP server. Anchor on `caller_session_key` instead (Decision 13);
+  a portable host-provided session-id env is the only sanctioned upgrade path
+  (Open Questions).
+- **Per-message reply-to capability with TTL.** Rejected: a durable per-session
+  reply-id (Decision 11) is simpler — no token minting/expiry churn, and
+  multi-turn threads chain for free — at the acceptable cost that the handle
+  lives as long as the ferrule span rather than one message.
