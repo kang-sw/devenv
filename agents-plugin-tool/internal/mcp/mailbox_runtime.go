@@ -1,16 +1,15 @@
 package mcp
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wskey"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // mailbox_runtime.go implements the cross-session mailbox core's
@@ -142,8 +141,17 @@ func (identity mailboxIdentity) address() string {
 // (that would make an idle-but-alive process immune to the heartbeat
 // window, requiring a background liveness mechanism — out of scope here;
 // deferred to 260913-feat-cross-session-mailbox-wake's Decisions 6/7/9).
+//
+// Liveness itself delegates to wsstate.ProcessAlive rather than a
+// hand-rolled probe: that helper is this repo's own established,
+// cross-platform (unix + windows, both CI-exercised via windows-smoke)
+// same-machine process-liveness primitive, already used by this package's
+// own orchestrator lock. A bespoke probe here risked exactly the kind of
+// platform-specific gap (os.Process.Signal's ESRCH-masking on unix;
+// os.FindProcess's inverted error meaning on windows) that a
+// previously-reviewed version of this function actually had.
 func mailboxPresenceLive(p wsmailbox.Presence, now time.Time) bool {
-	if mailboxProcessDead(p.PID) {
+	if !wsstate.ProcessAlive(p.PID) {
 		return false
 	}
 	last, err := time.Parse(time.RFC3339, p.LastSeen)
@@ -151,26 +159,6 @@ func mailboxPresenceLive(p wsmailbox.Presence, now time.Time) bool {
 		return false
 	}
 	return now.Sub(last) < mailboxLivenessThreshold
-}
-
-// mailboxProcessDead reports whether pid is definitively not a running
-// process on this machine (same-machine mailbox: PID liveness is always
-// checkable). It is conservative: any inconclusive result (permission
-// denied, or a platform where probing isn't meaningful) reports false
-// ("not provably dead") rather than risk a false-positive reclaim.
-func mailboxProcessDead(pid int) bool {
-	if pid <= 0 {
-		return true
-	}
-	proc, err := os.FindProcess(pid)
-	if err != nil || proc == nil {
-		return false
-	}
-	err = proc.Signal(syscall.Signal(0))
-	if err == nil {
-		return false
-	}
-	return errors.Is(err, syscall.ESRCH)
 }
 
 func (s *Server) setMailboxConflict(v bool) {

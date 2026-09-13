@@ -44,14 +44,11 @@ func TestReapStaleReplyIDsRemovesOnlyStaleEmptyEntries(t *testing.T) {
 	}
 }
 
-// TestMailboxProcessDeadDetectsCrashedProcess verifies the Critical
-// restart-false-positive fix: a PID that genuinely is not running is
-// reported dead, while this test's own live PID is not.
-func TestMailboxProcessDeadDetectsCrashedProcess(t *testing.T) {
-	if mailboxProcessDead(0) != true {
-		t.Fatalf("PID 0 must be treated as dead")
-	}
-	if mailboxProcessDead(-1) != true {
-		t.Fatalf("a negative PID must be treated as dead")
-	}
-}
+// mailboxPresenceLive's restart-false-positive fix delegates its actual
+// process-liveness syscall logic to wsstate.ProcessAlive (see
+// mailbox_runtime.go's doc comment on mailboxPresenceLive for why: a
+// hand-rolled probe here previously had a platform-specific bug this
+// package cannot re-introduce without noticing). That primitive's own
+// liveness behavior — including the exited-PID case this fix depends on —
+// is exercised directly in internal/wsstate's
+// TestProcessAliveDetectsLiveAndExitedProcess, not duplicated here.

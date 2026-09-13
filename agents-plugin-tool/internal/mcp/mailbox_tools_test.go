@@ -425,21 +425,22 @@ func TestMailboxFerruleRebindPreservesAddressAndQueuedMail(t *testing.T) {
 	}
 
 	// The named inbox is now empty (just drained by the new owner). Queue a
-	// SECOND, post-rebind message before asserting the stale key can't see
-	// it — asserting on an already-empty queue would pass vacuously
-	// regardless of whether the gate actually works.
+	// SECOND, post-rebind message and check the STALE key FIRST, before the
+	// legitimate new owner ever touches this second message — draining with
+	// the new owner first would empty the queue and make the stale-key
+	// check pass vacuously regardless of whether the gate actually works.
 	callToolWithKey(t, serverB, 6, keyB, "mailbox.send", map[string]any{
 		"to": "alice@worktree", "content": "queued after rebind",
 	})
 
-	newOwnerResp := callToolWithKey(t, serverA, 7, keyA2, "mailbox.recv", nil)
-	if !strings.Contains(newOwnerResp, "queued after rebind") {
-		t.Fatalf("new owner key could not drain mail queued after the rebind: %s", newOwnerResp)
-	}
-
 	oldOwnerResp := callToolWithKey(t, serverA, 5, keyA1, "mailbox.recv", nil)
 	if strings.Contains(oldOwnerResp, "queued before rebind") || strings.Contains(oldOwnerResp, "queued after rebind") {
 		t.Fatalf("stale pre-rebind owner key could still drain the named inbox after rebind: %s", oldOwnerResp)
+	}
+
+	newOwnerResp := callToolWithKey(t, serverA, 7, keyA2, "mailbox.recv", nil)
+	if !strings.Contains(newOwnerResp, "queued after rebind") {
+		t.Fatalf("new owner key could not drain mail queued after the rebind: %s", newOwnerResp)
 	}
 }
 
@@ -599,8 +600,8 @@ func TestMailboxToolBoundaryErrors(t *testing.T) {
 	sendMalformedTo := callToolWithKey(t, s, 3, key, "mailbox.send", map[string]any{
 		"to": "not a valid address", "content": "hi",
 	})
-	if !strings.Contains(sendMalformedTo, "mailbox.send") {
-		t.Fatalf("mailbox.send with a malformed to did not report a mailbox.send-scoped error: %s", sendMalformedTo)
+	if !strings.Contains(sendMalformedTo, "mailbox.send") || !strings.Contains(sendMalformedTo, "name@scope") {
+		t.Fatalf("mailbox.send with a malformed to did not report the specific address-parse failure: %s", sendMalformedTo)
 	}
 
 	sendMissingContent := callToolWithKey(t, s, 4, key, "mailbox.send", map[string]any{
