@@ -180,6 +180,54 @@ func TestWaitTimesOutCleanlyWithNoMail(t *testing.T) {
 	}
 }
 
+// TestWaitClampsFinalSleepToRemaining exercises Wait's partial-final-sleep clamp
+// branch (`remaining < poll` -> `sleep(remaining)`): with a Timeout that is not
+// an exact multiple of the poll interval, the last block before the deadline must
+// be the clamped remainder, never a full poll that overshoots the deadline.
+func TestWaitClampsFinalSleepToRemaining(t *testing.T) {
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	const poll = 500 * time.Millisecond
+	const timeout = 1200 * time.Millisecond // not a multiple of poll: 500 + 500 + 200
+
+	var slept []time.Duration
+	clock := &fakeClock{now: time.Date(2026, 9, 13, 0, 0, 0, 0, time.UTC)}
+	clock.onSleep = func(d time.Duration) { slept = append(slept, d) }
+
+	result, err := Wait(WaitTarget{SessionKey: "amber-tide-fox"}, WaitOptions{
+		Timeout: timeout, Poll: poll, Now: clock.Now, Sleep: clock.Sleep,
+	})
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if !result.TimedOut {
+		t.Fatalf("Wait = %#v, want TimedOut with no mail", result)
+	}
+	if len(slept) < 2 {
+		t.Fatalf("Wait slept %v, want at least two blocks (full polls then a clamped remainder)", slept)
+	}
+	// No single block may exceed the poll interval, and the total slept must not
+	// overshoot the timeout — the clamp is what guarantees both.
+	var totalSlept time.Duration
+	for i, d := range slept {
+		if d > poll {
+			t.Fatalf("sleep[%d] = %s exceeds the poll interval %s (clamp branch missing)", i, d, poll)
+		}
+		totalSlept += d
+	}
+	if totalSlept > timeout {
+		t.Fatalf("total slept %s overshoots the timeout %s", totalSlept, timeout)
+	}
+	last := slept[len(slept)-1]
+	if last != timeout-poll*time.Duration(len(slept)-1) {
+		t.Fatalf("final sleep = %s, want the clamped remainder %s", last, timeout-poll*time.Duration(len(slept)-1))
+	}
+	if last >= poll {
+		t.Fatalf("final sleep = %s was a full poll, not the clamped remainder", last)
+	}
+}
+
 func TestNamedInboxStatusReportsPresenceAndOwnership(t *testing.T) {
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))

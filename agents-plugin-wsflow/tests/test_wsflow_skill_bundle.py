@@ -11,6 +11,10 @@ FULL_PLUGIN_SKILLS_DIR = PLUGIN_DIR.parent / "agents-plugin" / "skills"
 # rsrc playbook directory; both count for drift detection.
 FULL_PLUGIN_RSRC_DIR = PLUGIN_DIR.parent / "agents-plugin" / "rsrc"
 SKILLS_DIR = PLUGIN_DIR / "skills"
+# The wsflow package's own shared-playbook copies (byte-mirrored from full ws,
+# template variables and all): the wsflow side of the run/stop obligation text
+# pinned below.
+RSRC_DIR = PLUGIN_DIR / "rsrc"
 
 
 EXPECTED_SKILLS = {
@@ -306,6 +310,43 @@ class WsflowSkillBundleTest(unittest.TestCase):
             if match is None:
                 offenders.append(f"{path.relative_to(PLUGIN_DIR)}: body is not the {target} parallel-init shim")
         self.assertEqual(offenders, [])
+
+    def test_wsflow_run_and_stop_protocol_carry_merge_obligation_text(self):
+        # The byte-mirror carries the lead-run.md / worker-stop-protocol.md
+        # obligation text into the wsflow package, but nothing on the wsflow side
+        # pinned it. This mirrors agents-plugin's
+        # test_skill_dispatch_contracts.py::test_workers_report_and_lead_owns_impl_merge
+        # against the wsflow copies, so a mirror that silently drops or mangles
+        # the merge/stop obligations fails here too. Template variables
+        # ({{.McpNamespace}}) are preserved verbatim by the mirror.
+        for name in ("ticket-worker", "ticket-worker-elevated", "ticket-worker-escalated"):
+            text = (RSRC_DIR / name / (name + ".md")).read_text(encoding="utf-8")
+            self.assertIn("The lead owns merging after your report; do not merge.", text)
+            self.assertNotIn("Merge per the route verdict", text)
+        protocol = (RSRC_DIR / "worker-stop-protocol.md").read_text(encoding="utf-8")
+        self.assertIn("all merges, including impl into goal, belong to the lead", protocol)
+        self.assertIn("merge_confirm: skip | ask", protocol)
+        self.assertIn("completion: phase | ticket | ad_hoc | none", protocol)
+        self.assertIn("Valid terminal pairs are `[ok]` with `stop: none`", protocol)
+        self.assertIn(
+            "Your terminal report does not restore the checkout: the shared worktree's",
+            protocol,
+        )
+        run = (RSRC_DIR / "lead-run" / "lead-run.md").read_text(encoding="utf-8")
+        self.assertIn("`merge_confirm: skip` auto-calls", run)
+        self.assertIn("`ask` (including absent)", run)
+        self.assertIn("{{.McpNamespace}}/git.merge", run)
+        self.assertIn("call `{{.McpNamespace}}/git.merge` with the goal branch", run)
+        self.assertNotIn("goal-to-PARENT terminal uses raw Git", run)
+        self.assertIn("`completion: phase`, leave the ticket active", run)
+        self.assertIn("With `completion: ticket`", run)
+        self.assertIn("incompatible values are a protocol mismatch", run)
+        self.assertIn("do not query the ticket, infer a\npath, merge", run)
+        self.assertIn(
+            "call `{{.McpNamespace}}/git.status` and read\n`branch.head`, `impl_ticket`, and the working-tree state",
+            run,
+        )
+        self.assertIn("Branch-explicit calls (`{{.McpNamespace}}/git.merge`)", run)
 
     def test_bootstrap_scaffolds_emit_converged_output_across_packages(self):
         # Ticket 260825 Phase 4: assert positive convergence. Both packages'

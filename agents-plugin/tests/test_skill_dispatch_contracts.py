@@ -204,6 +204,31 @@ class SkillDispatchContractsTest(unittest.TestCase):
             protocol,
         )
 
+    def test_run_pins_branch_awareness_reasoning(self):
+        # The existing merge/stop test pins the mechanical ws/git.status call and
+        # its field names; this pins the branch-awareness REASONING the lead must
+        # apply to those fields, so a rewrite that keeps the call but drops the
+        # stack-vs-return decision, the base-derivation convention, or the
+        # dirty-tree judgment fails here.
+        run = (RSRC_DIR / "lead-run" / "lead-run.md").read_text(encoding="utf-8")
+        # stack-vs-return: the explicit either/or the lead must decide.
+        self.assertIn(
+            "Decide explicitly: stack on the impl branch when the write\n"
+            "belongs to that impl ticket, or check out the derived base branch",
+            run,
+        )
+        # base-derivation: how the base branch is computed, tied to git.merge's
+        # own convention.
+        self.assertIn("between `impl/` and the last `/`, the same convention", run)
+        # dirty-tree: the worker's shared checkout may be dirty; commit/stash, do
+        # not force a checkout through it.
+        self.assertIn(
+            "A dirty working tree at\n"
+            "that point is your own judgment call: commit or stash before the checkout,\n"
+            "never force one through it.",
+            run,
+        )
+
     def test_run_dispatches_through_playbook_read(self):
         # lead-run is a playbook.read shim over an rsrc body, not an inline
         # SKILL.md: the body uses harness-idiom template variables, and those

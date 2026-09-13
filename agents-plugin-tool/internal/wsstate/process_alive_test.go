@@ -31,6 +31,13 @@ func TestProcessAliveDetectsLiveAndExitedProcess(t *testing.T) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("failed to run a short-lived self-reexec child process: %v", err)
 	}
+	// Harden against PID reuse: confirm the child truly reached a terminated
+	// (Exited) state before asserting its PID reads dead, so a "not alive"
+	// result cannot be an artifact of the OS having recycled the PID for an
+	// unrelated live process between Run() and the probe.
+	if cmd.ProcessState == nil || !cmd.ProcessState.Exited() {
+		t.Fatalf("child process did not reach an Exited terminal state: state=%v", cmd.ProcessState)
+	}
 	exitedPID := cmd.Process.Pid
 	if ProcessAlive(exitedPID) {
 		t.Fatalf("a real, already-exited child process PID %d was reported alive", exitedPID)

@@ -1,6 +1,7 @@
 package wsmailbox
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -21,6 +22,51 @@ func TestEnsureMachineSecretPersistsAndReturnsSameValue(t *testing.T) {
 	}
 	if string(first) != string(second) {
 		t.Fatalf("EnsureMachineSecret returned different values across calls")
+	}
+}
+
+// TestEnsureMachineSecretRepairsTruncatedFile verifies the doc-claimed recovery
+// in EnsureMachineSecret/readValidSecret: a truncated / wrong-length secret file
+// (e.g. a partial write) is repaired by regenerating a fresh valid-length secret
+// and persisting it, rather than propagating the bad bytes as if they were a
+// real key.
+func TestEnsureMachineSecretRepairsTruncatedFile(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	path, err := MachineSecretPath()
+	if err != nil {
+		t.Fatalf("MachineSecretPath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bad := []byte("too-short")
+	if len(bad) == secretByteLen {
+		t.Fatalf("test fixture is accidentally a valid-length secret")
+	}
+	if err := os.WriteFile(path, bad, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	secret, err := EnsureMachineSecret()
+	if err != nil {
+		t.Fatalf("EnsureMachineSecret over a truncated file: %v", err)
+	}
+	if len(secret) != secretByteLen {
+		t.Fatalf("EnsureMachineSecret returned a %d-byte secret, want a repaired %d-byte secret", len(secret), secretByteLen)
+	}
+	if string(secret) == string(bad) {
+		t.Fatalf("EnsureMachineSecret propagated the truncated bytes instead of repairing")
+	}
+
+	// The repair is persisted, not just returned: a fresh read sees the valid
+	// secret, so the next process does not re-repair.
+	reread, err := readValidSecret(path)
+	if err != nil {
+		t.Fatalf("readValidSecret after repair: %v", err)
+	}
+	if len(reread) != secretByteLen || string(reread) != string(secret) {
+		t.Fatalf("repaired secret was not persisted: reread %d bytes, want the returned %d-byte secret", len(reread), secretByteLen)
 	}
 }
 

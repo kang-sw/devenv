@@ -573,6 +573,71 @@ func TestMailboxLookupPeersFiltersDeadPeersAndSurfacesConflict(t *testing.T) {
 	}
 }
 
+// TestRebindMailboxOwnerRefusesLiveDifferentPIDHolder covers the
+// security-sensitive in-lock refusal branch of rebindMailboxOwnerAtFerrule
+// (Critical: owner-rebind ignoring conflict state): when a DIFFERENT, genuinely
+// live process legitimately holds the presence record at the moment of a
+// parent-less ferrule login — a race that resolved against this process AFTER
+// its own registration — the rebind must refuse to steal the ownership pointer
+// rather than hijack the live holder's identity.
+//
+// The existing conflict tests only exercise the registration-time flagging path
+// (a duplicate detected at self-register, via s.mailbox.conflict). This drives
+// the distinct post-registration re-verify under the write lock: registration
+// succeeds cleanly (empty store, so conflict stays false), then a live different
+// PID takes over the record before rebind, so the rebind reaches the in-lock
+// `p.PID != pid && mailboxPresenceLive` guard rather than the conflict-flag
+// early return.
+func TestRebindMailboxOwnerRefusesLiveDifferentPIDHolder(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	t.Setenv(envMailbox, "frank@worktree")
+	s := NewServer(root, "test")
+	// Register under this process's own PID against an empty store: no conflict
+	// is flagged, so registerOnce is spent and the later rebind is routed past
+	// the conflict-flag early return into the in-lock re-verify branch.
+	s.ensureMailboxRegistered(root)
+
+	path, err := wsmailbox.WorktreePath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A different, genuinely-live PID (the test binary's own parent, guaranteed
+	// alive for the test's duration — the same live-PID choice the existing
+	// conflict fixture makes) takes over the presence record after our own
+	// registration.
+	otherLivePID := os.Getppid()
+	if otherLivePID == os.Getpid() || otherLivePID <= 0 {
+		t.Skipf("cannot obtain a distinct live parent PID (ppid=%d)", otherLivePID)
+	}
+	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+		p := store.Presence["frank"]
+		p.PID = otherLivePID
+		p.Owner = ""
+		p.LastSeen = mailboxNowString()
+		store.Presence["frank"] = p
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Parent-less ferrule login: the only path that ever rebinds ownership.
+	s.rebindMailboxOwnerAtFerrule("intruder-session-key", "", root)
+
+	after, err := wsmailbox.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := after.Presence["frank"].Owner; got != "" {
+		t.Fatalf("rebind hijacked ownership of a name held by a live different PID: Owner = %q, want empty", got)
+	}
+	if got := after.Presence["frank"].PID; got != otherLivePID {
+		t.Fatalf("rebind clobbered the live holder's presence record: PID = %d, want the live holder's %d", got, otherLivePID)
+	}
+}
+
 // TestMailboxToolBoundaryErrors verifies each of the three MCP handlers'
 // argument/session validation surfaces a clear error rather than a panic,
 // a silently-wrong result, or a generic message indistinguishable from an
