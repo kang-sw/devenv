@@ -94,10 +94,11 @@ ticket puts the audit window and the steering rule on it.
   history, scroll position, expand state and event subscription survive; only
   the editor appears. The switch alone changes nothing on the record —
   ownership flips only on the first send. `/answer` opens `interactive`
-  from the start, as today. A child whose record `sendToAgent` refuses (a
-  one-shot explore record, per `260906-feat-ws-pi-lead-explore-as-async-rpc-child`)
-  opens in `view` mode only: Enter shows a one-line hint and does not
-  switch. Rejected: a separate `/steer <id>` command (one more verb for the
+  from the start, as today. Every current registry role retains a persistent
+  send path, including Explore, so Phase 2 adds no send-refusing read-only
+  special case. A future role without a send path requires its own ticket and
+  must not silently broaden this contract. Rejected: a separate `/steer <id>` command
+  (one more verb for the
   same window); rebuilding the component on switch (resets the view).
 - **`lastWriter` on the record.** `RpcAgentRecord.lastWriter?: "lead" |
   "owner"` (absent = lead). Set to `owner` by a send from the viewer; set to
@@ -193,6 +194,7 @@ ticket puts the audit window and the steering rule on it.
   leads (`ctx.mode !== "tui"`).
 - Ask behaviour that is not about ownership (thread registry, persistence,
   `/answer`, `/thread`, injection) is unchanged.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
 
 ## Prior Art
 
@@ -228,6 +230,22 @@ ticket puts the audit window and the steering rule on it.
   park exemption and the fan-in set; settle push routed by `lastWriter`.
 - `{#260905-pi-live-agent-widget}`: owner-held flag and the
   running / idle-awaiting-owner row split.
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-pi/src/audit.ts, agents-plugin-pi/src/ask.ts, agents-plugin-pi/src/spawner.ts, agents-plugin-pi/src/fork.ts, agents-plugin-pi/src/agent-sidecar.ts, agents-plugin-pi/src/agent-widget.ts, agents-plugin-pi/src/index.ts |
+| scope.surface | public-interface | existing /audit and /answer overlays plus ws-agent-list output |
+| scope.new_public_symbol | no | no new command or exported symbol is specified |
+| scope.new_type_contract | yes | RpcAgentRecord lastWriter and ownerSends; ws-agent-list owner_held field |
+| scope.test_surface | existing | agents-plugin-pi/test/audit.test.ts and existing spawner, ask, fork, agent-sidecar, and agent-widget tests |
+| complexity.reuse_points | confirmed | ConversationViewComponent and sendToAgent in agents-plugin-pi/src; RpcClient.abort in agents-plugin-pi/node_modules/@earendil-works/pi-coding-agent/dist/modes/rpc/rpc-client.d.ts |
+| complexity.side_effect_risk | high | changes settle delivery, parking, fan-in, alias reuse, and owner-facing UI |
+| risk.correctness | high | last-writer transitions and final/settle races govern terminal delivery and parking |
+| risk.fit | high | must reconcile the shared audit and ask bindings with existing thread and lifecycle rules |
+| risk.test | high | callback races plus owner-run TUI behavior require broad existing test coverage and live verification |
+| risk.security_or_contract | moderate | changes user-visible child-control and ws-agent-list contracts without changing ws-mcp |
 
 ## Phases
 
