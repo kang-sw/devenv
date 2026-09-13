@@ -43,7 +43,7 @@ export interface OwnershipMetadata extends AgentOwnership {
   createdAt: number; lastActivityAt: number; updatedAt: number;
   /** Latest durable child-attributable usage projection, used by ancestor footer aggregation and eviction roll-up. */
   telemetry?: AgentTelemetry;
-  liveness: { lifecycle: "starting" | "live" | "stopping" | "stopped" | "unknown"; running?: boolean; observedAt?: number; pid?: number; instanceNonce?: string; threadBound?: boolean; ownerHeld?: boolean; pendingQuestion?: boolean; waitingOnChildren?: boolean; expectedReport?: boolean; pendingApprovalCommandId?: string; recovery?: "none" | "sidecar" | "thread" | "revived" };
+  liveness: { lifecycle: "starting" | "live" | "stopping" | "stopped" | "unknown"; running?: boolean; observedAt?: number; pid?: number; instanceNonce?: string; threadBound?: boolean; ownerHeld?: boolean; pendingQuestion?: boolean; waitingOnChildren?: boolean; pendingDelivery?: boolean; pendingApprovalCommandId?: string; recovery?: "none" | "sidecar" | "thread" | "revived" };
   sessionSignature?: { mtimeMs: number; size: number };
 }
 
@@ -210,7 +210,7 @@ export function validOwnership(value: unknown): value is OwnershipMetadata {
     (l.pid === undefined || (Number.isInteger(l.pid) && l.pid > 0)) && (l.instanceNonce === undefined || SAFE_COMPONENT.test(l.instanceNonce)) &&
     (l.threadBound === undefined || typeof l.threadBound === "boolean") && (l.ownerHeld === undefined || typeof l.ownerHeld === "boolean") &&
     (l.pendingQuestion === undefined || typeof l.pendingQuestion === "boolean") &&
-    (l.waitingOnChildren === undefined || typeof l.waitingOnChildren === "boolean") && (l.expectedReport === undefined || typeof l.expectedReport === "boolean") &&
+    (l.waitingOnChildren === undefined || typeof l.waitingOnChildren === "boolean") && (l.pendingDelivery === undefined || typeof l.pendingDelivery === "boolean") &&
     (l.pendingApprovalCommandId === undefined || SAFE_COMPONENT.test(l.pendingApprovalCommandId)) &&
     (o.telemetry === undefined || parseTelemetry(o.telemetry) !== undefined) &&
     (l.recovery === undefined || ["none","sidecar","thread","revived"].includes(l.recovery)) &&
@@ -282,8 +282,8 @@ export function inspectOwnedHomeRemoval(ownership: AgentOwnership): OwnedHomeRem
     if (!metadata || !sameOwnershipIdentity(ownership, metadata)) return { status: "retained", reason: "ownership metadata is missing, unreadable, or mismatched" };
     const liveness = metadata.liveness;
     if (liveness.lifecycle !== "stopped" || liveness.running !== false) return { status: "retained", reason: "child liveness is not confirmed stopped" };
-    if (liveness.threadBound || liveness.ownerHeld || liveness.pendingQuestion || liveness.waitingOnChildren || liveness.expectedReport || liveness.pendingApprovalCommandId) {
-      return { status: "retained", reason: "child has a protected owner, question, approval, or report wait" };
+    if (liveness.threadBound || liveness.ownerHeld || liveness.pendingQuestion || liveness.waitingOnChildren || liveness.pendingDelivery || liveness.pendingApprovalCommandId) {
+      return { status: "retained", reason: "child has a protected owner, question, approval, descendant wait, or delivery" };
     }
     if (!hasOnlyContainedRegularEntries(home, home)) return { status: "retained", reason: "owned home contains a symlink or non-regular entry" };
     return { status: "eligible", metadata };

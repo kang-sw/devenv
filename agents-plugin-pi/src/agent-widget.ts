@@ -59,8 +59,9 @@ export const DEFAULT_AGENT_WIDGET_WIDTH = 80;
 /** One live-agent row's display role. `"thread"` overrides the record's own `spawnRole` label only for a `threadBound` record whose bound thread is `origin: "lead-ask"`. `"explore"` is a persistent researcher role — see `roleFromSpawnRole`. */
 export type AgentRowRole = "worker" | "execute" | "fork" | "thread" | "explore";
 
-/** One live-agent row's state, in display precedence order (`awaiting-owner` first). Idle is deliberately not a state here — an idle, non-`threadBound` record is auto-parked (see `spawner.ts`'s `attachEventListener`) before it would ever read this way. */
-export type AgentRowState = "awaiting-owner" | "idle-awaiting-owner" | "awaiting-approval" | "running";
+/** One live-agent row's state, in display precedence order. Execution,
+ * descendant waits, delivery, and owner action remain distinct. */
+export type AgentRowState = "awaiting-owner" | "idle-awaiting-owner" | "awaiting-approval" | "waiting-on-children" | "pending-delivery" | "running";
 
 /** One rendered row of the live-agent widget. Pure data — no `RpcAgentRecord`/`ThreadRecord` reference — so `buildWidgetLines`/`buildHeadingLine` need no registry access of their own. */
 export interface AgentRow {
@@ -104,13 +105,17 @@ export const AGENT_STATE_RANK: Readonly<Record<AgentRowState, number>> = {
   "awaiting-owner": 0,
   "idle-awaiting-owner": 0,
   "awaiting-approval": 1,
-  running: 2,
+  "waiting-on-children": 2,
+  "pending-delivery": 3,
+  running: 4,
 };
 
 export const AGENT_STATE_LABEL: Readonly<Record<AgentRowState, string>> = {
   "awaiting-owner": "awaiting owner",
   "idle-awaiting-owner": "idle awaiting owner",
   "awaiting-approval": "awaiting approval",
+  "waiting-on-children": "waiting on children",
+  "pending-delivery": "pending delivery",
   running: "running",
 };
 
@@ -130,19 +135,18 @@ export function rowName(record: RpcAgentRecord): string {
 /**
  * 260908 (subagent audit window ticket): the row-inclusion/state
  * classification half of `buildAgentRows`'s per-record loop below, pulled
- * out as its own pure predicate so the audit picker's three live tiers
- * (`260908` sibling ticket) reuse the identical inclusion rule and state
- * precedence rather than a second copy. `undefined` means "not included by
- * the widget" — i.e. the record is dormant (`client === undefined &&
- * !threadBound && pendingApproval === undefined`), exactly the complement
- * `buildAgentRows`'s own doc comment already describes. Pure refactor:
- * `buildAgentRows`'s own output is unchanged.
+ * out as its own pure predicate so the audit picker reuses identical
+ * inclusion and precedence. Execution, descendant waiting, pending terminal
+ * delivery, approval, and owner action are distinct states. `undefined`
+ * means the record is resting with no visible action or delivery pending.
  */
 export function classifyRegistryRowState(record: RpcAgentRecord): AgentRowState | undefined {
   if (record.threadBound === true) return "awaiting-owner";
   if (record.pendingApproval !== undefined) return "awaiting-approval";
-  if (isOwnerHeld(record) && !record.running) return "idle-awaiting-owner";
-  if (record.client !== undefined || record.running || record.streaming || record.waitingOnChildren) return "running";
+  if (isOwnerHeld(record) && !record.running && !record.streaming) return "idle-awaiting-owner";
+  if (record.running || record.streaming) return "running";
+  if (record.waitingOnChildren) return "waiting-on-children";
+  if (record.terminalDelivery && record.terminalDelivery.state !== "enqueued") return "pending-delivery";
   return undefined;
 }
 
@@ -166,14 +170,10 @@ function clampElapsed(deltaMs: number): number {
  * both cases used to render zero rows and silently drop the merged-in
  * pending-question surface entirely).
  *
- * Row inclusion, RPC-registry side (a record the widget cares about even
- * with no matching thread): `record.threadBound || record.pendingApproval
- * !== undefined || record.client !== undefined`. A plain, non-`threadBound`
- * idle record never satisfies any of these — the automatic-park step in
- * `spawner.ts`'s `attachEventListener` has already cleared `client` by the
- * time it would otherwise read that way — which is what makes "idle is not a
- * row state" true without this function needing to check `streaming`/
- * `running` itself. A `threadBound` record renders even while dormant
+ * RPC-side rows render only for an explicit classified state: owner action,
+ * approval, execution, descendant waiting, or pending terminal delivery. A
+ * retained but settled client is not implicitly running. A `threadBound`
+ * record renders even while dormant
  * (`client === undefined`): that row is the owner's action cue, and it must
  * not disappear just because the respondent fork happens to be parked
  * between messages.
@@ -186,8 +186,8 @@ function clampElapsed(deltaMs: number): number {
  * `"awaiting-owner"`, elapsed is `now - touchedAt`, and the `/answer <id>`
  * hint is always set. This is the ticket's merged-in pending-question row.
  *
- * State precedence: `threadBound` (awaiting owner) beats `pendingApproval`
- * (awaiting approval) beats the default `"running"`.
+ * State precedence keeps owner and approval actions ahead of execution, then
+ * descendant waiting and terminal delivery as distinct non-running states.
  *
  * Hint/clock vs. role (review relay #1 Important #2): a `threadBound`
  * record's `/answer <id>` hint and `touchedAt`-based elapsed follow the
@@ -198,8 +198,7 @@ function clampElapsed(deltaMs: number): number {
  * match (the ticket's Entry-B-only role override); a fork-raised match keeps
  * the record's own `spawnRole` label (typically `"fork"`).
  *
- * Sort: state rank first (awaiting owner, then awaiting approval, then
- * running), elapsed descending within each state. No cap here — `N` for the
+ * Sort: state rank first, elapsed descending within each state. No cap here — `N` for the
  * panel heading is this deduped, UNCAPPED row count; the display cap
  * to `AGENT_WIDGET_ROW_CAP` with its `+N more` tail is `buildWidgetLines`'s
  * own rendering concern, not a property of the underlying agent count.

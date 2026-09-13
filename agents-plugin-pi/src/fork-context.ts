@@ -86,13 +86,6 @@ export function captureRegisteredTools(activeNames: readonly string[], allTools:
   });
 }
 
-/** A task fork cannot complete if this parent-visible channel is absent. */
-export const COMPLETION_CRITICAL_FORK_TOOL_NAMES = ["ws-report-to-lead"] as const;
-
-export function isCompletionCriticalForkTool(name: string): boolean {
-  return (COMPLETION_CRITICAL_FORK_TOOL_NAMES as readonly string[]).includes(name);
-}
-
 /** Strict registration comparison, retaining the parent-captured order in every result list. */
 export interface ForkRegistrationComparison {
   missing: ForkToolDefinition[];

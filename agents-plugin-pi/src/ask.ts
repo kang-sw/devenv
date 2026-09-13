@@ -24,10 +24,9 @@
  *     live fork — it never spawns a second one. There is no fork-less
  *     quick-answer path.
  *
- * A discussion fork (Entry B) is deliberately NOT wrapped in Entry A's
- * structural anti-bleed frame (`buildForkInitialMessage`) and runs NO
- * anti-bleed loop (§4): a discussion fork is meant to speak AS the lead —
- * persona continuity is the feature there, not a bleed to suppress.
+ * A legacy discussion-fork prompt is deliberately not wrapped in Entry A's
+ * task frame (`buildForkInitialMessage`): it speaks as the lead, so persona
+ * continuity rather than task isolation is the feature.
  *
  * Persistence (§5): the registry is written to a sibling file of the lead's
  * own session file (`<sessionFile>.ws-threads.json`), so pending questions
@@ -77,7 +76,7 @@
  * (`ensureRespondent`'s spawn branch, `buildDiscussionForkDirectiveText`/
  * `buildDiscussionForkInitialMessage`, `resolveDoneAction`/
  * `summarizeThenClose`/`runDoneAction`'s "summarize" branch,
- * `closeThreadOnDone`/`handleRespondentFinalReport`'s `"lead-ask"` branches)
+ * `closeThreadOnDone`'s `"lead-ask"` branch)
  * is deliberately left in place rather than deleted: no live code path can
  * reach it for a `"lead-ask"` thread anymore (fork-raised always already has
  * a `respondentAgentId` at registration, so those branches were only ever
@@ -199,8 +198,6 @@ export function checkContextLength(context: string | undefined, limit = MAX_CONT
  * old per-thread overlay module, now deleted, with one shape addition):
  * `close()` closes the view only (the fork and its thread are untouched);
  * `closeWithSummary(summary)` ends the thread with a supplied summary.
- * Reused unchanged by `handleRespondentFinalReport`'s
- * `overlay.closeWithSummary(message)` path.
  *
  * Review relay #2 C1/I1: `closeWithSummary`'s `alreadyRendered` parameter
  * (default `false`, so every EXISTING caller keeps its old append-then-close
@@ -264,7 +261,7 @@ export function buildForkQuestionLeadNotice(agentId: string, threadId: string): 
   return [
     `[ws] Agent ${agentId} raised a question for the OWNER, registered as thread ${threadId}.`,
     "The owner answers it directly in their own discussion overlay (/answer " + threadId + "); you are not part of that exchange.",
-    "Do NOT relay this question, answer it yourself, or ask the owner about it. End your turn — this agent resumes its task once the owner replies, and what was decided reaches you in its own pushed final report's Decisions: line.",
+    "Do NOT relay this question, answer it yourself, or ask the owner about it. End your turn — this agent resumes its task once the owner replies, and its later ordinary settled answer carries the outcome.",
   ].join("\n");
 }
 
@@ -358,8 +355,8 @@ export type ThreadStatus = "pending" | "open" | "dormant" | "closed";
  *   mid-task via `ws-report-to-lead(kind:"question")`; its lifecycle belongs
  *   to `ws-fork`/`ws-agent-stop`, not to this surface. `/done`
  *   therefore only detaches the overlay: no summary request, no stop, no
- *   injection. The fork resumes its task and the lead learns the outcome from
- *   its own `kind:"final"` report's `Decisions:` line (§1/§4).
+ *   injection. The fork resumes its task and its later ordinary settled
+ *   answer reaches the lead through the shared terminal lifecycle.
  *
  * A record parsed without this field is treated as `"fork-raised"`: the
  * conservative default, since that is the origin whose respondent must never
@@ -386,7 +383,7 @@ export function buildThreadHeaderHint(thread: Pick<ThreadRecord, "threadId" | "c
  * field (see the plan's `spawner.ts#L647-706` finding) — this is a copy, not
  * a new contract.
  */
-export interface PersistedForkResume extends Pick<RpcAgentRecord, "delegation" | "subtreeChannel" | "expectedReport" | "waitingOnChildren" | "lastWriter" | "ownerSends" | "requiresFreshFinal"> {
+export interface PersistedForkResume extends Pick<RpcAgentRecord, "delegation" | "subtreeChannel" | "waitingOnChildren" | "lastWriter" | "ownerSends"> {
   sessionPath: string;
   systemPromptPath?: string;
   forkContext?: ForkContext;
@@ -622,11 +619,9 @@ export function addAskToolsIfLead(activeTools: readonly string[], role: SpawnRol
  * directive-style rule): a discussion fork is meant to speak as the lead, so
  * nothing here tries to give it a separate identity.
  *
- * The thread has two exits: the owner's `/done` (which asks for a summary
- * turn), and — post-close dogfood 2026-09-05 — the fork's own
- * `ws-report-to-lead(kind:"final")` once the owner has stated a decision,
- * whose text IS the summary (`handleRespondentFinalReport`). No progress
- * reports, no task frame.
+ * The owner ends the thread with `/done`; ordinary settled answers before
+ * that remain part of the owner conversation. No completion report tool and
+ * no task frame are involved.
  */
 export function buildDiscussionForkDirectiveText(): string {
   return [
@@ -636,7 +631,7 @@ export function buildDiscussionForkDirectiveText(): string {
     "",
     "There is no task to complete and no progress report to file here. Do not start editing files or running work unless the owner explicitly asks for it in this thread.",
     "",
-    'The owner may end the thread themselves with /done, in which case you will be asked once for a short summary. When the owner states a decision, or says they will go a certain way, end the thread yourself: call ws-report-to-lead with kind:"final" and a short summary of what was decided — 2 to 4 sentences, the decision first. That summary is delivered to the lead.',
+    "The owner ends the thread with /done. Until then, each ordinary settled answer belongs to the owner conversation and is not a completion report to the lead.",
   ].join("\n");
 }
 
@@ -735,7 +730,7 @@ export function captureForkResume(record: RpcAgentRecord): PersistedForkResume {
     systemPromptPath: record.systemPromptPath,
     ...(record.forkContext ? { forkContext: record.forkContext } : {}),
     explicitTools: record.explicitTools,
-    ...(record.delegation ? { delegation: record.delegation, subtreeChannel: record.subtreeChannel, expectedReport: record.expectedReport, waitingOnChildren: record.waitingOnChildren, requiresFreshFinal: record.requiresFreshFinal } : {}),
+    ...(record.delegation ? { delegation: record.delegation, subtreeChannel: record.subtreeChannel, waitingOnChildren: record.waitingOnChildren } : {}),
     ...(record.lastWriter ? { lastWriter: record.lastWriter } : {}),
     ...(record.ownerSends?.length ? { ownerSends: record.ownerSends.map((send) => ({ ...send })) } : {}),
     wsToolNames: [...record.wsToolNames],
@@ -778,7 +773,7 @@ export function rehydrateForkRecord(agentId: string, resume: PersistedForkResume
     wsToolNames: [...resume.wsToolNames],
     toolGroup: resume.toolGroup,
     explicitTools: resume.explicitTools,
-    ...(resume.delegation ? { delegation: parseDelegationPolicy(resume.delegation), subtreeChannel: resume.subtreeChannel, expectedReport: resume.expectedReport, waitingOnChildren: resume.waitingOnChildren, requiresFreshFinal: resume.requiresFreshFinal } : {}),
+    ...(resume.delegation ? { delegation: parseDelegationPolicy(resume.delegation), subtreeChannel: resume.subtreeChannel, waitingOnChildren: resume.waitingOnChildren } : {}),
     ...(resume.lastWriter === "lead" || resume.lastWriter === "owner" ? { lastWriter: resume.lastWriter } : {}),
     ...(Array.isArray(resume.ownerSends) ? { ownerSends: resume.ownerSends.flatMap((send) => send && typeof send.text === "string" && typeof send.at === "number" ? [{ text: send.text, at: send.at }] : []) } : {}),
     spawnRole: "fork",
@@ -997,13 +992,8 @@ export function handleForkRaisedQuestion(
   rpcRegistry: RpcAgentRegistry,
   agentId: string,
   message: string,
-  /**
-   * Review relay #1 (I2): only used to arm the respondent's final-report hook
-   * here (see below). Optional so the registration itself still works from a
-   * call site with no extension API — the thread is registered either way; the
-   * bind is then released by the other close paths.
-   */
-  pi?: ExtensionAPI,
+  /** Retained for call-site compatibility; registration itself owns no IO. */
+  _pi?: ExtensionAPI,
 ): ThreadRecord {
   const now = nowIso();
   const record: ThreadRecord = {
@@ -1021,23 +1011,12 @@ export function handleForkRaisedQuestion(
     record.forkResume = captureForkResume(live);
     // 260905: the thread is bound from REGISTRATION, not from overlay open —
     // the exchange belongs to the owner from the moment the fork raised it,
-    // so the lead must not be pushed this fork's settles/advisories (nor
-    // count it as one of its own outstanding children) even before the owner
+    // so settled output routes to the owner when that surface exists (and the
+    // fork is not counted as one of the lead's children) even before the owner
     // gets around to `/answer`.
     bindThread(rpcRegistry, agentId, true);
   }
   handle.threads.set(record.threadId, record);
-  // Review relay #1 (I2): arm the final-report hook HERE, not only from
-  // `ensureRespondent`. `ensureRespondent` runs on `/answer`, so before this
-  // fix the bind set above could only ever be released by an owner who
-  // actually opened the thread — and in headless (§8) there is no owner
-  // surface at all, so a fork-raised question latched `threadBound` forever:
-  // permanently outside the fan-in count, settles permanently suppressed,
-  // anti-bleed permanently disarmed, and the lead's fan-in showing no status
-  // line while the fork was still working. Armed at registration, the fork's OWN
-  // `kind:"final"` closes the thread and releases the bind with no owner
-  // involvement (`handleRespondentFinalReport` -> `detachForkRaisedThread`).
-  if (pi) armFinalReportHook(pi, handle, rpcRegistry, record.threadId, agentId);
   persistThreads(handle);
   refreshAgentWidget();
   return record;
@@ -1204,10 +1183,8 @@ export function registerAsk(
 }
 
 /**
- * The thread's close, routed on its `origin` — reached from the overlay's
- * `/done` (with the fork's summary turn) and from the respondent's own
- * `kind:"final"` report (`handleRespondentFinalReport`, with the report
- * text). The two entries own their respondent differently (review relay #2
+ * The thread's `/done` close, routed on its `origin`. The two entries own
+ * their respondent differently (review relay #2
  * C2, see `ThreadOrigin`):
  *
  * - `"lead-ask"`: this surface spawned the discussion fork, so `/done` runs
@@ -1215,8 +1192,8 @@ export function registerAsk(
  * - `"fork-raised"`: the respondent is a LIVE Entry A task fork the lead is
  *   parked on. Stopping it would destroy its in-flight task and hang the
  *   lead's own delegation of it, so `/done` only
- *   detaches: the thread goes dormant and the fork carries on, reporting what
- *   was decided through its own `kind:"final"` report (§1/§4).
+ *   starts a fresh lead-owned Finish handoff whose ordinary settled answer is
+ *   delivered through the shared terminal lifecycle.
  */
 export function closeThreadOnDone(
   pi: ExtensionAPI,
@@ -1270,18 +1247,14 @@ function finishForkRaisedThread(pi: ExtensionAPI, handle: ThreadRegistryHandle, 
   startForkFinish(record, rpcRegistry, pi, resumeCtx ?? { cwd: process.cwd(), extensionPath: process.argv[1] ?? "" });
 }
 
-/**
- * Ordinary final-report close for a fork-raised thread when no `/done`
- * coordinator is active. It releases the bind and keeps the old behaviour.
- */
+/** Release a fork-raised thread bind when its respondent is gone or the thread is withdrawn. */
 export function detachForkRaisedThread(handle: ThreadRegistryHandle, rpcRegistry: RpcAgentRegistry, thread: ThreadRecord): void {
   const agentId = thread.respondentAgentId;
   if (agentId) {
     const record = rpcRegistry.get(agentId);
     if (record) {
       // The thread itself is closing here, so the thread-lifetime bind is
-      // released too: the fork rejoins the lead's fan-in and its own
-      // kind:"final" is pushed to the lead as any other child's would be.
+      // released too and any later turn belongs to the lead route.
       record.threadBound = false;
       syncOwnershipProtection(record);
       // Refresh the resume snapshot while the record is still live, so a
@@ -1461,93 +1434,6 @@ function createForkChannel(
  * and the thread stays reopenable (the doom-overlay example's own
  * persistent-state-vs-disposable-view split).
  */
-/** The live overlay handle for `threadId`, if the one shared owner overlay is attached to that thread. */
-function attachedOverlayFor(threadId: string): OverlayHandle | undefined {
-  const active = currentOwnerOverlay();
-  return active?.threadId === threadId && active.closeWithSummary
-    ? { close: active.close, closeWithSummary: active.closeWithSummary }
-    : undefined;
-}
-
-/**
- * A respondent's own `kind:"final"` report (post-close dogfood 2026-09-05):
- * the discussion fork ends the thread itself once the owner has stated a
- * decision, and the report text is the summary. Routed exactly like `/done`
- * — through the attached overlay's `closeWithSummary` (whose `onDone` is
- * `closeThreadOnDone`) when one is open, directly through `closeThreadOnDone`
- * when the owner had already pressed Esc — so a `lead-ask` thread gets the
- * §6 injection, the stop, `dormant`, persistence and the widget refresh in
- * one place, with no summary turn. A `fork-raised` thread's final report
- * closes an attached overlay and detaches the thread (its lifecycle belongs
- * to `ws-fork`, and the lead reads the pushed report itself). A `lead-ask`
- * thread is ignored unless it is `open` — a late duplicate from an
- * already-closed thread must not re-inject — while a `fork-raised` thread also
- * accepts `pending` (review relay #1 I2: the owner may never open it, and in
- * headless never can, so this is that bind's only release path).
- *
- * 260905 return value = `spawner.ts`'s `onFinalReport` SUPPRESSION contract:
- * `true` means "consumed, do not push this report to the lead". Only a
- * `lead-ask` thread returns true — the owner's decision already reaches the
- * lead as the `ws-thread-summary` message, so a `ws-agent-report` push on top
- * would deliver the same event twice. A `fork-raised` fork's final IS the
- * completion signal the lead is meant to see, so it returns `false` and the
- * push goes out. A non-`open` thread also returns `false`: nothing was
- * consumed.
- *
- * `overlay` is injectable for tests; the default is the module-scope active
- * overlay.
- */
-export function handleRespondentFinalReport(
-  pi: ExtensionAPI,
-  handle: ThreadRegistryHandle,
-  rpcRegistry: RpcAgentRegistry,
-  thread: ThreadRecord,
-  message: string,
-  overlay: OverlayHandle | undefined = attachedOverlayFor(thread.threadId),
-): boolean {
-  if (thread.origin === "fork-raised") {
-    // Review relay #1 (I2): `"pending"` counts here, unlike for `lead-ask`. A
-    // fork-raised thread is bound from REGISTRATION, and in headless (§8) no
-    // owner surface will ever open it — so the fork's own final is the only
-    // event that can release the bind, and refusing it while the thread is
-    // merely pending is exactly the permanent latch this branch must not
-    // create. The fork answered itself or finished the task; either way the
-    // owner has nothing left to answer.
-    if (thread.status !== "open" && thread.status !== "pending") return false;
-    // Close the view if one is open, then run the thread close itself
-    // (previously only reachable via `/done`) so `threadBound` is released and
-    // the fork rejoins the lead's fan-in on the very report that ends the
-    // thread.
-    overlay?.close();
-    detachForkRaisedThread(handle, rpcRegistry, thread);
-    return false;
-  }
-  if (thread.status !== "open") return false;
-  if (overlay) {
-    overlay.closeWithSummary(message);
-    return true;
-  }
-  closeThreadOnDone(pi, handle, rpcRegistry, thread, message);
-  return true;
-}
-
-/**
- * Arms `handleRespondentFinalReport` on the thread's respondent record. The
- * thread is re-read from the registry by id at fire time, since a
- * `session_start` re-hydration replaces the record objects.
- */
-function armFinalReportHook(pi: ExtensionAPI, handle: ThreadRegistryHandle, rpcRegistry: RpcAgentRegistry, threadId: string, agentId: string): void {
-  const record = rpcRegistry.get(agentId);
-  if (!record) return;
-  record.onFinalReport = (_record, message) => {
-    const thread = handle.threads.get(threadId);
-    if (!thread) return false;
-    // The boolean propagates verbatim: it is `spawner.ts`'s
-    // report-push suppression signal, not a local status.
-    return handleRespondentFinalReport(pi, handle, rpcRegistry, thread, message);
-  };
-}
-
 /**
  * Ensures the thread has a live-or-resumable respondent fork on the shared
  * `rpcRegistry`, spawning a discussion fork lazily when it has none.
@@ -1581,10 +1467,7 @@ export async function ensureRespondent(
       }
       rpcRegistry.set(agentId, rehydrateForkRecord(agentId, thread.forkResume));
     }
-    // Idempotent: a live or rehydrated respondent (either origin) reports its
-    // own final into this thread — see `handleRespondentFinalReport`.
     bindThread(rpcRegistry, agentId, true);
-    armFinalReportHook(pi, handle, rpcRegistry, thread.threadId, agentId);
     return agentId;
   }
 
@@ -1658,7 +1541,6 @@ export async function ensureRespondent(
   thread.respondentAgentId = result.agent_id;
   const record = rpcRegistry.get(result.agent_id);
   if (record) thread.forkResume = captureForkResume(record);
-  armFinalReportHook(pi, handle, rpcRegistry, thread.threadId, result.agent_id);
   return result.agent_id;
 }
 
@@ -1801,8 +1683,7 @@ export function runDoneAction(
 /**
  * Wraps a live `ConversationViewComponent` + the `ctx.ui.custom` `done`
  * callback as an `OverlayHandle` — the external contract
- * `handleRespondentFinalReport`'s `overlay.closeWithSummary` path, a pending
- * `summarizeThenClose` settle, an owner Esc, and a second `/answer` closing
+ * a pending `summarizeThenClose` settle, an owner Esc, and a second `/answer` closing
  * the first overlay all drive without reaching into the component itself.
  * `closeWithSummary` mirrors the old, now-deleted per-thread overlay
  * module's own: a non-empty summary is appended as the child's own turn
@@ -1812,9 +1693,8 @@ export function runDoneAction(
  *
  * Review relay #2 Important (I1a/I1b/I4): a private `finished` flag makes
  * `close`/`closeWithSummary` a no-op after either has already run once —
- * whichever of the three real races wins (an owner Esc during the summary
- * wait, the fork's own `kind:"final"` report arriving mid-wait via
- * `handleRespondentFinalReport`, or the summary settle itself) is the ONLY
+ * whichever close race wins (an owner Esc during the summary wait, a second
+ * owner action, or the summary settle itself) is the ONLY
  * one that runs `closeThreadOnDone`/injects a summary/calls `done`, exactly
  * mirroring the old component's own `finished` guard. `onFinish` — called
  * exactly once, by whichever path wins — is `openThread`'s hook to tear down
@@ -2552,7 +2432,7 @@ async function openThread(
         // Review relay #2 I1a: the one `summarizeThenClose` listener that may
         // be waiting on a settle at any given moment. Torn down by
         // `buildOverlayHandle`'s `onFinish` hook the instant ANY close path
-        // wins, so an owner Esc (or a racing final report) during the wait
+        // wins, so an owner Esc (or another close action) during the wait
         // stops this listener rather than leaving it to fire later into an
         // already-guarded (but still leaked) `closeWithSummary`.
         let pendingSummarizeUnsubscribe: (() => void) | undefined;

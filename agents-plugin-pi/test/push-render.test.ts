@@ -29,11 +29,11 @@ import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 describe("buildPushRenderLines", () => {
   test("splits a real pushed message into head, payload and status", () => {
     const status = "1 delegated agent still running";
-    const content = buildPushContent("ws-agent-report", "w1", { kind: "final", report: "Outcome: done" }, status);
+    const content = buildPushContent("ws-agent-report", "w1", { report: "Outcome: done" }, status);
 
     assert.deepEqual(buildPushRenderLines({ content, details: { status } }), {
       head: "[ws-agent-report] agent w1",
-      body: ["kind: final", "report: Outcome: done"],
+      body: ["report: Outcome: done"],
       status,
     });
   });
@@ -240,7 +240,7 @@ function displayWidth(text: string): number {
 describe("buildPushComponent", () => {
   const status = "1 delegated agent still running";
   const message = {
-    content: buildPushContent("ws-agent-report", "w1", { kind: "final", report: "Outcome: done" }, status),
+    content: buildPushContent("ws-agent-report", "w1", { report: "Outcome: done" }, status),
     details: { status },
   };
 
@@ -252,7 +252,6 @@ describe("buildPushComponent", () => {
     const rendered = component.render(80);
     assert.deepEqual(rendered.map(plainLine), [
       "w1 · report",
-      "kind: final",
       "report: Outcome: done",
       status,
     ]);
@@ -265,7 +264,7 @@ describe("buildPushComponent", () => {
       "report head uses the theme's existing label role",
     );
     assert.ok(
-      theme.fgCalls.some((call) => call.color === "muted" && call.text.includes("kind: final")),
+      theme.fgCalls.some((call) => call.color === "muted" && call.text.includes("report: Outcome: done")),
       "body is muted",
     );
     assert.ok(

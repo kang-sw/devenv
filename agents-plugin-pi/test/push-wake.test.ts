@@ -148,8 +148,7 @@ test('/goal stop leaves a running child untouched and preserves its eventual rep
     },
     running: true,
     streaming: true,
-    terminalThisTurn: false,
-    threadBound: false,
+        threadBound: false,
     reportLog: [],
   };
   h.registry.set('child-1', child);
@@ -201,8 +200,8 @@ test('ordinary busy steer with no older hold stays an immediate individual custo
 
 test('approval and question steer with no older hold keep their individual custom types', () => {
   const h = harness(); h.busy();
-  const approvalRecord: any = {agentId: 'approval-agent', workGeneration: 1, pendingApproval: {cmdId: 'cmd-1'}, reportLog: [], terminalThisTurn: false};
-  const questionRecord: any = {agentId: 'question-agent', workGeneration: 1, reportLog: [{kind: 'question', at: 1}], terminalThisTurn: true};
+  const approvalRecord: any = {agentId: 'approval-agent', workGeneration: 1, pendingApproval: {cmdId: 'cmd-1'}, reportLog: []};
+  const questionRecord: any = {agentId: 'question-agent', workGeneration: 1, reportLog: [{kind: 'question', at: 1}]};
   h.registry.set(approvalRecord.agentId, approvalRecord);
   h.registry.set(questionRecord.agentId, questionRecord);
   pushToLead(h.pi, h.registry, approvalRecord, 'ws-agent-approval', {cmd_id: 'cmd-1', request: 'approve'}, 'steer');
@@ -215,7 +214,7 @@ test('approval and question steer with no older hold keep their individual custo
 
 test('an actionable steer joins an older held followUp instead of overtaking FIFO', () => {
   const h = harness(); h.busy();
-  const approvalRecord: any = {agentId: 'approval-agent', workGeneration: 1, pendingApproval: {cmdId: 'cmd-1'}, reportLog: [], terminalThisTurn: false};
+  const approvalRecord: any = {agentId: 'approval-agent', workGeneration: 1, pendingApproval: {cmdId: 'cmd-1'}, reportLog: []};
   h.registry.set(approvalRecord.agentId, approvalRecord);
   h.push('followUp', 'progress first');
   pushToLead(h.pi, h.registry, approvalRecord, 'ws-agent-approval', {cmd_id: 'cmd-1', request: 'approve second'}, 'steer');
@@ -255,15 +254,15 @@ for (const steeringMode of ['one-at-a-time', 'all'] as const) test(`agent_end ba
 
 test('snapshot-time validation marks stale approval and question controls superseded', () => {
   const h = harness(); h.busy();
-  const approvalRecord: any = {agentId: 'approval-agent', workGeneration: 1, pendingApproval: {cmdId: 'cmd-1'}, reportLog: [], terminalThisTurn: false};
+  const approvalRecord: any = {agentId: 'approval-agent', workGeneration: 1, pendingApproval: {cmdId: 'cmd-1'}, reportLog: []};
   const questionEntry = {kind: 'question', at: 1};
-  const questionRecord: any = {agentId: 'question-agent', workGeneration: 2, reportLog: [questionEntry], terminalThisTurn: true};
+  const questionRecord: any = {agentId: 'question-agent', workGeneration: 2, reportLog: [questionEntry]};
   h.registry.set(approvalRecord.agentId, approvalRecord);
   h.registry.set(questionRecord.agentId, questionRecord);
   pushToLead(h.pi, h.registry, approvalRecord, 'ws-agent-approval', {cmd_id: 'cmd-1', request: 'approve'}, 'followUp');
   pushToLead(h.pi, h.registry, questionRecord, 'ws-agent-question', {question: 'continue?'}, 'followUp');
   approvalRecord.pendingApproval = {cmdId: 'cmd-2'};
-  questionRecord.terminalThisTurn = false;
+  questionRecord.workGeneration = 3;
 
   h.end();
 
@@ -277,16 +276,16 @@ test('snapshot-time validation marks stale approval and question controls supers
 
 test('one boundary batch carries every push family plus the owner summary in strict arrival order', () => {
   const h = harness(); h.busy(); leadCompactingRef.current = true;
-  const approvalRecord: any = {agentId: 'approval-agent', workGeneration: 1, pendingApproval: {cmdId: 'cmd-1'}, reportLog: [], terminalThisTurn: false};
+  const approvalRecord: any = {agentId: 'approval-agent', workGeneration: 1, pendingApproval: {cmdId: 'cmd-1'}, reportLog: []};
   const questionEntry = {kind: 'question', at: 1};
-  const questionRecord: any = {agentId: 'question-agent', workGeneration: 1, reportLog: [questionEntry], terminalThisTurn: true};
+  const questionRecord: any = {agentId: 'question-agent', workGeneration: 1, reportLog: [questionEntry]};
   h.registry.set(approvalRecord.agentId, approvalRecord);
   h.registry.set(questionRecord.agentId, questionRecord);
   pushToLead(h.pi, h.registry, undefined, 'ws-agent-report', {report: 'progress'}, 'followUp');
   pushToLead(h.pi, h.registry, approvalRecord, 'ws-agent-approval', {cmd_id: 'cmd-1', request: 'approve'}, 'steer');
   pushToLead(h.pi, h.registry, questionRecord, 'ws-agent-question', {question: 'continue?'}, 'steer');
   pushToLead(h.pi, h.registry, undefined, 'ws-agent-advisory', {advisory: 'stalled'}, 'followUp');
-  pushToLead(h.pi, h.registry, undefined, 'ws-agent-report', {kind: 'final', report: 'done'}, 'followUp');
+  pushToLead(h.pi, h.registry, undefined, 'ws-agent-report', {report: 'done'}, 'followUp');
   pushToLead(h.pi, h.registry, undefined, 'ws-agent-settled', {reason: 'idle'}, 'followUp');
   pushToLead(h.pi, h.registry, undefined, 'ws-agent-orphaned', {count: 1}, 'followUp');
   sendToLead(h.pi, {customType: 'ws-thread-summary', content: 'owner summary', display: true, details: {threadId: 'q1'}}, 'followUp');
@@ -304,9 +303,9 @@ test('one boundary batch carries every push family plus the owner summary in str
 
 test('snapshot-time validation keeps current controls actionable with a trailing identity summary', () => {
   const h = harness(); h.busy();
-  const approvalRecord: any = {agentId: 'approval-agent', workGeneration: 1, pendingApproval: {cmdId: 'cmd-1'}, reportLog: [], terminalThisTurn: false};
+  const approvalRecord: any = {agentId: 'approval-agent', workGeneration: 1, pendingApproval: {cmdId: 'cmd-1'}, reportLog: []};
   const questionEntry = {kind: 'question', at: 1};
-  const questionRecord: any = {agentId: 'question-agent', workGeneration: 2, reportLog: [questionEntry], terminalThisTurn: true};
+  const questionRecord: any = {agentId: 'question-agent', workGeneration: 2, reportLog: [questionEntry]};
   h.registry.set(approvalRecord.agentId, approvalRecord);
   h.registry.set(questionRecord.agentId, questionRecord);
   pushToLead(h.pi, h.registry, approvalRecord, 'ws-agent-approval', {cmd_id: 'cmd-1', request: 'approve'}, 'followUp');
@@ -340,17 +339,15 @@ test('terminal obligations move only on accepted batch delivery and restore on r
   const h = harness(); h.busy();
   const calls: string[] = [];
   const terminal: any = {
-    releaseObligation: () => calls.push('release'),
-    restoreObligation: () => calls.push('restore'),
     afterEnqueue: () => calls.push('after'),
   };
-  pushToLead(h.pi, h.registry, undefined, 'ws-agent-report', {kind: 'final', report: 'done'}, 'followUp', terminal);
+  pushToLead(h.pi, h.registry, undefined, 'ws-agent-report', {report: 'done'}, 'followUp', terminal);
   assert.equal(terminal.state, 'held');
   h.failCustom(); h.end();
-  assert.deepEqual(calls, ['release', 'restore']);
+  assert.deepEqual(calls, []);
   assert.equal(terminal.state, 'held');
   h.allowCustom(); h.settle(); h.start();
-  assert.deepEqual(calls, ['release', 'restore', 'release', 'after']);
+  assert.deepEqual(calls, ['after']);
   assert.equal(terminal.state, 'enqueued');
   h.emit('session_shutdown');
 });

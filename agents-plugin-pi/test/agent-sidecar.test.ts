@@ -138,7 +138,7 @@ describe("captureOrphans", () => {
 
   test("records the state at shutdown and the last-report time (relay #2: the roll-call needs both)", () => {
     const registry: RpcAgentRegistry = new Map([
-      ["busy", record({ agentId: "busy", client: {} as RpcClient, running: true, reportLog: [{ at: 1_000 }, { kind: "final", at: 2_000 }] })],
+      ["busy", record({ agentId: "busy", client: {} as RpcClient, running: true, reportLog: [{ at: 1_000 }, { at: 2_000 }] })],
       ["quiet", record({ agentId: "quiet", client: {} as RpcClient, running: false })],
     ]);
     const [busy, quiet] = captureOrphans(registry);
@@ -163,7 +163,7 @@ describe("captureOrphans", () => {
           spawnRole: "fork",
           running: true,
           streaming: true,
-          reportLog: [{ kind: "final", at: 1 }],
+          reportLog: [{ at: 1 }],
         }),
       ],
     ]);
@@ -666,23 +666,6 @@ describe("reviveOrphans (role wiring re-armed on revival)", () => {
 
     const worker = revivedRegistry.get("worker-1")!;
     assert.equal(worker.onQuestionReport, undefined, "a plain worker has no role wiring to re-arm");
-  });
-
-  test("a revived fork's anti-bleed loop is restored on its first resume", () => {
-    const parsed = parseOrphans(serializeOrphans([{ ...(captureOrphans(new Map([["f", record({ agentId: "f", spawnRole: "fork", client: {} as RpcClient })]]))[0]) }]));
-    const registry: RpcAgentRegistry = new Map();
-    reviveOrphans(registry, parsed, { fork: (rec) => armForkRoleWiring(pi, registry, rec) });
-
-    const fork = registry.get("f")!;
-    let subscriptions = 0;
-    fork.client = {
-      onEvent() {
-        subscriptions += 1;
-        return () => {};
-      },
-    } as unknown as RpcClient;
-    fork.onResume?.(fork);
-    assert.equal(subscriptions, 1, "sendToAgent's dormant-resume branch fires this once the client exists");
   });
 
   test("an execute-worker's approval relay is re-armed on the record itself, not left to the resume call site", () => {

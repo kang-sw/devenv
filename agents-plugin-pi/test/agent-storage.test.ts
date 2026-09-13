@@ -215,7 +215,7 @@ describe("agent storage", () => {
 
       const protections = [
         { threadBound: true }, { ownerHeld: true }, { pendingQuestion: true },
-        { waitingOnChildren: true }, { expectedReport: true }, { pendingApprovalCommandId: "call-1" },
+        { waitingOnChildren: true }, { pendingDelivery: true }, { pendingApprovalCommandId: "call-1" },
       ];
       for (const [index, protection] of protections.entries()) {
         const protectedChild = allocateAgentHome(context, `agent-protected-${index}`, "execute-worker");

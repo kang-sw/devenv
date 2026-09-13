@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { applyForkAffinity, captureForkContext, captureRegisteredTools, classifyForkRegistrations, compareForkRegistrations, isCompletionCriticalForkTool, parseForkContext, readForkLaunchContext, restoreForkContext, writePrivateJson } from "../src/fork-context.ts";
+import { applyForkAffinity, captureForkContext, captureRegisteredTools, classifyForkRegistrations, compareForkRegistrations, parseForkContext, readForkLaunchContext, restoreForkContext, writePrivateJson } from "../src/fork-context.ts";
 
 describe("ForkContext", () => {
   const context = captureForkContext({
@@ -40,8 +40,6 @@ describe("ForkContext", () => {
     });
     assert.match(compareForkRegistrations(context.registeredTools, [...actual].reverse()) ?? "", /reordered callable tools/);
     assert.match(compareForkRegistrations(context.registeredTools, [{ ...actual[0], description: "changed" }, actual[1]]) ?? "", /changed callable tools: read/);
-    assert.equal(isCompletionCriticalForkTool("ws-report-to-lead"), true);
-    assert.equal(isCompletionCriticalForkTool("read"), false);
   });
 
   test("rejects an envelope that omits present context rather than taking the legacy path", () => {

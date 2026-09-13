@@ -1010,7 +1010,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     test(`carry survives ${interruption} until an eligible ordinary reminder`, async () => {
       const clock = fakeClock();
       const pi = fakePi();
-      const registry = new Map([["child", { threadBound: false, running: false, terminalThisTurn: false }]]) as unknown as RpcAgentRegistry;
+      const registry = new Map([["child", { threadBound: false, running: false }]]) as unknown as RpcAgentRegistry;
       registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock, rpcRegistryRef: { current: registry } });
       let idle = true;
       const { ctx } = fakeCtx(() => idle);
@@ -1627,7 +1627,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     test("a running child at fire time yields — no send, and a later settle with nothing running re-arms and fires normally", () => {
       const clock = fakeClock();
       const pi = fakePi();
-      const registry = new Map([["child-1", { threadBound: false, running: true, terminalThisTurn: false }]]) as unknown as RpcAgentRegistry;
+      const registry = new Map([["child-1", { threadBound: false, running: true }]]) as unknown as RpcAgentRegistry;
       const rpcRegistryRef = { current: registry };
       registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer, rpcRegistryRef });
       const { ctx } = fakeCtx();
@@ -1865,7 +1865,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       const threshold3Path = writeConfig("streak-threshold-3.json", JSON.stringify({ runaway_threshold: 3 }));
       const clock = fakeClock();
       const pi = fakePi();
-      const registry = new Map([["child-1", { threadBound: false, running: true, terminalThisTurn: false }]]) as unknown as RpcAgentRegistry;
+      const registry = new Map([["child-1", { threadBound: false, running: true }]]) as unknown as RpcAgentRegistry;
       const rpcRegistryRef = { current: registry };
       registerGoalLoop(pi.api, { goalLoopConfigPath: threshold3Path, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer, rpcRegistryRef });
       const { ctx } = fakeCtx();

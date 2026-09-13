@@ -32,15 +32,22 @@ export function installSubtreePublisher(registry: RpcAgentRegistry, channel: Sub
   publishers.set(registry, { revision: 0, delegated: false, dispatching: 0, channel, deliveries });
   publishSubtree(registry);
 }
+export function subtreeOutstanding(registry: RpcAgentRegistry): number {
+  let count = 0;
+  for (const record of registry.values()) {
+    if (record.waitingOnChildren || (record.terminalDelivery && record.terminalDelivery.state !== "enqueued")) count++;
+  }
+  return count;
+}
 export function publishSubtree(registry: RpcAgentRegistry | undefined, dispatched = false): SubtreeSnapshot | undefined {
   if (!registry) return undefined;
   const p = publishers.get(registry);
   if (!p) return undefined;
   if (dispatched) { p.revision++; p.delegated = true; }
-  let outstanding = 0, active = p.dispatching;
+  const outstanding = subtreeOutstanding(registry);
+  let active = p.dispatching;
   for (const r of registry.values()) {
-    if (r.expectedReport || r.waitingOnChildren) outstanding++;
-    if (r.running || r.streaming || r.threadBound || r.lastWriter === "owner") active++;
+    if (r.running || r.streaming) active++;
   }
   p.delegated ||= registry.size > 0;
   const snapshot = { nonce: p.channel?.nonce ?? "local", outstanding, active, deliveries: p.deliveries(), delegated: p.delegated, revision: p.revision };
@@ -53,9 +60,4 @@ export function beginSubtreeDispatch(registry: RpcAgentRegistry): () => void {
   publisher.dispatching++;
   publishSubtree(registry);
   return () => { publisher.dispatching--; publishSubtree(registry); };
-}
-export function assertSubtreeFinal(registry: RpcAgentRegistry): number {
-  const state = publishSubtree(registry);
-  if (state && subtreeWaiting(state)) throw new Error("ws-pi-agent: final rejected while child results are outstanding; consume their reports, follow up or explicitly stop them, then submit a fresh final");
-  return state?.revision ?? 0;
 }

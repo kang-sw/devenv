@@ -205,8 +205,8 @@ describe("buildAuditPickerItems", () => {
     const NOW = Date.parse("2026-09-09T10:00:00.000Z");
     const owner = record({ agentId: "owner-agent-id", alias: "scout", threadBound: true, runStartedAt: NOW - 180_000, telemetry: { version: 1, origin: { sessionId: "owner", sessionPath: "/tmp/owner", emptyPrefix: true }, model: "gpt-5.6-terra", contextTokens: 0 } });
     const approval = record({ agentId: "appr-agent-id", title: "ignored title", pendingApproval: { cmdId: "c1", command: "rm -rf /" }, runStartedAt: NOW - 120_000, observedModel: "stored-model", observedContextTokens: 132_400 });
-    const runningOld = record({ agentId: "run-old-id", alias: "old-runner", client: {} as never, runStartedAt: NOW - 60_000, telemetry: { version: 1, origin: { sessionId: "old", sessionPath: "/tmp/old", emptyPrefix: true }, model: "large-model", contextTokens: 1_354_100 } });
-    const runningNew = record({ agentId: "run-new-id", alias: "new-runner", client: {} as never, runStartedAt: NOW - 5_000 });
+    const runningOld = record({ agentId: "run-old-id", alias: "old-runner", client: {} as never, running: true, runStartedAt: NOW - 60_000, telemetry: { version: 1, origin: { sessionId: "old", sessionPath: "/tmp/old", emptyPrefix: true }, model: "large-model", contextTokens: 1_354_100 } });
+    const runningNew = record({ agentId: "run-new-id", alias: "new-runner", client: {} as never, running: true, runStartedAt: NOW - 5_000 });
     const dormantRecent = record({ agentId: "dorm-recent-id", alias: "recent-dormant", lastLeadPromptAt: NOW - 1_000 });
     const dormantOld = record({ agentId: "dorm-old-id", alias: "old-dormant", lastLeadPromptAt: NOW - 100_000 });
 
@@ -224,7 +224,7 @@ describe("buildAuditPickerItems", () => {
 
   test("clamps future run and activity timestamps to zero-duration labels", () => {
     const NOW = Date.parse("2026-09-09T10:00:00.000Z");
-    const running = record({ agentId: "future-running-id", client: {} as never, runStartedAt: NOW + 60_000 });
+    const running = record({ agentId: "future-running-id", client: {} as never, running: true, runStartedAt: NOW + 60_000 });
     const dormant = record({ agentId: "future-dormant-id", lastLeadPromptAt: NOW + 60_000 });
     assert.deepEqual(buildAuditPickerItems(registryOf(running, dormant), NOW), [
       { value: "future-running-id", label: "future-r · running · — · ctx ? · running for 0s" },
@@ -419,6 +419,7 @@ describe("registerAuditCommands", () => {
       agentId: "orphan-copy-hotfix-id",
       alias: "orphan-copy-hotfix",
       client: {} as never,
+      running: true,
       runStartedAt: Date.now() - 180_000,
       telemetry: { version: 1, origin: { sessionId: "picker", sessionPath: "/tmp/picker", emptyPrefix: true }, model: "provider/gpt-5.6-terra", contextTokens: 132_400 },
     }));
