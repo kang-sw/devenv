@@ -28,6 +28,7 @@ EXPECTED_SKILLS = {
     "lead-delegate",
     "lead-revive",
     "lead-scope-worktree",
+    "lead-use-mailbox",
     "mcp-server-repair",
 }
 
@@ -69,6 +70,7 @@ POINTER_TAIL_TITLES = {
     "lead-check-blockers": "Check Blockers",
     "lead-workflow-manual": "Workflow Manual",
     "lead-scope-worktree": "Scope Worktree",
+    "lead-use-mailbox": "Use Mailbox",
 }
 
 FORBIDDEN_PATTERNS = {
