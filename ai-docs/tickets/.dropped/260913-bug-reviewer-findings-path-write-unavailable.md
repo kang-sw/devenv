@@ -1,5 +1,6 @@
 ---
 title: Reviewer delegates cannot write required findings artifacts
+dropped: 2026-09-13
 ---
 
 # Reviewer delegates cannot write required findings artifacts
@@ -13,3 +14,8 @@ The partitioned code-review playbooks require every reviewer to write a detailed
 ### Phase 1: Align reviewer permissions with the findings-artifact contract
 
 Trace how reviewer playbooks are rendered and how spawned reviewer tool capabilities are assigned. Preserve read-only repository access while providing a bounded way to write the allocated findings path, or change the review artifact contract so the lead owns persistence explicitly. Cover the selected contract with a regression that exercises a spawned reviewer rather than only static playbook text.
+
+
+## Resolution (2026-09-13)
+
+Duplicate capture absorbed by `260912-bug-ws-pi-readonly-reviewer-artifact-contract`. Preserve this capture's spawned-reviewer integration requirement and context-meter provenance in the canonical ticket.
