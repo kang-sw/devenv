@@ -181,3 +181,104 @@ func TestShouldNotifyNamedInboxUnreadRejectsMalformedSlug(t *testing.T) {
 		t.Fatal("ShouldNotifyNamedInboxUnread accepted a slug with no @scope suffix")
 	}
 }
+
+// seedWorktreeInboxQueue seeds root's own worktree-scope mailbox store
+// (distinct from the machine-scope store seedHookPeekQueue targets) with
+// name's queue holding exactly count generic envelopes.
+func seedWorktreeInboxQueue(t *testing.T, root, name string, count int) {
+	t.Helper()
+	path, err := WorktreePath(root)
+	if err != nil {
+		t.Fatalf("WorktreePath(%s): %v", root, err)
+	}
+	if err := WithLock(path, func(store *StoreFile) error {
+		store.Presence[name] = Presence{Name: name, Scope: ScopeWorktree, Owner: "someone-else-key", LastSeen: "2026-09-13T00:00:00Z"}
+		store.Queues[name] = nil
+		for i := 0; i < count; i++ {
+			store.Queues = AppendQueue(store.Queues, name, Envelope{Content: "msg", SentAt: "2026-09-13T00:00:00Z"})
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed worktree inbox %s at %s: %v", name, root, err)
+	}
+}
+
+// TestShouldNotifyNamedInboxUnreadIsolatesWatermarkPerRoot is the direct
+// regression test for the round-2 correctness finding on the round-1
+// Critical-2 fix: a prior version of the watermark keyed its on-disk state
+// only by (scope, name) under a single machine-global cache root, so two
+// DIFFERENT worktree roots sharing the same mailbox name (e.g.
+// "lead@worktree", the exact per-role naming pattern this scope exists to
+// support) would collide on one watermark file despite tracking two
+// independent queues — reopening the "unbounded re-block" failure mode
+// Critical-2 fixed, just across roots instead of across owners. The fix
+// derives the watermark path from the resolved store's own directory
+// (root-scoped by PathForScope/WorktreePath) instead of a fixed cache
+// root. This test seeds two separate git worktree fixtures with the SAME
+// name and the SAME static (never-changing) queue length, and asserts
+// both roots notify independently rather than one suppressing the other.
+func TestShouldNotifyNamedInboxUnreadIsolatesWatermarkPerRoot(t *testing.T) {
+	withHookPeekTestCacheHome(t)
+
+	rootA := initGitFixture(t)
+	rootB := initGitFixture(t)
+
+	// Same name, same unread count (1), on two structurally distinct
+	// worktree roots — the exact configuration a global (scope, name)-keyed
+	// watermark would collide on.
+	seedWorktreeInboxQueue(t, rootA, "lead", 1)
+	seedWorktreeInboxQueue(t, rootB, "lead", 1)
+
+	notifyA1, unreadA1, err := ShouldNotifyNamedInboxUnread("lead@worktree", rootA)
+	if err != nil {
+		t.Fatalf("root A first firing: %v", err)
+	}
+	if !notifyA1 || unreadA1 != 1 {
+		t.Fatalf("root A first firing = (%v, %d), want (true, 1)", notifyA1, unreadA1)
+	}
+
+	// Root B must ALSO get its own first-firing notify, unaffected by root
+	// A's watermark having just advanced at the identical count: if the
+	// watermark were still keyed only by (scope, name), this would
+	// incorrectly return (false, 1) here, matching root A's just-written
+	// state instead of root B's own (nonexistent) watermark.
+	notifyB1, unreadB1, err := ShouldNotifyNamedInboxUnread("lead@worktree", rootB)
+	if err != nil {
+		t.Fatalf("root B first firing: %v", err)
+	}
+	if !notifyB1 || unreadB1 != 1 {
+		t.Fatalf("root B first firing = (%v, %d), want (true, 1) — a root-scoped watermark must not let root A's state suppress root B's own first notify", notifyB1, unreadB1)
+	}
+
+	// Both roots repeat-fire at their own unchanged count: both must now be
+	// suppressed independently (each already notified once for count 1).
+	notifyA2, _, err := ShouldNotifyNamedInboxUnread("lead@worktree", rootA)
+	if err != nil {
+		t.Fatalf("root A second firing: %v", err)
+	}
+	if notifyA2 {
+		t.Fatalf("root A second firing = true, want false (already notified at count 1)")
+	}
+	notifyB2, _, err := ShouldNotifyNamedInboxUnread("lead@worktree", rootB)
+	if err != nil {
+		t.Fatalf("root B second firing: %v", err)
+	}
+	if notifyB2 {
+		t.Fatalf("root B second firing = true, want false (already notified at count 1)")
+	}
+
+	// The two watermark files must physically differ on disk.
+	pathA, err := WorktreePath(rootA)
+	if err != nil {
+		t.Fatalf("WorktreePath(rootA): %v", err)
+	}
+	pathB, err := WorktreePath(rootB)
+	if err != nil {
+		t.Fatalf("WorktreePath(rootB): %v", err)
+	}
+	watermarkA := hookNotifyStatePath(filepath.Dir(pathA), "lead")
+	watermarkB := hookNotifyStatePath(filepath.Dir(pathB), "lead")
+	if watermarkA == watermarkB {
+		t.Fatalf("watermark path collision: root A and root B both resolved to %s", watermarkA)
+	}
+}

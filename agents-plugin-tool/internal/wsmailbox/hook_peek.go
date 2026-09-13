@@ -21,8 +21,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-
-	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // PeekNamedInboxUnread reports how many messages are currently queued for
@@ -45,9 +43,9 @@ func PeekNamedInboxUnread(slug, root string) (int, error) {
 	return len(store.Queues[name]), nil
 }
 
-// hookNotifyDirName is the on-disk directory for ShouldNotifyNamedInboxUnread's
-// per-slug watermark files, a sibling of listening.go's marker directory
-// under the same cache root.
+// hookNotifyDirName is the on-disk subdirectory, sibling of the mailbox
+// store file itself, holding ShouldNotifyNamedInboxUnread's per-name
+// watermark files.
 const hookNotifyDirName = "mailbox-codex-stop-notified"
 
 // hookNotifyState is one slug's watermark: the queue length as of the last
@@ -56,25 +54,41 @@ type hookNotifyState struct {
 	Count int `json:"count"`
 }
 
-// hookNotifyStatePath resolves the watermark file path for a validated
-// (name, scope) pair. Both come from ParseSlugScope, which already bounds
-// name to namePattern and scope to the three-value enum, so the joined
-// "<scope>-<name>.json" filename needs no separate path-safety regex the
-// way listening.go's caller-supplied session_key does.
-func hookNotifyStatePath(name string, scope Scope) (string, error) {
-	root, err := wsstate.CacheRoot(wsstate.Options{})
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(root, hookNotifyDirName, string(scope)+"-"+name+".json"), nil
+// hookNotifyStatePath resolves the watermark file path for name, given
+// storeDir — the directory of the SAME resolved store file
+// ShouldNotifyNamedInboxUnread just read (filepath.Dir of PathForScope's
+// result), not a separate machine-global cache root.
+//
+// This must key off the actual resolved store directory rather than a
+// fixed machine-wide root: for ScopeWorktree/ScopeClone, PathForScope
+// resolves a *different* physical store per caller-supplied root (each
+// worktree/clone gets its own file — see store.go's WorktreePath/
+// ClonePath), so two different worktree roots that both happen to use the
+// same mailbox name (e.g. "lead@worktree", the common per-role naming
+// pattern this scope exists to support) would otherwise share one
+// watermark file despite tracking two independent queues. A prior version
+// of this function built the path from a fixed wsstate.CacheRoot()
+// instead, keyed only on (scope, name); round-2 review caught that this
+// silently reopens the exact "unbounded re-block" failure mode Critical-2
+// fixed, just across roots instead of across owners: two same-length,
+// never-draining roots would suppress each other's genuine notification,
+// or two different-length roots would alternate-fire forever. Deriving the
+// watermark path from storeDir instead means it is automatically as
+// root-scoped as the store it tracks, with no extra bookkeeping — scope no
+// longer needs to appear in the filename either, since storeDir already
+// disambiguates every scope (machine's is the single global config
+// directory; a worktree/clone's is that root's own per-project cache
+// directory) as well as every distinct root within worktree/clone scope.
+func hookNotifyStatePath(storeDir, name string) string {
+	return filepath.Join(storeDir, hookNotifyDirName, name+".json")
 }
 
-// notifyStateFileSafe re-validates that name/scope alone could not have
-// produced a path outside the cache root, defending the same class of bug
-// listening.go's listeningKeyPattern guards against even though both inputs
-// here are already regex-bounded by ParseSlugScope. Cheap and cannot fail
-// for a value ParseSlugScope accepted; kept as a named check so a future
-// change to namePattern/Scope does not silently reopen a traversal.
+// hookNotifyNameSafe re-validates that name alone could not have produced a
+// path outside storeDir, defending the same class of bug listening.go's
+// listeningKeyPattern guards against even though name is already
+// regex-bounded by ParseSlugScope. Cheap and cannot fail for a value
+// ParseSlugScope accepted; kept as a named check so a future change to
+// namePattern does not silently reopen a traversal.
 var hookNotifyNameSafe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
 // ShouldNotifyNamedInboxUnread reports whether a Codex Stop hook should emit
@@ -110,10 +124,7 @@ func ShouldNotifyNamedInboxUnread(slug, root string) (bool, int, error) {
 	if !hookNotifyNameSafe.MatchString(name) {
 		return false, unread, fmt.Errorf("wsmailbox: invalid mailbox name %q for a notify watermark path", name)
 	}
-	statePath, err := hookNotifyStatePath(name, scope)
-	if err != nil {
-		return false, unread, err
-	}
+	statePath := hookNotifyStatePath(filepath.Dir(path), name)
 
 	if unread == 0 {
 		// Drained (or never had anything): clear the watermark so a future
