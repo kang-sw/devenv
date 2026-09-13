@@ -267,14 +267,14 @@ func TestBlockedByPromotionWarning(t *testing.T) {
 		consumerFM string
 		prereqs    map[string]string // stem -> "status|body"
 		wantWarn   bool
-		mentions   string
+		mentions   []string
 	}{
 		{
 			name:       "ready-but-unexecuted bare stem warns",
 			consumerFM: "blocked-by: 260101-feat-a\n",
 			prereqs:    map[string]string{"260101-feat-a": "ready|" + prereqWithPhases("A", false, false)},
 			wantWarn:   true,
-			mentions:   "260101-feat-a",
+			mentions:   []string{"260101-feat-a"},
 		},
 		{
 			name:       "done prerequisite is silent",
@@ -293,7 +293,23 @@ func TestBlockedByPromotionWarning(t *testing.T) {
 			consumerFM: "blocked-by: 260101-feat-a#2\n",
 			prereqs:    map[string]string{"260101-feat-a": "ready|" + prereqWithPhases("A", true, false)},
 			wantWarn:   true,
-			mentions:   "260101-feat-a#2",
+			mentions:   []string{"260101-feat-a#2"},
+		},
+		{
+			name:       "multi-edge names every pending prerequisite (join path)",
+			consumerFM: "blocked-by:\n  - 260101-feat-a\n  - 260101-feat-b\n",
+			prereqs: map[string]string{
+				"260101-feat-a": "ready|" + prereqWithPhases("A", false, false),
+				"260101-feat-b": "ready|" + prereqWithPhases("B", false, false),
+			},
+			wantWarn: true,
+			mentions: []string{"260101-feat-a", "260101-feat-b"},
+		},
+		{
+			name:       "malformed edge stays silent here (closure/dispatch gate owns it)",
+			consumerFM: "blocked-by: not-a-stem\n",
+			prereqs:    map[string]string{},
+			wantWarn:   false,
 		},
 		{
 			name:       "soft related edge never warns",
@@ -326,8 +342,10 @@ func TestBlockedByPromotionWarning(t *testing.T) {
 				if warning == "" {
 					t.Fatalf("want an advisory warning on %q, got none", tc.name)
 				}
-				if tc.mentions != "" && !strings.Contains(warning, tc.mentions) {
-					t.Fatalf("warning = %q, want it to mention %q", warning, tc.mentions)
+				for _, mention := range tc.mentions {
+					if !strings.Contains(warning, mention) {
+						t.Fatalf("warning = %q, want it to mention %q", warning, mention)
+					}
 				}
 			} else if warning != "" {
 				t.Fatalf("want no advisory warning, got %q", warning)
