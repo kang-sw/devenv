@@ -148,6 +148,7 @@ narrow, high-value class of tasks.
   read the bundled conventions first (or the convention text is injected as
   context) rather than trusting the embedded prompt to encode them.
 - **Run inside the track worktree** so any edit damage is bounded to a branch.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
 
 ## Spec Impact
 
@@ -158,6 +159,22 @@ model and `canUseTool` enforcement, the closed-tool list, the fan-out/join and
 concurrency-cap behavior, and the resume-by-stem handle contract. Caller-visible
 change: the lead gains a synchronous delegation tool that returns per-item
 results and durable 3-word agent handles.
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-pi/src/claude-delegate.ts, agents-plugin-pi/src/claude-sdk.ts, agents-plugin-pi/src/claude-delegate-prompts.ts, and existing claude-*.test.ts files |
+| scope.surface | public-interface | the registered ws-claude tool schema and result contract evolve |
+| scope.new_public_symbol | no | ws-claude is already registered by agents-plugin-pi/src/claude-delegate.ts |
+| scope.new_type_contract | yes | edit-targets, rewrite, resume, and design-review extend the tool item/result contract |
+| scope.test_surface | existing | agents-plugin-pi/test/claude-contract.test.ts, agents-plugin-pi/test/claude-delegate.test.ts, agents-plugin-pi/test/claude-lifecycle.test.ts, agents-plugin-pi/test/claude-sdk.test.ts, and agents-plugin-pi/test/claude-session.test.ts |
+| complexity.reuse_points | confirmed | reuse the existing session controller, SDK tool gate, and Claude task-frame modules |
+| complexity.side_effect_risk | high | rewrite writes worktree files while cancellation manages owned Claude child processes |
+| risk.correctness | high | canonical edit-target containment and concurrent-target rejection must prevent escapes and collisions |
+| risk.fit | high | design-review must adapt the canonical playbook without passing credentials or widening the closed tool profile |
+| risk.test | high | containment, symlink, concurrent rewrite, resume, and context-adaptation cases need deterministic coverage |
+| risk.security_or_contract | high | edit authorization and the public delegation contract gain write and resume capabilities |
 
 ## Phases
 
