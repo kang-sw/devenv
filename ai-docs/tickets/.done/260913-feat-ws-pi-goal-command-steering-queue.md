@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: d5a72d8e5e3a919f
 sage-review-completeness-reviewed: d5a72d8e5e3a919f
+completed: 2026-09-13
 ---
 
 # Pi goal command: queue updates during active turns
@@ -58,6 +59,14 @@ Add a typed held-input entry for validated goal replacement, integrate it with t
 
 Verify active-turn acceptance and acknowledgement, idle behavior, one-batch FIFO owner rendering with prose on both sides, multiple queued replacements, no per-prose-segment goal-state semantics, no synthetic model message for the command, reminder text using only the resulting goal, immediate terminal generation invalidating older queued replacements, a post-terminal replacement using the new generation, delivery-time failure preserving the then-current goal, wake batching, queue cleanup, and restart/compaction behavior with the held-push queue explicitly non-persistent today (`agents-plugin-pi/src/spawner.ts#L1200-L1201`, `agents-plugin-pi/src/spawner.ts#L1411-L1414`).
 
+### Result (4d1d9cf) - 2026-09-13
+
+- Added typed `goal-replacement` controls to the existing held-input FIFO. Busy `/goal <goal>` commands now acknowledge queue admission immediately, apply in order at a safe boundary, render owner-visible applied/failed outcomes, and stay out of model prose.
+- Preserved immediate idle replacement and terminal `stop`/`clear`/`reset` behavior. Terminal transitions invalidate older queued controls, while later controls use the new generation; control-only drains create no synthetic model turn and compaction release schedules the resulting goal's reminder.
+- Mixed prose/control retry outcomes are latched to avoid duplicate state application. Review fix `c5013663` deferred mixed-snapshot control application until confirmed delivery so an intervening terminal transition remains authoritative and added a terminal-only stale-control regression test.
+- Verification: focused goal/control boundary tests passed (8/8); `cd agents-plugin-pi && npm test` passed (1675 passed, 0 failed, 2 skipped). Partitioned correctness, fit, and test review completed; round-two correctness and test verification reported clean with no remaining findings.
+- Decision: queued controls remain volatile with the existing held-input FIFO and are dropped on shutdown rather than introducing persistence or a second queue.
+
 ## Sage Review Round 1 (2026-09-13)
 
 ### Design Reviewer — block
@@ -71,3 +80,8 @@ Verify active-turn acceptance and acknowledgement, idle behavior, one-batch FIFO
 
 | # | Title | Severity |
 |---|-------|----------|
+
+
+## Resolution (2026-09-13)
+
+Implemented queued `/goal <goal>` steering through the existing held-input FIFO, with safe-boundary application, terminal-generation invalidation, model-prose omission, compaction/retry/shutdown coverage, and clean partitioned review.
