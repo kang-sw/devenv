@@ -47,6 +47,8 @@ func main() {
 		gitCommand(os.Args[2:])
 	case "tickets":
 		ticketsCommand(os.Args[2:])
+	case "mailbox":
+		mailboxCommand(os.Args[2:])
 	case "tools":
 		toolsCommand(os.Args[2:])
 	case "call":
@@ -58,7 +60,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|git|tickets>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|git|tickets|mailbox>")
 }
 
 func doctor(args []string) {
