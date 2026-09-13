@@ -182,6 +182,51 @@ gated nor refused, and the selector still infers an order for it from prose
 `related:` hints (no regression for legacy artifacts)**; a soft `related:` edge
 never triggers the hard gate; and no gate path reads or writes a sage stamp.
 
+### Result (a03be36) - 2026-09-13
+
+Landed the typed `blocked-by:` edge and both bound gates.
+
+- **Typed edge + parsing.** New optional `blocked-by:` frontmatter key, parsed
+  on every projection into `TicketInfo.BlockedBy` (`agents-plugin-tool/internal/wsdoc/tickets.go`).
+  `agents-plugin-tool/internal/wsdoc/tickets_deps.go` holds `blockedByEntries`
+  (normalises scalar/list/map shapes), `parseBlockedByEdge` (bare `<stem>` =
+  Phase 0; `<stem>#<phaseN>` suffix, accepting `#2` and `#phase2`), and the
+  code-level landed-predicate (`edgeLanded`, `phaseResultPresent`,
+  `phaseNumberOf`).
+- **Dispatch gate.** `DispatchBlockFor` scans the whole board live
+  (`resolveFull`, incl. `.done/`/`.dropped/` and index-hidden entries) and
+  returns `DispatchBlock{blocking_stem, reason}` for the first unlanded edge. It
+  is wired into the `tickets.query` single-stem point-resolve branch only
+  (`agents-plugin-tool/internal/mcp/server.go`), surfaced in both text
+  (`formatTickets`) and JSON via the `dispatch_blocked` omitempty pointer, and
+  fails open on a scan error (by design; the promotion closure backstops the
+  `idea`/`todo` cases). lead-run honors it (refuse spawn, report blocker); the
+  tool description documents the field.
+- **Promotion closure.** `blockedByPromotionError` in
+  `agents-plugin-tool/internal/wsdoc/tickets_mutate.go`, fired only for
+  `TicketsMove(to: "ready")` before any write, refuses when a `blocked-by:`
+  prerequisite is neither in `ready/` nor `.done/` (status-only subset).
+- **Selector + mirrors.** `ticket-selector` orders `ready/` from the typed edge
+  with prose fallback; `lead-run` and `ticket-selector` playbook edits mirrored
+  to `agents-plugin-wsflow/` via the documented regen; both `manifest.json`
+  files updated. `blocked-by:` documented in the bundled ticket-conventions.
+
+Verification: `go build ./...`, `go vet ./...`, `go test ./...` (all packages
+pass, incl. new `internal/wsdoc/tickets_deps_test.go` and
+`internal/mcp/ticket_dispatch_gate_test.go`); `python3 -m unittest discover
+agents-plugin-wsflow/tests` (11 tests OK). Independent review: partitioned
+correctness/fit/test, round 1 then round 2 fix-verification — final verdict
+clean (2 round-1 Important test-coverage findings fixed: sage-stamp
+independence and multi-edge iteration; 1 fit Minor fixed: convention-doc entry
+for the new key).
+
+Decisions: dispatch gate computed in the MCP handler (not `readTicketFromBytes`)
+so the field never appears on discovery listings; a malformed/absent
+prerequisite blocks rather than being silently ignored, so a typo fails loud;
+the fail-open-on-scan-error, first-unlanded-edge-only reporting, and
+gate-runs-on-any-status point-resolve behaviors are accepted by design (recorded
+as Minor in review).
+
 ### Phase 2: Promotion-time advisory warning + design-reviewer solo-path advisory
 
 Add the softer, non-blocking layer on top of Phase 1's typed edge and gate. The

@@ -202,6 +202,14 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 		if match := ticketCategoryRE.FindStringSubmatch(stem); len(match) == 2 && nonImplementationCategories[match[1]] {
 			return TicketMutateResult{}, fmt.Errorf("%s tickets never enter ready/: %s is a %s ticket, a board artifact rather than an execution target; ready/ is the implementation queue", match[1], stem, match[1])
 		}
+		// Promotion closure: a typed blocked-by prerequisite must already be in
+		// ready/ or .done/ before the consumer lands. Placed before any write so
+		// the refusal is a genuine no-op. Status-only by design — the
+		// phase-granular ### Result predicate is the dispatch gate's job, and the
+		// same-batch case stays with the promotion playbook.
+		if err := blockedByPromotionError(root, scope, filepath.Join(root, filepath.FromSlash(oldPath))); err != nil {
+			return TicketMutateResult{}, err
+		}
 	}
 	newPath := ticketRelPath(to, stem)
 	// Both scope pre-flights run before prepareSageReviewForUpwardMove, which
