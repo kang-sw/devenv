@@ -268,6 +268,33 @@ pair of rewrite items touching disjoint files leaves both edited and unstaged;
 `rewrite` without `edit-targets` and a read-only preset with `edit-targets` are
 both rejected.
 
+### Result (b4bfb468) - 2026-09-13
+
+Phase 2 adds edit-scoped `rewrite` fan-out with exact canonical target
+authorization, scheduled overlap rejection, content-based `changed` reporting,
+and unstaged output. `Edit` and `Write` remain outside the SDK allowlist so every
+attempt passes through `canUseTool`; traversal, out-of-root paths, symlink
+escapes, dangling symlinks, Windows cross-volume paths, unauthorized in-root
+files, and mutable aliases fail closed. Authorized new leaves require an
+existing canonical in-worktree parent. The rewrite frame reads project guidance
+to prevent convention drift.
+
+Implementation landed in `2e8f846e`; Round 1 review fixes landed in `b4bfb468`.
+Partitioned correctness, fit, and test review completed in two rounds. Round 1's
+two Critical containment findings and five Important fit/test findings were all
+resolved; Round 2 found each specified fix complete with no unresolved
+observations. The final matrix covers exact authorization, canonical symlink
+collision, actual concurrent disjoint fan-out, new-file reporting and Git state,
+and both containment regressions.
+
+Verification: `node --test test/claude-*.test.ts` passed 51/51;
+`cd agents-plugin-pi && npm test` passed 1,803 tests with 0 failures and 2
+expected skips (1,805 total); `git diff --check` passed. The unavailable local
+TypeScript probe was classified as environment/tooling because TypeScript is not
+installed. No additional live Claude SDK probe was run; the retained owner-run
+acceptance applies to Phase 1, and Phase 2 owner acceptance remains a later
+workflow action rather than an automated implementation claim.
+
 ### Phase 3: resume and the playbook-backed design-review preset
 
 Add resume: capture each agent's Claude session id, map it to its 3-word stem,
