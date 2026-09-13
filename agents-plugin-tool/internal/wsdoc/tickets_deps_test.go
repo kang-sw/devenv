@@ -178,6 +178,83 @@ func TestDispatchBlockForPredicate(t *testing.T) {
 	}
 }
 
+// TestDispatchBlockForIgnoresSageStamp pins the decisive design property: the
+// landed-predicate is computed live from directory state and phase Results, and
+// is never read from a content-hashed sage-review stamp. A prerequisite still in
+// ready/ that carries completed sage stamps (and a design-reviewed hash) must
+// still block — the stamp says the ticket's text passed review, which is not the
+// same as the ticket having landed — and a .done/ prerequisite clears even with
+// a blocked sage stamp. If the gate ever started consulting the stamp, one of
+// these flips.
+func TestDispatchBlockForIgnoresSageStamp(t *testing.T) {
+	root := t.TempDir()
+	// Unlanded (ready/) prerequisite whose sage stamps all read completed.
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "ready", "260101-feat-stamped.md"),
+		"---\ntitle: Stamped\nsage-review-design: completed\nsage-review-completeness: completed\nsage-review-design-reviewed: deadbeefdeadbeef\nsage-review-completeness-reviewed: deadbeefdeadbeef\n---\n\n# Stamped\n\n## Phases\n\n### Phase 1: A\n")
+	consumerRel := "ai-docs/tickets/ready/260101-feat-consumer.md"
+	mustWrite(t, root, filepath.FromSlash(consumerRel),
+		"---\ntitle: Consumer\nblocked-by: 260101-feat-stamped\n---\n\n# Consumer\n\n## Phases\n\n### Phase 1: X\n")
+	info, err := TicketAt(root, consumerRel)
+	if err != nil {
+		t.Fatalf("TicketAt: %v", err)
+	}
+	block, err := DispatchBlockFor(root, info)
+	if err != nil {
+		t.Fatalf("DispatchBlockFor: %v", err)
+	}
+	if block == nil || block.BlockingStem != "260101-feat-stamped" {
+		t.Fatalf("a completed sage stamp on a ready/ prerequisite cleared the gate: %+v", block)
+	}
+
+	// A .done/ prerequisite clears even when its sage stamp reads blocked: the
+	// predicate keys on directory state, not the stamp.
+	root2 := t.TempDir()
+	mustWrite(t, root2, filepath.Join("ai-docs", "tickets", ".done", "260101-feat-stamped.md"),
+		"---\ntitle: Stamped\nsage-review-design: blocked\n---\n\n# Stamped\n")
+	mustWrite(t, root2, filepath.FromSlash(consumerRel),
+		"---\ntitle: Consumer\nblocked-by: 260101-feat-stamped\n---\n\n# Consumer\n\n## Phases\n\n### Phase 1: X\n")
+	info2, err := TicketAt(root2, consumerRel)
+	if err != nil {
+		t.Fatalf("TicketAt: %v", err)
+	}
+	block2, err := DispatchBlockFor(root2, info2)
+	if err != nil {
+		t.Fatalf("DispatchBlockFor: %v", err)
+	}
+	if block2 != nil {
+		t.Fatalf("a .done/ prerequisite with a blocked sage stamp was gated: %+v", block2)
+	}
+}
+
+// TestDispatchBlockForMultipleEdges pins that the gate iterates every blocked-by
+// edge and reports the actual unlanded one, rather than only checking the first
+// edge or short-circuiting on the first landed edge. The unlanded prerequisite
+// is placed second so a first-edge-only bug would wrongly clear.
+func TestDispatchBlockForMultipleEdges(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", ".done", "260101-feat-landed.md"),
+		"---\ntitle: Landed\n---\n\n# Landed\n")
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "ready", "260101-feat-pending.md"),
+		"---\ntitle: Pending\n---\n\n# Pending\n\n## Phases\n\n### Phase 1: A\n")
+	consumerRel := "ai-docs/tickets/ready/260101-feat-consumer.md"
+	mustWrite(t, root, filepath.FromSlash(consumerRel),
+		"---\ntitle: Consumer\nblocked-by:\n  - 260101-feat-landed\n  - 260101-feat-pending\n---\n\n# Consumer\n\n## Phases\n\n### Phase 1: X\n")
+	info, err := TicketAt(root, consumerRel)
+	if err != nil {
+		t.Fatalf("TicketAt: %v", err)
+	}
+	if len(info.BlockedBy) != 2 {
+		t.Fatalf("consumer should carry two blocked-by edges, got %v", info.BlockedBy)
+	}
+	block, err := DispatchBlockFor(root, info)
+	if err != nil {
+		t.Fatalf("DispatchBlockFor: %v", err)
+	}
+	if block == nil || block.BlockingStem != "260101-feat-pending" {
+		t.Fatalf("multi-edge gate should report the unlanded second edge, got %+v", block)
+	}
+}
+
 // TestBlockedByPromotionClosure pins the promotion-closure half bound to
 // tickets.move(to: "ready"): a typed prerequisite must already be in ready/ or
 // .done/. It is status-only — a ready-but-unexecuted prerequisite passes the
@@ -223,6 +300,13 @@ func TestBlockedByPromotionClosure(t *testing.T) {
 			consumerFM: "related:\n  260101-feat-a: partner\n",
 			prereqs:    map[string]string{"260101-feat-a": "todo"},
 			wantErr:    false,
+		},
+		{
+			name:       "multi-edge refuses on the unlanded second edge",
+			consumerFM: "blocked-by:\n  - 260101-feat-a\n  - 260101-feat-b\n",
+			prereqs:    map[string]string{"260101-feat-a": ".done", "260101-feat-b": "idea"},
+			wantErr:    true,
+			errHas:     "260101-feat-b",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
