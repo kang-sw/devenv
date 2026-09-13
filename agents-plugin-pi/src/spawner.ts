@@ -506,8 +506,10 @@ export interface RpcAgentRecord {
   forkFinish?: ForkFinishOperation;
   /** Existing terminal push admission for the current work, if one exists. */
   terminalDelivery?: TerminalDelivery;
-  /** Last-seen final assistant text, cached across `getLastAssistantText()` calls. */
+  /** Last assistant text observed from this work generation's message_end event. */
   lastText?: string;
+  /** Work generation that produced lastText; absent text is never borrowed across turns. */
+  lastTextGeneration?: number;
   /**
    * 260905: the head-truncated (`truncatePromptForStorage`,
    * `PROMPT_STORAGE_CAP_BYTES`) copy of the spawn's initial `prompt`, stashed
@@ -1527,7 +1529,16 @@ export function pushToLead(
         terminal.state = "enqueued";
         terminal.afterEnqueue?.();
       }
-    } catch { /* human-only best effort; an undelivered terminal stays retryable */ }
+    } catch {
+      // Owner UI routes can be temporarily unavailable during overlay/session
+      // transitions. Keep the terminal obligation live and actively retry it;
+      // a successor generation clears record.terminalDelivery and makes the
+      // scheduled callback a no-op.
+      if (terminal?.retry && terminal.state === undefined) {
+        const timer = setTimeout(() => terminal.retry?.(), OWNER_TERMINAL_RETRY_DELAY_MS);
+        timer.unref?.();
+      }
+    }
     return;
   }
   if (!pi || !shouldPushToLead() || !leadIdleRef.current) return;
@@ -1640,6 +1651,8 @@ function claimLeadOwnership(record: RpcAgentRecord): void {
   acceptWriter(record, stamp);
 }
 
+export const OWNER_TERMINAL_RETRY_DELAY_MS = 100;
+
 export async function promptAgent(
   record: RpcAgentRecord,
   client: RpcClient,
@@ -1650,8 +1663,7 @@ export async function promptAgent(
   const now = Date.now();
   const writerStamp = stampWriter(record, writer, writer === "owner" ? message : undefined, writer === "lead" && opts?.isLeadPrompt !== false ? now : undefined);
   record.running = true;
-  record.workGeneration = (record.workGeneration ?? 0) + 1;
-  clearTerminalFacts(record);
+  advanceWorkGeneration(record);
   record.runStartedAt = now;
   if (record.ownership) observeSessionWrite(record.ownership.home, record.sessionPath);
   if (record.ownership) updateOwnership(record.ownership.home, { lastActivityAt: now, liveness: { lifecycle: "live", running: true, observedAt: now } });
@@ -1674,6 +1686,14 @@ export async function promptAgent(
  */
 function clearTerminalFacts(record: RpcAgentRecord): void {
   record.terminalDelivery = undefined;
+}
+
+/** Start work whose assistant output must never inherit an earlier turn. */
+function advanceWorkGeneration(record: RpcAgentRecord): void {
+  record.workGeneration = (record.workGeneration ?? 0) + 1;
+  record.lastText = undefined;
+  record.lastTextGeneration = undefined;
+  clearTerminalFacts(record);
 }
 
 function clearLiveState(record: RpcAgentRecord): void {
@@ -1734,7 +1754,8 @@ export function markAgentExited(
     return;
   }
   record.settlementAdmissionGeneration = workGeneration;
-  const terminal = createTerminalDelivery(record, registry, pi, workGeneration, { reason: "exited", last_message: record.lastText });
+  const lastMessage = record.lastTextGeneration === workGeneration ? record.lastText : undefined;
+  const terminal = createTerminalDelivery(record, registry, pi, workGeneration, { reason: "exited", last_message: lastMessage });
   terminal.retry?.();
 }
 
@@ -2161,8 +2182,7 @@ export function applyRpcEvent(
       // A direct child can wake itself for its own children's reports, without
       // a new outer promptAgent call. This is a new own-turn generation.
       record.running = true;
-      record.workGeneration = (record.workGeneration ?? 0) + 1;
-      clearTerminalFacts(record);
+      advanceWorkGeneration(record);
     }
     observeForkFinishEvent(record, evt);
   } else if (evt.type === "agent_settled") {
@@ -2277,8 +2297,15 @@ export function attachEventListener(
     })();
   };
   record.unsubscribe = client.onEvent((evt) => {
-    const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string; isError?: unknown; result?: unknown };
+    const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string; isError?: unknown; result?: unknown; message?: unknown };
     if (record.client !== client || record.launchGeneration !== generation) return;
+    if (e.type === "message_end") {
+      const text = assistantMessageText(e.message);
+      if (text !== undefined) {
+        record.lastText = text;
+        record.lastTextGeneration = record.workGeneration;
+      }
+    }
     if (record.subtreeChannel) {
       const snapshot = readSubtreeSnapshot(record.subtreeChannel);
       record.waitingOnChildren = subtreeWaiting(snapshot);
@@ -2992,8 +3019,7 @@ export async function sendToAgent(
       // outstanding again from the lead's point of view even though no fresh
       // prompt was issued. The accepted instruction starts a new generation.
       record.running = true;
-      clearTerminalFacts(record);
-      record.workGeneration = (record.workGeneration ?? 0) + 1;
+      advanceWorkGeneration(record);
     } else {
       await promptAgent(record, live, message, { writer });
     }
@@ -3023,22 +3049,34 @@ export async function sendToAgent(
 }
 
 /**
- * The agent's last assistant text, refreshed over RPC when the child is still
- * live and falling back to the cached `lastText` otherwise. This is the
- * former `ws-agent-wait` `reason:"idle"` payload, reused verbatim as the
- * `last_message` field of the `ws-agent-settled` push.
+ * Read the agent's ordinary assistant answer at settlement without borrowing
+ * from an earlier generation. `getLastAssistantText()` remains the native RPC
+ * read, while the current generation's assistant `message_end` is the proof
+ * that the returned transcript tail belongs to this turn. When the RPC skips
+ * an empty/aborted message or disagrees with that event, preserve the event's
+ * exact text; when no current assistant event exists, report missing output.
  */
+function assistantMessageText(message: unknown): string | undefined {
+  if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== "assistant") return undefined;
+  const content = (message as { content?: unknown }).content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.flatMap((part) => part && typeof part === "object" && (part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string"
+    ? [(part as { text: string }).text]
+    : []).join("");
+}
+
 async function harvestLastMessage(record: RpcAgentRecord): Promise<string | undefined> {
-  if (!record.client) return record.lastText;
-  try {
-    const text = await record.client.getLastAssistantText();
-    if (text !== null && text !== undefined) {
-      record.lastText = text;
-    }
-  } catch {
-    // best effort — fall back to whatever lastText was last cached.
+  const workGeneration = record.workGeneration;
+  const observed = record.lastTextGeneration === workGeneration ? record.lastText : undefined;
+  if (record.lastTextGeneration !== workGeneration) return undefined;
+  if (record.client) {
+    try {
+      const rpcText = await record.client.getLastAssistantText();
+      if (rpcText === observed) return rpcText ?? undefined;
+    } catch { /* the generation-scoped event text remains authoritative */ }
   }
-  return record.lastText;
+  return observed;
 }
 
 /**
@@ -3134,7 +3172,7 @@ export async function stopAgent(
   const client = record.client;
   if (!opts?.silent) {
     record.waitingOnChildren = false;
-    record.workGeneration = (record.workGeneration ?? 0) + 1;
+    advanceWorkGeneration(record);
     publishSubtree(registry);
   }
   if (record.ownership) touchOwnership(record.ownership.home);

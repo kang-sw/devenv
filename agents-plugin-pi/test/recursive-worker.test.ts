@@ -26,7 +26,9 @@ import {
   leadIdleRef,
   leadWakeStartPendingRef,
   listAgents,
+  OWNER_TERMINAL_RETRY_DELAY_MS,
   ownerNotifyRef,
+  probeAgentLiveness,
   promptAgent,
   registerPushFlush,
   resolveTools,
@@ -92,6 +94,7 @@ function pushHarness(sent: unknown[]) {
   return { client, pi, emit: (event: unknown) => listener?.(event), setLast: (v: string) => { last = v; }, stops: () => stops };
 }
 const drain = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+const assistantEnd = (text: string) => ({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text }] } });
 
 test("delegation policy preserves execution at the terminal depth without child-management tools", () => {
   const parent = worker();
@@ -138,6 +141,7 @@ test("ordinary settlement yields exactly one terminal result and clears executio
   const registry: RpcAgentRegistry = new Map([[child.agentId, child]]);
   attachEventListener(h.pi, registry, child, h.client);
 
+  h.emit(assistantEnd("settled answer"));
   h.emit({ type: "agent_settled" });
   h.emit({ type: "agent_settled" });
   await drain();
@@ -160,6 +164,36 @@ test("ordinary settlement yields exactly one terminal result and clears executio
   assert.equal(sent.length, 1, "duplicate settlement for the same generation is ignored");
 });
 
+test("a failed real settlement batch remains held and retries without duplicate delivery", async () => {
+  const sent: any[] = [];
+  const h = pushHarness(sent);
+  let attempts = 0;
+  const sendMessage = (message: unknown) => {
+    attempts += 1;
+    if (attempts === 1) throw new Error("temporary parent queue failure");
+    capturePush(sent, message);
+  };
+  (h.pi as any).sendMessage = sendMessage;
+  const child = record("retry-child", { client: h.client, running: true, workGeneration: 1 });
+  const registry = new Map([[child.agentId, child]]);
+  attachEventListener(h.pi, registry, child, h.client);
+
+  h.emit(assistantEnd("retryable result"));
+  h.emit({ type: "agent_settled" });
+  await drain();
+  assert.equal(child.terminalDelivery?.state, "held");
+  assert.equal(flushHeldPushes(h.pi, true), 0, "the rejected batch stays queued");
+  assert.equal(child.terminalDelivery?.state, "held");
+  assert.equal(h.stops(), 0, "parking waits for successful admission");
+
+  assert.equal(flushHeldPushes(h.pi, true), 1);
+  await drain();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].details.last_message, "retryable result");
+  assert.equal(child.terminalDelivery?.state, "enqueued");
+  assert.equal(h.stops(), 1);
+});
+
 test("a settled parent waits for descendants without remaining globally running", async () => {
   const sent: any[] = [];
   const h = pushHarness(sent);
@@ -171,6 +205,7 @@ test("a settled parent waits for descendants without remaining globally running"
   const registry = new Map([[parent.agentId, parent]]);
   attachEventListener(h.pi, registry, parent, h.client);
 
+  h.emit(assistantEnd("waiting answer"));
   h.emit({ type: "agent_settled" });
   await drain();
   assert.equal(parent.running, false);
@@ -183,6 +218,7 @@ test("a settled parent waits for descendants without remaining globally running"
   installSubtreePublisher(inner, channel, () => 0);
   assert.equal(subtreeWaiting(readSubtreeSnapshot(channel)), false);
   h.emit({ type: "agent_start" });
+  h.emit(assistantEnd("settled answer"));
   h.emit({ type: "agent_settled" });
   await drain();
   flushHeldPushes(h.pi, true);
@@ -205,6 +241,7 @@ test("settled prose is preserved without adapter adequacy parsing for every role
     const child = record(`${role}-${sent.length}`, { client: h.client, spawnRole: role, running: true, workGeneration: 1 });
     const registry = new Map([[child.agentId, child]]);
     attachEventListener(h.pi, registry, child, h.client);
+    if (text !== undefined) h.emit(assistantEnd(text));
     h.emit({ type: "agent_settled" });
     await drain();
     flushHeldPushes(h.pi, true);
@@ -223,6 +260,7 @@ test("owner-held settlement notifies the owner once and generic Finish produces 
   const owner = record("owner", { client: ownerHarness.client, spawnRole: "fork", lastWriter: "owner", running: true, workGeneration: 1 });
   const ownerRegistry = new Map([[owner.agentId, owner]]);
   attachEventListener(ownerHarness.pi, ownerRegistry, owner, ownerHarness.client);
+  ownerHarness.emit(assistantEnd("settled answer"));
   ownerHarness.emit({ type: "agent_settled" });
   ownerHarness.emit({ type: "agent_settled" });
   await drain();
@@ -241,6 +279,7 @@ test("owner-held settlement notifies the owner once and generic Finish produces 
   await drain();
   finishHarness.setLast("fresh Finish result");
   finishHarness.emit({ type: "agent_start" });
+  finishHarness.emit(assistantEnd("fresh Finish result"));
   finishHarness.emit({ type: "agent_settled" });
   await drain();
   flushHeldPushes(finishHarness.pi, true);
@@ -248,6 +287,32 @@ test("owner-held settlement notifies the owner once and generic Finish produces 
   assert.equal(finishSent.length, 1);
   assert.equal(finishSent[0].details.last_message, "fresh Finish result");
   assert.equal(notices.length, 1, "Finish does not replay the old owner-held result");
+});
+
+test("owner-route terminal delivery retries after a temporary notifier failure", async () => {
+  const sent: any[] = [];
+  const notices: string[] = [];
+  let attempts = 0;
+  ownerNotifyRef.current = (message) => {
+    attempts += 1;
+    if (attempts === 1) throw new Error("overlay transitioning");
+    notices.push(message);
+  };
+  const h = pushHarness(sent);
+  const child = record("owner-retry", { client: h.client, lastWriter: "owner", running: true, workGeneration: 1 });
+  const registry = new Map([[child.agentId, child]]);
+  attachEventListener(h.pi, registry, child, h.client);
+
+  h.emit(assistantEnd("owner result"));
+  h.emit({ type: "agent_settled" });
+  await drain();
+  assert.equal(child.terminalDelivery?.state, undefined);
+  assert.equal(notices.length, 0);
+  await new Promise((resolve) => setTimeout(resolve, OWNER_TERMINAL_RETRY_DELAY_MS + 20));
+  assert.equal(attempts, 2);
+  assert.equal(notices.length, 1);
+  assert.match(notices[0], /owner result/);
+  assert.equal(child.terminalDelivery?.state, "enqueued");
 });
 
 test("a successor prompt invalidates a late harvest from the previous generation", async () => {
@@ -260,6 +325,7 @@ test("a successor prompt invalidates a late harvest from the previous generation
   const registry = new Map([[child.agentId, child]]);
   attachEventListener(h.pi, registry, child, h.client);
 
+  h.emit(assistantEnd("stale answer"));
   h.emit({ type: "agent_settled" });
   await drain();
   await promptAgent(child, h.client, "successor");
@@ -269,6 +335,63 @@ test("a successor prompt invalidates a late harvest from the previous generation
   assert.equal(sent.length, 0);
   assert.equal(child.running, true);
   assert.equal(child.workGeneration, 2);
+});
+
+test("empty or missing current output never falls back to a previous generation", async () => {
+  const cases: Array<{ event?: string; expected: string | undefined }> = [
+    { event: "", expected: "" },
+    { expected: undefined },
+  ];
+  for (const [index, item] of cases.entries()) {
+    heldPushQueue.length = 0;
+    const sent: any[] = [];
+    const h = pushHarness(sent);
+    (h.client as any).getLastAssistantText = async () => "previous successful answer";
+    const child = record(`generation-${index}`, {
+      client: h.client,
+      running: false,
+      workGeneration: 1,
+      lastText: "previous successful answer",
+      lastTextGeneration: 1,
+    });
+    const registry = new Map([[child.agentId, child]]);
+    attachEventListener(h.pi, registry, child, h.client);
+    await promptAgent(child, h.client, "new work");
+    if (item.event !== undefined) h.emit(assistantEnd(item.event));
+    h.emit({ type: "agent_settled" });
+    await drain();
+    flushHeldPushes(h.pi, true);
+    await drain();
+    assert.equal(sent[0].details.last_message, item.expected);
+    assert.notEqual(sent[0].details.last_message, "previous successful answer");
+  }
+});
+
+test("exited and ordinary stopped paths each emit their terminal disposition", async () => {
+  const exitedSent: any[] = [];
+  const exitedHarness = pushHarness(exitedSent);
+  const exited = record("exited", { client: exitedHarness.client, running: true, workGeneration: 1 });
+  const exitedRegistry = new Map([[exited.agentId, exited]]);
+  attachEventListener(exitedHarness.pi, exitedRegistry, exited, exitedHarness.client);
+  exitedHarness.emit(assistantEnd("last output before exit"));
+  (exitedHarness.client as any).getState = async () => { throw new Error("process exited"); };
+  assert.equal(await probeAgentLiveness(exitedHarness.pi, exitedRegistry, exited), false);
+  flushHeldPushes(exitedHarness.pi, true);
+  assert.equal(exitedSent.length, 1);
+  assert.equal(exitedSent[0].details.reason, "exited");
+  assert.equal(exitedSent[0].details.last_message, "last output before exit");
+  assert.equal(exited.client, undefined);
+
+  heldPushQueue.length = 0;
+  const stoppedSent: any[] = [];
+  const stoppedHarness = pushHarness(stoppedSent);
+  const stopped = record("stopped", { client: stoppedHarness.client, running: true, workGeneration: 1 });
+  const stoppedRegistry = new Map([[stopped.agentId, stopped]]);
+  await stopAgent(stoppedRegistry, stopped.agentId, stoppedHarness.pi);
+  flushHeldPushes(stoppedHarness.pi, true);
+  assert.equal(stoppedSent.length, 1);
+  assert.equal(stoppedSent[0].details.reason, "stopped");
+  assert.equal(stopped.client, undefined);
 });
 
 test("explicit stop remains an idempotent disposition and emits no fabricated terminal result", async () => {

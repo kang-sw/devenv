@@ -293,6 +293,7 @@ describe("buildForkSpawnCtx (the ws-fork push channel)", () => {
 
     // Exactly what spawnAgent does with the ctx it is handed.
     attachEventListener(ctx.pi, registry, record, client);
+    listener?.({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Outcome: shipped" }] } });
     listener?.({ type: "agent_settled" });
     await new Promise((resolve) => setTimeout(resolve, 10));
     flushHeldPushes(pushPi, true);

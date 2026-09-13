@@ -227,6 +227,7 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
       for (const listener of child.parentClient.wsPiTestEventListeners) listener({ type: "tool_execution_start", toolName: "ws-report-to-lead", toolCallId: "progress", args: { message: "closeout in progress" } });
       for (const listener of child.parentClient.wsPiTestEventListeners) listener({ type: "tool_execution_end", toolName: "ws-report-to-lead", toolCallId: "progress", isError: false, result: reportResult });
       child.terminalText = finalReport;
+      for (const listener of child.parentClient.wsPiTestEventListeners) listener({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: finalReport }] } });
       for (const listener of child.parentClient.wsPiTestEventListeners) listener({ type: "agent_settled" });
       await new Promise((resolve) => setTimeout(resolve, 20));
       const leadListTool = lead.session.agent.state.tools.find((tool: any) => tool.name === "ws-agent-list");
