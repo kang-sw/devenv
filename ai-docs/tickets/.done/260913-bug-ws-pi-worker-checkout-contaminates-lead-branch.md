@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 7f3a5b86ff2cb6c4
 sage-review-completeness-reviewed: 7f3a5b86ff2cb6c4
+completed: 2026-09-13
 ---
 
 # Worker checkout can contaminate lead-owned commits
@@ -63,3 +64,71 @@ Recovery required preserving the contaminated tip, selectively transplanting onl
 On `develop`, update the shared lead-run playbook and the shared `worker-stop-protocol` include (`agents-plugin/rsrc/worker-stop-protocol.md`, which holds the Report block and Branch section and is also pulled into `ticket-worker.md`, `ticket-worker-elevated.md`, and `ticket-worker-escalated.md`) so that, on a worker's terminal stop-condition report, the lead must call `ws/git.status` and read `branch.head`/`impl_ticket` before any HEAD-relative lead-owned write (ticket Edition/revision, hotfix commit, follow-up dispatch base), then make an explicit stack-vs-return decision stated in the playbook text: stack on the impl branch when the write belongs to that impl ticket; check out the derived base branch (`impl/<root>/<stem>` → `<root>`) when the write is unrelated or the ticket is fully blocked and the lead is exiting. Do not add base/impl handoff fields to the assignment note, do not add fail-closed refusal machinery, and do not allocate a worktree. Regenerate the required shipped mirrors.
 
 Verify: the awareness step is present in the shared source and its shipped mirrors (mirror-integrity); the stack-vs-return guidance names both branches of the decision; the base-branch derivation matches the `ws/git.merge` `impl/<root>/<stem>` convention; and `ws/git.merge`'s existing branch-explicit behavior is documented as unaffected by the current checkout. No behavioral regression harness is required because the change is playbook text; the 2026-09-13 six-commit contamination is cited as the motivating example, not a coded test.
+
+### Result (b8a6f827) - 2026-09-13
+
+Landed on `impl/goal/develop/amber-quill-fern/body-crazy-carol`:
+
+- `agents-plugin/rsrc/lead-run/lead-run.md` "Handle the report": before any
+  lead-owned `HEAD`-relative write (ticket Edition/revision, hotfix commit,
+  follow-up dispatch base), mandates `ws/git.status` and reading
+  `branch.head`, `impl_ticket`, and the working-tree state, then an explicit
+  stack-vs-return decision — stack on the impl branch when the write belongs
+  to that impl ticket, or check out the derived base branch (everything
+  between `impl/` and the last `/`, the same convention `ws/git.merge` already
+  uses) when the write is unrelated or the ticket is fully blocked and the
+  lead is exiting. A dirty working tree at that point is the lead's own
+  judgment call (commit or stash first), not fail-closed refusal.
+  `ws/git.merge`'s branch-explicit behavior is documented as unaffected.
+- `agents-plugin/rsrc/worker-stop-protocol.md` "Branch" section: documents the
+  handoff from the worker's side — the terminal report does not restore the
+  checkout, and checking branch state before the next write is the lead's
+  responsibility, not the worker's. This include reaches `ticket-worker.md`,
+  `ticket-worker-elevated.md`, and `ticket-worker-escalated.md` unchanged.
+- Regenerated `agents-plugin/rsrc/manifest.json` and the byte-identical
+  `agents-plugin-wsflow/rsrc/` mirror (`lead-run.md`, `worker-stop-protocol.md`,
+  `manifest.json`) per `wsflow-mirroring.md`'s after-edit checklist.
+- Added a presence pin for the new obligation to the existing
+  `test_workers_report_and_lead_owns_impl_merge` in
+  `agents-plugin/tests/test_skill_dispatch_contracts.py`, alongside its
+  sibling pins for this same file.
+
+Decisions taken during round-1 review fixes (`ae474ee8` -> `b8a6f827`):
+
+- Reworded the base-branch derivation from a literal `impl/<root>/<stem>` ->
+  `<root>` notation to "everything between `impl/` and the last `/`" — the
+  original notation reads as a single path segment, but every impl branch this
+  repo actually produces has a multi-segment root (e.g.
+  `impl/goal/develop/<slug>/<stem>` -> `goal/develop/<slug>`); reused this same
+  file's existing PARENT-derivation phrasing for the identical rule instead of
+  adding a second notation.
+- Added a one-clause dirty-working-tree judgment prompt to the checkout arm:
+  checking out through uncommitted changes is a second contamination vector
+  the original text left silent. Advisory only (commit or stash), no new
+  fail-closed machinery, consistent with the ticket's "leave the rest to lead
+  discretion" decision.
+- Reordered so "Otherwise act by stop letter" stays adjacent to the
+  protocol-mismatch clause it originally negated, rather than being separated
+  by the new paragraph.
+
+Verification:
+
+- `go test ./internal/wsrsrc/... ./internal/mcp/... -count=1` (agents-plugin-tool): PASS
+- `python3 -m unittest discover agents-plugin/tests`: PASS (68 tests, includes the new pin)
+- `python3 -m unittest discover agents-plugin-wsflow/tests`: PASS (11 tests)
+- `go build ./... && go vet ./...` (agents-plugin-tool): clean
+- Two review rounds (partitioned: correctness, fit): round 1 raised 3 Important
+  + 1 Minor (correctness/fit); all fixed in `b8a6f827`. Round 2 (both
+  partitions): clean, no findings.
+
+Unresolved observations (round-2, out of scope, not fixed):
+
+- A rootless `impl/<stem>` branch shape (no merge root) exists in the
+  implementation and has no stated fallback in the new derivation sentence,
+  mirroring a pre-existing gap in the PARENT sentence it was modeled on.
+- The exact wording of the derivation phrase and the dirty-tree judgment
+  sentence is not independently pinned by the new test assertion, so a future
+  edit could drift that specific wording without failing a test.
+- `branch.head`/`impl_ticket` are exact response field names; "the
+  working-tree state" is prose describing the `clean`/`changed_files` fields,
+  not a literal field name.

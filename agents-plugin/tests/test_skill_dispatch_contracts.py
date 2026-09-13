@@ -194,6 +194,15 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn("With `completion: ticket`", text)
         self.assertIn("incompatible values are a protocol mismatch", text)
         self.assertIn("do not query the ticket, infer a\npath, merge", text)
+        self.assertIn(
+            "call `{{.McpNamespace}}/git.status` and read\n`branch.head`, `impl_ticket`, and the working-tree state",
+            text,
+        )
+        self.assertIn("Branch-explicit calls (`{{.McpNamespace}}/git.merge`)", text)
+        self.assertIn(
+            "Your terminal report does not restore the checkout: the shared worktree's",
+            protocol,
+        )
 
     def test_run_dispatches_through_playbook_read(self):
         # lead-run is a playbook.read shim over an rsrc body, not an inline
