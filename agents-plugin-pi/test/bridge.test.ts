@@ -57,6 +57,7 @@ const FIXTURES_DIR = join(TEST_DIR, "fixtures");
 const REAL_STATIC_BODY_SNAPSHOT = readFileSync(join(FIXTURES_DIR, "workflow-manual-static-body.txt"), "utf8");
 const REAL_WORKFLOW_MANUAL_RESPONSE = readFileSync(join(FIXTURES_DIR, "workflow-manual-response.txt"), "utf8");
 const BUNDLED_RUNTIME = JSON.parse(readFileSync(join(TEST_DIR, "..", "runtime.json"), "utf8")) as {
+  plugin_version: string;
   tools: Record<string, string>;
   commands: Record<string, string>;
 };
@@ -146,7 +147,7 @@ describe("sanitizeToolName", () => {
 test("production bridge registration returns the pointer on a repeat playbook.read", async () => {
   const directory = mkdtempSync(join(tmpdir(), "ws-pi-dedupe-bridge-"));
   const launcher = join(directory, "launcher.py");
-  writeFileSync(launcher, `import json,sys\nfor line in sys.stdin:\n q=json.loads(line); m=q['method'];\n if m=='initialize': r={'serverInfo':{'version':'0.46.3'},'capabilities':{}}\n elif m=='tools/list': r={'tools':[{'name':'playbook.read','description':'read','inputSchema':{'type':'object','properties':{'name':{'type':'string'}},'required':['name']}}]}\n elif m=='tools/call': r={'isError':False,'content':[{'type':'text','text':'# Repeat\\n## Detail'}]}\n print(json.dumps({'jsonrpc':'2.0','id':q['id'],'result':r}),flush=True)\n`);
+  writeFileSync(launcher, `import json,sys\nfor line in sys.stdin:\n q=json.loads(line); m=q['method'];\n if m=='initialize': r={'serverInfo':{'version':${JSON.stringify(BUNDLED_RUNTIME.plugin_version)}},'capabilities':{}}\n elif m=='tools/list': r={'tools':[{'name':'playbook.read','description':'read','inputSchema':{'type':'object','properties':{'name':{'type':'string'}},'required':['name']}}]}\n elif m=='tools/call': r={'isError':False,'content':[{'type':'text','text':'# Repeat\\n## Detail'}]}\n print(json.dumps({'jsonrpc':'2.0','id':q['id'],'result':r}),flush=True)\n`);
   const tools = new Map<string, any>();
   const pi = { registerTool: (definition: any) => tools.set(definition.name, definition), on() {} } as unknown as ExtensionAPI;
   const oldRole = process.env.WS_PI_SPAWN_ROLE;

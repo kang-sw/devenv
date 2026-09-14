@@ -14,7 +14,7 @@
  * already uses, just with a launcher that fails instead of one that answers.
  */
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,6 +40,7 @@ function harness() {
 }
 
 const runtimeJsonPath = join(dirname(fileURLToPath(import.meta.url)), "../runtime.json");
+const runtimeVersion = (JSON.parse(readFileSync(runtimeJsonPath, "utf8")) as { plugin_version: string }).plugin_version;
 
 /** A launcher that does nothing but exit immediately — no JSON-RPC response at all. */
 function writeBrokenLauncher(dir: string): string {
@@ -53,7 +54,7 @@ function writeWorkingLauncher(dir: string): string {
   const launcher = join(dir, "fake-mcp.py");
   writeFileSync(
     launcher,
-    `import json, sys\nfor line in sys.stdin:\n req=json.loads(line); method=req['method']; result={'serverInfo':{'version':'0.46.3'}} if method=='initialize' else {'tools':[{'name':'git.status','description':'status','inputSchema':{'type':'object','properties':{},'required':[]}}]} if method=='tools/list' else {'isError':True,'content':[{'type':'text','text':'no bootstrap'}]}; print(json.dumps({'jsonrpc':'2.0','id':req['id'],'result':result}), flush=True)\n`,
+    `import json, sys\nfor line in sys.stdin:\n req=json.loads(line); method=req['method']; result={'serverInfo':{'version':${JSON.stringify(runtimeVersion)}}} if method=='initialize' else {'tools':[{'name':'git.status','description':'status','inputSchema':{'type':'object','properties':{},'required':[]}}]} if method=='tools/list' else {'isError':True,'content':[{'type':'text','text':'no bootstrap'}]}; print(json.dumps({'jsonrpc':'2.0','id':req['id'],'result':result}), flush=True)\n`,
   );
   return launcher;
 }

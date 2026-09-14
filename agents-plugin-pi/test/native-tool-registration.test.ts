@@ -15,6 +15,9 @@ import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 
 type Captured = { name: string; parameters?: { properties?: Record<string, unknown> }; execute?: (...args: never[]) => unknown; renderCall?: (...args: never[]) => unknown; renderResult?: (...args: never[]) => unknown };
 
+const RUNTIME_JSON_PATH = join(dirname(fileURLToPath(import.meta.url)), "../runtime.json");
+const RUNTIME_VERSION = (JSON.parse(readFileSync(RUNTIME_JSON_PATH, "utf8")) as { plugin_version: string }).plugin_version;
+
 class Text {
   private text = "";
   setText(text: string): void { this.text = text; }
@@ -134,12 +137,12 @@ test("actual MCP startup registers through the same cold then late-filled shared
   const { tools, pi } = harness();
   const dir = mkdtempSync(join(tmpdir(), "ws-pi-mcp-preview-"));
   const launcher = join(dir, "fake-mcp.py");
-  writeFileSync(launcher, `import json, sys\nfor line in sys.stdin:\n req=json.loads(line); method=req['method']; result={'serverInfo':{'version':'0.46.3'}} if method=='initialize' else {'tools':[{'name':'git.status','description':'status','inputSchema':{'type':'object','properties':{},'required':[]}}]} if method=='tools/list' else {'isError':True,'content':[{'type':'text','text':'no bootstrap'}]}; print(json.dumps({'jsonrpc':'2.0','id':req['id'],'result':result}), flush=True)\n`);
+  writeFileSync(launcher, `import json, sys\nfor line in sys.stdin:\n req=json.loads(line); method=req['method']; result={'serverInfo':{'version':${JSON.stringify(RUNTIME_VERSION)}}} if method=='initialize' else {'tools':[{'name':'git.status','description':'status','inputSchema':{'type':'object','properties':{},'required':[]}}]} if method=='tools/list' else {'isError':True,'content':[{'type':'text','text':'no bootstrap'}]}; print(json.dumps({'jsonrpc':'2.0','id':req['id'],'result':result}), flush=True)\n`);
   const ref = createToolPreviewTuiRef();
   const oldRole = process.env.WS_PI_SPAWN_ROLE;
   process.env.WS_PI_SPAWN_ROLE = "worker";
   try {
-    const handle = await startBridge(pi, { launcherPath: launcher, pluginDir: dir, runtimeJsonPath: join(dirname(fileURLToPath(import.meta.url)), "../runtime.json"), cwd: dir, toolPreviewTuiRef: ref });
+    const handle = await startBridge(pi, { launcherPath: launcher, pluginDir: dir, runtimeJsonPath: RUNTIME_JSON_PATH, cwd: dir, toolPreviewTuiRef: ref });
     const tool = tools.get("ws__git_status")!;
     assert.ok(tool.renderCall && tool.renderResult, "the real MCP loop supplies hooks before the ref is filled");
     assert.throws(() => tool.renderCall!({}, {}, { state: {}, argsComplete: true, isPartial: false }), "cold startup remains native fallback");

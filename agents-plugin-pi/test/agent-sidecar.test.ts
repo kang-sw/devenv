@@ -113,18 +113,22 @@ describe("captureOrphans", () => {
     assert.deepEqual(captureOrphans(registry).map((o) => o.agentId).sort(), ["explore", "worker"]);
   });
 
-  test("round-trips intent-mode research selections through two sidecar cycles", () => {
+  test("round-trips canonical and former intent-mode research selections through two sidecar cycles", () => {
     const source: RpcAgentRegistry = new Map([
+      ["search", record({ agentId: "search", spawnRole: "explore", exploreMode: "search", modelBase: "pi/small", modelEffort: "medium", toolGroup: "read-only-explore" })],
+      ["assurance", record({ agentId: "assurance", spawnRole: "explore", exploreMode: "high-assurance-research", modelBase: "pi/xlarge", modelEffort: "high", toolGroup: "read-only-explore" })],
       ["code", record({ agentId: "code", spawnRole: "explore", exploreMode: "code-search", modelBase: "pi/small", modelEffort: "medium", toolGroup: "read-only-explore" })],
-      ["synthesis", record({ agentId: "synthesis", spawnRole: "explore", exploreMode: "synthesis", modelBase: "pi/large", modelEffort: "high", toolGroup: "read-only-explore" })],
+      ["synthesis", record({ agentId: "synthesis", spawnRole: "explore", exploreMode: "synthesis", modelBase: "pi/medium", modelEffort: "high", toolGroup: "read-only-explore" })],
     ]);
     const first = parseOrphans(serializeOrphans(captureOrphans(source)));
     const revived = new Map<string, RpcAgentRecord>();
     reviveOrphans(revived, first);
     const second = parseOrphans(serializeOrphans(captureOrphans(revived)));
     assert.deepEqual(second.map(({ agentId, spawnRole, exploreMode, toolGroup, modelBase, modelEffort }) => ({ agentId, spawnRole, exploreMode, toolGroup, modelBase, modelEffort })), [
+      { agentId: "search", spawnRole: "explore", exploreMode: "search", toolGroup: "read-only-explore", modelBase: "pi/small", modelEffort: "medium" },
+      { agentId: "assurance", spawnRole: "explore", exploreMode: "high-assurance-research", toolGroup: "read-only-explore", modelBase: "pi/xlarge", modelEffort: "high" },
       { agentId: "code", spawnRole: "explore", exploreMode: "code-search", toolGroup: "read-only-explore", modelBase: "pi/small", modelEffort: "medium" },
-      { agentId: "synthesis", spawnRole: "explore", exploreMode: "synthesis", toolGroup: "read-only-explore", modelBase: "pi/large", modelEffort: "high" },
+      { agentId: "synthesis", spawnRole: "explore", exploreMode: "synthesis", toolGroup: "read-only-explore", modelBase: "pi/medium", modelEffort: "high" },
     ]);
   });
 
