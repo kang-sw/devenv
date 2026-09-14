@@ -55,11 +55,10 @@
  * `fork`, until the not-yet-landed side-thread-fork ticket decides
  * otherwise.
  *
- * Following the bridge.ts/spawner.ts convention (not discuss.ts's
- * single-call-site convention): this one file mixes pure, unit-tested
- * state-machine/config-reader functions with the `registerGoalLoop` IO glue,
- * since the goal-loop's command, tools, and lifecycle listeners are closer in
- * shape to spawner.ts than to discuss.ts.
+ * Following the bridge.ts/spawner.ts convention, this one file mixes pure,
+ * unit-tested state-machine/config-reader functions with the `registerGoalLoop`
+ * IO glue because its command, tools, and lifecycle listeners are closer in
+ * shape to spawner.ts.
  *
  * Phase 2 (260903) adds a third, non-terminal lever: `goal-compact-and-continue`
  * compacts context with model-supplied carry-forward prose via `ctx.compact()`

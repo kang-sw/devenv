@@ -186,6 +186,27 @@ test("a child-role Pi extension load installs executable same-name scoped edit/w
   }
 });
 
+test("extension factory no longer registers the retired ws-discuss command", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "ws-pi-command-loader-")));
+  const previousRole = process.env[WS_PI_SPAWN_ROLE_ENV];
+  const previousPolicy = process.env[DELEGATION_ENV];
+  try {
+    delete process.env[WS_PI_SPAWN_ROLE_ENV];
+    delete process.env[DELEGATION_ENV];
+    const extensionPath = fileURLToPath(new URL("../src/index.ts", import.meta.url));
+    const loaded = await discoverAndLoadExtensions([extensionPath], root, join(root, "agent"), createEventBus());
+    assert.deepEqual(loaded.errors, []);
+    const extension = loaded.extensions.find(candidate => candidate.resolvedPath === extensionPath);
+    assert.ok(extension, "the real Pi loader loaded the adapter entry");
+    assert.equal(extension.commands.has("ws-discuss"), false, "the retired command is absent from the registered command surface");
+    assert.ok(extension.commands.has("ws-model-catalog-list"), "unrelated extension commands remain registered");
+  } finally {
+    if (previousRole === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV]; else process.env[WS_PI_SPAWN_ROLE_ENV] = previousRole;
+    if (previousPolicy === undefined) delete process.env[DELEGATION_ENV]; else process.env[DELEGATION_ENV] = previousPolicy;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("representative bridged MCP definition uses the same late-filled ref without mutating its schema or executor", () => {
   const { tools, pi } = harness();
   const ref = createToolPreviewTuiRef();
