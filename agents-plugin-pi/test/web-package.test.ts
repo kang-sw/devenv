@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,4 +47,32 @@ test('packed install/update carries the pinned search license and resolves host 
   }
   const env = { ...process.env, PI_CODING_AGENT_DIR: root };
   await createWebSearch({ packageRoot: installed, env }).probe();
+
+  // Git-install shape: Pi's `pi install git:...` clones the repo and runs
+  // `npm install` only against the repo-root manifest (260903's git-root-install
+  // model), which the mirror this ticket's Phase 1 added makes carry the same
+  // six runtime dependencies as agents-plugin-pi/package.json. That lands
+  // `pi-web-access` at the clone root, one level above the extension subdir —
+  // not inside the subdir's own `node_modules`. Reproduce that shape with a
+  // real install against the actual mirrored root manifest and confirm
+  // resolution still succeeds through the clone-root candidate.
+  const cloneRoot = join(root, 'clone');
+  mkdirSync(cloneRoot);
+  const rootDependencies = JSON.parse(readFileSync(join(packageRoot, '..', 'package.json'), 'utf8')).dependencies;
+  writeFileSync(join(cloneRoot, 'package.json'), JSON.stringify({ private: true, dependencies: rootDependencies }));
+  run('npm', ['install', '--ignore-scripts', '--legacy-peer-deps', '--no-audit', '--no-fund', '--package-lock=false'], cloneRoot);
+  const extDir = join(cloneRoot, 'agents-plugin-pi');
+  mkdirSync(join(extDir, 'src'), { recursive: true });
+  cpSync(join(packageRoot, 'src', 'web-search-helper.mjs'), join(extDir, 'src', 'web-search-helper.mjs'));
+  const clonePeerScope = join(cloneRoot, 'node_modules', '@earendil-works');
+  mkdirSync(clonePeerScope, { recursive: true });
+  for (const name of ['pi-ai', 'pi-coding-agent', 'pi-tui']) {
+    symlinkSync(realpathSync(join(packageRoot, 'node_modules', '@earendil-works', name)), join(clonePeerScope, name));
+  }
+  await createWebSearch({ packageRoot: extDir, env }).probe();
+
+  // Absent from both known locations fails closed rather than resolving
+  // anywhere else (e.g. a global/user copy via require.resolve's free walk).
+  rmSync(join(cloneRoot, 'node_modules', 'pi-web-access'), { recursive: true, force: true });
+  await assert.rejects(createWebSearch({ packageRoot: extDir, env }).probe(), /web-search-extension-missing/);
 });
