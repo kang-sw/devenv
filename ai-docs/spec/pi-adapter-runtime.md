@@ -2119,16 +2119,21 @@ self-contained: it carries its own byte-identical copies of the ws-mcp launcher
 and the prompt/playbook tree (`rsrc/`) — the same copy-not-reference precedent the
 `agents-plugin-wsflow` package already uses, and required because the launcher
 resolves those trees relative to its own package directory at runtime. These three
-copies are kept in sync by hand: there is no automated sync tooling, so a change
-to the canonical `agents-plugin/` copies must be mirrored here — but there is
-automated drift detection. An identity test in the adapter suite
+copies are resynced automatically at every ws version bump: `bump-ws-version.sh`
+(in `agents-plugin-tool/scripts/`) re-copies all three from the just-updated
+`agents-plugin/` sources and bumps the `ws-pi-bridge` `package.json` version in
+lockstep. Automated drift detection backs this up for the case where a mirror
+was hand-edited or a bump was skipped. An identity test in the adapter suite
 (`test/version-check.test.ts`) reads both trees from disk and asserts
 `runtime.json`, `bin/ws-mcp-launcher.py`, and the whole `rsrc/` tree are
 byte-identical to their `agents-plugin/` sources, with no file the Pi tree
 carries that the source lacks, so the next desync fails the suite naming the
-offending file. The guard fires when the adapter suite runs, not the moment an
-upstream file is edited, so the Pi track owner runs it when syncing from
-`develop`.
+offending file; a Go-side equivalent
+(`agents-plugin-tool/internal/wsrsrc`: `TestPiMirrorUpToDate`) runs the same
+check from a bare `go test ./...`, and the release workflow's "Validate plugin
+release contract" step fails a tag build the same way. The adapter-suite guard
+fires when that suite runs, not the moment an upstream file is edited, so the
+Pi track owner still runs it when syncing from `develop`.
 
 The ws skills tree is a fourth carried copy, but with a distinct, **automated**
 sync model rather than a hand-synced commit: a pack-time script (wired to npm

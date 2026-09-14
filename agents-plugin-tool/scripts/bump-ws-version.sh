@@ -79,7 +79,9 @@ update_json("agents-plugin-wsflow/runtime.json", update_runtime)
 
 
 def sync_file(src: str, dst: str) -> None:
-    shutil.copyfile(rel(src), rel(dst))
+    # copy, not copyfile: preserves the source file's mode (the launcher is
+    # 0o755) even when dst does not exist yet, instead of creating it 0o644.
+    shutil.copy(rel(src), rel(dst))
 
 
 def sync_tree(src: str, dst: str) -> None:
