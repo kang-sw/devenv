@@ -17,7 +17,7 @@ spec:
 ## Background
 
 `260902-feat-ws-pi-native-mvp` proved the ws-pi-native composition (bridge +
-spawner + model-catalog + `/ws-discuss` PoC) end-to-end, but the package ships
+spawner + model catalog) end-to-end, but the package ships
 **dev-load only** — it is consumed via `pi -e agents-plugin-pi/src/index.ts` from
 a checkout of this monorepo. `package.json` is `"private": true` with no publish
 metadata, and one load-bearing path (skills exposure) resolves to a *sibling
@@ -52,7 +52,7 @@ not introduce a reverse dependency.
   rather than copying it … unlike bin/ws-mcp-launcher.py + runtime.json, which
   have repo precedent for copying"). On a standalone npm install
   `<repoRoot>/agents-plugin/skills` does not exist, so skill exposure — and thus
-  `/ws-discuss` and every `/skill:*` — breaks.
+  every `/skill:*` — breaks.
 - Source is TypeScript consumed via Node native type-stripping (no build step);
   the whole package assumes a Node that supports `--experimental-strip-types`.
 

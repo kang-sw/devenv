@@ -27,9 +27,9 @@
  * model-invoked lever. `registerTool` is the only primitive the model can
  * invoke directly as a function call, matching the existing
  * `ws-report-to-lead` precedent (spawner.ts) of a plain, non-bridged, custom
- * tool. `/goal` itself stays a `registerCommand` (user-invoked entry,
- * matching the ticket's own "goal-entry **command**" wording and the
- * existing `/ws-discuss` precedent in index.ts).
+ * tool. `/goal` itself stays a `registerCommand` because it is a
+ * user-invoked entry, matching the ticket's own "goal-entry **command**"
+ * wording.
  *
  * Runaway backstop: N consecutive re-fires with no intervening tool call
  * force-stop the loop (disarm goal mode) — Pi has no session-kill primitive
@@ -55,11 +55,10 @@
  * `fork`, until the not-yet-landed side-thread-fork ticket decides
  * otherwise.
  *
- * Following the bridge.ts/spawner.ts convention (not discuss.ts's
- * single-call-site convention): this one file mixes pure, unit-tested
- * state-machine/config-reader functions with the `registerGoalLoop` IO glue,
- * since the goal-loop's command, tools, and lifecycle listeners are closer in
- * shape to spawner.ts than to discuss.ts.
+ * Following the bridge.ts/spawner.ts convention, this one file mixes pure,
+ * unit-tested state-machine/config-reader functions with the `registerGoalLoop`
+ * IO glue because its command, tools, and lifecycle listeners are closer in
+ * shape to spawner.ts.
  *
  * Phase 2 (260903) adds a third, non-terminal lever: `goal-compact-and-continue`
  * compacts context with model-supplied carry-forward prose via `ctx.compact()`

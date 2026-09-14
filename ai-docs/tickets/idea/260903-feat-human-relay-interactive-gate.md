@@ -1,7 +1,7 @@
 ---
 title: "Human-relay interactive gate: package TTY-only test scenarios for one-shot human execution"
 related:
-  260902-feat-ws-pi-native-mvp: the motivating case — /ws-discuss can only be exercised in a real interactive Pi TTY, which no non-interactive driver could reach
+  260902-feat-ws-pi-native-mvp: the motivating case — an early Pi acceptance probe required a real interactive TTY that no non-interactive driver could reach
 related-mental-model:
   - workflow-skills
 ---
@@ -11,8 +11,8 @@ related-mental-model:
 ## Background
 
 Some acceptance gates cannot be driven non-interactively by an agent. The
-Phase 4 `/ws-discuss` gate (`260902-feat-ws-pi-native-mvp`) is the concrete
-example: three non-interactive driver paths were exhausted (`-p` drops the
+An early Phase 4 gate (`260902-feat-ws-pi-native-mvp`) is the concrete example:
+three non-interactive driver paths were exhausted (`-p` drops the
 handler-injected turn; interactive `--mode json`/`rpc` needs a real TTY a pipe
 can't supply; session-resume fails because the injected turn is never persisted),
 and the fully-literal proof was only obtained when the **user ran the command by
@@ -40,12 +40,11 @@ human-relay block**:
 1. **Run** — one exact, copy-pasteable command (e.g.
    `pi -e agents-plugin-pi/src/index.ts`), with any environment prerequisites
    (`--offline`, cwd) pre-resolved.
-2. **Do** — the single line(s) to type in the TUI (e.g. `/ws-discuss <topic>`).
+2. **Do** — the single line or interaction to complete in the TUI.
 3. **Copy back** — a precise description of which output block to paste
    (ideally delimited so the paste is unambiguous).
 4. **Expected evidence** — the gate criteria the lead will check the paste
-   against (for `/ws-discuss`: skill expanded, a bridged `ws__*` tool called, one
-   `explore` child harvested), so adjudication is mechanical, not improvised.
+   against, so adjudication is mechanical, not improvised.
 
 The lead then verifies the pasted block against (4) and records PASS/FAIL with
 the human run attributed as first-hand evidence (as the Phase 4 Result now does).

@@ -29,12 +29,6 @@
  * Pi's `ctx.scopedModels` read API but now points the user at `config.tune
  * agents.tier harness:pi` / `lead-tune` for curation instead of a data file.
  *
- * Phase 4 ships the `/ws-discuss` proof-of-concept command (kickoff built by
- * src/discuss.ts): a single `pi.sendUserMessage` that loads the lead-discuss
- * skill (skills-load), whose body drives the bridged `ws__*` tools (bridge),
- * and instructs the model to dispatch one persistent `explore` researcher (spawner) —
- * proving skills-load + bridge + spawner compose end-to-end on Pi.
- *
  * The 260903 ticket's Phase 1 adds the goal-mode arming + `agent_settled`
  * re-injection loop (src/goal-loop.ts, `registerGoalLoop`): a `/goal <goal>`
  * command arms the loop, an armed `agent_settled` re-fire re-injects a
@@ -194,7 +188,6 @@ import {
 import { createAgentWidgetController, shouldArmAgentWidget, type AgentWidgetController } from "./agent-widget.ts";
 import { registerPushMessageRenderers } from "./push-render.ts";
 import { buildOrphanPush, captureOrphans, noSessionSidecarPath, readAndClearSidecarAt, reviveOrphans, sidecarPath, writeSidecarAt, type PersistedOrphan } from "./agent-sidecar.ts";
-import { buildDiscussKickoff } from "./discuss.ts";
 import { registerGoalLoop, readGoalLoopConfig, resolveAgentWaitAnimation, resolveChildRetentionTtlDays, resolveSettleDelayMs } from "./goal-loop.ts";
 import { registerSkillResources } from "./skills-dir.ts";
 import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
@@ -481,24 +474,6 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       const lines = models.map((m) => `${m.provider}/${m.id}`);
       const header = ctx.scopedModels.length > 0 ? `Scoped models (${lines.length}):` : `All available models (${lines.length}):`;
       ctx.ui.notify([header, ...lines].join("\n"));
-    },
-  });
-
-  // Phase 4 proof-of-concept command: one message that loads the lead-discuss
-  // skill (skills-load), whose body calls the bridged ws__* tools (bridge), and
-  // instructs the model to dispatch one persistent `explore` researcher (spawner) — proving
-  // all three MVP surfaces compose. expandPromptTemplates:true expands the
-  // leading `/skill:lead-discuss <topic>` (docs/extensions.md#L1439-1467); the
-  // idle guard mirrors examples/extensions/send-user-message.ts so the plain
-  // (no deliverAs) send is always safe.
-  pi.registerCommand("ws-discuss", {
-    description: "PoC gate: load the ws discuss skill and dispatch one explore leaf, proving skills-load + bridge + spawner compose.",
-    handler: async (args, ctx) => {
-      if (!ctx.isIdle()) {
-        ctx.ui.notify("Agent is busy — try again when idle.", "warning");
-        return;
-      }
-      pi.sendUserMessage(buildDiscussKickoff(args), { expandPromptTemplates: true });
     },
   });
 

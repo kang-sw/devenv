@@ -85,11 +85,10 @@
  *     excluded from the lead's own active set (nothing observes the lead's
  *     own tool calls, so a gated lead tool would hang forever).
  *
- * Following spawner.ts's own convention (not discuss.ts's single-call-site
- * one): this file mixes pure, unit-tested helpers (test/execute-gateway.test.ts)
- * with the `registerExecuteGateway`/`createApprovalRelay` IO glue, since its
- * IO surface (5 tools + 1 injection callback) is closer in shape to
- * spawner.ts than to discuss.ts.
+ * Following spawner.ts's convention, this file mixes pure, unit-tested helpers
+ * (test/execute-gateway.test.ts) with the
+ * `registerExecuteGateway`/`createApprovalRelay` IO glue because its IO surface
+ * (5 tools + 1 injection callback) is closer in shape to spawner.ts.
  *
  * Golden rule: imports FROM spawner.ts only (`spawnAgent`,
  * `inheritModelFromToolCtx`, `GATED_EXEC_TOOL_NAME`, `WS_PI_APPROVAL_DIR_ENV`,

@@ -17,8 +17,7 @@ Pi — and all Pi-specific policy lives in the adapter.
 
 This document describes the caller-observable behavior of the adapter. It covers
 the bridge surface, the delegation spawner (persistent RPC worker children with
-bounded depth ≤ 2), the user-curated model catalog alias table, and the
-`/ws-discuss` proof-of-concept command.
+bounded depth ≤ 2), and the user-curated model catalog alias table.
 
 ## Tool exposure and name sanitization {#260903-pi-bridge-tool-registration}
 
@@ -2111,52 +2110,6 @@ auto-compaction remains the last-resort backstop.
   context-window / max-token override (finite-positive). Out-of-range, malformed,
   or missing values fall back to the built-in defaults.
 
-## Proof-of-concept command {#260903-pi-poc-discuss-command}
-
-The adapter registers one proof-of-concept command, `/ws-discuss`, via
-`pi.registerCommand` — the MVP gate that demonstrates the three adapter surfaces
-(skill exposure, the ws-mcp bridge, the delegation spawner) composing in a single
-end-to-end run. It is registered at the extension-factory top level alongside
-`ws-model-catalog-list` (command/tool registration is declarative and not gated
-behind `session_start`; only subprocess spawning is).
-
-The command is a thin kickoff, not an imperative workflow driver:
-
-- When the agent is not idle (`ctx.isIdle()` is false), it declines with a
-  `ctx.ui.notify` warning and does nothing else — mirroring Pi's own
-  `send-user-message` example, so the plain (no `deliverAs`) send below is always
-  safe.
-- When idle, it calls `pi.sendUserMessage(kickoff, { expandPromptTemplates: true })`
-  with a single kickoff string, then returns. The command triggers model work; it
-  does not run the bridge or spawner itself.
-
-The kickoff string is produced by a pure, unit-tested builder
-(`buildDiscussKickoff(args)`), so its exact shape is a fixed contract rather than
-incidental prose. It has two parts:
-
-- It **leads** with `/skill:lead-discuss <topic>`. Under
-  `expandPromptTemplates: true`, Pi expands that leading token into the
-  `lead-discuss` skill body (skills-load), and everything after the token on that
-  line becomes the skill's `User:` args. When the caller passes no argument, a
-  fixed default PoC topic is substituted so a bare `/ws-discuss` is still a valid
-  gate invocation. The `lead-discuss` skill body itself calls the bridged
-  `ws__playbook_print` / `ws__workflow_manual` tools, so skills-load transitively
-  drives the bridge with no imperative tool call in the handler.
-- It **appends**, after a blank-line separator, an explicit instruction to
-  dispatch one persistent `explore` researcher and report its result. The blank line keeps
-  this instruction off the skill-command line (so it does not corrupt the
-  `User:` args split). This append is load-bearing: the discuss skill does not
-  itself spawn, so the spawn round-trip that the gate requires is not inherent to
-  skills-load + bridge — the kickoff must name it explicitly to make the
-  spawn deterministic.
-
-Because the gate proof is a live model-driven run (the model reads the kickoff
-and issues the bridged and spawner tool calls itself), it is verified the same
-way the Phase 2–3 gates were — a `pi -e … --mode json -p` transcript — not a unit
-assertion. The unit tests pin only the kickoff wording that steers that run; the
-command handler's `ctx`/`pi` glue is left untested, matching the
-`ws-model-catalog-list` precedent.
-
 ## Package topology {#260903-pi-adapter-package-topology}
 
 The adapter lives in `agents-plugin-pi/`, a sibling package root parallel to
@@ -2201,10 +2154,10 @@ stays byte-identical.
 > [!note] Constraints
 > - This contract covers the bridge, the delegation spawner (upgraded to
 >   persistent RPC children with bounded depth ≤ 2, a child→lead report channel,
->   and a path-only transcript accessor), the model catalog alias table, the
->   `/ws-discuss` PoC command, and the lead-session goal loop (arming, the
->   `agent_settled` re-fire, the terminal levers, the runaway backstop, and the
->   model-driven compaction lever with its advisory surfacing, config knobs, and
+>   and a path-only transcript accessor), the model catalog alias table, and the
+>   lead-session goal loop (arming, the `agent_settled` re-fire, the terminal
+>   levers, the runaway backstop, and the model-driven compaction lever with its
+>   advisory surfacing, config knobs, and
 >   observe-only `session_before_compact` companion), the side-thread task fork
 >   with its anti-bleed loop, and the side-thread owner question surface
 >   (`ws-queue-question`/`ws-withdraw-question`, renamed by `260911` from

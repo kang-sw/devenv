@@ -640,7 +640,6 @@ User-directed order: MVP surface first, feature expansion second.
 - File-based continuation: `--session ~/.pi/agent/ws-sessions/<agentId>.jsonl`,
   `--no-session` removed, playbook rendered once to
   `~/.pi/agent/ws-sessions/<agentId>/system-prompt.md` and reused on continue.
-- One proof-of-concept command (e.g. `/ws-discuss`) via `pi.registerCommand`.
 
 **Feature expansion (after MVP validates the bridge + spawn):**
 - Recursive explore: depth-1 worker spawns depth-2 explore leaf (260605
