@@ -145,8 +145,10 @@ agents-plugin-tool/scripts/bump-ws-version.sh <X.Y.Z>
 ```
 
 The helper updates plugin manifests, runtime contracts, Go runtime development
-defaults, release workflow references, build script defaults, and selected
-documentation references. Development binaries such as `0.46.3-dev` satisfy the
+defaults, release workflow references, build script defaults, selected
+documentation references, and the `agents-plugin-pi/` mirrors (`runtime.json`,
+`bin/ws-mcp-launcher.py`, `rsrc/`, resynced byte-for-byte from `agents-plugin/`,
+plus both `ws-pi-bridge` `package.json` versions). Development binaries such as `0.46.3-dev` satisfy the
 plugin version the helper just set; older or newer minor releases are stale. The
 concrete range lives in `runtime.json.required_mcp` — read it there rather than
 restating a version here, which froze at `0.29.2` for seven minor releases

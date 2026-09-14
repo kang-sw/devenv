@@ -20,6 +20,7 @@ VERSION=$version REPO_ROOT=$repo_root python3 - <<'PY'
 import json
 import os
 import re
+import shutil
 from pathlib import Path
 
 version = os.environ["VERSION"]
@@ -76,6 +77,40 @@ update_json("agents-plugin-wsflow/.codex-plugin/plugin.json", update_plugin_mani
 update_json("agents-plugin-wsflow/.claude-plugin/plugin.json", update_plugin_manifest)
 update_json("agents-plugin-wsflow/runtime.json", update_runtime)
 
+
+def sync_file(src: str, dst: str) -> None:
+    # copy, not copyfile: preserves the source file's mode (the launcher is
+    # 0o755) even when dst does not exist yet, instead of creating it 0o644.
+    shutil.copy(rel(src), rel(dst))
+
+
+def sync_tree(src: str, dst: str) -> None:
+    dst_path = rel(dst)
+    tmp_path = dst_path.with_name(dst_path.name + ".sync-tmp")
+    if tmp_path.exists():
+        shutil.rmtree(tmp_path)
+    # Copy into a sibling temp dir first so a failure here (missing src,
+    # permission error) never leaves dst_path deleted or half-written; only
+    # the final swap below touches dst_path, and it is a single rename.
+    shutil.copytree(rel(src), tmp_path)
+    if dst_path.exists():
+        shutil.rmtree(dst_path)
+    tmp_path.rename(dst_path)
+
+
+def update_pi_bridge_package(data) -> None:
+    data["version"] = version
+
+
+# agents-plugin-pi/ mirrors agents-plugin/'s runtime.json, launcher, and rsrc/
+# byte-for-byte; resync from the just-updated agents-plugin/ copies rather than
+# re-deriving the version fields independently, so the two never drift.
+sync_file("agents-plugin/runtime.json", "agents-plugin-pi/runtime.json")
+sync_file("agents-plugin/bin/ws-mcp-launcher.py", "agents-plugin-pi/bin/ws-mcp-launcher.py")
+sync_tree("agents-plugin/rsrc", "agents-plugin-pi/rsrc")
+update_json("agents-plugin-pi/package.json", update_pi_bridge_package)
+update_json("package.json", update_pi_bridge_package)
+
 main_go = read_text("agents-plugin-tool/cmd/ws-mcp/main.go")
 main_go = re.sub(
     r'var version = "[^"]+"',
@@ -113,4 +148,5 @@ print(f"ws version set to {version}")
 print(f"release tag: {release_tag}")
 print(f"dev version: {dev_version}")
 print(f"runtime range: {contract_range}")
+print("agents-plugin-pi/ mirrors resynced from agents-plugin/")
 PY
