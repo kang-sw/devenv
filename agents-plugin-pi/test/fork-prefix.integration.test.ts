@@ -22,9 +22,7 @@ type RegisteredTool = { name: string; description: string; parameters: unknown }
 type ProviderCase = { name: string; provider: string; api: string; chunk: string };
 
 const LOCAL_SDK = join(process.cwd(), "node_modules/@earendil-works/pi-coding-agent");
-const GLOBAL_SDK = existsSync("/home/linuxbrew/.linuxbrew/lib/node_modules/@earendil-works/pi-coding-agent")
-  ? "/home/linuxbrew/.linuxbrew/lib/node_modules/@earendil-works/pi-coding-agent"
-  : "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent";
+const SDK_ROOTS = [["local-0.84.4", LOCAL_SDK]] as const;
 const PROVIDERS: ProviderCase[] = [
   { name: "anthropic", provider: "anthropic", api: "anthropic-messages", chunk: "anthropic-messages-" },
   { name: "codex", provider: "openai-codex", api: "openai-codex-responses", chunk: "openai-codex-responses-" },
@@ -160,7 +158,7 @@ describe("fork prefix actual SDK serializers (offline)", () => {
     assert.ok(captured.activeTools.includes("ws-withdraw-question"));
   });
 
-  for (const [sdkName, root] of [["local-0.84.4", LOCAL_SDK], ["global-0.85.1", GLOBAL_SDK]] as const) {
+  for (const [sdkName, root] of SDK_ROOTS) {
     test(`${sdkName}: actual resource loader retains explicit append bytes`, async () => {
       const append = "Explicit append keeps these bytes.  \r\n";
       const loaded = await loadRenderedAppend(root, append);
@@ -182,7 +180,7 @@ describe("fork prefix actual SDK serializers (offline)", () => {
     }
   });
 
-  for (const [sdkName, root] of [["local-0.84.4", LOCAL_SDK], ["global-0.85.1", GLOBAL_SDK]] as const) {
+  for (const [sdkName, root] of SDK_ROOTS) {
     for (const oauth of [false, true]) for (const retention of ["none", "short", "long"]) for (const midEffort of [false, true]) for (const [shape, history] of continuationHistories()) {
       test(`${sdkName}/Anthropic matrix/${oauth ? "OAuth" : "API-key"}/${retention}/${midEffort}/${shape}: three exact recovery generations`, async () => {
         const referenceHistory = structuredClone(history);

@@ -146,7 +146,7 @@ describe("sanitizeToolName", () => {
 test("production bridge registration returns the pointer on a repeat playbook.read", async () => {
   const directory = mkdtempSync(join(tmpdir(), "ws-pi-dedupe-bridge-"));
   const launcher = join(directory, "launcher.py");
-  writeFileSync(launcher, `import json,sys\nfor line in sys.stdin:\n q=json.loads(line); m=q['method'];\n if m=='initialize': r={'serverInfo':{'version':'0.46.1'},'capabilities':{}}\n elif m=='tools/list': r={'tools':[{'name':'playbook.read','description':'read','inputSchema':{'type':'object','properties':{'name':{'type':'string'}},'required':['name']}}]}\n elif m=='tools/call': r={'isError':False,'content':[{'type':'text','text':'# Repeat\\n## Detail'}]}\n print(json.dumps({'jsonrpc':'2.0','id':q['id'],'result':r}),flush=True)\n`);
+  writeFileSync(launcher, `import json,sys\nfor line in sys.stdin:\n q=json.loads(line); m=q['method'];\n if m=='initialize': r={'serverInfo':{'version':'0.46.3'},'capabilities':{}}\n elif m=='tools/list': r={'tools':[{'name':'playbook.read','description':'read','inputSchema':{'type':'object','properties':{'name':{'type':'string'}},'required':['name']}}]}\n elif m=='tools/call': r={'isError':False,'content':[{'type':'text','text':'# Repeat\\n## Detail'}]}\n print(json.dumps({'jsonrpc':'2.0','id':q['id'],'result':r}),flush=True)\n`);
   const tools = new Map<string, any>();
   const pi = { registerTool: (definition: any) => tools.set(definition.name, definition), on() {} } as unknown as ExtensionAPI;
   const oldRole = process.env.WS_PI_SPAWN_ROLE;

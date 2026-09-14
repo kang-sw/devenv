@@ -327,42 +327,6 @@ ai-docs/tickets/.dropped/
   by epic `260909-epic-ws-worker-interpreter-refoundation`. The prior
   `260605-research-ws-native-subagent-pivot` remains the harness-infrastructure
   reference under the prior epic.
-- Active direction: **Pi-native framework** (branch `feat/ws-pi-plugin`,
-  research anchor `260802-research-ws-pi-native-framework`). A Pi extension
-  bridges ws-mcp (harness-neutral; no host-specific logic in its Go source)
-  onto Pi via a stdio MCP
-  client, composing skills + playbook + tier/subagent + goal-loop as the
-  opinionated framework layer; dependency stays one-directional (Pi extension ->
-  ws-mcp). One clause (owner, 2026-09-05): ws-mcp may change so that a host
-  becomes a peer of Codex/Claude in the harness-keyed config surfaces (the
-  closed harness enum, `agents.tier`, prompt overrides, rsrc harness variants,
-  a harness-neutral tier read tool). Such changes carry no host-specific
-  logic, land through the normal `develop` release flow, and apply to any
-  later host as much as to Pi; the adapter then consumes the released ws.
-  Two further owner clauses (2026-09-07) bind that flow. (1) **On the Pi
-  track, non-Pi-extension code is authored on `develop`, not here.** ws-mcp Go
-  source and shared playbook/rsrc text are edited on `develop` and reach the
-  Pi track only by cherry-pick; Pi-track work never authors them here and
-  merges up. Rationale: the installed/running ws-mcp is the released build,
-  not the Pi track's working copy, so a Pi-track-authored ws-mcp edit cannot
-  be exercised in place. (2) **This Pi-direction guidance is Pi-track-local.**
-  Delete this entire `Active direction` bullet — the harness-peer clause and
-  sub-clauses (1), (2), and (3) included — from a non-Pi branch's `AGENTS.md`
-  whenever Pi-track content is absorbed or merged into it (`develop`/`main`);
-  this guidance never travels upward with a merge. (3) **The Pi bundle's
-  ws-mcp version tracks `develop`, not the Pi track.**
-  `agents-plugin-pi/runtime.json` (and the `agents-plugin/runtime.json` it
-  byte-syncs from) pins the ws-mcp version and tool contract of the `develop`
-  root worktree, treated as the release target — never a track-local working
-  version. The Pi adapter runs against that `develop` ws-mcp build, so the Pi
-  track never carries a diverging ws-mcp version or tool vocabulary; this makes
-  the clause-(1) cherry-pick of `develop` ws-mcp changes a standing obligation
-  rather than an occasional one. Rationale: a track-local ws-mcp version that
-  drifts from the root worktree produced persistent version/contract clutter
-  across Pi-track sessions.
-  Mercenary is a deprecated path: not modified for Pi, and not exposed by the
-  Pi adapter. The earlier opencode adapter direction is dropped
-  (`260801-feat-ws-opencode-adapter`, `.dropped/`).
 - Existing historical Claude workflow notes may mention `ws-*` on `PATH`; new
   shared guidance should use MCP tools and bundled runtime documents.
 - Claude plugin source artifacts were retired from the live tree; do not add a

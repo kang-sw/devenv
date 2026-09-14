@@ -8,11 +8,9 @@ import { RpcClient } from "@earendil-works/pi-coding-agent";
 // Only the MCP and RPC transports are substituted. The copied adapter source,
 // resource loader, extension runner, SessionManager and serializers are real.
 // Copying isolates changed child resources and the test-only MCP launcher.
-const GLOBAL_SDK = existsSync("/home/linuxbrew/.linuxbrew/lib/node_modules/@earendil-works/pi-coding-agent")
-  ? "/home/linuxbrew/.linuxbrew/lib/node_modules/@earendil-works/pi-coding-agent"
-  : "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent";
-for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-agent"), GLOBAL_SDK]) for (const [providerName, apiName] of [["openrouter", "openai-completions"], ["openai-codex", "openai-codex-responses"], ["anthropic", "anthropic-messages"]]) {
-  test(`production fork lifecycle ${JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version}/${apiName}`,  async () => {
+const SDK_ROOTS = [join(process.cwd(), "node_modules/@earendil-works/pi-coding-agent")];
+for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openrouter", "openai-completions"], ["openai-codex", "openai-codex-responses"], ["anthropic", "anthropic-messages"]]) {
+  test(`production fork lifecycle ${JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version}/${apiName}`, { concurrency: false }, async () => {
     const directory = mkdtempSync(join(tmpdir(), "ws-pi-lifecycle-"));
     const plugin = join(directory, "plugin");
     mkdirSync(plugin);
@@ -70,7 +68,7 @@ for (const root of [join(process.cwd(), "node_modules/@earendil-works/pi-coding-
           throw new Error("direct serializer capture before network");
         } }));
         const noop = () => {};
-        const ui = new Proxy({ notify: (message: string) => { if (message.includes("not ready") || message.includes("differs")) errors.push(message); }, custom: async () => undefined }, { get: (target: any, key) => target[key] ?? noop });
+        const ui = new Proxy({ notify: (message: string) => { if (message.includes("not ready") || message.includes("differs")) errors.push(message); }, custom: async () => undefined, setFooter: () => {} }, { get: (target: any, key) => target[key] ?? noop });
         await session.bindExtensions({ mode: env.WS_PI_SPAWN_ROLE === "fork" ? "rpc" : "tui", uiContext: ui, onError: (e: any) => errors.push(String(e.message ?? e)) });
         return h;
       });

@@ -278,68 +278,6 @@ This path exists only for the repository-local Codex or Claude plugin
 development loop. The marker file is gitignored and should not exist in normal
 GitHub release installs, downstream repositories, or Windows installs.
 
-### Pi adapter dogfood (Pi-track-local)
-
-> Pi-track-local: this subsection describes `agents-plugin-pi/`, which exists
-> only on the Pi track. Strip it when this manual is absorbed into a non-Pi
-> branch (`develop`/`main`), the same discipline the AGENTS.md Pi bullet
-> follows.
-
-The Pi adapter spawns its ws-mcp through
-`agents-plugin-pi/bin/ws-mcp-launcher.py` from the project tree, not from a
-`.codex`/`.claude` plugin cache, so the `.local-devenv-runtime` marker loop
-above does not apply to the launcher itself (the marker is honored by the
-launcher only under a plugin-cache path). Instead, `agents-plugin-pi/`'s own
-bridge (`src/local-devenv.ts`, wired into `src/bridge.ts`'s `startBridge`)
-reads a marker of the identical schema directly, independent of the
-launcher's own gate, and builds+injects the binary automatically on every
-lead/fork session start.
-
-The adapter also pins its ws-mcp by an exact string match (`assertVersionPin`
-in `src/version-check.ts`) — unrelaxed by this marker, unlike the launcher's
-own same-minor relaxation — so the build is stamped at the exact pinned
-`plugin_version` from `agents-plugin-pi/runtime.json` (which per AGENTS.md
-tracks `develop`), not a `-dev` suffix.
-
-Enable the loop once, per machine, by writing
-`agents-plugin-pi/.local-devenv-runtime` (same schema as the launcher's own
-contract, documented above) pointing at this repo's `agents-plugin-tool`:
-
-```json
-{
-  "schema_version": 1,
-  "source_root": "/Users/you/devenv",
-  "tool_dir": "/Users/you/devenv/agents-plugin-tool",
-  "go": "/opt/homebrew/bin/go"
-}
-```
-
-With the marker in place, every lead or fork Pi session start (worker/explore
-children skip this entirely and reuse whatever the lead already built) then:
-
-1. Reads and validates the marker, failing loud — naming the offending
-   field — on anything invalid (bad JSON, wrong schema, a relative path, a
-   `tool_dir` without `cmd/ws-mcp`, a non-executable `go`); a missing marker
-   file is simply inert, no other behavior change.
-2. Notifies `building ws-mcp from <source_root> @<short-HEAD>`, then runs
-   `go build -ldflags "-X main.version=<plugin_version> -X
-   main.sourceCommit=<short HEAD>" -o <tmp> ./cmd/ws-mcp` (cwd `tool_dir`)
-   without blocking the session-start event loop, atomically renaming the result into
-   `agents-plugin-pi/.runtime/local-devenv/ws-mcp` on success, and reports
-   elapsed time.
-3. Sets `WS_MCP_BOOTSTRAP_BINARY` on the launcher child's own spawn `env`
-   only (never on `process.env`) so the launcher installs and runs that
-   exact build.
-
-There is no fingerprint cache — every lead/fork session start rebuilds — and
-no cache fallback on a build failure: a broken build or an invalid marker
-both fail the session start loudly, with the active source root, commit, and
-built path prefixed onto whatever launch error follows. No manual
-rebuild-and-relaunch step is needed: edit the Go source and start (or
-reconnect) a Pi lead session to pick up the change. Delete the marker file to
-disable the loop; the next session start is then inert and takes the ordinary
-release-download path, exactly as when no marker was ever written.
-
 ## Development Verification
 
 Use three verification levels while developing `ws-mcp` and plugin-managed

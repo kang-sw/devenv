@@ -134,7 +134,7 @@ test("actual MCP startup registers through the same cold then late-filled shared
   const { tools, pi } = harness();
   const dir = mkdtempSync(join(tmpdir(), "ws-pi-mcp-preview-"));
   const launcher = join(dir, "fake-mcp.py");
-  writeFileSync(launcher, `import json, sys\nfor line in sys.stdin:\n req=json.loads(line); method=req['method']; result={'serverInfo':{'version':'0.46.1'}} if method=='initialize' else {'tools':[{'name':'git.status','description':'status','inputSchema':{'type':'object','properties':{},'required':[]}}]} if method=='tools/list' else {'isError':True,'content':[{'type':'text','text':'no bootstrap'}]}; print(json.dumps({'jsonrpc':'2.0','id':req['id'],'result':result}), flush=True)\n`);
+  writeFileSync(launcher, `import json, sys\nfor line in sys.stdin:\n req=json.loads(line); method=req['method']; result={'serverInfo':{'version':'0.46.3'}} if method=='initialize' else {'tools':[{'name':'git.status','description':'status','inputSchema':{'type':'object','properties':{},'required':[]}}]} if method=='tools/list' else {'isError':True,'content':[{'type':'text','text':'no bootstrap'}]}; print(json.dumps({'jsonrpc':'2.0','id':req['id'],'result':result}), flush=True)\n`);
   const ref = createToolPreviewTuiRef();
   const oldRole = process.env.WS_PI_SPAWN_ROLE;
   process.env.WS_PI_SPAWN_ROLE = "worker";
