@@ -60,6 +60,13 @@ jobs:
           diff -q ../agents-plugin/runtime.json ../agents-plugin-pi/runtime.json
           diff -q ../agents-plugin/bin/ws-mcp-launcher.py ../agents-plugin-pi/bin/ws-mcp-launcher.py
           diff -rq ../agents-plugin/rsrc ../agents-plugin-pi/rsrc
+          # Root package.json's dependencies must mirror agents-plugin-pi/package.json's
+          # runtime dependencies exactly: Pi's git-install flow runs `npm install`
+          # only against the root manifest. The two files legitimately differ
+          # elsewhere (root carries pi.extensions, omits type/files/scripts/
+          # devDependencies), so compare only the parsed dependencies object,
+          # not the whole file.
+          diff <(jq -S '.dependencies' ../package.json) <(jq -S '.dependencies' ../agents-plugin-pi/package.json)
 
       - name: Build release assets
         run: |

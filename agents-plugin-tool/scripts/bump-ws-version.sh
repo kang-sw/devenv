@@ -102,6 +102,17 @@ def update_pi_bridge_package(data) -> None:
     data["version"] = version
 
 
+def update_root_package(data) -> None:
+    # The root package.json is the manifest Pi's git-install `npm install`
+    # actually runs against; its `dependencies` block is a tooling-maintained
+    # mirror of agents-plugin-pi/package.json's runtime `dependencies` (NOT
+    # devDependencies — those are provided by the Pi host at load time), kept
+    # in sync here rather than hand-edited so the two never drift.
+    data["version"] = version
+    pi_bridge = json.loads(rel("agents-plugin-pi/package.json").read_text(encoding="utf-8"))
+    data["dependencies"] = pi_bridge["dependencies"]
+
+
 # agents-plugin-pi/ mirrors agents-plugin/'s runtime.json, launcher, and rsrc/
 # byte-for-byte; resync from the just-updated agents-plugin/ copies rather than
 # re-deriving the version fields independently, so the two never drift.
@@ -109,7 +120,7 @@ sync_file("agents-plugin/runtime.json", "agents-plugin-pi/runtime.json")
 sync_file("agents-plugin/bin/ws-mcp-launcher.py", "agents-plugin-pi/bin/ws-mcp-launcher.py")
 sync_tree("agents-plugin/rsrc", "agents-plugin-pi/rsrc")
 update_json("agents-plugin-pi/package.json", update_pi_bridge_package)
-update_json("package.json", update_pi_bridge_package)
+update_json("package.json", update_root_package)
 
 main_go = read_text("agents-plugin-tool/cmd/ws-mcp/main.go")
 main_go = re.sub(

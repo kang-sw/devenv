@@ -2,8 +2,10 @@ package wsrsrc
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -78,5 +80,45 @@ func TestPiMirrorUpToDate(t *testing.T) {
 		t.Fatalf("agents-plugin-pi mirrors have drifted from canonical agents-plugin/:\n%s\n\n"+
 			"Resync with: agents-plugin-tool/scripts/bump-ws-version.sh <current-version>",
 			strings.Join(diffs, "\n"))
+	}
+}
+
+// TestRootPackageDependenciesMirrored is the drift guard for the repo-root
+// package.json `dependencies` mirror of agents-plugin-pi/package.json's
+// runtime dependencies. Pi's git-install flow runs `npm install` only against
+// the root manifest, so the six runtime deps (yaml, jiti, linkedom, etc.) must
+// be declared there too, or the extension fails to load with a
+// "Cannot find module" error on a clean machine. Unlike the byte-identical
+// runtime.json/bin/rsrc mirrors above, the two package.json files legitimately
+// differ elsewhere — the root carries `pi.extensions` and omits the subdir's
+// `type`/`files`/`scripts`/`devDependencies` — so this compares only the
+// parsed `dependencies` object, not the whole file. devDependencies are
+// intentionally excluded: the Pi host provides `@earendil-works/pi-*` at
+// runtime.
+func TestRootPackageDependenciesMirrored(t *testing.T) {
+	repoRoot := filepath.Join("..", "..", "..")
+
+	readDependencies := func(t *testing.T, path string) map[string]string {
+		t.Helper()
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		var pkg struct {
+			Dependencies map[string]string `json:"dependencies"`
+		}
+		if err := json.Unmarshal(raw, &pkg); err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		return pkg.Dependencies
+	}
+
+	root := readDependencies(t, filepath.Join(repoRoot, "package.json"))
+	piBridge := readDependencies(t, filepath.Join(piRoot(), "package.json"))
+
+	if !reflect.DeepEqual(root, piBridge) {
+		t.Fatalf("root package.json dependencies have drifted from agents-plugin-pi/package.json:\nroot: %v\nagents-plugin-pi: %v\n\n"+
+			"Resync with: agents-plugin-tool/scripts/bump-ws-version.sh <current-version>",
+			root, piBridge)
 	}
 }
