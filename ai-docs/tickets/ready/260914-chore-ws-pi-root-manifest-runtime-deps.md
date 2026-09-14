@@ -201,6 +201,38 @@ it as the Result and stop before declaring the consumption path fixed.
 Phase 1 is already implemented on `impl/develop/sip-aptly-fence` (commits
 `7a60b80`, `053c5a6`, `aa28c2a`); Phase 2 continues on that same branch.
 
+### Result (aa28c2a) - 2026-09-14
+
+Landed on `impl/develop/sip-aptly-fence` in three commits: `7a60b80` (mirror
+the six runtime `dependencies` into the root `package.json`; extend
+`bump-ws-version.sh` with `update_root_package()`; add the release-workflow
+`diff` guard and the `TestRootPackageDependenciesMirrored` Go assertion),
+`053c5a6` (round-1 review fixes: gitignore the root `node_modules/` and a
+generated root `package-lock.json`; add the root `package.json` to the
+release-workflow PR trigger paths and jq-validate both `package.json` files;
+make `update_root_package()` fail loud instead of silently defaulting to an
+empty dependency map), and `aa28c2a` (capture the pi-web-access git-install
+gap found during round-1 review as its own idea ticket, since fixing it was
+out of Phase 1's file/decision scope — that ticket is now absorbed as this
+ticket's Phase 2, see its Result below).
+
+Re-verified in this session before starting Phase 2:
+- `go build ./...`, `go vet ./...`, `go test ./...` in `agents-plugin-tool`:
+  all green, including `TestPiMirrorUpToDate` and
+  `TestRootPackageDependenciesMirrored` (`-run` targeted, `-count=1`, both
+  PASS).
+- `diff <(jq -S '.dependencies' package.json) <(jq -S '.dependencies'
+  agents-plugin-pi/package.json)`: empty — root and subdir `dependencies`
+  are parsed-equal, confirming the dry-run-bump invariant holds on the
+  current tree without re-running the bump script.
+
+**Outstanding:** the Phase 1 "Live develop smoke (owner-run, no publish)"
+verification bullet — `pi install git:...@<develop-tip-sha>` on a clean
+machine confirming extension load with no `Cannot find module` error, plus
+launcher download/SHA256/`assertVersionPin`/`ws/*` registration — is
+explicitly owner-run and has not been performed; it requires pushing this
+branch's merge to `develop` first. Not attempted by this worker.
+
 ### Phase 2: Fix pi-web-access resolution to the actual install location
 
 Depends on Phase 1 (same branch). Fix `agents-plugin-pi/src/web-search.ts` so
@@ -236,3 +268,76 @@ Verification:
 
 Only when this Phase 2 smoke passes is the git-install consumption path fixed
 end-to-end; record the observed evidence in the Result.
+
+### Result (a1ae58f8) - 2026-09-14
+
+Landed on `impl/develop/sip-aptly-fence` in two commits: `c3fd173f` (fix —
+`agents-plugin-pi/src/web-search.ts` now resolves `pi-web-access` by checking
+two exact known candidate directories in priority order,
+`dirname(packageRoot)/node_modules/pi-web-access` (clone root, git-install)
+then `packageRoot/node_modules/pi-web-access` (subdir, dev/test), using the
+first that passes the existing name === `'pi-web-access'` / version ===
+`'0.29.0'` / `realpathSync(dir) === dir` / `existsSync(index.ts)` checks,
+preserved verbatim; the helper source path stays anchored to
+`packageRoot/src/web-search-helper.mjs`; no `require.resolve` or free upward
+walk introduced) and `a1ae58f8` (round-1 review fixes: thread the resolved
+`root` through every post-resolution `failure()` call so the
+`WebSearchError` diagnostic paths name the directory that actually resolved
+rather than always the clone-root default; restore `--offline` on the new
+clone-root `npm install` added to `web-package.test.ts`; add a test proving
+the clone-root candidate wins priority over the subdir candidate when both
+are valid).
+
+Test coverage added: `agents-plugin-pi/test/web-search.test.ts` gained four
+tests — clone-root-only layout resolves; a wrong-version clone-root
+candidate falls through to a valid subdir candidate; a spoofed (symlinked)
+or absent clone-root candidate fails closed with a diagnostic that still
+names the clone-root candidate's paths; clone-root wins priority when both
+candidates are independently valid (verified via a custom helper stub keyed
+on a marker file in each candidate directory, so the test fails under a
+reversed or arbitrary selection order, not just under total resolution
+failure). `agents-plugin-pi/test/web-package.test.ts`'s existing
+packed-install test was extended with a second, real (offline) `npm
+install` against a synthetic manifest built from the actual root
+`package.json`'s `dependencies` block, reproducing the true git-install
+shape end-to-end with the real packed `pi-web-access` artifact (not a
+synthetic stub), plus a fails-closed assertion when the dependency is
+absent from both known locations.
+
+Verification:
+- `agents-plugin-pi`: `node --test test/web-search.test.ts
+  test/web-package.test.ts test/web-tools.test.ts` — 21/21 pass.
+- `agents-plugin-pi`: full `npm test` — 1538/1543 relevant tests pass; the
+  same 5 pre-existing failures present before this change (a local
+  `ws-mcp` binary version-pin mismatch, `0.46.3` installed vs `0.46.4`
+  expected by `runtime.json` — an environment gap unrelated to
+  `web-search.ts`, reproduced identically on a clean pre-change baseline
+  run) remain, unchanged in count or cause.
+- Two review rounds completed (route allocation: partitioned
+  correctness + test). Round 1: correctness (opus) found the resolver
+  logic and security checks correct, one Important finding (the absorbed
+  idea ticket needed to be dropped with a commit note — addressed in this
+  same session, see below) and two Minor findings (diagnostic anchoring,
+  test `--offline`); test (sonnet) found the suite clean with two Minor
+  findings (missing both-valid-priority test coverage, the same
+  `--offline` gap). All four Minor/Important findings fixed in `a1ae58f8`.
+  Round 2: both reviewers confirmed all round-1 findings fixed correctly
+  with no regression; correctness noted one new non-blocking observation
+  (no test directly asserts a post-resolution diagnostic names the
+  resolved, non-clone-root directory) recorded here as `unresolved`, not
+  acted on per the two-round cap.
+- `idea/260914-bug-ws-pi-web-access-git-install-unresolvable.md` dropped
+  (see the ticket-closeout commit) — this ticket's Phase 2 absorbs it, as
+  its own frontmatter and Phase 2 text state.
+
+**Outstanding:** the Phase 2 "Owner-run develop smoke (no publish),
+Explore-role included" verification bullet — `pi install
+git:...@<develop-tip-sha>` on a clean machine, extension load plus an
+Explore-role web-search probe succeeding with no
+`web-search-extension-missing` — is explicitly owner-run and has not been
+performed; it requires pushing both phases' merge to `develop` first. Not
+attempted by this worker. The git-install consumption path is therefore
+verified end-to-end by automated/simulated evidence (a real npm install
+into a synthetic clone-root-shaped layout using the actual mirrored root
+manifest and the real packed artifact) but not yet by a genuine clean-machine
+`pi install`; this ticket stays in `ready/` pending that owner action.
