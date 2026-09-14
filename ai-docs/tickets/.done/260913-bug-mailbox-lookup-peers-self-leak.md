@@ -3,6 +3,7 @@ title: "mailbox.lookup_peers lists the caller's own bound named inbox as a peer 
 related:
   260913-feat-cross-session-mailbox-core: source — lookup_peers and the named-inbox self/peer projection live in this ticket's surface
   260913-feat-cross-session-mailbox-wake: source — ferrule-time named-inbox registration (the "catch") is this ticket's binding step
+completed: 2026-09-13
 ---
 
 # mailbox.lookup_peers lists the caller's own bound named inbox as a peer
@@ -93,3 +94,21 @@ the same way a caller's own reply-id is not surfaced as a peer.
 - Treating the double listing as a conflict-marker gap — rejected: only one live
   process holds the name, so conflict suppression is correct; the defect is
   self-exclusion.
+
+## Resolution (06988235) - 2026-09-13
+
+Fixed as a localized hotfix (delegate) in
+`agents-plugin-tool/internal/mcp/mailbox_tools.go` `handleMailboxLookupPeers`.
+The existing `isOwner` check (previously computed only for the `self` block) is
+hoisted above the peer-enumeration loop, and a live Presence entry is skipped
+when `isOwner && identity.Scope == scope && name == identity.Name` — the
+caller's own registered named inbox surfaces only under `self`, never in
+`peers[]`. A genuinely distinct second name (including a `Conflict`-flagged
+duplicate the session does not own) is untouched, per the Proposals contract.
+Regression test `TestMailboxLookupPeersExcludesSelfFromPeers`
+(`internal/mcp/mailbox_tools_test.go`) pins self-in-`self`/not-in-`peers[]` and
+that a distinct conflicted peer still surfaces; mutation-verified (disabling the
+predicate reproduces the leak). Full Go suite green.
+
+The Open Questions item (pre-`ferrule` retro-registration UX) remains out of
+scope and is left open as a separate concern.

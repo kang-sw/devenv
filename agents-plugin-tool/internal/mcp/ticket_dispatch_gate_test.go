@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -127,6 +128,16 @@ func TestTicketsQueryJSONDispatchBlockedContract(t *testing.T) {
 // dispatch_blocked line (see TestTicketsQueryPointResolveDispatchBlocked); its
 // absence here is therefore the fail-open path, not a no-op.
 func TestTicketsQueryPointResolveDispatchGateFailsOpen(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// The scan error is injected via chmod 0o000 to deny read, which Windows
+		// does not honor (its file mode only toggles the read-only bit, which
+		// gates writes, not reads), so the "unreadable" file stays readable, the
+		// board scan succeeds, and the gate correctly emits dispatch_blocked —
+		// making the injection, not the fail-open contract, the thing that fails.
+		// The fail-open path itself is platform-independent Go; POSIX coverage
+		// below is sufficient.
+		t.Skip("chmod 0o000 read-denial is POSIX-only; fail-open path covered on POSIX")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("running as root; chmod 000 does not deny read")
 	}

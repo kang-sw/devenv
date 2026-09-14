@@ -730,6 +730,115 @@ func TestMailboxPiggybackSuppressedForJSONFormat(t *testing.T) {
 	}
 }
 
+// TestMailboxLookupPeersExcludesSelfFromPeers is the regression test for
+// 260913-bug-mailbox-lookup-peers-self-leak: the caller's own bound named
+// inbox must appear only under self, never inside peers[], even though it
+// lives in the very same Presence map every other peer is enumerated from.
+// A genuinely distinct second live holder of a different name — including
+// one flagged Conflict — must still surface as a peer: the fix is a
+// self-only exclusion, not a "hide everything in my scope" shortcut.
+func TestMailboxLookupPeersExcludesSelfFromPeers(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	t.Setenv(envMailbox, "alice@worktree")
+	s := NewServer(root, "test")
+	key := mailboxLogin(t, s, 1, root)
+
+	path, err := wsmailbox.WorktreePath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A distinct, genuinely-live second holder under a different name (the
+	// test binary's own parent PID, guaranteed alive for the test's
+	// duration, matching the existing conflict fixture's PID choice), with
+	// the conflict marker already set, so the fix cannot suppress a real
+	// peer or its conflict marker along with the self entry.
+	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+		store.Presence["bob"] = wsmailbox.Presence{
+			Name: "bob", Scope: wsmailbox.ScopeWorktree, PID: os.Getppid(),
+			LastSeen: mailboxNowString(), Conflict: true,
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := callToolWithKey(t, s, 2, key, "mailbox.lookup_peers", map[string]any{"scope": "worktree"})
+	if !strings.Contains(resp, "self: alice@worktree") {
+		t.Fatalf("owner session's self entry is not its own address: %s", resp)
+	}
+	for _, line := range strings.Split(resp, "\n") {
+		if strings.HasPrefix(line, "alice@worktree") {
+			t.Fatalf("lookup_peers leaked the caller's own bound named inbox into peers[]: %s", resp)
+		}
+	}
+	if !strings.Contains(resp, "bob@worktree") || !strings.Contains(resp, "CONFLICT") {
+		t.Fatalf("lookup_peers suppressed a genuinely distinct peer or its conflict marker: %s", resp)
+	}
+}
+
+// TestMailboxLookupPeersSurfacesSelfConflict is the regression test for the
+// self-leak hotfix's follow-up repair: Presence is name-keyed, so a
+// same-name contest (a second live process also claiming this owner's own
+// WS_MAILBOX name) flags Conflict on the OWNER's own record rather than
+// creating a second entry (mirroring ensureMailboxRegistered's real
+// duplicate-registration path). The self-exclusion fix must not swallow
+// that record's Conflict signal along with dropping it from peers[] — it
+// must relocate the signal into self, since the owner is the party that
+// most needs the warning that another process claims its name.
+func TestMailboxLookupPeersSurfacesSelfConflict(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	t.Setenv(envMailbox, "alice@worktree")
+	s := NewServer(root, "test")
+	key := mailboxLogin(t, s, 1, root)
+
+	path, err := wsmailbox.WorktreePath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Flag Conflict directly on the caller's own already-registered record,
+	// exactly as ensureMailboxRegistered would when a second live process
+	// contests the same name — no second Presence entry is ever created for
+	// a name-keyed store.
+	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+		p := store.Presence["alice"]
+		p.Conflict = true
+		store.Presence["alice"] = p
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := callToolWithKey(t, s, 2, key, "mailbox.lookup_peers", map[string]any{"scope": "worktree"})
+	if !strings.Contains(resp, "self: alice@worktree") || !strings.Contains(resp, "CONFLICT") {
+		t.Fatalf("owner session's self entry did not surface its own name's conflict: %s", resp)
+	}
+	for _, line := range strings.Split(resp, "\n") {
+		if strings.HasPrefix(line, "alice@worktree") {
+			t.Fatalf("owner's own conflicted entry still leaked into peers[]: %s", resp)
+		}
+	}
+
+	jsonResp := callToolWithKey(t, s, 3, key, "mailbox.lookup_peers", map[string]any{"scope": "worktree", "format": "json"})
+	var parsed struct {
+		Self map[string]any `json:"self"`
+	}
+	if err := json.Unmarshal([]byte(jsonResp), &parsed); err != nil {
+		t.Fatalf("json lookup_peers response did not parse: %v\nresp=%s", err, jsonResp)
+	}
+	if v, _ := parsed.Self["conflict"].(bool); !v {
+		t.Fatalf("json self object did not carry conflict:true: %s", jsonResp)
+	}
+	if addr, _ := parsed.Self["address"].(string); addr != "alice@worktree" {
+		t.Fatalf("json self object lost its address alongside the conflict flag: %s", jsonResp)
+	}
+}
+
 // TestMailboxLookupPeersSelfAddressGatedByOwnership verifies the self-address
 // surface never hands a non-owner session an address it cannot actually
 // recv from: a parent-carrying delegate session sharing the owner's process
