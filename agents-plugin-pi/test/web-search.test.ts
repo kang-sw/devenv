@@ -292,3 +292,36 @@ test('spoofed or absent clone-root candidate never resolves without a valid dire
   symlinkSync(join(packageRoot, 'node_modules', 'pi-web-access'), join(cloneRoot, 'node_modules', 'pi-web-access'));
   await assert.rejects(createWebSearch({ packageRoot: extDir, env }).probe(), /web-search-extension-missing/);
 });
+
+test('when both candidates are valid, the clone-root candidate wins priority over the subdir candidate', async t => {
+  const { env } = setup(t);
+  const cloneRoot = realpathSync(mkdtempSync(join(tmpdir(), 'web-clone-')));
+  t.after(() => rmSync(cloneRoot, { recursive: true, force: true }));
+  const extDir = join(cloneRoot, 'agents-plugin-pi');
+  mkdirSync(join(extDir, 'src'), { recursive: true });
+  for (const [location, marker] of [
+    [join(cloneRoot, 'node_modules', 'pi-web-access'), 'clone-root'],
+    [join(extDir, 'node_modules', 'pi-web-access'), 'subdir'],
+  ] as const) {
+    mkdirSync(location, { recursive: true });
+    writeFileSync(join(location, 'package.json'), '{"name":"pi-web-access","version":"0.29.0"}');
+    writeFileSync(join(location, 'index.ts'), '');
+    writeFileSync(join(location, 'MARKER'), marker);
+  }
+  // A helper stub that only answers ready when spawned with the clone-root
+  // candidate's directory, so a successful probe() proves which candidate
+  // priority actually selected — not merely that some valid one did.
+  writeFileSync(join(extDir, 'src', 'web-search-helper.mjs'), [
+    "function frame(value) {",
+    "  const body = Buffer.from(JSON.stringify(value));",
+    "  const header = Buffer.alloc(4); header.writeUInt32BE(body.length);",
+    "  return Buffer.concat([header, body]);",
+    "}",
+    "for await (const chunk of process.stdin) { /* request ignored */ }",
+    "const { readFileSync } = await import('node:fs');",
+    "const { join } = await import('node:path');",
+    "const marker = readFileSync(join(process.argv[2], 'MARKER'), 'utf8');",
+    "process.stdout.write(frame({ ready: marker === 'clone-root' }));",
+  ].join('\n'));
+  await createWebSearch({ packageRoot: extDir, env }).probe();
+});

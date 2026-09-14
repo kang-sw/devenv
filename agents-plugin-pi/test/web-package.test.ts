@@ -60,7 +60,9 @@ test('packed install/update carries the pinned search license and resolves host 
   mkdirSync(cloneRoot);
   const rootDependencies = JSON.parse(readFileSync(join(packageRoot, '..', 'package.json'), 'utf8')).dependencies;
   writeFileSync(join(cloneRoot, 'package.json'), JSON.stringify({ private: true, dependencies: rootDependencies }));
-  run('npm', ['install', '--ignore-scripts', '--legacy-peer-deps', '--no-audit', '--no-fund', '--package-lock=false'], cloneRoot);
+  // Same offline invariant as the packed install above: the local npm cache
+  // already has these exact pinned versions from agents-plugin-pi's own install.
+  run('npm', ['install', '--offline', '--ignore-scripts', '--legacy-peer-deps', '--no-audit', '--no-fund', '--package-lock=false'], cloneRoot);
   const extDir = join(cloneRoot, 'agents-plugin-pi');
   mkdirSync(join(extDir, 'src'), { recursive: true });
   cpSync(join(packageRoot, 'src', 'web-search-helper.mjs'), join(extDir, 'src', 'web-search-helper.mjs'));
