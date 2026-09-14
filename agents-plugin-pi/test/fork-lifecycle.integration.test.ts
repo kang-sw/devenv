@@ -9,6 +9,13 @@ import { RpcClient } from "@earendil-works/pi-coding-agent";
 // resource loader, extension runner, SessionManager and serializers are real.
 // Copying isolates changed child resources and the test-only MCP launcher.
 const SDK_ROOTS = [join(process.cwd(), "node_modules/@earendil-works/pi-coding-agent")];
+const LEAD_ENV_KEYS = [
+  "WS_PI_SPAWN_ROLE",
+  "WS_PI_EXPLORE_MODE",
+  "WS_PI_DELEGATION_POLICY",
+  "WS_PI_SUBTREE_CHANNEL",
+  "WS_PI_PARENT_SESSION_KEY",
+] as const;
 for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openrouter", "openai-completions"], ["openai-codex", "openai-codex-responses"], ["anthropic", "anthropic-messages"]]) {
   test(`production fork lifecycle ${JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version}/${apiName}`, { concurrency: false }, async () => {
     const directory = mkdtempSync(join(tmpdir(), "ws-pi-lifecycle-"));
@@ -137,8 +144,20 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
     };
     for (const proto of prototypes) Object.assign(proto, transport);
     try {
-      process.env.PI_OFFLINE = "1";
-      for (const key of Object.keys(process.env)) if (key.startsWith("WS_PI_FORK_") || key === "WS_PI_PARENT_SESSION_KEY" || key === "WS_PI_SPAWN_ROLE") delete process.env[key];
+      // The lifecycle fixture is a synthetic host lead, not a child inheriting
+      // a launcher environment. Poison every role-shaping marker first so this
+      // assertion fails if a future cleanup drops one of them.
+      Object.assign(process.env, {
+        PI_OFFLINE: "1",
+        WS_PI_SPAWN_ROLE: "worker",
+        WS_PI_EXPLORE_MODE: "code-search",
+        WS_PI_DELEGATION_POLICY: JSON.stringify({ version: 1, depth: 1, maxDepth: 2, tools: ["read"], authority: "leaf" }),
+        WS_PI_SUBTREE_CHANNEL: "poisoned-subtree-channel",
+        WS_PI_PARENT_SESSION_KEY: "poisoned-parent-key",
+      });
+      for (const key of LEAD_ENV_KEYS) delete process.env[key];
+      for (const key of Object.keys(process.env)) if (key.startsWith("WS_PI_FORK_")) delete process.env[key];
+      assert.deepEqual(LEAD_ENV_KEYS.filter((key) => key in process.env), [], "synthetic lead clears inherited role-shaping environment");
       const lead = await makeSession(sdk.SessionManager.create(directory, join(directory, "sessions")), {}, undefined, "Explicit append Ω\r\ntrailing  ", false, true);
       if (!lead.api.getActiveTools().includes("ws-report-to-lead")) lead.api.setActiveTools([...lead.api.getActiveTools(), "ws-report-to-lead"]);
       await prompt(lead, "Original lead history Ω");
