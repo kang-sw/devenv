@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: fb1affa8754882af
 sage-review-completeness-reviewed: fb1affa8754882af
+completed: 2026-09-14
 ---
 
 # Fold agents-plugin-pi into the ws-mcp release train
@@ -112,3 +113,59 @@ byte-identical to `agents-plugin/`'s and both `package.json` versions match;
 then introduce a deliberate one-byte drift in a pi mirror and confirm the
 validation assertions fail (simulate the workflow's shell/jq/diff checks
 locally). `go test ./...` in `agents-plugin-tool` must stay green.
+
+### Result (6c42dd4b) - 2026-09-14
+
+Landed on `impl/develop/atop-prude-very` (4 commits: `6ea525c1`, `2beb809b`,
+`66512e6f`, `6c42dd4b`), routed via `route.resolve_implement`
+(delegated, review partitioned: correctness + test).
+
+`bump-ws-version.sh` now resyncs `agents-plugin-pi/{runtime.json,
+bin/ws-mcp-launcher.py, rsrc/}` byte-for-byte from the just-updated
+`agents-plugin/` copies (whole-file/whole-tree resync, not independent
+per-field derivation) and bumps the `ws-pi-bridge` version in both
+`agents-plugin-pi/package.json` and the repo-root `package.json`. The release
+workflow's "Validate plugin release contract" step gained three `diff`
+checks over the same three paths, and `agents-plugin-pi/**` was added to the
+`pull_request` path filter.
+
+Verification:
+- `go test ./...` and `go vet ./...` in `agents-plugin-tool`: pass (all 14
+  packages).
+- Manual dry-run: bumped to scratch version `9.9.9`, confirmed all three
+  mirrors byte-identical and both `package.json` versions matched; injected a
+  one-byte drift into `agents-plugin-pi/runtime.json` and confirmed `diff -q`
+  exits 1 (matching the CI assertions), then reverted before commit.
+- Round-1 test-partition review (Important): no automated regression
+  coverage existed for the mirror invariant beyond the new CI-only bash
+  checks. Fixed by adding `agents-plugin-tool/internal/wsrsrc/pi_mirror_test.go`
+  (`TestPiMirrorUpToDate`), generalizing the existing
+  `TestWsflowRsrcMirrorUpToDate` pattern; verified it fails on injected drift
+  and passes clean otherwise.
+- Round-1 correctness-partition review (minor, fixed): `sync_tree`'s
+  `rmtree`-then-`copytree` was destructive on the failure path — reworked to
+  copy into a sibling `.sync-tmp` dir and swap in with one `rename`. Also
+  refreshed hand-sync documentation in `ai-docs/manuals/ws-mcp.md`,
+  `agents-plugin-pi/src/index.ts`, `src/version-check.ts`, and
+  `test/version-check.test.ts` that still claimed "no shared sync tooling
+  exists yet".
+- Round 2 (both partitions): verdict clean / fixed, no Critical, no new
+  blocking findings.
+
+decisions:
+- Left `agents-plugin-pi/package-lock.json`'s stale `0.1.0` version
+  unaddressed — non-breaking (no `npm ci`/`install` runs in CI or release
+  scripts today; reformatting a 242KB generated lockfile via `update_json`
+  would add more diff noise than it fixes).
+- Accepted `update_json`'s `json.dumps(indent=2)` one-time array-reformat
+  churn on the two `package.json` files as inherent to reusing the existing
+  helper (the ticket's own `reuse_points` precedent).
+- Picked up two cheap round-2 observations outside the two rounds' named
+  findings: `sync_file` switched from `shutil.copyfile` to `shutil.copy` to
+  preserve the launcher's executable mode on a from-scratch recreation, and
+  `ai-docs/spec/pi-adapter-runtime.md`'s Package Topology section (same
+  stale "no automated sync tooling" claim, missed by round 1's four named
+  files) was refreshed.
+- Left `agents-plugin-pi/rsrc.sync-tmp` ungitignored (round-2 observation,
+  non-blocking): the next `sync_tree` run removes it idempotently and no
+  drift guard scopes outside `rsrc/` itself.
