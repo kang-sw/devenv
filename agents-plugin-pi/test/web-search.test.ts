@@ -240,3 +240,88 @@ test('exact local resolver never falls back to a separately installed package', 
   symlinkSync(join(packageRoot, 'node_modules', 'pi-web-access'), join(home, 'node_modules', 'pi-web-access'));
   await assert.rejects(createWebSearch({ env, packageRoot: home }).probe(), /web-search-extension-missing/);
 });
+
+test('clone-root git-install layout resolves pi-web-access one level above packageRoot', async t => {
+  const { env } = setup(t);
+  const cloneRoot = realpathSync(mkdtempSync(join(tmpdir(), 'web-clone-')));
+  t.after(() => rmSync(cloneRoot, { recursive: true, force: true }));
+  const extDir = join(cloneRoot, 'agents-plugin-pi');
+  mkdirSync(join(extDir, 'src'), { recursive: true });
+  // No `agents-plugin-pi/node_modules` at all — the git-install shape where a
+  // root-only `npm install` lands deps at the clone root, not the subdir.
+  const upstream = join(cloneRoot, 'node_modules', 'pi-web-access');
+  mkdirSync(upstream, { recursive: true });
+  writeFileSync(join(upstream, 'package.json'), '{"name":"pi-web-access","version":"0.29.0"}');
+  writeFileSync(join(upstream, 'index.ts'), '');
+  cpSync(join(packageRoot, 'test', 'web-search-protocol.fixture'), join(extDir, 'src', 'web-search-helper.mjs'));
+  await createWebSearch({ packageRoot: extDir, env }).probe();
+});
+
+test('clone-root candidate with a wrong version falls through to the subdir dev/test layout', async t => {
+  const { env } = setup(t);
+  const cloneRoot = realpathSync(mkdtempSync(join(tmpdir(), 'web-clone-')));
+  t.after(() => rmSync(cloneRoot, { recursive: true, force: true }));
+  const extDir = join(cloneRoot, 'agents-plugin-pi');
+  mkdirSync(join(extDir, 'src'), { recursive: true });
+  const badUpstream = join(cloneRoot, 'node_modules', 'pi-web-access');
+  mkdirSync(badUpstream, { recursive: true });
+  writeFileSync(join(badUpstream, 'package.json'), '{"name":"pi-web-access","version":"9.9.9"}');
+  writeFileSync(join(badUpstream, 'index.ts'), '');
+  const goodUpstream = join(extDir, 'node_modules', 'pi-web-access');
+  mkdirSync(goodUpstream, { recursive: true });
+  writeFileSync(join(goodUpstream, 'package.json'), '{"name":"pi-web-access","version":"0.29.0"}');
+  writeFileSync(join(goodUpstream, 'index.ts'), '');
+  cpSync(join(packageRoot, 'test', 'web-search-protocol.fixture'), join(extDir, 'src', 'web-search-helper.mjs'));
+  await createWebSearch({ packageRoot: extDir, env }).probe();
+});
+
+test('spoofed or absent clone-root candidate never resolves without a valid directory at either known location, and the diagnostic anchors on the clone root', async t => {
+  const { env } = setup(t);
+  const cloneRoot = realpathSync(mkdtempSync(join(tmpdir(), 'web-clone-')));
+  t.after(() => rmSync(cloneRoot, { recursive: true, force: true }));
+  const extDir = join(cloneRoot, 'agents-plugin-pi');
+  mkdirSync(join(extDir, 'src'), { recursive: true });
+  await assert.rejects(createWebSearch({ packageRoot: extDir, env }).probe(), error => {
+    assert.match(error.message, /web-search-extension-missing/);
+    assert.ok(error.message.includes(join(cloneRoot, 'node_modules', 'pi-web-access', 'README.md')), 'diagnostic prefers the clone-root candidate');
+    return true;
+  });
+  // A symlinked clone-root candidate (matching name+version but not the exact
+  // real directory) still fails closed, same as the subdir case above.
+  mkdirSync(join(cloneRoot, 'node_modules'), { recursive: true });
+  symlinkSync(join(packageRoot, 'node_modules', 'pi-web-access'), join(cloneRoot, 'node_modules', 'pi-web-access'));
+  await assert.rejects(createWebSearch({ packageRoot: extDir, env }).probe(), /web-search-extension-missing/);
+});
+
+test('when both candidates are valid, the clone-root candidate wins priority over the subdir candidate', async t => {
+  const { env } = setup(t);
+  const cloneRoot = realpathSync(mkdtempSync(join(tmpdir(), 'web-clone-')));
+  t.after(() => rmSync(cloneRoot, { recursive: true, force: true }));
+  const extDir = join(cloneRoot, 'agents-plugin-pi');
+  mkdirSync(join(extDir, 'src'), { recursive: true });
+  for (const [location, marker] of [
+    [join(cloneRoot, 'node_modules', 'pi-web-access'), 'clone-root'],
+    [join(extDir, 'node_modules', 'pi-web-access'), 'subdir'],
+  ] as const) {
+    mkdirSync(location, { recursive: true });
+    writeFileSync(join(location, 'package.json'), '{"name":"pi-web-access","version":"0.29.0"}');
+    writeFileSync(join(location, 'index.ts'), '');
+    writeFileSync(join(location, 'MARKER'), marker);
+  }
+  // A helper stub that only answers ready when spawned with the clone-root
+  // candidate's directory, so a successful probe() proves which candidate
+  // priority actually selected — not merely that some valid one did.
+  writeFileSync(join(extDir, 'src', 'web-search-helper.mjs'), [
+    "function frame(value) {",
+    "  const body = Buffer.from(JSON.stringify(value));",
+    "  const header = Buffer.alloc(4); header.writeUInt32BE(body.length);",
+    "  return Buffer.concat([header, body]);",
+    "}",
+    "for await (const chunk of process.stdin) { /* request ignored */ }",
+    "const { readFileSync } = await import('node:fs');",
+    "const { join } = await import('node:path');",
+    "const marker = readFileSync(join(process.argv[2], 'MARKER'), 'utf8');",
+    "process.stdout.write(frame({ ready: marker === 'clone-root' }));",
+  ].join('\n'));
+  await createWebSearch({ packageRoot: extDir, env }).probe();
+});

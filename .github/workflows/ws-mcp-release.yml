@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/ws-mcp-release.yml"
+      - "package.json"
       - ".agents/plugins/marketplace.json"
       - ".claude-plugin/marketplace.json"
       - "agents-plugin/**"
@@ -55,11 +56,20 @@ jobs:
           jq . ../agents-plugin/runtime.json >/dev/null
           jq . ../.agents/plugins/marketplace.json >/dev/null
           jq . ../.claude-plugin/marketplace.json >/dev/null
+          jq . ../package.json >/dev/null
+          jq . ../agents-plugin-pi/package.json >/dev/null
           test "$(jq -r '.plugins[].name' ../.agents/plugins/marketplace.json | sort | tr '\n' ' ')" = "ws wsflow "
           test "$(jq -r '.plugins[].name' ../.claude-plugin/marketplace.json | sort | tr '\n' ' ')" = "ws wsflow "
           diff -q ../agents-plugin/runtime.json ../agents-plugin-pi/runtime.json
           diff -q ../agents-plugin/bin/ws-mcp-launcher.py ../agents-plugin-pi/bin/ws-mcp-launcher.py
           diff -rq ../agents-plugin/rsrc ../agents-plugin-pi/rsrc
+          # Root package.json's dependencies must mirror agents-plugin-pi/package.json's
+          # runtime dependencies exactly: Pi's git-install flow runs `npm install`
+          # only against the root manifest. The two files legitimately differ
+          # elsewhere (root carries pi.extensions, omits type/files/scripts/
+          # devDependencies), so compare only the parsed dependencies object,
+          # not the whole file.
+          diff <(jq -S '.dependencies' ../package.json) <(jq -S '.dependencies' ../agents-plugin-pi/package.json)
 
       - name: Build release assets
         run: |
