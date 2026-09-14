@@ -10,7 +10,7 @@ import { createAgentStorageContext } from "../src/agent-storage.ts";
 import { captureOrphans, parseOrphans, reviveOrphans, serializeOrphans } from "../src/agent-sidecar.ts";
 import { EXPLORE_MODE_TIERS, WS_PI_EXPLORE_MODE_ENV, WS_PI_SPAWN_ROLE_ENV, type ExploreMode, type PublicExploreMode } from "../src/process-role.ts";
 import { WEB_HOME_ENV, WEB_NONCE_ENV } from "../src/web-readiness.ts";
-import { registerAgentTools, resolveTools, sendToAgent, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { registerAgentTools, resolveTools, sendToAgent, spawnAdmission, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import type { McpToolCallResult } from "../src/mcp-stdio-client.ts";
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -280,15 +280,36 @@ describe("persistent Explore intent modes", () => {
     } finally { rpc.restore(); }
   });
 
-  test("former public sidecar modes remain resumable and retain their stored labels", () => {
-    const raw = JSON.stringify({ version: 1, writtenAt: new Date(0).toISOString(), orphans:
-      FORMER_PUBLIC_MODES.map(mode => legacyResearch(mode, mode)) });
-    const parsed = parseOrphans(raw);
-    assert.deepEqual(parsed.map(({ exploreMode }) => exploreMode), FORMER_PUBLIC_MODES);
-    const restored: RpcAgentRegistry = new Map();
-    reviveOrphans(restored, parsed);
-    assert.deepEqual([...restored.values()].map(({ exploreMode }) => exploreMode), FORMER_PUBLIC_MODES);
-    assert.deepEqual(parseOrphans(serializeOrphans(parsed)).map(({ exploreMode }) => exploreMode), FORMER_PUBLIC_MODES);
+  test("former public sidecar modes resume through the persistent client path and retain their stored labels", async () => {
+    const rpc = installRpcHarness();
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-legacy-resume-test-"));
+    storageRoots.add(root);
+    try {
+      await withRole(undefined, undefined, undefined, async () => {
+        const raw = JSON.stringify({ version: 1, writtenAt: new Date(0).toISOString(), orphans:
+          FORMER_PUBLIC_MODES.map(mode => ({
+            ...legacyResearch(mode, mode),
+            sessionPath: join(root, `${mode}.jsonl`),
+            delegation: spawnAdmission({ parentPolicy: parentPolicy(), wsToolNames: [], toolGroup: "read-only-explore", spawnRole: "explore", exploreMode: mode } as never),
+            subtreeChannel: { path: join(root, `${mode}-subtree.json`), nonce: `nonce-${mode}` },
+          })) });
+        const parsed = parseOrphans(raw);
+        assert.deepEqual(parsed.map(({ exploreMode }) => exploreMode), FORMER_PUBLIC_MODES);
+        const restored: RpcAgentRegistry = new Map();
+        reviveOrphans(restored, parsed);
+        assert.deepEqual([...restored.values()].map(({ exploreMode }) => exploreMode), FORMER_PUBLIC_MODES);
+        assert.deepEqual(parseOrphans(serializeOrphans(parsed)).map(({ exploreMode }) => exploreMode), FORMER_PUBLIC_MODES);
+
+        for (const mode of FORMER_PUBLIC_MODES) {
+          await sendToAgent(restored, { cwd: PACKAGE_ROOT, extensionPath: EXTENSION_ENTRY }, mode, `resume ${mode}`);
+          const client = restored.get(mode)!.client as unknown as { options?: { env?: Record<string, string> } };
+          assert.equal(client.options?.env?.[WS_PI_EXPLORE_MODE_ENV], mode);
+          assert.equal(rpc.prompts.at(-1)?.message, `resume ${mode}`);
+          assert.equal(restored.get(mode)!.exploreMode, mode);
+        }
+        await Promise.all([...restored.values()].map(record => record.client?.stop()));
+      });
+    } finally { rpc.restore(); }
   });
 
   test("legacy sidecar aliases normalize once at the read boundary and are never serialized again", () => {
