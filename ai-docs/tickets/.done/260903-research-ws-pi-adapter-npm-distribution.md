@@ -10,6 +10,7 @@ related-mental-model:
   - claude-compatibility
 spec:
   - pi-adapter-runtime
+completed: 2026-09-14
 ---
 
 # Research: npm distribution for the ws Pi adapter (agents-plugin-pi)
@@ -269,3 +270,8 @@ real-session marker-removal check. Preserve the default release path and the
 bootstrap ticket's package-local, gitignored, never-packed developer artifacts.
 No publication, package metadata change, or new runtime implementation is
 authorized by this transfer.
+
+
+## Resolution (2026-09-14)
+
+Distribution model decided (git-install) and the actionable follow-ups spun out to ready/: 260914-chore-ws-pi-join-release-train (fold agents-plugin-pi into the ws-mcp release train — version-follow bump + CI drift guard) and 260914-chore-ws-pi-release-path-acceptance-and-docs (marker-removal release-path acceptance + consumer git-install docs). The npm-publish path remains a documented, deferred secondary option in this ticket's history; revive it as a new ticket only if registry reach is later wanted.
