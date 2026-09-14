@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: f6bdc05d3874fbfe
 sage-review-completeness-reviewed: f6bdc05d3874fbfe
+completed: 2026-09-14
 ---
 
 # Make Pi Explore intent modes express investigation cost
@@ -105,3 +106,16 @@ Rejected alternatives:
 Separate the canonical schema-visible modes from the internal accepted legacy-mode set. Update mode typing, tier resolution, omission default, schema description, persistence validation, and focused tests as needed to implement the decisions above. Keep the change local to the Pi Explore contract and avoid unrelated worker or runtime behavior changes.
 
 If full-suite verification encounters a version mismatch, apply the diagnosis and bounded repair rule above before continuing to commit and independent review.
+
+### Result (3e19db9) - 2026-09-14
+
+- Replaced the fresh-call Explore schema with `lookup`, `search`, `investigation`, `deep-research`, and `high-assurance-research`, including the specified small-to-xlarge tier mapping and `search` omission default. Public descriptions and Pi lead guidance advertise only this ladder and disclaim formal assurance or completeness guarantees.
+- Kept one unchanged read-only Explore capability profile across every mode. Tests prove that mode selection changes tier, prompt, and persisted metadata without changing tools, network authority, delegation depth, delegation authority, timeout, or budget behavior.
+- Preserved former public labels in the internal persistence map with their settled small/medium tiers. Historical `simple` and `deep` values normalize only at read boundaries to `code-search` and `synthesis`; fresh calls reject all legacy values before tier lookup or allocation, and serialization does not emit migration aliases.
+- Existing storage and sidecar validators already consume the shared internal mode type, so compatibility required focused contract tests rather than new source branches in those modules. Round-one correctness and fit review passed; test review found one Important dormant-resume coverage gap, fixed in `612f613` by driving every former public label through sidecar revival and `sendToAgent`, after which round-two review passed with no remaining findings.
+- Verification: the focused Explore/storage/sidecar/web suite passed 86/86; `node --test test/persistent-explore.test.ts` passed 9/9 after the review fix; the final `npm test` passed 1,546 tests with 2 intentional skips and 0 failures. Earlier full-suite attempts failed on five exact-version checks; diagnosis traced the reported `0.46.3` to tracked fake launchers rather than the ignored local runtime. The fixtures now derive `runtime.json` (`0.46.4`), production exact-version enforcement remains unchanged, and no additional ignored-runtime rebuild/retry was used after attribution.
+
+
+## Resolution (2026-09-14)
+
+Implemented the compatibility-aware Pi Explore intent tier ladder, preserved persisted legacy metadata and resume behavior, verified the full package suite, and resolved independent partitioned review.
