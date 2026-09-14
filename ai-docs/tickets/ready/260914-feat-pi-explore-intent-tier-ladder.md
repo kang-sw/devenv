@@ -2,8 +2,8 @@
 title: "Make Pi Explore intent modes express investigation cost"
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: cd9cff3313fa6853
-sage-review-completeness-reviewed: cd9cff3313fa6853
+sage-review-design-reviewed: f6bdc05d3874fbfe
+sage-review-completeness-reviewed: f6bdc05d3874fbfe
 ---
 
 # Make Pi Explore intent modes express investigation cost
@@ -80,6 +80,7 @@ Rejected alternatives:
 - Assert a new canonical mode is propagated into task-prompt text and persisted metadata.
 - Assert all modes retain the same read-only Explore tool/network profile and delegation limits.
 - Run the focused Pi Explore and sidecar tests plus the package test suite required by the affected modules.
+- When the full package suite reports a `ws-mcp` version mismatch versus `runtime.json`, identify the exact failing tests and whether the reported version came from the ignored local runtime or a tracked fake launcher before selecting a repair. Rebuild and retry once only for a confirmed ignored-runtime mismatch. Treat fixture-origin version drift as a normal source/test failure, preserve the production exact-version check, and retain the existing failure history for stop-rule accounting.
 
 ## Route Facts
 
@@ -102,3 +103,5 @@ Rejected alternatives:
 ### Phase 1: Implement the compatibility-aware intent tier ladder
 
 Separate the canonical schema-visible modes from the internal accepted legacy-mode set. Update mode typing, tier resolution, omission default, schema description, persistence validation, and focused tests as needed to implement the decisions above. Keep the change local to the Pi Explore contract and avoid unrelated worker or runtime behavior changes.
+
+If full-suite verification encounters a version mismatch, apply the diagnosis and bounded repair rule above before continuing to commit and independent review.
