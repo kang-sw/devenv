@@ -40,7 +40,7 @@ describe("resolveSkillEntries", () => {
   test("filters to source:'skill' only, stripping the 'skill:' name prefix", () => {
     const commands: SlashCommandInfo[] = [
       skillCommand("lead-proceed", "Route a task", "/skills/lead-proceed/SKILL.md"),
-      { name: "ws-discuss", description: "PoC", source: "extension", sourceInfo: sourceInfo("/ext/ws-discuss") },
+      { name: "ws-model-catalog-list", description: "Catalog", source: "extension", sourceInfo: sourceInfo("/ext/ws-model-catalog-list") },
       { name: "custom-prompt", description: undefined, source: "prompt", sourceInfo: sourceInfo("/prompts/custom") },
     ];
     const entries = resolveSkillEntries(commands);

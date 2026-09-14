@@ -27,9 +27,9 @@
  * model-invoked lever. `registerTool` is the only primitive the model can
  * invoke directly as a function call, matching the existing
  * `ws-report-to-lead` precedent (spawner.ts) of a plain, non-bridged, custom
- * tool. `/goal` itself stays a `registerCommand` (user-invoked entry,
- * matching the ticket's own "goal-entry **command**" wording and the
- * existing `/ws-discuss` precedent in index.ts).
+ * tool. `/goal` itself stays a `registerCommand` because it is a
+ * user-invoked entry, matching the ticket's own "goal-entry **command**"
+ * wording.
  *
  * Runaway backstop: N consecutive re-fires with no intervening tool call
  * force-stop the loop (disarm goal mode) — Pi has no session-kill primitive
