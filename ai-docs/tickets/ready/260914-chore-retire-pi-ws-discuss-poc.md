@@ -27,6 +27,22 @@ Retire this completed proof-of-concept surface rather than maintaining it as a p
 - Follow the repository manuals that match every implementation path discovered at runtime.
 - Do not broaden the change into retirement of the canonical discussion workflow.
 
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-pi/src/index.ts, agents-plugin-pi/src/discuss.ts, agents-plugin-pi/test/discuss.test.ts, ai-docs/spec/pi-adapter-runtime.md |
+| scope.surface | public-interface | agents-plugin-pi/src/index.ts registers the user-invoked ws-discuss command |
+| scope.new_public_symbol | no | removes the existing command and kickoff builder; none added |
+| scope.new_type_contract | no | deletion-only surface change; no type or signature proposed |
+| scope.test_surface | existing | agents-plugin-pi/package.json test script and agents-plugin-pi/test/discuss.test.ts |
+| complexity.reuse_points | confirmed | canonical agents-plugin/skills/lead-discuss/SKILL.md, bridge, and explore spawner already exist |
+| complexity.side_effect_risk | moderate | removes a user-invoked command and its active runtime-contract text |
+| risk.correctness | moderate | deletion closure includes registration, builder, tests, source comments, and contract documentation |
+| risk.fit | moderate | ai-docs/spec/pi-adapter-runtime.md and current Pi tickets retain command-specific references that need classification |
+| risk.test | moderate | package suite must remain green after deleting the dedicated test and command references |
+| risk.security_or_contract | moderate | removal changes the documented interactive command surface without a compatibility alias |
+
 ## Phases
 
 ### Phase 1: Remove the proof-of-concept surface and its live closure
