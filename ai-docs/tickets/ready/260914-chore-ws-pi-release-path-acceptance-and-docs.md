@@ -26,9 +26,13 @@ through Pi's git package manager, even though the consumption path is decided.
 
 ## Decisions
 
-- **Consumption path = `pi install git:kang-sw/devenv@<tag>`.** The repo-root
-  manifest loads the subdir extension; the launcher downloads the tag's ws-mcp
-  release binary. npm distribution stays secondary/deferred (`260903`).
+- **Consumption path = `pi install git:github.com/kang-sw/devenv@<tag>`.** The
+  repo-root manifest loads the subdir extension; the launcher downloads the
+  tag's ws-mcp release binary. npm distribution stays secondary/deferred
+  (`260903`). The `<host>` segment is REQUIRED: Pi's git spec is
+  `git:<host>/<user>/<repo>` and a host-less `git:kang-sw/devenv` mis-parses
+  `kang-sw` as the host (`Could not resolve host: kang-sw`), observed during
+  the v0.46.4 owner-gate acceptance on a fresh Windows clone.
 - **Acceptance procedure.** Remove `agents-plugin-pi/.local-devenv-runtime`,
   start a fresh Pi session, and confirm the ordinary launcher path downloads and
   SHA256-verifies the ws-mcp release binary for the current release tag and the
@@ -70,7 +74,7 @@ through Pi's git package manager, even though the consumption path is decided.
 
 Perform the acceptance procedure above against the current release tag —
 resolved from `agents-plugin-pi/runtime.json` `release_tag` (currently
-`v0.46.3`) — and record the evidence (observed runtime/version, download +
+`v0.46.4`) — and record the evidence (observed runtime/version, download +
 checksum behavior, tool registration). The implementing agent runs the live Pi
 session and observes it directly; where a real Pi TUI session cannot be driven
 non-interactively, hand the run to the user and record their observed evidence.
@@ -82,7 +86,7 @@ from a downloaded release binary; evidence recorded in the Result.
 
 ### Phase 2: Consumer git-install documentation
 
-Document the `pi install git:kang-sw/devenv@<tag>` install and enablement flow
+Document the `pi install git:github.com/kang-sw/devenv@<tag>` install and enablement flow
 for downstream consumers, reflecting the behavior observed in Phase 1. Add it to
 `README.md`'s install section, where general ws-plugin install text already
 lives, so a consumer finds it beside the existing install guidance; do not bury
