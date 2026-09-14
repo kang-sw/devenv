@@ -48,14 +48,16 @@ describe("generated skill playbook targets", () => {
 /**
  * Review relay #1 (Important, correctness): version-check.ts's own header
  * comment declares agents-plugin-pi/runtime.json a "hand-synced,
- * byte-identical copy of agents-plugin/runtime.json" with "no sync tooling
- * ... to keep these in lockstep automatically" — the two files desynced
+ * byte-identical copy of agents-plugin/runtime.json" — the two files desynced
  * once already (pi's copy was stuck at 0.43.4 / missing config.resolve_agent
  * while agents-plugin/runtime.json had moved to 0.44.4), and nothing in
  * `npm test` caught it, because the other tests in this file feed a runtime
  * object's own `plugin_version` back into `assertVersionPin` rather than
  * reading the bundled file from disk. This test closes that specific gap:
  * it reads both files directly and fails loudly on the next desync.
+ * agents-plugin-tool/scripts/bump-ws-version.sh now resyncs this file
+ * automatically at bump time (260914); this test still guards a hand-edit
+ * or a skipped bump.
  */
 describe("agents-plugin-pi/runtime.json hand-sync (review relay #1, Important #2)", () => {
   const testDir = dirname(fileURLToPath(import.meta.url));
@@ -68,7 +70,7 @@ describe("agents-plugin-pi/runtime.json hand-sync (review relay #1, Important #2
     assert.equal(
       piRuntime,
       sourceRuntime,
-      "agents-plugin-pi/runtime.json must be re-copied verbatim from agents-plugin/runtime.json whenever the source changes (no shared sync tooling exists yet)",
+      "agents-plugin-pi/runtime.json must be re-copied verbatim from agents-plugin/runtime.json whenever the source changes (bump-ws-version.sh does this automatically at bump time; a hand-edit outside it must still match)",
     );
   });
 });
@@ -81,8 +83,11 @@ describe("agents-plugin-pi/runtime.json hand-sync (review relay #1, Important #2
  * the launcher. compareTrees is a pure two-root comparator so the negative
  * cases run against tmpdir fixtures; only the positive case reads the
  * committed trees. It fails on the next desync naming the offending file.
- * There is automated drift detection, not automated sync: the guard fires
- * when this suite runs, so the Pi track owner runs it when syncing develop.
+ * agents-plugin-tool/scripts/bump-ws-version.sh now performs the sync
+ * automatically at bump time (260914); this guard still fires against a
+ * hand-edit or a skipped bump, and the Go-side equivalent
+ * (agents-plugin-tool/internal/wsrsrc: TestPiMirrorUpToDate) runs the same
+ * check from a bare `go test ./...`.
  */
 function listFilesRel(root: string): string[] {
   const out: string[] = [];

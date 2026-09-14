@@ -6,8 +6,9 @@
  * agents-plugin/runtime.json (see the HAND-SYNC NOTE in index.ts for the
  * full 3-way copy surface — this mirrors the existing agents-plugin-wsflow
  * precedent, which carries its own copies rather than a cross-root relative
- * reference). No sync tooling exists yet to keep these in lockstep
- * automatically.
+ * reference). agents-plugin-tool/scripts/bump-ws-version.sh resyncs all
+ * three copies at every ws version bump (260914); this check still guards
+ * the case where a mirror was hand-edited or a bump was skipped.
  */
 
 import { readFileSync } from "node:fs";

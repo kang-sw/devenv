@@ -84,9 +84,16 @@ def sync_file(src: str, dst: str) -> None:
 
 def sync_tree(src: str, dst: str) -> None:
     dst_path = rel(dst)
+    tmp_path = dst_path.with_name(dst_path.name + ".sync-tmp")
+    if tmp_path.exists():
+        shutil.rmtree(tmp_path)
+    # Copy into a sibling temp dir first so a failure here (missing src,
+    # permission error) never leaves dst_path deleted or half-written; only
+    # the final swap below touches dst_path, and it is a single rename.
+    shutil.copytree(rel(src), tmp_path)
     if dst_path.exists():
         shutil.rmtree(dst_path)
-    shutil.copytree(rel(src), dst_path)
+    tmp_path.rename(dst_path)
 
 
 def update_pi_bridge_package(data) -> None:
