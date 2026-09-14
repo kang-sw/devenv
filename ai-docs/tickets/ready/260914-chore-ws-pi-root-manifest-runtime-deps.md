@@ -4,10 +4,11 @@ related:
   260914-chore-ws-pi-join-release-train: prerequisite
   260914-chore-ws-pi-release-path-acceptance-and-docs: unblocks
   260903-research-ws-pi-adapter-npm-distribution: origin of the git-root-install model
+  260914-bug-ws-pi-web-access-git-install-unresolvable: absorbed into Phase 2; drop on implementation
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: 795438c5c6743d74
-sage-review-completeness-reviewed: 795438c5c6743d74
+sage-review-design-reviewed: 4fb272f9a2f570a7
+sage-review-completeness-reviewed: 4fb272f9a2f570a7
 ---
 
 # Provide the pi extension's runtime deps through the git-install root manifest
@@ -44,6 +45,22 @@ Consequence: the v0.46.4 release binary, version pin, and mirror machinery are
 all sound, but the headline git-install consumption path does not work
 end-to-end on a clean machine. This blocks `260914-...-acceptance-and-docs`
 Phase 1 and must be fixed and re-released before that ticket's Phase 2 docs ship.
+
+**Second gap, surfaced by Phase 1 (folds in here, Phase 2).** Five of the six
+runtime deps are ordinary `import`s that the root-manifest mirror fixes via
+upward Node resolution. `pi-web-access` is NOT: `agents-plugin-pi/src/web-search.ts`
+locates it by an exact path `<packageRoot>/node_modules/pi-web-access` — where
+callers pass `packageRoot = dirname(dirname(extensionPath))` = `agents-plugin-pi/`
+(`web-tools.ts:24`, `spawner.ts:2813,3030`) — then spawns it as a hardened
+subprocess (`web-search.ts:64`), deliberately refusing `require.resolve`
+(`web-search.ts:48`). So a root-only `npm install` (which populates
+`<clone-root>/node_modules`) leaves `agents-plugin-pi/node_modules/pi-web-access`
+absent, and Explore-role spawns still throw `web-search-extension-missing` on a
+clean git-install. This is a location bug: the `packageRoot = extension dir`
+assumption predates the git-root-install model (`260903`), where deps install at
+the clone root, not the subdir. It supersedes the separately-filed
+`idea/260914-bug-ws-pi-web-access-git-install-unresolvable`, which this ticket
+now absorbs (drop it as part of Phase 2).
 
 ## Decisions
 
@@ -82,6 +99,30 @@ Phase 1 and must be fixed and re-released before that ticket's Phase 2 docs ship
   generated lockfile. (If the fact-populator or worker finds Pi's install path
   actually requires a root lock for reproducibility, surface it rather than
   adding one silently.)
+- **pi-web-access location fix = decouple the dep lookup from `packageRoot`,
+  tolerate both install locations (chosen).** `web-search.ts` uses `packageRoot`
+  for two distinct things: its own source helper path
+  (`<packageRoot>/src/web-search-helper.mjs`, stays at `agents-plugin-pi/`) AND
+  the dep location (`<packageRoot>/node_modules/pi-web-access`). Under git-root
+  install these split: source is in the subdir, deps are at the clone root.
+  Resolve the `pi-web-access` directory independently, checking the known
+  candidate locations in order — the clone root's `node_modules` (git-install)
+  and the subdir's `node_modules` (dev/test, where `npm test` and
+  `web-package.test.ts` still install) — and use the first that passes the
+  existing checks. **Preserve the security property verbatim**: exact known
+  directories only (never `require.resolve`'s free upward walk), the `pi-web-access`
+  name + `0.29.0` version pin, the `realpathSync` equality check, and the
+  `index.ts` existence check all still apply to whichever candidate is chosen.
+  The helper source path stays anchored to the extension dir.
+  - Rejected — **repoint `packageRoot` wholesale to the clone root**: breaks the
+    helper source path (`src/web-search-helper.mjs` is in the subdir, not the
+    root) and breaks dev/test, which install into the subdir `node_modules`.
+  - Rejected — **postinstall nested `npm install` for pi-web-access only**:
+    reintroduces the lifecycle-script dependency and a second install step this
+    ticket's Phase 1 decision already rejected for the general case.
+  - Deferred — **unify all modes on a single root `node_modules`** (move
+    devDeps to root / workspaces, update the test harness): a larger cleanup that
+    would make "look at root only" universally correct; out of scope here.
 - **This ticket does not bump the ws version.** The re-release that carries the
   fix is a separate `ws:lead-ship` action; the fix is verifiable on a `develop`
   smoke without a publish (below).
@@ -116,7 +157,7 @@ Phase 1 and must be fixed and re-released before that ticket's Phase 2 docs ship
 
 | fact | value | evidence |
 |---|---|---|
-| scope.span | multi-file | package.json, agents-plugin-tool/scripts/bump-ws-version.sh, .github/workflows/ws-mcp-release.yml, agents-plugin-tool/internal/wsrsrc/pi_mirror_test.go |
+| scope.span | multi-file | Phase 1: package.json, agents-plugin-tool/scripts/bump-ws-version.sh, .github/workflows/ws-mcp-release.yml, agents-plugin-tool/internal/wsrsrc/pi_mirror_test.go. Phase 2: agents-plugin-pi/src/web-search.ts (+ its test agents-plugin-pi/test/web-package.test.ts) |
 | scope.surface | internal | no exported Go/TS symbol changes; edits a dependency-manifest field, a bump script, and a CI workflow step |
 | scope.new_public_symbol | no | none |
 | scope.new_type_contract | no | none |
@@ -126,7 +167,7 @@ Phase 1 and must be fixed and re-released before that ticket's Phase 2 docs ship
 | risk.correctness | moderate | must mirror the exact six dependency name/version pairs and keep the drift guard in sync with future subdir dependency edits, or the failure this ticket exists to fix reappears silently |
 | risk.fit | low | follows the byte-identical-mirror-plus-CI-diff-guard shape already established for runtime.json/bin/rsrc by 260914-chore-ws-pi-join-release-train |
 | risk.test | moderate | no automated test yet covers the root/subdir dependencies relationship; verification is the new go test assertion plus a manual dry-run and owner-run live smoke |
-| risk.security_or_contract | moderate | changes the CI "Validate plugin release contract" gate itself, and the root package.json dependencies block is the consumer-facing contract Pi's git-install npm install reads directly |
+| risk.security_or_contract | moderate | changes the CI "Validate plugin release contract" gate itself, and the root package.json dependencies block is the consumer-facing contract Pi's git-install npm install reads directly. Phase 2 edits agents-plugin-pi/src/web-search.ts, a security-sensitive resolver: the fix must preserve its exact-directory-only + version-pin + realpath + index.ts checks (never introduce require.resolve's upward walk) while adding the clone-root candidate location |
 
 ### Phase 1: Mirror runtime deps into the root manifest with a drift guard
 
@@ -156,3 +197,42 @@ Verification:
 
 If the smoke surfaces a further missing module or a version-pin failure, capture
 it as the Result and stop before declaring the consumption path fixed.
+
+Phase 1 is already implemented on `impl/develop/sip-aptly-fence` (commits
+`7a60b80`, `053c5a6`, `aa28c2a`); Phase 2 continues on that same branch.
+
+### Phase 2: Fix pi-web-access resolution to the actual install location
+
+Depends on Phase 1 (same branch). Fix `agents-plugin-pi/src/web-search.ts` so
+`pi-web-access` is found where the active install actually placed it, per the
+Decisions "pi-web-access location fix" bullet: resolve the dep directory by
+checking known candidate locations in order — the clone root's `node_modules`
+(git-install) and the subdir's `node_modules` (dev/test) — and use the first
+that passes the existing name + `0.29.0` version + `realpathSync` + `index.ts`
+checks. Keep the helper source path anchored to the extension dir. Do not
+introduce `require.resolve` or any upward free walk; the candidate set is exact
+known directories only. When no candidate resolves, the `web-search-extension-missing`
+diagnostic (`web-search.ts:40` builds `docs` README/manifest/config paths from
+the root) should name a defensible candidate — prefer the clone-root candidate,
+the git-install layout this fix targets — so the error points a consumer at the
+expected location. Drop `idea/260914-bug-ws-pi-web-access-git-install-unresolvable`
+(this ticket absorbs it) with a note in the commit.
+
+Verification:
+- `agents-plugin-pi` test suite green, including `test/web-package.test.ts`
+  (the packed-install web-search resolution test) and any web-startup/probe
+  tests; add or extend a test that asserts resolution succeeds from a clone-root
+  `node_modules` layout (git-install shape) as well as the subdir layout, and
+  still fails closed for a wrong-version or spoofed directory.
+- The chosen candidate still rejects a `pi-web-access` whose manifest version is
+  not `0.29.0` or whose realpath differs (prove the security check survives).
+- **Owner-run develop smoke (no publish), Explore-role included:** after Phase 1
+  + Phase 2 land on `develop` and are pushed, `pi install
+  git:github.com/kang-sw/devenv@<develop-tip-sha>` on a clean machine loads the
+  extension AND an Explore-role spawn's web-search probe succeeds (no
+  `web-search-extension-missing`), in addition to the Phase 1 smoke criteria
+  (download + SHA256 + `assertVersionPin` + `ws/*` tools). This is the
+  end-to-end criterion that unblocks `260914-...-acceptance-and-docs`.
+
+Only when this Phase 2 smoke passes is the git-install consumption path fixed
+end-to-end; record the observed evidence in the Result.
