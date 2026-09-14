@@ -2,6 +2,13 @@
 title: "Add a user-gated worktree parallel route to lead-run: isolate parallel-safe tickets in per-worker worktrees, keep serial as default"
 related:
   260909-epic-ws-worker-interpreter-refoundation: context; that epic deferred parallelism (one worker per invocation, serial) and this ticket proposes the gated path to reopen it
+  260731-bug-playbook-render-root-override-manifest-resolution: prerequisite (done); landed the root_override/rsrc split Phase 1 builds on
+  260911-feat-ws-git-merge-lead-owned-merge-authority: prerequisite (done); Phase 2 routes the serial merges through this lead-owned ws/git.merge
+  260911-feat-impl-derivation-hardening-branch-aware-select: prerequisite (done); Phase 2 reuses its branch-aware Select for batch selection
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: dcf580432d7200b1
+sage-review-completeness-reviewed: dcf580432d7200b1
 ---
 
 # Add a user-gated worktree parallel route to lead-run
@@ -9,7 +16,8 @@ related:
 ## Background
 
 `lead-run` spawns exactly one worker per invocation, serially
-(`agents-plugin/rsrc/lead-run/lead-run.md:76`). The worker-interpreter
+(`agents-plugin/rsrc/lead-run/lead-run.md:88`, "One worker in flight per
+invocation."). The worker-interpreter
 refoundation deferred parallelism deliberately, not incidentally
 (`260909-...-drain-ready-queue-worker-spawner`): the earlier goal-fan-out
 N-background-worker shape starved the `/goal` Stop hook, and a first-dogfood
@@ -40,6 +48,18 @@ worker key to the main root instead. So `isolation: "worktree"` isolates the
 filesystem but leaves the worker's ws tools (tickets.move, git.commit) resolving
 against the wrong root — the missing piece is a first-class render/spawn mode
 that binds a worker key to a repo-worktree root.
+
+This root_override/rsrc-manifest conflict was fixed 2026-09-12 by
+`260731-bug-playbook-render-root-override-manifest-resolution` (commit
+`63542b5c`): `playbook.render` now resolves the rsrc manifest independently of
+`root_override` (`resolveRsrcRoot("")` at
+`agents-plugin-tool/internal/mcp/server.go#L1458`) while `root_override` still
+binds the worktree root and the render-minted child key
+(`agents-plugin-tool/internal/mcp/server.go#L1439-L1489`), so a lead can already
+bind a worker key to an arbitrary worktree root through `playbook.render`. The
+remaining gap this ticket must still close is only the worktree
+creation/reuse/pool lifecycle itself — no `git worktree add` or pooling helper
+exists anywhere in `agents-plugin-tool/internal` (verified by search).
 
 The same rehearsal also surfaced a shared-worktree collision on the *default*
 serial path: a lead housekeeping `git.commit` run while the worker was live
@@ -89,28 +109,44 @@ skill creates no worktree without explicit user approval for that run.
   `worktree.acquire`/`worktree.release` tools are ws-MCP changes under
   `agents-plugin-tool/internal/mcp/`).
 
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin/rsrc/lead-run/lead-run.md, agents-plugin-tool/internal/mcp/server.go, agents-plugin-tool/internal/mcp/playbook_tools.go, agents-plugin-wsflow/ mirror, ai-docs/manuals/ws-mcp.md |
+| scope.surface | public-interface | new MCP tools worktree.acquire and worktree.release, plus the shipped lead-run.md playbook route |
+| scope.new_public_symbol | yes | worktree.acquire, worktree.release |
+| scope.new_type_contract | yes | acquire's { path, worker_key } return shape and the worktree_pool config knob |
+| scope.test_surface | new-files | no worktree.acquire/release or worktree_pool test file exists yet (search over agents-plugin-tool/internal returned nothing) |
+| complexity.reuse_points | confirmed | renderPlaybook's existing mintRoot/child-key binding (agents-plugin-tool/internal/mcp/playbook_tools.go#L862) already binds a child key to an arbitrary root, reusable by acquire's key-mint step |
+| complexity.side_effect_risk | high | acquire/release perform live git worktree add/checkout/reset/clean and write to .git/info/exclude |
+| risk.correctness | high | reuse-eligibility and hygiene-reset logic can destroy uncommitted work or bind a worker key to the wrong root if implemented incorrectly |
+| risk.fit | moderate | must align with existing wsconfig knob patterns and the ws-mcp.md/skill-authoring.md/wsflow-mirroring.md conventions this ticket already declares |
+| risk.test | moderate | new git-worktree-mutating test surface with no existing fixture to extend (playbook_render_surface_test.go covers only the root split, not worktree lifecycle) |
+| risk.security_or_contract | high | introduces two new public MCP tools plus a session-key-minting contract tied to a filesystem root |
+
 ## Phases
 
 ### Phase 1: Worktree provisioning primitive (MCP)
 
-Split `playbook.render`'s `root_override` — today one knob fused into three roles
-(the worktree root, the rsrc-resolution root, and the child-key mint root;
-`server.go#L1377-L1408`, with `resolveRsrcRoot` returning the override verbatim
-rather than resolving the plugin cache, `playbook_tools.go#L667-L671`) — so the
-worktree/mint root can bind to a repo worktree while rsrc still resolves to the
-plugin cache. The knob was born as a test/advanced rsrc-root override for
-rsrc-dev worktrees whose own root holds `manifest.json`, then overloaded onto
-render, so today it is valid only when all three roots coincide; for a
-consuming-repo worktree the rsrc tree lives in the plugin cache, so redirecting
-the rsrc root to the repo worktree fails with "rsrc manifest missing". This is
-internal ws plumbing, not a shipped-surface leak.
+Prerequisite already landed: the `playbook.render` `root_override` split that
+lets a worker key bind to a repo worktree while rsrc still resolves to the
+plugin cache shipped 2026-09-12 via
+`260731-bug-playbook-render-root-override-manifest-resolution` (commit
+`63542b5c`; `resolveRsrcRoot` at `playbook_tools.go`, override wiring at
+`server.go`). So this phase's only remaining work is the deterministic
+`worktree.acquire`/`worktree.release` tool pair below — no `git worktree add` or
+pooling helper exists yet anywhere in `agents-plugin-tool/internal` (confirmed
+by search).
 
-On that split, add a deterministic MCP tool pair that owns the whole worktree
-lifecycle so neither the lead nor the worker carries git plumbing:
+Add a deterministic MCP tool pair that owns the whole worktree lifecycle so
+neither the lead nor the worker carries git plumbing:
 
 - `worktree.acquire(base, target_branch, session_key)` — resolve the pool root
-  (below), reuse an eligible idle worktree or create a new one, check out
-  `target_branch` on `base`, sync submodules, mint a child worker key already
+  (below), reuse an eligible idle worktree or create a new one, create
+  `target_branch` if it does not exist and check it out on `base` (this is what
+  pre-creates Phase 2's `impl/<parent>/<slug>`), sync submodules, mint a child
+  worker key already
   bound to that worktree root, and return `{ path, worker_key }`. Binding the
   key here is what closes the key-to-worktree gap — there is no separate render
   step.
@@ -141,32 +177,65 @@ worktrees (outside the pool) are never adopted — the earlier "ask the user to
 adopt an idle worktree" idea is dropped as unclear-benefit intrusion on lead
 judgment.
 
+Verification: Go table tests for `worktree.acquire`/`worktree.release` under
+`agents-plugin-tool/internal/mcp/` covering create-new, reuse-idle, skip-dirty/
+skip-branch-checked-out, hygiene-reset, detach-on-release, pool-root resolution
+from a linked worktree, and `.git/info/exclude` self-registration. The
+prerequisite `root_override`/rsrc split already carries coverage (260731); this
+phase adds only the worktree-lifecycle fixtures.
+
 ### Phase 2: Gated worktree parallel route in lead-run
 
 Add to `lead-run`'s Select/Spawn path an opt-in parallel route that activates
 only on explicit user approval for the run — this per-run approval is the single
 user gate, and it gates worktree *provisioning* itself, since derivation is
 expensive in large or submodule-heavy repositories. When active: an
-Explore/`tickets.query` pass identifies a parallel-safe batch from `ready/` —
-tickets whose Route Facts file scopes are mutually disjoint and that carry no
-`related:`/`parent:` ordering dependency among them — and the lead spawns one
-worker per ticket, each on a worktree from `worktree.acquire`, still one report
-handled per the existing stop protocol but across N concurrent workers. The lead
-then merges the finished branches into the goal branch serially, in dependency
-order, treating any cross-worker file overlap that slipped the safety check as a
-merge stop, and returns each worktree via `worktree.release`. Mirror to
-`agents-plugin-wsflow`.
+Explore/`tickets.query` pass (reusing the branch-aware Select landed by
+`260911-feat-impl-derivation-hardening-branch-aware-select`) identifies a
+parallel-safe batch from `ready/`. The parallel-safety gate is **dependency**,
+not file overlap: two tickets are parallel-safe when neither functionally
+depends on the other's output (no `related:`/`parent:` ordering-dependency edge,
+"A needs B's feature"); dependent tickets are sequenced. File-scope overlap is
+*not* a hard exclusion — overlapping tickets may still run in parallel, and any
+real conflict surfaces at the lead's serialized merge as a merge stop. The lead
+spawns one worker per ticket, each on a worktree from `worktree.acquire`, still
+one report handled per the existing stop protocol but across N concurrent
+workers. The lead then merges the finished branches into the goal branch through
+the lead-owned `ws/git.merge`
+(`260911-feat-ws-git-merge-lead-owned-merge-authority`) serially, in dependency
+order, treating any cross-worker file overlap as a merge stop, and returns each
+worktree via `worktree.release`. Mirror to `agents-plugin-wsflow`.
 
-Open points to resolve during execution: (a) exact parallel-safety predicate over
-Route Facts scope paths (disjointness granularity — file vs directory); (b) how
-the lead batches N concurrent stop reports without regressing the serial
-veto/merge-approval model; (c) whether the `/goal` Stop-hook starvation that
-killed the old fan-out is fully avoided by worktree isolation or needs its own
-guard; (d) a cap on concurrent workers; (f) reconciling `ticket-worker`'s own
-PARENT-branch capture and `impl/<parent>/<slug>` creation with a pre-provisioned
-worktree — decide whether `acquire`'s `target_branch` pre-creates the impl branch
-and suppresses the worker's branch capture, or the worker owns branch creation
-inside the acquired worktree; (h) a concurrency claim/lock so two runs never grab
-the same idle worktree, plus a pool cap and GC — deferred while the project holds
-its single-maintainer-serial posture (no concurrent runs to race), revisited when
-real parallel runs exist.
+Settled here (no longer open):
+
+- **(a) Parallel-safety predicate** — dependency-based, not file-overlap-based;
+  see the Phase 2 body above. File overlap is tolerated and caught at the
+  serialized merge, not a go/no-go gate.
+- **(f) Branch-creation ownership** — `worktree.acquire`'s `target_branch`
+  pre-creates the `impl/<parent>/<slug>` branch, and the worker suppresses its
+  own PARENT-branch capture / branch creation. One branch-creation owner (the
+  tool), so no double-create against a pre-provisioned worktree.
+
+Deferred to execution time (explicit, with rationale):
+
+- **(b)** How the lead batches N concurrent stop reports without regressing the
+  serial veto/merge-approval model — shaped once the concurrent report path is
+  built.
+- **(c)** Whether the `/goal` Stop-hook starvation that killed the old fan-out
+  is fully removed by worktree isolation or needs its own guard — verified
+  against the built route, not pre-guessed.
+- **(d)** A cap on concurrent workers.
+- **(h)** A concurrency claim/lock so two runs never grab the same idle
+  worktree, plus a pool cap and GC — deferred while the project holds its
+  single-maintainer-serial posture (no concurrent runs to race), revisited when
+  real parallel runs exist.
+
+(The lettering keeps the original rehearsal notes' labels; (e) and (g) were
+never assigned and are intentionally absent.)
+
+Verification: playbook/skill-shim tests that the parallel route stays inert
+without per-run approval (default serial behavior unchanged), that an approved
+run selects a dependency-disjoint batch and spawns one worker per worktree, and
+that merges route through `ws/git.merge` serially with a cross-worker overlap
+surfaced as a merge stop. Mirror-drift test in `agents-plugin-wsflow` per
+`wsflow-mirroring.md`.
