@@ -1,8 +1,10 @@
 {
   "name": "ws-pi-bridge",
-  "version": "0.1.0",
+  "version": "0.46.4",
   "private": true,
   "pi": {
-    "extensions": ["agents-plugin-pi/src/index.ts"]
+    "extensions": [
+      "agents-plugin-pi/src/index.ts"
+    ]
   }
 }
