@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/ws-mcp-release.yml"
+      - "package.json"
       - ".agents/plugins/marketplace.json"
       - ".claude-plugin/marketplace.json"
       - "agents-plugin/**"
@@ -55,6 +56,8 @@ jobs:
           jq . ../agents-plugin/runtime.json >/dev/null
           jq . ../.agents/plugins/marketplace.json >/dev/null
           jq . ../.claude-plugin/marketplace.json >/dev/null
+          jq . ../package.json >/dev/null
+          jq . ../agents-plugin-pi/package.json >/dev/null
           test "$(jq -r '.plugins[].name' ../.agents/plugins/marketplace.json | sort | tr '\n' ' ')" = "ws wsflow "
           test "$(jq -r '.plugins[].name' ../.claude-plugin/marketplace.json | sort | tr '\n' ' ')" = "ws wsflow "
           diff -q ../agents-plugin/runtime.json ../agents-plugin-pi/runtime.json

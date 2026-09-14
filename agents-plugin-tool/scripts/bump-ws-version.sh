@@ -110,6 +110,11 @@ def update_root_package(data) -> None:
     # in sync here rather than hand-edited so the two never drift.
     data["version"] = version
     pi_bridge = json.loads(rel("agents-plugin-pi/package.json").read_text(encoding="utf-8"))
+    if "dependencies" not in pi_bridge:
+        raise SystemExit(
+            "agents-plugin-pi/package.json has no 'dependencies' key; "
+            "refusing to silently clear the root package.json mirror"
+        )
     data["dependencies"] = pi_bridge["dependencies"]
 
 
