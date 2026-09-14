@@ -132,7 +132,12 @@ the same work item it already owns; a new work item, or a judgment that must
 not inherit the prior agent's conclusion, still opens with a fresh spawn. The
 earlier context-inheriting fork delegate and its Codex `spawn_agent`
 fork-fallback wording were removed, so no delegate inherits the lead's
-conversation.
+conversation on the Claude/Codex hosts. The Pi adapter's side-thread fork
+(`pi-adapter-runtime` "Side-thread task fork" and "Side-thread owner question
+surface") is a deliberate, Pi-scoped exception: it inherits the lead's
+transcript by design, is not a delegation-routing option of this posture, and
+is structurally mitigated (a message-level anti-bleed frame plus a completion
+loop) rather than left to a persona override.
 {#260724-prefer-subagent-fresh-spawn-delegation-posture}
 
 Shared skill text uses ws MCP primitives for agent orchestration, scoped

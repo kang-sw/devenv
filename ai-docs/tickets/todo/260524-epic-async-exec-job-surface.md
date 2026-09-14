@@ -74,6 +74,14 @@ The epic owns decomposition for:
   prompt-injection boundaries and default to a fresh reader context unless the
   caller opts into resumed context.
 - All introduced `exec.*` tools remain hidden from wsflow no-agent mode.
+- Forward-note (2026-09-04, from `260904-feat-ws-pi-execute-approval-gateway`):
+  the Pi adapter's `ws.execute` approval gateway (Pi-only, adapter-owned) is
+  orthogonal to this surface — `exec.*` is output-hygiene, `ws.execute` is a
+  delegation + approval posture. When `exec.ask` lands, (re)decide the
+  interaction policy: whether the Pi lead regains a direct exec path via
+  `exec.*`/`exec.ask`, and whether `ws.execute`'s worker is handed `exec.*`
+  (pure hygiene win for reads; routing worker *mutations* through ungated
+  `exec.*` would bypass `ws.execute`'s approval gate).
 
 ## Completion Criteria
 

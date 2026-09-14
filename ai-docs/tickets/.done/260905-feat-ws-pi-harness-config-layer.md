@@ -1,0 +1,604 @@
+---
+title: "Add `pi` as a first-class harness bucket in ws-mcp and unify the Pi adapter's model table on ws config (config.tune, model aliases, rsrc harness variants)"
+parent: 260605-epic-ws-playbook-factory-pivot
+related:
+  260802-research-ws-pi-native-framework: research anchor — the Pi adapter is a harness peer of Claude/Codex, so the harness-keyed config layer should know it
+  260903-feat-ws-pi-subagent-rpc-ux: sibling — introduced the adapter-side model catalog (`model-catalog.json`, a translation shim from tier names to Pi model strings) that Phase 4 of this ticket deletes once ws config holds a `pi` tier table
+related-mental-model:
+  - mcp-runtime
+spec:
+  - mcp-tools
+  - pi-adapter-runtime
+sage-review-design: completed
+sage-review-design-reviewed: 0419eaf97cb3d6e3
+sage-review-completeness: completed
+sage-review-completeness-reviewed: b65918c686bc149b
+completed: 2026-09-08
+---
+
+# Add `pi` as a first-class harness bucket in ws-mcp and unify the Pi adapter's model table on ws config (config.tune, model aliases, rsrc harness variants)
+
+## Background
+
+ws-mcp keys several config surfaces by **harness** — the host that is driving
+the MCP session — so that the same project config can carry different values
+per host: prompt override points (`config.tune` `prompt.*`), the fixed
+tier→model alias table (`agents.tier`, which is what `playbook.render`'s
+`recommended-model` and the `SmallTierModel`/`MediumTierModel`/... playbook
+variables resolve through), and rsrc playbook harness variants
+(`<name>.<harness>.md` overlays and `<include>.<harness>.md` includes). The
+`lead-tune` skill is a thin front on `config.tune`, so anything not reachable
+through the harness selector is not reachable through `lead-tune` either.
+
+Today the harness set is a closed enum of `codex` and `claude` (plus `*`/all
+and the implicit `default` bucket). Search `normalizedHarness` — it exists in
+both `internal/wsconfig/config.go` and `internal/mcp/server.go` — and
+`promptHarnessEnum` in `internal/mcp/config_registry.go`. Detection is a
+substring match on the `initialize` request text (`codex`, `claude`,
+`anthropic`) and on per-call `_meta` (Codex workspace roots).
+
+The Pi adapter (`agents-plugin-pi/`) initializes ws-mcp with clientInfo name
+`ws-pi-bridge`, matches none of those substrings, and therefore runs every
+session with an **empty detected harness**. Observable consequences on Pi:
+
+- `config.tune` with `harness: "pi"` is rejected (`harness must be one of
+  claude, codex, or *`); a Pi user can only write prompt overrides into `*`.
+- Harness-applicable knobs resolve to the `default` bucket, so a Pi-specific
+  tier→model mapping cannot be expressed; `playbook.render`'s
+  `recommended-model` on Pi is always the default-bucket value.
+- rsrc playbook loading never selects a `.pi.md` overlay because the loader is
+  called with an empty harness.
+
+The adapter also carries its **own** model table for spawns
+(`model-catalog.json`, `{aliases: {name → provider/id}}`, read fresh per
+`ws-agent-spawn`/`ws-fork`; spec `pi-adapter-runtime` "Model resolution: name
+alias, not tier" and "Model catalog data file"). Two implicit alias keys are
+baked into adapter code: `"small"` (the explore leaf) and `"complex"`
+(`ws-execute complex:true`). That table is the same concept as ws config's
+`agents.model_aliases` — `{alias → {harness → {backend, model, effort}}}`,
+the generic harness-keyed alias map that the fixed tiers are also stored in —
+except that it is adapter-local, unkeyed by harness, and invisible to
+`lead-tune`, `config.tune`, and `playbook.render`. Today a Pi lead therefore
+reads `recommended-model` from one table and must pass `model_name` from
+another, reconciling the two by hand. Owner direction (2026-09-05): unify on
+ws config as the single source; the adapter-local catalog retires once the
+ws side can answer the same lookup.
+
+## Decisions
+
+- **Harness identity comes from a structured `clientInfo` parse, not from the
+  substring matcher.** Today's detector (`detectHarnessFromRaw`) lowercases the
+  whole `initialize` params blob and substring-matches `codex` / `claude` /
+  `anthropic`; it never parses `clientInfo`, and it is shared with the per-call
+  `_meta` path (`detectHarnessFromMeta`), where no clientInfo exists. The `pi`
+  check is therefore **not** a new substring: at the `initialize` site, parse
+  `params.clientInfo.name` and treat exactly `ws-pi-bridge` as harness `pi`.
+  Precedence: this structured check runs **before** the substring detector, so
+  a bridge whose params happen to carry `codex`/`claude` text cannot
+  mis-detect; the substring detector is left byte-identical for Codex/Claude.
+  The `_meta` path is unchanged — a `pi` session is identified once at
+  `initialize` and the detected harness is held for the session, as it is for
+  Claude today. Rejected: having the Pi bridge spoof `claude` in its clientInfo
+  (it would silently inherit Claude-tuned prompt overrides and tier mappings,
+  the cross-host bleed the harness layer exists to prevent). Rejected for now:
+  an explicit harness declaration (a `_meta` field or an env value the
+  launcher sets) — the project owns both ends of this connection so it is
+  viable, but `clientInfo.name` is the field MCP already reserves for client
+  identity and needs no new contract; revisit only if a second Pi-family
+  client appears.
+- **Closed enum stays closed; it gains one member.** `pi` is added alongside
+  `codex` and `claude` in every place the enum is spelled (both
+  `normalizedHarness` copies, `promptHarnessEnum`, `aliasTargetKey`'s error
+  text, and any `config.list` rendering of harness buckets). A free-form
+  harness string is rejected: unknown hosts must fall to `default`, not create
+  ad-hoc buckets.
+- **Default bucket semantics unchanged.** A Pi session with no `pi`-keyed
+  value still resolves through the existing fallback chain (`pi` → `default`),
+  so upgrading ws-mcp without touching config is a no-op for current Pi users.
+- **One model table: ws config `agents.tier` under harness `pi`, tiers
+  only.** The Pi adapter's `model_name` (spawn/fork), the implicit `"small"`
+  (explore leaf and `ws-execute complex:false`), and `playbook.render`'s
+  `recommended-model`/tier variables all resolve through the same fixed
+  four-tier table (`small|medium|large|xlarge`), edited through
+  `lead-tune`/`config.tune agents.tier harness:pi`. There is no user-named
+  alias concept (see Open Decisions #1); `ws-execute complex:true` inherits
+  the lead's model and consults no table. For Pi the `model` value is the
+  `provider/id` string Pi's own model registry accepts and `effort` maps onto
+  the spawner's `modelEffort` with a fixed table: an empty resolved effort
+  (the stored form of "not given" — `normalizeOptionalEffort` collapses both
+  `""` and `none` to `""`, so a stored tier never carries `none`) passes no
+  `modelEffort` and leaves the child's default, and `low|medium|high|xhigh`
+  pass through unchanged; Pi's `off`, `minimal` and `max` levels are not
+  representable in ws config and are simply not offered through this layer.
+  `playbook.render`'s `recommended-model` line is left as-is on Pi: for an
+  unset `pi` tier it still prints the `default` bucket's id, which the Phase 4
+  guide tells the lead to ignore in favour of the tier name (the adapter
+  resolves the tier through the Phase 3 tool and inherits on a non-`pi`
+  answer). Accepted as presentation debt; suppressing the line would need a
+  harness-aware rule in `withRecommendedRenderBinding` that also changes
+  what undetected hosts see. A caller-supplied `model_effort` spawn parameter keeps
+  winning over the config-resolved effort (explicit per-call beats table
+  default), matching how `model_name` already overrides. Rejected: keeping `model-catalog.json` and
+  syncing it from ws config (two writers, drift), and deriving ws config from
+  the catalog (inverts the ownership every other harness uses).
+- **The adapter reads the resolution from ws-mcp, not from the config file.**
+  The adapter never parses ws's config store directly; it asks ws-mcp through
+  a read tool so the fallback chain (`pi` → `default`), legacy-key
+  normalization, and `InferBackend` stay in one place. Missing alias stays
+  "inherit the parent model", never an error, preserving the adapter's
+  never-hard-fail rule.
+- **Deliberate golden-rule exception: every phase lands on the Pi track.**
+  (Owner decision, 2026-09-05, replacing the earlier "respected by
+  sequencing" wording, which had the intent backwards.) The Pi track's
+  standing rule "never modify ws-mcp Go source" is waived for this ticket
+  only: Phases 2–3 change `agents-plugin-tool/` on the Pi-track branch, in
+  the same series as Phases 1 and 4, and reach `develop` when the track
+  merges. The exception is bounded by the AGENTS.md harness-peer clause: the
+  ws-mcp changes carry no Pi-specific logic, add `pi` only where `codex` and
+  `claude` are already spelled, and would apply to any later host. Phase 4
+  runs against the source-built ws-mcp from the same branch, so the adapter's
+  version pin is satisfied by the branch's own `runtime.json` rather than by
+  a published release.
+
+## Constraints
+
+- Any change to `agents-plugin/skills/` or shared rsrc text that names the
+  harness enum must go through the wsflow mirroring check
+  (`ai-docs/manuals/wsflow-mirroring.md`) and the skills-manifest regen step.
+- `config.tune`'s "warning-only for keys that do not vary by harness" rule
+  (the "Decision 5" comment in `server.go`'s `config.tune` handler) must keep
+  holding for the new bucket.
+- Adding a harness bucket must not change the stored key shape for existing
+  `prompt.<point>.<harness>` overrides (`*` is stored as `all`).
+
+## Spec Impact
+
+- `mcp-tools`: one new read tool (Phase 3) returning `{backend, model,
+  effort, resolved_from}` for a fixed tier under the session's detected
+  harness; `config.tune`/`config.list` harness enum gains `pi`.
+- `pi-adapter-runtime`: harness detection from `clientInfo.name` (if the
+  bridge name changes, note it); the bridged-tool inventory gains the
+  `mercenary.*` filter (Phase 1); the three model-resolution anchors ("Model
+  resolution: name alias, not tier", "Model catalog data file",
+  "Unset-catalog advisory") are rewritten in Phase 4 to tier-through-ws-mcp,
+  and the "no Pi model strings in the ws-mcp core" sentence becomes "user
+  config may carry Pi model strings; adapter and core code may not".
+
+## Phases
+
+### Phase 1: `ws-execute complex:true` inherits the lead model (Pi track)
+
+Independent of the ws-side phases; lands on the Pi track (`agents-plugin-pi/`)
+first. Today `complex:true` selects a `"complex"` catalog alias and only
+inherits the lead's model by accident (catalog miss → inherit fallback); a
+user who adds a `complex` entry would silently change its meaning. Make
+`complex:true` pass no `model_name` at all (inherit), keep `complex:false`
+on `"small"`, delete the `"complex"` alias from `resolveExecuteModelAlias`,
+the tool description, `pi-lead-guide.md`, and the `pi-adapter-runtime`
+`ws-execute` wording ("a light-model default; the lead's own model when
+set"). Update the tests. Verify with `npm test`.
+
+Also in this phase (Open Decisions #3, adapter half): the bridge filters
+`mercenary.*` out of the ws-mcp tool list before registering tools with Pi,
+so no Pi process — lead or child — can see or call the mercenary surface.
+Record the filter in `pi-adapter-runtime` next to the bridged-tool inventory
+and cover it with a bridge test.
+
+### Result (bfa2cbb6) - 2026-09-05
+
+Landed as `87a9961d` (survey plan), `dbc9e05b` (complex:true inherit),
+`bfa2cbb6` (mercenary filter), on the implementation branch under the goal
+branch.
+
+Behavioral delta:
+
+- `ws-execute complex:true` passes no `model_name`, so the execute worker
+  inherits the lead's model through the spawner's existing inherit path;
+  `complex:false` and omitted stay on `"small"`. The `"complex"` alias is
+  gone from `resolveExecuteModelAlias`, the tool description and parameter
+  schema, `pi-lead-guide.md`, and the `ws-execute` wording in
+  `pi-adapter-runtime` ("the lead's own model when set"). The three Phase 4
+  model-resolution anchors are untouched, as scheduled.
+- The bridge drops every raw tool name starting with `mercenary.` right
+  after `tools/list`, before Pi registration and before `wsToolNames` is
+  built, so neither the lead nor any spawned child sees the mercenary
+  surface regardless of the server-side `workflow.prefer_mercenary` knob.
+  Recorded in `pi-adapter-runtime` next to the bridged-tool inventory.
+- Tests 696/696 (+2): the filter is exercised by a fixture that contains
+  mercenary names (the live 60-tool fixture has none); the execute-gateway
+  tests assert `undefined` for `complex:true` and `"small"` otherwise.
+
+Review (single, full scope): one Important — the two implementation
+commits lacked `## Spec` and `## Ticket Updates` sections — [fixed] by
+rewording the local commits (tree unchanged). No Critical.
+
+## Resolved block (2026-09-05) — kept as history, not a blocker
+
+The drain run recorded Phases 2–3 as `develop`-only ws-mcp changes and Phase
+4 as gated on a ws release, following the ticket's then-current Decisions
+wording. The owner clarified that this ticket is a deliberate golden-rule
+exception (see Decisions), so all remaining phases advance on the Pi-track
+branch. Not a blocker; the next selector pass should pick this ticket up at
+Phase 2.
+
+### Phase 2: `pi` harness bucket end to end
+
+Lands on the Pi-track branch under the golden-rule exception in Decisions
+(ws-mcp Go changes in `agents-plugin-tool/`, host-neutral). Add `pi` to the
+harness enum and detection, wire it through `config.tune`
+(prompt overrides and `agents.tier` with `harness: "pi"`), the tier→model
+resolver used by `playbook.render` and the tier playbook variables, and the
+rsrc loader's harness-variant selection. Verify with Go tests covering:
+detection from a `ws-pi-bridge` clientInfo; `config.tune` accepting
+`harness: "pi"` for a prompt override and for `agents.tier`; `config.list`
+showing the bucket; `playbook.render` returning the `pi`-keyed model when set
+and the default when not; a `.pi.md` overlay being selected only under a
+detected `pi` harness. Run the full Go suite plus
+`WSRSRC_REGEN_SKILLS=1 go test ./internal/wsrsrc/...` if any rsrc text changes.
+Record in the Result whether the Pi bridge's clientInfo name had to change and,
+if so, land that adapter change on the Pi track with a matching spec note in
+`pi-adapter-runtime`.
+
+Finding (2026-09-05, dogfood via `lead-tune` in another session): the harness
+vocabulary is not discoverable before a write, so a lead cannot tell whether
+`pi` is accepted. `prompt.*` declares `Enum: promptHarnessEnum` on its
+`harness` selector, so `config.list` prints `harness[claude|codex|*]` and
+`config.tune` rejects an unknown value up front; `agents.tier`'s `harness`
+selector (`config_registry.go`) declares no enum, so `config.list` prints a
+bare `harness`, the `config.tune` enum guard is skipped, and an unknown value
+is only rejected later by `aliasTargetKey`. The two surfaces also use
+different wildcard spellings (`*` for prompt overrides, `default` for
+`agents.tier`). Phase 2 should, alongside adding `pi`: give the `agents.tier`
+harness selector an explicit enum so `config.list` lists it (`claude`, `codex`,
+`pi`, `default`), make the `config.tune` rejection text name the full enum per
+key rather than the hard-coded "claude, codex, or *", and have the `lead-tune`
+playbook tell the lead to read the selector enum from `config.list` before
+proposing a harness value. The playbook change goes through the wsflow
+mirroring check.
+
+### Result (0bd5d65e) - 2026-09-06
+
+Landed as `b2313996` (survey plan), `07e75de3` (Go source and tests),
+`05620b45` (spec), `6ac01f4e` (lead-tune playbook plus regenerated rsrc
+manifest and wsflow mirror), `0bd5d65e` (review relay #1 fixes), `14b60deb`
+(spec: `agents.tier` option set), on the implementation branch under the
+goal branch. Golden-rule exception exercised: `agents-plugin-tool/` changed
+on the Pi track; every change is host-neutral (`pi` added only where
+`codex`/`claude` were already spelled, plus the one `clientInfo.name`
+match the Decisions authorize).
+
+Behavioral delta:
+
+- `initialize` parses `params.clientInfo.name` first; an exact
+  `ws-pi-bridge` yields harness `pi` before the substring detector runs.
+  The substring detector and the `_meta` path are unchanged. The Pi
+  bridge's clientInfo name did **not** need to change (already
+  `ws-pi-bridge`); nothing landed under `agents-plugin-pi/`.
+- `pi` is a member of both `normalizedHarness` copies, `promptHarnessEnum`,
+  the prompt-override listing buckets, `aliasTargetKey`'s error text, the
+  `config.tune` schema description, and the CLI help text. The
+  `agents.tier` harness selector now declares the enum
+  `claude|codex|pi|default`, so `config.list` lists it.
+- `config.tune` lowercases the harness before the enum check, normalizes an
+  empty harness to `default` only when the key's enum contains `default`
+  (so `prompt.*` still rejects an unresolved empty harness), and rejects an
+  unknown value with a message naming that key's full enum.
+- No `internal/wsrsrc` change was needed: `.pi.md` overlay selection and
+  `playbook.render`'s tier resolution were already harness-generic and only
+  needed a detectable `pi`. The terminology table stays Claude/Codex with
+  neutral fallback for `pi`.
+- Tests: full Go module green (`go test ./...`). New coverage: pi detection
+  and its precedence over decoy `claude`/`codex` text; `config.tune`
+  `harness: "pi"` for a prompt override and for `agents.tier`; the
+  `agents.tier` selector enum in both catalog modes; `config.list` showing a
+  pi prompt override; case-insensitive harness acceptance; `prompt.*`
+  empty-harness rejection; pi-keyed tier model when set and default when
+  not; `.pi.md` overlay selected only under `pi`; neutral terminology for
+  `pi`; wsconfig-level pi round trip. Rsrc manifest and wsflow mirror
+  regenerated and drift tests green.
+
+Review (partitioned correctness/fit/test): no Critical. Four Important,
+all [fixed] in relay #1: prompt-override listing buckets lacked `pi`
+(reported by two reviewers); the new enum check was case-sensitive where
+the CLI and `aliasTargetKey` were not; no precedence test; no
+empty-harness `prompt.*` rejection test. Minor findings recorded only.
+
+Forward: Phase 3 builds on the `pi` bucket now resolving through
+`aliasResolutionKeys` (`pi` -> `default` -> ...); the read tool must report
+the answering bucket since no `pi` tier is ever auto-seeded.
+
+### Phase 3: Tier resolution read tool for adapters
+
+Depends on Phase 2. Expose one MCP read tool (working name
+`config.resolve_agent(tier, harness?)`, or an equivalent machine-readable
+mode on an existing config read tool — decide at implementation and record
+the choice) that returns the resolved `{backend, model, effort}` for a fixed
+tier under the session's detected harness, applying the same fallback chain
+and normalization `playbook.render` uses, and reporting which bucket answered
+(Open Decisions #2, settled). Register it in the config registry with the
+no-agent/harness applicability the other config tools carry, document it in
+`mcp-tools.md`, and cover it with Go tests for: each tier under `pi`,
+fallback to `default` with the answering bucket reported, and an unknown
+tier rejected.
+
+### Result (5767d7b4) - 2026-09-06
+
+Landed as `65b59ece` (survey plan), `5767d7b4` (Go source, tests, runtime
+manifests), plus one doc-only closeout commit (spec paragraph and this
+Result), on the implementation branch under the goal branch. Golden-rule exception exercised again: host-neutral Go in
+`agents-plugin-tool/`, nothing under `agents-plugin-pi/`.
+
+Design choice recorded: a dedicated read tool `config.resolve_agent(tier,
+harness?)`, not a machine-readable mode on `config.list`. The repo's
+convention for a narrow read is one tool per question (`git.status`,
+`git.diff`, ...), and `config.list`'s catalog JSON has no per-call
+tier/harness selector to extend cleanly.
+
+Behavioral delta:
+
+- `config.resolve_agent` returns `{backend, model, effort, resolved_from}`
+  for one fixed tier under the explicit or detected harness (`default` when
+  none is known), through the same alias fallback chain `agents.tier` and
+  `playbook.render` use; `resolved_from` names the answering bucket. An
+  unknown tier is rejected with the `agents.tier` wording; tier read-compat
+  synonyms are accepted. An unrecognized `harness` value is not rejected on
+  this read and degrades to `default`. The schema declares no
+  `session_key`; the tool is read-only and visible in full and agentless
+  modes.
+- `wsconfig` gains a strict-tier resolver (`ResolveAgentTierForHarness`)
+  and the alias resolver now also returns the answering key; the existing
+  render-path resolver keeps its unknown-tier coercion for its callers.
+- `agents-plugin/runtime.json` and `agents-plugin-wsflow/runtime.json` list
+  the new tool (required by the launcher-contract tests; a packaging
+  manifest, not skill or rsrc text, so no mirror regen).
+- Tests: full Go module green. New coverage at both layers: each tier under
+  `pi`; `default` fallback with `resolved_from`; unknown tier; explicit
+  harness override; no detected harness; no-agent visibility.
+- Spec: `{#260905-tier-resolution-read-tool}` in `mcp-tools`.
+
+Review (partitioned correctness/fit): fit clean; correctness clean with
+five Minor, recorded only. Two closed by spec wording in the doc pass
+(`backend` may be empty when not inferable, `resolved_from` may carry the
+non-bucket `tiers` value); untested extras noted (harness case-folding,
+tier synonyms, compact text rendering, unrecognized harness).
+
+Forward (Phase 4): (a) a partial `config.tune agents.tier harness:pi` write
+that supplies neither backend nor model seeds the `pi` bucket from the
+codex default, so `resolved_from: "pi"` can carry a codex model string; the
+adapter should not treat `resolved_from == "pi"` alone as proof of a Pi
+model string, or the writer should stop seeding. (b) A misspelled harness
+argument silently resolves at `default`; if that proves hard to debug,
+echo the effective harness in the payload.
+
+### Phase 4: Pi adapter resolves models through ws-mcp; catalog retires
+
+Depends on Phase 3 being on the same branch; the adapter is verified against
+the source-built ws-mcp from that branch (the version pin is the branch's own
+`runtime.json`). On the Pi track
+(`agents-plugin-pi/`): route `resolveModelForAlias` (spawner) and the explore
+leaf's / `ws-execute complex:false`'s `"small"` through the bridge to the
+Phase 3 tool, treating a non-`pi` answering bucket as inherit; carry `effort`
+into `modelEffort`; replace the "model catalog
+unset" `workflow_manual` advisory with an "alias table has no `pi` entries"
+advisory sourced from the same tool; delete `model-catalog.ts`,
+`model-catalog.json`, and their tests; update the `pi-adapter-runtime` spec
+anchors ("Model resolution: name alias, not tier", "Model catalog data file",
+"Unset-catalog advisory") and `pi-lead-guide.md` so the lead is told to pass
+the tier names `lead-tune` shows (and to drop the "anything the user names"
+sentence). Verify with the adapter's `npm test` and one live spawn per kind
+(a set `pi` tier, an unset tier → inherit, `complex:true` → inherit).
+
+### Result (4798a605) - 2026-09-06
+
+Landed as `bb3d1877` (survey plan), `2e021e83` (adapter code and tests),
+`866139bc` (spec and lead guide), `4798a605` (review relay #1), plus one
+doc-only closeout commit, on the implementation branch under the goal
+branch. Adapter-only change under `agents-plugin-pi/`; nothing under
+`agents-plugin-tool/` or `agents-plugin/skills/`.
+
+Behavioral delta:
+
+- `model_name` on `ws-agent-spawn`/`ws-fork`/`ws-execute`/the discussion
+  fork, and `explore`'s implicit `small`, resolve through
+  `config.resolve_agent(tier, format:"json")` with no explicit harness (the
+  bridge's detected `pi` session harness applies). A hit counts only when
+  `resolved_from == "pi"` and the model carries a `provider/id` slash
+  (Phase 3 Forward (a) guard); every other shape, including `isError`,
+  transport errors and unparsable text, inherits the parent model.
+- Effort: a single `effectiveModelEffort(caller, resolved)` fold with `||`
+  semantics is stored on the record and applied at both spawn time and
+  dormant resume; empty resolved effort applies nothing. The explore leaf
+  has no effort surface and receives only the model.
+- The `workflow_manual` advisory now reads "tier table has no `pi`
+  entries", sourced from the same tool (four round-trips, only on
+  `workflow_manual`, in both the mapped and raw dispatch paths). Four failed
+  lookups also fire it.
+- `model-catalog.ts`, `model-catalog.json` and their tests are deleted;
+  `ws-model-catalog-list` stays as a registry lister. The genuine-hit
+  predicate lives once, in `resolveModelForAliasViaWsMcp`, which
+  `bridge.ts` reuses.
+- `agents-plugin-pi/runtime.json` resynced byte-identically from
+  `agents-plugin/runtime.json` (0.44.4, `config.resolve_agent` listed) with
+  a disk-reading identity test.
+- Spec: the three `pi-adapter-runtime` anchors rewritten in place (ids
+  unchanged); `pi-lead-guide.md` names the four tiers as the legal
+  `model_name` values. Adapter `npm test`: 735 pass, 0 fail.
+
+Review (partitioned correctness/fit/test): one Critical (config-resolved
+effort was folded into the record but the spawn-time apply still read the
+caller value) fixed in relay #1 and confirmed by a Critical-scoped
+re-review; three Important (stale runtime.json pin, duplicated guard,
+untested raw-dispatch gate) fixed in the same relay. Minor, recorded:
+resolver JSDoc displaced above the new call-tool interface; the
+source-text guard test in `spawner.test.ts` is a formatting-brittle
+stopgap for a live-gate-only `spawnAgent`.
+
+Owner-run live checks remain outstanding, with one caveat: the adapter's
+`assertVersionPin` is an exact string match, so a source-built ws-mcp
+reporting `0.44.4-dev` is rejected against the pinned `0.44.4`. Run the
+live spawns against a build whose version string equals the pin (or build
+with the release version), or loosen the pin rule in a follow-up; the
+released 0.44.4 binary matches as-is.
+
+Forward: `agents-plugin-pi/rsrc/` has drifted from `agents-plugin/rsrc/`
+(nine playbooks plus `manifest.json`) despite the same byte-identical
+hand-sync declaration; only `runtime.json` is now guarded by a test.
+Captured as `260906-bug-ws-pi-rsrc-mirror-drift`.
+
+## Blocked (2026-09-06) — owner sign-off pending, not a work item
+
+All four phases carry a Result. Closing waits on the owner-run live checks
+listed in Phases 1, 2 and 4 (each spawn kind against a ws-mcp whose version
+string matches the adapter pin, see the Phase 4 Result caveat) and on the
+items below. Once those are done, close the ticket to `.done/`.
+
+The AGENTS.md owner-clause wording question raised in the Decisions section
+is settled (owner, 2026-09-07): the harness-peer clause wording is accepted,
+and two clauses were added to the `Active direction` entry — non-Pi-extension
+code is authored on `develop` and cherry-picked to the Pi track, and the
+Pi-direction guidance is stripped when absorbed into a non-Pi branch.
+
+Re-home to `develop` (owner, 2026-09-07): DONE. The Phase 2/3 ws-mcp Go
+changes (`07e75de3` pi harness bucket, `0bd5d65e` prompt-override widening,
+`5767d7b4` `config.resolve_agent`) were cherry-picked onto `develop`, adapted
+to develop's post-fork MCP refactors: `config.resolve_agent` registered under
+develop's current version range (`>=0.45.2-dev <0.46.0`) in both
+`runtime.json` manifests, and the `server_test.go` visible-tools assertion
+kept develop's `tickets.query`/`playbook.read` renames while adding the new
+tool. Verified with the full `agents-plugin-tool` Go suite green on the
+develop base and pushed to `origin/develop` (`b1dae422..f268ffd2`). This
+satisfies the harness-peer clause's "land through the normal `develop`
+release flow" requirement and, via the local devenv dogfood loop, restores
+in-place testability. `track/pi-agent` still carries the original commits; no
+cherry-pick back is needed, and the two copies reconcile at the next
+`track` ↔ `develop` integration. Remaining before close: the owner-run live
+checks listed above.
+
+## Non-goals
+
+- Authoring any `.pi.md` playbook overlays. This ticket makes them selectable;
+  it does not write them.
+- Changing how Claude or Codex are detected.
+- Reworking `mercenary` backends to launch Pi processes; `backend` for a `pi`
+  entry is informational until a Pi mercenary backend exists.
+
+## Open Decisions (2026-09-05)
+
+The design review's `missing` issues (table below, #1 #2 #3 #5) each need an
+owner decision before the phases can be re-cut. Lead recommendation per item,
+recorded for the owner to accept or overrule:
+
+1. **Arbitrary alias names have no home in ws config.** `agents.model_aliases`
+   looks generic but every writer and reader normalizes the outer key to the
+   four fixed tiers (`small|medium|large|xlarge`); `config.tune` has no
+   `model_alias` key. The adapter's `"complex"` and any user-named alias would
+   be dropped by the catalog-retirement phase as originally written.
+   **Settled 2026-09-05 (owner): tier only — there is no user-named alias
+   concept.** Tracing the adapter shows only three names ever reach the
+   catalog: `playbook.render`'s `recommended-model` (a ws-config tier value),
+   the explore leaf's fixed `"small"`, and `ws-execute`'s `"complex"`. No lead
+   path invents names and the guide never suggests one. The "generic
+   name → `provider/id`" framing came from `260903` D-A as a *translation
+   shim*: ws config could only hold codex/claude ids, so the adapter needed a
+   table to turn `recommended-model` into a Pi string without placing Pi
+   strings in ws-mcp. A `pi` harness bucket removes the shim's reason to
+   exist. Consequences, folded into the phases below: the model layer is the
+   four fixed tiers under harness `pi`; explore's `"small"` and `ws-execute
+   complex:false` are tier `small`; `complex:true` was always meant to
+   **inherit the lead's model** (no alias at all — today it only does so by
+   accident, through the catalog-miss fallback) and is corrected on the Pi
+   track independently of the ws-side phases; no alias writer or non-tier
+   resolver is added. The live spec anchor's "anything the user names"
+   sentence is amended when the catalog retires.
+2. **`pi` → `default` fallback hands Pi a codex model id.** `wsconfig.Load`
+   seeds `default`/`codex`/`claude` for every tier, so a fixed tier is never
+   "unset"; Pi cannot accept those ids as `--model`. Recommendation: the read
+   tool reports **which bucket answered** (`resolved_from: pi|default|…`) and
+   the Pi adapter treats a non-`pi` hit as "inherit the parent model" — the
+   fallback chain stays intact for Codex/Claude, and Pi degrades to inherit
+   exactly as today. Alternative: exempt `pi` from the chain server-side (a
+   `pi` lookup never falls to `default`) — simpler for the adapter but bakes a
+   harness special case into the resolver.
+   **Settled 2026-09-05 (owner): the recommendation.** The read tool reports
+   `resolved_from`; the adapter inherits on any non-`pi` answer; the resolver
+   gains no harness special case.
+3. **`backend` is load-bearing and `normalizedHarness` doubles as the backend
+   normalizer.** Adding `pi` there also creates a `pi` *backend* key, and a
+   mercenary spawn from a detected `pi` session would resolve the `pi` bucket
+   and try to launch a `provider/id` string under a codex/claude backend.
+   Recommendation: split the normalizers (harness enum vs backend enum; `pi`
+   joins only the harness one), require `pi` entries to carry an explicit
+   backend of `pi` (no mercenary backend yet — see Non-goals) and make the
+   mercenary path reject a `pi`-backend resolution with a clear error rather
+   than attempting a launch. Alternative: keep one normalizer and document the
+   mercenary-from-Pi path as unsupported — smaller diff, sharper edge.
+   **Settled 2026-09-05 (owner): mercenary is a deprecated path and is not
+   touched.** No normalizer split and no new error branch in ws-mcp. The
+   harness enum gains `pi` for every harness-keyed surface (prompt overrides,
+   `agents.tier`, rsrc harness variants, `config.list`), and whatever backend
+   key that incidentally creates stays inert because the Pi adapter never
+   exposes the mercenary surface: the bridge drops `mercenary.*` from the
+   tool list it registers with Pi (adapter-side filter after `tools/list`,
+   independent of the global `workflow.prefer_mercenary` knob, so Codex and
+   Claude sessions are unaffected). Playbook blocks tagged mercenary-only
+   already render under the same knob; the Pi guide names no mercenary
+   route. Mercenary-from-Pi is therefore unreachable from a Pi process,
+   not rejected at runtime. The parent epic classes a `tools/list` filter as
+   a harness-owned soft guard (containment proper belongs in the keyed
+   `tools/call` handler); this ticket knowingly trades against that for a
+   deprecated surface — the residual path (`mercenary.register(backend:
+   "pi")` issued from a non-Pi session) stays as loud and as unsupported as
+   any other misuse of a deprecated tool, and the prose that
+   `workflow.prefer_mercenary: on` renders for a Pi lead describes tools it
+   cannot see, which the Pi guide's "no mercenary route" line already
+   overrides. The adapter half lands in Phase 1.
+4. **Golden-rule exception and spec territory.** Phases 2–3 are ws-mcp Go
+   changes motivated solely by Pi; branch sequencing does not answer whether
+   that is an exception to "ws-mcp Go is never modified for Pi". The live spec
+   anchor also says no Pi model strings are placed in the ws-mcp core.
+   Recommendation: grant the exception explicitly here, scoped to "the harness
+   enum and a harness-neutral alias read tool" (nothing Pi-specific beyond the
+   enum member), and amend the anchor to say user *config* may carry Pi model
+   strings while *code* may not. Add `spec:` frontmatter and a `## Spec Impact`
+   section naming `mcp-tools` (new read tool) and the three `pi-adapter-runtime`
+   model-resolution anchors once this is accepted.
+   **Settled 2026-09-05 (owner): not an exception but a clause.** The Pi
+   track's rule ("ws-mcp Go source untouched") exists to keep the dependency
+   one-directional and to keep host-specific logic out of the core. Adding a
+   harness to a closed enum and exposing a harness-neutral read tool does
+   neither, and the same clause covers any later host (opencode or another)
+   that needs to be a peer of Codex/Claude in the harness-keyed surfaces. The
+   clause is recorded in `AGENTS.md` (Project Knowledge, Pi direction) and
+   the `pi-adapter-runtime` anchor amendment lands with Phase 4. `spec:` and
+   `## Spec Impact` added. Design re-review found three live statements
+   still contradicting Phases 2–3 (the AGENTS.md bullet's "Go source
+   untouched" parenthetical, the `pi-adapter-runtime` preamble's "no ws-mcp
+   source is modified for Pi", and the research anchor's "Go source
+   untouched"); all three were reworded to "no Pi-specific logic in its Go
+   source" plus a pointer to the clause in the same commit that stamps this
+   review, so no phase carries them. Only the
+   `{#260903-pi-model-catalog-config-file}` sentence remains scheduled
+   (Phase 4).
+
+## Resolved block (2026-09-05) — design round 1, kept as history
+
+Superseded the same day: every `missing` row below was settled under
+`## Open Decisions`, and the design re-review returned `concern` with all
+issues autonomous. The table is the original round-1 record.
+
+### Design Reviewer — block (round 1)
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | ws config `agents.model_aliases` cannot hold the adapter's alias names — no writer, no resolver (outer key is the fixed four-tier vocabulary; `complex` and user-named aliases have no home after Phase 3) | critical | missing |
+| 2 | `pi` → `default` fallback yields codex model ids, so "unmapped alias returns unset" cannot hold (`applyDefaultModelAliases` seeds every tier on load; ids are not portable across harness buckets) | critical | missing |
+| 3 | `backend` is load-bearing, not informational; `normalizedHarness` doubles as backend normalizer; mercenary spawn from a detected `pi` session is undefined | important | missing |
+| 4 | clientInfo-based detection is not a substring addition; precedence and the `_meta` path are unspecified; explicit harness declaration not weighed | important | autonomous |
+| 5 | golden-rule justification answers a different question (branch ordering, not exception grant); no `## Spec Impact` section / `spec:` frontmatter | important | missing |
+| 6 | effort vocabulary mismatch (ws none|low|medium|high|xhigh vs Pi off|minimal|…|max) and precedence against the surviving `model_effort` spawn parameter | minor | autonomous |
+| 7 | frontmatter `related:` entry for 260903 contradicts the body on the catalog's fate | minor | autonomous |
+
+
+## Resolution (2026-09-08)
+
+The owner confirmed that the config layer works in live Pi use and authorized closure during the 2026-09-08 ticket inventory review. This supersedes the historical owner-sign-off block above. The four implementation Results and their automated evidence remain unchanged; no new test run or per-spawn trace is claimed by this closure.

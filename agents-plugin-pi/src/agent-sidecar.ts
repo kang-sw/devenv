@@ -1,0 +1,547 @@
+/**
+ * Shutdown sidecar for the RPC-backed agent registry (260905, push model).
+ *
+ * The problem it exists for: `RpcAgentRegistry` is an in-memory `Map`. Under
+ * the pull model a lead that died with children running simply lost them —
+ * `ws-agent-wait` was gone along with the process, and nothing referenced the
+ * orphans again. Under the push model that silence is worse: the lead is
+ * supposed to be told about every child signal, so a whole set of children
+ * vanishing without a word is exactly the failure the model promises not to
+ * have.
+ *
+ * So on `session_shutdown` the still-live records are serialized to a sibling
+ * file of the lead's own session file (`<sessionFile>.ws-agents.json` — the
+ * same naming convention `ask.ts`'s `<sessionFile>.ws-threads.json` already
+ * uses), and the next `session_start` reads it, DELETES it (one revival per
+ * crash, never a growing backlog), and re-registers each entry as a dormant
+ * record. The lead can then `ws-agent-send` any of them — `sendToAgent`'s
+ * existing dormant-auto-resume branch relaunches from the same `--session`
+ * file.
+ *
+ * A single `ws-agent-orphaned` push announces the set, but only when at least
+ * one entry was `"running"` (see `buildOrphanPush`): re-registration is
+ * bookkeeping, whereas a child cut off mid-turn is work the lead has to
+ * re-issue.
+ *
+ * Deliberately narrow: the fields `sendToAgent`'s resume branch actually reads,
+ * plus two purely DESCRIPTIVE ones for the roll-call — `state` (what the child
+ * was doing at shutdown) and `lastReportAt` (how long it had been quiet). No
+ * live state round-trips (no `client`, no `unsubscribe`, no `reportLog`): a
+ * revived record is dormant by definition and rebuilds its own state on the
+ * resume. `state` is never restored ONTO the record; it only tells the lead
+ * that a `"running"` child was cut off mid-turn and needs its instruction
+ * re-issued, since a resume replays from the last flushed turn.
+ *
+ * Pure serialize/parse helpers are unit-tested directly
+ * (test/agent-sidecar.test.ts); the two filesystem functions are thin and
+ * best-effort by design (see `readAndClearSidecar`).
+ */
+
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { TOOL_GROUPS, isOwnerHeld, refreshAgentTelemetry, startOwnedSessionObserver, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole, type ToolGroup } from "./spawner.ts";
+import { parseForkContext, type ForkContext } from "./fork-context.ts";
+import { normalizeStoredExploreMode, type ExploreMode } from "./process-role.ts";
+import { readOwnership, removeOwnedAgentHome, updateOwnership, validDescriptor, type AgentOwnership } from "./agent-storage.ts";
+import { parseTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
+import { parseDelegationPolicy, type DelegationPolicy } from "./delegation-policy.ts";
+import type { SubtreeChannel } from "./subtree-lifecycle.ts";
+
+/** Sidecar file version. Bumped only on a breaking shape change; a mismatch is treated as "no sidecar". */
+export const SIDECAR_VERSION = 1;
+
+/**
+ * One persisted orphan. Field-for-field the subset of `RpcAgentRecord` that
+ * `sendToAgent`'s dormant-resume branch reads, plus `spawnRole` so a revival
+ * can tell a task fork from a worker without guessing at `toolGroup`.
+ */
+export interface PersistedOrphan {
+  agentId: string;
+  /** 260905 (alias/park/cap ticket): see `RpcAgentRecord.alias`/`.title`/`.prompt`. Absent for an old-shape sidecar entry. */
+  alias?: string;
+  title?: string;
+  /** Head-truncated at spawn (`truncatePromptForStorage`); round-trips verbatim, no re-truncation on revival. */
+  prompt?: string;
+  sessionPath: string;
+  systemPromptPath?: string;
+  forkContext?: ForkContext;
+  modelBase?: string;
+  modelEffort?: string;
+  telemetry?: AgentTelemetry;
+  telemetryContextFloor?: TelemetryOrigin;
+  observedModel?: string;
+  observedEffort?: string;
+  observedContextTokens?: number;
+  wsToolNames: string[];
+  toolGroup: ToolGroup;
+  explicitTools?: string;
+  delegation?: DelegationPolicy;
+  subtreeChannel?: SubtreeChannel;
+  waitingOnChildren?: boolean;
+  lastWriter?: "lead" | "owner";
+  ownerSends?: Array<{ text: string; at: number }>;
+  spawnRole?: SpawnAgentRole;
+  /** Persistent explore identity; only valid with the coherent explore tuple. */
+  exploreMode?: ExploreMode;
+  /**
+   * What the child was doing when the session went away: `"running"` means a
+   * prompt was outstanding (`RpcAgentRecord.running`), `"idle"` means it was
+   * live but between turns. Load-bearing for the roll-call, not for the
+   * resume: a `"running"` orphan was cut off mid-turn and comes back from its
+   * last FLUSHED turn, so the lead must re-issue whatever it had asked for
+   * rather than assume the work continued. Absent in a sidecar written before
+   * this field existed — `parseOrphans` reads that as `"idle"`, the
+   * conservative default (no caveat claimed about work that may not have been
+   * outstanding).
+   */
+  state?: OrphanState;
+  /** ISO time of the newest `reportLog` entry at shutdown; omitted when the child never reported. */
+  lastReportAt?: string;
+  /** Additive durable ownership; absence keeps a legacy record resumable. */
+  ownership?: AgentOwnership;
+}
+
+/** See `PersistedOrphan.state`. */
+export type OrphanState = "running" | "idle";
+
+export interface SidecarFile {
+  version: number;
+  writtenAt: string;
+  orphans: PersistedOrphan[];
+}
+
+/** `<leadSessionFile>.ws-agents.json` — sibling of the session file, same convention as ask.ts's thread registry. */
+export function sidecarPath(leadSessionFile: string): string {
+  return `${leadSessionFile}.ws-agents.json`;
+}
+
+/** Durable no-session locator. A fresh Pi identity never discovers another identity's registry. */
+export function noSessionSidecarPath(agentDir: string, sessionId: string): string {
+  return join(agentDir, "ws-agents", sessionId, "registry.ws-agents.json");
+}
+
+/**
+ * Selects the records worth reviving: every non-thread-bound record,
+ * live or dormant. A thread-bound one belongs to the owner surface, whose own
+ * `<sessionFile>.ws-threads.json` already persists it — reviving it here
+ * would announce the same agent twice.
+ *
+ * 260905 (alias/park/cap ticket): the `!record.client` half of the old skip
+ * is gone — automatic parking now routinely turns a settled, non-threadBound
+ * child dormant well before shutdown, so capturing only LIVE records would
+ * silently lose every parked (alias/title/prompt included) agent on a
+ * restart. Dormant records are already resumable; carrying them through the
+ * sidecar too costs nothing and keeps the roll-call complete.
+ *
+ * Persistent researchers are captured like every other non-thread-bound
+ * record; intent mode is immutable across restart and continuation.
+ */
+export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
+  const orphans: PersistedOrphan[] = [];
+  for (const record of registry.values()) {
+    if (record.threadBound) continue;
+    orphans.push({
+      agentId: record.agentId,
+      alias: record.alias,
+      title: record.title,
+      prompt: record.prompt,
+      sessionPath: record.sessionPath,
+      systemPromptPath: record.systemPromptPath,
+      ...(record.forkContext ? { forkContext: record.forkContext } : {}),
+      modelBase: record.modelBase,
+      modelEffort: record.modelEffort,
+      ...(record.telemetry ? { telemetry: record.telemetry } : {}),
+      ...(record.telemetryContextFloor ? { telemetryContextFloor: record.telemetryContextFloor } : {}),
+      ...(record.observedModel ? { observedModel: record.observedModel } : {}),
+      ...(record.observedEffort ? { observedEffort: record.observedEffort } : {}),
+      ...(record.observedContextTokens !== undefined ? { observedContextTokens: record.observedContextTokens } : {}),
+      wsToolNames: [...record.wsToolNames],
+      toolGroup: record.toolGroup,
+      explicitTools: record.explicitTools,
+      ...(record.delegation ? { delegation: record.delegation } : {}),
+      ...(record.subtreeChannel ? { subtreeChannel: record.subtreeChannel } : {}),
+      ...(record.waitingOnChildren !== undefined ? { waitingOnChildren: record.waitingOnChildren } : {}),
+      ...(record.lastWriter ? { lastWriter: record.lastWriter } : {}),
+      ...(record.ownerSends?.length ? { ownerSends: record.ownerSends.map((send) => ({ ...send })) } : {}),
+      spawnRole: record.spawnRole,
+      ...(record.exploreMode ? { exploreMode: record.exploreMode } : {}),
+      state: record.running || record.streaming ? "running" : "idle",
+      // `undefined` (never reported) rather than an omitted key, matching every
+      // other optional field above — `JSON.stringify` drops it on the way out
+      // and `parseOrphans` reads it back the same way.
+      lastReportAt: lastReportAt(record),
+      ...(record.ownership ? { ownership: record.ownership } : {}),
+    });
+  }
+  return orphans;
+}
+
+/**
+ * ISO time of the newest `reportLog` entry, or `undefined` when the child
+ * never reported.
+ *
+ * Review relay #1 (Important): falls back to `record.lastReportAtOverride`
+ * when `reportLog` is empty — the same precedence `listAgents` and
+ * `evictForCapacity` use — so a revived-but-never-reported-since orphan's
+ * last-report time round-trips through a SECOND shutdown/revive cycle
+ * instead of being dropped once `reportLog` is captured empty again. This
+ * stays read-side only: the override rides on the existing `lastReportAt`
+ * field rather than a second persisted key.
+ */
+function lastReportAt(record: RpcAgentRecord): string | undefined {
+  const newest = record.reportLog[record.reportLog.length - 1];
+  return newest ? new Date(newest.at).toISOString() : record.lastReportAtOverride;
+}
+
+/** Pure serializer — pretty-printed so a stranded sidecar is readable by hand during a post-mortem. */
+export function serializeOrphans(orphans: PersistedOrphan[], writtenAt = new Date().toISOString()): string {
+  const file: SidecarFile = { version: SIDECAR_VERSION, writtenAt, orphans };
+  return `${JSON.stringify(file, null, 2)}\n`;
+}
+
+/**
+ * Pure parser. Every failure mode — malformed JSON, wrong version, a
+ * non-array `orphans`, an entry missing a load-bearing field — degrades to
+ * "no orphans" rather than throwing: this runs inside `session_start`, where
+ * a corrupt sidecar must never stop the extension from coming up.
+ */
+export function parseOrphans(raw: string): PersistedOrphan[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  const file = parsed as Partial<SidecarFile> | null;
+  if (!file || typeof file !== "object" || file.version !== SIDECAR_VERSION || !Array.isArray(file.orphans)) return [];
+  const out: PersistedOrphan[] = [];
+  for (const entry of file.orphans) {
+    const o = entry as Partial<PersistedOrphan> | null;
+    if (!o || typeof o !== "object") continue;
+    if (typeof o.agentId !== "string" || !o.agentId) continue;
+    if (typeof o.sessionPath !== "string" || !o.sessionPath) continue;
+    if (o.systemPromptPath !== undefined && typeof o.systemPromptPath !== "string") continue;
+    let delegation: DelegationPolicy | undefined;
+    try { if (o.delegation !== undefined) delegation = parseDelegationPolicy(o.delegation); } catch { continue; }
+    if (o.waitingOnChildren !== undefined && typeof o.waitingOnChildren !== "boolean") continue;
+    if (o.lastWriter !== undefined && o.lastWriter !== "lead" && o.lastWriter !== "owner") continue;
+    const ownerSends = Array.isArray(o.ownerSends)
+      ? o.ownerSends.flatMap((send) => send && typeof send === "object" && typeof send.text === "string" && typeof send.at === "number" && Number.isFinite(send.at)
+        ? [{ text: send.text, at: send.at }]
+        : [])
+      : undefined;
+    if (o.ownerSends !== undefined && !Array.isArray(o.ownerSends)) continue;
+    if (o.subtreeChannel !== undefined && (!o.subtreeChannel || typeof o.subtreeChannel.path !== "string" || typeof o.subtreeChannel.nonce !== "string")) continue;
+    let forkContext: ForkContext | undefined;
+    try { forkContext = parseForkContext(o.forkContext); } catch { continue; }
+    if (!o.systemPromptPath && !forkContext) continue;
+    const toolGroup = o.toolGroup;
+    const isKnownToolGroup = toolGroup === undefined || Object.hasOwn(TOOL_GROUPS, toolGroup);
+    const isKnownRole = o.spawnRole === undefined || o.spawnRole === "worker" || o.spawnRole === "execute-worker" || o.spawnRole === "fork" || o.spawnRole === "explore";
+    if (!isKnownToolGroup || !isKnownRole) continue;
+    const hasExploreMode = Object.prototype.hasOwnProperty.call(o, "exploreMode");
+    const exploreMode = normalizeStoredExploreMode(o.exploreMode);
+    const legacySimple = o.exploreMode === "simple";
+    // Any research-shaped field makes the entire tuple strict. In particular,
+    // do not discard an invalid mode and accidentally revive it as a worker.
+    const hasResearchMetadata = o.spawnRole === "explore" || hasExploreMode || toolGroup === "read-only" || toolGroup === "read-only-explore";
+    if (hasResearchMetadata && (
+      o.spawnRole !== "explore" || !exploreMode || typeof o.modelBase !== "string" || !o.modelBase ||
+      typeof o.modelEffort !== "string" || !o.modelEffort || Object.prototype.hasOwnProperty.call(o, "explicitTools") ||
+      (legacySimple ? toolGroup !== "read-only" : toolGroup !== "read-only-explore")
+    )) continue;
+    const rawOwnership = o.ownership;
+    const ownershipMode = normalizeStoredExploreMode(rawOwnership?.exploreMode);
+    const normalizedOwnership = rawOwnership && rawOwnership.exploreMode !== undefined
+      ? { ...rawOwnership, exploreMode: ownershipMode }
+      : rawOwnership;
+    const ownership = normalizedOwnership && validDescriptor(normalizedOwnership) && normalizedOwnership.agentId === o.agentId && normalizedOwnership.sessionPath === o.sessionPath && (() => { const disk = readOwnership(normalizedOwnership.home); return !!disk && disk.home === normalizedOwnership.home && disk.ownerSessionId === normalizedOwnership.ownerSessionId && disk.agentId === normalizedOwnership.agentId && disk.sessionPath === normalizedOwnership.sessionPath && disk.role === normalizedOwnership.role && disk.exploreMode === normalizedOwnership.exploreMode; })() ? normalizedOwnership : undefined;
+    out.push({
+      agentId: o.agentId,
+      alias: typeof o.alias === "string" ? o.alias : undefined,
+      title: typeof o.title === "string" ? o.title : undefined,
+      prompt: typeof o.prompt === "string" ? o.prompt : undefined,
+      sessionPath: o.sessionPath,
+      systemPromptPath: o.systemPromptPath,
+      ...(forkContext ? { forkContext } : {}),
+      modelBase: typeof o.modelBase === "string" ? o.modelBase : undefined,
+      modelEffort: typeof o.modelEffort === "string" ? o.modelEffort : undefined,
+      ...(parseTelemetry(o.telemetry) ? { telemetry: parseTelemetry(o.telemetry) } : {}),
+      ...(parseTelemetry({ version: 1, origin: o.telemetryContextFloor })?.origin ? { telemetryContextFloor: parseTelemetry({ version: 1, origin: o.telemetryContextFloor })!.origin } : {}),
+      ...(typeof o.observedModel === "string" && o.observedModel ? { observedModel: o.observedModel } : {}),
+      ...(typeof o.observedEffort === "string" && o.observedEffort ? { observedEffort: o.observedEffort } : {}),
+      ...(typeof o.observedContextTokens === "number" && Number.isFinite(o.observedContextTokens) && o.observedContextTokens >= 0 ? { observedContextTokens: o.observedContextTokens } : {}),
+      wsToolNames: Array.isArray(o.wsToolNames) ? o.wsToolNames.filter((n): n is string => typeof n === "string") : [],
+      toolGroup: (legacySimple ? "read-only-explore" : o.toolGroup ?? "full-worker") as ToolGroup,
+      explicitTools: typeof o.explicitTools === "string" ? o.explicitTools : undefined,
+      ...(delegation ? { delegation } : {}),
+      ...(o.subtreeChannel ? { subtreeChannel: o.subtreeChannel } : {}),
+      ...(o.waitingOnChildren !== undefined ? { waitingOnChildren: o.waitingOnChildren } : {}),
+      ...(o.lastWriter ? { lastWriter: o.lastWriter } : {}),
+      ...(ownerSends?.length ? { ownerSends } : {}),
+      spawnRole: o.spawnRole,
+      ...(exploreMode ? { exploreMode } : {}),
+      // An older sidecar (or a corrupt value) has no state to trust; "idle" is
+      // the conservative read — it claims nothing about outstanding work.
+      state: o.state === "running" ? "running" : "idle",
+      // Review relay #1 (Minor a): a hand-edited/corrupt sidecar could carry a
+      // non-date string; `typeof === "string"` alone would let it through to
+      // feed `Date.parse` arithmetic in `evictForCapacity` (poisoning
+      // `Math.max` with `NaN`, making the record permanently un-evictable)
+      // and to `listAgents`'s `last_report_at`, which the tool description
+      // and spec both declare ISO. `Number.isFinite(Date.parse(...))` rejects
+      // anything that does not parse as a date.
+      lastReportAt: typeof o.lastReportAt === "string" && Number.isFinite(Date.parse(o.lastReportAt)) ? o.lastReportAt : undefined,
+      ...(ownership ? { ownership } : {}),
+    });
+  }
+  return out;
+}
+
+/**
+ * Rebuilds a DORMANT `RpcAgentRecord` from a persisted orphan — `client`
+ * absent is the load-bearing part (it is what routes a later
+ * `ws-agent-send` into `sendToAgent`'s relaunch branch), and `running:
+ * false` keeps a revived orphan out of the fan-in status line until the lead
+ * actually prompts it.
+ *
+ * 260905 (list-model/last-report-fidelity ticket): `lastReportAtOverride` is
+ * a direct passthrough of `orphan.lastReportAt` (already ISO, already the
+ * newest `reportLog` entry at shutdown) — the revived record's `reportLog`
+ * itself stays empty (no synthetic entry), so `listAgents` and
+ * `evictForCapacity` read the shutdown snapshot only until the record
+ * reports again for real.
+ */
+export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
+  const record: RpcAgentRecord = {
+    agentId: orphan.agentId,
+    alias: orphan.alias,
+    title: orphan.title,
+    prompt: orphan.prompt,
+    client: undefined,
+    sessionPath: orphan.sessionPath,
+    ...(orphan.ownership ? { ownership: orphan.ownership } : {}),
+    systemPromptPath: orphan.systemPromptPath,
+    ...(orphan.forkContext ? { forkContext: orphan.forkContext } : {}),
+    modelBase: orphan.modelBase,
+    modelEffort: orphan.modelEffort,
+    ...(orphan.telemetry ? { telemetry: orphan.telemetry } : {}),
+    ...(orphan.telemetryContextFloor ? { telemetryContextFloor: orphan.telemetryContextFloor } : {}),
+    ...(orphan.observedModel ? { observedModel: orphan.observedModel } : {}),
+    ...(orphan.observedEffort ? { observedEffort: orphan.observedEffort } : {}),
+    ...(orphan.observedContextTokens !== undefined ? { observedContextTokens: orphan.observedContextTokens } : {}),
+    wsToolNames: [...orphan.wsToolNames],
+    toolGroup: orphan.toolGroup,
+    explicitTools: orphan.explicitTools,
+    delegation: orphan.delegation,
+    subtreeChannel: orphan.subtreeChannel,
+    waitingOnChildren: orphan.waitingOnChildren,
+    lastWriter: orphan.lastWriter,
+    ownerSends: orphan.ownerSends?.map((send) => ({ ...send })),
+    spawnRole: orphan.spawnRole,
+    exploreMode: orphan.exploreMode,
+    streaming: false,
+    running: false,
+    reportLog: [],
+    lastReportAtOverride: orphan.lastReportAt,
+  };
+  // A parked record can gain a flushed final entry between sidecar capture
+  // and process exit. Reconcile it before any recovery consumer renders it.
+  refreshAgentTelemetry(record);
+  return record;
+}
+
+/**
+ * Role-keyed wiring re-armed on a revived orphan. The callbacks themselves are
+ * closures the revival's caller owns (`index.ts` composes `fork.ts`'s
+ * `armForkRoleWiring` and `execute-gateway.ts`'s approval relay), so this
+ * module stays free of both imports and directly testable.
+ */
+export interface OrphanRoleWiring {
+  /** A `ws-fork`/discussion fork: re-arm owner-question routing. */
+  fork?: (record: RpcAgentRecord) => void;
+  /** A `ws-execute` worker: the approval relay's `onApprovalPending`. */
+  executeWorker?: (record: RpcAgentRecord) => void;
+  /** A plain `ws-agent-spawn` worker: nothing role-specific to re-arm. */
+  worker?: (record: RpcAgentRecord) => void;
+}
+
+/**
+ * Puts each parsed orphan back on `registry` as a dormant record and re-arms
+ * its role wiring.
+ *
+ * Review relay #1 (I1): the re-arm is the load-bearing half and was missing —
+ * `spawnRole` was persisted and parsed but read only for the roll-call text,
+ * so a revived FORK came back as a plain record with no `onQuestionReport`.
+ * Its next `kind:"question"` would then be pushed straight
+ * at the lead as `ws-agent-question` instead of routing to the owner surface,
+ * a direct §1 violation.
+ *
+ * An id already present on the registry is left untouched (a live child always
+ * wins over a stale sidecar entry) and is not returned.
+ */
+export function reviveOrphans(registry: RpcAgentRegistry, orphans: PersistedOrphan[], wiring: OrphanRoleWiring = {}): RpcAgentRecord[] {
+  const revived: RpcAgentRecord[] = [];
+  for (const orphan of orphans) {
+    const existing = registry.get(orphan.agentId);
+    if (existing) {
+      // A live/current registration wins. A different, confirmed-stopped owned
+      // home from a stale sidecar is deliberately discarded through the same
+      // conservative deletion gate used by capacity eviction.
+      if (orphan.ownership && existing.ownership?.home !== orphan.ownership.home) removeOwnedAgentHome(orphan.ownership);
+      continue;
+    }
+    const record = rehydrateOrphanRecord(orphan);
+    startOwnedSessionObserver(record);
+    if (record.ownership) {
+      const durable = readOwnership(record.ownership.home);
+      const confirmedStopped = durable?.liveness.lifecycle === "stopped" && durable.liveness.running === false;
+      updateOwnership(record.ownership.home, { liveness: {
+        lifecycle: confirmedStopped ? "stopped" : "unknown", running: false, observedAt: Date.now(), recovery: "sidecar",
+        ...(record.threadBound === true ? { threadBound: true } : {}),
+        ...(isOwnerHeld(record) ? { ownerHeld: true } : {}),
+        ...(record.waitingOnChildren === true ? { waitingOnChildren: true } : {}),
+        ...(record.terminalDelivery && record.terminalDelivery.state !== "enqueued" ? { pendingDelivery: true } : {}),
+        ...(record.pendingApproval?.cmdId ? { pendingApprovalCommandId: record.pendingApproval.cmdId } : {}),
+      } });
+    }
+    registry.set(orphan.agentId, record);
+    const arm = orphan.spawnRole === "fork" ? wiring.fork : orphan.spawnRole === "execute-worker" ? wiring.executeWorker : orphan.spawnRole === "explore" ? undefined : wiring.worker;
+    try {
+      arm?.(record);
+    } catch {
+      // A wiring failure must not stop the remaining orphans from being
+      // announced — the record is still registered and revivable, just without
+      // its role hooks.
+    }
+    revived.push(record);
+  }
+  return revived;
+}
+
+/**
+ * Splits a revived set by what the lead has to DO about each entry. Every
+ * entry is re-registered either way (an idle reviewer must stay reachable
+ * through `ws-agent-send`); only the `"running"` ones carry lost work.
+ */
+export function partitionOrphansByState(orphans: PersistedOrphan[]): {
+  running: PersistedOrphan[];
+  idle: PersistedOrphan[];
+} {
+  const running: PersistedOrphan[] = [];
+  const idle: PersistedOrphan[] = [];
+  for (const orphan of orphans) {
+    ((orphan.state ?? "idle") === "running" ? running : idle).push(orphan);
+  }
+  return { running, idle };
+}
+
+/**
+ * The `ws-agent-orphaned` push body. One message for the whole set (not one
+ * per agent): a lead restarting after a crash wants a single roll-call it can
+ * act on, not N interleaved notices. One LINE per agent that was mid-turn —
+ * gives each interrupted agent an immediately executable recovery block.
+ * Previously idle agents are summarized, not named: their IDs remain in the
+ * structured payload for tools, while prose stays focused on interrupted work.
+ */
+function orphanDisplayId(orphan: PersistedOrphan): string {
+  return orphan.alias ?? orphan.agentId.slice(0, 8);
+}
+
+function orphanRecoveryTarget(orphan: PersistedOrphan): string {
+  return orphan.alias ?? orphan.agentId;
+}
+
+function reportSummary(orphan: PersistedOrphan): string {
+  return orphan.lastReportAt ? `last report ${orphan.lastReportAt}` : "no reports";
+}
+
+export function buildOrphanSummary(orphans: PersistedOrphan[]): string {
+  const { running, idle } = partitionOrphansByState(orphans);
+  const lines = [`${running.length} mid-turn agent${running.length === 1 ? "" : "s"} recovered as dormant`];
+  for (const orphan of running) {
+    const target = orphanRecoveryTarget(orphan);
+    lines.push(
+      `${orphanDisplayId(orphan)} · ${orphan.spawnRole ?? "worker"}`,
+      ...(orphan.title ? [orphan.title] : []),
+      `State at shutdown: running, ${reportSummary(orphan)}`,
+      `Resume: ws-agent-send ${target} "<repeat the interrupted instruction>"`,
+      `Inspect first: ws-agent-transcript ${target}`,
+    );
+  }
+  if (idle.length > 0) {
+    lines.push(
+      `${idle.length} previously idle agent${idle.length === 1 ? " was" : "s were"} also restored.`,
+      `Use ws-agent-list to inspect ${idle.length === 1 ? "it" : "them"}.`,
+    );
+  }
+  return lines.join("\n");
+}
+
+/**
+ * The whole `ws-agent-orphaned` payload for a revived set, or `undefined` when
+ * the set is worth no message at all.
+ *
+ * Edition (live-run fix): a `/reload` after three workers had all finished
+ * announced all three, and the lead had nothing to do with any of them. A
+ * roll-call is worth a message only when something was CUT OFF: an entry that
+ * was mid-turn resumes from its last flushed turn and needs its instruction
+ * re-issued, while an idle one is simply reachable again. So the push happens
+ * only when at least one entry was `"running"`; the idle ones ride along in
+ * the summary, and an all-idle set leaves no trace but `ws-agent-list`.
+ *
+ * Pure and exported (rather than inlined at the `session_start` call site) so
+ * this decision has direct coverage — the glue around it is live-gate only.
+ */
+export function buildOrphanPush(orphans: PersistedOrphan[]): Record<string, unknown> | undefined {
+  const { running, idle } = partitionOrphansByState(orphans);
+  if (running.length === 0) return undefined;
+  return {
+    count: running.length,
+    agents: buildOrphanSummary(orphans),
+    ...(idle.length > 0 ? { idle_agent_ids: idle.map((o) => o.agentId) } : {}),
+  };
+}
+
+/** Best-effort sidecar write; a failure here must never break session shutdown. */
+export function writeSidecar(leadSessionFile: string, orphans: PersistedOrphan[]): void {
+  writeSidecarAt(sidecarPath(leadSessionFile), orphans);
+}
+
+export function writeSidecarAt(path: string, orphans: PersistedOrphan[]): void {
+  try {
+    if (orphans.length === 0) return;
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    writeFileSync(path, serializeOrphans(orphans), { mode: 0o600 });
+  } catch {
+    // Nothing to fall back to — the orphans are simply not announced next run.
+  }
+}
+
+/**
+ * Reads and DELETES the sidecar in one step. The delete is unconditional (and
+ * happens even when parsing yields nothing) so a single crash produces a
+ * single revival: leaving the file behind would re-announce the same stale
+ * agents on every subsequent start.
+ */
+export function readAndClearSidecar(leadSessionFile: string): PersistedOrphan[] {
+  return readAndClearSidecarAt(sidecarPath(leadSessionFile));
+}
+
+export function readAndClearSidecarAt(path: string): PersistedOrphan[] {
+  let raw: string | undefined;
+  try {
+    if (!existsSync(path)) return [];
+    raw = readFileSync(path, "utf8");
+  } catch {
+    return [];
+  } finally {
+    try {
+      rmSync(path, { force: true });
+    } catch {
+      // A sidecar that cannot be removed would re-announce next start; that
+      // is noisy but harmless, and far better than failing session_start.
+    }
+  }
+  return raw === undefined ? [] : parseOrphans(raw);
+}

@@ -1,0 +1,308 @@
+/**
+ * TUI rendering for the six pushed child-report families and the versioned
+ * held-queue batch envelope (`spawner.ts`'s `PUSH_FAMILIES`/
+ * `PUSH_BATCH_CUSTOM_TYPE`).
+ *
+ * Why this exists at all: Pi's default custom-message component
+ * (`modes/interactive/components/custom-message.ts`) prints a bold
+ * `[customType]` label of its own and then the message content — and every
+ * pushed message's content already OPENS with `[family] agent <id>` (see
+ * `buildPushContent`), because that head line is what the lead's model reads.
+ * Rendered by the default, each push therefore showed its family twice. The
+ * content is deliberately left alone (the model sees only `content`, as a user
+ * message; changing it to satisfy the TUI would change what the lead reads),
+ * so the duplicate is removed on the RENDER side instead:
+ * `pi.registerMessageRenderer(family, ...)` draws the head once, the payload
+ * body underneath it (capped at ten logical lines, full recovery on
+ * expansion), and the status line — all three muted/gray, on a shared
+ * theme-aware `customMessageBg` background (260906 Phase 1). Every family
+ * renders an alias-first human head and vertical breathing room while its
+ * model-facing content retains the full provenance head.
+ *
+ * `@earendil-works/pi-tui` is reached through `./pi-tui.ts`'s
+ * `loadHostPiTui()` — the one resolution point that resolves the package
+ * through the host at runtime (see that file's Addendum doc comment for why:
+ * `pi-coding-agent`'s own `npm-shrinkwrap.json` makes a single deduped
+ * on-disk copy unattainable, so the live-instance identity guarantee comes
+ * from routing through the host, not from `npm ls` reporting one copy).
+ * `loadHostPiTui()` always resolves (falling back to this package's own
+ * static copy only if the host import ever fails), so `loadPushTuiModules`
+ * no longer has an "unavailable" branch; a renderer that cannot make sense
+ * of a message still returns `undefined`, which `CustomMessageComponent.rebuild()`
+ * treats as "use Pi's default".
+ *
+ * The theme is NOT imported: Pi hands the live `Theme` to the renderer as its
+ * third argument (it is not part of `pi-coding-agent`'s public export surface
+ * anyway — only the `Theme` class is), and that instance is the same singleton
+ * Pi's own component paints with.
+ *
+ * The batch renderer reads `details.items` and composes those same family
+ * cards (plus a default-style card for raw owner summaries) without exposing
+ * the XML envelope to the owner. `buildPushRenderLines` is the pure half,
+ * kept free of every host import so the line split has direct `node --test`
+ * coverage.
+ */
+
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { loadHostPiTui } from "./pi-tui.ts";
+import { PUSH_FAMILIES } from "./spawner.ts";
+import { PUSH_BATCH_CUSTOM_TYPE, type PushBatchItem } from "./push-protocol.ts";
+import { createBoundedText, updateText, type NativeBox, type NativeText } from "./tool-result-render.ts";
+
+/** The three visual bands of a pushed message, split out of its plain-text content. */
+export interface PushRenderLines {
+  /** `[family] agent <id>` — drawn once, in the custom-message label color. */
+  head: string;
+  /** The `key: value` payload lines between the head and the status line. */
+  body: string[];
+  /** The fan-in line, when the message carries one (absent when nothing is delegated). */
+  status: string | undefined;
+}
+
+/** The status line's own shape (`computeRunningStatusLine`), used to recognize it positionally. */
+const STATUS_LINE_PATTERN = /^\d+ delegated agents? still running$/;
+
+/** Pulls the plain text out of a custom message's `content` (string or text parts). */
+function extractText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((part): part is { type: string; text: string } => {
+      const p = part as { type?: unknown; text?: unknown };
+      return p?.type === "text" && typeof p.text === "string";
+    })
+    .map((part) => part.text)
+    .join("\n");
+}
+
+/**
+ * Splits one pushed message into head / payload / status.
+ *
+ * The status line is identified by `details.status` when present (that is the
+ * exact string `sendPush` put there) and otherwise by shape, so a message that
+ * legitimately carries no status line — nothing delegated — keeps its last
+ * payload line as a payload line. Returns `undefined` for anything this
+ * module cannot recognize (empty content, a foreign message shape), which the
+ * caller turns into Pi's default rendering rather than an empty box.
+ */
+export function buildPushRenderLines(message: { content?: unknown; details?: unknown }): PushRenderLines | undefined {
+  const lines = extractText(message.content).split("\n");
+  if (lines.length === 0 || lines[0].trim() === "") return undefined;
+
+  const head = lines[0];
+  const rest = lines.slice(1);
+  const declared = (message.details as { status?: unknown } | undefined)?.status;
+  const last = rest[rest.length - 1];
+  const isStatus =
+    last !== undefined && (typeof declared === "string" ? last === declared : STATUS_LINE_PATTERN.test(last));
+
+  return {
+    head,
+    body: isStatus ? rest.slice(0, -1) : rest,
+    status: isStatus ? last : undefined,
+  };
+}
+
+/**
+ * The `pi-tui` surface this module needs, as reached through `./pi-tui.ts`'s
+ * `loadHostPiTui()`. Widened (260906 Phase 1) with the two extra methods
+ * `ToolResultTuiModules` already declares — always present at runtime, since
+ * both come from the same host module — so a value of this shape can be
+ * passed straight into `createBoundedText`/`updateText` for the shared
+ * ten-logical-line body preview instead of re-implementing that caching.
+ */
+export interface PushTuiModules {
+  Box: new (paddingX?: number, paddingY?: number, bgFn?: (text: string) => string) => NativeBox;
+  Container: new () => { addChild(child: unknown): void; render(width: number): string[]; invalidate(): void };
+  Text: new (text?: string, paddingX?: number, paddingY?: number) => NativeText;
+  stripTerminalSequences(text: string): string;
+  truncateToWidth(text: string, width: number, ellipsis?: string): string;
+}
+
+/** Duck-typed slice of Pi's `Theme` (only the colors this renderer paints with). */
+export interface PushRenderTheme {
+  fg?(color: string, text: string): string;
+  bg?(color: string, text: string): string;
+  bold?(text: string): string;
+}
+
+const PUSH_FAMILY_SUFFIXES: Record<string, string> = {
+  "ws-agent-report": "report",
+  "ws-agent-settled": "settled",
+  "ws-agent-question": "question",
+  "ws-agent-approval": "approval",
+  "ws-agent-advisory": "advisory",
+  "ws-agent-orphaned": "orphaned",
+};
+
+const UUID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+const ALIAS_WITH_UUID_PATTERN = /^(.*?) \(([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\)$/i;
+
+/** Human-facing identity: retain an alias, otherwise use an eight-character UUID disambiguator. */
+function humanAgentIdentity(label: string | undefined, details: unknown): string | undefined {
+  let identity = label?.trim();
+  const agentId = (details as { agent_id?: unknown } | undefined)?.agent_id;
+  if (typeof agentId === "string" && agentId.length > 0) {
+    const provenanceSuffix = ` (${agentId})`;
+    if (identity?.endsWith(provenanceSuffix)) identity = identity.slice(0, -provenanceSuffix.length);
+    else if (identity === agentId) identity = agentId.slice(0, 8);
+  }
+  const aliasWithUuid = identity?.match(ALIAS_WITH_UUID_PATTERN);
+  if (aliasWithUuid?.[1]) return aliasWithUuid[1];
+  if (identity && UUID_PATTERN.test(identity)) return identity.slice(0, 8);
+  return identity || undefined;
+}
+
+/** Human-facing push head; content and details retain the full model-facing provenance. */
+function humanPushHead(head: string, details: unknown, registeredFamily: string | undefined): string {
+  const match = /^\[(ws-agent-[^\]]+)\](?: agent (.*))?$/.exec(head);
+  const family = registeredFamily && PUSH_FAMILY_SUFFIXES[registeredFamily] ? registeredFamily : match?.[1];
+  const suffix = family ? PUSH_FAMILY_SUFFIXES[family] : undefined;
+  if (!suffix) return head;
+  return `${humanAgentIdentity(match?.[2], details) ?? "Agents"} · ${suffix}`;
+}
+
+/**
+ * `./pi-tui.ts`'s `loadHostPiTui()`, narrowed to the slice this module needs.
+ * Always resolves — see `pi-tui.ts`'s Addendum doc comment.
+ */
+export async function loadPushTuiModules(): Promise<PushTuiModules> {
+  return (await loadHostPiTui()) as unknown as PushTuiModules;
+}
+
+/**
+ * Assembles one message's component: a one-column-padded box with one row
+ * above and below every card, painted with the shared theme-aware
+ * `customMessageBg` background, holding the alias-first head line
+ * (using Pi's `customMessageLabel` only for the registered report family),
+ * the payload body (capped at ten logical lines with full recovery on
+ * expansion — the same shared bounded-preview seam `tool-result-render.ts`
+ * uses), and the status line — all three in a subdued/gray foreground so the
+ * whole pushed message reads as muted, on top of the shared background.
+ * Returns `undefined` when the message is unrecognizable, which is Pi's "use
+ * the default" signal.
+ *
+ * `expanded` mirrors `MessageRenderOptions.expanded`: `CustomMessageComponent`
+ * calls this renderer fresh on every expand toggle and every theme change
+ * (no cross-call `context`/`lastComponent` reuse is available or needed
+ * here, unlike the tool renderCall/renderResult hooks) — the `BoundedText`
+ * body's own internal width-keyed cache is what pays for itself across
+ * ordinary same-content redraws within one call's returned component.
+ */
+export function buildPushComponent(
+  tui: PushTuiModules,
+  message: { content?: unknown; details?: unknown },
+  theme: PushRenderTheme | undefined,
+  expanded = false,
+  family?: string,
+): unknown {
+  const parts = buildPushRenderLines(message);
+  if (!parts) return undefined;
+  const paint = (color: string, text: string): string => {
+    try {
+      return theme?.fg?.(color, text) ?? text;
+    } catch {
+      return text;
+    }
+  };
+  const paintBg = (color: string, text: string): string => {
+    try {
+      return theme?.bg?.(color, text) ?? text;
+    } catch {
+      return text;
+    }
+  };
+  const isAgentReport = family === "ws-agent-report";
+  const box = new tui.Box(1, 1, (text) => paintBg("customMessageBg", text));
+  const displayHead = humanPushHead(parts.head, message.details, family);
+  box.addChild(new tui.Text(paint(isAgentReport ? "customMessageLabel" : "muted", displayHead), 0, 0));
+  if (parts.body.length > 0) {
+    const body = createBoundedText(tui);
+    updateText(tui, body, parts.body.join("\n"), (text) => paint("muted", text), {
+      expanded,
+      trimOuterWhitespace: false,
+      lineBudget: "logical",
+      startIndent: 0,
+      continuationIndent: 0,
+      markerStyle: (marker) => paint("muted", marker),
+    }, theme);
+    box.addChild(body);
+  }
+  if ((message as { state?: unknown }).state === "superseded") {
+    box.addChild(new tui.Text(paint("dim", "state: superseded"), 0, 0));
+  }
+  if (parts.status) box.addChild(new tui.Text(paint("dim", parts.status), 0, 0));
+  return box;
+}
+
+/** Render a batch as the same independent cards its structured items had before batching. */
+export function buildPushBatchComponent(
+  tui: PushTuiModules,
+  message: { details?: unknown },
+  theme: PushRenderTheme | undefined,
+  expanded = false,
+): unknown {
+  const rawItems = (message.details as { items?: unknown } | undefined)?.items;
+  if (!Array.isArray(rawItems) || rawItems.length === 0) return undefined;
+  const container = new tui.Container();
+  let rendered = 0;
+  for (const candidate of rawItems) {
+    const item = candidate as PushBatchItem;
+    if (!item || typeof item.customType !== "string") continue;
+    let component: unknown;
+    if ((PUSH_FAMILIES as readonly string[]).includes(item.customType)) {
+      component = buildPushComponent(tui, item, theme, expanded, item.customType);
+    } else {
+      const paint = (color: string, text: string): string => {
+        try { return theme?.fg?.(color, text) ?? text; } catch { return text; }
+      };
+      const paintBg = (text: string): string => {
+        try { return theme?.bg?.("customMessageBg", text) ?? text; } catch { return text; }
+      };
+      const box = new tui.Box(1, 1, paintBg);
+      box.addChild(new tui.Text(paint("customMessageLabel", `[${item.customType}]`), 0, 0));
+      const text = extractText(item.content);
+      if (text) {
+        const body = createBoundedText(tui);
+        updateText(tui, body, text, (value) => paint("muted", value), {
+          expanded,
+          trimOuterWhitespace: false,
+          lineBudget: "logical",
+          startIndent: 0,
+          continuationIndent: 0,
+          markerStyle: (marker) => paint("muted", marker),
+        }, theme);
+        box.addChild(body);
+      }
+      component = box;
+    }
+    if (component) {
+      container.addChild(component);
+      rendered += 1;
+    }
+  }
+  return rendered > 0 ? container : undefined;
+}
+
+/**
+ * Registers the compact renderer for every push family and the batch envelope. Call only from a TUI
+ * process (`ctx.mode === "tui"`) — there is no component to draw anywhere
+ * else. The `Promise<boolean>` return is no longer an "unavailable" signal
+ * (`loadPushTuiModules` always resolves — see `pi-tui.ts`'s Addendum doc
+ * comment); it stays `Promise<boolean>` only so `index.ts`'s
+ * `pushRenderersRegistered` retry-on-teardown guard (a genuine, still-live
+ * failure mode: a rejection from e.g. `assertActive()` during teardown) keeps
+ * its existing `.then((registered) => ...)` wiring unchanged.
+ */
+export async function registerPushMessageRenderers(pi: ExtensionAPI, tuiModules?: PushTuiModules): Promise<boolean> {
+  const tui = tuiModules ?? (await loadPushTuiModules());
+  for (const family of PUSH_FAMILIES) {
+    pi.registerMessageRenderer(family, (message, options, theme) =>
+      buildPushComponent(tui, message as { content?: unknown; details?: unknown }, theme as unknown as PushRenderTheme, (options as { expanded?: boolean } | undefined)?.expanded, family) as never,
+    );
+  }
+  pi.registerMessageRenderer(PUSH_BATCH_CUSTOM_TYPE, (message, options, theme) =>
+    buildPushBatchComponent(tui, message as { details?: unknown }, theme as unknown as PushRenderTheme, (options as { expanded?: boolean } | undefined)?.expanded) as never,
+  );
+  return true;
+}

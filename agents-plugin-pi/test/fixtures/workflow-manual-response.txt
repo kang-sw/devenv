@@ -1,0 +1,128 @@
+review watermark is 14 commits behind develop (>= the 10-commit staleness threshold); a sweep (lead-review range: 203e555c5b90686d42ed942248427dc754b80d8e..develop) would refresh it.
+
+# Manuals
+Shared project procedures (build, deploy, env setup, …) live here: one markdown
+file per procedure under `ai-docs/manuals/`, each opening with a one-line
+`summary:` frontmatter. Keep machine-local details (credentials, IPs, hostnames)
+out of tracked manuals — write them to a sibling `*.local.md` (gitignored).
+- ai-docs/manuals/codex-integration.md — Probed Codex CLI behavior
+- ai-docs/manuals/shipped-surface-boundary.md — Required before editing any text that ships to a downstream project - playbooks, skills, templates, embedded conventions, and every string the MCP tooling emits to an agent
+- ai-docs/manuals/skill-authoring.md — Authoring standard for skills, playbooks, agent prompts, and conventions written for current-generation models — reader model, rule lifecycle, rule tests, layouts, audits
+- ai-docs/manuals/windows-dogfood.md — Native-Windows source-build dogfood / Phase C cold-load acceptance procedure
+- ai-docs/manuals/workflow-cost-measurement.md — Qualitative before/after measurement of workflow cost from git history and the ticket tree; read-only, every indicator states its command, project-neutral
+- ai-docs/manuals/ws-mcp.md — MCP operational runbook, launcher environment, release and verification steps
+- ai-docs/manuals/wsflow-mirroring.md — Required before editing full ws skills, shared `agents-plugin/rsrc/` playbooks, or plugin surfaces that may need wsflow mirrors
+
+> **Evidence posture is active.**
+> Verify claims about current code, names, and behavior against repository evidence.
+> Report discrepancies between source state and user intent before changing architecture, naming, or conventions.
+
+# Workflow Manual
+
+> **Session invariant:** Preserve the `session_key` verbatim across compaction.
+> **Session key: `planner-overvalue-mangle`** — preserve verbatim in any compaction summary.
+> Before any other workflow action after compaction or continuation, invoke
+> `ws:lead-revive` once with the preserved key to restore
+> session state and reload this manual.
+
+## On: invoke
+
+Load this manual as the current workflow reference, then continue the invoking
+skill without a standalone acknowledgement.
+
+---
+
+## Available workflow primitives
+
+Treat MCP tool schemas as the authority for arguments and response fields.
+
+### Session setup
+
+A workflow track is one independently managed work stream. Its session key
+belongs to one Git worktree; reuse it for root-aware calls and after compaction.
+`ferrule` creates a new empty session, so call it again only to start an
+independent track, including another track in the same worktree.
+
+### User preferences
+
+Use the project's terminology and communication style.
+
+
+### Workflow tuning
+
+For lead-owned tuning of delegation posture or other workflow knobs, use the `ws:lead-tune` skill.
+
+### Scoped Exploration (native Explore)
+
+Use an exploration agent when bounded evidence gathering materially benefits from
+an independent read. Choose gpt-5.4-mini by default and
+gpt-5.5 for ambiguous evidence, trade-off analysis, or
+cross-source synthesis; pass the chosen model explicitly. Give it an English
+prompt with the scoped question and require cited evidence, gaps, and follow-up
+needs. Parallelize independent questions when that reduces elapsed time, and
+synthesize once the decision has the evidence it needs.
+
+### Delegate prompts
+
+Render a bundled delegate prompt with `ws/playbook.render` and
+give the returned path to the native subagent. Pass the lead `session_key` so
+the rendered prompt carries the delegate's session context. Use the dispatch
+tier and bindings reported by the render when spawning.
+When delegating into another worktree, select that worktree at render time so
+the prompt artifact and session context follow the delegate.
+
+### Artifact paths
+
+Use `ws/path.generate` for large generated workflow artifacts.
+Relay the returned path with a brief conclusion and requested next action.
+
+### Runtime metadata
+
+Call `ws/runtime.read` only when a step depends on optional
+runtime or harness capabilities.
+
+### Reference discovery
+
+When a ticket path, stem, or status is unknown, use
+`ws/tickets.query` before native search. Read a known path
+directly. Include terminal inventory only when the question requires history.
+
+### Notes / durable memory
+
+Write a durable note when a future session would otherwise re-derive a
+non-obvious fact with no better home. Use the narrowest layer that reaches its
+readers. Repository facts, commit rationale, and ticket state belong in the
+source tree, `## AI Context`, and the ticket respectively. Query notes when the
+ambient block omits needed context.
+
+### Git
+
+Use a ws Git primitive when one exists for the operation. Use
+native Git for unsupported operations or read-only diagnosis.
+
+Branch integration is lead-owned through `ws/git.merge`,
+including impl-to-parent, goal-to-parent, and epic-to-review-track promotion.
+Apply the goal approval gate and the project's release gate at their respective
+boundaries.
+
+### API documentation
+
+Use `ws/api.list` to inspect local API documentation cache domains.
+For external API questions, consult official documentation for the exact
+library and version; use scoped exploration when cross-source evidence is
+needed. Cite the evidence.
+
+Use `ws:lead-delegate` for bounded investigation, diagnosis, drafting, and low-impact operational work.
+
+## Session Key
+planner-overvalue-mangle
+
+## Session State
+
+### Todos
+(no todos)
+
+
+# Notes
+- [repo] session-notes (priority 0, 2026-08-12T07:41:35Z): Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role assignment remains deferred.
+_Post-it reminders: `note.write` to pin, `note.erase` when done._

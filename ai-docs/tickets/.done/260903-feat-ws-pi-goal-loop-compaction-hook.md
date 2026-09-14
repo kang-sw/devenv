@@ -1,0 +1,295 @@
+---
+title: "Pi goal-loop + turn-end compaction judgment hook"
+parent: 260605-epic-ws-playbook-factory-pivot
+related:
+  260802-research-ws-pi-native-framework: research anchor; scopes goal-loop as a post-MVP expansion surface on Pi's re-entry primitives
+  260731-research-ws-opencode-drop-in-package: origin design of the judgment-turn / compression-safety-heuristic protocol (opencode prior art)
+  260902-feat-ws-pi-native-mvp: MVP that explicitly deferred goal-loop + compaction hooks to follow-up tickets
+  260723-feat-goal-step-rename-and-goal-loop-completion: Claude-native goal-loop ancestor (durable ticket-state loop) this reproduces on Pi
+related-mental-model:
+  - plugin-runtime
+spec:
+  - pi-adapter-runtime
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: ce6262334bd651be
+sage-review-completeness-reviewed: ce6262334bd651be
+completed: 2026-09-04
+---
+
+# Pi goal-loop + turn-end compaction judgment hook
+
+## Background
+
+The ws-pi-native framework vision (`260802-research-ws-pi-native-framework`)
+includes a **goal-loop**: after an agent run settles, inject a judgment turn that
+decides whether the goal is achieved, whether to keep working, and — the piece
+the user specifically wants — **whether now is a safe time to compact**. The MVP
+(`260902-feat-ws-pi-native-mvp`) shipped bridge + spawner + model-catalog +
+`/ws-discuss` PoC and **explicitly deferred goal-loop + compaction hooks** to a
+follow-up ticket under the epic. This is that ticket.
+
+The origin design is the opencode judgment-turn protocol
+(`260731-research-ws-opencode-drop-in-package`): on turn-end, inject a judgment
+turn carrying the current ws goal plus a **compression-safety heuristic** (phase
+boundaries / lead-proceed merge gates are normally safe to compact; a turn that
+stopped for a non-phase reason is unsafe to compact) and ask the model to emit a
+token (`achieved` / `next-step` / `keep-working` / `pause`). `next-step` accepts
+compaction then re-enters the next goal turn; `keep-working` resumes without
+compacting. The research anchor states the marker protocol is **redesigned from
+scratch on Pi** (Pi's `agent_settled` is a stronger primitive than opencode's
+`session.idle`); the opencode four-token marker is prior art, not the target
+shape.
+
+Golden rule holds: ws-mcp Go source untouched; adapter -> ws-mcp only.
+
+## Feasibility (evidence, installed Pi build)
+
+From `@earendil-works/pi-coding-agent` type defs
+(`dist/core/extensions/types.d.ts`) — every piece the designed loop needs is a
+real API:
+
+- **`agent_settled`** event (`types.d.ts:559-562`): "Fired after an agent run has
+  fully settled and no automatic retry, compaction, or queued continuation will
+  run." The truest judgment-turn trigger. (`turn_end` fires per model turn;
+  `agent_end` once per run — `agent_settled` is the post-drain boundary.)
+- **`getContextUsage()`** (`types.d.ts:243`) -> `{ tokens, contextWindow,
+  percent }`: read how near the window we are. (`percent`/`tokens` are `null`
+  right after a compaction until the next LLM response.)
+- **`ctx.compact({ customInstructions, onComplete, onError })`**
+  (`types.d.ts:245`): programmatically trigger compaction (see
+  `examples/extensions/trigger-compact.ts`).
+- **`session_before_compact`** (`reason: "manual" | "threshold" | "overflow"`,
+  `willRetry`; handler result can `cancel` or supply a custom compaction result):
+  detect/customize/veto an imminent compaction. `reason === "threshold"` is Pi's
+  own "near compaction" signal. Companion events `session_compact` /
+  `session_compact_failed`.
+- Auto-compaction toggle is RPC-only (`set_auto_compaction`), not on the `pi.*`
+  extension API — a caveat for any design that wants to disable Pi's built-in
+  auto-compaction while the ws loop owns compaction timing.
+
+## Resolved design (2026-09-03 discussion)
+
+**Signal shape — explicit skill calls, zero prose parsing.** State transitions
+happen ONLY through model-invoked skills; the absence of any call means the loop
+continues. No response-text marker parsing — a deliberate departure from the
+opencode four-token design and a sharper contract than the Claude prose-judged
+loop (which relied on the harness Stop-hook plus the agent simply stopping). The
+three levers:
+
+- `/goal-achieved <summary>` — terminal; goal met, end the run.
+- `/goal-blocked <reason>` — terminal; end the run with a blocker report.
+  (Whether the blocker is also written to durable ticket state — the Claude-native
+  `260723` mechanism that survives compaction — is deferred to promotion.)
+- `/goal-compact-and-continue <carry-forward-prose>` — non-terminal; the prose is
+  passed as `ctx.compact({ customInstructions })`, then the loop re-enters the
+  next goal turn.
+- (no call) — default; `agent_settled` re-injects a continue turn and the agent
+  keeps working.
+
+**Arming (Claude-parity, minimal).** Entering goal mode injects an announcement
+turn ("Goal settled: <goal>"), matching Claude's own `/goal` surface — no branch
+or state substrate beyond an active-goal marker. The `agent_settled` handler is
+armed ONLY while a goal is active; a settle outside goal mode is an ordinary stop
+(this is what stops every normal Pi session from looping forever). Each loop
+re-fire re-injects a reminder carrying the goal and the levers, e.g. "Goal yet
+running … <goal> … call /goal-achieved | /goal-blocked |
+/goal-compact-and-continue for a state transition."
+
+**Runaway backstop.** Well-behaved agents self-terminate via achieved/blocked;
+as a backstop, N consecutive re-fires with no tool call force-stop the goal.
+Claude's own goal loop force-stops around ~10 consecutive no-tool-call re-fires —
+mirror that threshold, config-tunable.
+
+**Compaction ownership — model-driven.** The extension surfaces the current
+`getContextUsage().percent` in the continue turn as information; the model decides
+whether to call `/goal-compact-and-continue`. The extension does NOT autonomously
+compact. Pi's own overflow auto-compaction stays as the last-resort backstop.
+Config knobs: (a) the compaction advisory point (the `percent` at which the
+reminder nudges the model to compact), and (b) a context-window / max-token
+override. These knobs plus the Phase 1 runaway threshold live as **adapter-owned
+config** — built-in extension-constant defaults overridden by an adapter-owned
+data file read fresh per use (the `model-catalog.json` sibling precedent), never
+in ws-mcp config (golden rule). `session_before_compact` remains the companion
+surface for injecting ws state into a compaction and detecting Pi's own
+`reason: "threshold"` signal.
+
+## Remaining open questions (post-2026-09-03)
+
+Resolved above: judgment signal shape (explicit skills, no prose parsing),
+arming (active-goal announcement + armed-only-in-goal-mode), loop guard (N
+consecutive no-tool-call re-fires force-stop), and compaction ownership
+(model-driven with `percent` surfaced + config knobs + Pi overflow backstop).
+The items below are deferred and **none blocks the phases** — Phase 1 verification
+is single-session, and Phase 2 already fixes the heuristic as advisory-only:
+
+- **Durable goal state across compaction.** The Claude-native ancestor
+  (`260723`) leaned on durable on-disk ticket state to survive compaction; how
+  much of that carries over to the Pi loop, and whether `/goal-blocked` writes a
+  durable blocker record.
+- **Compression-safety heuristic placement.** In the model-driven design the
+  "phase boundary / merge gate = safe to compact" heuristic becomes advisory
+  prose the model weighs (not an extension gate) — confirm this is sufficient, or
+  whether `session_before_compact` should still veto an unsafe compaction.
+- **Interaction with subagent RPC children** (`260903-feat-ws-pi-subagent-rpc-ux`):
+  settled 2026-09-04 — the goal-loop runs on the **lead session only**. RPC
+  children are one-shot prompt runs driven by the lead (`ws-agent-send` /
+  `ws-agent-wait`), so no settle re-injection or compaction lever is armed in a
+  child; the extension's `agent_settled` handler is a no-op when the process
+  is a spawned child.
+
+## Spec Impact
+
+- Target spec: `ai-docs/spec/pi-adapter-runtime.md`. Add new `260904`-dated
+  anchors for the goal-loop surface — a levers/arming anchor (the three `/goal-*`
+  skills, the "Goal settled" announcement, the `agent_settled`
+  armed-only-in-goal-mode handler + per-re-fire reminder, and the
+  N-consecutive-no-tool-call runaway backstop) and a compaction anchor
+  (model-driven `/goal-compact-and-continue`, `getContextUsage().percent`
+  surfacing, the config knobs, and the `session_before_compact` companion with Pi
+  overflow as backstop).
+- Update the spec's closing Constraints note, which currently lists the goal-loop
+  and compaction hooks as "deferred to follow-up tickets … not part of this
+  contract yet," to reflect that this ticket lands them.
+- Expected caller-visible change: while a goal is active, an agent settle
+  re-injects a continue turn and three `/goal-*` skills drive state transitions;
+  the model owns compaction timing via `/goal-compact-and-continue`.
+- Contract-first: yes. Write the `🚧` planned spec entries at proceed via
+  `lead-write-spec`, removing the markers as each phase lands.
+
+## Phases
+
+### Phase 1: Goal-mode arming + agent_settled loop + terminal levers
+
+Register the goal-entry command `/goal <goal>` (inject the "Goal settled: <goal>"
+announcement and set the active-goal marker), the `agent_settled` handler armed only while a
+goal is active (a settle outside goal mode is an ordinary stop), the per-re-fire
+reminder injection carrying the goal + levers, and the two terminal skills
+`/goal-achieved <summary>` and `/goal-blocked <reason>` that end the run. Add the
+runaway backstop: N consecutive re-fires with no tool call force-stop the goal
+(default 10 consecutive, config-tunable). No compaction in this phase.
+
+Verification: a live `pi … --mode json` transcript showing (a) goal entry arms
+the loop, (b) a settle re-injects the reminder, (c) `/goal-achieved` and
+`/goal-blocked` each terminate the loop, (d) a non-goal session settle does NOT
+re-fire, (e) the runaway backstop force-stops after the configured count.
+Loop-guard / threshold logic unit-tested where seam-extractable.
+
+### Result (91a19eaf) - 2026-09-04
+
+Landed the lead-session goal loop arming + settled re-fire + terminal levers in a
+new adapter-local module `agents-plugin-pi/src/goal-loop.ts`, registered at the
+extension-factory top level from `index.ts`.
+
+- `/goal <goal>` (`pi.registerCommand`) injects a `Goal settled: <goal>`
+  announcement and arms an in-memory state machine; the `agent_settled` handler
+  is armed **only** while a goal is active, so a non-goal settle is an ordinary
+  stop.
+- An armed settle re-injects a reminder carrying the goal + both lever tool names
+  + the force-stop caveat.
+- Terminal levers are model-invoked `pi.registerTool` tools (zero prose parsing,
+  matching the `ws-report-to-lead` precedent): `goal-achieved(summary)` and
+  `goal-blocked(reason)` each disarm the loop. Design-ambiguity resolution: the
+  ticket's "skill" wording was implemented as `registerTool`, since neither Pi
+  commands nor skills apply to the model's own generated output.
+- Runaway backstop: N **consecutive** no-tool-call re-fires force-stop and reset;
+  a re-fire with an intervening tool call resets the streak. Threshold defaults to
+  10, tunable via adapter-owned `agents-plugin-pi/goal-loop-config.json` (sibling
+  to `model-catalog.json`), read fresh per settle; missing/malformed/non-positive
+  falls back to the default.
+- Lead-session-only: both spawn call sites in `spawner.ts` now stamp a
+  `WS_PI_AGENT_CHILD=1` env marker (via extracted `buildChildProcessEnv`), and the
+  settle handler no-ops when the marker is present (via extracted pure predicate
+  `isChildProcess(env)`), settling the cross-ticket fact with
+  `260903-feat-ws-pi-subagent-rpc-ux`.
+
+Spec: `{#260904-pi-goal-loop-arming-settled-levers}` (commit 9e230835); Constraints
+updated to mark arming/levers landed with compaction still deferred to Phase 2.
+
+Verification: `cd agents-plugin-pi && npm test` → 161/161 pass (129 baseline + 24
+Phase-1 + 8 review-fix tests). Review: fit clean, correctness clean (1 Minor:
+fractional `runaway_threshold` accepted, record-only), test 1 Important **[fixed]**
+in relay #1 (extracted `isChildProcess` + `buildChildProcessEnv`, added positive/
+negative/marker-placement unit coverage) + 1 Minor [fixed] + 1 Minor
+[won't fix: explicitly optional]. GOLDEN RULE held (no `agents-plugin-tool/`
+change).
+
+Deferred: the live `pi --mode json` five-point transcript gate (goal arms /
+settle re-injects / both levers stop / non-goal settle doesn't re-fire / backstop
+force-stops) is **outstanding** — this sandbox has no provider credentials, so it
+is honestly unverified, not faked. Also unexercised live: that a spawned worker's
+runtime env actually carries `WS_PI_AGENT_CHILD=1` (verified by reading compiled
+`rpc-client.js` env-merge behavior + unit tests, not observed live).
+
+### Phase 2: Model-driven compaction lever + config knobs
+
+Add `/goal-compact-and-continue <carry-forward-prose>` (prose →
+`ctx.compact({ customInstructions })` → re-enter the next goal turn), surface in
+the continue turn both `getContextUsage().percent` AND the compression-safety
+heuristic advisory (phase-boundary / merge-gate = safe to compact; a non-phase
+stop = unsafe) as information, wire the config knobs (runaway threshold,
+compaction advisory point, context-window override — stored as extension-constant
+defaults plus an adapter-owned data-file override, per the `model-catalog.json`
+precedent), and add the `session_before_compact` companion (inject ws state;
+observe Pi's `reason: "threshold"`), leaving Pi's overflow auto-compaction as the
+last-resort backstop.
+
+Verification: a live transcript showing the model call
+`/goal-compact-and-continue` compacts with the carry-forward prose and re-enters
+the loop; the percent surfaces in the continue turn; a config-knob override takes
+effect on a fresh read. Depends on Phase 1.
+
+### Result (151809e6) - 2026-09-04
+
+Extended `agents-plugin-pi/src/goal-loop.ts` with the model-driven compaction
+surface; no new module.
+
+- `goal-compact-and-continue(carry_forward)` — a **non-terminal**
+  `pi.registerTool` lever that calls `ctx.compact({ customInstructions:
+  carry_forward })` once and returns **without** `disarmGoal()`. Because a manual
+  `ctx.compact` aborts the invoking turn, the goal reaches a fresh settle and the
+  existing Phase-1 `agent_settled` reminder re-enters the next goal turn — no
+  separate continuation path.
+- **Advisory surfacing (not a gate).** The reminder now carries
+  `getContextUsage().percent` (via pure `computeContextPercent`, which derives
+  from `tokens`/context-window/override when `percent` is null right after a
+  compaction) plus a static compression-safety heuristic (phase/merge boundary =
+  safe; non-phase stop = unsafe). Past the advisory point the percent line reads
+  as a nudge. The extension never autonomously compacts.
+- **`session_before_compact` observe-only companion** (`buildCompactionObservation`
+  pure builder) — never `cancel`s or overrides. Verified against the installed
+  build: the manual path forwards `customInstructions` verbatim while
+  `_runAutoCompaction` hardcodes them empty and offers no partial-inject hook, so
+  observe-only for `reason:"threshold"` is the faithful scoping (Pi's overflow
+  auto-compaction remains the last-resort backstop).
+- **Config knobs** — `compaction_advisory_percent` (`(0,100]`) and
+  `context_window_override` (finite-positive) join the Phase-1 runaway threshold in
+  `goal-loop-config.json`, with `resolveCompactionAdvisoryPercent` /
+  `resolveContextWindowOverride` mirroring Phase 1's never-throw, read-fresh-per-
+  settle pattern.
+- **Phase-1 reducer churn (planned):** `decideOnSettle` now returns
+  `{ action:"reinject", goal }` and `buildGoalReminder` construction moved into the
+  IO glue where `ctx.getContextUsage()` + config are in scope. Armed-only gating,
+  terminal disarm, and the runaway backstop are unchanged and still asserted.
+
+Spec: `{#260904-pi-goal-loop-model-driven-compaction}` (commit c1229949);
+Constraints updated to mark compaction landed — only the always-visible TODO
+remains deferred under the epic.
+
+Verification: `cd agents-plugin-pi && npm test` → 189/189 pass (161 prior + 28
+new Phase-2). Review: fit clean, correctness clean (1 Minor: theoretical
+`contextWindow===0` → `Infinity`, doc-comment overclaim, record-only), test clean
+(3 Minor: one untested `computeContextPercent` branch combo, no fractional-percent
+rounding test, un-extracted lever result-text template consistent with Phase 1 —
+all record-only). No relay required (no Critical/Important). GOLDEN RULE held.
+
+Deferred: the live `pi --mode json` compaction transcript gate (lever compacts
+with carry-forward + re-enters; percent surfaces; config override applies on fresh
+read) is **outstanding** — no provider credentials in this sandbox; honestly
+unverified, not faked. Code-level claims verified by direct dist source inspection
+(`types.d.ts`, `agent-session.js` compact vs auto-compaction paths).
+
+## Non-goals
+
+- Changing ws-mcp; the loop is adapter-local.
+- Reproducing the opencode four-token marker verbatim (explicitly discarded).

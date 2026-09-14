@@ -1,0 +1,7 @@
+{
+  "key": "gotcha.pi-tui-dual-package",
+  "value": "GOTCHA (agents-plugin-pi): pi-coding-agent's npm-shrinkwrap nests its own pi-tui, so npm can't dedupe a top-level pi-tui dep -\u003e TWO physical copies (instanceof vs the host's tui fails). RULE: resolve pi-tui THROUGH THE HOST at runtime (guarded dynamic import / loadHostPiTui in src/pi-tui.ts), static import only for types/tests. Detail: spec {#260909-pi-conversation-view-component} + plan 2026-09/09-0122-260908-conversation-view-phase1.md addendum.",
+  "priority": 8,
+  "written_at": "2026-09-08T17:42:36Z",
+  "visible": true
+}

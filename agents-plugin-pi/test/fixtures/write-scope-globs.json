@@ -1,0 +1,18 @@
+{
+  "cases": [
+    { "pattern": "*.md", "candidate": "root.md", "matches": true },
+    { "pattern": "*.md", "candidate": "docs/root.md", "matches": false },
+    { "pattern": "*.*", "candidate": "notes.txt", "matches": true },
+    { "pattern": "**/*.md", "candidate": "root.md", "matches": true },
+    { "pattern": "**/*.md", "candidate": "docs/root.md", "matches": true },
+    { "pattern": "docs/?.md", "candidate": "docs/a.md", "matches": true },
+    { "pattern": "docs/?.md", "candidate": "docs/ab.md", "matches": false },
+    { "pattern": "src/[a-c].ts", "candidate": "src/b.ts", "matches": true },
+    { "pattern": "src/[a-c].ts", "candidate": "src/d.ts", "matches": false },
+    { "pattern": "literal/\\*.txt", "candidate": "literal/*.txt", "matches": true },
+    { "pattern": ".reports/**/*.md", "candidate": ".reports/run/result.md", "matches": true },
+    { "pattern": "**/*.md", "candidate": ".reports/result.md", "matches": false },
+    { "pattern": "reports/**/result.md", "candidate": "reports/result.md", "matches": true },
+    { "pattern": "reports/**/result.md", "candidate": "reports/2026/09/result.md", "matches": true }
+  ]
+}
