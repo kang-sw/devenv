@@ -50,3 +50,7 @@ Retire this completed proof-of-concept surface rather than maintaining it as a p
 Trace every current `/ws-discuss` registration, implementation, test, normative contract, and active supporting artifact. Delete the retired surface and clean up any remaining active text or fixtures so they describe the surviving canonical behavior without stale command-specific language.
 
 Verify the Pi extension test suite and relevant package checks. Search the live source, tests, current contract documentation, and active ticket tree for remaining `/ws-discuss` references; any retained match must be demonstrably historical rather than an active contract or dependency.
+
+## Blocked (2026-09-14)
+
+Implementation is committed and the full `agents-plugin-pi` suite passes (1670 passed, 0 failed, 2 skipped), but both required independent review rounds are blocked because Pi rejects the rendered `code-reviewer` playbook for missing trusted shipped provenance. Follow-up `260914-bug-pi-code-reviewer-render-provenance` captures the infrastructure defect. Repair that path, then resume the existing worker on `impl/track/pi-agent/grew-skied-tux`; do not bypass independent review.
