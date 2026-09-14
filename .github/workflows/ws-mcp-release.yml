@@ -10,6 +10,7 @@ on:
       - ".agents/plugins/marketplace.json"
       - ".claude-plugin/marketplace.json"
       - "agents-plugin/**"
+      - "agents-plugin-pi/**"
       - "agents-plugin-wsflow/**"
       - "agents-plugin-tool/**"
   workflow_dispatch:
@@ -56,6 +57,9 @@ jobs:
           jq . ../.claude-plugin/marketplace.json >/dev/null
           test "$(jq -r '.plugins[].name' ../.agents/plugins/marketplace.json | sort | tr '\n' ' ')" = "ws wsflow "
           test "$(jq -r '.plugins[].name' ../.claude-plugin/marketplace.json | sort | tr '\n' ' ')" = "ws wsflow "
+          diff -q ../agents-plugin/runtime.json ../agents-plugin-pi/runtime.json
+          diff -q ../agents-plugin/bin/ws-mcp-launcher.py ../agents-plugin-pi/bin/ws-mcp-launcher.py
+          diff -rq ../agents-plugin/rsrc ../agents-plugin-pi/rsrc
 
       - name: Build release assets
         run: |
