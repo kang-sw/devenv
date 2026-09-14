@@ -31,15 +31,27 @@ export const WS_PI_SPAWN_ROLE_ENV = "WS_PI_SPAWN_ROLE";
 
 /** Internal exploration intent. It is meaningful only for an explore-role process. */
 export const WS_PI_EXPLORE_MODE_ENV = "WS_PI_EXPLORE_MODE";
-export const EXPLORE_MODE_TIERS = {
+
+/** Canonical modes offered to fresh Explore callers, in public schema order. */
+export const PUBLIC_EXPLORE_MODE_TIERS = {
   lookup: "small",
+  search: "small",
+  investigation: "medium",
+  "deep-research": "large",
+  "high-assurance-research": "xlarge",
+} as const;
+export type PublicExploreMode = keyof typeof PUBLIC_EXPLORE_MODE_TIERS;
+
+/** Canonical and formerly-public modes accepted at persisted-record boundaries. */
+export const EXPLORE_MODE_TIERS = {
+  ...PUBLIC_EXPLORE_MODE_TIERS,
   "code-search": "small",
   "history-search": "small",
   "docs-search": "medium",
   "web-search": "medium",
   diagnosis: "medium",
   comparison: "medium",
-  synthesis: "large",
+  synthesis: "medium",
 } as const;
 export type ExploreMode = keyof typeof EXPLORE_MODE_TIERS;
 export type ExploreTier = (typeof EXPLORE_MODE_TIERS)[ExploreMode];
@@ -52,7 +64,7 @@ export function normalizeStoredExploreMode(value: unknown): ExploreMode | undefi
   return undefined;
 }
 
-/** Reads the internal mode only for a correctly marked explore process. */
+/** Reads a canonical or persisted-compatible mode only for a correctly marked explore process. */
 export function readExploreMode(env: NodeJS.ProcessEnv): ExploreMode | undefined {
   if (readSpawnRole(env) !== "explore") return undefined;
   const value = env[WS_PI_EXPLORE_MODE_ENV];

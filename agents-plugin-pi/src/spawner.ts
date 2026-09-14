@@ -99,7 +99,7 @@ import {
   type TierFailure,
   type TierRejection,
 } from "./model-catalog.ts";
-import { EXPLORE_MODE_TIERS, WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readSpawnRole, type ExploreMode, type SpawnRole } from "./process-role.ts";
+import { PUBLIC_EXPLORE_MODE_TIERS, WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readSpawnRole, type ExploreMode, type PublicExploreMode, type SpawnRole } from "./process-role.ts";
 import { captureForkContext, compareForkRegistrations, removeForkTransport, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
 import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, readOwnership, removeOwnedAgentHome, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
 import { ownerNotifyRef } from "./owner-notify.ts";
@@ -3406,7 +3406,7 @@ export function getAgentTranscriptPath(registry: RpcAgentRegistry, agentId: stri
 
 export interface ExploreParams {
   query: string;
-  mode?: ExploreMode;
+  mode?: PublicExploreMode;
 }
 
 export interface AgentToolsHandle {
@@ -3716,16 +3716,16 @@ export function registerAgentTools(
     name: "explore",
     label: "explore",
     description:
-      "Spawn a persistent exploration researcher. It returns exactly {agent_id, alias}; use ws-agent-send to continue the same child. Select mode by evidence intent, not importance: code-search traces bounded code/tests while diagnosis connects evidence into a cause; comparison evaluates alternatives while synthesis reconciles conflicting or architecture-level evidence.",
+      "Spawn a persistent exploration researcher. It returns exactly {agent_id, alias}; use ws-agent-send to continue the same child. Select mode by intended investigation burden: lookup and search are small, investigation is medium, deep-research is large, and high-assurance-research is xlarge.",
     parameters: {
       type: "object",
       properties: {
         query: { type: "string", description: "Exploration question." },
         mode: {
           type: "string",
-          enum: Object.keys(EXPLORE_MODE_TIERS),
+          enum: Object.keys(PUBLIC_EXPLORE_MODE_TIERS),
           description:
-            "Intent mode; defaults to code-search. lookup locates one known fact; code-search traces bounded repository code/tests; history-search traces Git, tickets, or decisions; docs-search inspects local or installed documentation; web-search collects current external evidence; diagnosis connects code/tests/logs/runtime observations into a cause; comparison evaluates alternatives against evidence; synthesis reconciles conflicting evidence or produces a cross-source architecture conclusion.",
+            "Investigation burden; defaults to search. lookup retrieves one fact whose likely location or identity is known. search performs bounded evidence discovery or tracing without cross-source judgment. investigation gathers and connects bounded evidence. deep-research pursues an ambiguous, difficult question through multiple sources and iterative hypothesis testing. high-assurance-research applies raised evidentiary standards through cross-source corroboration, adversarial challenge, repeated hypothesis testing, and explicit coverage and gap accounting; it does not promise completeness, conformance to a formal assurance or certification standard, or freedom from unresolved gaps.",
         },
       },
       required: ["query"],
@@ -3737,9 +3737,12 @@ export function registerAgentTools(
         throw new Error("ws-pi-agent: invalid explore arguments");
       }
       const p = params as ExploreParams;
-      const mode = p.mode ?? "code-search";
-      const tier = EXPLORE_MODE_TIERS[mode];
-      if (!tier) throw new Error(`ws-pi-agent: unknown explore mode: ${String(p.mode)}`);
+      const requestedMode = p.mode ?? "search";
+      if (!Object.prototype.hasOwnProperty.call(PUBLIC_EXPLORE_MODE_TIERS, requestedMode)) {
+        throw new Error(`ws-pi-agent: unknown explore mode: ${String(p.mode)}`);
+      }
+      const mode = requestedMode as PublicExploreMode;
+      const tier = PUBLIC_EXPLORE_MODE_TIERS[mode];
       let resolvedInfo: ResolvedModelInfo | undefined;
       const result = await spawnAgent(
         rpcRegistry,

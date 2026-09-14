@@ -46,13 +46,34 @@ describe("agent storage", () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test("normalizes legacy Explore modes only when reading persisted ownership", () => {
+  test("accepts former public Explore modes in persisted ownership without rewriting their labels", () => {
     const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
     try {
-      const owned = allocateAgentHome(createAgentStorageContext("lead", root), "research", "explore", "code-search");
-      const metadata = readOwnership(owned.home)!;
-      writeFileSync(ownershipPath(owned.home), `${JSON.stringify({ ...metadata, exploreMode: "simple" })}\n`);
-      assert.equal(readOwnership(owned.home)?.exploreMode, "code-search");
+      const context = createAgentStorageContext("lead", root);
+      const modes = ["code-search", "history-search", "docs-search", "web-search", "diagnosis", "comparison", "synthesis"] as const;
+      for (const [index, mode] of modes.entries()) {
+        const owned = allocateAgentHome(context, `research-${index}`, "explore", "search");
+        const metadata = readOwnership(owned.home)!;
+        writeFileSync(ownershipPath(owned.home), `${JSON.stringify({ ...metadata, exploreMode: mode })}\n`);
+        assert.equal(readOwnership(owned.home)?.exploreMode, mode);
+        assert.equal(touchOwnership(owned.home), true);
+        assert.equal(JSON.parse(readFileSync(ownershipPath(owned.home), "utf8")).exploreMode, mode);
+      }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("normalizes persistence-only Explore aliases at ownership read and never serializes them again", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+    try {
+      const context = createAgentStorageContext("lead", root);
+      for (const [index, [alias, expected]] of [["simple", "code-search"], ["deep", "synthesis"]].entries()) {
+        const owned = allocateAgentHome(context, `research-alias-${index}`, "explore", "search");
+        const metadata = readOwnership(owned.home)!;
+        writeFileSync(ownershipPath(owned.home), `${JSON.stringify({ ...metadata, exploreMode: alias })}\n`);
+        assert.equal(readOwnership(owned.home)?.exploreMode, expected);
+        assert.equal(touchOwnership(owned.home), true);
+        assert.equal(JSON.parse(readFileSync(ownershipPath(owned.home), "utf8")).exploreMode, expected);
+      }
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 

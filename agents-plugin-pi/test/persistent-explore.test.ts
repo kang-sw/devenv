@@ -8,9 +8,9 @@ import { RpcClient, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CHILD_MANAGEMENT_TOOLS, DELEGATION_ENV, terminalTools } from "../src/delegation-policy.ts";
 import { createAgentStorageContext } from "../src/agent-storage.ts";
 import { captureOrphans, parseOrphans, reviveOrphans, serializeOrphans } from "../src/agent-sidecar.ts";
-import { WS_PI_EXPLORE_MODE_ENV, WS_PI_SPAWN_ROLE_ENV, type ExploreMode } from "../src/process-role.ts";
+import { EXPLORE_MODE_TIERS, WS_PI_EXPLORE_MODE_ENV, WS_PI_SPAWN_ROLE_ENV, type ExploreMode, type PublicExploreMode } from "../src/process-role.ts";
 import { WEB_HOME_ENV, WEB_NONCE_ENV } from "../src/web-readiness.ts";
-import { registerAgentTools, resolveTools, sendToAgent, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { registerAgentTools, resolveTools, sendToAgent, spawnAdmission, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import type { McpToolCallResult } from "../src/mcp-stdio-client.ts";
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -18,16 +18,15 @@ const EXTENSION_ENTRY = join(PACKAGE_ROOT, "src", "index.ts");
 const EXPLORE_GUIDE = join(PACKAGE_ROOT, "explore-guide.md");
 const MODE_CONTRACT = [
   ["lookup", "small"],
-  ["code-search", "small"],
-  ["history-search", "small"],
-  ["docs-search", "medium"],
-  ["web-search", "medium"],
-  ["diagnosis", "medium"],
-  ["comparison", "medium"],
-  ["synthesis", "large"],
-] as const satisfies ReadonlyArray<readonly [ExploreMode, "small" | "medium" | "large"]>;
+  ["search", "small"],
+  ["investigation", "medium"],
+  ["deep-research", "large"],
+  ["high-assurance-research", "xlarge"],
+] as const satisfies ReadonlyArray<readonly [PublicExploreMode, "small" | "medium" | "large" | "xlarge"]>;
 const MODES = MODE_CONTRACT.map(([mode]) => mode);
-const TIER_BY_MODE = Object.fromEntries(MODE_CONTRACT) as Record<ExploreMode, "small" | "medium" | "large">;
+const TIER_BY_MODE = Object.fromEntries(MODE_CONTRACT) as Record<PublicExploreMode, "small" | "medium" | "large" | "xlarge">;
+const FORMER_PUBLIC_MODES = ["code-search", "history-search", "docs-search", "web-search", "diagnosis", "comparison", "synthesis"] as const;
+const FORMER_MODE_TIERS = ["small", "small", "medium", "medium", "medium", "medium", "medium"] as const;
 const storageRoots = new Set<string>();
 
 afterEach(() => {
@@ -128,7 +127,7 @@ function activeDynamicTools(tools: Map<string, CapturedTool>, allowlist: readonl
   return [...tools.keys()].filter(name => allowed.has(name));
 }
 
-function legacyResearch(agentId: string, exploreMode: "simple" | "deep", toolGroup: "read-only" | "read-only-explore") {
+function legacyResearch(agentId: string, exploreMode: ExploreMode | "simple" | "deep", toolGroup: "read-only" | "read-only-explore" = "read-only-explore") {
   return {
     agentId, sessionPath: `/tmp/${agentId}.jsonl`, systemPromptPath: "/tmp/explore.md",
     wsToolNames: [], toolGroup, spawnRole: "explore", exploreMode,
@@ -143,7 +142,7 @@ describe("persistent Explore intent modes", () => {
       [undefined, undefined, undefined],
       ["fork", undefined, parentPolicy(0)],
       ["worker", undefined, parentPolicy(1)],
-      ["explore", "diagnosis", parentPolicy(1)],
+      ["explore", "investigation", parentPolicy(1)],
     ] as const) {
       await withRole(role, mode, policy, async () => {
         const h = harness();
@@ -152,13 +151,14 @@ describe("persistent Explore intent modes", () => {
         assert.deepEqual(Object.keys(tool.parameters.properties ?? {}), ["query", "mode"]);
         assert.deepEqual(tool.parameters.properties?.mode?.enum, MODES);
         assert.equal(tool.parameters.additionalProperties, false);
-        assert.match(tool.description, /code-search.*diagnosis.*comparison.*synthesis/);
+        assert.match(tool.description, /lookup.*search.*investigation.*deep-research.*high-assurance-research/);
+        for (const legacy of FORMER_PUBLIC_MODES) assert.doesNotMatch(tool.description, new RegExp(`\\b${legacy}\\b`));
         await h.handle.stopAll();
       });
     }
     assert.equal(new Set(schemas).size, 1, "all eligible dispatcher roles expose the same Explore contract");
 
-    await withRole("explore", "synthesis", parentPolicy(2), async () => {
+    await withRole("explore", "high-assurance-research", parentPolicy(2), async () => {
       const h = harness();
       assert.ok(h.tools.has("explore"), "registration stays role-independent");
       const terminal = terminalTools(resolveTools("read-only-explore").split(","), 2, 2);
@@ -173,7 +173,8 @@ describe("persistent Explore intent modes", () => {
       await withRole(undefined, undefined, undefined, async () => {
         const h = harness();
         const tool = h.tools.get("explore")!;
-        const cases: Array<[ExploreMode | undefined, ExploreMode]> = [[undefined, "code-search"], ...MODES.map(mode => [mode, mode] as [ExploreMode, ExploreMode])];
+        const profiles: string[] = [];
+        const cases: Array<[PublicExploreMode | undefined, PublicExploreMode]> = [[undefined, "search"], ...MODES.map(mode => [mode, mode] as [PublicExploreMode, PublicExploreMode])];
         for (const [requested, expectedMode] of cases) {
           const raw = await tool.execute("call", { query: `inspect ${expectedMode}`, ...(requested ? { mode: requested } : {}) }, undefined, undefined, h.ctx);
           const result = JSON.parse(raw.content[0]!.text);
@@ -188,19 +189,34 @@ describe("persistent Explore intent modes", () => {
           assert(record.delegation?.tools.includes("ws_web_fetch"));
           assert(!record.delegation?.tools.includes("bash"));
           assert(!record.delegation?.tools.includes("write"));
+          profiles.push(JSON.stringify({
+            toolGroup: record.toolGroup,
+            tools: record.delegation?.tools,
+            network: record.delegation?.network,
+            depth: record.delegation?.depth,
+            maxDepth: record.delegation?.maxDepth,
+            authority: record.delegation?.authority,
+          }));
         }
+        assert.equal(new Set(profiles).size, 1, "mode never changes tools, network authority, depth, or delegation authority");
         assert.deepEqual(h.lookups, cases.map(([, mode]) => TIER_BY_MODE[mode]));
         await h.handle.stopAll();
       });
     } finally { rpc.restore(); }
   });
 
-  test("removed and unknown arguments reject without tier lookup or allocation", async () => {
+  test("former public modes retain their persisted-record tier classification", () => {
+    assert.deepEqual(FORMER_PUBLIC_MODES.map(mode => EXPLORE_MODE_TIERS[mode]), FORMER_MODE_TIERS);
+  });
+
+  test("former, migration-only, and unknown modes reject fresh calls without tier lookup or allocation", async () => {
     await withRole(undefined, undefined, undefined, async () => {
       const h = harness();
       const tool = h.tools.get("explore")!;
       await assert.rejects(() => tool.execute("old", { query: "x", deep_research: true }, undefined, undefined, h.ctx), /invalid explore arguments/);
-      await assert.rejects(() => tool.execute("unknown", { query: "x", mode: "important" }, undefined, undefined, h.ctx), /unknown explore mode/);
+      for (const mode of [...FORMER_PUBLIC_MODES, "simple", "deep", "important", "__proto__"]) {
+        await assert.rejects(() => tool.execute("unknown", { query: "x", mode }, undefined, undefined, h.ctx), /unknown explore mode/);
+      }
       assert.deepEqual(h.lookups, []);
       assert.equal(h.handle.rpcRegistry.size, 0);
       assert.equal(existsSync(join(h.root, "ws-agents", "owner")), false);
@@ -211,7 +227,7 @@ describe("persistent Explore intent modes", () => {
   test("mapped-tier authentication refusal happens before alias, registry, or storage allocation", async () => {
     await withRole(undefined, undefined, undefined, async () => {
       const h = harness({ auth: false });
-      await assert.rejects(() => h.tools.get("explore")!.execute("call", { query: "diagnose", mode: "diagnosis" }, undefined, undefined, h.ctx), /explore refused: tier medium/);
+      await assert.rejects(() => h.tools.get("explore")!.execute("call", { query: "diagnose", mode: "investigation" }, undefined, undefined, h.ctx), /explore refused: tier medium/);
       assert.deepEqual(h.lookups, ["medium"]);
       assert.equal(h.handle.rpcRegistry.size, 0);
       assert.equal(existsSync(join(h.root, "ws-agents", "owner")), false);
@@ -224,19 +240,19 @@ describe("persistent Explore intent modes", () => {
     try {
       await withRole(undefined, undefined, undefined, async () => {
         const h = harness();
-        const result = JSON.parse((await h.tools.get("explore")!.execute("call", { query: "compare", mode: "comparison" }, undefined, undefined, h.ctx)).content[0]!.text);
+        const result = JSON.parse((await h.tools.get("explore")!.execute("call", { query: "corroborate", mode: "high-assurance-research" }, undefined, undefined, h.ctx)).content[0]!.text);
         const original = h.handle.rpcRegistry.get(result.agent_id)!;
         const sessionPath = original.sessionPath;
         const systemPromptPath = original.systemPromptPath;
         const delegation = original.delegation;
         const firstClient = rpc.prompts[0]?.client;
         assert.ok(firstClient, "the initial query reaches the persistent RPC client");
-        assert.match(rpc.prompts[0]!.message, /Intent mode: comparison[\s\S]*Question:\ncompare/);
+        assert.match(rpc.prompts[0]!.message, /Intent mode: high-assurance-research[\s\S]*Question:\ncorroborate/);
         await sendToAgent(h.handle.rpcRegistry, { cwd: PACKAGE_ROOT, extensionPath: EXTENSION_ENTRY }, original.agentId, "follow up");
         assert.deepEqual(rpc.prompts.at(-1), { client: firstClient, message: "follow up" });
         assert.equal(original.sessionPath, sessionPath);
         assert.equal(original.systemPromptPath, systemPromptPath);
-        assert.equal(original.exploreMode, "comparison");
+        assert.equal(original.exploreMode, "high-assurance-research");
         assert.equal(h.lookups.length, 1, "same-process continuation never re-resolves the tier");
 
         original.client = undefined;
@@ -253,8 +269,8 @@ describe("persistent Explore intent modes", () => {
         assert.equal(resumedArgs[sessionIndex + 1], sessionPath);
         assert.equal(revived.sessionPath, sessionPath);
         assert.equal(revived.systemPromptPath, systemPromptPath);
-        assert.equal(revived.exploreMode, "comparison");
-        assert.equal(revived.modelBase, "pi/medium");
+        assert.equal(revived.exploreMode, "high-assurance-research");
+        assert.equal(revived.modelBase, "pi/xlarge");
         assert.equal(revived.modelEffort, "high");
         assert.deepEqual(revived.delegation, delegation);
         assert.equal(h.lookups.length, 1, "restart continuation uses the persisted selection");
@@ -264,7 +280,39 @@ describe("persistent Explore intent modes", () => {
     } finally { rpc.restore(); }
   });
 
-  test("legacy sidecar modes normalize once at the read boundary and are never serialized again", () => {
+  test("former public sidecar modes resume through the persistent client path and retain their stored labels", async () => {
+    const rpc = installRpcHarness();
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-legacy-resume-test-"));
+    storageRoots.add(root);
+    try {
+      await withRole(undefined, undefined, undefined, async () => {
+        const raw = JSON.stringify({ version: 1, writtenAt: new Date(0).toISOString(), orphans:
+          FORMER_PUBLIC_MODES.map(mode => ({
+            ...legacyResearch(mode, mode),
+            sessionPath: join(root, `${mode}.jsonl`),
+            delegation: spawnAdmission({ parentPolicy: parentPolicy(), wsToolNames: [], toolGroup: "read-only-explore", spawnRole: "explore", exploreMode: mode } as never),
+            subtreeChannel: { path: join(root, `${mode}-subtree.json`), nonce: `nonce-${mode}` },
+          })) });
+        const parsed = parseOrphans(raw);
+        assert.deepEqual(parsed.map(({ exploreMode }) => exploreMode), FORMER_PUBLIC_MODES);
+        const restored: RpcAgentRegistry = new Map();
+        reviveOrphans(restored, parsed);
+        assert.deepEqual([...restored.values()].map(({ exploreMode }) => exploreMode), FORMER_PUBLIC_MODES);
+        assert.deepEqual(parseOrphans(serializeOrphans(parsed)).map(({ exploreMode }) => exploreMode), FORMER_PUBLIC_MODES);
+
+        for (const mode of FORMER_PUBLIC_MODES) {
+          await sendToAgent(restored, { cwd: PACKAGE_ROOT, extensionPath: EXTENSION_ENTRY }, mode, `resume ${mode}`);
+          const client = restored.get(mode)!.client as unknown as { options?: { env?: Record<string, string> } };
+          assert.equal(client.options?.env?.[WS_PI_EXPLORE_MODE_ENV], mode);
+          assert.equal(rpc.prompts.at(-1)?.message, `resume ${mode}`);
+          assert.equal(restored.get(mode)!.exploreMode, mode);
+        }
+        await Promise.all([...restored.values()].map(record => record.client?.stop()));
+      });
+    } finally { rpc.restore(); }
+  });
+
+  test("legacy sidecar aliases normalize once at the read boundary and are never serialized again", () => {
     const raw = JSON.stringify({ version: 1, writtenAt: new Date(0).toISOString(), orphans: [
       legacyResearch("simple", "simple", "read-only"),
       legacyResearch("deep", "deep", "read-only-explore"),
