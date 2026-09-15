@@ -262,6 +262,37 @@ mirror, copy to the pi mirror, update or delete the pinned tests, and run
 
 Verification: all three suites green; `grep -rn "session.note" agents-plugin/rsrc agents-plugin-wsflow/rsrc agents-plugin-pi/rsrc` returns nothing; `wc -l agents-plugin/rsrc/lead-run/lead-run.md` reported in the Result; the three mirrors byte-identical.
 
+### Result (0a1d5b5b) - 2026-09-15
+
+- `lead-run.md`: 307 -> 170 lines (141 non-blank). The session.note record,
+  its session.children key lookup, the release-target acknowledgement prose,
+  the dispatch_blocked and worktree.acquire schema restatements, the
+  duplicated continue/merge/poll rationale, and the separate stop-(e) retry
+  table are gone; the retry ladder is a third column of the Spawn tier
+  table; the parallel route is a three-bullet delta naming
+  `ticket-batch-selector`.
+- `ticket-batch-selector.md` created (42 lines, medium tier) with the
+  parallel-safety predicate, the active-impl-ticket stop, and the
+  batch/excluded/omitted output shape.
+- Deviation: the ~100-line target was not reached. What remains is the
+  closed stop list, the four pinned End-the-turn lines, the identity
+  paragraph pinned by `fixtures/lead_delegate_contract.json`, and the
+  parallel delta. Phase 2 is the next cut.
+- Verification: `go test ./...` in agents-plugin-tool (1611 pass, 0 fail, 7
+  skip per the delegate; lead re-ran ./internal/mcp and ./internal/wsrsrc
+  ok); `python3 -m unittest discover agents-plugin-wsflow/tests` 12 OK;
+  `python3 -m unittest discover agents-plugin/tests` 70 OK;
+  `grep -rn "session.note"` over the three rsrc trees empty; the three
+  copies of both playbooks byte-identical (`TestPiMirrorUpToDate` and
+  `TestWsflowRsrcMirrorUpToDate` green).
+- Pins: 51 remain in `TestPlaybookPrintLeadRunWorkerTierPolicy`, all on
+  kept structural fragments and whitespace-normalized; negative pins on
+  `session.note` and `session.children` added in the python dispatch test.
+  `test_run_dispatches_through_playbook_read`, red before this change, is
+  green.
+- Execution split as directed: prose by the lead, mechanical steps by a
+  lead-delegate executor at large tier.
+
 ### Phase 2: Fresh-reader audit
 
 Run the fresh-reader audit from `skill-authoring.md` on the rewritten
