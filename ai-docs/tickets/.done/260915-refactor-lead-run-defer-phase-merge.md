@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 856955c97db245e3
 sage-review-completeness-reviewed: 856955c97db245e3
+completed: 2026-09-15
 ---
 
 # Move lead-run phase-completion default from merge to continue
@@ -234,3 +235,59 @@ mid-ticket merge never collides with a leftover branch:
 Verification: Go table tests under `agents-plugin-tool/internal/mcp/` for the
 create path detecting a leftover impl branch, and for a merge cleanup failure
 being surfaced rather than leaving a silent orphan.
+
+### Result (bc00285) - 2026-09-15
+
+Guaranteed clutter-free same-ticket re-entry after a mid-ticket merge, in
+`agents-plugin-tool/internal/mcp/`. Two complementary changes:
+
+- **Create-path leftover detection** (`implement_resolver.go`,
+  `deriveImplementBranchPlan`): the create path (current branch non-`impl/`,
+  non-`implement/`) now inspects the exact target impl branch, not only the
+  ancestor D/F ref conflict it checked before. A new observation field
+  `TargetAheadOfMergeRoot` measures the leftover branch's own commits ahead of
+  its merge root (the existing `AheadOfMergeRoot` measures the current branch,
+  which on the create path is the merge root itself and is always 0 ahead, so it
+  could not tell a remnant from real work). A fully-landed remnant (0 ahead — the
+  failed-`branch -d` cleanup of a just-succeeded merge) resolves to a new
+  `recreate` action that deletes then recreates the branch; a leftover ahead of
+  merge root (un-landed unique work) resolves to `stop` and never discards
+  commits (not overridable by `allow_rename`). The `recreate` action is threaded
+  through both instruction renderers (`implementBranchNextInstruction`,
+  `implementRouteInstruction`) and the `merge_target`-ignored warning guard, and
+  emits `git branch -d` (safe delete), never a raw `git switch -c` collision.
+- **git.merge cleanup-failure surfacing** (`git_merge.go`): a failed post-merge
+  `branch -d` now appends a loud, visible non-fatal `cleanup_failed` diagnostic
+  (new `advisory` classification, rendered in `text()`) instead of a quiet
+  advisory string. Status stays `merged` and the call returns no error — the
+  merge succeeded, and the create-path recovery above is the actual fix. The new
+  classification is appended only after all pre-merge `blocked()` gates, so it
+  never misreports a landed merge as blocked.
+
+Absorbed the dropped idea `260915-bug-merge-cleanup-fail-orphans-impl-branch`.
+
+Verification: `go test ./... -count=1` in `agents-plugin-tool` (14 packages ok).
+New tests: `TestResolveImplementCreatePathLeftoverBranch` and
+`TestObserveImplementBranchMeasuresLeftoverTargetAheadState` (create-path
+recreate/stop at unit level and against real git),
+`TestImplMergeCleanupFailureSurfacesDiagnostic` (non-fatal status, visible
+diagnostic, retained orphan, empty legacy advisory),
+`TestDeriveImplementTodoInstructionsRecreate` (recreate route instruction), plus
+two rows in `TestResolveImplementBranchPlanRules`.
+
+Review: partitioned correctness/fit/test — round 1 all clean, no
+Critical/Major/Important; three convergent/actionable Minors fixed in commit
+`bc00285` (broaden the merge_target-ignored warning to `recreate`; cover the
+`recreate` route instruction; assert the legacy `Advisory` field stays empty).
+Round-2 verifier: clean, all three fixes confirmed, nothing new.
+
+Decisions taken (recorded in commit `## AI Context`, none escalated): introduced
+a new `recreate` branch-plan action rather than overloading `create` (the create
+next-instruction has no delete step and a raw `switch -c` would collide); added a
+new `TargetAheadOfMergeRoot` observation field rather than reusing
+`AheadOfMergeRoot` (different branch measured); classified the cleanup diagnostic
+`advisory` (non-fatal) distinct from `must_resolve`/`overrideable`. Kept two
+note-only review items unaddressed: `observeImplementBranch`'s fail-closed error
+path stays untested (non-injectable `ExecRunner`, same limit as the existing
+current-branch guard) and the cleanup test's orphan-remains assertion stays as
+intent documentation.
