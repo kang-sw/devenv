@@ -434,6 +434,9 @@ func TestImplMergeCleanupFailureSurfacesDiagnostic(t *testing.T) {
 	if r.Status != "merged" || r.BranchDeleted {
 		t.Fatalf("want merged with BranchDeleted=false, got status=%q deleted=%t", r.Status, r.BranchDeleted)
 	}
+	if r.Advisory != "" {
+		t.Fatalf("cleanup failure must surface as a diagnostic, not a quiet advisory string: %q", r.Advisory)
+	}
 	d := requireMergeDiagnostic(t, r, "cleanup_failed", "advisory")
 	if !strings.Contains(d.Reason, branch) || !strings.Contains(strings.ToLower(d.Reason), "orphan") {
 		t.Fatalf("diagnostic must name the orphan branch: %+v", d)

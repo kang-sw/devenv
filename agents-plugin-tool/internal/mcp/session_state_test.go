@@ -344,6 +344,29 @@ func TestDeriveImplementTodoInstructionsMergeConfirmSkip(t *testing.T) {
 	}
 }
 
+// The recreate branch action installs a worker-facing route instruction that
+// deletes the fully-landed leftover before creating, and never promises a plain
+// create-over that a raw `git switch -c` would fail on.
+func TestDeriveImplementTodoInstructionsRecreate(t *testing.T) {
+	verdict := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation:  "delegated",
+		BranchPlan:  implementBranchPlan{Action: "recreate", CurrentBranch: "develop", TargetBranch: "impl/develop/leftover", MergeTarget: "develop", MergeConfirm: "ask"},
+		ReviewAlloc: "single",
+		NeedReview:  true,
+	})
+	route := requireInstruction(t, todoByKey(t, verdict, "route"))
+	for _, want := range []string{"Delete the leftover", "git branch -d", "impl/develop/leftover", "do not call route.resolve_implement again"} {
+		if !strings.Contains(route, want) {
+			t.Fatalf("recreate route instruction missing %q: %q", want, route)
+		}
+	}
+	// recreate is a non-stop action: the worker proceeds to edits.
+	edit := requireInstruction(t, todoByKey(t, verdict, "edit"))
+	if strings.Contains(edit, "Do not start source edits") {
+		t.Fatalf("recreate must proceed to edits, not block them: %q", edit)
+	}
+}
+
 func TestDeriveImplementTodoInstructionsBranchStop(t *testing.T) {
 	got := deriveImplementTodosFromVerdict(implementTodoVerdict{
 		Delegation:  "delegated",
