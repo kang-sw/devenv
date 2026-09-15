@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 86fedc1e6333a3df
 sage-review-design-reviewed: 86fedc1e6333a3df
+completed: 2026-09-15
 ---
 
 # Keep Pi mailbox arrivals on the informational push-batch path while the lead is busy
@@ -49,3 +50,16 @@ The source ticket requires every drained mailbox envelope to use the shared push
 ### Phase 1: Close the busy/no-held mailbox delivery gap
 
 Route the uncovered mailbox state through the same informational batch representation used by held and idle delivery. Add a discriminating regression test for busy/no-held admission and retain the existing timeout, drain, backoff, FIFO, rendering, and wake tests. Run the focused mailbox/push suites and the full Pi adapter test suite.
+
+### Result (738fc26b) - 2026-09-15
+
+Busy/no-held mailbox arrivals now request an explicit always-batch admission mode at the mailbox waiter boundary, so they are immediately steered as a one-item `ws-push-batch` with `state: informational`. The default raw admission mode remains unchanged for unrelated thread summaries and other raw families. Regression coverage proves the busy empty-queue envelope and renders that delivered envelope through the compact mailbox batch card.
+
+Round 1 found two Important issues: a generic admission-layer dependency on the `ws-mailbox` wire literal and an insufficient `PushDeliverAs` narrowing. Commit `f3691042` moved the policy to an explicit boundary option and narrowed batch submission to its accepted delivery modes; round-2 correctness and fit verification found both resolved, with no remaining findings.
+
+Verification: the 20-test mailbox waiter suite passed; the seven focused mailbox/raw-FIFO/render cases passed; the full Pi adapter suite ran 1,573 tests with 1,570 passing, two skipped, and the sole failure remaining the pre-existing unrelated `bridge.test.ts` 54-versus-56 tool-count assertion already documented on the parent branch.
+
+
+## Resolution (2026-09-15)
+
+Phase 1 closed the busy/no-held mailbox batch admission gap; independent correctness, fit, and test review completed with round-1 findings resolved in round 2.
