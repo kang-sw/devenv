@@ -24,6 +24,8 @@ type TicketFindOptions struct {
 	Query              string
 	TicketStem         string
 	MentionsTicketStem string
+	Offset             int
+	Limit              int
 	// Resolve marks this call as a resolution query rather than a discovery
 	// one: under an active sparse-checkout scope the board is completed from
 	// the index, so a stem hidden by this worktree still resolves. It is a
@@ -146,7 +148,24 @@ func TicketsFind(root string, opts TicketFindOptions) ([]TicketInfo, error) {
 		}
 		out = append(out, ticket)
 	}
-	return out, nil
+	return paginateTickets(out, opts.Offset, opts.Limit), nil
+}
+
+// paginateTickets slices the fully filtered projection. A non-positive limit
+// preserves the unbounded behavior internal callers use; the MCP discovery
+// boundary always supplies its validated default or explicit positive limit.
+func paginateTickets(tickets []TicketInfo, offset, limit int) []TicketInfo {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(tickets) {
+		return []TicketInfo{}
+	}
+	end := len(tickets)
+	if limit > 0 && limit < end-offset {
+		end = offset + limit
+	}
+	return tickets[offset:end]
 }
 
 func TicketsStatus(root string, opts TicketStatusOptions) (*TicketInfo, error) {
