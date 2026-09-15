@@ -316,6 +316,11 @@ export function formatContextTokens(tokens: number | undefined): string {
   return tokens === undefined ? "ctx ?" : `ctx ${(tokens / 1_000).toFixed(1)}k`;
 }
 
+/** Unlabeled counterpart for the live row; `/audit` retains the labeled formatter. */
+function formatLiveContextTokens(tokens: number | undefined): string {
+  return tokens === undefined ? "?" : `${(tokens / 1_000).toFixed(1)}k`;
+}
+
 function formatEstimatedUsd(usd: number | undefined): string {
   if (usd === undefined) return "—";
   return String(Number(usd.toFixed(3)));
@@ -377,13 +382,12 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
   const base = `${primary} · ${row.role} · ${stateLabel} · ${formatCompactDuration(row.elapsedMs)}`;
   const model = row.model ?? "—";
   const effort = row.effort ?? "—";
-  // 260914: replaces the dropped `ctx Xk` label in this same telemetry slot —
-  // `AgentRow.contextTokens` and `formatContextTokens` stay exported/populated
-  // unchanged for the `/audit` picker (`audit.ts`), this row just stops
-  // rendering them.
+  // Keep the compact occupancy value in its established telemetry slot while
+  // `/audit` retains its labeled `formatContextTokens` presentation.
+  const contextTokens = formatLiveContextTokens(row.contextTokens);
   const activity = `active ${formatCompactDuration(row.lastActivityMs)}`;
   const estimate = `$${formatEstimatedUsd(row.estimatedUsd)}`;
-  const telemetry = ` · ${model} (${effort}) · ${activity} · ${estimate}`;
+  const telemetry = ` · ${model} (${effort}) · ${contextTokens} · ${activity} · ${estimate}`;
   const protectedHint = row.inspectionHint;
   const hint = protectedHint ? ` — ${protectedHint}` : "";
   // A supplied inspection affordance remains the only protected tail. The
@@ -410,6 +414,8 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
       theme.fg("dim", " · ") +
       theme.fg("accent", model) +
       theme.fg("dim", ` (${effort})`) +
+      theme.fg("dim", " · ") +
+      theme.fg("syntaxNumber", contextTokens) +
       theme.fg("dim", " · ") +
       theme.fg("syntaxNumber", activity) +
       theme.fg("dim", " · ") +
