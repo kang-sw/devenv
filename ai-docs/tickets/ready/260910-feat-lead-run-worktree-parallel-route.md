@@ -184,6 +184,54 @@ from a linked worktree, and `.git/info/exclude` self-registration. The
 prerequisite `root_override`/rsrc split already carries coverage (260731); this
 phase adds only the worktree-lifecycle fixtures.
 
+### Result (6bc205d2) - 2026-09-15
+
+Landed the `worktree.acquire`/`worktree.release` MCP tool pair. New
+`agents-plugin-tool/internal/mcp/worktree_tools.go` owns the whole lifecycle
+(pure, `wsgit.Runner`-injected): pool-root resolution against the primary
+worktree root (`worktree list` first entry), reuse eligibility (under owned pool
+prefix + detached HEAD + clean), create-or-reuse, branch create/checkout on base
+via `git switch` (never resetting an existing branch), hygiene `reset --hard` +
+`clean -ffdx`, submodule sync when `.gitmodules` is present, and
+`.git/info/exclude` self-registration for in-repo pools. `release` cleans and
+`checkout --detach`s back into the pool, never deleting. The dispatch handlers in
+`server.go` mint the worktree-bound worker key (roleLead, parent = lead key) and
+resolve the pool config; `worktree.acquire`/`worktree.release` are session-keyed
+and lead-only (`isLeadOnlyTool`, `toolSchemaRequiresSessionKey`). Added
+`wsconfig.ItemWorktreePool` (`worktree_pool`, builtin default
+`$(GitRoot)/.ws-worktrees`, project scope, resolver-backed). Mirrored the two
+tool entries into all three `runtime.json` packages.
+
+Verification: `go build ./...` clean; `go vet ./internal/mcp/` clean;
+`go test ./internal/mcp/ ./cmd/ws-mcp/ ./internal/wsconfig/ -count=1` all `ok`
+(includes the full-surface and no-agent runtime-contract tests and the
+pi-mirror byte-equality guard); `python3 -m unittest discover
+agents-plugin-wsflow/tests` → OK (12). New table/dispatch tests in
+`worktree_tools_test.go` cover every listed case plus an absolute-pool override,
+the release pool-membership guard (refuse primary + foreign), release-by-path and
+release-by-key dispatch, and the missing-base/missing-target_branch guards.
+
+Review: partitioned correctness/fit/test, two rounds. Round 1 raised one
+Important per partition — (correctness) `release` was destructive with no
+pool-membership guard; (fit) the schema literals hand-declared a `session_key`
+that `withSessionKeyToolSchemas` overwrites; (test) the hygiene test did not
+discriminate the `clean -ffdx` ignored-cruft purge from a plain branch switch —
+all fixed in `6bc205d2` and confirmed [fixed] by a round-2 verifier (clean).
+
+Decisions:
+- `worktree_pool` is resolver-backed (layered config + builtin default) with no
+  `config.tune` writer this phase: `config.tune`'s scalar path lowercases values,
+  which would corrupt case-sensitive paths.
+- `release` refuses any target that is the primary worktree, outside the resolved
+  pool, or not a registered worktree — the symmetric safety guard to acquire's
+  reuse-eligibility rule (the ticket's `risk.correctness: high` class).
+- An existing `target_branch` is checked out as-is, never reset to `base`, so a
+  re-entered branch keeps its commits; only working-tree cruft is cleared.
+- Minors recorded but not fixed: no test for the skip-unreadable-candidate branch
+  (hard to force deterministically) or the submodule success/warning paths (need
+  a submodule fixture); `wtRun` duplicates `mergeImplBranch`'s local git-run
+  closure (not extracted to avoid churning `git_merge.go`).
+
 ### Phase 2: Gated worktree parallel route in lead-run
 
 Add to `lead-run`'s Select/Spawn path an opt-in parallel route that activates
