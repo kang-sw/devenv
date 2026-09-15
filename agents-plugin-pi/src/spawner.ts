@@ -1005,7 +1005,15 @@ function admitPush(pi: ExtensionAPI, held: HeldPush | HeldRawSend): void {
     heldPushQueue.push(held);
     requestPushWake(pi);
   } else if (held.kind === "raw") {
-    pi.sendMessage(held.message, { deliverAs: held.deliverAs, triggerTurn: true });
+    if (held.message.customType === "ws-mailbox") {
+      // Mail is always an informational batch item, even when an active lead
+      // has no older FIFO prefix. Queue-then-submit preserves the shared
+      // materialization path without changing direct delivery for other raw families.
+      heldPushQueue.push(held);
+      submitHeldPushBatch(pi, held.deliverAs);
+    } else {
+      pi.sendMessage(held.message, { deliverAs: held.deliverAs, triggerTurn: true });
+    }
   } else {
     sendPush(pi, held.registry, held.record, held.family, held.payload, held.deliverAs, held.terminal);
   }

@@ -146,6 +146,22 @@ test('260914: an arriving mail admitted while dormant takes the idle-wake path a
   h.emit('session_shutdown');
 });
 
+test('260915: mail admitted while busy with no older hold still steers as one informational batch item', () => {
+  const h = harness();
+  h.busy();
+
+  sendToLead(h.pi, buildMailboxPushMessage({ from: 'scout@worktree', content: 'run the ready ticket' }), 'steer');
+
+  assert.equal(h.custom.length, 1);
+  assert.equal(h.custom[0].message.customType, PUSH_BATCH_CUSTOM_TYPE);
+  assert.deepEqual(h.custom[0].message.details.items.map((item: any) => item.customType), ['ws-mailbox']);
+  assert.deepEqual(h.custom[0].message.details.items.map((item: any) => item.state), ['informational']);
+  assert.match(h.custom[0].message.content, /run the ready ticket/);
+  assert.deepEqual(h.custom[0].options, { deliverAs: 'steer', triggerTurn: true });
+  assert.equal(heldPushQueue.length, 0, 'accepted immediate batch leaves no held prefix');
+  h.settle(); h.emit('session_shutdown');
+});
+
 test('260914: mail joins an older held family push in one FIFO batch instead of a parallel delivery', () => {
   const h = harness();
   h.busy();
