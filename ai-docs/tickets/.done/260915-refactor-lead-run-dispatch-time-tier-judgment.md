@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 60c546a7435fe478
 sage-review-completeness-reviewed: 60c546a7435fe478
+completed: 2026-09-15
 ---
 
 # Move worker-tier selection to a dispatch-time qualitative lead judgment against a shared risk rubric
@@ -135,6 +136,87 @@ Verification boundary: mirror guards (`TestWsflowRsrcMirrorUpToDate`,
 tests pass. No Go behavior change is expected (the lead reads the body; the
 projection contract is untouched).
 
+### Result (5b332cdb) - 2026-09-15
+
+Landed across three commits: `83c60e42` (Phase 1 implementation), `36edc74f`
+(round-1 review fixes), `5b332cdb` (round-2 non-blocking polish).
+
+- Added `agents-plugin/rsrc/risk-rubric.md`: a bundled rsrc doc (Axes / Scale /
+  Tier guidance for `medium`/`large`/`xlarge`, holistic, not a table to total),
+  included into `lead-run.md` via its existing `includes:` frontmatter
+  mechanism rather than inlined, per the ticket's rejected-inline-block
+  decision.
+- Rewrote `lead-run.md`'s Spawn section: the lead now reads the selected
+  ticket's whole body at dispatch (the one exception to the projection-only
+  rule, scoped to that one ticket) and grades risk against the rubric,
+  replacing the four-axis OR-gate table and the `:53` author-tier prose. The
+  projection's `risk.*` rows are now an explicit first-pass hint, not a
+  verdict. The chosen tier and driving risk are recorded in the assignment
+  note (`session.note` text extended, no tool change). The Parallel route's
+  per-ticket worker-playbook selection (step 4) is repointed at the same
+  qualitative grading instead of the removed OR-table. The stop-(e) escalate
+  ladder is kept as the safety net, with an explicit terminal case added for a
+  worker already dispatched at `ticket-worker-escalated` (reachable
+  proactively now), and Select's read-body ban is reworded to name Spawn's
+  read as its sole, scoped exception instead of contradicting it.
+  Mechanical Route Facts (`dispatch_blocked`, phase state, scope) are
+  untouched.
+- Mirrored byte-identical to `agents-plugin-wsflow/rsrc/` (via
+  `WS_REGEN_WSFLOW_RSRC`) and `agents-plugin-pi/rsrc/` (manual copy — no
+  dedicated pi regen test exists short of the full version-bump script, which
+  was out of scope); `manifest.json` regenerated in all three via
+  `WSRSRC_REGEN`.
+- Two pre-existing pinned tests that asserted the old OR-table/render-call text
+  verbatim were updated in the same change:
+  `agents-plugin-tool/internal/mcp/playbook_tools_test.go`
+  (`TestPlaybookPrintLeadRunWorkerTierPolicy`) and
+  `agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py`
+  (`test_wsflow_run_and_stop_protocol_carry_merge_obligation_text`); the Go
+  test's want-list now also pins a distinctive `risk-rubric.md` phrase so a
+  broken or dropped `includes:` declaration fails loudly instead of silently
+  rendering an empty rubric.
+
+**Round-1 review** (correctness + test partitions, per the route verdict's
+`partitioned: correctness, test` allocation) found 3 Important correctness
+findings — proactive `xlarge` had no stop-(e) terminal rung; Select's
+unqualified read-body ban textually contradicted Spawn's new scoped read; the
+new text asserted a tier/review-breadth coupling the runtime does not
+have (review allocation is computed from the ticket's frozen Route Facts risk
+rows via the worker's own `route.resolve_implement` call, independent of the
+lead's dispatch-time tier pick) — and 1 Important test-coverage finding (no
+assertion pinned the rubric's own content reaching the rendered body). All
+four fixed in `36edc74f`.
+
+**Round 2** re-verified all four fixes as landed correctly (including tracing
+`deriveImplementReviewAlloc`/`implementReviewPartitions` in
+`agents-plugin-tool/internal/mcp/implement_resolver.go` to confirm the
+review-allocation independence claim is a real mechanical fact, not an
+assertion taken on faith) and raised no new blocking findings; one non-blocking
+observation (residual "heavier review" wording in the rubric's own `medium`
+bullet) was applied in `5b332cdb`.
+
+**Decisions taken (cosmetic/adapted, not structural deviations):**
+- The rubric's opening line was drafted to name only "picking the worker tier
+  to dispatch it at," not implementation-and-review scope, since worker tier
+  selects the model only — review breadth is a separate, mechanically
+  independent axis (see round-1/round-2 correctness findings above).
+- The Parallel route's step 4 render-call wording was repointed to the same
+  qualitative grading Spawn performs, rather than left referencing the removed
+  OR-table, per the ticket's explicit reconciliation instruction.
+
+**Verification:**
+- `go build ./... && go vet ./...` (agents-plugin-tool): clean.
+- `go test ./... -count=1` (agents-plugin-tool, all packages): pass.
+- `go test ./internal/wsrsrc/... -run 'TestWsflowRsrcMirrorUpToDate|TestPiMirrorUpToDate|TestValidateRealTree'`: pass.
+- `python3 -m unittest discover agents-plugin-wsflow/tests`: 12/12 pass.
+- Independent review: round 1 (3 Important correctness + 1 Important test,
+  all fixed) and round 2 (all fixes verified, no Critical open, one
+  non-blocking observation applied).
+
+**Deferred to Phase 2** (unchanged from the plan): narrowing the
+fact-populator's `risk.*` rows to advisory and auditing other risk-authority
+consumers.
+
 ### Phase 2: Narrow fact-populator risk to advisory and adjust risk-authority consumers
 
 Depends on Phase 1 landing (the lead must already be the tier authority before
@@ -155,3 +237,77 @@ consumer to adjust.) Mirror any shipped changes.
 Verification boundary: the fact-populator and reviewer playbooks still satisfy
 their skill-authoring invariants; mirror and manifest guards pass; no consumer
 still treats `risk.*` as tier authority.
+
+### Result (6b6144a9) - 2026-09-15
+
+Landed across two commits: `e8f6c28b` (Phase 2 implementation), `6b6144a9`
+(round-1 review fixes; round 2 raised no new findings).
+
+- Reworded `agents-plugin/rsrc/ticket-fact-populator/ticket-fact-populator.md`'s
+  Route Facts grading guidance (the paragraph after the schema table): the four
+  `risk.*` rows are now explicitly stated as not driving the worker tier — the
+  worker tier is the lead's own dispatch-time read of the ticket (Phase 1),
+  and a populator's `risk.*` grade is only that read's first-pass hint. The
+  "never guess a low" calibration rule is kept (not deleted) but re-grounded in
+  the rows' remaining live mechanical role: they still contribute to the review
+  allocation the worker's own `route.resolve_implement` call derives (only
+  `moderate`/`high` keeps a partition in play, so an ungrounded `low` *or*
+  `unknown` silently drops one).
+- Audited `agents-plugin/rsrc` and `agents-plugin/skills` for
+  `risk.correctness`/`risk.fit`/`risk.test`/`risk.security_or_contract`: no
+  consumer beyond `lead-run.md` (already reworded in Phase 1) and
+  `ticket-fact-populator.md` itself exists; neither
+  `ticket-reviewer-design.md` nor `ticket-reviewer-completeness.md` references
+  Route Facts or `risk.*`, matching the ticket's own prediction — no other
+  consumer needed adjustment.
+- Mirrored byte-identical to `agents-plugin-wsflow/rsrc/` (via
+  `WS_REGEN_WSFLOW_RSRC`) and `agents-plugin-pi/rsrc/` (manual copy, per Phase
+  1's precedent — no dedicated pi regen test exists short of the full
+  version-bump script); `manifest.json` regenerated via `WSRSRC_REGEN` and
+  copied byte-identical into both mirrors, both times (initial edit and the
+  round-1 fix).
+
+**Round-1 review** (correctness + test partitions, per the route verdict's
+`partitioned: correctness, test` allocation): the test partition reported
+clean (prose-only diff, no test-code checklist items applied; re-verified the
+phase's stated verification boundary directly). The correctness partition
+found 2 Important findings: (1) the anti-low rule's justification claimed only
+an ungrounded `low` drops a review partition, but `materialRisk` in
+`implement_resolver.go` (`value == "moderate" || value == "high"`) treats
+`low` and `unknown` identically as non-material, so the original wording was
+inconsistent with both the resolver code and the file's own earlier
+"all-unknown table asks for the smallest review" line; (2) the wording named
+"the shared Risk Rubric" as a resolvable pointer, but the populator playbook
+declares no `includes:` for it, leaving an unresolvable reference. Also 2
+Minor findings: "still set the review allocation" overstated sole causation
+(other facts also feed the partitions), and "no longer reads this table" was
+migration-relative phrasing in a shipped prompt. All four fixed in `6b6144a9`.
+
+**Round 2** re-verified both Important fixes against the cited code itself
+(re-read `materialRisk`/`implementReviewPartitions` and grepped for `rubric`
+in the populator playbook) and confirmed both Minor fixes, raising no new
+blocking findings. One non-blocking observation recorded: "silently drops one"
+is conditional at the allocation level (a partition can survive via a
+non-risk trigger, e.g. `new_type_contract`/`new_public_symbol`), judged an
+adequate hedge for a cheap-tier delegate instruction.
+
+**Decisions taken (cosmetic/adapted, not structural deviations):**
+- Did not add an `includes:` for `risk-rubric` to `ticket-fact-populator.md`.
+  The populator is a cheap-tier delegate that fills a first-pass hint, not the
+  tier-grading reader (that's the lead, per Phase 1); wiring the rubric into
+  the populator was not named in this phase's task list, and the round-1
+  correctness finding was resolved by dropping the unresolvable proper-noun
+  reference rather than by adding a new include. Left as a candidate follow-up
+  if dogfooding shows populator/lead grading drift without a shared rubric.
+
+**Verification:**
+- `go build ./... && go vet ./...` (agents-plugin-tool): clean.
+- `go test ./... -count=1` (agents-plugin-tool, all packages): pass, both
+  before and after the round-1 fix.
+- `go test ./internal/wsrsrc/... -run 'TestWsflowRsrcMirrorUpToDate|TestPiMirrorUpToDate|TestValidateRealTree'`: pass.
+- `python3 -m unittest discover agents-plugin-wsflow/tests`: 12/12 pass.
+- Independent review: round 1 (2 Important + 2 Minor, all fixed) and round 2
+  (all fixes verified against source, no Critical open, one non-blocking
+  observation recorded).
+
+Both phases of this ticket are now complete.

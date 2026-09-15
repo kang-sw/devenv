@@ -1,5 +1,7 @@
 ---
 kind: print
+includes:
+  - risk-rubric
 variables:
   - SpawnIdiom
 ---
@@ -27,7 +29,9 @@ auto-continued: it waits on the user.
 
 With no active assignment (and no named ticket), render `ticket-selector`, spawn
 it at its recommended tier, and use its one `selection:` result. Do not list
-`ready/` or read ticket files yourself. When this is not a goal run and the
+`ready/` or read ticket files yourself here — Spawn's later read of the one
+selected ticket, for tier grading, is the sole exception below, not a license
+to browse the queue. When this is not a goal run and the
 selector returns `selection: ready/ empty`, end the turn: tell the user no
 implementation-ready ticket exists, relay its `backlog:` and
 `backlog_omitted:` fields, and propose preparing one through
@@ -38,8 +42,8 @@ invocation.
 ## Spawn
 
 For a ticket target, point-resolve the selected stem with
-`{{.McpNamespace}}/tickets.query(ticket_stem: "<stem>", format: "json")` and use its Route
-Facts projection; do not read or summarize the ticket body. A
+`{{.McpNamespace}}/tickets.query(ticket_stem: "<stem>", format: "json")` and use its
+Route Facts projection for the mechanical facts below. A
 `dispatch_blocked` field in that projection means the ticket declares a
 prerequisite that has not landed: do not spawn a worker on it. Report the named
 blocking stem to the user and end the turn — the prerequisite must land, or its
@@ -49,15 +53,23 @@ absent, or a worker stops reporting it incomplete, render
 commit, and query again before choosing the worker. Once per ticket: a second
 empty return is a ticket problem, not a retry.
 
-Choose the initial worker from `risk.correctness`, `risk.fit`, `risk.test`, and
-`risk.security_or_contract` in that projection. Only an explicit `high` raises
-the author tier; moderate risk still keeps its existing independent-review
-breadth.
+Then read the selected ticket's whole body — the one exception to staying on
+the projection, scoped to the one ticket you are about to dispatch — and grade
+its risk yourself against the Risk Rubric below. Treat the projection's
+`risk.correctness`, `risk.fit`, `risk.test`, and `risk.security_or_contract`
+rows as a first-pass hint, not a verdict: your own read of the ticket and the
+tree decides. Pick the tier your read produces and its worker playbook:
 
-| Target condition | Worker playbook | Tier |
-|---|---|---|
-| Ticket: any risk is `high` | `ticket-worker-elevated` | large |
-| Ticket: all risks are `low`, `moderate`, or `unknown` | `ticket-worker` | medium |
+| Tier | Worker playbook |
+|---|---|
+| medium | `ticket-worker` |
+| large | `ticket-worker-elevated` |
+| xlarge | `ticket-worker-escalated` |
+
+This tier picks the worker's model only; the ticket's own Route Facts risk
+rows still set the review allocation the worker's own route call derives, not
+your read here. `xlarge` is a proactive pick here, not only the reactive
+stop-e retry outcome below.
 
 1. A goal run is the current branch `goal/*` or an active goal reminder. Stage
    a goal branch only when an active goal reminder is present and the branch
@@ -88,7 +100,8 @@ breadth.
    Never paraphrase the ticket path or branch.
 4. Record the assignment: `{{.McpNamespace}}/session.note(session_key: <your
    key>, child_session_key: <worker key>, text: "<stem>: dispatched
-   <host agent id>; playbook <chosen worker playbook>; stop-e retries <0 or 1>")`.
+   <host agent id>; playbook <chosen worker playbook>; tier <chosen tier>;
+   risk <the driving axis and its grade>; stop-e retries <0 or 1>")`.
    This is the carry-over record a compacted or restarted
    lead rebuilds from (`{{.McpNamespace}}/session.children`); it is not a
    progress board. Advance it through `active` (impl branch retained, unmerged,
@@ -140,8 +153,9 @@ is provisioned.
    suppresses its own PARENT-branch capture and skips the serial Spawn step-1
    goal-branch staging.
 4. Render each worker into its worktree and spawn it:
-   `{{.McpNamespace}}/playbook.render(name: <worker playbook chosen from the
-   Spawn tier table for that ticket's risks>, session_key: <your key>,
+   `{{.McpNamespace}}/playbook.render(name: <worker playbook for that ticket's
+   tier — grade its risk against the Risk Rubric from its body the same way
+   Spawn does>, session_key: <your key>,
    root_override: <that worktree path>)`. `root_override` binds the worker's
    spliced key to the worktree root, so the worker's ws calls resolve against
    its own worktree and not yours — this is what isolates the batch. Spawn one
@@ -244,7 +258,10 @@ successful integration.
   playbook to choose the next tier below. Repeat Spawn steps 2–5 with that
   playbook on the same branch, adding the finding's location (commit and file) to the
   task block and recording one stop-e retry. A second (e) goes to the user;
-  do not reset the retry count on resume or reclassify the original risks.
+  do not reset the retry count on resume or reclassify the original risks. A
+  worker already dispatched at `ticket-worker-escalated` — proactively from
+  Spawn or after a retry — has no further tier: its (e) goes to the user
+  immediately, the same as a second (e) elsewhere.
 
   | Failed worker | Retry playbook | Tier |
   |---|---|---|

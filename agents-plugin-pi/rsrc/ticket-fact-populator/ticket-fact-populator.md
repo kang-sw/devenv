@@ -100,7 +100,13 @@ Values come from the ticket's phase text and the tree: the files it names,
 whether they are exported surface, whether tests cover them, whether the
 component it reuses was read. A value you cannot ground is `unknown`, with the
 reason in the evidence cell instead of a citation; on the risk and
-side-effect rows in particular, never guess a `low`.
+side-effect rows in particular, never guess a `low`. The four `risk.*` rows
+still contribute to the review allocation the worker's own route call
+derives: only `moderate` or `high` keeps a partition in play, so an
+ungrounded `low` or `unknown` there silently drops one a reviewer would
+otherwise run. The worker tier is not derived from this table: it is the
+lead's own dispatch-time read of the ticket, and your `risk.*` grades here are
+only that read's first-pass hint.
 
 ## Constraints
 

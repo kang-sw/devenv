@@ -362,7 +362,8 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertIn("{{.McpNamespace}}/worktree.acquire(base: <goal branch>", run)
         self.assertIn("is the sole branch-creation owner", run)
         self.assertIn("Render each worker into its worktree and spawn it:", run)
-        self.assertIn("{{.McpNamespace}}/playbook.render(name: <worker playbook chosen from the", run)
+        self.assertIn("{{.McpNamespace}}/playbook.render(name: <worker playbook for that ticket's", run)
+        self.assertIn("grade its risk against the Risk Rubric from its body the same way", run)
         self.assertIn("`root_override` binds the worker's", run)
         self.assertIn("you never discover the worker's own spliced key", run)
         self.assertIn(
