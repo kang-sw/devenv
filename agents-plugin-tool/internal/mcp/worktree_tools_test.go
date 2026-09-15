@@ -16,7 +16,11 @@ import (
 // *.log so tests can exercise the ignored-cruft purge of hygiene/release.
 func worktreeFixture(t *testing.T) (root, base string) {
 	t.Helper()
-	root = initGitRepo(t)
+	// Canonicalize so root matches the main-worktree path the production code
+	// derives from git: on some hosts (Windows CI) git's toplevel resolves
+	// symlinks/short-names that a raw t.TempDir path does not, which would make
+	// a legitimate under-pool path compare as outside the pool.
+	root = canonicalRootForTest(t, initGitRepo(t))
 	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("base\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -51,14 +55,20 @@ func jsonrpcHasError(t *testing.T, line string) bool {
 }
 
 func TestResolvePoolRoot(t *testing.T) {
+	// Roots must be OS-absolute so the "already absolute" and "make relative
+	// absolute under root" branches behave the same on every platform; a
+	// Unix-style literal like "/main" is not absolute on Windows (no volume),
+	// which would send every case down the relative-join branch.
+	root := t.TempDir()
+	absPool := t.TempDir()
 	cases := []struct {
 		value, gitRoot, want string
 	}{
-		{"$(GitRoot)/.ws-worktrees", "/main", filepath.Clean("/main/.ws-worktrees")},
-		{"", "/main", filepath.Clean("/main/.ws-worktrees")},
-		{"/abs/pool", "/main", filepath.Clean("/abs/pool")},
-		{"relative/pool", "/main", filepath.Clean("/main/relative/pool")},
-		{"  $(GitRoot)/p  ", "/main", filepath.Clean("/main/p")},
+		{"$(GitRoot)/.ws-worktrees", root, filepath.Join(root, ".ws-worktrees")},
+		{"", root, filepath.Join(root, ".ws-worktrees")},
+		{absPool, root, filepath.Clean(absPool)},
+		{"relative/pool", root, filepath.Join(root, "relative", "pool")},
+		{"  $(GitRoot)/p  ", root, filepath.Join(root, "p")},
 	}
 	for _, c := range cases {
 		if got := resolvePoolRoot(c.value, c.gitRoot); got != c.want {
@@ -103,8 +113,8 @@ func TestProvisionWorktreeCreateNew(t *testing.T) {
 	if res.Reused {
 		t.Fatal("first acquire must not report reuse")
 	}
-	if !pathUnder(filepath.Join(root, ".ws-worktrees"), res.Path) {
-		t.Fatalf("worktree path %q not under default pool", res.Path)
+	if !pathUnder(res.Pool, res.Path) {
+		t.Fatalf("worktree path %q not under resolved pool %q", res.Path, res.Pool)
 	}
 	if info, err := os.Stat(res.Path); err != nil || !info.IsDir() {
 		t.Fatalf("worktree dir missing: %v", err)

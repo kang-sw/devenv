@@ -65,7 +65,11 @@ func listWorktrees(ctx context.Context, runner wsgit.Runner, root string) ([]wor
 		switch {
 		case strings.HasPrefix(line, "worktree "):
 			flush()
-			cur = &worktreeEntry{Path: strings.TrimSpace(strings.TrimPrefix(line, "worktree "))}
+			// git emits worktree paths with forward slashes even on Windows;
+			// filepath.Clean canonicalizes to the OS separator so a reused
+			// (git-sourced) path and a freshly created (filepath.Join-sourced)
+			// path share one form and compare equal.
+			cur = &worktreeEntry{Path: filepath.Clean(strings.TrimSpace(strings.TrimPrefix(line, "worktree ")))}
 		case cur == nil:
 			// ignore lines before the first worktree header
 		case strings.HasPrefix(line, "HEAD "):
