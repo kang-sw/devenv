@@ -1,11 +1,13 @@
 /**
  * 260905 (`260905-feat-ws-pi-live-agent-widget`): the live-agent widget — one
  * compact `belowEditor` panel listing every live agent and open owner
- * discussion thread, one row each, headed by the uncapped count segment.
- * Phase 1 of that ticket also folds in the standalone `260904` "N pending
- * question(s)" `aboveEditor` widget (`ask.ts`'s deleted `refreshPendingWidget`)
- * — the pending-question surface is now a row in THIS widget instead of its
- * own panel.
+ * discussion thread, one row each. Phase 1 of that ticket also folds in the
+ * standalone `260904` "N pending question(s)" `aboveEditor` widget (`ask.ts`'s
+ * deleted `refreshPendingWidget`) — the pending-question surface is now a row
+ * in THIS widget instead of its own panel. 260914 dropped the panel's `ws: N
+ * agents` count heading (`buildHeadingLine`, added by `260909`): every row is
+ * now prefixed by a state bullet (`AGENT_STATE_BULLET`) instead, and the
+ * owner counts visible rows by eye.
  *
  * Source of truth is the two registries `index.ts` already owns — the RPC
  * agent registry (`spawner.ts`) and the owner-question thread registry
@@ -24,9 +26,9 @@
  * remaining widget call sites go through the same ref, not through this
  * module directly, for the identical reason.
  *
- * `buildAgentRows`/`buildWidgetLines`/`buildHeadingLine` are pure and unit
- * tested directly (`test/agent-widget.test.ts`) with duck-typed fake records
- * and threads, no live `pi` session. `createAgentWidgetController` is the IO
+ * `buildAgentRows`/`buildWidgetLines` are pure and unit tested directly
+ * (`test/agent-widget.test.ts`) with duck-typed fake records and threads, no
+ * live `pi` session. `createAgentWidgetController` is the IO
  * glue (`ctx.ui.setWidget`/`setStatus`, the 10-second elapsed timer) and is
  * left to `index.ts`'s own live-gate wiring, the same split `ask.ts` and
  * `spawner.ts` already use between their pure helpers and their `registerX`
@@ -34,7 +36,7 @@
  */
 
 import type { ThreadRecord } from "./ask.ts";
-import { isOwnerHeld, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole } from "./spawner.ts";
+import { isOwnerHeld, lastActivityAt, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole } from "./spawner.ts";
 import { visibleWidth } from "./text-width.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
 
@@ -63,7 +65,7 @@ export type AgentRowRole = "worker" | "execute" | "fork" | "thread" | "explore";
  * descendant waits, delivery, and owner action remain distinct. */
 export type AgentRowState = "awaiting-owner" | "idle-awaiting-owner" | "awaiting-approval" | "waiting-on-children" | "pending-delivery" | "running";
 
-/** One rendered row of the live-agent widget. Pure data — no `RpcAgentRecord`/`ThreadRecord` reference — so `buildWidgetLines`/`buildHeadingLine` need no registry access of their own. */
+/** One rendered row of the live-agent widget. Pure data — no `RpcAgentRecord`/`ThreadRecord` reference — so `buildWidgetLines` needs no registry access of its own. */
 export interface AgentRow {
   /** `alias > title > shortened uuid` (mirrors `ask.ts:351`'s short-uuid convention). */
   name: string;
@@ -71,6 +73,8 @@ export interface AgentRow {
   state: AgentRowState;
   /** Milliseconds since the clock this row's state uses — `ThreadRecord.touchedAt` for a `"thread"` row, `RpcAgentRecord.runStartedAt` otherwise. Never negative. */
   elapsedMs: number;
+  /** Milliseconds since `spawner.ts`'s `lastActivityAt` (last prompt/report/owner-send) for an RPC-backed row; for a pure synthetic thread row (no backing record) this is the same `ThreadRecord.touchedAt` delta as `elapsedMs`, the best available activity signal. Never negative. 260914: replaces the removed `ctx` label as the live panel's per-row activity cue. */
+  lastActivityMs: number;
   /** The valid `/answer <id>` command for an owner-question row. */
   answerHint?: string;
   /** A supplied owner-held inspection affordance. Presentation preserves it but never invents one. */
@@ -117,6 +121,32 @@ export const AGENT_STATE_LABEL: Readonly<Record<AgentRowState, string>> = {
   "waiting-on-children": "waiting on children",
   "pending-delivery": "pending delivery",
   running: "running",
+};
+
+/**
+ * 260914: one glyph per `AgentRowState`, prefixed to every live-panel row so
+ * state reads from the bullet at a glance (the ticket's replacement for the
+ * dropped `ws: N agents` count heading). `awaiting-owner`/`idle-awaiting-owner`
+ * share `●` — that glyph is styled by the caller with whatever
+ * `ownerActionColor` the existing 330ms attention cycle (260908) computed for
+ * the row, so the bullet participates in the flash instead of introducing a
+ * second, competing animation.
+ */
+export const AGENT_STATE_BULLET: Readonly<Record<AgentRowState, string>> = {
+  running: "·",
+  "awaiting-approval": "▲",
+  "awaiting-owner": "●",
+  "idle-awaiting-owner": "●",
+  "waiting-on-children": "◦",
+  "pending-delivery": "▸",
+};
+
+/** Static (non-flashing) bullet color per state — every state except the owner-held pair, whose bullet instead follows the caller-supplied `ownerActionColor` so it stays in lockstep with the existing 330ms cue (260908). Approval intentionally gets a plain, non-bold color: it must never join the owner-attention animation (see `isAttentionState`). */
+const STATE_BULLET_COLOR: Readonly<Partial<Record<AgentRowState, "warning" | "error" | "dim" | "accent">>> = {
+  running: "warning",
+  "awaiting-approval": "error",
+  "waiting-on-children": "dim",
+  "pending-delivery": "accent",
 };
 
 /** `worker -> "worker"`, `execute-worker -> "execute"`, `fork -> "fork"`, `explore -> "explore"` (260906); an unset `spawnRole` (should not happen post-spawn, but never throw) falls back to `"worker"`. */
@@ -198,10 +228,11 @@ function clampElapsed(deltaMs: number): number {
  * match (the ticket's Entry-B-only role override); a fork-raised match keeps
  * the record's own `spawnRole` label (typically `"fork"`).
  *
- * Sort: state rank first, elapsed descending within each state. No cap here — `N` for the
- * panel heading is this deduped, UNCAPPED row count; the display cap
- * to `AGENT_WIDGET_ROW_CAP` with its `+N more` tail is `buildWidgetLines`'s
- * own rendering concern, not a property of the underlying agent count.
+ * Sort: state rank first, elapsed descending within each state. No cap here —
+ * the display cap to `AGENT_WIDGET_ROW_CAP` with its `+N more` tail is
+ * `buildWidgetLines`'s own rendering concern, not a property of this
+ * function's row count (260914 dropped the `ws: N agents` heading that used
+ * to read this count; the owner now counts visible rows by eye).
  */
 export function buildAgentRows(records: RpcAgentRegistry, threads: readonly ThreadRecord[], now: number): AgentRow[] {
   const rows: AgentRow[] = [];
@@ -225,6 +256,7 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
       role: isAwaitingOwnerWithThread && boundThread!.origin === "lead-ask" ? "thread" : roleFromSpawnRole(record.spawnRole),
       state,
       elapsedMs,
+      lastActivityMs: clampElapsed(now - lastActivityAt(record)),
       ...(isAwaitingOwnerWithThread ? { answerHint: `/answer ${boundThread!.threadId}` } : {}),
       ...(isOwnerHeld(record) ? { inspectionHint: `/audit ${record.alias ?? record.agentId}` } : {}),
       ...(record.telemetry?.model ?? record.observedModel ? { model: record.telemetry?.model ?? record.observedModel } : {}),
@@ -241,6 +273,10 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
       role: "thread",
       state: "awaiting-owner",
       elapsedMs: clampElapsed(now - Date.parse(thread.touchedAt)),
+      // No backing RpcAgentRecord for a pure synthetic thread row, so there is
+      // no spawner.ts `lastActivityAt` to read — the thread's own touchedAt
+      // delta (identical to elapsedMs here) is the best available signal.
+      lastActivityMs: clampElapsed(now - Date.parse(thread.touchedAt)),
       answerHint: `/answer ${thread.threadId}`,
       ...(thread.forkResume?.telemetry?.model ?? thread.forkResume?.observedModel ? { model: thread.forkResume?.telemetry?.model ?? thread.forkResume?.observedModel } : {}),
       ...(thread.forkResume?.telemetry?.effort ?? thread.forkResume?.observedEffort ? { effort: thread.forkResume?.telemetry?.effort ?? thread.forkResume?.observedEffort } : {}),
@@ -304,10 +340,36 @@ function truncateWithProtectedPrimary(primary: string, base: string, width: numb
   return suffixWidth <= 1 ? primary : primary + truncateToWidth(base.slice(primary.length), suffixWidth);
 }
 
+/**
+ * 260914: the leading state-bullet glyph (`AGENT_STATE_BULLET`), reserving its
+ * own width slot ahead of the row body and degrading gracefully at narrow
+ * widths (bare glyph with no trailing space at `width === glyphWidth`,
+ * nothing at all below it) — the same narrow-width discipline `truncateToWidth`
+ * uses elsewhere in this file. The bullet is COLOR-ONLY, never bold: the
+ * owner-held pair (`awaiting-owner` / `idle-awaiting-owner`) takes the
+ * caller's `ownerActionColor` so it tracks the existing 330ms attention cycle
+ * (260908) without a second, independently-flashing bold span — the cycle's
+ * one bold treatment stays on the `⚠ OWNER ACTION` cue text exactly as
+ * before. Every other state gets a static color; `awaiting-approval` in
+ * particular must never bold-flash (that toggle is reserved for owner-held
+ * rows, see `isAttentionState`).
+ */
+function formatBullet(state: AgentRowState, width: number, ownerActionColor: OwnerActionColor | undefined, theme: AgentWidgetTheme | undefined): { text: string; width: number } {
+  const glyph = AGENT_STATE_BULLET[state];
+  const glyphWidth = visibleWidth(glyph);
+  const candidate = width >= glyphWidth + 1 ? `${glyph} ` : width >= glyphWidth ? glyph : "";
+  if (candidate === "") return { text: "", width: 0 };
+  const color = isAttentionState(state) ? ownerActionColor : STATE_BULLET_COLOR[state];
+  const styled = color && theme ? theme.fg(color, candidate) : candidate;
+  return { text: styled, width: visibleWidth(candidate) };
+}
+
 function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActionColor: OwnerActionColor | undefined, theme?: AgentWidgetTheme): string {
+  const bullet = formatBullet(row.state, width, ownerActionColor, theme);
+  const bodyWidth = Math.max(0, width - bullet.width);
   const ownerAction = isAttentionState(row.state);
   const primary = row.answerHint
-    ? ownerAnswerCue(row.answerHint, width)
+    ? ownerAnswerCue(row.answerHint, bodyWidth)
     : ownerAction
       ? `⚠ OWNER ACTION · ${sanitizeDisplayTitle(row.name, "owner action")}`
       : row.name;
@@ -315,9 +377,13 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
   const base = `${primary} · ${row.role} · ${stateLabel} · ${formatCompactDuration(row.elapsedMs)}`;
   const model = row.model ?? "—";
   const effort = row.effort ?? "—";
-  const context = formatContextTokens(row.contextTokens);
+  // 260914: replaces the dropped `ctx Xk` label in this same telemetry slot —
+  // `AgentRow.contextTokens` and `formatContextTokens` stay exported/populated
+  // unchanged for the `/audit` picker (`audit.ts`), this row just stops
+  // rendering them.
+  const activity = `active ${formatCompactDuration(row.lastActivityMs)}`;
   const estimate = `$${formatEstimatedUsd(row.estimatedUsd)}`;
-  const telemetry = ` · ${model} (${effort}) · ${context} · ${estimate}`;
+  const telemetry = ` · ${model} (${effort}) · ${activity} · ${estimate}`;
   const protectedHint = row.inspectionHint;
   const hint = protectedHint ? ` — ${protectedHint}` : "";
   // A supplied inspection affordance remains the only protected tail. The
@@ -325,15 +391,15 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
   let line: string;
   let appendedHint = false;
   let appendedTelemetry = false;
-  if (protectedHint && visibleWidth(hint) <= width) {
-    const available = width - visibleWidth(hint);
+  if (protectedHint && visibleWidth(hint) <= bodyWidth) {
+    const available = bodyWidth - visibleWidth(hint);
     const withTelemetry = base + telemetry;
     appendedTelemetry = visibleWidth(withTelemetry) <= available;
     line = appendedTelemetry ? withTelemetry + hint : (row.answerHint ? truncateWithProtectedPrimary(primary, base, available) : truncateToWidth(base, available)) + hint;
     appendedHint = true;
   } else {
-    appendedTelemetry = visibleWidth(base + telemetry) <= width;
-    line = appendedTelemetry ? base + telemetry : row.answerHint ? truncateWithProtectedPrimary(primary, base, width) : truncateToWidth(base, width);
+    appendedTelemetry = visibleWidth(base + telemetry) <= bodyWidth;
+    line = appendedTelemetry ? base + telemetry : row.answerHint ? truncateWithProtectedPrimary(primary, base, bodyWidth) : truncateToWidth(base, bodyWidth);
   }
   // Add ANSI only after width truncation: styling before truncation can leave
   // an incomplete escape sequence in a narrow terminal.
@@ -345,7 +411,7 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
       theme.fg("accent", model) +
       theme.fg("dim", ` (${effort})`) +
       theme.fg("dim", " · ") +
-      theme.fg("syntaxNumber", context) +
+      theme.fg("syntaxNumber", activity) +
       theme.fg("dim", " · ") +
       theme.fg("warning", estimate);
     content = base + styledTelemetry;
@@ -358,7 +424,7 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
     const cueEnd = Math.min(content.length, primary.length);
     content = semanticBold(content.slice(0, cueEnd), ownerActionColor, theme) + content.slice(cueEnd);
   }
-  return content + suffix;
+  return bullet.text + content + suffix;
 }
 
 /**
@@ -385,32 +451,24 @@ function truncateToWidth(text: string, width: number): string {
 }
 
 /**
- * The panel heading: `ws: N agents` (`N = rows.length`, the deduped row count
- * `buildAgentRows` already produced) plus ` · M question(s)` only while
- * `pendingCount > 0`. It is shown whenever rows or pending questions exist.
- */
-export function buildHeadingLine(rows: readonly AgentRow[], pendingCount: number, width: number = DEFAULT_AGENT_WIDGET_WIDTH, emphasizeAttention = false, theme?: AgentWidgetTheme, ownerActionColor: OwnerActionColor = "error"): string | undefined {
-  if (rows.length === 0 && pendingCount <= 0) return undefined;
-  const questionPart = pendingCount > 0 ? ` · ${pendingCount} question${pendingCount === 1 ? "" : "s"}` : "";
-  const heading = truncateToWidth(`ws: ${rows.length} agents${questionPart}`, width);
-  return emphasizeAttention && rows.some((row) => isAttentionState(row.state))
-    ? semanticBold(heading, ownerActionColor, theme)
-    : heading;
-}
-
-/**
- * Renders the panel heading followed by `rows` (as produced by
- * `buildAgentRows`, already sorted). The heading does not consume the
- * ticket's five-row cap: every awaiting-state row is kept, `running` rows are
- * trimmed so the body has `AGENT_WIDGET_ROW_CAP` rows with a synthetic `+N
- * more` trailing line. Every line is bounded to `width` display columns via
- * `truncateToWidth`. `undefined` only when rows and pending questions are
- * both absent.
+ * Renders `rows` (as produced by `buildAgentRows`, already sorted) with no
+ * separate heading line. 260914 dropped the `ws: N agents` count heading
+ * (superseding 260909's `buildHeadingLine`): with every row visible, the
+ * owner counts by eye, and each row's own state bullet (`AGENT_STATE_BULLET`)
+ * plus its `AGENT_STATE_LABEL` already carry what the heading used to
+ * summarize. `pendingCount` remains the visibility guard's pending-question
+ * fallback — every live/open thread `buildAgentRows` counts already yields a
+ * row of its own, so this is normally redundant with `rows.length`, but
+ * keeping it preserves the exact prior hide/show contract. Rows do not
+ * consume the ticket's five-row cap by themselves: every awaiting-state row
+ * is kept, `running` rows are trimmed so the body has `AGENT_WIDGET_ROW_CAP`
+ * rows with a synthetic `+N more` trailing line. Every line is bounded to
+ * `width` display columns via `truncateToWidth`. `undefined` only when rows
+ * and pending questions are both absent.
  */
 export function buildWidgetLines(rows: readonly AgentRow[], pendingCount: number, width: number = DEFAULT_AGENT_WIDGET_WIDTH, emphasizeAttention = false, theme?: AgentWidgetTheme, ownerActionColor: OwnerActionColor = "error"): string[] | undefined {
+  if (rows.length === 0 && pendingCount <= 0) return undefined;
   const emphasizeOwnerAttention = emphasizeAttention && rows.some((row) => isAttentionState(row.state));
-  const heading = buildHeadingLine(rows, pendingCount, width, emphasizeOwnerAttention, theme, ownerActionColor);
-  if (heading === undefined) return undefined;
 
   const awaiting = rows.filter((row) => row.state !== "running");
   const running = rows.filter((row) => row.state === "running");
@@ -425,7 +483,7 @@ export function buildWidgetLines(rows: readonly AgentRow[], pendingCount: number
     hiddenRunning = running.length - runningSlots;
   }
 
-  const lines = [heading, ...shown.map((row) => formatRow(row, width, emphasizeOwnerAttention && isAttentionState(row.state) ? ownerActionColor : undefined, theme))];
+  const lines = shown.map((row) => formatRow(row, width, emphasizeOwnerAttention && isAttentionState(row.state) ? ownerActionColor : undefined, theme));
   if (hiddenRunning > 0) lines.push(truncateToWidth(`+${hiddenRunning} more`, width));
   return lines;
 }
