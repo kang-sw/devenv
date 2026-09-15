@@ -1,10 +1,15 @@
 ---
 title: rationale.query tool and the ticket `## Prior Decisions` section
 related:
+  260909-epic-ws-worker-interpreter-refoundation: source of the numbered epic Decisions cited below (7, 14, 16)
   260909-research-ws-refoundation-evidence-audit: binding anchor; verdict A4 named the design-review contract check as the one spec consumption point that changed an agent's action
   260909-refactor-retire-spec-mental-model-layers: retired the write-side layer this ticket replaces on the read side
   260728-feat-lead-backfill-docs-entry-skill: prior art for post-landing documentation, retired; its "candidates, not verdicts" rule is reused here
   260915-refactor-lead-run-playbook-diet-drop-assignment-note: validation case; it reversed epic Decision 16 (`session.note`) and declared the reversal
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 87fe282dd016a6d2
+sage-review-completeness-reviewed: 87fe282dd016a6d2
 ---
 
 # rationale.query tool and the ticket `## Prior Decisions` section
@@ -26,7 +31,7 @@ authorship. Measured on this repository on 2026-09-15:
 |---|---|
 | commits reachable from HEAD | 6,559 |
 | commits carrying `## AI Context` | 6,145 (94%) |
-| commits whose body names a ticket stem | 4,215 (64%) |
+| commits whose body names a ticket stem (regex below) | 3,405 (52%) |
 | `.done/` tickets with `## Decisions` / `### Result` | 347 / 430 |
 | `git log` of the whole history with bodies and touched paths | 0.4 s |
 | `git log -L` on one function's line range | 0.05 s |
@@ -107,6 +112,10 @@ at the two points where the answer changes an action.
 - The `## Route Facts` reader parses that section only; an extra section before
   it is tolerated by construction. Phase 2 verification confirms this with the
   existing route tests.
+- Phase 1's `agents-plugin-pi/runtime.json` edit and Phase 2's hand copy into
+  `agents-plugin-pi/rsrc/` each land either before a pi tag is cut or after
+  its acceptance run
+  (260914-chore-ws-pi-release-path-acceptance-and-docs), never between them.
 - All ticket content in English.
 
 ## Prior Art
@@ -119,7 +128,12 @@ at the two points where the answer changes an action.
   directory walk and frontmatter parsing.
 - `ticket-fact-populator.md` step 3 Constraints bullet: the existing pattern
   of "write one derived section into the ticket, replacing it whole".
-- The ticket stem regex used by `tickets.query(mentions_ticket_stem)`.
+- `tickets.query(mentions_ticket_stem)` itself carries no stem-extraction
+  regex to reuse: it validates a caller-given stem against
+  `^\d{6}-[\w-]+$` and then matches a ticket body by plain substring
+  `strings.Contains`, not by scanning free text for stems
+  (agents-plugin-tool/internal/wsdoc/tickets.go#L12,109-114,141-144). The stem
+  regex below is new to this tool.
 
 ## Tool Specification
 
@@ -189,8 +203,15 @@ stem's `YYMMDD` as `20YY-MM-DD`), `paths` (backticked tokens in the ticket body
 containing `/` and ending in a file extension, plus `path#L` references, plus
 the union of paths touched by commits in the ticket's thread).
 
-Ticket stem regex, shared with `tickets.query`:
-`\b\d{6}-(?:feat|bug|refactor|chore|research|epic)-[a-z0-9]+(?:-[a-z0-9]+)*\b`.
+Ticket stem regex, new to this tool (not shared with `tickets.query`, which
+matches by plain substring — see Prior Art):
+`\b\d{6}-[a-z]+-[a-z0-9]+(?:-[a-z0-9]+)*\b`. The category segment is any
+lowercase word, not the six authoring categories: closed inventory is immutable
+and history names stems in retired categories (`workset`, `todo`, `design`,
+`perf`, `test`, `idea`) that commits still mention. Measured on this
+repository, the six-category form recognizes 2,920 stem-naming commits (45%)
+against 3,405 (52%) for this form; the extra matches are retired-category and
+category-less legacy stems.
 
 ### Threads
 
@@ -206,12 +227,15 @@ and select the `occurrence`-th; zero matches is an error, more than one with
 `occurrence` unset is allowed but reported in `omitted:` as
 `site matched K locations; used occurrence 1`. Run
 `git log -L <start>,<end>:<path> -w --no-patch` with the sentinel format and
-`-n` bounded by `limit`; the returned commits are the chain, newest first.
-Build commit records from those commits exactly as above (their AI Context
-bullets and stems). Additionally return the chain summary: `introduced`
-(oldest chain commit hash and date), `last_changed` (newest), `changes`
-(chain length). Renames across files are not followed; state that in the
-tool's `omitted:` line when the chain's oldest commit is a file creation.
+`-n 500`; the returned commits are the whole chain, newest first, and `limit`
+applies only to the records built from it. When the chain hits 500, set
+`site.truncated: true` (the top-level `truncated` is the scan cap only) and
+append `site chain truncated at 500` to `omitted:`; `introduced` is then
+unknown and the JSON field is null. Build commit records from the chain commits exactly
+as above (their AI Context bullets and stems). Additionally return the chain
+summary: `introduced` (oldest chain commit hash and date), `last_changed`
+(newest), `changes` (chain length). Renames across files are not followed;
+site mode always appends `renames not followed` to `omitted:`.
 
 ### Pickaxe mode
 
@@ -231,17 +255,17 @@ record; records within a thread are always date descending.
 
 ```
 thread: <stem> (<status>) — <N> records
-  <date> ticket <section> — <quoted record, cut at 300 characters>
-  <date> <short-hash> — <quoted record, cut at 300 characters>
+  <date> ticket <section> — <quoted record, collapsed to one line, cut at 300 characters>
+  <date> <short-hash> — <quoted record, collapsed to one line, cut at 300 characters>
   paths: <up to 5 distinct touched paths, then "+K more">
 thread: (no ticket) — <N> records
   <date> <short-hash> — <quoted record>
 site: introduced <short-hash> <date>; last changed <short-hash> <date>; <N> changes
-omitted: <K> records past limit; scanned <N> commits[; truncated at 20000][; site matched K locations; used occurrence 1] | none
+omitted: scanned <N> commits[; <K> records past limit][; truncated at 20000][; site matched K locations; used occurrence 1][; site chain truncated at 500][; renames not followed]
 ```
 
 The `site:` line appears only in site mode. The `omitted:` line is always the
-last line; it reads `omitted: none` when nothing applies.
+last line and always carries the scanned count, so it is never empty.
 
 ### Output, `format: json`
 
@@ -255,7 +279,7 @@ last line; it reads `omitted: none` when nothing applies.
           "paths": ["..."], "stems": ["..."], "score": <number> }
       ] }
   ],
-  "site": { "introduced": {"hash": "...", "date": "..."}, "last_changed": {...}, "changes": <n> } | null,
+  "site": { "introduced": {"hash": "...", "date": "..."} | null, "last_changed": {...}, "changes": <n>, "truncated": <bool> } | null,
   "scanned_commits": <n>, "truncated": <bool>, "omitted": ["..."]
 }
 ```
@@ -279,8 +303,9 @@ fixture `ai-docs/tickets/` tree. Pin:
 6. Ranking: with `query`, a record containing the query terms outranks one that
    does not; without `query`, newest first.
 7. Site mode: after three commits editing one function, the chain returns them
-   newest first with `introduced` and `last_changed` set; a regex with two
-   matches and no `occurrence` reports the K-locations line in `omitted:`.
+   newest first with `introduced` and `last_changed` set and `omitted:`
+   containing `renames not followed`; a regex with two matches and no
+   `occurrence` reports the K-locations line in `omitted:`.
 8. Pickaxe mode returns the commit that introduced the string and the one that
    removed it, and nothing else.
 9. `limit` cap: `limit: 500` returns at most 100 records and the `omitted:`
@@ -319,11 +344,13 @@ reviewer and the worker read them without searching. Fill it from
 
 1. `paths:` every path the ticket names, no `query`, `limit: 30`.
 2. `query:` the distinctive terms of the ticket title, no `paths`.
-3. For each `path#Lstart-Lend` reference or quoted code line the ticket
-   cites, `site:` that location.
+3. `site:` at most four of the `path#Lstart-Lend` references or quoted code
+   lines the ticket cites, choosing the ones its unfinished phases edit.
 
-Merge the results by pointer. Keep at most 8 threads, preferring threads whose
-paths overlap the ticket's, then the most recent. Write one line per thread:
+Six calls per ticket at most. Merge the results by pointer. Keep at most 8
+threads, preferring threads whose paths overlap the ticket's, then the most
+recent. Write one line per thread, the quote collapsed to one line and never
+beginning with `#`:
 
     - <stem or short hash> (<date>, <section or "commit">): "<quoted record, at most 200 characters>" — bearing: <supports|constrains|contradiction-candidate>
 
@@ -332,15 +359,32 @@ ticket builds on it, `constrains` when the ticket must respect it,
 `contradiction-candidate` when the ticket's plan or `## Decisions` appears to
 reverse it and the ticket does not say so. A contradiction with a recorded
 decision is a design choice, not a factual claim: never rewrite the ticket's
-plan or decisions over it; list it and count it as `prior_contradictions:` in
-the report. When every query returns nothing, write the section with the single
+plan or decisions over it; list it under `prior_contradictions:` in the
+report. When every query returns nothing, write the section with the single
 line `- none found (queried <YYYY-MM-DD>)`.
 ```
 
-In `## Output`, after the line `relations: <N>`, add:
+In `## Route Facts`, replace the sentence
 
 ```
-prior_contradictions: <N>
+before `## Phases` — or, when the ticket has no phases, before the first `##`
+heading after its body prose.
+```
+
+with
+
+```
+before `## Phases` — or, when the ticket has no phases, before the first `##`
+heading after its body prose and its `## Prior Decisions` section.
+```
+
+In `## Output`, after the count line `relations: <N>`, add the count line
+`prior_contradictions: <N>`, and after the `unverified:` list add:
+
+```
+prior_contradictions:
+  - pointer: <stem or short hash>
+    reverses: <the ticket sentence or decision that appears to reverse it>
 ```
 
 ### `ticket-reviewer-design.md`
@@ -350,12 +394,29 @@ At the end of Process step 2, add:
 ```
    Read the ticket's `## Prior Decisions` section as a third contradiction
    anchor. For each `contradiction-candidate`, open the pointed commit with
-   {{.McpNamespace}}/git.log(range: "<hash>^..<hash>", include_body: true) or
-   the pointed ticket, and verify the quoted record is that source's latest
-   position: a later record in the same section, or a later commit on the same
-   paths that reverses it, makes the candidate stale, not a finding. A ticket
-   with no `## Prior Decisions` section was populated incompletely: report that
-   in `omitted:` and continue.
+   {{.McpNamespace}}/git.log(range: "<hash>^..<hash>", include_body: true), or
+   resolve the pointed stem with {{.McpNamespace}}/tickets.query(ticket_stem:
+   <stem>, include_done: true, include_dropped: true) and read that ticket;
+   confirm the quote and check whether a later record in the same section
+   reverses it. Then establish commit-level currency with one bounded explorer
+   question (**Autonomous Exploration** below): whether a later commit on the
+   quote's paths reverses the decision; the explorer calls
+   {{.McpNamespace}}/rationale.query(kinds: ["commit"], paths: <the quote's
+   paths>, since: <the quote's date>) and nothing wider; put every candidate
+   into that one question rather than one spawn each. A reversed decision
+   makes the candidate stale, not a finding. A ticket with no
+   `## Prior Decisions` section was populated incompletely: report that in
+   `omitted:` and continue.
+```
+
+In `## Constraints`, after the bullet beginning "Use host-native explorers",
+add:
+
+```
+- A pointer in the ticket's `## Prior Decisions` section may be opened at its
+  current path whatever its status, including `.done/`, and its commit-level
+  currency checked with a commit-only `rationale.query`; this opens exact
+  pointers and commits only, never a ticket directory.
 ```
 
 In `## Checklist`, add item 7:
@@ -365,10 +426,8 @@ In `## Checklist`, add item 7:
    entry reverse a verified, still-current recorded decision without naming
    it? Naming it (`supersedes <hash or stem>: <reason>`) is a legitimate change
    of direction and never a finding. An unnamed reversal is `important` with
-   `resolution: missing`: which contract holds is a policy choice the
-   implementer cannot make. It is `critical` only when the reversed decision
-   is a cross-child invariant of the named parent epic, which item 5 already
-   covers.
+   `resolution: missing`, which the thresholds below turn into `block`: which
+   contract holds is a policy choice the implementer cannot make.
 ```
 
 In `## Batch review boundary`, in the delta-review paragraph after
@@ -378,6 +437,22 @@ add:
 ```
 Re-check Checklist item 7 only for `changed_stems`.
 ```
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | new package `agents-plugin-tool/internal/wsrationale/`; `agents-plugin-tool/internal/mcp/server.go` (dispatch, schema, `toolSchemaRequiresSessionKey`); `agents-plugin/runtime.json`, `agents-plugin-wsflow/runtime.json`, `agents-plugin-pi/runtime.json`; `agents-plugin/rsrc/ticket-fact-populator/ticket-fact-populator.md`; `agents-plugin/rsrc/ticket-reviewer-design/ticket-reviewer-design.md`; `agents-plugin-pi/rsrc/` (hand copy); five pinned test files |
+| scope.surface | public-interface | adds MCP tool `rationale.query` to `tools/list` and the three `runtime.json` contracts (agents-plugin-tool/internal/mcp/server.go#L3934-3943 shows the sibling `toolSchemaRequiresSessionKey` list `rationale.query` joins) |
+| scope.new_public_symbol | yes | `rationale.query` |
+| scope.new_type_contract | yes | new input schema (query/paths/site/occurrence/pickaxe/since/until/stems/exclude_stem/kinds/order/limit/format) and new JSON output shape (threads/records/site/scanned_commits/truncated/omitted) |
+| scope.test_surface | new-files | Phase 1 adds twelve acceptance tests in the new `wsrationale` package fixture; Phase 2 updates five existing pinned test files (playbook_tools_test.go, playbook_render_surface_test.go, ticket_review_design_test.go, ticket_batch_review_test.go, agents-plugin/tests/test_skill_dispatch_contracts.py — all confirmed to already reference these two playbooks) |
+| complexity.reuse_points | confirmed | `LogArgs`/`ParseLog` in agents-plugin-tool/internal/wsgit/git.go#L363,381; `toolSchemaRequiresSessionKey` entry pattern next to `git.log` in internal/mcp/server.go#L3934-3943; ticket directory walk and frontmatter parsing in internal/wsdoc/tickets.go (TicketsFind, scanTicketsWithBodies) |
+| complexity.side_effect_risk | moderate | Phase 1's tool is read-only by Constraints, but Phase 2 changes what `ticket-fact-populator` writes into every future ticket and adds design-reviewer Checklist item 7, which can produce an `important` finding that blocks ready promotion — a workflow-wide behavior change, not a contained code change |
+| risk.correctness | moderate | the stem regex decision is settled (generic category segment, measured 3,405 vs 2,920 commits); residual risk sits in the bullet-or-paragraph extraction rule on free-form commit bodies and in site mode, whose `git log -L` chain cannot distinguish a rename from a creation and whose regex can match several locations (Tool Specification > Record model, Site mode; twelve acceptance tests pin these) |
+| risk.fit | low | Decisions 1-9 and the epic's already-`.done` 260909-refactor-retire-spec-mental-model-layers establish the read-side, no-new-document direction this ticket follows; Prior Art reuses git.log and tickets.query shapes directly |
+| risk.test | moderate | twelve new acceptance tests plus five existing pinned test files updated in lockstep, and Phase 2 requires a manual (non-regenerated) byte-identical copy step to `agents-plugin-pi/rsrc/`, a drift-prone step the automated wsflow-mirroring regen commands do not cover |
+| risk.security_or_contract | moderate | new read-only MCP tool follows the `git.log` session-key precedent (low on its own), but Phase 2 also changes the design-review gate contract by adding Checklist item 7, which can newly block a ticket's promotion to ready |
 
 ## Phases
 
@@ -436,7 +511,10 @@ record precision. Each case mirrors one populator recipe query and is judged
    `agents-plugin-tool/internal/wsdoc/tickets_mutate.go`, no query: the
    target is the commit that retired that gate.
 3. Site `agents-plugin-tool/internal/mcp/server.go:/^func \(s \*Server\) resolveToolRoot/,+20`:
-   the chain has eight members as of 2026-09-15 and the target is the
+   the chain has nine members as of 2026-09-15, listed here in no particular order (`git log -w --no-patch -L
+   '/^func (s \*Server) resolveToolRoot/,+20:agents-plugin-tool/internal/mcp/server.go'`
+   returns 79602bf5, 6ef9c100, 24d7dfb8, bf06f7c2, 6499533d, 50e7d7d0,
+   79fe8bfa, 24569308, 6762aaf5) and the target is the
    2026-06-11 member "require session keys for root resolution", whose AI
    Context records removing every silent root fallback. A regex without the
    receiver (`^func resolveToolRoot`) matches nothing and must return the
