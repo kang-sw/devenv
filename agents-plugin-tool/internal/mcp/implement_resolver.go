@@ -145,6 +145,13 @@ type implementBranchObservation struct {
 	TargetExists         bool
 	MergeRootRefConflict string
 	AheadOfMergeRoot     int
+	// TargetAheadOfMergeRoot counts commits the observed target impl branch
+	// carries ahead of its own merge root, measured only when TargetExists.
+	// AheadOfMergeRoot measures the CURRENT branch, which on the create path is
+	// the merge root itself (always 0 ahead) and so says nothing about a
+	// leftover target branch; this field is what the create path reads to tell
+	// a fully-landed cleanup remnant (0) from un-landed unique work (>0).
+	TargetAheadOfMergeRoot int
 }
 
 type normalizedImplementFacts struct {
@@ -606,6 +613,18 @@ func observeImplementBranch(root string, targetBranch string) (implementBranchOb
 	if targetBranch != "" {
 		if _, err := (wsgit.ExecRunner{}).RunGit(context.Background(), root, "rev-parse", "--verify", "--quiet", "refs/heads/"+targetBranch); err == nil {
 			obs.TargetExists = true
+			// A leftover target branch is only safe to delete-and-recreate when
+			// it holds no unique work; measure its own ahead-of-merge-root count
+			// so the create path never discards un-landed commits. Fail closed
+			// exactly like the current-branch check: an unverifiable leftover is
+			// not assumed clean.
+			if mergeRoot := implementMergeRootFor(targetBranch); mergeRoot != "" && mergeRoot != targetBranch {
+				count, err := aheadOfMergeRootCount(root, mergeRoot, targetBranch)
+				if err != nil {
+					return implementBranchObservation{}, fmt.Errorf("verify leftover target branch ahead state: %w", err)
+				}
+				obs.TargetAheadOfMergeRoot = count
+			}
 		}
 		segments := strings.Split(targetBranch, "/")
 		for i := 1; i < len(segments); i++ {
@@ -647,7 +666,7 @@ func resolveImplement(input implementInput, source implementRouteFactsSource, ob
 	docMode := deriveImplementDocMode(n)
 	branchPlan := deriveImplementBranchPlan(n, obs)
 	warnings = append(warnings, branchPlan.Warnings...)
-	if branchPlan.Action == "create" && n.MergeTargetPolicy != "" {
+	if (branchPlan.Action == "create" || branchPlan.Action == "recreate") && n.MergeTargetPolicy != "" {
 		warnings = append(warnings, fmt.Sprintf("policy.branch.merge_target %q ignored (not on an implementation branch: impl/*, or legacy implement/*); derived from current branch %q", n.MergeTargetPolicy, branchPlan.MergeTarget))
 	}
 	if routeFactsMissing(source.Status) {
@@ -892,6 +911,28 @@ func deriveImplementBranchPlan(n normalizedImplementFacts, obs implementBranchOb
 			plan.Reason = fmt.Sprintf("existing branch %q conflicts with creating %q", obs.MergeRootRefConflict, targetBranch)
 			return plan
 		}
+		// A leftover target branch is invisible to the D/F ref-conflict check
+		// above (that scans ancestor segments, not the exact target), so resolve
+		// it here under the ahead-of-merge-root guard. A fully-landed remnant
+		// (the failed-`branch -d` cleanup of a just-succeeded merge) is deleted
+		// and recreated for a clean re-entry; a leftover carrying un-landed
+		// unique work is a genuine collision that stops, never a silent discard.
+		if obs.TargetExists {
+			if obs.TargetAheadOfMergeRoot > 0 {
+				_, suspectedStem, _ := parseImplBranchRoot(targetBranch)
+				plan.Action = "stop"
+				plan.SuspectedOwnerStem = firstNonEmpty(suspectedStem, "unknown")
+				plan.Reason = fmt.Sprintf(
+					"target implementation branch %q already exists with %d unmerged commit(s) ahead of merge root %q; creating over it would discard un-landed work (not overridable by allow_rename)",
+					targetBranch, obs.TargetAheadOfMergeRoot, mergeRoot)
+				return plan
+			}
+			plan.Action = "recreate"
+			plan.Reason = fmt.Sprintf(
+				"leftover fully-landed implementation branch %q has no commits ahead of merge root %q; delete and recreate for a clean re-entry",
+				targetBranch, mergeRoot)
+			return plan
+		}
 		plan.Action = "create"
 		plan.Reason = "current branch is not an implementation branch"
 		return plan
@@ -1002,6 +1043,8 @@ func implementBranchNextInstruction(verdict implementVerdict) string {
 		return "Stop before source edits. Report the branch safety blocker in Branch Action and ask for the missing policy or branch cleanup."
 	case "create":
 		return fmt.Sprintf("Create %s from %s before source edits, then %s", verdict.BranchPlan.TargetBranch, verdict.BranchPlan.MergeTarget, nextAfterBranch)
+	case "recreate":
+		return fmt.Sprintf("Delete the leftover fully-landed branch %s (git branch -d, which the empty ahead-count above makes safe), recreate it from %s before source edits, then %s", verdict.BranchPlan.TargetBranch, verdict.BranchPlan.MergeTarget, nextAfterBranch)
 	case "rename":
 		return fmt.Sprintf("Rename the current branch to %s before source edits, then %s", verdict.BranchPlan.TargetBranch, nextAfterBranch)
 	case "continue":

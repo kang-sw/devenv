@@ -190,8 +190,8 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn("{{.McpNamespace}}/git.merge", text)
         self.assertIn("call `{{.McpNamespace}}/git.merge` with the goal branch", text)
         self.assertNotIn("goal-to-PARENT terminal uses raw Git", text)
-        self.assertIn("`completion: phase`, leave the ticket active", text)
-        self.assertIn("With `completion: ticket`", text)
+        self.assertIn("With `completion: phase`, do not merge. Mark the note `active`", text)
+        self.assertIn("With `completion: ticket`, merge the retained impl branch", text)
         self.assertIn("incompatible values are a protocol mismatch", text)
         self.assertIn("do not query the ticket, infer a\npath, merge", text)
         self.assertIn(
@@ -203,6 +203,48 @@ class SkillDispatchContractsTest(unittest.TestCase):
             "Your terminal report does not restore the checkout: the shared worktree's",
             protocol,
         )
+
+    def test_run_defers_phase_merge_and_continues_active_assignment(self):
+        # 260915: the phase-completion default is "continue on the persistent
+        # impl branch," not "merge." Per-phase merge deleted the deterministic
+        # impl branch and forced the next phase to re-create the same name.
+        run = (RSRC_DIR / "lead-run" / "lead-run.md").read_text(encoding="utf-8")
+        # Assert against whitespace-normalized sections so line wrapping in the
+        # prose does not break a phrase across a newline (the rendered-policy Go
+        # test normalizes the same way).
+        norm = lambda s: " ".join(s.split())
+        report = norm(run.split("## Handle the report")[1].split("## Terminal")[0])
+        # (a) phase completion does not merge; the impl branch is retained and
+        # the assignment note goes active.
+        self.assertIn("With `completion: phase`, do not merge", report)
+        self.assertIn("Mark the note `active`", report)
+        self.assertIn("A per-phase merge is not the default", report)
+        # (b) ticket completion still merges through the user-approval gate; a
+        # mid-ticket landing uses the same gate, and no auto-merge is added.
+        self.assertIn("With `completion: ticket`, merge the retained impl branch", report)
+        self.assertIn("Merge mid-ticket only when a landing is actually needed", report)
+        self.assertIn("`merge_confirm: skip` auto-calls", report)
+        self.assertIn("`ask` (including absent)", report)
+        # (c) re-invocation with an active advanceable assignment skips the
+        # selector and continues the next phase; named-ticket still wins; a
+        # blocked assignment is not auto-continued.
+        select = norm(run.split("## Select")[1].split("## Spawn")[0])
+        self.assertIn("session.children", select)
+        self.assertIn("for an assignment note in the `active` state", select)
+        self.assertIn("skip the selector and continue that ticket directly", select)
+        self.assertIn("still wins over an active assignment", select)
+        self.assertIn("A `blocked` assignment is not auto-continued", select)
+        # the note lifecycle carries the active state Select keys on.
+        spawn = norm(run.split("## Spawn")[1].split("## Handle the report")[0])
+        self.assertIn("Advance it through `active`", spawn)
+        self.assertIn("Select keys its continue-detection on `active`", spawn)
+        # (d) the continue verdict variant is emitted, distinct from the generic
+        # ready-queue line, and the finished/complete/done ban stays intact.
+        end = norm(run.split("## End the turn")[1])
+        self.assertIn("has phases remaining on its retained impl branch", end)
+        self.assertIn("next cycle: {{.SkillNamespace}}:lead-run continues it.", end)
+        self.assertIn("next cycle: {{.SkillNamespace}}:lead-run.", end)
+        self.assertIn("keep `finished`, `complete`, and `done` out", end)
 
     def test_run_pins_branch_awareness_reasoning(self):
         # The existing merge/stop test pins the mechanical ws/git.status call and

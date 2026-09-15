@@ -304,7 +304,19 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 		return result, nil
 	}
 	if _, err := run("branch", "-d", "--", branch); err != nil {
-		result.Advisory = "Merge succeeded but branch cleanup failed: " + err.Error()
+		// The merge itself succeeded, so this is not a fatal error and status
+		// stays "merged" — converting it would misreport a landed merge. But a
+		// bare advisory string is too quiet: a swallowed cleanup failure leaves
+		// an orphan branch the next same-ticket phase re-derives the name of.
+		// Surface it as a loud, visible non-fatal diagnostic (rendered like the
+		// release-target acknowledgement), with the create path's leftover
+		// detection as the actual recovery.
+		result.Diagnostics = append(result.Diagnostics, implMergeDiagnostic{
+			Code:           "cleanup_failed",
+			Classification: "advisory",
+			Reason:         fmt.Sprintf("Merge succeeded but deleting the merged source branch %q failed: %v; it remains as an orphan.", branch, err),
+			Resolution:     "No action is needed to complete this merge. A same-ticket re-entry detects this fully-landed leftover and recreates the branch cleanly; delete it manually with git branch -d only if you will not re-run the ticket.",
+		})
 	} else {
 		result.BranchDeleted = true
 	}

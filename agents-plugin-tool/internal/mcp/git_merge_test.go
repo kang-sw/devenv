@@ -419,6 +419,37 @@ func TestImplMergeNoFFAndCleanup(t *testing.T) {
 	}
 }
 
+func TestImplMergeCleanupFailureSurfacesDiagnostic(t *testing.T) {
+	root, branch := mergeFixture(t, "develop")
+	runner := mergeInterceptRunner{intercept: func(ctx context.Context, root string, args []string) ([]byte, error, bool) {
+		if len(args) >= 2 && args[0] == "branch" && args[1] == "-d" {
+			return []byte("simulated cleanup failure"), fmt.Errorf("branch -d refused"), true
+		}
+		return nil, nil, false
+	}}
+	r, err := mergeImplBranch(context.Background(), root, runner, branch, "develop", mergeMessage(), implMergeAcknowledgement{})
+	if err != nil {
+		t.Fatalf("cleanup failure must stay non-fatal: err=%v result=%+v", err, r)
+	}
+	if r.Status != "merged" || r.BranchDeleted {
+		t.Fatalf("want merged with BranchDeleted=false, got status=%q deleted=%t", r.Status, r.BranchDeleted)
+	}
+	if r.Advisory != "" {
+		t.Fatalf("cleanup failure must surface as a diagnostic, not a quiet advisory string: %q", r.Advisory)
+	}
+	d := requireMergeDiagnostic(t, r, "cleanup_failed", "advisory")
+	if !strings.Contains(d.Reason, branch) || !strings.Contains(strings.ToLower(d.Reason), "orphan") {
+		t.Fatalf("diagnostic must name the orphan branch: %+v", d)
+	}
+	if !strings.Contains(r.text(), "cleanup_failed [advisory]") {
+		t.Fatalf("diagnostic must render loudly in text(): %s", r.text())
+	}
+	// The orphan really remains: it is the leftover the create path recovers.
+	if refs := strings.TrimSpace(string(runGitOutput(t, root, "branch", "--list", branch))); refs == "" {
+		t.Fatalf("expected orphan branch %q to remain after failed cleanup", branch)
+	}
+}
+
 func TestImplMergeRefusals(t *testing.T) {
 	for _, tc := range []struct {
 		name, target, assertion, want string
