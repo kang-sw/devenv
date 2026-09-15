@@ -2732,6 +2732,7 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 			body = strings.Join(strings.Fields(body), " ")
 			for _, want := range []string{
 				product + `/tickets.query(ticket_stem: "<stem>", format: "json")`,
+				"Spawn's later read of the one selected ticket, for tier grading, is the sole exception below, not a license to browse the queue",
 				"use its Route Facts projection for the mechanical facts below",
 				"Then read the selected ticket's whole body — the one exception to staying on the projection, scoped to the one ticket you are about to dispatch",
 				"`risk.correctness`, `risk.fit`, `risk.test`, and `risk.security_or_contract`",
@@ -2739,12 +2740,21 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				"| medium | `ticket-worker` |",
 				"| large | `ticket-worker-elevated` |",
 				"| xlarge | `ticket-worker-escalated` |",
+				"This tier picks the worker's model only; the ticket's own Route Facts risk rows still set the review allocation the worker's own route call derives, not your read here.",
 				"`xlarge` is a proactive pick here, not only the reactive stop-e retry outcome below.",
+				// The Risk Rubric is a bundled rsrc doc pulled in through
+				// lead-run.md's `includes: - risk-rubric` frontmatter, not
+				// inlined in lead-run.md itself — assert its own content
+				// actually arrives in the rendered body, so a wrong include
+				// key or resolution order fails here rather than silently
+				// leaving the lead grading against nothing.
+				"Record the tier picked and the axis (or axes) that drove it. The rubric is the ruler; the read is the caller's.",
 				"Spawn one worker at the tier the render recommends",
 				"playbook <chosen worker playbook>; tier <chosen tier>; risk <the driving axis and its grade>; stop-e retries <0 or 1>",
 				"| `ticket-worker` | `ticket-worker-elevated` | large |",
 				"| `ticket-worker-elevated` | `ticket-worker-escalated` | xlarge |",
 				"A second (e) goes to the user",
+				"A worker already dispatched at `ticket-worker-escalated` — proactively from Spawn or after a retry — has no further tier: its (e) goes to the user immediately, the same as a second (e) elsewhere.",
 				"`merge_confirm: skip` auto-calls `" + product + "/git.merge`",
 				"`ask` (including absent) surfaces the report for user approval first",
 				"accept `stop: none` only with `completion: phase` or `ticket`, and stops `a` through `e` only with `completion: none`",

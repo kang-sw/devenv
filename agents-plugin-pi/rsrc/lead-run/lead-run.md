@@ -29,7 +29,9 @@ auto-continued: it waits on the user.
 
 With no active assignment (and no named ticket), render `ticket-selector`, spawn
 it at its recommended tier, and use its one `selection:` result. Do not list
-`ready/` or read ticket files yourself. When this is not a goal run and the
+`ready/` or read ticket files yourself here — Spawn's later read of the one
+selected ticket, for tier grading, is the sole exception below, not a license
+to browse the queue. When this is not a goal run and the
 selector returns `selection: ready/ empty`, end the turn: tell the user no
 implementation-ready ticket exists, relay its `backlog:` and
 `backlog_omitted:` fields, and propose preparing one through
@@ -64,8 +66,10 @@ tree decides. Pick the tier your read produces and its worker playbook:
 | large | `ticket-worker-elevated` |
 | xlarge | `ticket-worker-escalated` |
 
-`xlarge` is a proactive pick here, not only the reactive stop-e retry outcome
-below.
+This tier picks the worker's model only; the ticket's own Route Facts risk
+rows still set the review allocation the worker's own route call derives, not
+your read here. `xlarge` is a proactive pick here, not only the reactive
+stop-e retry outcome below.
 
 1. A goal run is the current branch `goal/*` or an active goal reminder. Stage
    a goal branch only when an active goal reminder is present and the branch
@@ -254,7 +258,10 @@ successful integration.
   playbook to choose the next tier below. Repeat Spawn steps 2–5 with that
   playbook on the same branch, adding the finding's location (commit and file) to the
   task block and recording one stop-e retry. A second (e) goes to the user;
-  do not reset the retry count on resume or reclassify the original risks.
+  do not reset the retry count on resume or reclassify the original risks. A
+  worker already dispatched at `ticket-worker-escalated` — proactively from
+  Spawn or after a retry — has no further tier: its (e) goes to the user
+  immediately, the same as a second (e) elsewhere.
 
   | Failed worker | Retry playbook | Tier |
   |---|---|---|

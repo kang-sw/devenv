@@ -1,10 +1,10 @@
 # Risk Rubric
 
-One ruler for grading how risky a change is before choosing how much
-implementation and review it gets. Grade the axes below from the unit of work
-in front of you — its stated scope, the touched tree, and what depends on it —
-then read the tier guidance holistically. It is a rubric for judgment, not a
-table to total: do not count highs or apply it as a mechanical gate.
+One ruler for grading how risky a change is before picking the worker tier to
+dispatch it at. Grade the axes below from the unit of work in front of you —
+its stated scope, the touched tree, and what depends on it — then read the
+tier guidance holistically. It is a rubric for judgment, not a table to
+total: do not count highs or apply it as a mechanical gate.
 
 ## Axes
 
