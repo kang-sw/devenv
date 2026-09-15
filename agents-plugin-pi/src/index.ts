@@ -641,7 +641,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       mailboxWaiterHandle = startMailboxWaiter({
         runWait: createSubprocessWait({ launcherPath, pluginDir, sessionKey: mailboxSessionKey }),
         drainMail: createBridgeDrain((name, args) => mailboxHandle.client.callTool(name, args), mailboxSessionKey),
-        admit: (envelope) => sendToLead(pi, buildMailboxPushMessage(envelope), "steer"),
+        admit: (envelope) => sendToLead(pi, buildMailboxPushMessage(envelope), "steer", "always"),
       });
     }
 
