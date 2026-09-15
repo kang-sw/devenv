@@ -16,7 +16,7 @@ sage-review-completeness-reviewed: e86a51f9ee9f589c
 |---|---|---|
 | scope.span | multi-file | agents-plugin-pi/src/spawner.ts, agents-plugin-pi/src/push-protocol.ts, agents-plugin-pi/src/execute-gateway.ts |
 | scope.surface | internal | reused pushToLead/admitPush are agents-plugin-pi/src-internal, no external package boundary crossed |
-| scope.new_public_symbol | likely | a session-bound mail-arrival waiter/detector; exact name unfixed |
+| scope.new_public_symbol | yes | a session-bound mail-arrival waiter/detector; exact name unfixed |
 | scope.new_type_contract | yes | a new `PushBatchItem` customType `"ws-mailbox"` (state informational, display true) rides the existing push-batch wire contract |
 | scope.test_surface | existing | agents-plugin-pi/test/spawner.test.ts, push-wake.test.ts, push-render.test.ts, execute-gateway.test.ts already cover admitPush/pushToLead/push-batch machinery |
 | complexity.reuse_points | confirmed | pushToLead (agents-plugin-pi/src/spawner.ts#L1580), admitPush (agents-plugin-pi/src/spawner.ts#L993), heldPushQueue (agents-plugin-pi/src/spawner.ts#L1169), PUSH_BATCH_CUSTOM_TYPE (agents-plugin-pi/src/push-protocol.ts#L2), steer precedent (agents-plugin-pi/src/execute-gateway.ts#L576) |
