@@ -476,6 +476,7 @@ describe("buildPushBatchComponent", () => {
         pi as never,
         buildMailboxPushMessage({ from: "scout@worktree", content: "run the ready ticket", sent_at: "2026-09-15T12:00:00Z" }),
         "steer",
+        "always",
       );
 
       assert.equal(sent.length, 1);

@@ -984,10 +984,17 @@ function requestPushWake(pi: ExtensionAPI): void {
   }
 }
 
+export type RawPushBatchMode = "when-held" | "always";
+
 /** Admit raw summaries through the very same FIFO as family-shaped reports. */
-export function sendToLead(pi: ExtensionAPI, message: Parameters<ExtensionAPI["sendMessage"]>[0], deliverAs: PushDeliverAs): void {
+export function sendToLead(
+  pi: ExtensionAPI,
+  message: Parameters<ExtensionAPI["sendMessage"]>[0],
+  deliverAs: PushDeliverAs,
+  batchMode: RawPushBatchMode = "when-held",
+): void {
   if (!shouldPushToLead() || !leadIdleRef.current) return;
-  admitPush(pi, { kind: "raw", deliverAs, message });
+  admitPush(pi, { kind: "raw", deliverAs, message, batchMode });
 }
 
 function admitPush(pi: ExtensionAPI, held: HeldPush | HeldRawSend): void {
@@ -1005,12 +1012,11 @@ function admitPush(pi: ExtensionAPI, held: HeldPush | HeldRawSend): void {
     heldPushQueue.push(held);
     requestPushWake(pi);
   } else if (held.kind === "raw") {
-    if (held.message.customType === "ws-mailbox") {
-      // Mail is always an informational batch item, even when an active lead
-      // has no older FIFO prefix. Queue-then-submit preserves the shared
-      // materialization path without changing direct delivery for other raw families.
+    if (held.batchMode === "always") {
+      // Queue-then-submit preserves shared batch materialization for callers
+      // that require it without changing direct delivery for other raw families.
       heldPushQueue.push(held);
-      submitHeldPushBatch(pi, held.deliverAs);
+      submitHeldPushBatch(pi, held.deliverAs === "steer" ? "steer" : "followUp");
     } else {
       pi.sendMessage(held.message, { deliverAs: held.deliverAs, triggerTurn: true });
     }
@@ -1122,6 +1128,8 @@ interface HeldRawSend {
   kind: "raw";
   deliverAs: PushDeliverAs;
   message: Parameters<ExtensionAPI["sendMessage"]>[0];
+  /** Whether a no-prefix active delivery must still use ws-push-batch materialization. */
+  batchMode: RawPushBatchMode;
 }
 
 /** Delivery-time outcome for a queued `/goal <goal>` replacement. */

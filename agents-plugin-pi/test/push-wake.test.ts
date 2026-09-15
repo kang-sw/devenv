@@ -129,7 +129,7 @@ test('260914: an arriving mail admitted while dormant takes the idle-wake path a
   const h = harness();
   // The waiter admits mail through the SAME FIFO funnel as every push, never a
   // raw pi.sendMessage: sendToLead of the built ws-mailbox custom message.
-  sendToLead(h.pi, buildMailboxPushMessage({ from: 'scout@worktree', content: 'run the ready ticket', sent_at: '2026-09-15T12:00:00Z' }), 'steer');
+  sendToLead(h.pi, buildMailboxPushMessage({ from: 'scout@worktree', content: 'run the ready ticket', sent_at: '2026-09-15T12:00:00Z' }), 'steer', 'always');
   // Dormant session -> held, and a single counted wake user message, no raw custom send.
   assert.equal(h.custom.length, 0, 'mail is held, not sent as a separate structured item, while dormant');
   assert.equal(h.users.length, 1);
@@ -150,7 +150,7 @@ test('260915: mail admitted while busy with no older hold still steers as one in
   const h = harness();
   h.busy();
 
-  sendToLead(h.pi, buildMailboxPushMessage({ from: 'scout@worktree', content: 'run the ready ticket' }), 'steer');
+  sendToLead(h.pi, buildMailboxPushMessage({ from: 'scout@worktree', content: 'run the ready ticket' }), 'steer', 'always');
 
   assert.equal(h.custom.length, 1);
   assert.equal(h.custom[0].message.customType, PUSH_BATCH_CUSTOM_TYPE);
@@ -166,7 +166,7 @@ test('260914: mail joins an older held family push in one FIFO batch instead of 
   const h = harness();
   h.busy();
   h.push('followUp', 'progress first');
-  sendToLead(h.pi, buildMailboxPushMessage({ reply_to: 'id:abc', content: 'incoming instruction' }), 'steer');
+  sendToLead(h.pi, buildMailboxPushMessage({ reply_to: 'id:abc', content: 'incoming instruction' }), 'steer', 'always');
   assert.equal(h.custom.length, 0, 'the later mail steer cannot overtake the held FIFO prefix');
   h.end();
   assert.equal(h.custom.length, 1);
