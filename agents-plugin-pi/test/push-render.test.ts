@@ -22,7 +22,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { buildPushBatchComponent, buildPushComponent, buildPushRenderLines, registerPushMessageRenderers, type PushTuiModules } from "../src/push-render.ts";
-import { buildPushContent, PUSH_FAMILIES } from "../src/spawner.ts";
+import { buildPushContent, heldPushQueue, leadIdleRef, PUSH_FAMILIES, sendToLead } from "../src/spawner.ts";
 import { approximateCodePointWidth } from "../src/tool-result-render.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { buildMailboxPushMessage } from "../src/mailbox-waiter.ts";
@@ -463,25 +463,39 @@ describe("buildPushBatchComponent", () => {
     assert.equal(buildPushBatchComponent(tui.modules, {details: {items: []}}, undefined), undefined);
   });
 
-  test("260914: an arriving ws-mailbox item renders as its own generic card in the batch", () => {
-    const tui = fakeTui();
-    const mail = buildMailboxPushMessage({ from: "scout@worktree", content: "run the ready ticket", sent_at: "2026-09-15T12:00:00Z" });
-    const component = buildPushBatchComponent(tui.modules, { details: { items: [
-      {
-        customType: "ws-agent-report",
-        content: buildPushContent("ws-agent-report", "worker-1", { report: "done" }, undefined),
-        display: true,
-        details: { agent_id: "worker-1", report: "done" },
-        state: "informational",
+  test("260915: a busy/no-held mailbox arrival uses the compact informational batch renderer", () => {
+    const sent: Array<{ message: any; options: any }> = [];
+    const pi = {
+      sendMessage(message: unknown, options: unknown) {
+        sent.push({ message, options });
       },
-      { ...mail, details: { ...mail.details }, state: "informational" },
-    ] } }, undefined, false) as FakeComponent;
+    };
+    leadIdleRef.current = () => false;
+    try {
+      sendToLead(
+        pi as never,
+        buildMailboxPushMessage({ from: "scout@worktree", content: "run the ready ticket", sent_at: "2026-09-15T12:00:00Z" }),
+        "steer",
+        "always",
+      );
 
-    assert.deepEqual(component.render(80), [
-      "worker-1 · report", "report: done",
-      "[ws-mailbox]", "mail from scout@worktree (2026-09-15T12:00:00Z):", "run the ready ticket",
-    ]);
-    assert.equal(tui.boxes.length, 2, "mail is one more card in the batch, not a parallel structured item");
+      assert.equal(sent.length, 1);
+      assert.equal(sent[0]!.message.customType, PUSH_BATCH_CUSTOM_TYPE);
+      assert.deepEqual(sent[0]!.message.details.items.map((item: any) => [item.customType, item.state]), [
+        ["ws-mailbox", "informational"],
+      ]);
+      assert.deepEqual(sent[0]!.options, { deliverAs: "steer", triggerTurn: true });
+
+      const tui = fakeTui();
+      const component = buildPushBatchComponent(tui.modules, sent[0]!.message, undefined, false) as FakeComponent;
+      assert.deepEqual(component.render(80), [
+        "[ws-mailbox]", "mail from scout@worktree (2026-09-15T12:00:00Z):", "run the ready ticket",
+      ]);
+      assert.equal(tui.boxes.length, 1, "mail renders as one compact batch card, not a direct custom message");
+    } finally {
+      heldPushQueue.length = 0;
+      leadIdleRef.current = undefined;
+    }
   });
 });
 

@@ -579,7 +579,7 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
     const pi = { registerTool: (tool: CapturedTool) => tools.set(tool.name, tool), sendMessage() {}, sendUserMessage() {} } as unknown as ExtensionAPI;
     const bridge = {
       client: { callTool }, wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" },
-      ...(provenance ? { renderRegistry: { get: () => provenance } } : {}),
+      ...(provenance ? { renderRegistry: { get: () => ({ ...provenance, promptBase64: Buffer.from("Test reviewer prompt").toString("base64") }) } } : {}),
     } as never;
     const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" });
     const ctx = {

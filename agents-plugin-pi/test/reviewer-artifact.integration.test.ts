@@ -6,10 +6,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RpcClient, createEventBus, discoverAndLoadExtensions, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { captureOrphans, parseOrphans, rehydrateOrphanRecord, serializeOrphans } from "../src/agent-sidecar.ts";
-import { DELEGATION_ENV, playbookProfile, type DelegationPolicy } from "../src/delegation-policy.ts";
+import { DELEGATION_ENV, RenderRegistry, playbookProfile, type DelegationPolicy } from "../src/delegation-policy.ts";
 import { createAgentStorageContext } from "../src/agent-storage.ts";
 import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
-import { resolveTools, spawnAdmission, spawnAgent, stopAgent, type RpcAgentRegistry } from "../src/spawner.ts";
+import { registerAgentTools, resolveTools, spawnAdmission, spawnAgent, stopAgent, type RpcAgentRegistry } from "../src/spawner.ts";
 
 const roots: string[] = [];
 const originalRpc = Object.fromEntries(
@@ -84,6 +84,109 @@ test("code-review provenance requires exactly one exact-file write scope", () =>
   assert.equal(admitted.tools.includes("bash"), false);
   assert.equal(admitted.tools.includes("edit"), true);
   assert.equal(admitted.tools.includes("write"), true);
+});
+
+test("registered nested reviewer dispatch launches verified bytes across async model resolution", async () => {
+  Object.assign(RpcClient.prototype, {
+    start: async () => {}, stop: async () => {}, abort: async () => {},
+    onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {},
+    getState: async () => ({ sessionFile: "/tmp/offline-reviewer.jsonl", model: { provider: "offline", id: "reviewer" } }),
+    getSessionStats: async () => { throw new Error("offline"); },
+  });
+  const root = tempRoot();
+  const context = reviewerContext(root);
+  const previousPolicy = process.env[DELEGATION_ENV];
+  process.env[DELEGATION_ENV] = JSON.stringify(workerPolicy());
+  const tools = new Map<string, any>();
+  const pi = { registerTool: (tool: any) => tools.set(tool.name, tool), sendMessage() {} } as unknown as ExtensionAPI;
+  const renders = new RenderRegistry();
+  let modelCalls = 0;
+  let entered = Promise.withResolvers<void>();
+  let resume = Promise.withResolvers<void>();
+  const bridge = {
+    wsToolNames: wsTools, renderRegistry: renders, defaultSessionKeyRef: { current: "worker-key" },
+    client: { callTool: async (name: string) => {
+      assert.equal(name, "config.resolve_agent");
+      modelCalls++;
+      entered.resolve();
+      await resume.promise;
+      return { content: [{ type: "text", text: JSON.stringify({ resolved_from: "pi", model: "offline/reviewer" }) }] };
+    } },
+  };
+  const handle = registerAgentTools(pi, bridge as never, context);
+  const tool = tools.get("ws-agent-spawn");
+  const toolCtx = {
+    model: { provider: "offline", id: "reviewer" },
+    modelRegistry: { getAll: () => [{ provider: "offline", id: "reviewer" }], hasConfiguredAuth: () => true },
+  };
+  try {
+    for (const name of ["reviewer", "code-review-correctness", "code-review-fit", "code-review-test"]) {
+      const path = join(root, `${name}-prompt.md`);
+      // Include non-ASCII and a non-UTF8 byte to pin byte identity, not just decoded text.
+      const verified = Buffer.concat([Buffer.from(`**Your ws session_key: \`child-${name}\`**\nTrusted review — ${name}\n`), Buffer.from([0xff])]);
+      writeFileSync(path, verified);
+      renders.record(path, playbookProfile(pluginDir, name));
+      const findings = join(root, `${name}-findings.md`);
+      const args = { system_prompt_path: path, prompt: "Review", model_name: "small", write_scopes: [{ path: findings, kind: "file" }] };
+      const call = (input = args) => tool.execute("spawn", input, undefined, undefined, toolCtx);
+      const callsBefore = modelCalls;
+      const homesBefore = handle.rpcRegistry.size;
+
+      const copied = join(root, `${name}-copied.md`);
+      writeFileSync(copied, verified);
+      await assert.rejects(call({ ...args, system_prompt_path: copied }), /requires trusted render provenance/);
+      writeFileSync(path, "Changed before admission");
+      await assert.rejects(call(), /rendered prompt changed since authorization/);
+      writeFileSync(path, verified);
+      for (const scopes of [undefined, [{ path: root, kind: "tree" }], [{ path: findings, kind: "file" }, { path: copied, kind: "file" }], [{ path: findings, kind: "file", include: ["*.md"] }]]) {
+        await assert.rejects(call({ ...args, write_scopes: scopes } as never), /code reviewer requires exactly one file write scope|file scopes do not accept include patterns/);
+      }
+      assert.equal(modelCalls, callsBefore, "untrusted prompts and invalid grants fail before model resolution");
+      assert.equal(handle.rpcRegistry.size, homesBefore, "rejections allocate no child");
+
+      entered = Promise.withResolvers<void>();
+      resume = Promise.withResolvers<void>();
+      const pending = call();
+      await entered.promise;
+      writeFileSync(path, "Changed after admission; must never execute");
+      resume.resolve();
+      const result = JSON.parse((await pending).content[0].text);
+      const child = handle.rpcRegistry.get(result.agent_id)!;
+      assert.notEqual(child.systemPromptPath, path);
+      const launched = readFileSync(child.systemPromptPath!);
+      assert.deepEqual(launched.subarray(0, verified.length), verified);
+      assert.match(launched.subarray(verified.length).toString(), /^\n\n## Persistent delegation/);
+      assert.equal(launched.includes(Buffer.from("Changed after admission")), false);
+      assert.equal(child.delegation?.sessionKey, `child-${name}`);
+      assert.deepEqual(child.delegation?.write, { mode: "scoped", scopes: [{ path: findings, kind: "file" }] });
+      assert.equal(child.delegation?.tools.includes("bash"), false);
+    }
+    assert.throws(() => playbookProfile(pluginDir, "code-reviewer"), /lacks trusted shipped provenance/);
+  } finally {
+    resume.resolve();
+    await handle.stopAll();
+    if (previousPolicy === undefined) delete process.env[DELEGATION_ENV]; else process.env[DELEGATION_ENV] = previousPolicy;
+  }
+});
+
+test("restored provenance revalidates disk and builds a fresh immutable snapshot", () => {
+  const root = tempRoot();
+  const path = join(root, "prompt.md");
+  writeFileSync(path, "Trusted prompt");
+  const renders = new RenderRegistry();
+  const metadata = renders.record(path, playbookProfile(pluginDir, "reviewer"));
+  assert.equal("promptBase64" in metadata, false, "snapshots are not persisted with render metadata");
+  const restored = new RenderRegistry();
+  restored.restore([{ ...metadata, promptBase64: Buffer.from("Untrusted persisted snapshot").toString("base64") }]);
+  const admitted = restored.get(path)!;
+  assert.ok(Object.isFrozen(admitted));
+  assert.equal(Buffer.from(admitted.promptBase64, "base64").toString(), "Trusted prompt");
+  assert.equal("promptBase64" in restored.values()[0]!, false);
+  writeFileSync(path, "Edited cached prompt");
+  assert.throws(() => restored.get(path), /changed since authorization/);
+  const stale = new RenderRegistry();
+  stale.restore([metadata]);
+  assert.equal(stale.get(path), undefined);
 });
 
 test("spawned reviewers publish clean and non-clean artifacts through one immutable binding", async () => {

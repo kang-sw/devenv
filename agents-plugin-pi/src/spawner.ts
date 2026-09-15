@@ -984,10 +984,17 @@ function requestPushWake(pi: ExtensionAPI): void {
   }
 }
 
+export type RawPushBatchMode = "when-held" | "always";
+
 /** Admit raw summaries through the very same FIFO as family-shaped reports. */
-export function sendToLead(pi: ExtensionAPI, message: Parameters<ExtensionAPI["sendMessage"]>[0], deliverAs: PushDeliverAs): void {
+export function sendToLead(
+  pi: ExtensionAPI,
+  message: Parameters<ExtensionAPI["sendMessage"]>[0],
+  deliverAs: PushDeliverAs,
+  batchMode: RawPushBatchMode = "when-held",
+): void {
   if (!shouldPushToLead() || !leadIdleRef.current) return;
-  admitPush(pi, { kind: "raw", deliverAs, message });
+  admitPush(pi, { kind: "raw", deliverAs, message, batchMode });
 }
 
 function admitPush(pi: ExtensionAPI, held: HeldPush | HeldRawSend): void {
@@ -1005,7 +1012,14 @@ function admitPush(pi: ExtensionAPI, held: HeldPush | HeldRawSend): void {
     heldPushQueue.push(held);
     requestPushWake(pi);
   } else if (held.kind === "raw") {
-    pi.sendMessage(held.message, { deliverAs: held.deliverAs, triggerTurn: true });
+    if (held.batchMode === "always") {
+      // Queue-then-submit preserves shared batch materialization for callers
+      // that require it without changing direct delivery for other raw families.
+      heldPushQueue.push(held);
+      submitHeldPushBatch(pi, held.deliverAs === "steer" ? "steer" : "followUp");
+    } else {
+      pi.sendMessage(held.message, { deliverAs: held.deliverAs, triggerTurn: true });
+    }
   } else {
     sendPush(pi, held.registry, held.record, held.family, held.payload, held.deliverAs, held.terminal);
   }
@@ -1114,6 +1128,8 @@ interface HeldRawSend {
   kind: "raw";
   deliverAs: PushDeliverAs;
   message: Parameters<ExtensionAPI["sendMessage"]>[0];
+  /** Whether a no-prefix active delivery must still use ws-push-batch materialization. */
+  batchMode: RawPushBatchMode;
 }
 
 /** Delivery-time outcome for a queued `/goal <goal>` replacement. */
@@ -2773,6 +2789,7 @@ export async function spawnAgent(
   try {
   const admission = resolveSpawnAdmission(ctx, params.writeScopes);
   const delegation = admission.policy;
+  const verifiedPrompt = ctx.provenance ? Buffer.from(ctx.provenance.promptBase64, "base64") : undefined;
   // Resolve exactly once before any guard, alias transfer, eviction, UUID, or
   // session allocation. Concrete ws-agent-spawn IDs validate locally and fail
   // closed. Named tiers retain their existing resolution/refusal behavior; an
@@ -2811,7 +2828,7 @@ export async function spawnAgent(
   });
 
   if (ctx.spawnRole === "explore") await createWebSearch({ packageRoot: dirname(dirname(ctx.extensionPath)) }).probe();
-  const promptBody = params.systemPromptPath ? readFileSync(params.systemPromptPath, "utf8") : undefined;
+  const promptBody = verifiedPrompt ?? (params.systemPromptPath ? readFileSync(params.systemPromptPath) : undefined);
   const alias = params.alias ?? (ctx.aliasPrefix ? nextGeneratedAlias(registry, ctx.aliasPrefix) : undefined);
   const eviction = runSpawnGuards(registry, alias, resolveAgentRegistryCap());
   if (!eviction.ok) throw new Error(eviction.error);
@@ -2839,7 +2856,7 @@ export async function spawnAgent(
   let promptPath = params.systemPromptPath;
   if (promptPath && role !== "fork") {
     promptPath = join(ownership.home, "prompt.md");
-    writeFileSync(promptPath, promptBody + WORKER_LIFECYCLE_GUIDE, { mode: 0o600 });
+    writeFileSync(promptPath, Buffer.concat([promptBody!, Buffer.from(WORKER_LIFECYCLE_GUIDE)]), { mode: 0o600 });
   }
   const record: RpcAgentRecord = {
     agentId,

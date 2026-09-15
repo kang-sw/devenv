@@ -496,7 +496,7 @@ func implementReviewInstruction(verdict implementTodoVerdict) string {
 		return fmt.Sprintf("Do not start review before implementation can run; resolve the branch blocker first: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(verdict.ReviewAlloc)), "partitioned:") {
-		return fmt.Sprintf("Dispatch %s reviewers with the rendered reviewer playbook and generated review paths. %s %s", formatReviewPartitions(verdict.ReviewAlloc), implementReviewFixClause, implementReviewRoundsClause)
+		return fmt.Sprintf("Dispatch %s reviewers: render each named structured wrapper and supply its rendered path and a generated findings path. %s %s", formatReviewPartitions(verdict.ReviewAlloc), implementReviewFixClause, implementReviewRoundsClause)
 	}
 	if strings.EqualFold(strings.TrimSpace(verdict.ReviewAlloc), "single") {
 		return fmt.Sprintf("Render `reviewer` and dispatch one full-scope review with the rendered path and a generated findings path. %s %s", implementReviewFixClause, implementReviewRoundsClause)
@@ -539,7 +539,7 @@ func formatReviewPartitions(reviewAlloc string) string {
 	for _, part := range strings.Split(partsRaw, ",") {
 		part = strings.TrimSpace(part)
 		if part != "" {
-			parts = append(parts, part)
+			parts = append(parts, fmt.Sprintf("%s (`code-review-%s`)", part, part))
 		}
 	}
 	if len(parts) == 0 {

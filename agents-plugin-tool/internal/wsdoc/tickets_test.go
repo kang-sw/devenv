@@ -79,6 +79,32 @@ func TestTicketsListAndFindAcceptReadyStatusFilter(t *testing.T) {
 	}
 }
 
+func TestTicketsFindPaginationFollowsFilteredStatusAndStemOrder(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/tickets/ready/260100-ready-nope.md", "---\ntitle: No match\n---\n# Other\n")
+	mustWrite(t, root, "ai-docs/tickets/ready/260101-ready-a.md", "---\ntitle: A\n---\n# Shared\n")
+	mustWrite(t, root, "ai-docs/tickets/ready/260103-ready-c.md", "---\ntitle: C\n---\n# Shared\n")
+	mustWrite(t, root, "ai-docs/tickets/todo/260102-todo-b.md", "---\ntitle: B\n---\n# Shared\n")
+	mustWrite(t, root, "ai-docs/tickets/todo/260104-todo-d.md", "---\ntitle: D\n---\n# Shared\n")
+	mustWrite(t, root, "ai-docs/tickets/idea/260105-idea-e.md", "---\ntitle: E\n---\n# Shared\n")
+
+	page, err := TicketsFind(root, TicketFindOptions{Query: "Shared", Offset: 1, Limit: 3})
+	if err != nil {
+		t.Fatalf("TicketsFind returned error: %v", err)
+	}
+	if got, want := stems(page), "260103-ready-c,260102-todo-b,260104-todo-d"; got != want {
+		t.Fatalf("paginated stems = %s, want %s", got, want)
+	}
+
+	terminal, err := TicketsFind(root, TicketFindOptions{Query: "Shared", Offset: 4, Limit: 3})
+	if err != nil {
+		t.Fatalf("TicketsFind terminal page returned error: %v", err)
+	}
+	if got, want := stems(terminal), "260105-idea-e"; got != want {
+		t.Fatalf("terminal stems = %s, want %s", got, want)
+	}
+}
+
 func TestTicketsFindByMentionAndQuery(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/tickets/todo/260504-parent-demo.md", "---\ntitle: Parent\n---\n# Parent\n")
