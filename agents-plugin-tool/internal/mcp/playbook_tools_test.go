@@ -2693,6 +2693,18 @@ func TestPlaybookRenderGoldenTicketWorker(t *testing.T) {
 							t.Errorf("rendered body missing protocol text %q", want)
 						}
 					}
+					procedure := strings.Join(strings.Fields(body), " ")
+					for _, want := range []string{
+						"`single` uses `reviewer`",
+						"correctness uses `code-review-correctness`",
+						"fit uses `code-review-fit`",
+						"test uses `code-review-test`",
+						"The flat `code-reviewer` is an included contract, not a delegated playbook.",
+					} {
+						if !strings.Contains(procedure, want) {
+							t.Errorf("rendered review procedure missing %q", want)
+						}
+					}
 					// delegates:true → the harness continuity tip carries the continuation idiom.
 					if !strings.Contains(body, "SendMessage(to: <agentId>)") {
 						t.Errorf("rendered body missing claude continuation idiom")
