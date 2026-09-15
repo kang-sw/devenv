@@ -89,7 +89,7 @@ const bootstrapToolName = "ferrule"
 // preserved no-op, since the pre-rename tickets.sage_record was reachable by
 // a delegate-scoped key.
 func isLeadOnlyTool(name string) bool {
-	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || name == "git.merge" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
+	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || name == "git.merge" || name == "worktree.acquire" || name == "worktree.release" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
 }
 
 func workflowPreferenceWriterTool(name string) bool {
@@ -483,6 +483,7 @@ func builtinConfigDefaults() map[string]string {
 		wsconfig.ItemWorkflowPreferSubagent: "off",
 		wsconfig.ItemSageReview:             "auto",
 		wsconfig.ItemBootstrapAlarm:         "on",
+		wsconfig.ItemWorktreePool:           "$(GitRoot)/.ws-worktrees",
 	}
 }
 
@@ -1001,6 +1002,65 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolJSONResponse(req.ID, result, err)
 		}
 		return toolTextResponse(req.ID, result.text(), err)
+	case "worktree.acquire":
+		key, err := s.requireLeadSessionKey("worktree.acquire", params.Arguments)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		entry, _ := s.sessions.lookup(key) // requireLeadSessionKey verified it exists and is lead
+		base, _ := params.Arguments["base"].(string)
+		targetBranch, _ := params.Arguments["target_branch"].(string)
+		if strings.TrimSpace(base) == "" || strings.TrimSpace(targetBranch) == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: base and target_branch are required"))
+		}
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		poolRV, _ := resolver.Get(key, wsconfig.ItemWorktreePool)
+		result, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, entry.root, base, targetBranch, poolRV.Value)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		// Bind the worker key to the canonical worktree root so the worker's
+		// root-aware ws calls resolve against its own worktree, not the lead's.
+		mintPath := result.Path
+		if canon, cerr := canonicalGitRoot(result.Path); cerr == nil {
+			mintPath = canon
+		}
+		workerKey, err := s.sessions.mint(mintPath, roleLead, key)
+		if err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: mint worker key: %w", err))
+		}
+		result.Path = mintPath
+		result.WorkerKey = workerKey
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, nil)
+		}
+		return toolTextResponse(req.ID, result.text(), nil)
+	case "worktree.release":
+		if _, err := s.requireLeadSessionKey("worktree.release", params.Arguments); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		path, _ := params.Arguments["path"].(string)
+		workerKey, _ := params.Arguments["key"].(string)
+		path = strings.TrimSpace(path)
+		workerKey = strings.TrimSpace(workerKey)
+		if path == "" && workerKey == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.release: path or key is required"))
+		}
+		if path == "" {
+			wentry, ok := s.sessions.lookup(workerKey)
+			if !ok {
+				return toolTextResponse(req.ID, "", fmt.Errorf("worktree.release: key %q is not a known session key", workerKey))
+			}
+			path = wentry.root
+		}
+		if err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, path); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, map[string]any{"path": path, "detached": true}, nil)
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("released: %s\ndetached: true\n", path), nil)
 	case "git.commit":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -3468,6 +3528,34 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "worktree.acquire",
+			"description": "Lead-only. Provision an isolated Git worktree from a recycled pool for a parallel worker: reuse an eligible idle pooled worktree or create one, create target_branch on base if it does not exist and check it out, hygiene-reset the tree, sync submodules, and mint a worktree-bound worker session key. Returns the worktree path and worker_key. The pool location is the worktree_pool config knob (default $(GitRoot)/.ws-worktrees). Defaults to text; use format=json for structured output.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key":   stringProperty("Caller's lead ws session key (see ws:workflow-manual)."),
+					"base":          stringProperty("Base commit-ish the worktree branch is created on, e.g. the goal branch."),
+					"target_branch": stringProperty("Branch to create (when absent) and check out in the worktree, e.g. impl/<parent>/<slug>."),
+					"format":        stringProperty(`Optional output format. Use "json" for structured output.`),
+				},
+				"required": []string{"session_key", "base", "target_branch"},
+			},
+		},
+		{
+			"name":        "worktree.release",
+			"description": "Lead-only. Return a worktree to the pool: clean it and detach HEAD so it becomes reuse-eligible. Never deletes the worktree. Identify it by path or by a worker session key bound to it. Defaults to text; use format=json for structured output.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's lead ws session key (see ws:workflow-manual)."),
+					"path":        stringProperty("Absolute worktree path to release. Provide path or key."),
+					"key":         stringProperty("A worker session key bound to the worktree to release. Provide path or key."),
+					"format":      stringProperty(`Optional output format. Use "json" for structured output.`),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
 			"name":        "project_tree",
 			"description": "Render the ws project document map and active ticket inventory.",
 			"inputSchema": map[string]any{
@@ -3846,6 +3934,7 @@ func toolSchemaRequiresSessionKey(name string) bool {
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "git.merge",
 		"project_tree",
 		"review.marker", "review.stamp",
+		"worktree.acquire", "worktree.release",
 		"tickets.query", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify", "path.generate", "playbook.render":
 		return true
 	default:

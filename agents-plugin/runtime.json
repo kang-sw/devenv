@@ -59,6 +59,8 @@
     "git.merge_base": ">=0.46.5-dev <0.47.0",
     "git.merge": ">=0.46.5-dev <0.47.0",
     "git.commit": ">=0.46.5-dev <0.47.0",
+    "worktree.acquire": ">=0.46.5-dev <0.47.0",
+    "worktree.release": ">=0.46.5-dev <0.47.0",
     "api.list": ">=0.46.5-dev <0.47.0"
   },
   "commands": {

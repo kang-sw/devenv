@@ -59,6 +59,15 @@ const (
 	// default) or "off". Global-only: this is a cross-project user preference
 	// about warning noise, not a per-project opt-in.
 	ItemBootstrapAlarm = "bootstrap_alarm"
+
+	// ItemWorktreePool is the pool location where worktree.acquire provisions
+	// and recycles per-worker Git worktrees. The value is either an absolute
+	// path or a template containing the $(GitRoot) token, which binds to the
+	// primary (main) worktree root so a call from any linked worktree resolves
+	// to the one shared pool. Builtin default: "$(GitRoot)/.ws-worktrees".
+	// Resolved through the layered config (project/global/session files +
+	// builtin) rather than a dedicated config.tune writer.
+	ItemWorktreePool = "worktree_pool"
 )
 
 func init() {
