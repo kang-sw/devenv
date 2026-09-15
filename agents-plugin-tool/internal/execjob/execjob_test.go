@@ -129,6 +129,37 @@ func TestLongLargeAndAbort(t *testing.T) {
 	}
 }
 
+// TestAbortWaitsForProcessExit pins the deterministic wait added to Abort:
+// the cancelled process must have actually exited by the time Abort returns,
+// not merely be "probably dead after a fixed sleep." It asserts processAlive
+// immediately after Abort returns, with no retry/poll loop -- unlike
+// TestLongLargeAndAbort's delay-tolerant Status polling, which passes with or
+// without the deterministic wait and so does not pin this behavior. Under the
+// old fixed-100ms-sleep implementation this immediate check would be flaky
+// (false on a loaded/slow runner where SIGKILL reaping had not completed
+// within 100ms), so a pass here is non-tautological evidence of the wait.
+func TestAbortWaitsForProcessExit(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := gitRoot(t)
+	launched, err := Launch(LaunchOptions{Root: root, Cmd: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--", "slowabort"}, Env: map[string]string{"GO_WANT_HELPER_PROCESS": "1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if launched.Status != stateRunning || launched.PID <= 0 {
+		t.Fatalf("launch = %#v", launched)
+	}
+	if !processAlive(launched.PID) {
+		t.Fatalf("process %d not alive before abort", launched.PID)
+	}
+
+	if _, err := Abort(root, launched.ExecKey); err != nil {
+		t.Fatal(err)
+	}
+	if processAlive(launched.PID) {
+		t.Fatalf("process %d still alive immediately after Abort returned (deterministic wait regressed)", launched.PID)
+	}
+}
+
 func TestReconcileLostRunningWorker(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	root := gitRoot(t)

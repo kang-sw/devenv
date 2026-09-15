@@ -67,6 +67,33 @@ func TestResolvePoolRoot(t *testing.T) {
 	}
 }
 
+// TestPathUnder pins the directory-boundary semantics documented on pathUnder:
+// child must be at or below parent, comparing at directory boundaries so a
+// sibling that merely shares parent as a string prefix (/a/bc vs /a/b) is not
+// treated as under it. A naive strings.HasPrefix(child, parent) regression
+// would report /a/bc as under /a/b, which the "sibling prefix" case below
+// catches.
+func TestPathUnder(t *testing.T) {
+	cases := []struct {
+		name, parent, child string
+		want                bool
+	}{
+		{"exact same path", "/a/b", "/a/b", true},
+		{"real child", "/a/b", "/a/b/c", true},
+		{"nested descendant", "/a/b", "/a/b/c/d", true},
+		{"sibling prefix", "/a/b", "/a/bc", false},
+		{"clearly outside", "/a/b", "/x/y", false},
+		{"parent under child", "/a/b/c", "/a/b", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := pathUnder(c.parent, c.child); got != c.want {
+				t.Errorf("pathUnder(%q, %q) = %t, want %t", c.parent, c.child, got, c.want)
+			}
+		})
+	}
+}
+
 func TestProvisionWorktreeCreateNew(t *testing.T) {
 	root, base := worktreeFixture(t)
 	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", "")
