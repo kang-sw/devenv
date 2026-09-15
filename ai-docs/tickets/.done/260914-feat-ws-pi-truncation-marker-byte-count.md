@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 94a17e4d9792c763
 sage-review-completeness-reviewed: 94a17e4d9792c763
+completed: 2026-09-15
 ---
 
 # Show total byte size in the "..." truncation marker
@@ -75,6 +76,61 @@ the marker text carries the correct total byte count (including a multibyte case
 so `Buffer.byteLength` vs. string length is exercised) and that the row-cap
 behavior is unchanged.
 
+### Result (5e00bb5) - 2026-09-15
+
+`truncatedMarker()` in `agents-plugin-pi/src/tool-result-render.ts` now takes
+a required `totalBytes` argument and renders `...[N bytes total]` — N is
+`Buffer.byteLength` of `physicalPreviewLayout`'s laid-out `source` (sanitized:
+ANSI stripped, control chars substituted, tabs expanded, CRLF normalized;
+outer-trimmed when `trimOuterWhitespace` is set) — whenever `appendMarker()`
+decides to truncate. The annotated form is used only when it fits the
+available width; narrower widths fall back to the pre-existing bare-dot
+marker unchanged, so the marker row never forces a native rewrap and the
+`PREVIEW_ROWS` collapse threshold/expanded view are untouched.
+`CAP_OUTPUT_DROP_HINT` and `PROMPT_TRUNCATION_MARKER` were left unchanged, per
+Decisions.
+
+`physicalPreviewLayout`/`truncatedMarker` back every collapsed preview in the
+package (tool call-args previews, tool-result previews, and
+`push-render.ts`'s pushed-report bodies), so the byte-count change rippled to
+all three call sites' existing tests, not only the tool-result-render ones —
+matching the ticket's `side_effect_risk: moderate` route fact. 8 pre-existing
+test assertions across `test/tool-result-render.test.ts`,
+`test/tool-row-render.test.ts`, and `test/push-render.test.ts` were updated to
+expect the annotated marker text, computed from the same source text via
+`Buffer.byteLength` rather than hardcoded, so they stay correct if the fixture
+text changes.
+
+Decision/deviation: the ticket's Verification line names
+`test/tool-row-render.test.ts` for the new byte-count/multibyte assertion,
+but the dedicated multibyte-and-narrow-width-fallback test was added to
+`test/tool-result-render.test.ts` instead, alongside `truncatedMarker`'s
+other unit tests (where the marker's row/width unit tests already live);
+`tool-row-render.test.ts`'s existing marker assertion was still updated to
+expect the correct byte count. Cosmetic deviation, confirmed by round-1
+review as satisfying the ticket's intent.
+
+Verification:
+- `npm test -- test/tool-result-render.test.ts test/tool-row-render.test.ts test/push-render.test.ts` (from `agents-plugin-pi/`): 75/75 pass, both before and after the review-driven fixes.
+- Full package `npm test`: pre-existing baseline has 146 failures unrelated to this change (`bridge`, `fork-*`, `persistent-explore`, `playbook-read-dedupe`, `spawner`, `web-*` — network/credential/extension-availability issues in this sandbox); confirmed pre-existing via `git stash` on an unmodified tree before implementing. None of the 4 changed files appear in that failure list.
+
+Review: single-allocation round 1 (agent a5b633b733a226074, opus) found no
+Critical/Important findings, 3 Minor (dead optional-parameter branch,
+docstring inaccuracy about what `totalBytes` counts, a misleading test
+comment/over-loose regex in `push-render.test.ts`) — all fixed in `9f0f304`.
+Round 2 (agent aa7debb3fbab7b8cd, opus) verified all three fixes and raised
+no new blocking findings; one non-blocking wording observation (docstring
+said control chars are "stripped" when `sanitizePreviewText` substitutes them
+with `?`) was polished in `98ba370` without a third review round.
+
+Commits: `5e00bb5` (implementation), `9f0f304` (round-1 fixes), `98ba370`
+(docstring wording polish).
+
 ## Open Questions
 
 - None blocking.
+
+
+## Resolution (2026-09-15)
+
+Phase 1 landed: the collapsed tool-call/result truncation marker in agents-plugin-pi/src/tool-result-render.ts now reports `...[N bytes total]` (Buffer.byteLength of the full laid-out source, shown plus hidden) whenever it truncates, falling back to the pre-existing bare-dot marker at widths too narrow for the annotation. Reviewed (2 rounds, all findings fixed), verified with 75/75 passing on the three affected test files.
