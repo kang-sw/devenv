@@ -14,7 +14,18 @@ source; the worker owns implementation and verification.
 
 ## Select
 
-Unless the invocation already names a ticket, render `ticket-selector`, spawn
+Unless the invocation already names a ticket, first check
+`{{.McpNamespace}}/session.children(session_key: <your key>, scope: "control")`
+for an assignment note in the `active` state — an impl branch retained,
+unmerged, with phases remaining. If one is present, skip the selector and
+continue that ticket directly: check out its retained impl branch and run Spawn
+steps 2–5 for its next phase, with the retained impl branch as the task block's
+Branch line so `{{.McpNamespace}}/route.resolve_implement` returns its
+`continue` verdict and the phase stacks on that branch. An explicit named-ticket
+invocation still wins over an active assignment. A `blocked` assignment is not
+auto-continued: it waits on the user.
+
+With no active assignment (and no named ticket), render `ticket-selector`, spawn
 it at its recommended tier, and use its one `selection:` result. Do not list
 `ready/` or read ticket files yourself. When this is not a goal run and the
 selector returns `selection: ready/ empty`, end the turn: tell the user no
@@ -80,8 +91,9 @@ breadth.
    <host agent id>; playbook <chosen worker playbook>; stop-e retries <0 or 1>")`.
    This is the carry-over record a compacted or restarted
    lead rebuilds from (`{{.McpNamespace}}/session.children`); it is not a
-   progress board. Advance it to `merged` or `blocked` when the ticket
-   resolves.
+   progress board. Advance it through `active` (impl branch retained, unmerged,
+   phases remain) to `merged` (integrated) or `blocked` (an unresolved user
+   stop) as the ticket resolves; Select keys its continue-detection on `active`.
 5. Wait for the host's completion notification. Do not poll, do not block in
    a tool call, and do not touch the ticket or the branch meanwhile.
 
@@ -114,25 +126,38 @@ never force one through it. Branch-explicit calls (`{{.McpNamespace}}/git.merge`
 name their own source and target and need no check.
 
 On an accepted `stop: none` report, take the impl branch from the report or
-assignment note and retain it in the note until merged. Merging belongs to you:
-`merge_confirm: skip` auto-calls `{{.McpNamespace}}/git.merge` with that
-branch; `ask` (including absent) surfaces the report for user approval first.
-Use the worker's reported route value, so goal-run skip survives the handoff.
-The explicit branch lets the tool run from your base checkout. A refusal leaves
-the assignment unmerged; a conflict goes to `{{.SkillNamespace}}:lead-delegate`
-as a bounded resolution task. Release-target acknowledgement is a separate
-decision from approval to integrate a worker's result: present the tool's
-diagnostics to the user and obtain explicit acknowledgement when its
-release-target policy is overrideable. Use the tool's inspected retry values
-after that acknowledgement; changed candidate tips need fresh acknowledgement.
-All impl integration stays with `{{.McpNamespace}}/git.merge`.
-Advance the note to `merged` only after
-successful integration. With `completion: phase`, leave the ticket active for a
-later cycle and go to **End the turn**. With `completion: ticket`, then go to
-**End the turn**; when that closed ticket was an epic's last open child, first
-surface that epic to the user for a close decision, since nothing auto-closes an
-epic and an otherwise-complete board floats until you raise it (interim guard
-until a reliable trigger lands).
+assignment note and retain it in the note. The impl branch is deterministic per
+ticket and persists across phases: the next phase stacks on it because
+`{{.McpNamespace}}/route.resolve_implement` returns a `continue` verdict while
+that branch still exists.
+
+With `completion: phase`, do not merge. Mark the note `active` (impl branch
+retained, unmerged, phases remain), leave the ticket active for a later cycle,
+and go to **End the turn**. A per-phase merge is not the default: it would
+delete the deterministic impl branch and force the next phase to re-create the
+same name. Merge mid-ticket only when a landing is actually needed — a dependent
+ticket blocked on this phase — through the same user-approval gate a completion
+merge uses.
+
+With `completion: ticket`, merge the retained impl branch, then go to **End the
+turn**; when that closed ticket was an epic's last open child, first surface
+that epic to the user for a close decision, since nothing auto-closes an epic
+and an otherwise-complete board floats until you raise it (interim guard until a
+reliable trigger lands).
+
+Merging belongs to you: `merge_confirm: skip` auto-calls
+`{{.McpNamespace}}/git.merge` with that branch; `ask` (including absent)
+surfaces the report for user approval first. Use the worker's reported route
+value, so goal-run skip survives the handoff. The explicit branch lets the tool
+run from your base checkout. A refusal leaves the assignment unmerged; a
+conflict goes to `{{.SkillNamespace}}:lead-delegate` as a bounded resolution
+task. Release-target acknowledgement is a separate decision from approval to
+integrate a worker's result: present the tool's diagnostics to the user and
+obtain explicit acknowledgement when its release-target policy is overrideable.
+Use the tool's inspected retry values after that acknowledgement; changed
+candidate tips need fresh acknowledgement. All impl integration stays with
+`{{.McpNamespace}}/git.merge`. Advance the note to `merged` only after
+successful integration.
 
 - **(a) parent merge** — this is the run's terminal; see below.
 - **(b) unresolved decision** — read what the worker points at (the ticket,
@@ -189,6 +214,7 @@ re-picks it.
 Whatever re-invokes this skill judges from the transcript's last line, so make
 it exactly one of:
 
+- `Active ticket <stem> has phases remaining on its retained impl branch — next cycle: {{.SkillNamespace}}:lead-run continues it.`
 - `Ready queue still has advanceable tickets — next cycle: {{.SkillNamespace}}:lead-run.`
 - `Ready queue is empty — prepare a todo or idea ticket with {{.SkillNamespace}}:lead-ticket before re-invoking {{.SkillNamespace}}:lead-run.`
 - `Goal run finished — <reason>. Do not re-invoke {{.SkillNamespace}}:lead-run.`

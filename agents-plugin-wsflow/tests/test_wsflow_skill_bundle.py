@@ -338,8 +338,9 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertIn("{{.McpNamespace}}/git.merge", run)
         self.assertIn("call `{{.McpNamespace}}/git.merge` with the goal branch", run)
         self.assertNotIn("goal-to-PARENT terminal uses raw Git", run)
-        self.assertIn("`completion: phase`, leave the ticket active", run)
-        self.assertIn("With `completion: ticket`", run)
+        self.assertIn("With `completion: phase`, do not merge", run)
+        self.assertIn("leave the ticket active for a later cycle", run)
+        self.assertIn("With `completion: ticket`, merge the retained impl branch", run)
         self.assertIn("incompatible values are a protocol mismatch", run)
         self.assertIn("do not query the ticket, infer a\npath, merge", run)
         self.assertIn(
