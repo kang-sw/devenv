@@ -68,9 +68,12 @@ this file. The Worker Protocol appended below governs; read it first.
 3. Edit and verify. Run the project's build and test commands (from
    `AGENTS.md` `## Project Orientation` or the cited manuals). Resolve every
    warning your change introduces.
-4. Review: render the reviewer playbook(s) the route verdict allocates with
-   `{{.McpNamespace}}/playbook.render(name: <reviewer>, session_key: <your
-   key>)` and spawn each reviewer by {{.SpawnIdiom}} with the rendered path,
+4. Review: map the route allocation to structured render wrappers: `single`
+   uses `reviewer`; correctness uses `code-review-correctness`, fit uses
+   `code-review-fit`, and test uses `code-review-test`. The flat `code-reviewer`
+   is an included contract, not a delegated playbook. Render each selected
+   wrapper with `{{.McpNamespace}}/playbook.render` and spawn each reviewer
+   by {{.SpawnIdiom}} with the rendered path,
    the ticket path, and the branch name; each reviewer reads the diff from
    git. Fix findings by severity. Two rounds: the second verifies the fixes
    of the first and raises nothing new; there is no third. A Critical finding

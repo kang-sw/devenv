@@ -153,6 +153,24 @@ func TestDeriveImplementTodoInstructionsPrepGuardrails(t *testing.T) {
 	}
 }
 
+func TestImplementReviewStructuredWrappers(t *testing.T) {
+	for _, partition := range []string{"correctness", "fit", "test"} {
+		t.Run(partition, func(t *testing.T) {
+			review := implementReviewInstruction(implementTodoVerdict{ReviewAlloc: "partitioned: " + partition})
+			if !strings.Contains(review, partition+" (`code-review-"+partition+"`)") {
+				t.Fatalf("partition lost its structured wrapper: %q", review)
+			}
+			if strings.Contains(review, "`code-reviewer`") {
+				t.Fatalf("flat include became a delegated wrapper: %q", review)
+			}
+		})
+	}
+	review := implementReviewInstruction(implementTodoVerdict{ReviewAlloc: "single"})
+	if !strings.Contains(review, "Render `reviewer`") || strings.Contains(review, "code-review-") {
+		t.Fatalf("single review lost its full-scope wrapper: %q", review)
+	}
+}
+
 func TestDeriveImplementTodoInstructionsPartitionedReview(t *testing.T) {
 	got := deriveImplementTodosFromVerdict(implementTodoVerdict{
 		Delegation:  "delegated",
@@ -161,10 +179,10 @@ func TestDeriveImplementTodoInstructionsPartitionedReview(t *testing.T) {
 		NeedReview:  true,
 	})
 	review := requireInstruction(t, todoByKey(t, got, "review"))
-	if !strings.Contains(review, "Dispatch correctness and test reviewers") {
+	if !strings.Contains(review, "Dispatch correctness (`code-review-correctness`) and test (`code-review-test`) reviewers") {
 		t.Fatalf("review instruction missing selected partitions: %q", review)
 	}
-	if !strings.Contains(review, "rendered reviewer playbook") || !strings.Contains(review, "fresh reviewer render") {
+	if !strings.Contains(review, "render each named structured wrapper") || !strings.Contains(review, "fresh reviewer render") {
 		t.Fatalf("review instruction missing named template guidance: %q", review)
 	}
 	if strings.Contains(review, "fit") {

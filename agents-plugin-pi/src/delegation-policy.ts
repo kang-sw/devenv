@@ -37,8 +37,11 @@ export interface PlaybookProfile {
 export interface RenderProvenance extends PlaybookProfile {
   path: string;
   digest: string;
+  /** Admission-only immutable byte snapshot; never restored from persisted metadata. */
+  readonly promptBase64: string;
   sessionKey?: string;
 }
+type StoredRenderProvenance = Omit<RenderProvenance, "promptBase64">;
 const AUTHORITY = { leaf: 0, delegate: 1, lead: 2 } as const;
 export const READ_TOOLS = ["read", "grep", "find", "ls"];
 // Positive inventory: newly shipped mutators must never become read authority by default.
@@ -137,12 +140,12 @@ export function playbookProfile(pluginDir: string, name: unknown): PlaybookProfi
 
 /** Only successful bridge renders add entries; restore from adapter custom entries, not prompt claims. */
 export class RenderRegistry {
-  private entries = new Map<string, RenderProvenance>();
-  record(path: string, profile: PlaybookProfile): RenderProvenance {
+  private entries = new Map<string, StoredRenderProvenance>();
+  record(path: string, profile: PlaybookProfile): StoredRenderProvenance {
     const canonical = realpathSync(path);
-    const body = readFileSync(canonical, "utf8");
-    const sessionKey = body.match(/^\*\*Your ws session_key: `([^`]+)`\*\*/m)?.[1];
-    const entry = { ...profile, path: canonical, digest: promptDigest(canonical), ...(sessionKey ? { sessionKey } : {}) };
+    const bytes = readFileSync(canonical);
+    const sessionKey = bytes.toString("utf8").match(/^\*\*Your ws session_key: `([^`]+)`\*\*/m)?.[1];
+    const entry = { ...profile, path: canonical, digest: createHash("sha256").update(bytes).digest("hex"), ...(sessionKey ? { sessionKey } : {}) };
     this.entries.set(canonical, entry);
     return entry;
   }
@@ -150,8 +153,11 @@ export class RenderRegistry {
     let canonical: string;
     try { canonical = realpathSync(path); } catch { return undefined; }
     const entry = this.entries.get(canonical);
-    if (entry && promptDigest(canonical) !== entry.digest) throw new Error("ws-pi-agent: rendered prompt changed since authorization");
-    return entry;
+    if (!entry) return undefined;
+    // Hash and launch must consume one read, even if the path changes while model resolution awaits.
+    const bytes = readFileSync(canonical);
+    if (createHash("sha256").update(bytes).digest("hex") !== entry.digest) throw new Error("ws-pi-agent: rendered prompt changed since authorization");
+    return Object.freeze({ ...entry, promptBase64: bytes.toString("base64") });
   }
   restore(values: readonly unknown[]): void {
     for (const value of values) {
@@ -159,9 +165,10 @@ export class RenderRegistry {
       if (!e || typeof e.path !== "string" || typeof e.digest !== "string" || !["worker", "reviewer", "delegate", "explore"].includes(e.class) || !Object.hasOwn(AUTHORITY, e.authority) || typeof e.readOnly !== "boolean" || typeof e.requiresChildren !== "boolean" || typeof e.reviewArtifact !== "boolean") continue;
       try {
         const canonical = realpathSync(e.path);
-        if (promptDigest(canonical) === e.digest) this.entries.set(canonical, { ...e, path: canonical });
+        const { promptBase64: _snapshot, ...metadata } = e;
+        if (promptDigest(canonical) === e.digest) this.entries.set(canonical, { ...metadata, path: canonical });
       } catch { /* stale/missing provenance is not authority */ }
     }
   }
-  values(): RenderProvenance[] { return [...this.entries.values()]; }
+  values(): StoredRenderProvenance[] { return [...this.entries.values()]; }
 }

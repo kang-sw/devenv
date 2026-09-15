@@ -2773,6 +2773,7 @@ export async function spawnAgent(
   try {
   const admission = resolveSpawnAdmission(ctx, params.writeScopes);
   const delegation = admission.policy;
+  const verifiedPrompt = ctx.provenance ? Buffer.from(ctx.provenance.promptBase64, "base64") : undefined;
   // Resolve exactly once before any guard, alias transfer, eviction, UUID, or
   // session allocation. Concrete ws-agent-spawn IDs validate locally and fail
   // closed. Named tiers retain their existing resolution/refusal behavior; an
@@ -2811,7 +2812,7 @@ export async function spawnAgent(
   });
 
   if (ctx.spawnRole === "explore") await createWebSearch({ packageRoot: dirname(dirname(ctx.extensionPath)) }).probe();
-  const promptBody = params.systemPromptPath ? readFileSync(params.systemPromptPath, "utf8") : undefined;
+  const promptBody = verifiedPrompt ?? (params.systemPromptPath ? readFileSync(params.systemPromptPath) : undefined);
   const alias = params.alias ?? (ctx.aliasPrefix ? nextGeneratedAlias(registry, ctx.aliasPrefix) : undefined);
   const eviction = runSpawnGuards(registry, alias, resolveAgentRegistryCap());
   if (!eviction.ok) throw new Error(eviction.error);
@@ -2839,7 +2840,7 @@ export async function spawnAgent(
   let promptPath = params.systemPromptPath;
   if (promptPath && role !== "fork") {
     promptPath = join(ownership.home, "prompt.md");
-    writeFileSync(promptPath, promptBody + WORKER_LIFECYCLE_GUIDE, { mode: 0o600 });
+    writeFileSync(promptPath, Buffer.concat([promptBody!, Buffer.from(WORKER_LIFECYCLE_GUIDE)]), { mode: 0o600 });
   }
   const record: RpcAgentRecord = {
     agentId,
