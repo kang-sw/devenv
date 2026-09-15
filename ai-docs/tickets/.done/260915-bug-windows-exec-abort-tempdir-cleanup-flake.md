@@ -49,3 +49,28 @@ that Linux behavior is unchanged. If the underlying handle-release is inherent
 to the OS, the fallback is to make the smoke job tolerate the known cleanup
 race narrowly (not blanket-ignore failures) so a real assertion failure still
 reds the release.
+
+#### Result
+
+Root cause: `execjob.Abort` (execjob.go) called `cancelProcess` — whose
+`TerminateProcess` (Windows) / `SIGKILL` (Unix) are asynchronous — then slept a
+fixed `100ms` and returned. The sleep was probabilistic: on a slow/loaded
+Windows runner the cancelled shell child (CWD = the exec worktree `root`) had
+not exited when Go's `t.TempDir()` cleanup ran `os.RemoveAll`, and Windows
+refuses to unlink a directory a live process holds as its CWD. This was the
+prior "fix" (fixed sleep + subtree reap in `d89e6539`) that never made the wait
+deterministic, which is why the flake recurred.
+
+Fix: replaced the fixed sleep with `waitProcessExit(pid, abortExitTimeout=5s)`,
+a bounded poll on the existing `processAlive` primitive that returns the moment
+the tracked process actually exits (releasing its CWD/file handles) and is
+bounded so a wedged process cannot hang the abort. Strictly faster than the old
+sleep on the common path; abort semantics unchanged.
+
+Verification: `go test ./internal/execjob/` and the `TestExecMCPRunningLargeAndAbort`
+mcp test pass on Linux; `GOOS=windows go build ./...` + `go vet` clean
+(`processAlive` is defined per-platform). True Windows-runner confirmation
+landed on `workflow_dispatch` run `34923283670` (develop, carrying `4b94bb3e`):
+the `Windows ws-mcp smoke` job — the exact job that reddened the v0.46.5 release
+run on this test — passed green. The fix is deterministic by construction rather
+than timing-dependent, so it holds regardless of runner load.
