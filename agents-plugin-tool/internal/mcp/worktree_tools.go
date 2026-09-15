@@ -260,18 +260,56 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 // releaseWorktree returns a worktree to the pool: clean it and detach HEAD so it
 // becomes reuse-eligible. It never deletes the worktree — the expensive
 // derivation is what the pool amortizes.
-func releaseWorktree(ctx context.Context, runner wsgit.Runner, wtPath string) error {
+//
+// Because reset --hard/clean -ffdx are destructive, release refuses any target
+// that is not a linked worktree under the owned pool: it never touches the
+// primary worktree or a foreign path. This is the symmetric guard to acquire's
+// reuse-eligibility rule — a mistaken path or a lead's own key bound to the main
+// root must not hard-reset the primary working tree.
+func releaseWorktree(ctx context.Context, runner wsgit.Runner, wtPath, poolConfigValue string) error {
 	wtPath = strings.TrimSpace(wtPath)
 	if wtPath == "" {
 		return fmt.Errorf("worktree release requires a path")
 	}
-	if _, err := wtRun(ctx, runner, wtPath, "reset", "--hard"); err != nil {
+	entries, err := listWorktrees(ctx, runner, wtPath)
+	if err != nil {
 		return err
 	}
-	if _, err := wtRun(ctx, runner, wtPath, "clean", "-ffdx"); err != nil {
+	if len(entries) == 0 {
+		return fmt.Errorf("could not resolve the primary worktree for %q", wtPath)
+	}
+	mainRoot := entries[0].Path
+	// Canonicalize the target through git so a symlinked or non-clean path
+	// compares against the git-canonical worktree-list paths.
+	target, err := wtRun(ctx, runner, wtPath, "rev-parse", "--path-format=absolute", "--show-toplevel")
+	if err != nil {
 		return err
 	}
-	if _, err := wtRun(ctx, runner, wtPath, "checkout", "--detach"); err != nil {
+	target = filepath.Clean(target)
+	if target == filepath.Clean(mainRoot) {
+		return fmt.Errorf("worktree.release refuses to release the primary worktree %q", target)
+	}
+	poolRoot := resolvePoolRoot(poolConfigValue, mainRoot)
+	if !pathUnder(poolRoot, target) {
+		return fmt.Errorf("worktree.release refuses %q: not under the owned worktree pool %q", target, poolRoot)
+	}
+	listed := false
+	for _, e := range entries {
+		if filepath.Clean(e.Path) == target {
+			listed = true
+			break
+		}
+	}
+	if !listed {
+		return fmt.Errorf("worktree.release refuses %q: not a registered git worktree", target)
+	}
+	if _, err := wtRun(ctx, runner, target, "reset", "--hard"); err != nil {
+		return err
+	}
+	if _, err := wtRun(ctx, runner, target, "clean", "-ffdx"); err != nil {
+		return err
+	}
+	if _, err := wtRun(ctx, runner, target, "checkout", "--detach"); err != nil {
 		return err
 	}
 	return nil

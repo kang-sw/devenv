@@ -12,11 +12,15 @@ import (
 )
 
 // worktreeFixture builds a git repo with one base commit and returns the repo
-// root and the base commit SHA.
+// root and the base commit SHA. The base commit carries a .gitignore ignoring
+// *.log so tests can exercise the ignored-cruft purge of hygiene/release.
 func worktreeFixture(t *testing.T) (root, base string) {
 	t.Helper()
 	root = initGitRepo(t)
 	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("*.log\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	runGit(t, root, "add", ".")
@@ -102,7 +106,7 @@ func TestProvisionWorktreeReuseIdle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("provision 1: %v", err)
 	}
-	if err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, res1.Path); err != nil {
+	if err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, res1.Path, ""); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 	res2, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", "")
@@ -143,7 +147,7 @@ func TestProvisionWorktreeSkipDirty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("provision 1: %v", err)
 	}
-	if err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, res1.Path); err != nil {
+	if err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, res1.Path, ""); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 	// Make the now-detached pooled worktree dirty AFTER release so it is
@@ -172,19 +176,30 @@ func TestProvisionWorktreeHygieneResetToBase(t *testing.T) {
 	}
 	runGit(t, res1.Path, "add", ".")
 	runGit(t, res1.Path, "commit", "-m", "alpha work")
-	if err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, res1.Path); err != nil {
+	if err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, res1.Path, ""); err != nil {
 		t.Fatalf("release: %v", err)
+	}
+	// Leave a git-IGNORED file behind after release. It does not show in `status
+	// --porcelain`, so the worktree stays reuse-eligible, and a plain `git switch`
+	// on reuse would NOT remove it — only acquire's `clean -ffdx` (the -x purge)
+	// does. This is the discriminating assertion for the hygiene-reset step.
+	debris := filepath.Join(res1.Path, "debris.log")
+	if err := os.WriteFile(debris, []byte("stale\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 	// Reuse for a fresh branch on base: the prior branch's content must not leak.
 	res2, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", "")
 	if err != nil {
 		t.Fatalf("provision 2: %v", err)
 	}
-	if !res2.Reused {
-		t.Fatal("expected reuse of released worktree")
+	if !res2.Reused || res2.Path != res1.Path {
+		t.Fatalf("expected reuse of the released worktree despite the ignored leftover: reused=%v path=%q", res2.Reused, res2.Path)
 	}
 	if _, err := os.Stat(filepath.Join(res2.Path, "alpha.txt")); !os.IsNotExist(err) {
 		t.Fatalf("prior branch file leaked into reused worktree (stat err=%v)", err)
+	}
+	if _, err := os.Stat(debris); !os.IsNotExist(err) {
+		t.Fatalf("ignored leftover not purged by hygiene clean -ffdx (stat err=%v)", err)
 	}
 }
 
@@ -197,7 +212,7 @@ func TestReleaseWorktreeDetaches(t *testing.T) {
 	if b := wtBranch(t, res.Path); b != "impl/test/alpha" {
 		t.Fatalf("pre-release branch = %q", b)
 	}
-	if err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, res.Path); err != nil {
+	if err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, res.Path, ""); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 	if b := wtBranch(t, res.Path); b != "HEAD" {
@@ -205,6 +220,28 @@ func TestReleaseWorktreeDetaches(t *testing.T) {
 	}
 	if _, err := os.Stat(res.Path); err != nil {
 		t.Fatalf("release must not delete the worktree: %v", err)
+	}
+}
+
+func TestReleaseWorktreeRefusesNonPoolTargets(t *testing.T) {
+	root, base := worktreeFixture(t)
+	// Make the primary worktree dirty so a wrongly-permitted release would be
+	// observable (and destructive).
+	if err := os.WriteFile(filepath.Join(root, "wip.txt"), []byte("uncommitted\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Releasing the primary worktree is refused.
+	if err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, root, ""); err == nil {
+		t.Fatal("release of the primary worktree must be refused")
+	}
+	if _, err := os.Stat(filepath.Join(root, "wip.txt")); err != nil {
+		t.Fatalf("refused release must not have touched the primary worktree: %v", err)
+	}
+	// A linked worktree OUTSIDE the pool is refused (foreign path).
+	foreign := filepath.Join(t.TempDir(), "foreign")
+	runGit(t, root, "worktree", "add", "--detach", foreign, base)
+	if err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, foreign, ""); err == nil {
+		t.Fatal("release of a worktree outside the pool must be refused")
 	}
 }
 
@@ -289,6 +326,23 @@ func TestWorktreeAcquireReleaseDispatch(t *testing.T) {
 	if b := wtBranch(t, acq.Path); b != "HEAD" {
 		t.Fatalf("released worktree not detached: %q", b)
 	}
+
+	// Re-acquire (reuses the same detached worktree) and release by explicit
+	// path — the other half of the path|key contract, through the dispatch path.
+	resp2 := callToolOnce(t, s, 3, "worktree.acquire", map[string]any{
+		"session_key": leadKey, "base": base, "target_branch": "impl/test/beta", "format": "json",
+	})
+	var acq2 worktreeAcquireResult
+	if err := json.Unmarshal([]byte(toolText(t, resp2)), &acq2); err != nil {
+		t.Fatalf("unmarshal acquire 2: %v\n%s", err, resp2)
+	}
+	relPath := callToolOnce(t, s, 4, "worktree.release", map[string]any{"session_key": leadKey, "path": acq2.Path})
+	if !strings.Contains(toolText(t, relPath), "detached: true") {
+		t.Fatalf("release-by-path response = %s", relPath)
+	}
+	if b := wtBranch(t, acq2.Path); b != "HEAD" {
+		t.Fatalf("path-released worktree not detached: %q", b)
+	}
 }
 
 func TestWorktreeAcquireRejectsNonLeadAndBadArgs(t *testing.T) {
@@ -316,8 +370,14 @@ func TestWorktreeAcquireRejectsNonLeadAndBadArgs(t *testing.T) {
 	}); !toolIsError(t, got) {
 		t.Fatalf("missing target_branch not rejected: %s", got)
 	}
+	// Missing base is a structured error (the other half of the guard).
+	if got := callToolOnce(t, s, 3, "worktree.acquire", map[string]any{
+		"session_key": leadKey, "target_branch": "impl/test/alpha",
+	}); !toolIsError(t, got) {
+		t.Fatalf("missing base not rejected: %s", got)
+	}
 	// Release with neither path nor key is an error.
-	if got := callToolOnce(t, s, 3, "worktree.release", map[string]any{"session_key": leadKey}); !toolIsError(t, got) {
+	if got := callToolOnce(t, s, 4, "worktree.release", map[string]any{"session_key": leadKey}); !toolIsError(t, got) {
 		t.Fatalf("release without path/key not rejected: %s", got)
 	}
 }

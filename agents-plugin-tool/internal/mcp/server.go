@@ -1028,6 +1028,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 		workerKey, err := s.sessions.mint(mintPath, roleLead, key)
 		if err != nil {
+			// Detach the freshly provisioned worktree so a failed mint does not
+			// leave it branch-checked-out and thus ineligible for pool reuse.
+			_, _ = wsgit.ExecRunner{}.RunGit(context.Background(), result.Path, "checkout", "--detach")
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: mint worker key: %w", err))
 		}
 		result.Path = mintPath
@@ -1037,7 +1040,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 		return toolTextResponse(req.ID, result.text(), nil)
 	case "worktree.release":
-		if _, err := s.requireLeadSessionKey("worktree.release", params.Arguments); err != nil {
+		key, err := s.requireLeadSessionKey("worktree.release", params.Arguments)
+		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
 		path, _ := params.Arguments["path"].(string)
@@ -1054,7 +1058,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			}
 			path = wentry.root
 		}
-		if err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, path); err != nil {
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		poolRV, _ := resolver.Get(key, wsconfig.ItemWorktreePool)
+		if err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, path, poolRV.Value); err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
 		if wantsJSON(params.Arguments) {
@@ -3533,12 +3540,11 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"session_key":   stringProperty("Caller's lead ws session key (see ws:workflow-manual)."),
 					"base":          stringProperty("Base commit-ish the worktree branch is created on, e.g. the goal branch."),
 					"target_branch": stringProperty("Branch to create (when absent) and check out in the worktree, e.g. impl/<parent>/<slug>."),
 					"format":        stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
-				"required": []string{"session_key", "base", "target_branch"},
+				"required": []string{"base", "target_branch"},
 			},
 		},
 		{
@@ -3547,12 +3553,10 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"session_key": stringProperty("Caller's lead ws session key (see ws:workflow-manual)."),
-					"path":        stringProperty("Absolute worktree path to release. Provide path or key."),
-					"key":         stringProperty("A worker session key bound to the worktree to release. Provide path or key."),
-					"format":      stringProperty(`Optional output format. Use "json" for structured output.`),
+					"path":   stringProperty("Absolute worktree path to release. Provide path or key."),
+					"key":    stringProperty("A worker session key bound to the worktree to release. Provide path or key."),
+					"format": stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
-				"required": []string{"session_key"},
 			},
 		},
 		{

@@ -81,6 +81,10 @@ func init() {
 	RegisterDefaultScope(ItemSageReviewCompletenessTier, ScopeProject)
 	// workflow.lang defaults to global scope: language is a cross-project user preference.
 	RegisterDefaultScope(ItemWorkflowLang, ScopeGlobal)
+	// worktree_pool defaults to project scope: the pool location is a per-project
+	// choice (declared explicitly even though ScopeProject is the fallback, to
+	// keep every item's scope declaration visible in one place).
+	RegisterDefaultScope(ItemWorktreePool, ScopeProject)
 }
 
 // ResolvedValue carries a config item value together with the scope it was
