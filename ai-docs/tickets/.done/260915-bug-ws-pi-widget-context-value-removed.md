@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 21ec7d0d598da603
 sage-review-completeness-reviewed: 21ec7d0d598da603
+completed: 2026-09-15
 ---
 
 # Restore the prefixless context-token value in Pi live agent rows
@@ -49,3 +50,15 @@ The current row model still carries `contextTokens`, and `/audit` still consumes
 ### Phase 1: Restore the prefixless live-row token value
 
 Update both plain and themed live-row rendering to include the existing compact context-token value without the `ctx ` prefix. Replace the tests that currently permit the value to disappear with discriminating assertions that require the value and reject the prefix. Run the focused agent-widget tests and the full Pi adapter test suite.
+
+### Result (682a2718) - 2026-09-15
+
+- Restored the live-row context value with an internal unlabeled formatter: populated values render as `132.4k`, unknown values as `?`, and both plain and themed telemetry retain the field between model/effort and activity. `/audit` continues to use the unchanged labeled `formatContextTokens` formatter.
+- Added discriminating plain and themed assertions for `0.0k` and `132.4k`, the missing-token fallback, the absence of only the `ctx ` prefix, and (review follow-up `520c26c7`) exact-fit 65-column versus 64-column all-or-nothing telemetry behavior.
+- Verification: focused `npm test -- --test-name-pattern='telemetry retains prefixless context values'` passed (58 files, 58 pass); the earlier broader focused set passed (59 files, 59 pass). Full `npm test` ran 1,569 passing tests with one unrelated failure in `test/bridge.test.ts` because its fixed 54-tool assertion observes 56 bundled tools; captured as `260915-bug-pi-bridge-bundled-tool-count` rather than changing unrelated bridge behavior.
+- Review: round 1 correctness clean; round 1 test review found the fit-boundary coverage gap, fixed in `520c26c7`; round 2 verified that fix cleanly with no unresolved observations.
+
+
+## Resolution (2026-09-15)
+
+Phase 1 completed: live Pi agent rows retain the prefixless compact context-token value; independent review completed with its fit-boundary finding fixed. The full suite has one unrelated stale bundled-tool count assertion tracked in 260915-bug-pi-bridge-bundled-tool-count.
