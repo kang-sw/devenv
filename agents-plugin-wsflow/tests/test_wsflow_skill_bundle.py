@@ -347,6 +347,30 @@ class WsflowSkillBundleTest(unittest.TestCase):
             run,
         )
         self.assertIn("Branch-explicit calls (`{{.McpNamespace}}/git.merge`)", run)
+        # Phase 2 opt-in parallel route: the byte-mirror must carry the gated
+        # provisioning approval, the dependency-based batch predicate, the
+        # worktree.acquire/release lifecycle, and the serial git.merge with
+        # cross-worker overlap as a merge stop into the wsflow package.
+        self.assertIn("## Parallel route (opt-in)", run)
+        self.assertIn(
+            "unless the opt-in parallel route below is\napproved for this run", run
+        )
+        self.assertIn("is the single gate, and it authorizes the provisioning itself", run)
+        self.assertIn("Without it, run the serial path unchanged.", run)
+        self.assertIn("The parallel-safety predicate is **dependency**, not file overlap", run)
+        self.assertIn("The approved batch bounds concurrency", run)
+        self.assertIn("{{.McpNamespace}}/worktree.acquire(base: <goal branch>", run)
+        self.assertIn("is the sole branch-creation owner", run)
+        self.assertIn("Render each worker into its worktree and spawn it:", run)
+        self.assertIn("{{.McpNamespace}}/playbook.render(name: <worker playbook chosen from the", run)
+        self.assertIn("`root_override` binds the worker's", run)
+        self.assertIn("you never discover the worker's own spliced key", run)
+        self.assertIn(
+            "serial veto and merge-approval model is unchanged", run
+        )
+        self.assertIn("Merge serially through `{{.McpNamespace}}/git.merge`", run)
+        self.assertIn("cannot resolve is a merge stop: surface it to", run)
+        self.assertIn("{{.McpNamespace}}/worktree.release(key: <that ticket's worker_key>)", run)
 
     def test_bootstrap_scaffolds_emit_converged_output_across_packages(self):
         # Ticket 260825 Phase 4: assert positive convergence. Both packages'
