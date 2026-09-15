@@ -141,8 +141,8 @@ function fittedIndent(width: number, preferred: number, remainder: string): numb
 /**
  * `totalBytes` is `Buffer.byteLength` of the full pre-truncation `source`
  * (the bytes already shown plus the hidden ones, not just the remainder) —
- * i.e. of `physicalPreviewLayout`'s laid-out text: sanitized (ANSI/control
- * chars stripped, tabs expanded, CRLF normalized) and, when
+ * i.e. of `physicalPreviewLayout`'s laid-out text: sanitized (ANSI stripped,
+ * control chars substituted with `?`, tabs expanded, CRLF normalized) and, when
  * `trimOuterWhitespace` is set, outer-trimmed. It is a count of what is
  * actually displayed, not of the raw pre-sanitize tool output, so it can
  * differ from the underlying payload's own byte size for tab- or
