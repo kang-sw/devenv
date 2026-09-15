@@ -213,7 +213,7 @@ func TestTicketsQueryPaginationBoundsTextAndJSONDiscovery(t *testing.T) {
 	}
 	initGit(t, root)
 
-	text := callScopedTool(t, root, 1, "tickets.query", map[string]any{"query": "Shared page"})
+	text := callScopedTool(t, root, 1, "tickets.query", nil)
 	if got := strings.Count(text, "[todo]"); got != 50 {
 		t.Fatalf("default text page has %d tickets, want 50:\n%s", got, text)
 	}
@@ -228,7 +228,7 @@ func TestTicketsQueryPaginationBoundsTextAndJSONDiscovery(t *testing.T) {
 	}
 
 	terminalText := callScopedTool(t, root, 3, "tickets.query", map[string]any{
-		"query": "Shared page", "offset": 50, "limit": 50,
+		"offset": 50, "limit": 50,
 	})
 	if got := strings.Count(terminalText, "[todo]"); got != 5 || !strings.Contains(terminalText, "260051-feat-page") || !strings.Contains(terminalText, "260055-feat-page") {
 		t.Fatalf("terminal text page is not the final five tickets:\n%s", terminalText)
