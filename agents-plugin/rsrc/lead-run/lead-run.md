@@ -19,9 +19,9 @@ Unless the invocation already names a ticket, first check
 for an assignment note in the `active` state — an impl branch retained,
 unmerged, with phases remaining. If one is present, skip the selector and
 continue that ticket directly: check out its retained impl branch and run Spawn
-steps 2–5 for its next phase, with the retained impl branch as the task block's
-Branch line so `{{.McpNamespace}}/route.resolve_implement` returns its
-`continue` verdict and the phase stacks on that branch. An explicit named-ticket
+for its next phase, pointing the task block's Branch line at that retained impl
+branch so `{{.McpNamespace}}/route.resolve_implement` returns its `continue`
+verdict and the phase stacks on that branch. An explicit named-ticket
 invocation still wins over an active assignment. A `blocked` assignment is not
 auto-continued: it waits on the user.
 
@@ -131,9 +131,8 @@ ticket and persists across phases: the next phase stacks on it because
 `{{.McpNamespace}}/route.resolve_implement` returns a `continue` verdict while
 that branch still exists.
 
-With `completion: phase`, do not merge. Mark the note `active` (impl branch
-retained, unmerged, phases remain), leave the ticket active for a later cycle,
-and go to **End the turn**. A per-phase merge is not the default: it would
+With `completion: phase`, do not merge. Mark the note `active`, leave the ticket
+active for a later cycle, and go to **End the turn**. A per-phase merge is not the default: it would
 delete the deterministic impl branch and force the next phase to re-create the
 same name. Merge mid-ticket only when a landing is actually needed — a dependent
 ticket blocked on this phase — through the same user-approval gate a completion
