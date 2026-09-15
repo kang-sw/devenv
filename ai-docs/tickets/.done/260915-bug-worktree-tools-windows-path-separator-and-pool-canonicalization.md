@@ -61,5 +61,8 @@ only.
   additionally trips manifest/rsrc tests that resolve sibling `agents-plugin*`
   trees not present in the partial copy — unrelated to this change and green on a
   full checkout (CI).
-- Authoritative full-Windows confirmation is the ws/wsflow 0.46.7 hotfix ship's
-  `ws-mcp release` Windows smoke gate.
+- Authoritative full-Windows confirmation: the ws/wsflow 0.46.7 hotfix ship's
+  `ws-mcp release` run (34953277510) is green — both the "Windows ws-mcp smoke"
+  and "Build ws-mcp assets" jobs succeeded, and the v0.46.7 GitHub release
+  published all platform binaries. The Windows smoke gate that 0.46.6 tripped
+  now passes.
