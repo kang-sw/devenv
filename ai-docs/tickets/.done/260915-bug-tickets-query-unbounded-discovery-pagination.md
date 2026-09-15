@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: c5c373382a9f814c
 sage-review-completeness-reviewed: c5c373382a9f814c
+completed: 2026-09-16
 ---
 
 # Bound tickets.query discovery output with deterministic offset pagination
@@ -53,3 +54,11 @@ The current discovery result is deterministic: it scans tickets in ticket-status
 ### Phase 1: Add bounded offset pagination to discovery queries
 
 Implement and validate the two inputs at the MCP boundary, slice the fully filtered and sorted discovery result, and keep the point-resolve branch untouched. Pin both text and JSON behavior, including the default 50-item cap and explicit next-page calls. Run the focused ticket-query tests and the full Go test suite.
+
+### Result (2053ec32) - 2026-09-15
+
+Added validated discovery-only `offset`/`limit` inputs, with defaults of 0/50 and a limit range of 1 through 200. `TicketsFind` now slices only after existing filters and deterministic status-rank/stem ordering; its zero-value options remain unbounded for non-MCP internal callers, while `tickets.query` supplies the bounded default. The exact `ticket_stem` point-resolve branch remains ahead of pagination parsing and retains its object/error behavior.
+
+Published schema and description text document the defaults, range, ordering basis, and `offset + limit` next-page rule. Tests cover filtered ordering, default unfiltered and filtered caps, text and bare-array JSON projections, full and terminal pages, accepted endpoints, invalid integer/range inputs, and existing point-resolve behavior.
+
+Verification: `go test ./internal/wsdoc -run 'TestTickets' -count=1`; `go test ./internal/mcp -run 'TestTickets|TestServeStdioTicketsQuery' -count=1`; `go test ./...`; `scripts/smoke-ws-mcp.sh ..` all passed. Partitioned review found correctness and fit clean; test review's Important request for an unfiltered >50-ticket case was fixed in `bbef57f3`, and round 2 confirmed it clean.
