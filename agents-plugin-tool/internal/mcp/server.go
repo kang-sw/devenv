@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1224,6 +1225,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// The explicit-stem form is a resolution query and must report a
 		// hidden-but-found ticket; the free-text query form stays a discovery
 		// surface, filesystem-only plus the aggregate hidden count below.
+		offset, limit, err := ticketDiscoveryPagination(params.Arguments)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		resolve := strings.TrimSpace(ticketStem) != ""
 		result, err := wsdoc.TicketsFind(root, wsdoc.TicketFindOptions{
 			Statuses:           statuses,
@@ -1232,6 +1237,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			Query:              query,
 			TicketStem:         ticketStem,
 			MentionsTicketStem: mentionsTicketStem,
+			Offset:             offset,
+			Limit:              limit,
 			Resolve:            resolve,
 		})
 		if wantsJSON(params.Arguments) {
@@ -3704,7 +3711,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.query",
-			"description": "Query ticket paths by text query, ticket stem, or mentions of another ticket stem. A ticket_stem given alone (no query, no mentions_ticket_stem, no statuses) point-resolves that ticket and returns its status metadata, erroring if the stem is not found; otherwise this is a discovery search. The point-resolve projection also carries a dispatch_blocked {blocking_stem, reason} field, computed live, when the ticket declares a blocked-by: prerequisite that has not landed (the producer is not yet in .done/, or its named phase carries no ### Result); it is absent otherwise and never on a discovery listing. Defaults to compact text; use format=json for structured metadata.",
+			"description": "Query ticket paths by text query, ticket stem, or mentions of another ticket stem. A ticket_stem given alone (no query, no mentions_ticket_stem, no statuses) point-resolves that ticket and returns its status metadata, erroring if the stem is not found; this exact form remains unpaginated. Otherwise this is a discovery search, paginated after all filters in deterministic status-rank and ticket-stem order: offset defaults to 0; limit defaults to 50 and accepts 1 through 200; request the next page with offset + limit. The point-resolve projection also carries a dispatch_blocked {blocking_stem, reason} field, computed live, when the ticket declares a blocked-by: prerequisite that has not landed (the producer is not yet in .done/, or its named phase carries no ### Result); it is absent otherwise and never on a discovery listing. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -3714,7 +3721,20 @@ func tools() []map[string]any {
 					"query":                stringProperty("Optional case-insensitive text query."),
 					"ticket_stem":          stringProperty("Optional exact ticket stem. Given alone, point-resolves that ticket."),
 					"mentions_ticket_stem": stringProperty("Optional ticket stem that result tickets must mention."),
-					"format":               stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+					"offset": map[string]any{
+						"type":        "integer",
+						"description": "Discovery result offset after filtering and deterministic ordering. Defaults to 0.",
+						"default":     0,
+						"minimum":     0,
+					},
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Maximum discovery results to return. Defaults to 50; accepts 1 through 200.",
+						"default":     50,
+						"minimum":     1,
+						"maximum":     200,
+					},
+					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},
 		},
@@ -4327,6 +4347,48 @@ func stringListKeepBlank(value any) []string {
 func boolArgument(value any) bool {
 	result, _ := value.(bool)
 	return result
+}
+
+func ticketDiscoveryPagination(arguments map[string]any) (int, int, error) {
+	offset, err := exactIntegerArgument(arguments, "offset", 0)
+	if err != nil {
+		return 0, 0, err
+	}
+	if offset < 0 {
+		return 0, 0, fmt.Errorf("offset must be at least 0")
+	}
+	limit, err := exactIntegerArgument(arguments, "limit", 50)
+	if err != nil {
+		return 0, 0, err
+	}
+	if limit < 1 || limit > 200 {
+		return 0, 0, fmt.Errorf("limit must be between 1 and 200")
+	}
+	return offset, limit, nil
+}
+
+func exactIntegerArgument(arguments map[string]any, name string, fallback int) (int, error) {
+	raw, ok := arguments[name]
+	if !ok {
+		return fallback, nil
+	}
+	var value float64
+	switch typed := raw.(type) {
+	case float64:
+		value = typed
+	case int:
+		value = float64(typed)
+	default:
+		return 0, fmt.Errorf("%s must be an integer", name)
+	}
+	if math.IsNaN(value) || math.IsInf(value, 0) || math.Trunc(value) != value {
+		return 0, fmt.Errorf("%s must be an integer", name)
+	}
+	maxInt := int(^uint(0) >> 1)
+	if value >= float64(maxInt) {
+		return maxInt, nil
+	}
+	return int(value), nil
 }
 
 func hasSpecStemArgument(arguments map[string]any) bool {

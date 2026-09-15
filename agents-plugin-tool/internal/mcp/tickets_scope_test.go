@@ -203,6 +203,129 @@ func TestTicketsListScopeAnnotationSuppressedWhenFilterSelectsNothing(t *testing
 	}
 }
 
+func TestTicketsQueryPaginationBoundsTextAndJSONDiscovery(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	for i := 1; i <= 55; i++ {
+		stem := fmt.Sprintf("260%03d-feat-page", i)
+		mustWrite(t, root, "ai-docs/tickets/todo/"+stem+".md", fmt.Sprintf("---\ntitle: Page %d\n---\n# Shared page\n", i))
+	}
+	initGit(t, root)
+
+	text := callScopedTool(t, root, 1, "tickets.query", nil)
+	if got := strings.Count(text, "[todo]"); got != 50 {
+		t.Fatalf("default text page has %d tickets, want 50:\n%s", got, text)
+	}
+
+	defaultJSON := callScopedTool(t, root, 2, "tickets.query", map[string]any{"query": "Shared page", "format": "json"})
+	var defaultPage []map[string]any
+	if err := json.Unmarshal([]byte(defaultJSON), &defaultPage); err != nil {
+		t.Fatalf("default JSON page is not a bare array: %v\n%s", err, defaultJSON)
+	}
+	if len(defaultPage) != 50 {
+		t.Fatalf("default JSON page length = %d, want 50", len(defaultPage))
+	}
+
+	terminalText := callScopedTool(t, root, 3, "tickets.query", map[string]any{
+		"offset": 50, "limit": 50,
+	})
+	if got := strings.Count(terminalText, "[todo]"); got != 5 || !strings.Contains(terminalText, "260051-feat-page") || !strings.Contains(terminalText, "260055-feat-page") {
+		t.Fatalf("terminal text page is not the final five tickets:\n%s", terminalText)
+	}
+
+	secondJSON := callScopedTool(t, root, 4, "tickets.query", map[string]any{
+		"query": "Shared page", "offset": 20, "limit": 20, "format": "json",
+	})
+	var secondPage []map[string]any
+	if err := json.Unmarshal([]byte(secondJSON), &secondPage); err != nil {
+		t.Fatalf("second JSON page is not a bare array: %v\n%s", err, secondJSON)
+	}
+	if len(secondPage) != 20 || secondPage[0]["stem"] != "260021-feat-page" || secondPage[19]["stem"] != "260040-feat-page" {
+		t.Fatalf("second JSON page = %#v", secondPage)
+	}
+
+	terminalJSON := callScopedTool(t, root, 5, "tickets.query", map[string]any{
+		"query": "Shared page", "offset": 40, "limit": 20, "format": "json",
+	})
+	var terminalPage []map[string]any
+	if err := json.Unmarshal([]byte(terminalJSON), &terminalPage); err != nil {
+		t.Fatalf("terminal JSON page is not a bare array: %v\n%s", err, terminalJSON)
+	}
+	if len(terminalPage) != 15 || terminalPage[0]["stem"] != "260041-feat-page" || terminalPage[14]["stem"] != "260055-feat-page" {
+		t.Fatalf("terminal JSON page = %#v", terminalPage)
+	}
+
+	for id, limit := range []int{1, 200} {
+		pageJSON := callScopedTool(t, root, id+6, "tickets.query", map[string]any{
+			"query": "Shared page", "limit": limit, "format": "json",
+		})
+		var page []map[string]any
+		if err := json.Unmarshal([]byte(pageJSON), &page); err != nil {
+			t.Fatalf("limit %d JSON page is not a bare array: %v\n%s", limit, err, pageJSON)
+		}
+		want := limit
+		if want > 55 {
+			want = 55
+		}
+		if len(page) != want {
+			t.Fatalf("limit %d page length = %d, want %d", limit, len(page), want)
+		}
+	}
+}
+
+func TestTicketsQueryPaginationRejectsInvalidDiscoveryArguments(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/tickets/todo/260101-feat-page.md", "---\ntitle: Page\n---\n# Page\n")
+	initGit(t, root)
+
+	cases := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{name: "negative offset", args: map[string]any{"offset": -1}, want: "offset must be at least 0"},
+		{name: "fractional offset", args: map[string]any{"offset": 1.5}, want: "offset must be an integer"},
+		{name: "string offset", args: map[string]any{"offset": "1"}, want: "offset must be an integer"},
+		{name: "zero limit", args: map[string]any{"limit": 0}, want: "limit must be between 1 and 200"},
+		{name: "negative limit", args: map[string]any{"limit": -1}, want: "limit must be between 1 and 200"},
+		{name: "oversized limit", args: map[string]any{"limit": 201}, want: "limit must be between 1 and 200"},
+		{name: "fractional limit", args: map[string]any{"limit": 1.5}, want: "limit must be an integer"},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			text := callScopedTool(t, root, i+1, "tickets.query", tc.args)
+			if !strings.Contains(text, tc.want) {
+				t.Fatalf("response missing %q:\n%s", tc.want, text)
+			}
+		})
+	}
+}
+
+func TestTicketsQueryPaginationSchemaDocumentsContract(t *testing.T) {
+	useLeadProfile(t)
+	server := NewServer(t.TempDir(), "test")
+	list := callToolsList(t, server)
+	properties := toolPropertiesByName(t, list, "tickets.query")
+
+	offset, _ := properties["offset"].(map[string]any)
+	if offset["type"] != "integer" || offset["default"] != float64(0) || offset["minimum"] != float64(0) {
+		t.Fatalf("offset schema = %#v", offset)
+	}
+	limit, _ := properties["limit"].(map[string]any)
+	if limit["type"] != "integer" || limit["default"] != float64(50) || limit["minimum"] != float64(1) || limit["maximum"] != float64(200) {
+		t.Fatalf("limit schema = %#v", limit)
+	}
+
+	entry := toolEntryTextByName(t, list, "tickets.query")
+	for _, want := range []string{"status-rank and ticket-stem order", "defaults to 50", "1 through 200", "offset + limit"} {
+		if !strings.Contains(entry, want) {
+			t.Fatalf("tickets.query schema/description missing %q:\n%s", want, entry)
+		}
+	}
+}
+
 // TestTicketsCloseDeliversPartialMutationNoticeOverMCP pins the delivery path,
 // not the notice text. wsdoc.TicketsClose populates PartialMutationNotice when
 // its non-idempotent writes landed before the git move failed, but the tool case
