@@ -155,6 +155,51 @@ and continues the next phase, (d) the continue verdict is emitted and a
 single-phase ticket is unchanged (one merge at its only completion). Mirror-drift
 test in `agents-plugin-wsflow`.
 
+### Result (260dd93) - 2026-09-15
+
+Landed the phase-completion default change in `lead-run`. On `stop: none` +
+`completion: phase` the lead no longer merges: it marks the assignment note
+`active` (impl branch retained, unmerged, phases remain), leaves the ticket
+active, and ends with the new continue verdict; the next phase stacks on the
+deterministic impl branch via `route.resolve_implement`'s existing `continue`
+verdict. Merge stays user-gated (`merge_confirm` skip/ask) and fires only at
+`completion: ticket` or a deliberate, need-driven mid-ticket landing — no
+auto-merge added. Select gained active-assignment continue-detection
+(`session.children`, scope `control`) that skips `ticket-selector`; named-ticket
+invocation still wins and `blocked` is not auto-continued. Note lifecycle:
+`dispatched` → `active` → `merged`/`blocked`.
+
+- Edited `agents-plugin/rsrc/lead-run/lead-run.md` (Select, Spawn step 4 note
+  lifecycle, Handle the report, End the turn).
+- Mirrored byte-identically to `agents-plugin-wsflow/rsrc/` and
+  `agents-plugin-pi/rsrc/` (three mirror consumers, not two — `agents-plugin-pi`
+  hand-mirrors `agents-plugin/rsrc` under `TestPiMirrorUpToDate`); manifests
+  regenerated for all three.
+- Tests: added `test_run_defers_phase_merge_and_continues_active_assignment`
+  (agents-plugin) covering (a)–(d); updated the stale phase-wording assertions in
+  `test_workers_report_and_lead_owns_impl_merge` (agents-plugin),
+  `test_wsflow_run_and_stop_protocol_carry_merge_obligation_text` (wsflow), and
+  the rendered-policy `TestPlaybookPrintLeadRunWorkerTierPolicy` (Go, ws+wsflow).
+
+Verification: `python3 -m unittest discover agents-plugin/tests` (70 ok);
+`python3 -m unittest discover agents-plugin-wsflow/tests` (12 ok);
+`go test ./... -count=1` in `agents-plugin-tool` (14 packages ok, incl.
+`TestPiMirrorUpToDate`, `TestWsflowRsrcMirrorUpToDate`, manifest guards).
+
+Review: partitioned correctness/fit/test — round 1 all `clean` with one Minor
+each (Select continue-path wording; thrice-restated `active`-state gloss;
+duplicate assertions across two Python methods). Fixed the first two (commit
+f820319f); kept the duplicate assertions as distinct contracts. Round 2 verifier
+`clean`, no remaining findings; one cosmetic long-line observation reflowed
+(commit 260dd93).
+
+Decisions taken (all recorded in commit `## AI Context`, none escalated): kept
+the existing `merge_confirm: skip` goal-run auto-merge path (decision 2 rejects
+*adding* auto-merge, not removing the existing goal gate); encoded note states
+as freeform note text per the ticket's "exact markers are an autonomous choice";
+resynced the third (`agents-plugin-pi`) mirror the ticket's Constraints did not
+name.
+
 ### Phase 2: Guarantee impl-branch deletion on mid-ticket merge
 
 Make impl-branch deletion a guarantee so a same-ticket phase re-entered after a
