@@ -267,7 +267,11 @@ describe("createDispatchToolPreview", () => {
     for (let i = 0; i < 10; i++) {
       assert.match(bodyLines[i]!, new RegExp(`line-${i}$`), `row ${i} of the body must be the ${i}-th input line`);
     }
-    assert.equal(bodyLines[10], "...", "the 11th body row is the truncation marker, not an 11th content line");
+    assert.equal(
+      bodyLines[10],
+      `...[${Buffer.byteLength(longAnswer)} bytes total]`,
+      "the 11th body row is the truncation marker (total byte count of the full 15-line answer), not an 11th content line",
+    );
     assert.ok(!lines.join("\n").includes("line-10"), "line-10 (the 11th input line) must be cut by the cap — proving it was actually applied, not just present under a big enough budget");
   });
 
