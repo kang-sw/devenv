@@ -776,16 +776,17 @@ cleared on settle, stop, exit or spawn failure.
 lead, fork, and worker. It returns exactly `{ agent_id, alias }` after the
 initial RPC prompt is accepted; the record parks, resumes through
 `ws-agent-send`, persists through the sidecar, and its settle `last_message` is
-an exploration answer. Omission defaults to `code-search`.
+an exploration answer. Omission defaults to `search`.
 
-Mode selects only an existing harness-`pi` tier alias: `lookup`, `code-search`,
-and `history-search` use `small`; `docs-search`, `web-search`, `diagnosis`, and
-`comparison` use `medium`; `synthesis` uses `large`. Every mode otherwise uses
-the same bundled researcher guide, `read-only-explore` profile, bounded web
-capabilities, persistent RPC/session lifecycle, continuation path, and subtree
-rules. No mode inherits the dispatcher's model/effort or automatically selects
-`xlarge`. Missing, malformed, unknown, or unauthenticated mapped tiers fail
-before guard, alias, registry, or storage allocation.
+Mode selects only an existing harness-`pi` tier alias, in public ladder order:
+`lookup` and `search` use `small`; `investigation` uses `medium`;
+`deep-research` uses `large`; `high-assurance-research` uses `xlarge`.
+Every mode otherwise uses the same bundled researcher guide,
+`read-only-explore` profile, bounded web capabilities, persistent RPC/session
+lifecycle, continuation path, and subtree rules. No mode inherits the
+dispatcher's own model/effort; `high-assurance-research` is the only mode that
+selects the `xlarge` tier. Missing, malformed, unknown, or unauthenticated
+mapped tiers fail before guard, alias, registry, or storage allocation.
 
 The mode is immutable on the record and in the child role environment. The
 initial launch records the model and actual accepted effort, including Pi
