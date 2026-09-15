@@ -553,6 +553,43 @@ func TestResolveImplementMergeTargetPolicyIgnoredOutsideImplementBranchWarns(t *
 	}
 }
 
+// TestResolveImplementMergeTargetPolicyIgnoredOnRecreateWarns proves the
+// merge_target-ignored warning also fires through resolveImplement on the
+// "recreate" branch-plan action (a fully-landed leftover target impl branch),
+// not just on "create". Commit bc00285e broadened the guard in resolveImplement
+// from Action == "create" to Action == "create" || Action == "recreate"; this
+// test drives the recreate disjunct end-to-end rather than asserting on
+// deriveImplementBranchPlan directly.
+func TestResolveImplementMergeTargetPolicyIgnoredOnRecreateWarns(t *testing.T) {
+	input := implementInput{
+		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 2", ScopeSlug: "next", TicketStem: "260900-feat-next-phase"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
+			},
+		},
+		Policy: implementPolicyInput{
+			Branch: implementBranchPolicyInput{MergeTarget: factString{Value: "master", Present: true}},
+		},
+	}
+	slug := wskey.Derive("260900-feat-next-phase", 3)
+	target := "impl/develop/" + slug
+
+	obs := implementBranchObservation{CurrentBranch: "develop", StartCommit: "abc123", TargetExists: true, TargetAheadOfMergeRoot: 0}
+	result := resolveImplement(input, factsFromTicket(input), obs)
+	if result.Verdict.BranchPlan.Action != "recreate" {
+		t.Fatalf("action = %q, want recreate; plan=%+v", result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)
+	}
+	if result.Verdict.BranchPlan.TargetBranch != target {
+		t.Fatalf("target branch = %q, want %q", result.Verdict.BranchPlan.TargetBranch, target)
+	}
+	wantWarning := `policy.branch.merge_target "master" ignored (not on an implementation branch: impl/*, or legacy implement/*); derived from current branch "develop"`
+	if !containsString(result.Warnings, wantWarning) {
+		t.Fatalf("warnings missing ignored merge_target note on recreate: %v", result.Warnings)
+	}
+}
+
 func TestResolveImplementMergeTargetPolicyHonoredOnImplementBranchNoWarning(t *testing.T) {
 	input := implementInput{
 		Target: implementTargetInput{Kind: "inline", Label: "tiny edit", ScopeLabel: "tiny edit", ScopeSlug: "tiny-edit"},
