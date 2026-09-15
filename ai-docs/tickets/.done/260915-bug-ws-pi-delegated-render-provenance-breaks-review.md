@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: a0d26f92ac62e916
 sage-review-completeness-reviewed: a0d26f92ac62e916
+completed: 2026-09-15
 ---
 
 # Restore trusted delegated-playbook rendering for Pi workers
@@ -62,3 +63,13 @@ Together these defects block required review or weaken the promise that edited p
 ### Phase 1: Route workers through structured reviewer wrappers and close the verified-prompt race
 
 Make every ticket-worker variant and its review todo route `single` to the structured `reviewer` wrapper and each correctness, fit, or test partition to its structured `code-review-<partition>` wrapper; regenerate the required wsflow and Pi mirrors, and pin the rendered procedure. In Pi nested spawn, capture immutable verified prompt bytes at admission and use those bytes for child-home creation after asynchronous model resolution, never rereading the caller-controlled rendered path. Add discriminating tests for the wrapper route, accepted reviewer provenance with its exact findings-file grant, rejection before admission, and mutation after admission. Run the focused playbook/MCP and Pi adapter tests plus their full suites.
+
+### Result (92a58085) - 2026-09-15
+
+- Worker variants and their wsflow/Pi mirrors now name the structured full-scope and partition wrappers; generated review todos identify each selected partition's wrapper. The flat shared include remains ineligible for delegated-role provenance.
+- Admission hashes one byte read and carries an immutable base64 snapshot. Spawn captures a private Buffer before asynchronous model resolution and writes those bytes plus the existing adapter lifecycle guide into the child home. Persisted render metadata excludes snapshots; restoration revalidates disk and admission produces a fresh snapshot. Record-time digest and session-key extraction also share one read.
+- Regression coverage drives the real registered nested spawn tool through all four wrappers, verifies exact findings-file grants, rejects copied/edited prompts and invalid grants before allocation, and deterministically mutates the prompt while model resolution is paused. Byte-identity assertions include non-ASCII and invalid UTF-8 bytes. Rendered worker and MCP todo tests pin wrapper selection.
+- Verification: focused MCP/wsrsrc tests, focused Pi spawner/reviewer tests, full `go test ./...`, `go build ./cmd/ws-mcp`, `scripts/smoke-ws-mcp.sh ..`, 12 wsflow package tests, and `git diff --check` passed. This checkout initially lacked local dependencies; `npm ci --no-audit --no-fund` repaired the Explore probe environment without source/test workarounds. Existing dependency deprecation warnings were unchanged.
+- Full Pi `npm test -- --test-reporter=dot` ran; its sole failing assertion is the unrelated pre-existing `test/bridge.test.ts:112` hardcoded 54-tool count versus the bundled runtime's 56. No tool-inventory contract was changed. Full-suite evidence is not claimed green.
+- Independent correctness and test reviews were clean in round 1. Fit's sole round-1 finding was rejected using the skill-authoring Layer Model's explicit delegate-prompt exemption and this ticket's required mapping; round 2 confirmed the disposition and returned clean. The required live nested reviewer dispatch itself succeeded for all three partitions with exact generated findings-file grants.
+- Decisions: retain metadata-only persistence and use an admission-only immutable byte snapshot, rather than trusting persisted prompt contents or rereading the source path at launch. No trust, capability, depth, or write-scope checks were relaxed. No implementation scope was omitted; the unrelated full-suite assertion remains a verification limitation.
