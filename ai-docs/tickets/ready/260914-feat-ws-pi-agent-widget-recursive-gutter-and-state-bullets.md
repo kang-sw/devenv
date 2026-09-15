@@ -20,7 +20,7 @@ sage-review-completeness-reviewed: dda9caa86520a977
 |---|---|---|
 | scope.span | multi-file | agents-plugin-pi/src/agent-widget.ts (primary), agents-plugin-pi/src/audit.ts (reuses agent-widget.ts's exported row/state helpers) |
 | scope.surface | public-interface | agent-widget.ts exports AgentRow, AGENT_STATE_LABEL, formatContextTokens, classifyRegistryRowState, rowName — imported/reused by audit.ts:28 |
-| scope.new_public_symbol | likely | a bullet-glyph-by-state helper; exact name unfixed |
+| scope.new_public_symbol | yes | a bullet-glyph-by-state helper; exact name unfixed |
 | scope.new_type_contract | yes | AgentRow gains a per-row activity-time field and loses the standalone ctx display use |
 | scope.test_surface | existing | test/agent-widget.test.ts and test/audit.test.ts cover buildAgentRows/buildWidgetLines/buildHeadingLine with fake registries |
 | complexity.reuse_points | confirmed | lastActivityAt (spawner.ts:2557) and formatContextTokens (agent-widget.ts:279-281) are reused as-is for activity-time / ctx-removal; state classification already exists via classifyRegistryRowState |
