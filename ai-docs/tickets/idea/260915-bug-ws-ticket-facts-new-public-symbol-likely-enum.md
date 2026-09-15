@@ -1,44 +1,69 @@
 ---
-title: "Ticket fact population emits out-of-enum scope.new_public_symbol value (likely)"
+title: "Harden route-fact enum handling: an out-of-enum scope.new_public_symbol collapses the whole facts table to unknown"
+related:
+  260915-feat-ws-worktree-pool-default-out-of-tree: same worktree-run dogfood session
 ---
 
-# Ticket fact population emits out-of-enum `scope.new_public_symbol` value
+# Harden route-fact enum handling for out-of-enum values
 
 ## Observed
 
-During a parallel `ws:lead-run` batch (2026-09-15), two independently
-authored `ready/` tickets both carried a `## Route Facts` row
-`scope.new_public_symbol | likely`. The route parser accepts only
-`yes` / `no` / `unknown` for this fact, so `route.resolve_implement`
-rejected the entire facts table and every fact fell back to `unknown`
-("route facts missing (unreadable)"). Both workers correctly stopped
-`stop: c` at Execute step 1 rather than re-deriving facts.
+During a parallel `ws:lead-run` batch (2026-09-15), two independently authored
+`ready/` tickets carried a `## Route Facts` row
+`scope.new_public_symbol | likely`. `likely` is outside the accepted enum
+(`yes` / `no` / `unknown`). Both workers stopped `stop: c` at Execute step 1
+because `route.resolve_implement`'s verdict reported the route facts as
+effectively missing/unreadable — **every** fact resolved to `unknown`, not just
+the offending cell.
 
-Affected tickets (fixed inline on their impl branches, `likely` -> `yes`):
-- `260914-feat-ws-pi-agent-widget-recursive-gutter-and-state-bullets`
-- `260914-feat-ws-pi-mailbox-native-steer-push`
+**The data defect is already fixed inline** on the two tickets during the run
+(`likely → yes`, evidence-backed; commits 27e23e15, 69f885d2). What remains is
+the robustness question below.
+
+## Code findings (2026-09-15, verified against source)
+
+- The parser `ticketRouteFacts`
+  (`agents-plugin-tool/internal/wsdoc/tickets.go:562`) is **tolerant**: it
+  reads the first two columns and stores every value **verbatim**
+  (`facts["scope.new_public_symbol"] = "likely"`). It does not validate the
+  enum and does not reject the table on a bad cell.
+- Therefore the "one bad cell → whole table becomes `unknown`" collapse lives
+  **downstream in `route.resolve_implement`'s fact normalization**, not in the
+  markdown parser. (Confirm the exact normalizer site during implementation.)
 
 ## Why it matters
 
-`likely` is a plausible natural-language hedge a fact-populating author
-(human or `ticket-fact-populator`) reaches for when a new symbol is
-intended but its name is unfixed. Because it silently invalidates the
-whole table (not just one cell), it turns a ready ticket into a hard
-worker stop, wasting a dispatch — and in a parallel batch it wasted two.
+`likely` is a natural hedge an author (or `ticket-fact-populator`) reaches for
+when a new symbol is intended but unnamed. Because the downstream normalizer
+collapses the *entire* table on a single out-of-enum value, one typo turns a
+ready ticket into a hard worker stop and wastes a dispatch — twice, in a
+parallel batch.
 
-## Candidate follow-ups (pick during triage)
+## Decision needed (this is not a mechanical fix)
 
-- Make `ticket-fact-populator` / the ticket-authoring path constrain
-  `scope.new_public_symbol` to the `yes/no/unknown` enum at authoring
-  time (reject/normalize `likely` and similar hedges).
-- Consider whether the route parser should fail *per-cell* (flag the one
-  bad cell) instead of collapsing the entire table to `unknown`, so a
-  single typo does not erase valid facts.
-- Consider a ticket-authoring lint / `tickets.verify` check for
-  out-of-enum Route Facts values before a ticket reaches `ready/`.
+Two enforcement points, and the ticket owner must choose one or both:
+
+1. **Authoring-time validation** — have `ticket-fact-populator` / the
+   ticket-authoring path constrain `scope.new_public_symbol` (and peers) to the
+   enum, rejecting or normalizing `likely`-style hedges before a ticket is
+   written.
+2. **Route-normalizer tolerance** — change `route.resolve_implement` to fail
+   **per-cell** (flag the one bad fact, keep the rest) instead of collapsing the
+   whole table to `unknown`. This is a behavior change to the routing contract
+   and needs its own care.
+
+A cheap third: a `tickets.verify` lint for out-of-enum Route Facts before
+`ready/`.
+
+## Verification (implementation-time)
+
+- Unit: a table with one out-of-enum cell resolves the *other* facts correctly
+  (per-cell path), or is rejected at authoring time (validation path).
+- Existing `route.resolve_implement` / ticket-fact suites stay green.
 
 ## Notes
 
-Captured under the "Dogfood surprises get captured" discipline; no
-design commitment implied. Route-parser vs. authoring-side enforcement
-is the open triage question.
+Captured under the "Dogfood surprises get captured" discipline. Sibling
+same-session tickets:
+`260915-bug-ws-tickets-close-operates-on-server-cwd-not-worktree` (investigation),
+`260915-bug-ws-route-resolve-implement-branch-handling-random-codename`.
