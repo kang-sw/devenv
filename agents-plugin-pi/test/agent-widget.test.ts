@@ -10,7 +10,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
-import { buildAgentRows, buildWidgetLines, createAgentWidgetController, shouldArmAgentWidget, AGENT_STATUS_KEY, AGENT_WIDGET_KEY, AGENT_WIDGET_ROW_CAP, AGENT_WIDGET_ATTENTION_TICK_MS, AGENT_WIDGET_TICK_MS } from "../src/agent-widget.ts";
+import { buildAgentRows, buildWidgetLines, createAgentWidgetController, shouldArmAgentWidget, AGENT_STATE_BULLET, AGENT_STATUS_KEY, AGENT_WIDGET_KEY, AGENT_WIDGET_ROW_CAP, AGENT_WIDGET_ATTENTION_TICK_MS, AGENT_WIDGET_TICK_MS, type AgentRowState } from "../src/agent-widget.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "../src/spawner.ts";
 import type { ThreadRecord } from "../src/ask.ts";
 import { visibleWidth } from "../src/text-width.ts";
@@ -106,6 +106,14 @@ describe("buildAgentRows", () => {
     const rows = buildAgentRows(registryOf(r), [], NOW);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].state, "awaiting-approval");
+  });
+
+  test("review round 1 Important: waiting-on-children and pending-delivery are classified as their own distinct, otherwise-untested states", () => {
+    const waiting = record({ agentId: "50000000-0000-0000-0000-000000000000", waitingOnChildren: true });
+    const delivering = record({ agentId: "60000000-0000-0000-0000-000000000000", terminalDelivery: { state: "held" } });
+    const rows = buildAgentRows(registryOf(waiting, delivering), [], NOW);
+    assert.equal(rows.find((r) => r.name === "50000000")!.state, "waiting-on-children");
+    assert.equal(rows.find((r) => r.name === "60000000")!.state, "pending-delivery");
   });
 
   test("a threadBound record renders even while dormant (no live client) — the owner's action cue must not disappear", () => {
@@ -258,6 +266,14 @@ describe("buildWidgetLines", () => {
     assert.ok(semanticCalls.some(([color, text]) => color === "error" && text === "▲ "), "the approval bullet is colored too, but statically (STATE_BULLET_COLOR), never bold, never joining the attention cycle");
     assert.ok(!animated[0].slice(animated[0].indexOf(" · fork")).includes("[1m"), "role, elapsed, telemetry, and separators stay plain");
     assert.ok(!animated[1].includes("[1m"), "approval remains entirely ordinary even beside an animated question");
+  });
+
+  test("review round 1 Important: every AgentRowState's bullet glyph matches AGENT_STATE_BULLET on the rendered row, including waiting-on-children and pending-delivery which no other test exercises", () => {
+    const rowFor = (state: AgentRowState) => ({ name: "r", role: "worker" as const, state, elapsedMs: 0, lastActivityMs: 0 });
+    for (const state of Object.keys(AGENT_STATE_BULLET) as AgentRowState[]) {
+      const line = buildWidgetLines([rowFor(state)], 0, 80)![0];
+      assert.ok(line.startsWith(`${AGENT_STATE_BULLET[state]} `), `state=${state}: the row leads with its own state bullet ("${AGENT_STATE_BULLET[state]}"), not another state's glyph`);
+    }
   });
 
   test("an owner-held row without qN receives an honest labeled inspection presentation", () => {
