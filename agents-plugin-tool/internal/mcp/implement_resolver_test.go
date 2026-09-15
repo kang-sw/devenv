@@ -1,6 +1,8 @@
 package mcp
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -357,6 +359,105 @@ func TestResolveImplementAheadOfMergeRootInertOnCreatePath(t *testing.T) {
 	}
 }
 
+func TestResolveImplementCreatePathLeftoverBranch(t *testing.T) {
+	input := implementInput{
+		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 2", ScopeSlug: "next", TicketStem: "260900-feat-next-phase"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:    factString{Value: "multi-file", Present: true},
+				Surface: factString{Value: "public-interface", Present: true},
+			},
+		},
+		Policy: implementPolicyInput{
+			Branch: implementBranchPolicyInput{AllowRename: factString{Value: "yes", Present: true}},
+		},
+	}
+	slug := wskey.Derive("260900-feat-next-phase", 3)
+	target := "impl/develop/" + slug
+
+	t.Run("fully-landed remnant recreates and never emits a raw switch -c", func(t *testing.T) {
+		obs := implementBranchObservation{CurrentBranch: "develop", StartCommit: "abc123", TargetExists: true, TargetAheadOfMergeRoot: 0}
+		result := resolveImplement(input, factsFromTicket(input), obs)
+		if result.Verdict.BranchPlan.Action != "recreate" {
+			t.Fatalf("action = %q, want recreate; plan=%+v", result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)
+		}
+		if result.Verdict.BranchPlan.TargetBranch != target {
+			t.Fatalf("target branch = %q, want %q", result.Verdict.BranchPlan.TargetBranch, target)
+		}
+		for _, want := range []string{"Delete the leftover", "git branch -d", target, "develop"} {
+			if !strings.Contains(result.NextInstruction, want) {
+				t.Fatalf("next instruction missing %q: %q", want, result.NextInstruction)
+			}
+		}
+		if strings.Contains(result.NextInstruction, "switch -c") {
+			t.Fatalf("recreate must not hand the worker a raw switch -c: %q", result.NextInstruction)
+		}
+	})
+
+	t.Run("leftover ahead of merge root stops without discarding work", func(t *testing.T) {
+		obs := implementBranchObservation{CurrentBranch: "develop", StartCommit: "abc123", TargetExists: true, TargetAheadOfMergeRoot: 4}
+		result := resolveImplement(input, factsFromTicket(input), obs)
+		if result.Verdict.BranchPlan.Action != "stop" {
+			t.Fatalf("action = %q, want stop; plan=%+v", result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)
+		}
+		if result.Verdict.BranchPlan.SuspectedOwnerStem != slug {
+			t.Fatalf("suspected owner stem = %q, want %q", result.Verdict.BranchPlan.SuspectedOwnerStem, slug)
+		}
+		combined := result.Verdict.BranchPlan.Reason + " " + result.NextInstruction
+		if !strings.Contains(combined, "discard un-landed work") || !strings.Contains(combined, "not overridable by allow_rename") {
+			t.Fatalf("stop reason must protect un-landed work: %q", combined)
+		}
+	})
+}
+
+// TestObserveImplementBranchMeasuresLeftoverTargetAheadState proves the create
+// path's leftover detection runs on real Git: a target impl branch that carries
+// no unique commits is observed as a recreate-eligible remnant, and the same
+// branch with a unique commit is observed as an un-landed collision.
+func TestObserveImplementBranchMeasuresLeftoverTargetAheadState(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		aheadCommit    bool
+		wantAhead      int
+		wantPlanAction string
+	}{
+		{"fully-landed remnant", false, 0, "recreate"},
+		{"un-landed unique work", true, 1, "stop"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			initGit(t, root)
+			runGit(t, root, "checkout", "-b", "develop")
+			if err := os.WriteFile(filepath.Join(root, "base.txt"), []byte("base\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, root, "add", ".")
+			runGit(t, root, "commit", "-m", "base")
+			target := "impl/develop/leftover"
+			runGit(t, root, "checkout", "-b", target)
+			if tc.aheadCommit {
+				runGit(t, root, "commit", "--allow-empty", "-m", "un-landed work")
+			}
+			runGit(t, root, "checkout", "develop")
+
+			obs, err := observeImplementBranch(root, target)
+			if err != nil {
+				t.Fatalf("observeImplementBranch: %v", err)
+			}
+			if !obs.TargetExists {
+				t.Fatalf("TargetExists = false, want true for existing %q", target)
+			}
+			if obs.TargetAheadOfMergeRoot != tc.wantAhead {
+				t.Fatalf("TargetAheadOfMergeRoot = %d, want %d", obs.TargetAheadOfMergeRoot, tc.wantAhead)
+			}
+			plan := deriveImplementBranchPlan(normalizedImplementFacts{ScopeSlug: "leftover", AllowRename: "yes"}, obs)
+			if plan.Action != tc.wantPlanAction {
+				t.Fatalf("plan action = %q, want %q; plan=%+v", plan.Action, tc.wantPlanAction, plan)
+			}
+		})
+	}
+}
+
 func TestResolveImplementMergeConfirmDefaultsToAskWhenUnset(t *testing.T) {
 	input := implementInput{
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "feature"},
@@ -549,6 +650,22 @@ func TestResolveImplementBranchPlanRules(t *testing.T) {
 			obs:        implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"},
 			wantAction: "rename",
 			wantReason: "rename is allowed",
+		},
+		{
+			name:             "create path leftover fully-landed branch recreates",
+			facts:            base,
+			obs:              implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123", TargetExists: true, TargetAheadOfMergeRoot: 0},
+			wantAction:       "recreate",
+			wantReason:       "delete and recreate for a clean re-entry",
+			wantTargetBranch: "impl/feature/base/target",
+		},
+		{
+			name:             "create path leftover branch ahead of merge root stops",
+			facts:            base,
+			obs:              implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123", TargetExists: true, TargetAheadOfMergeRoot: 3},
+			wantAction:       "stop",
+			wantReason:       "discard un-landed work",
+			wantTargetBranch: "impl/feature/base/target",
 		},
 		{
 			name:             "target branch name is not truncated when scope slug exceeds 15 characters",
