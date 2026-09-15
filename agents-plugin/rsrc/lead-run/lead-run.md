@@ -134,7 +134,7 @@ is provisioned.
    same per-ticket `impl/<parent>/<slug>` name the serial route derives for that
    stem, so the worker's own `{{.McpNamespace}}/route.resolve_implement` finds
    the branch already checked out and returns `continue` rather than deriving a
-   second one. `worktree.acquire` creates and checks out that branch in a fresh
+   second one. `{{.McpNamespace}}/worktree.acquire` creates and checks out that branch in a fresh
    or recycled worktree and returns its `path` plus a `worker_key` bound to that
    worktree root; it is the sole branch-creation owner, so a batch worker
    suppresses its own PARENT-branch capture and skips the serial Spawn step-1
@@ -148,7 +148,7 @@ is provisioned.
    worker per ticket at the render's recommended tier with the returned prompt
    path, its task-block Branch line naming the acquired impl branch. Record the
    assignment (Spawn step 4) on that ticket's `worker_key` from
-   `worktree.acquire` — that is your handle to track, resume, and later release
+   `{{.McpNamespace}}/worktree.acquire` — that is your handle to track, resume, and later release
    the worktree; you never discover the worker's own spliced key. Wait on the
    host's per-worker completion notification — never a poll loop — so an
    isolated batch worker does not starve your own loop.
