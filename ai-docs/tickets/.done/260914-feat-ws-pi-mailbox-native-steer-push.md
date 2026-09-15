@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: e86a51f9ee9f589c
 sage-review-completeness-reviewed: e86a51f9ee9f589c
+completed: 2026-09-15
 ---
 
 # Pi native mailbox push: steer incoming mail into the live conversation
@@ -116,6 +117,65 @@ Verification: extend the existing push-batch/spawner tests
 FIFO (not a raw send), renders inside a single `ws-push-batch`, and takes the
 idle-wake path when the session is dormant. Add a fake/stubbed waiter so the
 detection path is testable without a live mailbox.
+
+### Result (7f0a0d35) - 2026-09-15
+
+Landed. Commits `7f0a0d35` (feature) and `d65a89e7` (review fixes).
+
+What landed:
+
+- New `agents-plugin-pi/src/mailbox-waiter.ts`: a session-bound background
+  waiter. `mailbox wait` (via `createSubprocessWait`) is used only as a
+  block/peek signal; on exit code 0 the loop drains authoritatively through the
+  `mailbox.recv` MCP tool (`createBridgeDrain`, `format:"json"`) and admits each
+  drained `Envelope` through the existing push FIFO via
+  `sendToLead(pi, buildMailboxPushMessage(envelope), "steer")`. This peek-signal
+  / recv-drain split is the core decision: it avoids the hot-spin and
+  double-delivery that a drain from the peeking `wait` would cause, since `wait`
+  never dequeues. Exit mapping is the pure `mapMailboxWaitExit`
+  (0=mail, 3=timeout, our-abort=stopped, else=error→backoff re-arm). Arming is
+  gated by the pure `shouldArmMailboxWaiter` (owner lead only: `role===undefined`
+  and non-empty session key).
+- `buildMailboxPushMessage` produces a `PushBatchItem` with
+  `customType:"ws-mailbox"`, `state:"informational"` (forced by the FIFO's raw
+  held-send materialization), `display:true`, riding the shared `ws-push-batch`
+  and the active(`steer`)/idle-wake dual path. No raw `pi.sendMessage(...,steer)`.
+  The shared `Envelope` is untouched (adapter-only, best-effort boundary).
+- `agents-plugin-pi/src/index.ts`: arms the waiter in `session_start` (after the
+  execute gateway is registered) and stops+nulls it in `session_shutdown` before
+  bridge/client teardown; a prior handle is always stopped+nulled before re-arm.
+
+Verification evidence:
+
+- `agents-plugin-pi/test/mailbox-waiter.test.ts` (new): loop behavior through
+  injected fakes (scripted `runWait`, fake `drainMail`/`admit`/`sleep`; no live
+  mailbox or subprocess) — ordered admit, timeout/error backoff re-arm, `stop()`
+  aborts in-flight wait, per-envelope admit isolation, empty-drain-on-mail
+  re-arm without admit/backoff; plus `buildMailboxPushMessage`,
+  `createBridgeDrain` (tool-call/parse/isError-throw/degrade), table-tested
+  `mapMailboxWaitExit` and `shouldArmMailboxWaiter`.
+- `test/push-wake.test.ts` (extended): an arriving mail item is admitted through
+  the FIFO (`sendToLead`, not a raw send), renders as a single informational
+  `ws-push-batch` item, takes the idle-wake path when dormant, and joins an older
+  held family push in one FIFO batch.
+- `test/push-render.test.ts` (extended): the `ws-mailbox` item renders as a
+  generic `[ws-mailbox]` card inside the batch.
+- Targeted suite green: 83/83 pass, 0 fail. `node --experimental-strip-types
+  --check` clean on both changed source files. Full-suite 146 failures confirmed
+  pre-existing and environmental (identical on base `7f0a0d35~1`); the new
+  `index.ts` arming path is not exercised by unit tests (`session_start` is not
+  invoked there).
+- Independent review: two rounds, correctness + test partitions. Round 1 raised
+  1 Important + 2 Minor (correctness) and 2 Important + 2 Minor (test), all
+  addressed in `d65a89e7` (throw on `recv` `isError`; extract + table-test
+  `mapMailboxWaitExit` and `shouldArmMailboxWaiter`; trim `sent_at`; add
+  empty-drain and both-handles tests). Round 2 confirmed all findings fixed and
+  raised nothing new — PASS.
+
+Decisions / limitations:
+
+- Phase 1 arms the reply-id inbox only (no `--slug`); `mailbox.recv` still drains
+  an owned named inbox opportunistically. Documented limitation, not a defect.
 
 ## Open Questions
 
