@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: dda9caa86520a977
 sage-review-completeness-reviewed: dda9caa86520a977
+completed: 2026-09-15
 ---
 
 # Live agent widget: state bullets, activity time, drop count heading and ctx label
@@ -20,7 +21,7 @@ sage-review-completeness-reviewed: dda9caa86520a977
 |---|---|---|
 | scope.span | multi-file | agents-plugin-pi/src/agent-widget.ts (primary), agents-plugin-pi/src/audit.ts (reuses agent-widget.ts's exported row/state helpers) |
 | scope.surface | public-interface | agent-widget.ts exports AgentRow, AGENT_STATE_LABEL, formatContextTokens, classifyRegistryRowState, rowName — imported/reused by audit.ts:28 |
-| scope.new_public_symbol | likely | a bullet-glyph-by-state helper; exact name unfixed |
+| scope.new_public_symbol | yes | a bullet-glyph-by-state helper; exact name unfixed |
 | scope.new_type_contract | yes | AgentRow gains a per-row activity-time field and loses the standalone ctx display use |
 | scope.test_surface | existing | test/agent-widget.test.ts and test/audit.test.ts cover buildAgentRows/buildWidgetLines/buildHeadingLine with fake registries |
 | complexity.reuse_points | confirmed | lastActivityAt (spawner.ts:2557) and formatContextTokens (agent-widget.ts:279-281) are reused as-is for activity-time / ctx-removal; state classification already exists via classifyRegistryRowState |
@@ -125,7 +126,74 @@ glyph per state, the absence of the count heading, the presence of the
 activity-time field, the absence of the `ctx` text, and that approval/owner rows
 keep the existing 330ms styling behavior.
 
+### Result (9f6f94c8) - 2026-09-15
+
+Landed in `agents-plugin-pi/src/agent-widget.ts` (live panel only; `audit.ts`
+untouched): a new `AGENT_STATE_BULLET` glyph-per-state map plus `formatBullet`
+prefixes every row, reading `AgentRow.state` (already `classifyRegistryRowState`-
+derived) exactly per the Decisions mapping. `buildHeadingLine` and the `ws: N
+agents` heading line are removed entirely (supersedes `260909-feat-ws-pi-agent-
+count-panel-header`). Each row now carries `lastActivityMs` (`now -
+spawner.ts`'s `lastActivityAt`, or the synthetic thread row's own `touchedAt`
+delta when there is no backing `RpcAgentRecord`) rendered as `active
+Xs/Xm/XhYYm` in the telemetry slot the dropped `ctx Xk` text used to occupy;
+`AgentRow.contextTokens` and the exported `formatContextTokens` stay
+unchanged/still populated for `audit.ts`'s `/audit` picker. The owner-held
+bullet (`●`, `awaiting-owner`/`idle-awaiting-owner`) is styled COLOR-ONLY via
+the caller's existing 330ms `ownerActionColor` cycle (260908) so it participates
+in the flash without a second bold span; every other state's bullet gets a
+static `STATE_BULLET_COLOR`, and `awaiting-approval` in particular never bolds
+or joins the attention cycle, matching the pre-existing `isAttentionState`
+exclusion. `waiting-on-children` uses the theme's `"dim"` token in place of the
+Decisions' literal "dim cyan": the widget's `AgentWidgetTheme.fg` color
+vocabulary (`error | warning | accent | dim | syntaxNumber`) has no cyan/blue
+entry anywhere in the codebase, matching this ticket's own Open Questions note
+that final colors may be tuned to the active theme's palette.
+
+Verification: `agents-plugin-pi/test/agent-widget.test.ts` extended (44 tests
+in the file, all passing) — a parameterized `buildWidgetLines` test asserts
+every `AGENT_STATE_BULLET` glyph (all 6 states) leads its own row; the count
+heading's absence, `lastActivityMs` rendering, and `ctx` text absence are
+asserted across the `buildWidgetLines`/`createAgentWidgetController` suites;
+approval/owner-held 330ms styling behavior (bullet participates, approval never
+bolds) is asserted in the `createAgentWidgetController` "owner-answer waits
+cycle" test and the `buildWidgetLines` "owner actions have a labeled semantic
+cue" test. Full package `npm test`: 1541/1542 non-skipped tests pass; the one
+failure (`test/bridge.test.ts`'s "captured tool set exactly matches the
+bundled 54-tool contract", expects 54 got 56) is pre-existing and unrelated —
+confirmed still failing with this ticket's two changed files stashed out.
+Two-round independent review: round 1 raised one Important finding (bullet-
+glyph test coverage was missing for 2 of 6 states, `waiting-on-children`/
+`pending-delivery`) and one ticket-licensed Minor (the `dim` vs. "dim cyan"
+color, no fix needed); round 1's Important was fixed in a follow-up commit
+adding a `classifyRegistryRowState` fixture for both states plus the six-state
+parameterized bullet test; round 2 confirmed the fix and raised nothing new —
+final verdict clean.
+
+Decisions taken beyond the ticket text: (1) the bullet is deliberately never
+bold, even for the owner-held pair — only the existing `⚠ OWNER ACTION` cue
+text keeps the sole bold treatment, to avoid a second, independently-flashing
+bold span; (2) `buildWidgetLines`'s `pendingCount` parameter is kept
+(unchanged signature) for backward-compatible visibility semantics even though
+it is now mathematically redundant with `rows.length`, since every
+`isLiveThreadStatus` pending/open thread already yields a row of its own; (3)
+`ws/route.resolve_implement` deterministically returned a `Branch Action: stop`
+("target scope ... differs from suspected prior work") on this ticket's
+assigned branch `impl/goal/develop/hazel-quartz-meadow/brisk-cedar-nook`,
+because this repo's impl branches are always random codenames that never
+lexically match a ticket stem — a heuristic that will perpetually false-
+positive under that convention. Verified via `git show 27e23e15` that the
+branch's only pre-existing unmerged commit was a legitimate, on-topic fix for
+this exact ticket (a coordinator-applied route-facts normalization), then
+proceeded with implementation on the originally assigned branch per the Worker
+Protocol's guidance that an undocumented ambiguity is recorded, not escalated.
+
 ## Open Questions
 
 - None blocking. Final color codes may be tuned to the active theme's palette
   during implementation.
+
+
+## Resolution (2026-09-15)
+
+Phase 1 (the ticket's only phase) landed in agents-plugin-pi/src/agent-widget.ts: per-row state bullets (AGENT_STATE_BULLET), the ws: N agents count heading removed, lastActivityAt rendered per row as `active Xs/Xm/XhYYm`, and the ctx Xk text dropped from row rendering while formatContextTokens/AgentRow.contextTokens stay unchanged for audit.ts's /audit picker. Two-round independent review completed clean (round 1's one Important finding — missing bullet-glyph test coverage for 2 of 6 states — fixed and verified in round 2). See the ticket's ### Result (9f6f94c8) entry for full verification evidence and decisions.

@@ -25,6 +25,7 @@ import { buildPushBatchComponent, buildPushComponent, buildPushRenderLines, regi
 import { buildPushContent, PUSH_FAMILIES } from "../src/spawner.ts";
 import { approximateCodePointWidth } from "../src/tool-result-render.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
+import { buildMailboxPushMessage } from "../src/mailbox-waiter.ts";
 
 describe("buildPushRenderLines", () => {
   test("splits a real pushed message into head, payload and status", () => {
@@ -377,7 +378,10 @@ describe("buildPushComponent", () => {
     const collapsedLines = collapsed.render(80);
     // head + 10 capped body logical lines + marker.
     assert.equal(collapsedLines.length, 12);
-    assert.equal(collapsedLines.at(-1)?.trim(), "...");
+    // The marker's byte count is the total of the full (pre-cap) body text —
+    // all 12 "kN: vN" logical lines, not just the 10 shown.
+    const fullBody = Array.from({ length: 12 }, (_, index) => `k${index}: v${index}`).join("\n");
+    assert.equal(collapsedLines.at(-1)?.trim(), `...[${Buffer.byteLength(fullBody)} bytes total]`);
     assert.doesNotMatch(collapsedLines.join("\n"), /k11: v11/, "the 12th logical line is cut when collapsed");
 
     const expanded = buildPushComponent(tui.modules, built, undefined, true) as FakeComponent;
@@ -457,6 +461,27 @@ describe("buildPushBatchComponent", () => {
     const tui = fakeTui();
     assert.equal(buildPushBatchComponent(tui.modules, {}, undefined), undefined);
     assert.equal(buildPushBatchComponent(tui.modules, {details: {items: []}}, undefined), undefined);
+  });
+
+  test("260914: an arriving ws-mailbox item renders as its own generic card in the batch", () => {
+    const tui = fakeTui();
+    const mail = buildMailboxPushMessage({ from: "scout@worktree", content: "run the ready ticket", sent_at: "2026-09-15T12:00:00Z" });
+    const component = buildPushBatchComponent(tui.modules, { details: { items: [
+      {
+        customType: "ws-agent-report",
+        content: buildPushContent("ws-agent-report", "worker-1", { report: "done" }, undefined),
+        display: true,
+        details: { agent_id: "worker-1", report: "done" },
+        state: "informational",
+      },
+      { ...mail, details: { ...mail.details }, state: "informational" },
+    ] } }, undefined, false) as FakeComponent;
+
+    assert.deepEqual(component.render(80), [
+      "worker-1 · report", "report: done",
+      "[ws-mailbox]", "mail from scout@worktree (2026-09-15T12:00:00Z):", "run the ready ticket",
+    ]);
+    assert.equal(tui.boxes.length, 2, "mail is one more card in the batch, not a parallel structured item");
   });
 });
 
@@ -545,7 +570,14 @@ describe("registerPushMessageRenderers", () => {
     for (const width of [40, 80, 120]) {
       const collapsed = registered.get("ws-agent-report")!(message, { expanded: false }, fakeTheme()) as FakeComponent;
       const collapsedLines = collapsed.render(width);
-      assert.equal(collapsedLines.at(-1)?.replace(/<[^>]+>/g, "").trim(), "...");
+      // The annotation fits at every tested width here (40/80/120 all leave
+      // enough room). The exact byte count is not asserted: it is
+      // Buffer.byteLength of the ANSI-stripped/sanitized body, and
+      // reproducing that sanitization in the test would just duplicate
+      // tool-result-render.ts's internals — the dedicated marker tests in
+      // tool-result-render.test.ts already cover the exact byte count,
+      // including a multibyte case.
+      assert.match(collapsedLines.at(-1)?.replace(/<[^>]+>/g, "").trim() ?? "", /^\.\.\.\[\d+ bytes total\]$/);
       assert.doesNotMatch(collapsedLines.join("\n"), /k11: v11/, `collapsed report retains the logical-line cap at ${width}`);
       assert.ok(collapsedLines.every((line) => displayWidth(line) <= width), `collapsed report rows fit ${width} columns`);
       assert.doesNotMatch(collapsedLines.join("\n"), /\x1b\[/, `collapsed report sanitizes ANSI at ${width}`);

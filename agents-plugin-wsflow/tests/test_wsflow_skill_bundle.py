@@ -332,46 +332,68 @@ class WsflowSkillBundleTest(unittest.TestCase):
             "Your terminal report does not restore the checkout: the shared worktree's",
             protocol,
         )
-        run = (RSRC_DIR / "lead-run" / "lead-run.md").read_text(encoding="utf-8")
+        # Whitespace-normalized so a prose reflow in the canonical body cannot
+        # break a pinned phrase across a newline; the mirror is byte-identical,
+        # so this reads the same text the full package pins.
+        run = " ".join((RSRC_DIR / "lead-run" / "lead-run.md").read_text(encoding="utf-8").split())
         self.assertIn("`merge_confirm: skip` auto-calls", run)
         self.assertIn("`ask` (including absent)", run)
         self.assertIn("{{.McpNamespace}}/git.merge", run)
         self.assertIn("call `{{.McpNamespace}}/git.merge` with the goal branch", run)
         self.assertNotIn("goal-to-PARENT terminal uses raw Git", run)
-        self.assertIn("With `completion: phase`, do not merge. Mark the note `active`", run)
-        self.assertIn("With `completion: ticket`, merge the retained impl branch", run)
+        self.assertIn("`completion: phase` — do not merge", run)
+        self.assertIn("`completion: ticket` — merge the retained impl branch", run)
         self.assertIn("incompatible values are a protocol mismatch", run)
-        self.assertIn("do not query the ticket, infer a\npath, merge", run)
+        self.assertIn("call `{{.McpNamespace}}/git.status` and decide", run)
+        self.assertIn("Branch-explicit calls need no check.", run)
+        # Opt-in parallel route: the byte-mirror must carry the gated
+        # provisioning approval, the delegated batch selection, the
+        # worktree.acquire/release lifecycle, and the serial git.merge with an
+        # unresolvable conflict as a merge stop into the wsflow package.
+        self.assertIn("## Parallel route (opt-in)", run)
+        self.assertIn("unless the opt-in parallel route below is approved for this run", run)
+        self.assertIn("Serial is the default.", run)
         self.assertIn(
-            "call `{{.McpNamespace}}/git.status` and read\n`branch.head`, `impl_ticket`, and the working-tree state",
+            'One per-run user approval, "may this run provision worktrees and execute'
+            ' ready tickets in parallel", opens this route',
             run,
         )
-        self.assertIn("Branch-explicit calls (`{{.McpNamespace}}/git.merge`)", run)
-        # Phase 2 opt-in parallel route: the byte-mirror must carry the gated
-        # provisioning approval, the dependency-based batch predicate, the
-        # worktree.acquire/release lifecycle, and the serial git.merge with
-        # cross-worker overlap as a merge stop into the wsflow package.
-        self.assertIn("## Parallel route (opt-in)", run)
+        self.assertIn("The approved batch is the concurrency cap.", run)
+        self.assertIn("Render `ticket-batch-selector` and spawn it at its recommended tier", run)
         self.assertIn(
-            "unless the opt-in parallel route below is\napproved for this run", run
+            "{{.McpNamespace}}/worktree.acquire(base: <your branch>, target_branch:"
+            " <that ticket's impl/<parent>/<slug> branch>, session_key: <your key>)`"
+            " and keep the `worker_key` it returns",
+            run,
         )
-        self.assertIn("is the single gate, and it authorizes the provisioning itself", run)
-        self.assertIn("Without it, run the serial path unchanged.", run)
-        self.assertIn("The parallel-safety predicate is **dependency**, not file overlap", run)
-        self.assertIn("The approved batch bounds concurrency", run)
-        self.assertIn("{{.McpNamespace}}/worktree.acquire(base: <goal branch>", run)
-        self.assertIn("is the sole branch-creation owner", run)
-        self.assertIn("Render each worker into its worktree and spawn it:", run)
-        self.assertIn("{{.McpNamespace}}/playbook.render(name: <worker playbook for that ticket's", run)
-        self.assertIn("grade its risk against the Risk Rubric from its body the same way", run)
-        self.assertIn("`root_override` binds the worker's", run)
-        self.assertIn("you never discover the worker's own spliced key", run)
-        self.assertIn(
-            "serial veto and merge-approval model is unchanged", run
-        )
+        self.assertIn("it is the sole branch owner, so skip Spawn step 3", run)
+        self.assertIn("Render each worker with `root_override: <that worktree path>`", run)
+        self.assertIn("Collect every terminal report before any merge", run)
         self.assertIn("Merge serially through `{{.McpNamespace}}/git.merge`", run)
-        self.assertIn("cannot resolve is a merge stop: surface it to", run)
-        self.assertIn("{{.McpNamespace}}/worktree.release(key: <that ticket's worker_key>)", run)
+        self.assertIn(
+            "cannot resolve is a merge stop: surface it and leave the unmerged branches retained",
+            run,
+        )
+        self.assertIn("{{.McpNamespace}}/worktree.release(key: <its worker_key>)", run)
+        # The parallel-safety predicate moved out of lead-run into its own
+        # delegate playbook; the mirror must carry that playbook too.
+        batch = " ".join(
+            (RSRC_DIR / "ticket-batch-selector" / "ticket-batch-selector.md")
+            .read_text(encoding="utf-8")
+            .split()
+        )
+        self.assertIn(
+            "Exclude a candidate only when its `blocked-by:` edge, a `related:` or `parent:`"
+            " line, or its body names another candidate as something it needs first",
+            batch,
+        )
+        self.assertIn(
+            "Everything else is parallel-safe: a shared epic, an unqualified `related:`"
+            " edge, merely related prose, and overlapping files, whose conflicts are"
+            " resolved downstream.",
+            batch,
+        )
+        self.assertIn("{{.McpNamespace}}/git.status(format: \"json\")", batch)
 
     def test_bootstrap_scaffolds_emit_converged_output_across_packages(self):
         # Ticket 260825 Phase 4: assert positive convergence. Both packages'

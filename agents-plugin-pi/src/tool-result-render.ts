@@ -138,10 +138,26 @@ function fittedIndent(width: number, preferred: number, remainder: string): numb
   return Math.max(0, Math.min(preferred, width - approximateCodePointWidth(firstCodePoint)));
 }
 
-function truncatedMarker(width: number, preferredIndent = 0): string {
+/**
+ * `totalBytes` is `Buffer.byteLength` of the full pre-truncation `source`
+ * (the bytes already shown plus the hidden ones, not just the remainder) —
+ * i.e. of `physicalPreviewLayout`'s laid-out text: sanitized (ANSI stripped,
+ * control chars substituted with `?`, tabs expanded, CRLF normalized) and, when
+ * `trimOuterWhitespace` is set, outer-trimmed. It is a count of what is
+ * actually displayed, not of the raw pre-sanitize tool output, so it can
+ * differ from the underlying payload's own byte size for tab- or
+ * ANSI-heavy content. The annotated form `...[N bytes total]` is used only
+ * when it fits the available width; narrower widths fall back to the bare
+ * dot marker so the marker row never forces a native rewrap.
+ */
+function truncatedMarker(width: number, totalBytes: number, preferredIndent = 0): string {
   if (width <= 0) return "";
   const indent = Math.max(0, Math.min(preferredIndent, width - 1));
-  return `${" ".repeat(indent)}${".".repeat(Math.min(3, width - indent))}`;
+  const available = width - indent;
+  const dots = ".".repeat(Math.min(3, available));
+  const annotated = `${dots}[${totalBytes} bytes total]`;
+  const marker = annotated.length <= available ? annotated : dots;
+  return `${" ".repeat(indent)}${marker}`;
 }
 
 interface PhysicalPreviewLayout {
@@ -162,7 +178,7 @@ function physicalPreviewLayout(
   const resolvedStartIndent = startIndent ?? INPUT_START_INDENT;
   const resolvedContinuationIndent = continuationIndent ?? CONTINUATION_INDENT;
   const appendMarker = (): PhysicalPreviewLayout => {
-    const marker = truncatedMarker(boundedWidth, markerIndent);
+    const marker = truncatedMarker(boundedWidth, Buffer.byteLength(source), markerIndent);
     return marker ? { rows: [...rows, marker], marker } : { rows, marker: undefined };
   };
 
