@@ -11,6 +11,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 701b5d9c91b05018
 sage-review-design-reviewed: 701b5d9c91b05018
+completed: 2026-09-15
 ---
 
 # Diet the lead-run playbook to the authoring standard, drop the session.note assignment record, and add ticket-batch-selector
@@ -303,3 +304,41 @@ rest with their class in this phase's Result.
 Verification: the audit report for each file recorded in the Result with
 every finding classified; when any `fix` landed, mirrors regenerated and all
 three suites green again.
+
+### Result (722b7d7e) - 2026-09-15
+
+- Two context-free fresh-reader audits ran (`fresh-reader-audit`, large
+  tier, one cycle each): 32 findings on `lead-run.md` (5 high, 16 medium, 11
+  low) and 19 on `ticket-batch-selector.md` (3 high, 10 medium, 6 low).
+- `lead-run.md` fixes (20): the report-validity paragraph points at the
+  worker block's own pair table and names `completion: ad_hoc` invalid here;
+  End the turn maps user stops, protocol mismatches, and dispatch blocks onto
+  the four pinned lines; the wait rule is "do not edit the ticket or move
+  HEAD", which no longer contradicts the worker protocol's shared-branch
+  premise; stop (a) points at the goal-branch terminal; `worker_key` is
+  sourced from `worktree.acquire`; goal run is defined at first use; the
+  selector's `stop:` result is named; the Route Facts sentence gained an
+  action; stop (c) says one tier above the worker's; stop (e) carries the
+  report's `unresolved:` line; "hotfix" left the lead's write list; the
+  blocked terminal names the `## Blocked` note and the pause exit.
+- `ticket-batch-selector.md` fixes (16): the `impl_ticket` gate is defined
+  by HEAD state; `blocked-by:` direction stated; one positive parallel-safe
+  default replaces three negations; output is one `batch:` line per ticket,
+  `excluded: <path> — <reason>`, terminal lines in place of `batch:`, and
+  `excluded` versus `omitted` defined; the unverified "clean goal branch"
+  claim dropped; the step-4 invariant stated.
+- Intentional difference (not fixed): undefined-term findings the session
+  context resolves (render, backlog fields, goal reminder, route verdicts,
+  projection, point-resolve, `RoleModel` mirroring `ticket-selector`), and
+  the pinned phrasings "Do not read the file" and "`ask` (including
+  absent)". Risk accepted: commit-or-stash stays the lead's judgment;
+  `git.merge` target stays the schema default; `impl/<parent>/<slug>` naming
+  carried over per the open random-codename bug.
+- Sizes: `lead-run.md` 181 lines, `ticket-batch-selector.md` 54. The
+  ~100-line target is unmet; the audit added missing mappings and
+  definitions rather than filler.
+- Verification: mirrors regenerated and pi copy refreshed; `go test ./...`
+  1611 pass, 0 fail, 7 skip (delegate; lead re-ran mcp and wsrsrc ok);
+  wsflow tests 12 OK; agents-plugin tests 70 OK; no `session.note` in any
+  rsrc tree; three copies of both playbooks byte-identical. Pins re-fitted,
+  none deleted this round.
