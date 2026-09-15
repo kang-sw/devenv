@@ -132,11 +132,11 @@ ticket and persists across phases: the next phase stacks on it because
 that branch still exists.
 
 With `completion: phase`, do not merge. Mark the note `active`, leave the ticket
-active for a later cycle, and go to **End the turn**. A per-phase merge is not the default: it would
-delete the deterministic impl branch and force the next phase to re-create the
-same name. Merge mid-ticket only when a landing is actually needed — a dependent
-ticket blocked on this phase — through the same user-approval gate a completion
-merge uses.
+active for a later cycle, and go to **End the turn**. A per-phase merge is not
+the default: it would delete the deterministic impl branch and force the next
+phase to re-create the same name. Merge mid-ticket only when a landing is
+actually needed — a dependent ticket blocked on this phase — through the same
+user-approval gate a completion merge uses.
 
 With `completion: ticket`, merge the retained impl branch, then go to **End the
 turn**; when that closed ticket was an epic's last open child, first surface
