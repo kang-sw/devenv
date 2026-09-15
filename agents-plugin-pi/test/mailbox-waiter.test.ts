@@ -12,6 +12,8 @@ import assert from "node:assert/strict";
 import {
   buildMailboxPushMessage,
   createBridgeDrain,
+  mapMailboxWaitExit,
+  shouldArmMailboxWaiter,
   startMailboxWaiter,
   WS_MAILBOX_CUSTOM_TYPE,
   type MailboxEnvelope,
@@ -129,6 +131,22 @@ describe("startMailboxWaiter", () => {
     assert.ok(errors.some((message) => message.includes("wait failed")), "the wait failure is reported");
   });
 
+  test("a mail wake that drains nothing (peek/drain race) re-arms without admitting or backing off", async () => {
+    const admitted: MailboxEnvelope[] = [];
+    const sleeps: number[] = [];
+    const script = scriptedWait(["mail", "stopped"]);
+    const waiter = startMailboxWaiter({
+      ...script,
+      drainMail: () => Promise.resolve([]), // recv drained nothing (already emptied elsewhere)
+      admit: (envelope) => admitted.push(envelope),
+      sleep: (ms) => { sleeps.push(ms); return Promise.resolve(); },
+    });
+    await waiter.done;
+    assert.equal(admitted.length, 0, "an empty drain admits nothing");
+    assert.equal(sleeps.length, 0, "an empty drain is a success, not a failure — no backoff");
+    assert.equal(script.calls(), 2, "the loop re-armed immediately after the empty drain");
+  });
+
   test("one throwing admit is isolated — the rest of the batch still lands", async () => {
     const errors: string[] = [];
     const admitted: string[] = [];
@@ -172,6 +190,48 @@ describe("buildMailboxPushMessage", () => {
     assert.equal(message.content, "mail from unknown:\norphan mail");
     assert.deepEqual(message.details, { content: "orphan mail" });
   });
+
+  test("if both handles are present (contract says exactly one) from wins the head and both echo in details", () => {
+    const message = buildMailboxPushMessage({ from: "alice@machine", reply_to: "id:beef", content: "hi", sent_at: "  2026-09-15T00:00:00Z  " });
+    assert.equal(message.content, "mail from alice@machine (2026-09-15T00:00:00Z):\nhi");
+    assert.deepEqual(message.details, { from: "alice@machine", reply_to: "id:beef", content: "hi", sent_at: "2026-09-15T00:00:00Z" });
+  });
+});
+
+describe("mapMailboxWaitExit", () => {
+  test("our own abort is stopped regardless of how the child exited", () => {
+    assert.equal(mapMailboxWaitExit(0, null, true), "stopped");
+    assert.equal(mapMailboxWaitExit(130, "SIGTERM", true), "stopped");
+    assert.equal(mapMailboxWaitExit(null, "SIGKILL", true), "stopped");
+  });
+
+  test("exit codes map to outcomes when we did not abort", () => {
+    assert.equal(mapMailboxWaitExit(0, null, false), "mail");
+    assert.equal(mapMailboxWaitExit(3, null, false), "timeout");
+    assert.equal(mapMailboxWaitExit(1, null, false), "error", "any other nonzero code is an error");
+  });
+
+  test("a stray external signal we did not send re-arms via error, never a permanent stop", () => {
+    assert.equal(mapMailboxWaitExit(130, null, false), "error", "the CLI's own interrupt code, unaborted, is not a stop");
+    assert.equal(mapMailboxWaitExit(null, "SIGTERM", false), "error", "signal-terminated but not by our stop() -> error, so the loop re-arms with backoff");
+  });
+});
+
+describe("shouldArmMailboxWaiter", () => {
+  test("arms for an owner lead (no spawn role) with a session key", () => {
+    assert.equal(shouldArmMailboxWaiter(undefined, "my-key"), true);
+  });
+
+  test("does not arm a fork/worker/explore child", () => {
+    assert.equal(shouldArmMailboxWaiter("fork", "my-key"), false);
+    assert.equal(shouldArmMailboxWaiter("worker", "my-key"), false);
+    assert.equal(shouldArmMailboxWaiter("explore", "my-key"), false);
+  });
+
+  test("does not arm without a resolved session key", () => {
+    assert.equal(shouldArmMailboxWaiter(undefined, undefined), false);
+    assert.equal(shouldArmMailboxWaiter(undefined, ""), false);
+  });
 });
 
 describe("createBridgeDrain", () => {
@@ -184,6 +244,11 @@ describe("createBridgeDrain", () => {
     const envelopes = await drain();
     assert.deepEqual(calls, [{ name: "mailbox.recv", args: { session_key: "my-key", format: "json" } }]);
     assert.deepEqual(envelopes, [{ from: "x", content: "hi", sent_at: "t" }]);
+  });
+
+  test("throws on a tool-level error response so the loop backs off instead of hot-spinning", async () => {
+    const drain = createBridgeDrain(async () => ({ isError: true, content: [{ type: "text", text: "mailbox.recv: reply-id drain: disk full" }] }), "k");
+    await assert.rejects(drain(), /disk full/);
   });
 
   test("degrades a missing, non-JSON, or non-array response to no mail and filters malformed items", async () => {

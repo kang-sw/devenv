@@ -34,6 +34,7 @@
  */
 
 import { spawn } from "node:child_process";
+import type { SpawnRole } from "./process-role.ts";
 
 /**
  * One queued mailbox message, mirroring the ws `Envelope` JSON shape
@@ -80,9 +81,20 @@ export function buildMailboxPushMessage(envelope: MailboxEnvelope): MailboxPushM
       ...(envelope.from ? { from: envelope.from } : {}),
       ...(envelope.reply_to ? { reply_to: envelope.reply_to } : {}),
       content: envelope.content,
-      ...(stamp ? { sent_at: envelope.sent_at } : {}),
+      ...(stamp ? { sent_at: stamp } : {}),
     },
   };
+}
+
+/**
+ * Gate for arming the waiter: an owner lead (no spawn-role marker) that already
+ * has its own session key. A fork/worker/explore child has no cross-session
+ * inbox worth a background subprocess, and no key means bootstrap has not
+ * resolved one yet. Narrows `sessionKey` to `string` on success so the caller
+ * can pass it straight to the subprocess/drain factories.
+ */
+export function shouldArmMailboxWaiter(role: SpawnRole | undefined, sessionKey: string | undefined): sessionKey is string {
+  return role === undefined && typeof sessionKey === "string" && sessionKey.length > 0;
 }
 
 export interface MailboxWaiterDeps {
@@ -176,8 +188,26 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
 
 /** The CLI exit code `ws-mcp mailbox wait` uses to signal a deadline with no unread mail. */
 const MAILBOX_WAIT_EXIT_TIMEOUT = 3;
-/** The CLI exit code `ws-mcp mailbox wait` uses on SIGINT/SIGTERM. */
-const MAILBOX_WAIT_EXIT_INTERRUPTED = 130;
+
+/**
+ * Distill a finished `mailbox wait` child into an outcome.
+ *
+ * `aborted` (our own `stop()`) is authoritative: it is always `stopped`,
+ * whatever the child's exit looks like. Otherwise exit 0 is `mail`, the timeout
+ * code is `timeout`, and everything else — a nonzero code, or termination by a
+ * signal we did not send (including the CLI's own 130 on an external
+ * SIGINT/SIGTERM) — is `error`, so the loop re-arms with backoff. Mapping a
+ * stray external signal to `error` rather than `stopped` is deliberate: a
+ * `stopped` we did not cause would break the loop and silently disable
+ * mail-push for the rest of the session.
+ */
+export function mapMailboxWaitExit(code: number | null, signal: NodeJS.Signals | null, aborted: boolean): MailboxWaitOutcome {
+  if (aborted) return "stopped";
+  if (code === 0) return "mail";
+  if (code === MAILBOX_WAIT_EXIT_TIMEOUT) return "timeout";
+  void signal;
+  return "error";
+}
 
 export interface SubprocessWaitOptions {
   /** Absolute path to `bin/ws-mcp-launcher.py`; the launcher forwards the `mailbox wait` subcommand to the runtime. */
@@ -239,11 +269,7 @@ export function createSubprocessWait(options: SubprocessWaitOptions): (signal: A
         finish("error");
       });
       child.on("exit", (code, sig) => {
-        if (signal.aborted) finish("stopped");
-        else if (code === 0) finish("mail");
-        else if (code === MAILBOX_WAIT_EXIT_TIMEOUT) finish("timeout");
-        else if (code === MAILBOX_WAIT_EXIT_INTERRUPTED || sig) finish("stopped");
-        else finish("error");
+        finish(mapMailboxWaitExit(code, sig, signal.aborted));
       });
     });
 }
@@ -257,12 +283,19 @@ export type MailboxToolCall = (
 /**
  * The real `drainMail`: call the mailbox recv tool (`format: "json"` returns
  * the bare array of drained envelopes) through the bridge's already-connected
- * client. Parse failures and non-array results degrade to "no mail", never a
- * throw, so a malformed response re-arms the wait rather than killing the loop.
+ * client. A tool-level error (`isError`) THROWS, so the loop treats it as a
+ * failed drain and backs off rather than re-arming instantly — otherwise a
+ * persistently failing drain-write over still-queued mail would hot-spin, since
+ * `mailbox wait` keeps waking immediately on the un-drained mail. A
+ * successful-but-malformed response (missing/non-JSON/non-array text) is
+ * genuinely "no usable mail" and degrades to `[]` without a throw.
  */
 export function createBridgeDrain(callTool: MailboxToolCall, sessionKey: string): () => Promise<MailboxEnvelope[]> {
   return async () => {
     const result = await callTool("mailbox.recv", { session_key: sessionKey, format: "json" });
+    if (result.isError) {
+      throw new Error(result.content.find((item) => item.type === "text")?.text ?? "mailbox.recv failed");
+    }
     const text = result.content.find((item) => item.type === "text")?.text;
     if (!text) return [];
     let parsed: unknown;

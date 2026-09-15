@@ -197,7 +197,7 @@ import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, typ
 import { applyForkAffinity, captureRegisteredTools, classifyForkRegistrations, compareForkRegistrations, effectiveForkDescriptor, formatForkRegistrationMismatch, frameForkInput, readForkLaunchContext, removeForkTransport, restoreForkContext, restoreForkKeys, writePrivateJson, type ForkContext } from "./fork-context.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, type SpawnRole } from "./process-role.ts";
 import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
-import { buildMailboxPushMessage, createBridgeDrain, createSubprocessWait, startMailboxWaiter, type MailboxWaiterHandle } from "./mailbox-waiter.ts";
+import { buildMailboxPushMessage, createBridgeDrain, createSubprocessWait, shouldArmMailboxWaiter, startMailboxWaiter, type MailboxWaiterHandle } from "./mailbox-waiter.ts";
 import { armForkRoleWiring, registerFork } from "./fork.ts";
 import {
   buildForkQuestionLeadNotice,
@@ -636,7 +636,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     mailboxWaiterHandle?.stop();
     mailboxWaiterHandle = undefined;
     const mailboxSessionKey = handle.defaultSessionKeyRef.current;
-    if (readSpawnRole(process.env) === undefined && mailboxSessionKey) {
+    if (shouldArmMailboxWaiter(readSpawnRole(process.env), mailboxSessionKey)) {
       const mailboxHandle = handle;
       mailboxWaiterHandle = startMailboxWaiter({
         runWait: createSubprocessWait({ launcherPath, pluginDir, sessionKey: mailboxSessionKey }),
