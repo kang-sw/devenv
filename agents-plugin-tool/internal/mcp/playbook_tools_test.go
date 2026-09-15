@@ -2768,8 +2768,10 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				// Opt-in parallel route (Phase 2): the route is inert without
 				// per-run approval, provisioning is the gated cost, the batch
 				// predicate is dependency (not file overlap), the approved batch
-				// is the concurrency cap, branch creation has one owner, and
-				// merges stay serial through git.merge with overlap as a stop.
+				// is the concurrency cap, branch creation has one owner, each
+				// worker is bound to its own worktree via root_override (one
+				// worktree per ticket, one worker per worktree), and merges stay
+				// serial through git.merge with overlap as a merge stop.
 				"One worker in flight per invocation, unless the opt-in parallel route below is approved for this run.",
 				"the default and the only path without explicit user approval for this run",
 				"is the single gate, and it authorizes the provisioning itself, not only the parallel decision",
@@ -2779,13 +2781,20 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				"File-scope overlap is not an exclusion",
 				"never batch a `dispatch_blocked` ticket",
 				"The approved batch bounds concurrency: do not add a ticket after approval.",
-				"`" + product + "/worktree.acquire(base: <goal branch>, target_branch: impl/<parent>/<slug>, session_key: <your key>)`",
-				"is the sole branch-creation owner: a worker on a pre-provisioned worktree suppresses its own PARENT-branch capture and branch creation",
-				"so an isolated batch worker does not starve the lead's own loop",
+				"Provision one worktree per approved ticket, one at a time",
+				"`" + product + "/worktree.acquire(base: <goal branch>, target_branch: <that ticket's canonical impl branch>, session_key: <your key>)`",
+				"Use the same per-ticket `impl/<parent>/<slug>` name the serial route derives",
+				"is the sole branch-creation owner, so a batch worker suppresses its own PARENT-branch capture",
+				"`" + product + "/playbook.render(name: <worker playbook chosen from the Spawn tier table for that ticket's risks>, session_key: <your key>, root_override: <that worktree path>)`",
+				"binds the worker's spliced key to the worktree root",
+				"Spawn one worker per ticket at the render's recommended tier",
+				"you never discover the worker's own spliced key",
+				"so an isolated batch worker does not starve your own loop",
 				"collect every terminal report first, so the serial veto and merge-approval model is unchanged",
-				"Merge serially through `" + product + "/git.merge`, one branch at a time into the goal branch, in dependency order.",
+				"Merge serially through `" + product + "/git.merge`, one branch at a time into the goal branch, in dependency order",
+				"advancing each ticket's assignment note after its branch integrates",
 				"cannot resolve is a merge stop: surface it to the user and leave the unmerged branches retained",
-				"`" + product + "/worktree.release(key: <worker_key>)`",
+				"`" + product + "/worktree.release(key: <that ticket's worker_key>)`",
 			} {
 				if !strings.Contains(body, want) {
 					t.Errorf("rendered policy missing %q", want)

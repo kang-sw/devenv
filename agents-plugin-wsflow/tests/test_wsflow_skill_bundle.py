@@ -361,12 +361,16 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertIn("The approved batch bounds concurrency", run)
         self.assertIn("{{.McpNamespace}}/worktree.acquire(base: <goal branch>", run)
         self.assertIn("is the sole branch-creation owner", run)
+        self.assertIn("Render each worker into its worktree and spawn it:", run)
+        self.assertIn("{{.McpNamespace}}/playbook.render(name: <worker playbook chosen from the", run)
+        self.assertIn("`root_override` binds the worker's", run)
+        self.assertIn("you never discover the worker's own spliced key", run)
         self.assertIn(
             "serial veto and merge-approval model is unchanged", run
         )
         self.assertIn("Merge serially through `{{.McpNamespace}}/git.merge`", run)
         self.assertIn("cannot resolve is a merge stop: surface it to", run)
-        self.assertIn("{{.McpNamespace}}/worktree.release(key: <worker_key>)", run)
+        self.assertIn("{{.McpNamespace}}/worktree.release(key: <that ticket's worker_key>)", run)
 
     def test_bootstrap_scaffolds_emit_converged_output_across_packages(self):
         # Ticket 260825 Phase 4: assert positive convergence. Both packages'

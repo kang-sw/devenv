@@ -128,34 +128,44 @@ is provisioned.
 2. Present the candidate batch and its ticket count to the user for the
    provisioning approval. The approved batch bounds concurrency: do not add a
    ticket after approval. On refusal, run the serial path.
-3. Provision one worktree per approved ticket with
+3. Provision one worktree per approved ticket, one at a time, with
    `{{.McpNamespace}}/worktree.acquire(base: <goal branch>, target_branch:
-   impl/<parent>/<slug>, session_key: <your key>)`. It returns `{ path,
-   worker_key }`, creating and checking out the impl branch and minting the
-   worker key already bound to that worktree root. `worktree.acquire`'s
-   `target_branch` is the sole branch-creation owner: a worker on a
-   pre-provisioned worktree suppresses its own PARENT-branch capture and branch
-   creation, so skip the serial Spawn step-1 goal-branch staging for a batch
-   worker.
-4. Spawn one worker per ticket in its acquired worktree, each through Spawn
-   steps 2–5 (render, read the one un-noted control child key, spawn at the
-   recommended tier, note the assignment, wait). Point each worker's task-block
-   Branch line at its acquired impl branch. Wait on the host's per-worker
-   completion notification, never a poll loop, so an isolated batch worker does
-   not starve the lead's own loop.
+   <that ticket's canonical impl branch>, session_key: <your key>)`. Use the
+   same per-ticket `impl/<parent>/<slug>` name the serial route derives for that
+   stem, so the worker's own `{{.McpNamespace}}/route.resolve_implement` finds
+   the branch already checked out and returns `continue` rather than deriving a
+   second one. `worktree.acquire` creates and checks out that branch in a fresh
+   or recycled worktree and returns its `path` plus a `worker_key` bound to that
+   worktree root; it is the sole branch-creation owner, so a batch worker
+   suppresses its own PARENT-branch capture and skips the serial Spawn step-1
+   goal-branch staging.
+4. Render each worker into its worktree and spawn it:
+   `{{.McpNamespace}}/playbook.render(name: <worker playbook chosen from the
+   Spawn tier table for that ticket's risks>, session_key: <your key>,
+   root_override: <that worktree path>)`. `root_override` binds the worker's
+   spliced key to the worktree root, so the worker's ws calls resolve against
+   its own worktree and not yours — this is what isolates the batch. Spawn one
+   worker per ticket at the render's recommended tier with the returned prompt
+   path, its task-block Branch line naming the acquired impl branch. Record the
+   assignment (Spawn step 4) on that ticket's `worker_key` from
+   `worktree.acquire` — that is your handle to track, resume, and later release
+   the worktree; you never discover the worker's own spliced key. Wait on the
+   host's per-worker completion notification — never a poll loop — so an
+   isolated batch worker does not starve your own loop.
 5. Handle the N reports one at a time by the same **Handle the report** stop
    protocol as the serial path: a stop from any worker goes to the user exactly
    as that section dictates, and the other workers' retained branches wait. Do
    not merge as reports arrive — collect every terminal report first, so the
    serial veto and merge-approval model is unchanged across the batch.
 6. Merge serially through `{{.McpNamespace}}/git.merge`, one branch at a time
-   into the goal branch, in dependency order. A cross-worker file overlap
+   into the goal branch, in dependency order, advancing each ticket's assignment
+   note after its branch integrates. A cross-worker file overlap
    `{{.McpNamespace}}/git.merge` cannot resolve is a merge stop: surface it to
    the user and leave the unmerged branches retained, exactly as a serial
    conflict. Return each worktree to the pool with
-   `{{.McpNamespace}}/worktree.release(key: <worker_key>)` after its branch
-   integrates; release every acquired worktree, including one whose worker
-   stopped.
+   `{{.McpNamespace}}/worktree.release(key: <that ticket's worker_key>)` after
+   its branch integrates; release every acquired worktree, including one whose
+   worker stopped.
 
 ## Handle the report
 
