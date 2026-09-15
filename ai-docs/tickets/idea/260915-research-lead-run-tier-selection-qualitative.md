@@ -97,6 +97,57 @@ input is already a lossy quantization of a model judgment. Sketch:
 3. Record the chosen tier and the driving axis in the assignment note (the lead
    already writes a note) to recover most of the lost auditability.
 
+## Deeper reframing: move the risk judgment to the lead at dispatch
+
+A follow-on discussion questioned a deeper premise — the constraint that the
+lead must not read the ticket body (`lead-run.md:42`, "use its Route Facts
+projection; do not read or summarize the ticket body"). Reading the unit of
+work you are about to dispatch is a sound default, and doing the risk analysis
+first-hand at dispatch time (with current repo state) beats consuming a frozen
+enum a cheaper model graded at authoring time.
+
+What the read-body ban protects (intents are stated, not justified inline):
+
+- **Single source of routing truth** — `ticket-fact-populator.md:113`: "Route
+  Facts are the only place for routing judgment." Deliberate concentration for
+  reproducibility/audit.
+- **Restart/compaction survivability** — `lead-run.md:92`: a compacted or
+  restarted lead rebuilds from the carry-over (assignment) note, so the lead is
+  meant to stay shallow.
+- **Lead context economy** — implied by choosing a projection over the body;
+  not written.
+
+These are largely recoverable under the reframed direction:
+
+- Context: the lead reads only the one selector-chosen ticket, at dispatch —
+  one body per dispatched cycle, bounded, and needed to route anyway.
+- Reproducibility + restart: the lead records the chosen tier and the driving
+  risk in the assignment note (already an MCP touchpoint, `session.note`); the
+  single source moves from a frozen artifact to a recorded decision that a
+  restart reads back.
+
+**Separation of concerns (do not discard the projection).** Route Facts carry
+more than risk: `dispatch_blocked`/prerequisite edges, phase/result state, and
+scope/mirror facts are mechanical and reproducibility-worthy — keep them
+computed in MCP. Only the *judgment* (risk → tier) moves to the lead.
+
+**Reframed MCP role** (answers "does MCP need to intervene in the analysis?" —
+not in the judgment): MCP shifts from *decider/gate* to *judgment scaffolding*:
+
+1. keep computing the mechanical dispatch facts (`dispatch_blocked`, phase
+   state) as today;
+2. provide the risk *rubric* (the "scale" the analysis grades against) from one
+   place, so lead, populator, and reviewers measure with the same ruler —
+   today the four axes live only implicitly in the populator; if the lead
+   judges, the rubric must reach the lead (playbook text, or an MCP-served
+   shared rubric doc);
+3. record the lead's tier decision (note).
+
+End state: the lead reads the selected ticket at dispatch, analyzes risk
+against a shared rubric, qualitatively picks `medium`/`large`/`xlarge`, and
+records the decision. Author-time risk pre-grading disappears for tier
+purposes; the fact-populator narrows to mechanical facts.
+
 ## Outcome Ledger
 
 ### Verified Findings
@@ -113,21 +164,44 @@ input is already a lossy quantization of a model judgment. Sketch:
 - No test pins the lead's tier-selection mapping; `tickets_route_facts_test.go`
   covers only the fact projection, so removing the table breaks no existing
   test.
+- The lead is barred from reading the ticket body (`lead-run.md:42`); the
+  stated intents behind keeping the lead shallow are single-source routing
+  truth (`ticket-fact-populator.md:113`) and restart/compaction survivability
+  (`lead-run.md:92`). Context economy is implied, not written.
+- Route Facts carry mechanical facts beyond risk (`dispatch_blocked`, phase
+  state, scope/mirror), so the projection retains value even if risk grading
+  leaves it.
 
 ### Confirmed Decisions
 <!-- none yet -->
 
 ### Proposals
-- (User-favored, unconfirmed) Move tier selection to a qualitative lead
-  judgment over the four axes, picking `medium`/`large`/`xlarge`, restoring the
-  apparent original intent; keep the axes as required inputs.
-- Surface the Route Facts evidence column as an additive projection field so
-  the qualitative pick has grounds to weigh.
-- Record chosen tier + driving axis in the assignment note for audit.
+- (User-favored, unconfirmed) Move the risk judgment itself to the lead at
+  dispatch: let the lead read the selected ticket, analyze risk against a
+  shared rubric, and qualitatively pick `medium`/`large`/`xlarge`. Author-time
+  risk pre-grading disappears for tier purposes; the fact-populator narrows to
+  mechanical facts. (Supersedes the lighter "lead reads only the enums"
+  variant.)
+- Keep the mechanical Route Facts (`dispatch_blocked`, phase state, scope) in
+  MCP; move only judgment out. Reframe MCP from decider/gate to judgment
+  scaffolding: compute mechanical facts, serve the shared rubric, record the
+  decision.
+- If a lighter step is preferred instead: surface the Route Facts evidence
+  column as an additive projection field so a qualitative pick has grounds to
+  weigh without reading the body.
+- Record chosen tier + driving risk in the assignment note for audit and
+  restart recovery (already an MCP touchpoint via `session.note`).
 - (Orthogonal follow-up) Decouple model tier from review breadth into two knobs
   so "more review, same model" is expressible.
 
 ### Open Questions
+- Reopen the lead read-body ban for the selected ticket at dispatch? Weigh the
+  bounded context cost (one body per dispatched cycle) against fresher
+  first-hand judgment; confirm the single-source/restart intents are recovered
+  by recording the decision in the note.
+- Where does the risk rubric ("the scale") live so lead, populator, and
+  reviewers grade against one ruler — playbook text, or an MCP-served shared
+  rubric doc?
 - Should tier and review-breadth be decoupled now, or is that a separate
   ticket? (Affects whether the worker-playbook set stays a 1:1 tier ladder.)
 - If qualitative, how much guidance is enough to keep leads consistent without
