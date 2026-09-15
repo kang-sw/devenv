@@ -2743,11 +2743,11 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				// selector's single result. The lead does not browse the queue.
 				"A ticket named in the invocation wins. Otherwise render `ticket-selector`, spawn it at its recommended tier, and use its one `selection:` result.",
 				product + `/tickets.query(ticket_stem: "<stem>", format: "json")`,
-				"A `dispatch_blocked` field means a prerequisite has not landed: report the blocking stem to the user and end the turn",
+				"On `dispatch_blocked`, report the blocking stem to the user and end the turn.",
 				// Dispatch-time tier grading, and the one table that now carries
 				// both the tier's worker playbook and its stop-(e) retry target.
 				"Read the selected ticket's whole body and grade its risk against the Risk Rubric below",
-				"The tier picks the worker's model only, never the review breadth.",
+				"The tier sets the worker's model; the worker's route sets review breadth.",
 				"| medium | `ticket-worker` | `ticket-worker-elevated` |",
 				"| large | `ticket-worker-elevated` | `ticket-worker-escalated` |",
 				"| xlarge | `ticket-worker-escalated` | none: its (e) goes to the user |",
@@ -2762,8 +2762,8 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				// Report handling: fail closed on a malformed report, check the
 				// shared checkout before a HEAD-relative write of the lead's own,
 				// and keep the merge gate with the lead.
-				"Accept `stop: none` only with `completion: phase` or `ticket`, and stops `a` through `e` only with `completion: none`",
-				"missing, unknown, or incompatible values are a protocol mismatch: surface the raw report and end the invocation",
+				"defines its own valid `stop:` and `completion:` pairs; `completion: ad_hoc` is invalid in this ticket-only run",
+				"Missing, unknown, or incompatible values are a protocol mismatch: surface the raw report and end the invocation",
 				"The worker's checkout is shared and outlives its turn, so before a HEAD-relative write of your own",
 				"call `" + product + "/git.status` and decide",
 				"`merge_confirm: skip` auto-calls `" + product + "/git.merge` with the impl branch",
@@ -2775,7 +2775,7 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				"`completion: ticket` — merge the retained impl branch.",
 				"revise the unimplemented phase directly, or append an `#### Edition` when it already has a `### Result`",
 				"A `pass` commits the phase update and resumes the worker",
-				"One retry: a second (e), or an (e) from `ticket-worker-escalated`, goes to the user.",
+				"One retry: a second (e) goes to the user.",
 				// Opt-in parallel route: inert without the per-run approval, batch
 				// selection delegated to ticket-batch-selector, one worktree per
 				// ticket bound through root_override, merges serial, every acquired
@@ -2785,7 +2785,7 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				`One per-run user approval, "may this run provision worktrees and execute ready tickets in parallel", opens this route`,
 				"The approved batch is the concurrency cap.",
 				"Render `ticket-batch-selector` and spawn it at its recommended tier; it owns the parallel-safety read.",
-				"Provision each approved ticket, one at a time, with `" + product + "/worktree.acquire(base: <goal branch>, target_branch: <that ticket's impl/<parent>/<slug> branch>, session_key: <your key>)`",
+				"Provision each approved ticket, one at a time, with `" + product + "/worktree.acquire(base: <your branch>, target_branch: <that ticket's impl/<parent>/<slug> branch>, session_key: <your key>)` and keep the `worker_key` it returns",
 				"it is the sole branch owner, so skip Spawn step 3",
 				"Render each worker with `root_override: <that worktree path>`",
 				"Collect every terminal report before any merge",

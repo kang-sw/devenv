@@ -258,8 +258,8 @@ class SkillDispatchContractsTest(unittest.TestCase):
         # stack-vs-return: the explicit either/or the lead must decide.
         self.assertIn(
             "stack on the impl branch when the write belongs to a ticket that continues;"
-            " check out the base branch when the write is unrelated or you are leaving"
-            " the ticket blocked",
+            " check out the branch you were invoked on when the write is unrelated or you"
+            " are leaving the ticket blocked",
             run,
         )
         # dirty-tree: the worker's shared checkout may be dirty; commit or stash
@@ -301,8 +301,17 @@ class SkillDispatchContractsTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("impl_ticket", batch)
         self.assertIn('statuses: ["ready"]', batch)
-        for field in ("batch:", "excluded:", "omitted:"):
-            self.assertIn(field, batch)
+        # The output block is the contract the lead reads back: one line per
+        # selected ticket, a reason on every exclusion, and the three terminal
+        # lines that stand in place of `batch:`.
+        self.assertIn("batch: <ticket path>", batch)
+        self.assertIn("excluded: <ticket path> — <reason>", batch)
+        self.assertIn("omitted: none", batch)
+        self.assertIn(
+            "Terminal lines in place of `batch:`: `ready/ empty`, `every remaining ticket"
+            " blocked`, or `stop: <reason>`.",
+            " ".join(batch.split()),
+        )
         self.assertIn(
             "A goal run is the current branch `goal/*` or an active goal reminder.",
             flat,

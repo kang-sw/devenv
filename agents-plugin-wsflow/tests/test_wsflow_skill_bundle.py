@@ -360,7 +360,12 @@ class WsflowSkillBundleTest(unittest.TestCase):
         )
         self.assertIn("The approved batch is the concurrency cap.", run)
         self.assertIn("Render `ticket-batch-selector` and spawn it at its recommended tier", run)
-        self.assertIn("{{.McpNamespace}}/worktree.acquire(base: <goal branch>", run)
+        self.assertIn(
+            "{{.McpNamespace}}/worktree.acquire(base: <your branch>, target_branch:"
+            " <that ticket's impl/<parent>/<slug> branch>, session_key: <your key>)`"
+            " and keep the `worker_key` it returns",
+            run,
+        )
         self.assertIn("it is the sole branch owner, so skip Spawn step 3", run)
         self.assertIn("Render each worker with `root_override: <that worktree path>`", run)
         self.assertIn("Collect every terminal report before any merge", run)
@@ -377,8 +382,17 @@ class WsflowSkillBundleTest(unittest.TestCase):
             .read_text(encoding="utf-8")
             .split()
         )
-        self.assertIn("Two tickets are parallel-safe when neither functionally depends", batch)
-        self.assertIn("file-scope overlap is not an exclusion", batch)
+        self.assertIn(
+            "Exclude a candidate only when its `blocked-by:` edge, a `related:` or `parent:`"
+            " line, or its body names another candidate as something it needs first",
+            batch,
+        )
+        self.assertIn(
+            "Everything else is parallel-safe: a shared epic, an unqualified `related:`"
+            " edge, merely related prose, and overlapping files, whose conflicts are"
+            " resolved downstream.",
+            batch,
+        )
         self.assertIn("{{.McpNamespace}}/git.status(format: \"json\")", batch)
 
     def test_bootstrap_scaffolds_emit_converged_output_across_packages(self):
