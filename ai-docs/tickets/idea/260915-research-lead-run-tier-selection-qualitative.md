@@ -157,7 +157,7 @@ purposes; the fact-populator narrows to mechanical facts.
   drops the evidence column (`tickets.go:560-561`).
 - Tier selection is an OR over four risk axes with binary output
   (`lead-run.md:53,59`); `xlarge` is reachable only reactively via stop-e
-  (`lead-run.md:241-242`).
+  (`lead-run.md:243-252`).
 - The populator's calibration rule forbids guessing `low` on risk/side-effect
   rows (`ticket-fact-populator.md:101-103`), giving an upward skew the OR-gate
   amplifies.
@@ -173,7 +173,23 @@ purposes; the fact-populator narrows to mechanical facts.
   leaves it.
 
 ### Confirmed Decisions
-<!-- none yet -->
+- Tier selection becomes a **dispatch-time qualitative lead judgment**: the
+  lead reads the selector-chosen ticket body at dispatch, grades risk against a
+  shared rubric, and picks `medium`/`large`/`xlarge`. This reopens the lead
+  read-body ban (`lead-run.md:42`) for that one ticket.
+- The shared risk **rubric lives as a bundled rsrc document** served through
+  the rsrc channel, so lead, populator, and reviewers grade against one ruler.
+- `ticket-fact-populator` keeps grading `risk.*` rows but **demoted to
+  advisory**; its tier authority is removed (not full removal of the rows).
+- **Mechanical Route Facts stay computed in MCP** (`dispatch_blocked`, phase
+  state, scope); only the judgment moves to the lead.
+- The **context-accumulation tradeoff is accepted** (bounded per cycle,
+  cumulative across a long drain; the assignment note is the durable record).
+- **Decoupling model-tier from review-breadth is deferred** to a separate
+  follow-up ticket; out of scope here.
+- Actionable work is derived into
+  `260915-refactor-lead-run-dispatch-time-tier-judgment`; this research ticket
+  remains the evidence record.
 
 ### Proposals
 - (User-favored, unconfirmed) Move the risk judgment itself to the lead at
@@ -195,21 +211,19 @@ purposes; the fact-populator narrows to mechanical facts.
   so "more review, same model" is expressible.
 
 ### Open Questions
-- Reopen the lead read-body ban for the selected ticket at dispatch? Weigh the
-  bounded context cost (one body per dispatched cycle) against fresher
-  first-hand judgment; confirm the single-source/restart intents are recovered
-  by recording the decision in the note.
-- Where does the risk rubric ("the scale") live so lead, populator, and
-  reviewers grade against one ruler — playbook text, or an MCP-served shared
-  rubric doc?
-- Should tier and review-breadth be decoupled now, or is that a separate
-  ticket? (Affects whether the worker-playbook set stays a 1:1 tier ladder.)
-- If qualitative, how much guidance is enough to keep leads consistent without
-  re-introducing a de-facto table (e.g. "correctness/security high generally
-  warrants large; a lone fit/test high usually does not")?
-- Is there value in retaining a deterministic *floor* (e.g.
-  `security_or_contract: high` always ≥ large) for safety-adjacent axes while
-  the rest is qualitative?
+- (Resolved → Confirmed Decisions) Reopen the lead read-body ban: yes, for the
+  selected ticket at dispatch.
+- (Resolved → Confirmed Decisions) Rubric home: a bundled rsrc doc served
+  through the rsrc channel.
+- (Resolved → Confirmed Decisions) Decouple tier from review-breadth: deferred
+  to a separate follow-up ticket.
+- How much guidance the rubric needs to keep leads consistent without becoming
+  a de-facto table is a Phase 1 design detail of
+  `260915-refactor-lead-run-dispatch-time-tier-judgment`, not a blocker.
+- (Not adopted, left non-authoritative) Retaining a deterministic *floor* for
+  safety-adjacent axes (e.g. `security_or_contract: high` always ≥ large): the
+  confirmed direction is pure qualitative with rubric guidance; revisit only if
+  dogfooding shows leads under-calling a safety axis.
 
 ### Rejected Alternatives
 <!-- none yet -->
