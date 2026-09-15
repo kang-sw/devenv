@@ -548,11 +548,14 @@ describe("registerPushMessageRenderers", () => {
     for (const width of [40, 80, 120]) {
       const collapsed = registered.get("ws-agent-report")!(message, { expanded: false }, fakeTheme()) as FakeComponent;
       const collapsedLines = collapsed.render(width);
-      // The marker degrades to bare dots at narrower widths (no room for the
-      // byte-count annotation); either form is a valid fit here — the
-      // dedicated marker tests in tool-result-render.test.ts cover the exact
-      // byte count.
-      assert.match(collapsedLines.at(-1)?.replace(/<[^>]+>/g, "").trim() ?? "", /^\.\.\.(\[\d+ bytes total\])?$/);
+      // The annotation fits at every tested width here (40/80/120 all leave
+      // enough room). The exact byte count is not asserted: it is
+      // Buffer.byteLength of the ANSI-stripped/sanitized body, and
+      // reproducing that sanitization in the test would just duplicate
+      // tool-result-render.ts's internals — the dedicated marker tests in
+      // tool-result-render.test.ts already cover the exact byte count,
+      // including a multibyte case.
+      assert.match(collapsedLines.at(-1)?.replace(/<[^>]+>/g, "").trim() ?? "", /^\.\.\.\[\d+ bytes total\]$/);
       assert.doesNotMatch(collapsedLines.join("\n"), /k11: v11/, `collapsed report retains the logical-line cap at ${width}`);
       assert.ok(collapsedLines.every((line) => displayWidth(line) <= width), `collapsed report rows fit ${width} columns`);
       assert.doesNotMatch(collapsedLines.join("\n"), /\x1b\[/, `collapsed report sanitizes ANSI at ${width}`);

@@ -139,19 +139,24 @@ function fittedIndent(width: number, preferred: number, remainder: string): numb
 }
 
 /**
- * `totalBytes` is `Buffer.byteLength` of the full pre-truncation source (the
- * bytes already shown plus the hidden ones, not just the remainder). The
- * annotated form `...[N bytes total]` is used only when it fits the
- * available width; narrower widths fall back to the bare dot marker so the
- * marker row never forces a native rewrap.
+ * `totalBytes` is `Buffer.byteLength` of the full pre-truncation `source`
+ * (the bytes already shown plus the hidden ones, not just the remainder) —
+ * i.e. of `physicalPreviewLayout`'s laid-out text: sanitized (ANSI/control
+ * chars stripped, tabs expanded, CRLF normalized) and, when
+ * `trimOuterWhitespace` is set, outer-trimmed. It is a count of what is
+ * actually displayed, not of the raw pre-sanitize tool output, so it can
+ * differ from the underlying payload's own byte size for tab- or
+ * ANSI-heavy content. The annotated form `...[N bytes total]` is used only
+ * when it fits the available width; narrower widths fall back to the bare
+ * dot marker so the marker row never forces a native rewrap.
  */
-function truncatedMarker(width: number, preferredIndent = 0, totalBytes?: number): string {
+function truncatedMarker(width: number, totalBytes: number, preferredIndent = 0): string {
   if (width <= 0) return "";
   const indent = Math.max(0, Math.min(preferredIndent, width - 1));
   const available = width - indent;
   const dots = ".".repeat(Math.min(3, available));
-  const annotated = totalBytes === undefined ? undefined : `${dots}[${totalBytes} bytes total]`;
-  const marker = annotated !== undefined && annotated.length <= available ? annotated : dots;
+  const annotated = `${dots}[${totalBytes} bytes total]`;
+  const marker = annotated.length <= available ? annotated : dots;
   return `${" ".repeat(indent)}${marker}`;
 }
 
@@ -173,7 +178,7 @@ function physicalPreviewLayout(
   const resolvedStartIndent = startIndent ?? INPUT_START_INDENT;
   const resolvedContinuationIndent = continuationIndent ?? CONTINUATION_INDENT;
   const appendMarker = (): PhysicalPreviewLayout => {
-    const marker = truncatedMarker(boundedWidth, markerIndent, Buffer.byteLength(source));
+    const marker = truncatedMarker(boundedWidth, Buffer.byteLength(source), markerIndent);
     return marker ? { rows: [...rows, marker], marker } : { rows, marker: undefined };
   };
 
