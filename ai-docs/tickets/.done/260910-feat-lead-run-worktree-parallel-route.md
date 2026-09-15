@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: dcf580432d7200b1
 sage-review-completeness-reviewed: dcf580432d7200b1
+completed: 2026-09-15
 ---
 
 # Add a user-gated worktree parallel route to lead-run
@@ -184,6 +185,54 @@ from a linked worktree, and `.git/info/exclude` self-registration. The
 prerequisite `root_override`/rsrc split already carries coverage (260731); this
 phase adds only the worktree-lifecycle fixtures.
 
+### Result (6bc205d2) - 2026-09-15
+
+Landed the `worktree.acquire`/`worktree.release` MCP tool pair. New
+`agents-plugin-tool/internal/mcp/worktree_tools.go` owns the whole lifecycle
+(pure, `wsgit.Runner`-injected): pool-root resolution against the primary
+worktree root (`worktree list` first entry), reuse eligibility (under owned pool
+prefix + detached HEAD + clean), create-or-reuse, branch create/checkout on base
+via `git switch` (never resetting an existing branch), hygiene `reset --hard` +
+`clean -ffdx`, submodule sync when `.gitmodules` is present, and
+`.git/info/exclude` self-registration for in-repo pools. `release` cleans and
+`checkout --detach`s back into the pool, never deleting. The dispatch handlers in
+`server.go` mint the worktree-bound worker key (roleLead, parent = lead key) and
+resolve the pool config; `worktree.acquire`/`worktree.release` are session-keyed
+and lead-only (`isLeadOnlyTool`, `toolSchemaRequiresSessionKey`). Added
+`wsconfig.ItemWorktreePool` (`worktree_pool`, builtin default
+`$(GitRoot)/.ws-worktrees`, project scope, resolver-backed). Mirrored the two
+tool entries into all three `runtime.json` packages.
+
+Verification: `go build ./...` clean; `go vet ./internal/mcp/` clean;
+`go test ./internal/mcp/ ./cmd/ws-mcp/ ./internal/wsconfig/ -count=1` all `ok`
+(includes the full-surface and no-agent runtime-contract tests and the
+pi-mirror byte-equality guard); `python3 -m unittest discover
+agents-plugin-wsflow/tests` → OK (12). New table/dispatch tests in
+`worktree_tools_test.go` cover every listed case plus an absolute-pool override,
+the release pool-membership guard (refuse primary + foreign), release-by-path and
+release-by-key dispatch, and the missing-base/missing-target_branch guards.
+
+Review: partitioned correctness/fit/test, two rounds. Round 1 raised one
+Important per partition — (correctness) `release` was destructive with no
+pool-membership guard; (fit) the schema literals hand-declared a `session_key`
+that `withSessionKeyToolSchemas` overwrites; (test) the hygiene test did not
+discriminate the `clean -ffdx` ignored-cruft purge from a plain branch switch —
+all fixed in `6bc205d2` and confirmed [fixed] by a round-2 verifier (clean).
+
+Decisions:
+- `worktree_pool` is resolver-backed (layered config + builtin default) with no
+  `config.tune` writer this phase: `config.tune`'s scalar path lowercases values,
+  which would corrupt case-sensitive paths.
+- `release` refuses any target that is the primary worktree, outside the resolved
+  pool, or not a registered worktree — the symmetric safety guard to acquire's
+  reuse-eligibility rule (the ticket's `risk.correctness: high` class).
+- An existing `target_branch` is checked out as-is, never reset to `base`, so a
+  re-entered branch keeps its commits; only working-tree cruft is cleared.
+- Minors recorded but not fixed: no test for the skip-unreadable-candidate branch
+  (hard to force deterministically) or the submodule success/warning paths (need
+  a submodule fixture); `wtRun` duplicates `mergeImplBranch`'s local git-run
+  closure (not extracted to avoid churning `git_merge.go`).
+
 ### Phase 2: Gated worktree parallel route in lead-run
 
 Add to `lead-run`'s Select/Spawn path an opt-in parallel route that activates
@@ -239,3 +288,70 @@ run selects a dependency-disjoint batch and spawns one worker per worktree, and
 that merges route through `ws/git.merge` serially with a cross-worker overlap
 surfaced as a merge stop. Mirror-drift test in `agents-plugin-wsflow` per
 `wsflow-mirroring.md`.
+
+### Result (2d69717a) - 2026-09-15
+
+Added a `## Parallel route (opt-in)` section to the `lead-run` playbook
+(`agents-plugin/rsrc/lead-run/lead-run.md`), mirrored byte-for-byte into
+`agents-plugin-wsflow/` and `agents-plugin-pi/` and regenerated all three
+manifests. The route is inert without an explicit per-run user approval that
+gates worktree *provisioning* itself; without it the serial Select→Spawn path
+is unchanged. When approved: (1) select a dependency-disjoint batch from
+`ready/` (dependency predicate, not file overlap — file overlap is deferred to
+the serialized merge as a merge stop); (2) present the batch + count for the
+provisioning approval, whose approved count is the concurrency cap; (3)
+`worktree.acquire` one worktree per ticket on the ticket's canonical
+`impl/<parent>/<slug>` (sole branch-creation owner; worker suppresses its own
+branch creation); (4) `playbook.render(root_override=<worktree>)` binds each
+worker's operating key to its worktree and the acquire `worker_key` is the
+lead's tracking/release handle; (5) handle N reports one at a time by the
+existing stop protocol, collecting all before merging; (6) merge serially
+through `ws/git.merge` in dependency order, overlap as a merge stop, then
+`worktree.release` each worktree.
+
+Verification: `go build ./...` clean; `go vet ./internal/mcp/` clean;
+`go test ./internal/mcp/ ./internal/wsrsrc/ ./internal/wsconfig/ -count=1` all
+`ok` (includes `TestPlaybookPrintLeadRunWorkerTierPolicy` render pins for both
+ws and wsflow, `TestWsflowRsrcMirrorUpToDate`, `TestPiMirrorUpToDate`, and the
+manifest regen guards); `python3 -m unittest discover agents-plugin-wsflow/tests`
+→ OK (12), including the extended byte-mirror pins for the parallel route.
+Test coverage pins each verification clause: inert-without-approval, the
+dependency batch predicate + 1:1 worktree-per-ticket / worker-per-worktree
+cardinality, the `root_override` key binding, and serial `git.merge` with
+overlap as a merge stop.
+
+Review: partitioned correctness/fit/test, two rounds. Round 1 raised one
+Critical (correctness) — the first draft reused serial Spawn steps 2–5, whose
+`playbook.render` has no `root_override`, so a batch worker's key would bind to
+the lead's root and defeat isolation, and `worktree.acquire`'s extra un-noted
+control child broke the "one un-noted control child" identification. Fixed by
+making `worktree.acquire`'s returned `worker_key` the lead's tracking/release
+handle and `playbook.render(root_override=<worktree>)` the worker's
+worktree-bound operating key (spliced into its prompt, never discovered by the
+lead). Plus fit Minors (namespacing, doubled "wait", note-advancement),
+a correctness Minor (canonical branch-name pointer), and a test Minor
+(cardinality pins). A round-2 verifier confirmed the Critical and all minors
+[fixed].
+
+Decisions:
+- Deferred item (d) concurrency cap: resolved as the user-approved batch count
+  itself rather than a separate numeric knob — the single provisioning approval
+  already bounds concurrency, and no `pool cap`/GC (item h) is added while the
+  project holds its single-maintainer-serial posture.
+- Deferred item (b) N-report batching: reports are handled one at a time by the
+  existing stop protocol and merges are held until every report is collected,
+  then run serially, so the serial veto/merge-approval model is unchanged.
+- Deferred item (c) `/goal` Stop-hook starvation: addressed by construction —
+  workers run in isolated worktrees and the lead waits on the host's per-worker
+  completion notification, never a poll loop; a live parallel run to confirm
+  awaits item (h) being reopened.
+- Adapted from the ticket's "there is no separate render step" wording: the
+  tools require a render to produce a keyed worker prompt (render always mints a
+  child key for a lead caller), so acquire's `worker_key` and render's spliced
+  key are two keys with two roles (handle vs. operating identity). Recorded, not
+  a structural deviation.
+- `target_branch` points at the ticket's canonical `impl/<parent>/<slug>` so the
+  worker's `route.resolve_implement` returns `continue`; the lead cannot compute
+  `wskey.Derive` itself, so a non-canonical name would trigger a rename (not a
+  fatal double-create) — left as a forward note for a future acquire helper that
+  returns the derived name.
