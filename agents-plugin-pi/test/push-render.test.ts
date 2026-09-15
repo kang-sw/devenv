@@ -377,7 +377,10 @@ describe("buildPushComponent", () => {
     const collapsedLines = collapsed.render(80);
     // head + 10 capped body logical lines + marker.
     assert.equal(collapsedLines.length, 12);
-    assert.equal(collapsedLines.at(-1)?.trim(), "...");
+    // The marker's byte count is the total of the full (pre-cap) body text —
+    // all 12 "kN: vN" logical lines, not just the 10 shown.
+    const fullBody = Array.from({ length: 12 }, (_, index) => `k${index}: v${index}`).join("\n");
+    assert.equal(collapsedLines.at(-1)?.trim(), `...[${Buffer.byteLength(fullBody)} bytes total]`);
     assert.doesNotMatch(collapsedLines.join("\n"), /k11: v11/, "the 12th logical line is cut when collapsed");
 
     const expanded = buildPushComponent(tui.modules, built, undefined, true) as FakeComponent;
@@ -545,7 +548,14 @@ describe("registerPushMessageRenderers", () => {
     for (const width of [40, 80, 120]) {
       const collapsed = registered.get("ws-agent-report")!(message, { expanded: false }, fakeTheme()) as FakeComponent;
       const collapsedLines = collapsed.render(width);
-      assert.equal(collapsedLines.at(-1)?.replace(/<[^>]+>/g, "").trim(), "...");
+      // The annotation fits at every tested width here (40/80/120 all leave
+      // enough room). The exact byte count is not asserted: it is
+      // Buffer.byteLength of the ANSI-stripped/sanitized body, and
+      // reproducing that sanitization in the test would just duplicate
+      // tool-result-render.ts's internals — the dedicated marker tests in
+      // tool-result-render.test.ts already cover the exact byte count,
+      // including a multibyte case.
+      assert.match(collapsedLines.at(-1)?.replace(/<[^>]+>/g, "").trim() ?? "", /^\.\.\.\[\d+ bytes total\]$/);
       assert.doesNotMatch(collapsedLines.join("\n"), /k11: v11/, `collapsed report retains the logical-line cap at ${width}`);
       assert.ok(collapsedLines.every((line) => displayWidth(line) <= width), `collapsed report rows fit ${width} columns`);
       assert.doesNotMatch(collapsedLines.join("\n"), /\x1b\[/, `collapsed report sanitizes ANSI at ${width}`);

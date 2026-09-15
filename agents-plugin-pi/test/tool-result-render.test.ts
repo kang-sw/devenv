@@ -222,7 +222,37 @@ describe("bounded YAML preview preparation", () => {
     assert.equal(physicalPreview(ten, 80, { expanded: false, trimOuterWhitespace: false }).length, 10);
     assert.deepEqual(
       physicalPreview(eleven, 80, { expanded: false, trimOuterWhitespace: false }).slice(-2),
-      ["    line-9", "..."],
+      ["    line-9", `...[${Buffer.byteLength(eleven)} bytes total]`],
+    );
+  });
+
+  test("260914: the collapsed truncation marker reports the total byte size, counting shown plus hidden bytes", () => {
+    const ten = Array.from({ length: 10 }, (_, index) => `line-${index}`).join("\n");
+    const eleven = `${ten}\nline-10`;
+    assert.equal(eleven.length, Buffer.byteLength(eleven), "sanity: this fixture is pure ASCII, so multibyte content is exercised separately below");
+    assert.deepEqual(
+      physicalPreview(eleven, 80, { expanded: false, trimOuterWhitespace: false }).slice(-1),
+      [`...[${eleven.length} bytes total]`],
+      "pure-ASCII content: Buffer.byteLength equals the character count",
+    );
+
+    // Multibyte case: a 3-byte-per-code-point CJK character makes
+    // Buffer.byteLength diverge from both the JS string length and the
+    // row/column layout math, proving the marker counts bytes, not
+    // characters or rows.
+    const cjkLine = "界".repeat(20);
+    const multibyte = Array.from({ length: 11 }, () => cjkLine).join("\n");
+    assert.notEqual(Buffer.byteLength(multibyte), multibyte.length, "sanity: CJK code points are multi-byte in UTF-8");
+    const marker = physicalPreview(multibyte, 80, { expanded: false, trimOuterWhitespace: false }).at(-1);
+    assert.equal(marker, `...[${Buffer.byteLength(multibyte)} bytes total]`);
+    assert.notEqual(marker, `...[${multibyte.length} bytes total]`, "must not report the JS string length in place of the byte length");
+
+    // Narrow widths still fall back to the bare dot marker — the byte-count
+    // annotation must never force a native rewrap of the marker row.
+    assert.equal(
+      physicalPreview(eleven, 1, { expanded: false, trimOuterWhitespace: false }).at(-1),
+      ".",
+      "no room for the annotation at width 1: degrades to the pre-existing bare marker",
     );
   });
 
@@ -266,7 +296,7 @@ describe("bounded YAML preview preparation", () => {
     const source = Array.from({ length: 11 }, (_, index) => `line-${index}`).join("\n");
     assert.equal(
       physicalPreview(source, 80, { expanded: false, trimOuterWhitespace: true, markerIndent: 4 }).at(-1),
-      "    ...",
+      `    ...[${Buffer.byteLength(source)} bytes total]`,
     );
     assert.equal(
       physicalPreview(source, 5, { expanded: false, trimOuterWhitespace: true, markerIndent: 4 }).at(-1),
@@ -324,8 +354,8 @@ describe("native YAML preview renderers", () => {
     const initialLayouts = layouts();
     input.render(80);
 
-    assert.equal(first.at(-2), "    ...");
-    assert.ok(theme.fgCalls.some((call) => call.color === "toolOutput" && call.text === "    ..."));
+    assert.equal(first.at(-2), "    ...[200000 bytes total]");
+    assert.ok(theme.fgCalls.some((call) => call.color === "toolOutput" && call.text === "    ...[200000 bytes total]"));
     assert.equal(layouts(), initialLayouts, "unchanged input redraw reuses the bounded physical layout");
   });
 
@@ -340,7 +370,7 @@ describe("native YAML preview renderers", () => {
     const serializer = (_value: object) => Array.from({ length: 11 }, (_, index) => `line-${index}`).join("\n");
     const capped = createToolPreviewRenderers(tui, "ws__test", serializer);
     const collapsed = capped.renderResult({ content }, { expanded: false, isPartial: false }, unstyledTheme, context({ state: {} }));
-    assert.deepEqual(collapsed.render(80).slice(-2), ["    line-9", "..."]);
+    assert.deepEqual(collapsed.render(80).slice(-2), ["    line-9", `...[${Buffer.byteLength(serializer({}))} bytes total]`]);
     const expanded = capped.renderResult({ content }, { expanded: true, isPartial: false }, unstyledTheme, context({ state: {}, lastComponent: collapsed }));
     assert.equal(expanded.render(80).filter((line) => line.includes("line-")).length, 11);
   });
@@ -579,21 +609,27 @@ describe("native YAML preview renderers", () => {
         cwd: string,
       ) => { render(width: number): string[]; setArgsComplete(): void };
     };
-    const renderers = createToolPreviewRenderers(tui, "ws__test", () => Array.from({ length: 11 }, (_, index) => `line-${index}`).join("\n"));
+    const inputSource = Array.from({ length: 11 }, (_, index) => `line-${index}`).join("\n");
+    const renderers = createToolPreviewRenderers(tui, "ws__test", () => inputSource);
     const component = new toolExecution.ToolExecutionComponent(
       "ws__test", "call-1", { input: true }, { showImages: false },
       { renderCall: renderers.renderCall, renderResult: renderers.renderResult }, { requestRender() {} }, process.cwd(),
     );
     component.setArgsComplete();
 
+    const annotatedMarker = `    ...[${Buffer.byteLength(inputSource)} bytes total]`;
     const wide = component.render(40);
-    const marker = wide.find((line) => tui.stripTerminalSequences(line).trim() === "...");
+    const marker = wide.find((line) => tui.stripTerminalSequences(line).trim() === annotatedMarker.trim());
     assert.ok(marker);
-    assert.match(tui.stripTerminalSequences(marker), /^ {5}\.\.\. *$/, "parent padding plus four-column input marker indent");
-    assert.ok(marker.includes(themeModule.theme.fg("toolOutput", "    ...")), "marker uses toolOutput independently of input text");
+    assert.match(
+      tui.stripTerminalSequences(marker),
+      new RegExp(`^ {5}${annotatedMarker.trim().replace(/[.[\]]/g, "\\$&")} *$`),
+      "parent padding plus four-column input marker indent, annotated with the total byte count",
+    );
+    assert.ok(marker.includes(themeModule.theme.fg("toolOutput", annotatedMarker)), "marker uses toolOutput independently of input text");
 
     const narrowMarkers = component.render(3).filter((line) => tui.stripTerminalSequences(line).trim() === ".");
-    assert.equal(narrowMarkers.length, 1, "narrow input marker remains a single fitted row");
+    assert.equal(narrowMarkers.length, 1, "narrow input marker remains a single fitted row — too narrow for the byte-count annotation");
   });
 
   test("uses the input-owned separator for YAML, raw, error, and pending installed Pi rows", async () => {
