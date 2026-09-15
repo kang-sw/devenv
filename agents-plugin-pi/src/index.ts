@@ -184,6 +184,7 @@ import {
   pushToLead,
   registerAgentTools,
   registerPushFlush,
+  sendToLead,
   type AgentToolsHandle,
   type RpcAgentRegistry,
 } from "./spawner.ts";
@@ -196,6 +197,7 @@ import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, typ
 import { applyForkAffinity, captureRegisteredTools, classifyForkRegistrations, compareForkRegistrations, effectiveForkDescriptor, formatForkRegistrationMismatch, frameForkInput, readForkLaunchContext, removeForkTransport, restoreForkContext, restoreForkKeys, writePrivateJson, type ForkContext } from "./fork-context.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, type SpawnRole } from "./process-role.ts";
 import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
+import { buildMailboxPushMessage, createBridgeDrain, createSubprocessWait, startMailboxWaiter, type MailboxWaiterHandle } from "./mailbox-waiter.ts";
 import { armForkRoleWiring, registerFork } from "./fork.ts";
 import {
   buildForkQuestionLeadNotice,
@@ -449,6 +451,12 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   // `session_shutdown`. `undefined` in every non-TUI or non-lead/fork process,
   // which is also what keeps `agentWidgetRefreshRef.current` unset there.
   let agentWidgetHandle: AgentWidgetController | undefined;
+  // 260914 (pi native mailbox push): the session-bound background waiter that
+  // drives `ws-mcp mailbox wait` and actively steers arriving mail into the
+  // live conversation. Owner-lead only (`readSpawnRole` === undefined), started
+  // after bootstrap once this session's own key exists, stopped on
+  // `session_shutdown`. `undefined` in every other role/process.
+  let mailboxWaiterHandle: MailboxWaiterHandle | undefined;
   // The footer has the same TUI lead/fork lifetime as the widget, but remains
   // a separate component: replacing the footer never touches belowEditor cards.
   const agentFooterLifecycle = createAgentFooterSessionLifecycle(async () => {
@@ -615,6 +623,28 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       extensionPath: extensionEntryPath,
       onApprovalPending,
     }, toolPreviewTuiRef);
+
+    // 260914 (pi native mailbox push): arm the session-bound mail waiter for an
+    // owner lead once its own session key is known. Stop any prior waiter first
+    // (a `/reload` re-runs session_start) so its subprocess never outlives the
+    // bridge/client it drains through. Owner-lead only — a fork/worker/explore
+    // child has no cross-session inbox worth an extra background subprocess.
+    // The waiter uses `mailbox wait` purely as a block-until-mail signal and
+    // drains through the bridge's connected client, admitting each envelope via
+    // the shared push FIFO (`sendToLead` -> held-batch / idle-wake) exactly like
+    // every other pushed system message — see mailbox-waiter.ts.
+    mailboxWaiterHandle?.stop();
+    mailboxWaiterHandle = undefined;
+    const mailboxSessionKey = handle.defaultSessionKeyRef.current;
+    if (readSpawnRole(process.env) === undefined && mailboxSessionKey) {
+      const mailboxHandle = handle;
+      mailboxWaiterHandle = startMailboxWaiter({
+        runWait: createSubprocessWait({ launcherPath, pluginDir, sessionKey: mailboxSessionKey }),
+        drainMail: createBridgeDrain((name, args) => mailboxHandle.client.callTool(name, args), mailboxSessionKey),
+        admit: (envelope) => sendToLead(pi, buildMailboxPushMessage(envelope), "steer"),
+      });
+    }
+
     // 260904 Phase 1 (side-thread fork): registered declaratively/globally,
     // same pattern as registerExecuteGateway above — a fork child re-runs
     // session_start too and needs ws-fork registered so computeForkToolSurface's
@@ -873,6 +903,10 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // — the registries the controller closed over are about to be discarded.
     agentWidgetHandle?.stop();
     agentWidgetHandle = undefined;
+    // 260914: stop the mail waiter before the bridge/client it drains through is
+    // torn down below; `stop()` aborts any in-flight `mailbox wait` subprocess.
+    mailboxWaiterHandle?.stop();
+    mailboxWaiterHandle = undefined;
     applySessionShutdownAgentFooter(agentFooterLifecycle);
     agentWidgetRefreshRef.current = undefined;
     agentCostRefreshRef.current = undefined;

@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { heldPushQueue, leadIdleRef, leadCompactingRef, leadWakeStartPendingRef, pushToLead, registerPushFlush, sendToLead } from '../src/spawner.ts';
 import { PUSH_BATCH_CUSTOM_TYPE } from '../src/push-protocol.ts';
+import { buildMailboxPushMessage } from '../src/mailbox-waiter.ts';
 
 function harness(withGoal = false, steeringMode: 'one-at-a-time' | 'all' = 'one-at-a-time') {
   const handlers = new Map<string, Function[]>();
@@ -124,6 +125,42 @@ for (const order of ['raw-family', 'family-raw'] as const) {
     h.emit('session_shutdown');
   });
 }
+test('260914: an arriving mail admitted while dormant takes the idle-wake path and ships as one informational ws-mailbox batch item', () => {
+  const h = harness();
+  // The waiter admits mail through the SAME FIFO funnel as every push, never a
+  // raw pi.sendMessage: sendToLead of the built ws-mailbox custom message.
+  sendToLead(h.pi, buildMailboxPushMessage({ from: 'scout@worktree', content: 'run the ready ticket', sent_at: '2026-09-15T12:00:00Z' }), 'steer');
+  // Dormant session -> held, and a single counted wake user message, no raw custom send.
+  assert.equal(h.custom.length, 0, 'mail is held, not sent as a separate structured item, while dormant');
+  assert.equal(h.users.length, 1);
+  assert.match(h.users[0].content, /1.*waiting/);
+  assert.equal(heldPushQueue.length, 1);
+
+  h.start();
+  assert.equal(h.custom.length, 1);
+  assert.equal(h.custom[0].message.customType, PUSH_BATCH_CUSTOM_TYPE, 'mail rides the shared ws-push-batch');
+  assert.deepEqual(h.custom[0].message.details.items.map((item: any) => item.customType), ['ws-mailbox']);
+  assert.deepEqual(h.custom[0].message.details.items.map((item: any) => item.state), ['informational']);
+  assert.match(h.custom[0].message.content, /run the ready ticket/);
+  assert.deepEqual(h.custom[0].options, { deliverAs: 'steer', triggerTurn: true });
+  h.emit('session_shutdown');
+});
+
+test('260914: mail joins an older held family push in one FIFO batch instead of a parallel delivery', () => {
+  const h = harness();
+  h.busy();
+  h.push('followUp', 'progress first');
+  sendToLead(h.pi, buildMailboxPushMessage({ reply_to: 'id:abc', content: 'incoming instruction' }), 'steer');
+  assert.equal(h.custom.length, 0, 'the later mail steer cannot overtake the held FIFO prefix');
+  h.end();
+  assert.equal(h.custom.length, 1);
+  assert.equal(h.custom[0].message.customType, PUSH_BATCH_CUSTOM_TYPE);
+  assert.deepEqual(h.custom[0].message.details.items.map((item: any) => item.customType), ['ws-agent-report', 'ws-mailbox']);
+  assert.deepEqual(h.custom[0].message.details.items.map((item: any) => item.state), ['informational', 'informational']);
+  assert.match(h.custom[0].message.content, /incoming instruction/);
+  h.settle(); h.emit('session_shutdown');
+});
+
 test('an independent user start clears the pending wake reservation and releases steering', () => {
   const h = harness();
   h.push('followUp');

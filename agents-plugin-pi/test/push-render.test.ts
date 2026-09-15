@@ -25,6 +25,7 @@ import { buildPushBatchComponent, buildPushComponent, buildPushRenderLines, regi
 import { buildPushContent, PUSH_FAMILIES } from "../src/spawner.ts";
 import { approximateCodePointWidth } from "../src/tool-result-render.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
+import { buildMailboxPushMessage } from "../src/mailbox-waiter.ts";
 
 describe("buildPushRenderLines", () => {
   test("splits a real pushed message into head, payload and status", () => {
@@ -457,6 +458,27 @@ describe("buildPushBatchComponent", () => {
     const tui = fakeTui();
     assert.equal(buildPushBatchComponent(tui.modules, {}, undefined), undefined);
     assert.equal(buildPushBatchComponent(tui.modules, {details: {items: []}}, undefined), undefined);
+  });
+
+  test("260914: an arriving ws-mailbox item renders as its own generic card in the batch", () => {
+    const tui = fakeTui();
+    const mail = buildMailboxPushMessage({ from: "scout@worktree", content: "run the ready ticket", sent_at: "2026-09-15T12:00:00Z" });
+    const component = buildPushBatchComponent(tui.modules, { details: { items: [
+      {
+        customType: "ws-agent-report",
+        content: buildPushContent("ws-agent-report", "worker-1", { report: "done" }, undefined),
+        display: true,
+        details: { agent_id: "worker-1", report: "done" },
+        state: "informational",
+      },
+      { ...mail, details: { ...mail.details }, state: "informational" },
+    ] } }, undefined, false) as FakeComponent;
+
+    assert.deepEqual(component.render(80), [
+      "worker-1 · report", "report: done",
+      "[ws-mailbox]", "mail from scout@worktree (2026-09-15T12:00:00Z):", "run the ready ticket",
+    ]);
+    assert.equal(tui.boxes.length, 2, "mail is one more card in the batch, not a parallel structured item");
   });
 });
 
