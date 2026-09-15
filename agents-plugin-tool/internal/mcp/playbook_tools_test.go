@@ -2731,17 +2731,26 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 			}
 			body = strings.Join(strings.Fields(body), " ")
 			for _, want := range []string{
+				// Section skeleton: the lead's path through the playbook.
+				"## Select",
+				"## Spawn",
+				"## Handle the report",
+				"## Parallel route (opt-in)",
+				"## Terminal: `ready/` empty on a goal branch",
+				"## Terminal: every remaining ticket blocked on a goal branch",
+				"## End the turn",
+				// Select is one selection: the invocation's ticket, or the
+				// selector's single result. The lead does not browse the queue.
+				"A ticket named in the invocation wins. Otherwise render `ticket-selector`, spawn it at its recommended tier, and use its one `selection:` result.",
 				product + `/tickets.query(ticket_stem: "<stem>", format: "json")`,
-				"Spawn's later read of the one selected ticket, for tier grading, is the sole exception below, not a license to browse the queue",
-				"use its Route Facts projection for the mechanical facts below",
-				"Then read the selected ticket's whole body — the one exception to staying on the projection, scoped to the one ticket you are about to dispatch",
-				"`risk.correctness`, `risk.fit`, `risk.test`, and `risk.security_or_contract`",
-				"Treat the projection's `risk.correctness`, `risk.fit`, `risk.test`, and `risk.security_or_contract` rows as a first-pass hint, not a verdict",
-				"| medium | `ticket-worker` |",
-				"| large | `ticket-worker-elevated` |",
-				"| xlarge | `ticket-worker-escalated` |",
-				"This tier picks the worker's model only; the ticket's own Route Facts risk rows still set the review allocation the worker's own route call derives, not your read here.",
-				"`xlarge` is a proactive pick here, not only the reactive stop-e retry outcome below.",
+				"A `dispatch_blocked` field means a prerequisite has not landed: report the blocking stem to the user and end the turn",
+				// Dispatch-time tier grading, and the one table that now carries
+				// both the tier's worker playbook and its stop-(e) retry target.
+				"Read the selected ticket's whole body and grade its risk against the Risk Rubric below",
+				"The tier picks the worker's model only, never the review breadth.",
+				"| medium | `ticket-worker` | `ticket-worker-elevated` |",
+				"| large | `ticket-worker-elevated` | `ticket-worker-escalated` |",
+				"| xlarge | `ticket-worker-escalated` | none: its (e) goes to the user |",
 				// The Risk Rubric is a bundled rsrc doc pulled in through
 				// lead-run.md's `includes: - risk-rubric` frontmatter, not
 				// inlined in lead-run.md itself — assert its own content
@@ -2750,64 +2759,46 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				// leaving the lead grading against nothing.
 				"Record the tier picked and the axis (or axes) that drove it. The rubric is the ruler; the read is the caller's.",
 				"Spawn one worker at the tier the render recommends",
-				"playbook <chosen worker playbook>; tier <chosen tier>; risk <the driving axis and its grade>; stop-e retries <0 or 1>",
-				"| `ticket-worker` | `ticket-worker-elevated` | large |",
-				"| `ticket-worker-elevated` | `ticket-worker-escalated` | xlarge |",
-				"A second (e) goes to the user",
-				"A worker already dispatched at `ticket-worker-escalated` — proactively from Spawn or after a retry — has no further tier: its (e) goes to the user immediately, the same as a second (e) elsewhere.",
-				"`merge_confirm: skip` auto-calls `" + product + "/git.merge`",
+				// Report handling: fail closed on a malformed report, check the
+				// shared checkout before a HEAD-relative write of the lead's own,
+				// and keep the merge gate with the lead.
+				"Accept `stop: none` only with `completion: phase` or `ticket`, and stops `a` through `e` only with `completion: none`",
+				"missing, unknown, or incompatible values are a protocol mismatch: surface the raw report and end the invocation",
+				"The worker's checkout is shared and outlives its turn, so before a HEAD-relative write of your own",
+				"call `" + product + "/git.status` and decide",
+				"`merge_confirm: skip` auto-calls `" + product + "/git.merge` with the impl branch",
 				"`ask` (including absent) surfaces the report for user approval first",
-				"accept `stop: none` only with `completion: phase` or `ticket`, and stops `a` through `e` only with `completion: none`",
-				"Missing, unknown, or incompatible values are a protocol mismatch",
-				"do not query the ticket, infer a path, merge, or advance the assignment note",
-				"With `completion: phase`, do not merge",
-				"leave the ticket active for a later cycle",
-				"A per-phase merge is not the default",
-				"With `completion: ticket`, merge the retained impl branch, then go to **End the turn**",
-				"Merge mid-ticket only when a landing is actually needed",
-				"for an assignment note in the `active` state",
-				"skip the selector and continue that ticket directly",
-				"A `blocked` assignment is not auto-continued",
-				"has phases remaining on its retained impl branch — next cycle: " + product + ":lead-run continues it.",
 				"goes to `" + product + ":lead-delegate` as a bounded resolution task",
-				"Release-target acknowledgement is a separate decision from approval to integrate a worker's result",
-				"obtain explicit acknowledgement when its release-target policy is overrideable",
-				"changed candidate tips need fresh acknowledgement",
-				"All impl integration stays with `" + product + "/git.merge`",
-				"on approval call `" + product + "/git.merge` with the goal branch and explicit PARENT target",
-				"do not reset the retry count on resume or reclassify the original risks",
-				"When the executed phase has no `### Result`, revise that unimplemented phase directly; when it already has a Result, append an `#### Edition` under its Result area",
+				"`completion: phase` — do not merge: a per-phase merge deletes the impl branch the next phase stacks on.",
+				"Leave the checkout on that impl branch, since the worker's route returns `continue` only when HEAD is that branch",
+				"Merge mid-ticket only when a dependent ticket needs the landing, through the same gate.",
+				"`completion: ticket` — merge the retained impl branch.",
+				"revise the unimplemented phase directly, or append an `#### Edition` when it already has a `### Result`",
 				"A `pass` commits the phase update and resumes the worker",
-				// Opt-in parallel route (Phase 2): the route is inert without
-				// per-run approval, provisioning is the gated cost, the batch
-				// predicate is dependency (not file overlap), the approved batch
-				// is the concurrency cap, branch creation has one owner, each
-				// worker is bound to its own worktree via root_override (one
-				// worktree per ticket, one worker per worktree), and merges stay
-				// serial through git.merge with overlap as a merge stop.
+				"One retry: a second (e), or an (e) from `ticket-worker-escalated`, goes to the user.",
+				// Opt-in parallel route: inert without the per-run approval, batch
+				// selection delegated to ticket-batch-selector, one worktree per
+				// ticket bound through root_override, merges serial, every acquired
+				// worktree released.
 				"One worker in flight per invocation, unless the opt-in parallel route below is approved for this run.",
-				"the default and the only path without explicit user approval for this run",
-				"is the single gate, and it authorizes the provisioning itself, not only the parallel decision",
-				"never infer this approval from a goal run, a full queue, or convenience",
-				"Without it, run the serial path unchanged.",
-				"The parallel-safety predicate is **dependency**, not file overlap",
-				"File-scope overlap is not an exclusion",
-				"never batch a `dispatch_blocked` ticket",
-				"The approved batch bounds concurrency: do not add a ticket after approval.",
-				"Provision one worktree per approved ticket, one at a time",
-				"`" + product + "/worktree.acquire(base: <goal branch>, target_branch: <that ticket's canonical impl branch>, session_key: <your key>)`",
-				"Use the same per-ticket `impl/<parent>/<slug>` name the serial route derives",
-				"is the sole branch-creation owner, so a batch worker suppresses its own PARENT-branch capture",
-				"`" + product + "/playbook.render(name: <worker playbook for that ticket's tier — grade its risk against the Risk Rubric from its body the same way Spawn does>, session_key: <your key>, root_override: <that worktree path>)`",
-				"binds the worker's spliced key to the worktree root",
-				"Spawn one worker per ticket at the render's recommended tier",
-				"you never discover the worker's own spliced key",
-				"so an isolated batch worker does not starve your own loop",
-				"collect every terminal report first, so the serial veto and merge-approval model is unchanged",
-				"Merge serially through `" + product + "/git.merge`, one branch at a time into the goal branch, in dependency order",
-				"advancing each ticket's assignment note after its branch integrates",
-				"cannot resolve is a merge stop: surface it to the user and leave the unmerged branches retained",
-				"`" + product + "/worktree.release(key: <that ticket's worker_key>)`",
+				"Serial is the default.",
+				`One per-run user approval, "may this run provision worktrees and execute ready tickets in parallel", opens this route`,
+				"The approved batch is the concurrency cap.",
+				"Render `ticket-batch-selector` and spawn it at its recommended tier; it owns the parallel-safety read.",
+				"Provision each approved ticket, one at a time, with `" + product + "/worktree.acquire(base: <goal branch>, target_branch: <that ticket's impl/<parent>/<slug> branch>, session_key: <your key>)`",
+				"it is the sole branch owner, so skip Spawn step 3",
+				"Render each worker with `root_override: <that worktree path>`",
+				"Collect every terminal report before any merge",
+				"Merge serially through `" + product + "/git.merge`",
+				"a conflict it cannot resolve is a merge stop: surface it and leave the unmerged branches retained",
+				"Release every acquired worktree with `" + product + "/worktree.release(key: <its worker_key>)`, including a stopped worker's.",
+				// Goal-branch terminal.
+				"on approval call `" + product + "/git.merge` with the goal branch and explicit PARENT target",
+				// The four End-the-turn lines the re-invoke driver reads verbatim.
+				"- `Active ticket <stem> has phases remaining on its retained impl branch — next cycle: " + product + ":lead-run continues it.`",
+				"- `Ready queue still has advanceable tickets — next cycle: " + product + ":lead-run.`",
+				"- `Ready queue is empty — prepare a todo or idea ticket with " + product + ":lead-ticket before re-invoking " + product + ":lead-run.`",
+				"- `Goal run finished — <reason>. Do not re-invoke " + product + ":lead-run.`",
 			} {
 				if !strings.Contains(body, want) {
 					t.Errorf("rendered policy missing %q", want)

@@ -184,21 +184,19 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn("merge_confirm: skip | ask", protocol)
         self.assertIn("completion: phase | ticket | ad_hoc | none", protocol)
         self.assertIn("Valid terminal pairs are `[ok]` with `stop: none`", protocol)
-        text = (RSRC_DIR / "lead-run" / "lead-run.md").read_text(encoding="utf-8")
+        # Whitespace-normalized so a prose reflow cannot break a pinned phrase
+        # across a newline (the rendered-policy Go test normalizes the same way).
+        text = " ".join((RSRC_DIR / "lead-run" / "lead-run.md").read_text(encoding="utf-8").split())
         self.assertIn("`merge_confirm: skip` auto-calls", text)
         self.assertIn("`ask` (including absent)", text)
         self.assertIn("{{.McpNamespace}}/git.merge", text)
         self.assertIn("call `{{.McpNamespace}}/git.merge` with the goal branch", text)
         self.assertNotIn("goal-to-PARENT terminal uses raw Git", text)
-        self.assertIn("With `completion: phase`, do not merge. Mark the note `active`", text)
-        self.assertIn("With `completion: ticket`, merge the retained impl branch", text)
+        self.assertIn("`completion: phase` — do not merge", text)
+        self.assertIn("`completion: ticket` — merge the retained impl branch", text)
         self.assertIn("incompatible values are a protocol mismatch", text)
-        self.assertIn("do not query the ticket, infer a\npath, merge", text)
-        self.assertIn(
-            "call `{{.McpNamespace}}/git.status` and read\n`branch.head`, `impl_ticket`, and the working-tree state",
-            text,
-        )
-        self.assertIn("Branch-explicit calls (`{{.McpNamespace}}/git.merge`)", text)
+        self.assertIn("call `{{.McpNamespace}}/git.status` and decide", text)
+        self.assertIn("Branch-explicit calls need no check.", text)
         self.assertIn(
             "Your terminal report does not restore the checkout: the shared worktree's",
             protocol,
@@ -213,31 +211,33 @@ class SkillDispatchContractsTest(unittest.TestCase):
         # prose does not break a phrase across a newline (the rendered-policy Go
         # test normalizes the same way).
         norm = lambda s: " ".join(s.split())
-        report = norm(run.split("## Handle the report")[1].split("## Terminal")[0])
-        # (a) phase completion does not merge; the impl branch is retained and
-        # the assignment note goes active.
-        self.assertIn("With `completion: phase`, do not merge", report)
-        self.assertIn("Mark the note `active`", report)
-        self.assertIn("A per-phase merge is not the default", report)
+        report = norm(run.split("## Handle the report")[1].split("## Parallel route")[0])
+        # (a) phase completion does not merge; the impl branch is retained AND
+        # stays checked out, which is the condition under which the worker's
+        # route returns `continue` for the next phase.
+        self.assertIn("`completion: phase` — do not merge", report)
+        self.assertIn("a per-phase merge deletes the impl branch the next phase stacks on", report)
+        self.assertIn("Leave the checkout on that impl branch", report)
+        self.assertIn("the worker's route returns `continue` only when HEAD is that branch", report)
         # (b) ticket completion still merges through the user-approval gate; a
         # mid-ticket landing uses the same gate, and no auto-merge is added.
-        self.assertIn("With `completion: ticket`, merge the retained impl branch", report)
-        self.assertIn("Merge mid-ticket only when a landing is actually needed", report)
+        self.assertIn("`completion: ticket` — merge the retained impl branch", report)
+        self.assertIn(
+            "Merge mid-ticket only when a dependent ticket needs the landing, through the same gate",
+            report,
+        )
         self.assertIn("`merge_confirm: skip` auto-calls", report)
         self.assertIn("`ask` (including absent)", report)
-        # (c) re-invocation with an active advanceable assignment skips the
-        # selector and continues the next phase; named-ticket still wins; a
-        # blocked assignment is not auto-continued.
+        # (c) Select is one selection and nothing else: the invocation's ticket,
+        # or the selector's single result. Continue detection for an active
+        # multi-phase ticket is the selector's own git.status `impl_ticket`
+        # read, so the lead keeps no assignment record of its own.
         select = norm(run.split("## Select")[1].split("## Spawn")[0])
-        self.assertIn("session.children", select)
-        self.assertIn("for an assignment note in the `active` state", select)
-        self.assertIn("skip the selector and continue that ticket directly", select)
-        self.assertIn("still wins over an active assignment", select)
-        self.assertIn("A `blocked` assignment is not auto-continued", select)
-        # the note lifecycle carries the active state Select keys on.
-        spawn = norm(run.split("## Spawn")[1].split("## Handle the report")[0])
-        self.assertIn("Advance it through `active`", spawn)
-        self.assertIn("Select keys its continue-detection on `active`", spawn)
+        self.assertIn("A ticket named in the invocation wins.", select)
+        self.assertIn("Otherwise render `ticket-selector`", select)
+        self.assertIn("use its one `selection:` result", select)
+        self.assertNotIn("session.note", run)
+        self.assertNotIn("session.children", run)
         # (d) the continue verdict variant is emitted, distinct from the generic
         # ready-queue line, and the finished/complete/done ban stays intact.
         end = norm(run.split("## End the turn")[1])
@@ -247,29 +247,24 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn("keep `finished`, `complete`, and `done` out", end)
 
     def test_run_pins_branch_awareness_reasoning(self):
-        # The existing merge/stop test pins the mechanical ws/git.status call and
-        # its field names; this pins the branch-awareness REASONING the lead must
-        # apply to those fields, so a rewrite that keeps the call but drops the
-        # stack-vs-return decision, the base-derivation convention, or the
-        # dirty-tree judgment fails here.
-        run = (RSRC_DIR / "lead-run" / "lead-run.md").read_text(encoding="utf-8")
+        # The merge/stop test pins the mechanical ws/git.status call; this pins
+        # the branch-awareness REASONING the lead must apply to it, so a rewrite
+        # that keeps the call but drops why it exists, the stack-vs-return
+        # decision, or the dirty-tree judgment fails here. Whitespace-normalized
+        # so a reflow of the compressed paragraph does not break the pins.
+        run = " ".join((RSRC_DIR / "lead-run" / "lead-run.md").read_text(encoding="utf-8").split())
+        # why the check exists at all.
+        self.assertIn("The worker's checkout is shared and outlives its turn", run)
         # stack-vs-return: the explicit either/or the lead must decide.
         self.assertIn(
-            "Decide explicitly: stack on the impl branch when the write\n"
-            "belongs to that impl ticket, or check out the derived base branch",
+            "stack on the impl branch when the write belongs to a ticket that continues;"
+            " check out the base branch when the write is unrelated or you are leaving"
+            " the ticket blocked",
             run,
         )
-        # base-derivation: how the base branch is computed, tied to git.merge's
-        # own convention.
-        self.assertIn("between `impl/` and the last `/`, the same convention", run)
-        # dirty-tree: the worker's shared checkout may be dirty; commit/stash, do
-        # not force a checkout through it.
-        self.assertIn(
-            "A dirty working tree at\n"
-            "that point is your own judgment call: commit or stash before the checkout,\n"
-            "never force one through it.",
-            run,
-        )
+        # dirty-tree: the worker's shared checkout may be dirty; commit or stash
+        # rather than forcing a checkout through it.
+        self.assertIn("committing or stashing a dirty tree first", run)
 
     def test_run_dispatches_through_playbook_read(self):
         # lead-run is a playbook.read shim over an rsrc body, not an inline
@@ -278,26 +273,43 @@ class SkillDispatchContractsTest(unittest.TestCase):
         shim = (SKILLS_DIR / "lead-run" / "SKILL.md").read_text(encoding="utf-8")
         text = (RSRC_DIR / "lead-run" / "lead-run.md").read_text(encoding="utf-8")
 
+        # Phrase pins run against the whitespace-normalized body so a reflow
+        # does not break one across a newline; the template-variable and
+        # forbidden-string pins run against the raw text.
+        flat = " ".join(text.split())
+
         self.assertIn('ws/playbook.read(name: "lead-run", session_key:', shim)
         self.assertIn("ticket-selector", text)
+        # Batch selection for the parallel route is its own delegate playbook,
+        # not inline lead prose.
+        self.assertIn("ticket-batch-selector", text)
         self.assertNotIn("{{.ExploreAgent}}", text)
         self.assertIn("{{.SpawnIdiom}}", text)
-        self.assertIn('{{.McpNamespace}}/playbook.render(name: <chosen worker playbook>', text)
-        self.assertIn("{{.McpNamespace}}/session.note(session_key:", text)
-        self.assertIn("One worker in flight per invocation.", text)
+        self.assertIn('{{.McpNamespace}}/playbook.render(name: <chosen worker playbook>', flat)
+        self.assertIn(
+            "One worker in flight per invocation, unless the opt-in parallel route below"
+            " is approved for this run.",
+            flat,
+        )
         selector = (RSRC_DIR / "ticket-selector" / "ticket-selector.md").read_text(encoding="utf-8")
         self.assertIn("prerequisite", selector)
         self.assertIn("impl_ticket", selector)
         self.assertIn('statuses: ["todo", "idea"]', selector)
         self.assertIn("backlog_omitted", selector)
-        self.assertIn("Do not list\n`ready/` or read", text)
+        batch = (
+            RSRC_DIR / "ticket-batch-selector" / "ticket-batch-selector.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("impl_ticket", batch)
+        self.assertIn('statuses: ["ready"]', batch)
+        for field in ("batch:", "excluded:", "omitted:"):
+            self.assertIn(field, batch)
         self.assertIn(
             "A goal run is the current branch `goal/*` or an active goal reminder.",
-            text,
+            flat,
         )
         self.assertIn(
-            "a goal branch only when an active goal reminder is present",
-            text,
+            "When a goal reminder is active and the branch is not yet `goal/*`",
+            flat,
         )
         self.assertNotIn("/goal", text)
         self.assertIn(
