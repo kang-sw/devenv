@@ -97,7 +97,65 @@ breadth.
 5. Wait for the host's completion notification. Do not poll, do not block in
    a tool call, and do not touch the ticket or the branch meanwhile.
 
-One worker in flight per invocation.
+One worker in flight per invocation, unless the opt-in parallel route below is
+approved for this run.
+
+## Parallel route (opt-in)
+
+The serial Select→Spawn path above is the default and the only path without
+explicit user approval for this run. Worktree provisioning can be very
+expensive in large or submodule-heavy repositories, so one per-run user
+approval — "may this run provision worktrees and execute ready tickets in
+parallel" — is the single gate, and it authorizes the provisioning itself, not
+only the parallel decision. Reopening deferred parallelism is a canonical-flow
+change: never infer this approval from a goal run, a full queue, or convenience.
+Without it, run the serial path unchanged.
+
+To make the approval informed, select the candidate batch read-only first and
+present it; the approved batch is also the concurrency cap, so nothing beyond it
+is provisioned.
+
+1. Select a batch, not one ticket. Reuse the branch-aware Select: render
+   `ticket-selector` for its dependency reading, or drive the same read with
+   `{{.McpNamespace}}/tickets.query(statuses: ["ready"], format: "json")`, over
+   `ready/`. The parallel-safety predicate is **dependency**, not file overlap:
+   two tickets are parallel-safe when neither functionally depends on the
+   other's output — no `blocked-by:` edge between them, and no `related:`/
+   `parent:` prose hint or "A needs B's feature" relation. Sequence a dependent
+   ticket behind its prerequisite; never batch a `dispatch_blocked` ticket.
+   File-scope overlap is not an exclusion — overlapping tickets may run in
+   parallel; a real conflict surfaces later at your serialized merge.
+2. Present the candidate batch and its ticket count to the user for the
+   provisioning approval. The approved batch bounds concurrency: do not add a
+   ticket after approval. On refusal, run the serial path.
+3. Provision one worktree per approved ticket with
+   `{{.McpNamespace}}/worktree.acquire(base: <goal branch>, target_branch:
+   impl/<parent>/<slug>, session_key: <your key>)`. It returns `{ path,
+   worker_key }`, creating and checking out the impl branch and minting the
+   worker key already bound to that worktree root. `worktree.acquire`'s
+   `target_branch` is the sole branch-creation owner: a worker on a
+   pre-provisioned worktree suppresses its own PARENT-branch capture and branch
+   creation, so skip the serial Spawn step-1 goal-branch staging for a batch
+   worker.
+4. Spawn one worker per ticket in its acquired worktree, each through Spawn
+   steps 2–5 (render, read the one un-noted control child key, spawn at the
+   recommended tier, note the assignment, wait). Point each worker's task-block
+   Branch line at its acquired impl branch. Wait on the host's per-worker
+   completion notification, never a poll loop, so an isolated batch worker does
+   not starve the lead's own loop.
+5. Handle the N reports one at a time by the same **Handle the report** stop
+   protocol as the serial path: a stop from any worker goes to the user exactly
+   as that section dictates, and the other workers' retained branches wait. Do
+   not merge as reports arrive — collect every terminal report first, so the
+   serial veto and merge-approval model is unchanged across the batch.
+6. Merge serially through `{{.McpNamespace}}/git.merge`, one branch at a time
+   into the goal branch, in dependency order. A cross-worker file overlap
+   `{{.McpNamespace}}/git.merge` cannot resolve is a merge stop: surface it to
+   the user and leave the unmerged branches retained, exactly as a serial
+   conflict. Return each worktree to the pool with
+   `{{.McpNamespace}}/worktree.release(key: <worker_key>)` after its branch
+   integrates; release every acquired worktree, including one whose worker
+   stopped.
 
 ## Handle the report
 

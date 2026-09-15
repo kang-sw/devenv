@@ -2765,6 +2765,27 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				"do not reset the retry count on resume or reclassify the original risks",
 				"When the executed phase has no `### Result`, revise that unimplemented phase directly; when it already has a Result, append an `#### Edition` under its Result area",
 				"A `pass` commits the phase update and resumes the worker",
+				// Opt-in parallel route (Phase 2): the route is inert without
+				// per-run approval, provisioning is the gated cost, the batch
+				// predicate is dependency (not file overlap), the approved batch
+				// is the concurrency cap, branch creation has one owner, and
+				// merges stay serial through git.merge with overlap as a stop.
+				"One worker in flight per invocation, unless the opt-in parallel route below is approved for this run.",
+				"the default and the only path without explicit user approval for this run",
+				"is the single gate, and it authorizes the provisioning itself, not only the parallel decision",
+				"never infer this approval from a goal run, a full queue, or convenience",
+				"Without it, run the serial path unchanged.",
+				"The parallel-safety predicate is **dependency**, not file overlap",
+				"File-scope overlap is not an exclusion",
+				"never batch a `dispatch_blocked` ticket",
+				"The approved batch bounds concurrency: do not add a ticket after approval.",
+				"`" + product + "/worktree.acquire(base: <goal branch>, target_branch: impl/<parent>/<slug>, session_key: <your key>)`",
+				"is the sole branch-creation owner: a worker on a pre-provisioned worktree suppresses its own PARENT-branch capture and branch creation",
+				"so an isolated batch worker does not starve the lead's own loop",
+				"collect every terminal report first, so the serial veto and merge-approval model is unchanged",
+				"Merge serially through `" + product + "/git.merge`, one branch at a time into the goal branch, in dependency order.",
+				"cannot resolve is a merge stop: surface it to the user and leave the unmerged branches retained",
+				"`" + product + "/worktree.release(key: <worker_key>)`",
 			} {
 				if !strings.Contains(body, want) {
 					t.Errorf("rendered policy missing %q", want)
