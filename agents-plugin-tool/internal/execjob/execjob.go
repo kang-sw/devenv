@@ -266,14 +266,48 @@ func Abort(root, key string) (Response, error) {
 	rec.Status = stateCancelRequested
 	rec.UpdatedAt = ts()
 	_ = writeRecord(root, rec)
+	pid := 0
 	if v, ok := active.Load(activeKey(root, key)); ok {
-		_ = cancelProcess(v.(*activeJob).cmd.Process.Pid)
+		pid = v.(*activeJob).cmd.Process.Pid
 	} else if rec.PID > 0 {
-		_ = cancelProcess(rec.PID)
+		pid = rec.PID
 	}
-	time.Sleep(100 * time.Millisecond)
+	if pid > 0 {
+		_ = cancelProcess(pid)
+		// cancelProcess only initiates termination (TerminateProcess is async on
+		// Windows, SIGKILL is async on Unix); it does not wait for the process to
+		// exit. A fixed sleep here was probabilistic: on a slow/loaded runner the
+		// cancelled child could still hold its working directory (root) open when a
+		// caller — or Go's t.TempDir() cleanup on Windows, which cannot unlink a
+		// directory a live process has as its CWD — next touches the tree. Wait
+		// deterministically for the tracked process to actually exit, bounded so a
+		// process that refuses to die never hangs the abort (best-effort contract).
+		waitProcessExit(pid, abortExitTimeout)
+	}
 	rec, _ = refreshSizes(root, key)
 	return responseFor(root, rec, false), nil
+}
+
+// abortExitTimeout bounds how long Abort waits for a cancelled process to exit
+// before returning anyway. Generous relative to observed exit latency so the
+// common case returns as soon as the process is gone, while a wedged process
+// cannot hang the abort.
+const abortExitTimeout = 5 * time.Second
+
+// waitProcessExit polls processAlive until pid has exited or timeout elapses.
+// Returns as soon as the process is gone (typically well under a millisecond),
+// so it is strictly faster than the previous fixed sleep on the common path.
+func waitProcessExit(pid int, timeout time.Duration) {
+	if pid <= 0 {
+		return
+	}
+	deadline := time.Now().Add(timeout)
+	for processAlive(pid) {
+		if time.Now().After(deadline) {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func Tail(root, key, stream string, lines int) (RawTailResponse, error) {
