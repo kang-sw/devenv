@@ -38,7 +38,7 @@ total: do not count highs or apply it as a mechanical gate.
 Weigh the axes together as one read, not a checklist:
 
 - **medium** — the risk profile reads low-to-moderate across the board; no
-  axis stands out as a reason for heavier review.
+  axis stands out as a reason for a heavier tier.
 - **large** — at least one axis reads high, or several moderate axes compound
   into a wide blast radius even without a single high (for example, moderate
   correctness risk on a widely-depended-on surface).
