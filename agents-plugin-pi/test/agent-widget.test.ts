@@ -317,6 +317,24 @@ describe("buildWidgetLines", () => {
     assert.match(compactLine, /p \(l\).*132\.4k.*active 0s.*\$0.123/);
     assert.ok(!compactLine.includes("ctx "), "a populated contextTokens keeps its value but not its prefix on the row");
 
+    for (const [width, includesTelemetry] of [[65, true], [64, false]] as const) {
+      const boundaryPlain = buildWidgetLines([compact], 0, width)![0];
+      assert.equal(boundaryPlain.includes("132.4k"), includesTelemetry, `plain telemetry is all-or-nothing at width=${width}`);
+      assert.ok(!boundaryPlain.includes("ctx "), `plain boundary output has no ctx prefix at width=${width}`);
+      assert.ok(visibleWidth(boundaryPlain) <= width, `plain boundary output stays bounded at width=${width}`);
+
+      const boundarySpans: Array<[string, string]> = [];
+      const boundaryThemed = buildWidgetLines([compact], 0, width, false, {
+        fg(color, text) {
+          boundarySpans.push([color, text]);
+          return `\u001b[38;5;1m${text}\u001b[39m`;
+        },
+      })![0];
+      assert.equal(boundarySpans.some(([color, text]) => color === "syntaxNumber" && text === "132.4k"), includesTelemetry, `themed telemetry is all-or-nothing at width=${width}`);
+      assert.ok(!boundaryThemed.includes("ctx "), `themed boundary output has no ctx prefix at width=${width}`);
+      assert.ok(visibleWidth(boundaryThemed) <= width, `themed boundary output stays bounded at width=${width}`);
+    }
+
     const themedSpans: Array<[string, string]> = [];
     const themed = buildWidgetLines([compact], 0, 80, false, {
       fg(color, text) {
