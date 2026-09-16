@@ -547,6 +547,58 @@ Verification: `go test ./... -count=1`, the wsflow package tests, and
 `agents-plugin/tests` all green; the three copies of each playbook
 byte-identical.
 
+### Result (f1d8664f) - 2026-09-16
+
+Inserted the Playbook Text verbatim into
+`ticket-fact-populator.md` (step-3 bullet, the `## Prior Decisions` section
+before `## Route Facts`, the Route Facts placement-sentence update, and the
+`## Output` `prior_contradictions:` count line + report block) and
+`ticket-reviewer-design.md` (Process-step-2 Prior-Decisions contradiction
+anchor, the Constraints read-boundary bullet, Checklist item 7 "unacknowledged
+reversal", and the Batch-review-boundary "Re-check Checklist item 7 only for
+`changed_stems`" line). Regenerated `agents-plugin/rsrc/manifest.json`
+(`WSRSRC_REGEN`) and the `agents-plugin-wsflow/rsrc/` mirror
+(`WS_REGEN_WSFLOW_RSRC`), then hand-copied the two playbooks and `manifest.json`
+into `agents-plugin-pi/rsrc/` byte-identically. Added two dual-namespace Go
+pins in `internal/mcp/ticket_review_design_test.go`
+(`TestTicketFactPopulatorPriorDecisionsSection`,
+`TestTicketDesignReviewPriorDecisionsAnchor`) covering the `## Prior Decisions`
+section text, the `prior_contradictions:` report line, and reviewer item 7; and
+one fixture case in `internal/wsdoc/tickets_route_facts_test.go`
+("prior decisions section before route facts") pinning that the route-facts
+reader tolerates a `## Prior Decisions` section before `## Route Facts`.
+
+Decisions (recorded, none escalated):
+- No route-facts parser change was needed: `ticketRouteFacts` seeks the
+  `## Route Facts` heading and stops at the next heading, so a preceding
+  `## Prior Decisions` section is tolerated by construction. Pinned with a
+  fixture case (exact-count assertion catches both under- and over-parsing)
+  rather than editing the parser.
+- New pins are dual-namespace (ws + wsflow) to catch mirror drift on the new
+  prose, matching the existing reviewer/populator pin pattern; the pi hand-copy
+  stays covered by the existing byte-identity `TestPiMirrorUpToDate`.
+
+Verification: `go build ./...`, `go test ./... -count=1` in `agents-plugin-tool/`
+all green (the sole failure during development was a self-inflicted pin dropping
+backticks around the rendered tool name, fixed before commit); the two playbooks
+are byte-identical across `agents-plugin`, `agents-plugin-wsflow`, and
+`agents-plugin-pi` (md5 single-hash); `python3 -m unittest discover
+agents-plugin-wsflow/tests` (12 tests) and `agents-plugin/tests` (70 tests) both
+OK; `TestPiMirrorUpToDate` and `TestWsflowRsrcMirrorUpToDate` pass.
+
+Review: partitioned correctness + test (route allocation). Both round-1
+reviewers returned clean with no Critical/Important/Minor findings; correctness
+confirmed verbatim match against the ticket Playbook Text, byte-identity across
+the three package copies, and shipped-surface cleanliness; test confirmed the
+pins are load-bearing (render the real rsrc files) and complete. No round 2
+needed (no findings to verify).
+
+Landing-order note (Constraint): the `agents-plugin-pi/rsrc/` hand copy must
+land either before a pi tag is cut or after its acceptance run
+(260914-chore-ws-pi-release-path-acceptance-and-docs), never between them. This
+landed on the impl branch as a normal commit; the lead should confirm no pi tag
+window is open before integrating.
+
 ### Phase 3: validation on recorded reversals
 
 Run the tool against this repository, without editing any closed ticket, and
