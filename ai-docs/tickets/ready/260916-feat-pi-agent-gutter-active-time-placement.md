@@ -1,5 +1,9 @@
 ---
 title: "Refine Pi live-agent and footer status UX"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 17336914f9e45453
+sage-review-completeness-reviewed: 17336914f9e45453
 ---
 
 # Refine Pi live-agent and footer status UX
@@ -78,12 +82,48 @@ gutter-probe | worker | running | 1m (25s) | gpt-5.6-luna (high) | 17k | $0.33
 - `agents-plugin-pi/src/agent-footer.ts` owns the current custom footer and cached render path.
 - `agents-plugin-pi/src/index.ts` owns Pi lifecycle and input-hook registration.
 
+## Prior Decisions
+
+- 260915-bug-ws-pi-widget-context-value-removed (2026-09-15, Phase 1): "Kept a dedicated unlabeled live-row formatter rather than changing formatContextTokens so /audit's existing ctx Nk and ctx ? contract remains unchanged." — bearing: constrains
+- 260914-feat-ws-pi-agent-widget-recursive-gutter-and-state-bullets (2026-09-15, Result): "lastActivityAt rendered per row as active Xs/Xm/XhYYm" — bearing: supports
+- 260913-bug-ws-pi-cost-footer-cpu-saturation (2026-09-13, Result): "The synchronous 250 ms descendant scan and render-time history traversal were removed because both ran on Pi's main thread and reproduced sustained CPU saturation." — bearing: constrains
+- 260912-feat-ws-pi-custom-footer-cost-telemetry (2026-09-13, Result): "The built-in footer cannot be extended field-by-field, so the adapter owns a complete replacement while leaving the independent belowEditor agent widget untouched." — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-pi/src/agent-widget.ts#L372-L393, agents-plugin-pi/src/agent-footer.ts#L429-L491, agents-plugin-pi/src/index.ts#L462-L470 |
+| scope.surface | public-interface | owner-visible live-agent panel and custom footer |
+| scope.new_public_symbol | no | no externally callable symbol is specified |
+| scope.new_type_contract | yes | internal Git-status cache record and refresh lifecycle |
+| scope.test_surface | existing | agents-plugin-pi/test/agent-widget.test.ts and agents-plugin-pi/test/agent-footer.test.ts |
+| complexity.reuse_points | confirmed | formatCompactDuration, footer controller lifecycle, and shell/statusline.sh counters |
+| complexity.side_effect_risk | moderate | asynchronous Git subprocesses and an idle timer require lifecycle cleanup |
+| risk.correctness | moderate | displayed counters and operation precedence must match repository state |
+| risk.fit | high | footer replacement must retain existing content, width behavior, and O(1) render path |
+| risk.test | high | cache coalescing, deferred idle refresh, failure retention, width, and lifecycle need coverage |
+| risk.security_or_contract | moderate | Git execution and owner-visible repository-state display must fail closed outside repositories |
+
 ## Phases
 
 ### Phase 1: Relocate the live-agent active-time entry
 
 Update the Pi live-agent gutter to produce the confirmed duration layout. Preserve the existing active-time value, accounting, and style; only its position and `active ` prefix change.
 
+Verification:
+
+- Add focused plain and themed renderer cases with distinct total and active durations. Assert the exact `<total-time> (<active-time>)` order, absence of a trailing `active ` field, and unchanged surrounding label, state, model/effort, context, and cost fields.
+- Assert that the moved active-time value retains its existing style and that established narrow-width behavior remains bounded.
+- Run the focused agent-widget tests and the full Pi TypeScript suite.
+
 ### Phase 2: Add cached Git status to the custom footer
 
 Add the confirmed counters and repository-operation state beside the existing cwd/branch display. Populate a per-working-directory cache through asynchronous `turn_end` refreshes and the debounced five-minute idle refresh, preserving an O(1) cache-only render path and non-blocking input handling.
+
+Verification:
+
+- Cover the confirmed counter semantics, operation labels and colors, `conflicting` precedence, clean and non-repository omission, exact placement, and grouped narrow-width fallback.
+- With controlled lifecycle events and fake time, prove refresh requests after every `turn_end`, per-working-directory single-flight coalescing, the five-minute idle interval, resettable 30-second post-input deferral, the still-idle check, timeout behavior, stale-on-error retention, and timer/process cleanup on reload and shutdown.
+- Assert that cached footer renders execute no Git, filesystem, history, or registry traversal and that publishing a changed cache value requests a re-render without blocking input handling.
+- Run the focused footer and lifecycle tests and the full Pi TypeScript suite.
