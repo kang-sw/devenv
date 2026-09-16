@@ -172,6 +172,100 @@ func TestTicketFactPopulatorPreservesConstraintsFixture(t *testing.T) {
 	}
 }
 
+// TestTicketFactPopulatorPriorDecisionsSection pins the shipped instruction for
+// the populator's `## Prior Decisions` section and its `prior_contradictions:`
+// report line: both must render in both namespaces (catching ws/wsflow mirror
+// drift) with the namespace-correct rationale.query recipe. The rendered prompt
+// is the contract boundary for this model-executed section.
+func TestTicketFactPopulatorPriorDecisionsSection(t *testing.T) {
+	for _, product := range []struct{ pkg, namespace string }{
+		{"agents-plugin", "ws"},
+		{"agents-plugin-wsflow", "wsflow"},
+	} {
+		t.Run(product.namespace, func(t *testing.T) {
+			t.Setenv("WS_MCP_NAMESPACE", product.namespace)
+			t.Setenv("WS_MCP_NO_AGENT", map[bool]string{true: "1", false: "0"}[product.namespace == "wsflow"])
+			root := filepath.Join("..", "..", "..", product.pkg, "rsrc")
+			body, _, err := renderPlaybookBody(&Server{}, root, "ticket-fact-populator", nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := strings.Join(strings.Fields(body), " ")
+			for _, want := range []string{
+				"Write the `## Prior Decisions` section (below), replacing it whole if present",
+				"A section written exactly `## Prior Decisions`, placed immediately before `## Route Facts`",
+				"Fill it from `" + product.namespace + "/rationale.query` with `exclude_stem: <this stem>`",
+				"bearing: <supports|constrains|contradiction-candidate>",
+				"never rewrite the ticket's plan or decisions over it; list it under `prior_contradictions:` in the report",
+				"write the section with the single line `- none found (queried <YYYY-MM-DD>)`",
+				"prior_contradictions: <N>",
+				"reverses: <the ticket sentence or decision that appears to reverse it>",
+			} {
+				if !strings.Contains(text, strings.Join(strings.Fields(want), " ")) {
+					t.Errorf("%s missing prior-decisions fragment %q", product.namespace, want)
+				}
+			}
+			// The Route Facts placement sentence must acknowledge the new section.
+			if !strings.Contains(text, "heading after its body prose and its `## Prior Decisions` section") {
+				t.Errorf("%s route-facts placement did not account for `## Prior Decisions`", product.namespace)
+			}
+		})
+	}
+}
+
+// TestTicketDesignReviewPriorDecisionsAnchor pins the design reviewer's use of
+// the ticket's `## Prior Decisions` section as a third contradiction anchor:
+// the Process-step currency check, the read-boundary constraint, and Checklist
+// item 7 (unacknowledged reversal). Dual-namespace to catch mirror drift; the
+// rendered prompt is the contract boundary for this model-executed check.
+func TestTicketDesignReviewPriorDecisionsAnchor(t *testing.T) {
+	for _, product := range []struct{ pkg, namespace string }{
+		{"agents-plugin", "ws"},
+		{"agents-plugin-wsflow", "wsflow"},
+	} {
+		t.Run(product.namespace, func(t *testing.T) {
+			t.Setenv("WS_MCP_NAMESPACE", product.namespace)
+			t.Setenv("WS_MCP_NO_AGENT", map[bool]string{true: "1", false: "0"}[product.namespace == "wsflow"])
+			root := filepath.Join("..", "..", "..", product.pkg, "rsrc")
+			body, _, err := renderPlaybookBody(&Server{}, root, "ticket-reviewer-design", nil, wsconfig.Options{}, "", "", "", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := strings.Join(strings.Fields(body), " ")
+			for _, want := range []string{
+				"Read the ticket's `## Prior Decisions` section as a third contradiction anchor",
+				"For each `contradiction-candidate`",
+				product.namespace + "/rationale.query(kinds: [\"commit\"], paths: <the quote's paths>, since: <the quote's date>)",
+				"A reversed decision makes the candidate stale, not a finding",
+				"A ticket with no `## Prior Decisions` section was populated incompletely",
+				"may be opened at its current path whatever its status, including `.done/`",
+				"this opens exact pointers and commits only, never a ticket directory",
+			} {
+				if !strings.Contains(text, strings.Join(strings.Fields(want), " ")) {
+					t.Errorf("%s missing prior-decisions anchor fragment %q", product.namespace, want)
+				}
+			}
+			// Checklist item 7 (unacknowledged reversal) must land inside the checklist.
+			checklist := strings.Split(strings.Split(body, "## Checklist")[1], "## Heuristics")[0]
+			checklistFlat := strings.Join(strings.Fields(checklist), " ")
+			for _, want := range []string{
+				"7. **Unacknowledged reversal**",
+				"reverse a verified, still-current recorded decision without naming it",
+				"Naming it (`supersedes <hash or stem>: <reason>`) is a legitimate change of direction and never a finding",
+				"An unnamed reversal is `important` with `resolution: missing`",
+			} {
+				if !strings.Contains(checklistFlat, strings.Join(strings.Fields(want), " ")) {
+					t.Errorf("%s checklist missing item 7 fragment %q", product.namespace, want)
+				}
+			}
+			// Delta boundary must scope item 7 re-checks to changed stems.
+			if !strings.Contains(text, "Re-check Checklist item 7 only for `changed_stems`") {
+				t.Errorf("%s delta boundary missing item 7 re-check scope", product.namespace)
+			}
+		})
+	}
+}
+
 // The rendered prompt is the contract boundary for this model-executed check;
 // these assertions do not claim to execute a model's contradiction judgment.
 func TestTicketDesignReviewContradictionAnchors(t *testing.T) {

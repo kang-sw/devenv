@@ -48,13 +48,15 @@ not settle. You edit exactly one file: the ticket at the path you were given.
      `project-tool/internal/mcp/` path keeps a valid existing MCP-manual
      convention line, adds any missing matching rsrc convention lines, and
      reports `corrections: 1` or more when that union changes the section.
+   - Write the `## Prior Decisions` section (below), replacing it whole if
+     present.
 4. Return the report.
 
 ## Route Facts
 
 A table under a heading written exactly `## Route Facts`, placed immediately
 before `## Phases` — or, when the ticket has no phases, before the first `##`
-heading after its body prose. The implementation route reads this section and
+heading after its body prose and its `## Prior Decisions` section. The implementation route reads this section and
 nothing else about the ticket, so the fact names and the values are exact: an
 unlisted fact name or a value outside its set makes the whole section
 unreadable and the ticket unroutable.
@@ -108,6 +110,35 @@ otherwise run. The worker tier is not derived from this table: it is the
 lead's own dispatch-time read of the ticket, and your `risk.*` grades here are
 only that read's first-pass hint.
 
+## Prior Decisions
+
+A section written exactly `## Prior Decisions`, placed immediately before
+`## Route Facts`. It carries the recorded decisions that bear on this ticket's
+paths and subject, as pointers into git history and other tickets, so the
+reviewer and the worker read them without searching. Fill it from
+`{{.McpNamespace}}/rationale.query` with `exclude_stem: <this stem>`:
+
+1. `paths:` every path the ticket names, no `query`, `limit: 30`.
+2. `query:` the distinctive terms of the ticket title, no `paths`.
+3. `site:` at most four of the `path#Lstart-Lend` references or quoted code
+   lines the ticket cites, choosing the ones its unfinished phases edit.
+
+Six calls per ticket at most. Merge the results by pointer. Keep at most 8
+threads, preferring threads whose paths overlap the ticket's, then the most
+recent. Write one line per thread, the quote collapsed to one line and never
+beginning with `#`:
+
+    - <stem or short hash> (<date>, <section or "commit">): "<quoted record, at most 200 characters>" — bearing: <supports|constrains|contradiction-candidate>
+
+`bearing` is your read of the thread's newest record: `supports` when the
+ticket builds on it, `constrains` when the ticket must respect it,
+`contradiction-candidate` when the ticket's plan or `## Decisions` appears to
+reverse it and the ticket does not say so. A contradiction with a recorded
+decision is a design choice, not a factual claim: never rewrite the ticket's
+plan or decisions over it; list it under `prior_contradictions:` in the
+report. When every query returns nothing, write the section with the single
+line `- none found (queried <YYYY-MM-DD>)`.
+
 ## Constraints
 
 - Edit only the ticket file. Do not commit; the lead reviews your edits as a
@@ -130,6 +161,7 @@ corrections: <N applied>
 decision_gaps: <N>
 unverified: <N>
 relations: <N>
+prior_contradictions: <N>
 
 decision_gaps:
   - claim: <the ticket's wording, or the gap in one sentence>
@@ -139,6 +171,10 @@ decision_gaps:
 unverified:
   - claim: <the ticket's wording>
     blocker: <why the tree could not settle it, or the unlanded stem>
+
+prior_contradictions:
+  - pointer: <stem or short hash>
+    reverses: <the ticket sentence or decision that appears to reverse it>
 
 relations:
   - stem: <ticket stem this ticket names>

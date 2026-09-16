@@ -30,6 +30,10 @@ verdict text only.
   or the whole ticket tree.
 - Use host-native explorers for codebase discovery. You may open exact
   artifacts cited by the ticket or an explorer to verify load-bearing claims.
+- A pointer in the ticket's `## Prior Decisions` section may be opened at its
+  current path whatever its status, including `.done/`, and its commit-level
+  currency checked with a commit-only `rationale.query`; this opens exact
+  pointers and commits only, never a ticket directory.
 - Do not load conversation history or session context.
 - All output in English.
 
@@ -46,6 +50,21 @@ verdict text only.
    epic body for cross-child invariants.
    If either lookup or an anchor read fails, report the incomplete check instead
    of treating missing evidence as a clean comparison.
+   Read the ticket's `## Prior Decisions` section as a third contradiction
+   anchor. For each `contradiction-candidate`, open the pointed commit with
+   {{.McpNamespace}}/git.log(range: "<hash>^..<hash>", include_body: true), or
+   resolve the pointed stem with {{.McpNamespace}}/tickets.query(ticket_stem:
+   <stem>, include_done: true, include_dropped: true) and read that ticket;
+   confirm the quote and check whether a later record in the same section
+   reverses it. Then establish commit-level currency with one bounded explorer
+   question (**Autonomous Exploration** below): whether a later commit on the
+   quote's paths reverses the decision; the explorer calls
+   {{.McpNamespace}}/rationale.query(kinds: ["commit"], paths: <the quote's
+   paths>, since: <the quote's date>) and nothing wider; put every candidate
+   into that one question rather than one spawn each. A reversed decision
+   makes the candidate stale, not a finding. A ticket with no
+   `## Prior Decisions` section was populated incompletely: report that in
+   `omitted:` and continue.
 3. Attempt to produce a coherent high-level implementation plan sketch for the ticket's
    current unfinished phase(s), taking every `Relations:` entry as landed. A premise the
    table accounts for is a sequencing fact, not a design defect; a premise it does not
@@ -115,6 +134,12 @@ contract conflict as a missing decision, and carry exploration gaps into
    relation never does. This mirrors, on the single-ticket path, the
    dependency-mistake reasoning the batch path already applies in **Batch review
    boundary**.
+7. **Unacknowledged reversal**: Does the ticket's plan or a `## Decisions`
+   entry reverse a verified, still-current recorded decision without naming
+   it? Naming it (`supersedes <hash or stem>: <reason>`) is a legitimate change
+   of direction and never a finding. An unnamed reversal is `important` with
+   `resolution: missing`, which the thresholds below turn into `block`: which
+   contract holds is a policy choice the implementer cannot make.
 
 ## Heuristics
 
@@ -169,6 +194,7 @@ is not a block; name the incompatible behavior or mistaken dependency.
 A delta review receives `changed_stems`, `previously_passed_stems`, and the prior
 report. Review the changed tickets and their dependency or collision edges;
 previously passed tickets are accepted baseline context, not fresh targets.
+Re-check Checklist item 7 only for `changed_stems`.
 Carry unresolved prior findings forward and check fixes. Reverse a prior pass
 only with a `reversal` naming the changed ticket or relation, citing a concrete
 premise in the passed ticket, and explaining how the change invalidates it.
