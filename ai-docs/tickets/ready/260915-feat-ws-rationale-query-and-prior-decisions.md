@@ -525,6 +525,81 @@ findings (path-filter test had no negative fixture; MCP dispatch arg-mapping
 untested) and one minor (JSON nested shape unchecked), all fixed in 36f5186b
 and confirmed by a round-2 verification reviewer.
 
+#### Edition (1b9a39e0) - 2026-09-16
+
+Phase 3 validation found that a `## Cross-Child Decisions` section using an
+ordered list with no blank line between items (this repository's own
+`260909-epic-ws-worker-interpreter-refoundation`) has no top-level `- `
+bullet, so the whole list fell through to `splitParagraphs` and became one
+oversized record instead of one record per decision — silently swallowing
+Cross-Child Decision 16 (`session.note` carry-over) inside a merged blob that
+only surfaced item 1's text in the compact-text preview.
+
+Generalized `splitRecords`' bullet-start check to also recognize a top-level
+ordered-list marker (`^\d+\.\s`) via new `isBulletStart`/`stripBulletMarker`
+helpers in `agents-plugin-tool/internal/wsrationale/extract.go`; the
+literal-`- `-only behavior and its existing pinned tests are unchanged. Added
+`TestOrderedListBulletExtraction` in `rationale_test.go` pinning the fix
+against a fixture reproducing the real pattern (single- and double-digit
+markers, indented continuation, no blank line between items). This is a
+tuning edit to the extraction rule only; the Ranking section's tokenizer and
+BM25 formula (literal Tool Specification contract text) are untouched.
+
+Verification: `go build ./...`, `go vet ./...`, and `go test ./... -count=1`
+in `agents-plugin-tool/` all green (12 tests in `wsrationale`, the eleven
+Phase 1 acceptance tests plus the new pin, full suite unaffected).
+
+#### Edition (86154c32) - 2026-09-16
+
+Round-1 independent review of the Edition above found the new `splitBullets`
+silently dropped text on two separate paths, both load-bearing on real
+tracked ticket sections in this repository:
+
+- Correctness (Critical): routing any block containing an ordered-list marker
+  through `splitBullets` lost text on 7 of 1,423 tracked ticket sections.
+  Concrete measured cases: `.done/260622-chore-windows-shipping-hardening.md`
+  `### Result` (the headline paragraph and a "Per-item outcome:" line were
+  dropped; only items 1-7 survived) and
+  `.dropped/260801-feat-ws-opencode-adapter.md` `## Decisions` (Decision 8,
+  written with a one-space-indented marker after a blank line, was dropped
+  entirely). Root cause: `default: flush()` discarded any column-0 non-bullet
+  line once a block had a marker anywhere.
+- Test (Important): a numbered item's non-indented plain continuation line
+  was silently dropped by the same code path (input `1. First item.\na plain
+  non-indented continuation line\n\n2. Second item.` yielded only 2 records,
+  losing the continuation text).
+
+Fixed both by rewriting `splitBullets` in
+`agents-plugin-tool/internal/wsrationale/extract.go` to a 3-case switch
+(bullet-start / blank / default-extends-whatever-is-open) that never discards
+a non-blank line: a line either opens a new bullet record, or — when no
+bullet is open — opens a new loose-paragraph record, and every other
+non-blank line extends whichever is currently open. Removed the now-dead
+`isContinuation` helper. Added three regression tests in
+`rationale_test.go` pinning the exact real-repo shapes above:
+`TestBulletFlatContinuationPreserved`, `TestBulletBlockLeadingParagraphPreserved`
+(mirrors the 260622 Result shape), `TestBulletBlockUnrecognizedMarkerPreserved`
+(mirrors the 260801 Decisions shape).
+
+Round 2: the test reviewer independently confirmed the Important finding
+resolved (revert-and-rerun load-bearing check). The correctness reviewer
+independently re-derived that no text-bearing line can reach `splitBullets`'s
+`default` branch without extending an open record, re-ran the tool against
+both cited real tickets confirming the previously-dropped text now returns,
+ran an exhaustive property check (every non-blank line's stripped text must
+appear in some output record) over all `.md` files under `ai-docs/` plus
+200,000 fuzzed inputs — pass post-fix, 22,530 dropped lines pre-fix,
+reproducing the round-1 measurement — and confirmed the four new/changed
+tests are genuine (each fails against the pre-fix code). It returned clean
+with one minor: the `splitRecords` doc comment stated a non-marker line
+always opens its own paragraph record, when in fact one directly following an
+open bullet is merged into it as a continuation; corrected in follow-up
+commit `58c343d0` (doc-only, no behavior change).
+
+Verification: `go build ./...`, `go vet ./...`, `go test ./... -count=1` in
+`agents-plugin-tool/` all green throughout (15 tests in `wsrationale` after
+this Edition: the 12 above plus the three new regression tests).
+
 ### Phase 2: populator and reviewer prose
 
 Insert the Playbook Text verbatim into
@@ -630,6 +705,169 @@ Pass when all three targets are present; otherwise tune the populator recipe
 or ranking in an Edition of Phase 1 or 2 before closing. The Result also
 states, with these numbers as evidence, whether each follow-up candidate below
 should be ticketed.
+
+### Result (86154c32) - 2026-09-16
+
+Ran the tool against this repository via a scratch throwaway driver
+(`wsrationale.Query` called directly, not committed; created and removed
+twice, confirmed absent by `git status` and a clean `go build ./...` both
+times) to exercise the three populator-recipe query shapes without a live MCP
+client. Measured before and after the two Phase 1 Editions above: `1b9a39e0`
+(ordered-list bullet extraction, the finding that motivated this validation
+pass) and `86154c32` (the unified continuation-preserving `splitBullets`
+rewrite that round-1 review required after `1b9a39e0` — see that Edition for
+the full review history). The numbers below are measured against the final,
+post-review state (commit `86154c32`; the follow-up `58c343d0` is doc-only
+and does not change extraction behavior).
+
+**Case 1** — query `session.note`, no paths (scanned 6593 commits, ~1-3s
+warm, ~8s on the first cold call):
+- Target (a), the epic's Cross-Child Decision 16: **not present** in the top
+  8 threads. Before the Edition it was not even extracted as its own record
+  (merged into a 20-item paragraph blob); after the Edition it is its own
+  record but ranks ~34th of ~46 threads at `limit: 100` (the default `limit:
+  30` doesn't reach it either). Root cause: `tokenize()` splits
+  `session.note` into the two generic tokens `session`/`note`, both frequent
+  across the corpus (session keys, `note.*` tooling), so BM25 cannot lift one
+  short decision above dozens of unrelated mentions — the literal, specified
+  tokenizer and BM25 formula, not an extraction gap.
+- Target (b), the diet ticket's decision declaring the record's removal:
+  **not present** in the top 8; ranks ~14th of ~46. Same root cause.
+- Then paths `agents-plugin/rsrc/lead-run`, no query: target (c), commit
+  `0a1d5b5b` — **present**, rank 1 of 3 threads (~1.2s).
+- Top-8 relevance for query (a)/(b) is otherwise good: 7 of 8 threads are
+  genuinely `session.note`/`note.*`-history related by my reading; the tool
+  finds the right neighborhood, just not the two specific named targets.
+- Case verdict: **partial** (1 of 3 named sub-targets present).
+
+**Case 2** — query `spec-address gate`, no paths (scanned 6593 commits,
+~1.3s):
+- Target, the retirement ticket's decision to delete the gate
+  (`260909-refactor-retire-spec-mental-model-layers`): **present**, rank 3 of
+  10 threads at the default `limit: 30`. 8 of 8 top threads are genuinely
+  spec-address-gate history.
+- Then paths `agents-plugin-tool/internal/wsdoc/tickets_mutate.go`, no query
+  (~1.2s): target, commit `91621687` (thread
+  `260909-refactor-retire-spec-mental-model-layers`) — **not present**, even
+  at `limit: 100` (574 records past the cap; only 5 threads surface at all).
+  Root cause: the Record model's thread-widening rule pulls a matching
+  ticket's entire decision/result history into the ranked set once any one
+  commit in its thread touches the path, and the spec's `order: time` default
+  then ranks purely by recency; a later, unrelated 35-record "landing" commit
+  (`203e555c`, closing two other tickets) that also happens to touch the
+  queried file crowds the smaller, on-topic, older thread past the 100-record
+  global cap. This is literal Record-model and Ranking-section behavior, not
+  an extraction bug.
+- Case verdict: **partial** (1 of 2 named sub-targets present).
+
+**Case 3** — site
+`agents-plugin-tool/internal/mcp/server.go:/^func \(s \*Server\)
+resolveToolRoot/,+20` (~90-110ms):
+- Chain returned exactly the nine hashes the ticket lists (79602bf5,
+  6ef9c100, 24d7dfb8, bf06f7c2, 6499533d, 50e7d7d0, 79fe8bfa, 24569308,
+  6762aaf5), `introduced 79602bf5 2026-05-05; last changed 6762aaf5
+  2026-06-19; 9 changes`, matching the ticket's ground truth exactly.
+- Target, the 2026-06-11 member removing every silent root fallback: both
+  same-day commits (`79fe8bfa`, `24569308`) land in the `(no ticket)` thread
+  at **rank 2 of 9** threads; `79fe8bfa`'s AI Context reads "Phase 2a requires
+  removing all silent root fallback sources before deleting the actor/setup
+  model," matching the cited rationale. **Present.**
+- Negative case: `site` regex without the receiver
+  (`^func resolveToolRoot`) correctly returns the zero-match error
+  (`site regex "^func resolveToolRoot" matched no lines in ...`), not an
+  empty chain.
+- Case verdict: **pass** (target present, chain and error behavior exact).
+
+**Aggregate**: 3 of 6 named sub-targets present in the top 8 (cases: 1
+partial, 2 partial, 3 pass). Not all three cases pass outright. Two Editions
+were applied to Phase 1: the ordered-list bullet extraction (`1b9a39e0`, a
+genuine Phase 1 implementation gap — the merged-paragraph behavior
+contradicted the Record model's own stated intent of "one bullet or one
+paragraph of rationale" per item) and, after round-1 independent review of
+that fix found a Critical data-loss regression on real tracked ticket
+sections plus an Important continuation-line drop, the unified
+continuation-preserving rewrite (`86154c32`) that resolved both, confirmed
+clean by round-2 review (one doc-only minor, fixed in `58c343d0`). All three
+commits are pinned by tests (15 total in `wsrationale`). The two remaining
+precision gaps trace to literal,
+as-written Tool Specification contract text (the BM25 tokenizer/formula in
+Ranking, and the thread-widening plus `order: time` default in the Record
+model), which this validation phase has no authority to revise without
+reopening the Phase 1 contract itself; per Decision 2 and Decision 8, that
+revision belongs to a follow-up ticket informed by this measurement, not to
+this phase's tuning budget.
+
+Filed `ai-docs/tickets/idea/260916-research-rationale-query-ranking-precision.md`
+per AGENTS.md's dogfood-capture rule, since this ticket is closing and its own
+Follow-up candidates list below is then immutable. It carries the two
+findings above in full (evidence, root cause, proposals) for a future ticket
+to weigh.
+
+Follow-up candidate dispositions, from this evidence:
+- `site:` habit line for the worker playbook: **worth ticketing** — site mode
+  was exact, fast (~100ms), and recovered its target cleanly; a cheap habit
+  with no observed downside here.
+- Standalone `rationale-discovery` delegate: **worth ticketing** — a delegate
+  running several query variants with judgment could route around both
+  measured misses better than one mechanical populator call; already a
+  Decision 5 deferred item.
+- `all_branches: true`: not evaluated by this phase; no evidence gathered
+  either way.
+- HEAD-keyed untracked cache: **not yet** — measured full-scan times (~1-3s
+  warm) sit at or under the 2s trigger in Decision 8; the one ~8s outlier was
+  the first cold call in this session and not reproduced on repeat runs.
+  Revisit if a downstream repository measures consistently above 2s.
+- Embedding-based ranking: **worth ticketing** — Decision 2's own trigger
+  ("Phase 3 measures a miss rate that path and site addressing do not cover")
+  is measured met by Case 1's two misses, which have no natural path or site
+  address to fall back on. Captured in the new idea ticket above rather than
+  reconsidered here.
+- Reconcile `ai-docs/spec/pi-adapter-runtime.md`: not evaluated by this
+  phase; out of scope, no evidence gathered.
+
+Decisions (recorded, none escalated):
+- Applied the ordered-list extraction fix as a Phase 1 Edition rather than
+  leaving it as a documented-only finding: it is a genuine implementation gap
+  against the Record model's stated intent (an item is self-evidently "one
+  bullet"), low-risk, and immediately verifiable, unlike the two remaining
+  ranking-contract-level gaps.
+- Ran a full two-round independent review (partitioned correctness + test) on
+  the extraction fix rather than treating it as a low-risk drive-by edit,
+  since it changes how every tracked ticket/commit section in this repository
+  is parsed; this caught a Critical data-loss regression that manual
+  spot-checking during Phase 3 querying had not surfaced. See the
+  `86154c32` Edition above for the full finding/fix/verification history.
+- Did not attempt to change the BM25 tokenizer, formula, or default `order`,
+  or the Record model's thread-widening rule: all four are literal,
+  prescriptive Tool Specification text ("Implement it as written"); revising
+  them is a Phase 1 contract change outside this validation phase's
+  authority, and Decisions 2 and 8 already name the conditions and place
+  (a follow-up ticket) for that reconsideration.
+- Treated the phase as complete despite the residual precision gaps, per the
+  worker instruction that this is the final phase and per Decisions 2/8's own
+  designed feedback loop (measure now, ticket the ranking work later) rather
+  than blocking ticket closure on an open-ended ranking redesign.
+- Removed the scratch verification driver after use; it was never part of the
+  shipped surface and is not committed.
+
+Review: partitioned correctness + test, on the `1b9a39e0` extraction fix.
+Round 1: correctness raised 1 Critical (real data loss on 7 of 1,423 tracked
+ticket sections) and test raised 1 Important (continuation-line drop); both
+fixed in `86154c32` with three new regression tests. Round 2: test confirmed
+the Important finding resolved; correctness independently re-derived the fix,
+re-ran the tool against both cited real tickets, ran an exhaustive
+non-blank-line-preservation property check (12,152 real blocks + 200,000
+fuzzed inputs) confirming the invariant post-fix and reproducing the
+pre-fix failure count, and confirmed the new tests are genuine — returned
+clean with one doc-only minor, fixed in `58c343d0`. Full detail in the
+`86154c32` Edition above.
+
+Verification: `go build ./...`, `go vet ./...`, `go test ./... -count=1` in
+`agents-plugin-tool/` all green after every commit in this phase (`1b9a39e0`,
+`86154c32`, `58c343d0`); 15 tests in `wsrationale`, full module suite
+unaffected. No `.done/`, `.dropped/`, or any other closed-inventory ticket
+was edited or moved by this phase's queries; only this ticket (still `ready/`
+until closed below) and the new idea ticket were written.
 
 ## Follow-up candidates (not in scope)
 
