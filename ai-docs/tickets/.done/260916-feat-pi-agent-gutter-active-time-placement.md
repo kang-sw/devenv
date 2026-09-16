@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 17336914f9e45453
 sage-review-completeness-reviewed: 17336914f9e45453
+completed: 2026-09-16
 ---
 
 # Refine Pi live-agent and footer status UX
@@ -135,3 +136,12 @@ Verification:
 - With controlled lifecycle events and fake time, prove refresh requests after every `turn_end`, per-working-directory single-flight coalescing, the five-minute idle interval, resettable 30-second post-input deferral, the still-idle check, timeout behavior, stale-on-error retention, and timer/process cleanup on reload and shutdown.
 - Assert that cached footer renders execute no Git, filesystem, history, or registry traversal and that publishing a changed cache value requests a re-render without blocking input handling.
 - Run the focused footer and lifecycle tests and the full Pi TypeScript suite.
+
+### Result (bdcee0fd) - 2026-09-16
+
+- Added compact, semantically colored Git counters and repository-operation labels immediately after the branch and before the existing session name. Conflicts override operation labels; clean and non-repository snapshots produce no suffix. Narrow layouts drop all Git indicators together.
+- Added an eight-working-directory in-memory cache with per-directory single-flight requests, asynchronous `turn_end` refreshes, a five-minute idle timer, and resettable 30-second input deferral. Rendering reads cached spans only; changed snapshots request a re-render. Reload/shutdown abort pending queries and suppress late publication.
+- Decisions: no startup query or filesystem watcher was added; only turn boundaries and the idle timer request snapshots. Git uses a two-second whole-query deadline and subprocess timeout; transient failures preserve the last successful value. NUL-delimited porcelain v2 and numstat preserve path-count versus unstaged-line semantics, including staged-only omission.
+- Verification: `cd agents-plugin-pi && npm test -- --test-reporter=spec test/agent-footer.test.ts test/footer-git-status.test.ts` passed all 26 tests; `npm test -- --test-reporter=dot` passed the full Pi suite after the final test change. Real Git fixtures cover repository states and subprocess cancellation/timeouts; controlled time covers refresh/debounce lifecycle behavior.
+- Independent correctness and fit reviews were clean. The test review's Important request for explicit render-time filesystem/registry guards was addressed in e5e47a96 and verified clean in round 2. A test-only inherited-Map mock restoration failure was diagnosed and fixed with removable own-property guards. No unresolved findings.
+- Omitted: interactive Pi smoke testing; automated rendering, real-Git, lifecycle, and full-suite verification were used.
