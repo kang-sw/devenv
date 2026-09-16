@@ -195,6 +195,12 @@ func TestPathFilter(t *testing.T) {
 	// A ticket whose body names no path; its only path link is the commit.
 	writeFile(t, root, "ai-docs/tickets/ready/260103-feat-gamma.md",
 		"---\ntitle: gamma\n---\n\n## Decisions\n\n- decided the shape\n")
+	// A commit + ticket on an unrelated path, to prove the filter excludes.
+	commitFixture(t, root, "2026-01-02",
+		map[string]string{"docs/guide.md": "# guide\n"},
+		"docs\n\n## AI Context\n- rewrote the guide for 260199-feat-other\n")
+	writeFile(t, root, "ai-docs/tickets/ready/260199-feat-other.md",
+		"---\ntitle: other\n---\n\n## Decisions\n\n- an off-path decision\n")
 
 	res := query(t, root, Options{Paths: []string{"internal/mcp"}})
 	texts := allRecordTexts(res)
@@ -203,6 +209,13 @@ func TestPathFilter(t *testing.T) {
 	}
 	if !texts["decided the shape"] {
 		t.Fatalf("ticket record not matched via thread commit path: %v", texts)
+	}
+	// The unrelated-path records must be excluded.
+	if texts["rewrote the guide for 260199-feat-other"] {
+		t.Fatalf("path filter wrongly kept an off-path commit record: %v", texts)
+	}
+	if texts["an off-path decision"] {
+		t.Fatalf("path filter wrongly kept an off-path ticket record: %v", texts)
 	}
 }
 
@@ -404,19 +417,46 @@ func TestOutputShape(t *testing.T) {
 	}
 	assertEndsWithOmitted(t, FormatText(empty))
 
-	// JSON shape matches the documented schema keys.
+	// JSON shape matches the documented schema, top-level and nested.
 	raw, err := json.Marshal(JSON(res))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var decoded map[string]json.RawMessage
+	var decoded struct {
+		Threads []struct {
+			Stem    *string `json:"stem"`
+			Status  *string `json:"status"`
+			Title   *string `json:"title"`
+			Records []struct {
+				Kind    string   `json:"kind"`
+				Pointer string   `json:"pointer"`
+				Date    string   `json:"date"`
+				Text    string   `json:"text"`
+				Paths   []string `json:"paths"`
+				Stems   []string `json:"stems"`
+				Score   float64  `json:"score"`
+			} `json:"records"`
+		} `json:"threads"`
+		ScannedCommits int      `json:"scanned_commits"`
+		Omitted        []string `json:"omitted"`
+	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("json does not match documented shape: %v\n%s", err, raw)
+	}
+	// Verify a top-level "site" key exists (null is valid in non-site mode).
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &envelope); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"threads", "site", "scanned_commits", "truncated", "omitted"} {
-		if _, ok := decoded[key]; !ok {
-			t.Fatalf("json missing key %q: %s", key, raw)
-		}
+	if _, ok := envelope["site"]; !ok {
+		t.Fatalf("json missing site key: %s", raw)
+	}
+	if len(decoded.Threads) == 0 || len(decoded.Threads[0].Records) == 0 {
+		t.Fatalf("expected at least one record to validate nested shape: %s", raw)
+	}
+	rec := decoded.Threads[0].Records[0]
+	if rec.Kind == "" || rec.Pointer == "" || rec.Date == "" || rec.Text == "" {
+		t.Fatalf("nested record missing required fields: %+v", rec)
 	}
 }
 
