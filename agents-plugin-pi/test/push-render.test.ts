@@ -497,6 +497,40 @@ describe("buildPushBatchComponent", () => {
       leadIdleRef.current = undefined;
     }
   });
+
+  test("f3691042: a non-steer deliverAs (nextTurn) is normalized to followUp before submitHeldPushBatch", () => {
+    // Regression guard for the admitPush batchMode:"always" branch
+    // (`held.deliverAs === "steer" ? "steer" : "followUp"`): every existing
+    // batchMode:"always" caller happens to pass "steer", so a regression that
+    // drops or inverts the normalization would ship undetected. This drives
+    // the same busy/no-held path as the "steer" case above but with
+    // deliverAs "nextTurn", which is neither "steer" nor "followUp" (the
+    // latter is intercepted earlier in admitPush's outer queue-and-wake
+    // condition), so it is the only value that actually reaches the
+    // normalization ternary.
+    const sent: Array<{ message: any; options: any }> = [];
+    const pi = {
+      sendMessage(message: unknown, options: unknown) {
+        sent.push({ message, options });
+      },
+    };
+    leadIdleRef.current = () => false;
+    try {
+      sendToLead(
+        pi as never,
+        buildMailboxPushMessage({ from: "scout@worktree", content: "run the ready ticket", sent_at: "2026-09-15T12:00:00Z" }),
+        "nextTurn",
+        "always",
+      );
+
+      assert.equal(sent.length, 1);
+      assert.equal(sent[0]!.message.customType, PUSH_BATCH_CUSTOM_TYPE);
+      assert.deepEqual(sent[0]!.options, { deliverAs: "followUp", triggerTurn: true });
+    } finally {
+      heldPushQueue.length = 0;
+      leadIdleRef.current = undefined;
+    }
+  });
 });
 
 describe("registerPushMessageRenderers", () => {
