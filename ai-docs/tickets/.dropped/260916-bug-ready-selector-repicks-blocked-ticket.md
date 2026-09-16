@@ -3,6 +3,7 @@ title: "Stop ready selection from re-picking explicitly blocked tickets"
 related:
   260914-chore-ws-pi-root-manifest-runtime-deps: reproduced with its owner-action Blocked note
   260916-feat-pi-agent-gutter-active-time-placement: advanceable ticket starved by the selection
+dropped: 2026-09-16
 ---
 
 # Stop ready selection from re-picking explicitly blocked tickets
@@ -30,3 +31,8 @@ Verification:
 - Reproduce the observed mixed queue: one ready ticket with an owner-action `## Blocked` note and one advanceable ready ticket; selection must return the advanceable ticket.
 - Cover an all-blocked queue and assert that each blocked ticket and reason remains reportable.
 - Preserve selection and `dispatch_blocked` behavior for prerequisite blocks and for ready tickets without an active Blocked note.
+
+
+## Resolution (2026-09-16)
+
+Duplicate of `260913-bug-ticket-selector-chooses-recorded-blocker`, which now carries both the 2026-09-13 and 2026-09-16 reproductions plus the confirmed raw-heading projection design for JSON and compact-text `tickets.query` output. Continue the work only in the older ticket.
