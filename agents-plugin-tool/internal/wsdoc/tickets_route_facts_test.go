@@ -59,6 +59,16 @@ func TestTicketRouteFactsProjection(t *testing.T) {
 			wantPresent: true,
 			wantFacts:   map[string]string{"risk.fit": "low"},
 		},
+		{
+			// A `## Prior Decisions` section placed immediately before
+			// `## Route Facts` (per the fact populator's contract) is tolerated
+			// by construction: the reader seeks the Route Facts heading, so the
+			// prior section's own bullets are never absorbed as facts.
+			name:        "prior decisions section before route facts",
+			body:        "# T\n\n## Prior Decisions\n\n- 260101-feat-x (2026-01-01, commit): \"quoted\" — bearing: supports\n- none found (queried 2026-01-01)\n\n## Route Facts\n\n| fact | value | evidence |\n|---|---|---|\n| scope.span | multi-file | a.go, b.go |\n| risk.fit | low | small change |\n\n## Phases\n",
+			wantPresent: true,
+			wantFacts:   map[string]string{"scope.span": "multi-file", "risk.fit": "low"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			present, facts := ticketRouteFacts(tc.body)
