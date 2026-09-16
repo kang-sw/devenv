@@ -2616,6 +2616,27 @@ func TestExecMCPRunningLargeAndAbort(t *testing.T) {
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	server := NewServer(root, "test")
+	var execKeys []string
+	// t.Cleanup is LIFO across ALL cleanups registered in this test, not just
+	// t.TempDir()'s own. Registering the reap here — after the WS_CACHE_HOME
+	// t.Setenv and its backing t.TempDir("cache") above, and after root's own
+	// t.TempDir() earlier still — makes it the LAST registration, so it is the
+	// FIRST to run: before WS_CACHE_HOME is restored, before the cache dir is
+	// removed, and before root's own RemoveAll. That ordering matters twice
+	// over: exec.status/exec.abort resolve the job store through WS_CACHE_HOME
+	// and root, so reaping must happen while both are still the test's live
+	// values; and every exec job this test spawns (the running/aborted job and
+	// the large job) must reach a terminal status before root's RemoveAll
+	// runs, because a still-"running" job on Windows holds root as its
+	// child's CWD and keeps open stdout/stderr/combined file handles under
+	// it — RemoveAll racing that live process fails with "The process cannot
+	// access the file because it is being used by another process" (POSIX
+	// unlink tolerates this; Windows does not). Registering the reap earlier
+	// (e.g. immediately after root's t.TempDir()) would run it too early:
+	// LIFO would then unwind WS_CACHE_HOME's restore and the cache dir's
+	// RemoveAll first, and exec.status/exec.abort would report the job "not
+	// found" against the now-reset cache home.
+	t.Cleanup(func() { reapExecKeys(t, server, root, execKeys) })
 
 	input := toolCallLine(t, 1, "exec.shell", mcpAbortShellArgs()) + "\n"
 	var out bytes.Buffer
@@ -2628,6 +2649,7 @@ func TestExecMCPRunningLargeAndAbort(t *testing.T) {
 		t.Fatalf("running launch response = %s", byID["1"])
 	}
 	running := execToolResponse{ExecKey: execKeyFromText(t, text)}
+	execKeys = append(execKeys, running.ExecKey)
 	out.Reset()
 	input = strings.Join([]string{
 		fmt.Sprintf(`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"exec.result","arguments":{"exec_key":%q}}}`, running.ExecKey),
@@ -2681,9 +2703,65 @@ func TestExecMCPRunningLargeAndAbort(t *testing.T) {
 	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
 		t.Fatal(err)
 	}
-	largeText := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["4"])
-	if strings.Contains(largeText, strings.Repeat("x", 100)) || !strings.Contains(largeText, "combined_bytes: 5000") || !strings.Contains(largeText, "exec.raw.*") {
+	launchText := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["4"])
+	large := execToolResponse{ExecKey: execKeyFromText(t, launchText)}
+	execKeys = append(execKeys, large.ExecKey)
+
+	// Do not assert combined_bytes off the synchronous launch response: on a
+	// loaded Windows runner, powershell cold-start can exceed the 5s
+	// ForegroundWindow (execjob.ForegroundWindow), so the launch can still
+	// return "status: running" / "combined_bytes: 0" while the job keeps
+	// writing. Drive exec.result with a generous timeout so it polls
+	// (execjob.ResultWithTimeout) until the job reaches a terminal status —
+	// only then is combined_bytes final and exec.abort's t.Cleanup-time reap
+	// guaranteed a closed file handle.
+	out.Reset()
+	input = fmt.Sprintf(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"exec.result","arguments":{"exec_key":%q,"timeout_seconds":30}}}`, large.ExecKey) + "\n"
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+		t.Fatal(err)
+	}
+	largeText := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["5"])
+	if strings.Contains(largeText, strings.Repeat("x", 100)) || !strings.Contains(largeText, "status: succeeded") || !strings.Contains(largeText, "combined_bytes: 5000") || !strings.Contains(largeText, "exec.raw.*") {
 		t.Fatalf("large response = %s", largeText)
+	}
+}
+
+// reapExecKeys aborts and waits for every exec job this test spawned to reach
+// a terminal status. It is registered via t.Cleanup as the last registration
+// in TestExecMCPRunningLargeAndAbort (see the comment at that call site for
+// why) so it runs, LIFO, before WS_CACHE_HOME is restored and before Go's own
+// TempDir RemoveAll cleanups, which on Windows cannot unlink a directory a
+// live child process still holds as its CWD or has open file handles under.
+// exec.abort on an already-terminal job is a documented no-op
+// (execjob.Abort), so calling it unconditionally for every key — including
+// one already confirmed cancelled by the test body — is safe.
+func reapExecKeys(t *testing.T, server *Server, root string, keys []string) {
+	t.Helper()
+	for _, key := range keys {
+		var out bytes.Buffer
+		abortInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":990,"method":"tools/call","params":{"name":"exec.abort","arguments":{"exec_key":%q}}}`, key) + "\n"
+		if err := serveStdioWithSession(t, server, root, abortInput, &out); err != nil {
+			t.Logf("reapExecKeys: abort %s: %v", key, err)
+			continue
+		}
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			out.Reset()
+			statusInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":991,"method":"tools/call","params":{"name":"exec.status","arguments":{"exec_key":%q}}}`, key) + "\n"
+			if err := serveStdioWithSession(t, server, root, statusInput, &out); err != nil {
+				t.Logf("reapExecKeys: status %s: %v", key, err)
+				break
+			}
+			text := out.String()
+			if strings.Contains(text, "status: succeeded") || strings.Contains(text, "status: failed") || strings.Contains(text, "status: cancelled") {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Logf("reapExecKeys: %s did not reach terminal status before cleanup deadline: %s", key, text)
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
 	}
 }
 
