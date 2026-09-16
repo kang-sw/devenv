@@ -221,9 +221,11 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 		// The out-of-tree default's sibling parent can be uncreatable (mount
 		// root, read-only parent, container /workspace). Fall back to the
 		// legacy in-tree pool rather than leaving the repo un-provisionable.
-		// An explicit worktree_pool override is never silently overridden:
-		// only the builtin default (isDefaultPoolConfig) resolving outside
-		// mainRoot triggers the fallback.
+		// isDefaultPoolConfig is a value comparison, not override provenance:
+		// it cannot distinguish "unset" from an explicit override that
+		// happens to equal the literal default template, but the resolved
+		// path is identical either way, so that one coincidental value is the
+		// only override the fallback ever applies to.
 		if isDefaultPoolConfig(poolConfigValue) && !pathUnder(mainRoot, poolRoot) {
 			fallback := resolvePoolRoot(legacyInTreePoolTemplate, mainRoot)
 			if fbErr := os.MkdirAll(fallback, 0o755); fbErr != nil {

@@ -69,11 +69,12 @@ const (
 	// a filesystem sibling of the repo, outside the working tree, so IDEs do
 	// not index the pooled worktrees — see
 	// agents-plugin-tool/internal/mcp/worktree_tools.go's
-	// defaultWorktreePoolTemplate for the exact template string, which
-	// resolvePoolRoot falls back away from (to the in-tree
-	// legacyInTreePoolTemplate) when the sibling parent is not writable.
-	// Resolved through the layered config (project/global/session files +
-	// builtin) rather than a dedicated config.tune writer.
+	// defaultWorktreePoolTemplate for the exact template string.
+	// provisionWorktree (not resolvePoolRoot, which stays a pure string
+	// function) falls back to the in-tree legacyInTreePoolTemplate when the
+	// sibling parent is not writable. Resolved through the layered config
+	// (project/global/session files + builtin) rather than a dedicated
+	// config.tune writer.
 	ItemWorktreePool = "worktree_pool"
 )
 
