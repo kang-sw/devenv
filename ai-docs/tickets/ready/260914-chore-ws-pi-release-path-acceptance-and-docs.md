@@ -94,3 +94,25 @@ it in project-internal memory.
 
 Verification: the documented command and flow match the Phase 1 evidence; a
 reader can install and enable the adapter from the doc alone.
+
+## Blocked (2026-09-16)
+
+No agent-advanceable work remains; this ticket is gated on owner action.
+
+- **Phase 1 is owner-run live verification.** The acceptance is a real Pi TUI
+  session on a **clean machine** ("hand the run to the user and record their
+  observed evidence"). This dev machine is not clean — `agents-plugin-pi/node_modules`
+  is already populated by dogfooding, the exact false-positive condition
+  `260914-chore-ws-pi-root-manifest-runtime-deps` documented — so running the
+  acceptance here would be an invalid test.
+- **A re-release carrying the deps fix is required first.** The git-install
+  consumption fix (root-manifest runtime deps + pi-web-access resolution) is
+  merged to `develop` but not yet re-released; the current `runtime.json`
+  `release_tag` is `v0.46.4`, which predates the fix. Per this ticket's
+  Constraints, full e2e verification needs a real published tag whose pi mirror
+  is non-drifted — a separate `ws:lead-ship` action, owner-gated.
+- **Phase 2 (docs) is gated on Phase 1 evidence** and cannot be written before
+  the acceptance run produces observed behavior to document.
+
+Unblocks when the owner cuts the re-release and records the clean-machine Pi
+acceptance evidence. `ws:lead-run` cannot advance this ticket further.
