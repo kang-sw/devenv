@@ -341,3 +341,21 @@ verified end-to-end by automated/simulated evidence (a real npm install
 into a synthetic clone-root-shaped layout using the actual mirrored root
 manifest and the real packed artifact) but not yet by a genuine clean-machine
 `pi install`; this ticket stays in `ready/` pending that owner action.
+
+## Blocked (2026-09-16)
+
+Both phases are fully implemented, reviewed (two rounds), and already merged to
+`develop`: commits `7a60b80`, `053c5a6`, `aa28c2a` (Phase 1) and `c3fd173f`,
+`a1ae58f8` (Phase 2) are all ancestors of `develop`, the
+`impl/develop/sip-aptly-fence` branch has been merged and pruned, and the
+root/subdir `dependencies` drift check is parsed-equal on the current tree.
+
+The sole remaining item is the **owner-run clean-machine smoke** named in both
+phases' verification bullets: `pi install
+git:github.com/kang-sw/devenv@<develop-tip-sha>` on a clean machine, confirming
+extension load with no `Cannot find module`, launcher download + SHA256 +
+`assertVersionPin` + `ws/*` registration, plus an Explore-role web-search probe
+succeeding (no `web-search-extension-missing`). This requires a clean machine and
+a real `pi install`, so no agent (worker or lead) can perform it. `ws:lead-run`
+cannot advance this ticket further; it is gated on the owner. Move to `.done/`
+once the owner runs the smoke and records the observed evidence.
