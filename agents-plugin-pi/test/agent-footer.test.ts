@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import fsPromises from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -63,10 +66,11 @@ function checkpoint(storage: ReturnType<typeof createAgentStorageContext>): any 
 }
 const plain = (text: string) => text.replace(/\u001b\[[0-9;]*m/g, "");
 
-test("Git cache publishes beside branch, before session name, and drops indicators as one group", async () => {
+test("Git cache publishes beside branch, before session name, and drops indicators as one group", async t => {
   const ui = context(), storage = createAgentStorageContext("lead", root());
+  const registry: RpcAgentRegistry = new Map();
   let queries = 0;
-  const controller = createAgentFooterController(ui.ctx, new Map(), storage, { truncateToWidth, visibleWidth }, async () => {
+  const controller = createAgentFooterController(ui.ctx, registry, storage, { truncateToWidth, visibleWidth }, async () => {
     queries++;
     return { ahead: 1, behind: 2, added: 12, deleted: 3, changed: 2, untracked: 1, operation: "merging" };
   });
@@ -82,11 +86,29 @@ test("Git cache publishes beside branch, before session name, and drops indicato
   }
   assert.equal(plain(component.render(full.length - 1)[0]), "/work/project (feature/footer) • named session");
   ui.ctx.sessionManager.getEntries = () => { throw new Error("no render-time history traversal"); };
-  for (const width of [0, 1, 40, 80, 120]) {
-    assert.ok(component.render(width).every(line => visibleWidth(line) <= width));
+  // Arm guards only after the cache has published, so setup/teardown remain
+  // allowed to persist checkpoints while every cached render is IO-free.
+  for (const api of [fs, fsPromises]) {
+    for (const name of Object.keys(api)) {
+      if (/^(read|stat|lstat|fstat|open|access|exists|realpath|glob|watch)/.test(name) && typeof (api as any)[name] === "function") {
+        t.mock.method(api as any, name, () => assert.fail(`render touched filesystem: ${name}`));
+      }
+    }
   }
-  assert.equal(queries, 1, "rendering never queries Git");
-  controller.stop();
+  const traversalMethods = ["entries", "keys", "values", "forEach", Symbol.iterator] as const;
+  for (const method of traversalMethods) {
+    Object.defineProperty(registry, method, { configurable: true, value: () => assert.fail(`render traversed registry: ${String(method)}`) });
+  }
+  syncBuiltinESMExports();
+  try {
+    for (const width of [0, 1, 40, 80, 120]) {
+      assert.ok(component.render(width).every(line => visibleWidth(line) <= width));
+    }
+    assert.equal(queries, 1, "rendering never queries Git");
+  } finally {
+    for (const method of traversalMethods) Reflect.deleteProperty(registry, method);
+    t.mock.restoreAll(); syncBuiltinESMExports(); controller.stop();
+  }
 });
 
 describe("bounded direct-agent estimates", () => {
