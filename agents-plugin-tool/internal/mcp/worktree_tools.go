@@ -84,14 +84,35 @@ func listWorktrees(ctx context.Context, runner wsgit.Runner, root string) ([]wor
 	return entries, nil
 }
 
+const (
+	// defaultWorktreePoolTemplate is the builtin default for the worktree_pool
+	// config item: a filesystem sibling of the repo (same volume, so `.git`
+	// object sharing / hardlinks stay cheap) but outside the repo working
+	// tree, so IDEs that auto-index everything under the workspace root do
+	// not pick up the per-worker pooled worktrees. server.go's
+	// builtinConfigDefaults and the worktree.acquire tool description both
+	// read this constant so no default-definition site can state a different
+	// value.
+	defaultWorktreePoolTemplate = "$(GitRoot)/../.ws-worktrees/$(GitRootDirName)"
+
+	// legacyInTreePoolTemplate is the pre-existing in-tree pool location.
+	// resolvePoolRoot no longer defaults to it, but provisionWorktree falls
+	// back to it when the out-of-tree default's parent is not
+	// creatable/writable (mount root, read-only parent, container
+	// /workspace), so a repo never becomes un-provisionable.
+	legacyInTreePoolTemplate = "$(GitRoot)/.ws-worktrees"
+)
+
 // resolvePoolRoot resolves the configured worktree_pool value against gitRoot
-// (the primary worktree root). It substitutes the $(GitRoot) token, defaults an
-// empty value, and makes a relative result absolute under gitRoot.
+// (the primary worktree root). It substitutes the $(GitRootDirName) and
+// $(GitRoot) tokens, defaults an empty value to defaultWorktreePoolTemplate,
+// and makes a relative result absolute under gitRoot.
 func resolvePoolRoot(configValue, gitRoot string) string {
 	v := strings.TrimSpace(configValue)
 	if v == "" {
-		v = "$(GitRoot)/.ws-worktrees"
+		v = defaultWorktreePoolTemplate
 	}
+	v = strings.ReplaceAll(v, "$(GitRootDirName)", filepath.Base(gitRoot))
 	v = strings.ReplaceAll(v, "$(GitRoot)", gitRoot)
 	if !filepath.IsAbs(v) {
 		v = filepath.Join(gitRoot, v)
@@ -182,7 +203,25 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 	poolRoot := resolvePoolRoot(poolConfigValue, mainRoot)
 	res.Pool = poolRoot
 	if err := os.MkdirAll(poolRoot, 0o755); err != nil {
-		return res, fmt.Errorf("create worktree pool %q: %w", poolRoot, err)
+		// The out-of-tree default's sibling parent can be uncreatable (mount
+		// root, read-only parent, container /workspace). Fall back to the
+		// legacy in-tree pool rather than leaving the repo un-provisionable.
+		// An explicit worktree_pool override is never silently overridden:
+		// only the builtin default (empty poolConfigValue resolving outside
+		// mainRoot) triggers the fallback.
+		if strings.TrimSpace(poolConfigValue) == "" && !pathUnder(mainRoot, poolRoot) {
+			fallback := resolvePoolRoot(legacyInTreePoolTemplate, mainRoot)
+			if fbErr := os.MkdirAll(fallback, 0o755); fbErr != nil {
+				return res, fmt.Errorf("create worktree pool %q (in-tree fallback %q also failed): %w", poolRoot, fallback, fbErr)
+			}
+			res.Warnings = append(res.Warnings, fmt.Sprintf(
+				"out-of-tree worktree pool %q not creatable (%v); falling back to in-tree pool %q",
+				poolRoot, err, fallback))
+			poolRoot = fallback
+			res.Pool = poolRoot
+		} else {
+			return res, fmt.Errorf("create worktree pool %q: %w", poolRoot, err)
+		}
 	}
 	if pathUnder(mainRoot, poolRoot) {
 		if err := registerPoolExclude(commonDir, mainRoot, poolRoot); err != nil {

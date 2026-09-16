@@ -61,19 +61,43 @@ func TestResolvePoolRoot(t *testing.T) {
 	// which would send every case down the relative-join branch.
 	root := t.TempDir()
 	absPool := t.TempDir()
+	base := filepath.Base(root)
 	cases := []struct {
 		value, gitRoot, want string
 	}{
 		{"$(GitRoot)/.ws-worktrees", root, filepath.Join(root, ".ws-worktrees")},
-		{"", root, filepath.Join(root, ".ws-worktrees")},
+		// Empty resolves to the out-of-tree default: a sibling of gitRoot named
+		// after $(GitRootDirName), not the legacy in-tree ".ws-worktrees".
+		{"", root, filepath.Clean(filepath.Join(root, "..", ".ws-worktrees", base))},
 		{absPool, root, filepath.Clean(absPool)},
 		{"relative/pool", root, filepath.Join(root, "relative", "pool")},
 		{"  $(GitRoot)/p  ", root, filepath.Join(root, "p")},
+		// $(GitRootDirName) substitutes filepath.Base(gitRoot).
+		{"$(GitRoot)/../pool-of-$(GitRootDirName)", root, filepath.Clean(filepath.Join(root, "..", "pool-of-"+base))},
 	}
 	for _, c := range cases {
 		if got := resolvePoolRoot(c.value, c.gitRoot); got != c.want {
 			t.Errorf("resolvePoolRoot(%q,%q) = %q, want %q", c.value, c.gitRoot, got, c.want)
 		}
+	}
+}
+
+// TestResolvePoolRootDefaultTemplate pins the builtin default template itself
+// (not just its resolution), so a future edit to defaultWorktreePoolTemplate
+// that silently drops the sibling-of-repo or $(GitRootDirName) shape is
+// caught here rather than only downstream.
+func TestResolvePoolRootDefaultTemplate(t *testing.T) {
+	if defaultWorktreePoolTemplate != "$(GitRoot)/../.ws-worktrees/$(GitRootDirName)" {
+		t.Fatalf("defaultWorktreePoolTemplate = %q, want the out-of-tree sibling template", defaultWorktreePoolTemplate)
+	}
+	root := t.TempDir()
+	got := resolvePoolRoot("", root)
+	want := filepath.Clean(filepath.Join(filepath.Dir(root), ".ws-worktrees", filepath.Base(root)))
+	if got != want {
+		t.Fatalf("resolvePoolRoot(\"\", %q) = %q, want %q", root, got, want)
+	}
+	if pathUnder(root, got) {
+		t.Fatalf("default pool %q must resolve outside the repo %q", got, root)
 	}
 }
 
@@ -122,13 +146,36 @@ func TestProvisionWorktreeCreateNew(t *testing.T) {
 	if b := wtBranch(t, res.Path); b != "impl/test/alpha" {
 		t.Fatalf("checked-out branch = %q, want impl/test/alpha", b)
 	}
-	// .git/info/exclude self-registration (idempotent across a second acquire).
+	// The default pool is out-of-tree (sibling of the repo), so it must never
+	// be registered in .git/info/exclude: registerPoolExclude is scoped to the
+	// in-tree fallback only.
+	if pathUnder(root, res.Pool) {
+		t.Fatalf("default pool %q must resolve outside the repo %q", res.Pool, root)
+	}
+	excl := filepath.Join(root, ".git", "info", "exclude")
+	if data, err := os.ReadFile(excl); err == nil && strings.Contains(string(data), ".ws-worktrees") {
+		t.Fatalf("out-of-tree default pool wrongly registered in exclude:\n%s", data)
+	}
+	if _, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", ""); err != nil {
+		t.Fatalf("second provision: %v", err)
+	}
+}
+
+// TestProvisionWorktreeInTreeOverrideRegistersExclude pins the in-tree
+// exclude-registration path (registerPoolExclude), now reachable only via an
+// explicit in-tree worktree_pool override since the builtin default moved
+// out-of-tree.
+func TestProvisionWorktreeInTreeOverrideRegistersExclude(t *testing.T) {
+	root, base := worktreeFixture(t)
+	if _, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", legacyInTreePoolTemplate); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
 	excl := filepath.Join(root, ".git", "info", "exclude")
 	data, err := os.ReadFile(excl)
 	if err != nil || !strings.Contains(string(data), "/.ws-worktrees/") {
 		t.Fatalf("pool not registered in .git/info/exclude: %v\n%s", err, data)
 	}
-	if _, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", ""); err != nil {
+	if _, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", legacyInTreePoolTemplate); err != nil {
 		t.Fatalf("second provision: %v", err)
 	}
 	data2, _ := os.ReadFile(excl)
@@ -293,7 +340,7 @@ func TestProvisionWorktreePoolResolvesFromLinkedWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("provision from linked worktree: %v", err)
 	}
-	wantPool := filepath.Join(mainRoot, ".ws-worktrees")
+	wantPool := filepath.Clean(filepath.Join(mainRoot, "..", ".ws-worktrees", filepath.Base(mainRoot)))
 	if res.Pool != wantPool {
 		t.Fatalf("pool = %q, want the main-root pool %q (must not nest under the linked worktree)", res.Pool, wantPool)
 	}
@@ -318,6 +365,69 @@ func TestProvisionWorktreeAbsolutePoolOverride(t *testing.T) {
 	// An out-of-repo pool must not be registered in .git/info/exclude.
 	if data, err := os.ReadFile(filepath.Join(root, ".git", "info", "exclude")); err == nil && strings.Contains(string(data), "shared-pool") {
 		t.Fatalf("out-of-repo pool wrongly registered in exclude:\n%s", data)
+	}
+}
+
+// TestProvisionWorktreeDefaultFallsBackWhenParentUnwritable pins the
+// Constraints fallback: when the out-of-tree default's sibling parent
+// ($(GitRoot)/..) is not creatable/writable, provisioning must fall back to
+// the legacy in-tree pool with a caller-visible advisory rather than
+// hard-failing.
+func TestProvisionWorktreeDefaultFallsBackWhenParentUnwritable(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root ignores permission bits; fallback probe needs an enforced read-only parent")
+	}
+	parent := t.TempDir()
+	root := filepath.Join(parent, "repo")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "init")
+	runGit(t, root, "config", "user.email", "test@test.com")
+	runGit(t, root, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", ".")
+	runGit(t, root, "commit", "-m", "base")
+	base := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+
+	// Remove write on the sibling parent so $(GitRoot)/../.ws-worktrees/... is
+	// not creatable. Restored in cleanup (registered before t.TempDir()'s own
+	// cleanup runs, so it executes first via LIFO ordering) so the harness can
+	// still remove the tree afterward.
+	if err := os.Chmod(parent, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+
+	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", "")
+	if err != nil {
+		t.Fatalf("provisioning must fall back, not hard-fail, on an unwritable sibling parent: %v", err)
+	}
+	wantFallback := filepath.Clean(filepath.Join(root, ".ws-worktrees"))
+	if res.Pool != wantFallback {
+		t.Fatalf("pool = %q, want the in-tree fallback %q", res.Pool, wantFallback)
+	}
+	if !pathUnder(root, res.Path) {
+		t.Fatalf("worktree %q not under the in-tree fallback pool", res.Path)
+	}
+	if len(res.Warnings) == 0 {
+		t.Fatal("expected a fallback advisory warning naming the reason and the in-tree path")
+	}
+	found := false
+	for _, w := range res.Warnings {
+		if strings.Contains(w, wantFallback) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("warnings do not name the in-tree fallback path %q: %v", wantFallback, res.Warnings)
+	}
+	// The in-tree fallback still registers in .git/info/exclude (existing
+	// in-tree behavior), even though the requested pool was the default.
+	if data, err := os.ReadFile(filepath.Join(root, ".git", "info", "exclude")); err != nil || !strings.Contains(string(data), "/.ws-worktrees/") {
+		t.Fatalf("in-tree fallback pool not registered in .git/info/exclude: %v\n%s", err, data)
 	}
 }
 

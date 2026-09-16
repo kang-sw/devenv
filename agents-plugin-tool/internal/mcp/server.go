@@ -484,7 +484,7 @@ func builtinConfigDefaults() map[string]string {
 		wsconfig.ItemWorkflowPreferSubagent: "off",
 		wsconfig.ItemSageReview:             "auto",
 		wsconfig.ItemBootstrapAlarm:         "on",
-		wsconfig.ItemWorktreePool:           "$(GitRoot)/.ws-worktrees",
+		wsconfig.ItemWorktreePool:           defaultWorktreePoolTemplate,
 	}
 }
 
@@ -3543,7 +3543,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "worktree.acquire",
-			"description": "Lead-only. Provision an isolated Git worktree from a recycled pool for a parallel worker: reuse an eligible idle pooled worktree or create one, create target_branch on base if it does not exist and check it out, hygiene-reset the tree, sync submodules, and mint a worktree-bound worker session key. Returns the worktree path and worker_key. The pool location is the worktree_pool config knob (default $(GitRoot)/.ws-worktrees). Defaults to text; use format=json for structured output.",
+			"description": fmt.Sprintf("Lead-only. Provision an isolated Git worktree from a recycled pool for a parallel worker: reuse an eligible idle pooled worktree or create one, create target_branch on base if it does not exist and check it out, hygiene-reset the tree, sync submodules, and mint a worktree-bound worker session key. Returns the worktree path and worker_key. The pool location is the worktree_pool config knob (default %s). Defaults to text; use format=json for structured output.", defaultWorktreePoolTemplate),
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
