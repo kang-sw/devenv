@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 90cbd9e532779d9c
 sage-review-completeness-reviewed: 90cbd9e532779d9c
+completed: 2026-09-16
 ---
 
 # Default worktree pool out-of-tree
@@ -116,6 +117,20 @@ unchanged (only the builtin default string changes). Confirm the reuse scan and
 `registerPoolExclude`'s `pathUnder(mainRoot, poolRoot)` guard behave correctly
 when the resolved pool is now out-of-tree (exclude must not fire).
 
+### Result (100e0be) - 2026-09-16
+
+Landed together with Phases 2-3 in one worker session (tightly coupled Go
+package change). `defaultWorktreePoolTemplate = "$(GitRoot)/../.ws-worktrees/$(GitRootDirName)"`
+is now the single source `server.go`'s `builtinConfigDefaults` and the
+`worktree.acquire` tool description both read (via `fmt.Sprintf`), so the two
+default-definition sites plus the doc string cannot diverge.
+`resolvePoolRoot` substitutes `$(GitRootDirName)` (`filepath.Base(gitRoot)`)
+alongside the existing `$(GitRoot)` token, still `filepath.Clean`'d.
+`registerPoolExclude`'s `pathUnder(mainRoot, poolRoot)` guard needed no code
+change: it already scopes exclude registration to in-tree pools, so the
+now-out-of-tree default correctly gets no exclude entry (test:
+`TestProvisionWorktreeCreateNew`).
+
 ### Phase 2: In-tree fallback and advisory for unwritable parents
 
 When `$(GitRoot)/..` is not creatable/writable, resolve to the legacy in-tree
@@ -127,6 +142,27 @@ injectable probe, but must then update `scope.new_type_contract` in Route Facts
 (it currently reads `no`). Provisioning must never hard-fail solely because the
 sibling parent is not writable.
 
+### Result (e02d2eb) - 2026-09-16
+
+`provisionWorktree`'s `os.MkdirAll(poolRoot)` failure path falls back to
+`legacyInTreePoolTemplate` and appends a `res.Warnings` advisory naming the
+reason and the in-tree path, only when the pool is the builtin default and
+resolves outside `mainRoot`. `resolvePoolRoot` stayed a pure string function
+(no injectable probe); `scope.new_type_contract` remains `no` as recorded.
+
+Round-1 review (single-allocation, `reviewer`) caught a Critical: the initial
+gate compared `poolConfigValue == ""`, but `worktree.acquire`'s real dispatch
+path (`wsconfig.Resolver.Get`) never passes an empty value — it substitutes
+the literal builtin default template before calling `provisionWorktree` — so
+the fallback was unreachable in production on exactly the hosts (mount root,
+read-only parent, container `/workspace`) the Constraints named. Fixed in
+commit `e02d2eb` with `isDefaultPoolConfig` (empty OR the literal default
+template). The same review found `releaseWorktree` was not fallback-aware
+(a fallback-provisioned worktree would be unreleasable) and a portability gap
+in the new test (Windows `os.Getuid()`/chmod semantics; raw vs.
+git-canonicalized root path). Both fixed in the same commit; round 2 verified
+all three findings fixed, verdict clean (see Verification below).
+
 ### Phase 3: Tests
 
 Unit coverage for: `$(GitRootDirName)` resolution; the new default resolved +
@@ -135,6 +171,25 @@ Unit coverage for: `$(GitRootDirName)` resolution; the new default resolved +
 and the in-tree exclude guard firing only for the in-tree fallback, not the
 out-of-tree default. Existing `worktree.acquire` / `worktree.release` suite
 stays green.
+
+### Result (a6940d3) - 2026-09-16
+
+Added/updated in `agents-plugin-tool/internal/mcp/worktree_tools_test.go`:
+`TestResolvePoolRoot` (extended for `$(GitRootDirName)` + new default),
+`TestResolvePoolRootDefaultTemplate` (pins the literal template),
+`TestProvisionWorktreeCreateNew` (default is out-of-tree, no exclude entry),
+`TestProvisionWorktreeInTreeOverrideRegistersExclude` (exclude registration
+still covered via an explicit legacy override),
+`TestProvisionWorktreePoolResolvesFromLinkedWorktree` (updated expected pool),
+`TestProvisionWorktreeAbsolutePoolOverride` (override precedence, unchanged),
+`TestProvisionWorktreeDefaultFallsBackWhenParentUnwritable` (table over
+`poolConfigValue` in `{"", defaultWorktreePoolTemplate}` — the second case is
+the exact shape that caught the round-1 Critical — covering fallback
+resolution, the advisory warning, in-tree exclude registration, and
+`releaseWorktree` accepting the fallback-provisioned worktree; skips on
+Windows and under uid 0). Full suite: `go test ./...` from
+`agents-plugin-tool/` green (all packages `ok`), `go vet ./...` clean,
+`gofmt -l` clean on every file this ticket touched.
 
 ## Verification (acceptance)
 
