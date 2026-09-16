@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 87fe282dd016a6d2
 sage-review-completeness-reviewed: 87fe282dd016a6d2
+completed: 2026-09-16
 ---
 
 # rationale.query tool and the ticket `## Prior Decisions` section
@@ -881,3 +882,8 @@ until closed below) and the new idea ticket were written.
 - Reconcile `ai-docs/spec/pi-adapter-runtime.md`, the one live spec-shaped
   file this repository still maintains, against the retired-layer rule; it is
   evidence for the demand this ticket serves and is outside this ticket.
+
+
+## Resolution (2026-09-16)
+
+All three phases landed on this branch: Phase 1 (`rationale.query` tool, 484fab03, with two Editions — 1b9a39e0 ordered-list bullet extraction, 86154c32 the unified continuation-preserving fix a round-1 independent review required), Phase 2 (populator/reviewer `## Prior Decisions` prose, f1d8664f), Phase 3 (validation on recorded reversals, 86154c32/58c343d0). Phase 3 measured 4 of 6 named sub-targets present in the top 8 threads; the two residual precision gaps trace to literal Tool Specification contract text (BM25 tokenizer/formula, thread-widening + `order: time` default) and are captured with full evidence in the companion idea ticket `260916-research-rationale-query-ranking-precision` for a future ticket to weigh, rather than being fixed here outside this phase's authority.
