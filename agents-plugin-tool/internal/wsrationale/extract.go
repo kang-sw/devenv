@@ -81,12 +81,21 @@ func isBoundaryHeading(trimmed, headingPrefix string) bool {
 // scan: `## ` for level-2 sections and `### ` for level-3 sections. The caller
 // passes the concrete heading text and its prefix.
 
+// numberedItemRe matches a top-level ordered-list marker ("1. ", "21. ", ...).
+// Ticket sections such as `## Cross-Child Decisions` use ordered lists with no
+// blank line between items; without this, the whole list falls through to
+// splitParagraphs as one blank-line-separated paragraph and every item beyond
+// the first collapses into a single oversized record (Phase 3 finding on
+// 260909-epic-ws-worker-interpreter-refoundation's Cross-Child Decision 16).
+var numberedItemRe = regexp.MustCompile(`^\d+\.\s`)
+
 // splitRecords applies the bullet-or-paragraph rule to a block of lines.
 //
-// A record starts at a line beginning `- ` (at column 0) and continues through
-// following lines that start with whitespace or `>`; a blank line or the next
-// `- ` ends it. A block with no top-level bullet yields one record per
-// blank-line-separated paragraph.
+// A record starts at a line beginning `- ` or a top-level ordered-list marker
+// (at column 0) and continues through following lines that start with
+// whitespace or `>`; a blank line or the next bullet/ordered-list marker ends
+// it. A block with no top-level bullet or ordered-list marker yields one
+// record per blank-line-separated paragraph.
 func splitRecords(lines []string) []string {
 	if blockHasBullet(lines) {
 		return splitBullets(lines)
@@ -96,11 +105,32 @@ func splitRecords(lines []string) []string {
 
 func blockHasBullet(lines []string) bool {
 	for _, line := range lines {
-		if strings.HasPrefix(line, "- ") {
+		if isBulletStart(line) {
 			return true
 		}
 	}
 	return false
+}
+
+// isBulletStart reports whether line opens a new top-level record: a `- `
+// bullet or an ordered-list marker.
+func isBulletStart(line string) bool {
+	if strings.HasPrefix(line, "- ") {
+		return true
+	}
+	return numberedItemRe.MatchString(line)
+}
+
+// stripBulletMarker removes the leading `- ` or ordered-list marker from a
+// line already confirmed by isBulletStart.
+func stripBulletMarker(line string) string {
+	if strings.HasPrefix(line, "- ") {
+		return strings.TrimPrefix(line, "- ")
+	}
+	if loc := numberedItemRe.FindStringIndex(line); loc != nil {
+		return line[loc[1]:]
+	}
+	return line
 }
 
 func splitBullets(lines []string) []string {
@@ -116,9 +146,9 @@ func splitBullets(lines []string) []string {
 	}
 	for _, line := range lines {
 		switch {
-		case strings.HasPrefix(line, "- "):
+		case isBulletStart(line):
 			flush()
-			cur = []string{strings.TrimPrefix(line, "- ")}
+			cur = []string{stripBulletMarker(line)}
 		case strings.TrimSpace(line) == "":
 			flush()
 		case isContinuation(line):

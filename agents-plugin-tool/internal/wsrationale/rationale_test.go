@@ -137,6 +137,46 @@ func TestBulletExtraction(t *testing.T) {
 	}
 }
 
+// --- Test 1b: ordered-list bullet extraction (Phase 3 tuning edition) ---
+//
+// Real `## Cross-Child Decisions` sections in this repository use an ordered
+// list with no blank line between items (see
+// 260909-epic-ws-worker-interpreter-refoundation). Without ordered-list
+// support, the whole list has no top-level `- ` bullet, so it falls through
+// to splitParagraphs and the entire numbered list becomes one oversized
+// record instead of one record per item — Phase 3's finding for its
+// `session.note` validation case.
+func TestOrderedListBulletExtraction(t *testing.T) {
+	root := initRepo(t)
+	commitFixture(t, root, "2026-01-01", map[string]string{"a.txt": "x"},
+		"seed\n\n## AI Context\n- seed record\n")
+	ticket := "---\ntitle: delta\n---\n\n## Cross-Child Decisions\n" +
+		"1. **First decision.** Some rationale that continues\n" +
+		"   onto an indented line.\n" +
+		"2. **Second decision.** Short.\n" +
+		"21. **Twenty-first decision.** Double-digit marker.\n"
+	writeFile(t, root, "ai-docs/tickets/.done/260103-feat-delta.md", ticket)
+
+	res := query(t, root, Options{Kinds: []string{"ticket"}})
+	th, ok := threadByStem(res, "260103-feat-delta")
+	if !ok {
+		t.Fatalf("no thread for 260103-feat-delta: %+v", res.Threads)
+	}
+	if len(th.Records) != 3 {
+		t.Fatalf("want 3 ordered-list records, got %d: %+v", len(th.Records), th.Records)
+	}
+	texts := allRecordTexts(res)
+	for _, want := range []string{
+		"**First decision.** Some rationale that continues onto an indented line.",
+		"**Second decision.** Short.",
+		"**Twenty-first decision.** Double-digit marker.",
+	} {
+		if !texts[want] {
+			t.Fatalf("missing ordered-list record %q; have %v", want, texts)
+		}
+	}
+}
+
 // --- Test 2: paragraph fallback ---
 
 func TestParagraphFallback(t *testing.T) {
