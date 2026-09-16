@@ -6,8 +6,10 @@ title: TestExecMCPRunningLargeAndAbort flakes on Windows via TempDir cleanup rac
 
 ## Status of this ticket
 
-Bug capture from the ws 0.46.8 release run. Test-only defect (no shipped-binary
-impact). Ready to triage/fix once the fix approach is confirmed.
+**CI failure RESOLVED (2026-09-16)** by a test-only fix — see `## Resolution`.
+Kept open for one remaining, lower-priority thread: a latent production
+descendant-wait note (see `## Remaining`), which is best-effort by design and did
+not cause the CI failure.
 
 ## Observation
 
@@ -51,6 +53,34 @@ on Windows.
 - Verify the exec abort path itself reaps the child on Windows (if the leak is in
   production abort handling, not just the test, that is a real exec.* bug and this
   ticket should be re-scoped up from test-only).
+
+## Resolution
+
+Test-only fix landed on develop via PR #10 (merge 8973a8b7, fix commit 87187663),
+validated on real Windows CI by the release workflow's PR run 35057067620
+(Build + Windows smoke both green). Two changes in
+`TestExecMCPRunningLargeAndAbort`:
+
+- Drive `exec.result` with `timeout_seconds: 30` (polls to a terminal status) and
+  assert `combined_bytes: 5000` on that response, instead of trusting the 5s
+  synchronous `exec.shell` launch (which returned `running` under Windows load).
+- Add `reapExecKeys` + a `t.Cleanup` (registered after server setup, so it runs
+  before the `WS_CACHE_HOME`/`t.TempDir` cleanups) that aborts and polls-to-terminal
+  every spawned `exec_key` before TempDir removal.
+
+Investigation confirmed **no production exec bug** for this failure: `Abort`
+already waits for the shell process exit and `ResultWithTimeout` already polls to
+terminal, so the fix stayed entirely test-only.
+
+## Remaining (latent, low priority)
+
+`Abort`/`waitProcessExit` (execjob.go) wait only on the tracked shell pid, while
+`cancelProcess` issues async `TerminateProcess` to descendants without waiting.
+On Windows a grandchild (e.g. `ping`) that inherited the worktree root as CWD
+could briefly outlive the shell after `Abort` returns — best-effort by design,
+but the comment at execjob.go:277-285 overstates that the deterministic wait
+covers the CWD-holding case (true only for the shell, not descendants). No
+observed failure; consider making `Abort` wait the whole process tree.
 
 ## Notes
 
