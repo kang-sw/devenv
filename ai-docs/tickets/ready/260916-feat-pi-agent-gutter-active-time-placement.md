@@ -117,6 +117,14 @@ Verification:
 - Assert that the moved active-time value retains its existing style and that established narrow-width behavior remains bounded.
 - Run the focused agent-widget tests and the full Pi TypeScript suite.
 
+### Result (da578281) - 2026-09-16
+
+- Relocated the existing active-duration value beside total elapsed time as `1m (25s)`, preserving `syntaxNumber` styling and all time-accounting semantics. The worker label, state, model/effort, context, and cost fields remain unchanged.
+- Decision: activity now belongs to the duration field even when the remaining telemetry group does not fit; styling is applied only after plain-text truncation, retaining protected owner cues and inspection hints.
+- Verification: `cd agents-plugin-pi && npm test -- test/agent-widget.test.ts` passed all 45 tests; `npm test` passed 1,573 tests with 2 opt-in skips and no failures. Added distinct-duration plain/themed cases and exhaustive width bounds; updated the exact telemetry-fit boundary for the shorter layout.
+- Independent correctness, fit, and test reviews were all clean. No unresolved findings.
+- Deferred: Phase 2 footer Git-status work remains unimplemented and the ticket stays ready.
+
 ### Phase 2: Add cached Git status to the custom footer
 
 Add the confirmed counters and repository-operation state beside the existing cwd/branch display. Populate a per-working-directory cache through asynchronous `turn_end` refreshes and the debounced five-minute idle refresh, preserving an O(1) cache-only render path and non-blocking input handling.
