@@ -23,6 +23,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wskey"
+	"github.com/kang-sw/devenv/internal/wsrationale"
 	"github.com/kang-sw/devenv/internal/wsreview"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 	"github.com/kang-sw/devenv/internal/wsstate"
@@ -484,7 +485,7 @@ func builtinConfigDefaults() map[string]string {
 		wsconfig.ItemWorkflowPreferSubagent: "off",
 		wsconfig.ItemSageReview:             "auto",
 		wsconfig.ItemBootstrapAlarm:         "on",
-		wsconfig.ItemWorktreePool:           "$(GitRoot)/.ws-worktrees",
+		wsconfig.ItemWorktreePool:           defaultWorktreePoolTemplate,
 	}
 }
 
@@ -972,6 +973,33 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolJSONResponse(req.ID, result, err)
 		}
 		return toolTextResponse(req.ID, formatGitLog(result), err)
+	case "rationale.query":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		opts := wsrationale.Options{
+			Query:       optString(params.Arguments["query"]),
+			Paths:       stringList(params.Arguments["paths"]),
+			Site:        optString(params.Arguments["site"]),
+			Occurrence:  intFromArgument(params.Arguments["occurrence"], 0),
+			Pickaxe:     optString(params.Arguments["pickaxe"]),
+			Since:       optString(params.Arguments["since"]),
+			Until:       optString(params.Arguments["until"]),
+			Stems:       stringList(params.Arguments["stems"]),
+			ExcludeStem: optString(params.Arguments["exclude_stem"]),
+			Kinds:       stringList(params.Arguments["kinds"]),
+			Order:       optString(params.Arguments["order"]),
+			Limit:       intFromArgument(params.Arguments["limit"], 0),
+		}
+		result, err := wsrationale.Query(context.Background(), wsgit.ExecRunner{}, root, opts)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, wsrationale.JSON(result), nil)
+		}
+		return toolTextResponse(req.ID, wsrationale.FormatText(result), nil)
 	case "git.merge_base":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -3493,6 +3521,28 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "rationale.query",
+			"description": "Search recorded rationale: commit ## AI Context and ## Ticket Updates bullets and ticket decision sections. Address by path globs, a code site (git log -L), a pickaxe string (git log -S), or a text query. Returns pointers with quoted records grouped by ticket thread, newest first. Defaults to compact text; use format=json for structured output.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query":        stringProperty("BM25 text query over record text. Combines with any addressing mode."),
+					"paths":        stringArrayProperty("File globs. A commit record matches when any touched path matches; a ticket record matches when the ticket names a matching path or a commit in its thread touched one."),
+					"site":         stringProperty("A code site as <path>:/<regex>/,+N or <path>#L<start>-L<end>, resolved through git log -L. Exclusive with paths and pickaxe. +N defaults to +10."),
+					"occurrence":   integerProperty("Which regex match in the file `site` uses when it matches more than once. Default 1."),
+					"pickaxe":      stringProperty("A git log -S<string> pickaxe search. Exclusive with paths and site."),
+					"since":        stringProperty("YYYY-MM-DD inclusive lower bound on record date."),
+					"until":        stringProperty("YYYY-MM-DD inclusive upper bound on record date."),
+					"stems":        stringArrayProperty("Keep only records in these ticket threads."),
+					"exclude_stem": stringProperty("Drop the ticket's own records and commits that name only this stem."),
+					"kinds":        stringArrayProperty("Subset of commit, ticket. Default both."),
+					"order":        enumStringProperty("relevance or time. Default relevance when query is given, else time.", []string{"relevance", "time"}),
+					"limit":        integerProperty("Maximum records returned. Default 30, cap 100."),
+					"format":       stringProperty(`Optional output format. Use "json" for structured output.`),
+				},
+			},
+		},
+		{
 			"name":        "git.merge_base",
 			"description": "Return the read-only Git merge-base hash for two revisions. Defaults to text; use format=json for structured output.",
 			"inputSchema": map[string]any{
@@ -3543,7 +3593,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "worktree.acquire",
-			"description": "Lead-only. Provision an isolated Git worktree from a recycled pool for a parallel worker: reuse an eligible idle pooled worktree or create one, create target_branch on base if it does not exist and check it out, hygiene-reset the tree, sync submodules, and mint a worktree-bound worker session key. Returns the worktree path and worker_key. The pool location is the worktree_pool config knob (default $(GitRoot)/.ws-worktrees). Defaults to text; use format=json for structured output.",
+			"description": fmt.Sprintf("Lead-only. Provision an isolated Git worktree from a recycled pool for a parallel worker: reuse an eligible idle pooled worktree or create one, create target_branch on base if it does not exist and check it out, hygiene-reset the tree, sync submodules, and mint a worktree-bound worker session key. Returns the worktree path and worker_key. The pool location is the worktree_pool config knob (default %s). Defaults to text; use format=json for structured output.", defaultWorktreePoolTemplate),
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -3956,6 +4006,7 @@ func toolSchemaRequiresSessionKey(name string) bool {
 	case "api.list",
 		"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep",
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "git.merge",
+		"rationale.query",
 		"project_tree",
 		"review.marker", "review.stamp",
 		"worktree.acquire", "worktree.release",
@@ -4306,6 +4357,11 @@ type reviewMarkerJSON struct {
 
 func reviewMarkerJSONValue(entry wsreview.Entry, found bool) reviewMarkerJSON {
 	return reviewMarkerJSON{Base: entry.Base, Head: entry.Head, Verdict: entry.Verdict, Ref: entry.Ref, Found: found}
+}
+
+func optString(value any) string {
+	text, _ := value.(string)
+	return text
 }
 
 func stringList(value any) []string {

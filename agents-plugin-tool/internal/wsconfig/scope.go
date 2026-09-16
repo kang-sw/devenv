@@ -62,11 +62,19 @@ const (
 
 	// ItemWorktreePool is the pool location where worktree.acquire provisions
 	// and recycles per-worker Git worktrees. The value is either an absolute
-	// path or a template containing the $(GitRoot) token, which binds to the
-	// primary (main) worktree root so a call from any linked worktree resolves
-	// to the one shared pool. Builtin default: "$(GitRoot)/.ws-worktrees".
-	// Resolved through the layered config (project/global/session files +
-	// builtin) rather than a dedicated config.tune writer.
+	// path or a template containing the $(GitRoot) and/or $(GitRootDirName)
+	// tokens ($(GitRoot) binds to the primary (main) worktree root so a call
+	// from any linked worktree resolves to the one shared pool;
+	// $(GitRootDirName) is filepath.Base($(GitRoot))). The builtin default is
+	// a filesystem sibling of the repo, outside the working tree, so IDEs do
+	// not index the pooled worktrees — see
+	// agents-plugin-tool/internal/mcp/worktree_tools.go's
+	// defaultWorktreePoolTemplate for the exact template string.
+	// provisionWorktree (not resolvePoolRoot, which stays a pure string
+	// function) falls back to the in-tree legacyInTreePoolTemplate when the
+	// sibling parent is not writable. Resolved through the layered config
+	// (project/global/session files + builtin) rather than a dedicated
+	// config.tune writer.
 	ItemWorktreePool = "worktree_pool"
 )
 
