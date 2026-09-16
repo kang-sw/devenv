@@ -177,6 +177,123 @@ func TestOrderedListBulletExtraction(t *testing.T) {
 	}
 }
 
+// TestBulletFlatContinuationPreserved pins a Phase 3 test-review finding: once
+// ordered-list markers count as bullets, a numbered item's non-indented
+// continuation line must still be preserved (merged into the record), not
+// silently dropped. Before ordered-list recognition, a block with no `- `
+// bullet went through splitParagraphs, which never drops a non-blank line;
+// recognizing the numbered marker must not turn that into a content-loss
+// regression. Also pins that a mixed `- ` and numbered list in one block
+// still yields one record per item.
+func TestBulletFlatContinuationPreserved(t *testing.T) {
+	root := initRepo(t)
+	commitFixture(t, root, "2026-01-01", map[string]string{"a.txt": "x"},
+		"seed\n\n## AI Context\n- seed record\n")
+	ticket := "---\ntitle: eta\n---\n\n## Cross-Child Decisions\n" +
+		"1. First item.\n" +
+		"a plain non-indented continuation line.\n" +
+		"2. Second item.\n" +
+		"- A dash bullet mixed into the same list.\n"
+	writeFile(t, root, "ai-docs/tickets/.done/260104-feat-eta.md", ticket)
+
+	res := query(t, root, Options{Kinds: []string{"ticket"}})
+	th, ok := threadByStem(res, "260104-feat-eta")
+	if !ok {
+		t.Fatalf("no thread for 260104-feat-eta: %+v", res.Threads)
+	}
+	if len(th.Records) != 3 {
+		t.Fatalf("want 3 records, got %d: %+v", len(th.Records), th.Records)
+	}
+	texts := allRecordTexts(res)
+	for _, want := range []string{
+		"First item. a plain non-indented continuation line.",
+		"Second item.",
+		"A dash bullet mixed into the same list.",
+	} {
+		if !texts[want] {
+			t.Fatalf("missing record %q; have %v", want, texts)
+		}
+	}
+}
+
+// TestBulletBlockLeadingParagraphPreserved pins a Phase 3 correctness-review
+// Critical finding measured against this repository's own real tickets: a
+// section that opens with plain intro prose before its first list item (a
+// real pattern — e.g. .done/260622-chore-windows-shipping-hardening.md's
+// `### Result` section: a lead paragraph, a blank line, then "Per-item
+// outcome:" touching item 1 with no blank line before it) must keep that
+// leading prose as its own paragraph record(s), not drop it just because no
+// bullet is open yet when it is scanned.
+func TestBulletBlockLeadingParagraphPreserved(t *testing.T) {
+	root := initRepo(t)
+	commitFixture(t, root, "2026-01-01", map[string]string{"a.txt": "x"},
+		"seed\n\n## AI Context\n- seed record\n")
+	ticket := "---\ntitle: theta\n---\n\n### Result (aaaa111) - 2026-01-05\n\n" +
+		"Lead paragraph line one.\nLead paragraph line two.\n\n" +
+		"Per-item outcome:\n" +
+		"1. First outcome item.\n" +
+		"2. Second outcome item.\n"
+	writeFile(t, root, "ai-docs/tickets/.done/260105-feat-theta.md", ticket)
+
+	res := query(t, root, Options{Kinds: []string{"ticket"}})
+	th, ok := threadByStem(res, "260105-feat-theta")
+	if !ok {
+		t.Fatalf("no thread for 260105-feat-theta: %+v", res.Threads)
+	}
+	if len(th.Records) != 4 {
+		t.Fatalf("want 4 records (2 leading paragraphs + 2 items), got %d: %+v", len(th.Records), th.Records)
+	}
+	texts := allRecordTexts(res)
+	for _, want := range []string{
+		"Lead paragraph line one. Lead paragraph line two.",
+		"Per-item outcome:",
+		"First outcome item.",
+		"Second outcome item.",
+	} {
+		if !texts[want] {
+			t.Fatalf("missing record %q; have %v", want, texts)
+		}
+	}
+}
+
+// TestBulletBlockUnrecognizedMarkerPreserved pins a second Phase 3
+// correctness-review Critical finding: a real dropped ticket
+// (.dropped/260801-feat-ws-opencode-adapter.md) writes one decision's marker
+// with a one-space indent (" 8. **Tier-agent…**") after a blank line
+// separating it from the prior decision. isBulletStart requires column 0 (by
+// the same rule `- ` already uses), so this line is not recognized as a new
+// bullet; because the preceding blank line closed the prior record, this line
+// must still surface as its own (merged, paragraph-shaped) record instead of
+// being silently dropped on the floor.
+func TestBulletBlockUnrecognizedMarkerPreserved(t *testing.T) {
+	root := initRepo(t)
+	commitFixture(t, root, "2026-01-01", map[string]string{"a.txt": "x"},
+		"seed\n\n## AI Context\n- seed record\n")
+	ticket := "---\ntitle: iota\n---\n\n## Decisions\n\n" +
+		"1. First decision.\n\n" +
+		" 8. Irregular one-space-indented decision.\n" +
+		"    Continuation of the irregular decision.\n"
+	writeFile(t, root, "ai-docs/tickets/.dropped/260106-feat-iota.md", ticket)
+
+	res := query(t, root, Options{Kinds: []string{"ticket"}})
+	th, ok := threadByStem(res, "260106-feat-iota")
+	if !ok {
+		t.Fatalf("no thread for 260106-feat-iota: %+v", res.Threads)
+	}
+	if len(th.Records) != 2 {
+		t.Fatalf("want 2 records, got %d: %+v", len(th.Records), th.Records)
+	}
+	texts := allRecordTexts(res)
+	for _, want := range []string{
+		"First decision.",
+		"8. Irregular one-space-indented decision. Continuation of the irregular decision.",
+	} {
+		if !texts[want] {
+			t.Fatalf("missing record %q; have %v", want, texts)
+		}
+	}
+}
+
 // --- Test 2: paragraph fallback ---
 
 func TestParagraphFallback(t *testing.T) {

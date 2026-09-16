@@ -92,10 +92,16 @@ var numberedItemRe = regexp.MustCompile(`^\d+\.\s`)
 // splitRecords applies the bullet-or-paragraph rule to a block of lines.
 //
 // A record starts at a line beginning `- ` or a top-level ordered-list marker
-// (at column 0) and continues through following lines that start with
-// whitespace or `>`; a blank line or the next bullet/ordered-list marker ends
-// it. A block with no top-level bullet or ordered-list marker yields one
-// record per blank-line-separated paragraph.
+// (at column 0) and continues through every following line up to a blank line
+// or the next bullet/ordered-list marker. A block with no top-level bullet or
+// ordered-list marker yields one record per blank-line-separated paragraph.
+// Once a block has at least one such marker anywhere, a run of non-blank lines
+// that does not itself open with a marker (leading prose before the first
+// item, or an irregular item whose marker isn't recognized — see
+// splitBullets) becomes its own paragraph-shaped record instead of being
+// merged into an unrelated neighboring item or dropped: a block containing
+// bullets must never lose text that the pure paragraph fallback would have
+// kept (Phase 3 correctness-review finding on 260915).
 func splitRecords(lines []string) []string {
 	if blockHasBullet(lines) {
 		return splitBullets(lines)
@@ -133,6 +139,19 @@ func stripBulletMarker(line string) string {
 	return line
 }
 
+// splitBullets processes a block that contains at least one top-level bullet
+// or ordered-list marker somewhere. It never drops a non-blank line: a line
+// either opens a new bullet record, or — when no bullet is currently open —
+// opens a new loose paragraph record, and every other non-blank line extends
+// whichever of the two is currently open. This matters because a real ticket
+// section can freely mix a leading intro paragraph, well-formed list items,
+// and an irregular item whose marker this parser doesn't recognize (for
+// example a marker indented by one space, which CommonMark still treats as a
+// top-level item but which isBulletStart requires at column 0): every one of
+// those must still surface as a record, never silently disappear into an
+// unrelated neighboring item or the floor. A blank line or the next
+// bullet-start line ends whatever is open, exactly as it would for a `- `
+// bullet.
 func splitBullets(lines []string) []string {
 	var records []string
 	var cur []string
@@ -151,28 +170,14 @@ func splitBullets(lines []string) []string {
 			cur = []string{stripBulletMarker(line)}
 		case strings.TrimSpace(line) == "":
 			flush()
-		case isContinuation(line):
-			if len(cur) > 0 {
-				cur = append(cur, strings.TrimSpace(line))
-			}
 		default:
-			// A non-continuation, non-bullet line ends the current bullet and is
-			// not itself a record (bullets carry the rationale here).
-			flush()
+			// Continues an open bullet, or starts/continues a loose paragraph
+			// when nothing is open. Either way the line is never discarded.
+			cur = append(cur, strings.TrimSpace(line))
 		}
 	}
 	flush()
 	return records
-}
-
-func isContinuation(line string) bool {
-	if line == "" {
-		return false
-	}
-	if line[0] == ' ' || line[0] == '\t' || line[0] == '>' {
-		return true
-	}
-	return false
 }
 
 func splitParagraphs(lines []string) []string {
