@@ -3,8 +3,10 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -372,62 +374,94 @@ func TestProvisionWorktreeAbsolutePoolOverride(t *testing.T) {
 // Constraints fallback: when the out-of-tree default's sibling parent
 // ($(GitRoot)/..) is not creatable/writable, provisioning must fall back to
 // the legacy in-tree pool with a caller-visible advisory rather than
-// hard-failing.
+// hard-failing. It covers both the raw-empty-config caller shape and the
+// shape worktree.acquire's real dispatch path actually produces:
+// wsconfig.Resolver.Get substitutes the builtin default before
+// provisionWorktree is ever called, so poolConfigValue arrives as the
+// literal defaultWorktreePoolTemplate string, never "". A fallback gate keyed
+// only on the empty string is unreachable in production; both cases must
+// trigger the fallback identically.
 func TestProvisionWorktreeDefaultFallsBackWhenParentUnwritable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Windows' read-only attribute does not block creating new entries in
+		// a directory the way POSIX write-permission removal does, so this
+		// chmod-based probe cannot force the fallback path on that platform.
+		t.Skip("chmod-based write-protection probe is not meaningful on Windows")
+	}
 	if os.Getuid() == 0 {
 		t.Skip("root ignores permission bits; fallback probe needs an enforced read-only parent")
 	}
-	parent := t.TempDir()
-	root := filepath.Join(parent, "repo")
-	if err := os.Mkdir(root, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, root, "init")
-	runGit(t, root, "config", "user.email", "test@test.com")
-	runGit(t, root, "config", "user.name", "Test")
-	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("base\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, root, "add", ".")
-	runGit(t, root, "commit", "-m", "base")
-	base := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+	for _, poolConfigValue := range []string{"", defaultWorktreePoolTemplate} {
+		t.Run(fmt.Sprintf("poolConfigValue=%q", poolConfigValue), func(t *testing.T) {
+			parent := t.TempDir()
+			rawRoot := filepath.Join(parent, "repo")
+			if err := os.Mkdir(rawRoot, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, rawRoot, "init")
+			runGit(t, rawRoot, "config", "user.email", "test@test.com")
+			runGit(t, rawRoot, "config", "user.name", "Test")
+			if err := os.WriteFile(filepath.Join(rawRoot, "f.txt"), []byte("base\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, rawRoot, "add", ".")
+			runGit(t, rawRoot, "commit", "-m", "base")
+			base := strings.TrimSpace(string(runGitOutput(t, rawRoot, "rev-parse", "HEAD")))
+			// Canonicalize root the same way provisionWorktree derives
+			// mainRoot (via `git rev-parse --show-toplevel` through
+			// listWorktrees), so wantFallback below and the
+			// production-computed res.Pool compare in the same form even
+			// where the raw temp path and git's canonical toplevel differ
+			// (e.g. a /var -> /private/var symlink).
+			root := canonicalRootForTest(t, rawRoot)
 
-	// Remove write on the sibling parent so $(GitRoot)/../.ws-worktrees/... is
-	// not creatable. Restored in cleanup (registered before t.TempDir()'s own
-	// cleanup runs, so it executes first via LIFO ordering) so the harness can
-	// still remove the tree afterward.
-	if err := os.Chmod(parent, 0o555); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+			// Remove write on the sibling parent so
+			// $(GitRoot)/../.ws-worktrees/... is not creatable. Restored in
+			// cleanup (registered before t.TempDir()'s own cleanup runs, so
+			// it executes first via LIFO ordering) so the harness can still
+			// remove the tree afterward.
+			if err := os.Chmod(parent, 0o555); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
 
-	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", "")
-	if err != nil {
-		t.Fatalf("provisioning must fall back, not hard-fail, on an unwritable sibling parent: %v", err)
-	}
-	wantFallback := filepath.Clean(filepath.Join(root, ".ws-worktrees"))
-	if res.Pool != wantFallback {
-		t.Fatalf("pool = %q, want the in-tree fallback %q", res.Pool, wantFallback)
-	}
-	if !pathUnder(root, res.Path) {
-		t.Fatalf("worktree %q not under the in-tree fallback pool", res.Path)
-	}
-	if len(res.Warnings) == 0 {
-		t.Fatal("expected a fallback advisory warning naming the reason and the in-tree path")
-	}
-	found := false
-	for _, w := range res.Warnings {
-		if strings.Contains(w, wantFallback) {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("warnings do not name the in-tree fallback path %q: %v", wantFallback, res.Warnings)
-	}
-	// The in-tree fallback still registers in .git/info/exclude (existing
-	// in-tree behavior), even though the requested pool was the default.
-	if data, err := os.ReadFile(filepath.Join(root, ".git", "info", "exclude")); err != nil || !strings.Contains(string(data), "/.ws-worktrees/") {
-		t.Fatalf("in-tree fallback pool not registered in .git/info/exclude: %v\n%s", err, data)
+			res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", poolConfigValue)
+			if err != nil {
+				t.Fatalf("provisioning must fall back, not hard-fail, on an unwritable sibling parent: %v", err)
+			}
+			wantFallback := filepath.Clean(filepath.Join(root, ".ws-worktrees"))
+			if res.Pool != wantFallback {
+				t.Fatalf("pool = %q, want the in-tree fallback %q", res.Pool, wantFallback)
+			}
+			if !pathUnder(root, res.Path) {
+				t.Fatalf("worktree %q not under the in-tree fallback pool", res.Path)
+			}
+			if len(res.Warnings) == 0 {
+				t.Fatal("expected a fallback advisory warning naming the reason and the in-tree path")
+			}
+			found := false
+			for _, w := range res.Warnings {
+				if strings.Contains(w, wantFallback) {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("warnings do not name the in-tree fallback path %q: %v", wantFallback, res.Warnings)
+			}
+			// The in-tree fallback still registers in .git/info/exclude
+			// (existing in-tree behavior), even though the requested pool was
+			// the default.
+			if data, err := os.ReadFile(filepath.Join(root, ".git", "info", "exclude")); err != nil || !strings.Contains(string(data), "/.ws-worktrees/") {
+				t.Fatalf("in-tree fallback pool not registered in .git/info/exclude: %v\n%s", err, data)
+			}
+			// releaseWorktree must accept a fallback-provisioned worktree as
+			// owned-pool-eligible even though resolvePoolRoot(poolConfigValue,
+			// mainRoot) recomputes the (still-unwritable) out-of-tree default,
+			// not the fallback path acquire actually used.
+			if err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, res.Path, poolConfigValue); err != nil {
+				t.Fatalf("release of a fallback-provisioned worktree must succeed: %v", err)
+			}
+		})
 	}
 }
 

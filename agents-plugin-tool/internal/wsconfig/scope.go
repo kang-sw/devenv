@@ -65,14 +65,15 @@ const (
 	// path or a template containing the $(GitRoot) and/or $(GitRootDirName)
 	// tokens ($(GitRoot) binds to the primary (main) worktree root so a call
 	// from any linked worktree resolves to the one shared pool;
-	// $(GitRootDirName) is filepath.Base($(GitRoot))). Builtin default:
-	// "$(GitRoot)/../.ws-worktrees/$(GitRootDirName)" — a filesystem sibling
-	// of the repo, outside the working tree, so IDEs do not index the pooled
-	// worktrees (see agents-plugin-tool/internal/mcp/worktree_tools.go's
-	// defaultWorktreePoolTemplate, which resolvePoolRoot falls back to
-	// in-tree "$(GitRoot)/.ws-worktrees" when the sibling parent is not
-	// writable). Resolved through the layered config (project/global/session
-	// files + builtin) rather than a dedicated config.tune writer.
+	// $(GitRootDirName) is filepath.Base($(GitRoot))). The builtin default is
+	// a filesystem sibling of the repo, outside the working tree, so IDEs do
+	// not index the pooled worktrees — see
+	// agents-plugin-tool/internal/mcp/worktree_tools.go's
+	// defaultWorktreePoolTemplate for the exact template string, which
+	// resolvePoolRoot falls back away from (to the in-tree
+	// legacyInTreePoolTemplate) when the sibling parent is not writable.
+	// Resolved through the layered config (project/global/session files +
+	// builtin) rather than a dedicated config.tune writer.
 	ItemWorktreePool = "worktree_pool"
 )
 
