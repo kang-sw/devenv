@@ -95,13 +95,15 @@ var numberedItemRe = regexp.MustCompile(`^\d+\.\s`)
 // (at column 0) and continues through every following line up to a blank line
 // or the next bullet/ordered-list marker. A block with no top-level bullet or
 // ordered-list marker yields one record per blank-line-separated paragraph.
-// Once a block has at least one such marker anywhere, a run of non-blank lines
-// that does not itself open with a marker (leading prose before the first
-// item, or an irregular item whose marker isn't recognized — see
-// splitBullets) becomes its own paragraph-shaped record instead of being
-// merged into an unrelated neighboring item or dropped: a block containing
-// bullets must never lose text that the pure paragraph fallback would have
-// kept (Phase 3 correctness-review finding on 260915).
+// Once a block has at least one such marker anywhere, every non-blank line
+// still lands in a record: a line that directly follows an open bullet
+// extends that bullet as a continuation (matching the pure-bullet case
+// above), while a non-marker line with nothing currently open — leading
+// prose before the first item, or an irregular item whose marker isn't
+// recognized, see splitBullets — opens its own paragraph-shaped record
+// instead of being merged into an unrelated neighboring item or dropped: a
+// block containing bullets must never lose text that the pure paragraph
+// fallback would have kept (Phase 3 correctness-review finding on 260915).
 func splitRecords(lines []string) []string {
 	if blockHasBullet(lines) {
 		return splitBullets(lines)
