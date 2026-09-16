@@ -15,7 +15,7 @@ import {
 } from "../src/agent-footer.ts";
 import { agentWidgetRefreshRef, evictForCapacity, stopAgent, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { truncateToWidth, visibleWidth } from "../src/pi-tui.ts";
-import { applySessionShutdownAgentFooter, applySessionStartAgentFooter } from "../src/index.ts";
+import { applySessionShutdownAgentFooter, applySessionStartAgentFooter, registerAgentFooterGitEvents } from "../src/index.ts";
 
 const roots = new Set<string>();
 afterEach(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); roots.clear(); });
@@ -40,7 +40,7 @@ function record(agentId: string, storage: ReturnType<typeof createAgentStorageCo
 function context(entries: readonly unknown[] = []) {
   let footerFactory: any;
   let component: AgentFooterComponent | undefined;
-  let restores = 0;
+  let restores = 0, renders = 0;
   const ctx = {
     mode: "tui", cwd: "/work/project",
     model: { provider: "provider", id: "model", reasoning: true, contextWindow: 200_000 }, thinkingLevel: "high",
@@ -50,18 +50,44 @@ function context(entries: readonly unknown[] = []) {
   };
   const mount = (fg: (color: string, text: string) => string = (_color, text) => text) => {
     component = footerFactory(
-      { requestRender() {} },
+      { requestRender() { renders++; } },
       { fg },
       { getGitBranch: () => "feature/footer", getExtensionStatuses: () => new Map(), getAvailableProviderCount: () => 2, onBranchChange: () => () => {} },
     );
     return component!;
   };
-  return { ctx, mount, get restores() { return restores; } };
+  return { ctx, mount, get restores() { return restores; }, get renders() { return renders; } };
 }
 function checkpoint(storage: ReturnType<typeof createAgentStorageContext>): any {
   return JSON.parse(readFileSync(join(storage.root, "ws-agents", storage.ownerSessionId, ".cost-estimate", "checkpoint.json"), "utf8"));
 }
 const plain = (text: string) => text.replace(/\u001b\[[0-9;]*m/g, "");
+
+test("Git cache publishes beside branch, before session name, and drops indicators as one group", async () => {
+  const ui = context(), storage = createAgentStorageContext("lead", root());
+  let queries = 0;
+  const controller = createAgentFooterController(ui.ctx, new Map(), storage, { truncateToWidth, visibleWidth }, async () => {
+    queries++;
+    return { ahead: 1, behind: 2, added: 12, deleted: 3, changed: 2, untracked: 1, operation: "merging" };
+  });
+  const spans: Array<[string, string]> = [];
+  const component = ui.mount((color, text) => { spans.push([color, text]); return `\u001b[36m${text}\u001b[39m`; });
+  controller.turnEnd();
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  assert.equal(ui.renders, 1);
+  const full = "/work/project (feature/footer) merging ↑1 ↓2 +12 -3 ~2 ?1 • named session";
+  assert.equal(plain(component.render(full.length)[0]), full);
+  for (const pair of [["warning", "merging"], ["success", "↑1"], ["warning", "↓2"], ["success", "+12"], ["error", "-3"], ["warning", "~2"], ["accent", "?1"]]) {
+    assert.ok(spans.some(span => span[0] === pair[0] && span[1] === pair[1]));
+  }
+  assert.equal(plain(component.render(full.length - 1)[0]), "/work/project (feature/footer) • named session");
+  ui.ctx.sessionManager.getEntries = () => { throw new Error("no render-time history traversal"); };
+  for (const width of [0, 1, 40, 80, 120]) {
+    assert.ok(component.render(width).every(line => visibleWidth(line) <= width));
+  }
+  assert.equal(queries, 1, "rendering never queries Git");
+  controller.stop();
+});
 
 describe("bounded direct-agent estimates", () => {
   test("counts running, idle, dormant, and all direct roles while ignoring nested ownership", () => {
@@ -294,7 +320,7 @@ describe("custom footer render and lifecycle", () => {
     let release!: (value: any) => void;
     const pending = new Promise<any>(resolve => { release = resolve; });
     const calls: string[] = [];
-    const lifecycle = createAgentFooterSessionLifecycle(() => pending, () => ({ refresh() {}, refreshAgents() {}, acceptUsage() {}, checkpoint: () => true, stop() { calls.push("stop-controller"); } }));
+    const lifecycle = createAgentFooterSessionLifecycle(() => pending, () => ({ turnEnd() {}, input() {}, refresh() {}, refreshAgents() {}, acceptUsage() {}, checkpoint: () => true, stop() { calls.push("stop-controller"); } }));
     const ctx = { mode: "tui", cwd: "/", sessionManager: { getEntries: () => [] }, ui: { setFooter() {} } };
     const storage = createAgentStorageContext("lead", root());
     const start = lifecycle.start(undefined, ctx, new Map(), storage);
@@ -320,6 +346,32 @@ test("index session seams mount the re-enabled footer beside an existing widget 
   assert.equal(restores, 1, "reload restores the prior footer before replacement");
   applySessionShutdownAgentFooter(lifecycle);
   assert.equal(restores, 2); assert.deepEqual(widgets.get("ws-agents"), ["agent card"]);
+});
+
+test("production turn/input hooks route each event without awaiting Git; reload and shutdown abort snapshots", async t => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
+  const ui = context(), storage = createAgentStorageContext("lead", root());
+  let requests = 0;
+  const flights: Array<{ signal: AbortSignal; resolve: (value: undefined) => void }> = [];
+  const lifecycle = createAgentFooterSessionLifecycle(async () => ({ truncateToWidth, visibleWidth }),
+    (ctx, registry, storage, primitives) => createAgentFooterController(ctx, registry, storage, primitives, (_cwd, signal) => {
+      requests++;
+      return new Promise(resolve => flights.push({ signal, resolve }));
+    }));
+  const handlers = new Map<string, () => unknown>();
+  registerAgentFooterGitEvents({ on(event: string, handler: () => unknown) { handlers.set(event, handler); } } as never, lifecycle);
+  assert.deepEqual([...handlers.keys()], ["turn_end", "input"]);
+  await lifecycle.start(undefined, ui.ctx, new Map(), storage);
+  assert.equal(handlers.get("turn_end")!(), undefined); assert.equal(requests, 1);
+  flights[0].resolve(undefined); for (let i = 0; i < 5; i++) await Promise.resolve();
+  assert.equal(handlers.get("turn_end")!(), undefined); assert.equal(requests, 2);
+  assert.equal(handlers.get("input")!(), undefined, "input never returns a Git promise");
+  await lifecycle.start(undefined, ui.ctx, new Map(), storage);
+  assert.equal(flights[1].signal.aborted, true, "reload aborts the old query");
+  handlers.get("turn_end")!(); assert.equal(requests, 3);
+  lifecycle.stop(); assert.equal(flights[2].signal.aborted, true);
+  for (const flight of flights) flight.resolve(undefined);
+  t.mock.timers.tick(600_000); handlers.get("turn_end")!(); assert.equal(requests, 3);
 });
 
 test("footer arming is limited to TUI lead/fork sessions", () => {

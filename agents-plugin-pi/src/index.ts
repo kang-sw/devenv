@@ -267,6 +267,12 @@ export function applySessionShutdownAgentFooter(lifecycle: AgentFooterSessionLif
   lifecycle.stop();
 }
 
+/** Factory-scoped hooks: reload replaces the controller, not these subscriptions. */
+export function registerAgentFooterGitEvents(pi: Pick<ExtensionAPI, "on">, lifecycle: AgentFooterSessionLifecycle): void {
+  pi.on("turn_end", () => { lifecycle.turnEnd(); });
+  pi.on("input", () => { lifecycle.input(); });
+}
+
 export function applySessionStartAgentRetention(
   role: SpawnRole | undefined,
   root: string,
@@ -463,6 +469,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     const hostTui = await loadHostPiTui();
     return { truncateToWidth: hostTui.truncateToWidth, visibleWidth: hostTui.visibleWidth };
   });
+  registerAgentFooterGitEvents(pi, agentFooterLifecycle);
   pi.on("message_end", (event) => { agentFooterLifecycle.acceptUsage(event.message); });
   pi.on("session_compact", (event) => { agentFooterLifecycle.acceptUsage(event.compactionEntry); agentFooterLifecycle.checkpoint(); });
   pi.on("session_tree", (event) => { if (event.summaryEntry) agentFooterLifecycle.acceptUsage(event.summaryEntry); });
