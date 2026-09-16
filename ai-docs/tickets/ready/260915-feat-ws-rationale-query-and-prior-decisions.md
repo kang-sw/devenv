@@ -473,6 +473,58 @@ threads (record the outputs' first lines in the Result).
 
 Deferred from this phase: cache, `all_branches`, rename following.
 
+### Result (484fab03) - 2026-09-16
+
+Landed the `rationale.query` tool in the new package
+`agents-plugin-tool/internal/wsrationale/` (`glob.go` stem regex + glob
+matching, `extract.go` bullet-or-paragraph section splitting, `commits.go`
+sentinel `git log --name-only` scan + pickaxe, `tickets.go` status-dir walk +
+path/date extraction, `site.go` `git log -L` chain + regex/occurrence
+resolution, `bm25.go`, `dates.go`, `rationale.go` orchestration/filter/thread
+grouping, `format.go` compact-text + JSON). Wired through
+`internal/mcp/server.go` (dispatch case, schema, `toolSchemaRequiresSessionKey`
+next to `git.log`, `optString` helper) and declared in the three
+`runtime.json` tool contracts at the `git.log` range. Twelve acceptance tests:
+eleven fixture-repo tests in `wsrationale/rationale_test.go` (bullet/paragraph
+extraction, stem linkage, path filter with negative fixture, exclude_stem,
+ranking, site mode incl. K-locations, pickaxe, limit cap, errors, output
+shapes incl. nested JSON) and one `tools/list`+session-key test plus a
+`tools/call` argument-mapping test in `mcp/rationale_query_test.go`.
+
+Verification: `go build ./...`, `go vet`, and `go test ./... -count=1` in
+`agents-plugin-tool/` all green. Manual run of the three Phase 3 probe queries
+against this repository (scanned 6588 commits) returned non-empty threads:
+- `query: session.note` (~2.7s) — top threads `(no ticket)` (2 records, first:
+  "No CLI mirror entries added ... note.* is session-keyed"),
+  `260807-epic-mechanical-project-memory` ("No session.note revival."),
+  `260724-feat-lead-fan-out-worktree` (session.note tool decisions).
+- `paths: agents-plugin/rsrc/lead-run` (~1.2s) — top thread
+  `260915-refactor-lead-run-playbook-diet-drop-assignment-note` (5 records,
+  first: the diet ticket's implementation commit 0a1d5b5b AI Context).
+- `site: server.go:/^func \(s \*Server\) resolveToolRoot/,+20` (~88ms) — chain
+  of 9 changes, `introduced 79602bf5 2026-05-05; last changed 6762aaf5
+  2026-06-19`, "renames not followed" reported.
+
+Decisions (recorded, none escalated):
+- Site-mode chain records carry the single tracked site path as their touched
+  path: `git log -L --no-patch` emits no `--name-only` list (documented at
+  `scanSiteChain`). Cosmetic vs the Record model's "commit's touched paths".
+- Ticket status walk includes a sixth `wip` directory beyond the spec's five;
+  harmless (absent dirs are skipped) and correct if a `wip/` ever exists, since
+  `ticketStatusStem` already treats `wip` as a status.
+- The JSON `omitted` array carries the descriptive extras (records-past-limit,
+  site notes, renames note); scanned count and the 20000-cap truncation are the
+  separate `scanned_commits` and `truncated` fields per the JSON schema.
+- The full-scan and site-chain caps request `-n <cap+1>` to detect truncation
+  (spec wrote the literal `-n 500`/scan cap); returns exactly the cap and sets
+  the truncation flag.
+
+Review: partitioned correctness + test. Correctness clean (one minor: the
+`wip`-dir deviation above, recorded here). Test round 1 raised two important
+findings (path-filter test had no negative fixture; MCP dispatch arg-mapping
+untested) and one minor (JSON nested shape unchecked), all fixed in 36f5186b
+and confirmed by a round-2 verification reviewer.
+
 ### Phase 2: populator and reviewer prose
 
 Insert the Playbook Text verbatim into
