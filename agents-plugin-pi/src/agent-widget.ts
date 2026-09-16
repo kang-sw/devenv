@@ -379,15 +379,16 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
       ? `⚠ OWNER ACTION · ${sanitizeDisplayTitle(row.name, "owner action")}`
       : row.name;
   const stateLabel = AGENT_STATE_LABEL[row.state];
-  const base = `${primary} · ${row.role} · ${stateLabel} · ${formatCompactDuration(row.elapsedMs)}`;
+  const durationPrefix = `${primary} · ${row.role} · ${stateLabel} · ${formatCompactDuration(row.elapsedMs)} (`;
+  const activity = formatCompactDuration(row.lastActivityMs);
+  const base = `${durationPrefix}${activity})`;
   const model = row.model ?? "—";
   const effort = row.effort ?? "—";
   // Keep the compact occupancy value in its established telemetry slot while
   // `/audit` retains its labeled `formatContextTokens` presentation.
   const contextTokens = formatLiveContextTokens(row.contextTokens);
-  const activity = `active ${formatCompactDuration(row.lastActivityMs)}`;
   const estimate = `$${formatEstimatedUsd(row.estimatedUsd)}`;
-  const telemetry = ` · ${model} (${effort}) · ${contextTokens} · ${activity} · ${estimate}`;
+  const telemetry = ` · ${model} (${effort}) · ${contextTokens} · ${estimate}`;
   const protectedHint = row.inspectionHint;
   const hint = protectedHint ? ` — ${protectedHint}` : "";
   // A supplied inspection affordance remains the only protected tail. The
@@ -417,10 +418,16 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
       theme.fg("dim", " · ") +
       theme.fg("syntaxNumber", contextTokens) +
       theme.fg("dim", " · ") +
-      theme.fg("syntaxNumber", activity) +
-      theme.fg("dim", " · ") +
       theme.fg("warning", estimate);
     content = base + styledTelemetry;
+  }
+  // Style only the surviving activity value, after plain-text truncation.
+  // It now belongs to the duration field even when telemetry does not fit.
+  if (theme && content.length > durationPrefix.length) {
+    const end = Math.min(durationPrefix.length + activity.length, content.length);
+    const visibleActivity = content.slice(durationPrefix.length, end);
+    content = content.slice(0, durationPrefix.length) +
+      theme.fg("syntaxNumber", visibleActivity) + content.slice(end);
   }
   if (ownerActionColor && ownerAction && content.length > 0) {
     // The owner-action identity/cue is the first structured field. It stays

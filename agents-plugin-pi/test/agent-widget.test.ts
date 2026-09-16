@@ -259,8 +259,8 @@ describe("buildWidgetLines", () => {
     const semanticCalls: Array<[string, string]> = [];
     const theme = { fg(color: "error" | "warning" | "accent" | "dim" | "syntaxNumber", text: string) { semanticCalls.push([color, text]); return text; } };
     const animated = buildWidgetLines([question, approval], 1, 180, true, theme)!;
-    assert.equal(animated[0], "● [1m⚠ OWNER ACTION · /answer q7[22m · fork · awaiting owner · 3s · test-model (high) · 0.0k · active 3s · $0.1");
-    assert.equal(animated[1], "▲ awaiting approval audit · execute · awaiting approval · 3s · test-model (high) · 0.0k · active 3s · $0.1");
+    assert.equal(animated[0], "● [1m⚠ OWNER ACTION · /answer q7[22m · fork · awaiting owner · 3s (3s) · test-model (high) · 0.0k · $0.1");
+    assert.equal(animated[1], "▲ awaiting approval audit · execute · awaiting approval · 3s (3s) · test-model (high) · 0.0k · $0.1");
     assert.ok(semanticCalls.some(([color, text]) => color === "error" && text === "● "), "the owner-held bullet participates in the current attention-cycle color, same as the cue text");
     assert.ok(semanticCalls.some(([color, text]) => color === "error" && text === "⚠ OWNER ACTION · /answer q7"), "the owner cue text uses the identical color");
     assert.ok(semanticCalls.some(([color, text]) => color === "error" && text === "▲ "), "the approval bullet is colored too, but statically (STATE_BULLET_COLOR), never bold, never joining the attention cycle");
@@ -279,7 +279,7 @@ describe("buildWidgetLines", () => {
   test("an owner-held row without qN receives an honest labeled inspection presentation", () => {
     const row = { name: "parked reviewer", role: "fork" as const, state: "idle-awaiting-owner" as const, elapsedMs: 3_000, lastActivityMs: 3_000, inspectionHint: "/audit reviewer" };
     const line = buildWidgetLines([row], 0, 120, true)![0];
-    assert.equal(line, "● [1m⚠ OWNER ACTION · parked reviewer[22m · fork · idle awaiting owner · 3s · — (—) · ? · active 3s · $— — /audit reviewer");
+    assert.equal(line, "● [1m⚠ OWNER ACTION · parked reviewer[22m · fork · idle awaiting owner · 3s (3s) · — (—) · ? · $— — /audit reviewer");
     assert.ok(!line.includes("/answer"), "presentation never fabricates an answer target for an owner-held idle row");
   });
 
@@ -303,10 +303,10 @@ describe("buildWidgetLines", () => {
     }
   });
 
-  test("telemetry retains prefixless context values between model/effort and activity at wide widths without displacing a 40-column answer cue", () => {
+  test("telemetry retains prefixless context values between model/effort and cost at wide widths without displacing a 40-column answer cue", () => {
     const telemetry = { name: "模型-worker", role: "worker" as const, state: "running" as const, elapsedMs: 0, lastActivityMs: 0, model: "provider/模型", effort: "high", contextTokens: 0, estimatedUsd: 0 };
     const wideLine = buildWidgetLines([telemetry], 0, 120)![0];
-    assert.match(wideLine, /provider\/模型 \(high\).*0\.0k.*active 0s.*\$0/);
+    assert.match(wideLine, /0s \(0s\).*provider\/模型 \(high\).*0\.0k.*\$0/);
     assert.ok(!wideLine.includes("ctx "), "the live row removes only the ctx prefix");
     const missing = { ...telemetry, state: "awaiting-owner" as const, model: undefined, effort: undefined, contextTokens: undefined, estimatedUsd: undefined, answerHint: "/answer q1" };
     const narrowLine = buildWidgetLines([missing], 0, 40)![0];
@@ -314,10 +314,10 @@ describe("buildWidgetLines", () => {
     assert.ok(visibleWidth(narrowLine) <= 40);
     const compact = { ...telemetry, name: "a", model: "p", effort: "l", contextTokens: 132_400, estimatedUsd: .123456789 };
     const compactLine = buildWidgetLines([compact], 0, 80)![0];
-    assert.match(compactLine, /p \(l\).*132\.4k.*active 0s.*\$0.123/);
+    assert.match(compactLine, /0s \(0s\).*p \(l\).*132\.4k.*\$0.123/);
     assert.ok(!compactLine.includes("ctx "), "a populated contextTokens keeps its value but not its prefix on the row");
 
-    for (const [width, includesTelemetry] of [[65, true], [64, false]] as const) {
+    for (const [width, includesTelemetry] of [[58, true], [57, false]] as const) {
       const boundaryPlain = buildWidgetLines([compact], 0, width)![0];
       assert.equal(boundaryPlain.includes("132.4k"), includesTelemetry, `plain telemetry is all-or-nothing at width=${width}`);
       assert.ok(!boundaryPlain.includes("ctx "), `plain boundary output has no ctx prefix at width=${width}`);
@@ -344,11 +344,34 @@ describe("buildWidgetLines", () => {
     })![0];
     assert.ok(themedSpans.some(([color, text]) => color === "accent" && text === "p"), "model uses the theme accent");
     assert.ok(themedSpans.some(([color, text]) => color === "syntaxNumber" && text === "132.4k"), "the retained token value uses the numeric theme span");
-    assert.ok(themedSpans.some(([color, text]) => color === "syntaxNumber" && text === "active 0s"), "activity remains in its numeric theme span");
+    assert.ok(themedSpans.some(([color, text]) => color === "syntaxNumber" && text === "0s"), "activity remains in its numeric theme span");
     assert.ok(themedSpans.some(([color, text]) => color === "warning" && text === "$0.123"), "estimated cost uses the warning/gold theme color without a label");
     assert.ok(!themedSpans.some(([, text]) => text.includes("ctx ")), "no theme span carries the ctx prefix on a row");
     assert.ok(visibleWidth(themed) <= 80, "ANSI theme styling does not change width accounting");
   });
+  test("active duration follows total duration with unchanged numeric styling", () => {
+    const row = { name: "gutter-probe", role: "worker" as const, state: "running" as const,
+      elapsedMs: 60_000, lastActivityMs: 25_000, model: "gpt-5.6-luna", effort: "high",
+      contextTokens: 17_000, estimatedUsd: .33 };
+    const expected = "· gutter-probe · worker · running · 1m (25s) · gpt-5.6-luna (high) · 17.0k · $0.33";
+    assert.equal(buildWidgetLines([row], 0, 180)![0], expected);
+    const spans: Array<[string, string]> = [];
+    const theme = { fg(color: string, text: string) {
+      spans.push([color, text]);
+      return `\u001b[36m${text}\u001b[39m`;
+    } };
+    const themed = buildWidgetLines([row], 0, 180, false, theme)![0];
+    assert.equal(themed.replace(/\u001b\[[0-9;]*m/g, ""), expected);
+    assert.ok(spans.some(([color, text]) => color === "syntaxNumber" && text === "25s"));
+    assert.ok(!themed.includes("active "));
+    for (let width = 0; width <= expected.length; width++) {
+      const plain = buildWidgetLines([row], 0, width)![0];
+      const styled = buildWidgetLines([row], 0, width, false, theme)![0];
+      assert.equal(styled.replace(/\u001b\[[0-9;]*m/g, ""), plain);
+      assert.ok(visibleWidth(styled) <= width, `width=${width}`);
+    }
+  });
+
   function runningRow(elapsedMs: number, name = "w") {
     return { name, role: "worker" as const, state: "running" as const, elapsedMs, lastActivityMs: elapsedMs, answerHint: undefined };
   }
@@ -408,9 +431,9 @@ describe("buildWidgetLines", () => {
     assert.match(narrow, /^● ⚠ OWNER ACTION · \/answer q1/); assert.ok(visibleWidth(narrow) <= 40);
     for (const width of [80, 120]) {
       const lines = buildWidgetLines([completeWide, unknown], 0, width)!;
-      assert.match(lines[0], /provider\/模型 \(high\).*0\.0k.*active 0s.*\$0/, `complete reported zero is not rendered as unknown at ${width}`);
+      assert.match(lines[0], /0s \(0s\).*provider\/模型 \(high\).*0\.0k.*\$0/, `complete reported zero is not rendered as unknown at ${width}`);
       assert.ok(!lines[0].includes("ctx "), `the live-row ctx prefix never reappears at ${width}`);
-      assert.match(lines[1], /— \(—\).*\?.*active 0s.*\$—/, `unknown fields remain independently unknown at ${width}`);
+      assert.match(lines[1], /0s \(0s\).*— \(—\).*\?.*\$—/, `unknown fields remain independently unknown at ${width}`);
       assert.ok(lines.every(line => visibleWidth(line) <= width), `Unicode display width is bounded at ${width}`);
     }
   });

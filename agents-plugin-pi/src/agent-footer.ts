@@ -1,5 +1,6 @@
 /** Theme-aware replacement for Pi's built-in footer with bounded cost estimates. */
 import { homedir } from "node:os";
+import { createFooterGitCache, type GitCacheOptions } from "./footer-git-status.ts";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { readOwnerArtifacts, writeOwnerArtifact, type AgentStorageContext, type OwnershipMetadata } from "./agent-storage.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
@@ -312,7 +313,7 @@ export interface FooterPrimitives {
   visibleWidth(text: string): number;
   truncateToWidth(text: string, width: number, ellipsis?: string): string;
 }
-interface FooterTheme { fg(color: "text" | "dim" | "accent" | "warning" | "error", text: string): string }
+interface FooterTheme { fg(color: "text" | "dim" | "accent" | "warning" | "error" | "success", text: string): string }
 interface FooterData {
   getGitBranch(): string | null;
   getExtensionStatuses(): ReadonlyMap<string, string>;
@@ -323,6 +324,7 @@ interface FooterTui { requestRender(): void }
 export interface AgentFooterComponent { render(width: number): string[]; invalidate(): void; dispose?(): void }
 export interface AgentFooterContext {
   cwd: string;
+  isIdle?(): boolean;
   model?: { provider?: string; id?: string; reasoning?: boolean; contextWindow?: number };
   thinkingLevel?: string;
   sessionManager: { getEntries(): readonly unknown[]; getSessionName?(): string | undefined; getCwd?(): string };
@@ -330,6 +332,8 @@ export interface AgentFooterContext {
   ui: { setFooter(factory: ((tui: FooterTui, theme: FooterTheme, data: FooterData) => AgentFooterComponent) | undefined): void };
 }
 export interface AgentFooterController {
+  turnEnd(): void;
+  input(): void;
   refresh(): void;
   refreshAgents(): void;
   acceptUsage(source: unknown): void;
@@ -338,6 +342,8 @@ export interface AgentFooterController {
 }
 export interface AgentFooterSessionLifecycle {
   start(role: SpawnRole | undefined, ctx: AgentFooterContext & { mode?: string }, registry: RpcAgentRegistry, storage: AgentStorageContext): Promise<void>;
+  turnEnd(): void;
+  input(): void;
   refresh(): void;
   refreshAgents(): void;
   acceptUsage(source: unknown): void;
@@ -361,6 +367,8 @@ export function createAgentFooterSessionLifecycle(
       if (ownGeneration !== generation) return;
       current = createController(ctx, registry, storage, primitives);
     },
+    turnEnd() { current?.turnEnd(); },
+    input() { current?.input(); },
     refresh() { current?.refresh(); },
     refreshAgents() { current?.refreshAgents(); },
     acceptUsage(source) { current?.acceptUsage(source); },
@@ -411,6 +419,7 @@ export function createAgentFooterController(
   registry: RpcAgentRegistry,
   storage: AgentStorageContext,
   primitives: FooterPrimitives,
+  gitQuery?: GitCacheOptions["query"],
 ): AgentFooterController {
   registerAgentCostOwner(registry, storage);
   const loaded = loadCheckpoint(storage);
@@ -425,6 +434,12 @@ export function createAgentFooterController(
   let componentDispose: (() => void) | undefined;
   let stopped = false;
   const updatePresentation = () => { presentation = state.presentation(); if (!stopped) renderRequest?.(); };
+  const git = createFooterGitCache({
+    cwd: () => ctx.sessionManager.getCwd?.() ?? ctx.cwd,
+    isIdle: () => ctx.isIdle?.() ?? false,
+    changed: () => { if (!stopped) renderRequest?.(); },
+    query: gitQuery,
+  });
 
   ctx.ui.setFooter((tui, theme, footerData) => {
     renderRequest = () => tui.requestRender();
@@ -469,10 +484,17 @@ export function createAgentFooterController(
         if (primitives.visibleWidth(statsPlain) > width) statsPlain = primitives.truncateToWidth(statsPlain, width, "");
         const stats = styleStats(statsPlain, [leadCost, directCost], contextUsedPart, contextPart, context?.percent, theme);
 
-        let path = displayCwd(ctx.sessionManager.getCwd?.() ?? ctx.cwd);
+        const cwd = ctx.sessionManager.getCwd?.() ?? ctx.cwd;
+        let path = displayCwd(cwd);
         const branch = footerData.getGitBranch(); if (branch) path += ` (${branch})`;
-        const name = ctx.sessionManager.getSessionName?.(); if (name) path += ` • ${name}`;
-        const lines = [primitives.truncateToWidth(theme.fg("dim", path), width, theme.fg("dim", "...")), stats];
+        const name = ctx.sessionManager.getSessionName?.();
+        const nameSuffix = name ? ` • ${name}` : "";
+        const spans = git.spans(cwd);
+        const gitPlain = spans.length ? " " + spans.map(span => span.text).join(" ") : "";
+        const showGit = primitives.visibleWidth(path + gitPlain + nameSuffix) <= width;
+        const gitStyled = showGit && spans.length ? " " + spans.map(span => theme.fg(span.color, span.text)).join(" ") : "";
+        const pathLine = theme.fg("dim", path) + gitStyled + theme.fg("dim", nameSuffix);
+        const lines = [primitives.truncateToWidth(pathLine, width, theme.fg("dim", "...")), stats];
         const statuses = [...footerData.getExtensionStatuses().entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, text]) => sanitizeStatus(text));
         if (statuses.length) lines.push(primitives.truncateToWidth(statuses.join(" "), width, theme.fg("dim", "...")));
         return lines;
@@ -481,13 +503,15 @@ export function createAgentFooterController(
   });
 
   return {
+    turnEnd() { git.turnEnd(); },
+    input() { git.input(); },
     refresh() { if (!stopped) renderRequest?.(); },
     refreshAgents() { if (stopped) return; state.reconcile(); updatePresentation(); },
     acceptUsage(source) { if (stopped) return; state.acceptUsage(source); updatePresentation(); },
     checkpoint() { return stopped ? true : state.persist(); },
     stop() {
       if (stopped) return;
-      state.persist(); stopped = true;
+      state.persist(); stopped = true; git.stop();
       ctx.ui.setFooter(undefined); componentDispose?.(); renderRequest = undefined;
       if (registryEstimates.get(registry) === state) registryEstimates.delete(registry);
     },
