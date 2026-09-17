@@ -2842,7 +2842,16 @@ func TestExecMCPResultReadableJSONStdoutAndTimeout(t *testing.T) {
 	}
 	running := execKeyFromText(t, toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["2"]))
 	out.Reset()
-	input := fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"exec.result","arguments":{"exec_key":%q,"timeout_seconds":3}}}`, running) + "\n"
+	// Do not race mcpLongShellArgs's ~6s nominal duration against a tight
+	// timeout_seconds budget: on a loaded Windows runner the synchronous
+	// exec.shell launch can itself consume most of execjob.ForegroundWindow
+	// (5s) before the job even starts running its command, so a thin
+	// remaining margin (the previous timeout_seconds:3, ~2s of slack) flakes
+	// under CI load. Use a generous multiple of ForegroundWindow + the job's
+	// nominal duration so exec.result's poll loop (execjob.ResultWithTimeout)
+	// reaches the job's terminal status well before the budget expires,
+	// matching the precedent pattern in TestExecMCPRunningLargeAndAbort.
+	input := fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"exec.result","arguments":{"exec_key":%q,"timeout_seconds":30}}}`, running) + "\n"
 	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
 		t.Fatal(err)
 	}
