@@ -13,20 +13,27 @@ import (
 const schemaVersion = 1
 
 type Options struct {
-	CacheHome  string
+	CacheHome string
 	// ConfigHome overrides the global config directory. Resolution order:
 	// ConfigHome → $WS_CONFIG_HOME → ~/.ws/config.json (note: ~/.ws, not ~/.cache).
 	// Mirrors the CacheHome test-seam shape so tests can use Options{ConfigHome: t.TempDir()}.
 	ConfigHome string
+	// RepoRoot anchors the committed repo scope: when non-empty the resolver
+	// reads <RepoRoot>/.ws-workflow/config.json (see RepoPath). It is the caller's
+	// canonical Git worktree root — the same root the session key resolves to, so
+	// each worktree reads its own checked-out copy of the committed file. Empty
+	// means "no repo scope for this resolver" (the file scopes fall through to
+	// global/builtin); the repo layer is never an error just for being absent.
+	RepoRoot string
 }
 
 type Config struct {
-	SchemaVersion int               `json:"schema_version"`
-	Agents        AgentsConfig      `json:"agents"`
+	SchemaVersion int          `json:"schema_version"`
+	Agents        AgentsConfig `json:"agents"`
 	// Overrides is a generic key→value overlay for scope-aware config items.
 	// Keys are item identifiers; values are string-encoded config values.
 	// The field is additive: existing configs without it parse with a nil map.
-	Overrides     map[string]string `json:"overrides,omitempty"`
+	Overrides map[string]string `json:"overrides,omitempty"`
 }
 
 type AgentsConfig struct {

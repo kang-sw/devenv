@@ -40,6 +40,16 @@ func ScopedShow(r *Resolver, opts Options, sessionKey string) (View, error) {
 		allKeys[k] = struct{}{}
 	}
 
+	// Repo scope keys (committed, version-tracked). Absent when opts.RepoRoot is
+	// empty or the file does not exist; loadRepoConfig returns an empty Config.
+	repoCfg, err := loadRepoConfig(opts)
+	if err != nil {
+		return View{}, fmt.Errorf("scoped show: load repo overrides: %w", err)
+	}
+	for k := range repoCfg.Overrides {
+		allKeys[k] = struct{}{}
+	}
+
 	// Session scope keys: when a sessionR is available, enumerate all session
 	// overrides by asking the reader for the full key set. This ensures that
 	// session-only keys (not present in project or global) are included.
