@@ -517,6 +517,27 @@ func TestImplMergeTolerantWorktree(t *testing.T) {
 		}
 	})
 
+	t.Run("multiple-untracked-proceeds-and-nudges-plural", func(t *testing.T) {
+		// Both other subtests here that reach dirty_after_merge leave exactly one
+		// dirty file, so the n>1 "entries" plural branch of its advisory message
+		// is otherwise untested. Leave two untracked files behind to exercise it.
+		root, branch := mergeFixture(t, "goal/topic")
+		if err := os.WriteFile(filepath.Join(root, "scratch1.txt"), []byte("keep\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "scratch2.txt"), []byte("keep\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "goal/topic", mergeMessage(), implMergeAcknowledgement{})
+		if err != nil || r.Status != "merged" || !r.BranchDeleted {
+			t.Fatalf("result=%+v err=%v", r, err)
+		}
+		d := requireMergeDiagnostic(t, r, "dirty_after_merge", "advisory")
+		if !strings.Contains(d.Reason, "2 dirty working-tree entries remain") {
+			t.Fatalf("plural rendering missing: %+v", d)
+		}
+	})
+
 	t.Run("unstaged-proceeds-excluded-from-commit", func(t *testing.T) {
 		root := initGitRepo(t)
 		runGit(t, root, "switch", "-C", "goal/topic")
@@ -601,7 +622,9 @@ func TestImplMergeTolerantWorktree(t *testing.T) {
 		root, branch := mergeFixture(t, "develop")
 		// Add a file on develop and a conflicting file at the same path on impl,
 		// then cherry-pick to produce an add/add (AA) unmerged entry without a
-		// MERGE_HEAD — exercising the DD/AA pair branch of indexBlocksMerge.
+		// MERGE_HEAD — exercising only the A&&A arm of indexBlocksMerge's unmerged
+		// predicate. The sibling D&&D arm is exercised by
+		// "both-deleted-unmerged-blocks" below.
 		runGit(t, root, "switch", "develop")
 		if err := os.WriteFile(filepath.Join(root, "added.txt"), []byte("develop\n"), 0644); err != nil {
 			t.Fatal(err)
@@ -626,6 +649,44 @@ func TestImplMergeTolerantWorktree(t *testing.T) {
 		d := requireMergeDiagnostic(t, r, "dirty_worktree", "must_resolve")
 		if !strings.Contains(d.Reason, "unmerged") {
 			t.Fatalf("both-added wrong reason: %+v", d)
+		}
+	})
+
+	t.Run("both-deleted-unmerged-blocks", func(t *testing.T) {
+		root, branch := mergeFixture(t, "develop")
+		// A genuine DD (both-deleted) index entry cannot be reached through an
+		// ordinary conflicting merge/cherry-pick: git resolves an agreeing delete
+		// on both sides without conflict. Construct the real on-disk index state
+		// directly the way git status itself defines it — a stage-1 (base) entry
+		// with no stage-2/stage-3 entry — via update-index --index-info, then let
+		// git status classify it; this exercises the D&&D arm of
+		// indexBlocksMerge's unmerged predicate.
+		if err := os.WriteFile(filepath.Join(root, "deleted.txt"), []byte("shared\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, root, "add", "deleted.txt")
+		runGit(t, root, "commit", "-m", "impl adds deleted.txt")
+		blob := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD:deleted.txt")))
+		runGit(t, root, "update-index", "--force-remove", "--", "deleted.txt")
+		if err := os.Remove(filepath.Join(root, "deleted.txt")); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command("git", "update-index", "--index-info")
+		cmd.Dir = root
+		cmd.Stdin = strings.NewReader(fmt.Sprintf("100644 %s 1\tdeleted.txt\n", blob))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("update-index --index-info: %v\n%s", err, out)
+		}
+		if porcelain := string(runGitOutput(t, root, "status", "--porcelain=v1")); !strings.Contains(porcelain, "DD deleted.txt") {
+			t.Fatalf("expected DD unmerged entry, got: %q", porcelain)
+		}
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "develop", mergeMessage(), implMergeAcknowledgement{})
+		if err == nil || r.Status != "policy_blocked" {
+			t.Fatalf("both-deleted unmerged admitted: %+v err=%v", r, err)
+		}
+		d := requireMergeDiagnostic(t, r, "dirty_worktree", "must_resolve")
+		if !strings.Contains(d.Reason, "unmerged") {
+			t.Fatalf("both-deleted wrong reason: %+v", d)
 		}
 	})
 
