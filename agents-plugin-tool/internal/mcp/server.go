@@ -3557,7 +3557,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "git.merge",
-			"description": "Lead-only. Merge an exact local source branch into an exact local target using --no-ff. Delete merged impl/* and goal/* sources; preserve other sources. Main/master return policy_blocked diagnostics by default; explicit release-target acknowledgement bound to inspected source_oid and target_oid permits retry. Must-resolve safety findings cannot be waived. Conflicts remain on the target for lead-delegate to resolve. Defaults to text; use format=json for structured output.",
+			"description": "Lead-only. Merge an exact local source branch into an exact local target using --no-ff. Switches to and leaves the caller on the target branch (no switch-back), so any tolerated worktree change travels to the target checkout and is reported as a non-blocking advisory. Tolerates a dirty worktree but requires a clean index: staged changes and unmerged paths are refused, while unstaged tracked modifications and untracked files are allowed (git's native switch/merge still refuses one that overlaps a merged path). Delete merged impl/* and goal/* sources; preserve other sources. Main/master return policy_blocked diagnostics by default; explicit release-target acknowledgement bound to inspected source_oid and target_oid permits retry. Must-resolve safety findings cannot be waived. Conflicts remain on the target for lead-delegate to resolve. Defaults to text; use format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
