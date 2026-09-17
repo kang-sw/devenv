@@ -105,7 +105,14 @@ func TestLongLargeAndAbort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	waited, err := ResultWithTimeout(root, waiting.ExecKey, 2*time.Second)
+	// Launch itself already blocks up to ForegroundWindow (5s) before
+	// returning, so at most ~1s of the "slow" helper's 6s sleep remains when
+	// this call starts. A short timeout here (previously 2s, ~1s of slack)
+	// races that remainder under load; use a generous multiple of
+	// ForegroundWindow+the helper's nominal duration instead, matching the
+	// poll-until-terminal pattern used for the MCP-level equivalent in
+	// internal/mcp/server_test.go.
+	waited, err := ResultWithTimeout(root, waiting.ExecKey, 30*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

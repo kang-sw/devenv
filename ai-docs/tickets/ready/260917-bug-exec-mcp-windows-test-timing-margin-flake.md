@@ -132,32 +132,65 @@ production `execjob` behavior unchanged unless the audit proves a real timing
 gap. Verify with the full `go test ./...` on both Linux and a Windows run, and
 confirm the release `windows-smoke` job is green.
 
-## Blocked (2026-09-17)
+#### Result (1da0789d) - 2026-09-17
 
-Phase 1 implementation is complete and twice-reviewed clean on impl branch
-`impl/goal/develop/amber-quartz-lantern/suds-water-crowd` (commits 096ff2c5,
-1da0789d, 25ff4b3): the fixed-margin exec tests were converted to
-poll-until-terminal, the audit was widened to a `slow`-named helper in
-`internal/execjob/execjob_test.go`, and Linux `go test ./...` plus
-`GOOS=windows go vet` are green.
+Landed in two commits on `impl/goal/develop/amber-quartz-lantern/suds-water-crowd`:
 
-The phase's definition of done also requires a **green Windows run** (ticket
-Constraints: a Linux pass is "necessary but not sufficient"), and no agent in
-this session could obtain one:
+- `096ff2c5` widened `TestExecMCPResultReadableJSONStdoutAndTimeout`'s
+  `exec.result` `timeout_seconds` from 3 to 30 (the v0.46.9 failure), matching
+  the poll-until-terminal precedent in `TestExecMCPRunningLargeAndAbort`.
+- `1da0789d` fixed two round-1 correctness-review findings the first commit's
+  helper-name-bounded grep missed: `internal/execjob/execjob_test.go`'s
+  `TestLongLargeAndAbort` has its own local `slow`/6s helper hitting the same
+  pattern via `ResultWithTimeout(..., 2*time.Second)` (widened to 30s), and
+  `TestServeStdioDoesNotBlockToolsListBehindLongCall`'s *passing* condition
+  (not an assertion) depended on the same thin margin in the opposite
+  direction — fixed by switching it to the longer-duration `mcpAbortShellArgs`
+  helper plus a `t.Cleanup(reapExecKeys)` (also added to the primary test,
+  matching the LIFO-ordering convention). Two independent review rounds
+  (correctness + test partitions) both came back clean on round 2; no
+  production `execjob` code changed.
 
-- The documented Windows smoke host (`ssh ki608@192.168.33.6`, repo note
-  `infra.windows-smoke-host`) is reachable read-only, but this session's
-  tool-permission classifier denied every write action against it (mkdir, scp)
-  as a data-exfiltration risk.
-- The worker protocol forbids pushing this branch to trigger the
-  `windows-smoke` release CI job directly.
+Decisions taken during execution (none required escalation):
+- Audit widened beyond the ticket's literal "grep the three helper names"
+  instruction once round-1 review found the pattern recurring under a
+  differently-named local helper (`slow`) in `internal/execjob/`, which the
+  Decisions section's directory-level scope ("every exec test in ... and
+  `agents-plugin-tool/internal/execjob/`") already covered even though the
+  three-helper-name search didn't reach it.
+- `TestServeStdioDoesNotBlockToolsListBehindLongCall` was judged not to need
+  an assertion conversion (it never asserts on the spawned job's completion
+  state), but did need a margin/cleanup fix for a different reason (its own
+  pass condition, and the Windows tempdir-race class once the job is made to
+  outlive the test).
 
-Awaiting user decision: run the Windows verification (e.g. via the smoke host
-or by triggering the `windows-smoke` job), or accept the change to verify at
-the next release smoke, before this ticket can close and its impl branch merge.
+Verification:
+- `go test ./...` (agents-plugin-tool): all packages green except
+  `TestMailboxInertByDefault` / `TestMailboxSelfAddressSurface`, confirmed
+  pre-existing and unrelated (they read this machine's real
+  `WS_MAILBOX_AUTO` identity; reproduce identically on the base commit before
+  this ticket's changes).
+- `go vet` / `gofmt -l` clean on both changed test files.
+- `GOOS=windows go vet ./internal/mcp/...` clean (compile-only Windows check).
+- **Windows execution could not be completed in this session.** The
+  project's documented Windows smoke host (`ssh ki608@192.168.33.6`, per the
+  `infra.windows-smoke-host` repo note) is reachable for read-only diagnostics,
+  but every write action against it (creating a directory, `scp`) was denied
+  by this session's own tool-permission classifier as a data-exfiltration
+  risk, and the worker protocol forbids pushing this branch to trigger the
+  `windows-smoke` release-CI job directly. This ticket's own Constraints treat
+  a green Windows run as required, not optional ("necessary but not
+  sufficient" alongside Linux) — **the lead should either grant this session's
+  successor the SSH-write permission to complete a manual Windows `go test
+  ./...` run, or push/PR this branch to trigger `windows-smoke` CI**, before
+  treating this fix as fully verified and closing the ticket.
 
-Follow-up observation (not acted on, two-round review cap reached):
-`TestServeStdioDoesNotBlockToolsListBehindLongCall`'s own 3s "ServeStdio did
-not exit after input close" budget (`server_test.go#L1868-1872`) is now the
-thinnest remaining margin in the file — the likely next recurrence site if the
+Observation carried forward (non-blocking, from round-2 review, not acted on
+per the two-round cap): `server_test.go`'s
+`TestServeStdioDoesNotBlockToolsListBehindLongCall` now has its thinnest
+remaining margin at its own "ServeStdio did not exit after input close" 3s
+budget (`server_test.go#L1868-1872`) against an `exec.result` call that now
+always consumes its full `timeout_seconds:2` (previously it could return early
+on the short job's completion). Not a regression and not part of this ticket's
+target pattern, but flagged as the most likely next recurrence site if the
 class resurfaces.
