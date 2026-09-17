@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 4fb272f9a2f570a7
 sage-review-completeness-reviewed: 4fb272f9a2f570a7
+completed: 2026-09-17
 ---
 
 # Provide the pi extension's runtime deps through the git-install root manifest
@@ -342,7 +343,11 @@ into a synthetic clone-root-shaped layout using the actual mirrored root
 manifest and the real packed artifact) but not yet by a genuine clean-machine
 `pi install`; this ticket stays in `ready/` pending that owner action.
 
-## Blocked (2026-09-16)
+## Blocked (2026-09-16) — RESOLVED 2026-09-17
+
+Resolved: the owner ran the clean-machine `pi install` smoke and it passed
+(reported by the user). The sole outstanding item is complete, so this ticket
+is closed to `.done/`.
 
 Both phases are fully implemented, reviewed (two rounds), and already merged to
 `develop`: commits `7a60b80`, `053c5a6`, `aa28c2a` (Phase 1) and `c3fd173f`,
@@ -359,3 +364,8 @@ succeeding (no `web-search-extension-missing`). This requires a clean machine an
 a real `pi install`, so no agent (worker or lead) can perform it. `ws:lead-run`
 cannot advance this ticket further; it is gated on the owner. Move to `.done/`
 once the owner runs the smoke and records the observed evidence.
+
+
+## Resolution (2026-09-17)
+
+Owner ran the clean-machine `pi install` git-install smoke (reported by the user) and it passed: extension loads with no `Cannot find module`, launcher downloads + SHA256-verifies the ws-mcp binary, `assertVersionPin` passes, `ws/*` register, and an Explore-role web-search probe succeeds. Both phases were already implemented, reviewed, and merged to develop; this owner verification was the sole outstanding item.

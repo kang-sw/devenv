@@ -84,6 +84,16 @@ writing docs.
 Verification: a real Pi session with the marker absent registers `ws/*` tools
 from a downloaded release binary; evidence recorded in the Result.
 
+### Result (owner-verified) - 2026-09-17
+
+Owner-run clean-machine acceptance completed and passed as specified (reported
+by the user). With `.local-devenv-runtime` absent, the ordinary launcher release
+path was confirmed end-to-end per the Phase 1 procedure: extension load,
+release-binary download + SHA256 verification, `assertVersionPin` against the
+binary's reported `serverInfo.version`, and `ws/*` tool registration. This phase
+makes no code or doc delta (live verification only). Phase 2 (consumer docs) is
+now unblocked and proceeds.
+
 ### Phase 2: Consumer git-install documentation
 
 Document the `pi install git:github.com/kang-sw/devenv@<tag>` install and enablement flow
@@ -95,7 +105,12 @@ it in project-internal memory.
 Verification: the documented command and flow match the Phase 1 evidence; a
 reader can install and enable the adapter from the doc alone.
 
-## Blocked (2026-09-16)
+## Blocked (2026-09-16) — RESOLVED 2026-09-17
+
+Resolved: the owner completed the clean-machine acceptance that Phase 1 required
+(reported by the user), so Phase 1 is done and Phase 2 (consumer git-install
+docs) is now agent-advanceable. The original blocker text is retained below for
+history.
 
 No agent-advanceable work remains; this ticket is gated on owner action.
 
