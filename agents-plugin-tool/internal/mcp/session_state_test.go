@@ -3851,10 +3851,11 @@ func TestWorkflowManualGitCommitReinjection(t *testing.T) {
 			"id":      5302,
 			"method":  "tools/call",
 			"params": map[string]any{"name": "git.commit", "arguments": map[string]any{
-				"session_key": key,
-				"paths":       []any{"test-p3a.txt"},
-				"title":       "test(p3a): re-injection test",
-				"ai_context":  []any{"Phase 3a git.commit re-injection test"},
+				"session_key":     key,
+				"paths":           []any{"test-p3a.txt"},
+				"title":           "test(p3a): re-injection test",
+				"ai_context":      []any{"Phase 3a git.commit re-injection test"},
+				"expected_branch": headBranch(t, root),
 			}},
 		}
 		raw, err := json.Marshal(payload)
@@ -3905,10 +3906,11 @@ func TestWorkflowManualGitCommitReinjection(t *testing.T) {
 			"id":      5401,
 			"method":  "tools/call",
 			"params": map[string]any{"name": "git.commit", "arguments": map[string]any{
-				"session_key": key2,
-				"paths":       []any{"test-p3a-notodo.txt"},
-				"title":       "test(p3a): no-todo commit",
-				"ai_context":  []any{"no-todo test"},
+				"session_key":     key2,
+				"paths":           []any{"test-p3a-notodo.txt"},
+				"title":           "test(p3a): no-todo commit",
+				"ai_context":      []any{"no-todo test"},
+				"expected_branch": headBranch(t, root2),
 			}},
 		}
 		raw, err := json.Marshal(payload)

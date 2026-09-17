@@ -1144,12 +1144,14 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// above). wsdoc.SparseCheckoutActive is the cheap gate (no index
 		// enumeration), matching #260810's guardrail that the unscoped path
 		// (the common case) pays no extra cost.
+		expectedBranch, _ := params.Arguments["expected_branch"].(string)
 		result, err := wsgit.Client{Runner: wsgit.ExecRunner{}, Verifier: verifyAdapter}.Commit(context.Background(), root, wsgit.CommitOptions{
 			Paths:             stringList(params.Arguments["paths"]),
 			Title:             title,
 			Description:       description,
 			AIContext:         aiContext,
 			UpdatedTickets:    stringList(params.Arguments["updated_tickets"]),
+			ExpectedBranch:    expectedBranch,
 			SparseScopeActive: wsdoc.SparseCheckoutActive(root),
 		})
 		if wantsJSON(params.Arguments) {
@@ -3586,9 +3588,10 @@ func tools() []map[string]any {
 					"description":     stringProperty("Optional commit message body before AI Context."),
 					"ai_context":      stringArrayProperty("Required AI Context bullets for the commit message."),
 					"updated_tickets": stringArrayProperty("Optional ticket update summaries. If omitted, staged ticket moves and Result/Edition headings are detected."),
+					"expected_branch": stringProperty("The branch you currently remember being on — the one you believe this commit should land on. Fill it from what you already know, not by reading HEAD now: if you cannot recall it, stop and confirm whether you should be committing here at all rather than reflexively resolving the current branch to satisfy the field. This is a safety guard: the commit is refused, with nothing staged or committed, when your believed branch differs from the actual checkout (for example a parallel session switched this shared worktree) or when HEAD is detached."),
 					"format":          stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
-				"required": []string{"paths", "title", "ai_context"},
+				"required": []string{"paths", "title", "ai_context", "expected_branch"},
 			},
 		},
 		{

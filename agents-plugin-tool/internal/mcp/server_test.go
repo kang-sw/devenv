@@ -644,6 +644,15 @@ func initGit(t *testing.T, root string) {
 	runGit(t, root, "config", "user.name", "Test User")
 }
 
+// headBranch resolves the current branch name of a test repo. git.commit now
+// requires an expected_branch argument, and `git init` picks its default branch
+// from the test runner's init.defaultBranch config (main or master), so tests
+// resolve it here rather than hard-coding a branch into the tool arguments.
+func headBranch(t *testing.T, root string) string {
+	t.Helper()
+	return strings.TrimSpace(string(runGitOutput(t, root, "symbolic-ref", "--short", "HEAD")))
+}
+
 func initTicketRepo(t *testing.T, stem string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -1947,7 +1956,8 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 	}
 
 	out.Reset()
-	commitInput := `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt","ai-docs/tickets/todo/260503-feat-demo.md"],"title":"test: mcp commit","ai_context":["User intent: verify git.commit.","Verification: server test."]}}}`
+	branch := headBranch(t, root)
+	commitInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt","ai-docs/tickets/todo/260503-feat-demo.md"],"title":"test: mcp commit","ai_context":["User intent: verify git.commit.","Verification: server test."],"expected_branch":%q}}}`, branch)
 	if err := serveStdioWithSession(t, server, root, commitInput, &out); err != nil {
 		t.Fatalf("ServeStdio commit returned error: %v", err)
 	}
@@ -1972,7 +1982,7 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 
 	mustWrite(t, root, "file.txt", "one\ntwo\nthree\n")
 	out.Reset()
-	jsonCommitInput := `{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: mcp commit json","ai_context":["User intent: verify git.commit JSON.","Verification: server test."],"format":"json"}}}`
+	jsonCommitInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: mcp commit json","ai_context":["User intent: verify git.commit JSON.","Verification: server test."],"format":"json","expected_branch":%q}}}`, branch)
 	if err := serveStdioWithSession(t, server, root, jsonCommitInput, &out); err != nil {
 		t.Fatalf("ServeStdio JSON commit returned error: %v", err)
 	}
@@ -2011,6 +2021,43 @@ const unresolvedPhaseTicketBody = "---\ntitle: Closed with open phase\ncompleted
 	"### Phase 2: Second\n\n" +
 	"Never resolved.\n"
 
+// TestServeStdioGitCommitRefusesBranchMismatch is the end-to-end evidence for
+// the expected_branch guard: the required argument flows through the git.commit
+// dispatch case into wsgit.Commit, a believed/actual mismatch is refused with a
+// believed-vs-actual message, and no commit lands.
+func TestServeStdioGitCommitRefusesBranchMismatch(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	mustWrite(t, root, "file.txt", "one\n")
+	runGit(t, root, "add", "file.txt")
+	runGit(t, root, "commit", "-m", "initial")
+	head := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+	actualBranch := headBranch(t, root)
+	mustWrite(t, root, "file.txt", "one\ntwo\n")
+
+	server := NewServer(root, "test")
+	var out bytes.Buffer
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: mismatch","ai_context":["User intent: prove the guard refuses a believed/actual mismatch."],"expected_branch":"definitely-not-the-checked-out-branch"}}}`
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if !toolIsError(t, byID["1"]) {
+		t.Fatalf("git.commit did not refuse a believed/actual branch mismatch: %s", byID["1"])
+	}
+	text := toolText(t, byID["1"])
+	for _, want := range []string{"definitely-not-the-checked-out-branch", actualBranch, "believed", "actual"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("git.commit refusal = %q, want it to mention %q", text, want)
+		}
+	}
+	headAfter := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+	if headAfter != head {
+		t.Fatalf("HEAD moved to %s despite a refused commit (want unchanged %s)", headAfter, head)
+	}
+}
+
 // TestServeStdioGitCommitSurfacesTicketVerifyWarningsAsAdvisories is the
 // concrete instance of {#260720-wsdoc-commit-boundary}'s Phase 1 verification
 // boundary: a real ticket that trips wsdoc.TicketVerify's soft
@@ -2027,6 +2074,7 @@ func TestServeStdioGitCommitSurfacesTicketVerifyWarningsAsAdvisories(t *testing.
 	mustWrite(t, root, "file.txt", "one\n")
 	runGit(t, root, "add", "file.txt")
 	runGit(t, root, "commit", "-m", "initial")
+	branch := headBranch(t, root)
 
 	server := NewServer(root, "test")
 
@@ -2034,7 +2082,7 @@ func TestServeStdioGitCommitSurfacesTicketVerifyWarningsAsAdvisories(t *testing.
 	mustWrite(t, root, textTicketPath, unresolvedPhaseTicketBody)
 
 	var out bytes.Buffer
-	textInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":[%q],"title":"docs(ticket): close ticket with open phase","ai_context":["User intent: prove unresolved-phases warnings surface as git.commit advisories."]}}}`, textTicketPath)
+	textInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":[%q],"title":"docs(ticket): close ticket with open phase","ai_context":["User intent: prove unresolved-phases warnings surface as git.commit advisories."],"expected_branch":%q}}}`, textTicketPath, branch)
 	if err := serveStdioWithSession(t, server, root, textInput, &out); err != nil {
 		t.Fatalf("ServeStdio commit returned error: %v", err)
 	}
@@ -2058,7 +2106,7 @@ func TestServeStdioGitCommitSurfacesTicketVerifyWarningsAsAdvisories(t *testing.
 	mustWrite(t, root, jsonTicketPath, unresolvedPhaseTicketBody)
 
 	out.Reset()
-	jsonInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":[%q],"title":"docs(ticket): close ticket with open phase json","ai_context":["User intent: prove the json:\"-\" tag holds for advisories."],"format":"json"}}}`, jsonTicketPath)
+	jsonInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":[%q],"title":"docs(ticket): close ticket with open phase json","ai_context":["User intent: prove the json:\"-\" tag holds for advisories."],"format":"json","expected_branch":%q}}}`, jsonTicketPath, branch)
 	if err := serveStdioWithSession(t, server, root, jsonInput, &out); err != nil {
 		t.Fatalf("ServeStdio JSON commit returned error: %v", err)
 	}
@@ -2224,6 +2272,7 @@ func TestServeStdioGitCommitSurfacesTicketGraphParentBoard(t *testing.T) {
 	mustWrite(t, root, "file.txt", "one\n")
 	runGit(t, root, "add", "file.txt")
 	runGit(t, root, "commit", "-m", "initial")
+	branch := headBranch(t, root)
 
 	mustWrite(t, root, "ai-docs/tickets/todo/260726-epic-graph-e2e.md",
 		"---\ntitle: E2E epic\n---\n\n# E2E epic\n")
@@ -2238,7 +2287,7 @@ func TestServeStdioGitCommitSurfacesTicketGraphParentBoard(t *testing.T) {
 		"---\ntitle: E2E child\ncompleted: 2026-07-27\nparent: 260726-epic-graph-e2e\nrelated:\n  260726-nope-dangling: no such stem\n---\n\n# E2E child\n")
 
 	var out bytes.Buffer
-	textInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":[%q],"title":"docs(ticket): close the last child of an epic","ai_context":["User intent: prove the parent board reaches the git.commit response."]}}}`, textChild)
+	textInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":[%q],"title":"docs(ticket): close the last child of an epic","ai_context":["User intent: prove the parent board reaches the git.commit response."],"expected_branch":%q}}}`, textChild, branch)
 	if err := serveStdioWithSession(t, server, root, textInput, &out); err != nil {
 		t.Fatalf("ServeStdio commit returned error: %v", err)
 	}
@@ -2269,7 +2318,7 @@ func TestServeStdioGitCommitSurfacesTicketGraphParentBoard(t *testing.T) {
 		"---\ntitle: E2E child json\ncompleted: 2026-07-27\nparent: 260726-epic-graph-e2e\n---\n\n# E2E child json\n")
 
 	out.Reset()
-	jsonInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":[%q],"title":"docs(ticket): close another child of the epic","ai_context":["User intent: prove the json:\"-\" tag holds for graph advisories."],"format":"json"}}}`, jsonChild)
+	jsonInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":[%q],"title":"docs(ticket): close another child of the epic","ai_context":["User intent: prove the json:\"-\" tag holds for graph advisories."],"format":"json","expected_branch":%q}}}`, jsonChild, branch)
 	if err := serveStdioWithSession(t, server, root, jsonInput, &out); err != nil {
 		t.Fatalf("ServeStdio JSON commit returned error: %v", err)
 	}
@@ -2331,6 +2380,7 @@ func TestServeStdioGitCommitAIContextConditionsAndDebugEvent(t *testing.T) {
 	mustWrite(t, root, "file.txt", "one\n")
 	runGit(t, root, "add", "file.txt")
 	runGit(t, root, "commit", "-m", "initial")
+	branch := headBranch(t, root)
 	mustWrite(t, root, "file.txt", "one\ntwo\n")
 
 	server := NewServer(root, "test")
@@ -2354,7 +2404,7 @@ func TestServeStdioGitCommitAIContextConditionsAndDebugEvent(t *testing.T) {
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: absent ai_context field"}}}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: single empty-string entry","ai_context":[""]}}}`,
 		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: single whitespace entry","ai_context":["  "]}}}`,
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: large valid ai_context array","ai_context":%s}}}`, largeAIContextJSON),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: large valid ai_context array","ai_context":%s,"expected_branch":%q}}}`, largeAIContextJSON, branch),
 	}, "\n")
 
 	var out bytes.Buffer
