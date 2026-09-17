@@ -1808,10 +1808,24 @@ func TestServeStdioDoesNotBlockToolsListBehindLongCall(t *testing.T) {
 
 	var spawnOut bytes.Buffer
 	spawnServer := NewServer(root, "test")
-	if err := serveStdioWithSession(t, spawnServer, root, toolCallLine(t, 1, "exec.shell", mcpLongShellArgs())+"\n", &spawnOut); err != nil {
+	// This test's own pass condition depends on the spawned job still being
+	// "running" when the exec.result call below (timeout_seconds:2) is
+	// issued, not just on a nominal duration: if the job finishes first,
+	// exec.result returns immediately and can win the first-output-line race
+	// against tools/list, flipping the assertion below for a reason unrelated
+	// to the dispatch-ordering behavior this test pins. mcpLongShellArgs's
+	// ~6s nominal duration leaves under ~1s of slack after the 5s
+	// ForegroundWindow launch plus this function's own pipe/session setup, so
+	// use mcpAbortShellArgs's much longer duration instead for a wide margin
+	// (same rationale as its doc comment). Reap it via t.Cleanup — LIFO,
+	// registered after the WS_CACHE_HOME t.Setenv above so it runs first —
+	// so the still-running job doesn't race root's t.TempDir() RemoveAll on
+	// Windows (see reapExecKeys and TestExecMCPRunningLargeAndAbort).
+	if err := serveStdioWithSession(t, spawnServer, root, toolCallLine(t, 1, "exec.shell", mcpAbortShellArgs())+"\n", &spawnOut); err != nil {
 		t.Fatal(err)
 	}
 	running := execKeyFromText(t, toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(spawnOut.String()), "\n"))["1"]))
+	t.Cleanup(func() { reapExecKeys(t, spawnServer, root, []string{running}) })
 
 	reader, writer := io.Pipe()
 	outReader, outWriter := io.Pipe()
@@ -2841,6 +2855,12 @@ func TestExecMCPResultReadableJSONStdoutAndTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	running := execKeyFromText(t, toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["2"]))
+	// Reap before root's t.TempDir() cleanup, LIFO (registered after the
+	// WS_CACHE_HOME t.Setenv above so it runs first), matching
+	// TestExecMCPRunningLargeAndAbort: on an early t.Fatal below, or if the
+	// generous timeout_seconds budget below is ever exhausted, a still-live
+	// child holding root as its CWD would otherwise race Windows' RemoveAll.
+	t.Cleanup(func() { reapExecKeys(t, server, root, []string{running}) })
 	out.Reset()
 	// Do not race mcpLongShellArgs's ~6s nominal duration against a tight
 	// timeout_seconds budget: on a loaded Windows runner the synchronous
