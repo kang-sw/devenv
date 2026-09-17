@@ -2,6 +2,10 @@
 title: Add a required expected_branch guard to ws/git.commit
 related:
   260916-feat-ws-git-merge-relax-worktree-gate: related
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 718c241efb8b7146
+sage-review-completeness-reviewed: 718c241efb8b7146
 ---
 
 # Add a required expected_branch guard to ws/git.commit
@@ -88,6 +92,24 @@ keeps the guard from being trivially self-satisfied.
   from a fresh HEAD read inside the tool or its callers — that would always match
   and check nothing. The value must originate from the caller's remembered
   context established earlier in its task.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/mcp/server.go (git.commit schema and handler), agents-plugin-tool/internal/wsgit/git.go (CommitOptions/Commit), agents-plugin-tool/cmd/ws-mcp/main.go (CLI gitCommit caller), plus a caller sweep across agents-plugin-tool/internal/mcp/*_test.go, agents-plugin-tool/internal/wsdoc/*.go and *_test.go, agents-plugin/rsrc/lead-ticket/lead-ticket.md, agents-plugin/rsrc/lead-scope-worktree/lead-scope-worktree.md, agents-plugin-wsflow/rsrc/lead-ticket/lead-ticket.md, agents-plugin-wsflow/rsrc/lead-scope-worktree/lead-scope-worktree.md |
+| scope.surface | public-interface | git.commit MCP tool inputSchema (agents-plugin-tool/internal/mcp/server.go#L3578-L3593), an agent-facing shipped tool contract, gains a required field |
+| scope.new_public_symbol | no | extends the existing CommitOptions struct and git.commit inputSchema; no wholly new exported Go symbol |
+| scope.new_type_contract | yes | git.commit inputSchema required list, currently paths, title, ai_context (agents-plugin-tool/internal/mcp/server.go#L3592), gains expected_branch |
+| scope.test_surface | existing | git.commit already has coverage in agents-plugin-tool/internal/mcp/server_test.go and related *_test.go files (session_auth_test.go, tickets_verify_test.go, tickets_sage_test.go, note_tools_test.go) |
+| complexity.reuse_points | confirmed | mirrors git.merge's expected_source_oid/expected_target_oid compare-and-swap and must_resolve diagnostic shape (agents-plugin-tool/internal/mcp/git_merge.go#L121, #L138, #L200) and its current-branch resolution via git symbolic-ref --quiet --short HEAD (git_merge.go#L97) |
+| complexity.side_effect_risk | moderate | making the parameter required ripples through every existing git.commit caller across agents-plugin-tool tests plus the mirrored agents-plugin and agents-plugin-wsflow skill docs |
+| risk.correctness | moderate | detached-HEAD and believed-vs-actual mismatch detection are new branch conditions to get right without false positives or negatives |
+| risk.fit | low | the change explicitly mirrors the existing git.merge compare-and-swap pattern already established in the same package |
+| risk.test | moderate | the caller sweep spans two shipped skill packages plus a wide *_test.go set found in this pass; an incomplete sweep would surface only at go test time |
+| risk.security_or_contract | high | the ticket's own Constraints section calls this a shipped tool-contract (breaking) change to a widely used MCP tool, with the schema description's meta wording explicitly load-bearing |
 
 ## Prior Art
 

@@ -2,6 +2,10 @@
 title: Relax ws/git.merge worktree gate to git-native semantics and clarify target-landing contract
 related:
   260911-feat-ws-git-merge-lead-owned-merge-authority: prerequisite
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 3454e81f5d22c67f
+sage-review-completeness-reviewed: 3454e81f5d22c67f
 ---
 
 # Relax ws/git.merge worktree gate to git-native semantics and clarify target-landing contract
@@ -85,6 +89,8 @@ tool's blanket porcelain gate adds no safety over this — it only adds friction
 
 ## Constraints
 
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
 - `agents-plugin-tool/internal/mcp/` edits: read `ai-docs/manuals/ws-mcp.md`
   before editing.
 - The strengthened description is agent-facing shipped-surface text: read
@@ -115,6 +121,22 @@ tool's blanket porcelain gate adds no safety over this — it only adds friction
   the tool and the original clean-tree gate; its rationale was fast-forward-flatten
   prevention and removing free-form git from the worker, not clean-tree per se.
 
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/mcp/git_merge.go, agents-plugin-tool/internal/mcp/server.go, agents-plugin-tool/internal/mcp/git_merge_test.go |
+| scope.surface | public-interface | the git.merge MCP tool's behavior and description contract (agents-plugin-tool/internal/mcp/server.go#L3559-L3577); no new Go exported symbol |
+| scope.new_public_symbol | no | none |
+| scope.new_type_contract | no | none |
+| scope.test_surface | existing | agents-plugin-tool/internal/mcp/git_merge_test.go (e.g. TestImplMergeRefusals, TestImplMergeConflictAdvisory) |
+| complexity.reuse_points | confirmed | the add/gitFailure diagnostic closures and the advisory-classification cleanup_failed diagnostic shape (agents-plugin-tool/internal/mcp/git_merge.go#L120-L133, #L314-L319) |
+| complexity.side_effect_risk | moderate | narrows a safety gate used by every git.merge call; a parsing error in the narrowed check could silently admit an unsafe merge |
+| risk.correctness | moderate | requires correctly distinguishing staged/unmerged porcelain codes from unstaged/untracked ones in checkWorktree (agents-plugin-tool/internal/mcp/git_merge.go#L176-L196) |
+| risk.fit | low | the ticket's Decisions and Rejected/deferred sections already resolve the product choices, leaving little open product ambiguity |
+| risk.test | moderate | five new scenarios (untracked proceeds, non-overlapping unstaged proceeds and is excluded from the commit, staged blocks, overlap blocked actionably, dirty-remains nudge) must be added to git_merge_test.go |
+| risk.security_or_contract | moderate | changes a safety gate and the shipped git.merge tool description, a shipped-surface contract callers rely on |
+
 ## Phases
 
 ### Phase 1: Narrow the worktree gate, add the target-named nudge, and clarify the description
@@ -133,6 +155,8 @@ Verification: extend the existing `git_merge` tests in
 `agents-plugin-tool/internal/mcp` to cover — untracked file present → merge
 proceeds; non-overlapping unstaged modification → merge proceeds and the change
 is not in the merge commit; staged change → pre-empt `dirty_worktree` (still
+blocked); unmerged paths present without an active `MERGE_HEAD` (e.g. a stalled
+cherry-pick leaving conflict entries) → also pre-empt `dirty_worktree` (still
 blocked); overlapping change → blocked (via switch/merge native guard, surfaced
 actionably); and the dirty-remains nudge fires after a successful merge naming
 the target branch. `go test ./...` in `agents-plugin-tool` green.
