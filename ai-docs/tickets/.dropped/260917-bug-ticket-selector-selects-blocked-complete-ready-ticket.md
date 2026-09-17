@@ -1,11 +1,25 @@
 ---
 title: ticket-selector selects a Blocked/all-phases-complete ready ticket, wasting drain cycles
+dropped: 2026-09-17
 related:
   260914-chore-ws-pi-root-manifest-runtime-deps: the owner-blocked, all-phases-complete ready ticket the selector mis-picked
   260914-chore-ws-pi-release-path-acceptance-and-docs: the second owner-blocked ready ticket in the same queue
 ---
 
 # ticket-selector selects a Blocked/all-phases-complete ready ticket, wasting drain cycles
+
+## Dropped (2026-09-17)
+
+Duplicate of `260913-bug-ticket-selector-chooses-recorded-blocker`, which already
+captures the same defect (selector choosing a ready ticket with a current
+`## Blocked` note) with the same 2026-09-16 reproduction
+(`260914-chore-ws-pi-root-manifest-runtime-deps`) and a more mature fix design:
+surface the raw `## Blocked` heading in `tickets.query` JSON + compact-text and
+have `lead-run` recheck the body before dispatch. The one facet not in 260913 —
+an all-phases-`### Result` ticket lingering in `ready/` being selectable, with
+completeness misread as a positive signal — is subsumed in practice (owner-gated
+complete tickets carry a `## Blocked` note) and speculative; not worth a separate
+ticket. Fold into 260913 later only if it recurs without a Blocked marker.
 
 ## Background
 
