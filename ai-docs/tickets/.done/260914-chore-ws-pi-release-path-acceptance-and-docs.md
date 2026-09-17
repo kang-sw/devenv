@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: cd7c575097c7ae96
 sage-review-completeness-reviewed: cd7c575097c7ae96
+completed: 2026-09-17
 ---
 
 # Verify agents-plugin-pi release-path acceptance and document git-install
@@ -104,6 +105,29 @@ it in project-internal memory.
 
 Verification: the documented command and flow match the Phase 1 evidence; a
 reader can install and enable the adapter from the doc alone.
+
+### Result (a421c1cf) - 2026-09-17
+
+Added a `## Pi Adapter` section to `README.md`, placed immediately after the
+existing `## ws Plugin` section per the placement instruction. It documents
+`pi install git:github.com/kang-sw/devenv@<tag>` (naming the `<host>` segment
+as required, per the Decisions section), the repo-root `package.json` /
+`npm install` / extension-load flow, and the no-build-step release-binary
+download + checksum verification + `ws/*` registration behavior that Phase 1's
+owner-run acceptance observed. No code or package-metadata changes; the Pi
+project is referenced by its npm package name
+(`@earendil-works/pi-coding-agent`, verified against
+`agents-plugin-pi/package.json`) rather than an unverified external URL.
+
+Verification: single-reviewer sweep (round 1) found no Critical/Major/Minor/Nit
+issues — command, host-segment rationale, install/dependency-resolution claim,
+package name, and section placement each checked against repository evidence
+(ticket Decisions, `ai-docs/tickets/.done/260903-research-ws-pi-adapter-npm-distribution.md`,
+`ai-docs/tickets/.done/260914-chore-ws-pi-root-manifest-runtime-deps.md`, root
+`package.json`, `agents-plugin-pi/package.json`); no round 2 needed since
+round 1 raised nothing to verify.
+
+Decisions taken: none beyond the ticket's own Decisions section.
 
 ## Blocked (2026-09-16) — RESOLVED 2026-09-17
 
