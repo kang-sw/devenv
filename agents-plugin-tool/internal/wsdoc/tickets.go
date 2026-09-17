@@ -81,6 +81,14 @@ type TicketInfo struct {
 	// single-stem point-resolve projection (see DispatchBlockFor), never on a
 	// discovery listing.
 	DispatchBlocked *DispatchBlock `json:"dispatch_blocked,omitempty"`
+	// BlockedHeadings holds the verbatim body heading lines that begin with
+	// `## Blocked`, in document order, on every projection (discovery and
+	// point-resolve alike) so the queue selector's ordinary inventory carries
+	// the marker. It is advisory evidence, deliberately distinct from the typed
+	// DispatchBlocked gate: a present marker creates no hard MCP refusal, and the
+	// heading suffix (a date, a `— RESOLVED ...` note) is returned uninterpreted
+	// for the caller to read the section and judge currency.
+	BlockedHeadings []string `json:"blocked_headings,omitempty"`
 }
 
 type TicketPhase struct {
@@ -493,6 +501,7 @@ func readTicketFromBytes(relPath, status, text string) TicketInfo {
 	info.Skeletons = scalarList(fm["skeletons"])
 	info.Completed, _ = fm["completed"].(string)
 	info.RouteFactsPresent, info.RouteFacts = ticketRouteFacts(text)
+	info.BlockedHeadings = blockedHeadings(text)
 	for _, phase := range phases {
 		if !phase.ResultPresent {
 			info.UnresolvedPhases = append(info.UnresolvedPhases, phase.Heading)
@@ -629,6 +638,24 @@ func isTableRule(cell string) bool {
 		return false
 	}
 	return strings.Trim(cell, "-: ") == ""
+}
+
+// blockedHeadings collects every body heading line that begins with
+// `## Blocked`, verbatim (leading/trailing whitespace trimmed) and in document
+// order. The suffix is never interpreted: a `## Blocked (2026-07-27) — RESOLVED
+// 2026-08-11` line is returned whole, and whether the blocker is current is the
+// caller's judgment after reading the section, not the parser's. This is the
+// advisory-marker half of the dispatch gate — deliberately not promoted to
+// DispatchBlocked and creating no hard refusal.
+func blockedHeadings(text string) []string {
+	var out []string
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## Blocked") {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 // ticketStemFromRelPath takes the basename of a forward-slash board-relative

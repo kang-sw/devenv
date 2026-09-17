@@ -30,7 +30,14 @@ the turn: relay the reason.
 
 1. `{{.McpNamespace}}/tickets.query(ticket_stem: "<stem>", format: "json")`.
    On `dispatch_blocked`, report the blocking stem to the user and end the
-   turn. If Route Facts are absent, or a worker reported them incomplete,
+   turn. On a `blocked_headings` marker for a queue-selected ticket, read the
+   referenced `## Blocked` section and judge whether the blocker is current: a
+   current blocker drops the ticket from this cycle — return to Select for the
+   next candidate, falling through to the all-blocked terminal when none
+   remains — and never dispatch a worker into it. A ticket named directly in the
+   invocation is not re-selected by queue ordering: report its current blocker
+   to the user and end the turn. If Route Facts are absent, or a worker reported
+   them incomplete,
    render and spawn `ticket-fact-populator` on the ticket once, commit its
    edit, and query again; if they are still absent, report the ticket to the
    user and end the turn.

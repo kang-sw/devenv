@@ -154,6 +154,27 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn("{{.McpNamespace}}/tickets.sage_gate(stem, landing: \"ready\")", text)
         self.assertIn("{{.SkillNamespace}}:lead-run", text)
 
+    def test_selector_and_run_consume_body_blocked_marker(self):
+        # 260913: the body-level `## Blocked` marker is now advisory inventory,
+        # so the selector reads the section and judges currency (rather than
+        # skipping on any marker), and lead-run rechecks the selected ticket
+        # before dispatch. Assert on both mirror packages that ship the rsrc
+        # bodies; the pi mirror's byte-identity is guarded by TestPiMirrorUpToDate.
+        for rsrc in (RSRC_DIR, RSRC_DIR.parent.parent / "agents-plugin-wsflow" / "rsrc"):
+            selector = " ".join(
+                (rsrc / "ticket-selector" / "ticket-selector.md").read_text(encoding="utf-8").split()
+            )
+            self.assertIn("blocked_marker", selector)
+            self.assertIn("read that section and judge whether the blocker is current", selector)
+            self.assertIn("skipping only a current one", selector)
+
+            run = " ".join((rsrc / "lead-run" / "lead-run.md").read_text(encoding="utf-8").split())
+            self.assertIn("blocked_headings", run)
+            self.assertIn("read the referenced `## Blocked` section and judge whether the blocker is current", run)
+            self.assertIn("return to Select for the next candidate", run)
+            self.assertIn("never dispatch a worker into it", run)
+            self.assertIn("named directly in the invocation is not re-selected by queue ordering", run)
+
     def test_placed_lead_bodies_carry_no_unresolved_review_marker(self):
         for skill in ("lead-discuss", "lead-ticket", "lead-review", "lead-ship"):
             text = (RSRC_DIR / skill / f"{skill}.md").read_text(encoding="utf-8")

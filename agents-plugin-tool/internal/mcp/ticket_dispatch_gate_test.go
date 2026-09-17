@@ -113,6 +113,74 @@ func TestTicketsQueryJSONDispatchBlockedContract(t *testing.T) {
 	}
 }
 
+// TestTicketsQueryBlockedMarkerInBothProjections pins the advisory body-marker
+// surface tickets.query gained: the verbatim `## Blocked` heading rides both the
+// discovery listing and the point-resolve, in compact text (as a blocked_marker
+// line) and in JSON (as blocked_headings), a nonstandard suffix is returned
+// uninterpreted, a ticket without the marker carries none, and — because the
+// blocked ticket declares no blocked-by edge — the marker never becomes the
+// typed dispatch_blocked hard gate.
+func TestTicketsQueryBlockedMarkerInBothProjections(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	mustWrite(t, root, "ai-docs/tickets/ready/260201-feat-blocked.md",
+		"---\ntitle: Blocked widget\n---\n# Blocked widget\n\n## Blocked (2026-09-16) — owner smoke\n\nOwner-only.\n\n## Phases\n\n### Phase 1: X\n")
+	mustWrite(t, root, "ai-docs/tickets/ready/260202-feat-clean.md",
+		"---\ntitle: Clean widget\n---\n# Clean widget\n\n## Phases\n\n### Phase 1: Y\n")
+	initGit(t, root)
+
+	const marker = "## Blocked (2026-09-16) — owner smoke"
+
+	// Discovery listing (compact): the blocked ticket carries the marker line and
+	// the clean ticket does not; the advisory marker is not the typed gate.
+	discovery := callScopedTool(t, root, 1, "tickets.query", map[string]any{"query": "widget"})
+	if !strings.Contains(discovery, "blocked_marker: "+marker) {
+		t.Fatalf("discovery listing missing verbatim blocked_marker:\n%s", discovery)
+	}
+	if strings.Contains(discovery, "dispatch_blocked") {
+		t.Fatalf("body marker must not compute the dispatch gate on discovery:\n%s", discovery)
+	}
+	if strings.Count(discovery, "blocked_marker:") != 1 {
+		t.Fatalf("clean ticket must carry no blocked_marker line:\n%s", discovery)
+	}
+
+	// Discovery listing (JSON): the field name and verbatim value.
+	discoveryJSON := callScopedTool(t, root, 2, "tickets.query", map[string]any{"query": "widget", "format": "json"})
+	if !strings.Contains(discoveryJSON, `"blocked_headings"`) {
+		t.Fatalf("discovery json missing blocked_headings field:\n%s", discoveryJSON)
+	}
+	var listing []struct {
+		Stem            string   `json:"stem"`
+		BlockedHeadings []string `json:"blocked_headings"`
+	}
+	if err := json.Unmarshal([]byte(discoveryJSON), &listing); err != nil {
+		t.Fatalf("discovery json did not parse: %v\n%s", err, discoveryJSON)
+	}
+	for _, row := range listing {
+		switch row.Stem {
+		case "260201-feat-blocked":
+			if len(row.BlockedHeadings) != 1 || row.BlockedHeadings[0] != marker {
+				t.Fatalf("blocked ticket json headings = %#v", row.BlockedHeadings)
+			}
+		case "260202-feat-clean":
+			if len(row.BlockedHeadings) != 0 {
+				t.Fatalf("clean ticket json must carry no headings: %#v", row.BlockedHeadings)
+			}
+		}
+	}
+
+	// Point-resolve carries the same evidence in both modes.
+	resolve := callScopedTool(t, root, 3, "tickets.query", map[string]any{"ticket_stem": "260201-feat-blocked"})
+	if !strings.Contains(resolve, "blocked_marker: "+marker) {
+		t.Fatalf("point-resolve compact missing blocked_marker:\n%s", resolve)
+	}
+	resolveJSON := callScopedTool(t, root, 4, "tickets.query", map[string]any{"ticket_stem": "260201-feat-blocked", "format": "json"})
+	if !strings.Contains(resolveJSON, `"blocked_headings"`) || !strings.Contains(resolveJSON, marker) {
+		t.Fatalf("point-resolve json missing verbatim blocked_headings:\n%s", resolveJSON)
+	}
+}
+
 // TestTicketsQueryPointResolveDispatchGateFailsOpen verifies the documented
 // fail-open contract at the server point-resolve seam (server.go's
 // `blockErr == nil` guard): when the dispatch gate's live whole-board scan

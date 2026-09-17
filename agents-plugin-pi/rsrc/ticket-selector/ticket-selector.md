@@ -15,19 +15,23 @@ ticket path, `ready/ empty`, `every remaining ticket blocked`, or a stop reason.
    ready queue.
 2. When its `impl_ticket` field is present, never consider base-branch queue
    ordering:
-   - `active` with status `ready`: read that ticket only. Select it unless it
-     carries a `## Blocked (...)` note; a blocked owner stops.
+   - `active` with status `ready`: read that ticket only. When it carries a
+     `## Blocked` marker, read that section and judge whether the blocker is
+     current; a current blocker stops. Otherwise select it.
    - `active` with status `idea` or `todo`: stop because the owner is not
      executable.
    - `missing` or `ambiguous`: call `{{.McpNamespace}}/git.status()` and stop
      with its nudge line verbatim.
-3. Without `impl_ticket`, inspect `ready/`. Skip candidates carrying a
-   `## Blocked (...)` note, then prefer, in order: an in-progress ticket (some
-   phase has a `### Result`, at least one does not); a ticket named as a
-   prerequisite by another ready ticket's typed `blocked-by:` edge, falling back
-   to a `related:` or `parent:` prose hint when no `blocked-by:` edge is present;
-   then the oldest. This ordering is advisory — the dispatch-time
-   `dispatch_blocked` gate is what hard-blocks an unlanded prerequisite.
+3. Without `impl_ticket`, inspect `ready/`. Each candidate's inventory carries
+   its body `## Blocked` markers (`blocked_marker` lines); for a flagged
+   candidate read the referenced section and judge whether the blocker is
+   current, skipping only a current one. Among the rest prefer, in order: an
+   in-progress ticket (some phase has a `### Result`, at least one does not); a
+   ticket named as a prerequisite by another ready ticket's typed `blocked-by:`
+   edge, falling back to a `related:` or `parent:` prose hint when no
+   `blocked-by:` edge is present; then the oldest. This ordering is advisory —
+   the dispatch-time `dispatch_blocked` gate is what hard-blocks an unlanded
+   prerequisite.
 4. Outside a `goal/*` branch, when the selection is `ready/ empty`, call
    `{{.McpNamespace}}/tickets.query(statuses: ["todo", "idea"], format: "json")`
    and emit up to five `todo` rows followed by up to five `idea` rows, sorting
