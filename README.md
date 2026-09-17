@@ -65,6 +65,27 @@ claude plugin install ws@kang-sw-devenv
 The agentless `wsflow` package lives in `agents-plugin-wsflow/` for separate
 marketplace installation. `install.sh` does not install `wsflow` into Claude.
 
+## Pi Adapter
+
+The `ws` workflow tools are also available inside Pi
+(`@earendil-works/pi-coding-agent`) sessions through a bundled extension.
+Install it straight from this repo with Pi's own git package manager:
+
+```sh
+pi install git:github.com/kang-sw/devenv@<tag>
+```
+
+Replace `<tag>` with a published release tag (for example `v0.46.8`). The
+`<host>` segment (`github.com`) is required — Pi's git spec is
+`git:<host>/<user>/<repo>`, and a host-less `git:kang-sw/devenv` mis-parses
+`kang-sw` as the host and fails to resolve.
+
+Pi clones the repo, runs `npm install` against the repo-root
+`package.json` (which declares the extension and its runtime dependencies),
+and loads the extension. No local build step is required: on first use the
+extension's launcher downloads the release's `ws-mcp` binary, verifies its
+checksum, and registers the `ws/*` tools automatically.
+
 ## License
 
 Personal configuration. Use freely, no warranty implied.
