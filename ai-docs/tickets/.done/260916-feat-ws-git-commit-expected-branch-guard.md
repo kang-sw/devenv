@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 718c241efb8b7146
 sage-review-completeness-reviewed: 718c241efb8b7146
+completed: 2026-09-17
 ---
 
 # Add a required expected_branch guard to ws/git.commit
@@ -135,3 +136,43 @@ no commit and a believed-vs-actual message; detached HEAD → refused; missing
 `expected_branch` → schema-level rejection. `go test ./...` in `agents-plugin-tool`
 green, and the caller sweep leaves no playbook/test issuing a `git.commit` without
 the parameter.
+
+### Result (31eedb1) - 2026-09-17
+
+Landed the guard. `git.commit` now requires `expected_branch`; before any staging
+mutation `wsgit.Commit` resolves the actual branch via `git symbolic-ref --quiet
+--short HEAD` and hard-refuses (no mutation) on a believed-vs-actual mismatch or a
+detached HEAD, reporting both branch names. Enforcement is at both surfaces: the
+MCP `git.commit` inputSchema `required` list and `normalizeCommitOptions` (so the
+CLI and any direct caller are guarded too). The schema description is the
+meta/intent wording from `## Decisions`, kept downstream-neutral.
+
+Caller sweep: MCP handler wiring (`server.go`), CLI `--expected-branch` flag
+(`cmd/ws-mcp/main.go`), and every test that commits — wsgit `sequenceRunner`
+fixtures gained the leading `symbolic-ref` output with call-index assertions
+shifted by one, and MCP/CLI integration tests resolve the temp repo's branch via a
+new `headBranch` helper (`git init` picks main/master from `init.defaultBranch`).
+`lead-ticket.md` commit-call signature lists `expected_branch`; the wsflow rsrc
+mirror + both rsrc manifests were regenerated via `WSRSRC_REGEN` /
+`WS_REGEN_WSFLOW_RSRC`, and the `agents-plugin-pi/` byte-identical mirror was
+resynced for the same two files (review round-1 Critical: the pi mirror was missed
+initially; fixed in 8a0200b). `git.merge` is intentionally untouched (it uses OID
+compare-and-swap and never calls `wsgit.Commit`).
+
+Verification evidence: `go test ./... -count=1` in `agents-plugin-tool` — all 15
+packages green (the `-count=1` matters: the disk-reading mirror tests were served
+from a stale cache on an earlier plain `go test`, masking the pi drift);
+`go vet ./...` clean; `scripts/smoke-ws-mcp.sh ..` exit 0; wsflow package tests
+(`python3 -m unittest discover agents-plugin-wsflow/tests`) OK. New tests:
+`TestCommitRefusesBranchMismatch`, `TestCommitRefusesDetachedHead`, the missing-
+field `normalizeCommitOptions` subtest, and `TestServeStdioGitCommitRefusesBranchMismatch`
+(proves no commit lands on mismatch).
+
+Decisions taken: used a dedicated `symbolic-ref` resolution (the ticket's stated
+mechanism) placed as the first git op rather than reading the branch already
+present in the pre-commit `git status` output — faithful to the ticket and keeps
+the guard independent of the staging-status parse. Recorded (non-blocking) review
+Minors, left as-is: a `symbolic-ref` failure for a non-repo/other cause reports the
+"detached HEAD" refusal (fail-closed, diagnostic-quality only); and no separate
+MCP-layer missing-field test (the Go-level `normalizeCommitOptions` subtest is
+functionally equivalent since dispatch has no separate schema-validation layer).
