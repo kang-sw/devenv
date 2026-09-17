@@ -7,10 +7,22 @@ import (
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsreview"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// runGitAllow runs git and returns its combined output without failing the test
+// on a non-zero exit; used to reach expected-failure states like a conflicting
+// cherry-pick that leaves unmerged index entries.
+func runGitAllow(t *testing.T, root string, args ...string) []byte {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	out, _ := cmd.CombinedOutput()
+	return out
+}
 
 func mergeFixture(t *testing.T, target string) (string, string) {
 	t.Helper()
@@ -94,9 +106,10 @@ func TestImplMergeReleaseCollectsSafetyFindings(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(root, "untracked"), []byte("keep"), 0644); err != nil {
+			if err := os.WriteFile(filepath.Join(root, "staged.txt"), []byte("keep"), 0644); err != nil {
 				t.Fatal(err)
 			}
+			runGit(t, root, "add", "staged.txt")
 			mergeHead := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "--git-path", "MERGE_HEAD")))
 			if !filepath.IsAbs(mergeHead) {
 				mergeHead = filepath.Join(root, mergeHead)
@@ -404,6 +417,10 @@ func TestImplMergeNoFFAndCleanup(t *testing.T) {
 			if err != nil || r.Status != "merged" || !r.BranchDeleted {
 				t.Fatalf("result=%+v err=%v", r, err)
 			}
+			// A clean post-merge worktree must not raise the dirty_after_merge nudge.
+			if len(r.Diagnostics) != 0 {
+				t.Fatalf("clean merge raised diagnostics: %+v", r.Diagnostics)
+			}
 			parents := strings.Fields(string(runGitOutput(t, root, "rev-list", "--parents", "-n", "1", "HEAD")))
 			if len(parents) != 3 || parents[2] != source {
 				t.Fatalf("not a boundary merge: %v", parents)
@@ -456,15 +473,16 @@ func TestImplMergeRefusals(t *testing.T) {
 		dirty                         bool
 	}{
 		{"mismatch", "develop", "elsewhere", "does not match", false},
-		{"dirty", "develop", "", "clean worktree", true},
+		{"dirty", "develop", "", "clean index", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, branch := mergeFixture(t, tc.target)
 			before := string(runGitOutput(t, root, "rev-parse", "HEAD"))
 			if tc.dirty {
-				if err := os.WriteFile(filepath.Join(root, "untracked"), []byte("keep"), 0644); err != nil {
+				if err := os.WriteFile(filepath.Join(root, "staged.txt"), []byte("keep"), 0644); err != nil {
 					t.Fatal(err)
 				}
+				runGit(t, root, "add", "staged.txt")
 			}
 			_, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, tc.assertion, mergeMessage(), implMergeAcknowledgement{})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -475,6 +493,170 @@ func TestImplMergeRefusals(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestImplMergeTolerantWorktree(t *testing.T) {
+	t.Run("untracked-proceeds-and-nudges", func(t *testing.T) {
+		root, branch := mergeFixture(t, "goal/topic")
+		if err := os.WriteFile(filepath.Join(root, "scratch.txt"), []byte("keep\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "goal/topic", mergeMessage(), implMergeAcknowledgement{})
+		if err != nil || r.Status != "merged" || !r.BranchDeleted {
+			t.Fatalf("result=%+v err=%v", r, err)
+		}
+		if _, statErr := os.Stat(filepath.Join(root, "scratch.txt")); statErr != nil {
+			t.Fatalf("untracked file lost: %v", statErr)
+		}
+		d := requireMergeDiagnostic(t, r, "dirty_after_merge", "advisory")
+		if !strings.Contains(d.Reason, "goal/topic") {
+			t.Fatalf("nudge must name the target branch: %+v", d)
+		}
+		if !strings.Contains(r.text(), "dirty_after_merge [advisory]") {
+			t.Fatalf("nudge must render loudly in text(): %s", r.text())
+		}
+	})
+
+	t.Run("unstaged-proceeds-excluded-from-commit", func(t *testing.T) {
+		root := initGitRepo(t)
+		runGit(t, root, "switch", "-C", "goal/topic")
+		if err := os.WriteFile(filepath.Join(root, "shared.txt"), []byte("base\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "other.txt"), []byte("base\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, root, "add", ".")
+		runGit(t, root, "commit", "-m", "base")
+		branch := "impl/goal/topic/unit"
+		runGit(t, root, "switch", "-c", branch)
+		if err := os.WriteFile(filepath.Join(root, "shared.txt"), []byte("impl\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, root, "commit", "-am", "impl change")
+		// Non-overlapping unstaged modification to a file the merge does not touch.
+		if err := os.WriteFile(filepath.Join(root, "other.txt"), []byte("working\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "goal/topic", mergeMessage(), implMergeAcknowledgement{})
+		if err != nil || r.Status != "merged" {
+			t.Fatalf("result=%+v err=%v", r, err)
+		}
+		// The merge commit must record other.txt unchanged (base), not the working copy.
+		if committed := strings.TrimSpace(string(runGitOutput(t, root, "show", "HEAD:other.txt"))); committed != "base" {
+			t.Fatalf("unstaged change folded into merge commit: %q", committed)
+		}
+		// The working modification is preserved on the target checkout.
+		if wt, readErr := os.ReadFile(filepath.Join(root, "other.txt")); readErr != nil || strings.TrimSpace(string(wt)) != "working" {
+			t.Fatalf("working change lost: %q err=%v", wt, readErr)
+		}
+		requireMergeDiagnostic(t, r, "dirty_after_merge", "advisory")
+	})
+
+	t.Run("staged-blocks", func(t *testing.T) {
+		root, branch := mergeFixture(t, "develop")
+		if err := os.WriteFile(filepath.Join(root, "staged.txt"), []byte("keep\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, root, "add", "staged.txt")
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "develop", mergeMessage(), implMergeAcknowledgement{})
+		if err == nil || r.Status != "policy_blocked" {
+			t.Fatalf("staged change admitted: %+v err=%v", r, err)
+		}
+		d := requireMergeDiagnostic(t, r, "dirty_worktree", "must_resolve")
+		if !strings.Contains(d.Reason, "clean index") {
+			t.Fatalf("staged change wrong reason: %+v", d)
+		}
+	})
+
+	t.Run("unmerged-without-merge-head-blocks", func(t *testing.T) {
+		root, branch := mergeFixture(t, "develop")
+		// Diverge develop so cherry-picking it onto impl conflicts, leaving unmerged
+		// index entries under a CHERRY_PICK_HEAD (not a MERGE_HEAD).
+		runGit(t, root, "switch", "develop")
+		if err := os.WriteFile(filepath.Join(root, "shared.txt"), []byte("develop\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, root, "commit", "-am", "develop diverge")
+		dev := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+		runGit(t, root, "switch", branch)
+		runGitAllow(t, root, "cherry-pick", dev) // conflicts, leaves unmerged entries
+		if out := strings.TrimSpace(string(runGitOutput(t, root, "diff", "--name-only", "--diff-filter=U"))); out != "shared.txt" {
+			t.Fatalf("expected unmerged shared.txt, got %q", out)
+		}
+		if _, statErr := os.Stat(filepath.Join(root, ".git", "MERGE_HEAD")); statErr == nil {
+			t.Fatal("precondition: MERGE_HEAD must be absent so merge_in_progress does not mask the unmerged case")
+		}
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "develop", mergeMessage(), implMergeAcknowledgement{})
+		if err == nil || r.Status != "policy_blocked" {
+			t.Fatalf("unmerged paths admitted: %+v err=%v", r, err)
+		}
+		d := requireMergeDiagnostic(t, r, "dirty_worktree", "must_resolve")
+		if !strings.Contains(d.Reason, "unmerged") {
+			t.Fatalf("unmerged wrong reason: %+v", d)
+		}
+	})
+
+	t.Run("both-added-unmerged-blocks", func(t *testing.T) {
+		root, branch := mergeFixture(t, "develop")
+		// Add a file on develop and a conflicting file at the same path on impl,
+		// then cherry-pick to produce an add/add (AA) unmerged entry without a
+		// MERGE_HEAD — exercising the DD/AA pair branch of indexBlocksMerge.
+		runGit(t, root, "switch", "develop")
+		if err := os.WriteFile(filepath.Join(root, "added.txt"), []byte("develop\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, root, "add", "added.txt")
+		runGit(t, root, "commit", "-m", "develop adds file")
+		dev := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+		runGit(t, root, "switch", branch)
+		if err := os.WriteFile(filepath.Join(root, "added.txt"), []byte("impl\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, root, "add", "added.txt")
+		runGit(t, root, "commit", "-m", "impl adds file")
+		runGitAllow(t, root, "cherry-pick", dev) // add/add conflict -> AA
+		if porcelain := string(runGitOutput(t, root, "status", "--porcelain=v1")); !strings.Contains(porcelain, "AA added.txt") {
+			t.Fatalf("expected AA unmerged entry, got: %q", porcelain)
+		}
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "develop", mergeMessage(), implMergeAcknowledgement{})
+		if err == nil || r.Status != "policy_blocked" {
+			t.Fatalf("both-added unmerged admitted: %+v err=%v", r, err)
+		}
+		d := requireMergeDiagnostic(t, r, "dirty_worktree", "must_resolve")
+		if !strings.Contains(d.Reason, "unmerged") {
+			t.Fatalf("both-added wrong reason: %+v", d)
+		}
+	})
+
+	t.Run("overlapping-change-blocked-actionably", func(t *testing.T) {
+		root, branch := mergeFixture(t, "develop")
+		before := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+		// Unstaged change overlapping the merged path (shared.txt): now allowed past
+		// the narrowed gate, but git's own switch refuses it. It must surface as an
+		// actionable diagnostic, not a bare error string.
+		if err := os.WriteFile(filepath.Join(root, "shared.txt"), []byte("overlap-local\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "develop", mergeMessage(), implMergeAcknowledgement{})
+		if err == nil || r.Status != "policy_blocked" {
+			t.Fatalf("overlapping change admitted: %+v err=%v", r, err)
+		}
+		d := requireMergeDiagnostic(t, r, "switch_failed", "must_resolve")
+		if len(d.Command) == 0 || d.RawOutput == "" || !strings.Contains(d.Resolution, "overlapping") {
+			t.Fatalf("switch failure not actionable: %+v", d)
+		}
+		// The refusal did not switch away or move HEAD, and the local change survives.
+		if current := strings.TrimSpace(string(runGitOutput(t, root, "symbolic-ref", "--short", "HEAD"))); current != branch {
+			t.Fatalf("refusal switched to %s", current)
+		}
+		if after := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD"))); after != before {
+			t.Fatal("refusal moved HEAD")
+		}
+		if wt, _ := os.ReadFile(filepath.Join(root, "shared.txt")); strings.TrimSpace(string(wt)) != "overlap-local" {
+			t.Fatalf("overlapping change lost: %q", wt)
+		}
+	})
 }
 
 func TestImplMergeConflictAdvisory(t *testing.T) {
@@ -602,9 +784,10 @@ func TestGenericMergeRefusals(t *testing.T) {
 			case "missing-target":
 				target = ""
 			case "dirty":
-				if err := os.WriteFile(filepath.Join(root, "untracked"), []byte("keep"), 0644); err != nil {
+				if err := os.WriteFile(filepath.Join(root, "staged.txt"), []byte("keep"), 0644); err != nil {
 					t.Fatal(err)
 				}
+				runGit(t, root, "add", "staged.txt")
 				want = "dirty_worktree"
 			case "same-branch":
 				target, want = branch, "already_contained"
@@ -668,16 +851,15 @@ func TestGenericMergeReleaseMCP(t *testing.T) {
 				}
 				requireMergeDiagnostic(t, r, "release_target", "overrideable")
 				args["release_target_override"], args["expected_source_oid"], args["expected_target_oid"] = true, r.SourceOID, r.TargetOID
-				if err := os.WriteFile(filepath.Join(root, "untracked"), []byte("keep"), 0644); err != nil {
+				if err := os.WriteFile(filepath.Join(root, "staged.txt"), []byte("keep"), 0644); err != nil {
 					t.Fatal(err)
 				}
+				runGit(t, root, "add", "staged.txt")
 				if err := json.Unmarshal([]byte(toolText(t, callToolOnce(t, s, 2, "git.merge", args))), &r); err != nil {
 					t.Fatal(err)
 				}
 				requireMergeDiagnostic(t, r, "dirty_worktree", "must_resolve")
-				if err := os.Remove(filepath.Join(root, "untracked")); err != nil {
-					t.Fatal(err)
-				}
+				runGit(t, root, "rm", "-f", "staged.txt")
 				args["format"] = "text"
 				out := toolText(t, callToolOnce(t, s, 3, "git.merge", args))
 				if !strings.Contains(out, "status: merged") || !strings.Contains(out, fmt.Sprintf("branch_deleted: %t", strings.HasPrefix(branch, "goal/"))) {

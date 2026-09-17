@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 3454e81f5d22c67f
 sage-review-completeness-reviewed: 3454e81f5d22c67f
+completed: 2026-09-17
 ---
 
 # Relax ws/git.merge worktree gate to git-native semantics and clarify target-landing contract
@@ -160,3 +161,50 @@ cherry-pick leaving conflict entries) → also pre-empt `dirty_worktree` (still
 blocked); overlapping change → blocked (via switch/merge native guard, surfaced
 actionably); and the dirty-remains nudge fires after a successful merge naming
 the target branch. `go test ./...` in `agents-plugin-tool` green.
+
+### Result (8d25d155) - 2026-09-17
+
+Landed all four confirmed changes plus the switch-failure constraint.
+
+- **Narrowed `checkWorktree`** via a new `indexBlocksMerge(status string)` helper
+  (`git_merge.go`): `dirty_worktree` now fires only for a dirty index (any set
+  first porcelain column) or unmerged paths (`x=='U' || y=='U'`, plus the `DD`
+  and `AA` pairs). Untracked (`??`), ignored (`!!`), and unstaged-only (` M`)
+  entries are allowed. The shared closure covers both call sites. Two reasons
+  under the one `dirty_worktree` code: "requires a clean index" and "refuses
+  unmerged paths". The existing `MERGE_HEAD` `merge_in_progress` refusal is
+  unchanged.
+- **`--commit` kept** unchanged.
+- **Post-merge nudge**: new `dirty_after_merge` advisory (Classification
+  `advisory`, mirroring `cleanup_failed`) fires when the post-merge worktree is
+  still dirty; it names the target branch the caller now sits on and states that
+  git.merge does not switch back.
+- **Description strengthened** in `server.go`: states switch-to-and-land-on-target
+  (no switch-back) and clean-index-but-dirty-worktree-tolerated; kept
+  downstream-neutral per `shipped-surface-boundary.md`.
+- **Switch-failure path** (`git switch` error, the constraint): converted from a
+  bare `return result, err` to an actionable `switch_failed` diagnostic +
+  `blocked()`, so a now-permitted overlapping change surfaces with command and
+  raw output rather than a bare string.
+
+Decisions taken (recorded, not escalated):
+- `checkWorktree` reads the porcelain status **untrimmed** via `runner.RunGit`
+  directly, because the `run()` closure's `TrimSpace` strips the first entry's
+  leading index-column space and would misread ` M` (unstaged) as `M ` (staged).
+  This was found by a failing test, not from the ticket.
+- Reused the single `dirty_worktree` code for both the index and unmerged
+  reasons, matching the ticket's "only changes the `dirty_worktree` branch".
+
+Verification:
+- `go test ./...` in `agents-plugin-tool` — all packages ok.
+- `go vet ./...` — clean.
+- New `TestImplMergeTolerantWorktree` covers all six required scenarios plus a
+  both-added (`AA`) unmerged subcase; `TestImplMergeNoFFAndCleanup` gained a
+  `len(Diagnostics)==0` negative assertion for the nudge. Existing refusal tests
+  updated from an untracked trigger to a staged trigger (behavior change → test
+  change).
+
+Review: partitioned correctness + test, two rounds. Round 1 correctness clean;
+round 1 test raised two Minor gaps (untested `DD`/`AA` branch; no clean-merge
+nudge negative), both fixed in `8d25d155`. Round 2 verified both fixed, no
+Critical/Important open.
