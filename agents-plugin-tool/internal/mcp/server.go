@@ -1144,12 +1144,14 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// above). wsdoc.SparseCheckoutActive is the cheap gate (no index
 		// enumeration), matching #260810's guardrail that the unscoped path
 		// (the common case) pays no extra cost.
+		expectedBranch, _ := params.Arguments["expected_branch"].(string)
 		result, err := wsgit.Client{Runner: wsgit.ExecRunner{}, Verifier: verifyAdapter}.Commit(context.Background(), root, wsgit.CommitOptions{
 			Paths:             stringList(params.Arguments["paths"]),
 			Title:             title,
 			Description:       description,
 			AIContext:         aiContext,
 			UpdatedTickets:    stringList(params.Arguments["updated_tickets"]),
+			ExpectedBranch:    expectedBranch,
 			SparseScopeActive: wsdoc.SparseCheckoutActive(root),
 		})
 		if wantsJSON(params.Arguments) {
@@ -3564,7 +3566,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "git.merge",
-			"description": "Lead-only. Merge an exact local source branch into an exact local target using --no-ff. Delete merged impl/* and goal/* sources; preserve other sources. Main/master return policy_blocked diagnostics by default; explicit release-target acknowledgement bound to inspected source_oid and target_oid permits retry. Must-resolve safety findings cannot be waived. Conflicts remain on the target for lead-delegate to resolve. Defaults to text; use format=json for structured output.",
+			"description": "Lead-only. Merge an exact local source branch into an exact local target using --no-ff. Switches to and leaves the caller on the target branch (no switch-back), so any tolerated worktree change travels to the target checkout and is reported as a non-blocking advisory. Tolerates a dirty worktree but requires a clean index: staged changes and unmerged paths are refused, while unstaged tracked modifications and untracked files are allowed (git's native switch/merge still refuses one that overlaps a merged path). Delete merged impl/* and goal/* sources; preserve other sources. Main/master return policy_blocked diagnostics by default; explicit release-target acknowledgement bound to inspected source_oid and target_oid permits retry. Must-resolve safety findings cannot be waived. Conflicts remain on the target for lead-delegate to resolve. Defaults to text; use format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -3593,9 +3595,10 @@ func tools() []map[string]any {
 					"description":     stringProperty("Optional commit message body before AI Context."),
 					"ai_context":      stringArrayProperty("Required AI Context bullets for the commit message."),
 					"updated_tickets": stringArrayProperty("Optional ticket update summaries. If omitted, staged ticket moves and Result/Edition headings are detected."),
+					"expected_branch": stringProperty("The branch you currently remember being on — the one you believe this commit should land on. Fill it from what you already know, not by reading HEAD now: if you cannot recall it, stop and confirm whether you should be committing here at all rather than reflexively resolving the current branch to satisfy the field. This is a safety guard: the commit is refused, with nothing staged or committed, when your believed branch differs from the actual checkout (for example a parallel session switched this shared worktree) or when HEAD is detached."),
 					"format":          stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
-				"required": []string{"paths", "title", "ai_context"},
+				"required": []string{"paths", "title", "ai_context", "expected_branch"},
 			},
 		},
 		{

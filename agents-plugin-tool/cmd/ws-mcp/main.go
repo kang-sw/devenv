@@ -434,6 +434,7 @@ func gitCommit(args []string) {
 	title := fs.String("title", "", "single-line commit title")
 	description := fs.String("description", "", "commit description body")
 	descriptionFile := fs.String("description-file", "", "commit description file; use - for stdin")
+	expectedBranch := fs.String("expected-branch", "", "branch you believe you are on; the commit is refused if the actual checkout differs or HEAD is detached")
 	format := fs.String("format", "", `output format: text or json`)
 	var paths multiFlag
 	var aiContext multiFlag
@@ -458,6 +459,7 @@ func gitCommit(args []string) {
 		Description:    body,
 		AIContext:      aiContext,
 		UpdatedTickets: updatedTickets,
+		ExpectedBranch: *expectedBranch,
 	})
 	if outputJSON(*format) {
 		printJSONOrFatal("git commit", result, err)

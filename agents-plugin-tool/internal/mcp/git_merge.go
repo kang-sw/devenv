@@ -175,11 +175,19 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 	}
 	checkWorktree := func() {
 		args := []string{"status", "--porcelain=v1", "--untracked-files=all"}
-		status, err := run(args...)
+		// Read the porcelain status untrimmed: the trimming run() applies would
+		// strip the first entry's leading index-column space and misread an
+		// unstaged modification as a staged one.
+		rawStatus, err := runner.RunGit(ctx, root, args...)
+		status := string(rawStatus)
 		if err != nil {
 			gitFailure("worktree_inspection", "Cannot inspect worktree and index", status, err, args...)
-		} else if status != "" {
-			add("dirty_worktree", "git.merge requires a clean worktree and index", "Commit or stash the worktree and index changes, then retry git.merge.")
+		} else if reason := indexBlocksMerge(status); reason != "" {
+			// Only a dirty index (staged changes) or unmerged paths block: git's
+			// own --commit merge fails closed on exactly these. Non-overlapping
+			// unstaged and untracked changes are tolerated and delegated to git's
+			// native switch/merge guards, which refuse the overlapping case.
+			add("dirty_worktree", reason, "Commit or stash the staged/unmerged changes, then retry git.merge. Unstaged tracked modifications and untracked files are allowed and travel to the target checkout.")
 		}
 		args = []string{"rev-parse", "--verify", "--quiet", "MERGE_HEAD"}
 		out, err := run(args...)
@@ -271,8 +279,13 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 	if len(result.Diagnostics) > 0 {
 		return blocked()
 	}
-	if _, err := run("switch", "--no-guess", "--", mergeRoot); err != nil {
-		return result, err
+	if out, err := run("switch", "--no-guess", "--", mergeRoot); err != nil {
+		// With the worktree gate narrowed, an allowed unstaged/untracked change
+		// that overlaps a merged path now reaches this switch and git refuses it
+		// here. Surface an actionable diagnostic instead of a bare error string.
+		gitFailure("switch_failed", "Cannot switch to the merge target "+mergeRoot+"; a working-tree change likely overlaps it", out, err, "switch", "--no-guess", "--", mergeRoot)
+		result.Diagnostics[len(result.Diagnostics)-1].Resolution = "Commit, stash, or revert the overlapping working-tree change, then retry git.merge."
+		return blocked()
 	}
 	checkedOut, err := run("symbolic-ref", "--quiet", "HEAD")
 	if err != nil {
@@ -300,6 +313,23 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 		return result, err
 	}
 	result.Status = "merged"
+	// The tool does not switch back: any tolerated unstaged/untracked change
+	// travelled with the internal switch and is now stranded on the target
+	// checkout. Surface a non-blocking advisory naming the branch the caller
+	// now sits on so the leftover is not silently lost.
+	if dirty, statusErr := run("status", "--porcelain=v1", "--untracked-files=all"); statusErr == nil && dirty != "" {
+		n := len(strings.Split(dirty, "\n"))
+		entries := "entries"
+		if n == 1 {
+			entries = "entry"
+		}
+		result.Diagnostics = append(result.Diagnostics, implMergeDiagnostic{
+			Code:           "dirty_after_merge",
+			Classification: "advisory",
+			Reason:         fmt.Sprintf("Merge landed; you are now on %q (git.merge does not switch back); %d dirty working-tree %s remain here.", mergeRoot, n, entries),
+			Resolution:     "Verify these leftover changes belong on the target branch; commit, stash, or move them as needed.",
+		})
+	}
 	if !isImpl && !strings.HasPrefix(branch, "goal/") {
 		return result, nil
 	}
@@ -321,6 +351,35 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 		result.BranchDeleted = true
 	}
 	return result, nil
+}
+
+// indexBlocksMerge classifies `git status --porcelain=v1` output for the merge
+// gate. It returns a non-empty refusal reason only for a dirty index (any staged
+// change) or an unmerged path — the exact cases git's own `merge --commit`
+// refuses. Unstaged tracked modifications (only the second status column set) and
+// untracked/ignored files are tolerated; git's switch/merge guards still refuse
+// the ones that overlap a merged path. An empty return means the index is clean
+// enough to merge.
+func indexBlocksMerge(status string) string {
+	for _, line := range strings.Split(status, "\n") {
+		if len(line) < 2 {
+			continue
+		}
+		x, y := line[0], line[1]
+		if x == '?' || x == '!' {
+			// Untracked or ignored: allowed.
+			continue
+		}
+		// Unmerged entries per git status: any 'U', plus the DD and AA pairs.
+		if x == 'U' || y == 'U' || (x == 'D' && y == 'D') || (x == 'A' && y == 'A') {
+			return "git.merge refuses unmerged paths"
+		}
+		if x != ' ' {
+			// A set first (index) column is a staged change.
+			return "git.merge requires a clean index"
+		}
+	}
+	return ""
 }
 
 func validMergeOID(oid string) bool {

@@ -413,12 +413,14 @@ func TestGitCommitCLIRejectsRetiredDocTrailerFlags(t *testing.T) {
 		}
 	}
 
+	branch := strings.TrimSpace(string(runGitOutput(t, root, "symbolic-ref", "--short", "HEAD")))
 	cmd := exec.Command(bin,
 		"git", "commit",
 		"--root", root,
 		"--path", "file.txt",
 		"--title", "test: cli commit sections",
 		"--ai-context", "User intent: verify CLI commit sections.",
+		"--expected-branch", branch,
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

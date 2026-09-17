@@ -225,6 +225,7 @@ func TestMergeBaseRequiresRevisions(t *testing.T) {
 
 func TestCommitStagesExplicitPathsAndBuildsMessage(t *testing.T) {
 	runner := &sequenceRunner{outs: [][]byte{
+		[]byte("main\n"), // symbolic-ref --short HEAD (branch guard)
 		{},
 		{},
 		[]byte("1 A. N... 100644 100644 100644 aaa bbb src/file.go\n"),
@@ -234,10 +235,11 @@ func TestCommitStagesExplicitPathsAndBuildsMessage(t *testing.T) {
 		[]byte("abc123\n"),
 	}}
 	result, err := (Client{Runner: runner}).Commit(context.Background(), "/repo", CommitOptions{
-		Paths:       []string{"src"},
-		Title:       "feat(ws-mcp): add commit tool",
-		Description: "Builds a structured workflow commit.",
-		AIContext:   []string{"User intent: make commit creation portable.", "Verification: unit test."},
+		Paths:          []string{"src"},
+		Title:          "feat(ws-mcp): add commit tool",
+		Description:    "Builds a structured workflow commit.",
+		AIContext:      []string{"User intent: make commit creation portable.", "Verification: unit test."},
+		ExpectedBranch: "main",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -249,10 +251,10 @@ func TestCommitStagesExplicitPathsAndBuildsMessage(t *testing.T) {
 		t.Fatalf("ticket changes = %#v", result.TicketChanges)
 	}
 	wantFirst := []string{"add", "-A", "--", "src"}
-	if !reflect.DeepEqual(runner.calls[1].args, wantFirst) {
-		t.Fatalf("add args = %#v, want %#v", runner.calls[1].args, wantFirst)
+	if !reflect.DeepEqual(runner.calls[2].args, wantFirst) {
+		t.Fatalf("add args = %#v, want %#v", runner.calls[2].args, wantFirst)
 	}
-	commitArgs := runner.calls[5].args
+	commitArgs := runner.calls[6].args
 	if len(commitArgs) != 3 || commitArgs[0] != "commit" || commitArgs[1] != "-m" {
 		t.Fatalf("commit args = %#v", commitArgs)
 	}
@@ -269,6 +271,7 @@ func TestCommitStagesExplicitPathsAndBuildsMessage(t *testing.T) {
 
 func TestCommitAcceptsLargeAIContextArray(t *testing.T) {
 	runner := &sequenceRunner{outs: [][]byte{
+		[]byte("main\n"), // symbolic-ref --short HEAD (branch guard)
 		{},
 		{},
 		[]byte("1 A. N... 100644 100644 100644 aaa bbb src/file.go\n"),
@@ -282,9 +285,10 @@ func TestCommitAcceptsLargeAIContextArray(t *testing.T) {
 		aiContext = append(aiContext, fmt.Sprintf("Entry %d: %s", i, strings.TrimSpace(strings.Repeat("context detail ", 20))))
 	}
 	result, err := (Client{Runner: runner}).Commit(context.Background(), "/repo", CommitOptions{
-		Paths:     []string{"src"},
-		Title:     "feat(ws-mcp): accept a large ai_context array",
-		AIContext: aiContext,
+		Paths:          []string{"src"},
+		Title:          "feat(ws-mcp): accept a large ai_context array",
+		AIContext:      aiContext,
+		ExpectedBranch: "main",
 	})
 	if err != nil {
 		t.Fatalf("Commit error = %v, want nil", err)
@@ -292,7 +296,7 @@ func TestCommitAcceptsLargeAIContextArray(t *testing.T) {
 	if result.Hash != "abc123" {
 		t.Fatalf("result = %#v", result)
 	}
-	commitArgs := runner.calls[5].args
+	commitArgs := runner.calls[6].args
 	if len(commitArgs) != 3 || commitArgs[0] != "commit" || commitArgs[1] != "-m" {
 		t.Fatalf("commit args = %#v", commitArgs)
 	}
@@ -336,17 +340,70 @@ func TestCommitMessageRendersOnlyAIContextAndTicketSections(t *testing.T) {
 
 func TestCommitRefusesUnrelatedStagedPaths(t *testing.T) {
 	runner := &sequenceRunner{outs: [][]byte{
+		[]byte("main\n"), // symbolic-ref --short HEAD (branch guard)
 		{},
 		{},
 		[]byte("1 M. N... 100644 100644 100644 aaa bbb src/file.go\n1 M. N... 100644 100644 100644 aaa bbb docs/note.md\n"),
 	}}
 	_, err := (Client{Runner: runner}).Commit(context.Background(), "/repo", CommitOptions{
-		Paths:     []string{"src/file.go"},
-		Title:     "feat: scoped",
-		AIContext: []string{"User intent: scoped commit."},
+		Paths:          []string{"src/file.go"},
+		Title:          "feat: scoped",
+		AIContext:      []string{"User intent: scoped commit."},
+		ExpectedBranch: "main",
 	})
 	if err == nil || !strings.Contains(err.Error(), "unrelated staged path") {
 		t.Fatalf("Commit error = %v, want unrelated staged path", err)
+	}
+}
+
+// TestCommitRefusesBranchMismatch pins the expected_branch guard: when the
+// actual checkout differs from the believed branch, Commit refuses before any
+// staging mutation and reports both branch names.
+func TestCommitRefusesBranchMismatch(t *testing.T) {
+	runner := &sequenceRunner{outs: [][]byte{
+		[]byte("impl/develop/other\n"), // symbolic-ref: actual branch differs from believed
+	}}
+	_, err := (Client{Runner: runner}).Commit(context.Background(), "/repo", CommitOptions{
+		Paths:          []string{"src/file.go"},
+		Title:          "feat: guarded",
+		AIContext:      []string{"User intent: guarded commit."},
+		ExpectedBranch: "develop",
+	})
+	if err == nil {
+		t.Fatal("Commit did not refuse a believed/actual branch mismatch")
+	}
+	for _, want := range []string{"develop", "impl/develop/other", "believed", "actual"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Commit error = %v, want it to mention %q", err, want)
+		}
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("runner.calls = %#v, want exactly 1 (branch guard) — a mismatch must refuse before any staging mutation", runner.calls)
+	}
+}
+
+// TestCommitRefusesDetachedHead pins the detached-HEAD arm of the guard:
+// `git symbolic-ref --quiet` fails with empty output on a detached HEAD, which
+// Commit treats as no current branch and refuses before any staging mutation.
+func TestCommitRefusesDetachedHead(t *testing.T) {
+	runner := &sequenceRunner{
+		outs: [][]byte{nil},
+		errs: []error{errors.New("exit status 1")}, // symbolic-ref --quiet exits non-zero on detached HEAD
+	}
+	_, err := (Client{Runner: runner}).Commit(context.Background(), "/repo", CommitOptions{
+		Paths:          []string{"src/file.go"},
+		Title:          "feat: guarded",
+		AIContext:      []string{"User intent: guarded commit."},
+		ExpectedBranch: "develop",
+	})
+	if err == nil {
+		t.Fatal("Commit did not refuse a detached HEAD")
+	}
+	if !strings.Contains(err.Error(), "detached") {
+		t.Fatalf("Commit error = %v, want it to mention a detached HEAD", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("runner.calls = %#v, want exactly 1 (branch guard) — a detached HEAD must refuse before any staging mutation", runner.calls)
 	}
 }
 
@@ -575,8 +632,9 @@ func TestCommitPassesSparseScopeActiveThroughToStagingCommand(t *testing.T) {
 	root := "/repo"
 	ticketPath := "ai-docs/tickets/idea/260810-idea-demo.md"
 	runner := &sequenceRunner{outs: [][]byte{
-		{}, // pre-status (nothing staged yet)
-		{}, // add -A --sparse --
+		[]byte("main\n"), // symbolic-ref --short HEAD (branch guard)
+		{},               // pre-status (nothing staged yet)
+		{},               // add -A --sparse --
 		[]byte("1 A. N... 100644 100644 100644 aaa bbb " + ticketPath + "\n"), // post-status
 		{},                 // detectTicketChanges name-status
 		{},                 // detectTicketChanges unified diff
@@ -587,6 +645,7 @@ func TestCommitPassesSparseScopeActiveThroughToStagingCommand(t *testing.T) {
 		Paths:             []string{ticketPath},
 		Title:             "docs(ticket): capture idea",
 		AIContext:         []string{"User intent: prove SparseScopeActive reaches git add."},
+		ExpectedBranch:    "main",
 		SparseScopeActive: true,
 	})
 	if err != nil {
@@ -595,10 +654,10 @@ func TestCommitPassesSparseScopeActiveThroughToStagingCommand(t *testing.T) {
 	if result.Hash != "abc123" {
 		t.Fatalf("result.Hash = %q, want abc123", result.Hash)
 	}
-	if len(runner.calls) < 2 {
-		t.Fatalf("runner.calls = %#v, want at least pre-status and add", runner.calls)
+	if len(runner.calls) < 3 {
+		t.Fatalf("runner.calls = %#v, want at least branch guard, pre-status and add", runner.calls)
 	}
-	addCall := runner.calls[1]
+	addCall := runner.calls[2]
 	want := []string{"add", "-A", "--sparse", "--", ticketPath}
 	if !reflect.DeepEqual(addCall.args, want) {
 		t.Fatalf("add call args = %#v, want %#v", addCall.args, want)
@@ -636,10 +695,16 @@ func TestCommitRequiresAIContextAndRelativePaths(t *testing.T) {
 			t.Fatalf("normalize error = %v, want all-blank condition for a single empty-string entry", err)
 		}
 	})
-	_, err := normalizeCommitOptions(CommitOptions{Paths: []string{"../outside"}, Title: "feat: x", AIContext: []string{"context"}})
+	_, err := normalizeCommitOptions(CommitOptions{Paths: []string{"../outside"}, Title: "feat: x", AIContext: []string{"context"}, ExpectedBranch: "main"})
 	if err == nil || !strings.Contains(err.Error(), "inside the repository") {
 		t.Fatalf("normalize error = %v, want repository boundary", err)
 	}
+	t.Run("missing expected_branch", func(t *testing.T) {
+		_, err := normalizeCommitOptions(CommitOptions{Paths: []string{"src"}, Title: "feat: x", AIContext: []string{"context"}})
+		if err == nil || !strings.Contains(err.Error(), "expected_branch is required") {
+			t.Fatalf("normalize error = %v, want expected_branch required condition", err)
+		}
+	})
 }
 
 func TestParseTicketNameStatusDetectsMoves(t *testing.T) {
@@ -697,6 +762,7 @@ func TestParseTicketNameStatusDoesNotReconstructAmbiguousAddDeleteMove(t *testin
 
 func TestCommitMergesResultHeadingIntoReconstructedAddDeleteMove(t *testing.T) {
 	runner := &sequenceRunner{outs: [][]byte{
+		[]byte("main\n"), // symbolic-ref --short HEAD (branch guard)
 		{},
 		{},
 		[]byte("1 A. N... 100644 100644 100644 aaa bbb ai-docs/tickets/.done/260503-feat-demo.md\n1 D. N... 100644 000000 000000 aaa 0000000000000000000000000000000000000000 ai-docs/tickets/todo/260503-feat-demo.md\n"),
@@ -706,9 +772,10 @@ func TestCommitMergesResultHeadingIntoReconstructedAddDeleteMove(t *testing.T) {
 		[]byte("abc123\n"),
 	}}
 	result, err := (Client{Runner: runner}).Commit(context.Background(), "/repo", CommitOptions{
-		Paths:     []string{"ai-docs/tickets"},
-		Title:     "docs(ticket): close demo ticket",
-		AIContext: []string{"User intent: close the workflow ticket."},
+		Paths:          []string{"ai-docs/tickets"},
+		Title:          "docs(ticket): close demo ticket",
+		AIContext:      []string{"User intent: close the workflow ticket."},
+		ExpectedBranch: "main",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -720,7 +787,7 @@ func TestCommitMergesResultHeadingIntoReconstructedAddDeleteMove(t *testing.T) {
 	if change.FromStatus != "todo" || change.ToStatus != ".done" || !change.ResultAdded || change.ResultHeading != "### Result (abc123) - 2026-05-04" {
 		t.Fatalf("ticket change = %#v", change)
 	}
-	message := runner.calls[5].args[2]
+	message := runner.calls[6].args[2]
 	if !strings.Contains(message, "260503-feat-demo: moved todo -> .done and added ### Result") {
 		t.Fatalf("message missing reconstructed move summary:\n%s", message)
 	}
@@ -728,6 +795,7 @@ func TestCommitMergesResultHeadingIntoReconstructedAddDeleteMove(t *testing.T) {
 
 func TestCommitKeepsAmbiguousAddDeleteResultHeadingNonMove(t *testing.T) {
 	runner := &sequenceRunner{outs: [][]byte{
+		[]byte("main\n"), // symbolic-ref --short HEAD (branch guard)
 		{},
 		{},
 		[]byte("1 A. N... 100644 100644 100644 aaa bbb ai-docs/tickets/.done/260503-feat-demo.md\n1 D. N... 100644 000000 000000 aaa 0000000000000000000000000000000000000000 ai-docs/tickets/todo/260503-feat-demo.md\n1 D. N... 100644 000000 000000 aaa 0000000000000000000000000000000000000000 ai-docs/tickets/ready/260503-feat-demo.md\n"),
@@ -742,14 +810,15 @@ func TestCommitKeepsAmbiguousAddDeleteResultHeadingNonMove(t *testing.T) {
 		[]byte("abc123\n"),
 	}}
 	_, err := (Client{Runner: runner}).Commit(context.Background(), "/repo", CommitOptions{
-		Paths:     []string{"ai-docs/tickets"},
-		Title:     "docs(ticket): update ambiguous ticket records",
-		AIContext: []string{"User intent: preserve ambiguous ticket summary behavior."},
+		Paths:          []string{"ai-docs/tickets"},
+		Title:          "docs(ticket): update ambiguous ticket records",
+		AIContext:      []string{"User intent: preserve ambiguous ticket summary behavior."},
+		ExpectedBranch: "main",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	message := runner.calls[5].args[2]
+	message := runner.calls[6].args[2]
 	if strings.Contains(message, "moved") {
 		t.Fatalf("ambiguous add/delete emitted move summary:\n%s", message)
 	}
@@ -828,8 +897,9 @@ func TestCommitBlockedByVerifierNeverReachesCommit(t *testing.T) {
 	mustWriteGitTestFixture(t, root, ticketPath, "---\ntitle: Bad\n---\n\nBody.\n")
 
 	runner := &sequenceRunner{outs: [][]byte{
-		{}, // pre-status
-		{}, // add
+		[]byte("main\n"), // symbolic-ref --short HEAD (branch guard)
+		{},               // pre-status
+		{},               // add
 		[]byte("1 A. N... 100644 100644 100644 aaa bbb " + ticketPath + "\n"), // post-status
 	}}
 	verifyErr := errors.New("ticket verify failed: stem does not match the ticket stem pattern")
@@ -844,15 +914,16 @@ func TestCommitBlockedByVerifierNeverReachesCommit(t *testing.T) {
 	}}
 
 	_, err := client.Commit(context.Background(), root, CommitOptions{
-		Paths:     []string{ticketPath},
-		Title:     "test: blocked by verifier",
-		AIContext: []string{"User intent: prove the commit gate blocks an invalid ticket."},
+		Paths:          []string{ticketPath},
+		Title:          "test: blocked by verifier",
+		AIContext:      []string{"User intent: prove the commit gate blocks an invalid ticket."},
+		ExpectedBranch: "main",
 	})
 	if !errors.Is(err, verifyErr) {
 		t.Fatalf("Commit error = %v, want %v", err, verifyErr)
 	}
-	if len(runner.calls) != 3 {
-		t.Fatalf("runner.calls = %#v, want exactly 3 (pre-status, add, post-status) — verifier must block before ticket-change detection or `git commit`", runner.calls)
+	if len(runner.calls) != 4 {
+		t.Fatalf("runner.calls = %#v, want exactly 4 (branch guard, pre-status, add, post-status) — verifier must block before ticket-change detection or `git commit`", runner.calls)
 	}
 	for _, call := range runner.calls {
 		if len(call.args) > 0 && call.args[0] == "commit" {
@@ -872,8 +943,9 @@ func TestCommitVetoDiscardsAdvisoriesAlongsideError(t *testing.T) {
 	mustWriteGitTestFixture(t, root, ticketPath, "---\ntitle: Bad\n---\n\nBody.\n")
 
 	runner := &sequenceRunner{outs: [][]byte{
-		{}, // pre-status
-		{}, // add
+		[]byte("main\n"), // symbolic-ref --short HEAD (branch guard)
+		{},               // pre-status
+		{},               // add
 		[]byte("1 A. N... 100644 100644 100644 aaa bbb " + ticketPath + "\n"), // post-status
 	}}
 	verifyErr := errors.New("ticket verify failed: stem does not match the ticket stem pattern")
@@ -882,9 +954,10 @@ func TestCommitVetoDiscardsAdvisoriesAlongsideError(t *testing.T) {
 	}}
 
 	result, err := client.Commit(context.Background(), root, CommitOptions{
-		Paths:     []string{ticketPath},
-		Title:     "test: veto discards advisories",
-		AIContext: []string{"User intent: prove a veto's advisories never leak into CommitResult."},
+		Paths:          []string{ticketPath},
+		Title:          "test: veto discards advisories",
+		AIContext:      []string{"User intent: prove a veto's advisories never leak into CommitResult."},
+		ExpectedBranch: "main",
 	})
 	if !errors.Is(err, verifyErr) {
 		t.Fatalf("Commit error = %v, want %v", err, verifyErr)
@@ -904,8 +977,9 @@ func TestCommitProceedsWhenVerifierNilDefaultsToNoOp(t *testing.T) {
 	mustWriteGitTestFixture(t, root, ticketPath, "---\ntitle: Demo\n---\n\nBody.\n")
 
 	runner := &sequenceRunner{outs: [][]byte{
-		{}, // pre-status
-		{}, // add
+		[]byte("main\n"), // symbolic-ref --short HEAD (branch guard)
+		{},               // pre-status
+		{},               // add
 		[]byte("1 A. N... 100644 100644 100644 aaa bbb " + ticketPath + "\n"), // post-status
 		{},                 // detectTicketChanges name-status
 		{},                 // detectTicketChanges unified diff
@@ -915,9 +989,10 @@ func TestCommitProceedsWhenVerifierNilDefaultsToNoOp(t *testing.T) {
 	client := Client{Runner: runner}
 
 	result, err := client.Commit(context.Background(), root, CommitOptions{
-		Paths:     []string{ticketPath},
-		Title:     "test: nil verifier is a no-op",
-		AIContext: []string{"User intent: prove nil Verifier does not change existing Commit behavior."},
+		Paths:          []string{ticketPath},
+		Title:          "test: nil verifier is a no-op",
+		AIContext:      []string{"User intent: prove nil Verifier does not change existing Commit behavior."},
+		ExpectedBranch: "main",
 	})
 	if err != nil {
 		t.Fatalf("Commit returned error with nil Verifier: %v", err)
@@ -925,8 +1000,8 @@ func TestCommitProceedsWhenVerifierNilDefaultsToNoOp(t *testing.T) {
 	if result.Hash != "abc123" {
 		t.Fatalf("result.Hash = %q, want abc123", result.Hash)
 	}
-	if len(runner.calls) != 7 || runner.calls[5].args[0] != "commit" {
-		t.Fatalf("runner.calls = %#v, want `git commit` to run at call index 5", runner.calls)
+	if len(runner.calls) != 8 || runner.calls[6].args[0] != "commit" {
+		t.Fatalf("runner.calls = %#v, want `git commit` to run at call index 6", runner.calls)
 	}
 }
 
@@ -940,6 +1015,7 @@ func TestCommitPromotionVerifierSeesOnlyDestinationPath(t *testing.T) {
 	preStatus := "1 .D N... 100644 100644 100644 aaa bbb ai-docs/tickets/todo/260503-feat-demo.md\n? ai-docs/tickets/ready/260503-feat-demo.md\n"
 	postStatus := "2 R. N... 100644 100644 100644 aaa bbb R100 ai-docs/tickets/ready/260503-feat-demo.md\tai-docs/tickets/todo/260503-feat-demo.md\n"
 	runner := &sequenceRunner{outs: [][]byte{
+		[]byte("main\n"),   // symbolic-ref --short HEAD (branch guard)
 		[]byte(preStatus),  // pre-status
 		{},                 // add ready/...
 		{},                 // rm --cached todo/...
@@ -959,9 +1035,10 @@ func TestCommitPromotionVerifierSeesOnlyDestinationPath(t *testing.T) {
 	}}
 
 	result, err := client.Commit(context.Background(), root, CommitOptions{
-		Paths:     []string{"ai-docs/tickets/ready/260503-feat-demo.md"},
-		Title:     "docs(ticket): promote demo ticket",
-		AIContext: []string{"User intent: promote a ticket from todo to ready."},
+		Paths:          []string{"ai-docs/tickets/ready/260503-feat-demo.md"},
+		Title:          "docs(ticket): promote demo ticket",
+		AIContext:      []string{"User intent: promote a ticket from todo to ready."},
+		ExpectedBranch: "main",
 	})
 	if err != nil {
 		t.Fatalf("Commit returned error: %v", err)
@@ -983,6 +1060,7 @@ func TestCommitCloseVerifierSeesOnlyDestinationPath(t *testing.T) {
 	preStatus := "1 .D N... 100644 100644 100644 aaa bbb ai-docs/tickets/todo/260503-feat-demo.md\n? ai-docs/tickets/.dropped/260503-feat-demo.md\n"
 	postStatus := "2 R. N... 100644 100644 100644 aaa bbb R100 ai-docs/tickets/.dropped/260503-feat-demo.md\tai-docs/tickets/todo/260503-feat-demo.md\n"
 	runner := &sequenceRunner{outs: [][]byte{
+		[]byte("main\n"), // symbolic-ref --short HEAD (branch guard)
 		[]byte(preStatus),
 		{},
 		{},
@@ -999,9 +1077,10 @@ func TestCommitCloseVerifierSeesOnlyDestinationPath(t *testing.T) {
 	}}
 
 	result, err := client.Commit(context.Background(), root, CommitOptions{
-		Paths:     []string{"ai-docs/tickets/.dropped/260503-feat-demo.md"},
-		Title:     "docs(ticket): drop demo ticket",
-		AIContext: []string{"User intent: close a ticket by dropping it."},
+		Paths:          []string{"ai-docs/tickets/.dropped/260503-feat-demo.md"},
+		Title:          "docs(ticket): drop demo ticket",
+		AIContext:      []string{"User intent: close a ticket by dropping it."},
+		ExpectedBranch: "main",
 	})
 	if err != nil {
 		t.Fatalf("Commit returned error: %v", err)
@@ -1025,6 +1104,7 @@ func TestCommitOutrightDeletionSkipsVerifierEntirely(t *testing.T) {
 	preStatus := "1 .D N... 100644 100644 100644 aaa bbb ai-docs/tickets/idea/260503-feat-demo.md\n"
 	postStatus := "1 D. N... 100644 000000 000000 aaa 0000000000000000000000000000000000000000 ai-docs/tickets/idea/260503-feat-demo.md\n"
 	runner := &sequenceRunner{outs: [][]byte{
+		[]byte("main\n"), // symbolic-ref --short HEAD (branch guard)
 		[]byte(preStatus),
 		{},
 		[]byte(postStatus),
@@ -1040,9 +1120,10 @@ func TestCommitOutrightDeletionSkipsVerifierEntirely(t *testing.T) {
 	}}
 
 	result, err := client.Commit(context.Background(), root, CommitOptions{
-		Paths:     []string{"ai-docs/tickets/idea/260503-feat-demo.md"},
-		Title:     "docs(ticket): delete demo ticket",
-		AIContext: []string{"User intent: delete a ticket outright."},
+		Paths:          []string{"ai-docs/tickets/idea/260503-feat-demo.md"},
+		Title:          "docs(ticket): delete demo ticket",
+		AIContext:      []string{"User intent: delete a ticket outright."},
+		ExpectedBranch: "main",
 	})
 	if err != nil {
 		t.Fatalf("Commit returned error: %v", err)
@@ -1077,6 +1158,7 @@ func TestCommitDivergentCaseExcludesRenameOldPathEvenWhenCallerPassedIt(t *testi
 		"",
 	}, "\n")
 	runner := &sequenceRunner{outs: [][]byte{
+		[]byte("main\n"), // symbolic-ref --short HEAD (branch guard)
 		[]byte(preStatus),
 		{},
 		{},
@@ -1098,8 +1180,9 @@ func TestCommitDivergentCaseExcludesRenameOldPathEvenWhenCallerPassedIt(t *testi
 			"ai-docs/tickets/ready/260503-feat-alpha.md",
 			"ai-docs/tickets/todo/260504-feat-beta.md",
 		},
-		Title:     "docs(ticket): promote alpha and edit beta",
-		AIContext: []string{"User intent: promote one ticket while editing another in the same commit."},
+		Title:          "docs(ticket): promote alpha and edit beta",
+		AIContext:      []string{"User intent: promote one ticket while editing another in the same commit."},
+		ExpectedBranch: "main",
 	})
 	if err != nil {
 		t.Fatalf("Commit returned error: %v", err)
@@ -1121,8 +1204,9 @@ func TestCommitDivergentCaseExcludesRenameOldPathEvenWhenCallerPassedIt(t *testi
 func TestCommitStillRefusesUnrelatedStagedRenameOldPath(t *testing.T) {
 	postStatus := "2 R. N... 100644 100644 100644 aaa bbb R100 ai-docs/tickets/ready/260503-feat-alpha.md\tai-docs/tickets/todo/260503-feat-alpha.md\n"
 	runner := &sequenceRunner{outs: [][]byte{
-		{}, // pre-status
-		{}, // add
+		[]byte("main\n"), // symbolic-ref --short HEAD (branch guard)
+		{},               // pre-status
+		{},               // add
 		[]byte(postStatus),
 	}}
 	verifierCalled := false
@@ -1132,9 +1216,10 @@ func TestCommitStillRefusesUnrelatedStagedRenameOldPath(t *testing.T) {
 	}}
 
 	_, err := client.Commit(context.Background(), "/repo", CommitOptions{
-		Paths:     []string{"ai-docs/tickets/todo/260505-feat-gamma.md"},
-		Title:     "docs(ticket): unrelated commit",
-		AIContext: []string{"User intent: commit an unrelated ticket path."},
+		Paths:          []string{"ai-docs/tickets/todo/260505-feat-gamma.md"},
+		Title:          "docs(ticket): unrelated commit",
+		AIContext:      []string{"User intent: commit an unrelated ticket path."},
+		ExpectedBranch: "main",
 	})
 	if err == nil || !strings.Contains(err.Error(), "unrelated staged path") {
 		t.Fatalf("Commit error = %v, want unrelated staged path", err)
@@ -1142,8 +1227,8 @@ func TestCommitStillRefusesUnrelatedStagedRenameOldPath(t *testing.T) {
 	if verifierCalled {
 		t.Fatalf("Verifier was invoked despite an unrelated staged path blocking the commit")
 	}
-	if len(runner.calls) != 3 {
-		t.Fatalf("runner.calls = %#v, want exactly 3 (pre-status, add, post-status)", runner.calls)
+	if len(runner.calls) != 4 {
+		t.Fatalf("runner.calls = %#v, want exactly 4 (branch guard, pre-status, add, post-status)", runner.calls)
 	}
 }
 
@@ -1158,6 +1243,7 @@ func TestCommitIndexOnlyPathStillRefusesUnrelatedStagedRename(t *testing.T) {
 		"",
 	}, "\n")
 	runner := &sequenceRunner{outs: [][]byte{
+		[]byte("main\n"), // symbolic-ref --short HEAD (branch guard)
 		{},
 		{},
 		[]byte(postStatus),
@@ -1169,9 +1255,10 @@ func TestCommitIndexOnlyPathStillRefusesUnrelatedStagedRename(t *testing.T) {
 	}}
 
 	_, err := client.Commit(context.Background(), "/repo", CommitOptions{
-		Paths:     []string{"_index.md"},
-		Title:     "docs: update index",
-		AIContext: []string{"User intent: commit only the index while a ticket rename is separately staged."},
+		Paths:          []string{"_index.md"},
+		Title:          "docs: update index",
+		AIContext:      []string{"User intent: commit only the index while a ticket rename is separately staged."},
+		ExpectedBranch: "main",
 	})
 	if err == nil || !strings.Contains(err.Error(), "unrelated staged path") {
 		t.Fatalf("Commit error = %v, want unrelated staged path", err)
@@ -1188,6 +1275,7 @@ func TestCommitContentOnlyEditLeavesVerifierPathsUnmodified(t *testing.T) {
 	ticketPath := "ai-docs/tickets/todo/260503-feat-demo.md"
 	postStatus := "1 A. N... 100644 100644 100644 aaa bbb " + ticketPath + "\n"
 	runner := &sequenceRunner{outs: [][]byte{
+		[]byte("main\n"), // symbolic-ref --short HEAD (branch guard)
 		{},
 		{},
 		[]byte(postStatus),
@@ -1203,9 +1291,10 @@ func TestCommitContentOnlyEditLeavesVerifierPathsUnmodified(t *testing.T) {
 	}}
 
 	result, err := client.Commit(context.Background(), root, CommitOptions{
-		Paths:     []string{ticketPath},
-		Title:     "docs(ticket): edit demo ticket body",
-		AIContext: []string{"User intent: a plain content-only ticket edit."},
+		Paths:          []string{ticketPath},
+		Title:          "docs(ticket): edit demo ticket body",
+		AIContext:      []string{"User intent: a plain content-only ticket edit."},
+		ExpectedBranch: "main",
 	})
 	if err != nil {
 		t.Fatalf("Commit returned error: %v", err)
@@ -1253,10 +1342,12 @@ func TestCommitStagesCapturedIdeaTicketUnderSparseScopeThenSelfHides(t *testing.
 	mustWriteGitTestFixture(t, root, ticketPath, "# Demo Idea\n")
 
 	client := Client{Runner: ExecRunner{}}
+	branchName := strings.TrimSpace(string(sparseTestRunGitOutput(t, root, "rev-parse", "--abbrev-ref", "HEAD")))
 	result, err := client.Commit(context.Background(), root, CommitOptions{
 		Paths:             []string{ticketPath},
 		Title:             "docs(ticket): capture demo idea",
 		AIContext:         []string{"User intent: prove a hidden-idea/ capture stages and self-hides."},
+		ExpectedBranch:    branchName,
 		SparseScopeActive: true,
 	})
 	if err != nil {
