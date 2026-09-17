@@ -6,8 +6,9 @@ import (
 )
 
 // ScopedShow returns a View that includes ResolvedOverrides: one ScopedItem per
-// key that exists in any scope (session, project, global). Keys are deduplicated
-// by precedence, so only the winning scope for each key is reported.
+// key that exists in any scope (session, project, repo, global). Keys are
+// deduplicated by precedence, so only the winning scope for each key is reported.
+// The repo scope is enumerated only when opts.RepoRoot anchors a committed file.
 //
 // sessionKey may be empty; when empty the session scope is skipped.
 // r.sessionR must be set when a sessionKey is provided.

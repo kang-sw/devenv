@@ -64,6 +64,53 @@ func TestRepoScopeBelowProject(t *testing.T) {
 	}
 }
 
+// TestSessionScopeAboveRepo verifies a session override wins over the committed
+// repo value for the same key (session > repo), completing the precedence
+// ordering the ticket phase named (repo vs each other scope).
+func TestSessionScopeAboveRepo(t *testing.T) {
+	sess := newFakeSessionStore()
+	r, opts := newRepoTestResolver(t, sess)
+	const key = "ticket-assignee-aware"
+	const sessionKey = "test-session-key"
+
+	writeRepoConfig(t, opts.RepoRoot, map[string]string{key: "repo-value"})
+	if err := r.Set(key, "session-value", SetOptions{ExplicitScope: ScopeSession, SessionKey: sessionKey}); err != nil {
+		t.Fatalf("set session: %v", err)
+	}
+
+	rv, err := r.Get(sessionKey, key)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if rv.Value != "session-value" || rv.Scope != ScopeSession {
+		t.Fatalf("expected session-value/session, got %q/%q", rv.Value, rv.Scope)
+	}
+}
+
+// TestRepoScopeMalformedFileErrors verifies loadRepoConfig surfaces a parse
+// error (rather than silently treating a corrupt committed file as empty), so a
+// broken .ws-workflow/config.json fails loud instead of dropping every repo
+// override. This exercises repo.go's parse-error failure path.
+func TestRepoScopeMalformedFileErrors(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".ws-workflow")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{ not json"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	r := NewResolver(Options{
+		CacheHome:  t.TempDir(),
+		ConfigHome: t.TempDir(),
+		RepoRoot:   root,
+	}, nil, nil, nil)
+
+	if _, err := r.Get("", "any.key"); err == nil {
+		t.Fatalf("expected a parse error for malformed repo config, got nil")
+	}
+}
+
 // TestRepoScopeAboveGlobal verifies the committed repo value wins over a global
 // value for the same key (repo > global), so a committed project baseline
 // overrides a cross-project user default.
