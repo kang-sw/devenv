@@ -33,6 +33,15 @@ type TicketFindOptions struct {
 	// callers share this entry point, and a resolution caller must be able to
 	// ask for the whole board through it.
 	Resolve bool
+	// AssignedToEmail, when non-empty, hard-filters the discovery result to the
+	// tickets the given identity may take: assign-any tickets (no assignee) plus
+	// tickets whose assignee set contains this email (case-insensitive any-of).
+	// Others'-assigned tickets are omitted entirely — the selector never sees
+	// them. Empty (the default) applies no assignee filter, so every non-selector
+	// query keeps returning the whole board. The MCP layer only sets this when
+	// the ticket-assignee-aware flag is on and a current identity is known, so an
+	// off feature or an unidentifiable caller never narrows the queue.
+	AssignedToEmail string
 }
 
 type TicketStatusOptions struct {
@@ -89,6 +98,20 @@ type TicketInfo struct {
 	// heading suffix (a date, a `— RESOLVED ...` note) is returned uninterpreted
 	// for the caller to read the section and judge currency.
 	BlockedHeadings []string `json:"blocked_headings,omitempty"`
+	// Assignee holds the `assignee:` frontmatter emails, parsed on every
+	// projection from the same dual-shape (scalar or `- item` list) the parser
+	// already yields for plans/skeletons. An empty/absent assignee means
+	// assign-any (anyone may take the ticket), so every pre-feature ticket is
+	// backward compatible. It carries no ownership judgment by itself — that is
+	// the computed AssigneeGate, populated only when the feature is on.
+	Assignee []string `json:"assignee,omitempty"`
+	// AssigneeGate is the point-in-time ownership comparison between the current
+	// git identity and Assignee. Like DispatchBlocked it is a computed field the
+	// MCP layer fills in (it needs the caller's git user.email and the
+	// ticket-assignee-aware project flag, neither of which wsdoc reads); it is
+	// absent on every projection unless the feature is on, so an off feature adds
+	// nothing to any output.
+	AssigneeGate *AssigneeGate `json:"assignee_gate,omitempty"`
 }
 
 type TicketPhase struct {
@@ -117,6 +140,7 @@ func TicketsFind(root string, opts TicketFindOptions) ([]TicketInfo, error) {
 	query := strings.TrimSpace(opts.Query)
 	ticketStem := strings.TrimSpace(opts.TicketStem)
 	mentions := strings.TrimSpace(opts.MentionsTicketStem)
+	assignedTo := strings.TrimSpace(opts.AssignedToEmail)
 	if ticketStem != "" && !ticketStemRE.MatchString(ticketStem) {
 		return nil, fmt.Errorf("ticket_stem must be a ticket stem")
 	}
@@ -139,6 +163,12 @@ func TicketsFind(root string, opts TicketFindOptions) ([]TicketInfo, error) {
 			text = string(raw)
 		}
 		if ticketStem != "" && ticket.Stem != ticketStem {
+			continue
+		}
+		// Assignee omit-filter (selector hard-skip): drop a ticket the given
+		// identity may not take. assign-any and self-assigned tickets pass;
+		// others'-assigned tickets never reach the caller.
+		if assignedTo != "" && !AssigneeGateFor(ticket.Assignee, assignedTo).AssignedToCurrent {
 			continue
 		}
 		if mentions != "" && !strings.Contains(text, mentions) {
@@ -499,6 +529,7 @@ func readTicketFromBytes(relPath, status, text string) TicketInfo {
 	info.BlockedBy = blockedByEntries(fm["blocked-by"])
 	info.Plans = scalarList(fm["plans"])
 	info.Skeletons = scalarList(fm["skeletons"])
+	info.Assignee = scalarList(fm["assignee"])
 	info.Completed, _ = fm["completed"].(string)
 	info.RouteFactsPresent, info.RouteFacts = ticketRouteFacts(text)
 	info.BlockedHeadings = blockedHeadings(text)

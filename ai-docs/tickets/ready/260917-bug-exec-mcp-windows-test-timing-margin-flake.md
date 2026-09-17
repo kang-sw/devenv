@@ -131,3 +131,33 @@ relies on (the LIFO `t.Cleanup` caution at `server_test.go#L2670-2689`). Leave
 production `execjob` behavior unchanged unless the audit proves a real timing
 gap. Verify with the full `go test ./...` on both Linux and a Windows run, and
 confirm the release `windows-smoke` job is green.
+
+## Blocked (2026-09-17)
+
+Phase 1 implementation is complete and twice-reviewed clean on impl branch
+`impl/goal/develop/amber-quartz-lantern/suds-water-crowd` (commits 096ff2c5,
+1da0789d, 25ff4b3): the fixed-margin exec tests were converted to
+poll-until-terminal, the audit was widened to a `slow`-named helper in
+`internal/execjob/execjob_test.go`, and Linux `go test ./...` plus
+`GOOS=windows go vet` are green.
+
+The phase's definition of done also requires a **green Windows run** (ticket
+Constraints: a Linux pass is "necessary but not sufficient"), and no agent in
+this session could obtain one:
+
+- The documented Windows smoke host (`ssh ki608@192.168.33.6`, repo note
+  `infra.windows-smoke-host`) is reachable read-only, but this session's
+  tool-permission classifier denied every write action against it (mkdir, scp)
+  as a data-exfiltration risk.
+- The worker protocol forbids pushing this branch to trigger the
+  `windows-smoke` release CI job directly.
+
+Awaiting user decision: run the Windows verification (e.g. via the smoke host
+or by triggering the `windows-smoke` job), or accept the change to verify at
+the next release smoke, before this ticket can close and its impl branch merge.
+
+Follow-up observation (not acted on, two-round review cap reached):
+`TestServeStdioDoesNotBlockToolsListBehindLongCall`'s own 3s "ServeStdio did
+not exit after input close" budget (`server_test.go#L1868-1872`) is now the
+thinnest remaining margin in the file — the likely next recurrence site if the
+class resurfaces.

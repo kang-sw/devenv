@@ -74,9 +74,11 @@ func NewResolver(opts Options, builtinDefaults map[string]string, sessionReader 
 }
 
 // Get resolves the value for the given item key, walking
-// session → project → global → builtin. The returned ResolvedValue carries the
-// value and the scope it resolved from. If the key is absent from all scopes,
-// Scope is ScopeBuiltin and Value is "".
+// session → project → repo → global → builtin. The returned ResolvedValue
+// carries the value and the scope it resolved from. If the key is absent from
+// all scopes, Scope is ScopeBuiltin and Value is "". Global-only items
+// (GlobalOnly) skip the session/project/repo overlays entirely — see
+// getGlobalOnly.
 func (r *Resolver) Get(sessionKey, itemKey string) (ResolvedValue, error) {
 	if GlobalOnly(itemKey) {
 		return r.getGlobalOnly(itemKey)
@@ -97,6 +99,18 @@ func (r *Resolver) Get(sessionKey, itemKey string) (ResolvedValue, error) {
 	if projectCfg.Overrides != nil {
 		if v, ok := projectCfg.Overrides[itemKey]; ok {
 			return ResolvedValue{Value: v, Scope: ScopeProject}, nil
+		}
+	}
+
+	// Repo scope (committed, version-tracked — shared across contributors, below
+	// the machine-local project scope so a per-machine override can still win).
+	repoCfg, err := loadRepoConfig(r.opts)
+	if err != nil {
+		return ResolvedValue{}, fmt.Errorf("resolver: load repo config: %w", err)
+	}
+	if repoCfg.Overrides != nil {
+		if v, ok := repoCfg.Overrides[itemKey]; ok {
+			return ResolvedValue{Value: v, Scope: ScopeRepo}, nil
 		}
 	}
 

@@ -1,14 +1,24 @@
 package wsconfig
 
 // Scope identifies which config layer holds a value. The resolution order is:
-// session > project > global > builtin (highest to lowest precedence).
+// session > project > repo > global > builtin (highest to lowest precedence).
 type Scope string
 
 const (
 	// ScopeSession is the ephemeral per-key session store (keys/<key>.json).
 	ScopeSession Scope = "session"
-	// ScopeProject is the per-project file (~/.ws@<id>/config.json).
+	// ScopeProject is the per-project, machine-local file (~/.ws@<id>/config.json).
 	ScopeProject Scope = "project"
+	// ScopeRepo is the committed, version-tracked project file
+	// (<repo-root>/.ws-workflow/config.json). Unlike ScopeProject it is checked
+	// into the downstream repository, so it carries a project-wide decision that
+	// is shared across every contributor and read deterministically by the tools.
+	// It sits below the machine-local project scope so a per-machine override can
+	// still win for local experimentation, and above global so a committed
+	// project baseline overrides a cross-project user default. Read-only here:
+	// the file is hand-edited (or edited by a dedicated flow), not written via
+	// config.tune — hence it is absent from ScopeSchemaEnum.
+	ScopeRepo Scope = "repo"
 	// ScopeGlobal is the cross-project global file (~/.ws/config.json).
 	ScopeGlobal Scope = "global"
 	// ScopeBuiltin is the code-default floor; returned when no file scope holds the key.
@@ -59,6 +69,20 @@ const (
 	// default) or "off". Global-only: this is a cross-project user preference
 	// about warning noise, not a per-project opt-in.
 	ItemBootstrapAlarm = "bootstrap_alarm"
+
+	// ItemTicketAssigneeAware is the opt-in project gate for ticket assignee
+	// awareness. Values: "on" or "off" (builtin default: off). It is meant to be
+	// a shared, deterministic team decision, so a downstream project sets it in
+	// the committed repo scope (.ws-workflow/config.json); it still resolves
+	// through the normal chain, so a per-machine project override can win locally
+	// (the feature is opt-in coordination, not adversarial enforcement — see
+	// 260917-feat-ws-committed-project-config-scope's settled overridability
+	// decision). Off means the entire assignee feature is inert. The key is
+	// hyphenated (not the underscore form other items use) because it is the
+	// literal key a downstream author hand-writes into .ws-workflow/config.json,
+	// documented as `ticket-assignee-aware`; config.json keys are the item key
+	// verbatim.
+	ItemTicketAssigneeAware = "ticket-assignee-aware"
 
 	// ItemWorktreePool is the pool location where worktree.acquire provisions
 	// and recycles per-worker Git worktrees. The value is either an absolute

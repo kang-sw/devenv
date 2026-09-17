@@ -486,6 +486,7 @@ func builtinConfigDefaults() map[string]string {
 		wsconfig.ItemSageReview:             "auto",
 		wsconfig.ItemBootstrapAlarm:         "on",
 		wsconfig.ItemWorktreePool:           defaultWorktreePoolTemplate,
+		wsconfig.ItemTicketAssigneeAware:    "off",
 	}
 }
 
@@ -495,6 +496,64 @@ func builtinConfigAndPromptDefaults() map[string]string {
 		defaults[k] = v
 	}
 	return defaults
+}
+
+// assigneeFeature resolves the two inputs the ticket-assignee-awareness feature
+// depends on: the committed ticket-assignee-aware project flag (repo scope,
+// anchored at the session's worktree root) and, when that flag is on, the
+// caller's current git user.email. It is the single reader of both so
+// tickets.query and tickets.create_empty agree on when the feature is active and
+// on which identity it compares against. Flag off (the default) ⇒ aware=false
+// and an empty email, and every caller treats the feature as inert.
+func (s *Server) assigneeFeature(root, sessionKey string) (aware bool, currentEmail string) {
+	adapter := sessionConfigAdapter{s: s.sessions}
+	r := wsconfig.NewResolver(wsconfig.Options{RepoRoot: root}, builtinConfigDefaults(), adapter, adapter)
+	resolved, err := r.Get(sessionKey, wsconfig.ItemTicketAssigneeAware)
+	if err != nil || strings.TrimSpace(resolved.Value) != "on" {
+		return false, ""
+	}
+	return true, wsgit.CurrentUserEmail(context.Background(), wsgit.ExecRunner{}, root)
+}
+
+// applyAssigneeGate attaches the computed ownership gate to every ticket in the
+// projection, using the caller's current identity. Called only when the feature
+// is on, so an absent AssigneeGate on any projection means the feature is off.
+func applyAssigneeGate(tickets []wsdoc.TicketInfo, currentEmail string) {
+	for i := range tickets {
+		gate := wsdoc.AssigneeGateFor(tickets[i].Assignee, currentEmail)
+		tickets[i].AssigneeGate = &gate
+	}
+}
+
+// resolveSetAssignee turns tickets.create_empty's set_assignee argument into the
+// assignee list to stamp into the new ticket. The argument is
+// true | false | string[], default true. The whole behavior is subordinate to
+// the ticket-assignee-aware flag: aware=false stamps nothing. When aware: true
+// (or absent) stamps the caller's current git email — nothing when that email
+// is empty (CI/bot ⇒ assign-any); false stamps nothing; a string[] stamps those
+// emails verbatim (blank entries dropped by the create layer).
+func resolveSetAssignee(raw any, present, aware bool, currentEmail string) []string {
+	if !aware {
+		return nil
+	}
+	stampSelf := func() []string {
+		if strings.TrimSpace(currentEmail) == "" {
+			return nil
+		}
+		return []string{currentEmail}
+	}
+	if !present {
+		return stampSelf()
+	}
+	switch v := raw.(type) {
+	case bool:
+		if v {
+			return stampSelf()
+		}
+		return nil
+	default:
+		return stringList(raw)
+	}
 }
 
 // wsNamespaceRef matches the ws namespace prefix token (ws/ or ws:) anchored at
@@ -702,17 +761,28 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		// Resolve the committed repo scope's anchor from the session's canonical
+		// worktree root. Keyless callers (the former config.show contract) and
+		// unknown keys leave it empty, so the repo scope simply drops out — never
+		// an error. Shared across every scope-sensitive path below so repo
+		// resolution stays consistent between the show view and the tuning catalog.
+		configOpts := wsconfig.Options{}
+		if sessionKey != "" {
+			if entry, found := s.sessions.lookup(sessionKey); found {
+				configOpts.RepoRoot = entry.root
+			}
+		}
 		// config.show path: enumerate every known override key across all scopes.
 		showAdapter := sessionConfigAdapter{s: s.sessions}
-		showResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), showAdapter, showAdapter)
-		view, err := wsconfig.ScopedShow(&showResolver, wsconfig.Options{}, sessionKey)
+		showResolver := wsconfig.NewResolver(configOpts, builtinConfigDefaults(), showAdapter, showAdapter)
+		view, err := wsconfig.ScopedShow(&showResolver, configOpts, sessionKey)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
 		// config.tuning path: project the per-key writer schema + current values,
 		// with the no-agent full-ws-only cut applied per entry.
 		catalogAdapter := sessionConfigAdapter{s: s.sessions}
-		catalogResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigAndPromptDefaults(), catalogAdapter, catalogAdapter)
+		catalogResolver := wsconfig.NewResolver(configOpts, builtinConfigAndPromptDefaults(), catalogAdapter, catalogAdapter)
 		catalog, err := buildTuningCatalog(rsrcRoot, &catalogResolver, sessionKey, NoAgentMode())
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1210,10 +1280,15 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		sessionKey, _ := params.Arguments["session_key"].(string)
 		query, _ := params.Arguments["query"].(string)
 		ticketStem, _ := params.Arguments["ticket_stem"].(string)
 		mentionsTicketStem, _ := params.Arguments["mentions_ticket_stem"].(string)
 		statuses := stringList(params.Arguments["statuses"])
+		// The assignee feature reads the committed ticket-assignee-aware flag and,
+		// when on, the caller's git identity. Off ⇒ inert: no gate is attached and
+		// the assigned_to_me omit-filter does nothing.
+		assigneeAware, currentEmail := s.assigneeFeature(root, sessionKey)
 		// A pure point-resolve call - ticket_stem set, no query text, no
 		// mentions_ticket_stem filter, and no statuses override - is exactly
 		// the old tickets.status shape: reuse its logic (TicketsStatus +
@@ -1243,6 +1318,13 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				if block, blockErr := wsdoc.DispatchBlockFor(root, *result); blockErr == nil {
 					result.DispatchBlocked = block
 				}
+				// The warning token rides both projections whenever the feature is
+				// on, so the point-resolve path (a directly-named ticket) warns the
+				// same way the discovery listing does.
+				if assigneeAware {
+					gate := wsdoc.AssigneeGateFor(result.Assignee, currentEmail)
+					result.AssigneeGate = &gate
+				}
 			}
 			if wantsJSON(params.Arguments) {
 				return toolJSONResponse(req.ID, result, err)
@@ -1260,6 +1342,15 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", err)
 		}
 		resolve := strings.TrimSpace(ticketStem) != ""
+		// Selector hard-skip: when the caller asks for assigned_to_me and the
+		// feature is on with a known identity, omit others'-assigned tickets from
+		// the discovery result entirely (assign-any and self-assigned pass). An
+		// unknown identity or an off feature leaves the filter empty, so the query
+		// keeps returning the whole board.
+		assignedToEmail := ""
+		if assigneeAware && boolArgument(params.Arguments["assigned_to_me"]) && strings.TrimSpace(currentEmail) != "" {
+			assignedToEmail = currentEmail
+		}
 		result, err := wsdoc.TicketsFind(root, wsdoc.TicketFindOptions{
 			Statuses:           statuses,
 			IncludeDone:        boolArgument(params.Arguments["include_done"]),
@@ -1270,7 +1361,14 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			Offset:             offset,
 			Limit:              limit,
 			Resolve:            resolve,
+			AssignedToEmail:    assignedToEmail,
 		})
+		// Attach the warning token to every returned ticket (the omit-filter, when
+		// active, has already dropped the others'-assigned ones; plain queries keep
+		// them, gated but visible, for design review and other contexts).
+		if err == nil && assigneeAware {
+			applyAssigneeGate(result, currentEmail)
+		}
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
 		}
@@ -1415,10 +1513,16 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		adapter := sessionConfigAdapter{s: s.sessions}
 		r := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
 		resolved, _ := r.Get(sessionKey, wsconfig.ItemSageReview)
+		// Auto-fill the assignee at creation (the explicit ownership act). Inert
+		// unless the ticket-assignee-aware flag is on; set_assignee (default true)
+		// then chooses self / none / explicit emails.
+		assigneeAware, currentEmail := s.assigneeFeature(root, sessionKey)
+		rawSetAssignee, setAssigneePresent := params.Arguments["set_assignee"]
 		result, err := wsdoc.TicketCreate(root, wsdoc.TicketCreateOptions{
 			Stem:         stem,
 			InitialState: initialState,
 			SageReview:   resolved.Value,
+			Assignee:     resolveSetAssignee(rawSetAssignee, setAssigneePresent, assigneeAware, currentEmail),
 		})
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -2824,6 +2928,17 @@ func formatTickets(tickets []wsdoc.TicketInfo) string {
 		if ticket.DispatchBlocked != nil {
 			fmt.Fprintf(&b, "  dispatch_blocked: %s - %s\n", ticket.DispatchBlocked.BlockingStem, ticket.DispatchBlocked.Reason)
 		}
+		// Ownership line: emitted only when the feature is on (AssigneeGate set)
+		// and the ticket actually names an assignee. A mismatch carries the fixed
+		// warning token; a self-assignment prints the ownership plainly; an
+		// assign-any ticket prints nothing so the common case stays quiet.
+		if g := ticket.AssigneeGate; g != nil && !g.AssignAny && len(ticket.Assignee) > 0 {
+			line := "  assignee: " + strings.Join(ticket.Assignee, ", ")
+			if g.Warning != "" {
+				line += "   # " + g.Warning
+			}
+			b.WriteString(line + "\n")
+		}
 		// Advisory body marker, kept on its own line and prefix so it is never
 		// confused with the typed dispatch_blocked gate above. Emitted on every
 		// projection because the queue selector reads it from the discovery
@@ -3771,7 +3886,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.query",
-			"description": "Query ticket paths by text query, ticket stem, or mentions of another ticket stem. A ticket_stem given alone (no query, no mentions_ticket_stem, no statuses) point-resolves that ticket and returns its status metadata, erroring if the stem is not found; this exact form remains unpaginated. Otherwise this is a discovery search, paginated after all filters in deterministic status-rank and ticket-stem order: offset defaults to 0; limit defaults to 50 and accepts 1 through 200; request the next page with offset + limit. The point-resolve projection also carries a dispatch_blocked {blocking_stem, reason} field, computed live, when the ticket declares a blocked-by: prerequisite that has not landed (the producer is not yet in .done/, or its named phase carries no ### Result); it is absent otherwise and never on a discovery listing. Every projection (discovery and point-resolve) also carries blocked_headings: the verbatim body heading lines beginning with '## Blocked', rendered as blocked_marker lines in compact text. This is advisory evidence only, distinct from the typed dispatch_blocked gate — it creates no hard block and its suffix is returned uninterpreted, so a caller reads the referenced section to judge whether the blocker is current. Defaults to compact text; use format=json for structured metadata.",
+			"description": "Query ticket paths by text query, ticket stem, or mentions of another ticket stem. A ticket_stem given alone (no query, no mentions_ticket_stem, no statuses) point-resolves that ticket and returns its status metadata, erroring if the stem is not found; this exact form remains unpaginated. Otherwise this is a discovery search, paginated after all filters in deterministic status-rank and ticket-stem order: offset defaults to 0; limit defaults to 50 and accepts 1 through 200; request the next page with offset + limit. The point-resolve projection also carries a dispatch_blocked {blocking_stem, reason} field, computed live, when the ticket declares a blocked-by: prerequisite that has not landed (the producer is not yet in .done/, or its named phase carries no ### Result); it is absent otherwise and never on a discovery listing. Every projection (discovery and point-resolve) also carries blocked_headings: the verbatim body heading lines beginning with '## Blocked', rendered as blocked_marker lines in compact text. This is advisory evidence only, distinct from the typed dispatch_blocked gate — it creates no hard block and its suffix is returned uninterpreted, so a caller reads the referenced section to judge whether the blocker is current. When the ticket-assignee-aware project flag is on, every projection also carries assignee (the ticket's assignee emails) and a computed assignee_gate {assign_any, assigned_to_current, warning}; a ticket assigned to someone else renders 'assignee: <email>   # NOT ASSIGNED TO YOU' in compact text. Setting assigned_to_me=true additionally hard-omits others'-assigned tickets from a discovery result (assign-any and self-assigned tickets remain). Both are inert while the flag is off. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -3781,6 +3896,7 @@ func tools() []map[string]any {
 					"query":                stringProperty("Optional case-insensitive text query."),
 					"ticket_stem":          stringProperty("Optional exact ticket stem. Given alone, point-resolves that ticket."),
 					"mentions_ticket_stem": stringProperty("Optional ticket stem that result tickets must mention."),
+					"assigned_to_me":       boolProperty("When true and the ticket-assignee-aware flag is on, hard-omits others'-assigned tickets from a discovery result (assign-any and self-assigned tickets remain). Inert while the flag is off or the caller's git identity is unknown. The selector sets this to steer to the caller's own tickets."),
 					"offset": map[string]any{
 						"type":        "integer",
 						"description": "Discovery result offset after filtering and deterministic ordering. Defaults to 0.",
@@ -3850,12 +3966,19 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.create_empty",
-			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus resolved sage-review posture for ready or epic todo). Yields only a valid empty skeleton + applicable initial posture, not a full mutation orchestrator — populate the body via tickets.template. Returns the path and a promotion tip; does not stage or commit.",
+			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus resolved sage-review posture for ready or epic todo). Yields only a valid empty skeleton + applicable initial posture, not a full mutation orchestrator — populate the body via tickets.template. When the ticket-assignee-aware project flag is on, set_assignee (default true) stamps the assignee: true = the caller's current git user.email (nothing when unset), false = leave unassigned, or an array of emails = assign to those. Inert while the flag is off. Returns the path and a promotion tip; does not stage or commit.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"stem":          stringProperty("Semantic ticket stem without date prefix (e.g. feat-foo-bar). Authoring categories: feat, bug, refactor, chore, research, epic."),
 					"initial_state": stringProperty("Ticket status: idea, todo, or ready."),
+					"set_assignee": map[string]any{
+						"description": "Assignee to stamp at creation, honored only when the ticket-assignee-aware flag is on. true (default) = the caller's current git user.email; false = leave unassigned (assign-any); an array of email strings = assign to exactly those. Empty current email (CI/bot) yields no stamp.",
+						"oneOf": []any{
+							map[string]any{"type": "boolean"},
+							map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						},
+					},
 				},
 				"required": []string{"stem", "initial_state"},
 			},

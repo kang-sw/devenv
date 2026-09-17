@@ -31,6 +31,85 @@ func TestTicketCreateIdea(t *testing.T) {
 	}
 }
 
+func TestTicketCreateStampsAssignee(t *testing.T) {
+	root := t.TempDir()
+	res, err := TicketCreate(root, TicketCreateOptions{
+		Stem:         "feat-foo",
+		InitialState: "idea",
+		Today:        "260101",
+		Assignee:     []string{"a@example.com", "", "b@example.com"},
+	})
+	if err != nil {
+		t.Fatalf("TicketCreate: %v", err)
+	}
+	body := readCreatedTicket(t, root, res)
+	if !strings.Contains(body, "assignee:\n  - a@example.com\n  - b@example.com\n") {
+		t.Fatalf("assignee block not stamped as YAML sequence (blank dropped): %q", body)
+	}
+	// The stamped block must round-trip back into the parsed []string.
+	info := readTicketFromBytes(res.Path, "idea", body)
+	if len(info.Assignee) != 2 || info.Assignee[0] != "a@example.com" || info.Assignee[1] != "b@example.com" {
+		t.Fatalf("stamped assignee did not round-trip: %v", info.Assignee)
+	}
+}
+
+func TestTicketCreateNoAssigneeWhenEmpty(t *testing.T) {
+	root := t.TempDir()
+	res, err := TicketCreate(root, TicketCreateOptions{Stem: "feat-foo", InitialState: "idea", Today: "260101", Assignee: []string{"", "  "}})
+	if err != nil {
+		t.Fatalf("TicketCreate: %v", err)
+	}
+	body := readCreatedTicket(t, root, res)
+	if strings.Contains(body, "assignee:") {
+		t.Fatalf("empty/blank assignee must leave the ticket unassigned (assign-any): %q", body)
+	}
+}
+
+func TestTicketsFindAssigneeOmitFilter(t *testing.T) {
+	root := t.TempDir()
+	write := func(stem, assignee string) {
+		fm := "---\ntitle: X\n"
+		if assignee != "" {
+			fm += "assignee:\n  - " + assignee + "\n"
+		}
+		fm += "---\n# " + stem + "\n"
+		p := filepath.Join(root, "ai-docs", "tickets", "ready", stem+".md")
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(fm), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("260101-feat-mine", "me@example.com")
+	write("260102-feat-other", "bob@example.com")
+	write("260103-feat-anyone", "")
+
+	got, err := TicketsFind(root, TicketFindOptions{Statuses: []string{"ready"}, AssignedToEmail: "ME@example.com"})
+	if err != nil {
+		t.Fatalf("TicketsFind: %v", err)
+	}
+	stems := map[string]bool{}
+	for _, ti := range got {
+		stems[ti.Stem] = true
+	}
+	if !stems["260101-feat-mine"] || !stems["260103-feat-anyone"] {
+		t.Fatalf("filter dropped a self/assign-any ticket: %v", stems)
+	}
+	if stems["260102-feat-other"] {
+		t.Fatalf("filter must omit an others'-assigned ticket: %v", stems)
+	}
+
+	// No filter (empty AssignedToEmail) returns the whole board.
+	all, err := TicketsFind(root, TicketFindOptions{Statuses: []string{"ready"}})
+	if err != nil {
+		t.Fatalf("TicketsFind unfiltered: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("unfiltered query = %d tickets, want 3", len(all))
+	}
+}
+
 func TestTicketCreateEpicTodoStampsResolvedSageReviewDesignPosture(t *testing.T) {
 	for _, tc := range []struct {
 		name       string

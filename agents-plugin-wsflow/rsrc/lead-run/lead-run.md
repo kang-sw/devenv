@@ -19,7 +19,10 @@ source; the worker owns implementation and verification.
 A goal run is the current branch `goal/*` or an active goal reminder.
 
 A ticket named in the invocation wins. Otherwise render `ticket-selector`,
-spawn it at its recommended tier, and use its one `selection:` result.
+spawn it at its recommended tier, and use its one `selection:` result. A
+`not-assigned` invocation argument is passed through to the selector so it
+considers tickets assigned to other contributors; without it the selector
+steers to your own.
 Outside a goal run, `selection: ready/ empty` ends the turn: tell the user,
 relay its `backlog:` and `backlog_omitted:` lines, and propose
 `{{.SkillNamespace}}:lead-ticket`. On a goal run the empty and all-blocked
@@ -36,7 +39,10 @@ the turn: relay the reason.
    next candidate, falling through to the all-blocked terminal when none
    remains — and never dispatch a worker into it. A ticket named directly in the
    invocation is not re-selected by queue ordering: report its current blocker
-   to the user and end the turn. If Route Facts are absent, or a worker reported
+   to the user and end the turn. When the query warns the ticket is assigned to
+   another contributor, surface that warning and get user confirmation before
+   dispatching, unless the run passed `not-assigned` — a directly-named ticket is
+   never omitted by ownership the way a queue candidate is. If Route Facts are absent, or a worker reported
    them incomplete,
    render and spawn `ticket-fact-populator` on the ticket once, commit its
    edit, and query again; if they are still absent, report the ticket to the

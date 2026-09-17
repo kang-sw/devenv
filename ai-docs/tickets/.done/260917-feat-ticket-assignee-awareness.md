@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: b2be348c6ff09a19
 sage-review-completeness-reviewed: b2be348c6ff09a19
+completed: 2026-09-17
 ---
 
 # Ticket assignee awareness (opt-in, deterministic ownership gate)
@@ -132,3 +133,44 @@ stable `### Phase N:` cut lines; each phase's verification expectation is new MC
 tests for the identity comparison / warning token (slice 1), `set-assignee`
 auto-fill (slice 2), and selector omit-filter + goal-run terminal behavior
 (slice 3), alongside the existing 3-way mirror drift guard.
+
+### Result (07a24ed5) - 2026-09-17
+
+Executed as one unit (no `### Phase N:` cut lines were introduced; the three
+provisional slices landed as three commits, matching the committed-config-scope
+prerequisite's Result-without-phase-headers precedent).
+
+Delivered, opt-in and off by default via committed repo config
+`ticket-assignee-aware` (resolved session > project > repo > global > builtin;
+builtin default `off`):
+
+- Slice 1 — identity + surfacing (commit 1685842b). `wsgit.CurrentUserEmail`
+  reads git `user.email` (original case for display; any error folds to `""` so
+  the gate degrades to assign-any). `wsdoc` parses frontmatter `assignee:`
+  (scalar or list) and computes `AssigneeGate` (case-insensitive any-of match;
+  empty/absent assignee = assign-any). `tickets.query` surfaces the deterministic
+  warning token `# NOT ASSIGNED TO YOU` in both the compact and JSON projections
+  for point-resolve and discovery listings, only when the flag is on.
+- Slice 2 — create auto-fill (commit 1685842b). `tickets.create_empty` gains
+  `set_assignee` (bool | string[], default true): true stamps the current git
+  identity (nothing if identity is empty), false omits, list stamps verbatim.
+  Inert when the flag is off.
+- Slice 3 — selector + lead-run steering (commit a107947b). `tickets.query`
+  `assigned_to_me` server-side omit-filter; the selector queries with it (except
+  a `not-assigned` run) and, when the filter empties an otherwise-non-empty
+  ready set, returns `every remaining ticket blocked` rather than the merge-on-
+  goal-branch `ready/ empty`. `lead-run` passes `not-assigned` through and
+  surfaces an ownership warning + confirmation before dispatching a directly-
+  named others'-assigned ticket. All three carry the byte-identical 3-way mirror
+  (`agents-plugin{,-wsflow,-pi}`).
+
+Tests (commits 1685842b, a107947b, and review-fix 07a24ed5): `wsdoc`
+gate/parse/omit-filter and create-stamp tables; `wsgit.CurrentUserEmail` trim +
+error-fold; `mcp` warning-token (both projections), assign-any/self no-warning,
+flag-off inertness, `assigned_to_me` omission with visibility split, create
+stamping, pure `resolveSetAssignee` table (incl. empty-identity), and an
+end-to-end cleared-identity degrade case. Full `wsdoc`/`wsgit`/`mcp` suites pass
+(`WS_MAILBOX= WS_MAILBOX_AUTO=` for the documented ambient-mailbox flake).
+Partitioned review: round 1 raised no Critical/Major, one test-partition
+Important (empty-identity untested) fixed in 07a24ed5; round-2 verification
+PASS, nothing new.

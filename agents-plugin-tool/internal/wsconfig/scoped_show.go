@@ -6,8 +6,9 @@ import (
 )
 
 // ScopedShow returns a View that includes ResolvedOverrides: one ScopedItem per
-// key that exists in any scope (session, project, global). Keys are deduplicated
-// by precedence, so only the winning scope for each key is reported.
+// key that exists in any scope (session, project, repo, global). Keys are
+// deduplicated by precedence, so only the winning scope for each key is reported.
+// The repo scope is enumerated only when opts.RepoRoot anchors a committed file.
 //
 // sessionKey may be empty; when empty the session scope is skipped.
 // r.sessionR must be set when a sessionKey is provided.
@@ -37,6 +38,16 @@ func ScopedShow(r *Resolver, opts Options, sessionKey string) (View, error) {
 		return View{}, fmt.Errorf("scoped show: load global overrides: %w", err)
 	}
 	for k := range globalCfg.Overrides {
+		allKeys[k] = struct{}{}
+	}
+
+	// Repo scope keys (committed, version-tracked). Absent when opts.RepoRoot is
+	// empty or the file does not exist; loadRepoConfig returns an empty Config.
+	repoCfg, err := loadRepoConfig(opts)
+	if err != nil {
+		return View{}, fmt.Errorf("scoped show: load repo overrides: %w", err)
+	}
+	for k := range repoCfg.Overrides {
 		allKeys[k] = struct{}{}
 	}
 

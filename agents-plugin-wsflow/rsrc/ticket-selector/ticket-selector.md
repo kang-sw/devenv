@@ -22,7 +22,11 @@ ticket path, `ready/ empty`, `every remaining ticket blocked`, or a stop reason.
      executable.
    - `missing` or `ambiguous`: call `{{.McpNamespace}}/git.status()` and stop
      with its nudge line verbatim.
-3. Without `impl_ticket`, inspect `ready/`. Each candidate's inventory carries
+3. Without `impl_ticket`, inspect `ready/`. When ticket assignee-awareness is
+   on and the run did not pass `not-assigned`, query with `assigned_to_me` so
+   tickets assigned to another contributor are omitted from the candidate set;
+   a `not-assigned` run passes no such filter and considers every ready ticket.
+   Each candidate's inventory carries
    its body `## Blocked` markers (`blocked_marker` lines); for a flagged
    candidate read the referenced section and judge whether the blocker is
    current, skipping only a current one. Among the rest prefer, in order: an
@@ -32,6 +36,10 @@ ticket path, `ready/ empty`, `every remaining ticket blocked`, or a stop reason.
    `blocked-by:` edge is present; then the oldest. This ordering is advisory —
    the dispatch-time `dispatch_blocked` gate is what hard-blocks an unlanded
    prerequisite.
+   When the `assigned_to_me` filter leaves no candidate but the unfiltered
+   `ready/` is non-empty, every remaining ticket is assigned to someone else:
+   return `every remaining ticket blocked`, never `ready/ empty` — the queue is
+   not done, its remaining work just belongs to other contributors.
 4. Outside a `goal/*` branch, when the selection is `ready/ empty`, call
    `{{.McpNamespace}}/tickets.query(statuses: ["todo", "idea"], format: "json")`
    and emit up to five `todo` rows followed by up to five `idea` rows, sorting

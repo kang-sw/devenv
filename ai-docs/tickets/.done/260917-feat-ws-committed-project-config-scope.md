@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 474dfe33c67aeda3
 sage-review-completeness-reviewed: 474dfe33c67aeda3
+completed: 2026-09-17
 ---
 
 # Committed project-wide ws config scope (.ws-workflow/config.json)
@@ -104,3 +105,55 @@ new resolver tests covering precedence ordering (committed `repo` vs each other
 scope), missing-file = no-override, and repo-root discovery under nested
 worktrees, plus a `config.list` case showing the `repo` scope value in resolved
 output.
+
+### Result (e73ed082) - 2026-09-17
+
+Landed the committed `repo` scope in one slice (commits e73ed082 + review
+follow-up b193a7ee).
+
+**What landed**
+
+- `wsconfig`: new `ScopeRepo` (scope.go), `Options.RepoRoot`, `RepoPath`, and
+  `loadRepoConfig` (repo.go) reading `<RepoRoot>/.ws-workflow/config.json`.
+  `Resolver.Get` inserts the repo layer between project and global —
+  `session > project > repo > global > builtin` (resolver.go). `ScopedShow`
+  enumerates repo-scope keys (scoped_show.go).
+- `mcp`: `config.list` resolves the repo anchor from the session's canonical
+  worktree root (`entry.root`) and threads it through both the show resolver
+  and the tuning catalog; keyless callers leave `RepoRoot` empty so the repo
+  scope drops out with no error (server.go).
+- Read-only surface: `ScopeRepo` is excluded from `ScopeSchemaEnum`, so
+  `config.tune` never offers `repo` as a writable scope; the committed file is
+  hand-edited. This resolves the open question on write access minimally.
+
+**Decisions taken** (Open Questions settled)
+
+- Scope name: `repo`.
+- Overridability: the committed `repo` value is overridable by the machine
+  `project` scope (repo < project), per the ticket's proposed precedence —
+  local experimentation can still win; the flag is opt-in coordination, not
+  adversarial enforcement.
+- `config.tune` write of `repo`: no. Read-only / hand-edited for now.
+- Allowed-key schema / `.gitignore`: left minimal (no schema validation added);
+  a consumer adds keys as needed. Not pre-migrated review-policy/binding-anchor.
+- Repo-root discovery: implemented as a pure `filepath.Join` on the caller's
+  already-canonical worktree root (no git invocation in `wsconfig`, no
+  walk-up), mirroring the repo-layer note store. Each worktree reads its own
+  checked-out copy, giving genuine per-worktree isolation. The "nested
+  worktrees" test verifies that isolation; there is no discovery code in
+  `wsconfig` to exercise beyond it.
+
+**Verification**
+
+- `cd agents-plugin-tool && go test ./internal/wsconfig/` — ok.
+- `go test ./internal/mcp/` — ok except pre-existing `TestMailboxInertByDefault`
+  and `TestMailboxSelfAddressSurface`, which fail identically on the clean base
+  branch (a machine-level mailbox named `devenv` leaks from the real env);
+  confirmed unrelated to this change.
+- `go build ./...` — clean.
+
+**Review**: partitioned correctness + test, round 1 returned no Critical/Major.
+Actionable Minors fixed (session>repo precedence test, malformed-config test,
+stale ScopedShow comment); remaining Minors recorded in b193a7ee's AI Context
+(config.tune echo stays repo-unaware — out of scope, latent; keyless test
+asserts absence-of-repo). Converged clean in round 1.
