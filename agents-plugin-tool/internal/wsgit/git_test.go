@@ -214,6 +214,27 @@ func TestClientPropagatesRunnerError(t *testing.T) {
 	}
 }
 
+func TestCurrentUserEmailTrimsOutput(t *testing.T) {
+	runner := &recordingRunner{out: []byte("  Dev@Example.com \n")}
+	got := CurrentUserEmail(context.Background(), runner, "/repo")
+	if got != "Dev@Example.com" {
+		t.Fatalf("CurrentUserEmail = %q, want trimmed original-case email", got)
+	}
+	want := []string{"config", "user.email"}
+	if runner.root != "/repo" || !reflect.DeepEqual(runner.args, want) {
+		t.Fatalf("root,args = %q,%#v; want /repo,%#v", runner.root, runner.args, want)
+	}
+}
+
+func TestCurrentUserEmailFoldsErrorToEmpty(t *testing.T) {
+	// user.email unset (or a bot with no identity) makes git exit non-zero;
+	// the ownership gate must degrade to assign-any, so the error folds to "".
+	runner := &recordingRunner{err: errors.New("exit status 1")}
+	if got := CurrentUserEmail(context.Background(), runner, "/repo"); got != "" {
+		t.Fatalf("CurrentUserEmail on git error = %q, want empty", got)
+	}
+}
+
 func TestMergeBaseRequiresRevisions(t *testing.T) {
 	if _, err := (Client{}).MergeBase(context.Background(), "/repo", "", "HEAD"); err == nil {
 		t.Fatal("MergeBase accepted missing base")
