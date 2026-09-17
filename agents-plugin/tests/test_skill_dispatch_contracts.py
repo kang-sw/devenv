@@ -175,6 +175,23 @@ class SkillDispatchContractsTest(unittest.TestCase):
             self.assertIn("never dispatch a worker into it", run)
             self.assertIn("named directly in the invocation is not re-selected by queue ordering", run)
 
+    def test_lead_ticket_mentions_git_commit_expected_branch(self):
+        # 260916: git.commit now requires expected_branch (the branch guard
+        # against a parallel session switching the shared worktree). Unlike the
+        # parallel blocked_marker change (test_selector_and_run_consume_body_
+        # blocked_marker above), this argument was previously mentioned only in
+        # prose with no pinning test. Assert it on all three mirror packages
+        # directly, rather than leaning on the pi mirror's separate byte-identity
+        # guard (TestPiMirrorUpToDate), so a drift here fails at the source.
+        for rsrc in (
+            RSRC_DIR,
+            RSRC_DIR.parent.parent / "agents-plugin-wsflow" / "rsrc",
+            RSRC_DIR.parent.parent / "agents-plugin-pi" / "rsrc",
+        ):
+            text = " ".join((rsrc / "lead-ticket" / "lead-ticket.md").read_text(encoding="utf-8").split())
+            self.assertIn("git.commit(paths, title, ai_context, expected_branch)", text)
+            self.assertIn("expected_branch` is the branch", text)
+
     def test_placed_lead_bodies_carry_no_unresolved_review_marker(self):
         for skill in ("lead-discuss", "lead-ticket", "lead-review", "lead-ship"):
             text = (RSRC_DIR / skill / f"{skill}.md").read_text(encoding="utf-8")
