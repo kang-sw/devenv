@@ -59,6 +59,16 @@ helper commands, MCP tooling, and dev-environment templates. Tickets and
 manuals here describe the workflow system itself; do not add downstream
 application-domain material.
 
+The workflow is the product; a downstream project using it is the customer.
+This repository is also that workflow's first dogfood: its own `AGENTS.md`,
+ticket board, and release posture are a validation instance of the shipped
+workflow, not the design target. So when a feature's audience is in question,
+design for the downstream project — this repository's own operational posture
+(for example, its single-maintainer-serial release cadence) is never a design
+constraint on shipped behavior. This is distinct from Architecture Rule 4,
+which governs what shipped text may depend on, not who a feature is designed
+for.
+
 Root migration artifacts stay grouped by deliverable:
 
 - `agents-plugin/` - Codex-first plugin distribution candidate.
