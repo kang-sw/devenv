@@ -3,6 +3,10 @@ title: Ticket assignee awareness (opt-in, deterministic ownership gate)
 related:
   260917-feat-ws-committed-project-config-scope: prerequisite (home of the ticket-assignee-aware flag)
   260913-bug-ticket-selector-chooses-recorded-blocker: same small-tier selector surface; motivates deterministic (not prose) gating
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: b2be348c6ff09a19
+sage-review-completeness-reviewed: b2be348c6ff09a19
 ---
 
 # Ticket assignee awareness (opt-in, deterministic ownership gate)
@@ -81,6 +85,9 @@ is not the design target. The feature is off by default.
   `ai-docs/manuals/skill-authoring.md`.
 - Depends on `260917-feat-ws-committed-project-config-scope`; do not implement
   the flag storage here.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/rsrc/, agents-plugin-wsflow/skills/, agents-plugin-tool/internal/wsdoc/conventions/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/)
 
 ## Open Questions
 
@@ -93,6 +100,26 @@ Settle at grounding / `ready` promotion:
   every-remaining-blocked result.
 - multi-assignee match semantics (assumed any-of: current email matches if it is
   in the set).
+- Whether `ticket-assignee-aware` must be non-overridable by the machine
+  `project` scope so a contributor cannot silently disable the shared gate
+  locally — coupled to the overridability open question in
+  `260917-feat-ws-committed-project-config-scope`; settle the two together.
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/wsdoc/frontmatter.go, agents-plugin-tool/internal/wsdoc/tickets.go, agents-plugin-tool/internal/mcp/server.go (tickets.query, tickets.create_empty), and the 3-way mirrored agents-plugin/rsrc/ticket-selector/ticket-selector.md and agents-plugin/rsrc/lead-run/lead-run.md (agents-plugin-wsflow/, agents-plugin-pi/) |
+| scope.surface | public-interface | tickets.query and tickets.create_empty are MCP tool schemas read by external callers, evidence agents-plugin-tool/internal/mcp/server.go#L3774, #L3852-3862 |
+| scope.new_public_symbol | yes | new assignee frontmatter key, ticket-assignee-aware project flag, set-assignee tool param, not-assigned lead-run argument, and a new warning token in tickets.query output |
+| scope.new_type_contract | yes | new assignee []string frontmatter field and a new computed identity-comparison field on tickets.query's JSON and compact-text projections |
+| scope.test_surface | existing | agents-plugin-tool/internal/mcp/tickets_scope_test.go, ticket_dispatch_gate_test.go, and server_test.go cover tickets.query; playbook_tools_test.go and session_state_test.go cover tickets.create_empty |
+| complexity.reuse_points | confirmed | existing related: dual-shape (map[string]string or []string) frontmatter precedent at agents-plugin-tool/internal/wsdoc/tickets.go#L697-738 (relatedEntries), and the existing computed-field pattern for dispatch_blocked at agents-plugin-tool/internal/wsdoc/tickets_deps.go#L195-217 |
+| complexity.side_effect_risk | moderate | changes the candidate set the selector returns from the ready queue and introduces a new external git-identity read with no existing primitive |
+| risk.correctness | moderate | new deterministic case-insensitive identity comparison, multi-assignee any-of semantics, and a 3-way mirrored playbook edit must all agree |
+| risk.fit | moderate | hard-depends on 260917-feat-ws-committed-project-config-scope, itself unimplemented idea-status work whose scope name, precedence, and mutability are still open |
+| risk.test | moderate | needs new selector-filter, warning-token, and goal-run-terminal coverage in addition to the existing 3-way mirror drift-guard suite |
+| risk.security_or_contract | moderate | changes the tickets.query and tickets.create_empty tool contracts (new response field, new param) and the selector's default candidate set |
 
 ## Phases
 
@@ -100,4 +127,8 @@ Phasing deferred to grounding. Provisional slices, prerequisite (committed confi
 scope) first: (1) current-git-identity read + `assignee` parsing/surfacing with
 the deterministic warning token in `tickets.query`; (2) `create` auto-fill
 (`set-assignee` union); (3) selector omit-filter + `not-assigned` lead-run
-override + goal-run terminal — each carrying the 3-way mirror.
+override + goal-run terminal — each carrying the 3-way mirror. Grounding sets the
+stable `### Phase N:` cut lines; each phase's verification expectation is new MCP
+tests for the identity comparison / warning token (slice 1), `set-assignee`
+auto-fill (slice 2), and selector omit-filter + goal-run terminal behavior
+(slice 3), alongside the existing 3-way mirror drift guard.
