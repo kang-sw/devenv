@@ -432,6 +432,15 @@ type CommitOptions struct {
 	Description    string   `json:"description,omitempty"`
 	AIContext      []string `json:"ai_context"`
 	UpdatedTickets []string `json:"updated_tickets,omitempty"`
+	// ExpectedBranch is the branch the caller believes it is checked out on.
+	// Commit resolves the actual current branch and refuses (no mutation) when
+	// they disagree or when HEAD is detached — the guard against a parallel
+	// session switching the shared worktree out from under the caller. It is
+	// required: an empty value is rejected by normalizeCommitOptions so a caller
+	// that does not know its branch cannot form the call at all. The value must
+	// originate from the caller's remembered context, never a fresh HEAD read
+	// (which would always match and check nothing).
+	ExpectedBranch string `json:"expected_branch"`
 	// SparseScopeActive is a caller-computed signal, never a client-supplied
 	// field (json:"-"): true only when the caller has already determined a
 	// sparse-checkout scope is active for root (see wsdoc.SparseCheckoutActive).
@@ -470,6 +479,19 @@ func (c Client) Commit(ctx context.Context, root string, opts CommitOptions) (Co
 		return CommitResult{}, err
 	}
 	runner := c.runner()
+	// Branch guard first, before any staging mutation: resolve the actual
+	// current branch and refuse if it disagrees with the caller's believed
+	// branch (or if HEAD is detached). This is the whole point of the required
+	// expected_branch field — a commit that lands on the wrong branch because a
+	// parallel session switched the shared worktree is silent and hard to undo,
+	// so it must be caught before the commit, not after.
+	actualBranch := currentBranch(ctx, runner, root)
+	if actualBranch == "" {
+		return CommitResult{}, fmt.Errorf("git.commit refused: HEAD is detached, so there is no current branch to confirm against believed branch %q; a commit under a detached HEAD in a shared worktree is exactly the state this guard exists to stop — verify whether you should be committing here", opts.ExpectedBranch)
+	}
+	if actualBranch != opts.ExpectedBranch {
+		return CommitResult{}, fmt.Errorf("git.commit refused: believed branch %q does not match the actual checkout %q (a parallel session may have switched this worktree); verify whether you should be committing here before retrying (believed: %s / actual: %s)", opts.ExpectedBranch, actualBranch, opts.ExpectedBranch, actualBranch)
+	}
 	preStatusOut, err := runner.RunGit(ctx, root, StatusArgs()...)
 	if err != nil {
 		return CommitResult{}, err
@@ -527,12 +549,26 @@ func (c Client) Commit(ctx context.Context, root string, opts CommitOptions) (Co
 	return CommitResult{Hash: strings.TrimSpace(string(hashOut)), Paths: opts.Paths, Title: opts.Title, TicketChanges: ticketChanges, Advisories: advisories}, nil
 }
 
+// currentBranch resolves the short name of the branch HEAD points at, mirroring
+// git.merge's resolution (`git symbolic-ref --quiet --short HEAD`). --quiet makes
+// a detached HEAD exit non-zero with empty output rather than an error message,
+// so any resolution failure is reported as an empty name: the caller then
+// refuses (fail-closed) instead of committing unguarded.
+func currentBranch(ctx context.Context, runner Runner, root string) string {
+	out, err := runner.RunGit(ctx, root, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func normalizeCommitOptions(opts CommitOptions) (CommitOptions, error) {
 	rawAIContext := opts.AIContext
 	opts.Title = strings.TrimSpace(opts.Title)
 	opts.Description = strings.TrimSpace(opts.Description)
 	opts.AIContext = trimStrings(opts.AIContext)
 	opts.UpdatedTickets = trimStrings(opts.UpdatedTickets)
+	opts.ExpectedBranch = strings.TrimSpace(opts.ExpectedBranch)
 	if opts.Title == "" {
 		return CommitOptions{}, fmt.Errorf("title is required")
 	}
@@ -554,6 +590,9 @@ func normalizeCommitOptions(opts CommitOptions) (CommitOptions, error) {
 			}
 			return CommitOptions{}, fmt.Errorf("ai_context requires at least one non-blank entry: received %d entr%s, all blank", len(rawAIContext), plural)
 		}
+	}
+	if opts.ExpectedBranch == "" {
+		return CommitOptions{}, fmt.Errorf("expected_branch is required: assert the branch you believe you are on so the commit is refused if the worktree was switched out from under you; do not read HEAD just to fill this — if you do not know it, verify whether you should be committing here at all")
 	}
 	paths := trimStrings(opts.Paths)
 	if len(paths) == 0 {

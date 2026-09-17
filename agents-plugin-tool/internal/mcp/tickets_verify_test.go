@@ -19,6 +19,7 @@ func TestTicketsVerifyGitCommitCallSiteParityBlocksInvalidTicket(t *testing.T) {
 	runGit(t, root, "add", "keep.txt")
 	runGit(t, root, "commit", "-m", "initial")
 	initialHead := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+	branch := headBranch(t, root)
 
 	badPath := "ai-docs/tickets/todo/not-a-valid-stem.md"
 	mustWrite(t, root, badPath, "---\ntitle: Bad stem\n---\n\nBody.\n")
@@ -26,7 +27,7 @@ func TestTicketsVerifyGitCommitCallSiteParityBlocksInvalidTicket(t *testing.T) {
 	server := NewServer(root, "test")
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tickets.verify","arguments":{"paths":["` + badPath + `"]}}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["` + badPath + `"],"title":"test: blocked commit","ai_context":["User intent: prove the commit gate matches tickets.verify."]}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["` + badPath + `"],"title":"test: blocked commit","ai_context":["User intent: prove the commit gate matches tickets.verify."],"expected_branch":"` + branch + `"}}}`,
 	}, "\n") + "\n"
 
 	var out bytes.Buffer
@@ -72,11 +73,12 @@ func TestTicketsVerifyGitCommitCallSiteParityAllowsValidTicket(t *testing.T) {
 
 	goodPath := "ai-docs/tickets/todo/260723-feat-valid-parity.md"
 	mustWrite(t, root, goodPath, "---\ntitle: Valid ticket\n---\n\nBody.\n")
+	branch := headBranch(t, root)
 
 	server := NewServer(root, "test")
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tickets.verify","arguments":{"paths":["` + goodPath + `"]}}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["` + goodPath + `"],"title":"test: parity pass","ai_context":["User intent: prove a passing verify never blocks the commit."]}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["` + goodPath + `"],"title":"test: parity pass","ai_context":["User intent: prove a passing verify never blocks the commit."],"expected_branch":"` + branch + `"}}}`,
 	}, "\n") + "\n"
 
 	var out bytes.Buffer
@@ -115,11 +117,12 @@ func TestTicketsVerifyNoSpecAddressingIsClean(t *testing.T) {
 		"sage-review-completeness: completed\n" +
 		"---\n\nBody.\n"
 	mustWrite(t, root, path, body)
+	branch := headBranch(t, root)
 
 	server := NewServer(root, "test")
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tickets.verify","arguments":{"paths":["` + path + `"]}}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["` + path + `"],"title":"test: no spec addressing verifies clean","ai_context":["User intent: prove the retired spec-address gate never blocks a commit."]}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["` + path + `"],"title":"test: no spec addressing verifies clean","ai_context":["User intent: prove the retired spec-address gate never blocks a commit."],"expected_branch":"` + branch + `"}}}`,
 	}, "\n") + "\n"
 
 	var out bytes.Buffer
@@ -156,11 +159,12 @@ func TestTicketsVerifySageFreshnessWarningDoesNotBlockCommit(t *testing.T) {
 	runGit(t, root, "add", "ai-docs")
 	runGit(t, root, "commit", "-m", "stamp review")
 	mustWrite(t, root, path, strings.Replace(body, "Body.\n", "Body changed after review.\n", 1))
+	branch := headBranch(t, root)
 
 	server := NewServer(root, "test")
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tickets.verify","arguments":{"paths":["` + path + `"]}}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["` + path + `"],"title":"docs(ticket): edit stale review ticket","ai_context":["User intent: prove sage freshness warnings stay non-blocking."]}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["` + path + `"],"title":"docs(ticket): edit stale review ticket","ai_context":["User intent: prove sage freshness warnings stay non-blocking."],"expected_branch":"` + branch + `"}}}`,
 	}, "\n") + "\n"
 
 	var out bytes.Buffer
@@ -211,8 +215,9 @@ func TestGitCommitIgnoresStaleSageReviewOnUntouchedTicket(t *testing.T) {
 	runGit(t, root, "commit", "-m", "make ticket stale")
 
 	mustWrite(t, root, "notes.txt", "unrelated\n")
+	branch := headBranch(t, root)
 	server := NewServer(root, "test")
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["notes.txt"],"title":"docs: unrelated note","ai_context":["User intent: prove stale review warnings do not over-scan untouched tickets."]}}}` + "\n"
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["notes.txt"],"title":"docs: unrelated note","ai_context":["User intent: prove stale review warnings do not over-scan untouched tickets."],"expected_branch":"` + branch + `"}}}` + "\n"
 
 	var out bytes.Buffer
 	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {

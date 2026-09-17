@@ -196,7 +196,8 @@ Drop: `{{.McpNamespace}}/tickets.close(stem, status: "dropped")`. Closing to
 ## Output
 
 Commit edited paths with `{{.McpNamespace}}/git.commit(paths, title,
-ai_context)`, one logical unit. Suggest the next action: a child ticket for an
+ai_context, expected_branch)`, one logical unit. `expected_branch` is the branch
+you remember working on; the commit is refused if the checkout has since moved. Suggest the next action: a child ticket for an
 epic; `{{.SkillNamespace}}:lead-run` for an actionable ticket now
 in `ready/`. End with `Ticket: ai-docs/tickets/<status>/<stem>.md` per ticket
 written, the last of them on its own final line.
