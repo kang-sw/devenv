@@ -702,17 +702,28 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		// Resolve the committed repo scope's anchor from the session's canonical
+		// worktree root. Keyless callers (the former config.show contract) and
+		// unknown keys leave it empty, so the repo scope simply drops out — never
+		// an error. Shared across every scope-sensitive path below so repo
+		// resolution stays consistent between the show view and the tuning catalog.
+		configOpts := wsconfig.Options{}
+		if sessionKey != "" {
+			if entry, found := s.sessions.lookup(sessionKey); found {
+				configOpts.RepoRoot = entry.root
+			}
+		}
 		// config.show path: enumerate every known override key across all scopes.
 		showAdapter := sessionConfigAdapter{s: s.sessions}
-		showResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), showAdapter, showAdapter)
-		view, err := wsconfig.ScopedShow(&showResolver, wsconfig.Options{}, sessionKey)
+		showResolver := wsconfig.NewResolver(configOpts, builtinConfigDefaults(), showAdapter, showAdapter)
+		view, err := wsconfig.ScopedShow(&showResolver, configOpts, sessionKey)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
 		// config.tuning path: project the per-key writer schema + current values,
 		// with the no-agent full-ws-only cut applied per entry.
 		catalogAdapter := sessionConfigAdapter{s: s.sessions}
-		catalogResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigAndPromptDefaults(), catalogAdapter, catalogAdapter)
+		catalogResolver := wsconfig.NewResolver(configOpts, builtinConfigAndPromptDefaults(), catalogAdapter, catalogAdapter)
 		catalog, err := buildTuningCatalog(rsrcRoot, &catalogResolver, sessionKey, NoAgentMode())
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)

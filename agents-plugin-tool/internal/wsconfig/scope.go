@@ -1,14 +1,24 @@
 package wsconfig
 
 // Scope identifies which config layer holds a value. The resolution order is:
-// session > project > global > builtin (highest to lowest precedence).
+// session > project > repo > global > builtin (highest to lowest precedence).
 type Scope string
 
 const (
 	// ScopeSession is the ephemeral per-key session store (keys/<key>.json).
 	ScopeSession Scope = "session"
-	// ScopeProject is the per-project file (~/.ws@<id>/config.json).
+	// ScopeProject is the per-project, machine-local file (~/.ws@<id>/config.json).
 	ScopeProject Scope = "project"
+	// ScopeRepo is the committed, version-tracked project file
+	// (<repo-root>/.ws-workflow/config.json). Unlike ScopeProject it is checked
+	// into the downstream repository, so it carries a project-wide decision that
+	// is shared across every contributor and read deterministically by the tools.
+	// It sits below the machine-local project scope so a per-machine override can
+	// still win for local experimentation, and above global so a committed
+	// project baseline overrides a cross-project user default. Read-only here:
+	// the file is hand-edited (or edited by a dedicated flow), not written via
+	// config.tune — hence it is absent from ScopeSchemaEnum.
+	ScopeRepo Scope = "repo"
 	// ScopeGlobal is the cross-project global file (~/.ws/config.json).
 	ScopeGlobal Scope = "global"
 	// ScopeBuiltin is the code-default floor; returned when no file scope holds the key.
