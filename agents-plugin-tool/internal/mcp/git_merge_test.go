@@ -417,6 +417,10 @@ func TestImplMergeNoFFAndCleanup(t *testing.T) {
 			if err != nil || r.Status != "merged" || !r.BranchDeleted {
 				t.Fatalf("result=%+v err=%v", r, err)
 			}
+			// A clean post-merge worktree must not raise the dirty_after_merge nudge.
+			if len(r.Diagnostics) != 0 {
+				t.Fatalf("clean merge raised diagnostics: %+v", r.Diagnostics)
+			}
 			parents := strings.Fields(string(runGitOutput(t, root, "rev-list", "--parents", "-n", "1", "HEAD")))
 			if len(parents) != 3 || parents[2] != source {
 				t.Fatalf("not a boundary merge: %v", parents)
@@ -590,6 +594,38 @@ func TestImplMergeTolerantWorktree(t *testing.T) {
 		d := requireMergeDiagnostic(t, r, "dirty_worktree", "must_resolve")
 		if !strings.Contains(d.Reason, "unmerged") {
 			t.Fatalf("unmerged wrong reason: %+v", d)
+		}
+	})
+
+	t.Run("both-added-unmerged-blocks", func(t *testing.T) {
+		root, branch := mergeFixture(t, "develop")
+		// Add a file on develop and a conflicting file at the same path on impl,
+		// then cherry-pick to produce an add/add (AA) unmerged entry without a
+		// MERGE_HEAD — exercising the DD/AA pair branch of indexBlocksMerge.
+		runGit(t, root, "switch", "develop")
+		if err := os.WriteFile(filepath.Join(root, "added.txt"), []byte("develop\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, root, "add", "added.txt")
+		runGit(t, root, "commit", "-m", "develop adds file")
+		dev := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+		runGit(t, root, "switch", branch)
+		if err := os.WriteFile(filepath.Join(root, "added.txt"), []byte("impl\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, root, "add", "added.txt")
+		runGit(t, root, "commit", "-m", "impl adds file")
+		runGitAllow(t, root, "cherry-pick", dev) // add/add conflict -> AA
+		if porcelain := string(runGitOutput(t, root, "status", "--porcelain=v1")); !strings.Contains(porcelain, "AA added.txt") {
+			t.Fatalf("expected AA unmerged entry, got: %q", porcelain)
+		}
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "develop", mergeMessage(), implMergeAcknowledgement{})
+		if err == nil || r.Status != "policy_blocked" {
+			t.Fatalf("both-added unmerged admitted: %+v err=%v", r, err)
+		}
+		d := requireMergeDiagnostic(t, r, "dirty_worktree", "must_resolve")
+		if !strings.Contains(d.Reason, "unmerged") {
+			t.Fatalf("both-added wrong reason: %+v", d)
 		}
 	})
 
