@@ -2822,6 +2822,13 @@ func formatTickets(tickets []wsdoc.TicketInfo) string {
 		if ticket.DispatchBlocked != nil {
 			fmt.Fprintf(&b, "  dispatch_blocked: %s - %s\n", ticket.DispatchBlocked.BlockingStem, ticket.DispatchBlocked.Reason)
 		}
+		// Advisory body marker, kept on its own line and prefix so it is never
+		// confused with the typed dispatch_blocked gate above. Emitted on every
+		// projection because the queue selector reads it from the discovery
+		// inventory; the heading is verbatim, its currency is the caller's to judge.
+		for _, heading := range ticket.BlockedHeadings {
+			fmt.Fprintf(&b, "  blocked_marker: %s\n", heading)
+		}
 		writeIndentedLines(&b, "  unresolved: ", ticket.UnresolvedPhases)
 		writeIndentedLines(&b, "  snippet: ", ticket.MatchingSnippets)
 	}
@@ -3761,7 +3768,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.query",
-			"description": "Query ticket paths by text query, ticket stem, or mentions of another ticket stem. A ticket_stem given alone (no query, no mentions_ticket_stem, no statuses) point-resolves that ticket and returns its status metadata, erroring if the stem is not found; this exact form remains unpaginated. Otherwise this is a discovery search, paginated after all filters in deterministic status-rank and ticket-stem order: offset defaults to 0; limit defaults to 50 and accepts 1 through 200; request the next page with offset + limit. The point-resolve projection also carries a dispatch_blocked {blocking_stem, reason} field, computed live, when the ticket declares a blocked-by: prerequisite that has not landed (the producer is not yet in .done/, or its named phase carries no ### Result); it is absent otherwise and never on a discovery listing. Defaults to compact text; use format=json for structured metadata.",
+			"description": "Query ticket paths by text query, ticket stem, or mentions of another ticket stem. A ticket_stem given alone (no query, no mentions_ticket_stem, no statuses) point-resolves that ticket and returns its status metadata, erroring if the stem is not found; this exact form remains unpaginated. Otherwise this is a discovery search, paginated after all filters in deterministic status-rank and ticket-stem order: offset defaults to 0; limit defaults to 50 and accepts 1 through 200; request the next page with offset + limit. The point-resolve projection also carries a dispatch_blocked {blocking_stem, reason} field, computed live, when the ticket declares a blocked-by: prerequisite that has not landed (the producer is not yet in .done/, or its named phase carries no ### Result); it is absent otherwise and never on a discovery listing. Every projection (discovery and point-resolve) also carries blocked_headings: the verbatim body heading lines beginning with '## Blocked', rendered as blocked_marker lines in compact text. This is advisory evidence only, distinct from the typed dispatch_blocked gate — it creates no hard block and its suffix is returned uninterpreted, so a caller reads the referenced section to judge whether the blocker is current. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

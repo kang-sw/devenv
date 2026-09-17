@@ -134,6 +134,53 @@ func TestTicketsStatusRequiresTicketStem(t *testing.T) {
 	}
 }
 
+// TestTicketBlockedHeadingsAreVerbatimAndUninterpreted pins the advisory
+// body-marker projection: every heading line beginning with `## Blocked` is
+// collected verbatim and in document order, a nonstandard suffix such as
+// `— RESOLVED ...` is returned whole rather than classified, a ticket with no
+// such heading yields no field, and the marker never promotes to the typed
+// dispatch gate.
+func TestTicketBlockedHeadingsAreVerbatimAndUninterpreted(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/tickets/ready/260101-feat-current.md",
+		"---\ntitle: Current blocker\n---\n# Current\n\n## Blocked (2026-09-16)\n\nOwner-only smoke remains.\n")
+	mustWrite(t, root, "ai-docs/tickets/ready/260102-feat-resolved.md",
+		"---\ntitle: Resolved blocker\n---\n# Resolved\n\n## Blocked (2026-07-27) — RESOLVED 2026-08-11\n\nCleared.\n")
+	mustWrite(t, root, "ai-docs/tickets/ready/260103-feat-multi.md",
+		"---\ntitle: Two markers\n---\n# Multi\n\n## Blocked (2026-01-01)\n\nfirst\n\n## Blocked (2026-02-02)\n\nsecond\n")
+	mustWrite(t, root, "ai-docs/tickets/ready/260104-feat-clean.md",
+		"---\ntitle: No marker\n---\n# Clean\n\n## Background\n\nNothing blocked here.\n")
+
+	got, err := TicketsList(root, TicketListOptions{Statuses: []string{"ready"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	current := findTicket(t, got, "260101-feat-current")
+	if joined(current.BlockedHeadings) != "## Blocked (2026-09-16)" {
+		t.Fatalf("current blocked headings = %#v", current.BlockedHeadings)
+	}
+	// Advisory only: the marker never becomes the typed dispatch gate.
+	if current.DispatchBlocked != nil {
+		t.Fatalf("body marker must not populate DispatchBlocked: %#v", current.DispatchBlocked)
+	}
+
+	resolved := findTicket(t, got, "260102-feat-resolved")
+	if joined(resolved.BlockedHeadings) != "## Blocked (2026-07-27) — RESOLVED 2026-08-11" {
+		t.Fatalf("resolved heading not returned verbatim: %#v", resolved.BlockedHeadings)
+	}
+
+	multi := findTicket(t, got, "260103-feat-multi")
+	if joined(multi.BlockedHeadings) != "## Blocked (2026-01-01),## Blocked (2026-02-02)" {
+		t.Fatalf("multi headings/order wrong: %#v", multi.BlockedHeadings)
+	}
+
+	clean := findTicket(t, got, "260104-feat-clean")
+	if len(clean.BlockedHeadings) != 0 {
+		t.Fatalf("ticket without marker must carry no headings: %#v", clean.BlockedHeadings)
+	}
+}
+
 func stems(tickets []TicketInfo) string {
 	values := make([]string, 0, len(tickets))
 	for _, ticket := range tickets {

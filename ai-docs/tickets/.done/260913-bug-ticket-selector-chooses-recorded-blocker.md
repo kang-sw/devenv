@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: d640aebcd0a0db61
 sage-review-design-reviewed: d640aebcd0a0db61
+completed: 2026-09-17
 ---
 
 # Ticket selector can choose a ready ticket with a current Blocked note
@@ -74,3 +75,25 @@ Verification:
 - Assert matching raw marker evidence in JSON and default compact-text discovery and point-resolve output.
 - Include a nonstandard heading such as `## Blocked (2026-07-27) — RESOLVED 2026-08-11`; assert that the parser returns the complete literal line without assigning resolved/current semantics.
 - Preserve selection and `dispatch_blocked` behavior for typed prerequisite blocks, direct named tickets, and ready tickets without a body marker.
+
+### Result (73fa8af) - 2026-09-17
+
+Landed the advisory body-marker surface and made queue selection consume it.
+
+What landed:
+
+- `TicketInfo.BlockedHeadings` (json `blocked_headings`), populated on every projection by `blockedHeadings()` in `tickets.go`, which collects verbatim `## Blocked`-prefixed heading lines in document order with no suffix interpretation. The marker never populates `DispatchBlocked` and raises no MCP refusal, keeping the typed `blocked-by:`/`dispatch_blocked` hard gate untouched.
+- `server.go` renders the marker as `blocked_marker:` compact-text lines (distinct from the `dispatch_blocked:` line) and the `tickets.query` tool description documents the new field as advisory, present on both discovery and point-resolve.
+- `ticket-selector.md`: the `blocked_marker` inventory line is a cue to read the referenced section and judge currency, skipping only a current blocker. `lead-run.md`: Spawn step 1 rechecks a queue-selected ticket's body before dispatch, drops a current blocker and returns to Select (falling through to the all-blocked terminal when none remains), and preserves direct named-ticket invocation. Mirrored byte-identically into `agents-plugin-wsflow/rsrc/` and `agents-plugin-pi/rsrc/`.
+
+Verification:
+
+- `go test ./...` (agents-plugin-tool): pass.
+- `python3 -m unittest discover agents-plugin/tests`: 71 pass. `python3 -m unittest discover agents-plugin-wsflow/tests`: 12 pass.
+- New tests: `TestTicketBlockedHeadingsAreVerbatimAndUninterpreted` (verbatim/nonstandard `— RESOLVED`/multi/none, and no `DispatchBlocked` promotion), `TestTicketsQueryBlockedMarkerInBothProjections` (JSON + compact marker on discovery and point-resolve, dispatch behavior preserved), `TestTicketsQueryBlockedMarkerAndDispatchGateAreDistinctLines` (both facts on distinct lines), and `test_selector_and_run_consume_body_blocked_marker` (playbook prose pins on both shipping mirrors).
+- Mirror regen: canonical `manifest.json` via `WSRSRC_REGEN`, wsflow rsrc via `WS_REGEN_WSFLOW_RSRC`; pi rsrc hand-copied byte-identically (no non-version-bump regen entrypoint), guarded by `TestPiMirrorUpToDate`.
+
+Decisions:
+
+- Parser matches the literal `## Blocked` prefix per the ticket decision; an over-match like `## Blockedness` is accepted as faithful to "begin with `## Blocked`" rather than adding a boundary rule the spec does not require.
+- Review: correctness clean; test clean with four Minor notes (no Critical/Important). Added the distinct-lines guard to close the one Minor mapping to an explicit ticket decision; the rest were over-constraining boundary cases or playbook-prose behavior already string-pinned.
