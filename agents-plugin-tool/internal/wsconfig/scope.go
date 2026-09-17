@@ -70,6 +70,20 @@ const (
 	// about warning noise, not a per-project opt-in.
 	ItemBootstrapAlarm = "bootstrap_alarm"
 
+	// ItemTicketAssigneeAware is the opt-in project gate for ticket assignee
+	// awareness. Values: "on" or "off" (builtin default: off). It is meant to be
+	// a shared, deterministic team decision, so a downstream project sets it in
+	// the committed repo scope (.ws-workflow/config.json); it still resolves
+	// through the normal chain, so a per-machine project override can win locally
+	// (the feature is opt-in coordination, not adversarial enforcement — see
+	// 260917-feat-ws-committed-project-config-scope's settled overridability
+	// decision). Off means the entire assignee feature is inert. The key is
+	// hyphenated (not the underscore form other items use) because it is the
+	// literal key a downstream author hand-writes into .ws-workflow/config.json,
+	// documented as `ticket-assignee-aware`; config.json keys are the item key
+	// verbatim.
+	ItemTicketAssigneeAware = "ticket-assignee-aware"
+
 	// ItemWorktreePool is the pool location where worktree.acquire provisions
 	// and recycles per-worker Git worktrees. The value is either an absolute
 	// path or a template containing the $(GitRoot) and/or $(GitRootDirName)

@@ -57,6 +57,24 @@ type Client struct {
 
 func NewClient() Client { return Client{Runner: ExecRunner{}} }
 
+// CurrentUserEmail returns the repository's configured git user.email with
+// surrounding whitespace trimmed (original case preserved for display). It
+// returns "" when git reports no identity — user.email unset, or a CI/bot with
+// none — because any error is folded into "": an ownership gate that cannot
+// read an identity must degrade to assign-any, never surface a git error to a
+// caller that only asked to list tickets. A nil runner falls back to
+// ExecRunner, matching Client.runner.
+func CurrentUserEmail(ctx context.Context, runner Runner, root string) string {
+	if runner == nil {
+		runner = ExecRunner{}
+	}
+	out, err := runner.RunGit(ctx, root, "config", "user.email")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func (c Client) runner() Runner {
 	if c.Runner == nil {
 		return ExecRunner{}
