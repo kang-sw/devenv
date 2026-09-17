@@ -651,6 +651,10 @@ func blockedHeadings(text string) []string {
 	var out []string
 	for _, line := range strings.Split(text, "\n") {
 		trimmed := strings.TrimSpace(line)
+		// Design-accepted limitation: this matches by line prefix alone, so a
+		// `## Blocked (...)` line inside a fenced code block or quoted example
+		// prose is surfaced too. Advisory-only, and currency is the caller's
+		// judgment per the doc comment above, so this is not treated as a bug.
 		if strings.HasPrefix(trimmed, "## Blocked") {
 			out = append(out, trimmed)
 		}

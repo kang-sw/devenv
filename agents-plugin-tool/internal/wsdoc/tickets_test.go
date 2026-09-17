@@ -181,6 +181,30 @@ func TestTicketBlockedHeadingsAreVerbatimAndUninterpreted(t *testing.T) {
 	}
 }
 
+// TestTicketBlockedHeadingsSurfaceInsideFence pins a design-accepted limitation
+// of blockedHeadings: it matches by trimmed line prefix alone, so a
+// `## Blocked (...)` line inside a fenced code block (or quoted example prose)
+// is surfaced as an advisory marker too, exactly like a live one. Both the
+// correctness and test reviewers judged this acceptable — the marker is
+// advisory-only and currency is the caller's judgment — so this test locks the
+// current behavior in place rather than asserting the fence should suppress it.
+// If that verdict changes, it takes a ticket, not a silent test edit.
+func TestTicketBlockedHeadingsSurfaceInsideFence(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/tickets/ready/260105-feat-fenced.md",
+		"---\ntitle: Fenced example\n---\n# Fenced\n\nExample template:\n\n```\n## Blocked (2026-03-03)\n```\n\nNot actually blocked.\n")
+
+	got, err := TicketsList(root, TicketListOptions{Statuses: []string{"ready"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fenced := findTicket(t, got, "260105-feat-fenced")
+	if joined(fenced.BlockedHeadings) != "## Blocked (2026-03-03)" {
+		t.Fatalf("fenced heading must still surface (accepted limitation): %#v", fenced.BlockedHeadings)
+	}
+}
+
 func stems(tickets []TicketInfo) string {
 	values := make([]string, 0, len(tickets))
 	for _, ticket := range tickets {
