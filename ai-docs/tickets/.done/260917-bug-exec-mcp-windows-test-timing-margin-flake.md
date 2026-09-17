@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: d71808cf038e2818
 sage-review-completeness-reviewed: d71808cf038e2818
+completed: 2026-09-17
 ---
 
 # Exec MCP Windows test-timing margins recur as release smoke flakes
@@ -194,3 +195,13 @@ always consumes its full `timeout_seconds:2` (previously it could return early
 on the short job's completion). Not a regression and not part of this ticket's
 target pattern, but flagged as the most likely next recurrence site if the
 class resurfaces.
+
+#### Edition (4c5c2d43) - 2026-09-17
+
+Windows verification obtained and ticket closed. The lead merged the fix into
+`develop` (merge `4c5c2d43`) for the ws/wsflow 0.46.10 release and ran the
+release CI to get the Windows run the worker could not: `ws-mcp release` PR run
+35224670350 passed **Windows ws-mcp smoke green (17m8s)** on `windows-latest`,
+and the `v0.46.10` tag run re-confirmed it. This is the recurring flake's first
+green release-smoke since v0.46.7 (v0.46.8 and v0.46.9 both failed on it). Fix
+shipped in v0.46.10.
