@@ -437,6 +437,94 @@ func TestGitCommitCLIRejectsRetiredDocTrailerFlags(t *testing.T) {
 	}
 }
 
+// TestGitCommitCLIExpectedBranchGuard is the CLI-level counterpart to
+// internal/mcp.TestServeStdioGitCommitRefusesBranchMismatch: it exercises
+// --expected-branch through the actual `ws-mcp git commit` binary rather than
+// the MCP dispatch path, covering both a believed/actual mismatch and the
+// flag being omitted entirely (refused earlier by the required-argument
+// check, before the believed/actual comparison ever runs). Neither case had a
+// dedicated CLI test before; TestGitCommitCLIRejectsRetiredDocTrailerFlags
+// only piggybacked a matching --expected-branch onto an unrelated
+// flag-rejection assertion.
+func TestGitCommitCLIExpectedBranchGuard(t *testing.T) {
+	bin := wsMCPTestBin(t)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	newRepo := func(t *testing.T) string {
+		t.Helper()
+		root := t.TempDir()
+		runGit(t, root, "init")
+		runGit(t, root, "config", "core.autocrlf", "false")
+		runGit(t, root, "config", "user.email", "test@example.com")
+		runGit(t, root, "config", "user.name", "Test User")
+		if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("one\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, root, "add", "file.txt")
+		runGit(t, root, "commit", "-m", "initial")
+		if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("one\ntwo\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return root
+	}
+
+	t.Run("mismatch-refused", func(t *testing.T) {
+		root := newRepo(t)
+		head := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+		cmd := exec.Command(bin,
+			"git", "commit",
+			"--root", root,
+			"--path", "file.txt",
+			"--title", "test: mismatch",
+			"--ai-context", "User intent: prove the CLI guard refuses a believed/actual mismatch.",
+			"--expected-branch", "definitely-not-the-checked-out-branch",
+		)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("mismatch was admitted:\n%s", string(out))
+		}
+		actualBranch := strings.TrimSpace(string(runGitOutput(t, root, "symbolic-ref", "--short", "HEAD")))
+		for _, want := range []string{"definitely-not-the-checked-out-branch", actualBranch, "believed", "actual"} {
+			if !strings.Contains(string(out), want) {
+				t.Fatalf("refusal output = %q, want it to mention %q", string(out), want)
+			}
+		}
+		headAfter := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+		if headAfter != head {
+			t.Fatalf("HEAD moved to %s despite a refused commit (want unchanged %s)", headAfter, head)
+		}
+	})
+
+	t.Run("flag-omitted-refused", func(t *testing.T) {
+		root := newRepo(t)
+		head := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+		cmd := exec.Command(bin,
+			"git", "commit",
+			"--root", root,
+			"--path", "file.txt",
+			"--title", "test: no expected-branch flag",
+			"--ai-context", "User intent: prove the CLI guard refuses when --expected-branch is omitted.",
+		)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("commit without --expected-branch was admitted:\n%s", string(out))
+		}
+		// An omitted flag is refused earlier, by the required-argument check
+		// itself, rather than falling through to the believed/actual mismatch
+		// message covered by the mismatch-refused subtest above.
+		if !strings.Contains(string(out), "expected_branch is required") {
+			t.Fatalf("refusal output = %q, want the expected_branch-required guard message", string(out))
+		}
+		headAfter := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+		if headAfter != head {
+			t.Fatalf("HEAD moved to %s despite a refused commit (want unchanged %s)", headAfter, head)
+		}
+	})
+}
+
 func TestDocumentationCLICommandsDefaultToTextAndKeepJSONFormat(t *testing.T) {
 	bin := wsMCPTestBin(t)
 	build := exec.Command("go", "build", "-o", bin, ".")
