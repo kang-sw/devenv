@@ -13,6 +13,13 @@ type TicketCreateOptions struct {
 	InitialState string // "idea" | "todo" | "ready"
 	SageReview   string // sage_review config value ("" | "off" | "auto" | "ask")
 	Today        string // YYMMDD; if empty, use time.Now().Format("060102")
+	// Assignee, when non-empty, stamps an `assignee:` YAML sequence into the
+	// created stub's frontmatter — the explicit ownership act at creation. The
+	// MCP layer resolves it from set_assignee (and only when the
+	// ticket-assignee-aware flag is on); an empty slice leaves the ticket
+	// unassigned (assign-any). Emails are emitted verbatim (case preserved);
+	// blank entries are skipped.
+	Assignee []string
 }
 
 type TicketCreateResult struct {
@@ -109,6 +116,9 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 	if state == "ready" && completenessRequired {
 		stub += "sage-review-completeness: " + resolved + "\n"
 	}
+	if assigneeBlock := assigneeFrontmatter(opts.Assignee); assigneeBlock != "" {
+		stub += assigneeBlock
+	}
 	stub += "---\n"
 
 	if err := os.WriteFile(destAbs, []byte(stub), 0o644); err != nil {
@@ -132,4 +142,23 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 	}
 
 	return TicketCreateResult{Path: relPath, Tip: tip}, nil
+}
+
+// assigneeFrontmatter renders an `assignee:` YAML sequence for the create stub,
+// one email per `- item` line, matching the list shape the frontmatter parser
+// reads back into []string. Returns "" when no non-blank email is given, so an
+// unassigned ticket carries no assignee key at all (assign-any).
+func assigneeFrontmatter(assignee []string) string {
+	var b strings.Builder
+	for _, email := range assignee {
+		email = strings.TrimSpace(email)
+		if email == "" {
+			continue
+		}
+		if b.Len() == 0 {
+			b.WriteString("assignee:\n")
+		}
+		b.WriteString("  - " + email + "\n")
+	}
+	return b.String()
 }
