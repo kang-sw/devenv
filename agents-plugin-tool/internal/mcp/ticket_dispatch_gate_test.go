@@ -181,6 +181,34 @@ func TestTicketsQueryBlockedMarkerInBothProjections(t *testing.T) {
 	}
 }
 
+// TestTicketsQueryBlockedMarkerAndDispatchGateAreDistinctLines pins the ticket's
+// "visibly distinct" decision positively: a ticket that carries BOTH an unlanded
+// blocked-by edge and a body `## Blocked` marker renders the typed gate as a
+// dispatch_blocked line and the advisory marker as a separate blocked_marker
+// line, so a caller can never conflate the two.
+func TestTicketsQueryBlockedMarkerAndDispatchGateAreDistinctLines(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	mustWrite(t, root, "ai-docs/tickets/ready/260301-feat-prereq.md",
+		"---\ntitle: Prereq\n---\n# Prereq\n\n## Phases\n\n### Phase 1: A\n")
+	mustWrite(t, root, "ai-docs/tickets/ready/260302-feat-both.md",
+		"---\ntitle: Both\nblocked-by: 260301-feat-prereq\n---\n# Both\n\n## Blocked (2026-09-16) — owner smoke\n\nOwner-only.\n\n## Phases\n\n### Phase 1: X\n")
+	initGit(t, root)
+
+	resolve := callScopedTool(t, root, 1, "tickets.query", map[string]any{"ticket_stem": "260302-feat-both"})
+	if !strings.Contains(resolve, "dispatch_blocked: 260301-feat-prereq") {
+		t.Fatalf("typed gate line missing:\n%s", resolve)
+	}
+	if !strings.Contains(resolve, "blocked_marker: ## Blocked (2026-09-16) — owner smoke") {
+		t.Fatalf("advisory marker line missing:\n%s", resolve)
+	}
+	// The two facts must be on separate lines, not fused into one.
+	if !strings.Contains(resolve, "dispatch_blocked:") || !strings.Contains(resolve, "\n  blocked_marker:") {
+		t.Fatalf("gate and marker must render as distinct lines:\n%s", resolve)
+	}
+}
+
 // TestTicketsQueryPointResolveDispatchGateFailsOpen verifies the documented
 // fail-open contract at the server point-resolve seam (server.go's
 // `blockErr == nil` guard): when the dispatch gate's live whole-board scan
