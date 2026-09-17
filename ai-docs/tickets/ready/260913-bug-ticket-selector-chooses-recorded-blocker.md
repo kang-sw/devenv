@@ -5,6 +5,10 @@ related:
   260911-bug-ws-pi-question-queue-dogfood: first advanceable ticket omitted by the incorrect selection
   260914-chore-ws-pi-root-manifest-runtime-deps: second blocked-ticket example selected during dogfood
   260916-feat-pi-agent-gutter-active-time-placement: second advanceable ticket omitted by the incorrect selection
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-completeness-reviewed: d640aebcd0a0db61
+sage-review-design-reviewed: d640aebcd0a0db61
 ---
 
 # Ticket selector can choose a ready ticket with a current Blocked note
@@ -26,7 +30,7 @@ This is an evidence-visibility failure, not a request to infer hard execution st
 - Expose the raw Blocked heading lines consistently in both `tickets.query` JSON and its default compact-text output. Discovery listings must carry the marker because that is the inventory used by `ticket-selector`; point resolution must preserve the same evidence.
 - Keep the raw body marker visibly distinct from `dispatch_blocked` so callers cannot confuse advisory evidence with the typed dependency gate.
 - When a queue candidate carries a raw Blocked heading marker, `ticket-selector` reads the corresponding ticket section and judges whether the blocker is current before selecting or skipping it.
-- For queue-selected work, `lead-run` rechecks the selected ticket body before worker dispatch so a selector omission cannot silently launch work into a recorded blocker. Preserve direct named-ticket invocation behavior; an explicit user-selected ticket is not replaced by queue ordering.
+- For queue-selected work, `lead-run` rechecks the selected ticket body before worker dispatch so a selector omission cannot silently launch work into a recorded blocker. When the recheck finds a current blocker, `lead-run` treats the ticket as the selector should have — drop it from this cycle and re-select the next candidate, falling through to the existing all-blocked result when no advanceable candidate remains — and never dispatches into the recorded blocker. Preserve direct named-ticket invocation behavior; an explicit user-selected ticket is not replaced by queue ordering.
 - When every remaining ready ticket is judged blocked, retain the existing all-blocked result and include the recorded blocker inventory. Do not make blocked tickets disappear from diagnostics.
 
 ## Constraints
@@ -35,6 +39,27 @@ This is an evidence-visibility failure, not a request to infer hard execution st
 - Do not add natural-language classification of owner actions, dependency state, or resolution wording to `tickets.query`.
 - Do not require worker dispatch merely to rediscover a body-level blocker already present in the ticket.
 - Keep JSON and compact-text projections behaviorally aligned.
+- Mirror the `ticket-selector.md` and `lead-run.md` edits byte-identically into `agents-plugin-pi/rsrc/` as well as `agents-plugin-wsflow/rsrc/`; the pi package carries no declared Convention manual row but is an in-scope mirror (Route Facts `scope.span`), so keep all three copies identical.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for agents-plugin/rsrc/, agents-plugin-wsflow/rsrc/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin-wsflow/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/wsdoc/tickets.go, agents-plugin-tool/internal/mcp/server.go, agents-plugin/rsrc/ticket-selector/ticket-selector.md, agents-plugin/rsrc/lead-run/lead-run.md, plus their byte-identical agents-plugin-wsflow/rsrc/ and agents-plugin-pi/rsrc/ mirrors (confirmed identical via diff) |
+| scope.surface | public-interface | tickets.query is an MCP tool whose JSON and compact-text output contract gains a new field (server.go:3764 tool description; TicketInfo struct at tickets.go:46-84 has no such field today) |
+| scope.new_public_symbol | yes | a new TicketInfo field carrying the raw literal "## Blocked" heading line, absent today |
+| scope.new_type_contract | yes | tickets.query's JSON schema and its default compact-text formatter (formatTickets, server.go:2795-2829) both gain the new field; no such line exists today |
+| scope.test_surface | existing | agents-plugin-tool/internal/mcp/ticket_dispatch_gate_test.go, agents-plugin-tool/internal/mcp/playbook_tools_test.go, agents-plugin/tests/test_skill_dispatch_contracts.py |
+| complexity.reuse_points | confirmed | existing Blocked-heading writer (appendOrReplaceBlockedSection, tickets_sage.go:626) and existing body/frontmatter extraction pattern (ticketRouteFacts, tickets.go:581) are direct precedent; ticket-selector.md and lead-run.md are already byte-identical across the agents-plugin/, agents-plugin-wsflow/, and agents-plugin-pi/ rsrc mirrors |
+| complexity.side_effect_risk | moderate | changes a shipped MCP tool's output contract consumed by the ticket-selector and lead-run playbooks across three mirrored packages |
+| risk.correctness | moderate | must return the heading line verbatim without inferring resolved/current semantics, and lead-run's new pre-dispatch recheck must not replace direct named-ticket invocation |
+| risk.fit | low | follows the established dispatch_blocked-gate-plus-advisory-marker shape and the existing byte-identical rsrc mirror pattern |
+| risk.test | moderate | new heading-extraction and selection-recheck behavior needs new test coverage; existing test files give a pattern to extend but none cover this today |
+| risk.security_or_contract | moderate | a shipped-surface contract change to a caller-facing MCP tool; the ticket's own constraint requires JSON/compact-text stay aligned and the advisory marker must not become a new hard gate |
 
 ## Phases
 
