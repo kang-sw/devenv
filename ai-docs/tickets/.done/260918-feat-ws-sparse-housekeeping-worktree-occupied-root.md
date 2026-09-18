@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 5850e6a31ef99364
 sage-review-completeness-reviewed: 5850e6a31ef99364
+completed: 2026-09-18
 ---
 
 # Sparse housekeeping worktree for a lead whose root is occupied by a worker's impl/ branch
@@ -380,6 +381,49 @@ harness):
   `worker_key` succeeds on a file under `ai-docs/`.
 - `cd agents-plugin-tool && go test ./...` green.
 
+### Result (76a45c38) - 2026-09-18
+
+Delivered as specified. `worktree.acquire` gained `sparse_paths` (cone-mode dir
+list) and made `target_branch` optional; schema `required` is now `["base"]`
+with the three settled description texts and the appended tool-description
+sentence. `worktreeAcquireResult` carries `sparse: true|false` (JSON and text).
+
+Sparse provisioning sequence: `git worktree add --detach --no-checkout <base>`,
+then `git sparse-checkout set --cone <paths...>` in the new worktree, then the
+branch step populates only the cone. Cone patterns are re-applied on every
+sparse acquire (new and reused) so a stale pattern set never survives. Reuse
+shape-matching skips a candidate when `wsdoc.SparseCheckoutActive(e.Path) !=
+(len(sparsePaths) > 0)` (verified cheapest correct read for a linked worktree,
+since `git sparse-checkout set` writes per-worktree `config.worktree`).
+Direct-base checkout (`targetBranch == ""`) runs `git switch --no-guess --
+<base>` and wraps a held-branch failure with the settled "check out base %q ...
+release the worktree holding it first, or pass target_branch" error.
+`releaseWorktree` is unchanged (reset/clean/detach only; no `sparse-checkout
+disable`), so a released sparse worktree keeps its cone for reuse.
+
+Decision 11 (submodule sync in a sparse worktree whose `.gitmodules` names a
+path outside the cone): empirically pinned on git 2.50.1. Cone mode always
+materializes the root-level `.gitmodules`, so the existing gate
+(`os.Stat(.gitmodules)`, worktree_tools.go:360) fires and `git submodule update
+--init --recursive` runs. It is **not** a no-op: it clones and checks out the
+out-of-cone submodule path (e.g. `vendor/sub`) into the worktree, exit 0, no
+error and no warning. Housekeeping provisioning therefore still pays the
+submodule clone cost even when the submodule sits outside the cone; the result
+is correct (no failure), just not maximally lean. No shipped behavior change was
+made for this — the ticket only asked to record it.
+> Forward: a leaner housekeeping cone in a submodule-heavy downstream repo would
+> want to skip or shallow out-of-cone submodule sync; candidate follow-up idea
+> if provisioning cost is observed to matter.
+
+Tests (all green, `env -u WS_MAILBOX go test ./...`):
+`TestProvisionWorktreeSparsePaths`, `TestProvisionWorktreeSparseReuseMatchesShape`
+(sparse-reuses-sparse, sparse-skips-full, full-skips-sparse),
+`TestProvisionWorktreeBaseDirectCheckout` (commit advances base),
+`TestProvisionWorktreeBaseDirectCheckoutRefusesHeldBranch`,
+`TestWorktreeAcquireSparseDispatch`; `TestWorktreeAcquireRejectsNonLeadAndBadArgs`
+updated to drop the now-invalid missing-`target_branch` case while keeping the
+missing-`base` guard.
+
 ### Phase 2: occupied-root banner, `git.commit` refusal hint, `git.merge` held-target refusal
 
 Depends on Phase 1 (the banner names the landed `sparse_paths` argument, and
@@ -511,6 +555,67 @@ Verification:
   does not contain `worktree.acquire`; detached refusal text unchanged.
 - `go test ./...` green.
 
+### Result (a0093703) - 2026-09-18
+
+Delivered as specified.
+
+`occupiedRootAnnouncement` (new `occupied_root_announcement.go`): one `git
+symbolic-ref --quiet --short HEAD`; detached `HEAD`, non-`impl/` branch, or any
+error return `""` (advisory only, never a render failure). Parent via
+`parseImplBranchRoot`; the rootless `impl/<stem>` case (`parent == ""`) uses the
+"the branch this worker was spawned from" text variant. Gated by the caller in
+`handleWorkflowManual`: the FRESH-with-root path always injects (its key is
+minted with `parent: ""`); the CONTINUE path injects only when `rec.Parent ==
+""` — so a worker never sees the "do not commit here" banner about its own
+branch (Decision 6).
+
+`wsgit.Client.Commit`: the impl-branch escape-hatch suffix is appended only when
+`actualBranch` has the `impl/` prefix (quoted parent when it parses, unquoted
+"the branch this worker was spawned from" otherwise). A local `implBranchParent`
+twin avoids an mcp→wsgit import cycle; its `idx <= 0` guard and mcp's `idx < 0`
+differ only for the degenerate `impl//stem` and both yield "no parent". The
+detached-`HEAD` refusal is unchanged.
+
+Decision 13 (ticket-scope banner under cone mode): `TicketScopeInfo` gained
+`Cone bool`, set from `core.sparseCheckoutCone` read through the same config
+files `newTicketScope` already consults (so a linked worktree's `config.worktree`
+is honored). `scopeAnnouncement` returns `""` when `info.Cone`.
+`SparseCheckoutActive`, the activation rule, and the `tickets.move`/`close` gate
+stay keyed on `Active`, so `git.commit`'s sparse staging in a cone worktree still
+works. Side effect (recorded per contract): a cone checkout that excludes
+`ai-docs` no longer receives a hidden-stem notice; acceptable because the
+scope-banner remedy ("restore with git sparse-checkout disable") would be false
+under a deliberately-shaped development/housekeeping cone.
+
+Decision 14 (`git.merge` held-target refusal): `mergeImplBranch` gained a
+trailing `poolRoot string` param. A new `checkTargetHeld` closure runs once,
+right after the first `checkWorktree()` and before `checkTips()`/switch; when a
+`listWorktrees` entry holds `refs/heads/<mergeRoot>` at a path other than the
+session root it adds a `target_held_elsewhere` (`must_resolve`) diagnostic, and
+the diagnostics check returns `blocked()` before anything is switched or merged
+— HEAD and the target tip stay put. `<kind>` is the pool-housekeeping text when
+`poolRoot != ""` and the path is under it, "another worktree" otherwise, and the
+stale-record text with the `git worktree prune` resolution when the holder is
+`Prunable`. `worktreeEntry` gained `Prunable bool` from the porcelain `prunable`
+line. `server.go` resolves `poolRoot` the way `worktree.acquire` does
+(`ItemWorktreePool` via the session-key resolver, `resolvePoolRoot(value,
+mainRoot)`), failing open to `""` rather than failing the merge.
+
+Correctness-review Minor (recorded, not fixed — inert for this contract): in
+`checkTargetHeld` the session-root skip compares a symlink-resolved
+`canonicalGitRoot` against a non-resolved `filepath.Clean(e.Path)`. It could
+mis-skip only in a degenerate self-merge (source branch == target), which is
+already caught earlier as `already_contained`; the branch filter
+`e.Branch != "refs/heads/"+mergeRoot` excludes the session-root entry first in
+every real flow.
+
+Tests (green): `TestImplMergeRefusesTargetHeldElsewhere` (pool-holder,
+plain-holder, no-other-worktree-merges, prunable-holder incl. post-`prune`
+success), `TestListWorktreesPrunable`, `TestOccupiedRootAnnouncement*`
+(parent-gating on FRESH vs CONTINUE vs child-key),
+`TestScopeAnnouncementSilentUnderConeMode` (the `--no-cone` cases still fire),
+`TestCommitRefusesImplBranchNamesEscapeHatch`.
+
 ### Phase 3: prose at the write sites and mirrors
 
 Depends on Phase 2 (the prose refers to the banner).
@@ -585,6 +690,55 @@ Verification:
   clone's key is refused with `target_held_elsewhere` naming the pool path,
   `worktree.release` detaches the sparse worktree, and the same `git.merge`
   then lands.
+
+### Result (0fa9d218) - 2026-09-18
+
+Delivered as specified. The four settled paragraphs were applied verbatim at the
+three canonical write sites (`agents-plugin/rsrc/lead-workflow-manual/…`,
+`lead-run/…` Spawn step 6 and Handle-the-report, `lead-ticket/…` Output);
+`lead-discuss` untouched (Decision 7). Regenerated `manifest.json` and produced
+byte-identical `agents-plugin-wsflow/rsrc/` and `agents-plugin-pi/rsrc/` mirrors
+(12 files). Verified byte-identity of all three changed files across both
+mirrors; `go test ./...` drift guards (rsrc manifest, wsflow mirror, pi mirror)
+and `python3 -m unittest discover agents-plugin-wsflow/tests` (12 tests) green.
+
+Fresh-reader audit (per `skill-authoring.md` `## Audits`), four changed
+paragraphs; verdict: no blocking issues. Findings and classification:
+- "…is a worker's until the lead restores it" — reader flagged "restores it" as
+  an unoperationalized end-state (important-as-read). Classification: non-blocking
+  against verbatim-settled prose; the action is operationalized downstream in
+  `lead-run` Handle-the-report (the parent branch is checked back out as part of
+  merging the impl branch). Not changed (prose is settled).
+- "(the occupied-root banner names the parent branch)" — flagged as an orphaned
+  reference cited as the source for the `base:` argument. Classification:
+  false-positive at the shipped surface — the banner is a real runtime artifact
+  (`occupiedRootAnnouncement`, Phase 2) injected into the *same* `workflow_manual`
+  output that carries this `### Git` section, so a reader sees the banner and the
+  reference together. Not changed.
+- lands-on-worker-branch (manual) vs takes-no-ticket-write (lead-ticket) — reader
+  read a surface tension. Classification: minor, reconciled by `git.commit`'s
+  `expected_branch` guard (refuses a stale-checkout commit); both are true. Not
+  changed (settled prose).
+- "housekeeping that cannot wait" unscoped; `target_held_elsewhere` "typically"
+  hedge; lead-ticket Output not locally restating `worktree.release` — all minor,
+  the safe fallback matches the cautious default and the release obligation is
+  stated in the cross-referenced `### Git` section. Not changed.
+
+Dogfood (recorded per contract): driven against a freshly built `ws-mcp serve
+--stdio` over a scratch repo with a throwaway `impl/develop/throwaway-slug`
+checked out in the root. Observed, in order: FRESH `workflow_manual` shows the
+occupied-root banner naming `base: "develop"` and mints the lead key;
+`worktree.acquire(base: "develop", sparse_paths: ["ai-docs"])` returns
+`sparse: true` on a worktree whose `HEAD` is `develop` with `ai-docs/` present
+and out-of-cone `src/` absent; `workflow_manual` with the returned worker key
+shows neither the occupied-root nor the sparse-checkout-scope banner; a
+`git.commit` through that key lands on `develop`; `git.merge impl/develop/throwaway-slug`
+is refused (MCP error) with text `Target "develop" is checked out at <pool path>,
+a ws pool worktree: a parallel lead's housekeeping checkout (worktree.acquire
+with sparse_paths). Nothing was merged; "impl/develop/throwaway-slug" is retained
+and HEAD is unchanged.` — HEAD and branch confirmed unmoved; `worktree.release`
+detaches the sparse worktree; the same `git.merge` then lands (`status: merged`,
+`branch_deleted: true`, source now an ancestor of `develop`).
 
 ## Sage Review Round 1 (2026-09-18)
 
