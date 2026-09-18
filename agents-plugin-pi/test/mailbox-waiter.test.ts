@@ -293,6 +293,24 @@ describe("resolveMailboxSelfSlug", () => {
     assert.equal(await resolveMailboxSelfSlug(async () => ({ content: [{ type: "text", text: "not json" }] }), "k"), undefined);
     assert.equal(await resolveMailboxSelfSlug(async () => ({ content: [] }), "k"), undefined);
   });
+
+  test("resolves to undefined on a whitespace-only address, a non-object self, or a non-object top-level response", async () => {
+    assert.equal(
+      await resolveMailboxSelfSlug(async () => ({ content: [{ type: "text", text: JSON.stringify({ self: { address: "   " } }) }] }), "k"),
+      undefined,
+      "a whitespace-only address is treated the same as absent",
+    );
+    assert.equal(
+      await resolveMailboxSelfSlug(async () => ({ content: [{ type: "text", text: JSON.stringify({ self: "scout@worktree" }) }] }), "k"),
+      undefined,
+      "a non-object self never reaches into a bare string for .address",
+    );
+    assert.equal(
+      await resolveMailboxSelfSlug(async () => ({ content: [{ type: "text", text: "42" }] }), "k"),
+      undefined,
+      "a non-object top-level JSON value (still valid JSON) is not treated as {self}",
+    );
+  });
 });
 
 describe("buildMailboxWaitArgv", () => {
