@@ -455,6 +455,24 @@ func TestCommitRefusesImplBranchNamesEscapeHatch(t *testing.T) {
 	if strings.Contains(err.Error(), "worktree.acquire") {
 		t.Fatalf("non-impl refusal must not name the escape hatch: %v", err)
 	}
+
+	// Rootless impl/<stem>: no parent segment, so implBranchParent returns "" and
+	// the refusal falls back to the "branch this worker was spawned from" phrasing
+	// instead of naming a quoted base — the mcp twin already pins this case in
+	// occupied_root_announcement_test.go's TestOccupiedRootAnnouncementTextVariants.
+	rootlessRunner := &sequenceRunner{outs: [][]byte{[]byte("impl/foo\n")}}
+	_, err = (Client{Runner: rootlessRunner}).Commit(context.Background(), "/repo", CommitOptions{
+		Paths: []string{"src/file.go"}, Title: "feat: x", AIContext: []string{"intent"}, ExpectedBranch: "develop",
+	})
+	if err == nil {
+		t.Fatal("Commit did not refuse the mismatch")
+	}
+	if !strings.Contains(err.Error(), "worktree.acquire(base: <the branch this worker was spawned from>") {
+		t.Fatalf("rootless impl-branch refusal must fall back to the spawned-from phrasing: %v", err)
+	}
+	if strings.Contains(err.Error(), `base: "`) {
+		t.Fatalf("rootless impl-branch refusal must not name a quoted base: %v", err)
+	}
 }
 
 func TestCommitExpandsTicketMovePathsByStem(t *testing.T) {

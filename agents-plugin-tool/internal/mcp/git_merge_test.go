@@ -1037,6 +1037,91 @@ func TestImplMergeRefusesTargetHeldElsewhere(t *testing.T) {
 	})
 }
 
+// TestImplMergeDispatchClassifiesHeldTargetByPool drives git.merge through the
+// real dispatch path (callToolOnce, the same harness the other dispatch tests
+// use) rather than calling mergeImplBranch directly, so the pool-root
+// resolution glue in server.go's `case "git.merge"` handler (session_key ->
+// wsconfig ItemWorktreePool -> listWorktrees(root) -> resolvePoolRoot, fed
+// into mergeImplBranch as its poolRoot argument) is itself exercised.
+// TestImplMergeRefusesTargetHeldElsewhere above pins the pool-vs-plain
+// classification logic in mergeImplBranch with a hand-supplied poolRoot; that
+// leaves the dispatch-level resolution untested, so a regression there (e.g.
+// the poolRoot argument silently dropped, or session_key/config wiring
+// broken) would mislabel a pool holder as "another worktree" without any test
+// catching it, even though the label routes lead-run's "Handle the report"
+// response. See mkHeld's canonicalization comment above for why the pool
+// path is derived through canonicalRootForTest.
+func TestImplMergeDispatchClassifiesHeldTargetByPool(t *testing.T) {
+	t.Run("pool-holder", func(t *testing.T) {
+		root, branch := mergeFixture(t, "develop")
+		root = canonicalRootForTest(t, root)
+		t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+		s := NewServer(root, "test")
+		key, err := s.sessions.mint(root, roleLead, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The default worktree_pool config resolves to
+		// $(GitRoot)/../.ws-worktrees/$(GitRootDirName) — exactly what the
+		// dispatch handler computes with no explicit config override, so no
+		// config.tune is needed to make the holder fall inside the pool.
+		poolRoot := resolvePoolRoot("", root)
+		if err := os.MkdirAll(poolRoot, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		held := filepath.Join(poolRoot, "held")
+		runGit(t, root, "worktree", "add", held, "develop")
+
+		// mergeImplBranch returns a non-nil error for target_held_elsewhere, which
+		// toolJSONResponse collapses to a plain error-text response regardless of
+		// format:"json" (see toolJSONResponse's err != nil branch in server.go), so
+		// this asserts on the rendered text rather than unmarshalling a result
+		// struct.
+		resp := callToolOnce(t, s, 1, "git.merge", map[string]any{
+			"session_key": key, "branch": branch, "title": "merge(test): land implementation",
+			"ai_context": []string{"Test pool-holder classification reaches dispatch."},
+		})
+		out := toolText(t, resp)
+		if !strings.Contains(out, "checked out at") {
+			t.Fatalf("held target not refused via dispatch: %s", out)
+		}
+		if !strings.Contains(out, "ws pool worktree") || !strings.Contains(out, held) {
+			t.Fatalf("dispatch must classify the pool holder and name its path: %s", out)
+		}
+	})
+
+	t.Run("plain-holder", func(t *testing.T) {
+		root, branch := mergeFixture(t, "develop")
+		root = canonicalRootForTest(t, root)
+		t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+		s := NewServer(root, "test")
+		key, err := s.sessions.mint(root, roleLead, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Held outside the resolved pool (an unrelated temp dir): the dispatch
+		// handler's resolved poolRoot must not cover it, so the classification
+		// falls back to a plain "another worktree".
+		held := filepath.Join(t.TempDir(), "elsewhere")
+		runGit(t, root, "worktree", "add", held, "develop")
+
+		resp := callToolOnce(t, s, 1, "git.merge", map[string]any{
+			"session_key": key, "branch": branch, "title": "merge(test): land implementation",
+			"ai_context": []string{"Test plain-holder classification reaches dispatch."},
+		})
+		out := toolText(t, resp)
+		if !strings.Contains(out, "checked out at") {
+			t.Fatalf("held target not refused via dispatch: %s", out)
+		}
+		if strings.Contains(out, "ws pool worktree") {
+			t.Fatalf("holder outside the resolved pool must not be named a ws pool worktree: %s", out)
+		}
+		if !strings.Contains(out, "another worktree") || !strings.Contains(out, held) {
+			t.Fatalf("dispatch must classify the plain holder and name its path: %s", out)
+		}
+	})
+}
+
 // TestListWorktreesPrunable pins the prunable-record parse: a worktree whose
 // directory was removed without prune reports Prunable, and a live one does not.
 func TestListWorktreesPrunable(t *testing.T) {
