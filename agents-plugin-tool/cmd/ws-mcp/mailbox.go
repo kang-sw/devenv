@@ -120,13 +120,22 @@ func mailboxWait(args []string) {
 		done <- outcome{result, err}
 	}()
 
+	// Reprint this invocation's own resolved binary plus the wait-scoping
+	// flags it received, so every return path can hand the caller a runnable
+	// re-arm command (Phase 2 of 260917: the arming guidance is read once, but
+	// the wait fires much later, so the "re-arm to keep listening" reminder has
+	// to arrive at fire time, not only at read time). os.Args[0] is naturally
+	// host-neutral — whatever argv[0] the harness/launcher invoked — so this
+	// needs no package-internal launcher path (shipped-surface-boundary.md).
+	rearmCmd := buildMailboxWaitRearmCommand(os.Args[0], *sessionKey, target.Slug, *timeout)
+
 	select {
 	case out := <-done:
 		clearMarker()
 		if out.err != nil {
 			fatal("mailbox wait", out.err)
 		}
-		emitMailboxWaitResult(out.result, *format)
+		emitMailboxWaitResult(out.result, *format, rearmCmd)
 	case <-ctx.Done():
 		clearMarker()
 		fmt.Fprintln(os.Stderr, "ws-mcp mailbox wait: interrupted")
@@ -134,15 +143,23 @@ func mailboxWait(args []string) {
 	}
 }
 
-func emitMailboxWaitResult(result wsmailbox.WaitResult, format string) {
+func emitMailboxWaitResult(result wsmailbox.WaitResult, format, rearmCmd string) {
+	// The re-arm reminder rides every return path (mail or timeout): a single
+	// wait covers one wake, so the caller must re-run to keep listening. In
+	// JSON it is a structured `rearm` object rather than prose, so machine
+	// callers see one additive field, not a changed result shape.
+	rearm := map[string]string{"command": rearmCmd, "nudge": mailboxRearmNudge}
+
 	if result.TimedOut {
 		if outputJSON(format) {
 			printJSONOrFatal("mailbox wait", map[string]any{
 				"timed_out": true, "unread": 0,
 				"named": []wsmailbox.Envelope{}, "reply": []wsmailbox.Envelope{},
+				"rearm": rearm,
 			}, nil)
 		} else {
 			fmt.Println("timeout: no unread mail")
+			printMailboxWaitRearm(rearmCmd)
 		}
 		os.Exit(mailboxWaitExitTimeout)
 	}
@@ -165,6 +182,7 @@ func emitMailboxWaitResult(result wsmailbox.WaitResult, format string) {
 			"unread":    total,
 			"named":     named,
 			"reply":     reply,
+			"rearm":     rearm,
 		}, nil)
 		return
 	}
@@ -175,6 +193,40 @@ func emitMailboxWaitResult(result wsmailbox.WaitResult, format string) {
 	for _, m := range result.Reply {
 		printMailboxEnvelope(m)
 	}
+	printMailboxWaitRearm(rearmCmd)
+}
+
+// mailboxRearmNudge is the plain-language reminder printed (text) or carried
+// (JSON) on every mailbox wait return: one wait covers a single wake and must
+// be re-armed to keep listening. It is delivered when the wait actually
+// returns — not only when the arming guidance was first read — because the two
+// moments can be far apart.
+const mailboxRearmNudge = "one mailbox wait covers a single wake; re-run the re-arm command above to keep listening."
+
+// buildMailboxWaitRearmCommand reprints the resolved binary (bin, i.e.
+// os.Args[0]) plus the wait-scoping flags this invocation received, producing a
+// command that re-arms an identical wait. It emits only the resolved flags —
+// --session-key (always required), and --slug / --timeout when set — so the
+// command stays host-neutral (no package-internal launcher path is written
+// into it; the binary is whatever argv[0] the harness launched).
+func buildMailboxWaitRearmCommand(bin, sessionKey, slug string, timeout time.Duration) string {
+	parts := []string{bin, "mailbox", "wait", "--session-key", sessionKey}
+	if slug != "" {
+		parts = append(parts, "--slug", slug)
+	}
+	if timeout > 0 {
+		parts = append(parts, "--timeout", timeout.String())
+	}
+	return strings.Join(parts, " ")
+}
+
+// printMailboxWaitRearm writes the fire-time re-arm reminder to stdout, after
+// the result, on the human/text path only. It rides the same stream as the
+// result the harness re-injects into the agent, so the "re-arm to keep
+// listening" reminder reaches the woken agent alongside the mail it woke for.
+func printMailboxWaitRearm(rearmCmd string) {
+	fmt.Printf("\nre-arm: %s\n", rearmCmd)
+	fmt.Printf("(%s)\n", mailboxRearmNudge)
 }
 
 func printMailboxEnvelope(m wsmailbox.Envelope) {

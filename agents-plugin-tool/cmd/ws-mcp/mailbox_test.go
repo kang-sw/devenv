@@ -319,6 +319,130 @@ func TestMailboxWaitFailsWithGenericErrorExitCodeOnInvalidSessionKey(t *testing.
 	}
 }
 
+// TestMailboxWaitRearmReminderOnMailExit asserts Phase 1 of 260917: when the
+// wait returns because mail arrived, the text output appends a runnable re-arm
+// command (its own binary + the wait-scoping flags it received) and the
+// plain-language nudge, so the "one wait covers one wake" reminder is delivered
+// at fire time rather than only when the arming guidance was first read.
+func TestMailboxWaitRearmReminderOnMailExit(t *testing.T) {
+	bin := buildWsMCPMailboxTestBin(t)
+	env := mailboxTestEnv(t)
+
+	const sessionKey = "amber-tide-fox"
+	seedReplyMail(t, env, sessionKey, "run ticket X")
+
+	cmd := exec.Command(bin, "mailbox", "wait", "--session-key", sessionKey, "--timeout", "10s")
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("mailbox wait failed: %v\n%s", err, out)
+	}
+	text := string(out)
+	if !strings.Contains(text, "re-arm:") {
+		t.Fatalf("mailbox wait output = %q, want a re-arm: line on the mail exit", text)
+	}
+	// The re-arm command reprints the binary + the flags it was invoked with.
+	if !strings.Contains(text, "mailbox wait --session-key "+sessionKey) || !strings.Contains(text, "--timeout 10s") {
+		t.Fatalf("mailbox wait output = %q, want a runnable re-arm command carrying --session-key and --timeout", text)
+	}
+	if !strings.Contains(text, "re-run the re-arm command") {
+		t.Fatalf("mailbox wait output = %q, want the re-arm nudge string", text)
+	}
+}
+
+// TestMailboxWaitRearmReminderOnTimeoutExit asserts the same re-arm reminder is
+// delivered on the timeout exit path, not only the mail-found path.
+func TestMailboxWaitRearmReminderOnTimeoutExit(t *testing.T) {
+	bin := buildWsMCPMailboxTestBin(t)
+	env := mailboxTestEnv(t)
+
+	const sessionKey = "amber-tide-fox"
+	cmd := exec.Command(bin, "mailbox", "wait", "--session-key", sessionKey, "--slug", "alice@machine", "--timeout", "1s")
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != mailboxWaitExitTimeout {
+		t.Fatalf("mailbox wait did not time out as expected: err=%v out=%s", err, out)
+	}
+	text := string(out)
+	if !strings.Contains(text, "re-arm:") || !strings.Contains(text, "re-run the re-arm command") {
+		t.Fatalf("mailbox wait timeout output = %q, want the re-arm command and nudge", text)
+	}
+	// An explicit --slug is reprinted in the re-arm command so re-running it
+	// re-arms an identical (named-inbox-covering) wait.
+	if !strings.Contains(text, "--slug alice@machine") || !strings.Contains(text, "--timeout 1s") {
+		t.Fatalf("mailbox wait timeout output = %q, want the re-arm command to reprint --slug and --timeout", text)
+	}
+}
+
+// TestMailboxWaitJSONCarriesRearmField asserts the --format json path gains the
+// additive `rearm` object (command + nudge) without disturbing the existing
+// fields, so machine callers see one new field rather than a changed shape.
+func TestMailboxWaitJSONCarriesRearmField(t *testing.T) {
+	bin := buildWsMCPMailboxTestBin(t)
+	env := mailboxTestEnv(t)
+
+	const sessionKey = "amber-tide-fox"
+	seedReplyMail(t, env, sessionKey, "hello")
+
+	cmd := exec.Command(bin, "mailbox", "wait", "--session-key", sessionKey, "--timeout", "10s", "--format", "json")
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("mailbox wait --format json failed: %v\n%s", err, out)
+	}
+	var got struct {
+		TimedOut bool                 `json:"timed_out"`
+		Unread   int                  `json:"unread"`
+		Reply    []wsmailbox.Envelope `json:"reply"`
+		Named    []wsmailbox.Envelope `json:"named"`
+		Rearm    struct {
+			Command string `json:"command"`
+			Nudge   string `json:"nudge"`
+		} `json:"rearm"`
+	}
+	if uerr := json.Unmarshal(bytes.TrimSpace(out), &got); uerr != nil {
+		t.Fatalf("invalid mailbox wait JSON: %v\n%s", uerr, out)
+	}
+	// Existing fields stay structurally stable.
+	if got.TimedOut || got.Unread != 1 || len(got.Reply) != 1 || got.Reply[0].Content != "hello" {
+		t.Fatalf("mailbox wait JSON existing fields changed: %#v", got)
+	}
+	if !strings.Contains(got.Rearm.Command, "mailbox wait --session-key "+sessionKey) || got.Rearm.Nudge == "" {
+		t.Fatalf("mailbox wait JSON rearm = %#v, want a runnable command and a non-empty nudge", got.Rearm)
+	}
+}
+
+// TestMailboxWaitJSONTimeoutCarriesRearmField asserts the timeout JSON exit
+// also carries the additive `rearm` field.
+func TestMailboxWaitJSONTimeoutCarriesRearmField(t *testing.T) {
+	bin := buildWsMCPMailboxTestBin(t)
+	env := mailboxTestEnv(t)
+
+	cmd := exec.Command(bin, "mailbox", "wait", "--session-key", "amber-tide-fox", "--timeout", "1s", "--format", "json")
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != mailboxWaitExitTimeout {
+		t.Fatalf("mailbox wait --format json did not time out as expected: err=%v out=%s", err, out)
+	}
+	var got struct {
+		TimedOut bool `json:"timed_out"`
+		Unread   int  `json:"unread"`
+		Rearm    struct {
+			Command string `json:"command"`
+			Nudge   string `json:"nudge"`
+		} `json:"rearm"`
+	}
+	if uerr := json.Unmarshal(bytes.TrimSpace(out), &got); uerr != nil {
+		t.Fatalf("invalid mailbox wait JSON: %v\n%s", uerr, out)
+	}
+	if !got.TimedOut || got.Unread != 0 {
+		t.Fatalf("mailbox wait timeout JSON = %#v, want timed_out=true unread=0", got)
+	}
+	if got.Rearm.Command == "" || got.Rearm.Nudge == "" {
+		t.Fatalf("mailbox wait timeout JSON rearm = %#v, want a command and nudge", got.Rearm)
+	}
+}
+
 // seedNamedInbox seeds a machine-scope presence record (owned by ownerKey)
 // plus one queued envelope for name, directly via internal/wsmailbox.
 func seedNamedInbox(t *testing.T, env []string, name, ownerKey, content string) {
