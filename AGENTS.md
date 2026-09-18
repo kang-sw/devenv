@@ -272,8 +272,8 @@ ai-docs/tickets/.dropped/
   agents, plugin packaging, helper commands, MCP tooling, and dev-environment
   templates. Tickets and manuals here describe the workflow system itself;
   downstream application material belongs in downstream projects. Active plugin
-  package: `agents-plugin/` (`ws@0.46.11`). Agentless
-  derivative package: `agents-plugin-wsflow/` (`wsflow@0.46.11`). Native
+  package: `agents-plugin/` (`ws@0.46.12`). Agentless
+  derivative package: `agents-plugin-wsflow/` (`wsflow@0.46.12`). Native
   MCP/tooling source: `agents-plugin-tool/`. Retired Claude source material:
   `ai-docs/ref/claude-home-legacy.md` and git history.
 - **Project map / topology.**
