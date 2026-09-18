@@ -45,6 +45,11 @@ type worktreeEntry struct {
 	Head     string
 	Branch   string
 	Detached bool
+	// Prunable is set when the porcelain record carries a `prunable` line: the
+	// worktree's directory is gone but its record still holds the branch for
+	// git's one-checkout-per-branch rule, so a merge into that branch is still
+	// blocked until `git worktree prune` runs.
+	Prunable bool
 }
 
 // listWorktrees parses `git worktree list --porcelain`. The first entry is
@@ -80,6 +85,8 @@ func listWorktrees(ctx context.Context, runner wsgit.Runner, root string) ([]wor
 			cur.Branch = strings.TrimSpace(strings.TrimPrefix(line, "branch "))
 		case line == "detached":
 			cur.Detached = true
+		case line == "prunable" || strings.HasPrefix(line, "prunable "):
+			cur.Prunable = true
 		}
 	}
 	flush()

@@ -1094,9 +1094,22 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		expectedTarget, _ := params.Arguments["expected_target_oid"].(string)
 		title, _ := params.Arguments["title"].(string)
 		description, _ := params.Arguments["description"].(string)
+		// Resolve the worktree pool root the same way worktree.acquire does, so a
+		// held-target refusal can name a parallel lead's housekeeping checkout as
+		// such. Any failure passes "" (unknown pool) rather than failing the merge.
+		mergePoolRoot := ""
+		if mergeKey, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(mergeKey) != "" {
+			adapter := sessionConfigAdapter{s: s.sessions}
+			resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+			if poolRV, poolErr := resolver.Get(mergeKey, wsconfig.ItemWorktreePool); poolErr == nil {
+				if entries, lerr := listWorktrees(context.Background(), wsgit.ExecRunner{}, root); lerr == nil && len(entries) > 0 {
+					mergePoolRoot = resolvePoolRoot(poolRV.Value, entries[0].Path)
+				}
+			}
+		}
 		result, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, target, wsgit.CommitOptions{
 			Title: title, Description: description, AIContext: stringList(params.Arguments["ai_context"]), UpdatedTickets: stringList(params.Arguments["updated_tickets"]),
-		}, implMergeAcknowledgement{ReleaseTargetOverride: releaseOverride, ExpectedSourceOID: expectedSource, ExpectedTargetOID: expectedTarget})
+		}, implMergeAcknowledgement{ReleaseTargetOverride: releaseOverride, ExpectedSourceOID: expectedSource, ExpectedTargetOID: expectedTarget}, mergePoolRoot)
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
 		}

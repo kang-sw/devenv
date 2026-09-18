@@ -428,6 +428,35 @@ func TestCommitRefusesDetachedHead(t *testing.T) {
 	}
 }
 
+// TestCommitRefusesImplBranchNamesEscapeHatch pins Decision 9: when the actual
+// checkout is a worker's impl/ branch, the mismatch refusal appends the sparse
+// housekeeping worktree escape hatch naming the parent as the base; a non-impl
+// mismatch keeps the plain refusal. The detached-HEAD arm is unchanged
+// (TestCommitRefusesDetachedHead).
+func TestCommitRefusesImplBranchNamesEscapeHatch(t *testing.T) {
+	implRunner := &sequenceRunner{outs: [][]byte{[]byte("impl/develop/foo\n")}}
+	_, err := (Client{Runner: implRunner}).Commit(context.Background(), "/repo", CommitOptions{
+		Paths: []string{"src/file.go"}, Title: "feat: x", AIContext: []string{"intent"}, ExpectedBranch: "develop",
+	})
+	if err == nil {
+		t.Fatal("Commit did not refuse the mismatch")
+	}
+	if !strings.Contains(err.Error(), `worktree.acquire(base: "develop"`) {
+		t.Fatalf("impl-branch refusal must name worktree.acquire(base: \"develop\"): %v", err)
+	}
+
+	featRunner := &sequenceRunner{outs: [][]byte{[]byte("feature/x\n")}}
+	_, err = (Client{Runner: featRunner}).Commit(context.Background(), "/repo", CommitOptions{
+		Paths: []string{"src/file.go"}, Title: "feat: x", AIContext: []string{"intent"}, ExpectedBranch: "develop",
+	})
+	if err == nil {
+		t.Fatal("Commit did not refuse the mismatch")
+	}
+	if strings.Contains(err.Error(), "worktree.acquire") {
+		t.Fatalf("non-impl refusal must not name the escape hatch: %v", err)
+	}
+}
+
 func TestCommitExpandsTicketMovePathsByStem(t *testing.T) {
 	preStatus := ParseStatus([]byte("1 .D N... 100644 100644 100644 aaa bbb ai-docs/tickets/todo/260503-feat-demo.md\n? ai-docs/tickets/.done/260503-feat-demo.md\n"))
 	paths := expandCommitPathsForTicketMoves(preStatus, []string{"ai-docs/tickets/.done/260503-feat-demo.md"})

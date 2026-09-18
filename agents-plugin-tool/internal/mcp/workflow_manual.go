@@ -287,6 +287,9 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				body = injectBootstrapStalenessWarning(body, warning)
 			}
 			body = injectBootstrapStalenessWarning(body, scopeAnnouncement(canonical))
+			// FRESH-with-root mints a parent-less top-lead key (parent: ""), so
+			// the occupied-root banner is always safe to inject here.
+			body = injectBootstrapStalenessWarning(body, occupiedRootAnnouncement(canonical))
 			body = injectBootstrapStalenessWarning(body, mailboxAddressAnnouncement(s, mintedKey, canonical))
 			body = injectBootstrapStalenessWarning(body, computeManuals(canonical))
 			body = injectBootstrapStalenessWarning(body, wsreview.CheckpointNudge(context.Background(), canonical))
@@ -319,6 +322,13 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				body = injectBootstrapStalenessWarning(body, warning)
 			}
 			body = injectBootstrapStalenessWarning(body, scopeAnnouncement(rec.Root))
+			// Only a top-level lead key (empty parent) gets the occupied-root
+			// banner: a worker's own key carries the lead's key as parent, and on
+			// its own impl/* root the banner would tell it "do not commit here"
+			// about the branch it owns.
+			if rec.Parent == "" {
+				body = injectBootstrapStalenessWarning(body, occupiedRootAnnouncement(rec.Root))
+			}
 			body = injectBootstrapStalenessWarning(body, mailboxAddressAnnouncement(s, key, rec.Root))
 			body = injectBootstrapStalenessWarning(body, computeManuals(rec.Root))
 			body = injectBootstrapStalenessWarning(body, wsreview.CheckpointNudge(context.Background(), rec.Root))

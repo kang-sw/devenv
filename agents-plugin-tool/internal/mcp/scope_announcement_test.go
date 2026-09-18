@@ -109,6 +109,36 @@ func TestWorkflowManualScopeAnnouncementByteUnchangedWhenUnscoped(t *testing.T) 
 	}
 }
 
+// TestScopeAnnouncementSilentUnderConeMode verifies Decision 13: a cone-mode
+// sparse-checkout (a housekeeping/development worktree) suppresses the
+// ticket-scope banner on both workflow_manual paths, because its "restore with
+// git sparse-checkout disable" remedy would be false there. The existing
+// --no-cone cases (TestScopeAnnouncementFiresOnWorkflowManual,
+// TestScopeAnnouncementFiresWithNoTicketHidden) still fire.
+func TestScopeAnnouncementSilentUnderConeMode(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	mustWriteAndCommitTicket(t, root, "ready", "kept-one")
+	// Cone-mode sparse-checkout limits materialization to ai-docs, exactly what
+	// worktree.acquire(sparse_paths: ["ai-docs"]) produces.
+	runGit(t, root, "sparse-checkout", "set", "--cone", "ai-docs")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("WS_RSRC_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "rsrc"))
+
+	s := NewServer(root, "test")
+	freshResp := callToolWithKey(t, s, 1, freshBootstrapKey, "workflow_manual", map[string]any{"root": root})
+	if strings.Contains(freshResp, "Sparse-checkout scope is active") {
+		t.Fatalf("FRESH-with-root must stay silent under cone mode: %s", freshResp)
+	}
+	key, _ := parseLoginResponse(t, callLogin(t, s, 2, root, nil))
+	continueResp := callToolWithKey(t, s, 3, key, "workflow_manual", nil)
+	if strings.Contains(continueResp, "Sparse-checkout scope is active") {
+		t.Fatalf("CONTINUE must stay silent under cone mode: %s", continueResp)
+	}
+}
+
 // TestScopeAnnouncementFiresWithNoTicketHidden verifies the scope block
 // still renders when core.sparseCheckout is active but no ticket is
 // currently hidden (Hidden == 0 branch of scopeAnnouncement), so the caller
