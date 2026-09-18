@@ -61,3 +61,50 @@ classification is already correct. Verify on macOS and, per
 - Process follow-up (not this ticket): the review sweep and local verification
   were macOS-only; consider whether behavior tests that embed OS paths should
   carry a portability guard. Capture separately if worth a rule.
+
+### Result (2026-09-19)
+
+Root cause confirmed test-only, matching the diagnosis above: `listWorktrees`
+already returns each entry's path through git's own resolution (a
+`git rev-parse --show-toplevel`-equivalent canonical form; on macOS this
+resolves the `/var -> /private/var` symlink), and `d.Reason` embeds that
+form verbatim. The four affected assertions instead compared it against the
+raw `filepath.Join`-built `held`/`held` local. On macOS/Linux the raw form
+happened to be a trailing substring of git's resolved form (`/private/var/...`
+contains literal `/var/...`), so the substring check passed by coincidence;
+on Windows the two forms diverge and the check fails even though the location
+is the same.
+
+Fix (`agents-plugin-tool/internal/mcp/git_merge_test.go`, test-only, no
+`git_merge.go` or shipped-string change):
+
+- `TestImplMergeRefusesTargetHeldElsewhere/pool-holder` and `/plain-holder`:
+  introduced `heldCanonical := canonicalRootForTest(t, held)` (the same
+  `git rev-parse --show-toplevel` helper `mkHeld` already uses one directory
+  level up to derive `poolRoot`) and asserted `d.Reason` contains
+  `heldCanonical` instead of the raw `held`.
+- `TestImplMergeDispatchClassifiesHeldTargetByPool/pool-holder` and
+  `/plain-holder`: same `canonicalRootForTest(t, held)` treatment before the
+  `strings.Contains(out, ...)` checks. `pool-holder` wasn't in the CI failure
+  list but embeds the same raw-path pattern, so it was fixed alongside the
+  named `plain-holder` case per the ticket's "any sibling" instruction.
+
+Verification:
+
+- macOS: targeted subtests
+  (`TestImplMergeRefusesTargetHeldElsewhere|TestImplMergeDispatchClassifiesHeldTargetByPool`)
+  green; full `go test ./...` in `agents-plugin-tool` green (14 packages, all
+  `ok`).
+- Native Windows (`ki608@192.168.33.6`, `C:\Program Files\Go\bin\go.exe`):
+  pushed `develop` (`186a87f7`) to origin, fetched it into a scratch
+  `git worktree add` off the host's existing `devenv-win-verify` clone
+  (avoided touching that clone's own unrelated dirty working tree), ran the
+  same targeted subtests there. All pass, including the three originally
+  Windows-failing subtests (`TestImplMergeRefusesTargetHeldElsewhere/pool-holder`,
+  `/plain-holder`, `TestImplMergeDispatchClassifiesHeldTargetByPool/plain-holder`)
+  and the two additional siblings touched (`pool-holder` dispatch case,
+  `no-other-worktree-merges`/`prunable-holder` which needed no change). Scratch
+  worktree removed afterward.
+- Commit: `186a87f73abdd2dbe2ef01a2dacfa1a3f8fc77a7` on `develop`
+  (`test(mcp): canonicalize held-worktree path assertions for Windows
+  portability`).
