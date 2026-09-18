@@ -1,0 +1,52 @@
+name: ws-mcp CI
+
+# The release workflow runs the Windows test suite only on a version tag, so
+# every Windows-only test failure first shows up as a red release run (and its
+# notification email) after the fact. This workflow runs the same `go test ./...`
+# on both Linux and Windows for every develop push and pull request that touches
+# the Go tree, so a Windows-specific failure is caught at merge time instead of
+# at release. It publishes nothing; the tagged release workflow remains the sole
+# path that builds and uploads release assets.
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - ".github/workflows/ws-mcp-ci.yml"
+      - "agents-plugin-tool/**"
+  pull_request:
+    paths:
+      - ".github/workflows/ws-mcp-ci.yml"
+      - "agents-plugin-tool/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: go test (${{ matrix.os }})
+    strategy:
+      # Surface both platforms' results; a Linux failure must not cancel the
+      # Windows run, which is the one this workflow exists to catch early.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # The Windows smoke job in the release workflow has hung to ~46 min once
+    # (v0.37.2); the same cap turns a hang here into a fast, legible failure.
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: agents-plugin-tool
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: agents-plugin-tool/go.mod
+
+      - name: Run tests
+        run: go test ./...
