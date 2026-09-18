@@ -380,6 +380,76 @@ harness):
   `worker_key` succeeds on a file under `ai-docs/`.
 - `cd agents-plugin-tool && go test ./...` green.
 
+### Result (7ee24344) - 2026-09-18
+
+Landed as specified. `worktree.acquire` takes an optional `sparse_paths`
+cone-mode directory list, `target_branch` is optional (omitted checks `base`
+out directly), and `worktreeAcquireResult` carries `sparse` in both JSON and
+text. `provisionWorktree` gained the `sparsePaths []string` parameter in the
+contracted position; the reuse scan skips any candidate whose sparse state
+differs from the request, using `wsdoc.SparseCheckoutActive` — the same probe
+`git.commit`'s `--sparse` staging uses, so the pool and a commit into a pooled
+worktree can never disagree about the shape. A new sparse worktree is created
+`--no-checkout`, the cone patterns are applied, and the branch step populates
+only the selected directories; the patterns are re-applied on reuse so a stale
+set never survives. The tool description texts and the direct-base error string
+are verbatim from the contract above.
+
+Verification (git 2.43.0): `cd agents-plugin-tool && go vet ./... && go test
+./... -count=1` green (all 15 packages). The six contracted tests exist and
+pass: `TestProvisionWorktreeSparsePaths`,
+`TestProvisionWorktreeSparseReuseMatchesShape`,
+`TestProvisionWorktreeBaseDirectCheckout`,
+`TestProvisionWorktreeBaseDirectCheckoutRefusesHeldBranch`, the updated
+`TestWorktreeAcquireRejectsNonLeadAndBadArgs` (omitted `target_branch` is now a
+positive assertion against a free local branch, since a SHA base would fail the
+direct checkout for an unrelated reason), and `TestWorktreeAcquireSparseDispatch`
+(the ticket's "sparse variant" of the dispatch test, asserting `sparse: true`
+in JSON, `sparse: false` in text, and a `git.commit` through the returned
+`worker_key` landing on the parent branch). Review was partitioned
+correctness + test, two rounds, closing clean.
+
+Decisions and observations:
+
+- **Decision 11 (submodules under sparse), measured:** in a cone-mode worktree
+  whose `.gitmodules` names a path outside the cone, `git submodule update
+  --init --recursive` clones that submodule and materializes its directory
+  anyway, exiting 0. The call stays unconditional as the decision allows; a
+  sparse acquire simply does not save the submodule cost. No design change.
+- **Review finding (important), fixed:** a worktree created `--no-checkout` has
+  an empty index, so `git status --porcelain` there reports every tracked path
+  deleted. A branch step failing after the `worktree add` left it registered,
+  permanently reuse-ineligible, and bound to no session key anyone could
+  release it with — and the direct-base refusal is the expected route to that
+  failure, so the pool would have grown one dead entry per refused acquire.
+  `provisionWorktree` now discards a worktree it created without a checkout on
+  any branch-step failure. Scoped to `sparse && !res.Reused`: a reused worktree
+  and a fully checked-out one from the non-sparse path both stay clean and
+  detached on failure, which is reuse-eligible, so no pre-existing behavior
+  changed.
+- **Review finding (minor), fixed:** `sparse-checkout set --cone <paths...>`
+  parsed a caller-supplied entry beginning with a dash as an option — measured,
+  `--no-cone` exits 0, flips cone mode off and empties the pattern set while
+  the result still reports `sparse: true`. A `--` separator (accepted by git
+  2.43) now guards it, matching the branch step alongside.
+- **Review finding (test, important/minor), fixed:** added
+  `TestProvisionWorktreeSparsePathsNormalization` covering a blank-only
+  `sparse_paths` list (not a sparse request), a two-directory cone, and the
+  dash-leading entry. All three guards were mutation-checked — reverting each
+  fix fails its test.
+- **Left as-is, recorded:** the direct-base error text asserts "held elsewhere"
+  for any switch failure, including a legal non-branch commit-ish base; it is
+  verbatim from the contract and the wrapped git error states the real cause.
+  `worktree.release` still hard-resets, which in a housekeeping checkout of a
+  long-lived parent branch discards uncommitted lead edits; `## Constraints`
+  forbids adding a step to release, so this stands as a property of the
+  release contract.
+- **Round-2 observations (no action):** the discard ignores a `worktree remove`
+  failure and emits no warning, so a failed discard is silent; and a failure in
+  the hygiene `reset --hard` / `clean -ffdx` still returns directly, leaving a
+  branch-checked-out pool worktree the reuse scan skips — pre-existing and
+  shared with the non-sparse path.
+
 ### Phase 2: occupied-root banner, `git.commit` refusal hint, `git.merge` held-target refusal
 
 Depends on Phase 1 (the banner names the landed `sparse_paths` argument, and
