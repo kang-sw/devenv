@@ -1,13 +1,11 @@
 # Tickets Workflow
 
-A lightweight ticket system for a project run by a plain coding agent - no
-specialized workflow tooling, only native file read/write/edit, shell
-(`bash`, `git`), and a native search/explore agent. Place this file at the
-project root and pull it into the project's agent context file (for example
-`AGENTS.md` or `CLAUDE.md`) with an embed directive such as
-`@TICKETS_WORKFLOW.md`, or paste it in directly if the host has no embed
-mechanism. This project owns this copy; there is no automatic update path -
-re-copy the file by hand when a newer version is wanted.
+A lightweight ticket system for a project run by Claude Code - no specialized
+workflow tooling beyond native Read/Write/Edit, Bash (`git`), and the Explore
+agent. Place this file at the project root and pull it into the project's
+`CLAUDE.md` with an embed directive: `@CLAUDE_TICKETS_WORKFLOW.md`. This
+project owns this copy; there is no automatic update path - re-copy the file
+by hand when a newer version is wanted.
 
 ## Why This Exists
 
@@ -174,6 +172,6 @@ the diff. Reference the related ticket's stem when the commit is ticket-driven.
 ## Language
 
 Ticket bodies and commit `## AI Context` are written in English by default.
-Human-facing UI strings are always exempt. If this project's `AGENTS.md` or
-`CLAUDE.md` declares a different working language for AI-authored records,
-follow that declaration instead - this file only sets the default.
+Human-facing UI strings are always exempt. If this project's `CLAUDE.md`
+declares a different working language for AI-authored records, follow that
+declaration instead - this file only sets the default.
