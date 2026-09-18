@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 1e8761298e5a571a
 sage-review-completeness-reviewed: 1e8761298e5a571a
+completed: 2026-09-18
 ---
 
 # pi mailbox waiter should also wake on the owned named inbox (slug), not only the reply-id channel
@@ -119,3 +120,65 @@ Deferred: no change to reply-id lifetime, discovery, or the host-neutral mailbox
 contract; no new push family or message shape (the existing `ws-mailbox`
 custom-message path carries the drained envelopes regardless of which queue woke
 the waiter).
+
+### Result (a8a181fc) - 2026-09-18
+
+Landed as planned, plus a review-driven fix on top:
+
+- `agents-plugin-pi/src/mailbox-waiter.ts`: added `resolveMailboxSelfSlug`
+  (calls `mailbox.lookup_peers` with `{session_key, scope: "worktree",
+  format: "json"}` through the existing `MailboxToolCall` seam and returns
+  `self.address`, or `undefined` on any error/absent/malformed case —
+  best-effort, never throws). Extracted `buildMailboxWaitArgv` as a pure argv
+  builder out of `createSubprocessWait` (mirrors the existing
+  `mapMailboxWaitExit` split on the exit side) so the slug/no-slug argv
+  shapes are unit-testable without spawning a real subprocess.
+  `SubprocessWaitOptions` gained an optional `slug` field; `--slug <slug>` is
+  appended only when it resolves to a non-empty string, so the no-slug
+  invocation stays byte-identical to Phase 1's shape.
+- `agents-plugin-pi/src/index.ts`: the `session_start` arm site now resolves
+  `selfSlug` via `resolveMailboxSelfSlug` before calling `createSubprocessWait`,
+  passing it through as `slug`.
+- Decision confirmed by reading the server implementation
+  (`agents-plugin-tool/internal/mcp/mailbox_tools.go`): `mailbox.lookup_peers`
+  requires a `scope` argument, but `self.address` is populated from the
+  caller's own resolved identity (`mailboxOwnerCheck`) independent of which
+  scope is queried — so the fixed `"worktree"` scope choice for the resolution
+  call is arbitrary and does not claim anything about the session's actual
+  scope; documented inline in the source.
+- Round-1 correctness review (Important, fixed): awaiting
+  `resolveMailboxSelfSlug` between the `stop()` of any prior waiter and the
+  `startMailboxWaiter` reassignment broke the previously-atomic
+  stop-then-start sequence, opening a window where an overlapping
+  `session_start` (a rapid double `/reload`) or a `session_shutdown` could
+  leak a subprocess or produce two live waiters. Fixed with a monotonic
+  `mailboxWaiterEpoch` counter bumped at every place `mailboxWaiterHandle` is
+  reset (the arm site and `session_shutdown`); an arm attempt captures the
+  epoch right after its own bump and only calls `startMailboxWaiter` if the
+  epoch is still unchanged once the await resolves. Round-2 verification:
+  fixed, clean.
+- Round-1 test review: clean, with two Minor (non-blocking) coverage gaps
+  noted (the empty/whitespace-address trim guard and the non-object
+  self/non-object top-level-JSON fallback branches were only exercised
+  incidentally); closed both with direct test cases rather than leaving them
+  open.
+
+Verification:
+- `node --test test/mailbox-waiter.test.ts` (agents-plugin-pi/): 28/28 pass,
+  including the new `resolveMailboxSelfSlug` and `buildMailboxWaitArgv`
+  describe blocks (slug-arm reaches `--slug`, address-absent fallback is
+  byte-identical to the prior invocation).
+- `npm test` (agents-plugin-pi/, full suite): 1588/1588 pass, 0 fail, 2
+  pre-existing skips unrelated to this change.
+- Manual dogfood check (send mail to a pi session's owned slug while idle and
+  confirm it wakes) was **not** performed in this worker run — it requires a
+  live two-session pi harness setup outside this environment's reach; noted
+  as omitted rather than silently skipped.
+
+Decisions taken (none escalated):
+- Fixed `scope: "worktree"` for the `lookup_peers` resolution call (see
+  above) — commit a8a181fc.
+- Generation/epoch counter chosen over an in-flight mutex/queue for the
+  reload-race fix: this re-entrancy is rare (only a rapid double `/reload` or
+  a reload racing shutdown), so "last writer wins, no leaks" is sufficient
+  without serializing every arm attempt — commit b75c4075.

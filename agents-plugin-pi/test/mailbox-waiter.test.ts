@@ -11,8 +11,10 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildMailboxPushMessage,
+  buildMailboxWaitArgv,
   createBridgeDrain,
   mapMailboxWaitExit,
+  resolveMailboxSelfSlug,
   shouldArmMailboxWaiter,
   startMailboxWaiter,
   WS_MAILBOX_CUSTOM_TYPE,
@@ -263,5 +265,72 @@ describe("createBridgeDrain", () => {
       "k",
     );
     assert.deepEqual(await mixed(), [{ content: "keep" }]);
+  });
+});
+
+describe("resolveMailboxSelfSlug", () => {
+  test("calls lookup_peers with the session key and json format and returns self.address", async () => {
+    const calls: { name: string; args: Record<string, unknown> }[] = [];
+    const slug = await resolveMailboxSelfSlug(async (name, args) => {
+      calls.push({ name, args });
+      return { content: [{ type: "text", text: JSON.stringify({ self: { address: "scout@worktree", auto: true }, peers: [] }) }] };
+    }, "my-key");
+    assert.deepEqual(calls, [{ name: "mailbox.lookup_peers", args: { session_key: "my-key", scope: "worktree", format: "json" } }]);
+    assert.equal(slug, "scout@worktree");
+  });
+
+  test("resolves to undefined when self has no address (env-less session)", async () => {
+    const slug = await resolveMailboxSelfSlug(
+      async () => ({ content: [{ type: "text", text: JSON.stringify({ self: { reply_id: "id:abc" }, peers: [] }) }] }),
+      "k",
+    );
+    assert.equal(slug, undefined);
+  });
+
+  test("resolves to undefined on a tool-level error, a rejected call, or a malformed response", async () => {
+    assert.equal(await resolveMailboxSelfSlug(async () => ({ isError: true, content: [{ type: "text", text: "boom" }] }), "k"), undefined);
+    assert.equal(await resolveMailboxSelfSlug(async () => { throw new Error("transport down"); }, "k"), undefined);
+    assert.equal(await resolveMailboxSelfSlug(async () => ({ content: [{ type: "text", text: "not json" }] }), "k"), undefined);
+    assert.equal(await resolveMailboxSelfSlug(async () => ({ content: [] }), "k"), undefined);
+  });
+
+  test("resolves to undefined on a whitespace-only address, a non-object self, or a non-object top-level response", async () => {
+    assert.equal(
+      await resolveMailboxSelfSlug(async () => ({ content: [{ type: "text", text: JSON.stringify({ self: { address: "   " } }) }] }), "k"),
+      undefined,
+      "a whitespace-only address is treated the same as absent",
+    );
+    assert.equal(
+      await resolveMailboxSelfSlug(async () => ({ content: [{ type: "text", text: JSON.stringify({ self: "scout@worktree" }) }] }), "k"),
+      undefined,
+      "a non-object self never reaches into a bare string for .address",
+    );
+    assert.equal(
+      await resolveMailboxSelfSlug(async () => ({ content: [{ type: "text", text: "42" }] }), "k"),
+      undefined,
+      "a non-object top-level JSON value (still valid JSON) is not treated as {self}",
+    );
+  });
+});
+
+describe("buildMailboxWaitArgv", () => {
+  test("with no slug, the invocation is unchanged (reply-id-only, Phase 1 shape)", () => {
+    const argv = buildMailboxWaitArgv({ launcherPath: "/l", pluginDir: "/p", sessionKey: "my-key" });
+    assert.deepEqual(argv, ["/l", "mailbox", "wait", "--session-key", "my-key", "--timeout", "10m", "--format", "json"]);
+  });
+
+  test("a resolved self.address reaches the invocation as --slug", () => {
+    const argv = buildMailboxWaitArgv({ launcherPath: "/l", pluginDir: "/p", sessionKey: "my-key", slug: "scout@worktree" });
+    assert.deepEqual(argv, ["/l", "mailbox", "wait", "--session-key", "my-key", "--timeout", "10m", "--format", "json", "--slug", "scout@worktree"]);
+  });
+
+  test("an empty/whitespace slug is treated as absent", () => {
+    const argv = buildMailboxWaitArgv({ launcherPath: "/l", pluginDir: "/p", sessionKey: "my-key", slug: "   " });
+    assert.deepEqual(argv, ["/l", "mailbox", "wait", "--session-key", "my-key", "--timeout", "10m", "--format", "json"]);
+  });
+
+  test("a custom timeoutArg is respected alongside a slug", () => {
+    const argv = buildMailboxWaitArgv({ launcherPath: "/l", pluginDir: "/p", sessionKey: "my-key", slug: "scout@worktree", timeoutArg: "5m" });
+    assert.deepEqual(argv, ["/l", "mailbox", "wait", "--session-key", "my-key", "--timeout", "5m", "--format", "json", "--slug", "scout@worktree"]);
   });
 });
