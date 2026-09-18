@@ -320,12 +320,32 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 		}
 	}
 
+	// A worktree created `--no-checkout` has an empty index until the branch step
+	// populates it, and `status --porcelain` reports that as every tracked path
+	// deleted. A branch step that fails there would leave it registered, never
+	// reuse-eligible again, and bound to no key anyone could release it with — and
+	// the direct-base refusal below (base held elsewhere) is the expected way to
+	// get there, so the pool would grow by one dead entry per refused acquire.
+	// Discard it instead; it holds nothing, since the checkout never happened.
+	// A reused worktree, and a fully checked-out one the non-sparse path created,
+	// are both left alone: those stay clean and detached on failure, which is
+	// reuse-eligible.
+	discardIfNeverCheckedOut := func(cause error) (worktreeAcquireResult, error) {
+		if sparse && !res.Reused {
+			_, _ = wtRun(ctx, runner, root, "worktree", "remove", "--force", wtPath)
+		}
+		return res, cause
+	}
+
 	if sparse {
 		// Applied on reuse as well as on creation, so a pattern set left by a
 		// previous acquire of this pooled worktree never survives into this one.
-		args := append([]string{"sparse-checkout", "set", "--cone"}, sparsePaths...)
+		// `--` keeps a caller-supplied path that begins with a dash a path: git
+		// otherwise parses `--no-cone` as the option of that name, which exits 0
+		// while silently flipping the mode off and emptying the pattern set.
+		args := append([]string{"sparse-checkout", "set", "--cone", "--"}, sparsePaths...)
 		if _, err := wtRun(ctx, runner, wtPath, args...); err != nil {
-			return res, err
+			return discardIfNeverCheckedOut(err)
 		}
 	}
 
@@ -335,7 +355,7 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 		// net — a base already held elsewhere fails here rather than producing a
 		// second writable checkout of it.
 		if _, err := wtRun(ctx, runner, wtPath, "switch", "--no-guess", "--", base); err != nil {
-			return res, fmt.Errorf("worktree.acquire: check out base %q: %v; the actual checkout is held elsewhere — release the worktree holding it first, or pass target_branch", base, err)
+			return discardIfNeverCheckedOut(fmt.Errorf("worktree.acquire: check out base %q: %v; the actual checkout is held elsewhere — release the worktree holding it first, or pass target_branch", base, err))
 		}
 	} else {
 		// Create the branch on base if absent, else check the existing branch out —
@@ -348,11 +368,11 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 		}
 		if branchExists {
 			if _, err := wtRun(ctx, runner, wtPath, "switch", "--no-guess", "--", targetBranch); err != nil {
-				return res, err
+				return discardIfNeverCheckedOut(err)
 			}
 		} else {
 			if _, err := wtRun(ctx, runner, wtPath, "switch", "-c", targetBranch, base); err != nil {
-				return res, err
+				return discardIfNeverCheckedOut(err)
 			}
 		}
 	}

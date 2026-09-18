@@ -603,8 +603,12 @@ func TestProvisionWorktreeBaseDirectCheckout(t *testing.T) {
 }
 
 func TestProvisionWorktreeBaseDirectCheckoutRefusesHeldBranch(t *testing.T) {
-	root, _, primaryBranch := sparseFixture(t)
-	_, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, primaryBranch, "", []string{"ai-docs"}, "")
+	root, base, primaryBranch := sparseFixture(t)
+	before, err := listWorktrees(context.Background(), wsgit.ExecRunner{}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, primaryBranch, "", []string{"ai-docs"}, "")
 	if err == nil {
 		t.Fatal("checking out a branch the primary worktree holds must fail")
 	}
@@ -614,6 +618,75 @@ func TestProvisionWorktreeBaseDirectCheckoutRefusesHeldBranch(t *testing.T) {
 	if !strings.Contains(err.Error(), "target_branch") {
 		t.Fatalf("error does not offer the target_branch alternative: %v", err)
 	}
+	// The refusal must leave nothing behind. A worktree created --no-checkout
+	// has an empty index, so `status --porcelain` reports every tracked path
+	// deleted and the reuse scan would skip it forever — one dead pool entry per
+	// refused acquire, releasable by nobody since no key was ever bound to it.
+	after, err := listWorktrees(context.Background(), wsgit.ExecRunner{}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("refused acquire leaked a worktree: %d registered before, %d after", len(before), len(after))
+	}
+	// And the next acquire still works, rather than tripping over the leftover.
+	if _, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", []string{"ai-docs"}, ""); err != nil {
+		t.Fatalf("acquire after a refused one: %v", err)
+	}
+}
+
+// TestProvisionWorktreeSparsePathsNormalization pins the two input-shape rules
+// the sparse cone depends on: a list that carries no usable entry is not a
+// sparse request at all, and a cone entry is always a path, never an option.
+func TestProvisionWorktreeSparsePathsNormalization(t *testing.T) {
+	t.Run("blank entries mean no sparse request", func(t *testing.T) {
+		root, base, _ := sparseFixture(t)
+		res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", []string{"", "  "}, "")
+		if err != nil {
+			t.Fatalf("provision: %v", err)
+		}
+		if res.Sparse {
+			t.Fatal("a list of blanks must not report a sparse shape")
+		}
+		if _, err := os.Stat(filepath.Join(res.Path, "src", "y.go")); err != nil {
+			t.Fatalf("full checkout expected, but the tree is filtered: %v", err)
+		}
+	})
+
+	t.Run("multi-directory cone", func(t *testing.T) {
+		root, base, _ := sparseFixture(t)
+		res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", []string{" ai-docs ", "src"}, "")
+		if err != nil {
+			t.Fatalf("provision: %v", err)
+		}
+		for _, rel := range []string{"ai-docs/x.md", "src/y.go"} {
+			if _, err := os.Stat(filepath.Join(res.Path, filepath.FromSlash(rel))); err != nil {
+				t.Fatalf("%s not materialized by a two-directory cone: %v", rel, err)
+			}
+		}
+		list := strings.Fields(strings.TrimSpace(string(runGitOutput(t, res.Path, "sparse-checkout", "list"))))
+		if len(list) != 2 {
+			t.Fatalf("sparse-checkout list = %v, want both directories", list)
+		}
+	})
+
+	t.Run("a dash-leading entry stays a path", func(t *testing.T) {
+		root, base, _ := sparseFixture(t)
+		// Without a `--` separator git parses this as the --no-cone option: it
+		// exits 0, flips cone mode off, and empties the pattern set, leaving a
+		// worktree that reports sparse: true while filtering nothing.
+		res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", []string{"--no-cone"}, "")
+		if err != nil {
+			t.Fatalf("provision: %v", err)
+		}
+		if cone := strings.TrimSpace(string(runGitOutput(t, res.Path, "config", "--get", "core.sparseCheckoutCone"))); cone != "true" {
+			t.Fatalf("cone mode = %q, want true: the entry was parsed as an option", cone)
+		}
+		list := strings.TrimSpace(string(runGitOutput(t, res.Path, "sparse-checkout", "list")))
+		if list != "--no-cone" {
+			t.Fatalf("sparse-checkout list = %q, want the literal directory name", list)
+		}
+	})
 }
 
 // --- dispatch integration: acquire mints a worktree-bound worker key; release ---
