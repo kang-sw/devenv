@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: d34ee15d96b77940
 sage-review-completeness-reviewed: d34ee15d96b77940
+completed: 2026-09-18
 ---
 
 # Lightweight embeddable TICKETS_WORKFLOW.md for no-plugin downstream projects
@@ -196,3 +197,59 @@ banned tokens (`agents-plugin`, `wsflow`, `install.sh`, `ws/`, `convention.read`
 `tickets.`, real stems) and confirm none appear as live references; (3) confirm
 the folder/stem/header shape is a strict subset of `ticket-conventions.md` so a
 later plugin install is additive.
+
+### Result (413bd514) - 2026-09-18
+
+Authored `ai-docs/ref/TICKETS_WORKFLOW.md` (169 lines) realizing all 8
+Decisions: two-moment memory framing; `todo/`/`.done/`/`.dropped/` status
+subset with the `YYMMDD-<category>-<slug>` six-value-enum filename; an
+inline ticket template (frontmatter + `## Outcome Ledger` with the 3-header
+`Confirmed Decisions`/`Open Questions`/`Rejected Alternatives` subset, same
+names and relative order as the full system's Outcome Ledger, applied
+uniformly across categories per Decision 5); search-first autonomous
+capture and status-transition rules with the explicit-Explore-model rule
+(haiku default, sonnet for ambiguous synthesis); the `Confirmed Decisions`
+user-only invariant and `Open Questions` log-and-continue rule; the
+unconditional-but-proportional commit `## AI Context` rule with an optional
+`ticket:` stem line; the two `## Response Discipline` lines reworded
+host-neutral; and an English-by-default language rule routed through a
+downstream-generic `AGENTS.md`/`CLAUDE.md` hook.
+
+Verification: (1) re-read the doc standalone as a lead in a project that has
+never heard of this repository — self-contained, no live `ws/*` MCP hook,
+plugin/package name, real ticket stem, or commit hash referenced; (2) banned-
+token grep (`agents-plugin|wsflow|install\.sh|ws/|convention\.read|tickets\.|
+claude-plugin|migration anchor|...` plus a `26[0-9]{4}-<category>-` real-stem
+pattern and a 7+ hex-char pattern) returns no matches; (3) folder set, stem
+shape, and ledger header names confirmed a strict subset of
+`agents-plugin-tool/internal/wsdoc/conventions/ticket-conventions.md` and
+`tickets_template.go`'s `ticketBodyResearch`, so a later plugin install is
+additive, not migratory.
+
+Independent partitioned review (correctness/fit/test) ran two rounds.
+Round 1: correctness (opus) found 1 Important (missing `dropped:`
+frontmatter field/transition rule for `.dropped/`, mirroring `completed:`)
+and 4 Minor (unreachable haiku branch in the Explore model-choice rule;
+dot-prefixed `.done/`/`.dropped/` silently skipped by default search-tool
+behavior; a self-referential `related:` template example; the commit
+template's `ticket:` line not marked optional); fit (sonnet) found 2 Minor
+(em-dash vs. the cited voice reference's hyphen-space register; stray
+second-person "you"/"your"); test (sonnet) found 1 Important (`TEXT_TREES`
+in `agents-plugin/tests/test_shipped_surfaces_downstream_neutral.py` had no
+entry for the new file, leaving it without automated banned-token
+regression coverage despite an existing narrow-scope precedent for adding
+one). All fixed in commit `b8d36b3d` (doc content) plus an exact-file
+`TEXT_TREES` entry (`agents-plugin/tests/test_shipped_surfaces_downstream_
+neutral.py`), verified live via
+`python3 -m unittest agents-plugin.tests.test_shipped_surfaces_downstream_neutral`
+(7/7 pass). Round 2 verified all three partitions; correctness caught that
+the `related:` self-reference fix had only added a second example stem
+without removing the original collision, fixed directly in commit
+`413bd514`. No Critical finding arose in either round.
+
+Decisions taken beyond the plan: adding `ai-docs/ref/TICKETS_WORKFLOW.md` as
+an exact-file `TEXT_TREES` entry (not the whole `ai-docs/ref/` directory,
+which holds legitimately devenv-internal siblings) gives this shipped
+artifact the same automated downstream-neutrality regression coverage the
+plugin surfaces already have, closing the gap the ticket's own
+`risk.correctness`/`risk.test` facts flagged as unenforced.
