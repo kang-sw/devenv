@@ -338,12 +338,21 @@ func TestMailboxWaitRearmReminderOnMailExit(t *testing.T) {
 		t.Fatalf("mailbox wait failed: %v\n%s", err, out)
 	}
 	text := string(out)
+	// The mail body must still print alongside the re-arm block: the reminder
+	// rides the same stream as the result, it does not replace it.
+	if !strings.Contains(text, "unread 1") || !strings.Contains(text, "run ticket X") {
+		t.Fatalf("mailbox wait output = %q, want the mail result to still print alongside the re-arm block", text)
+	}
 	if !strings.Contains(text, "re-arm:") {
 		t.Fatalf("mailbox wait output = %q, want a re-arm: line on the mail exit", text)
 	}
 	// The re-arm command reprints the binary + the flags it was invoked with.
 	if !strings.Contains(text, "mailbox wait --session-key "+sessionKey) || !strings.Contains(text, "--timeout 10s") {
 		t.Fatalf("mailbox wait output = %q, want a runnable re-arm command carrying --session-key and --timeout", text)
+	}
+	// This invocation passed no --slug, so the re-arm command must not invent one.
+	if strings.Contains(text, "--slug") {
+		t.Fatalf("mailbox wait output = %q, want the re-arm command to omit --slug when none was passed", text)
 	}
 	if !strings.Contains(text, "re-run the re-arm command") {
 		t.Fatalf("mailbox wait output = %q, want the re-arm nudge string", text)
@@ -403,8 +412,10 @@ func TestMailboxWaitJSONCarriesRearmField(t *testing.T) {
 	if uerr := json.Unmarshal(bytes.TrimSpace(out), &got); uerr != nil {
 		t.Fatalf("invalid mailbox wait JSON: %v\n%s", uerr, out)
 	}
-	// Existing fields stay structurally stable.
-	if got.TimedOut || got.Unread != 1 || len(got.Reply) != 1 || got.Reply[0].Content != "hello" {
+	// Existing fields stay structurally stable: reply carries the mail, and
+	// named is still the normalized empty array (never null), not disturbed by
+	// the additive rearm field.
+	if got.TimedOut || got.Unread != 1 || len(got.Reply) != 1 || got.Reply[0].Content != "hello" || len(got.Named) != 0 {
 		t.Fatalf("mailbox wait JSON existing fields changed: %#v", got)
 	}
 	if !strings.Contains(got.Rearm.Command, "mailbox wait --session-key "+sessionKey) || got.Rearm.Nudge == "" {

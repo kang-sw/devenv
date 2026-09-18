@@ -122,9 +122,9 @@ func mailboxWait(args []string) {
 
 	// Reprint this invocation's own resolved binary plus the wait-scoping
 	// flags it received, so every return path can hand the caller a runnable
-	// re-arm command (Phase 2 of 260917: the arming guidance is read once, but
-	// the wait fires much later, so the "re-arm to keep listening" reminder has
-	// to arrive at fire time, not only at read time). os.Args[0] is naturally
+	// re-arm command: the arming guidance is read once, but the wait fires much
+	// later, so the "re-arm to keep listening" reminder has to arrive at fire
+	// time, not only at read time. os.Args[0] is naturally
 	// host-neutral — whatever argv[0] the harness/launcher invoked — so this
 	// needs no package-internal launcher path (shipped-surface-boundary.md).
 	rearmCmd := buildMailboxWaitRearmCommand(os.Args[0], *sessionKey, target.Slug, *timeout)
@@ -201,7 +201,7 @@ func emitMailboxWaitResult(result wsmailbox.WaitResult, format, rearmCmd string)
 // be re-armed to keep listening. It is delivered when the wait actually
 // returns — not only when the arming guidance was first read — because the two
 // moments can be far apart.
-const mailboxRearmNudge = "one mailbox wait covers a single wake; re-run the re-arm command above to keep listening."
+const mailboxRearmNudge = "one mailbox wait covers a single wake; re-run the re-arm command to keep listening."
 
 // buildMailboxWaitRearmCommand reprints the resolved binary (bin, i.e.
 // os.Args[0]) plus the wait-scoping flags this invocation received, producing a
