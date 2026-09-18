@@ -965,6 +965,15 @@ func TestImplMergeRefusesTargetHeldElsewhere(t *testing.T) {
 	t.Run("pool-holder", func(t *testing.T) {
 		root, branch := mergeFixture(t, "develop")
 		poolRoot, held := mkHeld(t, root)
+		// d.Reason embeds the path exactly as listWorktrees reports it (git's own
+		// resolved form, e.g. macOS /var -> /private/var). held is the raw
+		// filepath.Join value passed to `git worktree add`, which on Windows can
+		// diverge from git's reported form in separator and/or short-path/symlink
+		// resolution. Canonicalize held through the same `git rev-parse
+		// --show-toplevel` path mkHeld already uses for poolRoot, so the
+		// containment check compares two instances of git's own canonical form
+		// instead of git's form against a filepath.Join-built one.
+		heldCanonical := canonicalRootForTest(t, held)
 		developBefore := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "refs/heads/develop")))
 		headBefore := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
 		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{}, poolRoot)
@@ -975,7 +984,7 @@ func TestImplMergeRefusesTargetHeldElsewhere(t *testing.T) {
 			t.Fatalf("error must name the held checkout: %v", err)
 		}
 		d := requireMergeDiagnostic(t, r, "target_held_elsewhere", "must_resolve")
-		if !strings.Contains(d.Reason, "ws pool worktree") || !strings.Contains(d.Reason, held) {
+		if !strings.Contains(d.Reason, "ws pool worktree") || !strings.Contains(d.Reason, heldCanonical) {
 			t.Fatalf("pool-holder reason must name the pool kind and path: %+v", d)
 		}
 		assertUnmoved(t, root, branch, developBefore, headBefore)
@@ -984,6 +993,9 @@ func TestImplMergeRefusesTargetHeldElsewhere(t *testing.T) {
 	t.Run("plain-holder", func(t *testing.T) {
 		root, branch := mergeFixture(t, "develop")
 		_, held := mkHeld(t, root)
+		// See the pool-holder case above for why held must be canonicalized
+		// through git's own resolution before the containment check.
+		heldCanonical := canonicalRootForTest(t, held)
 		developBefore := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "refs/heads/develop")))
 		headBefore := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
 		// poolRoot "" (unknown) -> the holder is named as a plain worktree.
@@ -995,7 +1007,7 @@ func TestImplMergeRefusesTargetHeldElsewhere(t *testing.T) {
 		if strings.Contains(d.Reason, "ws pool worktree") {
 			t.Fatalf("unknown-pool holder must not be named a ws pool worktree: %+v", d)
 		}
-		if !strings.Contains(d.Reason, "another worktree") || !strings.Contains(d.Reason, held) {
+		if !strings.Contains(d.Reason, "another worktree") || !strings.Contains(d.Reason, heldCanonical) {
 			t.Fatalf("plain-holder reason must name another worktree and the path: %+v", d)
 		}
 		assertUnmoved(t, root, branch, developBefore, headBefore)
@@ -1071,6 +1083,13 @@ func TestImplMergeDispatchClassifiesHeldTargetByPool(t *testing.T) {
 		}
 		held := filepath.Join(poolRoot, "held")
 		runGit(t, root, "worktree", "add", held, "develop")
+		// The dispatch response embeds the path as listWorktrees reports it
+		// (git's own resolved form), which can diverge from this filepath.Join
+		// value on Windows (separator and/or short-path/symlink resolution). See
+		// TestImplMergeRefusesTargetHeldElsewhere/pool-holder for why held must
+		// be canonicalized through git's own `rev-parse --show-toplevel` before
+		// the containment check.
+		heldCanonical := canonicalRootForTest(t, held)
 
 		// mergeImplBranch returns a non-nil error for target_held_elsewhere, which
 		// toolJSONResponse collapses to a plain error-text response regardless of
@@ -1085,7 +1104,7 @@ func TestImplMergeDispatchClassifiesHeldTargetByPool(t *testing.T) {
 		if !strings.Contains(out, "checked out at") {
 			t.Fatalf("held target not refused via dispatch: %s", out)
 		}
-		if !strings.Contains(out, "ws pool worktree") || !strings.Contains(out, held) {
+		if !strings.Contains(out, "ws pool worktree") || !strings.Contains(out, heldCanonical) {
 			t.Fatalf("dispatch must classify the pool holder and name its path: %s", out)
 		}
 	})
@@ -1104,6 +1123,9 @@ func TestImplMergeDispatchClassifiesHeldTargetByPool(t *testing.T) {
 		// falls back to a plain "another worktree".
 		held := filepath.Join(t.TempDir(), "elsewhere")
 		runGit(t, root, "worktree", "add", held, "develop")
+		// See the pool-holder case above for why held must be canonicalized
+		// through git's own resolution before the containment check.
+		heldCanonical := canonicalRootForTest(t, held)
 
 		resp := callToolOnce(t, s, 1, "git.merge", map[string]any{
 			"session_key": key, "branch": branch, "title": "merge(test): land implementation",
@@ -1116,7 +1138,7 @@ func TestImplMergeDispatchClassifiesHeldTargetByPool(t *testing.T) {
 		if strings.Contains(out, "ws pool worktree") {
 			t.Fatalf("holder outside the resolved pool must not be named a ws pool worktree: %s", out)
 		}
-		if !strings.Contains(out, "another worktree") || !strings.Contains(out, held) {
+		if !strings.Contains(out, "another worktree") || !strings.Contains(out, heldCanonical) {
 			t.Fatalf("dispatch must classify the plain holder and name its path: %s", out)
 		}
 	})
