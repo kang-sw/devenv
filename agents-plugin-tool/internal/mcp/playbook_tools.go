@@ -180,6 +180,64 @@ func resolveNamespaceVars() map[string]string {
 	}
 }
 
+// mailboxWaitCommandGeneric is the host-neutral fallback rendered into
+// {{.MailboxWaitCommand}} whenever a concrete, runnable command cannot be
+// produced — a keyless (fresh) render, or a session_key that resolves to no
+// live record. It reproduces the abstract command form the playbook body
+// shipped before render-time injection, so a session with no key still learns
+// the shape rather than being handed a broken command.
+const mailboxWaitCommandGeneric = "ws-mcp mailbox wait --session-key <your key> [--slug <your address>] [--timeout <duration>]"
+
+// mailboxWaitCommandVar resolves {{.MailboxWaitCommand}} to a concrete,
+// runnable `mailbox wait` invocation for the caller's own session, or the
+// generic fallback when one cannot be produced. It runs inside the MCP server
+// process, so os.Args[0] is the same resolved binary the harness/launcher
+// invoked — naturally host-neutral, with no package-internal launcher path
+// written into shipped text (shipped-surface-boundary.md), mirroring the
+// re-arm command the `mailbox wait` CLI itself prints on return.
+//
+// The --slug is the caller's REGISTERED self address (owner-gated, the same
+// source mailbox.lookup_peers' self.address and the workflow_manual ambient
+// block read), never a re-derivation of WS_MAILBOX/WS_MAILBOX_AUTO from the
+// environment: under WS_MAILBOX_AUTO the env carries no minted stem, so
+// re-deriving it would emit a different address than the server registered. No
+// registered address (env-less, or a non-owner session sharing this process)
+// → the reply-id-only form (`--session-key` alone).
+func mailboxWaitCommandVar(s *Server, sessionKey string) string {
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sessionKey == "" {
+		return mailboxWaitCommandGeneric
+	}
+	entry, found := s.sessions.lookup(sessionKey)
+	if !found {
+		return mailboxWaitCommandGeneric
+	}
+	bin := strings.TrimSpace(os.Args[0])
+	if bin == "" {
+		return mailboxWaitCommandGeneric
+	}
+	parts := []string{bin, "mailbox", "wait", "--session-key", sessionKey}
+	if isOwner, identity, err := s.mailboxOwnerCheck(sessionKey, entry.root); err == nil && isOwner {
+		if addr := identity.address(); addr != "" {
+			parts = append(parts, "--slug", addr)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// injectMailboxWaitCommand sets the tool-owned {{.MailboxWaitCommand}} render
+// variable on the caller context, overriding any caller-supplied value so the
+// concrete command cannot be spoofed through render context (mirroring the
+// namespace-var override precedent). It is called on the playbook.read path,
+// the only path that substitutes the mailbox playbook body.
+func (s *Server) injectMailboxWaitCommand(callerContext map[string]string, sessionKey string) map[string]string {
+	if callerContext == nil {
+		callerContext = map[string]string{}
+	}
+	callerContext["MailboxWaitCommand"] = mailboxWaitCommandVar(s, sessionKey)
+	return callerContext
+}
+
 func isReservedNamespaceVar(name string) bool {
 	for _, reserved := range wsrsrc.ImplicitVariableNames {
 		if name == reserved {
@@ -445,6 +503,13 @@ type overridePointDecl struct {
 const (
 	workflowManualPlaybookName = "lead-workflow-manual"
 	preferSubagentEnabledValue = "on"
+	// mailboxWaitPlaybookName is the only playbook whose body substitutes
+	// {{.MailboxWaitCommand}}, so the render/read dispatch resolves that
+	// variable for this stem alone (mirroring the workflowManualPlaybookName
+	// special-case): a broader inject would run mailboxOwnerCheck I/O for
+	// every keyed read and, on the render path, route the reserved var through
+	// the wsflow free-text bridge for render-eligible stems.
+	mailboxWaitPlaybookName = "lead-use-mailbox"
 )
 
 // builtinPromptOverrideDefaults supplies defaults for configurable prompt points.
