@@ -76,7 +76,9 @@ the turn: relay the reason.
    ```
 
 6. Wait for the host's completion notification. Do not poll, and do not edit
-   the ticket or move `HEAD` meanwhile.
+   the ticket or move `HEAD` meanwhile; housekeeping that cannot wait uses
+   the sparse worktree the workflow manual's `### Git` section describes,
+   released before **Handle the report** merges.
 
 One worker in flight per invocation, unless the opt-in parallel route below is
 approved for this run.
@@ -102,6 +104,11 @@ Merging is yours. `merge_confirm: skip` auto-calls
 surfaces the report for user approval first. Use the worker's reported value,
 so goal-run skip survives the handoff. A conflict goes to
 `{{.SkillNamespace}}:lead-delegate` as a bounded resolution task.
+A `target_held_elsewhere` refusal means the target branch is checked out
+in another worktree, typically a parallel lead's sparse housekeeping
+worktree: that is a merge stop, not a conflict — leave the impl branch
+retained and `HEAD` where it is, report the holder's path, and end the
+turn; the next invocation merges once the holder has released it.
 
 - `completion: phase` — do not merge: a per-phase merge deletes the impl
   branch the next phase stacks on. Leave the checkout on that impl branch,

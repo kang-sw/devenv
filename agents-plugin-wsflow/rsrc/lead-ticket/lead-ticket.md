@@ -197,7 +197,10 @@ Drop: `{{.McpNamespace}}/tickets.close(stem, status: "dropped")`. Closing to
 
 Commit edited paths with `{{.McpNamespace}}/git.commit(paths, title,
 ai_context, expected_branch)`, one logical unit. `expected_branch` is the branch
-you remember working on; the commit is refused if the checkout has since moved. Suggest the next action: a child ticket for an
+you remember working on; the commit is refused if the checkout has since moved.
+A root occupied by a worker (`HEAD` on `impl/*`) takes no ticket write:
+author and commit in the sparse worktree the workflow manual's `### Git`
+section describes, with the key it returns. Suggest the next action: a child ticket for an
 epic; `{{.SkillNamespace}}:lead-run` for an actionable ticket now
 in `ready/`. End with `Ticket: ai-docs/tickets/<status>/<stem>.md` per ticket
 written, the last of them on its own final line.
