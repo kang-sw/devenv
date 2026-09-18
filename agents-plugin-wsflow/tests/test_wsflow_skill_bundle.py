@@ -217,7 +217,9 @@ class WsflowSkillBundleTest(unittest.TestCase):
                 r"description: .+\n"
                 r"---\n\n"
                 rf"# {re.escape(title)}\n\n"
-                rf"Call `wsflow/playbook\.read\(name: \"{re.escape(skill)}\"\)` and execute the returned procedure\n"
+                rf"Call `wsflow/playbook\.read\(name: \"{re.escape(skill)}\""
+                r"(?:, session_key: <your key, omit if fresh>)?"
+                r"\)` and execute the returned procedure\n"
                 r"inline against the current user request\. "
                 r"If this call fails to connect, run `/wsflow:mcp-server-repair`\.\n",
                 text,

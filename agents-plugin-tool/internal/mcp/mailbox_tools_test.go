@@ -872,3 +872,122 @@ func TestMailboxLookupPeersSelfAddressGatedByOwnership(t *testing.T) {
 		t.Fatalf("non-owner delegate session's self entry is not a reply-id fallback: %s", delegateLookup)
 	}
 }
+
+// TestMailboxWaitCommandRenderVariable verifies Phase 2's render-time
+// {{.MailboxWaitCommand}} injection across the four enumerated scenarios: a
+// key + explicit WS_MAILBOX, a key + WS_MAILBOX_AUTO (the emitted --slug must
+// be the SERVER-registered minted stem, not an env re-derivation), a key +
+// env-less session (reply-id-only: --session-key alone), and no key (generic
+// degrade). It asserts both the resolver output and that the playbook.read
+// dispatch actually substitutes the value into the shipped mailbox body.
+func TestMailboxWaitCommandRenderVariable(t *testing.T) {
+	// Scenario 1: key + explicit WS_MAILBOX → concrete command with the exact
+	// registered "name@scope" slug.
+	t.Run("explicit_slug", func(t *testing.T) {
+		setupMailboxTestEnv(t)
+		root := t.TempDir()
+		initGit(t, root)
+		t.Setenv(envMailbox, "alice@worktree")
+		s := NewServer(root, "test")
+		key := mailboxLogin(t, s, 1, root)
+
+		cmd := mailboxWaitCommandVar(s, key)
+		if cmd == mailboxWaitCommandGeneric {
+			t.Fatalf("owned explicit-slug session got the generic fallback: %s", cmd)
+		}
+		if !strings.Contains(cmd, "mailbox wait --session-key "+key) {
+			t.Fatalf("command missing the resolved --session-key: %s", cmd)
+		}
+		if !strings.Contains(cmd, "--slug alice@worktree") {
+			t.Fatalf("command missing the registered --slug: %s", cmd)
+		}
+
+		// The playbook.read dispatch substitutes it into the shipped body.
+		body := callToolWithKey(t, s, 2, key, "playbook.read", map[string]any{"name": "lead-use-mailbox"})
+		if !strings.Contains(body, "--slug alice@worktree") {
+			t.Fatalf("playbook.read body did not carry the concrete wait command: %s", body)
+		}
+		if strings.Contains(body, "{{.MailboxWaitCommand}}") {
+			t.Fatalf("playbook.read body left the render variable unsubstituted: %s", body)
+		}
+	})
+
+	// Scenario 2: key + WS_MAILBOX_AUTO → the --slug is the server-minted stem
+	// (AUTO-safe), never an env re-derivation. WS_MAILBOX_AUTO carries only the
+	// scope, so a correct implementation cannot reconstruct the address from the
+	// environment; it must read the registered identity.
+	t.Run("auto_slug_is_registered_not_env", func(t *testing.T) {
+		setupMailboxTestEnv(t)
+		root := t.TempDir()
+		initGit(t, root)
+		t.Setenv(envMailboxAuto, "worktree")
+		s := NewServer(root, "test")
+		key := mailboxLogin(t, s, 1, root)
+
+		identity := s.mailboxIdentityResolved()
+		if !identity.Active || !identity.Auto {
+			t.Fatalf("WS_MAILBOX_AUTO identity not active/auto: %#v", identity)
+		}
+		cmd := mailboxWaitCommandVar(s, key)
+		wantSlug := "--slug " + identity.Name + "@worktree"
+		if !strings.Contains(cmd, wantSlug) {
+			t.Fatalf("AUTO command did not emit the registered self address %q: %s", wantSlug, cmd)
+		}
+	})
+
+	// Scenario 3: key + env-less session → no registered address, so the
+	// reply-id-only form (--session-key alone, no --slug).
+	t.Run("env_less_reply_id_only", func(t *testing.T) {
+		setupMailboxTestEnv(t)
+		root := t.TempDir()
+		initGit(t, root)
+		t.Setenv(envMailbox, "")
+		t.Setenv(envMailboxAuto, "")
+		s := NewServer(root, "test")
+		key := mailboxLogin(t, s, 1, root)
+
+		cmd := mailboxWaitCommandVar(s, key)
+		if !strings.Contains(cmd, "mailbox wait --session-key "+key) {
+			t.Fatalf("env-less command missing the resolved --session-key: %s", cmd)
+		}
+		if strings.Contains(cmd, "--slug") {
+			t.Fatalf("env-less session emitted a --slug it cannot own: %s", cmd)
+		}
+	})
+
+	// Scenario 4: no key (fresh session) → today's generic guidance, never a
+	// broken command.
+	t.Run("no_key_generic_degrade", func(t *testing.T) {
+		setupMailboxTestEnv(t)
+		root := t.TempDir()
+		initGit(t, root)
+		t.Setenv(envMailbox, "alice@worktree")
+		s := NewServer(root, "test")
+		// A syntactically valid but unregistered key also degrades (no live
+		// record), same as an empty key.
+		if got := mailboxWaitCommandVar(s, ""); got != mailboxWaitCommandGeneric {
+			t.Fatalf("empty key did not degrade to the generic command: %s", got)
+		}
+		if got := mailboxWaitCommandVar(s, "not-a-real-session-key"); got != mailboxWaitCommandGeneric {
+			t.Fatalf("unresolvable key did not degrade to the generic command: %s", got)
+		}
+	})
+
+	// The injected value overrides any caller-supplied context value, so a
+	// concrete command cannot be spoofed through render context.
+	t.Run("caller_context_cannot_spoof", func(t *testing.T) {
+		setupMailboxTestEnv(t)
+		root := t.TempDir()
+		initGit(t, root)
+		t.Setenv(envMailbox, "alice@worktree")
+		s := NewServer(root, "test")
+		key := mailboxLogin(t, s, 1, root)
+		got := s.injectMailboxWaitCommand(map[string]string{"MailboxWaitCommand": "evil --slug attacker@worktree"}, key)
+		if got["MailboxWaitCommand"] == "evil --slug attacker@worktree" {
+			t.Fatalf("caller-supplied MailboxWaitCommand survived injection: %s", got["MailboxWaitCommand"])
+		}
+		if !strings.Contains(got["MailboxWaitCommand"], "--slug alice@worktree") {
+			t.Fatalf("injection did not resolve the real registered slug: %s", got["MailboxWaitCommand"])
+		}
+	})
+}

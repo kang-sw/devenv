@@ -60,6 +60,7 @@ var ImplicitVariableNames = []string{
 	"McpNamespace", "SkillNamespace",
 	"SmallTierModel", "MediumTierModel", "LargeTierModel", "XLargeTierModel",
 	"SmallTierReasoningEffort", "MediumTierReasoningEffort", "LargeTierReasoningEffort", "XLargeTierReasoningEffort",
+	"MailboxWaitCommand",
 }
 
 // Manifest is the on-disk manifest.json structure.

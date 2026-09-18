@@ -1636,6 +1636,11 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// Build an override lookup from the session-keyed resolver when a session_key
 		// is present.
 		keyStr, _ := params.Arguments["session_key"].(string)
+		// Inject the render-time {{.MailboxWaitCommand}} value (concrete when the
+		// key resolves an owned mailbox identity, generic otherwise). Read-only
+		// playbooks are the only surface that substitutes it, so this is the one
+		// dispatch that resolves it.
+		callerContext = s.injectMailboxWaitCommand(callerContext, keyStr)
 		printOverrideLookup := buildOverrideLookup(s, keyStr)
 		// Resolve workflow.lang for language-binding injection.
 		printLangAdapter := sessionConfigAdapter{s: s.sessions}

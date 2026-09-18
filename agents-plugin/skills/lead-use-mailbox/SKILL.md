@@ -5,6 +5,6 @@ description: Guide the lead and user through cross-session mail between independ
 
 # Use Mailbox
 
-Call `ws/playbook.read(name: "lead-use-mailbox")` and execute the returned procedure
+Call `ws/playbook.read(name: "lead-use-mailbox", session_key: <your key, omit if fresh>)` and execute the returned procedure
 inline against the user request.
 If this call fails to connect, run `/ws:mcp-server-repair`.
