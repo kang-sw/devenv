@@ -68,7 +68,7 @@ func TestImplMergeReleaseAcknowledgement(t *testing.T) {
 				if topology == "release-boundary" {
 					runGit(t, root, "branch", "develop", target)
 				}
-				r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{})
+				r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{}, "")
 				if err != nil || r.Status != "policy_blocked" || r.BranchDeleted {
 					t.Fatalf("result=%+v err=%v", r, err)
 				}
@@ -85,7 +85,7 @@ func TestImplMergeReleaseAcknowledgement(t *testing.T) {
 				if current := strings.TrimSpace(string(runGitOutput(t, root, "symbolic-ref", "--short", "HEAD"))); current != branch {
 					t.Fatalf("refusal switched to %s", current)
 				}
-				merged, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, target, mergeMessage(), releaseAcknowledgement(r))
+				merged, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, target, mergeMessage(), releaseAcknowledgement(r), "")
 				if err != nil || merged.Status != "merged" || !merged.BranchDeleted {
 					t.Fatalf("result=%+v err=%v", merged, err)
 				}
@@ -102,7 +102,7 @@ func TestImplMergeReleaseCollectsSafetyFindings(t *testing.T) {
 	for _, override := range []bool{false, true} {
 		t.Run(fmt.Sprint(override), func(t *testing.T) {
 			root, branch := mergeFixture(t, "main")
-			snapshot, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{})
+			snapshot, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{}, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -121,7 +121,7 @@ func TestImplMergeReleaseCollectsSafetyFindings(t *testing.T) {
 			if override {
 				ack = releaseAcknowledgement(snapshot)
 			}
-			r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "wrong", mergeMessage(), ack)
+			r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "wrong", mergeMessage(), ack, "")
 			if err != nil || r.Status != "policy_blocked" {
 				t.Fatalf("result=%+v err=%v", r, err)
 			}
@@ -142,7 +142,7 @@ func TestImplMergeReleaseRejectsChangedTipsAndMissingOIDs(t *testing.T) {
 	for _, change := range []string{"source", "target", "both", "missing", "abbreviated"} {
 		t.Run(change, func(t *testing.T) {
 			root, branch := mergeFixture(t, "master")
-			snapshot, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{})
+			snapshot, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{}, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -161,7 +161,7 @@ func TestImplMergeReleaseRejectsChangedTipsAndMissingOIDs(t *testing.T) {
 				ack.ExpectedTargetOID = ack.ExpectedTargetOID[:7]
 			}
 			before := string(runGitOutput(t, root, "rev-parse", "HEAD"))
-			r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), ack)
+			r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), ack, "")
 			if err != nil || r.Status != "policy_blocked" {
 				t.Fatalf("result=%+v err=%v", r, err)
 			}
@@ -199,7 +199,7 @@ func TestImplMergeReleaseRawDiagnosticAndFinalRecheck(t *testing.T) {
 	for _, fault := range []string{"count", "oid", "merge-state", "during-inspection", "checkout-target", "checkout-source"} {
 		t.Run(fault, func(t *testing.T) {
 			root, branch := mergeFixture(t, "main")
-			snapshot, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{})
+			snapshot, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{}, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -235,7 +235,7 @@ func TestImplMergeReleaseRawDiagnosticAndFinalRecheck(t *testing.T) {
 				}
 				return nil, nil, false
 			}}
-			r, err := mergeImplBranch(context.Background(), root, runner, branch, "", mergeMessage(), releaseAcknowledgement(snapshot))
+			r, err := mergeImplBranch(context.Background(), root, runner, branch, "", mergeMessage(), releaseAcknowledgement(snapshot), "")
 			if err != nil || r.Status != "policy_blocked" || merged {
 				t.Fatalf("result=%+v err=%v merged=%t", r, err, merged)
 			}
@@ -269,7 +269,7 @@ func TestImplMergeReleaseContainmentAndRefs(t *testing.T) {
 			if fault == "missing-target" {
 				runGit(t, root, "branch", "-D", "main")
 			}
-			r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{})
+			r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{}, "")
 			if err != nil || r.Status != "policy_blocked" {
 				t.Fatalf("result=%+v err=%v", r, err)
 			}
@@ -277,7 +277,7 @@ func TestImplMergeReleaseContainmentAndRefs(t *testing.T) {
 			code := map[string]string{"contained": "already_contained", "missing-source": "ref_inspection", "invalid-source": "invalid_ref", "missing-target": "ref_inspection"}[fault]
 			requireMergeDiagnostic(t, r, code, "must_resolve")
 			if fault == "contained" {
-				r, err = mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), releaseAcknowledgement(r))
+				r, err = mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), releaseAcknowledgement(r), "")
 				if err != nil || r.Status != "policy_blocked" {
 					t.Fatalf("containment waived: %+v %v", r, err)
 				}
@@ -299,7 +299,7 @@ func TestImplMergeReleaseReviewEvidence(t *testing.T) {
 	}
 	runGit(t, root, "add", "ai-docs/.review-ledger.md")
 	runGit(t, root, "commit", "-m", "record review frontier")
-	r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{})
+	r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{}, "")
 	if err != nil || r.Status != "policy_blocked" || len(r.Diagnostics) != 1 {
 		t.Fatalf("result=%+v err=%v", r, err)
 	}
@@ -313,7 +313,7 @@ func TestImplMergeReleaseReviewEvidence(t *testing.T) {
 
 func TestImplMergeOverrideScope(t *testing.T) {
 	root, branch := mergeFixture(t, "develop")
-	_, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{ReleaseTargetOverride: true})
+	_, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{ReleaseTargetOverride: true}, "")
 	if err == nil || !strings.Contains(err.Error(), "only to main or master") {
 		t.Fatalf("override scope lost: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestImplMergeRequiresExactLocalRefsDespiteTagShadows(t *testing.T) {
 					}
 					return nil, nil, false
 				}}
-				r, err := mergeImplBranch(context.Background(), root, runner, branch, "", mergeMessage(), ack)
+				r, err := mergeImplBranch(context.Background(), root, runner, branch, "", mergeMessage(), ack, "")
 				if merged || r.Status != "policy_blocked" || (target == "main" && err != nil) || (target != "main" && err == nil) {
 					t.Fatalf("tag shadow accepted: %+v err=%v merged=%t", r, err, merged)
 				}
@@ -413,7 +413,7 @@ func TestImplMergeNoFFAndCleanup(t *testing.T) {
 				input = branch
 			}
 			runGit(t, root, "config", "merge.ff", "only")
-			r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, input, "goal/topic", mergeMessage(), implMergeAcknowledgement{})
+			r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, input, "goal/topic", mergeMessage(), implMergeAcknowledgement{}, "")
 			if err != nil || r.Status != "merged" || !r.BranchDeleted {
 				t.Fatalf("result=%+v err=%v", r, err)
 			}
@@ -444,7 +444,7 @@ func TestImplMergeCleanupFailureSurfacesDiagnostic(t *testing.T) {
 		}
 		return nil, nil, false
 	}}
-	r, err := mergeImplBranch(context.Background(), root, runner, branch, "develop", mergeMessage(), implMergeAcknowledgement{})
+	r, err := mergeImplBranch(context.Background(), root, runner, branch, "develop", mergeMessage(), implMergeAcknowledgement{}, "")
 	if err != nil {
 		t.Fatalf("cleanup failure must stay non-fatal: err=%v result=%+v", err, r)
 	}
@@ -484,7 +484,7 @@ func TestImplMergeRefusals(t *testing.T) {
 				}
 				runGit(t, root, "add", "staged.txt")
 			}
-			_, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, tc.assertion, mergeMessage(), implMergeAcknowledgement{})
+			_, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, tc.assertion, mergeMessage(), implMergeAcknowledgement{}, "")
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err=%v", err)
 			}
@@ -501,7 +501,7 @@ func TestImplMergeTolerantWorktree(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(root, "scratch.txt"), []byte("keep\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "goal/topic", mergeMessage(), implMergeAcknowledgement{})
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "goal/topic", mergeMessage(), implMergeAcknowledgement{}, "")
 		if err != nil || r.Status != "merged" || !r.BranchDeleted {
 			t.Fatalf("result=%+v err=%v", r, err)
 		}
@@ -528,7 +528,7 @@ func TestImplMergeTolerantWorktree(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(root, "scratch2.txt"), []byte("keep\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "goal/topic", mergeMessage(), implMergeAcknowledgement{})
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "goal/topic", mergeMessage(), implMergeAcknowledgement{}, "")
 		if err != nil || r.Status != "merged" || !r.BranchDeleted {
 			t.Fatalf("result=%+v err=%v", r, err)
 		}
@@ -559,7 +559,7 @@ func TestImplMergeTolerantWorktree(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(root, "other.txt"), []byte("working\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "goal/topic", mergeMessage(), implMergeAcknowledgement{})
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "goal/topic", mergeMessage(), implMergeAcknowledgement{}, "")
 		if err != nil || r.Status != "merged" {
 			t.Fatalf("result=%+v err=%v", r, err)
 		}
@@ -580,7 +580,7 @@ func TestImplMergeTolerantWorktree(t *testing.T) {
 			t.Fatal(err)
 		}
 		runGit(t, root, "add", "staged.txt")
-		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "develop", mergeMessage(), implMergeAcknowledgement{})
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "develop", mergeMessage(), implMergeAcknowledgement{}, "")
 		if err == nil || r.Status != "policy_blocked" {
 			t.Fatalf("staged change admitted: %+v err=%v", r, err)
 		}
@@ -608,7 +608,7 @@ func TestImplMergeTolerantWorktree(t *testing.T) {
 		if _, statErr := os.Stat(filepath.Join(root, ".git", "MERGE_HEAD")); statErr == nil {
 			t.Fatal("precondition: MERGE_HEAD must be absent so merge_in_progress does not mask the unmerged case")
 		}
-		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "develop", mergeMessage(), implMergeAcknowledgement{})
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "develop", mergeMessage(), implMergeAcknowledgement{}, "")
 		if err == nil || r.Status != "policy_blocked" {
 			t.Fatalf("unmerged paths admitted: %+v err=%v", r, err)
 		}
@@ -642,7 +642,7 @@ func TestImplMergeTolerantWorktree(t *testing.T) {
 		if porcelain := string(runGitOutput(t, root, "status", "--porcelain=v1")); !strings.Contains(porcelain, "AA added.txt") {
 			t.Fatalf("expected AA unmerged entry, got: %q", porcelain)
 		}
-		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "develop", mergeMessage(), implMergeAcknowledgement{})
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "develop", mergeMessage(), implMergeAcknowledgement{}, "")
 		if err == nil || r.Status != "policy_blocked" {
 			t.Fatalf("both-added unmerged admitted: %+v err=%v", r, err)
 		}
@@ -680,7 +680,7 @@ func TestImplMergeTolerantWorktree(t *testing.T) {
 		if porcelain := string(runGitOutput(t, root, "status", "--porcelain=v1")); !strings.Contains(porcelain, "DD deleted.txt") {
 			t.Fatalf("expected DD unmerged entry, got: %q", porcelain)
 		}
-		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "develop", mergeMessage(), implMergeAcknowledgement{})
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "develop", mergeMessage(), implMergeAcknowledgement{}, "")
 		if err == nil || r.Status != "policy_blocked" {
 			t.Fatalf("both-deleted unmerged admitted: %+v err=%v", r, err)
 		}
@@ -699,7 +699,7 @@ func TestImplMergeTolerantWorktree(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(root, "shared.txt"), []byte("overlap-local\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "develop", mergeMessage(), implMergeAcknowledgement{})
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "develop", mergeMessage(), implMergeAcknowledgement{}, "")
 		if err == nil || r.Status != "policy_blocked" {
 			t.Fatalf("overlapping change admitted: %+v err=%v", r, err)
 		}
@@ -739,13 +739,13 @@ func TestImplMergeConflictAdvisory(t *testing.T) {
 			runGit(t, root, "commit", "-am", "target change")
 			ack := implMergeAcknowledgement{}
 			if target == "main" {
-				r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, target, mergeMessage(), ack)
+				r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, target, mergeMessage(), ack, "")
 				if err != nil || r.Status != "policy_blocked" {
 					t.Fatalf("result=%+v err=%v", r, err)
 				}
 				ack = releaseAcknowledgement(r)
 			}
-			r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, target, mergeMessage(), ack)
+			r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, target, mergeMessage(), ack, "")
 			if err != nil || r.Status != "conflict" || r.BranchDeleted || !strings.Contains(r.Advisory, "lead-delegate") {
 				t.Fatalf("result=%+v err=%v", r, err)
 			}
@@ -763,7 +763,7 @@ func TestImplMergeRejectsCheckoutShorthand(t *testing.T) {
 	mainBefore := string(runGitOutput(t, root, "rev-parse", "refs/heads/main"))
 	runGit(t, root, "update-ref", "refs/heads/-", "refs/heads/main")
 	runGit(t, root, "branch", "-m", branch, "impl/-/unit")
-	_, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, "impl/-/unit", "", mergeMessage(), implMergeAcknowledgement{})
+	_, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, "impl/-/unit", "", mergeMessage(), implMergeAcknowledgement{}, "")
 	if err == nil || !strings.Contains(err.Error(), "invalid merge target") {
 		t.Fatalf("shorthand target accepted: %v", err)
 	}
@@ -812,7 +812,7 @@ func TestGenericMergePromotion(t *testing.T) {
 					runGit(t, root, "switch", "integration")
 					input = branch
 				}
-				r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, input, "integration", mergeMessage(), implMergeAcknowledgement{})
+				r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, input, "integration", mergeMessage(), implMergeAcknowledgement{}, "")
 				deleted := strings.HasPrefix(branch, "goal/")
 				if err != nil || r.Status != "merged" || r.BranchDeleted != deleted || r.Branch != branch || r.Target != "integration" {
 					t.Fatalf("result=%+v err=%v", r, err)
@@ -878,7 +878,7 @@ func TestGenericMergeRefusals(t *testing.T) {
 				}
 				return nil, nil, false
 			}}
-			r, err := mergeImplBranch(context.Background(), root, runner, branch, target, mergeMessage(), implMergeAcknowledgement{})
+			r, err := mergeImplBranch(context.Background(), root, runner, branch, target, mergeMessage(), implMergeAcknowledgement{}, "")
 			if err == nil || merged || r.BranchDeleted {
 				t.Fatalf("unsafe merge: %+v err=%v merged=%t", r, err, merged)
 			}
@@ -928,5 +928,145 @@ func TestGenericMergeReleaseMCP(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestImplMergeRefusesTargetHeldElsewhere pins Decision 14: a target branch
+// checked out in another worktree is a merge stop, diagnosed as
+// target_held_elsewhere with the holder's kind (pool vs. plain vs. prunable)
+// and path, with nothing switched or merged.
+func TestImplMergeRefusesTargetHeldElsewhere(t *testing.T) {
+	mkHeld := func(t *testing.T, root string) (poolRoot, held string) {
+		t.Helper()
+		poolRoot = filepath.Join(t.TempDir(), "pool")
+		if err := os.MkdirAll(poolRoot, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		held = filepath.Join(poolRoot, "held")
+		runGit(t, root, "worktree", "add", held, "develop")
+		// Canonicalize the pool through the checked-out worktree so it compares
+		// equal to the git-canonical paths listWorktrees returns (macOS /var ->
+		// /private/var), exactly as server.go derives it from a canonical mainRoot.
+		return filepath.Dir(canonicalRootForTest(t, held)), held
+	}
+	assertUnmoved := func(t *testing.T, root, branch, developBefore, headBefore string) {
+		t.Helper()
+		if head := strings.TrimSpace(string(runGitOutput(t, root, "symbolic-ref", "--short", "HEAD"))); head != branch {
+			t.Fatalf("HEAD moved to %q, want %q", head, branch)
+		}
+		if after := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "refs/heads/develop"))); after != developBefore {
+			t.Fatal("develop tip moved on a refused merge")
+		}
+		if after := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD"))); after != headBefore {
+			t.Fatal("HEAD commit moved on a refused merge")
+		}
+	}
+
+	t.Run("pool-holder", func(t *testing.T) {
+		root, branch := mergeFixture(t, "develop")
+		poolRoot, held := mkHeld(t, root)
+		developBefore := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "refs/heads/develop")))
+		headBefore := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{}, poolRoot)
+		if err == nil || r.Status != "policy_blocked" {
+			t.Fatalf("held target not refused: %+v err=%v", r, err)
+		}
+		if !strings.Contains(err.Error(), "checked out at") {
+			t.Fatalf("error must name the held checkout: %v", err)
+		}
+		d := requireMergeDiagnostic(t, r, "target_held_elsewhere", "must_resolve")
+		if !strings.Contains(d.Reason, "ws pool worktree") || !strings.Contains(d.Reason, held) {
+			t.Fatalf("pool-holder reason must name the pool kind and path: %+v", d)
+		}
+		assertUnmoved(t, root, branch, developBefore, headBefore)
+	})
+
+	t.Run("plain-holder", func(t *testing.T) {
+		root, branch := mergeFixture(t, "develop")
+		_, held := mkHeld(t, root)
+		developBefore := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "refs/heads/develop")))
+		headBefore := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+		// poolRoot "" (unknown) -> the holder is named as a plain worktree.
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{}, "")
+		if err == nil || r.Status != "policy_blocked" {
+			t.Fatalf("held target not refused: %+v err=%v", r, err)
+		}
+		d := requireMergeDiagnostic(t, r, "target_held_elsewhere", "must_resolve")
+		if strings.Contains(d.Reason, "ws pool worktree") {
+			t.Fatalf("unknown-pool holder must not be named a ws pool worktree: %+v", d)
+		}
+		if !strings.Contains(d.Reason, "another worktree") || !strings.Contains(d.Reason, held) {
+			t.Fatalf("plain-holder reason must name another worktree and the path: %+v", d)
+		}
+		assertUnmoved(t, root, branch, developBefore, headBefore)
+	})
+
+	t.Run("no-other-worktree-merges", func(t *testing.T) {
+		root, branch := mergeFixture(t, "develop")
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{}, filepath.Join(t.TempDir(), "pool"))
+		if err != nil || r.Status != "merged" {
+			t.Fatalf("inspection must be inert with no other worktree: %+v err=%v", r, err)
+		}
+	})
+
+	t.Run("prunable-holder", func(t *testing.T) {
+		root, branch := mergeFixture(t, "develop")
+		poolRoot, held := mkHeld(t, root)
+		// Remove the held worktree's directory WITHOUT pruning: the record still
+		// holds develop (blocking the merge) but is prunable.
+		if err := os.RemoveAll(held); err != nil {
+			t.Fatal(err)
+		}
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{}, poolRoot)
+		if err == nil || r.Status != "policy_blocked" {
+			t.Fatalf("prunable held target not refused: %+v err=%v", r, err)
+		}
+		d := requireMergeDiagnostic(t, r, "target_held_elsewhere", "must_resolve")
+		if !strings.Contains(d.Reason, "stale worktree record") {
+			t.Fatalf("prunable reason must name a stale worktree record: %+v", d)
+		}
+		if !strings.Contains(d.Resolution, "git worktree prune") {
+			t.Fatalf("prunable resolution must direct to git worktree prune: %+v", d)
+		}
+		// After pruning, the branch is free and the merge lands.
+		runGit(t, root, "worktree", "prune")
+		r2, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{}, poolRoot)
+		if err != nil || r2.Status != "merged" {
+			t.Fatalf("merge must land after prune: %+v err=%v", r2, err)
+		}
+	})
+}
+
+// TestListWorktreesPrunable pins the prunable-record parse: a worktree whose
+// directory was removed without prune reports Prunable, and a live one does not.
+func TestListWorktreesPrunable(t *testing.T) {
+	root, branch := mergeFixture(t, "develop")
+	_ = branch
+	held := filepath.Join(t.TempDir(), "held")
+	runGit(t, root, "worktree", "add", held, "develop")
+	entries, err := listWorktrees(context.Background(), wsgit.ExecRunner{}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Prunable {
+			t.Fatalf("live worktree wrongly marked prunable: %+v", e)
+		}
+	}
+	if err := os.RemoveAll(held); err != nil {
+		t.Fatal(err)
+	}
+	entries, err = listWorktrees(context.Background(), wsgit.ExecRunner{}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range entries {
+		if e.Branch == "refs/heads/develop" && e.Prunable {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("removed worktree record not marked prunable: %+v", entries)
 	}
 }

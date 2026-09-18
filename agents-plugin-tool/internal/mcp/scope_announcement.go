@@ -21,6 +21,15 @@ func scopeAnnouncement(root string) string {
 	if err != nil || !info.Active {
 		return ""
 	}
+	// A cone-mode sparse-checkout is a housekeeping/development worktree
+	// (worktree.acquire's sparse_paths), not a ticket-board scope, which is
+	// file-level and requires --no-cone. This banner's "restore full visibility
+	// with git sparse-checkout disable" remedy would be false there, so stay
+	// silent; git.commit's --sparse staging and the tickets.move/close scope
+	// gate (keyed on Active) are unchanged.
+	if info.Cone {
+		return ""
+	}
 
 	var sb strings.Builder
 	sb.WriteString("> **Sparse-checkout scope is active.** ")

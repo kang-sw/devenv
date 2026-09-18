@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wskey"
 )
@@ -20,11 +21,12 @@ type worktreeAcquireResult struct {
 	WorkerKey string   `json:"worker_key,omitempty"`
 	Reused    bool     `json:"reused"`
 	Pool      string   `json:"pool"`
+	Sparse    bool     `json:"sparse"`
 	Warnings  []string `json:"warnings,omitempty"`
 }
 
 func (r worktreeAcquireResult) text() string {
-	text := fmt.Sprintf("path: %s\nworker_key: %s\nreused: %t\npool: %s\n", r.Path, r.WorkerKey, r.Reused, r.Pool)
+	text := fmt.Sprintf("path: %s\nworker_key: %s\nreused: %t\npool: %s\nsparse: %t\n", r.Path, r.WorkerKey, r.Reused, r.Pool, r.Sparse)
 	for _, w := range r.Warnings {
 		text += "warning: " + w + "\n"
 	}
@@ -43,6 +45,11 @@ type worktreeEntry struct {
 	Head     string
 	Branch   string
 	Detached bool
+	// Prunable is set when the porcelain record carries a `prunable` line: the
+	// worktree's directory is gone but its record still holds the branch for
+	// git's one-checkout-per-branch rule, so a merge into that branch is still
+	// blocked until `git worktree prune` runs.
+	Prunable bool
 }
 
 // listWorktrees parses `git worktree list --porcelain`. The first entry is
@@ -78,6 +85,8 @@ func listWorktrees(ctx context.Context, runner wsgit.Runner, root string) ([]wor
 			cur.Branch = strings.TrimSpace(strings.TrimPrefix(line, "branch "))
 		case line == "detached":
 			cur.Detached = true
+		case line == "prunable" || strings.HasPrefix(line, "prunable "):
+			cur.Prunable = true
 		}
 	}
 	flush()
@@ -193,13 +202,18 @@ func registerPoolExclude(commonDir, mainRoot, poolRoot string) error {
 // root is the caller's repository root; it may be the main worktree or any
 // linked worktree. The pool always resolves against the primary root, so a call
 // from a linked worktree never nests a per-worktree pool.
-func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, targetBranch, poolConfigValue string) (worktreeAcquireResult, error) {
+func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, targetBranch string, sparsePaths []string, poolConfigValue string) (worktreeAcquireResult, error) {
 	var res worktreeAcquireResult
 	base = strings.TrimSpace(base)
 	targetBranch = strings.TrimSpace(targetBranch)
-	if base == "" || targetBranch == "" {
-		return res, fmt.Errorf("worktree provisioning requires base and target_branch")
+	if base == "" {
+		return res, fmt.Errorf("worktree provisioning requires base")
 	}
+	// A sparse request materializes only the requested cone directories; an
+	// empty list is a full checkout, keeping the parallel route's calls
+	// byte-for-byte unchanged.
+	wantSparse := len(sparsePaths) > 0
+	res.Sparse = wantSparse
 
 	entries, err := listWorktrees(ctx, runner, root)
 	if err != nil {
@@ -248,10 +262,17 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 
 	// Reuse eligibility (conservative golden rule): under the owned pool prefix,
 	// at detached HEAD, and clean. A branch-checked-out or dirty worktree is
-	// skipped so no in-progress work is stomped.
+	// skipped so no in-progress work is stomped. The sparse shape must also
+	// match the request: a sparse candidate serves only a sparse request and a
+	// full candidate only a full request, so a reuse never hands back the wrong
+	// materialization (and a sparse reuse always re-applies the pattern set
+	// below, so a stale prior pattern never survives).
 	var claim string
 	for _, e := range entries {
 		if e.Path == mainRoot || !pathUnder(poolRoot, e.Path) || !e.Detached {
+			continue
+		}
+		if wsdoc.SparseCheckoutActive(e.Path) != wantSparse {
 			continue
 		}
 		status, err := wtRun(ctx, runner, e.Path, "status", "--porcelain")
@@ -272,26 +293,55 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 			return res, err
 		}
 		wtPath = filepath.Join(poolRoot, stem)
-		if _, err := wtRun(ctx, runner, root, "worktree", "add", "--detach", wtPath, base); err != nil {
+		// A sparse worktree is created without a checkout so the cone patterns
+		// below decide what materializes; the branch step then populates only
+		// the cone (git switch honors the sparse patterns).
+		addArgs := []string{"worktree", "add", "--detach"}
+		if wantSparse {
+			addArgs = append(addArgs, "--no-checkout")
+		}
+		addArgs = append(addArgs, wtPath, base)
+		if _, err := wtRun(ctx, runner, root, addArgs...); err != nil {
 			return res, err
 		}
 	}
 
-	// Create the branch on base if absent, else check the existing branch out —
-	// never reset an existing branch to base, which would drop its commits.
-	// `switch` (not `checkout`) is the branch-only verb, so a branch name that
-	// happens to collide with a path is never misread as a pathspec.
-	branchExists := false
-	if _, err := wtRun(ctx, runner, wtPath, "show-ref", "--verify", "--quiet", "refs/heads/"+targetBranch); err == nil {
-		branchExists = true
-	}
-	if branchExists {
-		if _, err := wtRun(ctx, runner, wtPath, "switch", "--no-guess", "--", targetBranch); err != nil {
+	// Apply the requested cone pattern set every time — new or reused — before
+	// the branch step, so a reused sparse worktree never keeps a prior request's
+	// pattern set and a fresh --no-checkout worktree gets its cone before the
+	// switch populates it.
+	if wantSparse {
+		if _, err := wtRun(ctx, runner, wtPath, append([]string{"sparse-checkout", "set", "--cone"}, sparsePaths...)...); err != nil {
 			return res, err
 		}
-	} else {
-		if _, err := wtRun(ctx, runner, wtPath, "switch", "-c", targetBranch, base); err != nil {
-			return res, err
+	}
+
+	// Branch step. With target_branch omitted, check base out directly so the
+	// lead's commits land on base with no extra branch and no merge step; Git's
+	// one-checkout-per-branch rule is the safety net (base is free exactly while
+	// a worker holds impl/* in the root). Otherwise create the branch on base if
+	// absent, else check the existing branch out — never reset an existing
+	// branch to base, which would drop its commits. `switch` (not `checkout`) is
+	// the branch-only verb, so a branch name that collides with a path is never
+	// misread as a pathspec.
+	switch {
+	case targetBranch == "":
+		if _, err := wtRun(ctx, runner, wtPath, "switch", "--no-guess", "--", base); err != nil {
+			return res, fmt.Errorf("worktree.acquire: check out base %q: %v; the actual checkout is held elsewhere — release the worktree holding it first, or pass target_branch", base, err)
+		}
+	default:
+		branchExists := false
+		if _, err := wtRun(ctx, runner, wtPath, "show-ref", "--verify", "--quiet", "refs/heads/"+targetBranch); err == nil {
+			branchExists = true
+		}
+		if branchExists {
+			if _, err := wtRun(ctx, runner, wtPath, "switch", "--no-guess", "--", targetBranch); err != nil {
+				return res, err
+			}
+		} else {
+			if _, err := wtRun(ctx, runner, wtPath, "switch", "-c", targetBranch, base); err != nil {
+				return res, err
+			}
 		}
 	}
 

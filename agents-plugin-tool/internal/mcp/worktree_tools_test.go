@@ -132,7 +132,7 @@ func TestPathUnder(t *testing.T) {
 
 func TestProvisionWorktreeCreateNew(t *testing.T) {
 	root, base := worktreeFixture(t)
-	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", "")
+	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", nil, "")
 	if err != nil {
 		t.Fatalf("provision: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestProvisionWorktreeCreateNew(t *testing.T) {
 	if data, err := os.ReadFile(excl); err == nil && strings.Contains(string(data), ".ws-worktrees") {
 		t.Fatalf("out-of-tree default pool wrongly registered in exclude:\n%s", data)
 	}
-	if _, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", ""); err != nil {
+	if _, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", nil, ""); err != nil {
 		t.Fatalf("second provision: %v", err)
 	}
 }
@@ -169,7 +169,7 @@ func TestProvisionWorktreeCreateNew(t *testing.T) {
 // out-of-tree.
 func TestProvisionWorktreeInTreeOverrideRegistersExclude(t *testing.T) {
 	root, base := worktreeFixture(t)
-	if _, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", legacyInTreePoolTemplate); err != nil {
+	if _, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", nil, legacyInTreePoolTemplate); err != nil {
 		t.Fatalf("provision: %v", err)
 	}
 	excl := filepath.Join(root, ".git", "info", "exclude")
@@ -177,7 +177,7 @@ func TestProvisionWorktreeInTreeOverrideRegistersExclude(t *testing.T) {
 	if err != nil || !strings.Contains(string(data), "/.ws-worktrees/") {
 		t.Fatalf("pool not registered in .git/info/exclude: %v\n%s", err, data)
 	}
-	if _, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", legacyInTreePoolTemplate); err != nil {
+	if _, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", nil, legacyInTreePoolTemplate); err != nil {
 		t.Fatalf("second provision: %v", err)
 	}
 	data2, _ := os.ReadFile(excl)
@@ -188,14 +188,14 @@ func TestProvisionWorktreeInTreeOverrideRegistersExclude(t *testing.T) {
 
 func TestProvisionWorktreeReuseIdle(t *testing.T) {
 	root, base := worktreeFixture(t)
-	res1, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", "")
+	res1, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", nil, "")
 	if err != nil {
 		t.Fatalf("provision 1: %v", err)
 	}
 	if err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, res1.Path, ""); err != nil {
 		t.Fatalf("release: %v", err)
 	}
-	res2, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", "")
+	res2, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", nil, "")
 	if err != nil {
 		t.Fatalf("provision 2: %v", err)
 	}
@@ -214,11 +214,11 @@ func TestProvisionWorktreeSkipBranchCheckedOut(t *testing.T) {
 	root, base := worktreeFixture(t)
 	// res1 stays checked out on a branch (not released → not detached), so it is
 	// not reuse-eligible; the next acquire must create a distinct worktree.
-	res1, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", "")
+	res1, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", nil, "")
 	if err != nil {
 		t.Fatalf("provision 1: %v", err)
 	}
-	res2, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", "")
+	res2, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", nil, "")
 	if err != nil {
 		t.Fatalf("provision 2: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestProvisionWorktreeSkipBranchCheckedOut(t *testing.T) {
 
 func TestProvisionWorktreeSkipDirty(t *testing.T) {
 	root, base := worktreeFixture(t)
-	res1, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", "")
+	res1, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", nil, "")
 	if err != nil {
 		t.Fatalf("provision 1: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestProvisionWorktreeSkipDirty(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(res1.Path, "cruft.txt"), []byte("x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	res2, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", "")
+	res2, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", nil, "")
 	if err != nil {
 		t.Fatalf("provision 2: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestProvisionWorktreeSkipDirty(t *testing.T) {
 func TestProvisionWorktreeHygieneResetToBase(t *testing.T) {
 	root, base := worktreeFixture(t)
 	// Prior run commits a file on alpha, then releases the worktree.
-	res1, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", "")
+	res1, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", nil, "")
 	if err != nil {
 		t.Fatalf("provision 1: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestProvisionWorktreeHygieneResetToBase(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Reuse for a fresh branch on base: the prior branch's content must not leak.
-	res2, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", "")
+	res2, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", nil, "")
 	if err != nil {
 		t.Fatalf("provision 2: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestProvisionWorktreeHygieneResetToBase(t *testing.T) {
 
 func TestReleaseWorktreeDetaches(t *testing.T) {
 	root, base := worktreeFixture(t)
-	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", "")
+	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", nil, "")
 	if err != nil {
 		t.Fatalf("provision: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestProvisionWorktreePoolResolvesFromLinkedWorktree(t *testing.T) {
 	linked := filepath.Join(t.TempDir(), "linked")
 	runGit(t, root, "worktree", "add", "--detach", linked, base)
 
-	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, linked, base, "impl/test/gamma", "")
+	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, linked, base, "impl/test/gamma", nil, "")
 	if err != nil {
 		t.Fatalf("provision from linked worktree: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestProvisionWorktreePoolResolvesFromLinkedWorktree(t *testing.T) {
 func TestProvisionWorktreeAbsolutePoolOverride(t *testing.T) {
 	root, base := worktreeFixture(t)
 	pool := filepath.Join(t.TempDir(), "shared-pool")
-	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", pool)
+	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", nil, pool)
 	if err != nil {
 		t.Fatalf("provision: %v", err)
 	}
@@ -425,7 +425,7 @@ func TestProvisionWorktreeDefaultFallsBackWhenParentUnwritable(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
 
-			res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", poolConfigValue)
+			res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", nil, poolConfigValue)
 			if err != nil {
 				t.Fatalf("provisioning must fall back, not hard-fail, on an unwritable sibling parent: %v", err)
 			}
@@ -545,13 +545,8 @@ func TestWorktreeAcquireRejectsNonLeadAndBadArgs(t *testing.T) {
 	}); !jsonrpcHasError(t, got) {
 		t.Fatalf("non-lead acquire not rejected: %s", got)
 	}
-	// Missing target_branch is a structured error.
-	if got := callToolOnce(t, s, 2, "worktree.acquire", map[string]any{
-		"session_key": leadKey, "base": base,
-	}); !toolIsError(t, got) {
-		t.Fatalf("missing target_branch not rejected: %s", got)
-	}
-	// Missing base is a structured error (the other half of the guard).
+	// Missing base is a structured error. target_branch is no longer required
+	// (omitting it checks base out directly), so only base is guarded here.
 	if got := callToolOnce(t, s, 3, "worktree.acquire", map[string]any{
 		"session_key": leadKey, "target_branch": "impl/test/alpha",
 	}); !toolIsError(t, got) {
@@ -560,5 +555,201 @@ func TestWorktreeAcquireRejectsNonLeadAndBadArgs(t *testing.T) {
 	// Release with neither path nor key is an error.
 	if got := callToolOnce(t, s, 4, "worktree.release", map[string]any{"session_key": leadKey}); !toolIsError(t, got) {
 		t.Fatalf("release without path/key not rejected: %s", got)
+	}
+}
+
+// sparseWorktreeFixture builds a repo with ai-docs/ and src/ subtrees on a
+// `develop` branch and leaves the primary worktree on an impl/develop/foo
+// branch, so `develop` is free for a direct-base checkout — the occupied-root
+// scenario the sparse housekeeping worktree serves.
+func sparseWorktreeFixture(t *testing.T) string {
+	t.Helper()
+	root := canonicalRootForTest(t, initGitRepo(t))
+	write := func(rel, body string) {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("ai-docs/x.md", "x\n")
+	write("src/y.go", "package y\n")
+	runGit(t, root, "add", ".")
+	runGit(t, root, "commit", "-m", "base")
+	runGit(t, root, "branch", "develop")
+	runGit(t, root, "switch", "-c", "impl/develop/foo")
+	return root
+}
+
+func TestProvisionWorktreeSparsePaths(t *testing.T) {
+	root := sparseWorktreeFixture(t)
+	// target_branch omitted: base (develop) is checked out directly, materializing
+	// only the ai-docs cone.
+	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, "develop", "", []string{"ai-docs"}, "")
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	if !res.Sparse {
+		t.Fatal("sparse request must report sparse: true")
+	}
+	if _, err := os.Stat(filepath.Join(res.Path, "ai-docs", "x.md")); err != nil {
+		t.Fatalf("cone dir ai-docs/x.md must be materialized: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(res.Path, "src", "y.go")); !os.IsNotExist(err) {
+		t.Fatalf("out-of-cone src/y.go must not be materialized (stat err=%v)", err)
+	}
+	list := strings.TrimSpace(string(runGitOutput(t, res.Path, "sparse-checkout", "list")))
+	if list != "ai-docs" {
+		t.Fatalf("sparse-checkout list = %q, want ai-docs", list)
+	}
+}
+
+func TestProvisionWorktreeSparseReuseMatchesShape(t *testing.T) {
+	root := sparseWorktreeFixture(t)
+	ctx := context.Background()
+	runner := wsgit.ExecRunner{}
+
+	// A released sparse worktree is reused by a sparse request (and the pattern
+	// set is re-applied).
+	sparse1, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/a", []string{"ai-docs"}, "")
+	if err != nil {
+		t.Fatalf("provision sparse 1: %v", err)
+	}
+	if err := releaseWorktree(ctx, runner, sparse1.Path, ""); err != nil {
+		t.Fatalf("release sparse 1: %v", err)
+	}
+	sparse2, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/b", []string{"ai-docs"}, "")
+	if err != nil {
+		t.Fatalf("provision sparse 2: %v", err)
+	}
+	if !sparse2.Reused || sparse2.Path != sparse1.Path {
+		t.Fatalf("sparse request must reuse the released sparse worktree: reused=%v path=%q want %q", sparse2.Reused, sparse2.Path, sparse1.Path)
+	}
+	if !sparse2.Sparse {
+		t.Fatal("sparse reuse must report sparse: true")
+	}
+	if _, err := os.Stat(filepath.Join(sparse2.Path, "src", "y.go")); !os.IsNotExist(err) {
+		t.Fatalf("reused sparse worktree must re-apply the cone (src out of cone), stat err=%v", err)
+	}
+
+	// A full request skips the sparse candidate and creates a new full worktree.
+	if err := releaseWorktree(ctx, runner, sparse2.Path, ""); err != nil {
+		t.Fatalf("release sparse 2: %v", err)
+	}
+	full, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/c", nil, "")
+	if err != nil {
+		t.Fatalf("provision full: %v", err)
+	}
+	if full.Reused || full.Path == sparse2.Path {
+		t.Fatalf("full request must not reuse a sparse worktree: reused=%v path=%q", full.Reused, full.Path)
+	}
+	if full.Sparse {
+		t.Fatal("full request must report sparse: false")
+	}
+	if _, err := os.Stat(filepath.Join(full.Path, "src", "y.go")); err != nil {
+		t.Fatalf("full worktree must materialize the whole tree: %v", err)
+	}
+
+	// Symmetrically, a released full worktree is skipped by a sparse request.
+	if err := releaseWorktree(ctx, runner, full.Path, ""); err != nil {
+		t.Fatalf("release full: %v", err)
+	}
+	sparse3, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/d", []string{"ai-docs"}, "")
+	if err != nil {
+		t.Fatalf("provision sparse 3: %v", err)
+	}
+	if sparse3.Reused && sparse3.Path == full.Path {
+		t.Fatalf("sparse request must not reuse a full worktree: path=%q", sparse3.Path)
+	}
+}
+
+func TestProvisionWorktreeBaseDirectCheckout(t *testing.T) {
+	root := sparseWorktreeFixture(t)
+	ctx := context.Background()
+	runner := wsgit.ExecRunner{}
+	before := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "refs/heads/develop")))
+
+	res, err := provisionWorktree(ctx, runner, root, "develop", "", nil, "")
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	head := strings.TrimSpace(string(runGitOutput(t, res.Path, "symbolic-ref", "--short", "HEAD")))
+	if head != "develop" {
+		t.Fatalf("direct-base checkout HEAD = %q, want develop", head)
+	}
+	// A commit made in the worktree advances base (develop) itself.
+	if err := os.WriteFile(filepath.Join(res.Path, "src", "z.go"), []byte("package y\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, res.Path, "add", "src/z.go")
+	runGit(t, res.Path, "commit", "-m", "advance develop")
+	after := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "refs/heads/develop")))
+	if after == before {
+		t.Fatalf("commit in the direct-base worktree did not advance develop (%s)", after)
+	}
+}
+
+func TestProvisionWorktreeBaseDirectCheckoutRefusesHeldBranch(t *testing.T) {
+	root := sparseWorktreeFixture(t)
+	// impl/develop/foo is checked out in the primary worktree, so a direct-base
+	// checkout of it must fail loudly rather than steal or duplicate the branch.
+	_, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, "impl/develop/foo", "", nil, "")
+	if err == nil {
+		t.Fatal("direct-base checkout of a branch held in another worktree must be refused")
+	}
+	if !strings.Contains(err.Error(), "check out base") {
+		t.Fatalf("error must name the check-out-base failure: %v", err)
+	}
+}
+
+// TestWorktreeAcquireSparseDispatch exercises the sparse shape through the real
+// dispatch path: acquire returns sparse: true, the out-of-cone tree is absent,
+// and git.commit through the returned worker key lands a file under ai-docs/ on
+// the directly-checked-out base branch.
+func TestWorktreeAcquireSparseDispatch(t *testing.T) {
+	root := sparseWorktreeFixture(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	s := NewServer(root, "test")
+	leadKey, err := s.sessions.mint(canonicalRootForTest(t, root), roleLead, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := callToolOnce(t, s, 1, "worktree.acquire", map[string]any{
+		"session_key": leadKey, "base": "develop", "sparse_paths": []string{"ai-docs"}, "format": "json",
+	})
+	var acq worktreeAcquireResult
+	if err := json.Unmarshal([]byte(toolText(t, resp)), &acq); err != nil {
+		t.Fatalf("unmarshal acquire: %v\n%s", err, resp)
+	}
+	if !acq.Sparse {
+		t.Fatalf("acquire did not report sparse: %+v", acq)
+	}
+	if head := strings.TrimSpace(string(runGitOutput(t, acq.Path, "symbolic-ref", "--short", "HEAD"))); head != "develop" {
+		t.Fatalf("sparse acquire HEAD = %q, want develop", head)
+	}
+	if _, err := os.Stat(filepath.Join(acq.Path, "src", "y.go")); !os.IsNotExist(err) {
+		t.Fatalf("out-of-cone src/y.go must be absent in the sparse worktree (stat err=%v)", err)
+	}
+	// git.commit through the worker key lands a file under the cone on develop.
+	if err := os.WriteFile(filepath.Join(acq.Path, "ai-docs", "note.md"), []byte("note\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commit := callToolOnce(t, s, 2, "git.commit", map[string]any{
+		"session_key":     acq.WorkerKey,
+		"paths":           []string{"ai-docs/note.md"},
+		"title":           "docs: sparse housekeeping note",
+		"ai_context":      []string{"exercise sparse-worktree commit"},
+		"expected_branch": "develop",
+	})
+	if toolIsError(t, commit) {
+		t.Fatalf("git.commit through the sparse worker key failed: %s", commit)
+	}
+	if head := strings.TrimSpace(string(runGitOutput(t, acq.Path, "symbolic-ref", "--short", "HEAD"))); head != "develop" {
+		t.Fatalf("post-commit HEAD = %q, want develop", head)
+	}
+	if subject := strings.TrimSpace(string(runGitOutput(t, root, "log", "-1", "--format=%s", "develop"))); subject != "docs: sparse housekeeping note" {
+		t.Fatalf("develop tip subject = %q, want the sparse commit", subject)
 	}
 }

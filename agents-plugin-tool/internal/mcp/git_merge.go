@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -72,7 +73,7 @@ func (r implMergeResult) text() string {
 	return text
 }
 
-func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, branch, target string, message wsgit.CommitOptions, acknowledgement implMergeAcknowledgement) (implMergeResult, error) {
+func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, branch, target string, message wsgit.CommitOptions, acknowledgement implMergeAcknowledgement, poolRoot string) (implMergeResult, error) {
 	result := implMergeResult{}
 	run := func(args ...string) (string, error) {
 		out, err := runner.RunGit(ctx, root, args...)
@@ -203,6 +204,41 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 		}
 	}
 	checkWorktree()
+	// A target branch checked out in another worktree cannot be switched to
+	// here: git's one-checkout-per-branch rule refuses it, and the switch_failed
+	// diagnostic below would misattribute that to an overlapping working-tree
+	// change. Detect it up front, before the pre-switch checkTips(), and refuse
+	// as a merge stop naming the holding worktree — never remove, switch, or
+	// force it. This runs once here and not inside checkWorktree, whose
+	// post-switch pass could only ever match the session root itself.
+	checkTargetHeld := func() {
+		entries, err := listWorktrees(ctx, runner, root)
+		if err != nil {
+			gitFailure("worktree_inspection", "Cannot list worktrees", "", err, "worktree", "list", "--porcelain")
+			return
+		}
+		sessionRoot, cerr := canonicalGitRoot(root)
+		if cerr != nil {
+			sessionRoot = filepath.Clean(root)
+		}
+		for _, e := range entries {
+			if e.Branch != "refs/heads/"+mergeRoot || filepath.Clean(e.Path) == sessionRoot {
+				continue
+			}
+			kind := "another worktree"
+			resolution := fmt.Sprintf("Do not remove, switch, or force that worktree. Treat this as a merge stop: report that %q is held elsewhere, end the turn with the branch retained, and retry git.merge unchanged once the holder has released it (worktree.release for a pool worktree).", mergeRoot)
+			switch {
+			case e.Prunable:
+				kind = "a stale worktree record whose directory is gone"
+				resolution = "The holder cannot release a branch it no longer has. Run `git worktree prune` in the repository, then retry git.merge unchanged."
+			case poolRoot != "" && pathUnder(poolRoot, e.Path):
+				kind = "a ws pool worktree: a parallel lead's housekeeping checkout (worktree.acquire with sparse_paths)"
+			}
+			add("target_held_elsewhere", fmt.Sprintf("Target %q is checked out at %s, %s. Nothing was merged; %q is retained and HEAD is unchanged.", mergeRoot, e.Path, kind, branch), resolution)
+			return
+		}
+	}
+	checkTargetHeld()
 	if acknowledgement.ReleaseTargetOverride {
 		if !validMergeOID(acknowledgement.ExpectedSourceOID) || !validMergeOID(acknowledgement.ExpectedTargetOID) {
 			add("expected_oids_required", "An override requires both full inspected commit OIDs", "Retry with expected_source_oid and expected_target_oid from the inspected refusal.")

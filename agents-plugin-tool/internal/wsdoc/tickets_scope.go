@@ -118,6 +118,28 @@ func sparseCheckoutDisabledInConfigFiles(gitDir string) bool {
 	return sawFalse
 }
 
+// sparseCheckoutConeActive reports whether cone-mode sparse-checkout is on for
+// this worktree, reading core.sparseCheckoutCone from the same config files
+// newTicketScope consults, config.worktree first so a linked worktree's
+// per-worktree value wins (git writes sparseCheckoutCone into config.worktree
+// for both `sparse-checkout set --cone` (true) and `--no-cone` (false),
+// measured git 2.50). A cone-mode worktree is a housekeeping/development
+// checkout, never a ticket-board scope (whose file-level patterns require
+// --no-cone), so core.sparseCheckoutCone == true means "not a ticket scope" by
+// construction. A missing value reports false, matching git's own default.
+func sparseCheckoutConeActive(gitDir string) bool {
+	for _, path := range gitConfigFiles(gitDir) {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if value, found := coreBoolFromGitConfig(string(raw), "sparsecheckoutcone"); found {
+			return value
+		}
+	}
+	return false
+}
+
 // gitConfigFiles lists the on-disk config files that can carry
 // core.sparseCheckout for this worktree, in no particular precedence order —
 // sparseCheckoutDisabledInConfigFiles requires agreement rather than ranking
@@ -414,6 +436,13 @@ type TicketScopeInfo struct {
 	Active      bool     `json:"active"`
 	Hidden      int      `json:"hidden"`
 	HiddenStems []string `json:"hidden_stems,omitempty"`
+	// Cone reports whether this worktree's sparse-checkout is in cone mode
+	// (core.sparseCheckoutCone). A cone-mode worktree is a housekeeping or
+	// development checkout (directory-level patterns), never a ticket-board
+	// scope, which is file-level and requires --no-cone. Consumers use it to
+	// suppress the ticket-scope advisory, whose "restore with git
+	// sparse-checkout disable" remedy would be false in a cone worktree.
+	Cone bool `json:"cone,omitempty"`
 }
 
 // SparseCheckoutActive reports whether a sparse-checkout scope is active for
@@ -444,7 +473,7 @@ func TicketScope(root string, statuses []string) (TicketScopeInfo, error) {
 	if err != nil {
 		return TicketScopeInfo{}, err
 	}
-	info := TicketScopeInfo{Active: true}
+	info := TicketScopeInfo{Active: true, Cone: sparseCheckoutConeActive(scope.gitDir)}
 	for _, rel := range paths {
 		status, stem, ok := ticketIndexPathParts(rel)
 		if !ok || !wanted[status] {

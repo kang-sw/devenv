@@ -508,7 +508,18 @@ func (c Client) Commit(ctx context.Context, root string, opts CommitOptions) (Co
 		return CommitResult{}, fmt.Errorf("git.commit refused: HEAD is detached, so there is no current branch to confirm against believed branch %q; a commit under a detached HEAD in a shared worktree is exactly the state this guard exists to stop — verify whether you should be committing here", opts.ExpectedBranch)
 	}
 	if actualBranch != opts.ExpectedBranch {
-		return CommitResult{}, fmt.Errorf("git.commit refused: believed branch %q does not match the actual checkout %q (a parallel session may have switched this worktree); verify whether you should be committing here before retrying (believed: %s / actual: %s)", opts.ExpectedBranch, actualBranch, opts.ExpectedBranch, actualBranch)
+		refusal := fmt.Sprintf("git.commit refused: believed branch %q does not match the actual checkout %q (a parallel session may have switched this worktree); verify whether you should be committing here before retrying (believed: %s / actual: %s)", opts.ExpectedBranch, actualBranch, opts.ExpectedBranch, actualBranch)
+		// When the actual checkout is a worker's impl/ branch, name the sanctioned
+		// escape hatch so the reader does not reflexively `git switch` this shared
+		// worktree onto their own branch.
+		if strings.HasPrefix(actualBranch, "impl/") {
+			base := "<the branch this worker was spawned from>"
+			if parent := implBranchParent(actualBranch); parent != "" {
+				base = fmt.Sprintf("%q", parent)
+			}
+			refusal += fmt.Sprintf("; the actual checkout is a worker's impl/ branch — housekeeping meanwhile goes through worktree.acquire(base: %s, sparse_paths: [\"ai-docs\"]) and its returned key, not this root", base)
+		}
+		return CommitResult{}, fmt.Errorf("%s", refusal)
 	}
 	preStatusOut, err := runner.RunGit(ctx, root, StatusArgs()...)
 	if err != nil {
@@ -578,6 +589,24 @@ func currentBranch(ctx context.Context, runner Runner, root string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// implBranchParent returns the parent (merge root) segment of an
+// "impl/<parent>/<stem>" branch, or "" for a rootless "impl/<stem>" or a
+// non-impl branch. It is the wsgit-local twin of internal/mcp's
+// parseImplBranchRoot: wsgit must not import internal/mcp (the dependency runs
+// mcp -> wsgit), so the tiny last-slash split is duplicated rather than shared.
+func implBranchParent(branch string) string {
+	const prefix = "impl/"
+	if !strings.HasPrefix(branch, prefix) {
+		return ""
+	}
+	rest := strings.TrimPrefix(branch, prefix)
+	idx := strings.LastIndex(rest, "/")
+	if idx <= 0 {
+		return ""
+	}
+	return rest[:idx]
 }
 
 func normalizeCommitOptions(opts CommitOptions) (CommitOptions, error) {

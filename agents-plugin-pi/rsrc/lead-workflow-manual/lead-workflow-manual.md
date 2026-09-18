@@ -100,6 +100,17 @@ including impl-to-parent, goal-to-parent, and epic-to-review-track promotion.
 Apply the goal approval gate and the project's release gate at their respective
 boundaries.
 
+A root whose `HEAD` is on an `impl/*` branch is a worker's until the lead
+restores it (the occupied-root banner names the parent branch): a commit or
+ticket move there lands on the worker's branch. Housekeeping meanwhile goes
+through `{{.McpNamespace}}/worktree.acquire(base: <parent branch>,
+sparse_paths: ["ai-docs"])`, which checks the parent branch out in a sparse
+pooled worktree and returns the key to commit with there; release it with
+`{{.McpNamespace}}/worktree.release(key: <that key>)` before anything checks
+the parent branch out elsewhere, because Git holds one checkout per branch:
+a `{{.McpNamespace}}/git.merge` into a branch still held that way is
+refused, not stolen.
+
 ### API documentation
 
 Use `{{.McpNamespace}}/api.list` to inspect local API documentation cache domains.

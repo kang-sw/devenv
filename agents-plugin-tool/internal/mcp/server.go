@@ -1094,9 +1094,22 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		expectedTarget, _ := params.Arguments["expected_target_oid"].(string)
 		title, _ := params.Arguments["title"].(string)
 		description, _ := params.Arguments["description"].(string)
+		// Resolve the worktree pool root the same way worktree.acquire does, so a
+		// held-target refusal can name a parallel lead's housekeeping checkout as
+		// such. Any failure passes "" (unknown pool) rather than failing the merge.
+		mergePoolRoot := ""
+		if mergeKey, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(mergeKey) != "" {
+			adapter := sessionConfigAdapter{s: s.sessions}
+			resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+			if poolRV, poolErr := resolver.Get(mergeKey, wsconfig.ItemWorktreePool); poolErr == nil {
+				if entries, lerr := listWorktrees(context.Background(), wsgit.ExecRunner{}, root); lerr == nil && len(entries) > 0 {
+					mergePoolRoot = resolvePoolRoot(poolRV.Value, entries[0].Path)
+				}
+			}
+		}
 		result, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, target, wsgit.CommitOptions{
 			Title: title, Description: description, AIContext: stringList(params.Arguments["ai_context"]), UpdatedTickets: stringList(params.Arguments["updated_tickets"]),
-		}, implMergeAcknowledgement{ReleaseTargetOverride: releaseOverride, ExpectedSourceOID: expectedSource, ExpectedTargetOID: expectedTarget})
+		}, implMergeAcknowledgement{ReleaseTargetOverride: releaseOverride, ExpectedSourceOID: expectedSource, ExpectedTargetOID: expectedTarget}, mergePoolRoot)
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
 		}
@@ -1109,13 +1122,14 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		entry, _ := s.sessions.lookup(key) // requireLeadSessionKey verified it exists and is lead
 		base, _ := params.Arguments["base"].(string)
 		targetBranch, _ := params.Arguments["target_branch"].(string)
-		if strings.TrimSpace(base) == "" || strings.TrimSpace(targetBranch) == "" {
-			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: base and target_branch are required"))
+		if strings.TrimSpace(base) == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: base is required"))
 		}
+		sparsePaths := stringList(params.Arguments["sparse_paths"])
 		adapter := sessionConfigAdapter{s: s.sessions}
 		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
 		poolRV, _ := resolver.Get(key, wsconfig.ItemWorktreePool)
-		result, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, entry.root, base, targetBranch, poolRV.Value)
+		result, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, entry.root, base, targetBranch, sparsePaths, poolRV.Value)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -3735,15 +3749,16 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "worktree.acquire",
-			"description": fmt.Sprintf("Lead-only. Provision an isolated Git worktree from a recycled pool for a parallel worker: reuse an eligible idle pooled worktree or create one, create target_branch on base if it does not exist and check it out, hygiene-reset the tree, sync submodules, and mint a worktree-bound worker session key. Returns the worktree path and worker_key. The pool location is the worktree_pool config knob (default %s). Defaults to text; use format=json for structured output.", defaultWorktreePoolTemplate),
+			"description": fmt.Sprintf("Lead-only. Provision an isolated Git worktree from a recycled pool for a parallel worker: reuse an eligible idle pooled worktree or create one, create target_branch on base if it does not exist and check it out, hygiene-reset the tree, sync submodules, and mint a worktree-bound worker session key. Returns the worktree path and worker_key. The pool location is the worktree_pool config knob (default %s). With sparse_paths the worktree is created without a checkout and materializes only those cone directories — the lead's housekeeping worktree while a worker occupies the root. Defaults to text; use format=json for structured output.", defaultWorktreePoolTemplate),
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"base":          stringProperty("Base commit-ish the worktree branch is created on, e.g. the goal branch."),
-					"target_branch": stringProperty("Branch to create (when absent) and check out in the worktree, e.g. impl/<parent>/<slug>."),
+					"target_branch": stringProperty("Branch to create (when absent) and check out in the worktree, e.g. impl/<parent>/<slug>. Omit to check out base itself; base must then be a local branch not checked out in another worktree."),
+					"sparse_paths":  stringArrayProperty(`Optional cone-mode sparse-checkout directories, e.g. ["ai-docs"]. Omitted: full checkout. A pooled worktree is reused only when its sparse state matches.`),
 					"format":        stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
-				"required": []string{"base", "target_branch"},
+				"required": []string{"base"},
 			},
 		},
 		{
