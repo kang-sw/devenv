@@ -27,10 +27,23 @@
  * real edges are `createSubprocessWait` / `createBridgeDrain`.
  *
  * Adapter-only, best-effort: this never alters the host-neutral mailbox
- * `Envelope` or contract. Phase 1 arms the wait on the always-available
- * reply-id channel only (`--session-key`, no `--slug`); recv still drains any
- * owned named inbox too, so its mail is pushed opportunistically whenever a
- * reply-id wake fires.
+ * `Envelope` or contract. Phase 1 armed the wait on the always-available
+ * reply-id channel only (`--session-key`, no `--slug`); recv still drained
+ * any owned named inbox too, so its mail was pushed opportunistically
+ * whenever a reply-id wake fired.
+ *
+ * 260917 Phase 1 widens the wake signal: at arm time the caller resolves its
+ * own registered named-inbox address via `mailbox.lookup_peers`'s
+ * `self.address` (through the same `MailboxToolCall` seam `drainMail` already
+ * uses — see `resolveMailboxSelfSlug`) and, when one resolves, passes it as
+ * `--slug` so the block-until-mail signal also covers the owned named inbox.
+ * `lookup_peers`, not `process.env.WS_MAILBOX`/`WS_MAILBOX_AUTO`, is the
+ * source: a fresh CLI process re-deriving `WS_MAILBOX_AUTO` would mint a
+ * different random stem than the already-registered server process (see
+ * `wait.go`'s `WaitTarget.Slug` doc comment), so only the bridge's own
+ * `lookup_peers` answer is a reliable identity here. No self slug (or a
+ * `lookup_peers` transport failure) keeps today's reply-id-only arm exactly
+ * as before — additive-only, never a regression.
  */
 
 import { spawn } from "node:child_process";
@@ -216,6 +229,13 @@ export interface SubprocessWaitOptions {
   pluginDir: string;
   /** This session's own session key — the required `--session-key`; gives the reply-id queue to watch. */
   sessionKey: string;
+  /**
+   * Optional owned named-inbox address (`"name@scope"`), resolved once at arm
+   * time via `resolveMailboxSelfSlug`. When set, passed through as `--slug` so
+   * the wait also covers the named inbox; omit (or leave `undefined`) for
+   * today's reply-id-only wait.
+   */
+  slug?: string;
   /** `--timeout` value; a finite window self-heals a wedged wait and bounds the listening marker. */
   timeoutArg?: string;
   /** Diagnostic sink for the child's stderr and spawn failures. */
@@ -225,13 +245,27 @@ export interface SubprocessWaitOptions {
 const DEFAULT_WAIT_TIMEOUT_ARG = "10m";
 
 /**
+ * Pure argv builder for the `mailbox wait` subprocess, factored out of
+ * `createSubprocessWait` so the slug-arm/no-slug shapes are unit-testable
+ * without spawning a real process (mirrors `mapMailboxWaitExit`'s split on the
+ * exit side). `--slug` is appended last and only when `options.slug` is a
+ * non-empty string, so the no-slug invocation stays byte-identical to Phase 1.
+ */
+export function buildMailboxWaitArgv(options: SubprocessWaitOptions): string[] {
+  const timeoutArg = options.timeoutArg ?? DEFAULT_WAIT_TIMEOUT_ARG;
+  const argv = [options.launcherPath, "mailbox", "wait", "--session-key", options.sessionKey, "--timeout", timeoutArg, "--format", "json"];
+  const slug = options.slug?.trim();
+  if (slug) argv.push("--slug", slug);
+  return argv;
+}
+
+/**
  * The real `runWait`: spawn `python3 <launcher> mailbox wait ...` (the launcher
  * forwards the subcommand verbatim to the resolved `ws-mcp` binary) and map its
  * exit code to an outcome. Its stdout — the peeked mail — is intentionally
  * ignored (`stdio` drops it): the drain, not the peek, is the source of truth.
  */
 export function createSubprocessWait(options: SubprocessWaitOptions): (signal: AbortSignal) => Promise<MailboxWaitOutcome> {
-  const timeoutArg = options.timeoutArg ?? DEFAULT_WAIT_TIMEOUT_ARG;
   const stderr = options.onStderr ?? ((line: string) => console.error(`[ws-mailbox] ${line}`));
   return (signal) =>
     new Promise<MailboxWaitOutcome>((resolve) => {
@@ -239,11 +273,7 @@ export function createSubprocessWait(options: SubprocessWaitOptions): (signal: A
         resolve("stopped");
         return;
       }
-      const child = spawn(
-        "python3",
-        [options.launcherPath, "mailbox", "wait", "--session-key", options.sessionKey, "--timeout", timeoutArg, "--format", "json"],
-        { cwd: options.pluginDir, stdio: ["ignore", "ignore", "pipe"] },
-      );
+      const child = spawn("python3", buildMailboxWaitArgv(options), { cwd: options.pluginDir, stdio: ["ignore", "ignore", "pipe"] });
       let settled = false;
       const finish = (outcome: MailboxWaitOutcome): void => {
         if (settled) return;
@@ -274,7 +304,7 @@ export function createSubprocessWait(options: SubprocessWaitOptions): (signal: A
     });
 }
 
-/** Minimal MCP tool-call surface the drain needs — the bridge's connected client satisfies it. */
+/** Minimal MCP tool-call surface the drain and self-slug resolution need — the bridge's connected client satisfies it. */
 export type MailboxToolCall = (
   name: string,
   args: Record<string, unknown>,
@@ -310,4 +340,45 @@ export function createBridgeDrain(callTool: MailboxToolCall, sessionKey: string)
         !!candidate && typeof candidate === "object" && typeof (candidate as { content?: unknown }).content === "string",
     );
   };
+}
+
+/**
+ * Resolve the caller's own registered named-inbox address (`"name@scope"`)
+ * for arming `mailbox wait --slug`, via `mailbox.lookup_peers`'s `self.address`
+ * field — never `process.env.WS_MAILBOX`/`WS_MAILBOX_AUTO` (see this file's
+ * top doc comment on why a freshly-spawned CLI process cannot re-derive an
+ * auto-minted stem). `scope` is a required argument on the tool but — per
+ * `mailbox.lookup_peers`'s server-side implementation — `self.address` is
+ * populated from the caller's own resolved identity regardless of which
+ * scope is queried, so any valid scope value reaches it; `"worktree"` is
+ * passed as an arbitrary fixed choice, not a claim about the session's actual
+ * scope.
+ *
+ * Best-effort by design (Decision: "an env-less session ... keep today's
+ * reply-id-only behavior"): a tool-level error, a transport failure, a
+ * malformed response, or a genuinely absent `self.address` (no owned named
+ * inbox) all resolve to `undefined` rather than throwing, so a resolution
+ * failure can never block arming — the caller falls back to exactly the
+ * reply-id-only wait it would have armed before this existed.
+ */
+export async function resolveMailboxSelfSlug(callTool: MailboxToolCall, sessionKey: string): Promise<string | undefined> {
+  try {
+    const result = await callTool("mailbox.lookup_peers", { session_key: sessionKey, scope: "worktree", format: "json" });
+    if (result.isError) return undefined;
+    const text = result.content.find((item) => item.type === "text")?.text;
+    if (!text) return undefined;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return undefined;
+    }
+    if (!parsed || typeof parsed !== "object") return undefined;
+    const self = (parsed as { self?: unknown }).self;
+    if (!self || typeof self !== "object") return undefined;
+    const address = (self as { address?: unknown }).address;
+    return typeof address === "string" && address.trim() ? address.trim() : undefined;
+  } catch {
+    return undefined;
+  }
 }

@@ -197,7 +197,7 @@ import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, typ
 import { applyForkAffinity, captureRegisteredTools, classifyForkRegistrations, compareForkRegistrations, effectiveForkDescriptor, formatForkRegistrationMismatch, frameForkInput, readForkLaunchContext, removeForkTransport, restoreForkContext, restoreForkKeys, writePrivateJson, type ForkContext } from "./fork-context.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, type SpawnRole } from "./process-role.ts";
 import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
-import { buildMailboxPushMessage, createBridgeDrain, createSubprocessWait, shouldArmMailboxWaiter, startMailboxWaiter, type MailboxWaiterHandle } from "./mailbox-waiter.ts";
+import { buildMailboxPushMessage, createBridgeDrain, createSubprocessWait, resolveMailboxSelfSlug, shouldArmMailboxWaiter, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle } from "./mailbox-waiter.ts";
 import { armForkRoleWiring, registerFork } from "./fork.ts";
 import {
   buildForkQuestionLeadNotice,
@@ -640,14 +640,24 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // drains through the bridge's connected client, admitting each envelope via
     // the shared push FIFO (`sendToLead` -> held-batch / idle-wake) exactly like
     // every other pushed system message — see mailbox-waiter.ts.
+    //
+    // 260917 Phase 1: before arming, resolve this session's own registered
+    // named-inbox address (if any) via `mailbox.lookup_peers` through the same
+    // bridge client `drainMail` uses, and pass it as `--slug` so the wait also
+    // covers the owned named inbox, not just the reply-id queue. Best-effort —
+    // `resolveMailboxSelfSlug` never throws — so a lookup failure just leaves
+    // `selfSlug` undefined and arming falls back to reply-id-only exactly as
+    // before.
     mailboxWaiterHandle?.stop();
     mailboxWaiterHandle = undefined;
     const mailboxSessionKey = handle.defaultSessionKeyRef.current;
     if (shouldArmMailboxWaiter(readSpawnRole(process.env), mailboxSessionKey)) {
       const mailboxHandle = handle;
+      const mailboxCallTool: MailboxToolCall = (name, args) => mailboxHandle.client.callTool(name, args);
+      const selfSlug = await resolveMailboxSelfSlug(mailboxCallTool, mailboxSessionKey);
       mailboxWaiterHandle = startMailboxWaiter({
-        runWait: createSubprocessWait({ launcherPath, pluginDir, sessionKey: mailboxSessionKey }),
-        drainMail: createBridgeDrain((name, args) => mailboxHandle.client.callTool(name, args), mailboxSessionKey),
+        runWait: createSubprocessWait({ launcherPath, pluginDir, sessionKey: mailboxSessionKey, slug: selfSlug }),
+        drainMail: createBridgeDrain(mailboxCallTool, mailboxSessionKey),
         admit: (envelope) => sendToLead(pi, buildMailboxPushMessage(envelope), "steer", "always"),
       });
     }
