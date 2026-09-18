@@ -920,6 +920,10 @@ func TestMailboxWaitCommandRenderVariable(t *testing.T) {
 		setupMailboxTestEnv(t)
 		root := t.TempDir()
 		initGit(t, root)
+		// Clear WS_MAILBOX so computeMailboxIdentity (which checks WS_MAILBOX
+		// first) cannot be routed down the explicit branch by an ambient value
+		// in the run environment.
+		t.Setenv(envMailbox, "")
 		t.Setenv(envMailboxAuto, "worktree")
 		s := NewServer(root, "test")
 		key := mailboxLogin(t, s, 1, root)
@@ -928,10 +932,18 @@ func TestMailboxWaitCommandRenderVariable(t *testing.T) {
 		if !identity.Active || !identity.Auto {
 			t.Fatalf("WS_MAILBOX_AUTO identity not active/auto: %#v", identity)
 		}
-		cmd := mailboxWaitCommandVar(s, key)
 		wantSlug := "--slug " + identity.Name + "@worktree"
+		cmd := mailboxWaitCommandVar(s, key)
 		if !strings.Contains(cmd, wantSlug) {
 			t.Fatalf("AUTO command did not emit the registered self address %q: %s", wantSlug, cmd)
+		}
+		// End-to-end: the playbook.read substitution carries the registered slug.
+		body := callToolWithKey(t, s, 2, key, "playbook.read", map[string]any{"name": "lead-use-mailbox"})
+		if !strings.Contains(body, wantSlug) {
+			t.Fatalf("playbook.read body did not carry the AUTO registered slug: %s", body)
+		}
+		if strings.Contains(body, "{{.MailboxWaitCommand}}") {
+			t.Fatalf("playbook.read body left the render variable unsubstituted: %s", body)
 		}
 	})
 
@@ -953,6 +965,44 @@ func TestMailboxWaitCommandRenderVariable(t *testing.T) {
 		if strings.Contains(cmd, "--slug") {
 			t.Fatalf("env-less session emitted a --slug it cannot own: %s", cmd)
 		}
+		// End-to-end: the substituted body's command ends at --session-key <key>
+		// (backtick-terminated), proving no --slug was appended.
+		body := callToolWithKey(t, s, 2, key, "playbook.read", map[string]any{"name": "lead-use-mailbox"})
+		if !strings.Contains(body, "mailbox wait --session-key "+key+"`") {
+			t.Fatalf("playbook.read body did not carry the reply-id-only command: %s", body)
+		}
+	})
+
+	// Scenario 3b: an owned identity but a NON-OWNER session (a parent-carrying
+	// delegate sharing the process) → reply-id-only, never the owner's --slug.
+	// This exercises the isOwner gate in mailboxWaitCommandVar directly: without
+	// it a non-owner would be handed a --slug it cannot recv from.
+	t.Run("non_owner_delegate_reply_id_only", func(t *testing.T) {
+		setupMailboxTestEnv(t)
+		root := t.TempDir()
+		initGit(t, root)
+		t.Setenv(envMailbox, "alice@worktree")
+		s := NewServer(root, "test")
+		keyOwner := mailboxLogin(t, s, 1, root)
+
+		delegateResp := callLogin(t, s, 2, root, map[string]any{
+			"parent_session_key": keyOwner,
+			"capability":         "delegate",
+		})
+		keyDelegate, _ := parseLoginResponse(t, delegateResp)
+
+		// The owner still gets the concrete --slug.
+		if got := mailboxWaitCommandVar(s, keyOwner); !strings.Contains(got, "--slug alice@worktree") {
+			t.Fatalf("owner session lost its registered --slug: %s", got)
+		}
+		// The non-owner delegate, sharing the same process identity, must not.
+		gotDelegate := mailboxWaitCommandVar(s, keyDelegate)
+		if !strings.Contains(gotDelegate, "mailbox wait --session-key "+keyDelegate) {
+			t.Fatalf("delegate command missing its own --session-key: %s", gotDelegate)
+		}
+		if strings.Contains(gotDelegate, "--slug") {
+			t.Fatalf("non-owner delegate was handed the owner's --slug: %s", gotDelegate)
+		}
 	})
 
 	// Scenario 4: no key (fresh session) → today's generic guidance, never a
@@ -971,6 +1021,16 @@ func TestMailboxWaitCommandRenderVariable(t *testing.T) {
 		if got := mailboxWaitCommandVar(s, "not-a-real-session-key"); got != mailboxWaitCommandGeneric {
 			t.Fatalf("unresolvable key did not degrade to the generic command: %s", got)
 		}
+		// End-to-end: an unregistered key still renders a body carrying today's
+		// generic guidance (the `[--timeout <duration>]` marker appears only in
+		// the generic fallback, never in a concrete command), never a broken one.
+		body := callToolWithKey(t, s, 2, "not-a-real-session-key", "playbook.read", map[string]any{"name": "lead-use-mailbox"})
+		if !strings.Contains(body, mailboxWaitCommandGeneric) {
+			t.Fatalf("playbook.read body for an unresolvable key did not degrade to the generic command: %s", body)
+		}
+		if strings.Contains(body, "{{.MailboxWaitCommand}}") {
+			t.Fatalf("playbook.read body left the render variable unsubstituted: %s", body)
+		}
 	})
 
 	// The injected value overrides any caller-supplied context value, so a
@@ -988,6 +1048,39 @@ func TestMailboxWaitCommandRenderVariable(t *testing.T) {
 		}
 		if !strings.Contains(got["MailboxWaitCommand"], "--slug alice@worktree") {
 			t.Fatalf("injection did not resolve the real registered slug: %s", got["MailboxWaitCommand"])
+		}
+	})
+
+	// Regression: {{.MailboxWaitCommand}} is a reserved implicit var, so any
+	// path that substitutes the body must supply it or substitution fails with
+	// ErrUnprovidedVar. The stem is kind:print and routes to playbook.read, but
+	// playbook.render is an exposed tool, so an off-contract render of this stem
+	// must still resolve the variable rather than fail closed.
+	t.Run("render_path_resolves_variable", func(t *testing.T) {
+		setupMailboxTestEnv(t)
+		root := t.TempDir()
+		initGit(t, root)
+		t.Setenv(envMailbox, "alice@worktree")
+		s := NewServer(root, "test")
+		key := mailboxLogin(t, s, 1, root)
+
+		resp := callToolOnce(t, s, 2, "playbook.render", map[string]any{
+			"session_key": key, "name": "lead-use-mailbox",
+		})
+		if toolIsError(t, resp) {
+			t.Fatalf("playbook.render of lead-use-mailbox failed closed (ErrUnprovidedVar regression): %s", resp)
+		}
+		renderedPath := strings.TrimSpace(toolText(t, resp))
+		bodyBytes, err := os.ReadFile(renderedPath)
+		if err != nil {
+			t.Fatalf("read rendered playbook %q: %v", renderedPath, err)
+		}
+		body := string(bodyBytes)
+		if !strings.Contains(body, "--slug alice@worktree") {
+			t.Fatalf("rendered body did not carry the concrete wait command: %s", body)
+		}
+		if strings.Contains(body, "{{.MailboxWaitCommand}}") {
+			t.Fatalf("rendered body left the render variable unsubstituted: %s", body)
 		}
 	})
 }

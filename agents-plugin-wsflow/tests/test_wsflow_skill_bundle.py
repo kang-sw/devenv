@@ -207,18 +207,29 @@ class WsflowSkillBundleTest(unittest.TestCase):
         # joined-tail shape, differing only by skill name and title. A missing
         # pointer on any of them must fail loudly rather than silently
         # matching the generic un-pointed shim regex instead.
+        #
+        # lead-use-mailbox alone threads a session_key into playbook.read so the
+        # render can emit a concrete wait command; that clause is REQUIRED there
+        # and FORBIDDEN on the other single-call shims. The per-skill expected
+        # arg (not an optional regex group) keeps the change pinned: a reverted
+        # lead-use-mailbox, or the clause leaking onto another shim, both fail.
+        session_key_shims = {"lead-use-mailbox"}
         offenders = []
         for skill, title in POINTER_TAIL_TITLES.items():
             path = SKILLS_DIR / skill / "SKILL.md"
             text = path.read_text(encoding="utf-8")
+            session_key_arg = (
+                r", session_key: <your key, omit if fresh>"
+                if skill in session_key_shims
+                else r""
+            )
             match = re.fullmatch(
                 r"---\n"
                 rf"name: {re.escape(skill)}\n"
                 r"description: .+\n"
                 r"---\n\n"
                 rf"# {re.escape(title)}\n\n"
-                rf"Call `wsflow/playbook\.read\(name: \"{re.escape(skill)}\""
-                r"(?:, session_key: <your key, omit if fresh>)?"
+                rf"Call `wsflow/playbook\.read\(name: \"{re.escape(skill)}\"{session_key_arg}"
                 r"\)` and execute the returned procedure\n"
                 r"inline against the current user request\. "
                 r"If this call fails to connect, run `/wsflow:mcp-server-repair`\.\n",

@@ -1636,11 +1636,15 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// Build an override lookup from the session-keyed resolver when a session_key
 		// is present.
 		keyStr, _ := params.Arguments["session_key"].(string)
-		// Inject the render-time {{.MailboxWaitCommand}} value (concrete when the
-		// key resolves an owned mailbox identity, generic otherwise). Read-only
-		// playbooks are the only surface that substitutes it, so this is the one
-		// dispatch that resolves it.
-		callerContext = s.injectMailboxWaitCommand(callerContext, keyStr)
+		// Provide the render-time {{.MailboxWaitCommand}} value (concrete when the
+		// key resolves an owned mailbox identity, generic otherwise) for the one
+		// stem whose body substitutes it. Because it is a reserved implicit var,
+		// any path that substitutes the body must supply it or substitution fails
+		// with ErrUnprovidedVar — so the render dispatch below gates on the same
+		// stem to keep playbook.render of this stem from failing closed.
+		if name == mailboxWaitPlaybookName {
+			callerContext = s.injectMailboxWaitCommand(callerContext, keyStr)
+		}
 		printOverrideLookup := buildOverrideLookup(s, keyStr)
 		// Resolve workflow.lang for language-binding injection.
 		printLangAdapter := sessionConfigAdapter{s: s.sessions}
@@ -1680,6 +1684,14 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// Override lookup is built for any present session_key (shared helper with
 		// the playbook.read path); it is independent of the lead-gate.
 		renderSessionKey, _ := params.Arguments["session_key"].(string)
+		// Supply {{.MailboxWaitCommand}} on the render path too, gated on the one
+		// stem that substitutes it: without this an off-contract
+		// playbook.render of that stem fails closed with ErrUnprovidedVar (the
+		// reserved implicit var is declared but unprovided). The stem is not
+		// render-eligible, so this never feeds the wsflow free-text bridge.
+		if name == mailboxWaitPlaybookName {
+			callerContext = s.injectMailboxWaitCommand(callerContext, renderSessionKey)
+		}
 		renderOverrideLookup := buildOverrideLookup(s, renderSessionKey)
 		if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
 			capturedKey := strings.TrimSpace(keyStr)

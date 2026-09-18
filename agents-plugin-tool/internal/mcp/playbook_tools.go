@@ -503,6 +503,13 @@ type overridePointDecl struct {
 const (
 	workflowManualPlaybookName = "lead-workflow-manual"
 	preferSubagentEnabledValue = "on"
+	// mailboxWaitPlaybookName is the only playbook whose body substitutes
+	// {{.MailboxWaitCommand}}, so the render/read dispatch resolves that
+	// variable for this stem alone (mirroring the workflowManualPlaybookName
+	// special-case): a broader inject would run mailboxOwnerCheck I/O for
+	// every keyed read and, on the render path, route the reserved var through
+	// the wsflow free-text bridge for render-eligible stems.
+	mailboxWaitPlaybookName = "lead-use-mailbox"
 )
 
 // builtinPromptOverrideDefaults supplies defaults for configurable prompt points.
