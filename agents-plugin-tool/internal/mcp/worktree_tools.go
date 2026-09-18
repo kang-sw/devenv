@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wskey"
 )
@@ -19,12 +20,13 @@ type worktreeAcquireResult struct {
 	Path      string   `json:"path"`
 	WorkerKey string   `json:"worker_key,omitempty"`
 	Reused    bool     `json:"reused"`
+	Sparse    bool     `json:"sparse"`
 	Pool      string   `json:"pool"`
 	Warnings  []string `json:"warnings,omitempty"`
 }
 
 func (r worktreeAcquireResult) text() string {
-	text := fmt.Sprintf("path: %s\nworker_key: %s\nreused: %t\npool: %s\n", r.Path, r.WorkerKey, r.Reused, r.Pool)
+	text := fmt.Sprintf("path: %s\nworker_key: %s\nreused: %t\nsparse: %t\npool: %s\n", r.Path, r.WorkerKey, r.Reused, r.Sparse, r.Pool)
 	for _, w := range r.Warnings {
 		text += "warning: " + w + "\n"
 	}
@@ -118,6 +120,19 @@ func isDefaultPoolConfig(configValue string) bool {
 	return v == "" || v == defaultWorktreePoolTemplate
 }
 
+// trimmedNonEmpty returns values with surrounding space removed and blanks
+// dropped, so a caller-supplied list of one empty string never reads as a
+// populated list.
+func trimmedNonEmpty(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 // resolvePoolRoot resolves the configured worktree_pool value against gitRoot
 // (the primary worktree root). It substitutes the $(GitRootDirName) and
 // $(GitRoot) tokens, defaults an empty value to defaultWorktreePoolTemplate,
@@ -193,13 +208,23 @@ func registerPoolExclude(commonDir, mainRoot, poolRoot string) error {
 // root is the caller's repository root; it may be the main worktree or any
 // linked worktree. The pool always resolves against the primary root, so a call
 // from a linked worktree never nests a per-worktree pool.
-func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, targetBranch, poolConfigValue string) (worktreeAcquireResult, error) {
+//
+// sparsePaths, when non-empty, makes the worktree a cone-mode sparse checkout
+// materializing only those directories. targetBranch may be empty, which checks
+// base itself out instead of deriving a branch from it; base must then be a
+// local branch that no other worktree holds, because Git allows one checkout
+// per branch. Those two together are the lead's housekeeping worktree: a cheap
+// partial tree on the parent branch while a worker occupies the lead's own root.
+func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, targetBranch string, sparsePaths []string, poolConfigValue string) (worktreeAcquireResult, error) {
 	var res worktreeAcquireResult
 	base = strings.TrimSpace(base)
 	targetBranch = strings.TrimSpace(targetBranch)
-	if base == "" || targetBranch == "" {
-		return res, fmt.Errorf("worktree provisioning requires base and target_branch")
+	if base == "" {
+		return res, fmt.Errorf("worktree provisioning requires base")
 	}
+	sparsePaths = trimmedNonEmpty(sparsePaths)
+	sparse := len(sparsePaths) > 0
+	res.Sparse = sparse
 
 	entries, err := listWorktrees(ctx, runner, root)
 	if err != nil {
@@ -248,10 +273,19 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 
 	// Reuse eligibility (conservative golden rule): under the owned pool prefix,
 	// at detached HEAD, and clean. A branch-checked-out or dirty worktree is
-	// skipped so no in-progress work is stomped.
+	// skipped so no in-progress work is stomped. A candidate must also already
+	// have the requested shape: release keeps a sparse worktree sparse (undoing
+	// it would materialize the whole tree, which is the cost the sparse shape
+	// exists to avoid), so the two shapes are two disjoint sub-pools rather than
+	// one pool with a conversion step.
 	var claim string
 	for _, e := range entries {
 		if e.Path == mainRoot || !pathUnder(poolRoot, e.Path) || !e.Detached {
+			continue
+		}
+		// Same detection git.commit's --sparse staging uses, so a worktree the
+		// pool calls sparse and a commit into it agree on the answer.
+		if wsdoc.SparseCheckoutActive(e.Path) != sparse {
 			continue
 		}
 		status, err := wtRun(ctx, runner, e.Path, "status", "--porcelain")
@@ -272,26 +306,54 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 			return res, err
 		}
 		wtPath = filepath.Join(poolRoot, stem)
-		if _, err := wtRun(ctx, runner, root, "worktree", "add", "--detach", wtPath, base); err != nil {
+		addArgs := []string{"worktree", "add", "--detach"}
+		if sparse {
+			// Materializing the full tree here and pruning it below is exactly
+			// the cost a sparse worktree exists to avoid, so the checkout is
+			// deferred: the cone patterns land on an empty tree and the branch
+			// step below populates only what they select.
+			addArgs = append(addArgs, "--no-checkout")
+		}
+		addArgs = append(addArgs, wtPath, base)
+		if _, err := wtRun(ctx, runner, root, addArgs...); err != nil {
 			return res, err
 		}
 	}
 
-	// Create the branch on base if absent, else check the existing branch out —
-	// never reset an existing branch to base, which would drop its commits.
-	// `switch` (not `checkout`) is the branch-only verb, so a branch name that
-	// happens to collide with a path is never misread as a pathspec.
-	branchExists := false
-	if _, err := wtRun(ctx, runner, wtPath, "show-ref", "--verify", "--quiet", "refs/heads/"+targetBranch); err == nil {
-		branchExists = true
-	}
-	if branchExists {
-		if _, err := wtRun(ctx, runner, wtPath, "switch", "--no-guess", "--", targetBranch); err != nil {
+	if sparse {
+		// Applied on reuse as well as on creation, so a pattern set left by a
+		// previous acquire of this pooled worktree never survives into this one.
+		args := append([]string{"sparse-checkout", "set", "--cone"}, sparsePaths...)
+		if _, err := wtRun(ctx, runner, wtPath, args...); err != nil {
 			return res, err
 		}
+	}
+
+	if targetBranch == "" {
+		// No branch to derive: check base out directly, so the caller's commits
+		// land on base itself. Git's one-checkout-per-branch rule is the safety
+		// net — a base already held elsewhere fails here rather than producing a
+		// second writable checkout of it.
+		if _, err := wtRun(ctx, runner, wtPath, "switch", "--no-guess", "--", base); err != nil {
+			return res, fmt.Errorf("worktree.acquire: check out base %q: %v; the actual checkout is held elsewhere — release the worktree holding it first, or pass target_branch", base, err)
+		}
 	} else {
-		if _, err := wtRun(ctx, runner, wtPath, "switch", "-c", targetBranch, base); err != nil {
-			return res, err
+		// Create the branch on base if absent, else check the existing branch out —
+		// never reset an existing branch to base, which would drop its commits.
+		// `switch` (not `checkout`) is the branch-only verb, so a branch name that
+		// happens to collide with a path is never misread as a pathspec.
+		branchExists := false
+		if _, err := wtRun(ctx, runner, wtPath, "show-ref", "--verify", "--quiet", "refs/heads/"+targetBranch); err == nil {
+			branchExists = true
+		}
+		if branchExists {
+			if _, err := wtRun(ctx, runner, wtPath, "switch", "--no-guess", "--", targetBranch); err != nil {
+				return res, err
+			}
+		} else {
+			if _, err := wtRun(ctx, runner, wtPath, "switch", "-c", targetBranch, base); err != nil {
+				return res, err
+			}
 		}
 	}
 
@@ -307,6 +369,10 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 
 	// Sync submodules only when the worktree actually declares them, keeping a
 	// no-submodule repo free of an unnecessary (and network-touching) call.
+	// A sparse cone does not restrict this: measured on git 2.43, `submodule
+	// update --init --recursive` clones a submodule whose path lies outside the
+	// cone and materializes that directory anyway. Left unconditional because it
+	// succeeds; a sparse acquire simply does not save the submodule cost.
 	if _, statErr := os.Stat(filepath.Join(wtPath, ".gitmodules")); statErr == nil {
 		if _, err := wtRun(ctx, runner, wtPath, "submodule", "update", "--init", "--recursive"); err != nil {
 			res.Warnings = append(res.Warnings, "submodule sync failed: "+err.Error())
