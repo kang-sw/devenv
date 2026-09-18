@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 6bd7359711258363
 sage-review-completeness-reviewed: 6bd7359711258363
+completed: 2026-09-18
 ---
 
 # Make the mailbox wait command actionable at read time and self-reminding at fire time
@@ -197,3 +198,61 @@ skill-shim drift tests.
 Deferred: no change to the mailbox Envelope/contract, discovery, or reply-id
 lifetime; the pi adapter's own auto-arm slug-wake is tracked separately in
 `260917-feat-ws-pi-mailbox-waiter-slug-wake`.
+
+### Result (d155958) - 2026-09-18
+
+Landed. `lead-use-mailbox`'s SKILL.md (ws + pi byte-identical; wsflow hand-edited
+per its curated-shim rule) now passes `session_key: <your key, omit if fresh>`
+to `playbook.read`, and the shared playbook body swaps the literal
+`ws-mcp mailbox wait ...` command for `{{.MailboxWaitCommand}}` (pure token swap,
+no new prose).
+
+`MailboxWaitCommand` is a new reserved implicit render variable
+(`wsrsrc.ImplicitVariableNames`), resolved by `mailboxWaitCommandVar`
+(`agents-plugin-tool/internal/mcp/playbook_tools.go`) to a concrete
+`<os.Args[0]> mailbox wait --session-key <key> [--slug <registered address>]`:
+- `os.Args[0]` is the same host-neutral binary the harness/launcher invoked
+  (mirroring Phase 1's re-arm command); no package-internal launcher path enters
+  shipped text (shipped-surface-boundary.md).
+- `--slug` is the owner-gated registered self address (`s.mailboxOwnerCheck`), the
+  same AUTO-safe source `mailbox.lookup_peers` self.address and the workflow_manual
+  ambient block read, never an env re-derivation of WS_MAILBOX/WS_MAILBOX_AUTO.
+- Degrades to today's generic guidance (a byte-for-byte reproduction of the prior
+  abstract command, modulo the old two-line wrap) when the key is absent/
+  unresolvable or no address is registered (env-less, or a non-owner session).
+
+Decision (structural deviation, adapted — recorded): the ticket named
+`resolveNamespaceVars`/`buildPlaybookVars` as the fill site, but that no-arg
+namespace resolver has no session context. Threading `session_key` + `*Server`
+through `printPlaybook`/`renderPlaybook`/`renderPlaybookBody` would churn ~130
+call sites (surgical-change violation). Instead the value is resolved in the
+`playbook.read` and `playbook.render` dispatches (which already hold session_key
++ `*Server`) via `s.injectMailboxWaitCommand`, gated on the one stem that
+substitutes it (`mailboxWaitPlaybookName`, mirroring the existing
+`workflowManualPlaybookName` special-case). Same variable-substitution path, same
+"tool-injected wins over caller context" anti-spoof property, identical behavior.
+
+Decision (risk-accepted, recorded): `os.Args[0]` is emitted unquoted, matching
+Phase 1's `buildMailboxWaitRearmCommand`; keeping both command forms identical
+outweighs speculative quoting for a space-bearing binary path.
+
+Verification (read in full):
+- `go build ./...`, `go vet ./internal/mcp/`: clean.
+- `go test ./...` (agents-plugin-tool): ok. New
+  `TestMailboxWaitCommandRenderVariable` covers all four ticket scenarios
+  end-to-end through `playbook.read` substitution (explicit WS_MAILBOX,
+  WS_MAILBOX_AUTO asserting the registered-not-env-derived slug, env-less
+  reply-id-only, no-key generic degrade), plus a non-owner delegate isOwner-gate
+  case, an anti-spoof case, and a `playbook.render` regression case.
+- `python3 -m unittest discover agents-plugin-wsflow/tests`: 12 ok. The
+  single-call-shim guard now requires the `session_key` clause for
+  lead-use-mailbox and forbids it on the other nine (per-skill, not an optional
+  group), so it fails on both a revert and a leak.
+- Mirrors resynced: ws rsrc manifest, wsflow rsrc mirror (byte-identical), pi
+  rsrc (byte-identical), skills manifest; all drift guards green.
+
+Review: partitioned correctness + test, two rounds. Round 1 raised one Important
+per partition (playbook.render ErrUnprovidedVar; a wsflow guard that pinned
+nothing) plus test-coverage gaps; all fixed in d155958. Round 2 confirmed every
+finding fixed with no regression and no new Critical. The unquoted-`os.Args[0]`
+Minor was risk-accepted as above.
