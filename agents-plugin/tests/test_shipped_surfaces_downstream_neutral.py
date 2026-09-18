@@ -41,13 +41,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # file, unlike the Codex entry above: it has no pre-existing sibling file
 # with unrelated migration-vocabulary baggage to avoid re-litigating.
 #
-# "ai-docs/ref/CLAUDE_TICKETS_WORKFLOW.md" is listed as an exact file, not the
-# whole "ai-docs/ref" directory: that directory's other siblings (e.g.
-# worktree-ticket-scope.md, design.md) are legitimately devenv-internal
-# reference material and would break the scan if the whole directory were
-# in scope. This one file is a copy-once artifact embedded by a downstream
-# project's own `CLAUDE.md`, so it is held to the same downstream-neutral
-# bar as the plugin surfaces above.
+# "ai-docs/ref/CLAUDE_TICKETS_WORKFLOW.md" and its one-time bootstrap
+# companion are listed as exact files, not the whole "ai-docs/ref" directory:
+# that directory's other siblings (e.g. worktree-ticket-scope.md, design.md)
+# are legitimately devenv-internal reference material and would break the
+# scan if the whole directory were in scope. Both are copy-once artifacts a
+# downstream project embeds or reads via its own `CLAUDE.md`, so they are
+# held to the same downstream-neutral bar as the plugin surfaces above.
 TEXT_TREES = (
     "agents-plugin/rsrc",
     "agents-plugin/skills",
@@ -57,6 +57,7 @@ TEXT_TREES = (
     "agents-plugin-wsflow/skills",
     "agents-plugin-tool/internal/wsdoc/conventions",
     "ai-docs/ref/CLAUDE_TICKETS_WORKFLOW.md",
+    "ai-docs/ref/CLAUDE_TICKETS_WORKFLOW.bootstrap.md",
 )
 
 # Go source root: every non-test .go file under it is scanned, but only the
