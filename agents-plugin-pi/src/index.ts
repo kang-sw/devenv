@@ -463,6 +463,22 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   // after bootstrap once this session's own key exists, stopped on
   // `session_shutdown`. `undefined` in every other role/process.
   let mailboxWaiterHandle: MailboxWaiterHandle | undefined;
+  // 260917 review fix: monotonic epoch guarding the async self-slug
+  // resolution the arm site awaits below. Before that await existed, every
+  // stop()-then-start() of `mailboxWaiterHandle` ran fully synchronously, so
+  // it was always atomic relative to any other `session_start`/
+  // `session_shutdown` on this same event loop. Awaiting
+  // `resolveMailboxSelfSlug` opens a window where a second `session_start`
+  // (a rapid double `/reload`) or a `session_shutdown` can run while an
+  // earlier arm attempt is still resolving. Every place that resets
+  // `mailboxWaiterHandle` to `undefined` also bumps this epoch; an arm
+  // attempt captures it right after its own bump and, once its await
+  // resolves, only assigns a new waiter if the epoch is unchanged —
+  // otherwise a newer event already owns (or has cleared) the handle, and
+  // assigning here would either leak this attempt's subprocess (never
+  // reachable to `stop()`) or clobber the newer waiter and duplicate mail
+  // admission.
+  let mailboxWaiterEpoch = 0;
   // The footer has the same TUI lead/fork lifetime as the widget, but remains
   // a separate component: replacing the footer never touches belowEditor cards.
   const agentFooterLifecycle = createAgentFooterSessionLifecycle(async () => {
@@ -650,16 +666,24 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // before.
     mailboxWaiterHandle?.stop();
     mailboxWaiterHandle = undefined;
+    const armEpoch = ++mailboxWaiterEpoch;
     const mailboxSessionKey = handle.defaultSessionKeyRef.current;
     if (shouldArmMailboxWaiter(readSpawnRole(process.env), mailboxSessionKey)) {
       const mailboxHandle = handle;
       const mailboxCallTool: MailboxToolCall = (name, args) => mailboxHandle.client.callTool(name, args);
       const selfSlug = await resolveMailboxSelfSlug(mailboxCallTool, mailboxSessionKey);
-      mailboxWaiterHandle = startMailboxWaiter({
-        runWait: createSubprocessWait({ launcherPath, pluginDir, sessionKey: mailboxSessionKey, slug: selfSlug }),
-        drainMail: createBridgeDrain(mailboxCallTool, mailboxSessionKey),
-        admit: (envelope) => sendToLead(pi, buildMailboxPushMessage(envelope), "steer", "always"),
-      });
+      // Re-check staleness after the await (see mailboxWaiterEpoch's doc
+      // comment): a newer session_start or a session_shutdown may have run
+      // while resolveMailboxSelfSlug was in flight and already bumped the
+      // epoch, in which case that event now owns mailboxWaiterHandle and
+      // this attempt must not overwrite it.
+      if (armEpoch === mailboxWaiterEpoch) {
+        mailboxWaiterHandle = startMailboxWaiter({
+          runWait: createSubprocessWait({ launcherPath, pluginDir, sessionKey: mailboxSessionKey, slug: selfSlug }),
+          drainMail: createBridgeDrain(mailboxCallTool, mailboxSessionKey),
+          admit: (envelope) => sendToLead(pi, buildMailboxPushMessage(envelope), "steer", "always"),
+        });
+      }
     }
 
     // 260904 Phase 1 (side-thread fork): registered declaratively/globally,
@@ -922,8 +946,12 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     agentWidgetHandle = undefined;
     // 260914: stop the mail waiter before the bridge/client it drains through is
     // torn down below; `stop()` aborts any in-flight `mailbox wait` subprocess.
+    // 260917 review fix: also bump mailboxWaiterEpoch so an arm attempt still
+    // resolving its self slug (see that epoch's doc comment) sees this
+    // shutdown and does not assign a now-stale waiter afterward.
     mailboxWaiterHandle?.stop();
     mailboxWaiterHandle = undefined;
+    mailboxWaiterEpoch++;
     applySessionShutdownAgentFooter(agentFooterLifecycle);
     agentWidgetRefreshRef.current = undefined;
     agentCostRefreshRef.current = undefined;
