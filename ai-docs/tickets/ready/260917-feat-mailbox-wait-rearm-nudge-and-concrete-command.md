@@ -133,6 +133,46 @@ Verification: extend the mailbox wait CLI tests in
 re-arm command and nudge appear on the mail and timeout exits, and that the JSON
 path stays structurally stable. Independent of Phase 2.
 
+### Result (03e09b3) - 2026-09-18
+
+Landed in `agents-plugin-tool/cmd/ws-mcp/mailbox.go` (+ tests in
+`mailbox_test.go`). `mailboxWait` now builds a re-arm command via
+`buildMailboxWaitRearmCommand(os.Args[0], sessionKey, slug, timeout)` — the
+resolved binary (whatever argv[0] the harness/launcher invoked) plus only the
+resolved wait-scoping flags: `--session-key` always, `--slug`/`--timeout` when
+set. This is host-neutral by construction (no package-internal launcher path
+enters the output, per shipped-surface-boundary.md), satisfying the "CLI reprints
+its own invocation" decision without a Phase 2 render dependency.
+
+`emitMailboxWaitResult` gained a `rearmCmd` parameter and now emits the reminder
+on **both** return paths (mail found and timeout):
+- Text path: a `re-arm: <command>` line plus the `mailboxRearmNudge` string
+  ("one mailbox wait covers a single wake; re-run the re-arm command to keep
+  listening."), printed to stdout after the result so it rides the same stream
+  the harness re-injects into the woken agent.
+- JSON path (`--format json`): an additive nested `rearm` object
+  (`{"command","nudge"}`). Existing fields (`timed_out`/`unread`/`named`/`reply`)
+  and the nil-slice→`[]` normalization are untouched, so machine callers see one
+  new field, not a changed shape.
+
+Verification (read in full):
+- `go build ./...` and `go vet ./cmd/ws-mcp/`: clean.
+- `go test ./cmd/ws-mcp/`: ok (full package). New tests
+  `TestMailboxWaitRearmReminderOnMailExit`,
+  `TestMailboxWaitRearmReminderOnTimeoutExit`,
+  `TestMailboxWaitJSONCarriesRearmField`,
+  `TestMailboxWaitJSONTimeoutCarriesRearmField` cover all four
+  {text,JSON}×{mail,timeout} combinations and assert existing-field stability.
+
+Review: partitioned correctness + test, round 1, no Critical/Major findings.
+Minor items were taken as cheap accuracy fixes (comment mislabel, nudge wording,
+tightened assertions). Two Minor items deliberately deferred: no shell-quoting on
+the re-arm command (inputs are validated slug-form/`name@scope`, space-free), and
+the `--timeout 0` omission branch is not CLI-testable without hanging the test.
+
+Decision recorded: JSON `rearm` is a nested `{command,nudge}` object (not two flat
+fields), keeping the machine contract additive under a single key.
+
 ### Phase 2: Concrete wait command in the `lead-use-mailbox` render + session_key wiring
 
 Behavior: SKILL.md passes `session_key: <your key, omit if fresh>` to
