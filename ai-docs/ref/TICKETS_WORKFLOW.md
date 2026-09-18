@@ -58,8 +58,8 @@ repository; a plain file move otherwise.
 ---
 title: <short title>
 related:             # optional - map of stem: relationship note
-  250101-feat-retry-queue: prerequisite
-  250102-bug-retry-timeout: blocks
+  250102-feat-auth-tokens: prerequisite
+  250103-bug-retry-timeout: blocks
 completed:           # YYYY-MM-DD, added when moved to .done/
 dropped:             # YYYY-MM-DD, added when moved to .dropped/
 ---
