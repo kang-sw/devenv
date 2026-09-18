@@ -67,8 +67,7 @@ Wake
 ## On: arm the wait
 
 1. Whenever you actually intend to sit idle waiting on a peer, launch
-   `ws-mcp mailbox wait --session-key <your key> [--slug <your address>]
-   [--timeout <duration>]` as a background process through your harness's
+   `{{.MailboxWaitCommand}}` as a background process through your harness's
    own background-task capability, never inline and never in a poll loop.
    Treat its exit as your cue to come back; read what it printed and act.
 2. On a harness that re-invokes you when a background task completes (for
