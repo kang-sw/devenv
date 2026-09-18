@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 62604d51fd93570e
 sage-review-completeness-reviewed: 62604d51fd93570e
+completed: 2026-09-18
 ---
 
 # Retarget CLAUDE_TICKETS_WORKFLOW doc to Claude-only + add one-time bootstrap companion
@@ -131,6 +132,39 @@ Verification: `python3 -m unittest
 agents-plugin.tests.test_shipped_surfaces_downstream_neutral` passes with the
 renamed path; banned-token / real-stem / hash grep clean on the renamed doc.
 
+### Result (7b7933cd) - 2026-09-18
+
+`git mv ai-docs/ref/TICKETS_WORKFLOW.md ai-docs/ref/CLAUDE_TICKETS_WORKFLOW.md`
+landed with the Decision 1 rewording applied: the intro paragraph now names
+Claude Code, native Read/Write/Edit, Bash (`git`), and the Explore agent
+directly, drops the `AGENTS.md`/`CLAUDE.md` pairing and the no-embed-mechanism
+fallback, and states the embed directive as `@CLAUDE_TICKETS_WORKFLOW.md`; the
+Language section's `AGENTS.md` alternative is dropped in favor of `CLAUDE.md`
+alone. The `TEXT_TREES` exact-file entry in
+`agents-plugin/tests/test_shipped_surfaces_downstream_neutral.py` and its
+explanatory comment were updated to the new path. No other line of the
+169-line steady-state body changed (Decision 4).
+
+Verification: `python3 -m unittest
+agents-plugin.tests.test_shipped_surfaces_downstream_neutral -v` — 7/7 pass.
+Banned-token grep (`26[0-9]{4}`, `agents-plugin|wsflow|install\.sh|claude-plugin`)
+on the renamed doc — clean.
+
+Decisions:
+- ws/route.resolve_implement's branch-mixing guard stopped on this ticket's
+  target scope (its deterministic branch name differs from the current
+  branch, and `target.scope_slug` is ignored for ticket targets — confirmed
+  by re-invoking with it set), even though the ticket's Background explicitly
+  directs continuing the retained `impl/develop/flock-fade-snide` branch from
+  the predecessor ticket. Verified via `git log develop..impl/develop/flock-fade-snide`
+  that the branch held only the predecessor ticket's commits plus this
+  ticket's own `ready` commit — no unrelated work mixed in — and proceeded on
+  the current branch per the ticket's design-reviewed decision, adopting the
+  router's other returned facts (review: partitioned correctness/fit/test;
+  merge target: develop; merge_confirm: ask; doc_mode: standard) rather than
+  escalating a router heuristic gap that has no override for this documented
+  continuation pattern.
+
 ### Phase 2: Author the bootstrap companion doc
 
 Write `ai-docs/ref/CLAUDE_TICKETS_WORKFLOW.bootstrap.md` realizing decision 3,
@@ -143,6 +177,44 @@ Verification: test suite passes with both files registered; banned-token grep
 clean on the bootstrap doc; fresh-reader re-read as an internal Claude Code user
 setting up a brand-new project confirms the zero-to-loop-then-self-delete path
 works and the steady-state doc stands alone afterward.
+
+### Result (7efc6349) - 2026-09-18
+
+Authored `ai-docs/ref/CLAUDE_TICKETS_WORKFLOW.bootstrap.md`: five ordered
+steps (create the ticket tree, wire the `@CLAUDE_TICKETS_WORKFLOW.md` embed
+into `CLAUDE.md`, reconcile with any pre-existing ad-hoc tracking by judgment
+rather than a fixed script — none / informal / real-external-system cases
+handled distinctly — optionally seed one first ticket, then self-delete).
+Registered the file as a new exact-file entry in `TEXT_TREES`
+(`agents-plugin/tests/test_shipped_surfaces_downstream_neutral.py`) alongside
+an updated shared explanatory comment. Neither produced doc names its own
+`ai-docs/ref/...` path verbatim (Implementation Notes); the bootstrap doc
+performs the `CLAUDE.md` wiring the steady doc only describes, per the
+predecessor/successor split the Implementation Notes call for.
+
+Verification: `python3 -m unittest
+agents-plugin.tests.test_shipped_surfaces_downstream_neutral -v` — 7/7 pass.
+Banned-token grep clean on the bootstrap doc. Fresh-reader re-read of both
+docs together (self, as the implementing worker — no separate delegate
+spawned for this manual step) confirms the zero-state -> ticket-tree ->
+`CLAUDE.md` wiring -> reconciliation -> optional seed -> self-delete sequence
+is coherent and that the steady-state doc reads standalone once the bootstrap
+file is gone (it carries no bootstrap-only content).
+
+Review: route allocation was `partitioned: correctness, fit, test`. Three
+fresh `general-purpose` delegates rendered from `code-review-correctness`,
+`code-review-fit`, and `code-review-test` reviewed `f3ca2d61..HEAD` (both
+commits above) against the ticket's Decisions/Constraints/Phases and the two
+declared manuals. All three round-1 reports came back clean with no findings;
+round 2 was skipped since there was nothing for it to verify (skill-authoring.md's
+review-rounds contract exists to check fixes, not to force a second sweep when
+the first found nothing).
+
+Decisions:
+- none beyond the branch-continuation adaptation recorded under Phase 1's
+  Result.
+
+Omitted: none.
 
 ## Implementation Notes
 
