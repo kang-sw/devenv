@@ -332,7 +332,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
         # against the wsflow copies, so a mirror that silently drops or mangles
         # the merge/stop obligations fails here too. Template variables
         # ({{.McpNamespace}}) are preserved verbatim by the mirror.
-        for name in ("ticket-worker", "ticket-worker-elevated", "ticket-worker-escalated"):
+        for name in ("ticket-worker", "ticket-worker-elevated"):
             text = (RSRC_DIR / name / (name + ".md")).read_text(encoding="utf-8")
             self.assertIn("The lead owns merging after your report; do not merge.", text)
             self.assertNotIn("Merge per the route verdict", text)

@@ -213,7 +213,7 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn("Give it an English\nprompt", text)
 
     def test_workers_report_and_lead_owns_impl_merge(self):
-        for name in ("ticket-worker", "ticket-worker-elevated", "ticket-worker-escalated"):
+        for name in ("ticket-worker", "ticket-worker-elevated"):
             text = (RSRC_DIR / name / (name + ".md")).read_text(encoding="utf-8")
             self.assertIn("The lead owns merging after your report; do not merge.", text)
             self.assertNotIn("Merge per the route verdict", text)
@@ -239,6 +239,52 @@ class SkillDispatchContractsTest(unittest.TestCase):
             "Your terminal report does not restore the checkout: the shared worktree's",
             protocol,
         )
+
+    def test_two_worker_bodies_diverge_in_behavior_not_just_tier(self):
+        # The three byte-identical ticket-worker* bodies collapsed to two that
+        # differ in behavior: default `ticket-worker` implements directly and is
+        # scoped to one phase; `elevated` orchestrates as a mini-lead owning the
+        # whole ticket. `ticket-worker-escalated` is retired (xlarge reuses the
+        # elevated body via a render-time tier override, not a third body). A
+        # future edit that re-collapses them to a tier-only difference, or drops
+        # the orchestration prose, fails here. Assert on both mirror packages
+        # shipping the rsrc bodies.
+        for rsrc in (RSRC_DIR, RSRC_DIR.parent.parent / "agents-plugin-wsflow" / "rsrc"):
+            self.assertFalse((rsrc / "ticket-worker-escalated").exists(), str(rsrc))
+            default = " ".join(
+                (rsrc / "ticket-worker" / "ticket-worker.md").read_text(encoding="utf-8").split()
+            )
+            elevated = " ".join(
+                (rsrc / "ticket-worker-elevated" / "ticket-worker-elevated.md")
+                .read_text(encoding="utf-8")
+                .split()
+            )
+            # Default body: unchanged direct implementer, scoped to one phase,
+            # with no orchestration prose.
+            self.assertIn(
+                "The earliest phase without a `### Result` is the phase you execute",
+                default,
+            )
+            self.assertNotIn("orchestrating mini-lead", default)
+            self.assertNotIn("delegate-implementer", default)
+            self.assertNotIn("warm worktree", default)
+            # Elevated body: orchestrating mini-lead owning the whole ticket,
+            # sequential leaves on one warm worktree, difficulty-calibrated
+            # delegation to the implementer floor.
+            self.assertIn("You are an orchestrating mini-lead", elevated)
+            self.assertIn("you own the whole ticket in one invocation", elevated)
+            self.assertIn("You own every phase without a `### Result`", elevated)
+            self.assertIn(
+                "Run leaves one at a time on your single warm worktree, never in parallel",
+                elevated,
+            )
+            self.assertIn('playbook.render(name: "delegate-implementer"', elevated)
+            self.assertIn("Calibrate delegation by difficulty, not a quota", elevated)
+            # Both keep role: worker (lead scope) — the difference is prose, not
+            # permission — and the lead-owns-merge obligation.
+            for body in (default, elevated):
+                self.assertIn("role: worker", body)
+                self.assertIn("The lead owns merging after your report; do not merge.", body)
 
     def test_run_defers_phase_merge_and_continues_active_assignment(self):
         # 260915: the phase-completion default is "continue on the persistent

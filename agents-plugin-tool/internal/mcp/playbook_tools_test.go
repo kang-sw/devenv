@@ -2673,7 +2673,6 @@ func TestPlaybookRenderGoldenTicketWorker(t *testing.T) {
 			for _, tc := range []struct{ name, tier string }{
 				{"ticket-worker", "medium"},
 				{"ticket-worker-elevated", "large"},
-				{"ticket-worker-escalated", "xlarge"},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					rsrcRoot := filepath.Join("..", "..", "..", map[string]string{"ws": "agents-plugin", "wsflow": "agents-plugin-wsflow"}[product], "rsrc")
@@ -2820,23 +2819,6 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				t.Error("rendered policy retains a fixed flagship floor or template variable")
 			}
 		})
-	}
-}
-
-func TestTicketWorkerVariantsDifferOnlyByTier(t *testing.T) {
-	root := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	base, err := os.ReadFile(filepath.Join(root, "ticket-worker", "ticket-worker.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, tier := range map[string]string{"ticket-worker-elevated": "large", "ticket-worker-escalated": "xlarge"} {
-		data, err := os.ReadFile(filepath.Join(root, name, name+".md"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := strings.Replace(string(data), "tier: "+tier+"\n", "tier: medium\n", 1); got != string(base) {
-			t.Errorf("%s differs from the base beyond tier frontmatter", name)
-		}
 	}
 }
 
