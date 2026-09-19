@@ -528,3 +528,14 @@ func normalizedTier(tier string) string {
 		return ""
 	}
 }
+
+// NormalizedTier exposes normalizedTier's alias-folding to callers outside this
+// package: any accepted spelling ("Large", "opus", "deep", ...) collapses to
+// its first-class taxonomy value ("small"/"medium"/"large"/"xlarge"); an
+// unknown/unrecognized tier returns "". Callers that already validated the
+// tier via ResolveAgentTierForHarness use this to recover the canonical form
+// for a return channel (e.g. a recommended-tier line) that must stay in
+// first-class vocabulary regardless of which accepted alias the caller typed.
+func NormalizedTier(tier string) string {
+	return normalizedTier(tier)
+}

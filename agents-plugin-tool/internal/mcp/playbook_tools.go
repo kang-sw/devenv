@@ -105,7 +105,12 @@ func resolveEffectiveTier(frontmatterTier, tierOverride, harness string, configO
 	if _, _, _, _, err := wsconfig.ResolveAgentTierForHarness(configOpts, trimmed, harness); err != nil {
 		return "", fmt.Errorf("tier_override: %w", err)
 	}
-	return trimmed, nil
+	// Return the canonical first-class spelling, not the caller's accepted
+	// alias verbatim: ResolveAgentTierForHarness validates "opus"/"Large"/etc
+	// as valid tiers but does not itself return the normalized form, and the
+	// recommended-tier return channel must stay in first-class vocabulary
+	// (small/medium/large/xlarge) regardless of which alias the caller typed.
+	return wsconfig.NormalizedTier(trimmed), nil
 }
 
 // resolveTierModel resolves a single tier string to a concrete per-harness

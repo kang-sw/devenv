@@ -227,6 +227,64 @@ func TestRenderDispatchSeparatesResourceAndWorktreeRoots(t *testing.T) {
 	}
 }
 
+// TestPlaybookRenderToolTierOverride drives tier_override through the actual
+// playbook.render MCP tool dispatch (callToolOnce), not renderPlaybookBody
+// directly, so the argument-key wiring at the "playbook.render" case in
+// server.go and the resulting recommended-tier/recommended-model response
+// lines are covered end to end — mirroring the in-file root_override
+// precedent in TestRenderDispatchSeparatesResourceAndWorktreeRoots.
+func TestPlaybookRenderToolTierOverride(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"tier-override-pb/tier-override-pb.md": tierOverridePlaybookContent,
+	})
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	repo := initGitRepo(t)
+	runGit(t, repo, "commit", "--allow-empty", "-m", "initial")
+	s := NewServer(repo, "test")
+	s.observeHarness("test", "codex")
+	leadKey, err := s.sessions.mint(repo, roleLead, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("override reflected in response payload and body", func(t *testing.T) {
+		resp := callToolOnce(t, s, 1, "playbook.render", map[string]any{
+			"name":          "tier-override-pb",
+			"session_key":   leadKey,
+			"tier_override": "large",
+		})
+		if toolIsError(t, resp) {
+			t.Fatalf("playbook.render with tier_override: %s", resp)
+		}
+		text := toolText(t, resp)
+		if !strings.Contains(text, "recommended-tier: large") || !strings.Contains(text, "recommended-model: gpt-5.6-sol") {
+			t.Fatalf("response payload did not reflect tier_override: %q", text)
+		}
+		path := strings.Split(strings.TrimSpace(text), "\n")[0]
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(body), "Model: gpt-5.6-sol") {
+			t.Fatalf("rendered body did not reflect tier_override: %s", body)
+		}
+	})
+
+	t.Run("unknown tier_override is rejected, not coerced", func(t *testing.T) {
+		resp := callToolOnce(t, s, 2, "playbook.render", map[string]any{
+			"name":          "tier-override-pb",
+			"session_key":   leadKey,
+			"tier_override": "bogus-tier",
+		})
+		if !toolIsError(t, resp) {
+			t.Fatalf("playbook.render accepted an unknown tier_override instead of rejecting it: %s", resp)
+		}
+	})
+}
+
 // --- integration: workflow preference writers ---
 
 // TestWorkflowPreferenceWritersRequireLeadSessionKey verifies that global
@@ -620,6 +678,23 @@ func TestRenderPlaybookBodyTierOverride(t *testing.T) {
 		s := newTestServerWithHarness(t, "codex")
 		if _, _, err := renderPlaybookBody(s, root, "tier-override-pb", nil, configOpts, "", "", "", nil, "bogus-tier"); err == nil {
 			t.Fatal("renderPlaybookBody accepted an unknown tier_override instead of rejecting it")
+		}
+	})
+
+	t.Run("accepted alias normalizes to first-class tier vocabulary", func(t *testing.T) {
+		// ResolveAgentTierForHarness accepts alias spellings ("Large", "opus")
+		// as valid tiers; the recommendedTier return channel must still surface
+		// the canonical small/medium/large/xlarge form, not the caller's raw
+		// alias, since the lead reads that line as its dispatch tier.
+		for _, alias := range []string{"Large", "opus", " LARGE "} {
+			s := newTestServerWithHarness(t, "codex")
+			_, tier, err := renderPlaybookBody(s, root, "tier-override-pb", nil, configOpts, "", "", "", nil, alias)
+			if err != nil {
+				t.Fatalf("renderPlaybookBody with tier_override %q: %v", alias, err)
+			}
+			if tier != "large" {
+				t.Errorf("tier_override %q normalized to %q, want %q", alias, tier, "large")
+			}
 		}
 	})
 }
