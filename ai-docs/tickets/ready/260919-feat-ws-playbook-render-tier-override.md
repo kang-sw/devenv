@@ -3,6 +3,10 @@ title: playbook.render tier override decoupled from frontmatter tier
 parent: 260909-epic-ws-worker-interpreter-refoundation
 related:
   260919-research-mini-lead-intra-ticket-orchestration: motivating consumer — "xlarge = elevated body + xlarge model" needs this override
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: a309921888669d29
+sage-review-completeness-reviewed: a309921888669d29
 ---
 
 # playbook.render tier override decoupled from frontmatter tier
@@ -61,15 +65,60 @@ for that approach, split out as its own tooling primitive.
   override must reach `recommended-tier`/`recommended-model` too — not only the
   in-body `RoleModel`. Overriding one without the other would spawn at the wrong
   model.
+- **Realizes a deferred item from `260611`, by a different mechanism.**
+  `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (Phase 2) explicitly
+  deferred a per-render tier override — "a per-render `tier` override arg on
+  `playbook.render` is explicitly deferred to the `(skill, role) → tier`
+  role-config surface" — rather than rejecting it. This builds it as an MCP arg
+  instead of that (never-built) `config.role_tier` lookup, because a role-keyed
+  config maps each role to a fixed tier and cannot express the per-ticket dispatch
+  grade (the same `elevated` body dispatched large vs xlarge by risk). The override
+  stays inside 260611's declarative principle: it invents no workload tier, it
+  selects within the fixed taxonomy, and the lead supplies it at dispatch — the
+  authority `260915-refactor-lead-run-dispatch-time-tier-judgment` already
+  established. Absent an override, 260611's frontmatter pass-through is unchanged.
 
 ## Constraints
 
 - Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/) —
   read before editing the MCP tool surface.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
 - This is a Go/MCP-tool change only; it edits no shipped `rsrc/` playbook prose,
-  so the skill-authoring / wsflow-mirroring / shipped-surface-boundary obligations
-  do not apply to this ticket. The consuming prose changes (elevated body,
-  `lead-run` dispatch table) belong to the mini-lead research ticket, not here.
+  so the skill-authoring and wsflow-mirroring obligations do not apply to this
+  ticket. shipped-surface-boundary.md *does* apply, though: its scope is not
+  limited to `rsrc/` prose — it covers "every string `agents-plugin-tool/`
+  emits to an agent (todo instructions, advisories, banners, doctor checks,
+  tool descriptions)" (`ai-docs/manuals/shipped-surface-boundary.md:9-13`), and
+  every existing `playbook.render` schema property (`session_key`, `name`,
+  `context`, `root_override`) carries a description via `stringProperty`
+  (`server.go:4625`); the new `tier_override` property will need one too. The
+  consuming prose changes (elevated body, `lead-run` dispatch table) belong to
+  the mini-lead research ticket, not here.
+
+## Prior Decisions
+
+- 260919-research-mini-lead-intra-ticket-orchestration (2026-09-19, Confirmed Decisions): "Two playbook bodies, not three... xlarge = elevated prose + xlarge model override via config.resolve_agent, not a third body." — bearing: supports
+- 260909-chore-retire-mercenary-surface (2026-09-09, ticket Decisions): "Tier resolution survives the removal. wsconfig.ResolveAgentForHarnessConfig and config.resolve_agent back native model selection through playbook.render's recommended-tier" — bearing: supports
+- 260909-refactor-route-resolve-implement-reads-ticket-facts (2026-09-09, commit 92389a0f): "The render already returns a recommended tier, so the lead defers to it instead of carrying a second, drifting answer." — bearing: constrains
+- 260714-feat-playbook-tier-model-render-vars (2026-07-14, ticket Decisions): "Coordinate with 260622-feat-playbook-render-tier-label... Both must share one resolution mechanism, not two parallel implementations." — bearing: constrains
+- 260622-feat-playbook-render-tier-label (2026-06-22, ticket Decisions): "Preserve the existing recommended-tier: <tier> output line verbatim and add separate additive lines when values resolve." — bearing: constrains
+- 260611-refactor-ws-tier-taxonomy-delegate-tier-routing (2026-06-12, commit 54e53d70): "Tier flows declaratively: frontmatter tier: is the single source; playbook.render returns it as recommended-tier... never a caller-invented workload tier." — bearing: reconciled (this ticket realizes 260611's own deferred per-render override; see Decisions)
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/mcp/server.go (playbook.render handler + input schema), playbook_tools.go (renderPlaybookBody, buildPlaybookVars, resolveRoleModelVar, withRecommendedRenderBinding), playbook_render_surface_test.go |
+| scope.surface | internal | no new exported Go symbol; agents-plugin-tool/internal/mcp/ is an unexported internal package, no wsflow mirror |
+| scope.new_public_symbol | yes | one new optional MCP arg `tier_override` on playbook.render (input schema server.go:4128-4138); required stays ["name"] |
+| scope.new_type_contract | yes | added parameter threads through renderPlaybookBody/buildPlaybookVars/withRecommendedRenderBinding call signatures (playbook_tools.go:270,366,765,777); no new Go type, reuses ResolveAgentForHarnessConfig/ResolveAgentTierForHarness |
+| scope.test_surface | existing | playbook_render_surface_test.go:533-555 (TestRenderReturnsFrontmatterRecommendedTier), :458-528 (TestWithRecommendedTier/TestWithRecommendedRenderBinding, recommended-binding format); add override + unknown-tier cases |
+| complexity.reuse_points | confirmed | config resolver already resolves decoupled from frontmatter tier (config.go:220-263, explicit-model short-circuit :230-238); unknown-tier rejection (config.go:274-276) |
+| complexity.side_effect_risk | moderate | playbook.render is consumed by every dispatch path; the change is gated behind an absent-by-default arg, so existing renders are byte-unchanged |
+| risk.correctness | moderate | must thread the override through several call layers and decouple recommendedTier/RoleModel from pb.Meta.Tier without altering the no-override path |
+| risk.fit | low | additive optional arg on an existing tool; the config layer already supports the resolution |
+| risk.test | low | render-surface tests are golden and pin the frontmatter-tier path; a regression case guards it while new cases cover the override |
+| risk.security_or_contract | low | no capability/permission change; the arg only selects a tier for model resolution |
 
 ## Phases
 
