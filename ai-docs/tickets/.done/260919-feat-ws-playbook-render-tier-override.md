@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: a309921888669d29
 sage-review-completeness-reviewed: a309921888669d29
+completed: 2026-09-19
 ---
 
 # playbook.render tier override decoupled from frontmatter tier
@@ -156,3 +157,76 @@ Edit surface (verify line numbers at implementation — they are search anchors)
 Out of scope (belongs to the mini-lead research ticket): the `elevated` body
 prose, the `lead-run` dispatch/escalation table rewrite, and retiring the
 `ticket-worker-escalated` body. This phase ships the primitive only.
+
+### Result (776dbb34) - 2026-09-19
+
+Landed across two commits (`d01c7164`, `776dbb34`) on
+`impl/goal/develop/cedar-drift-lantern/agile-fruit-icon`:
+
+- **MCP surface** (`agents-plugin-tool/internal/mcp/server.go`): added optional
+  `tier_override` (string) to the `playbook.render` input schema, with a
+  `stringProperty` description per shipped-surface-boundary.md; `required`
+  stays `["name"]`. The handler reads `params.Arguments["tier_override"]` and
+  threads it into `renderPlaybook`.
+- **Render core** (`agents-plugin-tool/internal/mcp/playbook_tools.go`): new
+  `resolveEffectiveTier(frontmatterTier, tierOverride, harness, configOpts)`
+  replaces the direct `pb.Meta.Tier` read in `renderPlaybookBody`. Absent
+  override, it returns `frontmatterTier` unchanged (byte-identical no-override
+  path, verified by the frontmatter-tier regression test). Present, it
+  validates through the existing `wsconfig.ResolveAgentTierForHarness`
+  rejection path (loud error on unknown tier, no coercion to medium) and
+  returns `wsconfig.NormalizedTier(trimmed)` — a new thin exported wrapper
+  around the existing unexported `normalizedTier` in
+  `agents-plugin-tool/internal/wsconfig/config.go` — so an accepted alias
+  (`"opus"`, `"Large"`) still surfaces as the first-class tier on the
+  `recommended-tier` return channel. `tierOverride` threads as a new trailing
+  parameter on `renderPlaybookBody`/`renderPlaybook` (placed last so every
+  existing call site — production and ~40 test call sites — needed only a
+  trailing `""` argument). `printPlaybook`/`playbook.read` intentionally never
+  supplies an override, per the ticket's Decisions.
+- **Tests** (`agents-plugin-tool/internal/mcp/playbook_render_surface_test.go`):
+  `TestRenderPlaybookBodyTierOverride` covers override-replaces-frontmatter
+  (both `recommendedTier` and in-body `RoleModel`, plus the composed
+  `recommended-tier`/`recommended-model` payload), the no-override regression
+  case, unknown-tier rejection, and alias normalization.
+  `TestPlaybookRenderToolTierOverride` drives the same override end to end
+  through the actual `playbook.render` tool dispatch (`callToolOnce`), added
+  in round-1 review to close a coverage gap (see below).
+
+**Decisions taken (not requiring escalation):**
+- Added one exported symbol (`wsconfig.NormalizedTier`) beyond the ticket's
+  Route Facts claim of no new exported symbol/type — a pure pass-through
+  wrapper around the existing `normalizedTier`, needed because
+  `ResolveAgentTierForHarness` validates aliases but does not return the
+  normalized form, and the `recommended-tier` channel must stay in
+  first-class vocabulary. Still package-internal (`internal/wsconfig`), so no
+  shipped/external surface widens. Cosmetic deviation from the route facts,
+  not a structural one.
+- `tierOverride` parameter placed last (after `overrideLookup`) rather than
+  adjacent to `configOpts`/`mintRoot`, to minimize test-call-site churn to a
+  single trailing argument per call rather than a mid-signature insertion.
+
+**Review:** single full-scope review, two rounds. Round 1 (commit `d01c7164`
+reviewed) raised 1 Important (no test exercised `tier_override` through the
+actual `playbook.render` tool dispatch, only through `renderPlaybookBody`
+directly) and 2 Minor (alias-unnormalized `recommended-tier` line; the
+render-core functions now carry 10 positional string-heavy params). Fixed the
+Important and the first Minor in commit `776dbb34`; the second Minor was
+explicitly flagged non-blocking by the reviewer and left as a future cleanup
+(an options struct "next time this signature grows"). Round 2 confirmed both
+fixes and raised nothing new: clean.
+
+**Verification:**
+- `go build ./...`, `go vet ./...` — clean.
+- `go test ./...` (all `agents-plugin-tool` packages) — pass.
+- `go test -count=1 ./internal/mcp/... ./internal/wsconfig/...` — pass
+  (re-run after the round-1 fix commit).
+- `gofmt -l` on every touched file — clean (only pre-existing,
+  untouched-by-this-ticket drift in `internal/wsconfig/global.go`).
+- `agents-plugin-tool/scripts/smoke-ws-mcp.sh ..` — passes (Level 1 per
+  `ai-docs/manuals/ws-mcp.md`).
+
+**Omitted:** the `elevated` body prose, `lead-run` dispatch table rewrite, and
+`ticket-worker-escalated` retirement remain out of scope per the ticket, for
+`260919-research-mini-lead-intra-ticket-orchestration` to consume this
+primitive.
