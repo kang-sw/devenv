@@ -19,9 +19,10 @@ The owner's proposal: rather than slicing a ticket into per-phase worker
 invocations that each drift, spawn one **elevated (large/xlarge) worker as a
 mini-lead** that owns the whole ticket "in one breath" and delegates bounded
 implementation slices to fresh-context implementer subagents. The expensive
-frontier model (mini-lead) holds only the interface/spine, the hard
-cross-cutting parts, and orchestration; the mechanical implementation grind
-goes to cheap medium-or-below implementers (10x+ cheaper than large).
+frontier model (mini-lead) keeps the interface/spine, the hard or
+non-decomposable parts, and orchestration for itself; only the mechanical,
+disjoint implementation grind goes to cheap medium-or-below implementers (10x+
+cheaper than large).
 
 This ticket records the design converged in lead-discuss (2026-09-19) after the
 parallel-acceleration framing was stress-tested and rejected in favor of a
@@ -94,14 +95,24 @@ permission" decision.
   `playbook.render` maps `role: worker` → lead-equivalent key scope
   (`childRoleForPlaybookRole` in `agents-plugin-tool/internal/mcp/playbook_tools.go`),
   and lead scope permits every tool including `ferrule`
-  (`roleAllowsTool` / `isLeadOnlyTool` in `.../mcp/server.go`). Depth-1 native
-  recursion is owner-confirmed on Claude Code, pi, and Codex; deeper nesting is
-  discouraged in prose, not blocked.
-- The mini-lead pattern already exists once: `lead-goal-fan-out-step` mints a
-  lead-capability child key via `ferrule(capability: "lead", ...)`; the child
-  runs its own loop and is re-discovered via `session.children`. (That fan-out
-  entry point is itself slated to retire per the epic and
-  260730-refactor-retire-goal-fan-out-step-and-session-note.)
+  (`roleAllowsTool` / `isLeadOnlyTool` in `.../mcp/server.go`). Per the anchor
+  ticket 260909-research-ws-refoundation-evidence-audit (Harness capability
+  premises) and epic Decision 4, depth-1 native recursion is owner-confirmed on
+  Claude Code, pi, and Codex, and deeper nesting is discouraged in prose, not
+  blocked. The three-harness confirmation is an owner statement recorded there,
+  not a tree/code fact.
+- The mini-lead pattern already existed once as a *parallel* fan-out:
+  `lead-goal-fan-out-step` minted a lead-capability child key via
+  `ferrule(capability: "lead", ...)`; the child ran its own loop and was
+  re-discovered via `session.children`. That entry point has already been
+  retired — no `lead-goal-fan-out-step` file remains under
+  `agents-plugin/rsrc/` (removed by commit `f2294816`, 2026-09-09; search for
+  `lead-goal-fan-out-step` under `agents-plugin/rsrc/` returns nothing). The
+  tracking ticket 260730-refactor-retire-goal-fan-out-step-and-session-note
+  remains open in `todo/` despite the removal already having landed. The
+  underlying `ferrule(capability: "lead", ...)` mechanism itself is unaffected
+  and remains a documented `ferrule` option
+  (`agents-plugin-tool/internal/mcp/server.go:3372`).
 - Mailbox (`mailbox.send/recv/lookup_peers`) is **cross-process only** and
   explicitly out of scope for native subagents inside one session
   (`agents-plugin/rsrc/lead-use-mailbox/...`; identity is resolved once per MCP
@@ -140,6 +151,14 @@ permission" decision.
    mini-lead). xlarge = `elevated` prose + xlarge model override via
    `config.resolve_agent`, not a third body. Both keep `role: worker`;
    difference is prose, not permission.
+6. **Delegation is opportunistic, not mandatory.** The mini-lead implements the
+   hard, high-leverage, or non-decomposable work directly — that is why it is
+   the expensive model — and delegates only mechanical, disjoint,
+   cheaply-verifiable leaves. A ticket with no cleanly-delegable leaves
+   degenerates to direct implementation; the `elevated` body must never push
+   hard work to a cheap implementer merely to delegate (cheap model × hard task
+   → Critical-finding churn, more review rounds, escalation — the opposite of
+   the intended saving).
 
 ### Proposals
 <!-- none: the design above was confirmed, not left as candidate. -->
@@ -188,6 +207,53 @@ permission" decision.
   behind a runtime capability probe, not core. It is the one legitimate
   harness-modification candidate if enforcement is later wanted.
 
+## Prior Decisions
+
+- 260724-feat-lead-fan-out-worktree (2026-07-24, ticket Decisions): "Each
+  parallel worker is a mini-lead: a native subagent holding a worktree-bound
+  lead-scope key minted by the lead (ferrule, capability: lead)." — bearing:
+  supports
+- 260910-refactor-risk-route-worker-tier-medium-large (2026-09-10, ticket
+  Result): "Shipped medium ticket-worker, large ticket-worker-elevated, and
+  xlarge ticket-worker-escalated playbooks whose bodies differ only by tier
+  frontmatter." — bearing: constrains
+- 260915-refactor-lead-run-dispatch-time-tier-judgment (2026-09-15, commit
+  83c60e42): "Kept the reactive escalate ladder (lead-run.md stop-e retry
+  table) unchanged as the safety net; added one prose line noting xlarge is
+  now also a proactive dispatch-time pick." — bearing: constrains
+- 260909-refactor-lead-surface-collapse-worker-stop-protocol (2026-09-09,
+  commit 27d32dd2): "A lead-scoped key permits every tool including ferrule,
+  so the root is the key's default binding, not a boundary." — bearing:
+  supports
+- 260912-feat-ws-pi-recursive-worker-subtree-lifecycle (2026-09-12, ticket
+  Decisions): "No orchestrator role. Extend the existing worker ownership
+  model; do not add another runtime role or move lead playbooks into a
+  mini-lead process." — bearing: supports
+- b8be3591 (2026-07-24, commit): "Model (1b) contained delegate children with
+  lead-owned selection + serial merge + delegated review; start at the
+  (1-min) rung, escalate to fat mini-lead (2) only on measured overload." —
+  bearing: supports
+- 260913-bug-ws-pi-worker-checkout-contaminates-lead-branch (2026-09-13,
+  ticket Result): "worker-stop-protocol.md Branch section: the terminal
+  report does not restore the checkout; checking branch state before the
+  next write is the lead's responsibility." — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin/rsrc/ticket-worker*, agents-plugin/rsrc/lead-run/lead-run.md, agents-plugin-tool/internal/mcp/playbook_tools.go, agents-plugin-tool/internal/mcp/server.go, agents-plugin-wsflow/, agents-plugin/skills/ |
+| scope.surface | cross-module | rsrc playbook prose plus agents-plugin-tool/internal/mcp/ (playbook_tools.go, server.go) plus wsflow/pi mirrors |
+| scope.new_public_symbol | unknown | gated on open question: playbook.render model-override decoupled from tier: feasibility unresolved |
+| scope.new_type_contract | no | Confirmed Decisions state the design uses only existing primitives (ferrule, worktree.acquire, session.children, config.resolve_agent) |
+| scope.test_surface | existing | agents-plugin-tool/internal/mcp/playbook_tools_test.go:2732 TestPlaybookPrintLeadRunWorkerTierPolicy, agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py |
+| complexity.reuse_points | confirmed | ferrule capability lead at agents-plugin-tool/internal/mcp/server.go:3372, childRoleForPlaybookRole at agents-plugin-tool/internal/mcp/playbook_tools.go:398, ResolveAgentTierForHarness at agents-plugin-tool/internal/wsconfig/config.go:273 |
+| complexity.side_effect_risk | high | restructures the shared worker-dispatch playbook trio consumed by every lead-run invocation, mirrored across agents-plugin, agents-plugin-wsflow, and agents-plugin-pi |
+| risk.correctness | high | core dispatch/worker-tier logic with multiple unresolved implementation-time open questions (render-override feasibility, escalation-ladder edit surface, phase-handling reconciliation) |
+| risk.fit | moderate | builds on existing lead-scope worker primitives, but interacts with the already-landed dispatch-time tier judgment (260915-refactor-lead-run-dispatch-time-tier-judgment, commit 83c60e42) not yet reconciled in this ticket |
+| risk.test | moderate | existing pinned/golden tests cover the current three-body table; a consumer sweep for the retired escalated body is an explicit open question |
+| risk.security_or_contract | low | Confirmed Decision 5 keeps both playbook bodies at role: worker (lead scope); no new permission tier or capability boundary is introduced |
+
 ## Constraints
 
 Editing paths `agents-plugin/rsrc/`, `agents-plugin/skills/`, and
@@ -196,3 +262,8 @@ Editing paths `agents-plugin/rsrc/`, `agents-plugin/skills/`, and
 `ai-docs/manuals/shipped-surface-boundary.md` before the edit. The shipped
 surface is downstream-first (Architecture Rule 4): this design deliberately
 uses only existing primitives so nothing here depends on host-specific behavior.
+
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/rsrc/, agents-plugin-wsflow/skills/, agents-plugin-tool/internal/wsdoc/conventions/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
