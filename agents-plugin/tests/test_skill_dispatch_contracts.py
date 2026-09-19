@@ -280,6 +280,13 @@ class SkillDispatchContractsTest(unittest.TestCase):
             )
             self.assertIn('playbook.render(name: "delegate-implementer"', elevated)
             self.assertIn("Calibrate delegation by difficulty, not a quota", elevated)
+            # Decomposition seam (interface/spine -> disjoint leaves, phase-serial
+            # fallback) and the recommendation-not-gate framing of spine review
+            # are named Confirmed Decisions this body ships; pin them so a revert
+            # to always-phase-serial leaves or a hard review gate fails loudly.
+            self.assertIn("disjoint implementation leaves", elevated)
+            self.assertIn("fall back to phase-serial leaves", elevated)
+            self.assertIn("a recommendation keyed to leverage, not a gate", elevated)
             # Both keep role: worker (lead scope) — the difference is prose, not
             # permission — and the lead-owns-merge obligation.
             for body in (default, elevated):
