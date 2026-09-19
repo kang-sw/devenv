@@ -376,7 +376,12 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn("ticket-batch-selector", text)
         self.assertNotIn("{{.ExploreAgent}}", text)
         self.assertIn("{{.SpawnIdiom}}", text)
-        self.assertIn('{{.McpNamespace}}/playbook.render(name: <chosen worker playbook>', flat)
+        self.assertIn('{{.McpNamespace}}/playbook.render(name: <the row\'s worker playbook>', flat)
+        # xlarge reuses the elevated body via a render-time tier override, so the
+        # dispatch step must thread tier_override for the elevated body's xlarge
+        # spawn rather than name a retired third body.
+        self.assertIn("pass that argument too", flat)
+        self.assertIn("`tier_override: xlarge`", flat)
         self.assertIn(
             "One worker in flight per invocation, unless the opt-in parallel route below"
             " is approved for this run.",

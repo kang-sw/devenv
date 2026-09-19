@@ -2760,8 +2760,15 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				"Read the selected ticket's whole body and grade its risk against the Risk Rubric below",
 				"The tier sets the worker's model; the worker's route sets review breadth.",
 				"| medium | `ticket-worker` | `ticket-worker-elevated` |",
-				"| large | `ticket-worker-elevated` | `ticket-worker-escalated` |",
-				"| xlarge | `ticket-worker-escalated` | none: its (e) goes to the user |",
+				"| large | `ticket-worker-elevated` | `ticket-worker-elevated`, `tier_override: xlarge` |",
+				"| xlarge | `ticket-worker-elevated`, `tier_override: xlarge` | none: its (e) goes to the user |",
+				// xlarge reuses the elevated body via a render-time tier override
+				// (the escalated body is retired), so the render step must pass
+				// tier_override for the elevated body — whose frontmatter tier is
+				// large — to spawn at the xlarge model. Pin that dispatch rule and
+				// the retry cell's carry of any tier_override.
+				"When the table cell pairs the body with `tier_override: xlarge`, pass that argument too",
+				"repeat Spawn steps 4 to 6 with the retry cell from the table (its body and any `tier_override`)",
 				// The Risk Rubric is a bundled rsrc doc pulled in through
 				// lead-run.md's `includes: - risk-rubric` frontmatter, not
 				// inlined in lead-run.md itself — assert its own content

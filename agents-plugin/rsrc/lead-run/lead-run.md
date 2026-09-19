@@ -56,16 +56,19 @@ the turn: relay the reason.
    | Tier | Worker playbook | Retry after stop (e) |
    |---|---|---|
    | medium | `ticket-worker` | `ticket-worker-elevated` |
-   | large | `ticket-worker-elevated` | `ticket-worker-escalated` |
-   | xlarge | `ticket-worker-escalated` | none: its (e) goes to the user |
+   | large | `ticket-worker-elevated` | `ticket-worker-elevated`, `tier_override: xlarge` |
+   | xlarge | `ticket-worker-elevated`, `tier_override: xlarge` | none: its (e) goes to the user |
 
 3. When a goal reminder is active and the branch is not yet `goal/*`, run
    `git checkout -b goal/<current branch>/<slug>` with a random
    word-word-word slug: a slug derived from the goal text collides across
    concurrent runs. On detached `HEAD`, skip this step, spawn on the detached
    checkout, and tell the user.
-4. `{{.McpNamespace}}/playbook.render(name: <chosen worker playbook>,
-   session_key: <your key>)`. Do not read the file.
+4. `{{.McpNamespace}}/playbook.render(name: <the row's worker playbook>,
+   session_key: <your key>)`. When the table cell pairs the body with
+   `tier_override: xlarge`, pass that argument too: the `elevated` body's
+   frontmatter tier is large, so xlarge dispatch needs the override to spawn at
+   the xlarge model rather than large. Do not read the file.
 5. Spawn one worker at the tier the render recommends, in a form that can
    itself spawn children ({{.SpawnIdiom}}), with this task block and nothing
    else beyond the lines **Handle the report** adds:
@@ -132,9 +135,9 @@ turn; the next invocation merges once the holder has released it.
   resumes the worker; a `block` goes to the user with the verdict.
 - **(d) irreversible action** — ask the user; resume with the answer.
 - **(e) Critical open after the fix round** — repeat Spawn steps 4 to 6 with
-  the retry playbook from the table, on the same branch, adding the report's
-  open Critical `unresolved:` line to the task block. One retry: a second (e)
-  goes to the user.
+  the retry cell from the table (its body and any `tier_override`), on the same
+  branch, adding the report's open Critical `unresolved:` line to the task
+  block. One retry: a second (e) goes to the user.
 
 Resume through the host's continuation mechanism. When it has none, or the
 agent is gone, re-spawn with the same task block plus one line:
