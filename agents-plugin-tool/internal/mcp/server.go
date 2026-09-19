@@ -1673,6 +1673,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		callerContext := stringMapArgument(params.Arguments["context"])
 		rootOverride, _ := params.Arguments["root_override"].(string)
 		rootOverride = strings.TrimSpace(rootOverride)
+		tierOverride, _ := params.Arguments["tier_override"].(string)
 
 		// Determine worktree root: root_override (when set) or session-bound root.
 		var worktreeRoot string
@@ -1724,7 +1725,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		renderLangAdapter := sessionConfigAdapter{s: s.sessions}
 		renderLangResolver := wsconfig.NewResolver(wsconfig.Options{}, nil, renderLangAdapter, renderLangAdapter)
 		renderWorkflowLangRV, _ := renderLangResolver.Get(renderSessionKey, wsconfig.ItemWorkflowLang)
-		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, renderWorkflowLangRV.Value, renderOverrideLookup)
+		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, renderWorkflowLangRV.Value, renderOverrideLookup, tierOverride)
 		return toolTextResponse(req.ID, withRecommendedRenderBinding(path, s.currentHarness(), recommendedTier, wsconfig.Options{})+"\n", err)
 
 	case "mailbox.send":
@@ -4126,7 +4127,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "playbook.render",
-			"description": namespaceText("Render a playbook to a worktree-scoped tmp file and return its path plus stable recommended-tier metadata when the playbook declares a tier, with optional config-resolved recommended-model/recommended-reasoning-effort bindings. Lead callers receive a render-minted child session key spliced into the rendered body. Available in both full and agentless product modes."),
+			"description": namespaceText("Render a playbook to a worktree-scoped tmp file and return its path plus stable recommended-tier metadata when the playbook declares a tier (or tier_override supplies one), with optional config-resolved recommended-model/recommended-reasoning-effort bindings. Lead callers receive a render-minted child session key spliced into the rendered body. Available in both full and agentless product modes."),
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4134,6 +4135,7 @@ func tools() []map[string]any {
 					"name":          stringProperty("Playbook name (bare stem resolvable by the rsrc loader)."),
 					"context":       map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional caller-supplied substitution values for variables declared in the playbook's frontmatter. In wsflow no-agent mode, legacy render-eligible stems append context as a ## Render Context block instead."},
 					"root_override": stringProperty("Optional delegate worktree path for prompt artifact allocation and child-key binding. Playbooks, manifests, and includes use the plugin resource root (WS_RSRC_ROOT or the executable-derived bundle)."),
+					"tier_override": stringProperty("Optional capability tier (small/medium/large/xlarge) that replaces the playbook's own frontmatter tier for this render only, driving both the in-body RoleModel substitution and the recommended-tier/recommended-model/recommended-reasoning-effort payload lines. Absent, render uses the frontmatter tier unchanged. An unknown tier is rejected, not coerced."),
 				},
 				"required": []string{"name"},
 			},

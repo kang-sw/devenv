@@ -61,7 +61,7 @@ func TestTicketDesignReviewExplorationBindings(t *testing.T) {
 						rows = []string{"| small | the small-tier model | |", "| medium | the medium-tier model | |", "| large | the large-tier model | |"}
 					}
 					root := filepath.Join("..", "..", "..", product.pkg, "rsrc")
-					body, _, err := renderPlaybookBody(newTestServerWithHarness(t, tc.harness), root, "ticket-reviewer-design", nil, opts, "", "", "", nil)
+					body, _, err := renderPlaybookBody(newTestServerWithHarness(t, tc.harness), root, "ticket-reviewer-design", nil, opts, "", "", "", nil, "")
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -104,7 +104,7 @@ func TestReferenceDiscoveryTicketQuerySchema(t *testing.T) {
 			t.Setenv("WS_MCP_NAMESPACE", product.namespace)
 			t.Setenv("WS_MCP_NO_AGENT", map[bool]string{true: "1", false: "0"}[product.namespace == "wsflow"])
 			root := filepath.Join("..", "..", "..", product.pkg, "rsrc")
-			body, _, err := renderPlaybookBody(&Server{}, root, "reference-discovery", nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil)
+			body, _, err := renderPlaybookBody(&Server{}, root, "reference-discovery", nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -124,7 +124,7 @@ func TestReferenceDiscoveryTicketQuerySchema(t *testing.T) {
 func TestTicketFactPopulatorGroundingBoundary(t *testing.T) {
 	for _, pkg := range []string{"agents-plugin", "agents-plugin-wsflow"} {
 		root := filepath.Join("..", "..", "..", pkg, "rsrc")
-		body, _, err := renderPlaybookBody(&Server{}, root, "ticket-fact-populator", nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil)
+		body, _, err := renderPlaybookBody(&Server{}, root, "ticket-fact-populator", nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -153,7 +153,7 @@ func TestTicketFactPopulatorPreservesConstraintsFixture(t *testing.T) {
 	for _, pkg := range []string{"agents-plugin", "agents-plugin-wsflow"} {
 		t.Run(pkg, func(t *testing.T) {
 			root := filepath.Join("..", "..", "..", pkg, "rsrc")
-			body, _, err := renderPlaybookBody(&Server{}, root, "ticket-fact-populator", nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil)
+			body, _, err := renderPlaybookBody(&Server{}, root, "ticket-fact-populator", nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -186,7 +186,7 @@ func TestTicketFactPopulatorPriorDecisionsSection(t *testing.T) {
 			t.Setenv("WS_MCP_NAMESPACE", product.namespace)
 			t.Setenv("WS_MCP_NO_AGENT", map[bool]string{true: "1", false: "0"}[product.namespace == "wsflow"])
 			root := filepath.Join("..", "..", "..", product.pkg, "rsrc")
-			body, _, err := renderPlaybookBody(&Server{}, root, "ticket-fact-populator", nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil)
+			body, _, err := renderPlaybookBody(&Server{}, root, "ticket-fact-populator", nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -227,7 +227,7 @@ func TestTicketDesignReviewPriorDecisionsAnchor(t *testing.T) {
 			t.Setenv("WS_MCP_NAMESPACE", product.namespace)
 			t.Setenv("WS_MCP_NO_AGENT", map[bool]string{true: "1", false: "0"}[product.namespace == "wsflow"])
 			root := filepath.Join("..", "..", "..", product.pkg, "rsrc")
-			body, _, err := renderPlaybookBody(&Server{}, root, "ticket-reviewer-design", nil, wsconfig.Options{}, "", "", "", nil)
+			body, _, err := renderPlaybookBody(&Server{}, root, "ticket-reviewer-design", nil, wsconfig.Options{}, "", "", "", nil, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -281,7 +281,7 @@ func TestTicketDesignReviewContradictionAnchors(t *testing.T) {
 			} else {
 				t.Setenv("WS_MCP_NO_AGENT", "0")
 			}
-			body, _, err := renderPlaybookBody(&Server{}, root, "ticket-reviewer-design", nil, wsconfig.Options{}, "", "", "", nil)
+			body, _, err := renderPlaybookBody(&Server{}, root, "ticket-reviewer-design", nil, wsconfig.Options{}, "", "", "", nil, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -334,7 +334,7 @@ func TestTicketDesignReviewDependencyLandingAdvisory(t *testing.T) {
 			} else {
 				t.Setenv("WS_MCP_NO_AGENT", "0")
 			}
-			body, _, err := renderPlaybookBody(&Server{}, root, "ticket-reviewer-design", nil, wsconfig.Options{}, "", "", "", nil)
+			body, _, err := renderPlaybookBody(&Server{}, root, "ticket-reviewer-design", nil, wsconfig.Options{}, "", "", "", nil, "")
 			if err != nil {
 				t.Fatal(err)
 			}

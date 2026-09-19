@@ -86,6 +86,28 @@ func terminologyForHarness(harness string) map[string]string {
 	return playbookTerminologyTable[""]
 }
 
+// resolveEffectiveTier returns tierOverride in place of frontmatterTier when
+// tierOverride is non-empty (after trimming), rejecting an unknown/unresolvable
+// override rather than silently coercing it. Absent tierOverride,
+// frontmatterTier passes through unchanged — the existing frontmatter-tier
+// render path is byte-identical.
+//
+// Validation reuses ResolveAgentTierForHarness, which rejects an unknown tier
+// outright (unlike ResolveAgentForHarnessConfig, which coerces an
+// empty/unrecognized tier to "medium" for its own callers). A render-time typo
+// in tier_override must fail loudly here rather than silently resolving to the
+// medium tier a few calls downstream.
+func resolveEffectiveTier(frontmatterTier, tierOverride, harness string, configOpts wsconfig.Options) (string, error) {
+	trimmed := strings.TrimSpace(tierOverride)
+	if trimmed == "" {
+		return frontmatterTier, nil
+	}
+	if _, _, _, _, err := wsconfig.ResolveAgentTierForHarness(configOpts, trimmed, harness); err != nil {
+		return "", fmt.Errorf("tier_override: %w", err)
+	}
+	return trimmed, nil
+}
+
 // resolveTierModel resolves a single tier string to a concrete per-harness
 // model via the shared config seam, returning "" on resolver error. This is
 // used for the playbook's own declared tier; fixed-tier variables resolve
@@ -759,10 +781,15 @@ func resolveRsrcRoot(rsrcRootOverride string) (string, error) {
 // printPlaybook or unit tests that do not seed overrides) to render every
 // override-point with its inline seed default.
 //
+// tierOverride: when non-empty, replaces the playbook's frontmatter tier for
+// this render only — both RoleModel resolution and the recommended binding
+// drive off it instead of pb.Meta.Tier. See resolveEffectiveTier. Pass "" to
+// leave frontmatter-tier behavior unchanged (printPlaybook never overrides).
+//
 // Returns (body, recommendedTier, error): recommendedTier is the first-class tier
-// declared in the playbook frontmatter, surfaced so the caller can pick the
-// delegate's model from one render call.
-func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
+// declared in the playbook frontmatter, or tierOverride when supplied, surfaced
+// so the caller can pick the delegate's model from one render call.
+func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
 	harness := s.currentHarness()
 
 	// Load once with nil vars so the MCP playbook layer can add reserved
@@ -773,8 +800,12 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 	}
 
 	// recommendedTier is the first-class tier declared in frontmatter, surfaced to
-	// the caller as a host model-selection guide for the spawned subagent.
-	recommendedTier := pb.Meta.Tier
+	// the caller as a host model-selection guide for the spawned subagent — unless
+	// tierOverride replaces it for this render (validated, not coerced).
+	recommendedTier, err := resolveEffectiveTier(pb.Meta.Tier, tierOverride, harness, configOpts)
+	if err != nil {
+		return "", "", err
+	}
 
 	vars, err := buildPlaybookVars(pb.Meta.Variables, callerContext, harness, recommendedTier, configOpts, workflowLang)
 	if err != nil {
@@ -899,7 +930,8 @@ func workflowPreferSubagentEnabled(configOpts wsconfig.Options) (bool, error) {
 // overrideLookup: when non-nil, the session-keyed closure for resolving prompt
 // override-point values; pass nil to render every override-point with its seed.
 func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
-	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, "", "", workflowLang, overrideLookup)
+	// playbook.read exposes no tier_override arg — always "" (frontmatter tier).
+	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, "", "", workflowLang, overrideLookup, "")
 	if err != nil {
 		return "", "", err
 	}
@@ -924,7 +956,10 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 // configOpts controls config-backed model alias resolution.
 // overrideLookup: when non-nil, the session-keyed closure for resolving prompt
 // override-point values; pass nil to render every override-point with its seed.
-func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
+// tierOverride: when non-empty, replaces the playbook's frontmatter tier for
+// this render only — see renderPlaybookBody and resolveEffectiveTier. Pass ""
+// to leave frontmatter-tier behavior unchanged.
+func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
 	templateContext := callerContext
 	var renderContext map[string]string
 	if NoAgentMode() && wsflowRenderEligibleStems[name] && len(callerContext) > 0 {
@@ -937,7 +972,7 @@ func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContex
 		}
 		templateContext, renderContext = splitDeclaredRenderContext(callerContext, declared)
 	}
-	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, templateContext, configOpts, mintRoot, parentKey, workflowLang, overrideLookup)
+	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, templateContext, configOpts, mintRoot, parentKey, workflowLang, overrideLookup, tierOverride)
 	if err != nil {
 		return "", "", err
 	}
