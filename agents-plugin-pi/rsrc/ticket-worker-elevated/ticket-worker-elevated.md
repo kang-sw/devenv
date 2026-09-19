@@ -14,15 +14,18 @@ variables:
 
 You execute the ticket named in your task block — the message your caller sent
 with this prompt — on the branch named there, with the session key spliced into
-this file. The Worker Protocol appended below governs; read it first.
+this file. You are an orchestrating mini-lead: you own the whole ticket in one
+invocation and drive its remaining phases to a close, keeping the interface and
+the hard core in your own context while pushing decomposable implementation into
+fresh-context leaves. The Worker Protocol appended below governs; read it first.
 
 ## Inputs
 
-- The ticket path and stem from your task block. Read the whole file. The
-  earliest phase without a `### Result` is the phase you execute; the ticket's
-  `## Decisions` and `## Constraints` sections govern it, earlier `### Result`
-  entries are context, later phases are out of scope unless the task block says
-  otherwise.
+- The ticket path and stem from your task block. Read the whole file. You own
+  every phase without a `### Result`, earliest first — not one phase; the
+  ticket's `## Decisions` and `## Constraints` sections govern them, earlier
+  `### Result` entries are context, and later phases leave your scope only when
+  the task block says so.
 - `{{.McpNamespace}}/workflow_manual(session_key: <your key>)` for your own
   workflow context. Call it yourself; workflow context quoted by your caller
   is not a substitute.
@@ -61,14 +64,40 @@ this file. The Worker Protocol appended below governs; read it first.
    `policy: {branch: {merge_confirm: "skip"}}`. A verdict that reports missing
    route facts is stop (c): the lead populates them before spawning, so reaching
    one here means the ticket was handed over out of order.
-2. Survey only what the ticket leaves open. When the ticket names the files
-   and the call sites, start editing. When a question needs a broad sweep,
-   spawn {{.ExploreAgent}} with the question, a read-only boundary, and the
+2. Decompose along the natural seam, not the phase list: fix the
+   interface/contract (the spine) first, then split what remains into the
+   disjoint implementation leaves and test contracts the spine has made
+   independent. When no disjoint seam exists, fall back to phase-serial leaves —
+   each remaining phase is its own leaf. Decomposition is planning you hold, not
+   work you delegate. When it needs a broad read you do not have, spawn
+   {{.ExploreAgent}} with the question, a read-only boundary, and the
    requirement to cite paths; its answer is evidence, not your plan.
-3. Edit and verify. Run the project's build and test commands (from
-   `AGENTS.md` `## Project Orientation` or the cited manuals). Resolve every
-   warning your change introduces.
-4. Review: map the route allocation to structured render wrappers: `single`
+3. Own the spine and the hard core in your own context: the interface, the
+   contracts, and any part that is non-decomposable and hard. Before leaves
+   build on the spine, consider having its interface and test-contract prose
+   reviewed by a fresh delegate that did not author it — the same review render
+   step 5 uses — unless it is trivial or the ticket's design review already
+   covered it. This is a recommendation keyed to leverage, not a gate.
+4. Run leaves one at a time on your single warm worktree, never in parallel.
+   Only one leaf holds the shared tree at a time, so concurrent-write races on
+   seam files cannot happen and every build runs against a quiescent snapshot;
+   the first build is cold and the rest are warm-incremental. Delegate a leaf by
+   rendering the implementer floor with `{{.McpNamespace}}/playbook.render(name:
+   "delegate-implementer", session_key: <your key>)`, resolving its model with
+   `{{.McpNamespace}}/config.resolve_agent(tier)` at the leaf's own difficulty
+   tier, and spawning it by {{.SpawnIdiom}} with the ticket path, the exact
+   files, the spine it builds against, and its verification. The leaf runs its
+   own build and test and commits on the shared branch, so its logs stay in its
+   context, not yours; batch a heavy build across a coherent group of leaves
+   when that amortizes it.
+   Calibrate delegation by difficulty, not a quota: mechanical, disjoint,
+   cheaply-verifiable leaves go down by default, and the hard, high-leverage, or
+   non-decomposable work stays with you. Do not hoard mechanical grind into your
+   own filling context — that is the phase-overrun this body exists to stop — and
+   do not push hard work onto a cheap leaf, which churns Critical findings and
+   re-review for the opposite of the saving. A ticket with no clean mechanical
+   leaf runs direct; that is calibration, not a shortfall.
+5. Review: map the route allocation to structured render wrappers: `single`
    uses `reviewer`; correctness uses `code-review-correctness`, fit uses
    `code-review-fit`, and test uses `code-review-test`. The flat `code-reviewer`
    is an included contract, not a delegated playbook. Render each selected
@@ -78,9 +107,9 @@ this file. The Worker Protocol appended below governs; read it first.
    git. Fix findings by severity. Two rounds: the second verifies the fixes
    of the first and raises nothing new; there is no third. A Critical finding
    still open after round 2 is stop (e).
-5. Record: append `### Result (<short-hash>) - YYYY-MM-DD` to the executed phase with what
-   landed, the verification evidence, and the decisions you took. When every
-   phase has a Result, `{{.McpNamespace}}/tickets.close(stem: <stem>,
-   status: "done")` and commit the closure.
-6. Emit the Report block with the retained impl branch and the route verdict's
+6. Record: append `### Result (<short-hash>) - YYYY-MM-DD` to each phase you
+   completed with what landed, the verification evidence, and the decisions you
+   took. When every phase has a Result, `{{.McpNamespace}}/tickets.close(stem:
+   <stem>, status: "done")` and commit the closure.
+7. Emit the Report block with the retained impl branch and the route verdict's
    merge_confirm. The lead owns merging after your report; do not merge.

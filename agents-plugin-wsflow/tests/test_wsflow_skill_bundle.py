@@ -324,6 +324,32 @@ class WsflowSkillBundleTest(unittest.TestCase):
                 offenders.append(f"{path.relative_to(PLUGIN_DIR)}: body is not the {target} parallel-init shim")
         self.assertEqual(offenders, [])
 
+    def test_wsflow_elevated_body_is_mini_lead_and_escalated_retired(self):
+        # Self-contained wsflow pin, parallel to the merge-obligation mirror
+        # below: the agents-plugin suite's divergence check reaches into
+        # agents-plugin-wsflow/rsrc, but `discover agents-plugin-wsflow/tests`
+        # in isolation must also catch a wsflow-only regression — a stray
+        # ticket-worker-escalated dir left in the mirror, or the elevated body
+        # silently drifting back toward the old single-phase prose.
+        self.assertFalse((RSRC_DIR / "ticket-worker-escalated").exists())
+        elevated = " ".join(
+            (RSRC_DIR / "ticket-worker-elevated" / "ticket-worker-elevated.md")
+            .read_text(encoding="utf-8")
+            .split()
+        )
+        self.assertIn("You are an orchestrating mini-lead", elevated)
+        self.assertIn("You own every phase without a `### Result`", elevated)
+        self.assertIn("Run leaves one at a time on your single warm worktree", elevated)
+        self.assertIn("fall back to phase-serial leaves", elevated)
+        self.assertIn("a recommendation keyed to leverage, not a gate", elevated)
+        default = " ".join(
+            (RSRC_DIR / "ticket-worker" / "ticket-worker.md").read_text(encoding="utf-8").split()
+        )
+        self.assertIn(
+            "The earliest phase without a `### Result` is the phase you execute", default
+        )
+        self.assertNotIn("orchestrating mini-lead", default)
+
     def test_wsflow_run_and_stop_protocol_carry_merge_obligation_text(self):
         # The byte-mirror carries the lead-run.md / worker-stop-protocol.md
         # obligation text into the wsflow package, but nothing on the wsflow side
@@ -332,7 +358,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
         # against the wsflow copies, so a mirror that silently drops or mangles
         # the merge/stop obligations fails here too. Template variables
         # ({{.McpNamespace}}) are preserved verbatim by the mirror.
-        for name in ("ticket-worker", "ticket-worker-elevated", "ticket-worker-escalated"):
+        for name in ("ticket-worker", "ticket-worker-elevated"):
             text = (RSRC_DIR / name / (name + ".md")).read_text(encoding="utf-8")
             self.assertIn("The lead owns merging after your report; do not merge.", text)
             self.assertNotIn("Merge per the route verdict", text)

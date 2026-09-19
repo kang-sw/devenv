@@ -2673,7 +2673,6 @@ func TestPlaybookRenderGoldenTicketWorker(t *testing.T) {
 			for _, tc := range []struct{ name, tier string }{
 				{"ticket-worker", "medium"},
 				{"ticket-worker-elevated", "large"},
-				{"ticket-worker-escalated", "xlarge"},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					rsrcRoot := filepath.Join("..", "..", "..", map[string]string{"ws": "agents-plugin", "wsflow": "agents-plugin-wsflow"}[product], "rsrc")
@@ -2761,8 +2760,15 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				"Read the selected ticket's whole body and grade its risk against the Risk Rubric below",
 				"The tier sets the worker's model; the worker's route sets review breadth.",
 				"| medium | `ticket-worker` | `ticket-worker-elevated` |",
-				"| large | `ticket-worker-elevated` | `ticket-worker-escalated` |",
-				"| xlarge | `ticket-worker-escalated` | none: its (e) goes to the user |",
+				"| large | `ticket-worker-elevated` | `ticket-worker-elevated`, `tier_override: xlarge` |",
+				"| xlarge | `ticket-worker-elevated`, `tier_override: xlarge` | none: its (e) goes to the user |",
+				// xlarge reuses the elevated body via a render-time tier override
+				// (the escalated body is retired), so the render step must pass
+				// tier_override for the elevated body — whose frontmatter tier is
+				// large — to spawn at the xlarge model. Pin that dispatch rule and
+				// the retry cell's carry of any tier_override.
+				"When the table cell pairs the body with `tier_override: xlarge`, pass that argument too",
+				"repeat Spawn steps 4 to 6 with the retry cell from the table (its body and any `tier_override`)",
 				// The Risk Rubric is a bundled rsrc doc pulled in through
 				// lead-run.md's `includes: - risk-rubric` frontmatter, not
 				// inlined in lead-run.md itself — assert its own content
@@ -2819,24 +2825,15 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 			if strings.Contains(body, "flagship class") || strings.Contains(body, "{{.") {
 				t.Error("rendered policy retains a fixed flagship floor or template variable")
 			}
+			// The escalated body is retired: xlarge reuses the elevated body via
+			// tier_override. The tier-table pins are positive assertIn, so without
+			// this a regression re-naming ticket-worker-escalated in a table row
+			// (a row can name a non-existent body without failing render) slips
+			// through. Pin the dispatch prose names no retired escalated body.
+			if strings.Contains(body, "ticket-worker-escalated") {
+				t.Error("rendered lead-run dispatch prose names the retired ticket-worker-escalated body")
+			}
 		})
-	}
-}
-
-func TestTicketWorkerVariantsDifferOnlyByTier(t *testing.T) {
-	root := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	base, err := os.ReadFile(filepath.Join(root, "ticket-worker", "ticket-worker.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, tier := range map[string]string{"ticket-worker-elevated": "large", "ticket-worker-escalated": "xlarge"} {
-		data, err := os.ReadFile(filepath.Join(root, name, name+".md"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := strings.Replace(string(data), "tier: "+tier+"\n", "tier: medium\n", 1); got != string(base) {
-			t.Errorf("%s differs from the base beyond tier frontmatter", name)
-		}
 	}
 }
 
