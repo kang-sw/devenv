@@ -2825,6 +2825,14 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 			if strings.Contains(body, "flagship class") || strings.Contains(body, "{{.") {
 				t.Error("rendered policy retains a fixed flagship floor or template variable")
 			}
+			// The escalated body is retired: xlarge reuses the elevated body via
+			// tier_override. The tier-table pins are positive assertIn, so without
+			// this a regression re-naming ticket-worker-escalated in a table row
+			// (a row can name a non-existent body without failing render) slips
+			// through. Pin the dispatch prose names no retired escalated body.
+			if strings.Contains(body, "ticket-worker-escalated") {
+				t.Error("rendered lead-run dispatch prose names the retired ticket-worker-escalated body")
+			}
 		})
 	}
 }

@@ -49,9 +49,9 @@ the turn: relay the reason.
    user and end the turn.
 2. Read the selected ticket's whole body and grade its risk against the Risk
    Rubric below; the query's `risk.*` rows are a first-pass hint, not a
-   verdict. Your grade picks the worker playbook and the render returns that
-   playbook's own tier. The tier sets the worker's model; the worker's route
-   sets review breadth.
+   verdict. Your grade picks the worker playbook and its render tier — the
+   body's own frontmatter tier, or the `tier_override` the table pairs with it.
+   The tier sets the worker's model; the worker's route sets review breadth.
 
    | Tier | Worker playbook | Retry after stop (e) |
    |---|---|---|
